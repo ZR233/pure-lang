@@ -6,13 +6,18 @@ use anyhow::{Context, Result, bail};
 use futures::FutureExt;
 use tokio::sync::MutexGuard;
 
-use super::{CreateTaskRun, RecordTaskAgentFailure, TaskRun, TaskWorktreeOwnerSnapshot};
+use super::{
+    CreateTaskRun, RecordTaskAgentFailure, TASK_EXECUTOR_HANDOFF_SECTION_ID, TaskExecutorHandoff,
+    TaskRun, TaskWorktreeOwnerSnapshot, WorkUnit,
+};
 use crate::studio::runtime_state::StudioRecoveryIssue;
 use crate::studio::store::StudioStore;
 use crate::studio::{
     InteractionEmitter, InteractionService, TaskRuntime, ThreadKind, ThreadRecord,
 };
-use crate::{AgentRuntimeHandle, AgentState};
+use crate::{
+    AgentRuntimeHandle, AgentState, InteractionRequest, InteractionStatus, TodoListSnapshot,
+};
 
 mod recovery;
 use recovery::resolve_worktree_recovery_groups;
@@ -70,6 +75,54 @@ pub(crate) struct BranchMutationGuard<'a> {
 impl TaskCoordinator {
     pub(in crate::studio) fn task_runtime(&self) -> TaskRuntime {
         self.task_runtime.clone()
+    }
+
+    /// 从 root Thread 的驻留投影读取 completion gate 所需事实。
+    pub(super) fn hot_completion_context(
+        &self,
+        root_thread_id: &str,
+        runtime: &AgentRuntimeHandle,
+    ) -> Result<(Vec<InteractionRequest>, Option<TodoListSnapshot>)> {
+        let thread_id = pl_core::ThreadId::new(root_thread_id.to_string())?;
+        let snapshot = runtime
+            .thread_snapshot(&thread_id)
+            .map_err(|error| anyhow::anyhow!(error))?;
+        let pending = snapshot
+            .interactions
+            .into_iter()
+            .filter(|interaction| interaction.status() == InteractionStatus::Pending)
+            .collect();
+        let todo = snapshot.runtime.and_then(|runtime| runtime.todo);
+        Ok((pending, todo))
+    }
+
+    /// 从 executor actor 的 working state 读取类型化 handoff，不回读对象表。
+    pub(super) async fn hot_work_unit_handoff(
+        &self,
+        runtime: &AgentRuntimeHandle,
+        run: &TaskRun,
+        work_unit: &WorkUnit,
+    ) -> Result<Option<TaskExecutorHandoff>> {
+        let Some(executor_thread_id) = work_unit.executor_thread_id.as_deref() else {
+            return Ok(None);
+        };
+        let context = runtime
+            .read_thread_context(pl_core::ThreadId::new(executor_thread_id.to_string())?)
+            .await
+            .map_err(|error| anyhow::anyhow!(error))?;
+        let sections = context
+            .session
+            .pinned_context_sections()
+            .filter(|section| section.id.as_str() == TASK_EXECUTOR_HANDOFF_SECTION_ID)
+            .collect::<Vec<_>>();
+        let section = match sections.as_slice() {
+            [section] => *section,
+            [] => return Ok(None),
+            _ => bail!("executor hot session has duplicate Task handoff sections"),
+        };
+        let handoff = TaskExecutorHandoff::from_context_section(section)?;
+        handoff.validate_owner(run, work_unit, executor_thread_id)?;
+        Ok(Some(handoff))
     }
 
     pub(in crate::studio) async fn handle_agent_turn_failure(

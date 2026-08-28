@@ -154,7 +154,9 @@ pub(super) async fn run_turn_with_trace(
             })
             .await?;
         }
-        let tool_plan = core.acquire_tool_plan();
+        let tool_plan = core
+            .acquire_tool_plan()
+            .allowed_by(options.execution_policy.as_ref());
         let iteration_tools = tool_plan.specs().to_vec();
         record_enabled_tools(recorder, &turn_id, iteration, &tool_plan);
         let iteration_snapshot = turn_instruction_snapshot.clone();
@@ -639,6 +641,7 @@ pub(super) async fn run_turn_with_trace(
         session.push_tool_media(tool_media);
         if let Some(content) = end_turn_content {
             session.push_assistant_response(content.clone(), None);
+            recorder.final_text_item(&turn_id, content.clone());
             last_content = content;
         }
         inference::record(

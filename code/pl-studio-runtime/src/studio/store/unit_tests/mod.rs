@@ -3,7 +3,8 @@ use crate::studio::store::directory::{
     DirectoryDelta, RegisteredChildThread, apply_directory_delta,
 };
 use crate::studio::task_coordinator::{
-    AllocateExecutor, CreateTaskRun, TaskWorktreeDisposition, WorkUnitState, current_work_units,
+    AllocateExecutor, CreateTaskRun, TaskExecutorBlueprint, TaskWorktreeDisposition, WorkUnitState,
+    current_work_units,
 };
 use crate::{PlanConfirmationResolution, PlanConfirmationResolutionPayload, StudioMode};
 use pl_protocol::ThreadMode;
@@ -399,6 +400,10 @@ async fn failed_executor_allocation_creates_an_explicit_attempt_chain() {
             thread_id: thread.id.clone(),
             title: "implement feature".to_string(),
             scope_hints: vec!["src".to_string()],
+            blueprint: TaskExecutorBlueprint::for_test(
+                "implement feature",
+                vec!["src".to_string()],
+            ),
             agent_id: "executor-1".to_string(),
             requested_by_call_id: "spawn-call-1".to_string(),
         })
@@ -423,6 +428,10 @@ async fn failed_executor_allocation_creates_an_explicit_attempt_chain() {
             thread_id: thread.id,
             title: "implement feature".to_string(),
             scope_hints: vec!["src".to_string()],
+            blueprint: TaskExecutorBlueprint::for_test(
+                "implement feature",
+                vec!["src".to_string()],
+            ),
             agent_id: "executor-2".to_string(),
             requested_by_call_id: "spawn-call-2".to_string(),
         })

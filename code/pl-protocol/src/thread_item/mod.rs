@@ -99,6 +99,63 @@ impl ThreadItem {
         self.state.failure()
     }
 
+    /// Fails a non-terminal item when its owning Turn has already failed.
+    ///
+    /// Returns `true` when the item changed. Terminal items and the Turn item
+    /// itself are left untouched; the latter is projected from the canonical
+    /// [`crate::TurnOutcome`].
+    pub fn fail_if_open(&mut self, failed_at: i64, error: String) -> bool {
+        if self.state.is_terminal() {
+            return false;
+        }
+        self.state = match &self.state {
+            ThreadItemState::Text(item) => ThreadItemState::Text(ThreadTextItem::new(
+                item.channel(),
+                item.text().to_string(),
+                item.attachments().to_vec(),
+                ThreadContentLifecycle::failed(failed_at, error.clone()),
+            )),
+            ThreadItemState::Thinking(item) => ThreadItemState::Thinking(ThreadThinkingItem::new(
+                item.summary().to_vec(),
+                item.content().to_vec(),
+                ThreadContentLifecycle::failed(failed_at, error.clone()),
+            )),
+            ThreadItemState::Tool(item) => ThreadItemState::Tool(ThreadToolItem::new(
+                item.invocation().clone(),
+                ThreadToolState::Failed(FailedThreadTool::new(
+                    failed_at,
+                    ThreadToolFailure::new(ThreadToolFailureKind::Execution, error.clone()),
+                    None,
+                )),
+            )),
+            ThreadItemState::Agent(item) => ThreadItemState::Agent(ThreadAgentItem::new(
+                item.identity().clone(),
+                ThreadAgentState::Failed(FailedThreadAgent::new(failed_at, error.clone())),
+            )),
+            ThreadItemState::Inference(item) => {
+                ThreadItemState::Inference(ThreadInferenceItem::new(
+                    item.inference_id().to_string(),
+                    item.model().to_string(),
+                    ThreadInferenceState::Failed(FailedThreadInference::new(
+                        failed_at,
+                        error.clone(),
+                    )),
+                ))
+            }
+            ThreadItemState::Plan(item) => ThreadItemState::Plan(ThreadPlanItem::new(
+                item.content().to_string(),
+                ThreadContentLifecycle::failed(failed_at, error),
+            )),
+            ThreadItemState::Turn(_)
+            | ThreadItemState::Skill(_)
+            | ThreadItemState::File(_)
+            | ThreadItemState::ContextCompaction(_) => return false,
+        };
+        self.revision = self.revision.saturating_add(1);
+        self.updated_at = failed_at;
+        true
+    }
+
     pub fn text(&self) -> Option<&ThreadTextItem> {
         match &self.state {
             ThreadItemState::Text(value) => Some(value),

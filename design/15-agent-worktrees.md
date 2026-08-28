@@ -20,7 +20,8 @@ Task executor 只能由 `task_spawn_executor` 创建。Task planner 必须先调
 `task_transition.finishDocumentEditing` 进入 `Working`。该动作只记录摘要并推进 Task 状态，不读取或修改 Git；
 executor worktree 始终由资源适配层从创建时的 `HEAD` 建立。planner 若希望 executor 获得主
 workspace 的既有修改，必须自行提交；未提交修改不会被 worktree 隐式复制。
-`scopeHints` 是可选的仓库相对关注路径，只帮助 Planner 拆分任务、review 聚焦和提示已知冲突；
+Task executor blueprint 的 `scopeHints` 是必需的仓库相对路径前缀，每项必须覆盖至少一个
+implementation target，只帮助 Planner 拆分任务、review 聚焦和提示已知冲突；
 它不是文件授权、并发互斥或 completion 门禁。executor 可以修改自身 worktree 内任意仓库文件，
 真正不变量是 durable owner 与 canonical worktree 资源身份；completion 的 commit 与 changed files
 是 executor 声明的审计事实，不由 TaskService 查询 Git 复核。

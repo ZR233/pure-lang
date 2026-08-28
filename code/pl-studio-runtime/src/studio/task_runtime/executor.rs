@@ -9,12 +9,17 @@ impl TaskRuntime {
             thread_id,
             title,
             mut scope_hints,
+            blueprint,
             agent_id,
             requested_by_call_id,
         } = input;
         let title = normalize_executor_title(&title)?;
         scope_hints.sort();
         scope_hints.dedup();
+        let blueprint = blueprint.normalize_and_validate()?;
+        if blueprint.task_name != title || blueprint.scope.scope_hints != scope_hints {
+            bail!("executor blueprint does not match its canonical allocation");
+        }
         let current = self
             .aggregate(&thread_id)
             .await
@@ -31,6 +36,7 @@ impl TaskRuntime {
             if existing.executor_thread_id.as_deref() != Some(agent_id.as_str())
                 || normalize_executor_title(&existing.title)? != title
                 || normalized_scope(&existing.scope_hints) != scope_hints
+                || existing.blueprint.as_ref() != Some(&blueprint)
             {
                 bail!("task executor call id is already owned by a different allocation");
             }
@@ -44,6 +50,7 @@ impl TaskRuntime {
             !unit.kind().is_terminal()
                 && normalize_executor_title(&unit.title).ok().as_deref() == Some(title.as_str())
                 && normalized_scope(&unit.scope_hints) == scope_hints
+                && unit.blueprint.as_ref() == Some(&blueprint)
         }) {
             return Ok(ExecutorAllocation {
                 run: current.facts.run,
@@ -92,6 +99,7 @@ impl TaskRuntime {
                 task_run_id: current.facts.run.id.clone(),
                 title,
                 scope_hints,
+                blueprint: Some(blueprint),
                 base_commit: "HEAD".to_string(),
                 worktree_path,
                 branch,

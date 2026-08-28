@@ -9,8 +9,9 @@ use sha2::{Digest, Sha256};
 
 use crate::studio::entity;
 
-/// 唯一支持的 Studio schema 版本；仅 v13 附件表有一次性迁移。
-pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 14;
+/// 唯一支持的 Studio schema 版本。
+pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 15;
+const STUDIO_DATABASE_SCHEMA_VERSION_V14: i64 = 14;
 
 pub(super) async fn migrate_studio_schema_v13_to_v14(
     db: &DatabaseConnection,
@@ -141,7 +142,7 @@ pub(super) async fn migrate_studio_schema_v13_to_v14(
             .await?;
         create_thread_input_index(&transaction).await?;
         create_attachment_indexes(&transaction).await?;
-        set_schema_version(&transaction, STUDIO_DATABASE_SCHEMA_VERSION).await?;
+        set_schema_version(&transaction, STUDIO_DATABASE_SCHEMA_VERSION_V14).await?;
         transaction.commit().await?;
         Ok::<_, anyhow::Error>(())
     }
@@ -150,6 +151,75 @@ pub(super) async fn migrate_studio_schema_v13_to_v14(
         cleanup_migration_blobs(&created_paths).await;
     }
     migration
+}
+
+/// 把 v14 的 Thread working-state 专用表迁移到稳定的版本化对象表。
+pub(super) async fn migrate_studio_schema_v14_to_v15(db: &DatabaseConnection) -> Result<()> {
+    use pl_protocol::AgentWorkingState;
+    use sea_orm::{EntityTrait, QueryOrder};
+
+    const LEGACY_MODEL_PERFORMANCE_KEY: &str = "observed:modelPerformance:v1";
+
+    let transaction = db.begin().await?;
+    Schema::new(transaction.get_database_backend())
+        .builder()
+        .register(entity::studio_object::Entity)
+        .apply(&transaction)
+        .await?;
+    let rows = entity::thread_session_state::Entity::find()
+        .order_by_asc(entity::thread_session_state::Column::ThreadId)
+        .all(&transaction)
+        .await?;
+    for row in rows {
+        let actual_hash = pl_core::canonical_content_hash(row.state_json.as_bytes());
+        ensure!(
+            actual_hash == row.state_hash,
+            "Thread {} session state hash mismatch during v14 migration",
+            row.thread_id
+        );
+        let state = serde_json::from_str::<AgentWorkingState>(&row.state_json)?;
+        ensure!(
+            i64::try_from(state.revision)? == row.revision,
+            "Thread {} session state revision mismatch during v14 migration",
+            row.thread_id
+        );
+        crate::studio::store::object::put_object(
+            &transaction,
+            &row.thread_id,
+            &state,
+            row.updated_at,
+        )
+        .await?;
+    }
+    if let Some(row) =
+        entity::app_setting::Entity::find_by_id(LEGACY_MODEL_PERFORMANCE_KEY.to_string())
+            .one(&transaction)
+            .await?
+    {
+        let state =
+            serde_json::from_str::<crate::studio::runtime::ModelPerformanceState>(&row.value)?;
+        crate::studio::store::object::put_object(
+            &transaction,
+            crate::studio::runtime::MODEL_PERFORMANCE_OWNER_ID,
+            &state,
+            row.updated_at,
+        )
+        .await?;
+        entity::app_setting::Entity::delete_by_id(LEGACY_MODEL_PERFORMANCE_KEY.to_string())
+            .exec(&transaction)
+            .await?;
+    }
+    // ThreadContextMetadata v15 不在热状态保留 JSON null。唯一迁移把旧的空
+    // metadata 归一化成 typed struct 的 canonical 空对象，运行期无需 fallback。
+    transaction
+        .execute_unprepared("UPDATE threads SET metadata_json = '{}' WHERE metadata_json = 'null'")
+        .await?;
+    transaction
+        .execute_unprepared("DROP TABLE thread_session_state")
+        .await?;
+    set_schema_version(&transaction, STUDIO_DATABASE_SCHEMA_VERSION).await?;
+    transaction.commit().await?;
+    Ok(())
 }
 
 async fn cleanup_migration_blobs(paths: &[PathBuf]) {
@@ -173,7 +243,7 @@ pub(super) async fn initialize_studio_schema(db: &DatabaseConnection) -> Result<
         .register(entity::attachment::Entity)
         .register(entity::thread_submission::Entity)
         .register(entity::thread_context_segment::Entity)
-        .register(entity::thread_session_state::Entity)
+        .register(entity::studio_object::Entity)
         .apply(db)
         .await?;
     create_state_indexes(db).await?;

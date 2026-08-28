@@ -51,6 +51,8 @@ pub(crate) struct TaskExecutorTarget {
 pub(crate) struct TaskExecutorScope {
     pub(crate) in_scope: Vec<String>,
     pub(crate) out_of_scope: Vec<String>,
+    /// Normalized repository-relative path prefixes covered by implementation targets.
+    /// This field is structural conflict metadata, not free-form prose.
     pub(crate) scope_hints: Vec<String>,
 }
 
@@ -120,6 +122,50 @@ pub(crate) struct TaskExecutorBlueprint {
 }
 
 impl TaskExecutorBlueprint {
+    #[cfg(test)]
+    pub(crate) fn for_test(task_name: &str, scope_hints: Vec<String>) -> Self {
+        let target = scope_hints
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "src".to_string());
+        Self {
+            task_name: task_name.to_string(),
+            objective: format!("Deliver {task_name}"),
+            scope: TaskExecutorScope {
+                in_scope: vec![target.clone()],
+                out_of_scope: Vec::new(),
+                scope_hints,
+            },
+            implementation_steps: vec![TaskExecutorImplementationStep {
+                id: "step-1".to_string(),
+                instruction: format!("Implement {task_name}"),
+                targets: vec![TaskExecutorTarget {
+                    path: target,
+                    symbol: None,
+                }],
+                expected_outcome: "The requested behavior is implemented".to_string(),
+                criterion_ids: vec!["criterion-1".to_string()],
+            }],
+            acceptance_criteria: vec![TaskExecutorAcceptanceCriterion {
+                id: "criterion-1".to_string(),
+                requirement: "The implementation passes its focused tests".to_string(),
+            }],
+            dependencies: Vec::new(),
+            evidence: Vec::new(),
+            verification: TaskExecutorVerificationContract {
+                commands: vec![TaskExecutorVerificationCommand {
+                    id: "verify-1".to_string(),
+                    command: "cargo test".to_string(),
+                    cwd: ".".to_string(),
+                    purpose: "Run the focused test suite".to_string(),
+                    expected_outcome: "Tests pass".to_string(),
+                    criterion_ids: vec!["criterion-1".to_string()],
+                }],
+                inspections: Vec::new(),
+            },
+        }
+    }
+
     pub(crate) fn normalize_and_validate(mut self) -> Result<Self> {
         self.task_name = normalize_required(&self.task_name, "taskName")?;
         self.objective = normalize_required(&self.objective, "objective")?;
@@ -167,6 +213,18 @@ impl TaskExecutorBlueprint {
                 "implementationSteps.criterionIds",
             )?;
             step_coverage.extend(step.criterion_ids.iter().cloned());
+        }
+        for hint in &self.scope.scope_hints {
+            if !self
+                .implementation_steps
+                .iter()
+                .flat_map(|step| &step.targets)
+                .any(|target| scope_hint_covers_target(hint, &target.path))
+            {
+                bail!(
+                    "scope.scopeHints entry `{hint}` does not cover any implementation target; use repository-relative path prefixes, not prose"
+                )
+            }
         }
 
         let mut verification_coverage = BTreeSet::new();
@@ -243,4 +301,11 @@ impl TaskExecutorBlueprint {
     pub(crate) fn verification_count(&self) -> usize {
         self.verification.commands.len() + self.verification.inspections.len()
     }
+}
+
+fn scope_hint_covers_target(hint: &str, target: &str) -> bool {
+    target == hint
+        || target
+            .strip_prefix(hint)
+            .is_some_and(|suffix| suffix.starts_with('/'))
 }

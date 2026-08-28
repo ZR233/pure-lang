@@ -21,7 +21,7 @@ struct TurnProjection<'a> {
     thread_id: &'a str,
     state: TurnState,
     usage: Option<&'a pl_model::TokenUsage>,
-    metadata: Option<&'a serde_json::Value>,
+    metadata: Option<&'a pl_core::MailboxMetadata>,
     updated_at: i64,
     revision: u64,
 }

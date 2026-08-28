@@ -16,10 +16,12 @@ impl StudioRuntime {
         target: &StudioTaskRecoveryTarget,
         _allow_generation_change: bool,
     ) -> Result<()> {
-        let run = self
-            .store
-            .read_active_task_run_for_root_thread(&preview.root_thread_id)
-            .await?;
+        let aggregate = self
+            .task_runtime
+            .activate(&preview.root_thread_id)
+            .await?
+            .context("Task recovery owner is not available")?;
+        let run = &aggregate.facts.run;
         if run.id != preview.run_id
             || run.revision != preview.revision
             || run.generation() != preview.task_generation
@@ -42,11 +44,10 @@ impl StudioRuntime {
                     .work_unit_id
                     .as_deref()
                     .context("Executor recovery target has no WorkUnit")?;
-                let unit = self
-                    .store
-                    .list_work_units(&run.id)
-                    .await?
-                    .into_iter()
+                let unit = aggregate
+                    .facts
+                    .work_units
+                    .iter()
                     .find(|unit| unit.id == work_unit_id)
                     .context("Task recovery WorkUnit disappeared")?;
                 if unit.executor_thread_id.as_deref() != Some(target.thread_id.as_str())
@@ -60,12 +61,10 @@ impl StudioRuntime {
                 }
             }
         }
-        let completions = self.store.list_work_completions(&run.id).await?;
-        let reviews = self.store.list_review_rounds(&run.id).await?;
-        let merges = self.store.list_merge_records(&run.id).await?;
-        if record_fingerprint(&completions)? != preview.completion_revision_fingerprint
-            || record_fingerprint(&reviews)? != preview.review_revision_fingerprint
-            || record_fingerprint(&merges)? != preview.merge_revision_fingerprint
+        if record_fingerprint(&aggregate.facts.completions)?
+            != preview.completion_revision_fingerprint
+            || record_fingerprint(&aggregate.facts.reviews)? != preview.review_revision_fingerprint
+            || record_fingerprint(&aggregate.facts.merges)? != preview.merge_revision_fingerprint
         {
             bail!("Task Completion/Review/Merge facts changed");
         }

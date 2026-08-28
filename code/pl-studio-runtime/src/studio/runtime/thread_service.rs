@@ -175,19 +175,20 @@ impl StudioRuntime {
     ) -> Result<Option<StudioArchiveThreadResult>> {
         self.ensure_persistence_accepts_new_work()?;
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
-        let Some(thread) = self.store.read_thread(&thread_id).await? else {
+        let Some((thread, roots, thread_tree)) =
+            self.activate_thread_archive_scope(&thread_id).await?
+        else {
             return Ok(None);
         };
-        if thread.visibility == ThreadVisibility::Archived {
-            return Ok(None);
-        }
-        if thread.parent_thread_id.is_some() {
-            bail!("only a root Thread can be archived");
+        let _pins = self
+            .residency
+            .pin_many(thread_tree.iter().map(|thread| thread.id.clone()));
+        for candidate in &thread_tree {
+            let _ = self.ensure_thread_agent(&candidate.id).await?;
         }
         if self.task_runtime.has_active_task(&thread_id).await {
             bail!("thread cannot be archived while a task is active");
         }
-        let roots = self.store.list_root_threads(&thread.project_id).await?;
         let root_index = roots
             .iter()
             .position(|candidate| candidate.id == thread_id)
@@ -196,17 +197,6 @@ impl StudioRuntime {
             .get(root_index + 1)
             .or_else(|| root_index.checked_sub(1).and_then(|index| roots.get(index)))
             .cloned();
-        // 冷端读出树成员，再叠加热集合中的同 root 条目（尚在落库途中的 child）。
-        let mut thread_tree = self.store.list_threads_for_root(&thread_id).await?;
-        for hot in self
-            .agent_facility
-            .product_events
-            .threads_for_root(&thread_id)
-        {
-            if !thread_tree.iter().any(|candidate| candidate.id == hot.id) {
-                thread_tree.push(ThreadRecord::from_directory_thread(hot));
-            }
-        }
         for candidate in &thread_tree {
             if self.thread_is_busy(&candidate.id).await? {
                 bail!("thread tree has an active turn or pending input");
@@ -275,10 +265,31 @@ impl StudioRuntime {
 
     pub async fn archive_project(&self, project_id: &str) -> Result<Option<ProjectRecord>> {
         self.ensure_persistence_accepts_new_work()?;
-        let Some(project) = self.store.read_project(project_id).await? else {
+        let Some(project) = self
+            .agent_facility
+            .product_events
+            .project_snapshot()
+            .await
+            .into_iter()
+            .find(|project| project.id == project_id)
+        else {
             return Ok(None);
         };
-        let thread_ids = self.store.list_project_thread_ids(project_id).await?;
+        let threads = self.activate_project_archive_scope(project_id).await?;
+        let thread_ids = threads
+            .iter()
+            .map(|thread| thread.id.clone())
+            .collect::<Vec<_>>();
+        let active_threads = threads
+            .iter()
+            .filter(|thread| thread.visibility == ThreadVisibility::Active)
+            .collect::<Vec<_>>();
+        let _pins = self
+            .residency
+            .pin_many(active_threads.iter().map(|thread| thread.id.clone()));
+        for thread in &active_threads {
+            let _ = self.ensure_thread_agent(&thread.id).await?;
+        }
         if self
             .task_runtime
             .has_active_task_for_roots(&thread_ids)
@@ -286,17 +297,17 @@ impl StudioRuntime {
         {
             bail!("project has an active task");
         }
-        for thread_id in &thread_ids {
-            if self.thread_is_busy(thread_id).await? {
+        for thread in &active_threads {
+            if self.thread_is_busy(&thread.id).await? {
                 bail!("project has an active turn");
             }
         }
-        for thread_id in &thread_ids {
-            let emitter = self.interaction_emitter(thread_id.clone());
+        for thread in &active_threads {
+            let emitter = self.interaction_emitter(thread.id.clone());
             self.agent_facility
                 .interactions
                 .cancel_thread(
-                    self.pending_thread_interactions(thread_id).await?,
+                    self.pending_thread_interactions(&thread.id).await?,
                     "project archived",
                     emitter,
                 )
@@ -318,6 +329,61 @@ impl StudioRuntime {
             self.model_performance.remove_session(thread_id).await?;
         }
         Ok(Some(project))
+    }
+
+    /// 归档是跨 owner 命令；先原子物化它需要的冷目录范围，再执行全部业务校验。
+    async fn activate_thread_archive_scope(
+        &self,
+        root_thread_id: &str,
+    ) -> Result<Option<(ThreadRecord, Vec<ThreadRecord>, Vec<ThreadRecord>)>> {
+        let (roots, mut tree) = tokio::try_join!(
+            self.store.list_root_threads_for_activation(root_thread_id),
+            self.store.list_threads_for_root(root_thread_id),
+        )?;
+        for hot in self
+            .agent_facility
+            .product_events
+            .threads_for_root(root_thread_id)
+        {
+            if !tree.iter().any(|candidate| candidate.id == hot.id) {
+                tree.push(ThreadRecord::from_directory_thread(hot));
+            }
+        }
+        let Some(root) = tree
+            .iter()
+            .find(|thread| thread.id == root_thread_id && thread.parent_thread_id.is_none())
+            .cloned()
+        else {
+            return Ok(None);
+        };
+        let mut entries = roots
+            .iter()
+            .chain(tree.iter())
+            .cloned()
+            .map(pl_protocol::Thread::from)
+            .collect::<Vec<_>>();
+        entries.sort_by(|left, right| left.id.cmp(&right.id));
+        entries.dedup_by(|left, right| left.id == right.id);
+        self.agent_facility
+            .product_events
+            .apply_thread_delta(entries, Vec::new())
+            .await?;
+        Ok(Some((root, roots, tree)))
+    }
+
+    async fn activate_project_archive_scope(&self, project_id: &str) -> Result<Vec<ThreadRecord>> {
+        let threads = self.store.list_threads_for_project(project_id).await?;
+        let entries = threads
+            .iter()
+            .filter(|thread| thread.visibility == ThreadVisibility::Active)
+            .cloned()
+            .map(pl_protocol::Thread::from)
+            .collect();
+        self.agent_facility
+            .product_events
+            .apply_thread_delta(entries, Vec::new())
+            .await?;
+        Ok(threads)
     }
 
     pub async fn set_thread_mode(&self, thread_id: &str, mode: StudioMode) -> Result<()> {

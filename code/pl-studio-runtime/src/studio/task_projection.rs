@@ -1,6 +1,5 @@
-use std::collections::HashMap;
-
 use anyhow::{Context, Result};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
 use crate::{
     StudioBudgetLimitKind, StudioBudgetLimitRuntime, StudioBudgetUsageRuntime,
@@ -26,6 +25,7 @@ use crate::{
 
 use super::{
     StudioStore,
+    entity::task_stop_event,
     task_coordinator::{
         ExecutorContinuationState, MergeCleanupState, MergeRecord, ReviewPassedOutcome,
         ReviewRoundRecord, ReviewRoundState, RunningActivity, TaskIssueState, TaskOutcome,
@@ -33,6 +33,7 @@ use super::{
         WorkCompletionRecord, WorkCompletionStatus, WorkUnitCompletionOutcome, WorkUnitFailure,
         WorkUnitPauseReason, WorkUnitState, WorkUnitStateKind,
     },
+    task_persistence::TaskStopEventFact,
 };
 
 /// 从 SQLite 冷基线一次性恢复出的完整 Task 聚合。
@@ -47,6 +48,7 @@ pub(crate) struct LoadedTaskAggregate {
     pub(crate) merges: Vec<MergeRecord>,
     pub(crate) reviews: Vec<ReviewRoundRecord>,
     pub(crate) issues: Vec<super::task_coordinator::TaskIssueRecord>,
+    pub(crate) stop_events: Vec<TaskStopEventFact>,
     pub(crate) runtime: StudioTaskRuntime,
 }
 
@@ -69,6 +71,7 @@ impl LoadedTaskAggregate {
             merges: Vec::new(),
             reviews: Vec::new(),
             issues: Vec::new(),
+            stop_events: Vec::new(),
             runtime,
         })
     }
@@ -82,20 +85,13 @@ impl LoadedTaskAggregate {
         Ok(())
     }
 
-    /// 从内存领域事实重建完整热投影；保留 handoff 与执行进度等 Thread owner 元数据。
+    /// 从内存领域事实重建完整热投影。
     pub(crate) fn refresh_projection(&mut self) -> Result<()> {
-        let previous = self
-            .runtime
-            .work_units
-            .iter()
-            .cloned()
-            .map(|runtime| (runtime.id.clone(), runtime))
-            .collect::<HashMap<_, _>>();
         let work_units = self
             .work_units
             .iter()
             .map(|unit| {
-                let previous = previous.get(&unit.id);
+                let blueprint = unit.blueprint.as_ref();
                 Ok(StudioTaskWorkUnitRuntime {
                     id: unit.id.clone(),
                     title: unit.title.clone(),
@@ -106,16 +102,20 @@ impl LoadedTaskAggregate {
                     attempt: unit.attempt,
                     supersedes_work_unit_id: unit.supersedes_work_unit_id.clone(),
                     budget_slice_limit: crate::studio::task_coordinator::MAX_EXECUTOR_BUDGET_SLICES,
-                    executor_progress_revision: previous
-                        .map_or(0, |runtime| runtime.executor_progress_revision),
-                    blueprint_fingerprint: previous
-                        .and_then(|runtime| runtime.blueprint_fingerprint.clone()),
-                    objective: previous.and_then(|runtime| runtime.objective.clone()),
-                    implementation_step_count: previous
-                        .map_or(0, |runtime| runtime.implementation_step_count),
-                    acceptance_criterion_count: previous
-                        .map_or(0, |runtime| runtime.acceptance_criterion_count),
-                    verification_count: previous.map_or(0, |runtime| runtime.verification_count),
+                    // Thread progress belongs to the Thread owner and is not a durable
+                    // Task fact. Task projection must not self-preserve an old projection
+                    // or query another owner during cold activation.
+                    executor_progress_revision: 0,
+                    blueprint_fingerprint: blueprint
+                        .map(|blueprint| blueprint.fingerprint())
+                        .transpose()?,
+                    objective: blueprint.map(|blueprint| blueprint.objective.clone()),
+                    implementation_step_count: blueprint
+                        .map_or(0, |blueprint| blueprint.implementation_steps.len()),
+                    acceptance_criterion_count: blueprint
+                        .map_or(0, |blueprint| blueprint.acceptance_criteria.len()),
+                    verification_count: blueprint
+                        .map_or(0, |blueprint| blueprint.verification_count()),
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -149,17 +149,9 @@ pub(crate) async fn load_task_aggregate(
     else {
         return Ok(None);
     };
-    let work_units = store.list_work_units(&run.id).await?;
+    let mut work_units = store.list_work_units(&run.id).await?;
     let mut work_unit_runtimes = Vec::with_capacity(work_units.len());
-    for unit in &work_units {
-        let executor_progress_revision = if let Some(executor_thread_id) = &unit.executor_thread_id
-        {
-            store
-                .read_thread_runtime_revision(executor_thread_id)
-                .await?
-        } else {
-            0
-        };
+    for unit in &mut work_units {
         let handoff = if unit.kind() == WorkUnitStateKind::Pending {
             None
         } else {
@@ -169,6 +161,19 @@ pub(crate) async fn load_task_aggregate(
                 .with_context(|| format!("failed to load Task handoff for work unit {}", unit.id))?
                 .map(|(_, handoff)| handoff)
         };
+        if let Some(handoff) = handoff {
+            if let Some(blueprint) = unit.blueprint.as_ref() {
+                anyhow::ensure!(
+                    blueprint == &handoff.blueprint,
+                    "stored WorkUnit blueprint does not match its executor handoff"
+                );
+            } else {
+                // One-time in-memory upgrade for pre-blueprint WorkUnit rows. The next
+                // typed Task commit persists this additive object field.
+                unit.context.blueprint = Some(handoff.blueprint);
+            }
+        }
+        let blueprint = unit.blueprint.as_ref();
         work_unit_runtimes.push(StudioTaskWorkUnitRuntime {
             id: unit.id.clone(),
             title: unit.title.clone(),
@@ -179,22 +184,16 @@ pub(crate) async fn load_task_aggregate(
             attempt: unit.attempt,
             supersedes_work_unit_id: unit.supersedes_work_unit_id.clone(),
             budget_slice_limit: crate::studio::task_coordinator::MAX_EXECUTOR_BUDGET_SLICES,
-            executor_progress_revision,
-            blueprint_fingerprint: handoff
-                .as_ref()
-                .map(|handoff| handoff.blueprint_fingerprint.clone()),
-            objective: handoff
-                .as_ref()
-                .map(|handoff| handoff.blueprint.objective.clone()),
-            implementation_step_count: handoff
-                .as_ref()
-                .map_or(0, |handoff| handoff.blueprint.implementation_steps.len()),
-            acceptance_criterion_count: handoff
-                .as_ref()
-                .map_or(0, |handoff| handoff.blueprint.acceptance_criteria.len()),
-            verification_count: handoff
-                .as_ref()
-                .map_or(0, |handoff| handoff.blueprint.verification_count()),
+            executor_progress_revision: 0,
+            blueprint_fingerprint: blueprint
+                .map(|blueprint| blueprint.fingerprint())
+                .transpose()?,
+            objective: blueprint.map(|blueprint| blueprint.objective.clone()),
+            implementation_step_count: blueprint
+                .map_or(0, |blueprint| blueprint.implementation_steps.len()),
+            acceptance_criterion_count: blueprint
+                .map_or(0, |blueprint| blueprint.acceptance_criteria.len()),
+            verification_count: blueprint.map_or(0, |blueprint| blueprint.verification_count()),
         });
     }
     let completions = store.list_work_completions(&run.id).await?;
@@ -209,6 +208,27 @@ pub(crate) async fn load_task_aggregate(
     )
     .await;
     let issues = store.list_task_issues(&run.id).await?;
+    let stop_events = task_stop_event::Entity::find()
+        .filter(task_stop_event::Column::TaskRunId.eq(run.id.clone()))
+        .order_by_asc(task_stop_event::Column::Generation)
+        .order_by_asc(task_stop_event::Column::CreatedAt)
+        .order_by_asc(task_stop_event::Column::Id)
+        .all(store.database())
+        .await?
+        .into_iter()
+        .map(|event| {
+            Ok(TaskStopEventFact {
+                id: event.id,
+                task_run_id: event.task_run_id,
+                generation: u64::try_from(event.generation)
+                    .context("Task stop generation must not be negative")?,
+                origin: event.origin,
+                reason: event.reason,
+                source_turn_id: event.source_turn_id,
+                created_at: event.created_at,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
     let runtime = studio_task_runtime(
         run.clone(),
         work_unit_runtimes,
@@ -225,6 +245,7 @@ pub(crate) async fn load_task_aggregate(
         merges,
         reviews,
         issues,
+        stop_events,
         runtime,
     }))
 }

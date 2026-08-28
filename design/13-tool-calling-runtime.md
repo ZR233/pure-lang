@@ -502,7 +502,8 @@ Task planner Turn 中保持可见，但只在 `Working` 接受新工作单或替
 破坏性的结构化实施蓝图协议，包含目标、分组范围、带目标路径与验收引用的实施步骤、验收条件、
 依赖、证据，以及带 ID、预期结果和验收引用的命令/检查验证。runtime 在分配任何 WorkUnit、
 worktree 或 child Thread 前校验完整性、唯一引用、规范仓库相对路径、未知字段和固定上下文
-预算。范围只用于拆分、审查和冲突提示，不限制 worktree 内合法修改；
+预算。Task blueprint 的 `scopeHints` 是结构化仓库相对路径前缀而不是自由文本，每一项必须覆盖
+至少一个 implementation target；范围只用于拆分、审查和冲突提示，不限制 worktree 内合法修改；
 `task_request_delivery_review` 固定 completion revision；`task_transition.beginIntegratedReview` 从
 完成声明和合并记录冻结整体目标。两条审查路径都创建只属于新 agent 的 child Thread，
 不使用 `spawn_agent.forkTurns`，但仍复用 AgentRuntime 的容量、repository、lifecycle saga、

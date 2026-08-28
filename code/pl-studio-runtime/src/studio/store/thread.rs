@@ -44,7 +44,7 @@ impl StudioStore {
             revision: Set(0),
             runtime_revision: Set(None),
             event_sequence: Set(0),
-            metadata_json: Set("null".to_string()),
+            metadata_json: Set("{}".to_string()),
             usage_json: Set(serde_json::to_string(&pl_model::TokenUsage::default())?),
             last_context_tokens: Set(None),
             trace_sequence: Set(0),
@@ -71,12 +71,39 @@ impl StudioStore {
         threads.into_iter().map(thread_record).collect()
     }
 
+    /// Thread 树 activation 同批装载相邻 root，用于归档后的选择回退。
+    pub async fn list_root_threads_for_activation(
+        &self,
+        root_thread_id: &str,
+    ) -> Result<Vec<ThreadRecord>> {
+        use entities::thread;
+        let Some(root) = thread::Entity::find_by_id(root_thread_id.to_string())
+            .one(&self.db)
+            .await?
+        else {
+            return Ok(Vec::new());
+        };
+        self.list_root_threads(&root.project_id).await
+    }
+
     /// 一棵 Thread 树的全部未归档成员（按 root_thread_id 直查，不扫全项目）。
     pub async fn list_threads_for_root(&self, root_thread_id: &str) -> Result<Vec<ThreadRecord>> {
         use entities::thread;
         let threads = thread::Entity::find()
             .filter(thread::Column::RootThreadId.eq(root_thread_id))
             .filter(thread::Column::Archived.eq(0))
+            .order_by_asc(thread::Column::CreatedAt)
+            .order_by_asc(thread::Column::Id)
+            .all(&self.db)
+            .await?;
+        threads.into_iter().map(thread_record).collect()
+    }
+
+    /// Project 归档 activation 一次性装载其完整 Thread 目录。
+    pub async fn list_threads_for_project(&self, project_id: &str) -> Result<Vec<ThreadRecord>> {
+        use entities::thread;
+        let threads = thread::Entity::find()
+            .filter(thread::Column::ProjectId.eq(project_id))
             .order_by_asc(thread::Column::CreatedAt)
             .order_by_asc(thread::Column::Id)
             .all(&self.db)

@@ -64,7 +64,8 @@ fn allowed_effects(snapshot: &AgentSnapshot) -> Vec<ToolEffect> {
             ToolEffect::AgentControl,
             ToolEffect::BranchControl,
         ],
-        "explorer" | "reviewer" | "planner" => vec![
+        "reviewer" => vec![ToolEffect::Read, ToolEffect::Process],
+        "explorer" | "planner" => vec![
             ToolEffect::Read,
             ToolEffect::WorkspaceWrite,
             ToolEffect::Process,
@@ -157,6 +158,22 @@ mod tests {
             );
             assert_eq!(policy.finalization, required_tool("task_transition"));
         }
+    }
+
+    #[test]
+    fn task_reviewer_has_no_workspace_or_branch_write_effects() {
+        let reviewer = snapshot("reviewer", false);
+        let policy = studio_execution_policy(
+            &reviewer,
+            StudioPolicyContext {
+                mode: StudioMode::Task,
+                task_phase: Some(TaskRunStateKind::Working),
+            },
+        );
+        assert!(policy.allows_effect(Some(ToolEffect::Read)));
+        assert!(policy.allows_effect(Some(ToolEffect::Process)));
+        assert!(!policy.allows_effect(Some(ToolEffect::WorkspaceWrite)));
+        assert!(!policy.allows_effect(Some(ToolEffect::BranchControl)));
     }
 
     fn snapshot(role: &str, root: bool) -> AgentSnapshot {

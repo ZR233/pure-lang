@@ -18,6 +18,7 @@ mod provider_error;
 mod responses_websocket;
 mod session;
 pub(crate) mod transport_policy;
+mod wire_capture;
 
 pub(crate) use provider_error::provider_stream_failure;
 pub use session::ModelSession;
@@ -478,6 +479,7 @@ impl ModelRuntime {
                 .await?;
                 return Ok(decode_raw_event_stream(raw_stream, protocol));
             }
+            wire_capture::capture_http(&body).await?;
             let config = PureOpenAiConfig::new(
                 api_base,
                 token,

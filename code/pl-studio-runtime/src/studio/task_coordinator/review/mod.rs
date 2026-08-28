@@ -13,7 +13,6 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
 use schemars::JsonSchema;
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use serde::{Deserialize, Serialize};
 
 use super::transition::TransitionPath;
@@ -392,6 +391,9 @@ impl TaskCoordinator {
                 let thread_id = thread_id.clone();
                 let runtime = runtime.clone();
                 async move {
+                    let runtime = runtime.as_ref().context(
+                        "resident AgentRuntime is required while reading active Task status",
+                    )?;
                     let aggregate = coordinator
                         .task_runtime
                         .aggregate(&thread_id)
@@ -407,7 +409,7 @@ impl TaskCoordinator {
                             &work_units,
                             &completions,
                             &merges,
-                            runtime.as_ref(),
+                            runtime,
                         )
                         .await?;
                     let review_records = aggregate.facts.reviews;
@@ -419,26 +421,21 @@ impl TaskCoordinator {
                     let mut model_work_units = Vec::with_capacity(work_units.len());
                     for work_unit in &work_units {
                         let handoff = coordinator
-                            .store
-                            .read_work_unit_handoff(&work_unit.id)
+                            .hot_work_unit_handoff(runtime, &run, work_unit)
                             .await
                             .ok()
-                            .flatten()
-                            .map(|(_, handoff)| handoff);
+                            .flatten();
                         model_work_units.push(ModelWorkUnit::new(
                             &run,
                             work_unit,
                             handoff.as_ref(),
                         ));
                     }
-                    let pending_interactions = coordinator
-                        .store
-                        .list_pending_interactions(&run.root_thread_id)
-                        .await?;
-                    let todo = coordinator.store.read_thread_todo(&run.root_thread_id).await?;
+                    let (pending_interactions, todo) = coordinator
+                        .hot_completion_context(&run.root_thread_id, runtime)?;
                     let issues = aggregate.facts.issues;
                     let execution_activity = coordinator
-                        .model_execution_activity(&run, runtime.as_ref())
+                        .model_execution_activity(&run, Some(runtime))
                         .await?;
                     let completion_readiness = completion_readiness(CompletionReadinessInput {
                         run: &run,
@@ -456,7 +453,7 @@ impl TaskCoordinator {
                         blockers: completion_readiness.blockers().to_vec(),
                     };
                     let available_actions = coordinator
-                        .transition_paths(&run, runtime.as_ref())
+                        .transition_paths(&run, Some(runtime))
                         .await?;
                     // 跨 Thread 的终态 Task 是冷数据：单条 keyset 查询回源 SQLite。
                     let latest_completed_task = coordinator
@@ -501,6 +498,7 @@ impl TaskCoordinator {
     pub(crate) fn read_work_unit_handoff_tool(
         self: &Arc<Self>,
         thread_id: impl Into<String>,
+        runtime: AgentRuntimeHandle,
     ) -> LocalTool {
         let coordinator = self.clone();
         let thread_id = thread_id.into();
@@ -511,26 +509,28 @@ impl TaskCoordinator {
         .handler(move |input: ReadWorkUnitHandoffInput, _| {
             let coordinator = coordinator.clone();
             let thread_id = thread_id.clone();
+            let runtime = runtime.clone();
             async move {
                 let work_unit_id = input.work_unit_id.trim();
                 if work_unit_id.is_empty() {
                     bail!("workUnitId must not be empty")
                 }
-                let run = coordinator
+                let aggregate = coordinator
                     .task_runtime
                     .aggregate(&thread_id)
                     .await
-                    .context("active Task aggregate is not resident")?
+                    .context("active Task aggregate is not resident")?;
+                let run = aggregate.facts.run;
+                let work_unit = aggregate
                     .facts
-                    .run;
-                let (work_unit, handoff) = coordinator
-                    .store
-                    .read_work_unit_handoff(work_unit_id)
+                    .work_units
+                    .iter()
+                    .find(|work_unit| work_unit.id == work_unit_id)
+                    .context("Task work unit not found")?;
+                let handoff = coordinator
+                    .hot_work_unit_handoff(&runtime, &run, work_unit)
                     .await?
-                    .context("Task work unit handoff not found")?;
-                if work_unit.task_run_id != run.id {
-                    bail!("workUnitId does not belong to the active Task")
-                }
+                    .context("Task work unit hot handoff not found")?;
                 ToolResult::json_with_budget(handoff, 8_000, 32 * 1024).map_err(anyhow::Error::from)
             }
         })
@@ -544,7 +544,7 @@ impl TaskCoordinator {
         call_id: &str,
         runtime: &AgentRuntimeHandle,
     ) -> Result<RequestReviewOutput> {
-        let prompt = match prompt::build_review_prompt(self, &round).await {
+        let prompt = match prompt::build_review_prompt(self, &round, runtime).await {
             Ok(prompt) => prompt,
             Err(error) => {
                 self.task_runtime
@@ -658,22 +658,21 @@ impl TaskCoordinator {
                 _ => {}
             }
         }
-        let last_stop = crate::studio::entity::task_stop_event::Entity::find()
-            .filter(crate::studio::entity::task_stop_event::Column::TaskRunId.eq(run.id.clone()))
-            .order_by_desc(crate::studio::entity::task_stop_event::Column::Generation)
-            .order_by_desc(crate::studio::entity::task_stop_event::Column::CreatedAt)
-            .one(self.store.database())
-            .await?
-            .map(|event| -> Result<ModelStopEvent> {
-                Ok(ModelStopEvent {
-                    generation: u64::try_from(event.generation)
-                        .context("task stop generation is negative")?,
-                    origin: event.origin,
-                    reason: event.reason,
-                    created_at: event.created_at,
-                })
-            })
-            .transpose()?;
+        let last_stop = self
+            .task_runtime
+            .aggregate(&run.root_thread_id)
+            .await
+            .context("Task aggregate is not resident while reading execution activity")?
+            .facts
+            .stop_events
+            .into_iter()
+            .max_by_key(|event| (event.generation, event.created_at, event.id.clone()))
+            .map(|event| ModelStopEvent {
+                generation: event.generation,
+                origin: event.origin,
+                reason: event.reason,
+                created_at: event.created_at,
+            });
         Ok(ModelExecutionActivity {
             planner_turns,
             executor_turns,
@@ -689,7 +688,7 @@ impl TaskCoordinator {
         work_units: &[WorkUnit],
         completions: &[WorkCompletionRecord],
         merges: &[MergeRecord],
-        runtime: Option<&AgentRuntimeHandle>,
+        runtime: &AgentRuntimeHandle,
     ) -> Result<Vec<MergeCandidate>> {
         if run.kind() != TaskRunStateKind::Working {
             return Ok(Vec::new());
@@ -702,16 +701,15 @@ impl TaskCoordinator {
             let Some(executor_agent_id) = work_unit.executor_thread_id.as_deref() else {
                 continue;
             };
-            if let Some(runtime) = runtime {
-                self.await_closed_agent_projection(runtime, executor_agent_id)
-                    .await?;
-            }
-            let executor = self
-                .store
-                .read_thread(executor_agent_id)
-                .await?
-                .context("approved executor canonical Thread not found")?;
-            if executor.role != "executor" || executor.status != pl_protocol::ThreadStatus::Closed {
+            self.await_closed_agent_projection(runtime, executor_agent_id)
+                .await?;
+            let executor = runtime
+                .snapshot(pl_core::ThreadId::new(executor_agent_id.to_string())?)
+                .await
+                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+            if executor.identity.role.as_str() != "executor"
+                || !matches!(executor.state, pl_core::AgentState::Closed(_))
+            {
                 continue;
             }
             let Some(completion) = completions

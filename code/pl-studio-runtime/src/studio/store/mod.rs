@@ -8,6 +8,7 @@ pub(in crate::studio) mod directory;
 mod error;
 pub(in crate::studio) mod history;
 mod interaction;
+pub(in crate::studio) mod object;
 mod project;
 pub(in crate::studio) mod settings;
 mod task;
@@ -19,7 +20,7 @@ pub struct StudioStore {
     attachments_dir: PathBuf,
 }
 
-pub(in crate::studio) use agent_framework::UnregisteredThreadFault;
+pub(in crate::studio) use agent_framework::{ThreadRuntimeSeed, UnregisteredThreadFault};
 pub use error::StudioDatabaseError;
 impl StudioStore {
     pub(crate) fn database(&self) -> &DatabaseConnection {

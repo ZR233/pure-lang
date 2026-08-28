@@ -401,7 +401,7 @@ mod tests {
         ]);
         let usage = aggregate_billing_usage(billing.values());
         let context = ThreadContextState {
-            metadata: serde_json::Value::Null,
+            metadata: pl_core::ThreadContextMetadata::default(),
             session: pl_core::AgentSession::new(),
             usage,
             billing_by_turn: billing,

@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::Mutex;
 
+use crate::studio::store::object::{PersistedStudioObject, load_object};
 use crate::studio::{ProductEventBus, StudioStore, unix_seconds};
 use crate::{
     PureError, StudioModelPerformanceSample, StudioModelPerformanceSnapshot,
@@ -14,13 +15,13 @@ use crate::{
 
 use super::super::agent_host::ThreadWriteBehindWriter;
 
-const CACHE_KEY: &str = "observed:modelPerformance:v1";
+pub(in crate::studio) const MODEL_PERFORMANCE_OWNER_ID: &str = "global";
 const CACHE_VERSION: u32 = 1;
 const HISTORY_LIMIT: usize = 1_000;
 
 #[derive(Clone)]
 pub(crate) struct ModelPerformanceOwner {
-    state: Arc<Mutex<PersistedModelPerformance>>,
+    state: Arc<Mutex<ModelPerformanceState>>,
     store: StudioStore,
     writer: ThreadWriteBehindWriter,
     product_events: ProductEventBus,
@@ -28,17 +29,22 @@ pub(crate) struct ModelPerformanceOwner {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct PersistedModelPerformance {
+pub(in crate::studio) struct ModelPerformanceState {
     version: u32,
     revision: u64,
     updated_at: i64,
     #[serde(default)]
-    sessions: BTreeMap<String, PersistedSessionCost>,
+    sessions: BTreeMap<String, SessionCostState>,
     #[serde(default)]
-    history: VecDeque<PersistedPerformanceSample>,
+    history: VecDeque<PerformanceSample>,
 }
 
-impl Default for PersistedModelPerformance {
+/// 仅在 persistence worker 内存在的 object 编码 DTO。
+#[derive(Serialize, Deserialize)]
+#[serde(transparent)]
+pub(in crate::studio) struct ModelPerformanceDto(ModelPerformanceState);
+
+impl Default for ModelPerformanceState {
     fn default() -> Self {
         Self {
             version: CACHE_VERSION,
@@ -50,9 +56,39 @@ impl Default for PersistedModelPerformance {
     }
 }
 
+impl PersistedStudioObject for ModelPerformanceState {
+    type PersistenceDto = ModelPerformanceDto;
+
+    const OWNER_KIND: &'static str = "studio";
+    const OBJECT_KIND: &'static str = "modelPerformance";
+    const SCHEMA_VERSION: i64 = 1;
+
+    fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    fn to_persistence_dto(&self) -> Self::PersistenceDto {
+        ModelPerformanceDto(self.clone())
+    }
+
+    fn from_persistence_dto(dto: Self::PersistenceDto) -> anyhow::Result<Self> {
+        Ok(dto.0)
+    }
+}
+
+impl ModelPerformanceState {
+    pub(in crate::studio) const fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    pub(in crate::studio) const fn updated_at(&self) -> i64 {
+        self.updated_at
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct PersistedSessionCost {
+struct SessionCostState {
     #[serde(default)]
     estimated_costs: Vec<RuntimeCostAmount>,
     #[serde(default)]
@@ -63,7 +99,7 @@ struct PersistedSessionCost {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct PersistedPerformanceSample {
+struct PerformanceSample {
     thread_id: String,
     inference_id: String,
     completed_at: i64,
@@ -83,7 +119,7 @@ impl ModelPerformanceOwner {
         product_events: ProductEventBus,
     ) -> Self {
         Self {
-            state: Arc::new(Mutex::new(PersistedModelPerformance::default())),
+            state: Arc::new(Mutex::new(ModelPerformanceState::default())),
             store,
             writer,
             product_events,
@@ -91,15 +127,13 @@ impl ModelPerformanceOwner {
     }
 
     pub(crate) async fn load_cache(&self) -> Result<(), PureError> {
-        let Some(value) = self
-            .store
-            .load_setting(CACHE_KEY)
-            .await
-            .map_err(|error| PureError::MemoryError(error.to_string()))?
+        let Some(mut restored) =
+            load_object::<ModelPerformanceState>(self.store.database(), MODEL_PERFORMANCE_OWNER_ID)
+                .await
+                .map_err(|error| PureError::MemoryError(error.to_string()))?
         else {
             return Ok(());
         };
-        let mut restored: PersistedModelPerformance = serde_json::from_str(&value)?;
         if restored.version != CACHE_VERSION {
             return Err(PureError::MemoryError(format!(
                 "unsupported model performance cache version {}",
@@ -131,12 +165,10 @@ impl ModelPerformanceOwner {
         }
         let identity = format!("{thread_id}:{}", billing.inference_id);
         let fingerprint = billing_fingerprint(billing)?;
-        let (snapshot, revision, value) = {
+        let snapshot = {
             let mut state = self.state.lock().await;
-            let session = state
-                .sessions
-                .entry(root_thread_id.to_string())
-                .or_default();
+            let mut next = state.clone();
+            let session = next.sessions.entry(root_thread_id.to_string()).or_default();
             if let Some(existing) = session.inference_fingerprints.get(&identity) {
                 if existing == &fingerprint {
                     return Ok(());
@@ -153,42 +185,39 @@ impl ModelPerformanceOwner {
             session.has_unpriced_usage |= billing.has_unpriced_usage;
 
             if let Some(sample) = performance_sample(thread_id, billing) {
-                state.history.push_back(sample);
-                while state.history.len() > HISTORY_LIMIT {
-                    state.history.pop_front();
+                next.history.push_back(sample);
+                while next.history.len() > HISTORY_LIMIT {
+                    next.history.pop_front();
                 }
             }
-            state.revision = state.revision.saturating_add(1);
-            state.updated_at = unix_seconds();
-            let snapshot = public_snapshot(&state);
-            let value = serde_json::to_string(&*state)?;
-            (snapshot, state.revision, value)
+            next.revision = next.revision.saturating_add(1);
+            next.updated_at = unix_seconds();
+            let snapshot = public_snapshot(&next);
+            self.writer.accept_model_performance(next.clone())?;
+            *state = next;
+            snapshot
         };
         self.product_events.emit_model_performance_state(snapshot);
-        self.writer
-            .enqueue_observed_state(CACHE_KEY, revision, value)
-            .await
+        Ok(())
     }
 
     pub(crate) async fn remove_session(&self, root_thread_id: &str) -> Result<(), PureError> {
         let update = {
             let mut state = self.state.lock().await;
-            if state.sessions.remove(root_thread_id).is_none() {
+            if !state.sessions.contains_key(root_thread_id) {
                 return Ok(());
             }
-            state.revision = state.revision.saturating_add(1);
-            state.updated_at = unix_seconds();
-            Some((
-                public_snapshot(&state),
-                state.revision,
-                serde_json::to_string(&*state)?,
-            ))
+            let mut next = state.clone();
+            next.sessions.remove(root_thread_id);
+            next.revision = next.revision.saturating_add(1);
+            next.updated_at = unix_seconds();
+            let snapshot = public_snapshot(&next);
+            self.writer.accept_model_performance(next.clone())?;
+            *state = next;
+            Some(snapshot)
         };
-        if let Some((snapshot, revision, value)) = update {
+        if let Some(snapshot) = update {
             self.product_events.emit_model_performance_state(snapshot);
-            self.writer
-                .enqueue_observed_state(CACHE_KEY, revision, value)
-                .await?;
         }
         Ok(())
     }
@@ -197,14 +226,14 @@ impl ModelPerformanceOwner {
 fn performance_sample(
     thread_id: &str,
     billing: &InferenceBillingRecord,
-) -> Option<PersistedPerformanceSample> {
+) -> Option<PerformanceSample> {
     let timing = billing
         .timing
         .filter(|timing| timing.has_throughput_sample())?;
     if billing.provider_instance_id.is_empty() || billing.model.is_empty() {
         return None;
     }
-    Some(PersistedPerformanceSample {
+    Some(PerformanceSample {
         thread_id: thread_id.to_string(),
         inference_id: billing.inference_id.clone(),
         completed_at: billing.recorded_at,
@@ -218,7 +247,7 @@ fn performance_sample(
     })
 }
 
-fn public_snapshot(state: &PersistedModelPerformance) -> StudioModelPerformanceSnapshot {
+fn public_snapshot(state: &ModelPerformanceState) -> StudioModelPerformanceSnapshot {
     let session_costs = state
         .sessions
         .iter()
@@ -238,7 +267,7 @@ fn public_snapshot(state: &PersistedModelPerformance) -> StudioModelPerformanceS
     }
 }
 
-fn public_sample(sample: &PersistedPerformanceSample) -> StudioModelPerformanceSample {
+fn public_sample(sample: &PerformanceSample) -> StudioModelPerformanceSample {
     StudioModelPerformanceSample {
         completed_at: sample.completed_at,
         provider_instance_id: sample.provider_instance_id.clone(),
@@ -263,7 +292,7 @@ struct SummaryAccumulator {
 }
 
 fn performance_summaries(
-    history: &VecDeque<PersistedPerformanceSample>,
+    history: &VecDeque<PerformanceSample>,
 ) -> Vec<StudioModelPerformanceSummary> {
     let mut groups = BTreeMap::<(String, String), SummaryAccumulator>::new();
     for sample in history {
@@ -490,22 +519,22 @@ mod tests {
         ));
 
         writer.flush().await.expect("flush observed state");
-        assert!(store.load_setting(CACHE_KEY).await.unwrap().is_some());
+        assert!(
+            load_object::<ModelPerformanceState>(store.database(), MODEL_PERFORMANCE_OWNER_ID,)
+                .await
+                .unwrap()
+                .is_some()
+        );
 
         let product_events = ProductEventBus::new(store.clone(), writer.clone());
         let restored = ModelPerformanceOwner::new(store.clone(), writer.clone(), product_events);
         restored.load_cache().await.expect("restore cache");
         assert_eq!(restored.snapshot().await, owner.snapshot().await);
 
-        store
-            .save_setting(
-                CACHE_KEY,
-                &serde_json::to_string(&PersistedModelPerformance::default()).unwrap(),
-            )
-            .await
-            .expect("replace with empty cache");
-        let product_events = ProductEventBus::new(store.clone(), writer.clone());
-        let empty = ModelPerformanceOwner::new(store, writer.clone(), product_events);
+        let empty_store = StudioStore::open_memory().await.expect("empty store");
+        let empty_writer = ThreadWriteBehindWriter::new(empty_store.clone());
+        let product_events = ProductEventBus::new(empty_store.clone(), empty_writer.clone());
+        let empty = ModelPerformanceOwner::new(empty_store, empty_writer.clone(), product_events);
         empty.load_cache().await.expect("load empty cache");
         assert_eq!(
             empty.snapshot().await,
@@ -513,6 +542,10 @@ mod tests {
         );
 
         writer.shutdown().await.expect("writer shutdown");
+        empty_writer
+            .shutdown()
+            .await
+            .expect("empty writer shutdown");
     }
 
     #[tokio::test]

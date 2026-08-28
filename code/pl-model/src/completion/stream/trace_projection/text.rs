@@ -1,8 +1,8 @@
 //! 正文与 reasoning 流的 trace part 投影。
 
 use pl_trace::{
-    AgentEvent, TraceDelta, TraceEventKind, TracePart, TracePartAction, TracePartCompletion,
-    TracePartKind, TraceTextChannel,
+    AgentEvent, TraceDelta, TraceEventKind, TracePart, TracePartCompletion, TracePartKind,
+    TraceTextChannel,
 };
 
 use super::TraceProjection;
@@ -28,7 +28,9 @@ impl TraceProjection {
                 text_channel,
                 now,
             );
-            self.record(TraceEventKind::TracePartStarted { item: item.clone() }, now);
+            if !self.record(TraceEventKind::TracePartStarted { item: item.clone() }, now) {
+                return events;
+            }
             events.push(AgentEvent::TracePartStarted { item: item.clone() });
             self.started.insert(item_id.clone(), item);
         }
@@ -43,6 +45,9 @@ impl TraceProjection {
     ) -> Vec<AgentEvent> {
         let now = unix_seconds();
         let mut events = self.start_text(item_id, text_channel);
+        if delta.is_empty() {
+            return events;
+        }
         let item_id = self.active_text_item_id(item_id, text_channel);
         let trace_delta = TraceDelta::Text {
             channel: text_channel,
@@ -51,25 +56,26 @@ impl TraceProjection {
         let Some(item) = self.started.get_mut(&item_id) else {
             return events;
         };
-        if let Err(error) =
-            item.apply(item.command(now, TracePartAction::Append(trace_delta.clone())))
-        {
-            self.trace_error.get_or_insert_with(|| {
-                pl_trace::TraceEventSinkError::new(format!(
-                    "failed to append text trace delta: {error}"
-                ))
-            });
-            return events;
-        }
-        let Ok(event) = item.delta_event(trace_delta) else {
-            return events;
+        let event = match item.apply_delta(now, trace_delta) {
+            Ok(Some(event)) => event,
+            Ok(None) => return events,
+            Err(error) => {
+                self.trace_error.get_or_insert_with(|| {
+                    pl_trace::TraceEventSinkError::new(format!(
+                        "failed to append text trace delta: {error}"
+                    ))
+                });
+                return events;
+            }
         };
-        self.record(
+        if !self.record(
             TraceEventKind::TracePartDelta {
                 event: event.clone(),
             },
             now,
-        );
+        ) {
+            return events;
+        }
         events.push(AgentEvent::TracePartDelta { event });
         events
     }
@@ -104,7 +110,9 @@ impl TraceProjection {
                 self.sequence,
                 now,
             );
-            self.record(TraceEventKind::TracePartStarted { item: item.clone() }, now);
+            if !self.record(TraceEventKind::TracePartStarted { item: item.clone() }, now) {
+                return events;
+            }
             events.push(AgentEvent::TracePartStarted { item: item.clone() });
             self.started.insert(item_id, item);
         }
@@ -119,6 +127,9 @@ impl TraceProjection {
     ) -> Vec<AgentEvent> {
         let now = unix_seconds();
         let mut events = self.start_thinking(item_id, chunk_index);
+        if delta.is_empty() {
+            return events;
+        }
         let item_id = self.active_thinking_item_id(item_id, chunk_index);
         let trace_delta = TraceDelta::Thinking {
             chunk_index: LOCAL_THINKING_CHUNK_INDEX,
@@ -127,25 +138,26 @@ impl TraceProjection {
         let Some(item) = self.started.get_mut(&item_id) else {
             return events;
         };
-        if let Err(error) =
-            item.apply(item.command(now, TracePartAction::Append(trace_delta.clone())))
-        {
-            self.trace_error.get_or_insert_with(|| {
-                pl_trace::TraceEventSinkError::new(format!(
-                    "failed to append thinking trace delta: {error}"
-                ))
-            });
-            return events;
-        }
-        let Ok(event) = item.delta_event(trace_delta) else {
-            return events;
+        let event = match item.apply_delta(now, trace_delta) {
+            Ok(Some(event)) => event,
+            Ok(None) => return events,
+            Err(error) => {
+                self.trace_error.get_or_insert_with(|| {
+                    pl_trace::TraceEventSinkError::new(format!(
+                        "failed to append thinking trace delta: {error}"
+                    ))
+                });
+                return events;
+            }
         };
-        self.record(
+        if !self.record(
             TraceEventKind::TracePartDelta {
                 event: event.clone(),
             },
             now,
-        );
+        ) {
+            return events;
+        }
         events.push(AgentEvent::TracePartDelta { event });
         events
     }
@@ -158,6 +170,9 @@ impl TraceProjection {
     ) -> Vec<AgentEvent> {
         let now = unix_seconds();
         let mut events = self.start_thinking(item_id, chunk_index);
+        if delta.is_empty() {
+            return events;
+        }
         let item_id = self.active_thinking_item_id(item_id, chunk_index);
         let trace_delta = TraceDelta::ReasoningContent {
             chunk_index: LOCAL_THINKING_CHUNK_INDEX,
@@ -166,25 +181,26 @@ impl TraceProjection {
         let Some(item) = self.started.get_mut(&item_id) else {
             return events;
         };
-        if let Err(error) =
-            item.apply(item.command(now, TracePartAction::Append(trace_delta.clone())))
-        {
-            self.trace_error.get_or_insert_with(|| {
-                pl_trace::TraceEventSinkError::new(format!(
-                    "failed to append reasoning content trace delta: {error}"
-                ))
-            });
-            return events;
-        }
-        let Ok(event) = item.delta_event(trace_delta) else {
-            return events;
+        let event = match item.apply_delta(now, trace_delta) {
+            Ok(Some(event)) => event,
+            Ok(None) => return events,
+            Err(error) => {
+                self.trace_error.get_or_insert_with(|| {
+                    pl_trace::TraceEventSinkError::new(format!(
+                        "failed to append reasoning content trace delta: {error}"
+                    ))
+                });
+                return events;
+            }
         };
-        self.record(
+        if !self.record(
             TraceEventKind::TracePartDelta {
                 event: event.clone(),
             },
             now,
-        );
+        ) {
+            return events;
+        }
         events.push(AgentEvent::TracePartDelta { event });
         events
     }

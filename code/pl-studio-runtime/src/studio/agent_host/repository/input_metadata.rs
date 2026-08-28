@@ -1,6 +1,7 @@
 //! Durable mailbox input 的 runtime metadata 编解码。
 
 use pl_core::DurableMailboxEnvelope;
+use pl_core::MailboxMetadata;
 use pl_protocol::PureError;
 
 use super::store_error;
@@ -41,7 +42,7 @@ pub(super) fn deserialize_input_metadata(
     input: &str,
 ) -> Result<
     (
-        serde_json::Value,
+        MailboxMetadata,
         Option<String>,
         pl_core::MailboxBudgetAction,
     ),
@@ -49,10 +50,10 @@ pub(super) fn deserialize_input_metadata(
 > {
     let mut value: serde_json::Value = serde_json::from_str(input)?;
     let Some(object) = value.as_object_mut() else {
-        return Ok((value, None, pl_core::MailboxBudgetAction::Preserve));
+        return Ok((value.into(), None, pl_core::MailboxBudgetAction::Preserve));
     };
     let Some(runtime) = object.get(RUNTIME_INPUT_METADATA_KEY) else {
-        return Ok((value, None, pl_core::MailboxBudgetAction::Preserve));
+        return Ok((value.into(), None, pl_core::MailboxBudgetAction::Preserve));
     };
     let key = runtime
         .get("queueCoalescingKey")
@@ -69,5 +70,5 @@ pub(super) fn deserialize_input_metadata(
     let payload = object
         .remove(INPUT_METADATA_PAYLOAD_KEY)
         .unwrap_or(serde_json::Value::Null);
-    Ok((payload, key, budget_action))
+    Ok((payload.into(), key, budget_action))
 }

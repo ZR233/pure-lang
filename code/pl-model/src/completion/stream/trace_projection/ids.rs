@@ -124,10 +124,12 @@ impl TraceProjection {
             return Vec::new();
         }
         let item = item.clone();
-        self.record(
+        if !self.record(
             TraceEventKind::TracePartCompleted { item: item.clone() },
             item.updated_at(),
-        );
+        ) {
+            return Vec::new();
+        }
         vec![AgentEvent::TracePartCompleted { item }]
     }
 }

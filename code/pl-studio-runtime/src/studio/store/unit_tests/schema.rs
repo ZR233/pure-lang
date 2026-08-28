@@ -12,8 +12,8 @@ use crate::studio::paths::sqlite_url;
 use crate::studio::store_support::STUDIO_DATABASE_SCHEMA_VERSION;
 
 #[tokio::test]
-async fn creates_canonical_schema_v14_with_six_state_tasks() {
-    let root = unique_test_root("schema-v14");
+async fn creates_canonical_schema_v15_with_six_state_tasks() {
+    let root = unique_test_root("schema-v15");
     let database_path = root.join("studio.sqlite");
     let store = StudioStore::open(&database_path).await.unwrap();
 
@@ -29,7 +29,7 @@ async fn creates_canonical_schema_v14_with_six_state_tasks() {
         "turns",
         "items",
         "thread_context_segments",
-        "thread_session_state",
+        "studio_objects",
         "interactions",
         "attachments",
         "app_settings",
@@ -291,7 +291,127 @@ async fn incompatible_schema_is_rebuilt_to_current_without_migration() {
 }
 
 #[tokio::test]
-async fn schema_v13_image_attachments_migrate_once_to_content_addressed_v14() {
+async fn schema_v14_working_state_migrates_once_to_typed_objects() {
+    let root = unique_test_root("schema-v14-object-migration");
+    let database_path = root.join("studio.sqlite");
+    let workspace = root.join("workspace");
+    tokio::fs::create_dir_all(&workspace).await.unwrap();
+    let store = StudioStore::open(&database_path).await.unwrap();
+    let project = store.upsert_project(&workspace).await.unwrap();
+    let thread = store
+        .create_thread(&project.id, "Object migration", StudioMode::Simple)
+        .await
+        .unwrap();
+    store
+        .database()
+        .execute_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Sqlite,
+            "UPDATE threads SET metadata_json = 'null' WHERE id = ?",
+            [thread.id.clone().into()],
+        ))
+        .await
+        .unwrap();
+    store
+        .database()
+        .execute_unprepared("DROP TABLE studio_objects")
+        .await
+        .unwrap();
+    sea_orm::Schema::new(store.database().get_database_backend())
+        .builder()
+        .register(crate::studio::entity::thread_session_state::Entity)
+        .apply(store.database())
+        .await
+        .unwrap();
+
+    let working_state = pl_protocol::AgentWorkingState {
+        revision: 7,
+        ..Default::default()
+    };
+    let state_json = serde_json::to_string(&working_state).unwrap();
+    let state_hash = pl_core::canonical_content_hash(state_json.as_bytes());
+    store
+        .database()
+        .execute_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Sqlite,
+            "INSERT INTO thread_session_state
+                 (thread_id, revision, state_json, state_hash, updated_at)
+             VALUES (?, 7, ?, ?, 11)",
+            [
+                thread.id.clone().into(),
+                state_json.into(),
+                state_hash.into(),
+            ],
+        ))
+        .await
+        .unwrap();
+    let performance = crate::studio::runtime::ModelPerformanceState::default();
+    store
+        .save_setting(
+            "observed:modelPerformance:v1",
+            &serde_json::to_string(&performance).unwrap(),
+        )
+        .await
+        .unwrap();
+    store
+        .database()
+        .execute_unprepared("PRAGMA user_version = 14")
+        .await
+        .unwrap();
+    drop(store);
+
+    let migrated = StudioStore::open(&database_path).await.unwrap();
+    assert_eq!(
+        schema_version(migrated.database()).await,
+        STUDIO_DATABASE_SCHEMA_VERSION
+    );
+    assert!(!table_exists(migrated.database(), "thread_session_state").await);
+    assert_eq!(
+        crate::studio::store::object::load_object::<pl_protocol::AgentWorkingState>(
+            migrated.database(),
+            &thread.id,
+        )
+        .await
+        .unwrap(),
+        Some(working_state)
+    );
+    assert_eq!(
+        crate::studio::store::object::load_object::<crate::studio::runtime::ModelPerformanceState>(
+            migrated.database(),
+            crate::studio::runtime::MODEL_PERFORMANCE_OWNER_ID
+        )
+        .await
+        .unwrap()
+        .map(|state| state.revision()),
+        Some(0)
+    );
+    assert!(
+        migrated
+            .load_setting("observed:modelPerformance:v1")
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let metadata_query = Statement::from_sql_and_values(
+        DatabaseBackend::Sqlite,
+        "SELECT metadata_json FROM threads WHERE id = ?",
+        [thread.id.clone().into()],
+    );
+    let metadata = migrated
+        .database()
+        .query_one_raw(metadata_query)
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get::<String>("", "metadata_json")
+        .unwrap();
+    assert_eq!(metadata, "{}");
+
+    drop(migrated);
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn schema_v13_image_attachments_migrate_once_to_content_addressed_v15() {
     let root = unique_test_root("schema-v13-attachment-migration");
     tokio::fs::create_dir_all(&root).await.unwrap();
     let database_path = root.join("studio.sqlite");
@@ -336,8 +456,19 @@ async fn schema_v13_image_attachments_migrate_once_to_content_addressed_v14() {
             "ALTER TABLE attachments DROP COLUMN kind;
              ALTER TABLE attachments DROP COLUMN content_sha256;
              ALTER TABLE thread_inputs DROP COLUMN attachments_json;
-             PRAGMA user_version = 13;",
+             DROP TABLE studio_objects;",
         )
+        .await
+        .unwrap();
+    sea_orm::Schema::new(store.database().get_database_backend())
+        .builder()
+        .register(crate::studio::entity::thread_session_state::Entity)
+        .apply(store.database())
+        .await
+        .unwrap();
+    store
+        .database()
+        .execute_unprepared("PRAGMA user_version = 13;")
         .await
         .unwrap();
     drop(store);
@@ -346,7 +477,10 @@ async fn schema_v13_image_attachments_migrate_once_to_content_addressed_v14() {
     let records = migrated.list_thread_attachments(&thread.id).await.unwrap();
     let expected_hash = format!("{:x}", Sha256::digest(image_bytes));
 
-    assert_eq!(schema_version(migrated.database()).await, 14);
+    assert_eq!(
+        schema_version(migrated.database()).await,
+        STUDIO_DATABASE_SCHEMA_VERSION
+    );
     assert!(
         table_columns(migrated.database(), "thread_inputs")
             .await
@@ -416,8 +550,19 @@ async fn failed_v13_attachment_migration_preserves_the_original_database() {
             "ALTER TABLE attachments DROP COLUMN kind;
              ALTER TABLE attachments DROP COLUMN content_sha256;
              ALTER TABLE thread_inputs DROP COLUMN attachments_json;
-             PRAGMA user_version = 13;",
+             DROP TABLE studio_objects;",
         )
+        .await
+        .unwrap();
+    sea_orm::Schema::new(store.database().get_database_backend())
+        .builder()
+        .register(crate::studio::entity::thread_session_state::Entity)
+        .apply(store.database())
+        .await
+        .unwrap();
+    store
+        .database()
+        .execute_unprepared("PRAGMA user_version = 13;")
         .await
         .unwrap();
     drop(store);

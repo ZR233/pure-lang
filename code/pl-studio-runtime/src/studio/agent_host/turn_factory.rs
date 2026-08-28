@@ -263,7 +263,11 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             None => context.snapshot.identity.role.clone(),
         };
         let route = config.models.resolve(&model_role)?;
-        let attachment_runtime = attachment_runtime(self.store.clone(), thread_id.clone());
+        let attachment_runtime = attachment_runtime(
+            self.store.clone(),
+            self.resources.clone(),
+            thread_id.clone(),
+        );
         let mcp_image_output =
             pl_core::McpImageOutputContext::for_model(&route.model, attachment_runtime.clone());
         let web_search = plan_web_search(&config.models, &route, &config.web_search)?;
@@ -417,8 +421,8 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .map(|attachment| attachment.id.clone())
             .collect::<Vec<_>>();
         let attachments = self
-            .store
-            .load_attachments(&thread_id, &attachment_ids)
+            .resources
+            .selected_thread_attachments(&thread_id, &attachment_ids)
             .await
             .map_err(anyhow_error)?;
         let stored_thread_attachments = attachments
@@ -430,11 +434,11 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
                 "mailbox attachment manifest does not match the canonical attachment store"
             )));
         }
-        let mut materialized = self
-            .store
-            .materialize_thread_attachments(&thread_id)
-            .await
-            .map_err(anyhow_error)?;
+        let attachment_records = self.resources.thread_attachments(&thread_id).await;
+        let mut materialized =
+            crate::studio::store::attachment::materialize_attachment_records(attachment_records)
+                .await
+                .map_err(anyhow_error)?;
         let initial_remote_urls = self
             .resources
             .take_initial_remote_urls(&attachment_ids)
@@ -463,7 +467,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
                 .payload
                 .metadata
                 .get("subagentConstraint")
-                .and_then(serde_json::Value::as_str),
+                .and_then(pl_core::MailboxMetadataValue::as_str),
         })?;
         #[cfg_attr(not(debug_assertions), allow(unused_mut))]
         let mut request = TurnRequest::new(input_message)
@@ -532,7 +536,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .payload
             .metadata
             .get("historyPolicy")
-            .and_then(serde_json::Value::as_str)
+            .and_then(pl_core::MailboxMetadataValue::as_str)
             == Some("ephemeral")
         {
             Ok(prepared.with_session_commit(pl_core::AgentSessionCommitPolicy::DiscardTurn))
@@ -695,26 +699,43 @@ fn interaction_emitter(
     })
 }
 
-fn attachment_runtime(store: StudioStore, thread_id: String) -> AttachmentRuntime {
+fn attachment_runtime(
+    store: StudioStore,
+    resources: StudioAgentResources,
+    thread_id: String,
+) -> AttachmentRuntime {
     let writer_store = store.clone();
+    let writer_resources = resources.clone();
     let writer_thread_id = thread_id.clone();
     AttachmentRuntime::new_batch(
         move |inputs| {
             let store = writer_store.clone();
+            let resources = writer_resources.clone();
             let thread_id = writer_thread_id.clone();
             async move {
-                store
-                    .persist_tool_images(&thread_id, inputs)
+                let records = store
+                    .persist_tool_image_records(&thread_id, inputs)
                     .await
-                    .map_err(anyhow_error)
+                    .map_err(anyhow_error)?;
+                let attachments = records
+                    .iter()
+                    .map(crate::studio::store::attachment::thread_attachment)
+                    .collect();
+                resources
+                    .insert_thread_attachments(&thread_id, records)
+                    .await;
+                Ok(attachments)
             }
         },
         move |attachment_ids| {
-            let store = store.clone();
+            let resources = resources.clone();
             let thread_id = thread_id.clone();
             async move {
-                store
-                    .materialize_attachments(&thread_id, &attachment_ids)
+                let records = resources
+                    .selected_thread_attachments(&thread_id, &attachment_ids)
+                    .await
+                    .map_err(anyhow_error)?;
+                crate::studio::store::attachment::materialize_attachment_records(records)
                     .await
                     .map_err(anyhow_error)
             }

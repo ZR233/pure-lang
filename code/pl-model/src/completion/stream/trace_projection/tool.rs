@@ -32,7 +32,9 @@ impl TraceProjection {
             now,
             invocation,
         );
-        self.record(TraceEventKind::TracePartStarted { item: item.clone() }, now);
+        if !self.record(TraceEventKind::TracePartStarted { item: item.clone() }, now) {
+            return Vec::new();
+        }
         self.started.insert(item_id, item.clone());
         vec![AgentEvent::TracePartStarted { item }]
     }
@@ -84,7 +86,9 @@ impl TraceProjection {
             now,
             invocation,
         );
-        self.record(TraceEventKind::TracePartStarted { item: item.clone() }, now);
+        if !self.record(TraceEventKind::TracePartStarted { item: item.clone() }, now) {
+            return Vec::new();
+        }
         self.started.insert(item_id, item.clone());
         vec![AgentEvent::TracePartStarted { item }]
     }
@@ -146,10 +150,12 @@ impl TraceProjection {
             return events;
         }
         let item = item.clone();
-        self.record(
+        if !self.record(
             TraceEventKind::TracePartCompleted { item: item.clone() },
             item.updated_at(),
-        );
+        ) {
+            return events;
+        }
         events.push(AgentEvent::TracePartCompleted { item });
         events
     }
@@ -162,38 +168,69 @@ impl TraceProjection {
         let now = unix_seconds();
         let item_id = self.active_tool_item_id(snapshot);
         let mut events = self.start_tool(snapshot);
-        let Some(item) = self.started.get_mut(&item_id) else {
-            return events;
+        let metadata_snapshot = {
+            let Some(item) = self.started.get_mut(&item_id) else {
+                return events;
+            };
+            let arguments = item
+                .tool()
+                .map(|tool| tool.invocation().arguments().to_string())
+                .unwrap_or_default();
+            let invocation =
+                TraceToolInvocation::new(item_id.clone(), snapshot.name.clone(), arguments)
+                    .with_provider_identity(
+                        snapshot.call_id.clone(),
+                        (!snapshot.id.is_empty()).then(|| snapshot.id.clone()),
+                    );
+            match item
+                .apply(item.command(now, TracePartAction::UpdateToolInvocation { invocation }))
+            {
+                Ok(decision) => decision.changed.then(|| item.clone()),
+                Err(error) => {
+                    self.trace_error.get_or_insert_with(|| {
+                        pl_trace::TraceEventSinkError::new(format!(
+                            "failed to update streamed tool invocation: {error}"
+                        ))
+                    });
+                    return events;
+                }
+            }
         };
-        let invocation = TraceToolInvocation::new(
-            item_id.clone(),
-            snapshot.name.clone(),
-            snapshot.arguments.clone(),
-        )
-        .with_provider_identity(
-            snapshot.call_id.clone(),
-            (!snapshot.id.is_empty()).then(|| snapshot.id.clone()),
-        );
-        if let Err(error) =
-            item.apply(item.command(now, TracePartAction::UpdateToolInvocation { invocation }))
-        {
-            self.trace_error.get_or_insert_with(|| {
-                pl_trace::TraceEventSinkError::new(format!(
-                    "failed to update streamed tool invocation: {error}"
-                ))
-            });
+        if let Some(item) = metadata_snapshot {
+            if !self.record(TraceEventKind::TracePartStarted { item: item.clone() }, now) {
+                return events;
+            }
+            events.push(AgentEvent::TracePartStarted { item });
+        }
+        if delta.is_empty() {
             return events;
         }
         let trace_delta = TraceDelta::ToolArguments { delta };
-        let Ok(event) = item.delta_event(trace_delta) else {
-            return events;
+        let event = {
+            let Some(item) = self.started.get_mut(&item_id) else {
+                return events;
+            };
+            match item.apply_delta(now, trace_delta) {
+                Ok(Some(event)) => event,
+                Ok(None) => return events,
+                Err(error) => {
+                    self.trace_error.get_or_insert_with(|| {
+                        pl_trace::TraceEventSinkError::new(format!(
+                            "failed to append tool arguments trace delta: {error}"
+                        ))
+                    });
+                    return events;
+                }
+            }
         };
-        self.record(
+        if !self.record(
             TraceEventKind::TracePartDelta {
                 event: event.clone(),
             },
             now,
-        );
+        ) {
+            return events;
+        }
         events.push(AgentEvent::TracePartDelta { event });
         events.extend(self.project_plan_arguments(snapshot));
         events
@@ -225,18 +262,23 @@ impl TraceProjection {
             let invocation =
                 TraceToolInvocation::new(item_id.clone(), call.name.clone(), call.payload_text())
                     .with_provider_identity(Some(call.call_id.clone()), Some(call.id.clone()));
-            if let Err(error) =
-                item.apply(item.command(now, TracePartAction::UpdateToolInvocation { invocation }))
+            match item
+                .apply(item.command(now, TracePartAction::UpdateToolInvocation { invocation }))
             {
-                self.trace_error.get_or_insert_with(|| {
-                    pl_trace::TraceEventSinkError::new(format!(
-                        "failed to update canonical tool trace: {error}"
-                    ))
-                });
+                Ok(_) => {}
+                Err(error) => {
+                    self.trace_error.get_or_insert_with(|| {
+                        pl_trace::TraceEventSinkError::new(format!(
+                            "failed to update canonical tool trace: {error}"
+                        ))
+                    });
+                }
             }
         }
         let item = item.clone();
-        self.record(TraceEventKind::TracePartStarted { item: item.clone() }, now);
+        if !self.record(TraceEventKind::TracePartStarted { item: item.clone() }, now) {
+            return Vec::new();
+        }
         let mut events = vec![AgentEvent::TracePartStarted { item }];
         if call.invalid_arguments.is_some() {
             events.extend(

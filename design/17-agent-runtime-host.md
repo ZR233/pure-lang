@@ -100,7 +100,15 @@ TaskRuntime；core 不携带 SQLite mutation。
 session/sequence 的 draft；sink 在单一临界区分配 sequence、推进 TracePart revision、保存本 Turn
 内存 capture 并立即投递 ThreadActor。模型 completion 不再拥有 trace buffer，也不得在调用结束后
 把一批事件回灌 recorder。`TurnResult.trace_events` 只是同一 sink 的审计 capture，不是第二条发布
-路径。provider/tool chunk 的可见边界是 sink 接受该 draft，而不是 provider EOS、工具终态或 SQLite。
+路径。ThreadActor 从 channel 取出的 typed trace batch 在 repository 接受前必须继续由 actor 持有；
+投影或 admission 失败后重试完整 batch，不能消费后跳过。只有成功 owner commit 能推进
+`trace_sequence`，producer completion 报告的 next sequence 只用于完整性校验，不能越过未提交事实。
+provider/tool chunk 的可见边界是 sink 接受该 draft，而不是 provider EOS、工具终态或 SQLite。
+ThreadActor 从首条待投影 trace 起最多等待 100ms、最多收集 256 个 typed event，再构造一次 owner
+commit；该窗口不改变逐事件 revision、通知顺序或热 Timeline 语义。write-behind 还可合并队尾相邻、
+同 owner/Turn 且严格连续的 `AppendTrace` commit：保留全部 trace 与规范通知，只折叠中间完整快照。
+队列暂满时 Studio repository 等待 writer progress 后重试同一 typed commit，不能把容量背压升级为
+业务 Turn 失败，也不能丢弃 reasoning/tool delta。
 
 合法 provider 输入上的 trace/Thread 投影准备错误只终结当前 Turn，使用类型化协议失败结果并让 Agent
 回到可接收输入状态。只有 ThreadActor 的复合聚合本身无法验证、或无法构造一致的 Turn 终态时，才允许
@@ -201,9 +209,11 @@ replacement、working state、recovery marker、Thread revision 和通知必须�
 
 Flutter Driver 的观察连接不是 Thread 生命周期 owner。只读 `readThreadSnapshot` 只能读取
 repository 与已驻留 actor 的 live overlay；actor 未驻留时返回 inactive，不触发恢复、不改 role、
-不投递 durable wake。wire 快照（订阅 bootstrap 帧与 `readThreadSnapshot`）在 bridge 转换层
-窗口化：items 按整 Turn 对齐截断到最近 400 条，并携带 `historyCursor`（窗口首 Turn 的 id，
-`listThreadTurns` 的 before 语义锚点）——内部 protocol 快照保持全量，只有 wire 边界窗口化。`subscribeThread` 是显式激活命令，未驻留 Thread 经订阅按需恢复；连接
+不投递 durable wake。wire 快照（订阅 bootstrap 帧与 `readThreadSnapshot`）携带最近至少 400 个、
+按整 Turn 对齐的热 items，并携带 `historyCursor`（窗口首 Turn 的 id，`listThreadTurns` 的 before
+语义锚点）。内部 protocol snapshot 同样只保存已显式加载的热 Timeline；向前翻页先把冷页合并进
+owner 热窗口。`subscribeThread` 是显式激活命令，未驻留 Thread 经订阅一次性恢复 working state、
+当前有效模型 Context、热 Timeline 与 pending Interaction；连接
 disposed/closed 时 Driver 可以重建 transport 并再次纯读；tap、输入、prompt submit、计划确认、
 恢复确认和 shutdown 永不自动重放。动作响应丢失后只能重连读取 canonical postcondition，且
 Driver reconnect 不刷新 Task stall 计时或 Task durable progress。
@@ -211,8 +221,8 @@ Driver reconnect 不刷新 Task stall 计时或 Task durable progress。
 启动 command 负责建立全部未归档 durable Thread 的目录索引（见 19.6），只为钉住集合 materialize
 pending wake。运行中 actor 缺失由 `repairThreadRuntime(threadId)` 或订阅/提交输入按需恢复；
 `readThreadSnapshot` 对未驻留 Thread 仍返回 typed inactive，不产生副作用。驻留 actor 由 manager
-的 LRU 双端队列管理：订阅、提交或修复时移到队尾；空闲判定为无活动 Turn、无活跃订阅且无
-pending input，超容量时从队首淘汰，淘汰前显式等待该 Thread 目标修订号耐久化，不要求冲刷无关
+的 LRU 双端队列管理：订阅、提交或修复时移到队尾；当前选择与活动 Task 引用 pin，其他空闲
+Thread 最多保留四个，超容量时从队首淘汰，淘汰前显式等待该 Thread 目标修订号耐久化，不要求冲刷无关
 owner。订阅是
 显式观察者注册：bridge 订阅 producer 存活期间持有驻留 pin，被观察的线程不参与淘汰，订阅
 取消/流关闭即解除 pin——淘汰一个仍被订阅的线程会让该订阅流永久静默（总线无事件也无关闭

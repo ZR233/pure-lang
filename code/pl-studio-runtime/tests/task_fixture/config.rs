@@ -34,10 +34,15 @@ pub(super) fn task_test_config(base_url: String) -> StudioConfig {
             .collect(),
     };
     config.runtime.permission_mode = PermissionMode::FullAccess;
-    config.runtime.tool_capabilities.skills = false;
+    config.instructions.developer =
+        "GLOBAL_DEVELOPER_CONTEXT_MARKER: deterministic Task wire acceptance.".to_string();
+    config.instructions.user =
+        "GLOBAL_USER_CONTEXT_MARKER: preserve the complete role prompt.".to_string();
+    config.runtime.tool_capabilities.skills = true;
     config.runtime.tool_capabilities.mcp = false;
     config.runtime.tool_capabilities.lsp = false;
-    config.skills.enabled = false;
+    config.skills.enabled = true;
+    config.skills.system.enabled = false;
     config.skills.auto_learn = false;
     config
 }

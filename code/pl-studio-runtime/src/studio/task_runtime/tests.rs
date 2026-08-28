@@ -1,5 +1,5 @@
 use super::*;
-use crate::studio::task_coordinator::CreateTaskRun;
+use crate::studio::task_coordinator::{CreateTaskRun, TaskExecutorBlueprint};
 use crate::{StudioMode, StudioTaskState};
 
 fn agent_failure(
@@ -21,6 +21,140 @@ fn agent_failure(
         ),
         disposition,
     }
+}
+
+#[tokio::test]
+async fn executor_blueprint_is_hot_immediately_and_survives_cold_activation() {
+    let store = StudioStore::open_memory().await.expect("memory store");
+    let workspace = std::env::temp_dir().join("pure-task-runtime-blueprint-fact");
+    let project = store.upsert_project(&workspace).await.expect("project");
+    let thread = store
+        .create_thread(&project.id, "Task", StudioMode::Task)
+        .await
+        .expect("thread");
+    let events = ProductEventBus::new(
+        store.clone(),
+        crate::studio::agent_host::ThreadWriteBehindWriter::new(store.clone()),
+    );
+    let runtime = TaskRuntime::new(store.clone(), events);
+    runtime
+        .initialize(store.list_active_task_runs().await.expect("active runs"))
+        .await
+        .expect("initialize runtime");
+    runtime
+        .create_task(CreateTaskRun {
+            project_id: project.id,
+            root_thread_id: thread.id.clone(),
+            request: "implement".to_string(),
+            workspace_root: workspace.to_string_lossy().to_string(),
+        })
+        .await
+        .expect("create task");
+    runtime
+        .submit_plan(&thread.id, "plan", 0, 0)
+        .await
+        .expect("submit plan");
+    runtime
+        .apply_run_command(
+            &thread.id,
+            1,
+            0,
+            TaskCommand::ConfirmPlan { plan_revision: 1 },
+        )
+        .await
+        .expect("confirm plan");
+    runtime
+        .apply_run_command(
+            &thread.id,
+            2,
+            0,
+            TaskCommand::FinishDocumentEditing {
+                summary: "documents ready".to_string(),
+            },
+        )
+        .await
+        .expect("finish design");
+
+    let blueprint = TaskExecutorBlueprint::for_test("implement feature", vec!["src".to_string()])
+        .normalize_and_validate()
+        .expect("valid blueprint");
+    let fingerprint = blueprint.fingerprint().expect("fingerprint");
+    let allocation = runtime
+        .allocate_executor(AllocateExecutor {
+            thread_id: thread.id.clone(),
+            title: blueprint.task_name.clone(),
+            scope_hints: blueprint.scope.scope_hints.clone(),
+            blueprint: blueprint.clone(),
+            agent_id: "executor-blueprint".to_string(),
+            requested_by_call_id: "spawn-blueprint".to_string(),
+        })
+        .await
+        .expect("allocate executor");
+    let assert_blueprint_projection = |snapshot: &StudioTaskRuntime| {
+        let unit = snapshot
+            .work_units
+            .iter()
+            .find(|unit| unit.id == allocation.work_unit.id)
+            .expect("projected work unit");
+        assert_eq!(
+            unit.blueprint_fingerprint.as_deref(),
+            Some(fingerprint.as_str())
+        );
+        assert_eq!(
+            unit.objective.as_deref(),
+            Some(blueprint.objective.as_str())
+        );
+        assert_eq!(unit.implementation_step_count, 1);
+        assert_eq!(unit.acceptance_criterion_count, 1);
+        assert_eq!(unit.verification_count, 1);
+    };
+    assert_blueprint_projection(&runtime.snapshot(&thread.id).await.expect("hot snapshot"));
+
+    runtime
+        .record_executor_worktree_base(&allocation.work_unit.id, "executor-blueprint", "base-1")
+        .await
+        .expect("update canonical work unit");
+    let expected_snapshot = runtime
+        .snapshot(&thread.id)
+        .await
+        .expect("updated hot snapshot");
+    assert_blueprint_projection(&expected_snapshot);
+    let durable_revision = runtime
+        .aggregate(&thread.id)
+        .await
+        .expect("resident aggregate")
+        .hot_revision;
+    runtime
+        .await_durable(&thread.id, durable_revision)
+        .await
+        .expect("blueprint durability");
+    runtime.writer().shutdown().await.expect("shutdown writer");
+
+    let reopened_events = ProductEventBus::new(
+        store.clone(),
+        crate::studio::agent_host::ThreadWriteBehindWriter::new(store.clone()),
+    );
+    let reopened = TaskRuntime::new(store.clone(), reopened_events);
+    reopened
+        .initialize(
+            store
+                .list_active_task_runs()
+                .await
+                .expect("reopened active runs"),
+        )
+        .await
+        .expect("reopen runtime");
+    let reopened_snapshot = reopened
+        .snapshot(&thread.id)
+        .await
+        .expect("reopened hot snapshot");
+    assert_blueprint_projection(&reopened_snapshot);
+    assert_eq!(reopened_snapshot, expected_snapshot);
+    reopened
+        .writer()
+        .shutdown()
+        .await
+        .expect("shutdown reopened writer");
 }
 
 #[tokio::test]
@@ -128,6 +262,78 @@ async fn hot_task_commits_publish_before_explicit_durability_barrier() {
         .expect("durable Task exists");
     assert_eq!(persisted, submitted);
     writer.shutdown().await.expect("shutdown writer");
+}
+
+#[tokio::test]
+async fn reopened_active_task_seeds_owner_revision_from_durable_receipt() {
+    let store = StudioStore::open_memory().await.expect("memory store");
+    let workspace = std::env::temp_dir().join("pure-task-runtime-owner-receipt");
+    let project = store.upsert_project(&workspace).await.expect("project");
+    let thread = store
+        .create_thread(&project.id, "Task", StudioMode::Task)
+        .await
+        .expect("thread");
+    let first = TaskRuntime::new(
+        store.clone(),
+        ProductEventBus::new(
+            store.clone(),
+            crate::studio::agent_host::ThreadWriteBehindWriter::new(store.clone()),
+        ),
+    );
+    first
+        .initialize(store.list_active_task_runs().await.expect("active runs"))
+        .await
+        .expect("initialize first runtime");
+    first
+        .create_task(CreateTaskRun {
+            project_id: project.id,
+            root_thread_id: thread.id.clone(),
+            request: "implement".to_string(),
+            workspace_root: workspace.to_string_lossy().to_string(),
+        })
+        .await
+        .expect("create hot Task");
+    first
+        .await_durable(&thread.id, 1)
+        .await
+        .expect("first owner revision durable");
+    first
+        .writer()
+        .shutdown()
+        .await
+        .expect("shutdown first writer");
+
+    let reopened = TaskRuntime::new(
+        store.clone(),
+        ProductEventBus::new(
+            store.clone(),
+            crate::studio::agent_host::ThreadWriteBehindWriter::new(store.clone()),
+        ),
+    );
+    reopened
+        .initialize(store.list_active_task_runs().await.expect("reopened runs"))
+        .await
+        .expect("initialize reopened runtime");
+    let restored = reopened
+        .aggregate(&thread.id)
+        .await
+        .expect("active Task restored");
+    assert_eq!(restored.hot_revision, 1);
+    assert_eq!(restored.durable_revision, 1);
+
+    reopened
+        .submit_plan(&thread.id, "plan", 0, 0)
+        .await
+        .expect("first post-reopen mutation");
+    reopened
+        .await_durable(&thread.id, 2)
+        .await
+        .expect("post-reopen owner revision durable");
+    reopened
+        .writer()
+        .shutdown()
+        .await
+        .expect("shutdown reopened writer");
 }
 
 #[tokio::test]
@@ -331,6 +537,7 @@ async fn faulted_executor_fails_work_unit_and_leaves_one_hot_planner_wake() {
                     task_run_id,
                     title: "executor fault".to_string(),
                     scope_hints: Vec::new(),
+                    blueprint: None,
                     base_commit: "HEAD".to_string(),
                     worktree_path: worktree.to_string_lossy().to_string(),
                     branch: "pure-task-executor-fault".to_string(),
@@ -600,6 +807,7 @@ async fn child_fact_commit_advances_run_revision_and_noop_replay_does_not_advanc
                     task_run_id,
                     title: "child fact".to_string(),
                     scope_hints: Vec::new(),
+                    blueprint: None,
                     base_commit: "HEAD".to_string(),
                     worktree_path: workspace
                         .join(".pure/worktrees/child")
@@ -687,6 +895,7 @@ async fn planner_wake_is_computed_and_deduplicated_from_hot_task_facts() {
                     task_run_id,
                     title: "wake planner".to_string(),
                     scope_hints: Vec::new(),
+                    blueprint: None,
                     base_commit: "HEAD".to_string(),
                     worktree_path: workspace
                         .join(".pure/worktrees/wake")

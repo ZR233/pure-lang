@@ -2,7 +2,7 @@
 
 ## 19.1 数据库
 
-Studio 默认只使用 `~/.pure/studio/studio.sqlite`，schema v14；测试和隔离验收可通过绝对路径
+Studio 默认只使用 `~/.pure/studio/studio.sqlite`，schema v15；测试和隔离验收可通过绝对路径
 `PURE_STUDIO_HOME` 改写整个 Studio 数据根。数据库启用 WAL、foreign keys、五秒
 busy timeout 和 synchronous=FULL；应用数据库连接池固定一个连接，mutation 统一经后台
 write-behind writer 的批量事务串行化，snapshot、分页和设置查询共用该连接。
@@ -38,7 +38,7 @@ Thread、Task、Project 及其目录 owner 的内存聚合是活动状态唯一�
 - attachments
 - app_settings
 - task_runs、task_stop_events、task_issues、work_units、work_completions、review_rounds、merge_records
-- thread_context_segments、thread_session_state
+- thread_context_segments、studio_objects
 
 Turn、thread input、Item、Interaction、TaskRun、WorkUnit、ReviewRound、WorkCompletion、TaskIssue 与
 Merge cleanup 等具有生命周期的记录只保存一份完整 `state_json`。需要筛选的表使用从
@@ -51,15 +51,16 @@ runtime snapshot、agent outcome 或 durable event journal。
 ## 19.2 提交
 
 ThreadActor、TaskRuntime 与产品目录 owner 的内存 snapshot 是各自活动聚合的唯一权威实例。每次
-mutation 先在串行 owner 中完成全部校验和纯投影，以一个复合状态原子替换 snapshot、递增 revision
-并立即广播可观察事实，再追加待落库批次。SQLite writer 在后台按 owner/revision 顺序异步落库；
-确认只推进 `durable_revision`，不得改变业务状态。
+mutation 先在串行 owner 中完成全部校验和纯投影，再把不可变 typed persistence snapshot 原子加入
+进程内待落库队列；admission 成功后才替换 owner snapshot、递增 revision 并广播。SQLite writer
+在后台按 owner/revision 顺序异步落库；确认只推进 `durable_revision`，不得改变业务状态。
 
 Thread 与 Project 的目录事实（创建、child 注册、mode 变更、归档、项目打开/关闭）使用同一条
-提交纪律：目录命令在串行临界区内基于内存或冷加载的聚合完成校验，先以统一的 `DirectoryDelta`
-（upsert 记录 + removal 标识）更新内存目录并广播 `DirectoryChanged` 事件，再把同一 delta 追加进
-write-behind 队列。不存在命令路径上的同步直写 SQLite；SQLite 写入失败只影响持久化健康状态
-（Degraded/Blocked 与新工作门禁），不回滚已发布的内存事实、不使命令失败。writer 队列 FIFO 保证
+提交纪律：目录命令在串行临界区内基于内存或冷加载的聚合完成校验，先把统一的 `DirectoryDelta`
+（upsert 记录 + removal 标识）加入 write-behind 队列；admission 成功后再更新内存目录并广播
+`DirectoryChanged`。不存在命令路径上的同步直写 SQLite；admission 失败使命令失败且不发布事实；
+SQLite 后台失败只影响持久化健康状态（Degraded/Blocked 与新工作门禁），不回滚已发布的内存事实。
+writer 队列 FIFO 保证
 Thread 注册 delta 先于该 Thread 的首个 state commit 落库；owner 淘汰与关机排水的 `awaitDurable`
 屏障同时要求该 owner 没有未落库的目录 delta。
 
@@ -75,7 +76,9 @@ writer 不得在重试耗尽后退出或删除批次。三次快速重试失败�
 首次失败时间和无敏感内容的错误摘要。Degraded、Recovering、Blocked 暂停新 Turn、新 Task 和新资源
 创建，但停止、查询、当前活动轮次收束和手动重试保持可用。
 
-队列上限仍为 1024 个批次，其中 768 个用于普通提交，256 个为已启动生命周期的终态收束预留。启动
+队列上限仍为 1024 个批次，其中 768 个用于普通提交，256 个为已启动生命周期的终态收束预留。首条
+pending fact 建立五秒最大批量 deadline，后续 fact 不重置；累计 64 条、终态收束或显式 barrier
+立即提交。启动
 新生命周期前必须取得终态许可。Timeline delta 只存在于内存 owner 与 live stream，不进入持久化
 队列；writer 只能合并已经发布后的冷存储事实，不能合并或延迟 live delta。普通区满时受控取消继续
 产生持久事实的轮次，并使用预留位置提交终态，禁止静默丢弃。正常关机必须等待 pending=0；强制退出
@@ -114,8 +117,9 @@ Turn terminal 与 mailbox 状态属于同一个持久化批次，并在 SQLite �
 重试成功后只推进 `durable_revision`；重同步只能从内存 owner 修复消费者投影，不得用旧数据库
 基线覆盖仍驻留的活动聚合。
 
-`thread_session_state` 每个 Thread 只有一行，replacement 保存 pinned working context、session note
-与 prompt generation 状态。Evidence Ledger 更新只覆盖这行的有界 working state，不复制完整
+`studio_objects` 以 `(owner_kind, owner_id, object_kind)` 保存版本化 JSON object；Thread 的
+`agentWorkingState` object 保存 pinned working context、session note 与 prompt generation 状态。
+Evidence Ledger 更新只覆盖该有界 object，不复制完整
 transcript，也不直接进入 provider request。`items` 不再包含 `contextPatch`，也不再保存 `provider_private_payload`；
 `contextCompaction` 可作为无正文内部审计 Item 保留，Bridge 查询永不返回。transcript replacement
 不删除 Studio Timeline，working state 也不能代替 `ThreadRuntimeSnapshot` 的当前产品事实。
@@ -174,20 +178,20 @@ tool call 与 Tool Search/Programmatic 计数、并行候选/实际并行、工�
 只读缓存命中，以及 Responses continuation/retry/fallback 分类。Turn 聚合只做可加计数、token 与
 时长汇总；比率和节省量由聚合后的原始量计算，避免平均值再平均。旧记录缺少该对象时按零值读取。
 
-## 19.3 不兼容库重建与唯一一次附件迁移
+## 19.3 不兼容库重建与一次性迁移
 
 启动先只读检查 canonical `studio.sqlite` 的 `user_version`、`quick_check` 与必需表/列
-fingerprint。Studio 只读写当前版本 v14，不保留跨版本兼容读路径。唯一迁移入口是精确匹配
-canonical v13 fingerprint 的 image attachment 表：迁移先验证所有旧 blob 位于 attachments 目录、
-大小与数据库一致，再计算 SHA-256、写入 content-addressed object，最后在单个 SQLite 事务内重建
-attachment 表并提升 `user_version`。迁移失败保留原 v13 数据库且启动报错，不转入重建。
+fingerprint。Studio 只读写当前版本 v15，不保留跨版本兼容读路径。精确匹配 canonical v13 时先
+执行既有 image attachment 迁移到 v14；精确匹配 v14 时再把 `thread_session_state` 事务迁移为
+`studio_objects` 的 `agentWorkingState` object。迁移校验每个 payload 的 JSON、revision 与 hash，
+失败时保留原数据库并阻断启动，不转入重建。
 
-除上述精确 v13 来源外，任何非 v14 库一律按不兼容处理，不迁移、不归档、不导入：
+除上述精确 v13/v14 来源外，任何非 v15 库一律按不兼容处理，不迁移、不归档、不导入：
 
 1. 关闭本次检查创建的全部数据库连接。
 2. 再次证明目标是配置解析得到的精确 canonical Studio 数据库文件。
 3. 精确删除 `studio.sqlite`、`studio.sqlite-wal` 与 `studio.sqlite-shm`；不使用 glob，不删除目录。
-4. 创建空 schema v14 并完成 fingerprint 校验后才向 Runtime 提供 store。
+4. 创建空 schema v15 并完成 fingerprint 校验后才向 Runtime 提供 store。
 
 删除或重建失败属于应用级致命错误，由错误页重试；不得在半初始化数据库上继续。重建只处理
 Studio 数据库文件，不扫描、删除或修改 Project、worktree、branch、attachments、凭据或构建
@@ -283,10 +287,11 @@ Thread 目录不是全量内存索引，而是"活动热集合 + SQLite 冷分�
   与窗口游标。
 - 启动不为目录做全量扫描；只有 Project 小集合目录在启动时整体载入内存。
 
-完整会话（transcript、working state、mailbox、Interaction）按需恢复：订阅、提交输入或 Task
+完整会话（transcript、working state、mailbox、Interaction）按需恢复：选择/订阅、提交输入或 Task
 恢复引用时从 canonical 表加载并创建 ThreadActor；启动只为钉住集合（queued input、pending
 Interaction、活动 Task 引用）主动恢复。驻留 actor 由 manager 的 LRU 双端队列管理，订阅、提交
-或修复时移到队尾；空闲判定为无活动 Turn、无活跃订阅且无 pending input，超容量时从队首淘汰。
+或修复时移到队尾；当前选择、活动 Task 引用与短期操作显式 pin。无 pin 的空闲 Thread 最多保留
+四个，超容量时从队首淘汰。
 淘汰前必须等待该 Thread 的目标 revision 与未落库目录 delta 耐久化，被淘汰 Thread 保留全部
 durable 状态，再次订阅时按需恢复。
 

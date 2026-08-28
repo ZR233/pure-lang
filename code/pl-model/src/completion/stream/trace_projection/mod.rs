@@ -124,10 +124,12 @@ impl TraceProjection {
                 continue;
             }
             let item = item.clone();
-            self.record(
+            if !self.record(
                 TraceEventKind::TracePartCompleted { item: item.clone() },
                 item.updated_at(),
-            );
+            ) {
+                continue;
+            }
             events.push(AgentEvent::TracePartCompleted { item });
         }
         events
@@ -165,10 +167,12 @@ impl TraceProjection {
                 continue;
             }
             let item = item.clone();
-            self.record(
+            if !self.record(
                 TraceEventKind::TracePartFailed { item: item.clone() },
                 item.updated_at(),
-            );
+            ) {
+                continue;
+            }
             events.push(AgentEvent::TracePartFailed { item });
         }
         events
@@ -205,16 +209,23 @@ impl TraceProjection {
                 continue;
             }
             let item = item.clone();
-            self.record(
+            if !self.record(
                 TraceEventKind::TracePartFailed { item: item.clone() },
                 item.updated_at(),
-            );
+            ) {
+                continue;
+            }
             events.push(AgentEvent::TracePartFailed { item });
         }
         events
     }
 
-    fn record(&mut self, kind: TraceEventKind, timestamp: i64) {
+    /// Publishes one canonical trace event before exposing its matching live event.
+    ///
+    /// A sink rejection is terminal for this projection. Callers must use the
+    /// return value as the broadcast gate so the live event stream can never
+    /// advance beyond the durable trace owner.
+    fn record(&mut self, kind: TraceEventKind, timestamp: i64) -> bool {
         let event = if let Some(sink) = &self.sink {
             match sink.emit(TraceEventDraft::new(timestamp, kind)) {
                 Ok(event) => event,
@@ -222,7 +233,7 @@ impl TraceProjection {
                     if self.trace_error.is_none() {
                         self.trace_error = Some(error);
                     }
-                    return;
+                    return false;
                 }
             }
         } else {
@@ -235,6 +246,7 @@ impl TraceProjection {
         };
         self.sequence = event.sequence.saturating_add(1);
         self.events.push(event);
+        true
     }
 }
 

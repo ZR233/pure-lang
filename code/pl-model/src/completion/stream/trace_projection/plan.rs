@@ -81,33 +81,27 @@ impl TraceProjection {
                 self.sequence,
                 now,
             );
-            self.record(TraceEventKind::TracePartStarted { item: item.clone() }, now);
+            if !self.record(TraceEventKind::TracePartStarted { item: item.clone() }, now) {
+                return events;
+            }
             self.started.insert(plan_item_id.clone(), item.clone());
             events.push(AgentEvent::TracePartStarted { item });
         }
         let Some(item) = self.started.get_mut(&plan_item_id) else {
             return events;
         };
-        if item
-            .apply(item.command(
-                unix_seconds(),
-                TracePartAction::Append(TraceDelta::Plan {
-                    delta: delta.clone(),
-                }),
-            ))
-            .is_err()
-        {
-            return events;
-        }
-        let Ok(delta_event) = item.delta_event(TraceDelta::Plan { delta }) else {
+        let Ok(Some(delta_event)) = item.apply_delta(unix_seconds(), TraceDelta::Plan { delta })
+        else {
             return events;
         };
-        self.record(
+        if !self.record(
             TraceEventKind::TracePartDelta {
                 event: delta_event.clone(),
             },
             delta_event.updated_at,
-        );
+        ) {
+            return events;
+        }
         events.push(AgentEvent::TracePartDelta { event: delta_event });
         events
     }
@@ -145,10 +139,12 @@ impl TraceProjection {
             return Vec::new();
         }
         let item = item.clone();
-        self.record(
+        if !self.record(
             TraceEventKind::TracePartFailed { item: item.clone() },
             item.updated_at(),
-        );
+        ) {
+            return Vec::new();
+        }
         vec![AgentEvent::TracePartFailed { item }]
     }
 }

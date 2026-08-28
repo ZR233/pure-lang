@@ -67,7 +67,7 @@ impl StudioStore {
         thread_id: &str,
     ) -> Result<Vec<MaterializedAttachment>> {
         let records = self.list_thread_attachments(thread_id).await?;
-        materialize_attachments(records).await
+        materialize_attachment_records(records).await
     }
 
     pub async fn materialize_attachments(
@@ -76,7 +76,7 @@ impl StudioStore {
         attachment_ids: &[String],
     ) -> Result<Vec<MaterializedAttachment>> {
         let records = self.load_attachments(thread_id, attachment_ids).await?;
-        materialize_attachments(records).await
+        materialize_attachment_records(records).await
     }
 
     pub(crate) async fn read_attachment_bytes(
@@ -177,11 +177,22 @@ impl StudioStore {
             .context("tool image batch returned no row")
     }
 
+    #[cfg(test)]
     pub(crate) async fn persist_tool_images(
         &self,
         thread_id: &str,
         inputs: Vec<pl_core::ToolImageAttachmentInput>,
     ) -> Result<Vec<ThreadAttachment>> {
+        self.persist_tool_image_records(thread_id, inputs)
+            .await
+            .map(|records| records.iter().map(thread_attachment).collect())
+    }
+
+    pub(crate) async fn persist_tool_image_records(
+        &self,
+        thread_id: &str,
+        inputs: Vec<pl_core::ToolImageAttachmentInput>,
+    ) -> Result<Vec<AttachmentRecord>> {
         if inputs.is_empty() {
             return Ok(Vec::new());
         }
@@ -240,7 +251,7 @@ impl StudioStore {
 
         let result = async {
             let transaction = self.db.begin().await?;
-            let mut attachments = Vec::with_capacity(prepared.len());
+            let mut records = Vec::with_capacity(prepared.len());
             for (input, storage_path) in prepared {
                 let row = entities::attachment::ActiveModel {
                     id: Set(new_id("attachment")),
@@ -258,11 +269,10 @@ impl StudioStore {
                 }
                 .insert(&transaction)
                 .await?;
-                let record = attachment_record(row)?;
-                attachments.push(thread_attachment(&record));
+                records.push(attachment_record(row)?);
             }
             transaction.commit().await?;
-            Ok::<_, anyhow::Error>(attachments)
+            Ok::<_, anyhow::Error>(records)
         }
         .await;
         if result.is_err() {
@@ -417,7 +427,7 @@ fn encode_jpeg(image: &image::DynamicImage, quality: u8) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-async fn materialize_attachments(
+pub(crate) async fn materialize_attachment_records(
     records: Vec<AttachmentRecord>,
 ) -> Result<Vec<MaterializedAttachment>> {
     let mut materialized = Vec::with_capacity(records.len());

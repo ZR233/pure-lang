@@ -185,6 +185,7 @@ impl TaskCoordinator {
                         thread_id: thread_id.clone(),
                         title: blueprint.task_name.clone(),
                         scope_hints: scope_hints.clone(),
+                        blueprint: blueprint.clone(),
                         agent_id: requested_thread_id.to_string(),
                         requested_by_call_id: call_id,
                     })
@@ -220,9 +221,8 @@ impl TaskCoordinator {
                     if allocation.work_unit.kind() == WorkUnitStateKind::Running
                         && runtime.snapshot(requested_thread_id.clone()).await.is_ok()
                     {
-                        let (_, existing) = match coordinator
-                            .store
-                            .read_work_unit_handoff(&allocation.work_unit.id)
+                        let existing = match coordinator
+                            .hot_work_unit_handoff(&runtime, &allocation.run, &allocation.work_unit)
                             .await
                         {
                             Ok(Some(existing)) => existing,
@@ -230,14 +230,14 @@ impl TaskCoordinator {
                                 return spawn_failure(missing_persisted_failure(
                                     &allocation.run,
                                     &allocation.work_unit,
-                                    "running executor allocation has no durable handoff",
+                                    "running executor allocation has no hot handoff",
                                 ));
                             }
                             Err(error) => {
                                 return spawn_failure(missing_persisted_failure(
                                     &allocation.run,
                                     &allocation.work_unit,
-                                    &format!("failed to read reused executor handoff: {error}"),
+                                    &format!("failed to read reused hot executor handoff: {error}"),
                                 ));
                             }
                         };

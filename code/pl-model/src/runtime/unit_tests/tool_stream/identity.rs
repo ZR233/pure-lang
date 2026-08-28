@@ -141,7 +141,10 @@ fn stream_accumulator_merges_tool_call_with_late_call_id() {
             | TraceEventKind::EnabledToolsRecorded { .. } => None,
         })
         .collect::<Vec<_>>();
-    assert_eq!(item_ids, vec!["turn-1-fc_1", "turn-1-fc_1", "turn-1-fc_1"]);
+    assert_eq!(
+        item_ids,
+        vec!["turn-1-fc_1", "turn-1-fc_1", "turn-1-fc_1", "turn-1-fc_1"]
+    );
 }
 
 #[test]
@@ -231,6 +234,7 @@ fn stream_accumulator_keeps_tool_trace_id_when_item_id_arrives_late() {
     assert_eq!(
         item_ids,
         vec![
+            "turn-1-call_1",
             "turn-1-call_1",
             "turn-1-call_1",
             "turn-1-call_1",

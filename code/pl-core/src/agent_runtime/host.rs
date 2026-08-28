@@ -73,7 +73,7 @@ pub struct ThreadCommit {
 }
 
 impl ThreadCommit {
-    /// 把严格连续、同一 owner/Turn/Item 的流式提交合并到当前提交。
+    /// 把严格连续、同一 owner/Turn 的流式提交合并到当前提交。
     ///
     /// 合并只压缩 write-behind 队列中的完整快照写入；规范通知、trace、runtime
     /// event 与 context mutation 都会保留。不可合并时原样返还 `next`，repository
@@ -103,7 +103,7 @@ impl ThreadCommit {
     }
 
     fn can_coalesce(&self, next: &Self) -> bool {
-        self.persistence == PersistenceClass::Coalescible
+        let common_boundary = self.persistence == PersistenceClass::Coalescible
             && next.persistence == PersistenceClass::Coalescible
             && self.agent_id == next.agent_id
             && next.expected_revision == Some(self.facts.revision)
@@ -115,12 +115,29 @@ impl ThreadCommit {
             && !contains_turn_start(&self.facts.runtime_events)
             && !contains_turn_start(&next.facts.runtime_events)
             && !contains_turn_terminal(&self.facts.runtime_events)
-            && !contains_turn_terminal(&next.facts.runtime_events)
-            && self.mutation == ThreadMutation::SnapshotAndQueue
-            && next.mutation == ThreadMutation::SnapshotAndQueue
-            && coalescing_subject(&self.facts.notifications)
-                == coalescing_subject(&next.facts.notifications)
-            && coalescing_subject(&self.facts.notifications).is_some()
+            && !contains_turn_terminal(&next.facts.runtime_events);
+        if !common_boundary {
+            return false;
+        }
+        match (&self.mutation, &next.mutation) {
+            (ThreadMutation::AppendTrace, ThreadMutation::AppendTrace) => {
+                self.facts.context.is_none()
+                    && next.facts.context.is_none()
+                    && self.facts.runtime_events.is_empty()
+                    && next.facts.runtime_events.is_empty()
+            }
+            (ThreadMutation::SnapshotAndQueue, ThreadMutation::SnapshotAndQueue) => {
+                coalescing_subject(&self.facts.notifications)
+                    == coalescing_subject(&next.facts.notifications)
+                    && coalescing_subject(&self.facts.notifications).is_some()
+            }
+            (ThreadMutation::SnapshotAndQueue, ThreadMutation::AppendTrace)
+            | (ThreadMutation::AppendTrace, ThreadMutation::SnapshotAndQueue)
+            | (ThreadMutation::ReplaceThread { .. }, _)
+            | (_, ThreadMutation::ReplaceThread { .. })
+            | (ThreadMutation::AppendThreadNotifications { .. }, _)
+            | (_, ThreadMutation::AppendThreadNotifications { .. }) => false,
+        }
     }
 }
 
@@ -351,8 +368,9 @@ impl AgentCommittedEvent {
 
 /// ThreadActor 使用的持久化端口。
 ///
-/// 内存 snapshot 是进程内唯一权威实例。`commit` 只把已经决定的事实加入
-/// 进程内待落库队列；SQLite 结果不得控制业务转换。`await_durable` 与
+/// 内存 snapshot 是进程内唯一权威实例。`commit` 只为已经决定的事实执行
+/// 进程内待落库队列 admission；admission 成功后业务转换才能对外可见，后台
+/// SQLite 结果不得回滚已接受的业务转换。`await_durable` 与
 /// `pending_commit_count` 只供淘汰、不可逆外部动作和正常关机使用；耐久屏障
 /// 只有显式目标修订号一种形式，全局排空属于宿主关机流程。
 pub trait ThreadRepository: Clone + Send + Sync + 'static {

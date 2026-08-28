@@ -227,6 +227,27 @@ pub(crate) fn project_runtime_event(
                 TurnPhase::Persisting,
                 event.created_at,
             );
+            if let TurnOutcome::Failed(result) = &outcome.outcome {
+                // A worker can fail before its TraceRecorder emits terminal
+                // events (for example a task join failure). TurnFinished is the
+                // last ownership boundary: do not clear active_turn while a
+                // model/tool/content item from that Turn is still streaming.
+                for item in current
+                    .items
+                    .iter()
+                    .filter(|item| item.turn_id == outcome.turn_id.as_str() && !item.is_terminal())
+                {
+                    let mut failed = item.clone();
+                    if failed.fail_if_open(outcome.finished_at, result.failure().message.clone()) {
+                        projector.push(
+                            event.created_at,
+                            ThreadNotification::ItemCompleted {
+                                item: Box::new(failed),
+                            },
+                        );
+                    }
+                }
+            }
             let state = match &outcome.outcome {
                 TurnOutcome::Completed(result) => TurnState::Completed(CompletedTurnState::new(
                     outcome.started_at,
@@ -739,7 +760,7 @@ mod tests {
                 message: "continue".to_string(),
                 attachments: Vec::new(),
                 presentation: MailboxPresentation::User,
-                metadata: serde_json::Value::Null,
+                metadata: crate::MailboxMetadata::default(),
             },
             queue_coalescing_key: None,
             budget_action: crate::MailboxBudgetAction::Preserve,
@@ -790,7 +811,7 @@ mod tests {
                 message: "inspect".to_string(),
                 attachments: vec![attachment.clone()],
                 presentation: MailboxPresentation::User,
-                metadata: serde_json::Value::Null,
+                metadata: crate::MailboxMetadata::default(),
             },
             queue_coalescing_key: None,
             budget_action: crate::MailboxBudgetAction::Preserve,
@@ -963,6 +984,80 @@ mod tests {
             ThreadNotification::ItemCompleted { item }
                 if item.failure() == Some("provider rejected tool schema")
                     && matches!(item.state(), ThreadItemState::Turn(_))
+        ));
+    }
+
+    #[test]
+    fn failed_turn_terminalizes_a_running_inference_when_worker_emits_no_final_trace() {
+        let mut current = snapshot();
+        current.active_turn = Some(Turn {
+            id: "turn-1".to_string(),
+            thread_id: "thread-1".to_string(),
+            revision: 0,
+            state: TurnState::Running(RunningTurnState::new(6, TurnPhase::Thinking)),
+            updated_at: 6,
+        });
+        current.items.push(ThreadItem::new(
+            "turn-1-inf-0".to_string(),
+            "thread-1".to_string(),
+            "turn-1".to_string(),
+            1,
+            0,
+            6,
+            6,
+            ThreadItemState::Inference(ThreadInferenceItem::new(
+                "turn-1-inf-0".to_string(),
+                "model".to_string(),
+                ThreadInferenceState::Running(RunningThreadInference),
+            )),
+        ));
+        let agent_snapshot = crate::AgentRegistration {
+            identity: crate::AgentIdentity {
+                id: crate::ThreadId::new("thread-1").unwrap(),
+                parent_id: None,
+                role: crate::AgentRoleId::new("planner").unwrap(),
+                depth: 0,
+            },
+            session: crate::ThreadContextState::empty(),
+            runtime_revision: 1,
+            event_sequence: 1,
+        }
+        .into_durable_state()
+        .snapshot;
+        let event = AgentRuntimeEvent {
+            agent_id: crate::ThreadId::new("thread-1").unwrap(),
+            sequence: 2,
+            created_at: 7,
+            kind: AgentRuntimeEventKind::TurnFinished {
+                outcome: pl_protocol::AgentTurnOutcome {
+                    turn_id: crate::TurnId::new("turn-1").unwrap(),
+                    thread_id: crate::ThreadId::new("thread-1").unwrap(),
+                    outcome: TurnOutcome::failed(pl_protocol::TurnFailure::permanent(
+                        pl_protocol::TurnFailureCategory::Provider,
+                        "turn task join failed",
+                    )),
+                    usage: pl_protocol::TokenUsage::default(),
+                    started_at: Some(6),
+                    finished_at: 7,
+                },
+                snapshot: Box::new(agent_snapshot),
+            },
+        };
+
+        let batch = project_runtime_event(&event, &current);
+
+        assert!(batch.notifications.iter().any(|notification| matches!(
+            &notification.notification,
+            ThreadNotification::ItemCompleted { item }
+                if item.id == "turn-1-inf-0"
+                    && item.failure() == Some("turn task join failed")
+                    && matches!(item.state(), ThreadItemState::Inference(inference)
+                        if matches!(inference.state(), ThreadInferenceState::Failed(_)))
+        )));
+        assert!(matches!(
+            &batch.notifications.last().unwrap().notification,
+            ThreadNotification::TurnCompleted { turn }
+                if turn.id == "turn-1" && matches!(turn.state, TurnState::Failed(_))
         ));
     }
 

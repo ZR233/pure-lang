@@ -1,6 +1,8 @@
 use pl_trace::{
-    AgentEvent, TracePart, TracePartKind, TraceTextChannel, TraceTextState, TraceToolState,
+    AgentEvent, TraceEvent, TraceEventDraft, TraceEventKind, TraceEventSink, TraceEventSinkError,
+    TracePart, TracePartKind, TraceTextChannel, TraceTextState, TraceToolState,
 };
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::super::tool_stream::ToolCallAccumulatorSnapshot;
 use super::*;
@@ -27,6 +29,67 @@ fn trace_with_projection(
         None,
         Arc::new(HashMap::from([(tool.to_string(), projection)])),
     )
+}
+
+#[derive(Debug)]
+struct RejectAfterFirstTraceSink {
+    inner: pl_trace::InMemoryTraceEventSink,
+    attempts: AtomicUsize,
+}
+
+impl RejectAfterFirstTraceSink {
+    fn new() -> Self {
+        Self {
+            inner: pl_trace::InMemoryTraceEventSink::new("session-1", 0),
+            attempts: AtomicUsize::new(0),
+        }
+    }
+}
+
+impl TraceEventSink for RejectAfterFirstTraceSink {
+    fn emit(&self, draft: TraceEventDraft) -> Result<TraceEvent, TraceEventSinkError> {
+        if self.attempts.fetch_add(1, Ordering::SeqCst) > 0 {
+            return Err(TraceEventSinkError::new("injected trace sink rejection"));
+        }
+        self.inner.emit(draft)
+    }
+
+    fn next_sequence(&self) -> u64 {
+        self.inner.next_sequence()
+    }
+}
+
+#[test]
+fn rejected_trace_event_is_not_broadcast() {
+    let sink = Arc::new(RejectAfterFirstTraceSink::new());
+    let mut trace = TraceProjection::with_sink(
+        CompletionTraceContext {
+            session_id: "session-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            inference_id: "inference-1".to_string(),
+        },
+        Some(sink.clone()),
+    );
+
+    let events = trace.append_text_delta(
+        "provider-text",
+        TraceTextChannel::Final,
+        "must not escape".to_string(),
+    );
+
+    assert!(matches!(
+        events.as_slice(),
+        [AgentEvent::TracePartStarted { .. }]
+    ));
+    assert_eq!(sink.inner.events().len(), 1);
+    assert_eq!(trace.events().len(), 1);
+    assert_eq!(
+        trace
+            .take_trace_error()
+            .expect("sink rejection must remain visible")
+            .message(),
+        "injected trace sink rejection"
+    );
 }
 
 #[test]
@@ -233,6 +296,54 @@ fn raw_reasoning_starts_the_part_and_later_summary_updates_the_same_part() {
             .map(|chunk| chunk.content.as_str())
             .collect::<String>(),
         "raw"
+    );
+}
+
+#[test]
+fn empty_reasoning_delta_does_not_create_a_revision_gap() {
+    let sink = Arc::new(pl_trace::InMemoryTraceEventSink::new("session-1", 0));
+    let mut trace = TraceProjection::with_sink(
+        CompletionTraceContext {
+            session_id: "session-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            inference_id: "inference-1".to_string(),
+        },
+        Some(sink.clone()),
+    );
+
+    let started = trace.append_reasoning_content_delta("thinking", 0, String::new());
+    let first = trace.append_reasoning_content_delta("thinking", 0, "first".to_string());
+    let ignored = trace.append_reasoning_content_delta("thinking", 0, String::new());
+    let second = trace.append_reasoning_content_delta("thinking", 0, " second".to_string());
+
+    assert!(matches!(
+        started.as_slice(),
+        [AgentEvent::TracePartStarted { .. }]
+    ));
+    assert!(ignored.is_empty());
+    assert!(first.iter().any(|event| matches!(
+        event,
+        AgentEvent::TracePartDelta { event } if event.revision == 1
+    )));
+    assert!(second.iter().any(|event| matches!(
+        event,
+        AgentEvent::TracePartDelta { event } if event.revision == 2
+    )));
+    assert!(trace.take_trace_error().is_none());
+    assert_eq!(
+        sink.events()
+            .into_iter()
+            .filter_map(|event| match event.kind {
+                TraceEventKind::TracePartDelta { event } => Some(event.revision),
+                TraceEventKind::TracePartStarted { .. }
+                | TraceEventKind::TracePartCompleted { .. }
+                | TraceEventKind::TracePartFailed { .. }
+                | TraceEventKind::InteractionChanged { .. }
+                | TraceEventKind::SkillActivated { .. }
+                | TraceEventKind::EnabledToolsRecorded { .. } => None,
+            })
+            .collect::<Vec<_>>(),
+        vec![1, 2]
     );
 }
 
@@ -522,13 +633,96 @@ fn late_provider_tool_id_keeps_original_trace_part_id() {
     assert_eq!(first_delta, "turn-1-call-1");
     assert_eq!(second_delta, "turn-1-call-1");
     assert_eq!(updated.item_id(), "turn-1-call-1");
-    assert_eq!(updated.revision(), 2);
+    assert_eq!(updated.revision(), 3);
     let tool = updated.tool().expect("tool metadata");
     assert_eq!(
         tool.invocation().provider_item_id(),
         Some("provider-tool-1")
     );
     assert_eq!(tool.invocation().call_id(), Some("call-1"));
+}
+
+#[test]
+fn tool_metadata_and_argument_deltas_share_one_revision_chain() {
+    let sink = Arc::new(pl_trace::InMemoryTraceEventSink::new("session-1", 0));
+    let mut trace = TraceProjection::with_sink(
+        CompletionTraceContext {
+            session_id: "session-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            inference_id: "inference-1".to_string(),
+        },
+        Some(sink.clone()),
+    );
+    let early = ToolCallAccumulatorSnapshot {
+        id: "call-1".to_string(),
+        trace_id: "call-1".to_string(),
+        call_id: Some("call-1".to_string()),
+        name: "exec".to_string(),
+        arguments: "{\"cmd\":\"ec".to_string(),
+        function_arguments: true,
+    };
+    let late = ToolCallAccumulatorSnapshot {
+        id: "provider-tool-1".to_string(),
+        trace_id: "call-1".to_string(),
+        call_id: Some("call-1".to_string()),
+        name: "exec".to_string(),
+        arguments: "{\"cmd\":\"echo hi\"}".to_string(),
+        function_arguments: true,
+    };
+
+    let first = trace.append_tool_arguments_delta(&early, "{\"cmd\":\"ec".to_string());
+    let ignored = trace.append_tool_arguments_delta(&early, String::new());
+    let second = trace.append_tool_arguments_delta(&late, "ho hi\"}".to_string());
+    let canonical = trace.update_tool_trace(&ToolCall {
+        id: "provider-tool-1".to_string(),
+        call_id: "call-1".to_string(),
+        name: "exec".to_string(),
+        payload: ToolCallPayload::Function {
+            arguments: serde_json::json!({"cmd": "echo hi"}),
+        },
+        invalid_arguments: None,
+        caller: None,
+    });
+
+    assert!(ignored.is_empty());
+    assert!(first.iter().any(|event| matches!(
+        event,
+        AgentEvent::TracePartDelta { event } if event.revision == 1
+    )));
+    assert!(second.iter().any(|event| matches!(
+        event,
+        AgentEvent::TracePartStarted { item } if item.revision() == 2
+    )));
+    assert!(second.iter().any(|event| matches!(
+        event,
+        AgentEvent::TracePartDelta { event } if event.revision == 3
+    )));
+    assert!(canonical.iter().any(|event| matches!(
+        event,
+        AgentEvent::TracePartStarted { item } if item.revision() == 3
+    )));
+    assert!(trace.take_trace_error().is_none());
+    assert_eq!(
+        sink.events()
+            .into_iter()
+            .filter_map(|event| match event.kind {
+                TraceEventKind::TracePartStarted { item } => Some(("snapshot", item.revision())),
+                TraceEventKind::TracePartDelta { event } => Some(("delta", event.revision)),
+                TraceEventKind::TracePartCompleted { .. }
+                | TraceEventKind::TracePartFailed { .. }
+                | TraceEventKind::InteractionChanged { .. }
+                | TraceEventKind::SkillActivated { .. }
+                | TraceEventKind::EnabledToolsRecorded { .. } => None,
+            })
+            .collect::<Vec<_>>(),
+        vec![
+            ("snapshot", 0),
+            ("delta", 1),
+            ("snapshot", 2),
+            ("delta", 3),
+            ("snapshot", 3),
+        ]
+    );
 }
 
 fn started_sequence(event: AgentEvent) -> Option<u64> {

@@ -435,7 +435,10 @@ impl ToolPlan {
         for binding in local.bindings.iter() {
             by_name.insert(binding.name().to_string(), binding.clone());
         }
-        let bindings = by_name.into_values().collect::<Vec<_>>();
+        Self::from_bindings(manager_id, by_name.into_values().collect())
+    }
+
+    fn from_bindings(manager_id: u64, bindings: Vec<ToolBinding>) -> Self {
         let programmatic_enabled = bindings
             .iter()
             .any(|binding| binding.spec.is_programmatic_tool_calling());
@@ -473,6 +476,23 @@ impl ToolPlan {
             execution_fingerprint: Arc::from(execution_fingerprint),
             input_trace_projections: Arc::new(input_trace_projections),
         }
+    }
+
+    /// 只向模型暴露当前执行策略实际允许调用的工具。
+    pub(crate) fn allowed_by(&self, policy: Option<&crate::AgentExecutionPolicy>) -> Self {
+        let Some(policy) = policy else {
+            return self.clone();
+        };
+        let bindings = self
+            .bindings
+            .iter()
+            .filter(|binding| policy.allows_effect(binding.tool().effect()))
+            .cloned()
+            .collect::<Vec<_>>();
+        if bindings.len() == self.bindings.len() {
+            return self.clone();
+        }
+        Self::from_bindings(self.manager_id, bindings)
     }
 
     pub fn specs(&self) -> &[ToolSpec] {
@@ -1009,6 +1029,44 @@ mod tests {
         assert_ne!(
             first.freeze().execution_fingerprint(),
             second.freeze().execution_fingerprint()
+        );
+    }
+
+    #[test]
+    fn execution_policy_removes_disallowed_tools_from_the_model_plan() {
+        let manager = ToolManager::new();
+        let tools = manager.agent_tool_set("reviewer", GlobalToolInheritance::Isolated);
+        let read = crate::tool::LocalTool::new(
+            "read",
+            "read",
+            serde_json::json!({"type": "object"}),
+            |_input, _context| async { Ok(ToolResult::success("ok")) },
+        )
+        .with_effect(ToolEffect::Read);
+        let write = crate::tool::LocalTool::new(
+            "write",
+            "write",
+            serde_json::json!({"type": "object"}),
+            |_input, _context| async { Ok(ToolResult::success("ok")) },
+        )
+        .with_effect(ToolEffect::WorkspaceWrite);
+        let _registration = tools
+            .replace(
+                ToolGroupId::new("tools"),
+                vec![Arc::new(read), Arc::new(write)],
+            )
+            .unwrap();
+        let policy = crate::AgentExecutionPolicy {
+            allowed_effects: crate::ToolEffectSet::from_effects([ToolEffect::Read]),
+            ..Default::default()
+        };
+
+        let plan = tools.freeze().allowed_by(Some(&policy));
+
+        assert_eq!(plan.names().collect::<Vec<_>>(), vec!["read"]);
+        assert_eq!(
+            plan.specs().iter().map(ToolSpec::name).collect::<Vec<_>>(),
+            vec!["read"]
         );
     }
 

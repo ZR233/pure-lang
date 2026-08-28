@@ -6,10 +6,11 @@ use sea_orm::{
 
 use crate::studio::entity as entities;
 use crate::studio::store::StudioStore;
+use crate::studio::store::object::load_object;
 use crate::studio::task_coordinator::{
     ExecutorContinuationRequest, ExecutorContinuationStateKind, TASK_EXECUTOR_HANDOFF_SECTION_ID,
     TaskExecutorHandoff, WorkUnit, WorkUnitCommand, WorkUnitContext, WorkUnitState,
-    decode_work_unit_state,
+    decode_work_unit_state, encode_work_unit_state,
 };
 
 impl StudioStore {
@@ -45,15 +46,10 @@ impl StudioStore {
             .executor_thread_id
             .as_deref()
             .context("executor work unit has no executor Thread identity")?;
-        let Some(row) =
-            entities::thread_session_state::Entity::find_by_id(executor_thread_id.to_string())
-                .one(&self.db)
-                .await?
+        let Some(state) = load_object::<AgentWorkingState>(&self.db, executor_thread_id).await?
         else {
             return Ok(None);
         };
-        let state =
-            AgentWorkingState::try_from(row).map_err(|error| anyhow::anyhow!(error.to_string()))?;
         let sections = state
             .sections
             .iter()
@@ -146,13 +142,15 @@ impl StudioStore {
 }
 
 pub(super) fn work_unit_record(model: entities::work_unit::Model) -> Result<WorkUnit> {
-    let state = work_unit_state(&model)?;
+    let (state, blueprint) = decode_work_unit_state(&model.state_json)?;
+    validate_work_unit_state_kind(&state, &model.state_kind)?;
     Ok(WorkUnit {
         context: WorkUnitContext {
             id: model.id,
             task_run_id: model.task_run_id,
             title: model.title,
             scope_hints: serde_json::from_str(&model.scope_hints_json)?,
+            blueprint,
             base_commit: model.base_commit,
             worktree_path: model.worktree_path,
             branch: model.branch,
@@ -169,15 +167,20 @@ pub(super) fn work_unit_record(model: entities::work_unit::Model) -> Result<Work
 }
 
 pub(super) fn work_unit_state(model: &entities::work_unit::Model) -> Result<WorkUnitState> {
-    let state = decode_work_unit_state(&model.state_json)?;
-    if state.kind().as_str() != model.state_kind {
+    let (state, _) = decode_work_unit_state(&model.state_json)?;
+    validate_work_unit_state_kind(&state, &model.state_kind)?;
+    Ok(state)
+}
+
+fn validate_work_unit_state_kind(state: &WorkUnitState, stored_kind: &str) -> Result<()> {
+    if state.kind().as_str() != stored_kind {
         anyhow::bail!(
             "stored WorkUnit state discriminator mismatch: JSON is {}, generated column is {}",
             state.kind().as_str(),
-            model.state_kind
+            stored_kind
         );
     }
-    Ok(state)
+    Ok(())
 }
 
 pub(super) async fn apply_work_unit_command<C>(
@@ -204,6 +207,7 @@ pub(super) async fn update_work_unit_state<C>(
 where
     C: ConnectionTrait,
 {
+    let (_, blueprint) = decode_work_unit_state(&model.state_json)?;
     let next_revision = model
         .revision
         .checked_add(1)
@@ -211,7 +215,7 @@ where
     let result = entities::work_unit::Entity::update_many()
         .col_expr(
             entities::work_unit::Column::StateJson,
-            Expr::value(serde_json::to_string(&next_state)?),
+            Expr::value(encode_work_unit_state(&next_state, blueprint.as_ref())?),
         )
         .col_expr(
             entities::work_unit::Column::Revision,

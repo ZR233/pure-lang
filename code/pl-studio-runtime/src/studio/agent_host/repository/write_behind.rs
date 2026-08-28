@@ -16,7 +16,9 @@ use tokio::sync::{Notify, oneshot, watch};
 use tokio::task::JoinHandle;
 
 use crate::PureError;
+use crate::studio::runtime::{MODEL_PERFORMANCE_OWNER_ID, ModelPerformanceState};
 use crate::studio::store::directory::{DirectoryDelta, apply_directory_delta};
+use crate::studio::store::object::put_object;
 use crate::studio::task_persistence::{
     ApplyTaskCommitOutcome, TaskPersistenceCommit, apply_task_commit, validate_task_commit,
 };
@@ -33,8 +35,8 @@ const MAX_BATCH_COMMITS: usize = 64;
 const NORMAL_PENDING_COMMITS: usize = 768;
 /// 总积压上限；达到后入队方等待 writer 追赶（背压而不是丢弃）。
 const MAX_PENDING_COMMITS: usize = 1024;
-/// 空闲时的批落库时间窗口。
-const FLUSH_INTERVAL: Duration = Duration::from_millis(500);
+/// 首条待写事实允许等待的最大批量时间窗口。
+const FLUSH_INTERVAL: Duration = Duration::from_secs(5);
 /// 进入公开 Degraded 状态前的快速重试次数。
 const FAST_BATCH_RETRIES: usize = 3;
 /// 瞬时失败的重试退避基值。
@@ -42,47 +44,151 @@ const RETRY_BACKOFF: Duration = Duration::from_millis(100);
 /// Degraded 后的最大自动重试间隔。
 const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(30);
 
+/// 穷尽的 Studio typed persistence mutation。
+///
+/// Thread 包含 working object、Transcript、Timeline 与 Thread projection；Task
+/// 包含 Task 领域 aggregate；Directory 包含产品目录和其他有界 Studio object。
+#[derive(Debug, Clone)]
+enum StudioMutation {
+    Thread(Box<ThreadCommit>),
+    Task(Box<TaskPersistenceCommit>),
+    Directory(Box<StudioDirectoryMutation>),
+}
+
+#[derive(Debug, Clone)]
+enum StudioDirectoryMutation {
+    Delta(DirectoryDelta),
+    ModelPerformance(ObservedStateCommit),
+}
+
+#[derive(Debug, Clone)]
+struct QueuedMutation {
+    accepted_at: tokio::time::Instant,
+    mutation: StudioMutation,
+}
+
+impl QueuedMutation {
+    fn new(mutation: StudioMutation) -> Self {
+        Self {
+            accepted_at: tokio::time::Instant::now(),
+            mutation,
+        }
+    }
+}
+
 enum QueueEntry {
-    ThreadCommit(Box<ThreadCommit>),
-    TaskCommit(Box<TaskPersistenceCommit>),
-    Directory(Box<DirectoryDelta>),
-    ObservedState(Box<ObservedStateCommit>),
+    Mutation(QueuedMutation),
     Barrier(oneshot::Sender<Result<(), PureError>>),
 }
 
 #[derive(Debug, Clone)]
 struct ObservedStateCommit {
-    key: String,
     revision: u64,
-    value: String,
+    value: ModelPerformanceState,
 }
 
 impl QueueEntry {
     const fn is_commit(&self) -> bool {
-        matches!(
-            self,
-            QueueEntry::ThreadCommit(_)
-                | QueueEntry::TaskCommit(_)
-                | QueueEntry::Directory(_)
-                | QueueEntry::ObservedState(_)
-        )
+        matches!(self, Self::Mutation(_))
     }
 
     fn terminal_key(&self) -> Option<String> {
         match self {
-            Self::ThreadCommit(commit) => terminal_turn_key(commit),
-            Self::TaskCommit(commit) if commit.ends_lifecycle() => Some(commit.lifecycle_key()),
-            Self::TaskCommit(_)
-            | Self::Directory(_)
-            | Self::ObservedState(_)
-            | Self::Barrier(_) => None,
+            Self::Mutation(QueuedMutation {
+                mutation: StudioMutation::Thread(commit),
+                ..
+            }) => terminal_turn_key(commit),
+            Self::Mutation(QueuedMutation {
+                mutation: StudioMutation::Task(commit),
+                ..
+            }) if commit.ends_lifecycle() => Some(commit.lifecycle_key()),
+            Self::Mutation(_) | Self::Barrier(_) => None,
         }
     }
+
+    /// worker panic 恢复只复制 typed mutation；barrier 由失败路径显式唤醒。
+    fn clone_commit(&self) -> Option<Self> {
+        match self {
+            Self::Mutation(commit) => Some(Self::Mutation(commit.clone())),
+            Self::Barrier(_) => None,
+        }
+    }
+
+    fn flushes_immediately(&self) -> bool {
+        match self {
+            Self::Mutation(QueuedMutation {
+                mutation: StudioMutation::Thread(commit),
+                ..
+            }) => {
+                commit.persistence == PersistenceClass::Settlement
+                    || matches!(
+                        commit.facts.context.as_ref(),
+                        Some(pl_core::ThreadContextMutation::Replace { .. })
+                    )
+            }
+            Self::Mutation(QueuedMutation {
+                mutation: StudioMutation::Task(commit),
+                ..
+            }) => commit.ends_lifecycle(),
+            Self::Mutation(QueuedMutation {
+                mutation: StudioMutation::Directory(_),
+                ..
+            }) => false,
+            Self::Barrier(_) => true,
+        }
+    }
+
+    fn accepted_at(&self) -> Option<tokio::time::Instant> {
+        match self {
+            Self::Mutation(commit) => Some(commit.accepted_at),
+            Self::Barrier(_) => None,
+        }
+    }
+
+    fn contains_directory_fact_for(&self, owner_id: &str) -> bool {
+        matches!(
+            self,
+            Self::Mutation(QueuedMutation {
+                mutation: StudioMutation::Directory(directory),
+                ..
+            }) if matches!(
+                directory.as_ref(),
+                StudioDirectoryMutation::Delta(delta) if delta.touches_thread(owner_id)
+            )
+        )
+    }
+}
+
+fn queue_thread(commit: ThreadCommit) -> QueueEntry {
+    QueueEntry::Mutation(QueuedMutation::new(StudioMutation::Thread(Box::new(
+        commit,
+    ))))
+}
+
+fn queue_task(commit: TaskPersistenceCommit) -> QueueEntry {
+    QueueEntry::Mutation(QueuedMutation::new(StudioMutation::Task(Box::new(commit))))
+}
+
+fn queue_directory(delta: DirectoryDelta) -> QueueEntry {
+    QueueEntry::Mutation(QueuedMutation::new(StudioMutation::Directory(Box::new(
+        StudioDirectoryMutation::Delta(delta),
+    ))))
+}
+
+fn queue_model_performance(commit: ObservedStateCommit) -> QueueEntry {
+    QueueEntry::Mutation(QueuedMutation::new(StudioMutation::Directory(Box::new(
+        StudioDirectoryMutation::ModelPerformance(commit),
+    ))))
 }
 
 struct WriterShared {
     store: StudioStore,
     queue: Mutex<VecDeque<QueueEntry>>,
+    /// 已从 queue 取出、但尚未 durable 的 typed mutation 副本。
+    ///
+    /// worker panic 时 supervisor 把它原序放回 queue；热状态从不依赖 worker
+    /// 局部变量保存唯一一份待写事实。
+    inflight: Mutex<VecDeque<QueueEntry>>,
     /// 入队方唤醒 writer。
     work_notify: Notify,
     /// writer 每次成功排空后发布进度，背压入队方据此重试。
@@ -95,6 +201,8 @@ struct WriterShared {
     state: watch::Sender<PersistenceStateSnapshot>,
     retry_notify: Notify,
     stopping: AtomicBool,
+    #[cfg(test)]
+    panic_after_drain: AtomicBool,
 }
 
 #[derive(Default)]
@@ -126,6 +234,7 @@ impl ThreadWriteBehindWriter {
             shared: Arc::new(WriterShared {
                 store,
                 queue: Mutex::new(VecDeque::new()),
+                inflight: Mutex::new(VecDeque::new()),
                 work_notify: Notify::new(),
                 progress,
                 durable_progress,
@@ -135,6 +244,8 @@ impl ThreadWriteBehindWriter {
                 state,
                 retry_notify: Notify::new(),
                 stopping: AtomicBool::new(false),
+                #[cfg(test)]
+                panic_after_drain: AtomicBool::new(false),
             }),
             task: Arc::new(Mutex::new(None)),
             pending_commits: Arc::new(AtomicUsize::new(0)),
@@ -197,6 +308,13 @@ impl ThreadWriteBehindWriter {
 
     /// 跳过当前退避等待并立即重试队首批次。
     pub(in crate::studio) fn retry_now(&self) {
+        let (sender, receiver) = oneshot::channel();
+        drop(receiver);
+        self.shared
+            .queue
+            .lock()
+            .expect("write-behind queue lock poisoned")
+            .push_back(QueueEntry::Barrier(sender));
         self.shared.retry_notify.notify_waiters();
         self.shared.work_notify.notify_one();
     }
@@ -210,45 +328,88 @@ impl ThreadWriteBehindWriter {
         self.state_snapshot().state.accepts_new_work()
     }
 
-    /// 把一次 commit 送入 write-behind 队列。
+    #[cfg(test)]
+    fn panic_after_next_drain(&self) {
+        self.shared.panic_after_drain.store(true, Ordering::Release);
+    }
+
+    /// 原子接受一次 Thread commit，不等待容量或 SQLite。
+    #[cfg(test)]
+    pub(in crate::studio) fn accept_thread(&self, commit: ThreadCommit) -> Result<(), PureError> {
+        if !self.try_accept_thread(&commit)? {
+            return Err(store_error(
+                "write-behind ordinary capacity is full; retry the command after persistence advances",
+            ));
+        }
+        Ok(())
+    }
+
+    /// 对 runtime owner 施加容量背压，直到同一份 typed commit 被原子接受。
     ///
-    /// 所有分类都只等待进入进程内队列，不等待 SQLite。
-    pub(in crate::studio) async fn enqueue(&self, commit: ThreadCommit) -> Result<(), PureError> {
+    /// `accept_thread` 保持零等待 admission 契约；Studio repository adapter 使用本
+    /// 入口避免把短暂队列饱和误判为业务 Turn 失败。
+    pub(in crate::studio) async fn accept_thread_with_backpressure(
+        &self,
+        commit: ThreadCommit,
+    ) -> Result<(), PureError> {
+        loop {
+            let mut progress = self.shared.progress.subscribe();
+            if self.try_accept_thread(&commit)? {
+                return Ok(());
+            }
+            self.blocked_result()?;
+            progress.changed().await.map_err(|_| {
+                store_error("write-behind writer stopped while waiting for Thread capacity")
+            })?;
+        }
+    }
+
+    fn try_accept_thread(&self, commit: &ThreadCommit) -> Result<bool, PureError> {
         self.check_accepting()?;
         self.ensure_task();
         if commit.persistence == PersistenceClass::Coalescible {
             let mut queue = self.lock_queue()?;
+            self.check_accepting()?;
             if try_coalesce_tail(&mut queue, commit.clone()) {
                 drop(queue);
                 self.shared.work_notify.notify_one();
-                return Ok(());
+                return Ok(true);
             }
         }
-        self.enqueue_with_capacity(commit).await?;
+        if !self.try_enqueue_now(commit)? {
+            return Ok(false);
+        }
         update_healthy_state(&self.shared, self.pending_commits.load(Ordering::Acquire));
         self.shared.work_notify.notify_one();
-        Ok(())
+        Ok(true)
     }
 
-    /// 把 TaskRuntime 已提交的完整事实快照送入同一 write-behind 队列。
-    pub(in crate::studio) async fn enqueue_task(
+    /// 测试和 repository async trait 使用的薄 future；admission 本身不 await。
+    #[cfg(test)]
+    pub(in crate::studio) async fn enqueue(&self, commit: ThreadCommit) -> Result<(), PureError> {
+        self.accept_thread(commit)
+    }
+
+    /// 原子接受 TaskRuntime 的完整 typed snapshot。
+    pub(in crate::studio) fn accept_task(
         &self,
         commit: TaskPersistenceCommit,
     ) -> Result<(), PureError> {
         validate_task_commit(&commit).map_err(store_error)?;
         self.check_accepting()?;
         self.ensure_task();
-        self.enqueue_task_with_capacity(commit).await?;
+        if !self.try_enqueue_task_now(&commit)? {
+            return Err(store_error(
+                "write-behind Task capacity is full; retry the command after persistence advances",
+            ));
+        }
         update_healthy_state(&self.shared, self.pending_commits.load(Ordering::Acquire));
         self.shared.work_notify.notify_one();
         Ok(())
     }
 
-    /// 把内存目录 owner 已接受的目录事实送入同一 write-behind 队列。
-    ///
-    /// FIFO 保证注册 delta 先于同 Thread 的首个 state commit 落库；SQLite 失败
-    /// 只影响持久化健康状态，不回滚内存目录事实。
-    pub(in crate::studio) async fn enqueue_directory(
+    /// 原子接受目录事实；调用方只有成功后才能更新热目录。
+    pub(in crate::studio) fn accept_directory(
         &self,
         delta: DirectoryDelta,
     ) -> Result<(), PureError> {
@@ -257,81 +418,57 @@ impl ThreadWriteBehindWriter {
         }
         self.check_accepting()?;
         self.ensure_task();
-        let mut progress = self.shared.progress.subscribe();
-        let mut pending = Some(delta);
-        loop {
-            self.check_accepting()?;
-            if self.try_enqueue_directory_now(pending.as_ref().expect("delta present"))? {
-                drop(pending.take());
-                self.record_visible_commit();
-                update_healthy_state(&self.shared, self.pending_commits.load(Ordering::Acquire));
-                self.shared.work_notify.notify_one();
-                return Ok(());
-            }
-            progress
-                .changed()
-                .await
-                .map_err(|_| store_error("write-behind progress channel closed"))?;
+        if !self.try_enqueue_directory_now(&delta)? {
+            return Err(store_error(
+                "write-behind directory capacity is full; retry the command after persistence advances",
+            ));
         }
+        update_healthy_state(&self.shared, self.pending_commits.load(Ordering::Acquire));
+        self.shared.work_notify.notify_one();
+        Ok(())
     }
 
-    /// 把产品 owner 的版本化 observed snapshot 送入同一 write-behind 队列。
+    /// 把模型性能 owner 的版本化 typed snapshot 送入同一 write-behind 队列。
     ///
-    /// 同 key 尚未落库的旧 revision 会被最新完整值覆盖。
-    pub(in crate::studio) async fn enqueue_observed_state(
+    /// 尚未落库的旧 revision 会被最新完整值覆盖；此处不执行 serde。
+    pub(in crate::studio) fn accept_model_performance(
         &self,
-        key: impl Into<String>,
-        revision: u64,
-        value: String,
+        value: ModelPerformanceState,
     ) -> Result<(), PureError> {
         self.check_accepting()?;
         self.ensure_task();
         let commit = ObservedStateCommit {
-            key: key.into(),
-            revision,
+            revision: value.revision(),
             value,
         };
-        let mut progress = self.shared.progress.subscribe();
-        loop {
-            self.check_accepting()?;
-            let result = {
-                let mut queue = self.lock_queue()?;
-                if try_coalesce_observed_state(&mut queue, &commit) {
-                    Some(false)
-                } else {
-                    let ordinary = queue
-                        .iter()
-                        .filter(|entry| entry.is_commit() && entry.terminal_key().is_none())
-                        .count();
-                    if ordinary < NORMAL_PENDING_COMMITS {
-                        queue.push_back(QueueEntry::ObservedState(Box::new(commit.clone())));
-                        self.record_visible_commit();
-                        Some(true)
-                    } else {
-                        None
-                    }
-                }
-            };
-            if let Some(added) = result {
-                if added {
-                    update_healthy_state(
-                        &self.shared,
-                        self.pending_commits.load(Ordering::Acquire),
-                    );
-                }
-                self.shared.work_notify.notify_one();
-                return Ok(());
-            }
-            progress
-                .changed()
-                .await
-                .map_err(|_| store_error("write-behind progress channel closed"))?;
+        let mut queue = self.lock_queue()?;
+        self.check_accepting()?;
+        if try_coalesce_observed_state(&mut queue, &commit) {
+            drop(queue);
+            self.shared.work_notify.notify_one();
+            return Ok(());
         }
+        let ordinary = queue
+            .iter()
+            .filter(|entry| entry.is_commit() && entry.terminal_key().is_none())
+            .count();
+        if ordinary >= NORMAL_PENDING_COMMITS {
+            return Err(store_error(
+                "write-behind model performance capacity is full; retry after persistence advances",
+            ));
+        }
+        queue.push_back(queue_model_performance(commit));
+        self.record_visible_commit();
+        drop(queue);
+        update_healthy_state(&self.shared, self.pending_commits.load(Ordering::Acquire));
+        self.shared.work_notify.notify_one();
+        Ok(())
     }
 
     /// 目录 delta 占用普通容量；队满时对调用方施加背压。
     fn try_enqueue_directory_now(&self, delta: &DirectoryDelta) -> Result<bool, PureError> {
         let mut queue = self.lock_queue()?;
+        self.check_accepting()?;
         let ordinary = queue
             .iter()
             .filter(|entry| entry.is_commit() && entry.terminal_key().is_none())
@@ -339,7 +476,8 @@ impl ThreadWriteBehindWriter {
         if ordinary >= NORMAL_PENDING_COMMITS {
             return Ok(false);
         }
-        queue.push_back(QueueEntry::Directory(Box::new(delta.clone())));
+        queue.push_back(queue_directory(delta.clone()));
+        self.record_visible_commit();
         Ok(true)
     }
 
@@ -349,11 +487,11 @@ impl ThreadWriteBehindWriter {
         owner_id: &str,
         revision: u64,
     ) -> Result<(), PureError> {
-        let mut progress = self.shared.durable_progress.subscribe();
         loop {
             if self
                 .durable_revision(owner_id)
                 .is_some_and(|durable| durable >= revision)
+                && !self.has_pending_directory_fact(owner_id)?
             {
                 return Ok(());
             }
@@ -363,13 +501,28 @@ impl ThreadWriteBehindWriter {
                     "write-behind writer stopped before owner {owner_id} revision {revision} became durable"
                 )));
             }
-            self.ensure_task();
-            self.shared.work_notify.notify_one();
-            progress
-                .changed()
-                .await
-                .map_err(|_| store_error("write-behind durable progress channel closed"))?;
+            self.flush().await?;
         }
+    }
+
+    fn has_pending_directory_fact(&self, owner_id: &str) -> Result<bool, PureError> {
+        let queued = self
+            .shared
+            .queue
+            .lock()
+            .map_err(|_| store_error("write-behind queue lock poisoned"))?
+            .iter()
+            .any(|entry| entry.contains_directory_fact_for(owner_id));
+        if queued {
+            return Ok(true);
+        }
+        Ok(self
+            .shared
+            .inflight
+            .lock()
+            .map_err(|_| store_error("write-behind inflight lock poisoned"))?
+            .iter()
+            .any(|entry| entry.contains_directory_fact_for(owner_id)))
     }
 
     /// 等待 Task owner 的指定热修订号被 SQLite 确认。
@@ -378,7 +531,6 @@ impl ThreadWriteBehindWriter {
         owner_id: &str,
         revision: u64,
     ) -> Result<(), PureError> {
-        let mut progress = self.shared.durable_progress.subscribe();
         loop {
             if self
                 .task_durable_revision(owner_id)
@@ -392,12 +544,7 @@ impl ThreadWriteBehindWriter {
                     "write-behind writer stopped before Task owner {owner_id} revision {revision} became durable"
                 )));
             }
-            self.ensure_task();
-            self.shared.work_notify.notify_one();
-            progress
-                .changed()
-                .await
-                .map_err(|_| store_error("write-behind durable progress channel closed"))?;
+            self.flush().await?;
         }
     }
 
@@ -442,7 +589,8 @@ impl ThreadWriteBehindWriter {
         self.shared.retry_notify.notify_waiters();
         let task = self.task.lock().expect("writer task lock").take();
         if let Some(task) = task {
-            let _ = task.await;
+            task.await
+                .map_err(|error| store_error(format!("write-behind supervisor failed: {error}")))?;
         }
         self.blocked_result()?;
         if self.pending_commit_count() != 0 {
@@ -476,6 +624,7 @@ impl ThreadWriteBehindWriter {
     }
 
     fn check_accepting(&self) -> Result<(), PureError> {
+        self.blocked_result()?;
         if self.shared.stopping.load(Ordering::Acquire) {
             return Err(store_error(
                 "write-behind writer is shutting down and no longer accepts commits",
@@ -493,45 +642,13 @@ impl ThreadWriteBehindWriter {
         if task.is_none() {
             let shared = self.shared.clone();
             let pending = self.pending_commits.clone();
-            *task = Some(tokio::spawn(run_writer(shared, pending)));
-        }
-    }
-
-    /// 普通事实只占用 768 个普通位置；终态提交必须消费已取得的终态许可，
-    /// 因而不会被普通积压挤出 256 个预留位置。
-    async fn enqueue_with_capacity(&self, commit: ThreadCommit) -> Result<(), PureError> {
-        let mut progress = self.shared.progress.subscribe();
-        loop {
-            self.check_accepting()?;
-            if self.try_enqueue_now(&commit)? {
-                return Ok(());
-            }
-            progress
-                .changed()
-                .await
-                .map_err(|_| store_error("write-behind progress channel closed"))?;
-        }
-    }
-
-    async fn enqueue_task_with_capacity(
-        &self,
-        commit: TaskPersistenceCommit,
-    ) -> Result<(), PureError> {
-        let mut progress = self.shared.progress.subscribe();
-        loop {
-            self.check_accepting()?;
-            if self.try_enqueue_task_now(&commit)? {
-                return Ok(());
-            }
-            progress
-                .changed()
-                .await
-                .map_err(|_| store_error("write-behind progress channel closed"))?;
+            *task = Some(tokio::spawn(supervise_writer(shared, pending)));
         }
     }
 
     fn try_enqueue_now(&self, commit: &ThreadCommit) -> Result<bool, PureError> {
         let mut queue = self.lock_queue()?;
+        self.check_accepting()?;
         if let Some(terminal_key) = terminal_turn_key(commit) {
             let mut slots = self
                 .shared
@@ -553,7 +670,7 @@ impl ThreadWriteBehindWriter {
                 return Ok(false);
             }
             slots.pending_terminal_turns.insert(terminal_key);
-            queue.push_back(QueueEntry::ThreadCommit(Box::new(commit.clone())));
+            queue.push_back(queue_thread(commit.clone()));
             self.record_visible_commit();
             return Ok(true);
         }
@@ -581,13 +698,14 @@ impl ThreadWriteBehindWriter {
             }
             slots.active_turns.insert(started_key);
         }
-        queue.push_back(QueueEntry::ThreadCommit(Box::new(commit.clone())));
+        queue.push_back(queue_thread(commit.clone()));
         self.record_visible_commit();
         Ok(true)
     }
 
     fn try_enqueue_task_now(&self, commit: &TaskPersistenceCommit) -> Result<bool, PureError> {
         let mut queue = self.lock_queue()?;
+        self.check_accepting()?;
         let lifecycle_key = commit.lifecycle_key();
         if commit.ends_lifecycle() {
             let mut slots = self
@@ -606,7 +724,7 @@ impl ThreadWriteBehindWriter {
                 return Ok(false);
             }
             slots.pending_terminal_turns.insert(lifecycle_key);
-            queue.push_back(QueueEntry::TaskCommit(Box::new(commit.clone())));
+            queue.push_back(queue_task(commit.clone()));
             self.record_visible_commit();
             return Ok(true);
         }
@@ -634,7 +752,7 @@ impl ThreadWriteBehindWriter {
             }
             slots.active_turns.insert(lifecycle_key);
         }
-        queue.push_back(QueueEntry::TaskCommit(Box::new(commit.clone())));
+        queue.push_back(queue_task(commit.clone()));
         self.record_visible_commit();
         Ok(true)
     }
@@ -685,7 +803,11 @@ fn terminal_turn_key(commit: &ThreadCommit) -> Option<String> {
 }
 
 fn try_coalesce_tail(queue: &mut VecDeque<QueueEntry>, next: ThreadCommit) -> bool {
-    let Some(QueueEntry::ThreadCommit(previous)) = queue.back_mut() else {
+    let Some(QueueEntry::Mutation(QueuedMutation {
+        mutation: StudioMutation::Thread(previous),
+        ..
+    })) = queue.back_mut()
+    else {
         return false;
     };
     previous.coalesce(Box::new(next)).is_ok()
@@ -697,17 +819,24 @@ fn try_coalesce_observed_state(
 ) -> bool {
     for entry in queue.iter_mut().rev() {
         match entry {
-            QueueEntry::ObservedState(previous) if previous.key == next.key => {
+            QueueEntry::Mutation(QueuedMutation {
+                mutation: StudioMutation::Directory(directory),
+                ..
+            }) if matches!(
+                directory.as_ref(),
+                StudioDirectoryMutation::ModelPerformance(_)
+            ) =>
+            {
+                let StudioDirectoryMutation::ModelPerformance(previous) = directory.as_mut() else {
+                    unreachable!("guard requires model performance mutation")
+                };
                 if next.revision >= previous.revision {
-                    **previous = next.clone();
+                    *previous = next.clone();
                 }
                 return true;
             }
             QueueEntry::Barrier(_) => break,
-            QueueEntry::ThreadCommit(_)
-            | QueueEntry::TaskCommit(_)
-            | QueueEntry::Directory(_)
-            | QueueEntry::ObservedState(_) => {}
+            QueueEntry::Mutation(_) => {}
         }
     }
     false
@@ -726,6 +855,7 @@ impl PendingBatch {
     }
 }
 
+#[derive(Debug)]
 enum BatchError {
     /// 内存是唯一 writer，revision 冲突属于内部错误，不得重试。
     Conflict {
@@ -741,25 +871,61 @@ enum PersistenceDisposition {
     Blocked,
 }
 
+async fn supervise_writer(shared: Arc<WriterShared>, pending_commits: Arc<AtomicUsize>) {
+    loop {
+        let worker_shared = shared.clone();
+        let worker = tokio::spawn(run_writer(worker_shared, pending_commits.clone()));
+        let Err(error) = worker.await else {
+            return;
+        };
+        recover_inflight(&shared);
+        publish_blocked(
+            &shared,
+            &format!("write-behind worker terminated unexpectedly: {error}"),
+        );
+        fail_barriers(&shared, "write-behind worker terminated unexpectedly");
+        if shared.stopping.load(Ordering::Acquire) {
+            return;
+        }
+        shared.retry_notify.notified().await;
+        if shared.stopping.load(Ordering::Acquire) {
+            return;
+        }
+    }
+}
+
 async fn run_writer(shared: Arc<WriterShared>, pending_commits: Arc<AtomicUsize>) {
-    let mut interval = tokio::time::interval(FLUSH_INTERVAL);
-    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut retries = 0usize;
     loop {
         let stopping = shared.stopping.load(Ordering::Acquire);
-        let batch = drain_batch(&shared);
-        if batch.entries.is_empty() {
+        let (queued_commits, flush_immediately, oldest_accepted_at) = queued_work(&shared);
+        if queued_commits == 0 && !flush_immediately {
             if stopping {
                 return;
             }
+            shared.work_notify.notified().await;
+            continue;
+        }
+        let deadline = oldest_accepted_at
+            .unwrap_or_else(tokio::time::Instant::now)
+            .checked_add(FLUSH_INTERVAL)
+            .unwrap_or_else(tokio::time::Instant::now);
+        if !stopping && queued_commits < MAX_BATCH_COMMITS && !flush_immediately {
             tokio::select! {
-                _ = shared.work_notify.notified() => {}
-                _ = interval.tick() => {}
+                _ = shared.work_notify.notified() => continue,
+                _ = tokio::time::sleep_until(deadline) => {}
             }
+        }
+        let batch = drain_batch(&shared);
+        if batch.entries.is_empty() {
             continue;
         }
         let started_at = std::time::Instant::now();
         let commit_count = batch.commit_count();
+        #[cfg(test)]
+        if shared.panic_after_drain.swap(false, Ordering::AcqRel) {
+            panic!("injected write-behind worker panic after drain");
+        }
         let outcome = if commit_count == 0 {
             Ok(())
         } else {
@@ -772,6 +938,7 @@ async fn run_writer(shared: Arc<WriterShared>, pending_commits: Arc<AtomicUsize>
                     PersistenceState::Degraded(_) | PersistenceState::Recovering(_)
                 );
                 retries = 0;
+                clear_inflight(&shared);
                 advance_batch_durability(&shared, &batch);
                 release_applied_settlement_slots(&shared, &batch);
                 pending_commits.fetch_sub(commit_count, Ordering::AcqRel);
@@ -841,6 +1008,18 @@ async fn run_writer(shared: Arc<WriterShared>, pending_commits: Arc<AtomicUsize>
     }
 }
 
+fn queued_work(shared: &WriterShared) -> (usize, bool, Option<tokio::time::Instant>) {
+    let queue = shared
+        .queue
+        .lock()
+        .expect("write-behind queue lock poisoned");
+    (
+        queue.iter().filter(|entry| entry.is_commit()).count(),
+        queue.iter().any(QueueEntry::flushes_immediately),
+        queue.iter().find_map(QueueEntry::accepted_at),
+    )
+}
+
 async fn wait_for_retry(shared: &WriterShared, backoff: Duration) {
     tokio::select! {
         _ = shared.retry_notify.notified() => {}
@@ -850,6 +1029,14 @@ async fn wait_for_retry(shared: &WriterShared, backoff: Duration) {
 
 /// 从队首取一批 entry：commit 尽量成批，barrier 只在批次末尾收尾。
 fn drain_batch(shared: &WriterShared) -> PendingBatch {
+    let mut inflight = shared
+        .inflight
+        .lock()
+        .expect("write-behind inflight lock poisoned");
+    assert!(
+        inflight.is_empty(),
+        "write-behind may only own one in-flight batch"
+    );
     let mut queue = shared
         .queue
         .lock()
@@ -858,7 +1045,10 @@ fn drain_batch(shared: &WriterShared) -> PendingBatch {
     while entries.len() < MAX_BATCH_COMMITS {
         match queue.front() {
             Some(QueueEntry::Barrier(_)) if !entries.is_empty() => break,
-            Some(_) => {
+            Some(entry) => {
+                if let Some(commit) = entry.clone_commit() {
+                    inflight.push_back(commit);
+                }
                 entries.push(queue.pop_front().expect("front entry checked"));
             }
             None => break,
@@ -869,6 +1059,7 @@ fn drain_batch(shared: &WriterShared) -> PendingBatch {
 
 /// 瞬时失败后把整批按原顺序放回队首等待重试。
 fn requeue_batch(shared: &WriterShared, batch: PendingBatch) {
+    clear_inflight(shared);
     let mut queue = shared
         .queue
         .lock()
@@ -878,12 +1069,45 @@ fn requeue_batch(shared: &WriterShared, batch: PendingBatch) {
     }
 }
 
+/// 成功应用后丢弃由共享状态持有的 typed snapshot 副本。
+fn clear_inflight(shared: &WriterShared) {
+    shared
+        .inflight
+        .lock()
+        .expect("write-behind inflight lock poisoned")
+        .clear();
+}
+
+/// worker panic 后恢复尚未 durable 的 typed mutation。
+///
+/// barrier 不是业务事实，worker 异常会关闭其 sender；typed mutation 则必须按原序
+/// 回到队首，供诊断或显式重试使用。
+fn recover_inflight(shared: &WriterShared) {
+    let mut inflight = shared
+        .inflight
+        .lock()
+        .expect("write-behind inflight lock poisoned");
+    if inflight.is_empty() {
+        return;
+    }
+    let mut queue = shared
+        .queue
+        .lock()
+        .expect("write-behind queue lock poisoned");
+    while let Some(entry) = inflight.pop_back() {
+        queue.push_front(entry);
+    }
+}
+
 async fn apply_batch(store: &StudioStore, batch: &PendingBatch) -> Result<(), BatchError> {
     let tx = store.database().begin().await.map_err(classify_db_error)?;
     for entry in &batch.entries {
         match entry {
-            QueueEntry::ThreadCommit(commit) => match apply_state_commit(&tx, commit).await {
-                Ok(ApplyCommitOutcome::Applied) => {}
+            QueueEntry::Mutation(QueuedMutation {
+                mutation: StudioMutation::Thread(commit),
+                ..
+            }) => match apply_state_commit(&tx, commit).await {
+                Ok(ApplyCommitOutcome::Applied | ApplyCommitOutcome::AlreadyApplied) => {}
                 Ok(ApplyCommitOutcome::RevisionConflict { actual_revision }) => {
                     let _ = tx.rollback().await;
                     return Err(BatchError::Conflict { actual_revision });
@@ -893,8 +1117,11 @@ async fn apply_batch(store: &StudioStore, batch: &PendingBatch) -> Result<(), Ba
                     return Err(classify_store_error(error));
                 }
             },
-            QueueEntry::TaskCommit(commit) => match apply_task_commit(&tx, commit).await {
-                Ok(ApplyTaskCommitOutcome::Applied) => {}
+            QueueEntry::Mutation(QueuedMutation {
+                mutation: StudioMutation::Task(commit),
+                ..
+            }) => match apply_task_commit(&tx, commit).await {
+                Ok(ApplyTaskCommitOutcome::Applied | ApplyTaskCommitOutcome::AlreadyApplied) => {}
                 Ok(ApplyTaskCommitOutcome::RevisionConflict { actual_revision }) => {
                     let _ = tx.rollback().await;
                     return Err(BatchError::Conflict { actual_revision });
@@ -904,21 +1131,30 @@ async fn apply_batch(store: &StudioStore, batch: &PendingBatch) -> Result<(), Ba
                     return Err(classify_store_error(store_error(error)));
                 }
             },
-            QueueEntry::Directory(delta) => {
-                if let Err(error) = apply_directory_delta(&tx, delta).await {
-                    let _ = tx.rollback().await;
-                    return Err(classify_store_error(store_error(error)));
+            QueueEntry::Mutation(QueuedMutation {
+                mutation: StudioMutation::Directory(directory),
+                ..
+            }) => match directory.as_ref() {
+                StudioDirectoryMutation::Delta(delta) => {
+                    if let Err(error) = apply_directory_delta(&tx, delta).await {
+                        let _ = tx.rollback().await;
+                        return Err(classify_store_error(store_error(error)));
+                    }
                 }
-            }
-            QueueEntry::ObservedState(commit) => {
-                if let Err(error) =
-                    crate::studio::store::settings::upsert_setting(&tx, &commit.key, &commit.value)
-                        .await
-                {
-                    let _ = tx.rollback().await;
-                    return Err(classify_store_error(store_error(error)));
+                StudioDirectoryMutation::ModelPerformance(commit) => {
+                    if let Err(error) = put_object(
+                        &tx,
+                        MODEL_PERFORMANCE_OWNER_ID,
+                        &commit.value,
+                        commit.value.updated_at(),
+                    )
+                    .await
+                    {
+                        let _ = tx.rollback().await;
+                        return Err(classify_store_error(store_error(error)));
+                    }
                 }
-            }
+            },
             QueueEntry::Barrier(_) => {}
         }
     }
@@ -1009,19 +1245,29 @@ fn advance_batch_durability(shared: &WriterShared, batch: &PendingBatch) {
     let mut task_revisions = HashMap::<String, u64>::new();
     for entry in &batch.entries {
         match entry {
-            QueueEntry::ThreadCommit(commit) => {
+            QueueEntry::Mutation(QueuedMutation {
+                mutation: StudioMutation::Thread(commit),
+                ..
+            }) => {
                 revisions
                     .entry(commit.agent_id.to_string())
                     .and_modify(|revision| *revision = (*revision).max(commit.facts.revision))
                     .or_insert(commit.facts.revision);
             }
-            QueueEntry::TaskCommit(commit) => {
+            QueueEntry::Mutation(QueuedMutation {
+                mutation: StudioMutation::Task(commit),
+                ..
+            }) => {
                 task_revisions
                     .entry(commit.owner_id.clone())
                     .and_modify(|revision| *revision = (*revision).max(commit.revision))
                     .or_insert(commit.revision);
             }
-            QueueEntry::Directory(_) | QueueEntry::ObservedState(_) | QueueEntry::Barrier(_) => {}
+            QueueEntry::Mutation(QueuedMutation {
+                mutation: StudioMutation::Directory(_),
+                ..
+            })
+            | QueueEntry::Barrier(_) => {}
         }
     }
     if revisions.is_empty() && task_revisions.is_empty() {
@@ -1112,10 +1358,7 @@ fn advance_task_durable_revision(shared: &WriterShared, owner_id: &str, revision
 fn complete_applied_batch(batch: PendingBatch) {
     for entry in batch.entries {
         match entry {
-            QueueEntry::ThreadCommit(_)
-            | QueueEntry::TaskCommit(_)
-            | QueueEntry::Directory(_)
-            | QueueEntry::ObservedState(_) => {}
+            QueueEntry::Mutation(_) => {}
             QueueEntry::Barrier(sender) => {
                 let _ = sender.send(Ok(()));
             }
@@ -1228,10 +1471,22 @@ fn oldest_pending_revision(shared: &WriterShared) -> Option<u64> {
         .expect("write-behind queue lock poisoned")
         .iter()
         .find_map(|entry| match entry {
-            QueueEntry::ThreadCommit(commit) => Some(commit.facts.revision),
-            QueueEntry::TaskCommit(commit) => Some(commit.revision),
-            QueueEntry::ObservedState(commit) => Some(commit.revision),
-            QueueEntry::Directory(_) | QueueEntry::Barrier(_) => None,
+            QueueEntry::Mutation(QueuedMutation {
+                mutation: StudioMutation::Thread(commit),
+                ..
+            }) => Some(commit.facts.revision),
+            QueueEntry::Mutation(QueuedMutation {
+                mutation: StudioMutation::Task(commit),
+                ..
+            }) => Some(commit.revision),
+            QueueEntry::Mutation(QueuedMutation {
+                mutation: StudioMutation::Directory(directory),
+                ..
+            }) => match directory.as_ref() {
+                StudioDirectoryMutation::ModelPerformance(commit) => Some(commit.revision),
+                StudioDirectoryMutation::Delta(_) => None,
+            },
+            QueueEntry::Barrier(_) => None,
         })
 }
 
@@ -1269,7 +1524,7 @@ mod tests {
     use pl_core::{
         AgentCommand, AgentRuntimeEvent, AgentRuntimeEventKind, AgentSnapshotTransition,
         AgentTurnOutcome, DurableCommitFacts, DurableMailboxEnvelope, MailboxBudgetAction,
-        MailboxDeliveryState, MailboxInputPayload, TurnId,
+        MailboxDeliveryState, MailboxInputPayload, ThreadMutation, TurnId,
     };
     use pl_model::TokenUsage;
     use pl_protocol::{
@@ -1288,24 +1543,26 @@ mod tests {
 
     #[test]
     fn observed_state_coalesces_latest_revision_without_crossing_barriers() {
-        let mut queue =
-            VecDeque::from([QueueEntry::ObservedState(Box::new(ObservedStateCommit {
-                key: "observed:a".to_string(),
-                revision: 1,
-                value: "one".to_string(),
-            }))]);
+        let mut queue = VecDeque::from([queue_model_performance(ObservedStateCommit {
+            revision: 1,
+            value: ModelPerformanceState::default(),
+        })]);
         assert!(try_coalesce_observed_state(
             &mut queue,
             &ObservedStateCommit {
-                key: "observed:a".to_string(),
                 revision: 2,
-                value: "two".to_string(),
+                value: ModelPerformanceState::default(),
             }
         ));
         assert!(matches!(
             queue.front(),
-            Some(QueueEntry::ObservedState(commit))
-                if commit.revision == 2 && commit.value == "two"
+            Some(QueueEntry::Mutation(QueuedMutation {
+                mutation: StudioMutation::Directory(directory),
+                ..
+            })) if matches!(
+                directory.as_ref(),
+                StudioDirectoryMutation::ModelPerformance(commit) if commit.revision == 2
+            )
         ));
 
         let (barrier, _) = oneshot::channel();
@@ -1313,19 +1570,49 @@ mod tests {
         assert!(!try_coalesce_observed_state(
             &mut queue,
             &ObservedStateCommit {
-                key: "observed:a".to_string(),
                 revision: 3,
-                value: "three".to_string(),
+                value: ModelPerformanceState::default(),
             }
         ));
         assert!(!try_coalesce_observed_state(
             &mut queue,
             &ObservedStateCommit {
-                key: "observed:b".to_string(),
                 revision: 1,
-                value: "other".to_string(),
+                value: ModelPerformanceState::default(),
             }
         ));
+    }
+
+    #[tokio::test]
+    async fn draining_one_full_batch_does_not_reset_the_remaining_deadline() {
+        let store = StudioStore::open_memory().await.expect("memory store");
+        let writer = ThreadWriteBehindWriter::new(store);
+        let accepted_at = tokio::time::Instant::now() - FLUSH_INTERVAL;
+        {
+            let mut queue = writer.shared.queue.lock().expect("queue lock");
+            for index in 0..=MAX_BATCH_COMMITS {
+                let mut entry = queue_thread(writer_test_commit(
+                    &format!("deadline-thread-{index}"),
+                    PersistenceClass::Standard,
+                ));
+                let QueueEntry::Mutation(commit) = &mut entry else {
+                    unreachable!("queue_thread always creates a mutation")
+                };
+                commit.accepted_at = accepted_at;
+                queue.push_back(entry);
+            }
+        }
+
+        let first = drain_batch(&writer.shared);
+        assert_eq!(first.commit_count(), MAX_BATCH_COMMITS);
+        clear_inflight(&writer.shared);
+        let (queued, immediate, oldest) = queued_work(&writer.shared);
+        assert_eq!(queued, 1);
+        assert!(!immediate);
+        assert_eq!(oldest, Some(accepted_at));
+        assert!(oldest.unwrap() + FLUSH_INTERVAL <= tokio::time::Instant::now());
+
+        writer.shared.queue.lock().expect("queue lock").clear();
     }
 
     async fn task_commit(
@@ -1398,11 +1685,8 @@ mod tests {
             task_commit(&store, "mixed-rollback-task", Some(9), 1).await;
         let batch = PendingBatch {
             entries: vec![
-                QueueEntry::ThreadCommit(Box::new(writer_test_commit(
-                    &thread_id,
-                    PersistenceClass::Standard,
-                ))),
-                QueueEntry::TaskCommit(Box::new(conflicting_task)),
+                queue_thread(writer_test_commit(&thread_id, PersistenceClass::Standard)),
+                queue_task(conflicting_task),
             ],
         };
 
@@ -1433,6 +1717,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn identical_thread_revision_is_already_applied_but_different_payload_blocks() {
+        let store = StudioStore::open_memory().await.expect("memory store");
+        let thread_id = seed_thread(&store, "thread-receipt").await;
+        let commit = writer_test_commit(&thread_id, PersistenceClass::Standard);
+        let first = PendingBatch {
+            entries: vec![queue_thread(commit.clone())],
+        };
+        apply_batch(&store, &first).await.expect("first apply");
+
+        let identical = PendingBatch {
+            entries: vec![queue_thread(commit.clone())],
+        };
+        apply_batch(&store, &identical)
+            .await
+            .expect("identical retry is idempotent");
+
+        let mut conflicting = commit;
+        conflicting.next_state.snapshot.updated_at = 2;
+        conflicting.facts = DurableCommitFacts::from_state(
+            &conflicting.next_state,
+            Vec::new(),
+            Vec::new(),
+            None,
+            None,
+        );
+        let conflicting = PendingBatch {
+            entries: vec![queue_thread(conflicting)],
+        };
+        assert!(matches!(
+            apply_batch(&store, &conflicting).await,
+            Err(BatchError::Conflict {
+                actual_revision: Some(1)
+            })
+        ));
+    }
+
+    #[tokio::test]
     async fn global_flush_advances_thread_and_task_durability_together() {
         let store = StudioStore::open_memory().await.expect("memory store");
         let thread_id = seed_thread(&store, "mixed-durable-thread").await;
@@ -1443,7 +1764,7 @@ mod tests {
             .enqueue(writer_test_commit(&thread_id, PersistenceClass::Standard))
             .await
             .expect("Thread enqueue");
-        writer.enqueue_task(task).await.expect("Task enqueue");
+        writer.accept_task(task).expect("Task enqueue");
 
         writer.flush().await.expect("global flush");
 
@@ -1514,6 +1835,7 @@ mod tests {
             .enqueue(writer_test_commit(&thread_id, PersistenceClass::Standard))
             .await
             .expect("hot commit accepted");
+        writer.retry_now();
 
         tokio::time::timeout(Duration::from_secs(3), async {
             loop {
@@ -1573,6 +1895,7 @@ mod tests {
             .enqueue(writer_test_commit(&thread_id, PersistenceClass::Standard))
             .await
             .expect("hot commit accepted");
+        writer.retry_now();
         tokio::time::timeout(Duration::from_secs(3), async {
             loop {
                 if matches!(writer.state_snapshot().state, PersistenceState::Degraded(_)) {
@@ -1670,6 +1993,42 @@ mod tests {
         writer.shutdown().await.expect("shutdown");
     }
 
+    #[tokio::test]
+    async fn owner_durable_barrier_also_flushes_its_pending_directory_fact() {
+        let store = StudioStore::open_memory().await.expect("memory store");
+        let thread_id = seed_thread(&store, "owner-directory-durable").await;
+        let writer = ThreadWriteBehindWriter::new(store.clone());
+        writer.seed_durable_revision(&thread_id, 1);
+        let record = store
+            .read_thread(&thread_id)
+            .await
+            .expect("read thread")
+            .expect("thread exists");
+        let mut thread = pl_protocol::Thread::from(record);
+        thread.title = "directory fact must be durable".to_string();
+        writer
+            .accept_directory(DirectoryDelta {
+                thread_upserts: vec![thread],
+                ..DirectoryDelta::default()
+            })
+            .expect("accept directory fact");
+
+        tokio::time::timeout(Duration::from_secs(2), writer.await_durable(&thread_id, 1))
+            .await
+            .expect("owner directory barrier timed out")
+            .expect("owner directory barrier");
+        assert_eq!(
+            store
+                .read_thread(&thread_id)
+                .await
+                .expect("read durable thread")
+                .expect("durable thread")
+                .title,
+            "directory fact must be durable"
+        );
+        writer.shutdown().await.expect("shutdown");
+    }
+
     #[test]
     fn consecutive_streaming_commits_coalesce_without_losing_revision_chain() {
         let first = writer_test_commit("thread-coalesce", PersistenceClass::Coalescible);
@@ -1678,16 +2037,75 @@ mod tests {
         next.next_state.snapshot.revision = 2;
         next.next_state.snapshot.event_sequence = 2;
         next.facts.revision = 2;
-        let mut queue = VecDeque::from([QueueEntry::ThreadCommit(Box::new(first))]);
+        let mut queue = VecDeque::from([queue_thread(first)]);
 
         assert!(try_coalesce_tail(&mut queue, next));
         assert_eq!(queue.len(), 1);
-        let QueueEntry::ThreadCommit(commit) = queue.front().expect("coalesced commit") else {
+        let QueueEntry::Mutation(QueuedMutation {
+            mutation: StudioMutation::Thread(commit),
+            ..
+        }) = queue.front().expect("coalesced commit")
+        else {
             panic!("tail must remain a commit");
         };
         assert_eq!(commit.expected_revision, None);
         assert_eq!(commit.facts.revision, 2);
         assert_eq!(commit.next_state.snapshot.revision, 2);
+    }
+
+    #[test]
+    fn consecutive_trace_commits_coalesce_without_losing_typed_events() {
+        let mut first = writer_test_commit("thread-trace-coalesce", PersistenceClass::Coalescible);
+        first.mutation = ThreadMutation::AppendTrace;
+        first.facts.trace_events.push(pl_trace::TraceEvent {
+            session_id: first.agent_id.to_string(),
+            sequence: 0,
+            timestamp: 1,
+            kind: pl_trace::TraceEventKind::EnabledToolsRecorded {
+                event: pl_trace::EnabledToolsEvent {
+                    turn_id: "turn-trace".to_string(),
+                    step: 0,
+                    tools: vec!["first".to_string()],
+                    wire_fingerprint: "wire-0".to_string(),
+                    execution_fingerprint: "execution-0".to_string(),
+                },
+            },
+        });
+        let mut next = writer_test_commit("thread-trace-coalesce", PersistenceClass::Coalescible);
+        next.expected_revision = Some(1);
+        next.next_state.snapshot.revision = 2;
+        next.next_state.snapshot.event_sequence = 2;
+        next.facts.revision = 2;
+        next.mutation = ThreadMutation::AppendTrace;
+        next.facts.trace_events.push(pl_trace::TraceEvent {
+            session_id: next.agent_id.to_string(),
+            sequence: 1,
+            timestamp: 2,
+            kind: pl_trace::TraceEventKind::EnabledToolsRecorded {
+                event: pl_trace::EnabledToolsEvent {
+                    turn_id: "turn-trace".to_string(),
+                    step: 1,
+                    tools: vec!["second".to_string()],
+                    wire_fingerprint: "wire-1".to_string(),
+                    execution_fingerprint: "execution-1".to_string(),
+                },
+            },
+        });
+        let mut queue = VecDeque::from([queue_thread(first)]);
+
+        assert!(try_coalesce_tail(&mut queue, next));
+        let QueueEntry::Mutation(QueuedMutation {
+            mutation: StudioMutation::Thread(commit),
+            ..
+        }) = queue.front().expect("coalesced trace commit")
+        else {
+            panic!("tail must remain a Thread commit");
+        };
+        assert_eq!(commit.facts.revision, 2);
+        assert_eq!(commit.facts.trace_events.len(), 2);
+        assert_eq!(commit.facts.trace_events[0].sequence, 0);
+        assert_eq!(commit.facts.trace_events[1].sequence, 1);
+        assert_eq!(commit.mutation, ThreadMutation::AppendTrace);
     }
 
     #[test]
@@ -1720,7 +2138,7 @@ mod tests {
                 snapshot: Box::new(next.next_state.snapshot.clone()),
             },
         });
-        let mut queue = VecDeque::from([QueueEntry::ThreadCommit(Box::new(first))]);
+        let mut queue = VecDeque::from([queue_thread(first)]);
 
         assert!(!try_coalesce_tail(&mut queue, next));
         assert_eq!(queue.len(), 1);
@@ -1935,17 +2353,96 @@ mod tests {
             .expect("batched enqueue");
         assert_eq!(writer.pending_commit_count(), 1);
 
-        let drained = tokio::time::timeout(FLUSH_INTERVAL * 4, async {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(writer.pending_commit_count(), 1);
+        tokio::time::timeout(FLUSH_INTERVAL + Duration::from_secs(1), async {
             while writer.pending_commit_count() > 0 {
-                tokio::time::sleep(Duration::from_millis(20)).await;
+                tokio::time::sleep(Duration::from_millis(10)).await;
             }
         })
-        .await;
-        assert!(
-            drained.is_ok(),
-            "idle batch must flush within the time window"
+        .await
+        .expect("idle batch must flush within five seconds");
+        assert_eq!(writer.durable_revision(&thread_id), Some(1));
+        writer.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn sixty_four_commits_flush_without_waiting_for_deadline() {
+        let store = StudioStore::open_memory().await.expect("memory store");
+        let thread_id = seed_thread(&store, "full-batch").await;
+        let writer = ThreadWriteBehindWriter::new(store);
+        for revision in 1..=MAX_BATCH_COMMITS as u64 {
+            let mut commit = writer_test_commit(&thread_id, PersistenceClass::Standard);
+            commit.expected_revision = (revision > 1).then_some(revision - 1);
+            commit.next_state.snapshot.revision = revision;
+            commit.next_state.snapshot.event_sequence = revision;
+            commit.next_state.snapshot.updated_at = i64::try_from(revision).unwrap();
+            commit.facts = DurableCommitFacts::from_state(
+                &commit.next_state,
+                Vec::new(),
+                Vec::new(),
+                None,
+                None,
+            );
+            writer.accept_thread(commit).expect("accept commit");
+        }
+        assert_eq!(writer.pending_commit_count(), MAX_BATCH_COMMITS);
+
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while writer.pending_commit_count() > 0 {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("full batch must bypass the five-second deadline");
+        assert_eq!(writer.pending_commit_count(), 0);
+        assert_eq!(
+            writer.durable_revision(&thread_id),
+            Some(MAX_BATCH_COMMITS as u64)
         );
         writer.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn worker_panic_recovers_inflight_typed_snapshot_and_retries_without_data_loss() {
+        let store = StudioStore::open_memory().await.expect("memory store");
+        let thread_id = seed_thread(&store, "panic-recovery").await;
+        let writer = ThreadWriteBehindWriter::new(store);
+        writer.panic_after_next_drain();
+        writer
+            .accept_thread(writer_test_commit(&thread_id, PersistenceClass::Settlement))
+            .expect("accept commit");
+        for _ in 0..1_000 {
+            if matches!(writer.state_snapshot().state, PersistenceState::Blocked(_)) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+
+        assert!(matches!(
+            writer.state_snapshot().state,
+            PersistenceState::Blocked(_)
+        ));
+        assert_eq!(writer.pending_commit_count(), 1);
+        assert_eq!(pending_from_queue(&writer.shared), 1);
+        assert!(
+            writer
+                .shared
+                .inflight
+                .lock()
+                .expect("inflight lock")
+                .is_empty()
+        );
+        writer.retry_now();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while writer.durable_revision(&thread_id) != Some(1) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("retried supervisor must apply the recovered typed snapshot");
+        assert_eq!(writer.pending_commit_count(), 0);
+        writer.shutdown().await.expect("shutdown recovered writer");
     }
 
     #[tokio::test]
@@ -1954,8 +2451,17 @@ mod tests {
         let thread_id = seed_thread(&store, "conflict").await;
         let writer = ThreadWriteBehindWriter::new(store.clone());
         // 先落库一次注册（runtime_revision None -> 1）。
+        let mut conflicting = writer_test_commit(&thread_id, PersistenceClass::Settlement);
+        conflicting.next_state.snapshot.updated_at = 2;
+        conflicting.facts = DurableCommitFacts::from_state(
+            &conflicting.next_state,
+            Vec::new(),
+            Vec::new(),
+            None,
+            None,
+        );
         writer
-            .enqueue(writer_test_commit(&thread_id, PersistenceClass::Settlement))
+            .enqueue(conflicting)
             .await
             .expect("first registration");
         writer.flush().await.expect("first registration durable");

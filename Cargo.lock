@@ -2922,6 +2922,7 @@ dependencies = [
  "serde_norway",
  "sha2 0.10.9",
  "tempfile",
+ "toml",
  "which",
  "windows-sys 0.61.2",
 ]

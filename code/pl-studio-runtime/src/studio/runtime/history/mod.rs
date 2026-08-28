@@ -36,8 +36,13 @@ impl StudioRuntime {
         let hot = handle
             .thread_hot_history(&agent_id)
             .map_err(|error| anyhow::anyhow!(error))?;
-        self.list_resident_thread_turns(thread_id, cursor, limit, hot)
-            .await
+        let page = self
+            .list_resident_thread_turns(thread_id, cursor, limit, hot)
+            .await?;
+        handle
+            .merge_thread_history(&agent_id, &page.turns)
+            .map_err(|error| anyhow::anyhow!(error))?;
+        Ok(page)
     }
 
     async fn list_resident_thread_turns(

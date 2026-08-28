@@ -4,14 +4,16 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
 use pl_studio_runtime::{
-    ConfigStore, InteractionKind, InteractionRequest, StudioConfig, StudioHostKind, StudioMode,
-    StudioRole, StudioRuntime, StudioRuntimeOptions, StudioStore, StudioTaskRuntime,
-    StudioTaskState,
+    ConfigStore, InteractionKind, InteractionRequest, InteractionStatus,
+    STUDIO_CONFIG_SCHEMA_VERSION, StudioConfig, StudioHostKind, StudioMode, StudioRole,
+    StudioRuntime, StudioRuntimeOptions, StudioStore, StudioTaskRuntime, StudioTaskState,
 };
+use sha2::{Digest, Sha256};
 
 use super::git::git_output;
 
-pub const LIVE_VERIFY_MARKER: &str = "PURE_SHOOTER_VERIFY_OK";
+pub const LIVE_VERIFY_MARKER: &str = "PURE_TASK_FIXTURE_VERIFY_OK";
+pub const LIVE_TASK_PROMPT: &str = include_str!("../../../../test-fixtures/task-live/prompt.md");
 
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 const IDLE_FAILURE_GRACE: Duration = Duration::from_secs(10);
@@ -21,17 +23,17 @@ pub struct LiveTaskFixture {
     pub store: StudioStore,
     pub workspace: PathBuf,
     pub studio_home: PathBuf,
+    pub artifact_dir: PathBuf,
     pub thread_id: String,
-    project_id: String,
     route_diagnostics: String,
-    node_version: String,
+    toolchain_diagnostics: String,
     installed_config: InstalledConfigGuard,
     _root: TempRoot,
 }
 
 impl LiveTaskFixture {
     pub async fn new() -> Result<Self> {
-        Self::new_with_mode(StudioMode::Task, "Live headless shooter task", true).await
+        Self::new_with_mode(StudioMode::Task, "Live multi-workstream Rust task", true).await
     }
 
     /// `require_node` 为 false 时用于不依赖 Node.js 验收的 Simple 模式 live 流程。
@@ -56,9 +58,9 @@ impl LiveTaskFixture {
             })
             .collect::<Result<Vec<_>>>()?
             .join("\n");
-        let node_version = if require_node {
-            command_output(None, "node", &["--version"])
-                .context("Node.js is required before starting the live model test")?
+        let toolchain_diagnostics = if require_node {
+            command_output(None, "cargo", &["--version"])
+                .context("Cargo is required before starting the live model test")?
         } else {
             "not required".to_string()
         };
@@ -73,14 +75,18 @@ impl LiveTaskFixture {
         )
         .await?;
         tokio::fs::create_dir_all(&workspace).await?;
-        tokio::fs::write(
-            workspace.join("README.md"),
-            "# Live Task Fixture\n\nBuild the requested project in this repository.\n",
-        )
-        .await?;
-        tokio::fs::write(workspace.join(".gitignore"), ".pure/\ntarget/\n").await?;
+        if mode == StudioMode::Task {
+            copy_directory(&live_fixture_workspace(), &workspace)?;
+        } else {
+            tokio::fs::write(
+                workspace.join("README.md"),
+                "# Live Task Fixture\n\nBuild the requested project in this repository.\n",
+            )
+            .await?;
+            tokio::fs::write(workspace.join(".gitignore"), ".pure/\ntarget/\n").await?;
+        }
         git_output(&workspace, &["init", "--initial-branch=main"])?;
-        git_output(&workspace, &["add", "README.md", ".gitignore"])?;
+        git_output(&workspace, &["add", "."])?;
         git_output(
             &workspace,
             &[
@@ -96,7 +102,10 @@ impl LiveTaskFixture {
 
         let runtime = StudioRuntime::with_options(StudioRuntimeOptions {
             studio_home: Some(studio_home.clone()),
-            host: StudioHostKind::Test,
+            // Live acceptance must exercise the same credential boundary as the
+            // native application. The Test host intentionally uses an in-memory
+            // credential store and would silently bypass installed system keys.
+            host: StudioHostKind::Desktop,
         })
         .await
         .map_err(anyhow::Error::new)?;
@@ -107,17 +116,35 @@ impl LiveTaskFixture {
         runtime.set_thread_mode(&session.id, mode).await?;
 
         eprintln!("live model routes:\n{route_diagnostics}");
-        eprintln!("Node.js: {node_version}");
+        let artifact_dir = task_artifact_dir()?;
+        std::fs::create_dir_all(&artifact_dir).with_context(|| {
+            format!(
+                "failed to create Task artifact directory `{}`",
+                artifact_dir.display()
+            )
+        })?;
+        let prompt = LIVE_TASK_PROMPT.as_bytes();
+        std::fs::write(artifact_dir.join("fixture-prompt.md"), prompt)?;
+        std::fs::write(
+            artifact_dir.join("fixture-prompt.sha256"),
+            format!("{:x}\n", Sha256::digest(prompt)),
+        )?;
+        std::fs::write(
+            artifact_dir.join("model-routes.txt"),
+            format!("{route_diagnostics}\n"),
+        )?;
+        eprintln!("toolchain: {toolchain_diagnostics}");
+        eprintln!("Task artifacts: {}", artifact_dir.display());
 
         Ok(Self {
             runtime,
             store,
             workspace: workspace.clone(),
             studio_home,
+            artifact_dir,
             thread_id: session.id,
-            project_id: project.id,
             route_diagnostics,
-            node_version,
+            toolchain_diagnostics,
             installed_config,
             _root: root,
         })
@@ -126,10 +153,12 @@ impl LiveTaskFixture {
     pub async fn wait_for_plan_confirmation(&self) -> Result<InteractionRequest> {
         let mut idle_since = None;
         loop {
-            let pending = self
-                .store
-                .list_pending_interactions(&self.thread_id)
-                .await?;
+            let thread = self.runtime.thread_snapshot(&self.thread_id).await?;
+            let pending = thread
+                .interactions
+                .into_iter()
+                .filter(|interaction| interaction.status() == InteractionStatus::Pending)
+                .collect::<Vec<_>>();
             if let Some(unexpected) = pending
                 .iter()
                 .find(|interaction| interaction.kind() != InteractionKind::PlanConfirmation)
@@ -180,10 +209,12 @@ impl LiveTaskFixture {
     pub async fn wait_for_completed_task(&self) -> Result<StudioTaskRuntime> {
         let mut idle_since = None;
         loop {
-            let pending = self
-                .store
-                .list_pending_interactions(&self.thread_id)
-                .await?;
+            let thread = self.runtime.thread_snapshot(&self.thread_id).await?;
+            let pending = thread
+                .interactions
+                .into_iter()
+                .filter(|interaction| interaction.status() == InteractionStatus::Pending)
+                .collect::<Vec<_>>();
             if let Some(interaction) = pending.first() {
                 bail!(
                     "unexpected pending interaction while Task was running: {:?}\n{}",
@@ -192,9 +223,10 @@ impl LiveTaskFixture {
                 );
             }
 
-            if let Some(task) = self.runtime.thread_task_view(&self.thread_id).await? {
+            let task = self.runtime.thread_task_view(&self.thread_id).await?;
+            if let Some(task) = &task {
                 if matches!(&task.state, StudioTaskState::Completed(_)) {
-                    return Ok(task);
+                    return Ok(task.clone());
                 }
                 if is_live_failure(&task.state) {
                     bail!(
@@ -205,31 +237,12 @@ impl LiveTaskFixture {
                     );
                 }
             }
-            let child_is_active = self
-                .store
-                .list_threads_for_root(&self.thread_id)
-                .await?
-                .iter()
-                .any(|thread| {
-                    thread.parent_thread_id.is_some()
-                        && matches!(
-                            thread.status,
-                            pl_protocol::ThreadStatus::Queued
-                                | pl_protocol::ThreadStatus::Running
-                                | pl_protocol::ThreadStatus::WaitingTool
-                                | pl_protocol::ThreadStatus::WaitingInteraction
-                                | pl_protocol::ThreadStatus::Cancelling
-                                | pl_protocol::ThreadStatus::Closing
-                        )
-                });
-
             if self
                 .runtime
                 .runtime_snapshot()
                 .await?
                 .active_turns
                 .is_empty()
-                && !child_is_active
             {
                 let idle_started = idle_since.get_or_insert_with(Instant::now);
                 if idle_started.elapsed() >= IDLE_FAILURE_GRACE {
@@ -333,13 +346,18 @@ impl LiveTaskFixture {
             .await
             .map(|task| format!("{task:#?}"))
             .unwrap_or_else(|error| format!("task projection failed: {error:#}"));
-        let interactions = self
-            .store
-            .list_pending_interactions(&self.thread_id)
-            .await
-            .map(|interactions| format!("{interactions:#?}"))
-            .unwrap_or_else(|error| format!("pending interaction query failed: {error:#}"));
         let snapshot = self.runtime.thread_snapshot(&self.thread_id).await;
+        let interactions = snapshot
+            .as_ref()
+            .map(|snapshot| {
+                let pending = snapshot
+                    .interactions
+                    .iter()
+                    .filter(|interaction| interaction.status() == InteractionStatus::Pending)
+                    .collect::<Vec<_>>();
+                format!("{pending:#?}")
+            })
+            .unwrap_or_else(|error| format!("hot interaction projection failed: {error:#}"));
         let snapshot_summary = snapshot
             .as_ref()
             .map(|snapshot| {
@@ -370,10 +388,10 @@ impl LiveTaskFixture {
             "repository not initialized".to_string()
         };
         format!(
-            "model routes:\n{}\nNode.js: {}\ntask projection:\n{task}\n\
+            "model routes:\n{}\ntoolchain: {}\ntask projection:\n{task}\n\
              pending interactions:\n{interactions}\nruntime snapshot:\n{runtime}\n\
              thread snapshot:\n{snapshot_summary}\nrecent items:\n{items}\ngit status:\n{git}",
-            self.route_diagnostics, self.node_version
+            self.route_diagnostics, self.toolchain_diagnostics
         )
     }
 
@@ -430,13 +448,11 @@ impl InstalledConfigGuard {
     fn load() -> Result<Self> {
         let store = ConfigStore::default_app()?;
         let path = store.paths().config_file().to_path_buf();
-        let (config, original_bytes, runtime_bytes) = if store.config_exists() {
+        let (mut config, original_bytes) = if store.config_exists() {
             let bytes = std::fs::read(&path)
                 .with_context(|| format!("failed to read installed config `{}`", path.display()))?;
-            let config = store.load().with_context(|| {
-                format!("installed Studio config `{}` is invalid", path.display())
-            })?;
-            (config, Some(bytes.clone()), bytes)
+            let config = load_isolated_installed_config(&path, &bytes)?;
+            (config, Some(bytes))
         } else {
             let mut config = StudioConfig::default_config();
             let default_provider = config
@@ -457,11 +473,24 @@ impl InstalledConfigGuard {
                     path.display()
                 );
             }
-            let bytes = toml::to_string_pretty(&config)
-                .context("failed to serialize isolated default Studio config")?
-                .into_bytes();
-            (config, None, bytes)
+            (config, None)
         };
+        validate_real_task_routes(&config)?;
+        append_acceptance_context(
+            &mut config.instructions.developer,
+            "TASK_LIVE_GLOBAL_DEVELOPER_CONTEXT: preserve the complete Task acceptance contract.",
+        );
+        append_acceptance_context(
+            &mut config.instructions.user,
+            "TASK_LIVE_GLOBAL_USER_CONTEXT: execute the canonical fixture prompt exactly.",
+        );
+        let mut persisted_config = config.clone();
+        for provider in persisted_config.models.providers.values_mut() {
+            provider.bearer_token = None;
+        }
+        let runtime_bytes = toml::to_string_pretty(&persisted_config)
+            .context("failed to serialize isolated live Studio config")?
+            .into_bytes();
         Ok(Self {
             path,
             original_bytes,
@@ -498,6 +527,75 @@ impl InstalledConfigGuard {
     }
 }
 
+fn load_isolated_installed_config(path: &Path, bytes: &[u8]) -> Result<StudioConfig> {
+    let source = std::str::from_utf8(bytes)
+        .with_context(|| format!("installed Studio config `{}` is not UTF-8", path.display()))?;
+    let mut document = source
+        .parse::<toml::Table>()
+        .with_context(|| format!("installed Studio config `{}` is invalid", path.display()))?;
+    let schema_version = document
+        .get("schema_version")
+        .and_then(toml::Value::as_integer)
+        .context("installed Studio config has no integer schema_version")?;
+    let current_schema = i64::from(STUDIO_CONFIG_SCHEMA_VERSION);
+    if schema_version != current_schema {
+        anyhow::ensure!(
+            schema_version.checked_add(1) == Some(current_schema),
+            "installed Studio config schema {schema_version} cannot be upgraded in the live acceptance copy to schema {current_schema}"
+        );
+        document.insert(
+            "schema_version".to_string(),
+            toml::Value::Integer(current_schema),
+        );
+    }
+
+    let isolated = tempfile::tempdir().context("failed to create config validation directory")?;
+    std::fs::write(
+        isolated.path().join("config.toml"),
+        toml::to_string_pretty(&document)?,
+    )?;
+    ConfigStore::for_studio_home(isolated.path())
+        .load()
+        .with_context(|| format!("installed Studio config `{}` is invalid", path.display()))
+}
+
+fn validate_real_task_routes(config: &StudioConfig) -> Result<()> {
+    for role in [
+        StudioRole::Planner,
+        StudioRole::Executor,
+        StudioRole::Reviewer,
+    ] {
+        let route = config.resolve_role(role)?;
+        let base_url = route.endpoint.base_url.to_ascii_lowercase();
+        if ["localhost", "127.0.0.1", "[::1]", "0.0.0.0"]
+            .iter()
+            .any(|host| base_url.contains(host))
+        {
+            bail!(
+                "live Task route {} points to a local/scripted endpoint `{}`",
+                role.key(),
+                route.endpoint.base_url
+            );
+        }
+        if route.endpoint.bearer_token.is_none() {
+            bail!(
+                "live Task route {} ({}/{}) has no resolved API credential",
+                role.key(),
+                route.provider_id,
+                route.model.slug
+            );
+        }
+    }
+    Ok(())
+}
+
+fn append_acceptance_context(target: &mut String, marker: &str) {
+    if !target.trim().is_empty() {
+        target.push_str("\n\n");
+    }
+    target.push_str(marker);
+}
+
 impl Drop for InstalledConfigGuard {
     fn drop(&mut self) {
         let unchanged = match &self.original_bytes {
@@ -516,6 +614,49 @@ impl Drop for InstalledConfigGuard {
             }
         }
     }
+}
+
+fn live_fixture_workspace() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("test-fixtures/task-live/workspace")
+}
+
+fn task_artifact_dir() -> Result<PathBuf> {
+    if let Some(path) = std::env::var_os("PURE_STUDIO_TASK_ARTIFACT_DIR") {
+        return Ok(PathBuf::from(path));
+    }
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    Ok(Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("target/task-live-artifacts")
+        .join(format!("headless-{}-{stamp}", std::process::id())))
+}
+
+fn copy_directory(source: &Path, target: &Path) -> Result<()> {
+    for entry in std::fs::read_dir(source)
+        .with_context(|| format!("failed to read fixture directory `{}`", source.display()))?
+    {
+        let entry = entry?;
+        let source_path = entry.path();
+        let target_path = target.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            std::fs::create_dir_all(&target_path)?;
+            copy_directory(&source_path, &target_path)?;
+        } else {
+            std::fs::copy(&source_path, &target_path).with_context(|| {
+                format!(
+                    "failed to copy fixture file `{}` to `{}`",
+                    source_path.display(),
+                    target_path.display()
+                )
+            })?;
+        }
+    }
+    Ok(())
 }
 
 struct TempRoot {
@@ -636,12 +777,6 @@ pub fn command_output(cwd: Option<&Path>, program: &str, args: &[&str]) -> Resul
         );
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-}
-
-pub fn normalized_text(path: &Path) -> Result<String> {
-    std::fs::read_to_string(path)
-        .with_context(|| format!("failed to read `{}`", path.display()))
-        .map(|content| content.replace("\r\n", "\n"))
 }
 
 #[cfg(test)]

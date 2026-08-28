@@ -274,6 +274,7 @@ mod tests {
                 task_run_id: "task-1".to_string(),
                 title: "work".to_string(),
                 scope_hints: Vec::new(),
+                blueprint: None,
                 base_commit: "base".to_string(),
                 worktree_path: "worktree".to_string(),
                 branch: "branch".to_string(),

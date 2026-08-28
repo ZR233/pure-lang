@@ -4,14 +4,17 @@
 //! TaskRun 修订基线，并幂等写入内存 owner 已经提交的事实。
 
 use anyhow::{Context, Result, bail};
+use pl_core::canonical_content_hash;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseTransaction, EntityTrait,
-    IntoActiveModel, QueryFilter,
+    ActiveModelTrait, ActiveValue::Set, ConnectionTrait, DatabaseTransaction, EntityTrait,
+    IntoActiveModel,
 };
+use serde::{Deserialize, Serialize};
 
 use super::entity::{
     merge_record, review_round, task_issue, task_run, task_stop_event, work_completion, work_unit,
 };
+use super::store::object::{PersistedStudioObject, load_object, put_object};
 use super::task_projection::LoadedTaskAggregate;
 
 #[derive(Debug, Clone)]
@@ -24,8 +27,8 @@ pub(in crate::studio) struct TaskPersistenceCommit {
     pub(in crate::studio) stop_events: Vec<TaskStopEventFact>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::studio) struct TaskStopEventFact {
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub(crate) struct TaskStopEventFact {
     pub(in crate::studio) id: String,
     pub(in crate::studio) task_run_id: String,
     pub(in crate::studio) generation: u64,
@@ -33,6 +36,66 @@ pub(in crate::studio) struct TaskStopEventFact {
     pub(in crate::studio) reason: String,
     pub(in crate::studio) source_turn_id: Option<String>,
     pub(in crate::studio) created_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TaskCommitReceipt {
+    revision: u64,
+    payload_hash: String,
+}
+
+pub(in crate::studio) async fn load_task_commit_revision(
+    db: &impl ConnectionTrait,
+    owner_id: &str,
+) -> Result<Option<u64>> {
+    Ok(load_object::<TaskCommitReceipt>(db, owner_id)
+        .await?
+        .map(|receipt| receipt.revision))
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(in crate::studio) struct TaskCommitReceiptDto {
+    revision: u64,
+    payload_hash: String,
+}
+
+impl PersistedStudioObject for TaskCommitReceipt {
+    type PersistenceDto = TaskCommitReceiptDto;
+
+    const OWNER_KIND: &'static str = "task";
+    const OBJECT_KIND: &'static str = "commitReceipt";
+    const SCHEMA_VERSION: i64 = 1;
+
+    fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    fn to_persistence_dto(&self) -> Self::PersistenceDto {
+        TaskCommitReceiptDto {
+            revision: self.revision,
+            payload_hash: self.payload_hash.clone(),
+        }
+    }
+
+    fn from_persistence_dto(dto: Self::PersistenceDto) -> Result<Self> {
+        Ok(Self {
+            revision: dto.revision,
+            payload_hash: dto.payload_hash,
+        })
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskPersistencePayload<'a> {
+    run: &'a super::task_coordinator::TaskRun,
+    work_units: &'a [super::task_coordinator::WorkUnit],
+    completions: &'a [super::task_coordinator::WorkCompletionRecord],
+    merges: &'a [super::task_coordinator::MergeRecord],
+    reviews: &'a [super::task_coordinator::ReviewRoundRecord],
+    issues: &'a [super::task_coordinator::TaskIssueRecord],
+    stop_events: &'a [TaskStopEventFact],
 }
 
 impl TaskPersistenceCommit {
@@ -52,6 +115,7 @@ impl TaskPersistenceCommit {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::studio) enum ApplyTaskCommitOutcome {
     Applied,
+    AlreadyApplied,
     RevisionConflict { actual_revision: Option<u64> },
 }
 
@@ -65,6 +129,23 @@ pub(in crate::studio) async fn apply_task_commit(
             "Task stop event does not belong to the committed TaskRun"
         );
     }
+    let payload_hash = task_commit_payload_hash(commit)?;
+    if let Some(receipt) = load_object::<TaskCommitReceipt>(tx, &commit.owner_id).await? {
+        if receipt.revision == commit.revision {
+            return Ok(if receipt.payload_hash == payload_hash {
+                ApplyTaskCommitOutcome::AlreadyApplied
+            } else {
+                ApplyTaskCommitOutcome::RevisionConflict {
+                    actual_revision: Some(receipt.revision),
+                }
+            });
+        }
+        if receipt.revision != commit.expected_owner_revision {
+            return Ok(ApplyTaskCommitOutcome::RevisionConflict {
+                actual_revision: Some(receipt.revision),
+            });
+        }
+    }
     let existing = task_run::Entity::find_by_id(commit.aggregate.run.id.clone())
         .one(tx)
         .await?;
@@ -73,14 +154,6 @@ pub(in crate::studio) async fn apply_task_commit(
         .map(|model| u64::try_from(model.revision))
         .transpose()
         .context("stored TaskRun revision must not be negative")?;
-    let snapshot_revision = commit.aggregate.run.revision;
-    if actual_revision == Some(snapshot_revision) && actual_revision != commit.expected_run_revision
-    {
-        if task_snapshot_matches(tx, commit).await? {
-            return Ok(ApplyTaskCommitOutcome::Applied);
-        }
-        return Ok(ApplyTaskCommitOutcome::RevisionConflict { actual_revision });
-    }
     if actual_revision != commit.expected_run_revision {
         return Ok(ApplyTaskCommitOutcome::RevisionConflict { actual_revision });
     }
@@ -104,215 +177,30 @@ pub(in crate::studio) async fn apply_task_commit(
     for event in &commit.stop_events {
         upsert_stop_event(tx, event).await?;
     }
+    put_object(
+        tx,
+        &commit.owner_id,
+        &TaskCommitReceipt {
+            revision: commit.revision,
+            payload_hash,
+        },
+        commit.aggregate.run.updated_at,
+    )
+    .await?;
     Ok(ApplyTaskCommitOutcome::Applied)
 }
 
-async fn task_snapshot_matches(
-    tx: &DatabaseTransaction,
-    commit: &TaskPersistenceCommit,
-) -> Result<bool> {
-    let run = &commit.aggregate.run;
-    let Some(stored_run) = task_run::Entity::find_by_id(run.id.clone()).one(tx).await? else {
-        return Ok(false);
+fn task_commit_payload_hash(commit: &TaskPersistenceCommit) -> Result<String> {
+    let payload = TaskPersistencePayload {
+        run: &commit.aggregate.run,
+        work_units: &commit.aggregate.work_units,
+        completions: &commit.aggregate.completions,
+        merges: &commit.aggregate.merges,
+        reviews: &commit.aggregate.reviews,
+        issues: &commit.aggregate.issues,
+        stop_events: &commit.stop_events,
     };
-    let plan_json = run.plan.as_ref().map(serde_json::to_string).transpose()?;
-    if stored_run.project_id != run.project_id
-        || stored_run.root_thread_id != run.root_thread_id
-        || stored_run.request != run.request
-        || stored_run.plan_json != plan_json
-        || stored_run.workspace_root != run.workspace_root
-        || stored_run.state_json != serde_json::to_string(&run.state)?
-        || u64::try_from(stored_run.revision).ok() != Some(run.revision)
-        || stored_run.created_at != run.created_at
-        || stored_run.updated_at != run.updated_at
-    {
-        return Ok(false);
-    }
-
-    let task_run_id = run.id.clone();
-    let stored_work_units = work_unit::Entity::find()
-        .filter(work_unit::Column::TaskRunId.eq(task_run_id.clone()))
-        .all(tx)
-        .await?;
-    if stored_work_units.len() != commit.aggregate.work_units.len() {
-        return Ok(false);
-    }
-    for record in &commit.aggregate.work_units {
-        let scope_hints_json = serde_json::to_string(&record.scope_hints)?;
-        let state_json = serde_json::to_string(&record.state)?;
-        let matches = stored_work_units.iter().any(|stored| {
-            stored.id == record.id
-                && stored.task_run_id == record.task_run_id
-                && stored.title == record.title
-                && stored.scope_hints_json == scope_hints_json
-                && stored.base_commit == record.base_commit
-                && stored.worktree_path == record.worktree_path
-                && stored.branch == record.branch
-                && u32::try_from(stored.attempt).ok() == Some(record.attempt)
-                && stored.supersedes_work_unit_id == record.supersedes_work_unit_id
-                && stored.executor_thread_id == record.executor_thread_id
-                && stored.requested_by_call_id == record.requested_by_call_id
-                && stored.state_json == state_json
-                && u64::try_from(stored.revision).ok() == Some(record.revision)
-                && stored.created_at == record.created_at
-                && stored.updated_at == record.updated_at
-        });
-        if !matches {
-            return Ok(false);
-        }
-    }
-
-    let stored_completions = work_completion::Entity::find()
-        .filter(work_completion::Column::TaskRunId.eq(task_run_id.clone()))
-        .all(tx)
-        .await?;
-    if stored_completions.len() != commit.aggregate.completions.len() {
-        return Ok(false);
-    }
-    for record in &commit.aggregate.completions {
-        let content_json = serde_json::to_string(&record.content)?;
-        let state_json = serde_json::to_string(&record.state)?;
-        let matches = stored_completions.iter().any(|stored| {
-            stored.id == record.id
-                && stored.task_run_id == record.task_run_id
-                && stored.work_unit_id == record.work_unit_id
-                && stored.executor_agent_id == record.executor_agent_id
-                && u32::try_from(stored.revision).ok() == Some(record.revision)
-                && stored.content_json == content_json
-                && stored.state_json == state_json
-                && u64::try_from(stored.state_revision).ok() == Some(record.state_revision)
-                && stored.base_commit == record.base_commit
-                && stored.verification_summary == record.verification_summary
-                && stored.worktree_path == record.worktree_path
-                && stored.branch == record.branch
-                && stored.created_at == record.created_at
-                && stored.updated_at == record.updated_at
-        });
-        if !matches {
-            return Ok(false);
-        }
-    }
-
-    let stored_reviews = review_round::Entity::find()
-        .filter(review_round::Column::TaskRunId.eq(task_run_id.clone()))
-        .all(tx)
-        .await?;
-    if stored_reviews.len() != commit.aggregate.reviews.len() {
-        return Ok(false);
-    }
-    for record in &commit.aggregate.reviews {
-        let state_json = serde_json::to_string(&record.state)?;
-        let design_references_json = serde_json::to_string(&record.design_references)?;
-        let findings_json = serde_json::to_string(&record.findings)?;
-        let file_reviews_json = record
-            .file_reviews
-            .as_ref()
-            .map(serde_json::to_string)
-            .transpose()?;
-        let matches = stored_reviews.iter().any(|stored| {
-            stored.id == record.id
-                && stored.task_run_id == record.task_run_id
-                && u32::try_from(stored.round).ok() == Some(record.round)
-                && stored.scope == record.scope.as_str()
-                && stored.work_unit_id == record.work_unit_id
-                && stored.completion_id == record.completion_id
-                && stored
-                    .completion_revision
-                    .and_then(|value| u32::try_from(value).ok())
-                    == record.completion_revision
-                && stored.reviewed_head == record.reviewed_head
-                && stored.requested_by_call_id == record.requested_by_call_id
-                && stored.reviewer_thread_id == record.reviewer_thread_id().map(ToOwned::to_owned)
-                && stored.state_json == state_json
-                && u64::try_from(stored.revision).ok() == Some(record.revision)
-                && stored.design_references_json == design_references_json
-                && stored.findings_json == findings_json
-                && stored.created_at == record.created_at
-                && stored.updated_at == record.updated_at
-                && stored.file_reviews_json == file_reviews_json
-        });
-        if !matches {
-            return Ok(false);
-        }
-    }
-
-    let stored_merges = merge_record::Entity::find()
-        .filter(merge_record::Column::TaskRunId.eq(task_run_id.clone()))
-        .all(tx)
-        .await?;
-    if stored_merges.len() != commit.aggregate.merges.len() {
-        return Ok(false);
-    }
-    for record in &commit.aggregate.merges {
-        let cleanup_state_json = serde_json::to_string(&record.cleanup)?;
-        let matches = stored_merges.iter().any(|stored| {
-            stored.id == record.id
-                && stored.task_run_id == record.task_run_id
-                && stored.work_unit_id == record.work_unit_id
-                && stored.completion_id == record.completion_id
-                && u32::try_from(stored.completion_revision).ok()
-                    == Some(record.completion_revision)
-                && stored.executor_agent_id == record.executor_agent_id
-                && stored.expected_previous_head == record.expected_previous_head
-                && stored.resulting_head == record.resulting_head
-                && stored.delivery_head == record.delivery_head
-                && stored.method == record.method.as_str()
-                && stored.summary == record.summary
-                && stored.cleanup_state_json == cleanup_state_json
-                && u64::try_from(stored.revision).ok() == Some(record.revision)
-                && stored.created_at == record.created_at
-                && stored.updated_at == record.updated_at
-        });
-        if !matches {
-            return Ok(false);
-        }
-    }
-
-    let stored_issues = task_issue::Entity::find()
-        .filter(task_issue::Column::TaskRunId.eq(task_run_id))
-        .all(tx)
-        .await?;
-    if stored_issues.len() != commit.aggregate.issues.len() {
-        return Ok(false);
-    }
-    for record in &commit.aggregate.issues {
-        let state_json = serde_json::to_string(&record.state)?;
-        let matches = stored_issues.iter().any(|stored| {
-            stored.id == record.id
-                && stored.task_run_id == record.task_run_id
-                && stored.source_thread_id == record.source_thread_id
-                && stored.source_turn_id == record.source_turn_id
-                && stored.source_agent_id == record.source_agent_id
-                && stored.source_role == record.source_role
-                && stored.work_unit_id == record.work_unit_id
-                && stored.review_round_id == record.review_round_id
-                && stored.state_json == state_json
-                && u64::try_from(stored.revision).ok() == Some(record.revision)
-                && stored.created_at == record.created_at
-                && stored.updated_at == record.updated_at
-        });
-        if !matches {
-            return Ok(false);
-        }
-    }
-    for event in &commit.stop_events {
-        let Some(stored) = task_stop_event::Entity::find_by_id(event.id.clone())
-            .one(tx)
-            .await?
-        else {
-            return Ok(false);
-        };
-        if stored.task_run_id != event.task_run_id
-            || u64::try_from(stored.generation).ok() != Some(event.generation)
-            || stored.origin != event.origin
-            || stored.reason != event.reason
-            || stored.source_turn_id != event.source_turn_id
-            || stored.created_at != event.created_at
-        {
-            return Ok(false);
-        }
-    }
-    Ok(true)
+    Ok(canonical_content_hash(&serde_json::to_vec(&payload)?))
 }
 
 async fn upsert_stop_event(tx: &DatabaseTransaction, event: &TaskStopEventFact) -> Result<()> {
@@ -392,7 +280,10 @@ async fn upsert_work_unit(
     active.supersedes_work_unit_id = Set(record.supersedes_work_unit_id.clone());
     active.executor_thread_id = Set(record.executor_thread_id.clone());
     active.requested_by_call_id = Set(record.requested_by_call_id.clone());
-    active.state_json = Set(serde_json::to_string(&record.state)?);
+    active.state_json = Set(super::task_coordinator::encode_work_unit_state(
+        &record.state,
+        record.blueprint.as_ref(),
+    )?);
     active.revision = Set(i64::try_from(record.revision).context("WorkUnit revision overflow")?);
     active.created_at = Set(record.created_at);
     active.updated_at = Set(record.updated_at);
@@ -612,7 +503,7 @@ mod tests {
             apply_task_commit(&tx, &commit)
                 .await
                 .expect("identical replay"),
-            ApplyTaskCommitOutcome::Applied
+            ApplyTaskCommitOutcome::AlreadyApplied
         );
         tx.rollback().await.expect("rollback replay");
 
@@ -624,6 +515,7 @@ mod tests {
                 task_run_id: run.id.clone(),
                 title: "stale".to_string(),
                 scope_hints: Vec::new(),
+                blueprint: None,
                 base_commit: "HEAD".to_string(),
                 worktree_path: workspace
                     .join(".pure/worktrees/stale")
@@ -650,7 +542,7 @@ mod tests {
                 .await
                 .expect("different replay"),
             ApplyTaskCommitOutcome::RevisionConflict {
-                actual_revision: Some(1)
+                actual_revision: Some(2)
             }
         );
         tx.rollback().await.expect("rollback conflict");
@@ -691,7 +583,7 @@ mod tests {
             apply_task_commit(&tx, &stop_commit)
                 .await
                 .expect("replay stop"),
-            ApplyTaskCommitOutcome::Applied
+            ApplyTaskCommitOutcome::AlreadyApplied
         );
         tx.rollback().await.expect("rollback stop replay");
 
@@ -703,7 +595,7 @@ mod tests {
                 .await
                 .expect("conflicting stop"),
             ApplyTaskCommitOutcome::RevisionConflict {
-                actual_revision: Some(2)
+                actual_revision: Some(3)
             }
         );
         tx.rollback().await.expect("rollback stop conflict");

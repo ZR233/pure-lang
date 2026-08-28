@@ -222,7 +222,7 @@ pub(super) fn planner_response(
                     "scope": {
                         "inScope": ["Create the deterministic feature fixture and verify its committed diff."],
                         "outOfScope": ["Do not change the Task design or merge the executor branch."],
-                        "scopeHints": ["design"]
+                        "scopeHints": ["src/feature.txt"]
                     },
                     "implementationSteps": [{
                         "id": "step-create",

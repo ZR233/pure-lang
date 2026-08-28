@@ -3,7 +3,7 @@ use std::fmt;
 
 use tokio::sync::{mpsc, oneshot};
 
-use pl_protocol::{ThreadSnapshot, ThreadSubscriptionRequest};
+use pl_protocol::{ThreadSnapshot, ThreadSubscriptionRequest, ThreadTurnHistory};
 
 use super::agent_loop::{AgentLoopCommand, AgentLoopHandle};
 use super::coordinator::{AgentRegistry, CoordinatorCommand};
@@ -15,7 +15,7 @@ use super::{
     AgentSessionDigest, AgentSnapshot, AgentSpawnRequest, AgentSpawnResult, AgentSubmissionPage,
     AgentSubmitRequest, AgentTurnCheckpoint, AgentWaitResult, ConversationRecoveryPreview,
     ConversationRecoveryRequest, ConversationRecoveryResult, ConversationRecoveryTarget,
-    RestoredAgentRuntime, ThreadId, TurnId,
+    RestoredAgentRuntime, ThreadContextState, ThreadId, TurnId,
 };
 use crate::agent_runtime::state::AgentRuntimeError;
 use crate::{AgentRoleId, ThreadEventBusHandle, ThreadEventSubscription};
@@ -306,6 +306,20 @@ impl AgentRuntimeHandle {
         receive(receiver).await?
     }
 
+    /// 读取驻留 Thread actor 的完整类型化热上下文。
+    ///
+    /// 该入口只克隆内存领域对象，不访问 repository；产品协调器用它读取 working
+    /// state 等 activation 已物化事实，避免在业务 transition 中回源持久层。
+    pub async fn read_thread_context(
+        &self,
+        agent_id: ThreadId,
+    ) -> AgentRuntimeResult<ThreadContextState> {
+        let (reply, receiver) = oneshot::channel();
+        self.send_to_actor(&agent_id, AgentLoopCommand::ReadThreadContext { reply })
+            .await?;
+        receive(receiver).await?
+    }
+
     /// 读取目标 agent 的 durable 阶段提交历史（分页、不截断、关闭后可查）。
     pub async fn read_submissions(
         &self,
@@ -423,6 +437,17 @@ impl AgentRuntimeHandle {
     ) -> AgentRuntimeResult<crate::ThreadHotHistory> {
         self.thread_events
             .hot_history(thread_id.as_str())
+            .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))
+    }
+
+    /// 把产品显式读取的冷历史页先物化进驻留 Thread 热窗口。
+    pub fn merge_thread_history(
+        &self,
+        thread_id: &ThreadId,
+        histories: &[ThreadTurnHistory],
+    ) -> AgentRuntimeResult<()> {
+        self.thread_events
+            .merge_cold_history(thread_id.as_str(), histories)
             .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))
     }
 

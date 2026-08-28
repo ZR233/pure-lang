@@ -108,6 +108,10 @@ impl StudioRuntime {
             .store
             .promote_attachment_drafts(&thread_id, &drafts)
             .await?;
+        self.agent_facility
+            .resources
+            .insert_thread_attachments(&thread_id, attachments.clone())
+            .await;
         let attachment_ids = attachments
             .iter()
             .map(|attachment| attachment.id.clone())
@@ -198,6 +202,10 @@ impl StudioRuntime {
         self.agent_facility
             .resources
             .remove_initial_remote_urls(&attachment_ids)
+            .await;
+        self.agent_facility
+            .resources
+            .remove_thread_attachment_ids(&thread_record.id, &attachment_ids)
             .await;
         if let Err(cleanup_error) = self
             .store
@@ -396,6 +404,10 @@ impl StudioRuntime {
         handle: &pl_core::AgentRuntimeHandle,
         thread_record: ThreadRecord,
     ) -> Result<()> {
+        let attachments = self
+            .store
+            .list_thread_attachments(&thread_record.id)
+            .await?;
         let registered = self
             .store
             .read_thread_runtime_revision(&thread_record.id)
@@ -419,6 +431,10 @@ impl StudioRuntime {
                 Ok(_) | Err(pl_core::AgentRuntimeError::AlreadyExists(_)) => {}
                 Err(error) => return Err(anyhow::anyhow!(error)),
             }
+            self.agent_facility
+                .resources
+                .replace_thread_attachments(&thread_record.id, attachments)
+                .await;
             self.residency.touch(&thread_record.id).await;
             return Ok(());
         }
@@ -429,6 +445,10 @@ impl StudioRuntime {
             Ok(_) | Err(pl_core::AgentRuntimeError::AlreadyExists(_)) => {}
             Err(error) => return Err(anyhow::anyhow!(error)),
         }
+        self.agent_facility
+            .resources
+            .replace_thread_attachments(&thread_record.id, attachments)
+            .await;
         self.residency.touch(&thread_record.id).await;
         Ok(())
     }
@@ -471,7 +491,17 @@ impl StudioRuntime {
                 (Some(parent_id), role, parent_snapshot.identity.depth + 1)
             }
         };
-        let seed = self.store.thread_runtime_seed(&thread_record.id).await?;
+        // 新建 Thread 已先进入 typed write-behind 与热目录，首次 actor 注册不得
+        // 为等待 SQLite 再序列化/回读。冷激活则使用 durable seed。
+        let seed = self
+            .store
+            .thread_runtime_seed(&thread_record.id)
+            .await?
+            .unwrap_or(crate::studio::store::ThreadRuntimeSeed {
+                thread_revision: 0,
+                runtime_revision: 1,
+                event_sequence: 1,
+            });
         let registration = pl_core::AgentRegistration {
             identity: pl_core::AgentIdentity {
                 id: agent_id,
@@ -480,10 +510,10 @@ impl StudioRuntime {
                 depth,
             },
             session: pl_core::ThreadContextState {
-                metadata: serde_json::json!({
-                    "projectId": thread_record.project_id,
-                    "title": thread_record.title,
-                }),
+                metadata: pl_core::ThreadContextMetadata {
+                    project_id: Some(thread_record.project_id),
+                    title: Some(thread_record.title),
+                },
                 session: pl_core::AgentSession::new(),
                 usage: pl_model::TokenUsage::default(),
                 billing_by_turn: std::collections::BTreeMap::new(),
@@ -575,13 +605,12 @@ impl StudioRuntime {
         let emitter = self.interaction_emitter(thread_id.clone());
 
         if current.kind() == InteractionKind::PlanConfirmation {
-            let task = self
-                .store
-                .find_latest_task_run_for_root_thread(&thread_id)
-                .await?;
+            // Plan confirmation belongs to an active Task and is pinned with its root owner;
+            // diagnostics must not re-read SQLite after activation.
+            let task = self.task_runtime.snapshot(&thread_id).await;
             let context = crate::error_mapping::StudioDiagnosticContext {
                 operation: "resolvePlanConfirmation",
-                task_run_id: task.as_ref().map(|task| task.id.clone()),
+                task_run_id: task.as_ref().map(|task| task.run_id.clone()),
                 thread_id: Some(thread_id),
                 turn_id: Some(current.scope.turn_id.clone()),
                 interaction_id: Some(interaction_id.clone()),

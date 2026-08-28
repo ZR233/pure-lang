@@ -419,9 +419,8 @@ impl TaskCoordinator {
                         let completions = aggregate.facts.completions;
                         let merges = aggregate.facts.merges;
                         let reviews = aggregate.facts.reviews;
-                        let pending_interactions =
-                            self.store.list_pending_interactions(thread_id).await?;
-                        let todo = self.store.read_thread_todo(thread_id).await?;
+                        let (pending_interactions, todo) =
+                            self.hot_completion_context(thread_id, runtime)?;
                         let execution = self
                             .model_execution_activity(&current, Some(runtime))
                             .await?;
@@ -529,6 +528,8 @@ impl TaskCoordinator {
         run: &TaskRun,
         runtime: Option<&AgentRuntimeHandle>,
     ) -> Result<Vec<TransitionPath>> {
+        let runtime = runtime
+            .context("resident AgentRuntime is required while assembling Task transition paths")?;
         let aggregate = self
             .task_runtime
             .aggregate(&run.root_thread_id)
@@ -542,13 +543,10 @@ impl TaskCoordinator {
         let completions = aggregate.facts.completions;
         let merges = aggregate.facts.merges;
         let reviews = aggregate.facts.reviews;
-        let pending_interactions = self
-            .store
-            .list_pending_interactions(&run.root_thread_id)
-            .await?;
-        let todo = self.store.read_thread_todo(&run.root_thread_id).await?;
+        let (pending_interactions, todo) =
+            self.hot_completion_context(&run.root_thread_id, runtime)?;
         let issues = aggregate.facts.issues;
-        let execution = self.model_execution_activity(run, runtime).await?;
+        let execution = self.model_execution_activity(run, Some(runtime)).await?;
         let completion_readiness =
             super::review::completion_readiness(super::review::CompletionReadinessInput {
                 run,

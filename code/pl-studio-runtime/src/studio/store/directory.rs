@@ -38,6 +38,24 @@ impl DirectoryDelta {
             && self.project_removals.is_empty()
     }
 
+    /// 判断该 delta 是否仍携带指定 Thread owner 的目录事实。
+    ///
+    /// LRU 逐出在释放 Thread 热对象前使用它扩展 owner durability barrier，避免
+    /// runtime revision 已耐久但同一 owner 的标题、归档或 Project 关闭事实仍在队列。
+    pub(in crate::studio) fn touches_thread(&self, thread_id: &str) -> bool {
+        self.thread_upserts
+            .iter()
+            .any(|thread| thread.id == thread_id)
+            || self
+                .thread_removals
+                .iter()
+                .any(|removal| removal.thread_ids.iter().any(|id| id == thread_id))
+            || self
+                .project_removals
+                .iter()
+                .any(|removal| removal.thread_ids.iter().any(|id| id == thread_id))
+    }
+
     /// 注册一个新的 root Thread（`startNewThread` / 测试 seed 入口）。
     pub(in crate::studio) fn register_root_thread(
         project_id: &str,
@@ -196,7 +214,7 @@ async fn upsert_thread_directory_row(
             revision: Set(0),
             runtime_revision: Set(None),
             event_sequence: Set(0),
-            metadata_json: Set("null".to_string()),
+            metadata_json: Set("{}".to_string()),
             usage_json: Set(serde_json::to_string(&pl_model::TokenUsage::default())?),
             last_context_tokens: Set(None),
             trace_sequence: Set(0),

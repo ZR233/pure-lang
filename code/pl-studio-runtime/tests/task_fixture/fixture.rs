@@ -15,9 +15,8 @@ use super::server::{ScriptMode, ScriptedModelServer};
 pub const DESIGN_PATH: &str = "design/task-flow.md";
 pub const FEATURE_PATH: &str = "src/feature.txt";
 pub const FEATURE_CONTENT: &str = "offline integration verified\n";
-pub const PLANNER_FOLLOWUP_PATH: &str = FEATURE_PATH;
-pub const PLANNER_FOLLOWUP_CONTENT: &str =
-    "offline integration verified\nplanner merge adjustment verified\n";
+pub const SECOND_FEATURE_PATH: &str = "src/feature-two.txt";
+pub const SECOND_FEATURE_CONTENT: &str = "offline second workstream verified\n";
 
 const TEST_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -42,9 +41,21 @@ impl TaskFlowFixture {
         tokio::fs::create_dir_all(&home).await?;
         tokio::fs::create_dir_all(&workspace).await?;
         tokio::fs::write(workspace.join("README.md"), "# Offline Task Fixture\n").await?;
+        tokio::fs::write(
+            workspace.join("AGENTS.md"),
+            "# Offline acceptance project instructions\n\nPreserve deterministic Task role boundaries and cite design/task-flow.md in every review.\n",
+        )
+        .await?;
         tokio::fs::write(workspace.join(".gitignore"), ".pure/\ntarget/\n").await?;
+        let skill_dir = workspace.join("skills/offline-task-wire");
+        tokio::fs::create_dir_all(&skill_dir).await?;
+        tokio::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: offline-task-wire\ndescription: Preserve deterministic role and wire acceptance constraints.\n---\n\nRead the confirmed Task design and keep executor and reviewer responsibilities separate.\n",
+        )
+        .await?;
         git_output(&workspace, &["init", "--initial-branch=main"])?;
-        git_output(&workspace, &["add", "README.md", ".gitignore"])?;
+        git_output(&workspace, &["add", "."])?;
         git_output(
             &workspace,
             &[
@@ -163,6 +174,10 @@ impl TaskFlowFixture {
 
     pub async fn assert_script_complete(&self) -> Result<()> {
         self.server.assert_complete().await
+    }
+
+    pub async fn assert_wire_contract(&self, user_prompt_marker: &str) -> Result<()> {
+        self.server.assert_wire_contract(user_prompt_marker).await
     }
 
     pub async fn shutdown(&self) -> Result<()> {

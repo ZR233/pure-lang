@@ -11,6 +11,11 @@ use crate::thread_event::ObservedTurnEvent;
 pub(crate) use command::{AgentLoopCommand, AgentLoopHandle};
 use running_turn::{RunningTurn, TurnExecutionTerminal, turn_outcome};
 
+/// UI streaming stays responsive while repository admission sees bounded
+/// typed batches instead of one full owner snapshot per provider token.
+const TRACE_BATCH_MAX_DELAY: Duration = Duration::from_millis(100);
+const TRACE_BATCH_MAX_EVENTS: usize = 256;
+
 mod checkpoint;
 mod command;
 mod commit;
@@ -40,6 +45,9 @@ where
     state: ThreadActorState,
     runtime: AgentRuntimeHandle,
     channels: LoopChannels,
+    /// Canonical trace facts removed from the producer channel but not yet
+    /// accepted by the repository.
+    pending_trace_events: Vec<TraceEvent>,
     active: Option<RunningTurn>,
     dispatch_enabled: bool,
     cancel_grace: Duration,
@@ -74,6 +82,7 @@ where
                 observation_sender,
                 observation_receiver,
             },
+            pending_trace_events: Vec::new(),
             active: None,
             dispatch_enabled,
             cancel_grace,
@@ -197,6 +206,9 @@ where
                         AgentLoopCommand::ReadSession { reply } => {
                             let _ = reply.send(self.read_session());
                         }
+                        AgentLoopCommand::ReadThreadContext { reply } => {
+                            let _ = reply.send(Ok(self.state.session.clone()));
+                        }
                         AgentLoopCommand::ReadSubmissions {
                             offset,
                             limit,
@@ -291,7 +303,7 @@ where
         while let Ok(trace) = self.channels.trace_receiver.try_recv() {
             trace_events.push(trace);
         }
-        if trace_events.is_empty() {
+        if trace_events.is_empty() && self.pending_trace_events.is_empty() {
             return Ok(());
         }
         self.persist_trace_batch(trace_events).await
@@ -389,31 +401,8 @@ where
         tracing::error!(
             agent_id = %self.state.snapshot.identity.id,
             reason_bytes = reason.len(),
-            "failed to persist the faulted runtime event; using in-memory fallback"
+            "fault mutation admission failed; retaining the previous hot state"
         );
-        if self
-            .state
-            .snapshot
-            .transition(AgentCommand::Fault {
-                error: pl_protocol::StateError {
-                    code: "agentRuntimeRecoverable".to_string(),
-                    message: reason.clone(),
-                    retryable: false,
-                },
-                turn_id,
-                classification: AgentFaultClassification::RecoverableRuntime,
-            })
-            .is_err()
-        {
-            return;
-        }
-        self.state.active_input = None;
-        if fault_outcome.is_some() {
-            self.state.snapshot.last_turn = fault_outcome;
-        }
-        self.runtime
-            .directory
-            .store_snapshot(self.state.snapshot.clone());
     }
 }
 

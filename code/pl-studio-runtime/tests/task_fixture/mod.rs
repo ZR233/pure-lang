@@ -5,7 +5,7 @@ mod server;
 mod sse;
 
 pub use fixture::{
-    DESIGN_PATH, FEATURE_CONTENT, FEATURE_PATH, PLANNER_FOLLOWUP_CONTENT, PLANNER_FOLLOWUP_PATH,
+    DESIGN_PATH, FEATURE_CONTENT, FEATURE_PATH, SECOND_FEATURE_CONTENT, SECOND_FEATURE_PATH,
     TaskFlowFixture, normalized_text,
 };
 pub use git::git_output;

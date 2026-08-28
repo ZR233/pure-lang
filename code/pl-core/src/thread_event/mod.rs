@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use pl_protocol::{
     InteractionStatus, Thread, ThreadItem, ThreadItemDelta, ThreadNotification,
     ThreadNotificationEnvelope, ThreadSnapshot, ThreadSubscriptionRequest,
-    ThreadSubscriptionUpdate, Turn,
+    ThreadSubscriptionUpdate, ThreadTurnHistory, Turn,
 };
 use tokio::sync::{Mutex as AsyncMutex, mpsc};
 
@@ -85,7 +85,7 @@ struct ThreadChannelState {
 /// 驻留 Thread 的进程内历史窗口。
 ///
 /// `turns` 只包含本次驻留期间观察到的 Turn，按开始顺序排列；`items` 是 Thread
-/// owner 当前持有的完整 timeline。调用方负责与冷历史按标识合并，内存事实优先。
+/// owner 当前已物化的 timeline 热窗口。调用方负责与冷历史按标识合并，内存事实优先。
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThreadHotHistory {
     pub turns: Vec<Turn>,
@@ -176,6 +176,60 @@ impl ThreadEventBus {
             turns: state.hot_turns.clone(),
             items: state.snapshot.items.clone(),
         })
+    }
+
+    /// 把显式冷分页得到的领域对象合并进驻留热窗口，不广播伪造的 live 事件。
+    ///
+    /// 同 id 的现有热事实始终胜出；冷页只补齐更早 Turn/Item。这样 GUI 收到分页
+    /// 结果前，后续业务读取已经能从同一热对象观察到该页。
+    pub fn merge_cold_history(
+        &self,
+        thread_id: &str,
+        histories: &[ThreadTurnHistory],
+    ) -> Result<(), ThreadEventError> {
+        let channel = self.channel(thread_id)?;
+        let mut state = channel
+            .state
+            .lock()
+            .map_err(|_| ThreadEventError::LockPoisoned)?;
+        for history in histories.iter().rev() {
+            if history.turn.thread_id != thread_id {
+                return Err(ThreadEventError::ProjectionInvariant(format!(
+                    "cold Turn {} belongs to another Thread",
+                    history.turn.id
+                )));
+            }
+            if !state
+                .hot_turns
+                .iter()
+                .any(|turn| turn.id == history.turn.id)
+            {
+                state.hot_turns.push(history.turn.clone());
+            }
+            for item in &history.items {
+                if item.thread_id != thread_id {
+                    return Err(ThreadEventError::ProjectionInvariant(format!(
+                        "cold item {} belongs to another Thread",
+                        item.id
+                    )));
+                }
+                if !state
+                    .snapshot
+                    .items
+                    .iter()
+                    .any(|existing| existing.id == item.id)
+                {
+                    state.snapshot.items.push(item.clone());
+                }
+            }
+        }
+        state.hot_turns.sort_by(|left, right| {
+            left.updated_at
+                .cmp(&right.updated_at)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        state.snapshot.items.sort_by_key(|item| item.ordinal);
+        Ok(())
     }
 
     pub(crate) fn project(
@@ -429,6 +483,14 @@ impl ThreadEventBusHandle {
 
     pub fn hot_history(&self, thread_id: &str) -> Result<ThreadHotHistory, ThreadEventError> {
         self.bus.hot_history(thread_id)
+    }
+
+    pub(crate) fn merge_cold_history(
+        &self,
+        thread_id: &str,
+        histories: &[ThreadTurnHistory],
+    ) -> Result<(), ThreadEventError> {
+        self.bus.merge_cold_history(thread_id, histories)
     }
 
     pub(crate) fn project(

@@ -118,7 +118,7 @@ where
                 message,
                 attachments: Vec::new(),
                 presentation: super::super::MailboxPresentation::Hidden,
-                metadata: request.metadata,
+                metadata: request.metadata.into(),
             },
             queue_coalescing_key: None,
             budget_action: super::super::MailboxBudgetAction::Preserve,

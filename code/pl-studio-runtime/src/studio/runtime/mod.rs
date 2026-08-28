@@ -37,6 +37,7 @@ mod thread_service;
 mod updater;
 
 pub(crate) use model_performance::ModelPerformanceOwner;
+pub(in crate::studio) use model_performance::{MODEL_PERFORMANCE_OWNER_ID, ModelPerformanceState};
 pub(crate) use provider_usage::ProviderUsageRuntime;
 pub use provider_usage::{ProviderUsageStateData, ProviderUsageStateSnapshot};
 pub(crate) use shutdown_progress::ShutdownProgressBus;
@@ -227,7 +228,7 @@ impl StudioRuntime {
     /// 从 agent framework 派生当前所有活动 turn。
     ///
     /// 活动 turn 列表不再手工维护：canonical source 是每个 agent 的
-    /// `AgentSnapshot.active_turn_id`。这里聚合所有 root thread 的活动 turn，
+    /// `AgentSnapshot.active_turn_id`。这里聚合整棵 agent tree 的活动 turn，
     /// 用于 idle 判断。UI 不消费此列表（它从 per-thread 流读取 busy 状态）。
     async fn derive_active_turns(&self) -> Result<Vec<StudioActiveTurn>> {
         let Some(framework) = self.agent_facility.framework.lock().await.clone() else {
@@ -240,9 +241,6 @@ impl StudioRuntime {
             .map_err(|error| anyhow::anyhow!(error))?;
         let mut turns = Vec::new();
         for snapshot in snapshots {
-            if snapshot.identity.parent_id.is_some() {
-                continue;
-            }
             let Some(turn_id) = snapshot.active_turn_id().cloned() else {
                 continue;
             };

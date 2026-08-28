@@ -288,7 +288,7 @@ impl CollaborationTool {
         }
         let thread_id = ThreadId::generate();
         let session = ThreadContextState {
-            metadata: serde_json::Value::Null,
+            metadata: crate::ThreadContextMetadata::default(),
             session: fork_session(&self.session_runtime.parent_session(), args.fork_turns)?,
             usage: pl_model::TokenUsage::default(),
             billing_by_turn: std::collections::BTreeMap::new(),

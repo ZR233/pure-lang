@@ -126,12 +126,20 @@ impl ProductEventBus {
         self.initialize_revision(&self.revisions.task);
         self.initialize_revision(&self.revisions.agent);
         self.initialize_revision(&self.revisions.recovery);
-        *self.task_snapshot.lock().await = Some(Vec::new());
-        *self.project_snapshot.lock().await = self.store.list_projects().await?;
-        self.thread_index
-            .lock()
-            .expect("thread index lock poisoned")
-            .clear();
+        self.task_snapshot.lock().await.get_or_insert_default();
+        let durable_projects = self.store.list_projects().await?;
+        let mut projects = self.project_snapshot.lock().await;
+        for project in durable_projects {
+            if !projects.iter().any(|hot| hot.id == project.id) {
+                projects.push(project);
+            }
+        }
+        projects.sort_by(|left, right| {
+            right
+                .updated_at
+                .cmp(&left.updated_at)
+                .then_with(|| right.id.cmp(&left.id))
+        });
         Ok(())
     }
 
@@ -241,14 +249,15 @@ impl ProductEventBus {
         )))
     }
 
-    /// 提交一次目录事实：先更新内存热集合并广播，再加入 write-behind 队列。
+    /// 提交一次目录事实：先加入 write-behind 队列，再更新内存热集合并广播。
     ///
-    /// 这是 Thread/Project 目录 mutation 的唯一命令通道；SQLite 失败只影响
-    /// 持久化健康状态（Degraded/Blocked），内存事实保持已发布状态。
+    /// 这是 Thread/Project 目录 mutation 的唯一命令通道；admission 失败时不发布
+    /// 半状态，后台 SQLite 失败只影响持久化健康状态。
     pub(in crate::studio) async fn commit_directory(
         &self,
         delta: DirectoryDelta,
     ) -> Result<StudioProductEventEnvelope> {
+        self.writer.accept_directory(delta.clone())?;
         let (thread_upserts, thread_removals): (Vec<Thread>, Vec<String>) = (
             delta.thread_upserts.clone(),
             delta
@@ -277,9 +286,6 @@ impl ProductEventBus {
         }
         for removal in &delta.project_removals {
             self.remove_project_entry(&removal.project_id).await?;
-        }
-        if let Err(error) = self.writer.enqueue_directory(delta).await {
-            tracing::error!(%error, "directory write-behind rejected a committed in-memory fact");
         }
         Ok(envelope)
     }
@@ -310,18 +316,15 @@ impl ProductEventBus {
             .cloned()
     }
 
-    /// 注册一个 child Thread：热集合先行更新（spawn 后的首轮 turn 立即可读），
-    /// durable delta 经 write-behind 跟随。
+    /// 注册一个 child Thread：typed delta 先完成 admission，热集合随后更新。
     pub(in crate::studio) async fn register_child_thread(
         &self,
         spec: RegisteredChildThread,
     ) -> Result<()> {
         let delta = DirectoryDelta::register_child_thread(spec);
+        self.writer.accept_directory(delta.clone())?;
         self.apply_thread_delta(delta.thread_upserts.clone(), Vec::new())
             .await?;
-        if let Err(error) = self.writer.enqueue_directory(delta).await {
-            tracing::error!(%error, "child directory write-behind rejected a committed in-memory fact");
-        }
         Ok(())
     }
 
@@ -435,7 +438,7 @@ impl ProductEventBus {
     pub async fn apply_task_entry(
         &self,
         entry: StudioTaskDirectoryEntry,
-    ) -> Result<Option<StudioProductEventEnvelope>> {
+    ) -> Option<StudioProductEventEnvelope> {
         let mut previous = self.task_snapshot.lock().await;
         let tasks = previous.get_or_insert_default();
         if tasks
@@ -443,7 +446,7 @@ impl ProductEventBus {
             .find(|task| task.root_thread_id == entry.root_thread_id)
             == Some(&entry)
         {
-            return Ok(None);
+            return None;
         }
         if let Some(existing) = tasks
             .iter_mut()
@@ -457,10 +460,10 @@ impl ProductEventBus {
         let tasks = tasks.clone();
         drop(previous);
         self.bump(&self.revisions.task);
-        Ok(Some(self.emit(
-            StudioProductEventKind::TaskDirectoryChanged(StudioTaskDirectoryState {
+        Some(self.emit(StudioProductEventKind::TaskDirectoryChanged(
+            StudioTaskDirectoryState {
                 state: self.resource(&self.revisions.task, StudioTaskDirectoryData { tasks }),
-            }),
+            },
         )))
     }
 

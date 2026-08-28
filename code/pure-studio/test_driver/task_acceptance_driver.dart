@@ -98,6 +98,7 @@ Future<void> main(List<String> arguments) async {
       await _openFatalTaskFailureDetail(session, finalSnapshot);
     } else {
       validateTaskCompletion(finalSnapshot);
+      _validateCanonicalLiveTask(finalSnapshot);
     }
     if (budgetRecoveryEvidence != null) {
       stdout.writeln(
@@ -111,6 +112,12 @@ Future<void> main(List<String> arguments) async {
     }
     await File('${options.snapshotOutput}.png')
         .writeAsBytes(await session.screenshot(), flush: true);
+    final renderTree = await _driverCommand(
+      session.renderTree(),
+      'render tree capture',
+    );
+    await File('${options.snapshotOutput}.render-tree.txt')
+        .writeAsString(renderTree, flush: true);
     stdout.writeln(
       jsonEncode({
         'result': 'completed',
@@ -120,6 +127,28 @@ Future<void> main(List<String> arguments) async {
         ...finalSnapshot,
       }),
     );
+    if (options.shutdownAfterCompletion) {
+      final response = await _driverCommand(
+        session.requestData(
+          'shutdown-await',
+          timeout: const Duration(minutes: 2),
+        ),
+        'Studio durable shutdown',
+        const Duration(minutes: 2),
+      );
+      final decoded = jsonDecode(response);
+      if (decoded is! Map<String, dynamic> ||
+          decoded['shutdown'] != 'completed') {
+        throw StateError('unexpected Studio shutdown response: $response');
+      }
+      stdout.writeln(
+        jsonEncode({
+          'event': 'studioShutdownCompleted',
+          'attempt': options.attempt,
+          'capturedAt': DateTime.now().toUtc().toIso8601String(),
+        }),
+      );
+    }
   } catch (error, stackTrace) {
     stderr.writeln('Task Driver failed: $error');
     stderr.writeln(stackTrace);
@@ -155,6 +184,35 @@ Future<void> main(List<String> arguments) async {
         // The harness owns and terminates the GUI process tree.
       }
     }
+  }
+}
+
+void _validateCanonicalLiveTask(Map<String, dynamic> snapshot) {
+  final task = snapshot['task'] as Map<String, dynamic>;
+  final workUnits = (task['workUnits'] as List<dynamic>? ?? const [])
+      .whereType<Map<String, dynamic>>()
+      .toList();
+  final merges = (task['merges'] as List<dynamic>? ?? const [])
+      .whereType<Map<String, dynamic>>()
+      .toList();
+  final reviews = (task['reviews'] as List<dynamic>? ?? const [])
+      .whereType<Map<String, dynamic>>()
+      .toList();
+  if (workUnits.length != 2 || merges.length != 2) {
+    throw StateError(
+      'canonical live Task requires exactly two independent WorkUnits and merges',
+    );
+  }
+  final deliveryReviews = reviews
+      .where((review) => review['scope'] == 'delivery')
+      .toList();
+  final integratedReviews = reviews
+      .where((review) => review['scope'] == 'integrated')
+      .toList();
+  if (deliveryReviews.length != 2 || integratedReviews.length != 1) {
+    throw StateError(
+      'canonical live Task requires two Delivery Reviews and one Integrated Review',
+    );
   }
 }
 
@@ -930,6 +988,7 @@ class _DriverOptions {
     required this.stopAtRecoveryPoint,
     required this.expectBudgetRecovery,
     required this.expectedTaskOutcome,
+    required this.shutdownAfterCompletion,
   });
 
   final AcceptanceDriverMode mode;
@@ -948,6 +1007,7 @@ class _DriverOptions {
   final bool stopAtRecoveryPoint;
   final bool expectBudgetRecovery;
   final String expectedTaskOutcome;
+  final bool shutdownAfterCompletion;
 
   static _DriverOptions parse(List<String> arguments) {
     final values = <String, List<String>>{};
@@ -1018,6 +1078,7 @@ class _DriverOptions {
       stopAtRecoveryPoint: boolean('stop-at-recovery-point'),
       expectBudgetRecovery: boolean('expect-budget-recovery'),
       expectedTaskOutcome: expectedTaskOutcome,
+      shutdownAfterCompletion: boolean('shutdown-after-completion'),
     );
   }
 }

@@ -3,13 +3,14 @@ use pl_core::{
 };
 use pl_protocol::{AgentSessionSnapshot, AgentWorkingState, ModelContextItem};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel,
-    PaginatorTrait, QueryFilter, QueryOrder,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait,
+    QueryFilter, QueryOrder,
 };
 
 use crate::PureError;
 use crate::studio::StudioStore;
-use crate::studio::entity::{thread_context_segment, thread_session_state};
+use crate::studio::entity::thread_context_segment;
+use crate::studio::store::object::{decode_object, load_object, load_object_row, put_object};
 
 use super::{i64_from_u64, store_error};
 
@@ -22,14 +23,14 @@ pub(super) async fn audit_session_snapshot(
     store: &StudioStore,
     thread_id: &str,
 ) -> Result<(), SessionSnapshotAuditError> {
-    let working_state_row = thread_session_state::Entity::find_by_id(thread_id)
-        .one(store.database())
+    let working_state_row = load_object_row::<AgentWorkingState>(store.database(), thread_id)
         .await
         .map_err(|error| SessionSnapshotAuditError::Fatal(store_error(error)))?
         .ok_or_else(|| {
             SessionSnapshotAuditError::Corrupt(missing_working_state_error(thread_id))
         })?;
-    AgentWorkingState::try_from(working_state_row).map_err(SessionSnapshotAuditError::Corrupt)?;
+    decode_object::<AgentWorkingState>(working_state_row)
+        .map_err(|error| SessionSnapshotAuditError::Corrupt(store_error(error)))?;
     let rows = thread_context_segment::Entity::find()
         .filter(thread_context_segment::Column::ThreadId.eq(thread_id))
         .order_by_asc(thread_context_segment::Column::Ordinal)
@@ -79,7 +80,7 @@ pub(super) async fn persist_session_snapshot(
 }
 
 pub(super) fn serialize_thread_metadata(
-    metadata: &serde_json::Value,
+    metadata: &pl_core::ThreadContextMetadata,
     _session: &AgentSession,
 ) -> Result<String, PureError> {
     serde_json::to_string(metadata).map_err(Into::into)
@@ -89,33 +90,14 @@ async fn restore_working_state(
     db: &impl ConnectionTrait,
     thread_id: &str,
 ) -> Result<AgentWorkingState, PureError> {
-    let row = thread_session_state::Entity::find_by_id(thread_id)
-        .one(db)
+    load_object::<AgentWorkingState>(db, thread_id)
         .await
         .map_err(store_error)?
-        .ok_or_else(|| missing_working_state_error(thread_id))?;
-    row.try_into()
+        .ok_or_else(|| missing_working_state_error(thread_id))
 }
 
 fn missing_working_state_error(thread_id: &str) -> PureError {
     store_error(format!("Thread {thread_id} session state is missing"))
-}
-
-impl TryFrom<thread_session_state::Model> for AgentWorkingState {
-    type Error = PureError;
-
-    fn try_from(row: thread_session_state::Model) -> Result<Self, Self::Error> {
-        let thread_id = row.thread_id.as_str();
-        verify_hash("session state", thread_id, &row.state_json, &row.state_hash)?;
-        let state = serde_json::from_str::<Self>(&row.state_json)?;
-        if i64_from_u64(state.revision)? != row.revision {
-            return Err(store_error(format!(
-                "Thread {thread_id} session state revision mismatch: row={}, payload={}",
-                row.revision, state.revision
-            )));
-        }
-        Ok(state)
-    }
 }
 
 async fn restore_transcript(
@@ -190,46 +172,9 @@ async fn persist_working_state(
     state: &AgentWorkingState,
     updated_at: i64,
 ) -> Result<(), PureError> {
-    let state_json = serde_json::to_string(state)?;
-    let state_hash = canonical_content_hash(state_json.as_bytes());
-    let revision = i64_from_u64(state.revision)?;
-    let existing = thread_session_state::Entity::find_by_id(thread_id)
-        .one(tx)
+    put_object(tx, thread_id, state, updated_at)
         .await
-        .map_err(store_error)?;
-    if let Some(existing) = existing {
-        if existing.revision > revision {
-            return Err(store_error(format!(
-                "Thread {thread_id} session state revision regressed"
-            )));
-        }
-        if existing.revision == revision {
-            if existing.state_hash == state_hash && existing.state_json == state_json {
-                return Ok(());
-            }
-            return Err(store_error(format!(
-                "Thread {thread_id} session state revision conflicts"
-            )));
-        }
-        let mut active = existing.into_active_model();
-        active.revision = Set(revision);
-        active.state_json = Set(state_json);
-        active.state_hash = Set(state_hash);
-        active.updated_at = Set(updated_at);
-        active.update(tx).await.map_err(store_error)?;
-        return Ok(());
-    }
-    thread_session_state::ActiveModel {
-        thread_id: Set(thread_id.to_string()),
-        revision: Set(revision),
-        state_json: Set(state_json),
-        state_hash: Set(state_hash),
-        updated_at: Set(updated_at),
-    }
-    .insert(tx)
-    .await
-    .map_err(store_error)?;
-    Ok(())
+        .map_err(store_error)
 }
 
 async fn persist_transcript_mutation(
@@ -340,6 +285,7 @@ mod tests {
 
     use super::*;
     use crate::StudioMode;
+    use crate::studio::entity::studio_object;
 
     #[tokio::test]
     async fn transcript_segments_append_only_suffix_and_replace_after_compaction() {
@@ -514,13 +460,17 @@ mod tests {
             updated
         );
 
-        let row = thread_session_state::Entity::find_by_id(&thread_id)
-            .one(store.database())
-            .await
-            .unwrap()
-            .unwrap();
+        let row = studio_object::Entity::find_by_id((
+            "thread".to_string(),
+            thread_id.clone(),
+            "agentWorkingState".to_string(),
+        ))
+        .one(store.database())
+        .await
+        .unwrap()
+        .unwrap();
         let mut active = row.into_active_model();
-        active.state_hash = Set("sha256:corrupt".to_string());
+        active.payload_hash = Set("sha256:corrupt".to_string());
         active.update(store.database()).await.unwrap();
         let error = restore_working_state(store.database(), &thread_id)
             .await
@@ -574,7 +524,7 @@ mod tests {
 
         store
             .database()
-            .execute_unprepared("DROP TABLE thread_session_state")
+            .execute_unprepared("DROP TABLE studio_objects")
             .await
             .unwrap();
         let Err(SessionSnapshotAuditError::Fatal(storage)) =
@@ -582,7 +532,7 @@ mod tests {
         else {
             panic!("SQLite query failure must remain application-fatal");
         };
-        assert!(storage.to_string().contains("thread_session_state"));
+        assert!(storage.to_string().contains("studio_objects"));
     }
 
     async fn store_with_thread(slug: &str) -> (StudioStore, String) {

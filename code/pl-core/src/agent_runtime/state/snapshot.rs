@@ -7,6 +7,19 @@ use pl_protocol::{
 
 use crate::AgentSession;
 
+/// Runtime 热 session 的类型化展示元数据。
+///
+/// 该对象保持产品无关的 workspace/title 语义；存储适配器只在 worker 落库时
+/// 序列化，不允许把预编码 JSON 带入热状态。
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadContextMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+}
+
 /// 一次 commit 中需要原子追加到 durable 提交日志的 typed 载荷。
 #[derive(Debug, Clone)]
 pub struct ProgressSubmissionCommit {
@@ -28,8 +41,8 @@ impl From<&ProgressSubmissionCommit> for AgentSubmissionRecord {
 /// runtime 持有的 canonical session 及其统计。
 #[derive(Debug, Clone)]
 pub struct ThreadContextState {
-    /// 产品可持久化的 session 元数据，例如标题和展示属性；框架不解释其内容。
-    pub metadata: serde_json::Value,
+    /// 产品可持久化的类型化 session 展示元数据。
+    pub metadata: ThreadContextMetadata,
     pub session: AgentSession,
     pub usage: TokenUsage,
     /// 按 Turn 保存的 inference 计费快照；durable truth 位于 `turns.model_json`。
@@ -45,7 +58,7 @@ impl ThreadContextState {
     /// 创建空 session 状态。
     pub fn empty() -> Self {
         Self {
-            metadata: serde_json::Value::Null,
+            metadata: ThreadContextMetadata::default(),
             session: AgentSession::new(),
             usage: TokenUsage::default(),
             billing_by_turn: BTreeMap::new(),

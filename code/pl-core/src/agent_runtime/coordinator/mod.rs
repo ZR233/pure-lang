@@ -361,15 +361,32 @@ where
     if let Ok(existing) = snapshot_for(actors, &id).await {
         return Ok(existing);
     }
-    let thread_events = runtime.thread_events.clone();
     let thread_snapshot = super::runtime::normalize_restored_thread_snapshot(&mut agent)?;
-    thread_events
+    // 惰性 activation 先在隔离投影中完成遗留 Turn 收束及 durable admission。
+    // 只有整份领域状态准备成功后才替换共享 ThreadEventBus，失败时外部观察不到
+    // 只有 Timeline、没有 actor 的半恢复状态。
+    let activation_events = crate::ThreadEventBus::new(options.thread_events).handle();
+    activation_events
         .replace_snapshot(thread_snapshot)
         .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
-    let recovered = super::runtime::recover_interrupted_turns(host, &thread_events, vec![agent])
-        .await?
-        .pop()
-        .expect("recover preserves the restored agent count");
+    let recovered =
+        super::runtime::recover_interrupted_turns(host, &activation_events, vec![agent])
+            .await?
+            .pop()
+            .expect("recover preserves the restored agent count");
+    let activated_thread = recovered
+        .thread_snapshot
+        .as_ref()
+        .map(|restored| restored.snapshot.clone())
+        .ok_or_else(|| {
+            AgentRuntimeError::ThreadEvents(
+                "restored agent has no materialized Thread snapshot".to_string(),
+            )
+        })?;
+    runtime
+        .thread_events
+        .replace_snapshot(activated_thread)
+        .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
     let snapshot = recovered.state.snapshot.clone();
     runtime.directory.store_snapshot(snapshot.clone());
     let actor = spawn_agent_loop(

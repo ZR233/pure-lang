@@ -115,15 +115,6 @@ impl StudioStore {
         models.into_iter().map(task_run_record).collect()
     }
 
-    pub(crate) async fn read_active_task_run_for_root_thread(
-        &self,
-        root_thread_id: &str,
-    ) -> Result<TaskRun> {
-        self.find_active_task_run_for_root_thread(root_thread_id)
-            .await?
-            .context("active task run not found for this root Thread")
-    }
-
     pub(crate) async fn find_latest_task_run_for_root_thread(
         &self,
         root_thread_id: &str,

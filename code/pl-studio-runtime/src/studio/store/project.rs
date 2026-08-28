@@ -7,7 +7,7 @@ use sea_orm::sqlx::sqlite::{SqliteJournalMode, SqliteSynchronous};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set};
 use sea_orm::{
     ColumnTrait, ConnectOptions, ConnectionTrait, Database, DatabaseBackend, DatabaseConnection,
-    EntityTrait, QueryFilter, QueryOrder, Statement,
+    EntityTrait, QueryFilter, QueryOrder, Schema, Statement,
 };
 
 use crate::studio::entity as entities;
@@ -21,12 +21,14 @@ use crate::studio::records::ProjectRecord;
 use crate::studio::store::{StudioDatabaseError, StudioStore};
 use crate::studio::store_support::{
     STUDIO_DATABASE_SCHEMA_VERSION, initialize_studio_schema, migrate_studio_schema_v13_to_v14,
+    migrate_studio_schema_v14_to_v15,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExistingDatabaseState {
     Current,
     MigrateV13,
+    MigrateV14,
 }
 
 impl StudioStore {
@@ -70,8 +72,8 @@ impl StudioStore {
         let path = resolve_configured_database_path(path).await?;
         let database_exists = tokio::fs::try_exists(&path).await?;
         let family_exists = database_family_exists(&path).await?;
-        // v13 附件数据执行唯一一次精确迁移；更早或结构不匹配的数据库仍按
-        // 不兼容数据库重建，不引入长期迁移链或兼容读路径。
+        // 只接受精确 v13 附件来源与精确 v14 working-object 来源；更早或结构
+        // 不匹配的数据库仍按不兼容数据库重建，不引入兼容读路径。
         let existing_state = if database_exists {
             match inspect_database(&path).await {
                 Ok(state) => Some(state),
@@ -103,25 +105,28 @@ impl StudioStore {
             .parent()
             .context("Studio database path has no parent directory")?
             .join("attachments");
-        let migrating = existing_state == Some(ExistingDatabaseState::MigrateV13);
+        let migrating_v13 = existing_state == Some(ExistingDatabaseState::MigrateV13);
+        let migrating_v14 = existing_state == Some(ExistingDatabaseState::MigrateV14);
         let initialization = async {
             if created {
                 initialize_studio_schema(&db).await?;
-            } else if migrating {
+            } else if migrating_v13 {
                 migrate_studio_schema_v13_to_v14(&db, &attachments_dir).await?;
+                migrate_studio_schema_v14_to_v15(&db).await?;
+            } else if migrating_v14 {
+                migrate_studio_schema_v14_to_v15(&db).await?;
             }
             validate_database(&db).await
         }
         .await;
         if let Err(error) = initialization {
             let close = db.close().await;
-            if migrating {
+            if migrating_v13 || migrating_v14 {
                 return match close {
-                    Ok(()) => Err(error).context(
-                        "Studio v13 to v14 migration failed; the original database was preserved",
-                    ),
+                    Ok(()) => Err(error)
+                        .context("Studio schema migration failed; the original database was preserved"),
                     Err(close_error) => Err(error).context(format!(
-                        "Studio v13 to v14 migration failed; the original database was preserved; closing the database also failed: {close_error:#}"
+                        "Studio schema migration failed; the original database was preserved; closing the database also failed: {close_error:#}"
                     )),
                 };
             }
@@ -275,6 +280,9 @@ async fn inspect_database(path: &Path) -> Result<ExistingDatabaseState> {
         Ok(13) => validate_v13_migration_source(&database)
             .await
             .map(|()| ExistingDatabaseState::MigrateV13),
+        Ok(14) => validate_v14_migration_source(&database)
+            .await
+            .map(|()| ExistingDatabaseState::MigrateV14),
         Ok(found) => Err(StudioDatabaseError::UnsupportedSchema {
             found,
             supported: STUDIO_DATABASE_SCHEMA_VERSION,
@@ -362,6 +370,17 @@ async fn validate_v13_migration_source(db: &DatabaseConnection) -> Result<()> {
     Ok(())
 }
 
+async fn validate_v14_migration_source(db: &DatabaseConnection) -> Result<()> {
+    validate_database_health(db).await?;
+    let expected = expected_v14_schema_fingerprint().await?;
+    let actual = schema_fingerprint(db).await?;
+    ensure!(
+        actual == expected,
+        "Studio v14 schema does not match the only supported object migration source"
+    );
+    Ok(())
+}
+
 async fn validate_database_health(db: &DatabaseConnection) -> Result<()> {
     let rows = db
         .query_all_raw(Statement::from_string(
@@ -414,12 +433,37 @@ async fn expected_schema_fingerprint_without_attachment_table() -> Result<String
     )
     .await?;
     initialize_studio_schema(&database).await?;
+    downgrade_expected_schema_to_v14(&database).await?;
     database
         .execute_unprepared("ALTER TABLE thread_inputs DROP COLUMN attachments_json;")
         .await?;
     let fingerprint = schema_fingerprint_without_attachment_table(&database).await;
     database.close().await?;
     fingerprint
+}
+
+async fn expected_v14_schema_fingerprint() -> Result<String> {
+    let database = connect_sqlite(
+        "sqlite::memory:",
+        SqliteSynchronous::Normal,
+        /* max_connections */ 1,
+    )
+    .await?;
+    initialize_studio_schema(&database).await?;
+    downgrade_expected_schema_to_v14(&database).await?;
+    let fingerprint = schema_fingerprint(&database).await;
+    database.close().await?;
+    fingerprint
+}
+
+async fn downgrade_expected_schema_to_v14(db: &DatabaseConnection) -> Result<()> {
+    db.execute_unprepared("DROP TABLE studio_objects").await?;
+    Schema::new(db.get_database_backend())
+        .builder()
+        .register(entities::thread_session_state::Entity)
+        .apply(db)
+        .await?;
+    Ok(())
 }
 
 async fn schema_fingerprint(db: &DatabaseConnection) -> Result<String> {

@@ -265,6 +265,17 @@ mod tests {
         invalid_cwd.verification.commands[0].cwd = "/tmp".to_string();
         assert!(invalid_cwd.normalize_and_validate().is_err());
 
+        let mut prose_scope_hint = valid_blueprint();
+        prose_scope_hint.scope.scope_hints =
+            vec!["code/pl-model is the only allowed implementation area".to_string()];
+        assert!(
+            prose_scope_hint
+                .normalize_and_validate()
+                .unwrap_err()
+                .to_string()
+                .contains("not prose")
+        );
+
         let mut duplicate_id = valid_blueprint();
         duplicate_id.implementation_steps[0].id = "criterion-1".to_string();
         assert!(duplicate_id.normalize_and_validate().is_err());

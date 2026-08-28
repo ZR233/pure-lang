@@ -10,8 +10,8 @@ use pl_studio_runtime::{
     StudioSubmitPromptOptions, StudioSubmitPromptRequest, StudioTaskCompletionContent,
 };
 use task_fixture::{
-    DESIGN_PATH, FEATURE_CONTENT, FEATURE_PATH, PARENT_HISTORY_MARKER, PLANNER_FOLLOWUP_CONTENT,
-    PLANNER_FOLLOWUP_PATH, ScriptMode, TaskFlowFixture, git_output, normalized_text,
+    DESIGN_PATH, FEATURE_CONTENT, FEATURE_PATH, PARENT_HISTORY_MARKER, SECOND_FEATURE_CONTENT,
+    SECOND_FEATURE_PATH, ScriptMode, TaskFlowFixture, git_output, normalized_text,
 };
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -60,6 +60,7 @@ async fn run_offline_task_flow() -> Result<()> {
     let task = fixture.wait_for_completed_task().await?;
     fixture.wait_for_no_active_turns().await?;
     fixture.assert_script_complete().await?;
+    fixture.assert_wire_contract(PARENT_HISTORY_MARKER).await?;
 
     assert!(matches!(
         &task.state,
@@ -195,22 +196,23 @@ async fn run_offline_task_flow() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "scripted planner requires ripgrep on the host"]
-async fn offline_task_flow_requires_integrated_review_when_merge_content_changes() -> Result<()> {
+async fn offline_task_flow_captures_complete_wire_prompts_for_two_executor_review() -> Result<()> {
     tokio::time::timeout(Duration::from_secs(120), run_offline_required_review_flow())
         .await
         .context("offline required-review Task integration test timed out")?
 }
 
 async fn run_offline_required_review_flow() -> Result<()> {
-    let fixture = TaskFlowFixture::new_with_mode(ScriptMode::PostMergeImplementation).await?;
+    let fixture = TaskFlowFixture::new_with_mode(ScriptMode::TwoExecutorIntegrated).await?;
+    const USER_PROMPT_MARKER: &str = "satisfy the required integrated review";
     fixture
         .runtime
         .submit_prompt(StudioSubmitPromptRequest {
             thread_id: fixture.thread_id.clone(),
             input: pl_protocol::studio::StudioPromptInput {
-                text: "Create the offline fixture, adjust the merge content, and satisfy the required integrated review."
-                    .to_string(),
+                text: format!(
+                    "Create the offline fixture, adjust the merge content, and {USER_PROMPT_MARKER}."
+                ),
                 attachment_draft_ids: Vec::new(),
             },
             options: StudioSubmitPromptOptions::default(),
@@ -232,12 +234,14 @@ async fn run_offline_required_review_flow() -> Result<()> {
     let task = fixture.wait_for_completed_task().await?;
     fixture.wait_for_no_active_turns().await?;
     fixture.assert_script_complete().await?;
+    fixture.assert_wire_contract(USER_PROMPT_MARKER).await?;
 
-    assert_eq!(task.work_units.len(), 1);
-    assert_eq!(task.merges.len(), 1);
-    assert_eq!(task.reviews.len(), 2);
+    assert_eq!(task.work_units.len(), 2);
+    assert_eq!(task.merges.len(), 2);
+    assert_eq!(task.reviews.len(), 3);
     assert_eq!(task.reviews[0].scope, StudioReviewScope::Delivery);
-    assert_eq!(task.reviews[1].scope, StudioReviewScope::Integrated);
+    assert_eq!(task.reviews[1].scope, StudioReviewScope::Delivery);
+    assert_eq!(task.reviews[2].scope, StudioReviewScope::Integrated);
     assert!(task.reviews.iter().all(|review| matches!(
         &review.state,
         pl_studio_runtime::StudioTaskReviewState::Passed { .. }
@@ -249,7 +253,7 @@ async fn run_offline_required_review_flow() -> Result<()> {
         } => (review_round_id, reviewed_head),
         other => anyhow::bail!("unexpected final integrated review gate: {other:?}"),
     };
-    assert_eq!(review_round_id, &task.reviews[1].id);
+    assert_eq!(review_round_id, &task.reviews[2].id);
     assert_eq!(
         reviewed_head,
         task.merges
@@ -259,8 +263,8 @@ async fn run_offline_required_review_flow() -> Result<()> {
             .as_str()
     );
     assert_eq!(
-        normalized_text(&fixture.workspace.join(PLANNER_FOLLOWUP_PATH))?,
-        PLANNER_FOLLOWUP_CONTENT
+        normalized_text(&fixture.workspace.join(SECOND_FEATURE_PATH))?,
+        SECOND_FEATURE_CONTENT
     );
     assert_eq!(
         git_output(&fixture.workspace, &["rev-parse", "HEAD"])?,

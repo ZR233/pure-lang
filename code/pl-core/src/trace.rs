@@ -265,6 +265,22 @@ impl TraceRecorder {
         self.complete_item(item);
     }
 
+    pub(crate) fn final_text_item(&mut self, turn_id: &str, content: String) {
+        let timestamp = unix_seconds();
+        let sequence = self.current_sequence();
+        let item = TracePart::completed_text(
+            turn_id,
+            format!("{turn_id}-runtime-final-{sequence}"),
+            sequence,
+            TraceTextChannel::Final,
+            content,
+            Vec::new(),
+            timestamp,
+        );
+        self.record_and_broadcast_item_start(item.clone());
+        self.complete_item(item);
+    }
+
     pub fn running_turn_item(&mut self, turn_id: &str) -> TracePart {
         let timestamp = unix_seconds();
         TracePart::turn(

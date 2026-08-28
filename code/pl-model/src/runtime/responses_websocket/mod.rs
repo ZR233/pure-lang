@@ -83,6 +83,7 @@ pub(super) async fn stream_responses(
         "full"
     };
     let request_text = response_create_text(&mut wire_body)?;
+    super::wire_capture::capture_responses_websocket(request_mode, &wire_body).await?;
     tracing::debug!(
         request_mode,
         fallback_reason = fallback_reason.map_or("none", IncrementalRequestFallbackReason::as_str),

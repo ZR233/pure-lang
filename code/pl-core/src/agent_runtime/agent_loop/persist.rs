@@ -4,7 +4,7 @@ use super::super::host::{PersistenceClass, ThreadProjectionCommit, transcript_mu
 use super::super::state::{AgentRuntimeError, unix_timestamp};
 use super::super::*;
 use super::commit::{CommitPublication, PendingCommit};
-use super::{AgentLoop, notification_turn_id};
+use super::{AgentLoop, TRACE_BATCH_MAX_DELAY, TRACE_BATCH_MAX_EVENTS, notification_turn_id};
 use crate::thread_event::{
     ObservedTurnEvent, ThreadNotificationFact, TurnObservation, project_observation,
     project_runtime_event, project_thread_facts, project_trace_events, runtime_event_thread_id,
@@ -133,15 +133,28 @@ where
         &mut self,
         mut trace_events: Vec<TraceEvent>,
     ) -> AgentRuntimeResult<()> {
+        self.pending_trace_events.append(&mut trace_events);
         while let Ok(trace) = self.channels.trace_receiver.try_recv() {
-            trace_events.push(trace);
+            self.pending_trace_events.push(trace);
+        }
+        if !self.pending_trace_events.is_empty()
+            && self.pending_trace_events.len() < TRACE_BATCH_MAX_EVENTS
+        {
+            let deadline = tokio::time::Instant::now() + TRACE_BATCH_MAX_DELAY;
+            while self.pending_trace_events.len() < TRACE_BATCH_MAX_EVENTS {
+                match tokio::time::timeout_at(deadline, self.channels.trace_receiver.recv()).await {
+                    Ok(Some(trace)) => self.pending_trace_events.push(trace),
+                    Ok(None) | Err(_) => break,
+                }
+            }
         }
         let Some(active) = &self.active else {
             return Ok(());
         };
         let thread_id = active.thread_id.clone();
         let turn_id = active.turn_id.clone();
-        if trace_events
+        if self
+            .pending_trace_events
             .iter()
             .any(|trace| trace.session_id != thread_id.as_str())
         {
@@ -150,12 +163,15 @@ where
                 self.state.snapshot.identity.id
             )));
         }
-        trace_events.sort_by_key(|trace| trace.sequence);
+        self.pending_trace_events
+            .sort_by_key(|trace| trace.sequence);
         let current_sequence = self.state.session.trace_sequence;
-        trace_events.retain(|trace| trace.sequence >= current_sequence);
-        if trace_events.is_empty() {
+        self.pending_trace_events
+            .retain(|trace| trace.sequence >= current_sequence);
+        if self.pending_trace_events.is_empty() {
             return Ok(());
         }
+        let trace_events = self.pending_trace_events.clone();
         let next_trace_sequence = trace_events
             .last()
             .map(|trace| trace.sequence.saturating_add(1))
@@ -202,15 +218,21 @@ where
             session_projection,
             None,
         );
-        self.commit_and_publish(
-            PendingCommit::new(next, facts, ThreadMutation::AppendTrace).publish(
-                CommitPublication::new(Some(thread_id), Some(turn_id))
-                    .store_directory_snapshot()
-                    .with_trace_events(committed_trace_events)
-                    .with_thread_notifications(committed_thread_events),
-            ),
-        )
-        .await
+        let result = self
+            .commit_and_publish(
+                PendingCommit::new(next, facts, ThreadMutation::AppendTrace).publish(
+                    CommitPublication::new(Some(thread_id), Some(turn_id))
+                        .store_directory_snapshot()
+                        .with_trace_events(committed_trace_events)
+                        .with_thread_notifications(committed_thread_events),
+                ),
+            )
+            .await;
+        if result.is_ok() {
+            self.pending_trace_events
+                .retain(|trace| trace.sequence >= next_trace_sequence);
+        }
+        result
     }
 
     pub(super) async fn commit_transition<F>(

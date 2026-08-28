@@ -390,13 +390,21 @@ impl TracePart {
         }
     }
 
-    pub fn delta_event(
-        &self,
+    /// Atomically applies one streaming delta and returns its canonical event.
+    ///
+    /// A transition that does not change the typed part produces no event, so
+    /// downstream ledgers never observe a revision-less delta.
+    pub fn apply_delta(
+        &mut self,
+        updated_at: i64,
         delta: TraceDelta,
-    ) -> Result<TracePartDeltaEvent, TracePartTransitionError> {
-        let command = self.command(self.updated_at, TracePartAction::Append(delta.clone()));
-        self.decide(&command)?;
-        Ok(TracePartDeltaEvent {
+    ) -> Result<Option<TracePartDeltaEvent>, TracePartTransitionError> {
+        let decision =
+            self.apply(self.command(updated_at, TracePartAction::Append(delta.clone())))?;
+        if !decision.changed {
+            return Ok(None);
+        }
+        Ok(Some(TracePartDeltaEvent {
             turn_id: self.turn_id.clone(),
             item_id: self.item_id.clone(),
             started_sequence: self.started_sequence,
@@ -404,7 +412,7 @@ impl TracePart {
             created_at: self.created_at,
             updated_at: self.updated_at,
             delta,
-        })
+        }))
     }
 
     fn error(

@@ -31,7 +31,9 @@ use super::task_coordinator::{
     WorkCompletionRecord, WorkCompletionState, WorkCompletionStatus, WorkUnit, WorkUnitCommand,
     WorkUnitContext, WorkUnitState, WorkUnitStateKind,
 };
-use super::task_persistence::{TaskPersistenceCommit, TaskStopEventFact};
+use super::task_persistence::{
+    TaskPersistenceCommit, TaskStopEventFact, load_task_commit_revision,
+};
 use super::{ProductEventBus, StudioStore, task_projection};
 
 mod executor;
@@ -156,7 +158,9 @@ impl TaskRuntime {
         let mut aggregates = self.aggregates.write().await;
         aggregates.clear();
         for (entry, facts, delivered_planner_wakes) in restored {
-            let revision = entry.task.revision;
+            let revision = load_task_commit_revision(self.store.database(), &entry.root_thread_id)
+                .await?
+                .unwrap_or(0);
             self.writer
                 .seed_task_durable_revision(&entry.root_thread_id, revision);
             if !facts.run.kind().is_terminal() {
@@ -203,7 +207,9 @@ impl TaskRuntime {
             root_thread_id: root_thread_id.to_string(),
             task: facts.runtime.clone(),
         };
-        let revision = entry.task.revision;
+        let revision = load_task_commit_revision(self.store.database(), root_thread_id)
+            .await?
+            .unwrap_or(0);
         self.writer
             .seed_task_durable_revision(root_thread_id, revision);
         if !facts.run.kind().is_terminal() {
@@ -221,13 +227,7 @@ impl TaskRuntime {
             .write()
             .await
             .insert(root_thread_id.to_string(), aggregate.clone());
-        if let Err(error) = self.product_events.apply_task_entry(entry).await {
-            tracing::warn!(
-                root_thread_id,
-                error_bytes = error.to_string().len(),
-                "cold Task activation succeeded but directory publication failed"
-            );
-        }
+        self.product_events.apply_task_entry(entry).await;
         Ok(Some(aggregate))
     }
 
@@ -431,6 +431,20 @@ impl TaskRuntime {
             facts.run.root_thread_id == root_thread_id,
             "Task aggregate owner does not match root Thread"
         );
+        for stop_event in &stop_events {
+            if let Some(existing) = facts
+                .stop_events
+                .iter()
+                .find(|existing| existing.id == stop_event.id)
+            {
+                anyhow::ensure!(
+                    existing == stop_event,
+                    "Task stop event id is already bound to different hot facts"
+                );
+            } else {
+                facts.stop_events.push(stop_event.clone());
+            }
+        }
         if let Some(current) = current.as_ref()
             && current.facts.run.id == facts.run.id
         {
@@ -483,6 +497,9 @@ impl TaskRuntime {
             .as_ref()
             .filter(|value| value.facts.run.id == facts.run.id)
             .map_or_else(HashSet::new, |value| value.delivered_planner_wakes.clone());
+        self.writer
+            .accept_task(persistence_commit)
+            .map_err(anyhow::Error::msg)?;
         self.aggregates.write().await.insert(
             root_thread_id.to_string(),
             TaskAggregate {
@@ -493,22 +510,7 @@ impl TaskRuntime {
                 delivered_planner_wakes,
             },
         );
-        if let Err(error) = self.product_events.apply_task_entry(entry).await {
-            tracing::warn!(
-                root_thread_id,
-                revision,
-                error_bytes = error.to_string().len(),
-                "Task hot commit succeeded but product projection publication failed"
-            );
-        }
-        if let Err(error) = self.writer.enqueue_task(persistence_commit).await {
-            tracing::error!(
-                root_thread_id,
-                revision,
-                error = %error,
-                "Task write-behind rejected a committed in-memory fact"
-            );
-        }
+        self.product_events.apply_task_entry(entry).await;
         Ok(facts)
     }
 

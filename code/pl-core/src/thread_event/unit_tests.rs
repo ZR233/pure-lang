@@ -1,8 +1,9 @@
 use pl_protocol::{
-    CompletedTurnState, RunningTurnState, ThreadContentLifecycle, ThreadItem, ThreadItemDelta,
-    ThreadItemDeltaState, ThreadItemState, ThreadNotification, ThreadNotificationEnvelope,
-    ThreadSubscriptionRequest, ThreadSubscriptionUpdate, ThreadTextChannel, ThreadTextItem, Turn,
-    TurnCompletion, TurnPhase, TurnState,
+    CompletedTurnState, RunningTurnState, ThreadContentLifecycle, ThreadContextDisposition,
+    ThreadItem, ThreadItemDelta, ThreadItemDeltaState, ThreadItemState, ThreadNotification,
+    ThreadNotificationEnvelope, ThreadSubscriptionRequest, ThreadSubscriptionUpdate,
+    ThreadTextChannel, ThreadTextItem, ThreadTurnHistory, Turn, TurnCompletion, TurnPhase,
+    TurnState,
 };
 use tokio::time::{Duration, timeout};
 
@@ -83,6 +84,47 @@ async fn product_metadata_rebinds_only_the_subscription_bootstrap() {
         bus.snapshot("thread-1").unwrap().thread.mode,
         pl_protocol::ThreadMode::Simple
     );
+}
+
+#[test]
+fn cold_page_materializes_into_hot_window_without_overwriting_hot_items() {
+    let bus = ThreadEventBus::default();
+    let mut snapshot = ThreadSnapshot::empty("thread-1");
+    snapshot.active_turn = Some(active_turn(TurnPhase::Responding));
+    let hot_item = commentary_item("hot", 1, ThreadContentLifecycle::completed(2));
+    snapshot.items = vec![hot_item.clone()];
+    bus.replace_snapshot(snapshot).unwrap();
+    let older_turn = Turn::queued("turn-old", "thread-1", 0);
+    let histories = vec![
+        ThreadTurnHistory {
+            turn: active_turn(TurnPhase::Responding),
+            items: vec![commentary_item(
+                "cold-stale",
+                0,
+                ThreadContentLifecycle::completed(1),
+            )],
+            context_disposition: ThreadContextDisposition::Active,
+        },
+        ThreadTurnHistory {
+            turn: older_turn,
+            items: vec![user_message_item("cold-only", 0)],
+            context_disposition: ThreadContextDisposition::Active,
+        },
+    ];
+
+    bus.merge_cold_history("thread-1", &histories).unwrap();
+
+    let hot = bus.hot_history("thread-1").unwrap();
+    assert_eq!(hot.turns.len(), 2);
+    assert_eq!(hot.items.len(), 2);
+    assert_eq!(
+        hot.items
+            .iter()
+            .find(|item| item.id == hot_item.id)
+            .unwrap(),
+        &hot_item
+    );
+    assert!(hot.items.iter().any(|item| item.id == "cold-only"));
 }
 
 #[test]

@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use pl_core::{
     AgentCommand, AgentRecoveryTarget, AgentState, AgentStateTransition, MailboxCommand,
-    MailboxDeliveryState, TurnId, canonical_content_hash,
+    MailboxDeliveryState, TurnId,
 };
 use pl_protocol::{Turn, TurnCancellationCause, TurnCommand, TurnState};
 use sea_orm::{
@@ -10,10 +10,9 @@ use sea_orm::{
 };
 
 use crate::studio::StudioStore;
-use crate::studio::entity::{
-    thread, thread_context_segment, thread_input, thread_session_state, turn,
-};
+use crate::studio::entity::{thread, thread_context_segment, thread_input, turn};
 use crate::studio::ids::unix_seconds;
+use crate::studio::store::object::{delete_object, put_object};
 
 pub(in crate::studio) struct ThreadRuntimeSeed {
     pub thread_revision: u64,
@@ -76,25 +75,13 @@ impl StudioStore {
             anyhow::ensure!(!threads.is_empty(), "Thread reset target not found");
             let now = unix_seconds();
             let state = pl_protocol::AgentWorkingState::default();
-            let state_json = serde_json::to_string(&state)?;
-            let state_hash = canonical_content_hash(state_json.as_bytes());
             for thread_row in threads {
                 thread_context_segment::Entity::delete_many()
                     .filter(thread_context_segment::Column::ThreadId.eq(&thread_row.id))
                     .exec(&tx)
                     .await?;
-                thread_session_state::Entity::delete_by_id(thread_row.id.clone())
-                    .exec(&tx)
-                    .await?;
-                thread_session_state::ActiveModel {
-                    thread_id: Set(thread_row.id.clone()),
-                    revision: Set(0),
-                    state_json: Set(state_json.clone()),
-                    state_hash: Set(state_hash.clone()),
-                    updated_at: Set(now),
-                }
-                .insert(&tx)
-                .await?;
+                delete_object::<pl_protocol::AgentWorkingState>(&tx, &thread_row.id).await?;
+                put_object(&tx, &thread_row.id, &state, now).await?;
 
                 let inputs = thread_input::Entity::find()
                     .filter(thread_input::Column::ThreadId.eq(&thread_row.id))
@@ -191,38 +178,15 @@ impl StudioStore {
     pub(in crate::studio) async fn thread_runtime_seed(
         &self,
         thread_id: &str,
-    ) -> Result<ThreadRuntimeSeed> {
-        let row = thread::Entity::find_by_id(thread_id)
-            .one(&self.db)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("Thread runtime seed not found"))?;
+    ) -> Result<Option<ThreadRuntimeSeed>> {
+        let Some(row) = thread::Entity::find_by_id(thread_id).one(&self.db).await? else {
+            return Ok(None);
+        };
         let event_sequence = u64::try_from(row.event_sequence)?;
-        Ok(ThreadRuntimeSeed {
+        Ok(Some(ThreadRuntimeSeed {
             thread_revision: u64::try_from(row.revision)?,
             runtime_revision: event_sequence.saturating_add(1).max(1),
             event_sequence: event_sequence.saturating_add(1).max(1),
-        })
-    }
-
-    pub(crate) async fn read_thread_todo(
-        &self,
-        thread_id: &str,
-    ) -> Result<Option<pl_protocol::TodoListSnapshot>> {
-        let Some(row) = thread_session_state::Entity::find_by_id(thread_id.to_string())
-            .one(&self.db)
-            .await?
-        else {
-            return Ok(None);
-        };
-        let state: pl_protocol::AgentWorkingState =
-            serde_json::from_str(&row.state_json).context("thread working state is invalid")?;
-        state
-            .sections
-            .iter()
-            .find(|section| section.id.as_str() == pl_core::CURRENT_TODO_SECTION_ID)
-            .map(|section| {
-                serde_json::from_str(&section.content).context("thread todo section is invalid")
-            })
-            .transpose()
+        }))
     }
 }

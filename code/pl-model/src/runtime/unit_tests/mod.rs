@@ -250,6 +250,38 @@ fn minimal_request(_model: &str) -> CompletionRequest {
         .build()
 }
 
+fn complete_task_wire_request() -> CompletionRequest {
+    CompletionRequest::builder()
+        .instructions(
+            "TASK_WIRE_BASE_SYSTEM\nTASK_WIRE_GLOBAL_DEVELOPER\nTASK_WIRE_PLANNER_ROLE\n\
+             TASK_WIRE_WORKSPACE_AGENTS\nTASK_WIRE_SKILLS_AND_CONSTRAINTS",
+        )
+        .input(vec![
+            Message {
+                role: MessageRole::User,
+                content: MessageContent::text(
+                    "TASK_WIRE_REAL_USER_PROMPT TASK_WIRE_HOT_HISTORY TASK_WIRE_PHASE_CONTEXT"
+                        .to_string(),
+                ),
+                reasoning_content: None,
+                tool_calls: None,
+                tool_result: None,
+                metadata: HashMap::new(),
+            }
+            .into(),
+        ])
+        .tools(vec![pl_protocol::ToolSpec::function(
+            "task_status",
+            "Read the canonical Task state.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }),
+        )])
+        .build()
+}
+
 fn invocation(event_tx: pl_trace::AgentEventSender) -> ModelInvocationContext {
     ModelInvocationContext::new(ModelSession::default(), event_tx)
 }

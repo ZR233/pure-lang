@@ -28,6 +28,7 @@ pub(super) fn same_task_domain_facts(
         && left.merges == right.merges
         && left.reviews == right.reviews
         && left.issues == right.issues
+        && left.stop_events == right.stop_events
 }
 
 pub(super) fn planner_wakes_for_facts(

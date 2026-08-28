@@ -43,14 +43,9 @@ impl StudioRuntime {
         }
 
         let aggregate = self.task_runtime.aggregate(&thread_id).await;
-        let persisted_task = self
-            .store
-            .find_latest_task_run_for_root_thread(&thread_id)
-            .await?;
         if aggregate
             .as_ref()
             .is_some_and(|aggregate| aggregate.facts.run.kind().is_terminal())
-            || persisted_task.is_some_and(|task| task.kind().is_terminal())
         {
             return Err(plan_confirmation_conflict());
         }

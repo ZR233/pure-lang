@@ -5,7 +5,7 @@ use pl_core::ThreadId;
 use tokio::sync::RwLock;
 
 use crate::studio::task_coordinator::{StudioTaskSpawnPreparation, StudioTaskSpawnRequest};
-use crate::{WorktreeHandle, WorktreeManager};
+use crate::{AttachmentRecord, WorktreeHandle, WorktreeManager};
 
 #[derive(Clone)]
 pub(super) struct StudioAgentResource {
@@ -22,10 +22,18 @@ pub(in crate::studio) struct StudioAgentResources {
     tool_sets: Arc<RwLock<BTreeMap<ThreadId, pl_core::AgentToolSet>>>,
     cleanup_takeovers: Arc<RwLock<BTreeSet<String>>>,
     initial_remote_urls: Arc<RwLock<BTreeMap<String, String>>>,
+    attachments: Arc<RwLock<BTreeMap<String, BTreeMap<String, AttachmentRecord>>>>,
 }
 
 impl StudioAgentResources {
     pub(super) async fn insert(&self, id: ThreadId, resource: StudioAgentResource) {
+        // 新 child Thread 不继承父 Thread 的附件；即使集合为空，也必须先建立
+        // catalog 驻留标记，确保 activate_spawn 返回后首个 Turn 只读热对象。
+        self.attachments
+            .write()
+            .await
+            .entry(resource.thread_id.clone())
+            .or_default();
         self.entries.write().await.insert(id, resource);
     }
 
@@ -35,7 +43,11 @@ impl StudioAgentResources {
 
     pub(super) async fn remove(&self, id: &ThreadId) -> Option<StudioAgentResource> {
         self.tool_sets.write().await.remove(id);
-        self.entries.write().await.remove(id)
+        let resource = self.entries.write().await.remove(id);
+        if let Some(resource) = &resource {
+            self.attachments.write().await.remove(&resource.thread_id);
+        }
+        resource
     }
 
     pub(super) async fn tool_set(
@@ -130,6 +142,86 @@ impl StudioAgentResources {
         for attachment_id in attachment_ids {
             urls.remove(attachment_id);
         }
+    }
+
+    pub(in crate::studio) async fn replace_thread_attachments(
+        &self,
+        thread_id: &str,
+        records: Vec<AttachmentRecord>,
+    ) {
+        self.attachments.write().await.insert(
+            thread_id.to_string(),
+            records
+                .into_iter()
+                .map(|record| (record.id.clone(), record))
+                .collect(),
+        );
+    }
+
+    pub(in crate::studio) async fn insert_thread_attachments(
+        &self,
+        thread_id: &str,
+        records: impl IntoIterator<Item = AttachmentRecord>,
+    ) {
+        let mut attachments = self.attachments.write().await;
+        let catalog = attachments.entry(thread_id.to_string()).or_default();
+        catalog.extend(
+            records
+                .into_iter()
+                .map(|record| (record.id.clone(), record)),
+        );
+    }
+
+    pub(in crate::studio) async fn thread_attachments(
+        &self,
+        thread_id: &str,
+    ) -> Vec<AttachmentRecord> {
+        self.attachments
+            .read()
+            .await
+            .get(thread_id)
+            .map(|catalog| catalog.values().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    pub(in crate::studio) async fn selected_thread_attachments(
+        &self,
+        thread_id: &str,
+        attachment_ids: &[String],
+    ) -> anyhow::Result<Vec<AttachmentRecord>> {
+        let attachments = self.attachments.read().await;
+        let catalog = attachments
+            .get(thread_id)
+            .ok_or_else(|| anyhow::anyhow!("Thread attachment catalog is not resident"))?;
+        let mut selected = Vec::with_capacity(attachment_ids.len());
+        let mut seen = BTreeSet::new();
+        for id in attachment_ids {
+            anyhow::ensure!(seen.insert(id), "duplicate attachment id: {id}");
+            selected.push(
+                catalog
+                    .get(id)
+                    .cloned()
+                    .ok_or_else(|| anyhow::anyhow!("attachment {id} is not resident"))?,
+            );
+        }
+        Ok(selected)
+    }
+
+    pub(in crate::studio) async fn remove_thread_attachment_ids(
+        &self,
+        thread_id: &str,
+        attachment_ids: &[String],
+    ) {
+        let mut attachments = self.attachments.write().await;
+        if let Some(catalog) = attachments.get_mut(thread_id) {
+            for id in attachment_ids {
+                catalog.remove(id);
+            }
+        }
+    }
+
+    pub(in crate::studio) async fn evict_thread_attachments(&self, thread_id: &str) {
+        self.attachments.write().await.remove(thread_id);
     }
 }
 

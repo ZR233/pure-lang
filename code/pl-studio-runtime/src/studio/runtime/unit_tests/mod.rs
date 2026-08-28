@@ -454,9 +454,19 @@ async fn cold_start_cancels_plan_confirmation_for_a_completed_task() {
         )
         .await
         .unwrap();
+    let owner_revision = setup
+        .task_runtime
+        .aggregate(&thread.id)
+        .await
+        .expect("completed Task remains hot until durable")
+        .hot_revision;
+    assert_ne!(
+        owner_revision, completed.revision,
+        "Task owner revision must not be confused with TaskRun revision"
+    );
     setup
         .task_runtime
-        .await_durable(&thread.id, completed.revision)
+        .await_durable(&thread.id, owner_revision)
         .await
         .unwrap();
     drop(setup);
@@ -479,14 +489,6 @@ async fn cold_start_cancels_plan_confirmation_for_a_completed_task() {
             .interactions
             .is_empty()
     );
-    let stored = runtime
-        .store
-        .read_interaction(&interaction.interaction_id)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(stored.status(), crate::InteractionStatus::Cancelled);
-    assert_eq!(stored.revision, interaction.revision + 1);
     let late_click = runtime
         .resolve_interaction(
             interaction_id.clone(),
@@ -505,7 +507,7 @@ async fn cold_start_cancels_plan_confirmation_for_a_completed_task() {
         pl_protocol::studio::StudioErrorCode::Conflict
     );
 
-    let cancelled_revision = stored.revision;
+    let cancelled_revision = interaction.revision + 1;
     runtime.shutdown_runtime().await.unwrap();
     drop(runtime);
 

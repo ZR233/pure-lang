@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use pl_protocol::{
     ConversationRecoveryMode, ConversationRecoveryRecord, InteractionRequest, ThreadAttachment,
 };
@@ -6,6 +8,89 @@ use serde::{Deserialize, Serialize};
 use crate::agent_runtime::{ThreadId, TurnId};
 
 use super::{MailboxCommand, MailboxDeliveryState, MailboxTransitionError};
+
+/// Mailbox 中可持久化的类型化元数据值。
+///
+/// 该领域值让活动 actor 不持有 wire JSON；serde 仅由 repository/wire 边界调用。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum MailboxMetadataValue {
+    #[default]
+    Null,
+    Boolean(bool),
+    Signed(i64),
+    Unsigned(u64),
+    Float(f64),
+    String(String),
+    Array(Vec<Self>),
+    Object(BTreeMap<String, Self>),
+}
+
+impl MailboxMetadataValue {
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            Self::String(value) => Some(value),
+            Self::Null
+            | Self::Boolean(_)
+            | Self::Signed(_)
+            | Self::Unsigned(_)
+            | Self::Float(_)
+            | Self::Array(_)
+            | Self::Object(_) => None,
+        }
+    }
+}
+
+impl From<serde_json::Value> for MailboxMetadataValue {
+    fn from(value: serde_json::Value) -> Self {
+        match value {
+            serde_json::Value::Null => Self::Null,
+            serde_json::Value::Bool(value) => Self::Boolean(value),
+            serde_json::Value::Number(value) => value
+                .as_i64()
+                .map(Self::Signed)
+                .or_else(|| value.as_u64().map(Self::Unsigned))
+                .or_else(|| value.as_f64().map(Self::Float))
+                .unwrap_or(Self::Null),
+            serde_json::Value::String(value) => Self::String(value),
+            serde_json::Value::Array(values) => {
+                Self::Array(values.into_iter().map(Self::from).collect())
+            }
+            serde_json::Value::Object(values) => Self::Object(
+                values
+                    .into_iter()
+                    .map(|(key, value)| (key, Self::from(value)))
+                    .collect(),
+            ),
+        }
+    }
+}
+
+/// Mailbox 输入的产品元数据；活动会话中始终保持为领域对象。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(transparent)]
+pub struct MailboxMetadata(MailboxMetadataValue);
+
+impl MailboxMetadata {
+    pub fn get(&self, key: &str) -> Option<&MailboxMetadataValue> {
+        match &self.0 {
+            MailboxMetadataValue::Object(values) => values.get(key),
+            MailboxMetadataValue::Null
+            | MailboxMetadataValue::Boolean(_)
+            | MailboxMetadataValue::Signed(_)
+            | MailboxMetadataValue::Unsigned(_)
+            | MailboxMetadataValue::Float(_)
+            | MailboxMetadataValue::String(_)
+            | MailboxMetadataValue::Array(_) => None,
+        }
+    }
+}
+
+impl From<serde_json::Value> for MailboxMetadata {
+    fn from(value: serde_json::Value) -> Self {
+        Self(MailboxMetadataValue::from(value))
+    }
+}
 
 /// 决定 mailbox 输入是否以及如何投影到用户可见 Timeline。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -59,7 +144,7 @@ pub struct MailboxInputPayload {
     #[serde(default)]
     pub presentation: MailboxPresentation,
     #[serde(default)]
-    pub metadata: serde_json::Value,
+    pub metadata: MailboxMetadata,
 }
 
 impl MailboxInputPayload {
@@ -68,7 +153,7 @@ impl MailboxInputPayload {
             message: message.into(),
             attachments: Vec::new(),
             presentation: MailboxPresentation::User,
-            metadata: serde_json::Value::Null,
+            metadata: MailboxMetadata::default(),
         }
     }
 }
@@ -256,7 +341,7 @@ impl AgentSubmitRequest {
 
     /// 设置产品自定义、可持久化的输入元数据。
     pub fn with_metadata(mut self, metadata: serde_json::Value) -> Self {
-        self.payload.metadata = metadata;
+        self.payload.metadata = metadata.into();
         self
     }
 
@@ -335,7 +420,7 @@ impl AgentCurrentSessionSubmitRequest {
 
     /// 设置产品自定义、可持久化的输入元数据。
     pub fn with_metadata(mut self, metadata: serde_json::Value) -> Self {
-        self.payload.metadata = metadata;
+        self.payload.metadata = metadata.into();
         self
     }
 
@@ -374,7 +459,7 @@ mod tests {
                 message: "hello".to_string(),
                 attachments: Vec::new(),
                 presentation: MailboxPresentation::Hidden,
-                metadata: json!({"kind": "test"}),
+                metadata: json!({"kind": "test"}).into(),
             },
             queue_coalescing_key: None,
             budget_action: MailboxBudgetAction::Refresh,
@@ -434,7 +519,10 @@ mod tests {
         assert_eq!(envelope.payload.message, "hello");
         assert!(envelope.payload.attachments.is_empty());
         assert_eq!(envelope.payload.presentation, MailboxPresentation::Hidden);
-        assert_eq!(envelope.payload.metadata, json!({"kind": "test"}));
+        assert_eq!(
+            envelope.payload.metadata,
+            MailboxMetadata::from(json!({"kind": "test"}))
+        );
         assert_eq!(envelope.budget_action, MailboxBudgetAction::Preserve);
 
         let result = serde_json::from_value::<ConversationRecoveryResult>(json!({

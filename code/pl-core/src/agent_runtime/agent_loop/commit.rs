@@ -104,11 +104,11 @@ impl<H> AgentLoop<H>
 where
     H: AgentRuntimeHost,
 {
-    /// 统一执行内存状态/事件发布与待落库入队模板。
+    /// 统一执行待落库入队与内存状态/事件发布模板。
     ///
     /// 调用方负责准备领域 state、facts 与 mutation；repository 只接受到进程内
-    /// 待落库队列，不等待 SQLite。owner snapshot 与 live notification 先提交；队列
-    /// 拒绝只表示持久化健康退化，不得回滚或把已经发生的业务命令改写成失败。
+    /// 待落库队列，不等待 SQLite。只有队列接受完整 typed snapshot 后，owner
+    /// snapshot 与 live notification 才能对外可见；因此 admission 失败不会发布半状态。
     pub(super) async fn commit_and_publish(
         &mut self,
         commit: PendingCommit,
@@ -127,6 +127,11 @@ where
             facts: commit.facts,
             mutation: commit.mutation,
         };
+        self.host
+            .repository()
+            .commit(repository_commit)
+            .await
+            .map_err(|error| super::super::AgentRuntimeError::Repository(error.to_string()))?;
         self.state = commit.next_state;
         let publication = commit.publication;
         if let Some(publication) = &publication {
@@ -153,14 +158,6 @@ where
                     "thread projection rejected a committed in-memory fact; subscribers must resync"
                 );
             }
-        }
-        if let Err(error) = self.host.repository().commit(repository_commit).await {
-            tracing::error!(
-                agent_id = %self.state.snapshot.identity.id,
-                revision = self.state.snapshot.revision,
-                error = %error,
-                "write-behind rejected a committed in-memory fact"
-            );
         }
         if let Some(publication) = publication {
             self.host

@@ -8,12 +8,13 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use git::git_output;
-use live_fixture::{LIVE_VERIFY_MARKER, LiveTaskFixture, command_output, normalized_text};
+use live_fixture::{LIVE_TASK_PROMPT, LIVE_VERIFY_MARKER, LiveTaskFixture, command_output};
 use pl_studio_runtime::{
     InteractionResolution, InteractionStatus, PlanConfirmationResolution,
-    PlanConfirmationResolutionPayload, StudioReviewScope, StudioSubmitPromptOptions,
-    StudioSubmitPromptRequest, StudioTaskCompletionContent, StudioTaskCompletionState,
-    StudioTaskOutcome, StudioTaskReviewState, StudioTaskState, StudioTaskWorkUnitState,
+    PlanConfirmationResolutionPayload, StudioHostKind, StudioReviewScope, StudioRuntime,
+    StudioRuntimeOptions, StudioStore, StudioSubmitPromptOptions, StudioSubmitPromptRequest,
+    StudioTaskCompletionContent, StudioTaskCompletionState, StudioTaskOutcome,
+    StudioTaskReviewState, StudioTaskState, StudioTaskWorkUnitState,
     StudioWorkUnitCompletionOutcome, ThreadStatus,
 };
 
@@ -21,7 +22,7 @@ const LIVE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "uses the installed Studio model configuration and incurs real model usage"]
-async fn installed_config_task_mode_builds_headless_shooter() -> Result<()> {
+async fn installed_config_task_mode_delivers_two_rust_workstreams_and_recovers() -> Result<()> {
     let fixture = LiveTaskFixture::new().await?;
     let result = tokio::time::timeout(LIVE_TIMEOUT, run_live_task_flow(&fixture))
         .await
@@ -38,10 +39,16 @@ async fn installed_config_task_mode_builds_headless_shooter() -> Result<()> {
         .await
         .context("Studio runtime shutdown timed out")
         .and_then(|result| result);
+    let recovery = if result.is_ok() && shutdown.is_ok() {
+        assert_reopened_activation(&fixture).await
+    } else {
+        Ok(())
+    };
     let config_unchanged = fixture.assert_config_unchanged();
 
     result?;
     shutdown?;
+    recovery?;
     config_unchanged
 }
 
@@ -51,7 +58,7 @@ async fn run_live_task_flow(fixture: &LiveTaskFixture) -> Result<()> {
         .submit_prompt(StudioSubmitPromptRequest {
             thread_id: fixture.thread_id.clone(),
             input: pl_protocol::studio::StudioPromptInput {
-                text: live_task_prompt(),
+                text: LIVE_TASK_PROMPT.trim().to_string(),
                 attachment_draft_ids: Vec::new(),
             },
             options: StudioSubmitPromptOptions::default(),
@@ -87,7 +94,8 @@ async fn run_live_task_flow(fixture: &LiveTaskFixture) -> Result<()> {
     let task = fixture.wait_for_completed_task().await?;
     fixture.wait_for_no_active_turns().await?;
     assert_task_invariants(fixture, &task).await?;
-    assert_generated_project(fixture)?;
+    assert_delivered_fixture(fixture)?;
+    write_delivery_artifacts(fixture, &task)?;
     Ok(())
 }
 
@@ -104,8 +112,17 @@ async fn assert_task_invariants(
         },
         state => bail!("Task state is `{state:?}` instead of `completed`"),
     }
-    if task.work_units.is_empty() {
-        bail!("Task did not create an executor work unit");
+    if task.work_units.len() != 2 {
+        bail!(
+            "Task must create exactly two independent executor work units, got {}",
+            task.work_units.len()
+        );
+    }
+    if task.completions.len() != 2 {
+        bail!(
+            "Task must persist exactly two executor Completions, got {}",
+            task.completions.len()
+        );
     }
     for unit in &task.work_units {
         if !matches!(
@@ -168,23 +185,38 @@ async fn assert_task_invariants(
             bail!("task_spawn_executor recorded an invalid scopeHints entry: {hints:?}");
         }
     }
-    if !scope_hints
-        .iter()
-        .any(|hints| hints.as_slice() == ["game-core.mjs"])
-    {
-        bail!("Task did not preserve the requested focused scopeHints: {scope_hints:?}");
+    let expected_scope_hints = [
+        ["src/normalize.rs", "tests/normalize.rs"],
+        ["src/validate.rs", "tests/validate.rs"],
+    ];
+    for expected in expected_scope_hints {
+        if !scope_hints.iter().any(|hints| {
+            let mut actual = hints.iter().map(String::as_str).collect::<Vec<_>>();
+            actual.sort_unstable();
+            actual == expected
+        }) {
+            bail!("Task did not preserve executor scopeHints {expected:?}: {scope_hints:?}");
+        }
     }
-    if !task.completions.iter().any(|completion| {
-        matches!(
-            &completion.content,
-            StudioTaskCompletionContent::Delivery(delivery)
-                if delivery
-                    .changed_files
-                    .iter()
-                    .any(|path| path != "game-core.mjs" && !path.starts_with("design/"))
-        )
-    }) {
-        bail!("executor completion did not prove that scopeHints are non-authoritative");
+    for completion in &task.completions {
+        let StudioTaskCompletionContent::Delivery(delivery) = &completion.content else {
+            bail!("Task executor reported no delivery: {}", completion.id);
+        };
+        let mut changed = delivery
+            .changed_files
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        changed.sort_unstable();
+        if changed.as_slice() != expected_scope_hints[0]
+            && changed.as_slice() != expected_scope_hints[1]
+        {
+            bail!(
+                "executor completion `{}` escaped its exact two-file scope: {:?}",
+                completion.id,
+                delivery.changed_files
+            );
+        }
     }
 
     let recorded_merges = fixture.successful_task_record_merge_arguments().await?;
@@ -271,16 +303,7 @@ async fn assert_task_invariants(
     match &task.integrated_review_gate {
         pl_studio_runtime::StudioIntegratedReviewGate::NotRequiredSingleExecutorEquivalent {
             ..
-        } => {
-            if task.work_units.len() != 1
-                || task
-                    .reviews
-                    .iter()
-                    .any(|review| review.scope == StudioReviewScope::Integrated)
-            {
-                bail!("single-executor equivalent task unexpectedly created integrated review");
-            }
-        }
+        } => bail!("two-workstream Task incorrectly used the integrated-review exemption"),
         pl_studio_runtime::StudioIntegratedReviewGate::SatisfiedByReview {
             review_round_id,
             reviewed_head,
@@ -304,9 +327,9 @@ async fn assert_task_invariants(
         review
             .design_references
             .iter()
-            .any(|reference| reference.path == "design/shooter.md")
+            .any(|reference| reference.path == "design/task-workflows.md")
     }) {
-        bail!("not every review cited design/shooter.md");
+        bail!("not every review cited design/task-workflows.md");
     }
     if !task.completions.iter().all(|completion| {
         !matches!(&completion.state, StudioTaskCompletionState::Approved(_))
@@ -350,87 +373,151 @@ async fn assert_task_invariants(
     }
     git_output(
         &fixture.workspace,
-        &["cat-file", "-e", "HEAD:design/shooter.md"],
+        &["cat-file", "-e", "HEAD:design/task-workflows.md"],
     )
-    .context("design/shooter.md was not committed at workspace HEAD")?;
+    .context("design/task-workflows.md was not committed at workspace HEAD")?;
     Ok(())
 }
 
-fn assert_generated_project(fixture: &LiveTaskFixture) -> Result<()> {
+fn assert_delivered_fixture(fixture: &LiveTaskFixture) -> Result<()> {
     for path in [
-        "index.html",
-        "styles.css",
-        "game-core.mjs",
-        "game.js",
-        "verify.mjs",
-        "design/shooter.md",
+        "src/normalize.rs",
+        "src/validate.rs",
+        "tests/normalize.rs",
+        "tests/validate.rs",
+        "design/task-workflows.md",
     ] {
         if !fixture.workspace.join(path).is_file() {
-            bail!("required generated file is missing: {path}");
+            bail!("required delivered file is missing: {path}");
         }
     }
 
-    let html = normalized_text(&fixture.workspace.join("index.html"))?;
-    let html_lower = html.to_ascii_lowercase();
-    if !html_lower.contains("<canvas") {
-        bail!("index.html does not contain a canvas");
-    }
-    if !html.contains("styles.css") {
-        bail!("index.html does not reference styles.css");
-    }
-    if !html.contains("game.js") {
-        bail!("index.html does not reference game.js");
+    let fixture_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join("test-fixtures/task-live/workspace");
+    for protected in [
+        "Cargo.toml",
+        "Cargo.lock",
+        "src/lib.rs",
+        "src/bin/fixture_verify.rs",
+        "README.md",
+        "AGENTS.md",
+        ".gitignore",
+        "docs/product-contract.md",
+        "skills/task-fixture-rust/SKILL.md",
+    ] {
+        let expected = std::fs::read(fixture_root.join(protected))?;
+        let actual = std::fs::read(fixture.workspace.join(protected))?;
+        if actual != expected {
+            bail!("Task modified protected fixture file `{protected}`");
+        }
     }
 
-    run_node(fixture, &["--check", "game-core.mjs"])?;
-    run_node(fixture, &["--check", "game.js"])?;
-    let verification = run_node(fixture, &["verify.mjs"])?;
+    let tests = command_output(Some(&fixture.workspace), "cargo", &["test"])?;
+    let verification = command_output(
+        Some(&fixture.workspace),
+        "cargo",
+        &["run", "--quiet", "--bin", "fixture_verify"],
+    )?;
     if !verification
         .lines()
         .any(|line| line.trim() == LIVE_VERIFY_MARKER)
     {
         bail!(
-            "verify.mjs did not output the fixed success marker `{LIVE_VERIFY_MARKER}`\n\
+            "fixture verifier did not output the fixed success marker `{LIVE_VERIFY_MARKER}`\n\
              output:\n{verification}"
         );
     }
+    std::fs::write(fixture.artifact_dir.join("cargo-test.stdout.txt"), tests)?;
+    std::fs::write(
+        fixture.artifact_dir.join("fixture-verify.stdout.txt"),
+        format!("{verification}\n"),
+    )?;
     Ok(())
 }
 
-fn run_node(fixture: &LiveTaskFixture, args: &[&str]) -> Result<String> {
-    command_output(Some(&fixture.workspace), "node", args)
+fn write_delivery_artifacts(
+    fixture: &LiveTaskFixture,
+    task: &pl_studio_runtime::StudioTaskRuntime,
+) -> Result<()> {
+    std::fs::write(
+        fixture.artifact_dir.join("task-runtime.json"),
+        serde_json::to_vec_pretty(task)?,
+    )?;
+    std::fs::write(
+        fixture.artifact_dir.join("git-head.txt"),
+        format!(
+            "{}\n",
+            git_output(&fixture.workspace, &["rev-parse", "HEAD"])?
+        ),
+    )?;
+    std::fs::write(
+        fixture.artifact_dir.join("git-log.txt"),
+        git_output(
+            &fixture.workspace,
+            &["log", "--oneline", "--decorate", "--all"],
+        )?,
+    )?;
+    std::fs::write(
+        fixture.artifact_dir.join("git-status.txt"),
+        git_output(&fixture.workspace, &["status", "--porcelain=v1"])?,
+    )?;
+    Ok(())
 }
 
-fn live_task_prompt() -> String {
-    format!(
-        r#"Build and fully deliver a dependency-free static Web airplane shooter in this temporary Git workspace.
-
-Required files:
-- index.html
-- styles.css
-- game-core.mjs
-- game.js
-- verify.mjs
-- design/shooter.md
-
-Required behavior:
-- keyboard movement constrained to the canvas bounds
-- shooting
-- enemy spawning and movement
-- projectile/enemy collision
-- score updates
-- game-over state
-- restart that resets gameplay state
-
-Use only browser APIs and Node.js built-ins; do not add package dependencies or require a browser build step.
-Keep deterministic gameplay rules in game-core.mjs so verify.mjs can import them in Node.
-verify.mjs must use node:assert to verify movement boundaries, shooting, collision, scoring, and restart, then print exactly this success marker on its own line:
-{LIVE_VERIFY_MARKER}
-
-Follow the Task state machine all the way to a successful Completed outcome. Start by reading task_status. In Planning, submit the concrete plan with task_transition action submitPlan, using the exact expectedRevision and expectedGeneration returned by task_status. Stop and wait for plan confirmation. After confirmation moves the Task to EditingDocuments, use ordinary repository tools to create design/shooter.md and commit that design document, then read task_status again and use task_transition action finishDocumentEditing with the fresh revision and generation.
-
-In Working, spawn exactly one executor with a self-contained structured implementation blueprint. The blueprint must contain at least two concrete ordered implementation steps with repository targets, stable acceptance criteria, design evidence, and command or inspection checks covering every criterion. Use scopeHints exactly ["game-core.mjs"]. scopeHints are planning and review-focus hints, not write authorization: that executor must deliver and commit every required non-design file, including files outside the hint. Wait for its Completion, request delivery review, wait for the reviewer, and only proceed after the delivery passes. Close the approved executor, integrate its branch with ordinary Git in the Planner workspace, and call task_record_merge with the exact Completion revision and the actual before/after HEADs.
-
-Read task_status after recording the merge. If completionGate requires integrated review, call task_transition action beginIntegratedReview with the current expectedRevision and expectedGeneration, wait for the reviewer, and read task_status again; if the gate grants the single-executor equivalent exemption, do not create an integrated reviewer. Repair any reported issue through the normal Task workflow. When and only when completionGate allows success, call task_transition action complete with outcome succeeded, a concise summary, and the latest exact expectedRevision and expectedGeneration. Leave the final Git worktree clean."#
-    )
+async fn assert_reopened_activation(fixture: &LiveTaskFixture) -> Result<()> {
+    let expected_task: pl_studio_runtime::StudioTaskRuntime = serde_json::from_slice(
+        &std::fs::read(fixture.artifact_dir.join("task-runtime.json"))?,
+    )?;
+    let reopened = StudioRuntime::with_options(StudioRuntimeOptions {
+        studio_home: Some(fixture.studio_home.clone()),
+        host: StudioHostKind::Desktop,
+    })
+    .await
+    .map_err(anyhow::Error::new)?;
+    reopened.start_runtime().await?;
+    let project = reopened.open_project(&fixture.workspace).await?;
+    reopened.activate_project(&project.id).await?;
+    let snapshot = reopened.thread_snapshot(&fixture.thread_id).await?;
+    let reopened_store =
+        StudioStore::open(fixture.studio_home.join("studio/studio.sqlite")).await?;
+    let restored_task = reopened
+        .thread_task_view(&fixture.thread_id)
+        .await?
+        .context("reopened Task projection is missing")?;
+    if restored_task != expected_task {
+        std::fs::write(
+            fixture.artifact_dir.join("task-runtime-reopened.json"),
+            serde_json::to_vec_pretty(&restored_task)?,
+        )?;
+        bail!("reopened Task projection differs from the durable completed Task");
+    }
+    if snapshot.items.is_empty() || snapshot.revision == 0 {
+        bail!("reopened activation did not materialize the hot Timeline window");
+    }
+    if snapshot.active_turn.is_some() {
+        bail!("reopened completed Task retained an active Turn");
+    }
+    if !reopened_store
+        .list_pending_interactions(&fixture.thread_id)
+        .await?
+        .is_empty()
+    {
+        bail!("reopened completed Task retained a pending interaction");
+    }
+    let recovery = serde_json::json!({
+        "threadId": fixture.thread_id,
+        "taskRunId": restored_task.run_id,
+        "taskRevision": restored_task.revision,
+        "timelineItems": snapshot.items.len(),
+        "timelineRevision": snapshot.revision,
+        "activeTurn": snapshot.active_turn,
+        "status": "restoredHot",
+    });
+    std::fs::write(
+        fixture.artifact_dir.join("shutdown-reopen.json"),
+        serde_json::to_vec_pretty(&recovery)?,
+    )?;
+    reopened.shutdown_runtime().await?;
+    Ok(())
 }

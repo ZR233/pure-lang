@@ -282,9 +282,10 @@ Degraded、Recovering、Blocked 是全局新工作准入门禁，不是 Task 或
 
 每个 owner 使用串行 command mailbox。同 fingerprint/scope 的 pending command 合并；新的 desired
 revision 使旧结果失效；reset、shutdown 与 reconcile 在生命周期锁上串行，但状态锁内不得等待
-网络、进程退出或长 IO。先替换 owner snapshot，再发布事件，最后把同一 revision 的冷存储事实
-追加到 write-behind 队列。enqueue 或 SQLite 失败只改变 PersistenceState 与新工作门禁，不能回滚
-或覆盖已发布的内存事实。Flutter 不用迟到 command response 覆盖更高 event revision。
+网络、进程退出或长 IO。transition 先生成不可变 typed persistence snapshot，write-behind admission
+成功后才替换 owner snapshot 并发布事件；admission 失败不改变业务状态。后台 SQLite 失败只改变
+PersistenceState 与新工作门禁，不能回滚或覆盖已经发布的内存事实。Flutter 不用迟到 command
+response 覆盖更高 event revision。
 
 副作用探针覆盖 SQLite mutation、actor registration、durable wake、process spawn、Skills scan、
 Usage network、Updater fetch、MCP connector 与 LSP probe。所有 read 连续调用必须保持计数为零；

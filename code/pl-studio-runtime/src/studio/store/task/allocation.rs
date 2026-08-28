@@ -11,7 +11,7 @@ use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::store::StudioStore;
 use crate::studio::task_coordinator::{
-    AllocateExecutor, ExecutorAllocation, TaskRunStateKind, WorkUnitState,
+    AllocateExecutor, ExecutorAllocation, TaskRunStateKind, WorkUnitState, encode_work_unit_state,
 };
 
 const MAX_ACTIVE_EXECUTORS: usize = 4;
@@ -25,12 +25,17 @@ impl StudioStore {
             thread_id,
             title,
             mut scope_hints,
+            blueprint,
             agent_id,
             requested_by_call_id,
         } = input;
         let title = normalize_executor_title(&title)?;
         scope_hints.sort();
         scope_hints.dedup();
+        let blueprint = blueprint.normalize_and_validate()?;
+        if blueprint.task_name != title || blueprint.scope.scope_hints != scope_hints {
+            bail!("executor blueprint does not match its canonical allocation");
+        }
         let tx = self.db.begin().await?;
         let run_model = entities::task_run::Entity::find()
             .filter(entities::task_run::Column::RootThreadId.eq(thread_id))
@@ -56,6 +61,7 @@ impl StudioStore {
             if existing_unit.executor_thread_id.as_deref() != Some(agent_id.as_str())
                 || normalize_executor_title(&existing_unit.title)? != title
                 || !stored_scope_matches(existing_unit, &scope_hints)?
+                || work_unit_record(existing_unit.clone())?.blueprint.as_ref() != Some(&blueprint)
             {
                 bail!("task executor call id is already owned by a different allocation");
             }
@@ -74,6 +80,8 @@ impl StudioStore {
             {
                 if normalize_executor_title(&existing_unit.title)? == title
                     && stored_scope_matches(existing_unit, &scope_hints)?
+                    && work_unit_record(existing_unit.clone())?.blueprint.as_ref()
+                        == Some(&blueprint)
                 {
                     let work_unit = work_unit_record(existing_unit.clone())?;
                     tx.commit().await?;
@@ -135,7 +143,10 @@ impl StudioStore {
                 supersedes_work_unit_id: Set(previous.map(|unit| unit.id.clone())),
                 executor_thread_id: Set(Some(agent_id)),
                 requested_by_call_id: Set(requested_by_call_id),
-                state_json: Set(serde_json::to_string(&WorkUnitState::pending())?),
+                state_json: Set(encode_work_unit_state(
+                    &WorkUnitState::pending(),
+                    Some(&blueprint),
+                )?),
                 revision: Set(0),
                 created_at: Set(now),
                 updated_at: Set(now),

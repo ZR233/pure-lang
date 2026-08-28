@@ -57,8 +57,9 @@ journal 和双库 projection 不再是公共或内部架构边界。
 的 engine、request 和 policy，不保留只做转发的 kernel façade。
 
 `pl-core` 内部按变化原因拆分编排职责。ThreadActor 的 durable 变更可以在各领域步骤中准备
-不同 facts 和 mutation，但 repository CAS、内存状态替换以及提交后事件发布必须经过同一条
-commit pipeline，保持“先持久化、后更新内存与广播”的原子边界。Turn 编排入口只保留主流程，
+不同 facts 和 mutation，但 queue admission、内存状态替换以及提交后事件发布必须经过同一条
+commit pipeline，保持“先接受 typed 待落库事实、后更新内存与广播”的原子边界；接受不等待
+SQLite。Turn 编排入口只保留主流程，
 instruction 准备、checkpoint/mailbox 协调、工具结果投影等支线下沉到职责明确的子模块。
 Instruction 领域进一步分离 wire/领域类型、宿主 profile、指令组装和模型上下文投影；工具缓存
 分离执行编排、single-flight 状态、缓存条目投影、键与 mutation epoch、区间读取和确定性失败。

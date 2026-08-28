@@ -179,7 +179,13 @@ impl StudioRuntime {
 
     /// 淘汰超出 LRU 容量的空闲驻留 actor；淘汰前先排空 pending commits。
     pub(in crate::studio::runtime) async fn enforce_residency_limit(&self) {
-        let candidates = self.residency.over_capacity().await;
+        let task_pins = self
+            .task_runtime
+            .active_thread_ids()
+            .await
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>();
+        let candidates = self.residency.over_capacity(&task_pins).await;
         if candidates.is_empty() {
             return;
         }
@@ -188,7 +194,8 @@ impl StudioRuntime {
         };
         let handle = framework.handle();
         for thread_id in candidates {
-            // 有活跃订阅的线程不淘汰（design/17：订阅是显式观察者）。
+            // 候选计算已排除活跃订阅和非终态 Task；这里再次检查订阅 pin，覆盖
+            // 候选快照生成后到实际逐出前新建订阅的竞争。
             if self.residency.is_pinned(&thread_id) {
                 continue;
             }
@@ -209,6 +216,11 @@ impl StudioRuntime {
                 Ok(snapshot)
                     if snapshot.active_turn_id().is_none() && snapshot.pending_inputs == 0 =>
                 {
+                    let root_thread_id = self
+                        .agent_facility
+                        .product_events
+                        .thread_snapshot(&thread_id)
+                        .map(|thread| thread.root_thread_id);
                     if let Some(repository) = self.agent_facility.persistence.lock().await.clone()
                         && let Err(error) = repository
                             .writer()
@@ -226,15 +238,16 @@ impl StudioRuntime {
                     match handle.evict_agent(agent_id).await {
                         Ok(()) => {
                             self.residency.remove(&thread_id).await;
+                            self.agent_facility
+                                .resources
+                                .evict_thread_attachments(&thread_id)
+                                .await;
                             // 耐久化完成后热集合条目退回冷数据，由分页查询回源。
                             self.agent_facility
                                 .product_events
                                 .evict_thread_entry(&thread_id);
-                            if let Ok(Some(record)) = self.store.read_thread(&thread_id).await {
-                                let _ = self
-                                    .task_runtime
-                                    .evict_durable(&record.root_thread_id)
-                                    .await;
+                            if let Some(root_thread_id) = root_thread_id {
+                                let _ = self.task_runtime.evict_durable(&root_thread_id).await;
                             }
                             tracing::debug!(
                                 thread_id = %thread_id,

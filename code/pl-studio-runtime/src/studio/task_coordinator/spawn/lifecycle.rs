@@ -159,6 +159,7 @@ impl TaskCoordinator {
                 thread_id: request.root_thread_id.clone(),
                 title: request.task_name.clone(),
                 scope_hints: scope_hints.clone(),
+                blueprint: blueprint.clone(),
                 agent_id: request.agent_id.clone(),
                 requested_by_call_id: request.requested_by_call_id.clone(),
             })

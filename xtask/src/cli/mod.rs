@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::error::ErrorKind;
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -30,6 +30,8 @@ pub(crate) enum Command {
     CheckGuiGenerated,
     /// Generate, analyze, and test the Pure Studio desktop app.
     VerifyGui(VerifyGuiOptions),
+    /// Run the opt-in real-model Task acceptance harness.
+    VerifyTask(VerifyTaskOptions),
     /// Run the Pure Studio desktop app.
     RunGui(RunGuiOptions),
     /// Build release artifacts for the current desktop OS.
@@ -67,6 +69,25 @@ pub(crate) struct VerifyGuiOptions {
     /// Run the demo integration test on Flutter's headless web-server device.
     #[arg(long)]
     pub(crate) web_integration: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Args)]
+#[command(group(
+    ArgGroup::new("target")
+        .required(true)
+        .multiple(false)
+        .args(["headless", "gui"])
+))]
+pub(crate) struct VerifyTaskOptions {
+    /// Confirm that real provider credentials and billable model calls may be used.
+    #[arg(long, required = true)]
+    pub(crate) live: bool,
+    /// Run the real-model headless Task harness.
+    #[arg(long)]
+    pub(crate) headless: bool,
+    /// Run the real native GUI and Flutter Driver Task harness.
+    #[arg(long)]
+    pub(crate) gui: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Args)]
@@ -308,6 +329,23 @@ mod tests {
                 integration: true,
                 web_integration: true,
             }))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn live_task_verification_requires_one_execution_surface() -> Result<()> {
+        assert_eq!(
+            parse(["xtask", "verify-task", "--live", "--headless"].map(OsString::from))?,
+            ParseOutcome::Run(Command::VerifyTask(VerifyTaskOptions {
+                live: true,
+                headless: true,
+                gui: false,
+            }))
+        );
+        assert!(
+            parse(["xtask", "verify-task", "--live", "--headless", "--gui"].map(OsString::from))
+                .is_err()
         );
         Ok(())
     }

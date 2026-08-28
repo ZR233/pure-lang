@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 pub(crate) use state::*;
 
-use super::{TaskSpawnFailure, TaskWorktreeDisposition};
+use super::{TaskExecutorBlueprint, TaskSpawnFailure, TaskWorktreeDisposition};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -19,6 +19,8 @@ pub(crate) struct WorkUnitContext {
     pub(crate) task_run_id: String,
     pub(crate) title: String,
     pub(crate) scope_hints: Vec<String>,
+    #[serde(default)]
+    pub(crate) blueprint: Option<TaskExecutorBlueprint>,
     pub(crate) base_commit: String,
     pub(crate) worktree_path: String,
     pub(crate) branch: String,
@@ -136,8 +138,36 @@ pub(crate) fn current_work_units(work_units: &[WorkUnit]) -> Vec<&WorkUnit> {
         .collect()
 }
 
-pub(crate) fn decode_work_unit_state(value: &str) -> Result<WorkUnitState> {
-    serde_json::from_str(value).context("invalid stored WorkUnit state JSON")
+#[derive(Serialize)]
+struct WorkUnitPersistenceDto<'a> {
+    #[serde(flatten)]
+    state: &'a WorkUnitState,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    blueprint: Option<&'a TaskExecutorBlueprint>,
+}
+
+#[derive(Deserialize)]
+struct StoredWorkUnitPersistenceDto {
+    #[serde(flatten)]
+    state: WorkUnitState,
+    #[serde(default)]
+    blueprint: Option<TaskExecutorBlueprint>,
+}
+
+pub(crate) fn encode_work_unit_state(
+    state: &WorkUnitState,
+    blueprint: Option<&TaskExecutorBlueprint>,
+) -> Result<String> {
+    serde_json::to_string(&WorkUnitPersistenceDto { state, blueprint })
+        .context("failed to encode WorkUnit persistence state")
+}
+
+pub(crate) fn decode_work_unit_state(
+    value: &str,
+) -> Result<(WorkUnitState, Option<TaskExecutorBlueprint>)> {
+    let stored: StoredWorkUnitPersistenceDto =
+        serde_json::from_str(value).context("invalid stored WorkUnit state JSON")?;
+    Ok((stored.state, stored.blueprint))
 }
 
 #[cfg(test)]
@@ -152,6 +182,7 @@ mod tests {
                 task_run_id: "task-1".to_string(),
                 title: "work".to_string(),
                 scope_hints: Vec::new(),
+                blueprint: None,
                 base_commit: "base".to_string(),
                 worktree_path: "path".to_string(),
                 branch: "branch".to_string(),
@@ -364,5 +395,27 @@ mod tests {
         ] {
             assert!(decode_work_unit_state(legacy).is_err(), "accepted {legacy}");
         }
+    }
+
+    #[test]
+    fn additive_blueprint_round_trips_without_changing_the_state_discriminator() {
+        let blueprint = TaskExecutorBlueprint::for_test("implement", vec!["src".to_string()])
+            .normalize_and_validate()
+            .expect("valid blueprint");
+        let encoded = encode_work_unit_state(&WorkUnitState::pending(), Some(&blueprint))
+            .expect("encode work unit");
+        let json: serde_json::Value = serde_json::from_str(&encoded).expect("JSON");
+        assert_eq!(json["kind"], "pending");
+        assert!(json.get("blueprint").is_some());
+
+        let (state, restored_blueprint) =
+            decode_work_unit_state(&encoded).expect("decode work unit");
+        assert_eq!(state, WorkUnitState::pending());
+        assert_eq!(restored_blueprint.as_ref(), Some(&blueprint));
+
+        let legacy = serde_json::to_string(&WorkUnitState::pending()).expect("legacy JSON");
+        let (_, legacy_blueprint) =
+            decode_work_unit_state(&legacy).expect("decode legacy work unit");
+        assert_eq!(legacy_blueprint, None);
     }
 }

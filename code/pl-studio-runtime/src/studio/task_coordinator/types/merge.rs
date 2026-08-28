@@ -233,6 +233,7 @@ pub(crate) struct AllocateExecutor {
     pub(crate) thread_id: String,
     pub(crate) title: String,
     pub(crate) scope_hints: Vec<String>,
+    pub(crate) blueprint: super::super::TaskExecutorBlueprint,
     pub(crate) agent_id: String,
     pub(crate) requested_by_call_id: String,
 }

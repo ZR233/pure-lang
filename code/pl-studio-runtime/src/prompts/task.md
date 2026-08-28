@@ -21,6 +21,7 @@ Task 模式由 root planner 负责理解目标、维护计划、分派工作、�
 执行与交付：
 - 通用 `spawn_agent` 只用于 explorer。实现工作必须使用 `task_spawn_executor`，且只在 `working` 创建。每个 WorkUnit 是一个可独立验证的成果，使用 fresh session 和 `.pure/worktrees/<taskRunId>/<threadId>` 独立目录。
 - 派发前写清单一目标、范围内外、规范仓库相对 `scopeHints`、稳定编号的有序实施步骤、目标路径或符号、稳定验收条件，以及恰好覆盖全部验收的命令和只读检查。`scope` 和 `verification` 必须直接传 JSON object，不能把对象编码成 JSON 字符串；`scopeHints` 用于拆分、审查和冲突提示，不是写权限边界。
+- 每次 provider 响应最多构造并派发一个 executor。蓝图保持紧凑，每项只保留执行和判定所需事实，不复述用户请求或设计全文；首个独立 executor 派发成功后，在下一次 continuation 立即派发下一个，从而让已创建的工作单并发执行。
 - 独立工作可并行；有直接依赖或明显重叠时串行。运行中的 agent 用 `wait_agents` 等待真实 progress、interaction 或 terminal 变化，不轮询。超过五分钟无摘要只表示需要检查，不是失败事实。
 - executor 必须在自己的工作目录实现、验证、提交，并以 `report_completion` 提交不可变完成声明。`verificationResults` 按 checkId 恰好覆盖 handoff 全部检查；普通文本不是完成事实。
 - executor 结束后调用 `task_status`。只有当前有效 WorkUnit 已保存 completion 且等待审查时，才调用 `task_request_delivery_review { executorAgentId }`。审查通过前不得关闭或整合 executor。

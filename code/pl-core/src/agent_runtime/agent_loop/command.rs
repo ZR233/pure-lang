@@ -64,6 +64,9 @@ pub(crate) enum AgentLoopCommand {
     ReadSession {
         reply: oneshot::Sender<AgentRuntimeResult<AgentSessionDigest>>,
     },
+    ReadThreadContext {
+        reply: oneshot::Sender<AgentRuntimeResult<ThreadContextState>>,
+    },
     ReadSubmissions {
         offset: usize,
         limit: usize,

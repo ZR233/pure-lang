@@ -1,12 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use pl_core::MailboxDeliveryState;
 use pl_protocol::{AgentWorkingState, ConversationRecoveryState};
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
 use crate::studio::StudioStore;
-use crate::studio::entity::{thread_input, thread_session_state};
+use crate::studio::entity::thread_input;
+use crate::studio::store::object::load_object;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ConversationTurnInputs {
@@ -55,17 +56,9 @@ impl StudioStore {
         &self,
         thread_id: &str,
     ) -> Result<ConversationRecoveryState> {
-        let Some(row) = thread_session_state::Entity::find_by_id(thread_id.to_string())
-            .one(&self.db)
-            .await?
-        else {
+        let Some(state) = load_object::<AgentWorkingState>(&self.db, thread_id).await? else {
             return Ok(ConversationRecoveryState::default());
         };
-        let actual_hash = pl_core::canonical_content_hash(row.state_json.as_bytes());
-        if row.state_hash != actual_hash {
-            bail!("Thread session state hash mismatch");
-        }
-        let state = serde_json::from_str::<AgentWorkingState>(&row.state_json)?;
         Ok(state.conversation_recovery)
     }
 }

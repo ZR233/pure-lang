@@ -12,7 +12,7 @@ use pl_protocol::{
     PureError, ThreadItem, ThreadItemState, ThreadRuntimeSnapshot, ThreadRuntimeUsage,
     ThreadSnapshot, Turn,
 };
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 
 use crate::studio::entity::{interaction, item, thread, thread_input, turn};
 
@@ -22,6 +22,8 @@ use super::context::{SessionSnapshotAuditError, audit_session_snapshot, restore_
 use super::labels::agent_state_kind;
 use super::projection::latest_turn;
 use super::{StudioSessionRecoveryFailure, anyhow_into, store_error, u64_from_i64};
+
+const HOT_TIMELINE_ITEM_LIMIT: u64 = 400;
 
 impl StudioAgentRepository {
     /// 钉住集合：pending input、pending Interaction、活动 Turn、活动 Task root、
@@ -297,20 +299,54 @@ impl StudioAgentRepository {
         context: &ThreadContextState,
     ) -> Result<RestoredThreadSnapshot, PureError> {
         let thread_id = model.id.clone();
-        let items: Vec<ThreadItem> = item::Entity::find()
+        let mut item_rows = item::Entity::find()
             .filter(item::Column::ThreadId.eq(thread_id.clone()))
-            .order_by_asc(item::Column::Ordinal)
+            .order_by_desc(item::Column::Ordinal)
+            .limit(HOT_TIMELINE_ITEM_LIMIT)
             .all(self.store.database())
             .await
-            .map_err(store_error)?
+            .map_err(store_error)?;
+        if item_rows.len() == HOT_TIMELINE_ITEM_LIMIT as usize
+            && let Some(cutoff_turn_id) = item_rows.last().map(|row| row.turn_id.clone())
+        {
+            let existing_ids = item_rows
+                .iter()
+                .map(|row| row.id.clone())
+                .collect::<BTreeSet<_>>();
+            item_rows.extend(
+                item::Entity::find()
+                    .filter(item::Column::ThreadId.eq(thread_id.clone()))
+                    .filter(item::Column::TurnId.eq(cutoff_turn_id))
+                    .order_by_asc(item::Column::Ordinal)
+                    .all(self.store.database())
+                    .await
+                    .map_err(store_error)?
+                    .into_iter()
+                    .filter(|row| !existing_ids.contains(&row.id)),
+            );
+        }
+        item_rows.sort_by_key(|row| row.ordinal);
+        let items: Vec<ThreadItem> = item_rows
             .into_iter()
             .map(ThreadItem::try_from)
             .collect::<Result<Vec<ThreadItem>, PureError>>()?
             .into_iter()
             .filter(|item| !matches!(item.state(), ThreadItemState::ContextCompaction(_)))
             .collect();
-        let active_skills = active_skills_from_items(&items);
-        let latest_activation_at = items
+        // active skill 属于 working runtime，而不是 Timeline 窗口。它可能早于最近
+        // 400 项，因此单独按 typed Skill item 恢复，但不把旧 item 混入 GUI 热窗口。
+        let skill_items = item::Entity::find()
+            .filter(item::Column::ThreadId.eq(thread_id.clone()))
+            .filter(item::Column::StateKind.eq("skill"))
+            .order_by_asc(item::Column::Ordinal)
+            .all(self.store.database())
+            .await
+            .map_err(store_error)?
+            .into_iter()
+            .map(ThreadItem::try_from)
+            .collect::<Result<Vec<ThreadItem>, PureError>>()?;
+        let active_skills = active_skills_from_items(&skill_items);
+        let latest_activation_at = skill_items
             .iter()
             .filter_map(|item| match item.state() {
                 ThreadItemState::Skill(skill) => Some(skill.activation().activated_at),

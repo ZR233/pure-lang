@@ -135,7 +135,9 @@ impl TaskCoordinator {
             tools.push(Arc::new(
                 self.task_status_tool(thread_id, Some(runtime.clone())),
             ));
-            tools.push(Arc::new(self.read_work_unit_handoff_tool(thread_id)));
+            tools.push(Arc::new(
+                self.read_work_unit_handoff_tool(thread_id, runtime.clone()),
+            ));
             tools.push(Arc::new(self.read_review_round_tool(thread_id)));
             tools.push(Arc::new(self.read_review_file_coverage_tool(thread_id)));
             tools.push(Arc::new(self.task_stop_tool(thread_id, runtime.clone())));
@@ -189,7 +191,7 @@ impl TaskCoordinator {
                         bail!("report_completion requires an active executor");
                     }
                     let completion = coordinator
-                        .report_completion(&subagent, workspace.root(), result)
+                        .report_completion(&runtime, &subagent, workspace.root(), result)
                         .await?;
                     if let Err(error) = runtime
                         .report_progress(
@@ -224,6 +226,7 @@ impl TaskCoordinator {
 
     async fn report_completion(
         &self,
+        runtime: &AgentRuntimeHandle,
         subagent: &SubagentContext,
         caller_workspace: &Path,
         result: CompletionResultInput,
@@ -238,12 +241,10 @@ impl TaskCoordinator {
             .await?
             .context("active completion scope not found for this executor worktree")?;
         ensure_completion_scope_is_open(&scope)?;
-        let (_, handoff) = self
-            .store
-            .read_work_unit_handoff(&scope.work_unit.id)
+        let handoff = self
+            .hot_work_unit_handoff(runtime, &scope.run, &scope.work_unit)
             .await?
-            .context("Task executor handoff is missing")?;
-        handoff.validate_owner(&scope.run, &scope.work_unit, &subagent.id)?;
+            .context("Task executor hot handoff is missing")?;
         match ValidatedCompletionResultInput::try_from(result)? {
             ValidatedCompletionResultInput::Delivery {
                 head_commit,

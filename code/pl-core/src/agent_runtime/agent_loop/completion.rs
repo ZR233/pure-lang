@@ -34,6 +34,18 @@ where
                 "pending observation projection was rejected while settling the turn"
             );
         }
+        if self.state.session.trace_sequence < completion.next_trace_sequence {
+            let error = super::super::AgentRuntimeError::ThreadEvents(format!(
+                "canonical trace owner stopped at sequence {} before producer sequence {}",
+                self.state.session.trace_sequence, completion.next_trace_sequence
+            ));
+            self.mark_projection_failure(&error);
+            tracing::error!(
+                agent_id = %self.state.snapshot.identity.id,
+                error = %error,
+                "turn settlement observed unpublished canonical trace facts"
+            );
+        }
         let compactions = completion
             .worker_outcome
             .returned()
@@ -64,10 +76,6 @@ where
         let outcome = finalization.outcome;
         let result = finalization.retained_result;
         let mut next = self.state.clone();
-        next.session.trace_sequence = next
-            .session
-            .trace_sequence
-            .max(completion.next_trace_sequence);
         match completion.session {
             TurnSessionDisposition::Preserve => {}
             TurnSessionDisposition::Replace(completed_session) => {

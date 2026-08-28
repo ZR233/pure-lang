@@ -21,9 +21,9 @@ pub(crate) use merge_cleanup::*;
 pub(crate) use review_round::*;
 pub(crate) use spawn::{
     OperationalTaskSpawnFailure, StudioSpawnIntent, StudioTaskSpawnPreparation,
-    StudioTaskSpawnRequest, TASK_EXECUTOR_HANDOFF_SECTION_ID, TaskExecutorHandoff,
-    TaskSpawnCompensation, TaskSpawnCompensationState, TaskSpawnFailure, TaskSpawnFailureCode,
-    TaskSpawnFailurePhase, TaskSpawnNextAction, TaskSpawnResource,
+    StudioTaskSpawnRequest, TASK_EXECUTOR_HANDOFF_SECTION_ID, TaskExecutorBlueprint,
+    TaskExecutorHandoff, TaskSpawnCompensation, TaskSpawnCompensationState, TaskSpawnFailure,
+    TaskSpawnFailureCode, TaskSpawnFailurePhase, TaskSpawnNextAction, TaskSpawnResource,
 };
 pub(crate) use task_issue::*;
 pub(crate) use task_run::*;

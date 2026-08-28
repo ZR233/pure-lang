@@ -32,6 +32,7 @@ struct ReviewBlueprint<'a> {
 pub(crate) async fn build_review_prompt(
     coordinator: &TaskCoordinator,
     round: &ReviewRoundRecord,
+    runtime: &crate::AgentRuntimeHandle,
 ) -> Result<String> {
     let aggregate = coordinator
         .task_runtime
@@ -62,11 +63,10 @@ pub(crate) async fn build_review_prompt(
                 .iter()
                 .find(|work_unit| work_unit.id == completion.work_unit_id)
                 .context("delivery review work unit not found")?;
-            let (_, handoff) = coordinator
-                .store
-                .read_work_unit_handoff(&target_work_unit.id)
+            let handoff = coordinator
+                .hot_work_unit_handoff(runtime, &run, target_work_unit)
                 .await?
-                .context("delivery review work unit has no durable handoff")?;
+                .context("delivery review work unit has no hot handoff")?;
             let target_focus = ReviewFocus::from(target_work_unit);
             let sibling_focus = work_units
                 .iter()
