@@ -19,10 +19,17 @@ import '../../shared/studio_driver_keys.dart';
 import 'markdown_repair.dart';
 
 part 'timeline_blocks.dart';
+part 'timeline_image_blocks.dart';
 part 'timeline_markdown_blocks.dart';
 part 'timeline_plan_agent_blocks.dart';
+part 'timeline_remote_image_blocks.dart';
 part 'timeline_tool_blocks.dart';
 part 'timeline_wait_indicator.dart';
+
+typedef TimelineRemoteImageProviderFactory = ImageProvider Function(String url);
+
+final timelineRemoteImageProviderFactoryProvider =
+    Provider<TimelineRemoteImageProviderFactory>((ref) => NetworkImage.new);
 
 class TimelineView extends StatefulWidget {
   const TimelineView({
@@ -51,6 +58,7 @@ class _TimelineViewState extends State<TimelineView> {
   final ScrollController _controller = ScrollController();
   final Map<String, _TimelineScrollSnapshot> _threadScroll = {};
   final Set<String> _expandedReasoningGroups = {};
+  final _ThreadImageLoader _imageLoader = _ThreadImageLoader();
   bool _followingBottom = true;
   bool _detachedByUser = false;
   bool _programmaticScroll = false;
@@ -123,6 +131,7 @@ class _TimelineViewState extends State<TimelineView> {
       _saveThreadState(oldWidget.threadId);
       _expandedReasoningGroups.clear();
       _lastSelectedText = null;
+      _imageLoader.clear();
       _restoreThreadState();
       _contentVersion = _timelineContentVersion(widget.rows, widget.turn);
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -231,6 +240,7 @@ class _TimelineViewState extends State<TimelineView> {
     _saveThreadState(widget.threadId);
     _controller.removeListener(_handleScrollPositionChanged);
     _controller.dispose();
+    _imageLoader.clear();
     super.dispose();
   }
 
@@ -262,102 +272,105 @@ class _TimelineViewState extends State<TimelineView> {
               }
             },
           );
-    return SelectionArea(
-      onSelectionChanged: _handleTimelineSelectionChanged,
-      contextMenuBuilder: _buildTimelineContextMenu,
-      child: Stack(
-        children: [
-          Align(
-            alignment: Alignment.topCenter,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(
-                maxWidth: StudioLayout.conversationWidth,
+    return _ThreadImageCacheScope(
+      loader: _imageLoader,
+      child: SelectionArea(
+        onSelectionChanged: _handleTimelineSelectionChanged,
+        contextMenuBuilder: _buildTimelineContextMenu,
+        child: Stack(
+          children: [
+            Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(
+                  maxWidth: StudioLayout.conversationWidth,
+                ),
+                child: NotificationListener<ScrollMetricsNotification>(
+                  onNotification: _handleScrollMetricsChanged,
+                  child: CustomScrollView(
+                    key: StudioDriverKeys.timeline,
+                    controller: _controller,
+                    slivers: [
+                      SliverPadding(
+                        padding: const EdgeInsets.fromLTRB(24, 28, 24, 0),
+                        sliver: SliverList(
+                          delegate: SliverChildBuilderDelegate(
+                            (context, index) {
+                              final block = blocks[index];
+                              return _TimelineRowBlock(
+                                key: StudioDriverKeys.timelineBlock(block.id),
+                                row: block.rows.single,
+                                isCurrentActivity: block.isCurrentActivity,
+                                isReasoningExpanded: _expandedReasoningGroups
+                                    .contains(
+                                      block.rows.single.reasoningGroup?.id,
+                                    ),
+                                onToggleReasoning: _toggleReasoning,
+                              );
+                            },
+                            childCount: blocks.length,
+                            findChildIndexCallback: (key) {
+                              if (key is! ValueKey<String>) {
+                                return null;
+                              }
+                              final index = blocks.indexWhere(
+                                (block) =>
+                                    StudioDriverKeys.timelineBlock(block.id) ==
+                                    key,
+                              );
+                              return index == -1 ? null : index;
+                            },
+                          ),
+                        ),
+                      ),
+                      SliverPadding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        sliver: SliverFillRemaining(
+                          hasScrollBody: false,
+                          child: _TimelineTail(activity: activity),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-              child: NotificationListener<ScrollMetricsNotification>(
-                onNotification: _handleScrollMetricsChanged,
-                child: CustomScrollView(
-                  key: StudioDriverKeys.timeline,
-                  controller: _controller,
-                  slivers: [
-                    SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(24, 28, 24, 0),
-                      sliver: SliverList(
-                        delegate: SliverChildBuilderDelegate(
-                          (context, index) {
-                            final block = blocks[index];
-                            return _TimelineRowBlock(
-                              key: StudioDriverKeys.timelineBlock(block.id),
-                              row: block.rows.single,
-                              isCurrentActivity: block.isCurrentActivity,
-                              isReasoningExpanded: _expandedReasoningGroups
-                                  .contains(
-                                    block.rows.single.reasoningGroup?.id,
-                                  ),
-                              onToggleReasoning: _toggleReasoning,
-                            );
-                          },
-                          childCount: blocks.length,
-                          findChildIndexCallback: (key) {
-                            if (key is! ValueKey<String>) {
-                              return null;
-                            }
-                            final index = blocks.indexWhere(
-                              (block) =>
-                                  StudioDriverKeys.timelineBlock(block.id) ==
-                                  key,
-                            );
-                            return index == -1 ? null : index;
-                          },
+            ),
+            if (_showJumpToLatest)
+              Positioned.fill(
+                child: Align(
+                  alignment: Alignment.bottomCenter,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      maxWidth: StudioLayout.conversationWidth,
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+                      child: Align(
+                        alignment: Alignment.bottomRight,
+                        child: _JumpToLatestButton(
+                          pendingCount: _pendingNewEvents,
+                          onPressed: _jumpToLatest,
                         ),
                       ),
                     ),
-                    SliverPadding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      sliver: SliverFillRemaining(
-                        hasScrollBody: false,
-                        child: _TimelineTail(activity: activity),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          if (_showJumpToLatest)
-            Positioned.fill(
-              child: Align(
-                alignment: Alignment.bottomCenter,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(
-                    maxWidth: StudioLayout.conversationWidth,
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
-                    child: Align(
-                      alignment: Alignment.bottomRight,
-                      child: _JumpToLatestButton(
-                        pendingCount: _pendingNewEvents,
-                        onPressed: _jumpToLatest,
-                      ),
-                    ),
                   ),
                 ),
               ),
-            ),
-          if (widget.isLoadingOlder)
-            const Positioned(
-              top: 8,
-              left: 0,
-              right: 0,
-              child: Center(
-                child: SizedBox.square(
-                  key: ValueKey('timeline-history-loading'),
-                  dimension: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
+            if (widget.isLoadingOlder)
+              const Positioned(
+                top: 8,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: SizedBox.square(
+                    key: ValueKey('timeline-history-loading'),
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
                 ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }

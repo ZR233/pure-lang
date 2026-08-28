@@ -13,6 +13,7 @@ use crate::tool::cache::ToolCachePolicy;
 use crate::tool::{LocalTool, Tool, ToolDisplayMetadata, ToolRuntimeLockPolicy};
 use crate::turn::ToolEffect;
 
+use super::McpImageOutputContext;
 use super::connector::McpConnector;
 use super::health::McpAvailabilitySnapshot;
 use super::output::call_tool_result_to_output;
@@ -278,10 +279,13 @@ impl McpTurnLease {
     }
 
     /// 构造该 lease 的全部统一工具：MCP server 工具 + resource façade。
-    pub fn agent_tools(&self) -> Vec<Arc<dyn Tool>> {
+    pub fn agent_tools(&self, image_output: Option<McpImageOutputContext>) -> Vec<Arc<dyn Tool>> {
         let mut tools = Vec::with_capacity(self.tools.len() + ResourceToolKind::all().len());
         for descriptor in self.tools.iter() {
-            tools.push(Arc::new(self.registered_tool(descriptor.clone())) as Arc<dyn Tool>);
+            tools.push(
+                Arc::new(self.registered_tool(descriptor.clone(), image_output.clone()))
+                    as Arc<dyn Tool>,
+            );
         }
         if !self.server_ids.is_empty() {
             for kind in ResourceToolKind::all() {
@@ -291,7 +295,11 @@ impl McpTurnLease {
         tools
     }
 
-    fn registered_tool(&self, descriptor: McpRuntimeToolDescriptor) -> LocalTool {
+    fn registered_tool(
+        &self,
+        descriptor: McpRuntimeToolDescriptor,
+        image_output: Option<McpImageOutputContext>,
+    ) -> LocalTool {
         let lease = self.clone();
         let server_id = descriptor.server_id.clone();
         let raw_name = descriptor.raw_name.clone();
@@ -310,11 +318,13 @@ impl McpTurnLease {
                 let lease = lease.clone();
                 let server_id = handler_server_id.clone();
                 let raw_name = handler_raw_name.clone();
+                let image_output = image_output.clone();
                 async move {
                     let result = lease
                         .call_tool(server_id.clone(), raw_name.clone(), input.arguments)
                         .await?;
-                    call_tool_result_to_output(&server_id, &raw_name, result)
+                    call_tool_result_to_output(&server_id, &raw_name, result, image_output.as_ref())
+                        .await
                 }
             },
         )

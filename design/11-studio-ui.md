@@ -143,6 +143,12 @@ Markdown 使用 `GptMarkdown` 容错渲染流式不完整内容。修复只处�
 其他 scheme 不进入通用链接通道。裸 URL 后的普通标点和未配对闭合括号不属于目标；系统打开
 失败只显示本地化提示，不改写正文或中断 Timeline。
 
+Markdown image 使用独立于普通链接的 renderer。只有 assistant 正文和 plan 中的显式 HTTPS
+image destination 显示来源卡片，初始不创建网络 image provider；用户点击后才加载实时外部资源，
+成功后显示缩略图并打开统一图片弹层。HTTP、本地相对或绝对路径、`file:`、`data:`、`blob:`，以及
+user、reasoning、error 表面中的 image syntax 只显示替代文字或安全来源文本，不触发文件或网络 IO。
+HTTPS Markdown 图片不进入 attachment store，重新打开时仍按外部实时资源处理。
+
 整条 Timeline 共享挂在 `TimelineView` 根部的一个 `SelectionArea`，消息、plan、reasoning
 详情与工具卡正文都注册到同一选区，支持跨行、跨消息拖选；各消息块内部不再嵌套独立
 `SelectionArea`。代码块继续使用自带复制语义的 `SelectableText`，不并入共享选区。桌面右键
@@ -170,11 +176,14 @@ capability DTO 渲染输入标签（文本、视觉、视频、文件），设�
 保留完整草稿；command receipt 接受后才清空。原始外部 URL 不进入 Widget state，Timeline 与预览
 只通过 thread/draft 授权 loader 读取本地快照。
 
-代理 `view_image` 成功时，内部 `ToolMedia` 不投影成用户消息。对应 tool group 的折叠摘要显示
-“已阅读图片”；展开后在原 tool row 中显示安全文件名、尺寸、大小和缩略图，点击缩略图使用统一的
-图片预览弹层查看大图。用户历史附件与 tool attachment 复用同一个授权 loader、缩略图组件和
-`Dialog + InteractiveViewer`，不得复制第二套 bytes 缓存或引入新的图片查看依赖。tool attachment
-使用 typed DTO，不从 `outputArtifacts` JSON 推断，并为工具行、缩略图和大图弹层提供稳定 Driver key。
+代理 `view_image` 或受支持 MCP tool 返回图片时，内部 `ToolMedia` 不投影成用户消息。对应 tool
+group 在折叠摘要下始终显示 typed attachment gallery：单图最长边不超过 240 px 且不放大，多图为
+64 px 方形缩略图；展开后保留原 tool row 的状态、结果与附件 metadata，但不重复缩略图。点击图片
+使用统一预览弹层查看大图。用户历史附件与 tool attachment 复用同一个 Thread-scoped 授权 loader、
+加载去重、失败重试、缩略图组件和 `Dialog + InteractiveViewer`，不得复制第二套 bytes 缓存或引入
+新的图片查看依赖。弹层支持关闭按钮、Escape、遮罩关闭、焦点恢复与缩放。tool attachment 使用
+typed DTO，不从 `outputArtifacts` JSON 推断，并为工具行、通用缩略图、失败重试和大图弹层提供稳定
+Driver key。
 
 receipt 已接受后，Composer 必须继续关联该 Turn，不能在首次 `TurnStarted` 时丢失 identity。
 对应 Turn 若随后 failed，Composer 解除 pending 并显示 typed failure message（缺失时回退到 Turn
@@ -376,5 +385,6 @@ directory 增量更新和 selected agent 重建时必须保留。
 - Windows native Driver 使用真实 Bridge，关闭 frame sync，验证输入 read-back、SQLite 状态、
   绝对路径截图和零 runtime error。
 - 原生多模态 Driver 使用真实视觉模型，在 Composer 不附加图片的前提下要求代理调用
-  `view_image` 读取 workspace PNG；验收折叠“已阅读图片”、展开缩略图、点击大图、最终识别文本和
+  `view_image` 读取 workspace PNG；验收折叠工具组下直接显示缩略图、展开详情不重复图片、点击大图、
+  最终识别文本和
   `dataUrl` 安全诊断，日志不得包含图片 bytes、Base64 或凭据。

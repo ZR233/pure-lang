@@ -26,6 +26,14 @@ class _ToolGroupPartState extends State<_ToolGroupPart> {
   @override
   Widget build(BuildContext context) {
     final group = widget.group;
+    final imageAttachments = group.items
+        .expand(
+          (item) => item.tool?.attachments ?? const <ThreadAttachmentView>[],
+        )
+        .where(
+          (attachment) => attachment.modality == AttachmentModalityView.image,
+        )
+        .toList(growable: false);
     final activityLabel = _toolGroupActivityLabel(
       context,
       group,
@@ -61,6 +69,14 @@ class _ToolGroupPartState extends State<_ToolGroupPart> {
             ),
           ),
         ),
+        if (imageAttachments.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _ThreadImageGallery(
+            threadId: widget.threadId,
+            attachments: imageAttachments,
+            groupId: group.id,
+          ),
+        ],
         if (expanded)
           DecoratedBox(
             key: const ValueKey('timeline-tool-group-details'),
@@ -83,7 +99,6 @@ class _ToolGroupPartState extends State<_ToolGroupPart> {
                             showActivePulse: widget.isCurrentActivity,
                           )
                         : _ToolGroupItemRow(
-                            threadId: widget.threadId,
                             item: item,
                             showActivePulse: widget.isCurrentActivity,
                           ),
@@ -460,13 +475,8 @@ void _collectWebLinks(Object? value, Set<String> links) {
 }
 
 class _ToolGroupItemRow extends StatelessWidget {
-  const _ToolGroupItemRow({
-    required this.threadId,
-    required this.item,
-    this.showActivePulse = false,
-  });
+  const _ToolGroupItemRow({required this.item, this.showActivePulse = false});
 
-  final String threadId;
   final TimelineToolGroupItem item;
   final bool showActivePulse;
 
@@ -482,6 +492,7 @@ class _ToolGroupItemRow extends StatelessWidget {
       tool?.denialReason,
       item.part.error,
       _resultDetail(item, tool),
+      _attachmentDetail(tool),
     ].whereType<String>().where((value) => value.trim().isNotEmpty).toList();
     return Padding(
       key: tool?.name == 'view_image'
@@ -536,26 +547,6 @@ class _ToolGroupItemRow extends StatelessWidget {
                     ),
                   ),
                 ],
-                if (tool?.attachments.isNotEmpty == true) ...[
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      for (final attachment in tool!.attachments)
-                        _ThreadAttachmentCard(
-                          threadId: threadId,
-                          attachment: attachment,
-                          driverKey: StudioDriverKeys.viewImageThumbnail(
-                            attachment.id,
-                          ),
-                          dialogKey: StudioDriverKeys.viewImageDialog(
-                            attachment.id,
-                          ),
-                        ),
-                    ],
-                  ),
-                ],
               ],
             ),
           ),
@@ -576,6 +567,12 @@ class _ToolGroupItemRow extends StatelessWidget {
       return _taskTransitionRejectionDetail(result);
     }
     return result;
+  }
+
+  String? _attachmentDetail(TimelineToolPart? tool) {
+    final attachments = tool?.attachments ?? const <ThreadAttachmentView>[];
+    if (attachments.isEmpty) return null;
+    return attachments.map(_attachmentDescription).join('\n');
   }
 
   String _taskTransitionRejectionDetail(String result) {

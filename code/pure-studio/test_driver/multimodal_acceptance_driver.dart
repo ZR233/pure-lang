@@ -353,6 +353,13 @@ Future<Map<String, String>> _captureViewImageUi(
     session.waitFor(summary, timeout: const Duration(seconds: 30)),
     'view_image tool group summary',
   );
+  final thumbnail = find.byValueKey('view-image-thumbnail-$attachmentId');
+  await _command(
+    session.waitFor(thumbnail, timeout: const Duration(seconds: 30)),
+    'collapsed view_image thumbnail',
+  );
+  await File(options.previewScreenshotOutput)
+      .writeAsBytes(await session.screenshot(), flush: true);
   await _command(session.tap(summary), 'expand view_image tool group');
   await _command(
     session.waitFor(
@@ -361,13 +368,6 @@ Future<Map<String, String>> _captureViewImageUi(
     ),
     'expanded view_image tool row',
   );
-  final thumbnail = find.byValueKey('view-image-thumbnail-$attachmentId');
-  await _command(
-    session.waitFor(thumbnail, timeout: const Duration(seconds: 30)),
-    'view_image thumbnail',
-  );
-  await File(options.previewScreenshotOutput)
-      .writeAsBytes(await session.screenshot(), flush: true);
   await _command(session.tap(thumbnail), 'open view_image preview');
   await _command(
     session.waitFor(

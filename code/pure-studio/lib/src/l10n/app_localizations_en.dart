@@ -805,6 +805,26 @@ class AppLocalizationsEn extends AppLocalizations {
   String get timelineExternalLinkOpenFailed => 'Unable to open this link.';
 
   @override
+  String get timelineAttachment => 'Attachment';
+
+  @override
+  String get timelineImageLoadFailed => 'Unable to load this image.';
+
+  @override
+  String get timelineImageRetry => 'Retry';
+
+  @override
+  String get timelineImageClose => 'Close image preview';
+
+  @override
+  String timelineRemoteImageSource(String host) {
+    return 'External image from $host';
+  }
+
+  @override
+  String get timelineRemoteImageOpen => 'Click to load and preview';
+
+  @override
   String get timelineJumpToLatest => 'Jump to latest';
 
   @override

@@ -158,6 +158,28 @@ abstract final class StudioDriverKeys {
   static ValueKey<String> viewImageDialog(String id) =>
       ValueKey<String>('view-image-dialog-$id');
 
+  static ValueKey<String> timelineImageDialog(String id) =>
+      ValueKey<String>('timeline-image-dialog-$id');
+
+  static ValueKey<String> timelineImageRetry(String id) =>
+      ValueKey<String>('timeline-image-retry-$id');
+
+  static const ValueKey<String> timelineImageClose = ValueKey<String>(
+    'timeline-image-close',
+  );
+
+  static ValueKey<String> toolImageGallery(String groupId) =>
+      ValueKey<String>('tool-image-gallery-$groupId');
+
+  static ValueKey<String> markdownImageSource(String url) =>
+      ValueKey<String>('markdown-image-source-$url');
+
+  static ValueKey<String> markdownImageThumbnail(String url) =>
+      ValueKey<String>('markdown-image-thumbnail-$url');
+
+  static ValueKey<String> markdownImageDialog(String url) =>
+      ValueKey<String>('markdown-image-dialog-$url');
+
   static ValueKey<String> reasoningEffortOption(String effort) =>
       ValueKey<String>('reasoning-effort-$effort');
 

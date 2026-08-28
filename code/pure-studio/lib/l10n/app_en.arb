@@ -299,6 +299,17 @@
   "timelineEmptyTitle": "No messages yet",
   "timelineEmptyMessage": "Open a project or start a session to begin.",
   "timelineExternalLinkOpenFailed": "Unable to open this link.",
+  "timelineAttachment": "Attachment",
+  "timelineImageLoadFailed": "Unable to load this image.",
+  "timelineImageRetry": "Retry",
+  "timelineImageClose": "Close image preview",
+  "timelineRemoteImageSource": "External image from {host}",
+  "@timelineRemoteImageSource": {
+    "placeholders": {
+      "host": {"type": "String"}
+    }
+  },
+  "timelineRemoteImageOpen": "Click to load and preview",
   "timelineJumpToLatest": "Jump to latest",
   "timelineNew": "New",
   "timelineReasoningFallback": "Thinking",

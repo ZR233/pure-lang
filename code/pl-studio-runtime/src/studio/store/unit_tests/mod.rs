@@ -78,6 +78,116 @@ async fn tool_images_reuse_content_addressed_blob_and_rollback_failed_metadata()
     assert!(!tokio::fs::try_exists(failed_blob).await.unwrap());
 }
 
+#[tokio::test]
+async fn tool_image_batch_is_ordered_and_rolls_back_all_new_blobs() {
+    let store = StudioStore::open_memory().await.unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    let project = store.upsert_project(workspace.path()).await.unwrap();
+    let thread = store
+        .create_thread(&project.id, "Tool image batch", StudioMode::Simple)
+        .await
+        .unwrap();
+    let input = |name: &str, bytes: &[u8]| pl_core::ToolImageAttachmentInput {
+        filename: name.to_string(),
+        media_type: "image/png".to_string(),
+        data: bytes.to_vec(),
+        content_sha256: digest(bytes),
+        width: 8,
+        height: 4,
+    };
+
+    let attachments = store
+        .persist_tool_images(
+            &thread.id,
+            vec![input("first.png", b"first"), input("second.png", b"second")],
+        )
+        .await
+        .unwrap();
+    assert_eq!(attachments.len(), 2);
+    assert_eq!(attachments[0].filename.as_deref(), Some("first.png"));
+    assert_eq!(attachments[1].filename.as_deref(), Some("second.png"));
+
+    let failed_first = b"failed-first";
+    let failed_second = b"failed-second";
+    let failed_paths = [failed_first.as_slice(), failed_second.as_slice()].map(|bytes| {
+        let digest = digest(bytes);
+        store
+            .attachments_dir()
+            .join("objects")
+            .join(&digest[..2])
+            .join(digest)
+    });
+    let error = store
+        .persist_tool_images(
+            "missing-thread",
+            vec![
+                input("failed-first.png", failed_first),
+                input("failed-second.png", failed_second),
+            ],
+        )
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("FOREIGN KEY"));
+    for path in failed_paths {
+        assert!(!tokio::fs::try_exists(path).await.unwrap());
+    }
+    assert_eq!(
+        store
+            .list_thread_attachments(&thread.id)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+#[tokio::test]
+async fn tool_image_snapshot_survives_restart_and_enforces_thread_owner() {
+    let temp = tempfile::tempdir().unwrap();
+    let database = temp.path().join("studio.sqlite");
+    let workspace = tempfile::tempdir().unwrap();
+    let store = StudioStore::open(&database).await.unwrap();
+    let project = store.upsert_project(workspace.path()).await.unwrap();
+    let owner = store
+        .create_thread(&project.id, "Image owner", StudioMode::Simple)
+        .await
+        .unwrap();
+    let other = store
+        .create_thread(&project.id, "Other thread", StudioMode::Simple)
+        .await
+        .unwrap();
+    let bytes = b"durable-tool-image".to_vec();
+    let attachment = store
+        .persist_tool_image(
+            &owner.id,
+            pl_core::ToolImageAttachmentInput {
+                filename: "durable.png".to_string(),
+                media_type: "image/png".to_string(),
+                data: bytes.clone(),
+                content_sha256: digest(&bytes),
+                width: 12,
+                height: 8,
+            },
+        )
+        .await
+        .unwrap();
+    drop(store);
+
+    let reopened = StudioStore::open(&database).await.unwrap();
+    assert_eq!(
+        reopened
+            .read_attachment_bytes(&owner.id, &attachment.id)
+            .await
+            .unwrap(),
+        bytes
+    );
+    let error = reopened
+        .read_attachment_bytes(&other.id, &attachment.id)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("does not belong to Thread"));
+}
+
 /// 测试 seed：在独立事务中直接应用一次目录 delta。
 async fn seed_directory(store: &StudioStore, delta: DirectoryDelta) {
     let tx = store.database().begin().await.unwrap();

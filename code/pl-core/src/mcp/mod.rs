@@ -6,6 +6,7 @@ mod runtime;
 
 pub use connector::{ConnectedMcp, McpConnectRequest, McpConnector};
 pub use health::{McpAvailabilityKind, McpAvailabilitySnapshot};
+pub use output::McpImageOutputContext;
 pub use runtime::{
     McpGeneration, McpResetScope, McpRuntime, McpRuntimeHandle, McpRuntimeToolDescriptor,
     McpTurnLease,

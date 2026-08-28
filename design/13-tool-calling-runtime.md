@@ -399,18 +399,27 @@ PL 只做保证可注册所需的最小 normalize，不得把第三方动态 sch
 
 ## 结果回传
 
-普通工具结果进入模型上下文时仍使用字符串内容。`view_image` 是唯一可额外返回 typed model
-attachment 的内置工具：dispatcher 先按 provider 顺序写入本批全部字符串 tool results，再把成功
-结果中的图片合并为一个 `ModelContextItem::ToolMedia`。adapter 在下一次模型请求中把它投影成内部
-user multipart；不得把图片塞进 tool result 字符串、JSON artifact 或伪造的 durable user message。
-缓存命中不重复追加图片：首次结果已经存在于 durable history，后续只返回紧凑 receipt。
+普通工具结果进入模型上下文时仍使用字符串内容。`view_image` 与通过能力门禁的 MCP typed image
+result 可以额外返回 typed model attachment：dispatcher 先按 provider 顺序写入本批全部字符串
+tool results，再把成功结果中的图片合并为一个 `ModelContextItem::ToolMedia`。adapter 在下一次模型
+请求中把它投影成内部 user multipart；不得把图片塞进 tool result 字符串、JSON artifact 或伪造的
+durable user message。缓存命中不重复追加图片：首次结果已经存在于 durable history，后续只返回
+紧凑 receipt。
 
 `view_image { path }` 只在当前模型明确支持可重放 image、workspace 文件工具可用且宿主安装
 attachment runtime 时注册。handler 在任何 stat/read 前重复检查能力；路径解析、workspace escape、
 审批与链接拒绝完全复用 `read_file`。读取硬上限为 20 MiB，真实内容只接受 PNG/JPEG/WebP/GIF；
 规范化结果长边不超过 2000，Base64 后不超过 5 MiB，并继续满足模型更严格的 MIME、尺寸和字节限制。
 writer 必须在成功结果发布前提交 content-addressed snapshot。视频、抽帧与 MCP media result 不属于
-本阶段。
+`view_image` 范围。
+
+MCP image result 只在当前精确模型声明 image input、可用 snapshot replay 表示和模型限制，且宿主
+安装 attachment runtime 时接收。`isError` 在解码前短路；正常结果的全部 image block 先按编码长度、
+严格 Base64、MIME/文件头、解码、尺寸和模型限制整批校验，再由 batch writer 原子提交。同一结果任一
+图片或写入失败时整批不发布并返回有界诊断；能力或 runtime 缺失时同样只返回诊断，不创建仅供 UI
+查看的附件。成功图片按 content block 顺序进入 tool output attachments 和后续 `ToolMedia`。持久
+tool result 与 audit 用安全占位和 attachment metadata 代替原始 Base64；未命名图片使用工具名、
+一基序号和规范扩展名生成安全文件名。audio、video、SVG 与 embedded resource media 不进入该通道。
 
 失败结果必须包含稳定前缀和原始错误文本：
 

@@ -772,6 +772,26 @@ class AppLocalizationsZh extends AppLocalizations {
   String get timelineExternalLinkOpenFailed => '无法打开此链接。';
 
   @override
+  String get timelineAttachment => '附件';
+
+  @override
+  String get timelineImageLoadFailed => '无法加载此图片。';
+
+  @override
+  String get timelineImageRetry => '重试';
+
+  @override
+  String get timelineImageClose => '关闭图片预览';
+
+  @override
+  String timelineRemoteImageSource(String host) {
+    return '来自 $host 的外部图片';
+  }
+
+  @override
+  String get timelineRemoteImageOpen => '点击后加载并预览';
+
+  @override
   String get timelineJumpToLatest => '跳到最新';
 
   @override
@@ -2479,6 +2499,26 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get timelineExternalLinkOpenFailed => '无法打开此链接。';
+
+  @override
+  String get timelineAttachment => '附件';
+
+  @override
+  String get timelineImageLoadFailed => '无法加载此图片。';
+
+  @override
+  String get timelineImageRetry => '重试';
+
+  @override
+  String get timelineImageClose => '关闭图片预览';
+
+  @override
+  String timelineRemoteImageSource(String host) {
+    return '来自 $host 的外部图片';
+  }
+
+  @override
+  String get timelineRemoteImageOpen => '点击后加载并预览';
 
   @override
   String get timelineJumpToLatest => '跳到最新';

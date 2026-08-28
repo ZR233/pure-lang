@@ -1,8 +1,26 @@
 part of '../widget_test.dart';
 
+class _ImmediateTestImageProvider extends ImageProvider<String> {
+  const _ImmediateTestImageProvider(this.key, this.image);
+
+  final String key;
+  final ui.Image image;
+
+  @override
+  Future<String> obtainKey(ImageConfiguration configuration) =>
+      SynchronousFuture(key);
+
+  @override
+  ImageStreamCompleter loadImage(String key, ImageDecoderCallback decode) {
+    return OneFrameImageStreamCompleter(
+      SynchronousFuture(ImageInfo(image: image.clone())),
+    );
+  }
+}
+
 void registerTimelineModelTests() {
   testWidgets(
-    'view_image stays inside the tool row and opens its authorized thumbnail',
+    'view_image is visible in the collapsed tool gallery and opens its authorized thumbnail',
     (tester) async {
       const attachment = ThreadAttachmentView(
         id: 'tool-image-1',
@@ -53,12 +71,16 @@ void registerTimelineModelTests() {
       );
       expect(
         find.byKey(StudioDriverKeys.viewImageThumbnail('tool-image-1')),
-        findsNothing,
+        findsOneWidget,
       );
       expect(
         find.byKey(StudioDriverKeys.historyAttachment('tool-image-1')),
         findsNothing,
       );
+
+      expect(api.readThreadAttachmentRequests, [
+        (threadId: 'thread-1', attachmentId: 'tool-image-1'),
+      ]);
 
       await tester.tap(
         find.byKey(const ValueKey('timeline-tool-group-summary')),
@@ -70,6 +92,14 @@ void registerTimelineModelTests() {
       );
       expect(
         find.byKey(StudioDriverKeys.viewImageThumbnail('tool-image-1')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(
+          StudioDriverKeys.toolImageGallery(
+            'tool-group:turn-1:view-image-tool-item',
+          ),
+        ),
         findsOneWidget,
       );
       expect(api.readThreadAttachmentRequests, [
@@ -85,6 +115,12 @@ void registerTimelineModelTests() {
         findsOneWidget,
       );
       expect(find.byType(InteractiveViewer), findsOneWidget);
+      await tester.tap(find.byKey(StudioDriverKeys.timelineImageClose));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(StudioDriverKeys.viewImageDialog('tool-image-1')),
+        findsNothing,
+      );
     },
   );
 
@@ -126,20 +162,258 @@ void registerTimelineModelTests() {
     await tester.pumpWidget(
       _timelineHarness(threadId: 'thread-1', items: [item], api: api),
     );
-    await tester.tap(find.byKey(const ValueKey('timeline-tool-group-summary')));
     await tester.pumpAndSettle();
 
     expect(
       find.byKey(const ValueKey('attachment-load-failed-tool-image-failed')),
       findsOneWidget,
     );
-    await tester.tap(
-      find.byKey(StudioDriverKeys.viewImageThumbnail('tool-image-failed')),
-    );
-    await tester.pumpAndSettle();
     expect(
       find.byKey(StudioDriverKeys.viewImageDialog('tool-image-failed')),
       findsNothing,
+    );
+
+    api.threadAttachmentErrors.clear();
+    api.threadAttachmentBytes[(
+      threadId: 'thread-1',
+      attachmentId: 'tool-image-failed',
+    )] = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    );
+    await tester.tap(
+      find.byKey(StudioDriverKeys.timelineImageRetry('tool-image-failed')),
+    );
+    await tester.pumpAndSettle();
+    expect(api.readThreadAttachmentRequests, [
+      (threadId: 'thread-1', attachmentId: 'tool-image-failed'),
+      (threadId: 'thread-1', attachmentId: 'tool-image-failed'),
+    ]);
+  });
+
+  testWidgets('multiple tool images use compact tiles and share one loader', (
+    tester,
+  ) async {
+    const attachments = [
+      ThreadAttachmentView(
+        id: 'tool-image-a',
+        modality: AttachmentModalityView.image,
+        mediaType: 'image/png',
+        filename: 'a.png',
+        byteSize: 68,
+        width: 1,
+        height: 1,
+      ),
+      ThreadAttachmentView(
+        id: 'tool-image-b',
+        modality: AttachmentModalityView.image,
+        mediaType: 'image/png',
+        filename: 'b.png',
+        byteSize: 68,
+        width: 1,
+        height: 1,
+      ),
+    ];
+    final item = _threadItemFixture(
+      id: 'image-tool-item',
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      ordinal: 1,
+      kind: ThreadItemKind.toolCall,
+      status: 'succeeded',
+      tool: const TimelineToolPart(
+        toolCallId: 'tool-call-images',
+        name: 'mcp__images__generate',
+        attachments: attachments,
+      ),
+    );
+    final bytes = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    );
+    final api = _FakeStudioApi(_emptyState());
+    for (final attachment in attachments) {
+      api.threadAttachmentBytes[(
+            threadId: 'thread-1',
+            attachmentId: attachment.id,
+          )] =
+          bytes;
+    }
+
+    await tester.pumpWidget(
+      _timelineHarness(threadId: 'thread-1', items: [item], api: api),
+    );
+    await tester.pumpAndSettle();
+
+    for (final attachment in attachments) {
+      expect(
+        tester.getSize(
+          find.byKey(StudioDriverKeys.viewImageThumbnail(attachment.id)),
+        ),
+        const Size.square(64),
+      );
+    }
+    await tester.tap(find.byKey(const ValueKey('timeline-tool-group-summary')));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(StudioDriverKeys.viewImageThumbnail('tool-image-a')),
+      findsOneWidget,
+    );
+    expect(api.readThreadAttachmentRequests.length, 2);
+  });
+
+  testWidgets(
+    'assistant HTTPS markdown image waits for click while local and user images stay inert',
+    (tester) async {
+      final testImage = (await tester.runAsync(
+        () => createTestImage(width: 2, height: 2),
+      ))!;
+      var remoteLoads = 0;
+      const remoteUrl = 'https://images.example/preview.png';
+      final items = [
+        _threadItemFixture(
+          id: 'assistant-remote-image',
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          ordinal: 1,
+          text: '![Remote preview]($remoteUrl)',
+        ),
+        _threadItemFixture(
+          id: 'assistant-local-image',
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          ordinal: 2,
+          text: r'![Local output](./output.png)',
+        ),
+        _threadItemFixture(
+          id: 'assistant-http-image',
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          ordinal: 3,
+          text: '![HTTP output](http://images.example/output.png)',
+        ),
+        _threadItemFixture(
+          id: 'assistant-file-image',
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          ordinal: 4,
+          text: '![File output](file:///tmp/output.png)',
+        ),
+        _threadItemFixture(
+          id: 'assistant-data-image',
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          ordinal: 5,
+          text: '![Data output](data:image/png;base64,AAAA)',
+        ),
+        _threadItemFixture(
+          id: 'user-remote-image',
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          ordinal: 6,
+          kind: ThreadItemKind.userMessage,
+          channel: null,
+          text: '![User image](https://images.example/user.png)',
+        ),
+      ];
+
+      await tester.pumpWidget(
+        _timelineHarness(
+          threadId: 'thread-1',
+          items: items,
+          remoteImageProviderFactory: (url) {
+            remoteLoads += 1;
+            return _ImmediateTestImageProvider(url, testImage);
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(StudioDriverKeys.markdownImageSource(remoteUrl)),
+        findsOneWidget,
+      );
+      expect(remoteLoads, 0);
+      expect(find.text('Local output'), findsOneWidget);
+      expect(find.text('HTTP output'), findsOneWidget);
+      expect(find.text('File output'), findsOneWidget);
+      expect(find.text('Data output'), findsOneWidget);
+      expect(find.text('User image'), findsOneWidget);
+      expect(
+        find.byKey(
+          StudioDriverKeys.markdownImageSource(
+            'https://images.example/user.png',
+          ),
+        ),
+        findsNothing,
+      );
+
+      await tester.tap(
+        find.byKey(StudioDriverKeys.markdownImageSource(remoteUrl)),
+      );
+      await tester.pumpAndSettle();
+      expect(remoteLoads, 1);
+      expect(
+        find.byKey(
+          StudioDriverKeys.markdownImageThumbnail(remoteUrl),
+          skipOffstage: false,
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(StudioDriverKeys.markdownImageDialog(remoteUrl)),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets('failed HTTPS markdown image stays a retryable source card', (
+    tester,
+  ) async {
+    final validImage = (await tester.runAsync(
+      () => createTestImage(width: 2, height: 2),
+    ))!;
+    var attempts = 0;
+    const remoteUrl = 'https://images.example/retry.png';
+    final item = _threadItemFixture(
+      id: 'assistant-retry-image',
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      ordinal: 1,
+      text: '![Retry preview]($remoteUrl)',
+    );
+
+    await tester.pumpWidget(
+      _timelineHarness(
+        threadId: 'thread-1',
+        items: [item],
+        remoteImageProviderFactory: (url) {
+          attempts += 1;
+          return attempts == 1
+              ? MemoryImage(Uint8List.fromList(const [1, 2, 3]))
+              : _ImmediateTestImageProvider('retry-success', validImage);
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(
+      find.byKey(StudioDriverKeys.markdownImageSource(remoteUrl)),
+    );
+    await tester.pumpAndSettle();
+    expect(attempts, 1);
+    expect(find.text('Retry'), findsOneWidget);
+    expect(
+      find.byKey(StudioDriverKeys.markdownImageDialog(remoteUrl)),
+      findsNothing,
+    );
+
+    await tester.tap(
+      find.byKey(StudioDriverKeys.markdownImageSource(remoteUrl)),
+    );
+    await tester.pumpAndSettle();
+    expect(attempts, 2);
+    expect(
+      find.byKey(StudioDriverKeys.markdownImageDialog(remoteUrl)),
+      findsOneWidget,
     );
   });
 

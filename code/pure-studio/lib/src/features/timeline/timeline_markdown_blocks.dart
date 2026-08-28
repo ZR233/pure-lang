@@ -9,8 +9,11 @@ final List<MarkdownComponent> _studioMarkdownComponents = MarkdownComponent
     )
     .toList(growable: false);
 
-final List<MarkdownComponent> _studioMarkdownInlineComponents = [
-  ...MarkdownComponent.inlineComponents,
+List<MarkdownComponent> _studioMarkdownInlineComponents(
+  _MarkdownSurface surface,
+) => [
+  for (final component in MarkdownComponent.inlineComponents)
+    if (component is ImageMd) _StudioImageMd(surface) else component,
   _StudioBareWebLink(),
 ];
 
@@ -35,7 +38,7 @@ class _AgentMarkdown extends ConsumerWidget {
       key: ValueKey('gpt-markdown-$id-$status'),
       style: _markdownBodyStyle(context, surface),
       components: _studioMarkdownComponents,
-      inlineComponents: _studioMarkdownInlineComponents,
+      inlineComponents: _studioMarkdownInlineComponents(surface),
       onLinkTap: (url, _) {
         unawaited(_openTimelineWebLink(context, ref, url));
       },

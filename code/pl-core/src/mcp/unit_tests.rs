@@ -38,7 +38,7 @@ impl McpTestHarness {
             .expect("reconcile test MCP runtime");
         let lease = runtime.acquire_turn_lease().await.expect("MCP lease");
         core.agent_tools()
-            .install(ToolGroupId::new("mcp"), lease.agent_tools())
+            .install(ToolGroupId::new("mcp"), lease.agent_tools(None))
             .expect("install MCP tools");
         Self { runtime, closed }
     }
@@ -372,7 +372,7 @@ async fn installed_runtime(
     let manager = ToolManager::new();
     let tools = manager.agent_tool_set("mcp-test", GlobalToolInheritance::Isolated);
     tools
-        .install(ToolGroupId::new("mcp"), lease.agent_tools())
+        .install(ToolGroupId::new("mcp"), lease.agent_tools(None))
         .expect("install MCP tools");
     let plan = tools.freeze();
     InstalledMcp {

@@ -165,65 +165,108 @@ impl StudioStore {
         result
     }
 
+    #[cfg(test)]
     pub(crate) async fn persist_tool_image(
         &self,
         thread_id: &str,
         input: pl_core::ToolImageAttachmentInput,
     ) -> Result<ThreadAttachment> {
-        let actual_sha256 = sha256_hex(&input.data);
-        if actual_sha256 != input.content_sha256 {
-            bail!("tool image content digest does not match its bytes");
+        let mut attachments = self.persist_tool_images(thread_id, vec![input]).await?;
+        attachments
+            .pop()
+            .context("tool image batch returned no row")
+    }
+
+    pub(crate) async fn persist_tool_images(
+        &self,
+        thread_id: &str,
+        inputs: Vec<pl_core::ToolImageAttachmentInput>,
+    ) -> Result<Vec<ThreadAttachment>> {
+        if inputs.is_empty() {
+            return Ok(Vec::new());
         }
-        if input.width == 0 || input.height == 0 {
-            bail!("tool image dimensions must be non-zero");
-        }
-        if !matches!(
-            input.media_type.as_str(),
-            "image/png" | "image/jpeg" | "image/webp" | "image/gif"
-        ) {
-            bail!("tool image media type is not supported");
+        for input in &inputs {
+            let actual_sha256 = sha256_hex(&input.data);
+            if actual_sha256 != input.content_sha256 {
+                bail!("tool image content digest does not match its bytes");
+            }
+            if input.width == 0 || input.height == 0 {
+                bail!("tool image dimensions must be non-zero");
+            }
+            if !matches!(
+                input.media_type.as_str(),
+                "image/png" | "image/jpeg" | "image/webp" | "image/gif"
+            ) {
+                bail!("tool image media type is not supported");
+            }
         }
 
-        let dir = self
-            .attachments_dir()
-            .join("objects")
-            .join(&input.content_sha256[..2]);
-        tokio::fs::create_dir_all(&dir).await?;
-        let storage_path = dir.join(&input.content_sha256);
-        let created = !tokio::fs::try_exists(&storage_path).await?;
-        if created {
-            let path = storage_path.clone();
-            let data = input.data.clone();
-            tokio::task::spawn_blocking(move || {
-                pl_core::atomic_file::write_file_atomically(&path, &data)
-            })
-            .await
-            .context("tool image blob writer task failed")??;
+        let mut created_paths = Vec::new();
+        let mut prepared = Vec::with_capacity(inputs.len());
+        for input in inputs {
+            let result = async {
+                let dir = self
+                    .attachments_dir()
+                    .join("objects")
+                    .join(&input.content_sha256[..2]);
+                tokio::fs::create_dir_all(&dir).await?;
+                let storage_path = dir.join(&input.content_sha256);
+                let created = !tokio::fs::try_exists(&storage_path).await?;
+                if created {
+                    let path = storage_path.clone();
+                    let data = input.data.clone();
+                    tokio::task::spawn_blocking(move || {
+                        pl_core::atomic_file::write_file_atomically(&path, &data)
+                    })
+                    .await
+                    .context("tool image blob writer task failed")??;
+                }
+                Ok::<_, anyhow::Error>((input, storage_path, created))
+            }
+            .await;
+            match result {
+                Ok((input, storage_path, created)) => {
+                    if created {
+                        created_paths.push(storage_path.clone());
+                    }
+                    prepared.push((input, storage_path));
+                }
+                Err(error) => {
+                    cleanup_created_blobs(created_paths).await;
+                    return Err(error);
+                }
+            }
         }
 
         let result = async {
-            let row = entities::attachment::ActiveModel {
-                id: Set(new_id("attachment")),
-                thread_id: Set(thread_id.to_string()),
-                kind: Set("image".to_string()),
-                media_type: Set(input.media_type),
-                filename: Set(Some(input.filename)),
-                storage_path: Set(storage_path.to_string_lossy().to_string()),
-                byte_size: Set(i64::try_from(input.data.len())
-                    .context("tool image byte size exceeds SQLite range")?),
-                content_sha256: Set(input.content_sha256),
-                width: Set(Some(i64::from(input.width))),
-                height: Set(Some(i64::from(input.height))),
-                created_at: Set(unix_seconds()),
+            let transaction = self.db.begin().await?;
+            let mut attachments = Vec::with_capacity(prepared.len());
+            for (input, storage_path) in prepared {
+                let row = entities::attachment::ActiveModel {
+                    id: Set(new_id("attachment")),
+                    thread_id: Set(thread_id.to_string()),
+                    kind: Set("image".to_string()),
+                    media_type: Set(input.media_type),
+                    filename: Set(Some(input.filename)),
+                    storage_path: Set(storage_path.to_string_lossy().to_string()),
+                    byte_size: Set(i64::try_from(input.data.len())
+                        .context("tool image byte size exceeds SQLite range")?),
+                    content_sha256: Set(input.content_sha256),
+                    width: Set(Some(i64::from(input.width))),
+                    height: Set(Some(i64::from(input.height))),
+                    created_at: Set(unix_seconds()),
+                }
+                .insert(&transaction)
+                .await?;
+                let record = attachment_record(row)?;
+                attachments.push(thread_attachment(&record));
             }
-            .insert(&self.db)
-            .await?;
-            let record = attachment_record(row)?;
-            Ok::<_, anyhow::Error>(thread_attachment(&record))
+            transaction.commit().await?;
+            Ok::<_, anyhow::Error>(attachments)
         }
         .await;
-        if result.is_err() && created {
-            let _ = tokio::fs::remove_file(storage_path).await;
+        if result.is_err() {
+            cleanup_created_blobs(created_paths).await;
         }
         result
     }

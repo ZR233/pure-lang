@@ -1513,6 +1513,42 @@ abstract class AppLocalizations {
   /// **'Unable to open this link.'**
   String get timelineExternalLinkOpenFailed;
 
+  /// No description provided for @timelineAttachment.
+  ///
+  /// In en, this message translates to:
+  /// **'Attachment'**
+  String get timelineAttachment;
+
+  /// No description provided for @timelineImageLoadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Unable to load this image.'**
+  String get timelineImageLoadFailed;
+
+  /// No description provided for @timelineImageRetry.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry'**
+  String get timelineImageRetry;
+
+  /// No description provided for @timelineImageClose.
+  ///
+  /// In en, this message translates to:
+  /// **'Close image preview'**
+  String get timelineImageClose;
+
+  /// No description provided for @timelineRemoteImageSource.
+  ///
+  /// In en, this message translates to:
+  /// **'External image from {host}'**
+  String timelineRemoteImageSource(String host);
+
+  /// No description provided for @timelineRemoteImageOpen.
+  ///
+  /// In en, this message translates to:
+  /// **'Click to load and preview'**
+  String get timelineRemoteImageOpen;
+
   /// No description provided for @timelineJumpToLatest.
   ///
   /// In en, this message translates to:

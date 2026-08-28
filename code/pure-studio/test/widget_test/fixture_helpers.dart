@@ -11,9 +11,11 @@ Widget _timelineHarness({
   VoidCallback? onLoadOlder,
   bool isLoadingOlder = false,
   StudioApi? api,
+  TimelineRemoteImageProviderFactory? remoteImageProviderFactory,
 }) {
   return _timelineApp(
     api: api,
+    remoteImageProviderFactory: remoteImageProviderFactory,
     home: Scaffold(
       body: SizedBox(
         width: 980,
@@ -141,12 +143,17 @@ Widget _timelineApp({
   Locale locale = const Locale('en'),
   StudioApi? api,
   ExternalUrlLauncher? externalUrlLauncher,
+  TimelineRemoteImageProviderFactory? remoteImageProviderFactory,
 }) {
   return ProviderScope(
     overrides: [
       if (api != null) studioApiProvider.overrideWithValue(api),
       if (externalUrlLauncher != null)
         externalUrlLauncherProvider.overrideWithValue(externalUrlLauncher),
+      if (remoteImageProviderFactory != null)
+        timelineRemoteImageProviderFactoryProvider.overrideWithValue(
+          remoteImageProviderFactory,
+        ),
     ],
     child: _localizedApp(home: home, locale: locale),
   );

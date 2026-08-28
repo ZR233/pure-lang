@@ -228,6 +228,12 @@ Thread 审计事实，即使后续 inference 失败也随 Thread 保留。请求
 批量校验全部 id、顺序和 metadata 后才读取 bytes，同 Turn continuation、重试和进程恢复都走该
 loader，不重新访问原始 workspace 文件。
 
+通过模型能力门禁的 MCP typed image 使用同一 attachment store，但同一 `CallToolResult` 的图片必须
+作为一个有序批次原子提交。batch writer 在全部 blob 准备和 metadata 校验完成后一次发布 rows；任一
+失败时回滚 rows，并清理本批新建的 blob。MCP `isError`、无完整图片 replay
+能力、无 attachment runtime 或任一图片校验失败时不得写入。typed image 的 Base64 仅存在于 MCP
+调用返回到转换器的短生命周期内，不得进入 SQLite、Thread 事件、trace、audit、日志或 Flutter DTO。
+
 远程输入只接受 HTTPS，并使用不读取环境代理、无 cookie 的专用 client；每次 DNS 与 redirect 都
 拒绝 loopback、私网、链路本地、保留和 metadata 地址，同时限制 redirect、超时、声明长度、流式
 实际长度并执行 MIME sniff。原始 URL 只存在于当前进程的 draft，用于模型明确优选 URL 的一次首发，

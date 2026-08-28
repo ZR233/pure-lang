@@ -263,6 +263,9 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             None => context.snapshot.identity.role.clone(),
         };
         let route = config.models.resolve(&model_role)?;
+        let attachment_runtime = attachment_runtime(self.store.clone(), thread_id.clone());
+        let mcp_image_output =
+            pl_core::McpImageOutputContext::for_model(&route.model, attachment_runtime.clone());
         let web_search = plan_web_search(&config.models, &route, &config.web_search)?;
         let agent_tools = self
             .resources
@@ -284,16 +287,19 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             let refresh_workspace = pl_core::ToolWorkspace::new(workspace.clone())
                 .with_lsp_runtime(Some(lsp_runtime.clone()));
             let refresh_workspace_root = workspace_root.clone();
+            let mcp_image_output = mcp_image_output.clone();
             builder = builder.with_before_model_step(BeforeModelStepHook::new(move |step| {
                 let mcp_runtime = mcp_runtime.clone();
                 let lsp_runtime = lsp_runtime.clone();
                 let refresh_workspace = refresh_workspace.clone();
                 let refresh_workspace_root = refresh_workspace_root.clone();
+                let mcp_image_output = mcp_image_output.clone();
                 async move {
                     let mut replacements = Vec::with_capacity(2);
                     if refresh_mcp {
                         let lease = mcp_runtime.acquire_turn_lease().await?;
-                        replacements.push((ToolGroupId::new("mcp"), lease.agent_tools()));
+                        replacements
+                            .push((ToolGroupId::new("mcp"), lease.agent_tools(mcp_image_output)));
                     }
                     if refresh_lsp {
                         let available = !lsp_runtime
@@ -315,7 +321,6 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         if !refresh_lsp {
             agent_tools.uninstall(&ToolGroupId::new("lsp"));
         }
-        let attachment_runtime = attachment_runtime(self.store.clone(), thread_id.clone());
         let profile = CoreRuntimeProfile::local_agent_workspace(workspace.clone())
             .with_workspace_instructions(workspace_instructions.clone())
             .with_attachment_runtime(attachment_runtime);
@@ -693,13 +698,13 @@ fn interaction_emitter(
 fn attachment_runtime(store: StudioStore, thread_id: String) -> AttachmentRuntime {
     let writer_store = store.clone();
     let writer_thread_id = thread_id.clone();
-    AttachmentRuntime::new(
-        move |input| {
+    AttachmentRuntime::new_batch(
+        move |inputs| {
             let store = writer_store.clone();
             let thread_id = writer_thread_id.clone();
             async move {
                 store
-                    .persist_tool_image(&thread_id, input)
+                    .persist_tool_images(&thread_id, inputs)
                     .await
                     .map_err(anyhow_error)
             }
