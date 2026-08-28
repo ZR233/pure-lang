@@ -1111,18 +1111,23 @@ void registerTimelineToolTests() {
     },
   );
 
-  testWidgets('completed turn removes the wait pulse', (tester) async {
+  testWidgets('terminal turn transition removes the wait pulse and ticker', (
+    tester,
+  ) async {
     _configureResponsiveView(tester, const Size(980, 520));
-    final toolPart = _toolTimelinePart(
-      id: 'tool-done',
-      groupId: 'group-done',
-      turnId: 'turn-done',
-      name: 'exec',
-      status: 'succeeded',
-      arguments: jsonEncode({'command': 'cargo test'}),
-    );
-    await tester.pumpWidget(
-      _timelineApp(
+    Widget timeline({
+      required String toolStatus,
+      required StudioTurnState state,
+    }) {
+      final toolPart = _toolTimelinePart(
+        id: 'tool-terminal-transition',
+        groupId: 'group-terminal-transition',
+        turnId: 'turn-terminal-transition',
+        name: 'exec',
+        status: toolStatus,
+        arguments: jsonEncode({'command': 'cargo test'}),
+      );
+      return _timelineApp(
         home: Scaffold(
           body: SizedBox(
             width: 980,
@@ -1132,14 +1137,21 @@ void registerTimelineToolTests() {
               rows: timelineRowsFromFixtureParts([toolPart]),
               turn: _testTurn(
                 threadId: 'session-1',
-                state: const CompletedStudioTurnState(
-                  startedAt: 1,
-                  completedAt: 2,
-                  completion: StudioTurnCompletion.normal,
-                ),
+                turnId: 'turn-terminal-transition',
+                state: state,
               ),
             ),
           ),
+        ),
+      );
+    }
+
+    await tester.pumpWidget(
+      timeline(
+        toolStatus: 'running',
+        state: const RunningStudioTurnState(
+          startedAt: 1,
+          activity: StudioTurnActivity.runningTool,
         ),
       ),
     );
@@ -1148,8 +1160,37 @@ void registerTimelineToolTests() {
 
     expect(
       find.byKey(const ValueKey('timeline-current-activity-pulse')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('timeline-current-activity')),
+      findsOneWidget,
+    );
+    expect(tester.binding.hasScheduledFrame, isTrue);
+
+    await tester.pumpWidget(
+      timeline(
+        toolStatus: 'succeeded',
+        state: const CompletedStudioTurnState(
+          startedAt: 1,
+          completedAt: 2,
+          completion: StudioTurnCompletion.normal,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(
+      find.byKey(const ValueKey('timeline-current-activity-pulse')),
       findsNothing,
     );
+    expect(
+      find.byKey(const ValueKey('timeline-current-activity')),
+      findsNothing,
+    );
+    expect(find.text('exec completed'), findsOneWidget);
+    expect(tester.binding.hasScheduledFrame, isFalse);
   });
 
   testWidgets('awaiting approval and terminal tools show no item pulse', (
@@ -1260,6 +1301,68 @@ void registerTimelineToolTests() {
       find.byKey(const ValueKey('timeline-current-activity-pulse')),
       findsOneWidget,
     );
+    expect(tester.binding.hasScheduledFrame, isFalse);
+  });
+
+  testWidgets('TickerMode stops and resumes the wait pulse ticker', (
+    tester,
+  ) async {
+    _configureResponsiveView(tester, const Size(980, 520));
+    final reasoning = _threadItemFixture(
+      id: 'reasoning-ticker-mode',
+      threadId: 'session-1',
+      turnId: 'turn-1',
+      ordinal: 0,
+      kind: ThreadItemKind.reasoning,
+      channel: null,
+      reasoningSummary: const ['## Ticker mode reasoning'],
+      status: 'streaming',
+    );
+    Widget timeline({required bool enabled}) {
+      return _timelineApp(
+        home: TickerMode(
+          enabled: enabled,
+          child: Scaffold(
+            body: SizedBox(
+              width: 980,
+              height: 520,
+              child: TimelineView(
+                threadId: 'session-1',
+                rows: timelineRowsFromThreadItems([reasoning]),
+                turn: _testTurn(
+                  threadId: 'session-1',
+                  state: const RunningStudioTurnState(
+                    startedAt: 1,
+                    activity: StudioTurnActivity.thinking,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    await tester.pumpWidget(timeline(enabled: false));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(
+      find.byKey(const ValueKey('timeline-current-activity-pulse')),
+      findsOneWidget,
+    );
+    expect(tester.binding.hasScheduledFrame, isFalse);
+
+    await tester.pumpWidget(timeline(enabled: true));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(tester.binding.hasScheduledFrame, isTrue);
+
+    await tester.pumpWidget(timeline(enabled: false));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
     expect(tester.binding.hasScheduledFrame, isFalse);
   });
 

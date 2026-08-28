@@ -719,11 +719,15 @@ mod tests {
     #[test]
     fn running_turn_phases_map_losslessly() {
         for (phase, bridged_phase) in [
+            (TurnPhase::Preparing, BridgeTurnPhase::Preparing),
             (TurnPhase::Thinking, BridgeTurnPhase::Thinking),
+            (TurnPhase::Responding, BridgeTurnPhase::Responding),
+            (TurnPhase::Planning, BridgeTurnPhase::Planning),
             (TurnPhase::RunningTool, BridgeTurnPhase::RunningTool),
+            (TurnPhase::Persisting, BridgeTurnPhase::Persisting),
         ] {
             let bridged = bridge_turn(running_turn("turn-1", phase));
-            // 完整比较 BridgeTurn，确保 Thinking/RunningTool 逐个无损映射，
+            // 完整比较 BridgeTurn，确保六种 canonical phase 逐个无损映射，
             // 未来枚举变更仍由穷尽 match 暴露。
             assert_eq!(bridged, expected_bridge_turn("turn-1", phase));
             assert_eq!(
