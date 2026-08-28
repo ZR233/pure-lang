@@ -319,7 +319,10 @@ void registerRecoveryIssueTests() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [studioApiProvider.overrideWithValue(api)],
-          child: _localizedApp(home: const StudioShell()),
+          child: _localizedApp(
+            home: const StudioShell(),
+            disableAnimations: true,
+          ),
         ),
       );
       await tester.pumpAndSettle();

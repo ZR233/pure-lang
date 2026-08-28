@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -21,6 +22,7 @@ part 'timeline_blocks.dart';
 part 'timeline_markdown_blocks.dart';
 part 'timeline_plan_agent_blocks.dart';
 part 'timeline_tool_blocks.dart';
+part 'timeline_wait_indicator.dart';
 
 class TimelineView extends StatefulWidget {
   const TimelineView({

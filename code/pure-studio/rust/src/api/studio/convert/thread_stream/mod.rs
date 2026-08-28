@@ -710,10 +710,58 @@ fn mcp_server(value: McpServerDescriptor) -> BridgeThreadMcpServerDescriptor {
 #[cfg(test)]
 mod tests {
     use pl_protocol::{
-        SkillActivation, ThreadContextCompactionItem, ThreadSkillItem, ThreadTextItem,
+        RunningTurnState, SkillActivation, ThreadContextCompactionItem, ThreadSkillItem,
+        ThreadTextItem, TurnPhase, TurnState,
     };
 
     use super::*;
+
+    #[test]
+    fn running_turn_phases_map_losslessly() {
+        for (phase, bridged_phase) in [
+            (TurnPhase::Preparing, BridgeTurnPhase::Preparing),
+            (TurnPhase::Thinking, BridgeTurnPhase::Thinking),
+            (TurnPhase::Responding, BridgeTurnPhase::Responding),
+            (TurnPhase::Planning, BridgeTurnPhase::Planning),
+            (TurnPhase::RunningTool, BridgeTurnPhase::RunningTool),
+            (TurnPhase::Persisting, BridgeTurnPhase::Persisting),
+        ] {
+            let bridged = bridge_turn(running_turn("turn-1", phase));
+            // 完整比较 BridgeTurn，确保六种 canonical phase 逐个无损映射，
+            // 未来枚举变更仍由穷尽 match 暴露。
+            assert_eq!(bridged, expected_bridge_turn("turn-1", phase));
+            assert_eq!(
+                bridged.state,
+                BridgeTurnState::Running {
+                    started_at: 1,
+                    phase: bridged_phase,
+                }
+            );
+        }
+    }
+
+    fn running_turn(id: &str, phase: TurnPhase) -> Turn {
+        Turn {
+            id: id.to_string(),
+            thread_id: "thread-1".to_string(),
+            revision: 1,
+            state: TurnState::Running(RunningTurnState::new(1, phase)),
+            updated_at: 1,
+        }
+    }
+
+    fn expected_bridge_turn(id: &str, phase: TurnPhase) -> BridgeTurn {
+        BridgeTurn {
+            id: id.to_string(),
+            thread_id: "thread-1".to_string(),
+            revision: 1,
+            state: BridgeTurnState::Running {
+                started_at: 1,
+                phase: turn_phase(phase),
+            },
+            updated_at: 1,
+        }
+    }
 
     #[test]
     fn internal_context_items_never_cross_the_bridge_boundary() {

@@ -38,6 +38,7 @@ class _ToolGroupPartState extends State<_ToolGroupPart> {
           key: StudioDriverKeys.timelineToolGroupSummary(group.id),
           container: true,
           button: true,
+          liveRegion: widget.isCurrentActivity,
           expanded: expanded,
           label: activityLabel,
           onTap: _toggleExpanded,
@@ -55,6 +56,7 @@ class _ToolGroupPartState extends State<_ToolGroupPart> {
                 isCurrentActivity: widget.isCurrentActivity,
                 isIssue: group.issueCount > 0,
                 expanded: expanded,
+                showWaitPulse: widget.isCurrentActivity && !expanded,
               ),
             ),
           ),
@@ -75,10 +77,15 @@ class _ToolGroupPartState extends State<_ToolGroupPart> {
                 children: [
                   for (final item in group.items)
                     _isWebSearch(item)
-                        ? _WebSearchToolCard(item: item, embedded: true)
+                        ? _WebSearchToolCard(
+                            item: item,
+                            embedded: true,
+                            showActivePulse: widget.isCurrentActivity,
+                          )
                         : _ToolGroupItemRow(
                             threadId: widget.threadId,
                             item: item,
+                            showActivePulse: widget.isCurrentActivity,
                           ),
                 ],
               ),
@@ -121,6 +128,16 @@ class _ToolGroupPartState extends State<_ToolGroupPart> {
 bool _isActiveToolItem(TimelineToolGroupItem item) {
   return const {
     'awaitingApproval',
+    'started',
+    'streaming',
+    'approved',
+    'running',
+  }.contains(item.status);
+}
+
+/// 工具处于真正执行/流式中，可展示紧凑脉冲；等待授权不作为模型思考展示。
+bool _isExecutingToolItem(TimelineToolGroupItem item) {
+  return const {
     'started',
     'streaming',
     'approved',
@@ -178,10 +195,15 @@ bool _isWebSearch(TimelineToolGroupItem item) {
 }
 
 class _WebSearchToolCard extends StatelessWidget {
-  const _WebSearchToolCard({required this.item, this.embedded = false});
+  const _WebSearchToolCard({
+    required this.item,
+    this.embedded = false,
+    this.showActivePulse = false,
+  });
 
   final TimelineToolGroupItem item;
   final bool embedded;
+  final bool showActivePulse;
 
   @override
   Widget build(BuildContext context) {
@@ -206,6 +228,12 @@ class _WebSearchToolCard extends StatelessWidget {
                   ),
                 ),
               ),
+              if (showActivePulse && _isExecutingToolItem(item)) ...[
+                const SizedBox(width: 8),
+                TimelineWaitIndicator(
+                  key: ValueKey('timeline-tool-item-pulse:${item.id}'),
+                ),
+              ],
               _StatusPill(label: item.status),
             ],
           ),
@@ -432,10 +460,15 @@ void _collectWebLinks(Object? value, Set<String> links) {
 }
 
 class _ToolGroupItemRow extends StatelessWidget {
-  const _ToolGroupItemRow({required this.threadId, required this.item});
+  const _ToolGroupItemRow({
+    required this.threadId,
+    required this.item,
+    this.showActivePulse = false,
+  });
 
   final String threadId;
   final TimelineToolGroupItem item;
+  final bool showActivePulse;
 
   @override
   Widget build(BuildContext context) {
@@ -481,6 +514,12 @@ class _ToolGroupItemRow extends StatelessWidget {
                         ),
                       ),
                     ),
+                    if (showActivePulse && _isExecutingToolItem(item)) ...[
+                      const SizedBox(width: 8),
+                      TimelineWaitIndicator(
+                        key: ValueKey('timeline-tool-item-pulse:${item.id}'),
+                      ),
+                    ],
                     const SizedBox(width: 8),
                     _StatusPill(label: item.status),
                   ],

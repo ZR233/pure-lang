@@ -356,10 +356,13 @@ pub(super) fn interaction_completion_turn(
 
 fn phase_for_item(item: &TracePart) -> Option<TurnPhase> {
     match item.state() {
-        TracePartState::Text(text) => Some(match text.channel() {
-            TraceTextChannel::Commentary | TraceTextChannel::Final => TurnPhase::Responding,
-            TraceTextChannel::User => TurnPhase::Thinking,
-        }),
+        // User inputs are projected exactly once from the durable mailbox event (see
+        // thread_item below). The internal User trace is model-visible diagnostics only
+        // and must not advance an active Turn out of Preparing.
+        TracePartState::Text(text) => match text.channel() {
+            TraceTextChannel::Commentary | TraceTextChannel::Final => Some(TurnPhase::Responding),
+            TraceTextChannel::User => None,
+        },
         TracePartState::Thinking(_) | TracePartState::Inference(_) => Some(TurnPhase::Thinking),
         TracePartState::Tool(_) | TracePartState::Agent(_) => Some(TurnPhase::RunningTool),
         TracePartState::Plan(_) => Some(TurnPhase::Planning),
@@ -700,7 +703,10 @@ mod tests {
         InteractionScope, ResolveUserInput, RunningTurnState, SkillActivation,
         THREAD_SCHEMA_VERSION, Thread, ThreadAttachment, ThreadItemState, ThreadSnapshot,
     };
-    use pl_trace::{TracePartAction, TracePartCompletion};
+    use pl_trace::{
+        RunningTraceAgent, TraceAgentIdentity, TraceAgentPart, TraceAgentState, TracePartAction,
+        TracePartCompletion, TraceToolInvocation,
+    };
 
     use super::*;
 
@@ -1053,6 +1059,153 @@ mod tests {
             projected.notifications[0].notification,
             ThreadNotification::InteractionChanged { .. }
         ));
+    }
+
+    #[test]
+    fn inference_and_tool_starts_publish_wait_phases_before_items() {
+        let inference = started_trace(TracePart::running_inference(
+            "turn-1".to_string(),
+            "inference-1".to_string(),
+            1,
+            7,
+            "inf-1".to_string(),
+            "claude".to_string(),
+        ));
+        let tool = started_trace(TracePart::started_tool(
+            "turn-1".to_string(),
+            "tool-1".to_string(),
+            2,
+            8,
+            TraceToolInvocation::new(
+                "call-1".to_string(),
+                "read_file".to_string(),
+                "{}".to_string(),
+            ),
+        ));
+        let agent = started_trace(TracePart::agent(
+            "turn-1".to_string(),
+            "agent-1".to_string(),
+            3,
+            9,
+            TraceAgentPart::new(
+                TraceAgentIdentity::new(
+                    "agent-1".to_string(),
+                    "/sub".to_string(),
+                    "executor".to_string(),
+                    "do work".to_string(),
+                    1,
+                ),
+                TraceAgentState::Running(RunningTraceAgent),
+            ),
+        ));
+
+        // 每个外部等待 start 都必须先投影 canonical wait phase，再发布对应 ItemStarted；
+        // 客户端在请求发起到终态之间始终有 typed 活动状态，没有无状态窗口。
+        for (trace, expected_phase) in [
+            (inference, TurnPhase::Thinking),
+            (tool, TurnPhase::RunningTool),
+            (agent, TurnPhase::RunningTool),
+        ] {
+            let batch = project_trace_events("thread-1", &snapshot(), &[trace]);
+            assert_wait_phase_then_item(&batch, expected_phase);
+        }
+    }
+
+    #[test]
+    fn user_trace_keeps_preparing_until_inference_starts() {
+        // 真实 Turn 先 start/complete 内部 User trace，再建立 Inference item。User 输入
+        // 只从 durable mailbox 投影一次（见 thread_item），其 trace 必须对展示 phase 完全
+        // 中性：active Turn 保持 Preparing，直到 Inference start 才切到 Thinking。
+        let user_item = TracePart::completed_text(
+            "turn-1",
+            "turn-1-user",
+            1,
+            TraceTextChannel::User,
+            "hello".to_string(),
+            Vec::new(),
+            1,
+        );
+        let user_start = TraceEvent {
+            session_id: "thread-1".to_string(),
+            sequence: 1,
+            timestamp: 1,
+            kind: TraceEventKind::TracePartStarted {
+                item: user_item.clone(),
+            },
+        };
+        let user_complete = TraceEvent {
+            session_id: "thread-1".to_string(),
+            sequence: 2,
+            timestamp: 2,
+            kind: TraceEventKind::TracePartCompleted { item: user_item },
+        };
+
+        // User trace 单独投影时零 notification：既不产生 TurnUpdated，也不产生 Item。
+        let user_only = project_trace_events(
+            "thread-1",
+            &snapshot(),
+            &[user_start.clone(), user_complete.clone()],
+        );
+        assert!(
+            user_only.notifications.is_empty(),
+            "user trace must not publish TurnUpdated or Item, got {:?}",
+            user_only.notifications
+        );
+
+        // 随后 Inference start 才先投影 TurnUpdated(Thinking)，再发布 ItemStarted。
+        let inference = started_trace(TracePart::running_inference(
+            "turn-1".to_string(),
+            "inference-1".to_string(),
+            3,
+            7,
+            "inf-1".to_string(),
+            "claude".to_string(),
+        ));
+        let batch = project_trace_events(
+            "thread-1",
+            &snapshot(),
+            &[user_start, user_complete, inference],
+        );
+        assert_wait_phase_then_item(&batch, TurnPhase::Thinking);
+    }
+
+    fn started_trace(item: TracePart) -> TraceEvent {
+        TraceEvent {
+            session_id: "thread-1".to_string(),
+            sequence: item.started_sequence(),
+            timestamp: item.created_at(),
+            kind: TraceEventKind::TracePartStarted { item },
+        }
+    }
+
+    fn assert_wait_phase_then_item(batch: &ThreadProjectionBatch, expected_phase: TurnPhase) {
+        assert_eq!(
+            batch.notifications.len(),
+            2,
+            "expected exactly TurnUpdated then ItemStarted, got {:?}",
+            batch
+                .notifications
+                .iter()
+                .map(|envelope| &envelope.notification)
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            matches!(
+                &batch.notifications[0].notification,
+                ThreadNotification::TurnUpdated { turn }
+                    if turn.phase() == Some(expected_phase)
+            ),
+            "expected first notification to be TurnUpdated({expected_phase:?}), got {:?}",
+            batch.notifications[0].notification
+        );
+        assert!(
+            matches!(
+                &batch.notifications[1].notification,
+                ThreadNotification::ItemStarted { .. }
+            ),
+            "expected second notification to be ItemStarted, got {:?}",
+            batch.notifications[1].notification
+        );
     }
 
     fn snapshot() -> ThreadSnapshot {
