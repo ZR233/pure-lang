@@ -1,7 +1,8 @@
 use pl_model::{EffectivePromptCachePolicy, ModelInfo, TokenUsage};
 use pl_protocol::{
-    AgentRuntimeDelta, InferenceBillingRecord, InferenceTokenUsage, ModelPricingSnapshot,
-    RuntimeCostAmount, RuntimeUsageSnapshot, ThreadPromptSnapshot, TokenUsageSnapshot,
+    AgentRuntimeDelta, InferenceBillingRecord, InferenceTiming, InferenceTokenUsage,
+    ModelPricingSnapshot, RuntimeCostAmount, RuntimeUsageSnapshot, ThreadPromptSnapshot,
+    TokenUsageSnapshot,
 };
 
 use crate::tool::SubagentContext;
@@ -20,6 +21,7 @@ pub(crate) struct RuntimeAgentIdentity {
 
 pub(crate) struct InferenceBillingInput<'a> {
     pub inference_id: String,
+    pub provider_instance_id: &'a str,
     pub provider: &'a str,
     pub model: &'a str,
     pub usage: &'a TokenUsage,
@@ -27,6 +29,7 @@ pub(crate) struct InferenceBillingInput<'a> {
     pub prompt_cache_policy: EffectivePromptCachePolicy,
     pub prompt: Option<&'a ThreadPromptSnapshot>,
     pub orchestration: pl_protocol::InferenceOrchestrationMetrics,
+    pub timing: Option<InferenceTiming>,
     pub recorded_at: i64,
 }
 
@@ -86,6 +89,7 @@ pub(crate) fn inference_billing_record(input: InferenceBillingInput<'_>) -> Infe
     let estimated_cache_savings = cache_savings_for_inference(&normalized_usage, &pricing);
     InferenceBillingRecord {
         inference_id: input.inference_id,
+        provider_instance_id: input.provider_instance_id.to_string(),
         provider: input.provider.to_string(),
         model: input.model.to_string(),
         context_window: input.model_info.resolved_context_window(),
@@ -101,6 +105,7 @@ pub(crate) fn inference_billing_record(input: InferenceBillingInput<'_>) -> Infe
             .map(|snapshot| snapshot.prompt_cache_policy.clone()),
         prefix_changed_reason: input.prompt.map(|snapshot| snapshot.prefix_changed_reason),
         orchestration: input.orchestration,
+        timing: input.timing,
         recorded_at: input.recorded_at,
     }
 }
@@ -241,6 +246,7 @@ pub(crate) fn agent_runtime_delta(
         prompt_generation: billing.prompt_generation,
         prompt_cache_policy: billing.prompt_cache_policy.clone(),
         prefix_changed_reason: billing.prefix_changed_reason,
+        timing: billing.timing,
         updated_at: billing.recorded_at,
     }
 }
@@ -520,6 +526,7 @@ mod tests {
 
         let billing = inference_billing_record(InferenceBillingInput {
             inference_id: "inference-1".to_string(),
+            provider_instance_id: "openai-primary",
             provider: "OpenAI",
             model: &model.slug,
             usage: &usage,
@@ -529,6 +536,7 @@ mod tests {
             },
             prompt: None,
             orchestration: Default::default(),
+            timing: None,
             recorded_at: 1,
         });
 
@@ -556,6 +564,7 @@ mod tests {
         let prompt = openai_prompt_snapshot();
         let billing = inference_billing_record(InferenceBillingInput {
             inference_id: "inference-1".to_string(),
+            provider_instance_id: "openai-primary",
             provider: "OpenAI",
             model: &model.slug,
             usage: &usage,
@@ -565,6 +574,7 @@ mod tests {
             },
             prompt: Some(&prompt),
             orchestration: Default::default(),
+            timing: None,
             recorded_at: 1,
         });
 

@@ -501,6 +501,12 @@ abstract class AppLocalizations {
   /// **'LSP'**
   String get settingsLspTab;
 
+  /// No description provided for @settingsStatisticsTab.
+  ///
+  /// In en, this message translates to:
+  /// **'Statistics'**
+  String get settingsStatisticsTab;
+
   /// No description provided for @settingsSecurityTab.
   ///
   /// In en, this message translates to:
@@ -674,6 +680,108 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Partially unpriced'**
   String get statusUnpricedUsageLabel;
+
+  /// No description provided for @sessionAllAgentsCostTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Cost for all agents in this session'**
+  String get sessionAllAgentsCostTooltip;
+
+  /// No description provided for @statusCurrentAgentTokenSpeed.
+  ///
+  /// In en, this message translates to:
+  /// **'Current agent token speed'**
+  String get statusCurrentAgentTokenSpeed;
+
+  /// No description provided for @settingsStatisticsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Statistics'**
+  String get settingsStatisticsTitle;
+
+  /// No description provided for @settingsStatisticsSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Recent successful model calls, grouped by provider instance and actual model.'**
+  String get settingsStatisticsSubtitle;
+
+  /// No description provided for @settingsStatisticsSummaryTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Model performance'**
+  String get settingsStatisticsSummaryTitle;
+
+  /// No description provided for @settingsStatisticsHistoryTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Call history'**
+  String get settingsStatisticsHistoryTitle;
+
+  /// No description provided for @settingsStatisticsAllModels.
+  ///
+  /// In en, this message translates to:
+  /// **'All models'**
+  String get settingsStatisticsAllModels;
+
+  /// No description provided for @settingsStatisticsEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No complete performance samples yet.'**
+  String get settingsStatisticsEmpty;
+
+  /// No description provided for @statisticsModel.
+  ///
+  /// In en, this message translates to:
+  /// **'Provider / model'**
+  String get statisticsModel;
+
+  /// No description provided for @statisticsSpeed.
+  ///
+  /// In en, this message translates to:
+  /// **'Speed'**
+  String get statisticsSpeed;
+
+  /// No description provided for @statisticsSamples.
+  ///
+  /// In en, this message translates to:
+  /// **'Samples'**
+  String get statisticsSamples;
+
+  /// No description provided for @statisticsOutputTokens.
+  ///
+  /// In en, this message translates to:
+  /// **'Output tokens'**
+  String get statisticsOutputTokens;
+
+  /// No description provided for @statisticsAverageTtft.
+  ///
+  /// In en, this message translates to:
+  /// **'Average TTFT'**
+  String get statisticsAverageTtft;
+
+  /// No description provided for @statisticsAverageResponse.
+  ///
+  /// In en, this message translates to:
+  /// **'Average response'**
+  String get statisticsAverageResponse;
+
+  /// No description provided for @statisticsCompletedAt.
+  ///
+  /// In en, this message translates to:
+  /// **'Completed'**
+  String get statisticsCompletedAt;
+
+  /// No description provided for @statisticsDecode.
+  ///
+  /// In en, this message translates to:
+  /// **'Decode'**
+  String get statisticsDecode;
+
+  /// No description provided for @statisticsTotalResponse.
+  ///
+  /// In en, this message translates to:
+  /// **'Total'**
+  String get statisticsTotalResponse;
 
   /// No description provided for @statusTurnQueued.
   ///

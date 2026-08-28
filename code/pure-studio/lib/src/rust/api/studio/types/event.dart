@@ -94,6 +94,9 @@ sealed class BridgeProductEventPayload with _$BridgeProductEventPayload {
   const factory BridgeProductEventPayload.providerUsageStateChanged(
     BridgeProviderUsageStateSnapshot field0,
   ) = BridgeProductEventPayload_ProviderUsageStateChanged;
+  const factory BridgeProductEventPayload.modelPerformanceStateChanged(
+    BridgeModelPerformanceSnapshot field0,
+  ) = BridgeProductEventPayload_ModelPerformanceStateChanged;
   const factory BridgeProductEventPayload.updaterStateChanged(
     BridgeUpdaterStateSnapshot field0,
   ) = BridgeProductEventPayload_UpdaterStateChanged;

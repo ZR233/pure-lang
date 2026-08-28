@@ -164,6 +164,7 @@ class DemoStudioApi implements StudioApi {
         providerUsageState: ProviderUsageStateSnapshot.fromState(
           state: _demoInitialResource(),
         ),
+        modelPerformance: const ModelPerformanceSnapshotView(),
         updaterState: UpdaterStateSnapshot.idle(
           revision: 0,
           updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
@@ -235,6 +236,7 @@ class DemoStudioApi implements StudioApi {
           ),
         ),
       ),
+      modelPerformance: _demoModelPerformance(_fixtureNow!),
       updaterState: UpdaterStateSnapshot.idle(
         revision: 0,
         updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
@@ -270,6 +272,90 @@ class DemoStudioApi implements StudioApi {
           permissionMode: _permissionMode,
         ),
       ),
+    );
+  }
+
+  ModelPerformanceSnapshotView _demoModelPerformance(DateTime now) {
+    const deepseek = ModelPerformanceSummaryView(
+      providerInstanceId: 'deepseek-primary',
+      providerDisplayName: 'DeepSeek',
+      model: 'deepseek-v4-flash',
+      sampleCount: 2,
+      completionTokens: 300,
+      totalTtftMillis: 760,
+      totalDecodeMillis: 2000,
+      totalResponseMillis: 2760,
+      tokensPerSecond: 150,
+      averageTtftMillis: 380,
+      averageResponseMillis: 1380,
+    );
+    const openai = ModelPerformanceSummaryView(
+      providerInstanceId: 'openai-work',
+      providerDisplayName: 'OpenAI Work',
+      model: 'gpt-5.6-codex',
+      sampleCount: 1,
+      completionTokens: 216,
+      totalTtftMillis: 620,
+      totalDecodeMillis: 2500,
+      totalResponseMillis: 3120,
+      tokensPerSecond: 86.4,
+      averageTtftMillis: 620,
+      averageResponseMillis: 3120,
+    );
+    return ModelPerformanceSnapshotView(
+      revision: 3,
+      updatedAt: now,
+      sessionCosts: const [
+        SessionCostView(
+          rootThreadId: 'thread-main',
+          estimatedCosts: [
+            RuntimeCostView(currency: 'CNY', amount: 0.14),
+            RuntimeCostView(currency: 'USD', amount: 0.02),
+          ],
+          hasUnpricedUsage: false,
+        ),
+        SessionCostView(
+          rootThreadId: 'thread-alt',
+          estimatedCosts: [],
+          hasUnpricedUsage: true,
+        ),
+      ],
+      summaries: const [deepseek, openai],
+      history: [
+        ModelPerformanceSampleView(
+          completedAt: now.subtract(const Duration(seconds: 12)),
+          providerInstanceId: openai.providerInstanceId,
+          providerDisplayName: openai.providerDisplayName,
+          model: openai.model,
+          completionTokens: 216,
+          ttftMillis: 620,
+          decodeMillis: 2500,
+          totalResponseMillis: 3120,
+          tokensPerSecond: 86.4,
+        ),
+        ModelPerformanceSampleView(
+          completedAt: now.subtract(const Duration(seconds: 34)),
+          providerInstanceId: deepseek.providerInstanceId,
+          providerDisplayName: deepseek.providerDisplayName,
+          model: deepseek.model,
+          completionTokens: 150,
+          ttftMillis: 410,
+          decodeMillis: 1000,
+          totalResponseMillis: 1410,
+          tokensPerSecond: 150,
+        ),
+        ModelPerformanceSampleView(
+          completedAt: now.subtract(const Duration(minutes: 2)),
+          providerInstanceId: deepseek.providerInstanceId,
+          providerDisplayName: deepseek.providerDisplayName,
+          model: deepseek.model,
+          completionTokens: 150,
+          ttftMillis: 350,
+          decodeMillis: 1000,
+          totalResponseMillis: 1350,
+          tokensPerSecond: 150,
+        ),
+      ],
     );
   }
 
@@ -545,6 +631,8 @@ class DemoStudioApi implements StudioApi {
         activeMcpServers: ['dart'],
         activeLspServers: ['rust-analyzer'],
         agentCount: 1,
+        turnCompletionTokens: 150,
+        turnDecodeMillis: 1000,
       ),
     );
   }
@@ -582,6 +670,8 @@ class DemoStudioApi implements StudioApi {
         activeMcpServers: const ['dart'],
         activeLspServers: const [],
         agentCount: 0,
+        turnCompletionTokens: 216,
+        turnDecodeMillis: 2500,
       ),
     );
   }

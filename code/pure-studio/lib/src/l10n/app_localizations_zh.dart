@@ -238,6 +238,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsLspTab => 'LSP';
 
   @override
+  String get settingsStatisticsTab => '统计';
+
+  @override
   String get settingsSecurityTab => '安全';
 
   @override
@@ -323,6 +326,57 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get statusUnpricedUsageLabel => '部分费用未定价';
+
+  @override
+  String get sessionAllAgentsCostTooltip => '会话全部代理费用';
+
+  @override
+  String get statusCurrentAgentTokenSpeed => '当前代理 token 速度';
+
+  @override
+  String get settingsStatisticsTitle => '统计';
+
+  @override
+  String get settingsStatisticsSubtitle => '按 Provider 实例与实际模型汇总最近成功调用。';
+
+  @override
+  String get settingsStatisticsSummaryTitle => '模型性能';
+
+  @override
+  String get settingsStatisticsHistoryTitle => '调用历史';
+
+  @override
+  String get settingsStatisticsAllModels => '全部模型';
+
+  @override
+  String get settingsStatisticsEmpty => '暂无完整性能样本。';
+
+  @override
+  String get statisticsModel => 'Provider / 模型';
+
+  @override
+  String get statisticsSpeed => '速度';
+
+  @override
+  String get statisticsSamples => '样本数';
+
+  @override
+  String get statisticsOutputTokens => '输出 token';
+
+  @override
+  String get statisticsAverageTtft => '平均 TTFT';
+
+  @override
+  String get statisticsAverageResponse => '平均响应时间';
+
+  @override
+  String get statisticsCompletedAt => '完成时间';
+
+  @override
+  String get statisticsDecode => '解码';
+
+  @override
+  String get statisticsTotalResponse => '总响应';
 
   @override
   String get statusTurnQueued => '排队中';
@@ -1893,6 +1947,9 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get settingsLspTab => 'LSP';
 
   @override
+  String get settingsStatisticsTab => '统计';
+
+  @override
   String get settingsSecurityTab => '安全';
 
   @override
@@ -1978,6 +2035,57 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get statusUnpricedUsageLabel => '部分费用未定价';
+
+  @override
+  String get sessionAllAgentsCostTooltip => '会话全部代理费用';
+
+  @override
+  String get statusCurrentAgentTokenSpeed => '当前代理 token 速度';
+
+  @override
+  String get settingsStatisticsTitle => '统计';
+
+  @override
+  String get settingsStatisticsSubtitle => '按 Provider 实例与实际模型汇总最近成功调用。';
+
+  @override
+  String get settingsStatisticsSummaryTitle => '模型性能';
+
+  @override
+  String get settingsStatisticsHistoryTitle => '调用历史';
+
+  @override
+  String get settingsStatisticsAllModels => '全部模型';
+
+  @override
+  String get settingsStatisticsEmpty => '暂无完整性能样本。';
+
+  @override
+  String get statisticsModel => 'Provider / 模型';
+
+  @override
+  String get statisticsSpeed => '速度';
+
+  @override
+  String get statisticsSamples => '样本数';
+
+  @override
+  String get statisticsOutputTokens => '输出 token';
+
+  @override
+  String get statisticsAverageTtft => '平均 TTFT';
+
+  @override
+  String get statisticsAverageResponse => '平均响应时间';
+
+  @override
+  String get statisticsCompletedAt => '完成时间';
+
+  @override
+  String get statisticsDecode => '解码';
+
+  @override
+  String get statisticsTotalResponse => '总响应';
 
   @override
   String get statusTurnQueued => '排队中';

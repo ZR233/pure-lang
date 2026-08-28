@@ -83,6 +83,12 @@ final class ProviderUsageStateChangedPayload extends StudioBridgeEventPayload {
   final ProviderUsageStateSnapshot state;
 }
 
+final class ModelPerformanceStateChangedPayload
+    extends StudioBridgeEventPayload {
+  const ModelPerformanceStateChangedPayload(this.state);
+  final ModelPerformanceSnapshotView state;
+}
+
 final class UpdaterStateChangedPayload extends StudioBridgeEventPayload {
   const UpdaterStateChangedPayload(this.state);
   final UpdaterStateSnapshot state;

@@ -147,6 +147,7 @@ pub(super) async fn run(step: CompactionStep<'_>) -> Result<Option<TurnResult>> 
                     let recorded_at = unix_seconds();
                     let billing = inference_billing_record(InferenceBillingInput {
                         inference_id,
+                        provider_instance_id: runtime.provider_instance_id(),
                         provider: &runtime.endpoint().name,
                         model,
                         usage: &usage,
@@ -154,6 +155,7 @@ pub(super) async fn run(step: CompactionStep<'_>) -> Result<Option<TurnResult>> 
                         prompt_cache_policy,
                         prompt: prompt_cache::current(session, &options.prompt_scope),
                         orchestration: Default::default(),
+                        timing: None,
                         recorded_at,
                     });
                     inference::from_billing(active_subagent, billing)

@@ -6,7 +6,7 @@ use super::runtime::{
     RuntimeSnapshot,
 };
 use super::settings::BridgeStudioSettingsDto;
-use super::thread_stream::BridgeThread;
+use super::thread_stream::{BridgeRuntimeCostAmount, BridgeThread};
 use super::updater::BridgeUpdaterStateSnapshot;
 use serde::{Deserialize, Serialize};
 // ── Response types ──
@@ -39,8 +39,57 @@ pub struct BridgeStudioStateSnapshot {
     pub lsp: BridgeLspStateSnapshot,
     pub skills_by_project: Vec<BridgeSkillsStateSnapshot>,
     pub provider_usage: BridgeProviderUsageStateSnapshot,
+    pub model_performance: BridgeModelPerformanceSnapshot,
     pub updater: BridgeUpdaterStateSnapshot,
     pub persistence: BridgePersistenceStateSnapshot,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeModelPerformanceSnapshot {
+    pub revision: u64,
+    pub updated_at: i64,
+    pub session_costs: Vec<BridgeSessionCostSnapshot>,
+    pub summaries: Vec<BridgeModelPerformanceSummary>,
+    pub history: Vec<BridgeModelPerformanceSample>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeSessionCostSnapshot {
+    pub root_thread_id: String,
+    pub estimated_costs: Vec<BridgeRuntimeCostAmount>,
+    pub has_unpriced_usage: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeModelPerformanceSummary {
+    pub provider_instance_id: String,
+    pub provider_display_name: String,
+    pub model: String,
+    pub sample_count: u64,
+    pub completion_tokens: u64,
+    pub total_ttft_millis: u64,
+    pub total_decode_millis: u64,
+    pub total_response_millis: u64,
+    pub tokens_per_second: f64,
+    pub average_ttft_millis: f64,
+    pub average_response_millis: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeModelPerformanceSample {
+    pub completed_at: i64,
+    pub provider_instance_id: String,
+    pub provider_display_name: String,
+    pub model: String,
+    pub completion_tokens: u64,
+    pub ttft_millis: u64,
+    pub decode_millis: u64,
+    pub total_response_millis: u64,
+    pub tokens_per_second: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

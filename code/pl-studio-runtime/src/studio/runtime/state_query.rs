@@ -67,6 +67,7 @@ impl StudioRuntime {
             lsp,
             skills_by_project,
             provider_usage: self.read_provider_usage_state().await,
+            model_performance: self.model_performance.snapshot().await,
             updater: self.read_update_state().await,
             persistence: self.agent_facility.product_events.persistence_state(),
         })

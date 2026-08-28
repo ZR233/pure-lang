@@ -70,13 +70,42 @@ class _Header extends StatelessWidget {
                       ),
                     const Spacer(),
                     if (state.workspaceThreads.isNotEmpty)
-                      _AgentSwitcher(state: state),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _AgentSwitcher(state: state),
+                          const SizedBox(width: 8),
+                          _SessionCostChip(cost: state.sessionCost),
+                        ],
+                      ),
                   ],
                 ),
               ],
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _SessionCostChip extends StatelessWidget {
+  const _SessionCostChip({required this.cost});
+
+  final SessionCostView? cost;
+
+  @override
+  Widget build(BuildContext context) {
+    final value = cost;
+    final tooltip = value?.hasUnpricedUsage ?? false
+        ? '${context.l10n.sessionAllAgentsCostTooltip} · ${context.l10n.statusUnpricedUsageLabel}'
+        : context.l10n.sessionAllAgentsCostTooltip;
+    return Tooltip(
+      message: tooltip,
+      child: Chip(
+        key: StudioDriverKeys.sessionCost,
+        avatar: const Icon(Icons.receipt_long_outlined, size: 16),
+        label: Text(value?.label ?? '-'),
       ),
     );
   }

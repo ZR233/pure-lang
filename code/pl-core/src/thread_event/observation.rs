@@ -21,7 +21,7 @@ pub(crate) struct ObservedTurnEvent {
 
 #[derive(Debug, Clone)]
 pub(crate) enum TurnObservation {
-    RuntimeDelta(pl_protocol::AgentRuntimeDelta),
+    RuntimeDelta(Box<pl_protocol::AgentRuntimeDelta>),
     TodoList(pl_protocol::TodoListSnapshot),
     InteractionChanged(Box<InteractionRequest>),
     ContextCompacted {
@@ -35,7 +35,7 @@ pub(crate) enum TurnObservation {
 pub(crate) fn observation_from_agent_event(event: &AgentEvent) -> Option<TurnObservation> {
     match event {
         AgentEvent::AgentRuntimeUpdated { delta } => {
-            Some(TurnObservation::RuntimeDelta(delta.clone()))
+            Some(TurnObservation::RuntimeDelta(Box::new(delta.clone())))
         }
         AgentEvent::TodoListUpdated { snapshot } => {
             Some(TurnObservation::TodoList(snapshot.clone()))
@@ -92,7 +92,7 @@ pub(crate) fn project_observation(
             (
                 emitted_at,
                 Some(ThreadNotification::ThreadRuntimeUpdated {
-                    runtime: Box::new(runtime_snapshot(thread_id, current, delta)),
+                    runtime: Box::new(runtime_snapshot(thread_id, current, *delta)),
                 }),
             )
         }
@@ -185,6 +185,20 @@ fn runtime_snapshot(
         .map_or(0, |usage| usage.total_tokens)
         .saturating_add(delta.usage.total_tokens);
     let previous = current.runtime.as_ref();
+    let prior_turn_performance = previous.map_or((0, 0), |runtime| {
+        (runtime.turn_completion_tokens, runtime.turn_decode_millis)
+    });
+    let (turn_completion_tokens, turn_decode_millis) = match delta.timing {
+        Some(timing) if timing.has_throughput_sample() => (
+            prior_turn_performance
+                .0
+                .saturating_add(delta.usage.completion_tokens),
+            prior_turn_performance
+                .1
+                .saturating_add(timing.decode_millis),
+        ),
+        Some(_) | None => prior_turn_performance,
+    };
     ThreadRuntimeSnapshot {
         thread_id: thread_id.to_string(),
         usage: ThreadRuntimeUsage {
@@ -222,6 +236,8 @@ fn runtime_snapshot(
                 .or_else(|| prior.and_then(|usage| usage.prefix_changed_reason)),
             updated_at: delta.updated_at,
         },
+        turn_completion_tokens,
+        turn_decode_millis,
         todo: previous.and_then(|runtime| runtime.todo.clone()),
         active_skills: previous.map_or_else(Vec::new, |runtime| runtime.active_skills.clone()),
         active_mcp_servers: previous
@@ -258,6 +274,8 @@ pub(super) fn empty_runtime(thread_id: &str) -> ThreadRuntimeSnapshot {
             prefix_changed_reason: None,
             updated_at: 0,
         },
+        turn_completion_tokens: 0,
+        turn_decode_millis: 0,
         todo: None,
         active_skills: Vec::new(),
         active_mcp_servers: Vec::new(),
@@ -287,7 +305,7 @@ fn unix_timestamp() -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use pl_protocol::{AgentRuntimeDelta, SkillActivation, TokenUsageSnapshot};
+    use pl_protocol::{AgentRuntimeDelta, InferenceTiming, SkillActivation, TokenUsageSnapshot};
 
     use super::*;
 
@@ -312,7 +330,7 @@ mod tests {
             "turn-1",
             0,
             &current,
-            TurnObservation::RuntimeDelta(AgentRuntimeDelta {
+            TurnObservation::RuntimeDelta(Box::new(AgentRuntimeDelta {
                 inference_id: "inference-1".to_string(),
                 agent_id: "thread-1".to_string(),
                 path: "thread-1".to_string(),
@@ -327,8 +345,9 @@ mod tests {
                 prompt_generation: None,
                 prompt_cache_policy: None,
                 prefix_changed_reason: None,
+                timing: None,
                 updated_at: 8,
-            }),
+            })),
         );
 
         assert!(matches!(
@@ -336,6 +355,73 @@ mod tests {
             ThreadNotification::ThreadRuntimeUpdated { runtime }
                 if runtime.active_skills == ["doc", "pdf"]
         ));
+    }
+
+    #[test]
+    fn runtime_snapshot_weights_turn_throughput_by_tokens_and_decode_time() {
+        let current = ThreadSnapshot::empty("thread-1");
+        let first = runtime_snapshot(
+            "thread-1",
+            &current,
+            runtime_delta("inference-1", 20, 15, Some(100)),
+        );
+        let mut current = ThreadSnapshot::empty("thread-1");
+        current.runtime = Some(first);
+
+        let second = runtime_snapshot(
+            "thread-1",
+            &current,
+            runtime_delta("inference-2", 30, 25, Some(400)),
+        );
+        assert_eq!(second.turn_completion_tokens, 50);
+        assert_eq!(second.turn_decode_millis, 500);
+        assert_eq!(second.usage.reasoning_tokens, 40);
+
+        let mut current = ThreadSnapshot::empty("thread-1");
+        current.runtime = Some(second);
+        let without_timing = runtime_snapshot(
+            "thread-1",
+            &current,
+            runtime_delta("inference-3", 100, 80, None),
+        );
+        assert_eq!(without_timing.turn_completion_tokens, 50);
+        assert_eq!(without_timing.turn_decode_millis, 500);
+    }
+
+    fn runtime_delta(
+        inference_id: &str,
+        completion_tokens: u64,
+        reasoning_tokens: u64,
+        decode_millis: Option<u64>,
+    ) -> AgentRuntimeDelta {
+        AgentRuntimeDelta {
+            inference_id: inference_id.to_string(),
+            agent_id: "thread-1".to_string(),
+            path: "thread-1".to_string(),
+            parent_path: None,
+            role: "planner".to_string(),
+            model: "model".to_string(),
+            context_window: Some(100),
+            usage: TokenUsageSnapshot {
+                completion_tokens,
+                reasoning_tokens,
+                inference_count: 1,
+                total_tokens: completion_tokens,
+                ..TokenUsageSnapshot::default()
+            },
+            estimated_costs: Vec::new(),
+            estimated_cache_savings: Vec::new(),
+            has_unpriced_usage: false,
+            prompt_generation: None,
+            prompt_cache_policy: None,
+            prefix_changed_reason: None,
+            timing: decode_millis.map(|decode_millis| InferenceTiming {
+                ttft_millis: 10,
+                decode_millis,
+                total_millis: decode_millis + 10,
+            }),
+            updated_at: 8,
+        }
     }
 
     fn activation() -> SkillActivation {

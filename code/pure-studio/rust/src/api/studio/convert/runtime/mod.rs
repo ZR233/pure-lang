@@ -4,6 +4,7 @@
 //! `task` 桥接 Task runtime 聚合,`health` 桥接 MCP/LSP/agent 观测状态。
 
 mod health;
+mod model_performance;
 mod observed;
 mod persistence;
 mod recovery;
@@ -12,6 +13,7 @@ mod task;
 mod updater;
 
 pub(crate) use health::*;
+pub(crate) use model_performance::*;
 pub(crate) use observed::*;
 pub(crate) use persistence::*;
 pub(crate) use recovery::*;

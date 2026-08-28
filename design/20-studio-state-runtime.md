@@ -62,7 +62,8 @@ Rust install event 先通过命令转换为该状态并 durable commit，FRB 事
 
 `StudioRuntime::read_state()` 返回 `StudioStateSnapshot`，字段按领域保存完整快照：runtime、
 projectDirectory、threadDirectory、taskDirectory、agentDirectory、settings、recovery、mcp、lsp、
-skillsByProject、providerUsage、updater 和 persistence。它不接收 selected project/thread，不解析 workspace，
+skillsByProject、providerUsage、modelPerformance、updater 和 persistence。它不接收 selected
+project/thread，不解析 workspace，
 不创建会话，不加载磁盘配置，也不执行外部检查。
 
 Thread 高频 workspace 继续独立：
@@ -105,7 +106,8 @@ ThreadActor 的驻留期 Turn 热窗口与完整 Item timeline，再用 SQLite �
 
 Product event 携带完整领域 snapshot：ProjectDirectoryChanged、TaskDirectoryChanged、
 AgentDirectoryChanged、SettingsStateChanged、RecoveryStateChanged、McpStateChanged、LspStateChanged、
-SkillsStateChanged、ProviderUsageStateChanged、UpdaterStateChanged、PersistenceStateChanged；唯一例外是
+SkillsStateChanged、ProviderUsageStateChanged、ModelPerformanceStateChanged、UpdaterStateChanged、
+PersistenceStateChanged；唯一例外是
 `ThreadDirectoryChanged`，它携带增量 payload（upserted entries、removed ids 与 thread directory
 revision），由内存目录 owner 的 `DirectoryDelta` 提交派生（见 19.6），Flutter 按增量合并进分页窗口。
 信封 sequence 只用于 transport lag；payload 自带领域 revision。
@@ -230,7 +232,7 @@ Windows 的 probe、repair 和 server process 全部使用 `CREATE_NO_WINDOW`。
 Flutter LSP 页的页面进入和“刷新”只调用 read；probe、typed repair 与 reset 都使用稳定控件显式
 触发，command response 仍按 LSP revision replacement。
 
-## 20.8 Skills、Usage、Updater 与 Recovery
+## 20.8 Skills、Usage、模型性能、Updater 与 Recovery
 
 `SkillCatalogRuntime` 按 Project 持有 last-good `SkillCatalogSnapshot`、完整性状态与 Provider warning，
 并持有 `StudioPaths` 给出的显式系统目录和进程级 `SkillRegistry`。read 不访问文件系统；显式
@@ -250,6 +252,18 @@ id，重复 operation 只有 payload 完全一致才 no-op。持久化复用 `ap
 `observed:providerUsage:v2` 与 `observed:studioUpdate:v1`，不新增
 数据库 migration。update check 使用编译时当前版本；install 只接受缓存中的
 `expectedRevision + version`，Flutter 不回传 URL、hash 或 manifest。
+
+`ModelPerformanceOwner` 是已提交 inference billing 的产品级派生 owner。它串行接收
+`recordInference(rootThreadId, threadId, inferenceId, billing)` 与 `removeSession(rootThreadId)`；同一
+identity 与内容幂等，内容冲突进入 persistence Blocked。snapshot 包含 revision、按 root Thread 的
+多币种费用、部分未计价标记和全局最近 1000 条完整成功样本；Provider + model 摘要只在 query/
+bridge 投影时由窗口原始量派生，加权吞吐使用总 completion token 除以总 decode 毫秒，平均 TTFT
+与总响应时间使用样本原始总量。读取不访问 SQLite，升级时不回填既有 Turn。
+
+Thread runtime 吞吐与产品性能 owner 使用同一 billing timing 事实，但职责独立：
+`ThreadRuntimeSnapshot` 只保存当前/最近 Turn 的 completion token 与 decode 毫秒聚合，Turn 开始
+清空、成功 inference 累加、终态保留；`ModelPerformanceOwner` 跨 Thread 维护会话费用与全局历史。
+Flutter header 与 Statistics 只读后者，下部 Thread 状态栏只读前者。
 
 Recovery read 只读 registry；启动扫描属于 `startStudioRuntime`，重试、重扫、preview 和 cleanup
 都是明确 command。Project/Thread 局部错误保持隔离，不升级为全应用失败。

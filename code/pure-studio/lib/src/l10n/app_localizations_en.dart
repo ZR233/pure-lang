@@ -243,6 +243,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsLspTab => 'LSP';
 
   @override
+  String get settingsStatisticsTab => 'Statistics';
+
+  @override
   String get settingsSecurityTab => 'Security';
 
   @override
@@ -329,6 +332,59 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get statusUnpricedUsageLabel => 'Partially unpriced';
+
+  @override
+  String get sessionAllAgentsCostTooltip =>
+      'Cost for all agents in this session';
+
+  @override
+  String get statusCurrentAgentTokenSpeed => 'Current agent token speed';
+
+  @override
+  String get settingsStatisticsTitle => 'Statistics';
+
+  @override
+  String get settingsStatisticsSubtitle =>
+      'Recent successful model calls, grouped by provider instance and actual model.';
+
+  @override
+  String get settingsStatisticsSummaryTitle => 'Model performance';
+
+  @override
+  String get settingsStatisticsHistoryTitle => 'Call history';
+
+  @override
+  String get settingsStatisticsAllModels => 'All models';
+
+  @override
+  String get settingsStatisticsEmpty => 'No complete performance samples yet.';
+
+  @override
+  String get statisticsModel => 'Provider / model';
+
+  @override
+  String get statisticsSpeed => 'Speed';
+
+  @override
+  String get statisticsSamples => 'Samples';
+
+  @override
+  String get statisticsOutputTokens => 'Output tokens';
+
+  @override
+  String get statisticsAverageTtft => 'Average TTFT';
+
+  @override
+  String get statisticsAverageResponse => 'Average response';
+
+  @override
+  String get statisticsCompletedAt => 'Completed';
+
+  @override
+  String get statisticsDecode => 'Decode';
+
+  @override
+  String get statisticsTotalResponse => 'Total';
 
   @override
   String get statusTurnQueued => 'Queued';

@@ -174,6 +174,7 @@ pub(crate) fn responses_parse_response(body: serde_json::Value) -> Result<Comple
         tool_calls,
         responses_context_items,
         orchestration,
+        timing: None,
         usage: body
             .usage
             .as_ref()
@@ -346,6 +347,7 @@ pub(crate) fn chat_parse_response(body: serde_json::Value) -> Result<CompletionR
         tool_calls,
         responses_context_items: Vec::new(),
         orchestration,
+        timing: None,
         usage: body
             .usage
             .as_ref()

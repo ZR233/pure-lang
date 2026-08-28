@@ -21,7 +21,7 @@ mod turn_failure;
 pub use agent::*;
 pub use billing::InferenceTokenUsage as TokenUsage;
 pub use billing::{
-    InferenceBillingAppend, InferenceBillingRecord, InferenceOrchestrationMetrics,
+    InferenceBillingAppend, InferenceBillingRecord, InferenceOrchestrationMetrics, InferenceTiming,
     InferenceTokenUsage, ModelPricingSnapshot, TurnBillingRecord,
 };
 pub use error::{PureError, Result};

@@ -281,6 +281,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeModelPerformanceSnapshot
+  dco_decode_box_autoadd_bridge_model_performance_snapshot(dynamic raw);
+
+  @protected
   BridgeModelPricing dco_decode_box_autoadd_bridge_model_pricing(dynamic raw);
 
   @protected
@@ -985,6 +989,21 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeModelModality dco_decode_bridge_model_modality(dynamic raw);
 
   @protected
+  BridgeModelPerformanceSample dco_decode_bridge_model_performance_sample(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeModelPerformanceSnapshot dco_decode_bridge_model_performance_snapshot(
+    dynamic raw,
+  );
+
+  @protected
+  BridgeModelPerformanceSummary dco_decode_bridge_model_performance_summary(
+    dynamic raw,
+  );
+
+  @protected
   BridgeModelPricing dco_decode_bridge_model_pricing(dynamic raw);
 
   @protected
@@ -1182,6 +1201,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeRuntimeTimestamp dco_decode_bridge_runtime_timestamp(dynamic raw);
+
+  @protected
+  BridgeSessionCostSnapshot dco_decode_bridge_session_cost_snapshot(
+    dynamic raw,
+  );
 
   @protected
   BridgeSettingsStateData dco_decode_bridge_settings_state_data(dynamic raw);
@@ -1780,6 +1804,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<BridgeModelModality> dco_decode_list_bridge_model_modality(dynamic raw);
 
   @protected
+  List<BridgeModelPerformanceSample>
+  dco_decode_list_bridge_model_performance_sample(dynamic raw);
+
+  @protected
+  List<BridgeModelPerformanceSummary>
+  dco_decode_list_bridge_model_performance_summary(dynamic raw);
+
+  @protected
   List<BridgeProviderConnectionModeDescriptor>
   dco_decode_list_bridge_provider_connection_mode_descriptor(dynamic raw);
 
@@ -1808,6 +1840,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<BridgeRuntimeCostAmount> dco_decode_list_bridge_runtime_cost_amount(
+    dynamic raw,
+  );
+
+  @protected
+  List<BridgeSessionCostSnapshot> dco_decode_list_bridge_session_cost_snapshot(
     dynamic raw,
   );
 
@@ -2390,6 +2427,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeMcpStateSnapshot sse_decode_box_autoadd_bridge_mcp_state_snapshot(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeModelPerformanceSnapshot
+  sse_decode_box_autoadd_bridge_model_performance_snapshot(
     SseDeserializer deserializer,
   );
 
@@ -3282,6 +3325,21 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeModelPerformanceSample sse_decode_bridge_model_performance_sample(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeModelPerformanceSnapshot sse_decode_bridge_model_performance_snapshot(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeModelPerformanceSummary sse_decode_bridge_model_performance_summary(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeModelPricing sse_decode_bridge_model_pricing(
     SseDeserializer deserializer,
   );
@@ -3527,6 +3585,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeRuntimeTimestamp sse_decode_bridge_runtime_timestamp(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeSessionCostSnapshot sse_decode_bridge_session_cost_snapshot(
     SseDeserializer deserializer,
   );
 
@@ -4271,6 +4334,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<BridgeModelPerformanceSample>
+  sse_decode_list_bridge_model_performance_sample(SseDeserializer deserializer);
+
+  @protected
+  List<BridgeModelPerformanceSummary>
+  sse_decode_list_bridge_model_performance_summary(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<BridgeProviderConnectionModeDescriptor>
   sse_decode_list_bridge_provider_connection_mode_descriptor(
     SseDeserializer deserializer,
@@ -4305,6 +4378,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<BridgeRuntimeCostAmount> sse_decode_list_bridge_runtime_cost_amount(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<BridgeSessionCostSnapshot> sse_decode_list_bridge_session_cost_snapshot(
     SseDeserializer deserializer,
   );
 
@@ -5001,6 +5079,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_bridge_mcp_state_snapshot(
     BridgeMcpStateSnapshot self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_bridge_model_performance_snapshot(
+    BridgeModelPerformanceSnapshot self,
     SseSerializer serializer,
   );
 
@@ -6046,6 +6130,24 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_model_performance_sample(
+    BridgeModelPerformanceSample self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_model_performance_snapshot(
+    BridgeModelPerformanceSnapshot self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_model_performance_summary(
+    BridgeModelPerformanceSummary self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_model_pricing(
     BridgeModelPricing self,
     SseSerializer serializer,
@@ -6342,6 +6444,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_runtime_timestamp(
     BridgeRuntimeTimestamp self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_session_cost_snapshot(
+    BridgeSessionCostSnapshot self,
     SseSerializer serializer,
   );
 
@@ -7252,6 +7360,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_bridge_model_performance_sample(
+    List<BridgeModelPerformanceSample> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_model_performance_summary(
+    List<BridgeModelPerformanceSummary> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_bridge_provider_connection_mode_descriptor(
     List<BridgeProviderConnectionModeDescriptor> self,
     SseSerializer serializer,
@@ -7290,6 +7410,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_bridge_runtime_cost_amount(
     List<BridgeRuntimeCostAmount> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_session_cost_snapshot(
+    List<BridgeSessionCostSnapshot> self,
     SseSerializer serializer,
   );
 

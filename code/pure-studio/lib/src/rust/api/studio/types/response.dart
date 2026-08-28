@@ -15,7 +15,7 @@ import 'updater.dart';
 part 'response.freezed.dart';
 
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `ProviderUsagesResponse`, `SkillsResponse`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 class ArchiveThreadResult {
   final String archivedRootId;
@@ -229,6 +229,151 @@ sealed class BridgeMcpStateSnapshot with _$BridgeMcpStateSnapshot {
       BridgeMcpStateSnapshot_Failed;
   const factory BridgeMcpStateSnapshot.stopped(BridgeStoppedResource field0) =
       BridgeMcpStateSnapshot_Stopped;
+}
+
+class BridgeModelPerformanceSample {
+  final PlatformInt64 completedAt;
+  final String providerInstanceId;
+  final String providerDisplayName;
+  final String model;
+  final BigInt completionTokens;
+  final BigInt ttftMillis;
+  final BigInt decodeMillis;
+  final BigInt totalResponseMillis;
+  final double tokensPerSecond;
+
+  const BridgeModelPerformanceSample({
+    required this.completedAt,
+    required this.providerInstanceId,
+    required this.providerDisplayName,
+    required this.model,
+    required this.completionTokens,
+    required this.ttftMillis,
+    required this.decodeMillis,
+    required this.totalResponseMillis,
+    required this.tokensPerSecond,
+  });
+
+  @override
+  int get hashCode =>
+      completedAt.hashCode ^
+      providerInstanceId.hashCode ^
+      providerDisplayName.hashCode ^
+      model.hashCode ^
+      completionTokens.hashCode ^
+      ttftMillis.hashCode ^
+      decodeMillis.hashCode ^
+      totalResponseMillis.hashCode ^
+      tokensPerSecond.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeModelPerformanceSample &&
+          runtimeType == other.runtimeType &&
+          completedAt == other.completedAt &&
+          providerInstanceId == other.providerInstanceId &&
+          providerDisplayName == other.providerDisplayName &&
+          model == other.model &&
+          completionTokens == other.completionTokens &&
+          ttftMillis == other.ttftMillis &&
+          decodeMillis == other.decodeMillis &&
+          totalResponseMillis == other.totalResponseMillis &&
+          tokensPerSecond == other.tokensPerSecond;
+}
+
+class BridgeModelPerformanceSnapshot {
+  final BigInt revision;
+  final PlatformInt64 updatedAt;
+  final List<BridgeSessionCostSnapshot> sessionCosts;
+  final List<BridgeModelPerformanceSummary> summaries;
+  final List<BridgeModelPerformanceSample> history;
+
+  const BridgeModelPerformanceSnapshot({
+    required this.revision,
+    required this.updatedAt,
+    required this.sessionCosts,
+    required this.summaries,
+    required this.history,
+  });
+
+  @override
+  int get hashCode =>
+      revision.hashCode ^
+      updatedAt.hashCode ^
+      sessionCosts.hashCode ^
+      summaries.hashCode ^
+      history.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeModelPerformanceSnapshot &&
+          runtimeType == other.runtimeType &&
+          revision == other.revision &&
+          updatedAt == other.updatedAt &&
+          sessionCosts == other.sessionCosts &&
+          summaries == other.summaries &&
+          history == other.history;
+}
+
+class BridgeModelPerformanceSummary {
+  final String providerInstanceId;
+  final String providerDisplayName;
+  final String model;
+  final BigInt sampleCount;
+  final BigInt completionTokens;
+  final BigInt totalTtftMillis;
+  final BigInt totalDecodeMillis;
+  final BigInt totalResponseMillis;
+  final double tokensPerSecond;
+  final double averageTtftMillis;
+  final double averageResponseMillis;
+
+  const BridgeModelPerformanceSummary({
+    required this.providerInstanceId,
+    required this.providerDisplayName,
+    required this.model,
+    required this.sampleCount,
+    required this.completionTokens,
+    required this.totalTtftMillis,
+    required this.totalDecodeMillis,
+    required this.totalResponseMillis,
+    required this.tokensPerSecond,
+    required this.averageTtftMillis,
+    required this.averageResponseMillis,
+  });
+
+  @override
+  int get hashCode =>
+      providerInstanceId.hashCode ^
+      providerDisplayName.hashCode ^
+      model.hashCode ^
+      sampleCount.hashCode ^
+      completionTokens.hashCode ^
+      totalTtftMillis.hashCode ^
+      totalDecodeMillis.hashCode ^
+      totalResponseMillis.hashCode ^
+      tokensPerSecond.hashCode ^
+      averageTtftMillis.hashCode ^
+      averageResponseMillis.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeModelPerformanceSummary &&
+          runtimeType == other.runtimeType &&
+          providerInstanceId == other.providerInstanceId &&
+          providerDisplayName == other.providerDisplayName &&
+          model == other.model &&
+          sampleCount == other.sampleCount &&
+          completionTokens == other.completionTokens &&
+          totalTtftMillis == other.totalTtftMillis &&
+          totalDecodeMillis == other.totalDecodeMillis &&
+          totalResponseMillis == other.totalResponseMillis &&
+          tokensPerSecond == other.tokensPerSecond &&
+          averageTtftMillis == other.averageTtftMillis &&
+          averageResponseMillis == other.averageResponseMillis;
 }
 
 @freezed
@@ -466,6 +611,33 @@ sealed class BridgeRecoveryStateSnapshot with _$BridgeRecoveryStateSnapshot {
   ) = BridgeRecoveryStateSnapshot_Stopped;
 }
 
+class BridgeSessionCostSnapshot {
+  final String rootThreadId;
+  final List<BridgeRuntimeCostAmount> estimatedCosts;
+  final bool hasUnpricedUsage;
+
+  const BridgeSessionCostSnapshot({
+    required this.rootThreadId,
+    required this.estimatedCosts,
+    required this.hasUnpricedUsage,
+  });
+
+  @override
+  int get hashCode =>
+      rootThreadId.hashCode ^
+      estimatedCosts.hashCode ^
+      hasUnpricedUsage.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeSessionCostSnapshot &&
+          runtimeType == other.runtimeType &&
+          rootThreadId == other.rootThreadId &&
+          estimatedCosts == other.estimatedCosts &&
+          hasUnpricedUsage == other.hasUnpricedUsage;
+}
+
 class BridgeSettingsStateData {
   final BridgeStudioSettingsDto settings;
 
@@ -637,6 +809,7 @@ class BridgeStudioStateSnapshot {
   final BridgeLspStateSnapshot lsp;
   final List<BridgeSkillsStateSnapshot> skillsByProject;
   final BridgeProviderUsageStateSnapshot providerUsage;
+  final BridgeModelPerformanceSnapshot modelPerformance;
   final BridgeUpdaterStateSnapshot updater;
   final BridgePersistenceStateSnapshot persistence;
 
@@ -652,6 +825,7 @@ class BridgeStudioStateSnapshot {
     required this.lsp,
     required this.skillsByProject,
     required this.providerUsage,
+    required this.modelPerformance,
     required this.updater,
     required this.persistence,
   });
@@ -669,6 +843,7 @@ class BridgeStudioStateSnapshot {
       lsp.hashCode ^
       skillsByProject.hashCode ^
       providerUsage.hashCode ^
+      modelPerformance.hashCode ^
       updater.hashCode ^
       persistence.hashCode;
 
@@ -688,6 +863,7 @@ class BridgeStudioStateSnapshot {
           lsp == other.lsp &&
           skillsByProject == other.skillsByProject &&
           providerUsage == other.providerUsage &&
+          modelPerformance == other.modelPerformance &&
           updater == other.updater &&
           persistence == other.persistence;
 }

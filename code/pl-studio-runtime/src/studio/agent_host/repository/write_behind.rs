@@ -46,14 +46,25 @@ enum QueueEntry {
     ThreadCommit(Box<ThreadCommit>),
     TaskCommit(Box<TaskPersistenceCommit>),
     Directory(Box<DirectoryDelta>),
+    ObservedState(Box<ObservedStateCommit>),
     Barrier(oneshot::Sender<Result<(), PureError>>),
+}
+
+#[derive(Debug, Clone)]
+struct ObservedStateCommit {
+    key: String,
+    revision: u64,
+    value: String,
 }
 
 impl QueueEntry {
     const fn is_commit(&self) -> bool {
         matches!(
             self,
-            QueueEntry::ThreadCommit(_) | QueueEntry::TaskCommit(_) | QueueEntry::Directory(_)
+            QueueEntry::ThreadCommit(_)
+                | QueueEntry::TaskCommit(_)
+                | QueueEntry::Directory(_)
+                | QueueEntry::ObservedState(_)
         )
     }
 
@@ -61,7 +72,10 @@ impl QueueEntry {
         match self {
             Self::ThreadCommit(commit) => terminal_turn_key(commit),
             Self::TaskCommit(commit) if commit.ends_lifecycle() => Some(commit.lifecycle_key()),
-            Self::TaskCommit(_) | Self::Directory(_) | Self::Barrier(_) => None,
+            Self::TaskCommit(_)
+            | Self::Directory(_)
+            | Self::ObservedState(_)
+            | Self::Barrier(_) => None,
         }
     }
 }
@@ -187,6 +201,10 @@ impl ThreadWriteBehindWriter {
         self.shared.work_notify.notify_one();
     }
 
+    pub(in crate::studio) fn block(&self, reason: &str) {
+        publish_blocked(&self.shared, reason);
+    }
+
     #[cfg(test)]
     fn accepts_new_work(&self) -> bool {
         self.state_snapshot().state.accepts_new_work()
@@ -247,6 +265,60 @@ impl ThreadWriteBehindWriter {
                 drop(pending.take());
                 self.record_visible_commit();
                 update_healthy_state(&self.shared, self.pending_commits.load(Ordering::Acquire));
+                self.shared.work_notify.notify_one();
+                return Ok(());
+            }
+            progress
+                .changed()
+                .await
+                .map_err(|_| store_error("write-behind progress channel closed"))?;
+        }
+    }
+
+    /// 把产品 owner 的版本化 observed snapshot 送入同一 write-behind 队列。
+    ///
+    /// 同 key 尚未落库的旧 revision 会被最新完整值覆盖。
+    pub(in crate::studio) async fn enqueue_observed_state(
+        &self,
+        key: impl Into<String>,
+        revision: u64,
+        value: String,
+    ) -> Result<(), PureError> {
+        self.check_accepting()?;
+        self.ensure_task();
+        let commit = ObservedStateCommit {
+            key: key.into(),
+            revision,
+            value,
+        };
+        let mut progress = self.shared.progress.subscribe();
+        loop {
+            self.check_accepting()?;
+            let result = {
+                let mut queue = self.lock_queue()?;
+                if try_coalesce_observed_state(&mut queue, &commit) {
+                    Some(false)
+                } else {
+                    let ordinary = queue
+                        .iter()
+                        .filter(|entry| entry.is_commit() && entry.terminal_key().is_none())
+                        .count();
+                    if ordinary < NORMAL_PENDING_COMMITS {
+                        queue.push_back(QueueEntry::ObservedState(Box::new(commit.clone())));
+                        self.record_visible_commit();
+                        Some(true)
+                    } else {
+                        None
+                    }
+                }
+            };
+            if let Some(added) = result {
+                if added {
+                    update_healthy_state(
+                        &self.shared,
+                        self.pending_commits.load(Ordering::Acquire),
+                    );
+                }
                 self.shared.work_notify.notify_one();
                 return Ok(());
             }
@@ -619,6 +691,28 @@ fn try_coalesce_tail(queue: &mut VecDeque<QueueEntry>, next: ThreadCommit) -> bo
     previous.coalesce(Box::new(next)).is_ok()
 }
 
+fn try_coalesce_observed_state(
+    queue: &mut VecDeque<QueueEntry>,
+    next: &ObservedStateCommit,
+) -> bool {
+    for entry in queue.iter_mut().rev() {
+        match entry {
+            QueueEntry::ObservedState(previous) if previous.key == next.key => {
+                if next.revision >= previous.revision {
+                    **previous = next.clone();
+                }
+                return true;
+            }
+            QueueEntry::Barrier(_) => break,
+            QueueEntry::ThreadCommit(_)
+            | QueueEntry::TaskCommit(_)
+            | QueueEntry::Directory(_)
+            | QueueEntry::ObservedState(_) => {}
+        }
+    }
+    false
+}
+
 struct PendingBatch {
     entries: Vec<QueueEntry>,
 }
@@ -816,6 +910,15 @@ async fn apply_batch(store: &StudioStore, batch: &PendingBatch) -> Result<(), Ba
                     return Err(classify_store_error(store_error(error)));
                 }
             }
+            QueueEntry::ObservedState(commit) => {
+                if let Err(error) =
+                    crate::studio::store::settings::upsert_setting(&tx, &commit.key, &commit.value)
+                        .await
+                {
+                    let _ = tx.rollback().await;
+                    return Err(classify_store_error(store_error(error)));
+                }
+            }
             QueueEntry::Barrier(_) => {}
         }
     }
@@ -918,7 +1021,7 @@ fn advance_batch_durability(shared: &WriterShared, batch: &PendingBatch) {
                     .and_modify(|revision| *revision = (*revision).max(commit.revision))
                     .or_insert(commit.revision);
             }
-            QueueEntry::Directory(_) | QueueEntry::Barrier(_) => {}
+            QueueEntry::Directory(_) | QueueEntry::ObservedState(_) | QueueEntry::Barrier(_) => {}
         }
     }
     if revisions.is_empty() && task_revisions.is_empty() {
@@ -1009,7 +1112,10 @@ fn advance_task_durable_revision(shared: &WriterShared, owner_id: &str, revision
 fn complete_applied_batch(batch: PendingBatch) {
     for entry in batch.entries {
         match entry {
-            QueueEntry::ThreadCommit(_) | QueueEntry::TaskCommit(_) | QueueEntry::Directory(_) => {}
+            QueueEntry::ThreadCommit(_)
+            | QueueEntry::TaskCommit(_)
+            | QueueEntry::Directory(_)
+            | QueueEntry::ObservedState(_) => {}
             QueueEntry::Barrier(sender) => {
                 let _ = sender.send(Ok(()));
             }
@@ -1124,6 +1230,7 @@ fn oldest_pending_revision(shared: &WriterShared) -> Option<u64> {
         .find_map(|entry| match entry {
             QueueEntry::ThreadCommit(commit) => Some(commit.facts.revision),
             QueueEntry::TaskCommit(commit) => Some(commit.revision),
+            QueueEntry::ObservedState(commit) => Some(commit.revision),
             QueueEntry::Directory(_) | QueueEntry::Barrier(_) => None,
         })
 }
@@ -1178,6 +1285,48 @@ mod tests {
         CreateTaskRun, TaskCommand, TaskFailureKind, TaskOutcome,
     };
     use crate::studio::task_projection;
+
+    #[test]
+    fn observed_state_coalesces_latest_revision_without_crossing_barriers() {
+        let mut queue =
+            VecDeque::from([QueueEntry::ObservedState(Box::new(ObservedStateCommit {
+                key: "observed:a".to_string(),
+                revision: 1,
+                value: "one".to_string(),
+            }))]);
+        assert!(try_coalesce_observed_state(
+            &mut queue,
+            &ObservedStateCommit {
+                key: "observed:a".to_string(),
+                revision: 2,
+                value: "two".to_string(),
+            }
+        ));
+        assert!(matches!(
+            queue.front(),
+            Some(QueueEntry::ObservedState(commit))
+                if commit.revision == 2 && commit.value == "two"
+        ));
+
+        let (barrier, _) = oneshot::channel();
+        queue.push_back(QueueEntry::Barrier(barrier));
+        assert!(!try_coalesce_observed_state(
+            &mut queue,
+            &ObservedStateCommit {
+                key: "observed:a".to_string(),
+                revision: 3,
+                value: "three".to_string(),
+            }
+        ));
+        assert!(!try_coalesce_observed_state(
+            &mut queue,
+            &ObservedStateCommit {
+                key: "observed:b".to_string(),
+                revision: 1,
+                value: "other".to_string(),
+            }
+        ));
+    }
 
     async fn task_commit(
         store: &StudioStore,

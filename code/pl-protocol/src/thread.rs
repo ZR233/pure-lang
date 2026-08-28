@@ -112,6 +112,10 @@ impl ThreadSnapshot {
 pub struct ThreadRuntimeSnapshot {
     pub thread_id: String,
     pub usage: ThreadRuntimeUsage,
+    #[serde(default)]
+    pub turn_completion_tokens: u64,
+    #[serde(default)]
+    pub turn_decode_millis: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub todo: Option<TodoListSnapshot>,
     #[serde(default)]

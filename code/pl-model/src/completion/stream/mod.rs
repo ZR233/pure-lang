@@ -534,6 +534,7 @@ impl StreamCompletionAccumulator {
             tool_calls: self.tool_calls,
             responses_context_items: self.responses_context_items,
             orchestration,
+            timing: None,
             usage: self.final_usage.unwrap_or_default(),
             model: String::new(),
         })

@@ -229,6 +229,8 @@ pub struct BridgeTurnBudgetUsage {
 pub struct BridgeThreadRuntimeSnapshot {
     pub thread_id: String,
     pub usage: BridgeThreadRuntimeUsage,
+    pub turn_completion_tokens: u64,
+    pub turn_decode_millis: u64,
     pub todo: Option<BridgeTodoListSnapshot>,
     pub active_skills: Vec<String>,
     pub active_mcp_servers: Vec<String>,
@@ -458,7 +460,8 @@ pub enum BridgeTodoStatus {
     Completed,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct BridgeRuntimeCostAmount {
     pub currency: String,
     pub amount: f64,

@@ -43,6 +43,111 @@ String formatRuntimeCosts(Iterable<RuntimeCostView> costs) {
       .join(' + ');
 }
 
+String formatTokenThroughput(double? tokensPerSecond) {
+  if (tokensPerSecond == null || !tokensPerSecond.isFinite) return '- t/s';
+  final value = tokensPerSecond >= 10
+      ? tokensPerSecond.round().toString()
+      : tokensPerSecond.toStringAsFixed(1);
+  return '$value t/s';
+}
+
+class SessionCostView {
+  const SessionCostView({
+    required this.rootThreadId,
+    required this.estimatedCosts,
+    required this.hasUnpricedUsage,
+  });
+
+  final String rootThreadId;
+  final List<RuntimeCostView> estimatedCosts;
+  final bool hasUnpricedUsage;
+
+  String get label {
+    final value = formatRuntimeCosts(estimatedCosts);
+    return value.isEmpty ? '-' : value;
+  }
+}
+
+class ModelPerformanceSummaryView {
+  const ModelPerformanceSummaryView({
+    required this.providerInstanceId,
+    required this.providerDisplayName,
+    required this.model,
+    required this.sampleCount,
+    required this.completionTokens,
+    required this.totalTtftMillis,
+    required this.totalDecodeMillis,
+    required this.totalResponseMillis,
+    required this.tokensPerSecond,
+    required this.averageTtftMillis,
+    required this.averageResponseMillis,
+  });
+
+  final String providerInstanceId;
+  final String providerDisplayName;
+  final String model;
+  final int sampleCount;
+  final int completionTokens;
+  final int totalTtftMillis;
+  final int totalDecodeMillis;
+  final int totalResponseMillis;
+  final double tokensPerSecond;
+  final double averageTtftMillis;
+  final double averageResponseMillis;
+
+  String get filterKey => '$providerInstanceId\u0000$model';
+}
+
+class ModelPerformanceSampleView {
+  const ModelPerformanceSampleView({
+    required this.completedAt,
+    required this.providerInstanceId,
+    required this.providerDisplayName,
+    required this.model,
+    required this.completionTokens,
+    required this.ttftMillis,
+    required this.decodeMillis,
+    required this.totalResponseMillis,
+    required this.tokensPerSecond,
+  });
+
+  final DateTime completedAt;
+  final String providerInstanceId;
+  final String providerDisplayName;
+  final String model;
+  final int completionTokens;
+  final int ttftMillis;
+  final int decodeMillis;
+  final int totalResponseMillis;
+  final double tokensPerSecond;
+
+  String get filterKey => '$providerInstanceId\u0000$model';
+}
+
+class ModelPerformanceSnapshotView {
+  const ModelPerformanceSnapshotView({
+    this.revision = 0,
+    this.updatedAt,
+    this.sessionCosts = const [],
+    this.summaries = const [],
+    this.history = const [],
+  });
+
+  final int revision;
+  final DateTime? updatedAt;
+  final List<SessionCostView> sessionCosts;
+  final List<ModelPerformanceSummaryView> summaries;
+  final List<ModelPerformanceSampleView> history;
+
+  SessionCostView? sessionCost(String? rootThreadId) {
+    if (rootThreadId == null) return null;
+    for (final cost in sessionCosts) {
+      if (cost.rootThreadId == rootThreadId) return cost;
+    }
+    return null;
+  }
+}
+
 class ThreadRuntimeView {
   const ThreadRuntimeView({
     required this.model,
@@ -68,6 +173,8 @@ class ThreadRuntimeView {
     this.promptGeneration,
     this.promptCachePolicy,
     this.prefixChangedReason,
+    this.turnCompletionTokens = 0,
+    this.turnDecodeMillis = 0,
     this.task,
   });
 
@@ -94,11 +201,17 @@ class ThreadRuntimeView {
   final int? promptGeneration;
   final String? promptCachePolicy;
   final String? prefixChangedReason;
+  final int turnCompletionTokens;
+  final int turnDecodeMillis;
   final TaskRuntimeView? task;
 
   bool get hasActiveTask => task?.isActive ?? false;
   bool get hasUsage =>
       inferenceCount > 0 || promptTokens > 0 || completionTokens > 0;
+  double? get turnTokensPerSecond => turnDecodeMillis > 0
+      ? turnCompletionTokens * 1000 / turnDecodeMillis
+      : null;
+  String get turnThroughputLabel => formatTokenThroughput(turnTokensPerSecond);
 
   double? get effectiveCacheHitRate {
     if (!hasUsage) return null;
@@ -135,6 +248,8 @@ class ThreadRuntimeView {
             promptGeneration == other.promptGeneration &&
             promptCachePolicy == other.promptCachePolicy &&
             prefixChangedReason == other.prefixChangedReason &&
+            turnCompletionTokens == other.turnCompletionTokens &&
+            turnDecodeMillis == other.turnDecodeMillis &&
             task == other.task;
   }
 
@@ -163,6 +278,8 @@ class ThreadRuntimeView {
     promptGeneration,
     promptCachePolicy,
     prefixChangedReason,
+    turnCompletionTokens,
+    turnDecodeMillis,
     task,
   ]);
 
@@ -190,6 +307,8 @@ class ThreadRuntimeView {
     int? promptGeneration,
     String? promptCachePolicy,
     String? prefixChangedReason,
+    int? turnCompletionTokens,
+    int? turnDecodeMillis,
     TaskRuntimeView? task,
   }) {
     return ThreadRuntimeView(
@@ -217,6 +336,8 @@ class ThreadRuntimeView {
       promptGeneration: promptGeneration ?? this.promptGeneration,
       promptCachePolicy: promptCachePolicy ?? this.promptCachePolicy,
       prefixChangedReason: prefixChangedReason ?? this.prefixChangedReason,
+      turnCompletionTokens: turnCompletionTokens ?? this.turnCompletionTokens,
+      turnDecodeMillis: turnDecodeMillis ?? this.turnDecodeMillis,
       task: task ?? this.task,
     );
   }

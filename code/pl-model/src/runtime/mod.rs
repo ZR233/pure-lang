@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use async_openai::Client;
 use async_openai::config::Config;
 use async_openai::types::stream::StreamResponse;
 use futures::StreamExt;
-use pl_protocol::{PureError, Result};
+use pl_protocol::{InferenceTiming, PureError, Result};
 use pl_trace::{AgentEventSender, TraceEventSink};
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderName, HeaderValue};
 use secrecy::SecretString;
@@ -99,6 +99,7 @@ impl ModelInvocationContext {
 
 #[derive(Debug, Clone)]
 pub struct ModelRuntime {
+    provider_instance_id: String,
     endpoint: ProviderEndpoint,
     http_client: reqwest::Client,
     model: ModelInfo,
@@ -135,19 +136,76 @@ impl OpenAiTransport {
     }
 }
 
+#[derive(Debug, Clone)]
+struct InferenceTimer {
+    started_at: tokio::time::Instant,
+    first_token_millis: Arc<AtomicU64>,
+}
+
+impl InferenceTimer {
+    const FIRST_TOKEN_UNSET: u64 = u64::MAX;
+
+    fn start() -> Self {
+        Self {
+            started_at: tokio::time::Instant::now(),
+            first_token_millis: Arc::new(AtomicU64::new(Self::FIRST_TOKEN_UNSET)),
+        }
+    }
+
+    fn observe(&self, event: &crate::completion::stream::event::ModelStreamEvent) {
+        if !event.starts_visible_output() {
+            return;
+        }
+        let elapsed = duration_millis(self.started_at.elapsed());
+        let _ = self.first_token_millis.compare_exchange(
+            Self::FIRST_TOKEN_UNSET,
+            elapsed,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
+    }
+
+    fn finish(&self) -> Option<InferenceTiming> {
+        let total_millis = duration_millis(self.started_at.elapsed());
+        let ttft_millis = self.first_token_millis.load(Ordering::Acquire);
+        (ttft_millis != Self::FIRST_TOKEN_UNSET).then_some(InferenceTiming {
+            ttft_millis,
+            decode_millis: total_millis.saturating_sub(ttft_millis),
+            total_millis,
+        })
+    }
+}
+
 impl ModelRuntime {
     /// 使用已解析 endpoint 与单个模型构造运行时。
     pub fn new(endpoint: ProviderEndpoint, model: ModelInfo) -> Result<Self> {
+        let provider_instance_id = endpoint.name.clone();
+        Self::new_with_provider_id(provider_instance_id, endpoint, model)
+    }
+
+    /// 使用稳定 Provider 实例 ID、已解析 endpoint 与单个模型构造运行时。
+    pub fn new_with_provider_id(
+        provider_instance_id: impl Into<String>,
+        endpoint: ProviderEndpoint,
+        model: ModelInfo,
+    ) -> Result<Self> {
         model
             .transport
             .validate(&model.slug)
             .map_err(PureError::ConfigError)?;
+        let provider_instance_id = provider_instance_id.into();
+        if provider_instance_id.trim().is_empty() {
+            return Err(PureError::ConfigError(
+                "provider instance id cannot be empty".to_string(),
+            ));
+        }
         let http_client = reqwest::Client::builder()
             .timeout(Duration::from_secs(300))
             .build()
             .map_err(|e| PureError::HttpError(e.to_string()))?;
 
         Ok(Self {
+            provider_instance_id,
             endpoint,
             http_client,
             model,
@@ -165,11 +223,16 @@ impl ModelRuntime {
         &self.endpoint
     }
 
+    pub fn provider_instance_id(&self) -> &str {
+        &self.provider_instance_id
+    }
+
     pub async fn complete(
         &self,
         request: CompletionRequest,
         context: ModelInvocationContext,
     ) -> Result<CompletionResponse> {
+        let inference_timer = InferenceTimer::start();
         let original_trace = context.trace.clone();
         let retry_jitter_key = original_trace
             .as_ref()
@@ -211,9 +274,13 @@ impl ModelRuntime {
                     let tracked_stream: CompletionEventStream = event_stream
                         .inspect({
                             let stream_started = Arc::clone(&stream_started);
+                            let inference_timer = inference_timer.clone();
                             move |event| {
                                 if event.is_ok() {
                                     stream_started.store(true, Ordering::Release);
+                                }
+                                if let Ok(event) = event {
+                                    inference_timer.observe(event);
                                 }
                             }
                         })
@@ -254,6 +321,7 @@ impl ModelRuntime {
                         .continuation_invalid
                         .saturating_sub(transport_metrics_before.continuation_invalid);
                     response.orchestration.http_fallbacks = http_fallbacks;
+                    response.timing = inference_timer.finish();
                     return Ok(response);
                 }
                 Err(error) => error,
@@ -484,6 +552,10 @@ impl ModelRuntime {
         let fingerprint = hasher.finish();
         if fingerprint == 0 { 1 } else { fingerprint }
     }
+}
+
+fn duration_millis(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
 /// 按 wire protocol 选择 endpoint；供应商能力由模型目录与数据化 wire policy 收敛。

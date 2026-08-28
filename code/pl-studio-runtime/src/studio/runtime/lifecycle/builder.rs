@@ -17,8 +17,8 @@ use super::super::lsp_state::LspStateRuntime;
 use super::super::mcp_health::McpStateRuntime;
 use super::super::residency::ThreadResidency;
 use super::super::{
-    ProviderUsageRuntime, ShutdownProgressBus, SkillCatalogRuntime, StudioAgentFacility,
-    StudioExternalRuntimes, StudioUpdateRuntime,
+    ModelPerformanceOwner, ProviderUsageRuntime, ShutdownProgressBus, SkillCatalogRuntime,
+    StudioAgentFacility, StudioExternalRuntimes, StudioUpdateRuntime,
 };
 
 impl StudioRuntime {
@@ -95,8 +95,15 @@ impl StudioRuntime {
         // TaskRuntime 与 ThreadRepository 必须共用同一 write-behind 队列。
         let writer = ThreadWriteBehindWriter::new(store.clone());
         let product_events = ProductEventBus::new(store.clone(), writer.clone());
-        let task_runtime = TaskRuntime::with_writer(store.clone(), product_events.clone(), writer);
-        let persistence = StudioAgentRepository::with_writer(store.clone(), task_runtime.writer());
+        let model_performance =
+            ModelPerformanceOwner::new(store.clone(), writer.clone(), product_events.clone());
+        let task_runtime =
+            TaskRuntime::with_writer(store.clone(), product_events.clone(), writer.clone());
+        let persistence = StudioAgentRepository::with_writer_and_performance(
+            store.clone(),
+            writer,
+            model_performance.clone(),
+        );
         product_events.observe_persistence(persistence.writer().subscribe_state());
         let task_coordinator = std::sync::Arc::new(TaskCoordinator::new(
             store.clone(),
@@ -142,6 +149,7 @@ impl StudioRuntime {
                 None => SkillCatalogRuntime::default(),
             },
             provider_usage,
+            model_performance,
             updater,
             activation: Default::default(),
             task_runtime,

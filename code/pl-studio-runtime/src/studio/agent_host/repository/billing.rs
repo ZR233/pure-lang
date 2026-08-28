@@ -139,6 +139,8 @@ pub(super) fn runtime_from_context(
             prefix_changed_reason: latest.prefix_changed_reason,
             updated_at: latest.recorded_at,
         },
+        turn_completion_tokens: 0,
+        turn_decode_millis: 0,
         todo: None,
         active_skills: Vec::new(),
         active_mcp_servers: Vec::new(),
@@ -495,6 +497,7 @@ mod tests {
             prompt_generation: billing.prompt_generation,
             prompt_cache_policy: billing.prompt_cache_policy.clone(),
             prefix_changed_reason: billing.prefix_changed_reason,
+            timing: billing.timing,
             updated_at: billing.recorded_at,
         };
         ThreadCommit {
@@ -540,6 +543,7 @@ mod tests {
         let normalized_usage = reported_usage.normalized();
         InferenceBillingRecord {
             inference_id: inference_id.to_string(),
+            provider_instance_id: "deepseek-primary".to_string(),
             provider: "DeepSeek".to_string(),
             model: "deepseek-v4-flash".to_string(),
             context_window: Some(1_000_000),
@@ -562,6 +566,7 @@ mod tests {
             prompt_cache_policy: None,
             prefix_changed_reason: None,
             orchestration: Default::default(),
+            timing: None,
             recorded_at: 1,
         }
     }

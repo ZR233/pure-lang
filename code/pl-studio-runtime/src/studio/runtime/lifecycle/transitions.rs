@@ -31,6 +31,10 @@ impl StudioRuntime {
                 .load_cache()
                 .await
                 .map_err(|error| startup_failure("load_provider_usage", error))?;
+            self.model_performance
+                .load_cache()
+                .await
+                .map_err(|error| startup_failure("load_model_performance", error))?;
             self.updater
                 .load_cache()
                 .await

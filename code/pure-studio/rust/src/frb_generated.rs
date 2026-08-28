@@ -4762,6 +4762,86 @@ impl SseDecode for crate::api::studio::types::settings::BridgeModelModality {
     }
 }
 
+impl SseDecode for crate::api::studio::types::response::BridgeModelPerformanceSample {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_completedAt = <i64>::sse_decode(deserializer);
+        let mut var_providerInstanceId = <String>::sse_decode(deserializer);
+        let mut var_providerDisplayName = <String>::sse_decode(deserializer);
+        let mut var_model = <String>::sse_decode(deserializer);
+        let mut var_completionTokens = <u64>::sse_decode(deserializer);
+        let mut var_ttftMillis = <u64>::sse_decode(deserializer);
+        let mut var_decodeMillis = <u64>::sse_decode(deserializer);
+        let mut var_totalResponseMillis = <u64>::sse_decode(deserializer);
+        let mut var_tokensPerSecond = <f64>::sse_decode(deserializer);
+        return crate::api::studio::types::response::BridgeModelPerformanceSample {
+            completed_at: var_completedAt,
+            provider_instance_id: var_providerInstanceId,
+            provider_display_name: var_providerDisplayName,
+            model: var_model,
+            completion_tokens: var_completionTokens,
+            ttft_millis: var_ttftMillis,
+            decode_millis: var_decodeMillis,
+            total_response_millis: var_totalResponseMillis,
+            tokens_per_second: var_tokensPerSecond,
+        };
+    }
+}
+
+impl SseDecode for crate::api::studio::types::response::BridgeModelPerformanceSnapshot {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_revision = <u64>::sse_decode(deserializer);
+        let mut var_updatedAt = <i64>::sse_decode(deserializer);
+        let mut var_sessionCosts = <Vec<
+            crate::api::studio::types::response::BridgeSessionCostSnapshot,
+        >>::sse_decode(deserializer);
+        let mut var_summaries = <Vec<
+            crate::api::studio::types::response::BridgeModelPerformanceSummary,
+        >>::sse_decode(deserializer);
+        let mut var_history = <Vec<
+            crate::api::studio::types::response::BridgeModelPerformanceSample,
+        >>::sse_decode(deserializer);
+        return crate::api::studio::types::response::BridgeModelPerformanceSnapshot {
+            revision: var_revision,
+            updated_at: var_updatedAt,
+            session_costs: var_sessionCosts,
+            summaries: var_summaries,
+            history: var_history,
+        };
+    }
+}
+
+impl SseDecode for crate::api::studio::types::response::BridgeModelPerformanceSummary {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_providerInstanceId = <String>::sse_decode(deserializer);
+        let mut var_providerDisplayName = <String>::sse_decode(deserializer);
+        let mut var_model = <String>::sse_decode(deserializer);
+        let mut var_sampleCount = <u64>::sse_decode(deserializer);
+        let mut var_completionTokens = <u64>::sse_decode(deserializer);
+        let mut var_totalTtftMillis = <u64>::sse_decode(deserializer);
+        let mut var_totalDecodeMillis = <u64>::sse_decode(deserializer);
+        let mut var_totalResponseMillis = <u64>::sse_decode(deserializer);
+        let mut var_tokensPerSecond = <f64>::sse_decode(deserializer);
+        let mut var_averageTtftMillis = <f64>::sse_decode(deserializer);
+        let mut var_averageResponseMillis = <f64>::sse_decode(deserializer);
+        return crate::api::studio::types::response::BridgeModelPerformanceSummary {
+            provider_instance_id: var_providerInstanceId,
+            provider_display_name: var_providerDisplayName,
+            model: var_model,
+            sample_count: var_sampleCount,
+            completion_tokens: var_completionTokens,
+            total_ttft_millis: var_totalTtftMillis,
+            total_decode_millis: var_totalDecodeMillis,
+            total_response_millis: var_totalResponseMillis,
+            tokens_per_second: var_tokensPerSecond,
+            average_ttft_millis: var_averageTtftMillis,
+            average_response_millis: var_averageResponseMillis,
+        };
+    }
+}
+
 impl SseDecode for crate::api::studio::types::settings::BridgeModelPricing {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -5074,17 +5154,21 @@ impl SseDecode for crate::api::studio::types::event::BridgeProductEventPayload {
                 return crate::api::studio::types::event::BridgeProductEventPayload::ProviderUsageStateChanged(var_field0);
             }
             10 => {
+                let mut var_field0 = <crate::api::studio::types::response::BridgeModelPerformanceSnapshot>::sse_decode(deserializer);
+                return crate::api::studio::types::event::BridgeProductEventPayload::ModelPerformanceStateChanged(var_field0);
+            }
+            11 => {
                 let mut var_field0 =
                     <crate::api::studio::types::updater::BridgeUpdaterStateSnapshot>::sse_decode(
                         deserializer,
                     );
                 return crate::api::studio::types::event::BridgeProductEventPayload::UpdaterStateChanged(var_field0);
             }
-            11 => {
+            12 => {
                 let mut var_field0 = <crate::api::studio::types::response::BridgePersistenceStateSnapshot>::sse_decode(deserializer);
                 return crate::api::studio::types::event::BridgeProductEventPayload::PersistenceStateChanged(var_field0);
             }
-            12 => {
+            13 => {
                 let mut var_laggedEvents = <u64>::sse_decode(deserializer);
                 return crate::api::studio::types::event::BridgeProductEventPayload::Stale {
                     lagged_events: var_laggedEvents,
@@ -6023,6 +6107,22 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeRuntimeTimestamp {
     }
 }
 
+impl SseDecode for crate::api::studio::types::response::BridgeSessionCostSnapshot {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_rootThreadId = <String>::sse_decode(deserializer);
+        let mut var_estimatedCosts = <Vec<
+            crate::api::studio::types::thread_stream::BridgeRuntimeCostAmount,
+        >>::sse_decode(deserializer);
+        let mut var_hasUnpricedUsage = <bool>::sse_decode(deserializer);
+        return crate::api::studio::types::response::BridgeSessionCostSnapshot {
+            root_thread_id: var_rootThreadId,
+            estimated_costs: var_estimatedCosts,
+            has_unpriced_usage: var_hasUnpricedUsage,
+        };
+    }
+}
+
 impl SseDecode for crate::api::studio::types::response::BridgeSettingsStateData {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -6572,6 +6672,10 @@ impl SseDecode for crate::api::studio::types::response::BridgeStudioStateSnapsho
             <crate::api::studio::types::response::BridgeProviderUsageStateSnapshot>::sse_decode(
                 deserializer,
             );
+        let mut var_modelPerformance =
+            <crate::api::studio::types::response::BridgeModelPerformanceSnapshot>::sse_decode(
+                deserializer,
+            );
         let mut var_updater =
             <crate::api::studio::types::updater::BridgeUpdaterStateSnapshot>::sse_decode(
                 deserializer,
@@ -6592,6 +6696,7 @@ impl SseDecode for crate::api::studio::types::response::BridgeStudioStateSnapsho
             lsp: var_lsp,
             skills_by_project: var_skillsByProject,
             provider_usage: var_providerUsage,
+            model_performance: var_modelPerformance,
             updater: var_updater,
             persistence: var_persistence,
         };
@@ -8432,6 +8537,8 @@ impl SseDecode for crate::api::studio::types::thread_stream::BridgeThreadRuntime
             <crate::api::studio::types::thread_stream::BridgeThreadRuntimeUsage>::sse_decode(
                 deserializer,
             );
+        let mut var_turnCompletionTokens = <u64>::sse_decode(deserializer);
+        let mut var_turnDecodeMillis = <u64>::sse_decode(deserializer);
         let mut var_todo =
             <Option<crate::api::studio::types::thread_stream::BridgeTodoListSnapshot>>::sse_decode(
                 deserializer,
@@ -8447,6 +8554,8 @@ impl SseDecode for crate::api::studio::types::thread_stream::BridgeThreadRuntime
         return crate::api::studio::types::thread_stream::BridgeThreadRuntimeSnapshot {
             thread_id: var_threadId,
             usage: var_usage,
+            turn_completion_tokens: var_turnCompletionTokens,
+            turn_decode_millis: var_turnDecodeMillis,
             todo: var_todo,
             active_skills: var_activeSkills,
             active_mcp_servers: var_activeMcpServers,
@@ -9990,6 +10099,38 @@ impl SseDecode for Vec<crate::api::studio::types::settings::BridgeModelModality>
     }
 }
 
+impl SseDecode for Vec<crate::api::studio::types::response::BridgeModelPerformanceSample> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(
+                <crate::api::studio::types::response::BridgeModelPerformanceSample>::sse_decode(
+                    deserializer,
+                ),
+            );
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::studio::types::response::BridgeModelPerformanceSummary> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(
+                <crate::api::studio::types::response::BridgeModelPerformanceSummary>::sse_decode(
+                    deserializer,
+                ),
+            );
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode
     for Vec<crate::api::studio::types::settings::BridgeProviderConnectionModeDescriptor>
 {
@@ -10092,6 +10233,22 @@ impl SseDecode for Vec<crate::api::studio::types::thread_stream::BridgeRuntimeCo
         for idx_ in 0..len_ {
             ans_.push(
                 <crate::api::studio::types::thread_stream::BridgeRuntimeCostAmount>::sse_decode(
+                    deserializer,
+                ),
+            );
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::studio::types::response::BridgeSessionCostSnapshot> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(
+                <crate::api::studio::types::response::BridgeSessionCostSnapshot>::sse_decode(
                     deserializer,
                 ),
             );
@@ -13695,6 +13852,100 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::settings::Brid
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::response::BridgeModelPerformanceSample
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.completed_at.into_into_dart().into_dart(),
+            self.provider_instance_id.into_into_dart().into_dart(),
+            self.provider_display_name.into_into_dart().into_dart(),
+            self.model.into_into_dart().into_dart(),
+            self.completion_tokens.into_into_dart().into_dart(),
+            self.ttft_millis.into_into_dart().into_dart(),
+            self.decode_millis.into_into_dart().into_dart(),
+            self.total_response_millis.into_into_dart().into_dart(),
+            self.tokens_per_second.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::response::BridgeModelPerformanceSample
+{
+}
+impl
+    flutter_rust_bridge::IntoIntoDart<
+        crate::api::studio::types::response::BridgeModelPerformanceSample,
+    > for crate::api::studio::types::response::BridgeModelPerformanceSample
+{
+    fn into_into_dart(self) -> crate::api::studio::types::response::BridgeModelPerformanceSample {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::response::BridgeModelPerformanceSnapshot
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.revision.into_into_dart().into_dart(),
+            self.updated_at.into_into_dart().into_dart(),
+            self.session_costs.into_into_dart().into_dart(),
+            self.summaries.into_into_dart().into_dart(),
+            self.history.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::response::BridgeModelPerformanceSnapshot
+{
+}
+impl
+    flutter_rust_bridge::IntoIntoDart<
+        crate::api::studio::types::response::BridgeModelPerformanceSnapshot,
+    > for crate::api::studio::types::response::BridgeModelPerformanceSnapshot
+{
+    fn into_into_dart(self) -> crate::api::studio::types::response::BridgeModelPerformanceSnapshot {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::response::BridgeModelPerformanceSummary
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.provider_instance_id.into_into_dart().into_dart(),
+            self.provider_display_name.into_into_dart().into_dart(),
+            self.model.into_into_dart().into_dart(),
+            self.sample_count.into_into_dart().into_dart(),
+            self.completion_tokens.into_into_dart().into_dart(),
+            self.total_ttft_millis.into_into_dart().into_dart(),
+            self.total_decode_millis.into_into_dart().into_dart(),
+            self.total_response_millis.into_into_dart().into_dart(),
+            self.tokens_per_second.into_into_dart().into_dart(),
+            self.average_ttft_millis.into_into_dart().into_dart(),
+            self.average_response_millis.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::response::BridgeModelPerformanceSummary
+{
+}
+impl
+    flutter_rust_bridge::IntoIntoDart<
+        crate::api::studio::types::response::BridgeModelPerformanceSummary,
+    > for crate::api::studio::types::response::BridgeModelPerformanceSummary
+{
+    fn into_into_dart(self) -> crate::api::studio::types::response::BridgeModelPerformanceSummary {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::studio::types::settings::BridgeModelPricing {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -14057,11 +14308,13 @@ crate::api::studio::types::event::BridgeProductEventPayload::SkillsStateChanged(
 field0.into_into_dart().into_dart()].into_dart() }
 crate::api::studio::types::event::BridgeProductEventPayload::ProviderUsageStateChanged(field0) => { [9.into_dart(),
 field0.into_into_dart().into_dart()].into_dart() }
-crate::api::studio::types::event::BridgeProductEventPayload::UpdaterStateChanged(field0) => { [10.into_dart(),
+crate::api::studio::types::event::BridgeProductEventPayload::ModelPerformanceStateChanged(field0) => { [10.into_dart(),
 field0.into_into_dart().into_dart()].into_dart() }
-crate::api::studio::types::event::BridgeProductEventPayload::PersistenceStateChanged(field0) => { [11.into_dart(),
+crate::api::studio::types::event::BridgeProductEventPayload::UpdaterStateChanged(field0) => { [11.into_dart(),
 field0.into_into_dart().into_dart()].into_dart() }
-crate::api::studio::types::event::BridgeProductEventPayload::Stale{lagged_events} => { [12.into_dart(),
+crate::api::studio::types::event::BridgeProductEventPayload::PersistenceStateChanged(field0) => { [12.into_dart(),
+field0.into_into_dart().into_dart()].into_dart() }
+crate::api::studio::types::event::BridgeProductEventPayload::Stale{lagged_events} => { [13.into_dart(),
 lagged_events.into_into_dart().into_dart()].into_dart() }
  _ => { unimplemented!(""); }}
     }
@@ -15171,6 +15424,32 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::runtime::Bridg
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::response::BridgeSessionCostSnapshot
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.root_thread_id.into_into_dart().into_dart(),
+            self.estimated_costs.into_into_dart().into_dart(),
+            self.has_unpriced_usage.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::response::BridgeSessionCostSnapshot
+{
+}
+impl
+    flutter_rust_bridge::IntoIntoDart<
+        crate::api::studio::types::response::BridgeSessionCostSnapshot,
+    > for crate::api::studio::types::response::BridgeSessionCostSnapshot
+{
+    fn into_into_dart(self) -> crate::api::studio::types::response::BridgeSessionCostSnapshot {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
     for crate::api::studio::types::response::BridgeSettingsStateData
 {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
@@ -15732,6 +16011,7 @@ impl flutter_rust_bridge::IntoDart
             self.lsp.into_into_dart().into_dart(),
             self.skills_by_project.into_into_dart().into_dart(),
             self.provider_usage.into_into_dart().into_dart(),
+            self.model_performance.into_into_dart().into_dart(),
             self.updater.into_into_dart().into_dart(),
             self.persistence.into_into_dart().into_dart(),
         ]
@@ -17749,6 +18029,8 @@ impl flutter_rust_bridge::IntoDart
         [
             self.thread_id.into_into_dart().into_dart(),
             self.usage.into_into_dart().into_dart(),
+            self.turn_completion_tokens.into_into_dart().into_dart(),
+            self.turn_decode_millis.into_into_dart().into_dart(),
             self.todo.into_into_dart().into_dart(),
             self.active_skills.into_into_dart().into_dart(),
             self.active_mcp_servers.into_into_dart().into_dart(),
@@ -21614,6 +21896,58 @@ impl SseEncode for crate::api::studio::types::settings::BridgeModelModality {
     }
 }
 
+impl SseEncode for crate::api::studio::types::response::BridgeModelPerformanceSample {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i64>::sse_encode(self.completed_at, serializer);
+        <String>::sse_encode(self.provider_instance_id, serializer);
+        <String>::sse_encode(self.provider_display_name, serializer);
+        <String>::sse_encode(self.model, serializer);
+        <u64>::sse_encode(self.completion_tokens, serializer);
+        <u64>::sse_encode(self.ttft_millis, serializer);
+        <u64>::sse_encode(self.decode_millis, serializer);
+        <u64>::sse_encode(self.total_response_millis, serializer);
+        <f64>::sse_encode(self.tokens_per_second, serializer);
+    }
+}
+
+impl SseEncode for crate::api::studio::types::response::BridgeModelPerformanceSnapshot {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <u64>::sse_encode(self.revision, serializer);
+        <i64>::sse_encode(self.updated_at, serializer);
+        <Vec<crate::api::studio::types::response::BridgeSessionCostSnapshot>>::sse_encode(
+            self.session_costs,
+            serializer,
+        );
+        <Vec<crate::api::studio::types::response::BridgeModelPerformanceSummary>>::sse_encode(
+            self.summaries,
+            serializer,
+        );
+        <Vec<crate::api::studio::types::response::BridgeModelPerformanceSample>>::sse_encode(
+            self.history,
+            serializer,
+        );
+    }
+}
+
+impl SseEncode for crate::api::studio::types::response::BridgeModelPerformanceSummary {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.provider_instance_id, serializer);
+        <String>::sse_encode(self.provider_display_name, serializer);
+        <String>::sse_encode(self.model, serializer);
+        <u64>::sse_encode(self.sample_count, serializer);
+        <u64>::sse_encode(self.completion_tokens, serializer);
+        <u64>::sse_encode(self.total_ttft_millis, serializer);
+        <u64>::sse_encode(self.total_decode_millis, serializer);
+        <u64>::sse_encode(self.total_response_millis, serializer);
+        <f64>::sse_encode(self.tokens_per_second, serializer);
+        <f64>::sse_encode(self.average_ttft_millis, serializer);
+        <f64>::sse_encode(self.average_response_millis, serializer);
+    }
+}
+
 impl SseEncode for crate::api::studio::types::settings::BridgeModelPricing {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -21819,11 +22153,13 @@ crate::api::studio::types::event::BridgeProductEventPayload::SkillsStateChanged(
  }
 crate::api::studio::types::event::BridgeProductEventPayload::ProviderUsageStateChanged(field0) => { <i32>::sse_encode(9, serializer); <crate::api::studio::types::response::BridgeProviderUsageStateSnapshot>::sse_encode(field0, serializer);
  }
-crate::api::studio::types::event::BridgeProductEventPayload::UpdaterStateChanged(field0) => { <i32>::sse_encode(10, serializer); <crate::api::studio::types::updater::BridgeUpdaterStateSnapshot>::sse_encode(field0, serializer);
+crate::api::studio::types::event::BridgeProductEventPayload::ModelPerformanceStateChanged(field0) => { <i32>::sse_encode(10, serializer); <crate::api::studio::types::response::BridgeModelPerformanceSnapshot>::sse_encode(field0, serializer);
  }
-crate::api::studio::types::event::BridgeProductEventPayload::PersistenceStateChanged(field0) => { <i32>::sse_encode(11, serializer); <crate::api::studio::types::response::BridgePersistenceStateSnapshot>::sse_encode(field0, serializer);
+crate::api::studio::types::event::BridgeProductEventPayload::UpdaterStateChanged(field0) => { <i32>::sse_encode(11, serializer); <crate::api::studio::types::updater::BridgeUpdaterStateSnapshot>::sse_encode(field0, serializer);
  }
-crate::api::studio::types::event::BridgeProductEventPayload::Stale{lagged_events} => { <i32>::sse_encode(12, serializer); <u64>::sse_encode(lagged_events, serializer);
+crate::api::studio::types::event::BridgeProductEventPayload::PersistenceStateChanged(field0) => { <i32>::sse_encode(12, serializer); <crate::api::studio::types::response::BridgePersistenceStateSnapshot>::sse_encode(field0, serializer);
+ }
+crate::api::studio::types::event::BridgeProductEventPayload::Stale{lagged_events} => { <i32>::sse_encode(13, serializer); <u64>::sse_encode(lagged_events, serializer);
  }
  _ => { unimplemented!(""); }}
     }
@@ -22560,6 +22896,18 @@ impl SseEncode for crate::api::studio::types::runtime::BridgeRuntimeTimestamp {
     }
 }
 
+impl SseEncode for crate::api::studio::types::response::BridgeSessionCostSnapshot {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.root_thread_id, serializer);
+        <Vec<crate::api::studio::types::thread_stream::BridgeRuntimeCostAmount>>::sse_encode(
+            self.estimated_costs,
+            serializer,
+        );
+        <bool>::sse_encode(self.has_unpriced_usage, serializer);
+    }
+}
+
 impl SseEncode for crate::api::studio::types::response::BridgeSettingsStateData {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -23003,6 +23351,10 @@ impl SseEncode for crate::api::studio::types::response::BridgeStudioStateSnapsho
         );
         <crate::api::studio::types::response::BridgeProviderUsageStateSnapshot>::sse_encode(
             self.provider_usage,
+            serializer,
+        );
+        <crate::api::studio::types::response::BridgeModelPerformanceSnapshot>::sse_encode(
+            self.model_performance,
             serializer,
         );
         <crate::api::studio::types::updater::BridgeUpdaterStateSnapshot>::sse_encode(
@@ -24379,6 +24731,8 @@ impl SseEncode for crate::api::studio::types::thread_stream::BridgeThreadRuntime
         <crate::api::studio::types::thread_stream::BridgeThreadRuntimeUsage>::sse_encode(
             self.usage, serializer,
         );
+        <u64>::sse_encode(self.turn_completion_tokens, serializer);
+        <u64>::sse_encode(self.turn_decode_millis, serializer);
         <Option<crate::api::studio::types::thread_stream::BridgeTodoListSnapshot>>::sse_encode(
             self.todo, serializer,
         );
@@ -25529,6 +25883,30 @@ impl SseEncode for Vec<crate::api::studio::types::settings::BridgeModelModality>
     }
 }
 
+impl SseEncode for Vec<crate::api::studio::types::response::BridgeModelPerformanceSample> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::studio::types::response::BridgeModelPerformanceSample>::sse_encode(
+                item, serializer,
+            );
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::studio::types::response::BridgeModelPerformanceSummary> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::studio::types::response::BridgeModelPerformanceSummary>::sse_encode(
+                item, serializer,
+            );
+        }
+    }
+}
+
 impl SseEncode
     for Vec<crate::api::studio::types::settings::BridgeProviderConnectionModeDescriptor>
 {
@@ -25607,6 +25985,18 @@ impl SseEncode for Vec<crate::api::studio::types::thread_stream::BridgeRuntimeCo
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <crate::api::studio::types::thread_stream::BridgeRuntimeCostAmount>::sse_encode(
+                item, serializer,
+            );
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::studio::types::response::BridgeSessionCostSnapshot> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::studio::types::response::BridgeSessionCostSnapshot>::sse_encode(
                 item, serializer,
             );
         }

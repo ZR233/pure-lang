@@ -50,6 +50,19 @@ abstract final class StudioDriverKeys {
   static const taskRecoveryApply = ValueKey<String>('task-recovery-apply');
   static const taskRecoveryError = ValueKey<String>('task-recovery-error');
   static const agentSwitcher = ValueKey<String>('agent-switcher');
+  static const sessionCost = ValueKey<String>('session-cost');
+  static const threadThroughput = ValueKey<String>('thread-throughput');
+  static const statisticsSummary = ValueKey<String>('statistics-summary');
+  static const statisticsHistory = ValueKey<String>('statistics-history');
+  static const statisticsFilter = ValueKey<String>('statistics-filter');
+
+  static ValueKey<String> statisticsHistoryRow(
+    String providerInstanceId,
+    String model,
+    int completedAtMillis,
+  ) => ValueKey<String>(
+    'statistics-history-row:$providerInstanceId:$model:$completedAtMillis',
+  );
   static const providerEditor = ValueKey<String>('provider-editor');
   static const providerEdit = ValueKey<String>('provider-edit');
   static const providerSave = ValueKey<String>('provider-save');

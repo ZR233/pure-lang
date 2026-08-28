@@ -8,6 +8,7 @@ import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_driver_keys.dart';
 import 'settings_provider_tab.dart';
+import 'settings_statistics_tab.dart';
 import 'settings_system_tabs.dart';
 import 'settings_tabs.dart';
 
@@ -43,6 +44,7 @@ const _settingsTabs = [
   _SettingsTabInfo(Icons.badge_outlined, _SettingsTab.roles),
   _SettingsTabInfo(Icons.hub_outlined, _SettingsTab.mcp),
   _SettingsTabInfo(Icons.code_outlined, _SettingsTab.lsp),
+  _SettingsTabInfo(Icons.query_stats_outlined, _SettingsTab.statistics),
   _SettingsTabInfo(Icons.security_outlined, _SettingsTab.security),
   _SettingsTabInfo(Icons.tune_outlined, _SettingsTab.general),
 ];
@@ -61,6 +63,7 @@ class _SettingsTabInfo {
       _SettingsTab.roles => context.l10n.settingsRolesTab,
       _SettingsTab.mcp => context.l10n.settingsMcpTab,
       _SettingsTab.lsp => context.l10n.settingsLspTab,
+      _SettingsTab.statistics => context.l10n.settingsStatisticsTab,
       _SettingsTab.security => context.l10n.settingsSecurityTab,
       _SettingsTab.general => context.l10n.settingsGeneralTab,
     };
@@ -74,6 +77,7 @@ enum _SettingsTab {
   roles,
   mcp,
   lsp,
+  statistics,
   security,
   general,
 }
@@ -106,6 +110,7 @@ class _SettingsScaffold extends StatelessWidget {
       RolesTab(providers: state.providers, roles: state.roles),
       McpTab(settingsServers: state.mcpServers, state: state.mcpState),
       LspTab(projectId: state.selectedProjectId, state: state.lspState),
+      StatisticsTab(snapshot: state.modelPerformance),
       SecurityTab(mode: state.permissionMode),
       GeneralTab(
         settings: state.general,

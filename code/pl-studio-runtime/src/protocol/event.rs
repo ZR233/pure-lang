@@ -34,6 +34,7 @@ pub enum StudioProductEventKind {
     LspStateChanged(StudioLspStateSnapshot),
     SkillsStateChanged(StudioSkillsStateSnapshot),
     ProviderUsageStateChanged(ProviderUsageStateSnapshot),
+    ModelPerformanceStateChanged(StudioModelPerformanceSnapshot),
     UpdaterStateChanged(StudioUpdateStateSnapshot),
     PersistenceStateChanged(PersistenceStateSnapshot),
 }
@@ -127,6 +128,55 @@ pub struct StudioSettingsStateSnapshot {
     pub state: ObservedResource<pl_protocol::studio::StudioSettings>,
 }
 
+/// 产品级会话费用与模型性能快照。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioModelPerformanceSnapshot {
+    pub revision: u64,
+    pub updated_at: i64,
+    pub session_costs: Vec<StudioSessionCostSnapshot>,
+    pub summaries: Vec<StudioModelPerformanceSummary>,
+    pub history: Vec<StudioModelPerformanceSample>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioSessionCostSnapshot {
+    pub root_thread_id: String,
+    pub estimated_costs: Vec<pl_protocol::RuntimeCostAmount>,
+    pub has_unpriced_usage: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioModelPerformanceSummary {
+    pub provider_instance_id: String,
+    pub provider_display_name: String,
+    pub model: String,
+    pub sample_count: u64,
+    pub completion_tokens: u64,
+    pub total_ttft_millis: u64,
+    pub total_decode_millis: u64,
+    pub total_response_millis: u64,
+    pub tokens_per_second: f64,
+    pub average_ttft_millis: f64,
+    pub average_response_millis: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioModelPerformanceSample {
+    pub completed_at: i64,
+    pub provider_instance_id: String,
+    pub provider_display_name: String,
+    pub model: String,
+    pub completion_tokens: u64,
+    pub ttft_millis: u64,
+    pub decode_millis: u64,
+    pub total_response_millis: u64,
+    pub tokens_per_second: f64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioRecoveryStateSnapshot {
@@ -197,6 +247,7 @@ pub struct StudioStateSnapshot {
     pub lsp: StudioLspStateSnapshot,
     pub skills_by_project: Vec<StudioSkillsStateSnapshot>,
     pub provider_usage: ProviderUsageStateSnapshot,
+    pub model_performance: StudioModelPerformanceSnapshot,
     pub updater: StudioUpdateStateSnapshot,
     pub persistence: PersistenceStateSnapshot,
 }

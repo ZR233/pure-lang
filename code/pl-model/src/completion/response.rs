@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::completion::tool_call::ToolCall;
 use crate::completion::usage::TokenUsage;
-use pl_protocol::ResponsesContextItem;
+use pl_protocol::{InferenceTiming, ResponsesContextItem};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompletionResponse {
@@ -19,6 +19,8 @@ pub struct CompletionResponse {
     pub responses_context_items: Vec<ResponsesContextItem>,
     #[serde(default)]
     pub orchestration: pl_protocol::InferenceOrchestrationMetrics,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timing: Option<InferenceTiming>,
     pub usage: TokenUsage,
     pub model: String,
 }

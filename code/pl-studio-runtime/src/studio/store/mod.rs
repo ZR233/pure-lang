@@ -9,7 +9,7 @@ mod error;
 pub(in crate::studio) mod history;
 mod interaction;
 mod project;
-mod settings;
+pub(in crate::studio) mod settings;
 mod task;
 mod thread;
 

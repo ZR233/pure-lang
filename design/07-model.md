@@ -177,7 +177,19 @@ retryable。Studio 另行从 typed failure 派生 Task disposition，任何层�
 
 请求体不再由散落的 `serde_json::json!` 直接拼接，而是先转换为 `pl-model` 内部强类型 request，再由 serde 序列化。动态 JSON 只允许出现在 JSON Schema、工具参数、provider 返回的任意 JSON 参数和协议扩展 escape hatch。
 
-`CompletionResponse` 只保留 canonical 内容、reasoning、tool calls、Responses context、usage、orchestration 和实际模型。raw text、finish reason、hosted-search 汇总、trace event 与 sequence 不再重复存入 response；trace 和 hosted-search 状态分别由 `pl-core` projector 与 canonical context/event 维护。
+`CompletionResponse` 只保留 canonical 内容、reasoning、tool calls、Responses context、usage、orchestration、
+实际模型和可选 inference timing。raw text、finish reason、hosted-search 汇总、trace event 与 sequence
+不再重复存入 response；trace 和 hosted-search 状态分别由 `pl-core` projector 与 canonical
+context/event 维护。
+
+inference timing 由 `ModelRuntime` 在 canonical stream 边界使用单调毫秒时钟测量，不能由 provider
+adapter、核心层或 Flutter 估算。`startedAt` 在一次逻辑 inference 首次发送前确定；transport retry、
+WebSocket full replay 与 HTTP fallback 继续属于同一次 inference，等待时间计入 TTFT，最终成功只
+产生一份 timing。`firstTokenAt` 只由首个非空 text、reasoning 或 tool-input delta 确定，
+`ResponseStarted`、block open 和空 delta 不计；`completedAt` 只在 canonical 成功完成时确定。
+`TTFT = firstTokenAt - startedAt`，`decodeMs = completedAt - firstTokenAt`，
+`t/s = completionTokens × 1000 / decodeMs`。completion token 已包含 reasoning token，不得重复相加；
+timing、usage 不完整或 `decodeMs == 0` 时不生成吞吐样本。失败与取消不携带成功 timing。
 
 ## 7.6 多模态消息
 

@@ -11,12 +11,12 @@ use tokio::sync::{Mutex, broadcast, watch};
 use crate::{
     PersistenceStateSnapshot, ProviderUsageStateSnapshot, SkillsStateSnapshot,
     StudioAgentDirectoryData, StudioAgentDirectoryEntry, StudioAgentDirectoryState,
-    StudioLspStateSnapshot, StudioMcpStateSnapshot, StudioProductEventEnvelope,
-    StudioProductEventKind, StudioProjectDirectoryData, StudioProjectDirectoryState,
-    StudioRecoveryStateSnapshot, StudioSettingsStateSnapshot, StudioTaskDirectoryData,
-    StudioTaskDirectoryEntry, StudioTaskDirectoryState, StudioThreadDirectoryData,
-    StudioThreadDirectoryDelta, StudioThreadDirectoryPage, StudioThreadDirectoryPageData,
-    StudioThreadDirectoryState, StudioUpdateStateSnapshot,
+    StudioLspStateSnapshot, StudioMcpStateSnapshot, StudioModelPerformanceSnapshot,
+    StudioProductEventEnvelope, StudioProductEventKind, StudioProjectDirectoryData,
+    StudioProjectDirectoryState, StudioRecoveryStateSnapshot, StudioSettingsStateSnapshot,
+    StudioTaskDirectoryData, StudioTaskDirectoryEntry, StudioTaskDirectoryState,
+    StudioThreadDirectoryData, StudioThreadDirectoryDelta, StudioThreadDirectoryPage,
+    StudioThreadDirectoryPageData, StudioThreadDirectoryState, StudioUpdateStateSnapshot,
 };
 
 use super::StudioStore;
@@ -521,6 +521,13 @@ impl ProductEventBus {
         state: ProviderUsageStateSnapshot,
     ) -> StudioProductEventEnvelope {
         self.emit(StudioProductEventKind::ProviderUsageStateChanged(state))
+    }
+
+    pub fn emit_model_performance_state(
+        &self,
+        state: StudioModelPerformanceSnapshot,
+    ) -> StudioProductEventEnvelope {
+        self.emit(StudioProductEventKind::ModelPerformanceStateChanged(state))
     }
 
     pub fn emit_updater_state(

@@ -359,6 +359,7 @@ pub(super) async fn run_turn_with_trace(
         let recorded_at = unix_seconds();
         let mut billing = inference_billing_record(InferenceBillingInput {
             inference_id,
+            provider_instance_id: runtime.provider_instance_id(),
             provider: &runtime.endpoint().name,
             model: &actual_model,
             usage: &response.usage,
@@ -366,6 +367,7 @@ pub(super) async fn run_turn_with_trace(
             prompt_cache_policy,
             prompt: prompt_cache::current(session, &options.prompt_scope),
             orchestration: response.orchestration.clone(),
+            timing: response.timing,
             recorded_at,
         });
         let response_prompt_tokens = response.usage.prompt_tokens;

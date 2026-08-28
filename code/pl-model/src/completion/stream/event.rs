@@ -137,6 +137,28 @@ impl ToolInputDeltaPayload {
 }
 
 impl ModelStreamEvent {
+    pub(crate) fn starts_visible_output(&self) -> bool {
+        match self {
+            Self::BlockDelta { delta, .. } | Self::ReasoningRawDelta { delta, .. } => {
+                !delta.is_empty()
+            }
+            Self::ToolInputDelta { payload_delta, .. } => !payload_delta.text().is_empty(),
+            Self::ResponseStarted { .. }
+            | Self::BlockOpened { .. }
+            | Self::BlockClosed { .. }
+            | Self::ToolInputStarted { .. }
+            | Self::ToolInputCompleted { .. }
+            | Self::ToolCallReady { .. }
+            | Self::ToolCallCaller { .. }
+            | Self::ResponsesContextItem { .. }
+            | Self::WebSearchStarted { .. }
+            | Self::WebSearchCompleted { .. }
+            | Self::Usage(_)
+            | Self::Completed { .. }
+            | Self::Failed { .. } => false,
+        }
+    }
+
     pub fn text_started(id: String, channel: TraceTextChannel) -> Self {
         Self::BlockOpened {
             id,
@@ -208,6 +230,73 @@ impl ToolInputPayloadKind {
         match self {
             Self::FunctionArguments => ToolInputDeltaPayload::FunctionArguments(String::new()),
             Self::CustomInput => ToolInputDeltaPayload::CustomInput(String::new()),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_non_empty_output_deltas_start_visible_output() {
+        let events = [
+            (
+                ModelStreamEvent::ResponseStarted { response_id: None },
+                false,
+            ),
+            (
+                ModelStreamEvent::text_started("text".to_string(), TraceTextChannel::Final),
+                false,
+            ),
+            (
+                ModelStreamEvent::text_delta(
+                    "text".to_string(),
+                    TraceTextChannel::Final,
+                    String::new(),
+                ),
+                false,
+            ),
+            (
+                ModelStreamEvent::text_delta(
+                    "text".to_string(),
+                    TraceTextChannel::Final,
+                    "hello".to_string(),
+                ),
+                true,
+            ),
+            (
+                ModelStreamEvent::ReasoningRawDelta {
+                    id: "reasoning".to_string(),
+                    content_index: 0,
+                    delta: String::new(),
+                },
+                false,
+            ),
+            (
+                ModelStreamEvent::ReasoningRawDelta {
+                    id: "reasoning".to_string(),
+                    content_index: 0,
+                    delta: "thinking".to_string(),
+                },
+                true,
+            ),
+            (tool_delta(String::new()), false),
+            (tool_delta("{".to_string()), true),
+        ];
+
+        for (event, expected) in events {
+            assert_eq!(event.starts_visible_output(), expected, "{event:?}");
+        }
+    }
+
+    fn tool_delta(delta: String) -> ModelStreamEvent {
+        ModelStreamEvent::ToolInputDelta {
+            stream_id: None,
+            item_id: "tool".to_string(),
+            call_id: None,
+            name: None,
+            payload_delta: ToolInputDeltaPayload::FunctionArguments(delta),
         }
     }
 }

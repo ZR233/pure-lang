@@ -61,7 +61,9 @@ class ThreadStatusBar extends ConsumerWidget {
             alignment: Alignment.center,
             child: LayoutBuilder(
               builder: (context, constraints) {
-                final showModel = constraints.maxWidth >= 610;
+                final showModel =
+                    constraints.maxWidth >= 610 &&
+                    (runtime.task == null || constraints.maxWidth >= 760);
                 final showEffort = constraints.maxWidth >= 720;
                 final showCapabilities = constraints.maxWidth >= 840;
                 final showLspActivity = constraints.maxWidth >= 850;
@@ -155,6 +157,13 @@ class ThreadStatusBar extends ConsumerWidget {
                         paused: _taskExecutionIsPaused(task, thread),
                       ),
                     ContextUsageReadout(runtime: runtime),
+                    _StatusReadout(
+                      key: StudioDriverKeys.threadThroughput,
+                      icon: Icons.speed_outlined,
+                      label: runtime.turnThroughputLabel,
+                      tooltip: context.l10n.statusCurrentAgentTokenSpeed,
+                      maxWidth: 84,
+                    ),
                     if (showLspActivity && lspActiveServers.isNotEmpty)
                       _LspActivityReadout(servers: lspActiveServers),
                     if (showCapabilities && capabilityLabel.isNotEmpty)

@@ -155,7 +155,7 @@ where
                 checkpoint.turn_id.as_str(),
                 current.revision,
                 &current,
-                TurnObservation::RuntimeDelta(inference.runtime_delta.clone()),
+                TurnObservation::RuntimeDelta(Box::new(inference.runtime_delta.clone())),
             );
             next.session.thread_revision = projected.through_revision;
             let projected_thread = self

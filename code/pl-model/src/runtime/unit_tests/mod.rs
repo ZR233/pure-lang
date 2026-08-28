@@ -118,6 +118,49 @@ fn trace_text_channel(item: &pl_trace::TracePart) -> Option<pl_trace::TraceTextC
     item.text().map(pl_trace::TraceTextPart::channel)
 }
 
+#[tokio::test(start_paused = true)]
+async fn inference_timer_includes_wait_before_first_visible_delta() {
+    let timer = InferenceTimer::start();
+
+    tokio::time::advance(std::time::Duration::from_millis(250)).await;
+    timer.observe(&ModelStreamEvent::ResponseStarted { response_id: None });
+    timer.observe(&final_delta("output", ""));
+    tokio::time::advance(std::time::Duration::from_millis(750)).await;
+    timer.observe(&ModelStreamEvent::ReasoningRawDelta {
+        id: "reasoning".to_string(),
+        content_index: 0,
+        delta: "thinking".to_string(),
+    });
+    tokio::time::advance(std::time::Duration::from_millis(500)).await;
+
+    assert_eq!(
+        timer.finish(),
+        Some(pl_protocol::InferenceTiming {
+            ttft_millis: 1_000,
+            decode_millis: 500,
+            total_millis: 1_500,
+        })
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn inference_timer_keeps_first_delta_and_exposes_zero_decode() {
+    let timer = InferenceTimer::start();
+    timer.observe(&ModelStreamEvent::ToolInputDelta {
+        stream_id: None,
+        item_id: "tool".to_string(),
+        call_id: None,
+        name: None,
+        payload_delta: ToolInputDeltaPayload::CustomInput("x".to_string()),
+    });
+    timer.observe(&final_delta("output", "later"));
+
+    let timing = timer.finish().expect("first token timing");
+    assert_eq!(timing.ttft_millis, 0);
+    assert_eq!(timing.decode_millis, 0);
+    assert!(!timing.has_throughput_sample());
+}
+
 #[derive(Debug)]
 struct CapturedHttpRequest {
     request_line: String,
