@@ -92,7 +92,11 @@ impl ModelTurnClient {
     /// 从 canonical 路由构造客户端。
     pub fn from_route(route: &ResolvedModelRoute) -> Result<Self> {
         Ok(Self {
-            runtime: ModelRuntime::new(route.endpoint.clone(), route.model.clone())?,
+            runtime: ModelRuntime::new_with_provider_id(
+                route.provider_id.as_str(),
+                route.endpoint.clone(),
+                route.model.clone(),
+            )?,
         })
     }
 

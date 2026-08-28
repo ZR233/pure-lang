@@ -23,6 +23,7 @@ mod interaction_continuation;
 mod lifecycle;
 mod lsp_state;
 mod mcp_health;
+mod model_performance;
 mod plan_confirmation;
 mod prompt_runner;
 mod provider_usage;
@@ -35,6 +36,7 @@ mod task_recovery;
 mod thread_service;
 mod updater;
 
+pub(crate) use model_performance::ModelPerformanceOwner;
 pub(crate) use provider_usage::ProviderUsageRuntime;
 pub use provider_usage::{ProviderUsageStateData, ProviderUsageStateSnapshot};
 pub(crate) use shutdown_progress::ShutdownProgressBus;
@@ -141,6 +143,7 @@ pub struct StudioRuntime {
     recovery: crate::studio::StudioRecoveryRegistry,
     skills: SkillCatalogRuntime,
     provider_usage: ProviderUsageRuntime,
+    model_performance: ModelPerformanceOwner,
     updater: StudioUpdateRuntime,
     activation: ProjectActivationRuntime,
     task_runtime: crate::studio::TaskRuntime,

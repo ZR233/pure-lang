@@ -211,6 +211,8 @@ pub struct AgentRuntimeDelta {
     pub prompt_cache_policy: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prefix_changed_reason: Option<crate::PromptPrefixChangedReason>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timing: Option<crate::InferenceTiming>,
     pub updated_at: i64,
 }
 

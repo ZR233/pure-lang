@@ -44,6 +44,7 @@ class StudioState {
     required this.lspState,
     required this.skillsByProject,
     required this.providerUsageState,
+    this.modelPerformance = const ModelPerformanceSnapshotView(),
     required this.updaterState,
     this.configRecoveryNotice,
     this.persistenceState = const PersistenceStateSnapshot.ready(),
@@ -73,6 +74,7 @@ class StudioState {
   final LspStateSnapshot lspState;
   final Map<String, SkillsStateSnapshot> skillsByProject;
   final ProviderUsageStateSnapshot providerUsageState;
+  final ModelPerformanceSnapshotView modelPerformance;
   final UpdaterStateSnapshot updaterState;
   final ConfigRecoveryNotice? configRecoveryNotice;
   final PersistenceStateSnapshot persistenceState;
@@ -91,6 +93,8 @@ class StudioState {
   ];
   String? get defaultProviderId => settingsState.defaultProviderId;
   List<ProviderUsageView> get providerUsages => providerUsageState.usages;
+  SessionCostView? get selectedSessionCost =>
+      modelPerformance.sessionCost(selectedRootThread?.id);
   List<RoleSettingsView> get roles => settingsState.roles;
   List<McpServerSettingsView> get mcpServers => settingsState.mcpServers;
   InstructionsSettingsView get instructions => settingsState.instructions;
@@ -307,6 +311,7 @@ class StudioState {
     LspStateSnapshot? lspState,
     Map<String, SkillsStateSnapshot>? skillsByProject,
     ProviderUsageStateSnapshot? providerUsageState,
+    ModelPerformanceSnapshotView? modelPerformance,
     UpdaterStateSnapshot? updaterState,
     Object? configRecoveryNotice = _studioStateUnset,
     PersistenceStateSnapshot? persistenceState,
@@ -335,6 +340,7 @@ class StudioState {
       lspState: lspState ?? this.lspState,
       skillsByProject: skillsByProject ?? this.skillsByProject,
       providerUsageState: providerUsageState ?? this.providerUsageState,
+      modelPerformance: modelPerformance ?? this.modelPerformance,
       updaterState: updaterState ?? this.updaterState,
       configRecoveryNotice: identical(configRecoveryNotice, _studioStateUnset)
           ? this.configRecoveryNotice

@@ -89,6 +89,7 @@ abstract class HeaderView with _$HeaderView {
     required List<StudioAgentView> agents,
     required String? selectedThreadId,
     required ThreadRuntimeView runtime,
+    required SessionCostView? sessionCost,
     required List<PendingInteraction> pendingInteractions,
   }) = _HeaderView;
 
@@ -110,6 +111,7 @@ abstract class HeaderView with _$HeaderView {
       agents: state.selectedAgents,
       selectedThreadId: state.selectedThreadId,
       runtime: state.runtime,
+      sessionCost: state.selectedSessionCost,
       pendingInteractions: state.pendingInteractions,
     );
   }
@@ -133,6 +135,7 @@ abstract class SettingsPageView with _$SettingsPageView {
     required PermissionMode permissionMode,
     required GeneralSettingsView general,
     required WebSearchSettingsView webSearch,
+    required ModelPerformanceSnapshotView modelPerformance,
     required bool runtimeBusy,
   }) = _SettingsPageView;
 
@@ -154,6 +157,7 @@ abstract class SettingsPageView with _$SettingsPageView {
       permissionMode: state.permissionMode,
       general: state.general,
       webSearch: state.webSearch,
+      modelPerformance: state.modelPerformance,
       runtimeBusy: state.isBusy || state.runtime.hasActiveTask,
     );
   }

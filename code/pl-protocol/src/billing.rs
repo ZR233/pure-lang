@@ -9,6 +9,25 @@ pub enum InferenceBillingAppend {
     Identical,
 }
 
+/// 一次成功 inference 的单调时钟耗时事实。
+///
+/// 三个值都以逻辑 inference 首次发送为起点；transport retry 与 fallback
+/// 不会创建第二份 timing。
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct InferenceTiming {
+    pub ttft_millis: u64,
+    pub decode_millis: u64,
+    pub total_millis: u64,
+}
+
+impl InferenceTiming {
+    /// 只有正 decode 时长才能形成吞吐样本。
+    pub fn has_throughput_sample(self) -> bool {
+        self.decode_millis > 0
+    }
+}
+
 /// 模型调用发生时使用的价格快照。
 ///
 /// 历史账单只能使用该快照重建，不能按当前 catalog 价格重新计算。
@@ -176,6 +195,8 @@ impl InferenceTokenUsage {
 #[serde(rename_all = "camelCase")]
 pub struct InferenceBillingRecord {
     pub inference_id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub provider_instance_id: String,
     pub provider: String,
     pub model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -200,6 +221,8 @@ pub struct InferenceBillingRecord {
         skip_serializing_if = "InferenceOrchestrationMetrics::is_empty"
     )]
     pub orchestration: InferenceOrchestrationMetrics,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timing: Option<InferenceTiming>,
     pub recorded_at: i64,
 }
 
@@ -214,7 +237,7 @@ pub struct TurnBillingRecord {
 }
 
 impl TurnBillingRecord {
-    pub const VERSION: u32 = 3;
+    pub const VERSION: u32 = 4;
 
     pub fn new() -> Self {
         Self {
@@ -307,6 +330,7 @@ mod tests {
     fn turn_billing_append_is_idempotent_and_rejects_conflicts() {
         let inference = InferenceBillingRecord {
             inference_id: "turn-1-inf-0".to_string(),
+            provider_instance_id: "deepseek-primary".to_string(),
             provider: "DeepSeek".to_string(),
             model: "deepseek-v4-flash".to_string(),
             context_window: Some(1_000_000),
@@ -334,6 +358,11 @@ mod tests {
             prompt_cache_policy: Some("implicitPrefix".to_string()),
             prefix_changed_reason: Some(PromptPrefixChangedReason::Initial),
             orchestration: InferenceOrchestrationMetrics::default(),
+            timing: Some(InferenceTiming {
+                ttft_millis: 10,
+                decode_millis: 20,
+                total_millis: 30,
+            }),
             recorded_at: 1,
         };
         let mut billing = TurnBillingRecord::new();
@@ -394,7 +423,16 @@ mod tests {
         assert!(billing.inferences[0].estimated_cache_savings.is_empty());
         assert_eq!(billing.inferences[0].prompt_generation, None);
         assert!(billing.inferences[0].orchestration.is_empty());
+        assert!(billing.inferences[0].provider_instance_id.is_empty());
+        assert_eq!(billing.inferences[0].timing, None);
+        assert_eq!(billing.aggregate_usage().completion_tokens, 3);
+        assert_eq!(billing.aggregate_usage().reasoning_tokens, 0);
         assert_eq!(billing.aggregate_usage().total_tokens, 13);
+    }
+
+    #[test]
+    fn new_turn_billing_uses_v4_schema() {
+        assert_eq!(TurnBillingRecord::new().version, 4);
     }
 
     #[test]
@@ -411,6 +449,7 @@ mod tests {
         });
         let mut inference = InferenceBillingRecord {
             inference_id: "inference-1".to_string(),
+            provider_instance_id: "openai-primary".to_string(),
             provider: "OpenAI".to_string(),
             model: "gpt-5.6-sol".to_string(),
             context_window: None,
@@ -424,6 +463,7 @@ mod tests {
             prompt_cache_policy: None,
             prefix_changed_reason: None,
             orchestration: first,
+            timing: None,
             recorded_at: 1,
         };
         let mut billing = TurnBillingRecord::new();

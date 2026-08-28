@@ -27,6 +27,8 @@ StudioBridgeEventPayload _productPayloadFromFrb(
       SkillsStateChangedPayload(_skillsStateFromFrb(field0)),
     frb.BridgeProductEventPayload_ProviderUsageStateChanged(:final field0) =>
       ProviderUsageStateChangedPayload(_providerUsageStateFromFrb(field0)),
+    frb.BridgeProductEventPayload_ModelPerformanceStateChanged(:final field0) =>
+      ModelPerformanceStateChangedPayload(_modelPerformanceFromFrb(field0)),
     frb.BridgeProductEventPayload_UpdaterStateChanged(:final field0) =>
       UpdaterStateChangedPayload(updaterStateFromFrb(field0)),
     frb.BridgeProductEventPayload_PersistenceStateChanged(:final field0) =>
@@ -828,6 +830,7 @@ StudioState studioStateFromFrbSnapshot(frb.BridgeStudioStateSnapshot value) {
         snapshot.projectId: _skillsStateFromFrb(snapshot),
     },
     providerUsageState: _providerUsageStateFromFrb(value.providerUsage),
+    modelPerformance: _modelPerformanceFromFrb(value.modelPerformance),
     updaterState: updaterStateFromFrb(value.updater),
     persistenceState: _persistenceStateFromFrb(value.persistence),
     selectedProjectId: null,
@@ -1260,6 +1263,57 @@ ProviderUsageStateSnapshot _providerUsageStateFromFrb(
       frb.BridgeProviderUsageStateSnapshot_Stopped(:final field0) =>
         _stoppedResource(field0),
     },
+  );
+}
+
+ModelPerformanceSnapshotView _modelPerformanceFromFrb(
+  frb.BridgeModelPerformanceSnapshot value,
+) {
+  final updatedAt = value.updatedAt.toInt();
+  return ModelPerformanceSnapshotView(
+    revision: value.revision.toInt(),
+    updatedAt: updatedAt == 0 ? null : _dateFromUnix(value.updatedAt),
+    sessionCosts: [
+      for (final session in value.sessionCosts)
+        SessionCostView(
+          rootThreadId: session.rootThreadId,
+          estimatedCosts: [
+            for (final cost in session.estimatedCosts)
+              RuntimeCostView(currency: cost.currency, amount: cost.amount),
+          ],
+          hasUnpricedUsage: session.hasUnpricedUsage,
+        ),
+    ],
+    summaries: [
+      for (final summary in value.summaries)
+        ModelPerformanceSummaryView(
+          providerInstanceId: summary.providerInstanceId,
+          providerDisplayName: summary.providerDisplayName,
+          model: summary.model,
+          sampleCount: summary.sampleCount.toInt(),
+          completionTokens: summary.completionTokens.toInt(),
+          totalTtftMillis: summary.totalTtftMillis.toInt(),
+          totalDecodeMillis: summary.totalDecodeMillis.toInt(),
+          totalResponseMillis: summary.totalResponseMillis.toInt(),
+          tokensPerSecond: summary.tokensPerSecond,
+          averageTtftMillis: summary.averageTtftMillis,
+          averageResponseMillis: summary.averageResponseMillis,
+        ),
+    ],
+    history: [
+      for (final sample in value.history)
+        ModelPerformanceSampleView(
+          completedAt: _dateFromUnix(sample.completedAt),
+          providerInstanceId: sample.providerInstanceId,
+          providerDisplayName: sample.providerDisplayName,
+          model: sample.model,
+          completionTokens: sample.completionTokens.toInt(),
+          ttftMillis: sample.ttftMillis.toInt(),
+          decodeMillis: sample.decodeMillis.toInt(),
+          totalResponseMillis: sample.totalResponseMillis.toInt(),
+          tokensPerSecond: sample.tokensPerSecond,
+        ),
+    ],
   );
 }
 

@@ -413,6 +413,8 @@ fn empty_restored_runtime(thread_id: &str, updated_at: i64) -> ThreadRuntimeSnap
             prefix_changed_reason: None,
             updated_at,
         },
+        turn_completion_tokens: 0,
+        turn_decode_millis: 0,
         todo: None,
         active_skills: Vec::new(),
         active_mcp_servers: Vec::new(),

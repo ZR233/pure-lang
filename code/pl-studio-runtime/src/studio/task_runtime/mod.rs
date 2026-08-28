@@ -101,6 +101,7 @@ impl TaskRuntime {
     }
 
     /// ThreadRepository 与 TaskRuntime 必须共享同一个进程级 writer。
+    #[cfg(test)]
     pub(in crate::studio) fn writer(&self) -> ThreadWriteBehindWriter {
         self.writer.clone()
     }

@@ -548,6 +548,8 @@ fn runtime_snapshot(value: ThreadRuntimeSnapshot) -> BridgeThreadRuntimeSnapshot
     BridgeThreadRuntimeSnapshot {
         thread_id: value.thread_id,
         usage: runtime_usage(value.usage),
+        turn_completion_tokens: value.turn_completion_tokens,
+        turn_decode_millis: value.turn_decode_millis,
         todo: value.todo.map(todo),
         active_skills: value.active_skills,
         active_mcp_servers: value.active_mcp_servers,

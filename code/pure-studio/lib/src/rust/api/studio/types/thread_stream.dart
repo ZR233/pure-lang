@@ -416,6 +416,8 @@ enum BridgeThreadRuntimeAvailability { active, inactive }
 class BridgeThreadRuntimeSnapshot {
   final String threadId;
   final BridgeThreadRuntimeUsage usage;
+  final BigInt turnCompletionTokens;
+  final BigInt turnDecodeMillis;
   final BridgeTodoListSnapshot? todo;
   final List<String> activeSkills;
   final List<String> activeMcpServers;
@@ -427,6 +429,8 @@ class BridgeThreadRuntimeSnapshot {
   const BridgeThreadRuntimeSnapshot({
     required this.threadId,
     required this.usage,
+    required this.turnCompletionTokens,
+    required this.turnDecodeMillis,
     this.todo,
     required this.activeSkills,
     required this.activeMcpServers,
@@ -440,6 +444,8 @@ class BridgeThreadRuntimeSnapshot {
   int get hashCode =>
       threadId.hashCode ^
       usage.hashCode ^
+      turnCompletionTokens.hashCode ^
+      turnDecodeMillis.hashCode ^
       todo.hashCode ^
       activeSkills.hashCode ^
       activeMcpServers.hashCode ^
@@ -455,6 +461,8 @@ class BridgeThreadRuntimeSnapshot {
           runtimeType == other.runtimeType &&
           threadId == other.threadId &&
           usage == other.usage &&
+          turnCompletionTokens == other.turnCompletionTokens &&
+          turnDecodeMillis == other.turnDecodeMillis &&
           todo == other.todo &&
           activeSkills == other.activeSkills &&
           activeMcpServers == other.activeMcpServers &&

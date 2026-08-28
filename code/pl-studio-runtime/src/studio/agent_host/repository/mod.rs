@@ -36,6 +36,7 @@ pub(in crate::studio) use write_behind::ThreadWriteBehindWriter;
 pub(in crate::studio) struct StudioAgentRepository {
     store: StudioStore,
     writer: ThreadWriteBehindWriter,
+    model_performance: Option<crate::studio::runtime::ModelPerformanceOwner>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,11 +56,28 @@ mod unit_tests;
 impl StudioAgentRepository {
     /// write-behind writer 共享实例构造：与 TaskRuntime、ProductEventBus 使用
     /// 同一进程级 writer，恢复基线 seed 进该实例。
+    #[cfg(test)]
     pub(in crate::studio) fn with_writer(
         store: StudioStore,
         writer: ThreadWriteBehindWriter,
     ) -> Self {
-        Self { writer, store }
+        Self {
+            writer,
+            store,
+            model_performance: None,
+        }
+    }
+
+    pub(in crate::studio) fn with_writer_and_performance(
+        store: StudioStore,
+        writer: ThreadWriteBehindWriter,
+        model_performance: crate::studio::runtime::ModelPerformanceOwner,
+    ) -> Self {
+        Self {
+            writer,
+            store,
+            model_performance: Some(model_performance),
+        }
     }
 
     /// write-behind writer 句柄；关机排空与进度查询使用。
@@ -139,6 +157,20 @@ impl ThreadRepository for StudioAgentRepository {
     }
 
     async fn commit(&self, commit: ThreadCommit) -> Result<(), Self::Error> {
+        if let (Some(owner), Some(inference)) =
+            (&self.model_performance, commit.facts.inference.as_ref())
+        {
+            let projection = commit.facts.projection_snapshot.as_ref().ok_or_else(|| {
+                store_error("inference commit is missing its canonical Thread projection")
+            })?;
+            owner
+                .record_inference(
+                    &projection.thread.root_thread_id,
+                    commit.agent_id.as_str(),
+                    &inference.billing,
+                )
+                .await?;
+        }
         self.writer.enqueue(commit).await
     }
 

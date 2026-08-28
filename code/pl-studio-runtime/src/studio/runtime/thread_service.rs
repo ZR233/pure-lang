@@ -233,6 +233,7 @@ impl StudioRuntime {
             .product_events
             .commit_directory(DirectoryDelta::archive_threads(removed_thread_ids.clone()))
             .await?;
+        self.model_performance.remove_session(&thread.id).await?;
         Ok(Some(StudioArchiveThreadResult {
             archived_root_id: thread.id,
             removed_thread_ids,
@@ -250,6 +251,7 @@ impl StudioRuntime {
             .product_events
             .commit_directory(DirectoryDelta::archive_threads(vec![thread_id.to_string()]))
             .await?;
+        self.model_performance.remove_session(thread_id).await?;
         if let Some(error) = actor_cleanup_error {
             return Err(error).context(format!(
                 "new Thread {thread_id} was archived but its actor cleanup failed"
@@ -306,12 +308,15 @@ impl StudioRuntime {
             .commit_directory(DirectoryDelta {
                 project_removals: vec![ProjectRemoval {
                     project_id: project.id.clone(),
-                    thread_ids,
+                    thread_ids: thread_ids.clone(),
                     closed_at: crate::studio::unix_seconds(),
                 }],
                 ..Default::default()
             })
             .await?;
+        for thread_id in &thread_ids {
+            self.model_performance.remove_session(thread_id).await?;
+        }
         Ok(Some(project))
     }
 

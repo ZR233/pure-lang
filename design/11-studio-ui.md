@@ -190,21 +190,31 @@ plan confirmation 可以在 `busy=false` 时继续阻塞普通 Composer。
 
 ## 11.6 状态栏与 agent directory
 
-状态栏只读取当前 workspace 的 owner、模型、context、skills、MCP、LSP 和 Todo。上下文条目只
-保留进度圆环；缓存命中率、token 明细与费用不在状态栏直接展示，统一进入点击圆环弹出的详情：
+下部代理状态栏只读取当前 workspace 的 owner、模型、context、skills、MCP、LSP、Todo 和最近
+Turn 吞吐。上下文条目只保留进度圆环；缓存命中率、token 明细与代理费用不在该状态栏直接展示，
+统一进入点击圆环弹出的详情：
 context/total token、缓存命中、未命中、写入、reasoning token、inference 数、按币种的实际花费、
 缓存节省和部分未定价提示。读数只来自 canonical `ThreadRuntimeSnapshot`，不在 Flutter 建立逐
 inference 或计费副本。费用行固定展示，不随数据缺失隐藏。
 
+Context 条目后固定显示当前 Thread 最近一个 Turn 的加权解码速度。Turn 开始时清空读数；每个
+timing 与 usage 完整的成功 inference 累加 completion token 与 decode 毫秒，展示
+`Σ completionTokens × 1000 / Σ decodeMs`，Turn 终态后保留到下一 Turn 开始。代理切换时只读取新
+Thread 的 `ThreadRuntimeSnapshot`，不得读取产品级模型摘要。速度 `>= 10` 四舍五入为整数，低于
+10 保留一位小数；没有样本时显示 `- t/s`。
+
 Skills 摘要显示 `ThreadRuntimeSnapshot.activeSkills` 的去重数量；代理工具与用户手势激活共同参与
 该列表的首次出现顺序去重。当前 Thread 的 capability
 详情以完整列表展示全部名称，不截断，超出高度时在详情内部滚动并保持键盘与语义化访问。
-顶部 agent directory 只负责切换与目录状态，不复制该列表，也不新增独立 agent 详情面板。
+顶部 agent directory 只负责切换与目录状态，不复制该列表，也不新增独立 agent 详情面板。上部
+会话状态栏在 agent 数量 Chip 后以 8px 间隔显示同风格费用 Chip，只包含费用图标和金额，不显示
+`Total cost` 或等价文字。金额来自产品级性能快照按当前 root Thread 聚合的根会话及全部 child
+费用；在同一根会话内切换代理金额不变，切换根会话时同步切换。该值不能通过已加载 Thread 求和。
 
 费用只展示按币种聚合的实际花费：出现消费时按货币符号 + 金额展示，多币种用 ` + ` 连接（如
 `￥1.2 + $2.6`），不做汇率换算；已知币种 CNY/USD 显示 `￥`/`$`，未知币种回退为币种代码前缀。
-没有可计价花费（包括完全未定价）时值固定显示 `-`，不回退为文案占位；"部分未定价"提示仅在
-已展示金额时追加。
+没有可计价花费（包括完全未定价）时费用 Chip 固定显示图标和 `-`，不回退为文案占位；tooltip
+固定说明“会话全部代理费用”，并在已展示金额时承载“部分未定价”提示。
 
 LSP 活动指示是状态栏的运行时状态条目：任一 LSP server activity 非 idle 时显示活动摘要
 （如“正在索引 40%”），详情列出各 server 的活动类型与 title/message；数据取自产品级
@@ -265,7 +275,8 @@ canonical snapshot，不触发 reconcile、probe、discover、actor ensure 或�
 
 ## 11.9 设置与视觉
 
-Settings 是独立页面，覆盖 Providers、Instructions、Skills、Roles、MCP、LSP、Security、General。
+Settings 是独立页面，覆盖 Providers、Instructions、Skills、Roles、MCP、LSP、Statistics、Security、
+General；Statistics 位于系统分组的 Security 前。
 所有保存采用 typed command，并用 bridge 返回的 canonical settings snapshot 替换本地状态；
 secret 使用 preserve/replace/clear enum，不解析错误消息或 raw JSON 控制流程。
 Skills 页进入时只读取当前 catalog，并把返回的 canonical snapshot 应用到 GUI 状态；列表内容跨
@@ -274,6 +285,12 @@ Project 激活 command 才执行发现。
 MCP/LSP 页进入和“刷新”只读取各 owner 的 last-known snapshot；MCP 单 server“重新连接”、
 经确认的“全部重置”，以及 LSP probe、typed repair 和 reset 都必须调用各自的明确 command。
 这些操作使用稳定 `ValueKey`，其 command response 仍按领域 revision 应用，不能覆盖更晚事件。
+
+Statistics 是只读实时页，上部按 Provider 实例与实际 API model 分组展示加权 t/s、样本数、累计
+completion token、平均 TTFT 和平均总响应时间；下部展示全局最近 1000 条完整成功调用，最新优先，
+支持“全部模型”或单个 Provider 实例 + model 过滤。历史条目只包含完成时间、Provider 实例 ID/
+显示名、实际模型、completion token、TTFT、decode、总响应时间和单次 t/s，不显示 prompt、工具
+参数、结果或凭据。宽布局使用表格，紧凑布局使用虚拟化卡片列表；v1 不提供刷新、容量配置或清空。
 
 聊天页保持低对比双栏桌面布局：左侧 Project/root Thread，右侧当前 Thread workspace；窄屏改为
 icon rail。普通 agent 正文无卡片背景，plan 使用轻边框，reasoning/tool 默认折叠。Composer、
@@ -315,6 +332,9 @@ directory 增量更新和 selected agent 重建时必须保留。
 - 时间线窗口三迁移（快照重建、历史页扩展、上限裁剪）、锚点派生回源与跨代际响应丢弃有 widget test；
 - 关机阶段 overlay、pending 归零与全部关闭 hook 共享幂等 shutdown future 有 test；
 - root/child 切换时 canonical workspace 与 UI ephemeral 状态均正确隔离；
+- 上部会话费用在 root/child 切换时保持一致、切换 root 时隔离，且费用 Chip 不出现 `Total cost`；
+- 下部代理状态栏覆盖 `150 t/s`、`- t/s`、代理切换和 overflow；Statistics 覆盖摘要、过滤、历史、
+  空状态、1000 条窗口和紧凑布局；
 - lag、断流和旧 generation 不污染当前 workspace；
 - 空正文 provider failure、`Completed { Failed }` / recoverable issue 投影、agent directory 错误保留与
   `task_transition.complete` 门禁拒绝 message 有 widget test；

@@ -570,6 +570,8 @@ ThreadRuntimeView _threadRuntimeFromFrb(frb.BridgeThreadRuntimeSnapshot value) {
     promptGeneration: usage.promptGeneration?.toInt(),
     promptCachePolicy: usage.promptCachePolicy,
     prefixChangedReason: usage.prefixChangedReason?.name,
+    turnCompletionTokens: value.turnCompletionTokens.toInt(),
+    turnDecodeMillis: value.turnDecodeMillis.toInt(),
     costLabel: costLabel,
     activeSkills: value.activeSkills,
     activeMcpServers: value.activeMcpServers,

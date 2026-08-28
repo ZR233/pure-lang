@@ -183,6 +183,19 @@ pub(crate) fn project_runtime_event(
                     ),
                 },
             );
+            let mut runtime = current
+                .runtime
+                .clone()
+                .unwrap_or_else(|| super::observation::empty_runtime(thread_id));
+            runtime.turn_completion_tokens = 0;
+            runtime.turn_decode_millis = 0;
+            runtime.updated_at = event.created_at;
+            projector.push(
+                event.created_at,
+                ThreadNotification::ThreadRuntimeUpdated {
+                    runtime: Box::new(runtime),
+                },
+            );
             for input in claimed_inputs {
                 if input.turn_id.as_str() != turn_id.as_str() {
                     projector.push(
@@ -690,6 +703,65 @@ mod tests {
     use pl_trace::{TracePartAction, TracePartCompletion};
 
     use super::*;
+
+    #[test]
+    fn turn_started_clears_only_the_selected_agents_turn_throughput() {
+        let mut current = snapshot();
+        let mut runtime = super::super::observation::empty_runtime("thread-1");
+        runtime.turn_completion_tokens = 150;
+        runtime.turn_decode_millis = 1_000;
+        runtime.usage.completion_tokens = 600;
+        current.runtime = Some(runtime);
+        let agent_snapshot = crate::AgentRegistration {
+            identity: crate::AgentIdentity {
+                id: crate::ThreadId::new("thread-1").unwrap(),
+                parent_id: None,
+                role: crate::AgentRoleId::new("planner").unwrap(),
+                depth: 0,
+            },
+            session: crate::ThreadContextState::empty(),
+            runtime_revision: 1,
+            event_sequence: 1,
+        }
+        .into_durable_state()
+        .snapshot;
+        let input = DurableMailboxEnvelope {
+            mail_id: "mail-1".to_string(),
+            turn_id: crate::TurnId::new("turn-2").unwrap(),
+            thread_id: crate::ThreadId::new("thread-1").unwrap(),
+            payload: crate::MailboxInputPayload {
+                message: "continue".to_string(),
+                attachments: Vec::new(),
+                presentation: MailboxPresentation::User,
+                metadata: serde_json::Value::Null,
+            },
+            queue_coalescing_key: None,
+            budget_action: crate::MailboxBudgetAction::Preserve,
+            delivery_state: MailboxDeliveryState::default(),
+            queued_at: 8,
+        };
+        let event = AgentRuntimeEvent {
+            agent_id: crate::ThreadId::new("thread-1").unwrap(),
+            sequence: 2,
+            created_at: 9,
+            kind: AgentRuntimeEventKind::TurnStarted {
+                turn_id: crate::TurnId::new("turn-2").unwrap(),
+                thread_id: crate::ThreadId::new("thread-1").unwrap(),
+                input,
+                claimed_inputs: Vec::new(),
+                snapshot: Box::new(agent_snapshot),
+            },
+        };
+
+        let batch = project_runtime_event(&event, &current);
+        assert!(batch.notifications.iter().any(|notification| matches!(
+            &notification.notification,
+            ThreadNotification::ThreadRuntimeUpdated { runtime }
+                if runtime.turn_completion_tokens == 0
+                    && runtime.turn_decode_millis == 0
+                    && runtime.usage.completion_tokens == 600
+        )));
+    }
 
     #[test]
     fn durable_user_input_projects_its_typed_attachment_manifest() {

@@ -309,6 +309,14 @@ impl PreparedSessionRuntime {
         ThreadRuntimeSnapshot {
             thread_id: thread_id.to_string(),
             usage,
+            turn_completion_tokens: current
+                .runtime
+                .as_ref()
+                .map_or(0, |runtime| runtime.turn_completion_tokens),
+            turn_decode_millis: current
+                .runtime
+                .as_ref()
+                .map_or(0, |runtime| runtime.turn_decode_millis),
             todo: current
                 .runtime
                 .as_ref()
@@ -497,6 +505,8 @@ mod tests {
                 prefix_changed_reason: None,
                 updated_at: 1,
             },
+            turn_completion_tokens: 25,
+            turn_decode_millis: 100,
             active_skills: vec!["review".to_string()],
             active_mcp_servers: vec!["old-mcp".to_string()],
             active_lsp_servers: vec!["old-lsp".to_string()],
@@ -516,6 +526,8 @@ mod tests {
         assert_eq!(merged.usage.model, "new-model");
         assert_eq!(merged.usage.context_window, Some(128_000));
         assert_eq!(merged.usage.total_tokens, 7);
+        assert_eq!(merged.turn_completion_tokens, 25);
+        assert_eq!(merged.turn_decode_millis, 100);
         assert_eq!(merged.active_skills, vec!["review".to_string()]);
         assert_eq!(merged.active_mcp_servers, vec!["search".to_string()]);
         assert_eq!(merged.active_lsp_servers, vec!["rust-analyzer".to_string()]);

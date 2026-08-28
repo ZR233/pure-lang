@@ -115,7 +115,11 @@ pub struct TurnEngineBuilder {
 impl TurnEngineBuilder {
     /// 从已校验的角色路由构造绑定单一模型的 Turn runtime。
     pub fn from_route(route: &ResolvedModelRoute) -> Result<Self> {
-        let runtime = ModelRuntime::new(route.endpoint.clone(), route.model.clone())?;
+        let runtime = ModelRuntime::new_with_provider_id(
+            route.provider_id.as_str(),
+            route.endpoint.clone(),
+            route.model.clone(),
+        )?;
         Ok(Self {
             runtime,
             effort: route.effort.clone(),

@@ -53,6 +53,11 @@ StudioReduceResult reduceStudioEvent(
     ProviderUsageStateChangedPayload(:final state) => StudioReduceResult(
       applyProviderUsageState(current, state),
     ),
+    ModelPerformanceStateChangedPayload(:final state) => StudioReduceResult(
+      state.revision <= current.modelPerformance.revision
+          ? current
+          : current.copyWith(modelPerformance: state),
+    ),
     UpdaterStateChangedPayload(:final state) => StudioReduceResult(
       applyUpdaterState(current, state),
     ),

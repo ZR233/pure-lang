@@ -588,6 +588,92 @@ void registerShellSettingsTests() {
     expect(api.roleUpdate?.effort, 'max');
   });
 
+  testWidgets('header shows session cost only and selected agent throughput', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final base = _rootAndChildState();
+    final rootWorkspace = base.workspacesByThread['session-1']!;
+    final childWorkspace = base.workspacesByThread['child-1']!;
+    final state = base.copyWith(
+      modelPerformance: _modelPerformanceFixture(),
+      workspacesByThread: {
+        'session-1': rootWorkspace.copyWith(
+          runtime: rootWorkspace.runtime.copyWith(
+            turnCompletionTokens: 150,
+            turnDecodeMillis: 1000,
+          ),
+        ),
+        'child-1': childWorkspace.copyWith(
+          runtime: childWorkspace.runtime.copyWith(
+            turnCompletionTokens: 75,
+            turnDecodeMillis: 1000,
+          ),
+        ),
+      },
+    );
+    final api = _FakeStudioApi(state);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final sessionCost = find.byKey(StudioDriverKeys.sessionCost);
+    expect(sessionCost, findsOneWidget);
+    expect(
+      find.descendant(of: sessionCost, matching: find.text(r'￥0.14 + $0.02')),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Total cost'), findsNothing);
+    expect(find.byKey(StudioDriverKeys.threadThroughput), findsOneWidget);
+    expect(find.text('150 t/s'), findsOneWidget);
+
+    await tester.tap(find.byKey(StudioDriverKeys.agentSwitcher));
+    await tester.pumpAndSettle();
+    if (find.byKey(StudioDriverKeys.agentRow('child-1')).evaluate().isEmpty) {
+      await tester.tap(find.byKey(StudioDriverKeys.agentSwitcher));
+      await tester.pumpAndSettle();
+    }
+    await tester.tap(find.byKey(StudioDriverKeys.agentRow('child-1')));
+    await tester.pumpAndSettle();
+
+    expect(find.text(r'￥0.14 + $0.02'), findsOneWidget);
+    expect(find.text('75 t/s'), findsOneWidget);
+    expect(find.text('150 t/s'), findsNothing);
+  });
+
+  testWidgets('status bar shows a placeholder without a speed sample', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 160);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        child: _localizedApp(
+          home: Scaffold(
+            body: ThreadStatusBar(
+              workspace: _emptyState().selectedAgentWorkspace!,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(StudioDriverKeys.threadThroughput), findsOneWidget);
+    expect(find.text('- t/s'), findsOneWidget);
+  });
+
   testWidgets('status bar omits turn and interaction activity readouts', (
     tester,
   ) async {
@@ -2034,6 +2120,92 @@ void registerShellSettingsTests() {
     },
   );
 
+  testWidgets('statistics tab shows weighted summaries and filters history', (
+    tester,
+  ) async {
+    _configureSettingsTestView(tester);
+    final api = _FakeStudioApi(
+      _stateWithPlannerModels().copyWith(
+        modelPerformance: _modelPerformanceFixture(),
+      ),
+    );
+    await _pumpSettingsPage(tester, api);
+
+    await tester.tap(find.byKey(StudioDriverKeys.settingsTab('statistics')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(StudioDriverKeys.statisticsSummary), findsOneWidget);
+    expect(find.byKey(StudioDriverKeys.statisticsHistory), findsOneWidget);
+    expect(find.byType(DataTable), findsOneWidget);
+    expect(find.text('120 t/s'), findsOneWidget);
+    expect(
+      find.byKey(
+        StudioDriverKeys.statisticsHistoryRow('provider-a', 'model-a', 3000),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(
+        StudioDriverKeys.statisticsHistoryRow('provider-b', 'model-b', 2000),
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(StudioDriverKeys.statisticsFilter));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('OpenAI · model-b').last);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(
+        StudioDriverKeys.statisticsHistoryRow('provider-a', 'model-a', 3000),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.byKey(
+        StudioDriverKeys.statisticsHistoryRow('provider-b', 'model-b', 2000),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('statistics tab uses virtualized cards in compact layout', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(700, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _FakeStudioApi(
+      _stateWithPlannerModels().copyWith(
+        modelPerformance: _modelPerformanceFixture(),
+      ),
+    );
+    await _pumpSettingsPage(tester, api);
+
+    final statisticsTab = find.byKey(
+      StudioDriverKeys.settingsTab('statistics'),
+    );
+    await tester.scrollUntilVisible(
+      statisticsTab,
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(statisticsTab);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(DataTable), findsNothing);
+    expect(find.byKey(StudioDriverKeys.statisticsSummary), findsOneWidget);
+    expect(
+      find.byKey(
+        StudioDriverKeys.statisticsHistoryRow('provider-a', 'model-a', 3000),
+      ),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'settings ordinary controls save immediately without draft buttons',
     (tester) async {
@@ -2339,6 +2511,75 @@ Future<void> _pumpSettingsPage(WidgetTester tester, _FakeStudioApi api) async {
     ),
   );
   await tester.pumpAndSettle();
+}
+
+ModelPerformanceSnapshotView _modelPerformanceFixture() {
+  return ModelPerformanceSnapshotView(
+    revision: 3,
+    updatedAt: DateTime.fromMillisecondsSinceEpoch(3000),
+    sessionCosts: const [
+      SessionCostView(
+        rootThreadId: 'session-1',
+        estimatedCosts: [
+          RuntimeCostView(currency: 'CNY', amount: 0.14),
+          RuntimeCostView(currency: 'USD', amount: 0.02),
+        ],
+        hasUnpricedUsage: false,
+      ),
+    ],
+    summaries: const [
+      ModelPerformanceSummaryView(
+        providerInstanceId: 'provider-a',
+        providerDisplayName: 'DeepSeek',
+        model: 'model-a',
+        sampleCount: 2,
+        completionTokens: 150,
+        totalTtftMillis: 200,
+        totalDecodeMillis: 1250,
+        totalResponseMillis: 1450,
+        tokensPerSecond: 120,
+        averageTtftMillis: 100,
+        averageResponseMillis: 725,
+      ),
+      ModelPerformanceSummaryView(
+        providerInstanceId: 'provider-b',
+        providerDisplayName: 'OpenAI',
+        model: 'model-b',
+        sampleCount: 1,
+        completionTokens: 30,
+        totalTtftMillis: 80,
+        totalDecodeMillis: 300,
+        totalResponseMillis: 380,
+        tokensPerSecond: 100,
+        averageTtftMillis: 80,
+        averageResponseMillis: 380,
+      ),
+    ],
+    history: [
+      ModelPerformanceSampleView(
+        completedAt: DateTime.fromMillisecondsSinceEpoch(3000),
+        providerInstanceId: 'provider-a',
+        providerDisplayName: 'DeepSeek',
+        model: 'model-a',
+        completionTokens: 50,
+        ttftMillis: 100,
+        decodeMillis: 250,
+        totalResponseMillis: 350,
+        tokensPerSecond: 200,
+      ),
+      ModelPerformanceSampleView(
+        completedAt: DateTime.fromMillisecondsSinceEpoch(2000),
+        providerInstanceId: 'provider-b',
+        providerDisplayName: 'OpenAI',
+        model: 'model-b',
+        completionTokens: 30,
+        ttftMillis: 80,
+        decodeMillis: 300,
+        totalResponseMillis: 380,
+        tokensPerSecond: 100,
+      ),
+    ],
+  );
 }
 
 StudioState _providerListState({bool zhipuOnly = false}) {

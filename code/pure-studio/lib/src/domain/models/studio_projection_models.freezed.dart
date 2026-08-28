@@ -589,7 +589,7 @@ as bool,
 /// @nodoc
 mixin _$HeaderView {
 
- StudioThread? get selectedRootThread; StudioProject? get selectedProject; String? get selectedProjectId; List<StudioThread> get workspaceThreads; List<StudioAgentView> get agents; String? get selectedThreadId; ThreadRuntimeView get runtime; List<PendingInteraction> get pendingInteractions;
+ StudioThread? get selectedRootThread; StudioProject? get selectedProject; String? get selectedProjectId; List<StudioThread> get workspaceThreads; List<StudioAgentView> get agents; String? get selectedThreadId; ThreadRuntimeView get runtime; SessionCostView? get sessionCost; List<PendingInteraction> get pendingInteractions;
 /// Create a copy of HeaderView
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -600,16 +600,16 @@ $HeaderViewCopyWith<HeaderView> get copyWith => _$HeaderViewCopyWithImpl<HeaderV
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is HeaderView&&(identical(other.selectedRootThread, selectedRootThread) || other.selectedRootThread == selectedRootThread)&&(identical(other.selectedProject, selectedProject) || other.selectedProject == selectedProject)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&const DeepCollectionEquality().equals(other.workspaceThreads, workspaceThreads)&&const DeepCollectionEquality().equals(other.agents, agents)&&(identical(other.selectedThreadId, selectedThreadId) || other.selectedThreadId == selectedThreadId)&&(identical(other.runtime, runtime) || other.runtime == runtime)&&const DeepCollectionEquality().equals(other.pendingInteractions, pendingInteractions));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is HeaderView&&(identical(other.selectedRootThread, selectedRootThread) || other.selectedRootThread == selectedRootThread)&&(identical(other.selectedProject, selectedProject) || other.selectedProject == selectedProject)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&const DeepCollectionEquality().equals(other.workspaceThreads, workspaceThreads)&&const DeepCollectionEquality().equals(other.agents, agents)&&(identical(other.selectedThreadId, selectedThreadId) || other.selectedThreadId == selectedThreadId)&&(identical(other.runtime, runtime) || other.runtime == runtime)&&(identical(other.sessionCost, sessionCost) || other.sessionCost == sessionCost)&&const DeepCollectionEquality().equals(other.pendingInteractions, pendingInteractions));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,selectedRootThread,selectedProject,selectedProjectId,const DeepCollectionEquality().hash(workspaceThreads),const DeepCollectionEquality().hash(agents),selectedThreadId,runtime,const DeepCollectionEquality().hash(pendingInteractions));
+int get hashCode => Object.hash(runtimeType,selectedRootThread,selectedProject,selectedProjectId,const DeepCollectionEquality().hash(workspaceThreads),const DeepCollectionEquality().hash(agents),selectedThreadId,runtime,sessionCost,const DeepCollectionEquality().hash(pendingInteractions));
 
 @override
 String toString() {
-  return 'HeaderView(selectedRootThread: $selectedRootThread, selectedProject: $selectedProject, selectedProjectId: $selectedProjectId, workspaceThreads: $workspaceThreads, agents: $agents, selectedThreadId: $selectedThreadId, runtime: $runtime, pendingInteractions: $pendingInteractions)';
+  return 'HeaderView(selectedRootThread: $selectedRootThread, selectedProject: $selectedProject, selectedProjectId: $selectedProjectId, workspaceThreads: $workspaceThreads, agents: $agents, selectedThreadId: $selectedThreadId, runtime: $runtime, sessionCost: $sessionCost, pendingInteractions: $pendingInteractions)';
 }
 
 
@@ -620,7 +620,7 @@ abstract mixin class $HeaderViewCopyWith<$Res>  {
   factory $HeaderViewCopyWith(HeaderView value, $Res Function(HeaderView) _then) = _$HeaderViewCopyWithImpl;
 @useResult
 $Res call({
- StudioThread? selectedRootThread, StudioProject? selectedProject, String? selectedProjectId, List<StudioThread> workspaceThreads, List<StudioAgentView> agents, String? selectedThreadId, ThreadRuntimeView runtime, List<PendingInteraction> pendingInteractions
+ StudioThread? selectedRootThread, StudioProject? selectedProject, String? selectedProjectId, List<StudioThread> workspaceThreads, List<StudioAgentView> agents, String? selectedThreadId, ThreadRuntimeView runtime, SessionCostView? sessionCost, List<PendingInteraction> pendingInteractions
 });
 
 
@@ -637,7 +637,7 @@ class _$HeaderViewCopyWithImpl<$Res>
 
 /// Create a copy of HeaderView
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? selectedRootThread = freezed,Object? selectedProject = freezed,Object? selectedProjectId = freezed,Object? workspaceThreads = null,Object? agents = null,Object? selectedThreadId = freezed,Object? runtime = null,Object? pendingInteractions = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? selectedRootThread = freezed,Object? selectedProject = freezed,Object? selectedProjectId = freezed,Object? workspaceThreads = null,Object? agents = null,Object? selectedThreadId = freezed,Object? runtime = null,Object? sessionCost = freezed,Object? pendingInteractions = null,}) {
   return _then(HeaderView(
 selectedRootThread: freezed == selectedRootThread ? _self.selectedRootThread : selectedRootThread // ignore: cast_nullable_to_non_nullable
 as StudioThread?,selectedProject: freezed == selectedProject ? _self.selectedProject : selectedProject // ignore: cast_nullable_to_non_nullable
@@ -646,7 +646,8 @@ as String?,workspaceThreads: null == workspaceThreads ? _self.workspaceThreads :
 as List<StudioThread>,agents: null == agents ? _self.agents : agents // ignore: cast_nullable_to_non_nullable
 as List<StudioAgentView>,selectedThreadId: freezed == selectedThreadId ? _self.selectedThreadId : selectedThreadId // ignore: cast_nullable_to_non_nullable
 as String?,runtime: null == runtime ? _self.runtime : runtime // ignore: cast_nullable_to_non_nullable
-as ThreadRuntimeView,pendingInteractions: null == pendingInteractions ? _self.pendingInteractions : pendingInteractions // ignore: cast_nullable_to_non_nullable
+as ThreadRuntimeView,sessionCost: freezed == sessionCost ? _self.sessionCost : sessionCost // ignore: cast_nullable_to_non_nullable
+as SessionCostView?,pendingInteractions: null == pendingInteractions ? _self.pendingInteractions : pendingInteractions // ignore: cast_nullable_to_non_nullable
 as List<PendingInteraction>,
   ));
 }
@@ -732,10 +733,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( StudioThread? selectedRootThread,  StudioProject? selectedProject,  String? selectedProjectId,  List<StudioThread> workspaceThreads,  List<StudioAgentView> agents,  String? selectedThreadId,  ThreadRuntimeView runtime,  List<PendingInteraction> pendingInteractions)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( StudioThread? selectedRootThread,  StudioProject? selectedProject,  String? selectedProjectId,  List<StudioThread> workspaceThreads,  List<StudioAgentView> agents,  String? selectedThreadId,  ThreadRuntimeView runtime,  SessionCostView? sessionCost,  List<PendingInteraction> pendingInteractions)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _HeaderView() when $default != null:
-return $default(_that.selectedRootThread,_that.selectedProject,_that.selectedProjectId,_that.workspaceThreads,_that.agents,_that.selectedThreadId,_that.runtime,_that.pendingInteractions);case _:
+return $default(_that.selectedRootThread,_that.selectedProject,_that.selectedProjectId,_that.workspaceThreads,_that.agents,_that.selectedThreadId,_that.runtime,_that.sessionCost,_that.pendingInteractions);case _:
   return orElse();
 
 }
@@ -753,10 +754,10 @@ return $default(_that.selectedRootThread,_that.selectedProject,_that.selectedPro
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( StudioThread? selectedRootThread,  StudioProject? selectedProject,  String? selectedProjectId,  List<StudioThread> workspaceThreads,  List<StudioAgentView> agents,  String? selectedThreadId,  ThreadRuntimeView runtime,  List<PendingInteraction> pendingInteractions)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( StudioThread? selectedRootThread,  StudioProject? selectedProject,  String? selectedProjectId,  List<StudioThread> workspaceThreads,  List<StudioAgentView> agents,  String? selectedThreadId,  ThreadRuntimeView runtime,  SessionCostView? sessionCost,  List<PendingInteraction> pendingInteractions)  $default,) {final _that = this;
 switch (_that) {
 case _HeaderView():
-return $default(_that.selectedRootThread,_that.selectedProject,_that.selectedProjectId,_that.workspaceThreads,_that.agents,_that.selectedThreadId,_that.runtime,_that.pendingInteractions);case _:
+return $default(_that.selectedRootThread,_that.selectedProject,_that.selectedProjectId,_that.workspaceThreads,_that.agents,_that.selectedThreadId,_that.runtime,_that.sessionCost,_that.pendingInteractions);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -773,10 +774,10 @@ return $default(_that.selectedRootThread,_that.selectedProject,_that.selectedPro
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( StudioThread? selectedRootThread,  StudioProject? selectedProject,  String? selectedProjectId,  List<StudioThread> workspaceThreads,  List<StudioAgentView> agents,  String? selectedThreadId,  ThreadRuntimeView runtime,  List<PendingInteraction> pendingInteractions)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( StudioThread? selectedRootThread,  StudioProject? selectedProject,  String? selectedProjectId,  List<StudioThread> workspaceThreads,  List<StudioAgentView> agents,  String? selectedThreadId,  ThreadRuntimeView runtime,  SessionCostView? sessionCost,  List<PendingInteraction> pendingInteractions)?  $default,) {final _that = this;
 switch (_that) {
 case _HeaderView() when $default != null:
-return $default(_that.selectedRootThread,_that.selectedProject,_that.selectedProjectId,_that.workspaceThreads,_that.agents,_that.selectedThreadId,_that.runtime,_that.pendingInteractions);case _:
+return $default(_that.selectedRootThread,_that.selectedProject,_that.selectedProjectId,_that.workspaceThreads,_that.agents,_that.selectedThreadId,_that.runtime,_that.sessionCost,_that.pendingInteractions);case _:
   return null;
 
 }
@@ -788,7 +789,7 @@ return $default(_that.selectedRootThread,_that.selectedProject,_that.selectedPro
 
 
 class _HeaderView implements HeaderView {
-  const _HeaderView({required this.selectedRootThread, required this.selectedProject, required this.selectedProjectId, required  List<StudioThread> workspaceThreads, required  List<StudioAgentView> agents, required this.selectedThreadId, required this.runtime, required  List<PendingInteraction> pendingInteractions}): _workspaceThreads = workspaceThreads,_agents = agents,_pendingInteractions = pendingInteractions;
+  const _HeaderView({required this.selectedRootThread, required this.selectedProject, required this.selectedProjectId, required  List<StudioThread> workspaceThreads, required  List<StudioAgentView> agents, required this.selectedThreadId, required this.runtime, required this.sessionCost, required  List<PendingInteraction> pendingInteractions}): _workspaceThreads = workspaceThreads,_agents = agents,_pendingInteractions = pendingInteractions;
 
 
 @override final  StudioThread? selectedRootThread;
@@ -810,6 +811,7 @@ class _HeaderView implements HeaderView {
 
 @override final  String? selectedThreadId;
 @override final  ThreadRuntimeView runtime;
+@override final  SessionCostView? sessionCost;
  final  List<PendingInteraction> _pendingInteractions;
 @override List<PendingInteraction> get pendingInteractions {
   if (_pendingInteractions is EqualUnmodifiableListView) return _pendingInteractions;
@@ -828,16 +830,16 @@ _$HeaderViewCopyWith<_HeaderView> get copyWith => __$HeaderViewCopyWithImpl<_Hea
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _HeaderView&&(identical(other.selectedRootThread, selectedRootThread) || other.selectedRootThread == selectedRootThread)&&(identical(other.selectedProject, selectedProject) || other.selectedProject == selectedProject)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&const DeepCollectionEquality().equals(other._workspaceThreads, _workspaceThreads)&&const DeepCollectionEquality().equals(other._agents, _agents)&&(identical(other.selectedThreadId, selectedThreadId) || other.selectedThreadId == selectedThreadId)&&(identical(other.runtime, runtime) || other.runtime == runtime)&&const DeepCollectionEquality().equals(other._pendingInteractions, _pendingInteractions));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _HeaderView&&(identical(other.selectedRootThread, selectedRootThread) || other.selectedRootThread == selectedRootThread)&&(identical(other.selectedProject, selectedProject) || other.selectedProject == selectedProject)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&const DeepCollectionEquality().equals(other._workspaceThreads, _workspaceThreads)&&const DeepCollectionEquality().equals(other._agents, _agents)&&(identical(other.selectedThreadId, selectedThreadId) || other.selectedThreadId == selectedThreadId)&&(identical(other.runtime, runtime) || other.runtime == runtime)&&(identical(other.sessionCost, sessionCost) || other.sessionCost == sessionCost)&&const DeepCollectionEquality().equals(other._pendingInteractions, _pendingInteractions));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,selectedRootThread,selectedProject,selectedProjectId,const DeepCollectionEquality().hash(_workspaceThreads),const DeepCollectionEquality().hash(_agents),selectedThreadId,runtime,const DeepCollectionEquality().hash(_pendingInteractions));
+int get hashCode => Object.hash(runtimeType,selectedRootThread,selectedProject,selectedProjectId,const DeepCollectionEquality().hash(_workspaceThreads),const DeepCollectionEquality().hash(_agents),selectedThreadId,runtime,sessionCost,const DeepCollectionEquality().hash(_pendingInteractions));
 
 @override
 String toString() {
-  return 'HeaderView(selectedRootThread: $selectedRootThread, selectedProject: $selectedProject, selectedProjectId: $selectedProjectId, workspaceThreads: $workspaceThreads, agents: $agents, selectedThreadId: $selectedThreadId, runtime: $runtime, pendingInteractions: $pendingInteractions)';
+  return 'HeaderView(selectedRootThread: $selectedRootThread, selectedProject: $selectedProject, selectedProjectId: $selectedProjectId, workspaceThreads: $workspaceThreads, agents: $agents, selectedThreadId: $selectedThreadId, runtime: $runtime, sessionCost: $sessionCost, pendingInteractions: $pendingInteractions)';
 }
 
 
@@ -848,7 +850,7 @@ abstract mixin class _$HeaderViewCopyWith<$Res> implements $HeaderViewCopyWith<$
   factory _$HeaderViewCopyWith(_HeaderView value, $Res Function(_HeaderView) _then) = __$HeaderViewCopyWithImpl;
 @override @useResult
 $Res call({
- StudioThread? selectedRootThread, StudioProject? selectedProject, String? selectedProjectId, List<StudioThread> workspaceThreads, List<StudioAgentView> agents, String? selectedThreadId, ThreadRuntimeView runtime, List<PendingInteraction> pendingInteractions
+ StudioThread? selectedRootThread, StudioProject? selectedProject, String? selectedProjectId, List<StudioThread> workspaceThreads, List<StudioAgentView> agents, String? selectedThreadId, ThreadRuntimeView runtime, SessionCostView? sessionCost, List<PendingInteraction> pendingInteractions
 });
 
 
@@ -865,7 +867,7 @@ class __$HeaderViewCopyWithImpl<$Res>
 
 /// Create a copy of HeaderView
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? selectedRootThread = freezed,Object? selectedProject = freezed,Object? selectedProjectId = freezed,Object? workspaceThreads = null,Object? agents = null,Object? selectedThreadId = freezed,Object? runtime = null,Object? pendingInteractions = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? selectedRootThread = freezed,Object? selectedProject = freezed,Object? selectedProjectId = freezed,Object? workspaceThreads = null,Object? agents = null,Object? selectedThreadId = freezed,Object? runtime = null,Object? sessionCost = freezed,Object? pendingInteractions = null,}) {
   return _then(_HeaderView(
 selectedRootThread: freezed == selectedRootThread ? _self.selectedRootThread : selectedRootThread // ignore: cast_nullable_to_non_nullable
 as StudioThread?,selectedProject: freezed == selectedProject ? _self.selectedProject : selectedProject // ignore: cast_nullable_to_non_nullable
@@ -874,7 +876,8 @@ as String?,workspaceThreads: null == workspaceThreads ? _self._workspaceThreads 
 as List<StudioThread>,agents: null == agents ? _self._agents : agents // ignore: cast_nullable_to_non_nullable
 as List<StudioAgentView>,selectedThreadId: freezed == selectedThreadId ? _self.selectedThreadId : selectedThreadId // ignore: cast_nullable_to_non_nullable
 as String?,runtime: null == runtime ? _self.runtime : runtime // ignore: cast_nullable_to_non_nullable
-as ThreadRuntimeView,pendingInteractions: null == pendingInteractions ? _self._pendingInteractions : pendingInteractions // ignore: cast_nullable_to_non_nullable
+as ThreadRuntimeView,sessionCost: freezed == sessionCost ? _self.sessionCost : sessionCost // ignore: cast_nullable_to_non_nullable
+as SessionCostView?,pendingInteractions: null == pendingInteractions ? _self._pendingInteractions : pendingInteractions // ignore: cast_nullable_to_non_nullable
 as List<PendingInteraction>,
   ));
 }
@@ -885,7 +888,7 @@ as List<PendingInteraction>,
 /// @nodoc
 mixin _$SettingsPageView {
 
- List<ProviderSettingsView> get providers; ProviderCatalogView get providerCatalog; String? get defaultProviderId; List<RoleSettingsView> get roles; InstructionsSettingsView get instructions; SkillsSettingsView get skills; List<String> get activeSkills; List<String> get catalogSkills; String? get selectedProjectId; List<McpServerSettingsView> get mcpServers; McpStateSnapshot get mcpState; LspStateSnapshot get lspState; PermissionMode get permissionMode; GeneralSettingsView get general; WebSearchSettingsView get webSearch; bool get runtimeBusy;
+ List<ProviderSettingsView> get providers; ProviderCatalogView get providerCatalog; String? get defaultProviderId; List<RoleSettingsView> get roles; InstructionsSettingsView get instructions; SkillsSettingsView get skills; List<String> get activeSkills; List<String> get catalogSkills; String? get selectedProjectId; List<McpServerSettingsView> get mcpServers; McpStateSnapshot get mcpState; LspStateSnapshot get lspState; PermissionMode get permissionMode; GeneralSettingsView get general; WebSearchSettingsView get webSearch; ModelPerformanceSnapshotView get modelPerformance; bool get runtimeBusy;
 /// Create a copy of SettingsPageView
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -896,16 +899,16 @@ $SettingsPageViewCopyWith<SettingsPageView> get copyWith => _$SettingsPageViewCo
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is SettingsPageView&&const DeepCollectionEquality().equals(other.providers, providers)&&(identical(other.providerCatalog, providerCatalog) || other.providerCatalog == providerCatalog)&&(identical(other.defaultProviderId, defaultProviderId) || other.defaultProviderId == defaultProviderId)&&const DeepCollectionEquality().equals(other.roles, roles)&&(identical(other.instructions, instructions) || other.instructions == instructions)&&(identical(other.skills, skills) || other.skills == skills)&&const DeepCollectionEquality().equals(other.activeSkills, activeSkills)&&const DeepCollectionEquality().equals(other.catalogSkills, catalogSkills)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&const DeepCollectionEquality().equals(other.mcpServers, mcpServers)&&(identical(other.mcpState, mcpState) || other.mcpState == mcpState)&&(identical(other.lspState, lspState) || other.lspState == lspState)&&(identical(other.permissionMode, permissionMode) || other.permissionMode == permissionMode)&&(identical(other.general, general) || other.general == general)&&(identical(other.webSearch, webSearch) || other.webSearch == webSearch)&&(identical(other.runtimeBusy, runtimeBusy) || other.runtimeBusy == runtimeBusy));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is SettingsPageView&&const DeepCollectionEquality().equals(other.providers, providers)&&(identical(other.providerCatalog, providerCatalog) || other.providerCatalog == providerCatalog)&&(identical(other.defaultProviderId, defaultProviderId) || other.defaultProviderId == defaultProviderId)&&const DeepCollectionEquality().equals(other.roles, roles)&&(identical(other.instructions, instructions) || other.instructions == instructions)&&(identical(other.skills, skills) || other.skills == skills)&&const DeepCollectionEquality().equals(other.activeSkills, activeSkills)&&const DeepCollectionEquality().equals(other.catalogSkills, catalogSkills)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&const DeepCollectionEquality().equals(other.mcpServers, mcpServers)&&(identical(other.mcpState, mcpState) || other.mcpState == mcpState)&&(identical(other.lspState, lspState) || other.lspState == lspState)&&(identical(other.permissionMode, permissionMode) || other.permissionMode == permissionMode)&&(identical(other.general, general) || other.general == general)&&(identical(other.webSearch, webSearch) || other.webSearch == webSearch)&&(identical(other.modelPerformance, modelPerformance) || other.modelPerformance == modelPerformance)&&(identical(other.runtimeBusy, runtimeBusy) || other.runtimeBusy == runtimeBusy));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(providers),providerCatalog,defaultProviderId,const DeepCollectionEquality().hash(roles),instructions,skills,const DeepCollectionEquality().hash(activeSkills),const DeepCollectionEquality().hash(catalogSkills),selectedProjectId,const DeepCollectionEquality().hash(mcpServers),mcpState,lspState,permissionMode,general,webSearch,runtimeBusy);
+int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(providers),providerCatalog,defaultProviderId,const DeepCollectionEquality().hash(roles),instructions,skills,const DeepCollectionEquality().hash(activeSkills),const DeepCollectionEquality().hash(catalogSkills),selectedProjectId,const DeepCollectionEquality().hash(mcpServers),mcpState,lspState,permissionMode,general,webSearch,modelPerformance,runtimeBusy);
 
 @override
 String toString() {
-  return 'SettingsPageView(providers: $providers, providerCatalog: $providerCatalog, defaultProviderId: $defaultProviderId, roles: $roles, instructions: $instructions, skills: $skills, activeSkills: $activeSkills, catalogSkills: $catalogSkills, selectedProjectId: $selectedProjectId, mcpServers: $mcpServers, mcpState: $mcpState, lspState: $lspState, permissionMode: $permissionMode, general: $general, webSearch: $webSearch, runtimeBusy: $runtimeBusy)';
+  return 'SettingsPageView(providers: $providers, providerCatalog: $providerCatalog, defaultProviderId: $defaultProviderId, roles: $roles, instructions: $instructions, skills: $skills, activeSkills: $activeSkills, catalogSkills: $catalogSkills, selectedProjectId: $selectedProjectId, mcpServers: $mcpServers, mcpState: $mcpState, lspState: $lspState, permissionMode: $permissionMode, general: $general, webSearch: $webSearch, modelPerformance: $modelPerformance, runtimeBusy: $runtimeBusy)';
 }
 
 
@@ -916,7 +919,7 @@ abstract mixin class $SettingsPageViewCopyWith<$Res>  {
   factory $SettingsPageViewCopyWith(SettingsPageView value, $Res Function(SettingsPageView) _then) = _$SettingsPageViewCopyWithImpl;
 @useResult
 $Res call({
- List<ProviderSettingsView> providers, ProviderCatalogView providerCatalog, String? defaultProviderId, List<RoleSettingsView> roles, InstructionsSettingsView instructions, SkillsSettingsView skills, List<String> activeSkills, List<String> catalogSkills, String? selectedProjectId, List<McpServerSettingsView> mcpServers, McpStateSnapshot mcpState, LspStateSnapshot lspState, PermissionMode permissionMode, GeneralSettingsView general, WebSearchSettingsView webSearch, bool runtimeBusy
+ List<ProviderSettingsView> providers, ProviderCatalogView providerCatalog, String? defaultProviderId, List<RoleSettingsView> roles, InstructionsSettingsView instructions, SkillsSettingsView skills, List<String> activeSkills, List<String> catalogSkills, String? selectedProjectId, List<McpServerSettingsView> mcpServers, McpStateSnapshot mcpState, LspStateSnapshot lspState, PermissionMode permissionMode, GeneralSettingsView general, WebSearchSettingsView webSearch, ModelPerformanceSnapshotView modelPerformance, bool runtimeBusy
 });
 
 
@@ -933,7 +936,7 @@ class _$SettingsPageViewCopyWithImpl<$Res>
 
 /// Create a copy of SettingsPageView
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? providers = null,Object? providerCatalog = null,Object? defaultProviderId = freezed,Object? roles = null,Object? instructions = null,Object? skills = null,Object? activeSkills = null,Object? catalogSkills = null,Object? selectedProjectId = freezed,Object? mcpServers = null,Object? mcpState = null,Object? lspState = null,Object? permissionMode = null,Object? general = null,Object? webSearch = null,Object? runtimeBusy = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? providers = null,Object? providerCatalog = null,Object? defaultProviderId = freezed,Object? roles = null,Object? instructions = null,Object? skills = null,Object? activeSkills = null,Object? catalogSkills = null,Object? selectedProjectId = freezed,Object? mcpServers = null,Object? mcpState = null,Object? lspState = null,Object? permissionMode = null,Object? general = null,Object? webSearch = null,Object? modelPerformance = null,Object? runtimeBusy = null,}) {
   return _then(SettingsPageView(
 providers: null == providers ? _self.providers : providers // ignore: cast_nullable_to_non_nullable
 as List<ProviderSettingsView>,providerCatalog: null == providerCatalog ? _self.providerCatalog : providerCatalog // ignore: cast_nullable_to_non_nullable
@@ -950,7 +953,8 @@ as McpStateSnapshot,lspState: null == lspState ? _self.lspState : lspState // ig
 as LspStateSnapshot,permissionMode: null == permissionMode ? _self.permissionMode : permissionMode // ignore: cast_nullable_to_non_nullable
 as PermissionMode,general: null == general ? _self.general : general // ignore: cast_nullable_to_non_nullable
 as GeneralSettingsView,webSearch: null == webSearch ? _self.webSearch : webSearch // ignore: cast_nullable_to_non_nullable
-as WebSearchSettingsView,runtimeBusy: null == runtimeBusy ? _self.runtimeBusy : runtimeBusy // ignore: cast_nullable_to_non_nullable
+as WebSearchSettingsView,modelPerformance: null == modelPerformance ? _self.modelPerformance : modelPerformance // ignore: cast_nullable_to_non_nullable
+as ModelPerformanceSnapshotView,runtimeBusy: null == runtimeBusy ? _self.runtimeBusy : runtimeBusy // ignore: cast_nullable_to_non_nullable
 as bool,
   ));
 }
@@ -1036,10 +1040,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( List<ProviderSettingsView> providers,  ProviderCatalogView providerCatalog,  String? defaultProviderId,  List<RoleSettingsView> roles,  InstructionsSettingsView instructions,  SkillsSettingsView skills,  List<String> activeSkills,  List<String> catalogSkills,  String? selectedProjectId,  List<McpServerSettingsView> mcpServers,  McpStateSnapshot mcpState,  LspStateSnapshot lspState,  PermissionMode permissionMode,  GeneralSettingsView general,  WebSearchSettingsView webSearch,  bool runtimeBusy)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( List<ProviderSettingsView> providers,  ProviderCatalogView providerCatalog,  String? defaultProviderId,  List<RoleSettingsView> roles,  InstructionsSettingsView instructions,  SkillsSettingsView skills,  List<String> activeSkills,  List<String> catalogSkills,  String? selectedProjectId,  List<McpServerSettingsView> mcpServers,  McpStateSnapshot mcpState,  LspStateSnapshot lspState,  PermissionMode permissionMode,  GeneralSettingsView general,  WebSearchSettingsView webSearch,  ModelPerformanceSnapshotView modelPerformance,  bool runtimeBusy)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _SettingsPageView() when $default != null:
-return $default(_that.providers,_that.providerCatalog,_that.defaultProviderId,_that.roles,_that.instructions,_that.skills,_that.activeSkills,_that.catalogSkills,_that.selectedProjectId,_that.mcpServers,_that.mcpState,_that.lspState,_that.permissionMode,_that.general,_that.webSearch,_that.runtimeBusy);case _:
+return $default(_that.providers,_that.providerCatalog,_that.defaultProviderId,_that.roles,_that.instructions,_that.skills,_that.activeSkills,_that.catalogSkills,_that.selectedProjectId,_that.mcpServers,_that.mcpState,_that.lspState,_that.permissionMode,_that.general,_that.webSearch,_that.modelPerformance,_that.runtimeBusy);case _:
   return orElse();
 
 }
@@ -1057,10 +1061,10 @@ return $default(_that.providers,_that.providerCatalog,_that.defaultProviderId,_t
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( List<ProviderSettingsView> providers,  ProviderCatalogView providerCatalog,  String? defaultProviderId,  List<RoleSettingsView> roles,  InstructionsSettingsView instructions,  SkillsSettingsView skills,  List<String> activeSkills,  List<String> catalogSkills,  String? selectedProjectId,  List<McpServerSettingsView> mcpServers,  McpStateSnapshot mcpState,  LspStateSnapshot lspState,  PermissionMode permissionMode,  GeneralSettingsView general,  WebSearchSettingsView webSearch,  bool runtimeBusy)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( List<ProviderSettingsView> providers,  ProviderCatalogView providerCatalog,  String? defaultProviderId,  List<RoleSettingsView> roles,  InstructionsSettingsView instructions,  SkillsSettingsView skills,  List<String> activeSkills,  List<String> catalogSkills,  String? selectedProjectId,  List<McpServerSettingsView> mcpServers,  McpStateSnapshot mcpState,  LspStateSnapshot lspState,  PermissionMode permissionMode,  GeneralSettingsView general,  WebSearchSettingsView webSearch,  ModelPerformanceSnapshotView modelPerformance,  bool runtimeBusy)  $default,) {final _that = this;
 switch (_that) {
 case _SettingsPageView():
-return $default(_that.providers,_that.providerCatalog,_that.defaultProviderId,_that.roles,_that.instructions,_that.skills,_that.activeSkills,_that.catalogSkills,_that.selectedProjectId,_that.mcpServers,_that.mcpState,_that.lspState,_that.permissionMode,_that.general,_that.webSearch,_that.runtimeBusy);case _:
+return $default(_that.providers,_that.providerCatalog,_that.defaultProviderId,_that.roles,_that.instructions,_that.skills,_that.activeSkills,_that.catalogSkills,_that.selectedProjectId,_that.mcpServers,_that.mcpState,_that.lspState,_that.permissionMode,_that.general,_that.webSearch,_that.modelPerformance,_that.runtimeBusy);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -1077,10 +1081,10 @@ return $default(_that.providers,_that.providerCatalog,_that.defaultProviderId,_t
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( List<ProviderSettingsView> providers,  ProviderCatalogView providerCatalog,  String? defaultProviderId,  List<RoleSettingsView> roles,  InstructionsSettingsView instructions,  SkillsSettingsView skills,  List<String> activeSkills,  List<String> catalogSkills,  String? selectedProjectId,  List<McpServerSettingsView> mcpServers,  McpStateSnapshot mcpState,  LspStateSnapshot lspState,  PermissionMode permissionMode,  GeneralSettingsView general,  WebSearchSettingsView webSearch,  bool runtimeBusy)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( List<ProviderSettingsView> providers,  ProviderCatalogView providerCatalog,  String? defaultProviderId,  List<RoleSettingsView> roles,  InstructionsSettingsView instructions,  SkillsSettingsView skills,  List<String> activeSkills,  List<String> catalogSkills,  String? selectedProjectId,  List<McpServerSettingsView> mcpServers,  McpStateSnapshot mcpState,  LspStateSnapshot lspState,  PermissionMode permissionMode,  GeneralSettingsView general,  WebSearchSettingsView webSearch,  ModelPerformanceSnapshotView modelPerformance,  bool runtimeBusy)?  $default,) {final _that = this;
 switch (_that) {
 case _SettingsPageView() when $default != null:
-return $default(_that.providers,_that.providerCatalog,_that.defaultProviderId,_that.roles,_that.instructions,_that.skills,_that.activeSkills,_that.catalogSkills,_that.selectedProjectId,_that.mcpServers,_that.mcpState,_that.lspState,_that.permissionMode,_that.general,_that.webSearch,_that.runtimeBusy);case _:
+return $default(_that.providers,_that.providerCatalog,_that.defaultProviderId,_that.roles,_that.instructions,_that.skills,_that.activeSkills,_that.catalogSkills,_that.selectedProjectId,_that.mcpServers,_that.mcpState,_that.lspState,_that.permissionMode,_that.general,_that.webSearch,_that.modelPerformance,_that.runtimeBusy);case _:
   return null;
 
 }
@@ -1092,7 +1096,7 @@ return $default(_that.providers,_that.providerCatalog,_that.defaultProviderId,_t
 
 
 class _SettingsPageView implements SettingsPageView {
-  const _SettingsPageView({required  List<ProviderSettingsView> providers, required this.providerCatalog, required this.defaultProviderId, required  List<RoleSettingsView> roles, required this.instructions, required this.skills, required  List<String> activeSkills, required  List<String> catalogSkills, required this.selectedProjectId, required  List<McpServerSettingsView> mcpServers, required this.mcpState, required this.lspState, required this.permissionMode, required this.general, required this.webSearch, required this.runtimeBusy}): _providers = providers,_roles = roles,_activeSkills = activeSkills,_catalogSkills = catalogSkills,_mcpServers = mcpServers;
+  const _SettingsPageView({required  List<ProviderSettingsView> providers, required this.providerCatalog, required this.defaultProviderId, required  List<RoleSettingsView> roles, required this.instructions, required this.skills, required  List<String> activeSkills, required  List<String> catalogSkills, required this.selectedProjectId, required  List<McpServerSettingsView> mcpServers, required this.mcpState, required this.lspState, required this.permissionMode, required this.general, required this.webSearch, required this.modelPerformance, required this.runtimeBusy}): _providers = providers,_roles = roles,_activeSkills = activeSkills,_catalogSkills = catalogSkills,_mcpServers = mcpServers;
 
 
  final  List<ProviderSettingsView> _providers;
@@ -1140,6 +1144,7 @@ class _SettingsPageView implements SettingsPageView {
 @override final  PermissionMode permissionMode;
 @override final  GeneralSettingsView general;
 @override final  WebSearchSettingsView webSearch;
+@override final  ModelPerformanceSnapshotView modelPerformance;
 @override final  bool runtimeBusy;
 
 /// Create a copy of SettingsPageView
@@ -1152,16 +1157,16 @@ _$SettingsPageViewCopyWith<_SettingsPageView> get copyWith => __$SettingsPageVie
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _SettingsPageView&&const DeepCollectionEquality().equals(other._providers, _providers)&&(identical(other.providerCatalog, providerCatalog) || other.providerCatalog == providerCatalog)&&(identical(other.defaultProviderId, defaultProviderId) || other.defaultProviderId == defaultProviderId)&&const DeepCollectionEquality().equals(other._roles, _roles)&&(identical(other.instructions, instructions) || other.instructions == instructions)&&(identical(other.skills, skills) || other.skills == skills)&&const DeepCollectionEquality().equals(other._activeSkills, _activeSkills)&&const DeepCollectionEquality().equals(other._catalogSkills, _catalogSkills)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&const DeepCollectionEquality().equals(other._mcpServers, _mcpServers)&&(identical(other.mcpState, mcpState) || other.mcpState == mcpState)&&(identical(other.lspState, lspState) || other.lspState == lspState)&&(identical(other.permissionMode, permissionMode) || other.permissionMode == permissionMode)&&(identical(other.general, general) || other.general == general)&&(identical(other.webSearch, webSearch) || other.webSearch == webSearch)&&(identical(other.runtimeBusy, runtimeBusy) || other.runtimeBusy == runtimeBusy));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _SettingsPageView&&const DeepCollectionEquality().equals(other._providers, _providers)&&(identical(other.providerCatalog, providerCatalog) || other.providerCatalog == providerCatalog)&&(identical(other.defaultProviderId, defaultProviderId) || other.defaultProviderId == defaultProviderId)&&const DeepCollectionEquality().equals(other._roles, _roles)&&(identical(other.instructions, instructions) || other.instructions == instructions)&&(identical(other.skills, skills) || other.skills == skills)&&const DeepCollectionEquality().equals(other._activeSkills, _activeSkills)&&const DeepCollectionEquality().equals(other._catalogSkills, _catalogSkills)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&const DeepCollectionEquality().equals(other._mcpServers, _mcpServers)&&(identical(other.mcpState, mcpState) || other.mcpState == mcpState)&&(identical(other.lspState, lspState) || other.lspState == lspState)&&(identical(other.permissionMode, permissionMode) || other.permissionMode == permissionMode)&&(identical(other.general, general) || other.general == general)&&(identical(other.webSearch, webSearch) || other.webSearch == webSearch)&&(identical(other.modelPerformance, modelPerformance) || other.modelPerformance == modelPerformance)&&(identical(other.runtimeBusy, runtimeBusy) || other.runtimeBusy == runtimeBusy));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(_providers),providerCatalog,defaultProviderId,const DeepCollectionEquality().hash(_roles),instructions,skills,const DeepCollectionEquality().hash(_activeSkills),const DeepCollectionEquality().hash(_catalogSkills),selectedProjectId,const DeepCollectionEquality().hash(_mcpServers),mcpState,lspState,permissionMode,general,webSearch,runtimeBusy);
+int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(_providers),providerCatalog,defaultProviderId,const DeepCollectionEquality().hash(_roles),instructions,skills,const DeepCollectionEquality().hash(_activeSkills),const DeepCollectionEquality().hash(_catalogSkills),selectedProjectId,const DeepCollectionEquality().hash(_mcpServers),mcpState,lspState,permissionMode,general,webSearch,modelPerformance,runtimeBusy);
 
 @override
 String toString() {
-  return 'SettingsPageView(providers: $providers, providerCatalog: $providerCatalog, defaultProviderId: $defaultProviderId, roles: $roles, instructions: $instructions, skills: $skills, activeSkills: $activeSkills, catalogSkills: $catalogSkills, selectedProjectId: $selectedProjectId, mcpServers: $mcpServers, mcpState: $mcpState, lspState: $lspState, permissionMode: $permissionMode, general: $general, webSearch: $webSearch, runtimeBusy: $runtimeBusy)';
+  return 'SettingsPageView(providers: $providers, providerCatalog: $providerCatalog, defaultProviderId: $defaultProviderId, roles: $roles, instructions: $instructions, skills: $skills, activeSkills: $activeSkills, catalogSkills: $catalogSkills, selectedProjectId: $selectedProjectId, mcpServers: $mcpServers, mcpState: $mcpState, lspState: $lspState, permissionMode: $permissionMode, general: $general, webSearch: $webSearch, modelPerformance: $modelPerformance, runtimeBusy: $runtimeBusy)';
 }
 
 
@@ -1172,7 +1177,7 @@ abstract mixin class _$SettingsPageViewCopyWith<$Res> implements $SettingsPageVi
   factory _$SettingsPageViewCopyWith(_SettingsPageView value, $Res Function(_SettingsPageView) _then) = __$SettingsPageViewCopyWithImpl;
 @override @useResult
 $Res call({
- List<ProviderSettingsView> providers, ProviderCatalogView providerCatalog, String? defaultProviderId, List<RoleSettingsView> roles, InstructionsSettingsView instructions, SkillsSettingsView skills, List<String> activeSkills, List<String> catalogSkills, String? selectedProjectId, List<McpServerSettingsView> mcpServers, McpStateSnapshot mcpState, LspStateSnapshot lspState, PermissionMode permissionMode, GeneralSettingsView general, WebSearchSettingsView webSearch, bool runtimeBusy
+ List<ProviderSettingsView> providers, ProviderCatalogView providerCatalog, String? defaultProviderId, List<RoleSettingsView> roles, InstructionsSettingsView instructions, SkillsSettingsView skills, List<String> activeSkills, List<String> catalogSkills, String? selectedProjectId, List<McpServerSettingsView> mcpServers, McpStateSnapshot mcpState, LspStateSnapshot lspState, PermissionMode permissionMode, GeneralSettingsView general, WebSearchSettingsView webSearch, ModelPerformanceSnapshotView modelPerformance, bool runtimeBusy
 });
 
 
@@ -1189,7 +1194,7 @@ class __$SettingsPageViewCopyWithImpl<$Res>
 
 /// Create a copy of SettingsPageView
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? providers = null,Object? providerCatalog = null,Object? defaultProviderId = freezed,Object? roles = null,Object? instructions = null,Object? skills = null,Object? activeSkills = null,Object? catalogSkills = null,Object? selectedProjectId = freezed,Object? mcpServers = null,Object? mcpState = null,Object? lspState = null,Object? permissionMode = null,Object? general = null,Object? webSearch = null,Object? runtimeBusy = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? providers = null,Object? providerCatalog = null,Object? defaultProviderId = freezed,Object? roles = null,Object? instructions = null,Object? skills = null,Object? activeSkills = null,Object? catalogSkills = null,Object? selectedProjectId = freezed,Object? mcpServers = null,Object? mcpState = null,Object? lspState = null,Object? permissionMode = null,Object? general = null,Object? webSearch = null,Object? modelPerformance = null,Object? runtimeBusy = null,}) {
   return _then(_SettingsPageView(
 providers: null == providers ? _self._providers : providers // ignore: cast_nullable_to_non_nullable
 as List<ProviderSettingsView>,providerCatalog: null == providerCatalog ? _self.providerCatalog : providerCatalog // ignore: cast_nullable_to_non_nullable
@@ -1206,7 +1211,8 @@ as McpStateSnapshot,lspState: null == lspState ? _self.lspState : lspState // ig
 as LspStateSnapshot,permissionMode: null == permissionMode ? _self.permissionMode : permissionMode // ignore: cast_nullable_to_non_nullable
 as PermissionMode,general: null == general ? _self.general : general // ignore: cast_nullable_to_non_nullable
 as GeneralSettingsView,webSearch: null == webSearch ? _self.webSearch : webSearch // ignore: cast_nullable_to_non_nullable
-as WebSearchSettingsView,runtimeBusy: null == runtimeBusy ? _self.runtimeBusy : runtimeBusy // ignore: cast_nullable_to_non_nullable
+as WebSearchSettingsView,modelPerformance: null == modelPerformance ? _self.modelPerformance : modelPerformance // ignore: cast_nullable_to_non_nullable
+as ModelPerformanceSnapshotView,runtimeBusy: null == runtimeBusy ? _self.runtimeBusy : runtimeBusy // ignore: cast_nullable_to_non_nullable
 as bool,
   ));
 }

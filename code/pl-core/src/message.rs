@@ -418,6 +418,7 @@ mod tests {
             ],
             responses_context_items: Vec::new(),
             orchestration: Default::default(),
+            timing: None,
             usage: pl_model::TokenUsage {
                 prompt_tokens: 10,
                 cached_prompt_tokens: 4,
@@ -471,6 +472,7 @@ mod tests {
             )],
             responses_context_items: Vec::new(),
             orchestration: Default::default(),
+            timing: None,
             usage: pl_model::TokenUsage::default(),
             model: "test-model".to_string(),
         };

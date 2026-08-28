@@ -19,10 +19,11 @@ shutdown/drop 后才释放。取得失败返回 typed `InstanceBusy`，不进入
 该文件不属于数据 schema，不触发数据库或配置迁移。
 
 所有 `read*` 查询严格无 mutation；测试注入 SQLite mutation counter 并验证重复 read 为零。
-Provider Usage 与 Updater 的 last-known cache 复用现有 `app_settings`，键分别为
-`observed:providerUsage:v1` 和 `observed:studioUpdate:v1`，不新增 migration。内存 owner snapshot
-不是第二套 durable projection；进程重启后仅从 canonical tables/config 和这两个明确的 observed
-cache 重建。这里的“不是第二套 durable projection”只说明内存不承担跨进程耐久化；进程运行期间，
+Provider Usage、Updater 与模型性能的 last-known cache 复用现有 `app_settings`，键分别为
+`observed:providerUsage:v1`、`observed:studioUpdate:v1` 和 `observed:modelPerformance:v1`，不新增
+migration。内存 owner snapshot 不是第二套 durable projection；进程重启后仅从 canonical
+tables/config 和这些明确的 observed cache 重建。这里的“不是第二套 durable projection”只说明
+内存不承担跨进程耐久化；进程运行期间，
 Thread、Task、Project 及其目录 owner 的内存聚合是活动状态唯一可信事实，SQLite 不参与活动查询或
 状态转换。
 
@@ -150,8 +151,23 @@ usage 区分 prompt、缓存读取、缓存写入、completion 与 reasoning tok
 模型声明缓存写入 token、有效策略为 OpenAI cache key 且目录缺少显式写入价时，写入价按普通
 输入价的 `1.25 ×` 冻结，
 DeepSeek 继续按未命中输入、命中输入和输出计算。每个 inference 同时保存按币种的估算费用与
-相对全未缓存输入的缓存节省；不同币种永不相加。`TurnBillingRecord` 的 JSON 版本可独立演进，
-旧字段使用 serde default 读取，不要求数据库 schema 升级。
+相对全未缓存输入的缓存节省；不同币种永不相加。`TurnBillingRecord` 的 JSON 版本可独立演进；v4
+的 inference 记录增加稳定 Provider 实例 ID 与可选 timing。旧字段使用 serde default 读取，不要求
+数据库 schema 升级，但升级前缺少新事实的记录不进入会话费用或模型性能统计，也不扫描历史 Turn
+回填。
+
+Studio 级 `ModelPerformanceOwner` 只接收已经提交成功的 inference billing，以
+`(threadId, inferenceId)` 幂等。owner 独立维护 `rootThreadId → 会话累计费用`，费用包含根 Thread
+与全部 child 的成功 billing，按币种分别累加，不受性能历史裁剪影响；无完整 timing 的成功 billing
+仍参与费用，未计价语义沿用 billing。全局性能历史只保留最新 1000 条 timing 与 usage 完整的成功
+调用，按完成时间裁剪最旧记录；失败和取消不进入。模型摘要按稳定 Provider 实例 ID 与实际 API
+model 从该窗口实时派生，不保存第二份汇总。
+
+历史样本只保存完成时间、Provider 实例 ID/显示名、实际模型、completion token、TTFT、decode、
+总响应时间和单次 t/s，不保存 prompt、工具参数、结果或凭据。普通生成、工具 continuation 与内部
+compaction 均按独立 inference 记录。owner 先提交内存并发布 product event，再把最新 revision 追加
+到 write-behind writer 的可合并 observed-state commit；队列中同 key 只需持久化最新 revision。
+写入失败进入现有 persistence health，不回滚内存事实；正常关机等待排空，异常退出允许丢失末批。
 
 每个 inference billing 记录还可附带版本化 `orchestration` 指标：工具 schema/result 估算 token、
 tool call 与 Tool Search/Programmatic 计数、并行候选/实际并行、工具批次 wall-clock/关键路径、
@@ -185,6 +201,9 @@ Project），再把同一 `DirectoryDelta` 交给 write-behind writer，由后�
 关闭和 Thread 已归档，保留 Turn、Item、Interaction、attachment row 与附件文件。有活动 Task
 时拒绝归档 Project。Task worktree 只能走 preview-confirm-revalidate 产品清理，普通归档
 不删除库外文件、worktree 或 branch。
+
+归档或清理 root Thread 时，同一 owner transition 删除该 root 的会话费用聚合；全局 1000 条模型
+性能历史继续保留。恢复旧数据库时缓存键不存在即从空状态开始，禁止扫描已保存 billing 回填。
 
 持久附件由 `attachments` metadata row 与 content-addressed blob 组成。row 保存 attachment kind、
 实际 MIME、安全文件名、字节数、SHA-256 与可选宽高；附件表不保存 Item 外键，durable mailbox
