@@ -6,6 +6,7 @@ mod command;
 mod execution;
 mod lsp;
 mod manager;
+mod path;
 mod skill;
 mod tools;
 mod workspace;

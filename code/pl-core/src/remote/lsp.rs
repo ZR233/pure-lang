@@ -13,6 +13,7 @@ use crate::tool::{
 };
 
 use super::RemoteWorkspaceHost;
+use super::path::relative_workspace_path;
 
 impl LspHostBackend for RemoteWorkspaceHost {
     fn identity(&self) -> String {
@@ -143,30 +144,16 @@ impl LspHostBackend for RemoteWorkspaceHost {
 
 impl RemoteWorkspaceHost {
     fn relative_path(&self, path: &Path) -> Result<String, LspHostError> {
-        relative_workspace_path(Path::new(self.files.canonical_path()), path)
+        remote_lsp_path(self.files.canonical_path(), path)
     }
 }
 
-fn relative_workspace_path(root: &Path, path: &Path) -> Result<String, LspHostError> {
-    let relative = if path.is_absolute() {
-        path.strip_prefix(root).map_err(|_| {
-            LspHostError::new(format!(
-                "LSP path '{}' escapes remote workspace '{}'",
-                path.display(),
-                root.display()
-            ))
-        })?
-    } else {
-        path
-    };
-    let value = relative.to_string_lossy().replace('\\', "/");
-    if value.split('/').any(|component| component == "..") {
-        return Err(LspHostError::new("LSP path escapes remote workspace"));
-    }
-    Ok(if value.is_empty() {
-        ".".to_string()
-    } else {
-        value
+fn remote_lsp_path(root: &str, path: &Path) -> Result<String, LspHostError> {
+    relative_workspace_path(root, path).map_err(|()| {
+        LspHostError::new(format!(
+            "LSP path '{}' escapes remote workspace '{root}'",
+            path.display()
+        ))
     })
 }
 
@@ -181,16 +168,10 @@ mod tests {
     #[test]
     fn remote_lsp_paths_stay_inside_workspace() {
         assert_eq!(
-            relative_workspace_path(
-                Path::new("/srv/project"),
-                Path::new("/srv/project/src/lib.rs")
-            )
-            .expect("relative path"),
+            remote_lsp_path("/srv/project", Path::new("/srv/project/src/lib.rs"))
+                .expect("relative path"),
             "src/lib.rs"
         );
-        assert!(
-            relative_workspace_path(Path::new("/srv/project"), Path::new("/srv/other/lib.rs"))
-                .is_err()
-        );
+        assert!(remote_lsp_path("/srv/project", Path::new("/srv/other/lib.rs")).is_err());
     }
 }

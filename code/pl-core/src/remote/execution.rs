@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use pl_protocol::remote::RemoteSpawnRequest;
@@ -7,6 +7,7 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 use crate::tool::{ExecutionBackend, ExecutionOutput, ExecutionRequest, shell_quote_word};
 
 use super::RemoteClient;
+use super::path::relative_workspace_path;
 
 static NEXT_EXECUTION_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -15,7 +16,7 @@ static NEXT_EXECUTION_ID: AtomicU64 = AtomicU64::new(0);
 pub struct RemoteExecutionBackend {
     client: RemoteClient,
     workspace_id: String,
-    canonical_root: PathBuf,
+    canonical_root: String,
 }
 
 impl RemoteExecutionBackend {
@@ -23,7 +24,7 @@ impl RemoteExecutionBackend {
         Self {
             client,
             workspace_id,
-            canonical_root: PathBuf::from(canonical_root),
+            canonical_root,
         }
     }
 }
@@ -101,26 +102,12 @@ async fn read_all(mut reader: impl AsyncRead + Unpin) -> Result<Vec<u8>, String>
     Ok(bytes)
 }
 
-fn remote_cwd(cwd: &Path, canonical_root: &Path) -> Result<String, String> {
-    let relative = if cwd.is_absolute() {
-        cwd.strip_prefix(canonical_root).map_err(|_| {
-            format!(
-                "remote command cwd '{}' escapes workspace '{}'",
-                cwd.display(),
-                canonical_root.display()
-            )
-        })?
-    } else {
-        cwd
-    };
-    let value = relative.to_string_lossy().replace('\\', "/");
-    if value.split('/').any(|part| part == "..") {
-        return Err("remote command cwd escapes workspace".to_string());
-    }
-    Ok(if value.is_empty() {
-        ".".to_string()
-    } else {
-        value
+fn remote_cwd(cwd: &Path, canonical_root: &str) -> Result<String, String> {
+    relative_workspace_path(canonical_root, cwd).map_err(|()| {
+        format!(
+            "remote command cwd '{}' escapes workspace '{canonical_root}'",
+            cwd.display()
+        )
     })
 }
 
@@ -130,8 +117,8 @@ mod tests {
 
     #[test]
     fn cwd_accepts_root_and_rejects_escape() {
-        let root = Path::new("/srv/project");
-        assert_eq!(remote_cwd(root, root).expect("root"), ".");
+        let root = "/srv/project";
+        assert_eq!(remote_cwd(Path::new(root), root).expect("root"), ".");
         assert_eq!(
             remote_cwd(Path::new("/srv/project/src"), root).expect("child"),
             "src"
