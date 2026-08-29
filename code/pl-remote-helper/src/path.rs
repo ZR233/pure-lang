@@ -169,6 +169,7 @@ mod tests {
     #[tokio::test]
     async fn workspace_rejects_parent_and_symlink_escape() {
         let temp = tempfile::tempdir().expect("tempdir");
+        #[cfg(unix)]
         let outside = tempfile::tempdir().expect("outside");
         #[cfg(unix)]
         std::os::unix::fs::symlink(outside.path(), temp.path().join("link")).expect("symlink");
