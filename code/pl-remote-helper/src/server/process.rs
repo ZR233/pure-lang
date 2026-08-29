@@ -321,8 +321,8 @@ fn spawn_output_writer(
     })
 }
 
+#[cfg(unix)]
 fn terminate_process_group(group: i32) {
-    #[cfg(unix)]
     // SAFETY: `group` is a positive pid returned by the child spawn. Negating it targets only the
     // child process group created with `process_group(0)`.
     unsafe {
@@ -330,3 +330,6 @@ fn terminate_process_group(group: i32) {
         libc::kill(-group, libc::SIGKILL);
     }
 }
+
+#[cfg(not(unix))]
+fn terminate_process_group(_: i32) {}
