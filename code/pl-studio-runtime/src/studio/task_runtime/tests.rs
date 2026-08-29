@@ -2,6 +2,31 @@ use super::*;
 use crate::studio::task_coordinator::{CreateTaskRun, TaskExecutorBlueprint};
 use crate::{StudioMode, StudioTaskState};
 
+#[test]
+fn workspace_path_identity_canonicalizes_existing_aliases() {
+    let directory = tempfile::tempdir().expect("temporary workspace");
+    let alias = directory.path().join(".");
+
+    assert!(workspace_paths_match(directory.path(), &alias));
+}
+
+#[test]
+fn workspace_path_identity_keeps_remote_posix_case_semantics() {
+    assert!(!workspace_paths_match(
+        std::path::Path::new("/Remote/Workspace"),
+        std::path::Path::new("/remote/workspace"),
+    ));
+}
+
+#[cfg(windows)]
+#[test]
+fn workspace_path_identity_accepts_windows_case_aliases() {
+    assert!(workspace_paths_match(
+        std::path::Path::new(r"C:\Users\Runner\Workspace"),
+        std::path::Path::new("c:/users/runner/workspace"),
+    ));
+}
+
 fn agent_failure(
     root_thread_id: &str,
     source_thread_id: &str,

@@ -15,6 +15,7 @@ use super::{
     WorkUnitStateKind,
 };
 use crate::agent::worktree::git_compatible_path;
+use crate::studio::task_runtime::workspace_paths_match;
 use crate::tool::{LocalTool, SubagentContext, Tool, ToolGroupId, ToolResult, TypedTool};
 use crate::turn::ToolEffect;
 use crate::{AgentProgressStage, AgentRuntimeHandle, AgentSnapshot, TurnEngine};
@@ -345,9 +346,7 @@ fn validate_common(validation: CompletionValidation<'_>) -> Result<&str> {
     if verification_summary.is_empty() {
         bail!("verificationSummary must not be empty");
     }
-    if normalized_path(caller_workspace)
-        != normalized_path(Path::new(&scope.work_unit.worktree_path))
-    {
+    if !workspace_paths_match(caller_workspace, Path::new(&scope.work_unit.worktree_path)) {
         bail!("caller workspace does not match the assigned executor worktree");
     }
     Ok(verification_summary)
@@ -386,16 +385,6 @@ fn ensure_completion_scope_is_open(scope: &DeliveryScope) -> Result<()> {
         bail!("work unit is not accepting a completion");
     }
     Ok(())
-}
-
-fn normalized_path(path: &Path) -> String {
-    let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let path = path.to_string_lossy().replace('\\', "/");
-    if cfg!(windows) {
-        path.to_lowercase()
-    } else {
-        path
-    }
 }
 
 fn validated_verification_summary(

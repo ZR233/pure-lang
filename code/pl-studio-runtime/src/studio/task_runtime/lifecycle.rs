@@ -469,7 +469,10 @@ impl TaskRuntime {
                     .iter()
                     .filter(|unit| {
                         unit.executor_thread_id.as_deref() == Some(agent_id)
-                            && unit.worktree_path == worktree_path
+                            && workspace_paths_match(
+                                std::path::Path::new(&unit.worktree_path),
+                                std::path::Path::new(worktree_path),
+                            )
                     })
                     .map(|unit| DeliveryScope {
                         run: aggregate.facts.run.clone(),

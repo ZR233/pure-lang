@@ -5,6 +5,7 @@
 //! 在后台按 owner 修订号跟随。
 
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
@@ -45,6 +46,33 @@ mod review;
 mod tests;
 
 use facts::*;
+
+pub(super) fn workspace_paths_match(left: &Path, right: &Path) -> bool {
+    let left = canonical_workspace_path(left);
+    let right = canonical_workspace_path(right);
+    if cfg!(windows) && is_windows_local_path(&left) && is_windows_local_path(&right) {
+        left.eq_ignore_ascii_case(&right)
+    } else {
+        left == right
+    }
+}
+
+fn canonical_workspace_path(path: &Path) -> String {
+    let lexical = path.to_string_lossy().replace('\\', "/");
+    if cfg!(windows) && lexical.starts_with('/') && !lexical.starts_with("//") {
+        return lexical;
+    }
+    git_compatible_path(std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()))
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+fn is_windows_local_path(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
+        || path.starts_with("//")
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct TaskAggregate {
     pub(crate) entry: StudioTaskDirectoryEntry,
