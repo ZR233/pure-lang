@@ -74,6 +74,14 @@ xtask 只从 PATH 或标准 Cargo target linker 环境发现交叉链接器，�
 才原子上传到版本化远端目录。开发构建生成相邻 SHA-256，并可由显式环境变量、Studio 缓存目录
 或仓库 `dist/remote-helper` 提供；远端不需要网络或 Rust 工具链。
 
+`cargo xtask run-gui` 每次先通过 canonical helper 构建入口交叉编译全部支持架构，并把本地
+`dist/remote-helper` 路径显式注入 Studio 进程；这条开发路径只信任相邻 SHA-256。
+`cargo xtask build-gui` 不复用本地构建产物，而是下载与 Studio 版本一致的 GitHub Release
+helper、SHA-256 和 Minisign 签名，验签后复制到 GUI 的 `remote-helper/<target>/` 目录。
+正式 publisher 先在 Linux job 构建并签名两种 helper，再将相同字节注入 Windows GUI 打包并
+与 GUI 资产一起原子发布，避免构建尚未公开的同版本 Release 时产生循环依赖。runtime 优先从
+可执行文件相邻的打包目录发现 helper；带签名的任一生产资产都强制使用编译时内置公钥验签。
+
 确定性门禁使用 direct-stdio helper contract、fake SSH/Askpass、backend parity 与 Flutter Driver。
 `root@192.168.100.12` 是 opt-in aarch64 实机验收主机：测试只在唯一
 `/tmp/pure-ssh-validation.XXXXXX` workspace 内写入，结束后按记录的精确路径清理并验证无残留

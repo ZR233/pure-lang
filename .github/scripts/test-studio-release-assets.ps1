@@ -119,7 +119,7 @@ try {
 
     $partialDraft = [pscustomobject]@{ draft = $true; assets = @($assets[0], $assets[1]) }
     $partialPlan = Get-StudioReleaseAssetPlan -Release $partialDraft -Version $version -AssetDirectory $testRoot
-    Assert-Equal -Expected $names[2..5] -Actual $partialPlan.MissingNames -Message 'Partial draft must upload only missing assets'
+    Assert-Equal -Expected $names[2..($names.Count - 1)] -Actual $partialPlan.MissingNames -Message 'Partial draft must upload only missing assets'
 
     $completeDraft = [pscustomobject]@{ draft = $true; assets = $assets }
     $completePlan = Get-StudioReleaseAssetPlan -Release $completeDraft -Version $version -AssetDirectory $testRoot
@@ -128,7 +128,7 @@ try {
     Assert-Equal -Expected @() -Actual $repeatPlan.MissingNames -Message 'Repeated reconciliation must be idempotent'
 
     $conflictingAssets = @($assets | ForEach-Object { $_.PSObject.Copy() })
-    $conflictingAssets[5].digest = "sha256:$('0' * 64)"
+    $conflictingAssets[$conflictingAssets.Count - 1].digest = "sha256:$('0' * 64)"
     $conflictingDraft = [pscustomobject]@{ draft = $true; assets = $conflictingAssets }
     Assert-Throws `
         -Action { Get-StudioReleaseAssetPlan -Release $conflictingDraft -Version $version -AssetDirectory $testRoot } `

@@ -38,11 +38,19 @@ function Get-StudioReleaseAssetNames {
 
     $setup = "Pure-Studio-$Version-windows-x86_64-setup.exe"
     $portable = "Pure-Studio-$Version-windows-x86_64-portable.zip"
+    $aarch64Helper = "Pure-Remote-Helper-$Version-aarch64-unknown-linux-musl"
+    $x86Helper = "Pure-Remote-Helper-$Version-x86_64-unknown-linux-musl"
     return @(
         $setup
         "$setup.minisig"
         $portable
         "$portable.minisig"
+        $aarch64Helper
+        "$aarch64Helper.sha256"
+        "$aarch64Helper.minisig"
+        $x86Helper
+        "$x86Helper.sha256"
+        "$x86Helper.minisig"
         'latest.json'
         'SHA256SUMS.txt'
     )

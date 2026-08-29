@@ -29,11 +29,13 @@ API dispatch 串联。publisher 再从 GitHub API 和 tag 独立解析仓库、�
 三个版本文件，拒绝人工提供的版本或 SHA。回滚只允许发布更高版本的 forward fix，不覆盖 tag 或
 既有 Release。
 
-publisher 分为构建与发布两阶段。Windows job 从 tag 的精确提交执行 Rust/Flutter 检查、构建、
-签名、安装烟测、独立 verify 和 provenance，再把六个正式文件保存为同一 workflow run 的不可变
-Actions artifact。publish job 下载该 artifact 并按 Release ID 对账：draft 可为空或只含部分资产，
+publisher 分为 helper、GUI 构建与发布三阶段。Linux helper job 从 tag 的精确提交交叉编译两种
+musl 架构、生成 SHA-256 并用发布密钥签名，先保存为同一 workflow run 的不可变 Actions
+artifact。Windows job 只消费这组已签名、即将进入同一 GitHub Release 的 helper 资产，将其同时
+嵌入安装包/便携包并加入正式 Release 文件集，再执行 Rust/Flutter 检查、GUI 构建、签名、安装烟测、
+独立 verify 和 provenance。publish job 下载最终 artifact 并按 Release ID 对账：draft 可为空或只含部分资产，
 但任何已有资产的名称、长度与 GitHub SHA-256 digest 必须和本地文件完全一致；只允许补传缺失资产，
-不得覆盖不同字节。六项全部一致后才能取消 draft 并标记 latest。failed job 重跑复用原 artifact
+不得覆盖不同字节。全部资产一致后才能取消 draft 并标记 latest。failed job 重跑复用原 artifact
 继续补传；完整 draft 与已发布 Release 重跑均幂等成功。若存在尚未完成的稳定 draft，
 `studio-release.yml` 优先通过同一个 reusable workflow 恢复 publisher，而不创建下一版
 Release PR。Publisher 保留带精确 Release ID 的手动入口，仅用于故障恢复，不属于正常发版步骤。
@@ -49,6 +51,9 @@ GitHub draft Release 只对具备仓库 push 权限的身份可见，因此负�
 - `Pure-Studio-{version}-windows-x86_64-setup.exe`
 - `Pure-Studio-{version}-windows-x86_64-portable.zip`
 - 上述两个文件各自的 `.minisig`
+- `Pure-Remote-Helper-{version}-aarch64-unknown-linux-musl`
+- `Pure-Remote-Helper-{version}-x86_64-unknown-linux-musl`
+- 上述两个 helper 各自的 `.sha256` 与 `.minisig`
 - `latest.json`
 - `SHA256SUMS.txt`
 
@@ -64,6 +69,11 @@ GitHub draft Release 只对具备仓库 push 权限的身份可见，因此负�
 默认安装到 LocalAppData，声明 CloseApplications/RestartApplications。打包输入排除 PDB，
 包含 LICENSE 与 THIRD_PARTY_NOTICES。便携版只供手动分发；便携用户执行应用内升级时进入
 正式安装版，不对当前运行目录做原地覆盖。
+
+普通 `cargo xtask build-gui` 按 `pubspec.yaml` 版本从 `ZR233/pure-lang` 的正式 GitHub Release
+下载两种架构的 helper、SHA-256 与 Minisign 签名，验签后嵌入 GUI 目录。稳定发布尚未公开同版本
+Release，故 publisher 通过 `PURE_REMOTE_HELPER_RELEASE_DIR` 注入前置 helper job 产生的同一组
+待发布字节；该入口只接受完整签名资产并执行相同校验，不能回退到开发 helper 或重新编译。
 
 采用 `pure_studio.exe` 新文件名的首个版本要求用户先手动卸载旧版再安装。安装器继续使用
 同一 AppId、安装目录和用户数据目录，但允许直接覆盖安装，不检测也不删除旧 EXE 或旧 WER
