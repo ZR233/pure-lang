@@ -11,6 +11,9 @@ use crate::paths;
 use crate::process::run_checked;
 
 const BUILDER_ENV: &str = "PURE_REMOTE_HELPER_BUILDER";
+const CARGO_ZIGBUILD_EXECUTABLE: &str = "cargo-zigbuild";
+const ZIG_EXECUTABLE: &str = "zig";
+const CARGO_ZIGBUILD_ZIG_PATH_ENV: &str = "CARGO_ZIGBUILD_ZIG_PATH";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CargoBuilder {
@@ -51,12 +54,66 @@ fn selected_targets(options: &BuildRemoteHelperOptions) -> Result<Vec<&str>> {
 
 fn cargo_builder() -> Result<CargoBuilder> {
     match std::env::var(BUILDER_ENV) {
-        Err(std::env::VarError::NotPresent) => Ok(CargoBuilder::Cargo),
+        Err(std::env::VarError::NotPresent) => Ok(default_builder()),
         Ok(value) if value.is_empty() || value == "cargo" => Ok(CargoBuilder::Cargo),
-        Ok(value) if value == "zigbuild" => Ok(CargoBuilder::Zigbuild),
+        Ok(value) if value == "zigbuild" => {
+            ensure_zigbuild_available()?;
+            Ok(CargoBuilder::Zigbuild)
+        }
         Ok(value) => bail!("{BUILDER_ENV} must be 'cargo' or 'zigbuild', got '{value}'"),
         Err(error) => Err(error).context(format!("failed to read {BUILDER_ENV}")),
     }
+}
+
+fn default_builder() -> CargoBuilder {
+    let builder = choose_default_builder(
+        which::which(CARGO_ZIGBUILD_EXECUTABLE).is_ok(),
+        zig_available(),
+    );
+    if matches!(builder, CargoBuilder::Zigbuild) {
+        println!(concat!(
+            "检测到 Zig 与 cargo-zigbuild，远程助手将自动使用 cargo zigbuild；",
+            "如需强制使用系统交叉链接器，请设置 PURE_REMOTE_HELPER_BUILDER=cargo。"
+        ));
+    }
+    builder
+}
+
+fn choose_default_builder(cargo_zigbuild: bool, zig: bool) -> CargoBuilder {
+    if cargo_zigbuild && zig {
+        CargoBuilder::Zigbuild
+    } else {
+        CargoBuilder::Cargo
+    }
+}
+
+fn zig_available() -> bool {
+    std::env::var_os(CARGO_ZIGBUILD_ZIG_PATH_ENV)
+        .map(|path| Path::new(&path).is_file())
+        .unwrap_or_else(|| which::which(ZIG_EXECUTABLE).is_ok())
+}
+
+fn ensure_zigbuild_available() -> Result<()> {
+    let cargo_zigbuild = which::which(CARGO_ZIGBUILD_EXECUTABLE).is_ok();
+    let zig = zig_available();
+    if cargo_zigbuild && zig {
+        return Ok(());
+    }
+
+    let mut missing = Vec::new();
+    if !zig {
+        missing.push("zig");
+    }
+    if !cargo_zigbuild {
+        missing.push("cargo-zigbuild");
+    }
+    bail!(
+        concat!(
+            "PURE_REMOTE_HELPER_BUILDER=zigbuild 需要 {}。Windows 可执行 `winget install zig.zig`，",
+            "随后执行 `cargo install cargo-zigbuild --locked`；完成后重新运行本命令。"
+        ),
+        missing.join("、")
+    )
 }
 
 fn build_target(workspace_root: &Path, target: &str, builder: CargoBuilder) -> Result<()> {
@@ -148,7 +205,14 @@ fn discover_linker(target: &str) -> Result<PathBuf> {
         _ => unreachable!("target was validated before linker discovery"),
     };
     which::which(executable).with_context(|| {
-        format!("missing linker '{executable}' for {target}; add it to PATH or set {env_name}")
+        format!(
+            concat!(
+                "缺少 {} 的链接器 '{}'；请将其加入 PATH 或设置 {}。",
+                "若不想分别安装 musl GCC，可安装 Zig 与 cargo-zigbuild：",
+                " `winget install zig.zig`、`cargo install cargo-zigbuild --locked`；两者在 PATH 后会自动使用。"
+            ),
+            target, executable, env_name
+        )
     })
 }
 
@@ -188,5 +252,20 @@ mod tests {
             .expect("all targets"),
             SUPPORTED_TARGETS
         );
+    }
+
+    #[test]
+    fn linker_env_name_uses_cargo_convention() {
+        assert_eq!(
+            linker_env_name("aarch64-unknown-linux-musl"),
+            "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER"
+        );
+    }
+
+    #[test]
+    fn default_builder_uses_zig_when_both_tools_are_available() {
+        assert_eq!(choose_default_builder(true, true), CargoBuilder::Zigbuild);
+        assert_eq!(choose_default_builder(true, false), CargoBuilder::Cargo);
+        assert_eq!(choose_default_builder(false, true), CargoBuilder::Cargo);
     }
 }

@@ -42,6 +42,11 @@ bootstrap、连接状态与自动重连，并返回 `RemoteWorkspaceHost`。host
 `apply_patch` 在本地匹配并通过远端原子写提交；Git/worktree 在本地编排命令；LSP client 留在
 本地，language server 作为远端可观察进程运行。
 
+SSH 连接、平台探测、helper 上传和协议握手都通过本地后台进程工厂启动系统 OpenSSH：Windows
+使用 `CREATE_NO_WINDOW`，不得弹出额外命令行窗口；Unix 使用独立进程组并在丢弃时回收进程。
+SSH 通道只承载标准输入输出协议，因此固定关闭伪终端（`-T`）与 X11 转发（`-x`），不打开
+交互式终端或图形会话。
+
 连接状态穷尽为 disconnected、connecting、waiting-for-input、ready、reconnecting 与 failed。
 断线使当前远端 tool 立即以稳定 `remoteDisconnected` 失败，不透明重放写入或 stdin；core 以
 1、2、4、8、15、30 秒退避重连。重连成功后 core 主动重开已知 workspace；下一次 Turn
@@ -69,8 +74,11 @@ canonicalize，服务器离线是连接状态，不是项目损坏。
 ## 21.5 发布与验收
 
 helper 构建 stripped 静态 `aarch64-unknown-linux-musl` 与 `x86_64-unknown-linux-musl` 资产。
-xtask 只从 PATH 或标准 Cargo target linker 环境发现交叉链接器，不写死机器路径。两种 helper 在
-GUI 构建 Rust bridge 时以 zstd 压缩资产嵌入同一个应用二进制，不作为独立安装文件或网络资产。
+xtask 优先使用 `PURE_REMOTE_HELPER_BUILDER` 指定的构建器；未指定时若 PATH 中存在
+`cargo-zigbuild`，且 Zig 位于 PATH 或 `CARGO_ZIGBUILD_ZIG_PATH` 指定的文件，自动使用
+`cargo zigbuild`，否则从 PATH 或标准 Cargo target linker 环境发现交叉链接器，不写死机器路径。
+两种 helper 在 GUI 构建 Rust bridge 时以 zstd 压缩资产嵌入同一个应用二进制，不作为独立安装文件
+或网络资产。
 Core 先探测 `uname -s/-m`，再请求宿主 adapter 解压唯一匹配的 helper bytes，并按内容摘要上传到
 版本化远端目录；同一摘要已有可执行文件时直接复用，不重复传输。未匹配架构保持压缩状态，也不
 产生本地解压文件。远端不需要网络或 Rust 工具链。

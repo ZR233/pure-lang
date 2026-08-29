@@ -62,14 +62,154 @@ pl-protocol ← pl-trace ← pl-model ← pl-core ← pl-studio-runtime
 
 ### 前置条件
 
-- [Rust](https://rustup.rs/)（edition 2024）
-- [Flutter](https://docs.flutter.dev/get-started/install)（Windows 桌面端，`flutter` 需在 PATH 中）
-- Windows
+- [Rust](https://rustup.rs/)（建议使用 stable；项目使用 2024 版语言标准）
+- [Flutter](https://docs.flutter.dev/get-started/install) 3.47.1 或兼容版本（`flutter` 需在 PATH 中，内含 Dart）
+- Git、PowerShell（Windows）或 Bash（Linux/macOS）
+- 一个受支持的桌面开发环境：Windows、Linux 或 macOS
+
+`cargo xtask` 是本仓库统一的构建入口。不要直接在 Flutter 或 Rust 的安装目录执行项目命令；
+所有命令都应从仓库根目录运行。
+
+### 编译环境准备
+
+#### 所有桌面系统都需要的 Rust 目标
+
+普通的桌面构建会同时嵌入两个 Linux SSH 远程助手，因此首次准备时安装这两个 Rust 目标：
+
+```powershell
+rustup target add aarch64-unknown-linux-musl x86_64-unknown-linux-musl
+rustup component add rustfmt clippy
+```
+
+生成 Flutter/Rust 桥接代码还需要与仓库依赖一致的代码生成器：
+
+```powershell
+cargo install flutter_rust_bridge_codegen --version 2.12.0 --locked
+```
+
+远程助手推荐使用 [Zig](https://ziglang.org/) 与
+[`cargo-zigbuild`](https://github.com/rust-cross/cargo-zigbuild) 交叉编译。Zig 同时提供目标架构的编译器、链接器和 `musl` 系统库，
+不需要分别寻找 `aarch64-linux-musl-gcc` 与 `x86_64-linux-musl-gcc`：
+
+```powershell
+# Windows：安装 Zig 后重新打开终端，使 PATH 生效
+winget install --id zig.zig --exact --accept-source-agreements --accept-package-agreements
+cargo install cargo-zigbuild --locked
+```
+
+如果本机已有 Python，也可以用一条命令安装 `cargo-zigbuild` 及其 Zig 依赖：
+
+```powershell
+py -m pip install --upgrade cargo-zigbuild
+```
+
+安装后请确认 `zig version` 与 `cargo zigbuild --version` 均能执行。
+
+Linux/macOS 请从 [Zig 官方下载页](https://ziglang.org/download/) 安装与本机架构匹配的版本，
+再执行相同的 `cargo install` 命令。项目会在检测到 `cargo-zigbuild` 位于 PATH，且 `zig` 位于
+PATH 或由 `CARGO_ZIGBUILD_ZIG_PATH` 指定时，自动使用 `cargo zigbuild`，不必设置构建器变量。
+持续集成当前锁定 Zig 0.14.1 与
+`cargo-zigbuild` 0.23.3；需要完全复现持续集成时，请安装这两个版本：
+
+```bash
+cargo install cargo-zigbuild --version 0.23.3 --locked
+```
+
+如果 Zig 不在 PATH，可只为 `cargo-zigbuild` 指定绝对路径：
+
+```powershell
+$env:CARGO_ZIGBUILD_ZIG_PATH = "C:\path\to\zig.exe"
+```
+
+若需要明确指定构建器，可设置：
+
+```powershell
+$env:PURE_REMOTE_HELPER_BUILDER = "zigbuild"
+# 或强制使用系统 musl GCC
+$env:PURE_REMOTE_HELPER_BUILDER = "cargo"
+```
+
+如果已有完整的目标专用交叉工具链，也可以直接指定每个目标的链接器（目标专用 Clang 或
+musl GCC 均可）：
+
+```powershell
+$env:CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER = "C:\path\to\aarch64-linux-musl-clang.exe"
+$env:CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER = "C:\path\to\x86_64-linux-musl-clang.exe"
+$env:PURE_REMOTE_HELPER_BUILDER = "cargo"
+```
+
+这里的 Clang 必须已经包含对应目标的启动文件和 `musl` 系统库；普通桌面 Clang 不满足这个条件。
+
+若已从持续集成或其他机器取得两个已校验的助手文件，也可以跳过本机交叉编译：
+
+```powershell
+$env:PURE_REMOTE_HELPER_PREBUILT_DIR = "C:\path\to\dist\remote-helper"
+cargo xtask build-gui
+```
+
+不推荐把普通主机 `clang` 直接设置为 musl 链接器。Clang 只是编译器驱动，仍需要目标架构的
+启动文件、`musl` 系统库和正确的目标参数；没有完整的目标系统根目录时会在链接阶段失败。Linux 桌面
+图形界面的 Clang 预检与远程助手的 musl 交叉链接是两条独立链路。
+
+#### Windows
+
+- Visual Studio 2022 或 Build Tools，勾选“使用 C++ 的桌面开发”和 Windows 10/11 SDK；
+- Windows 桌面支持：`flutter config --enable-windows-desktop`；
+- Rust 使用 `stable-x86_64-pc-windows-msvc` 工具链；
+- CMake（Visual Studio 安装器可选装）应位于 PATH；
+- 运行 `cargo xtask build-gui` 还需要前文的 Zig、`cargo-zigbuild` 和两个 musl Rust 目标。
+
+检查环境：
+
+```powershell
+flutter doctor -v
+rustc -Vv
+zig version
+cargo zigbuild --version
+rustup target list --installed
+cargo xtask build-remote-helper --all-targets
+cargo xtask build-gui
+```
+
+如果只需要验证 Rust 工作区，不构建桌面端，可跳过 Flutter、桌面编译器和远程助手准备，直接
+运行 `cargo test --workspace`。如果 `build-gui` 报告缺少 musl 链接器，优先检查 `zig version`
+与 `cargo zigbuild --version` 是否都能执行；两者都在 PATH 后，xtask 会自动切换到 Zig 构建器。
+
+#### Linux
+
+Flutter 的 Linux 桌面构建需要 Clang、CMake、Ninja、pkg-config、GTK 3 开发文件和 C++ 标准
+库；无图形会话运行桌面集成测试还需要 Xvfb。Debian/Ubuntu 可一次安装：
+
+```bash
+sudo apt-get update
+sudo apt-get install -y clang cmake ninja-build pkg-config build-essential libgtk-3-dev xvfb
+flutter config --enable-linux-desktop
+flutter doctor -v
+```
+
+xtask 会在构建前使用 PATH 中发现的真实工具链编译并链接最小 GTK/C++ 探针；不会写死编译器版本、
+系统库路径，也不会注入 `LIBRARY_PATH` 或 `CPLUS_INCLUDE_PATH`。
+
+#### macOS
+
+- 安装 Xcode，并执行 `xcode-select --install`；
+- `flutter config --enable-macos-desktop`；
+- 接受 Xcode 许可：`sudo xcodebuild -license`；
+- 运行 `flutter doctor -v`，确保 CocoaPods（若项目依赖插件需要）可用。
+
+#### Windows 正式发布（可选）
+
+只有执行 `cargo xtask release-gui stage`/`finalize` 时才需要额外工具：
+
+- Inno Setup 6（`ISCC.exe`，可通过 `ISCC_PATH` 指定路径）；
+- `finalize` 需要 `minisign` 以及 `MINISIGN_SECRET_KEY_FILE`、`MINISIGN_PASSWORD`；
+- 若启用安装包代码签名，需要 Windows SDK 的 `signtool.exe`，并设置 `WINDOWS_SIGNTOOL_PATH`、
+  `WINDOWS_CERTIFICATE_PATH` 和 `WINDOWS_CERTIFICATE_PASSWORD`。
 
 ### 启动 Pure Studio 桌面应用
 
 ```powershell
-# Windows（Flutter + flutter_rust_bridge v2）
+# 当前 Windows/Linux/macOS 桌面目标（Flutter + flutter_rust_bridge v2）
 cargo xtask run-gui
 ```
 

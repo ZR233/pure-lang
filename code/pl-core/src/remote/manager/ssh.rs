@@ -5,6 +5,7 @@ use std::io::Write;
 use tokio::process::Command;
 
 use super::{SshAuth, SshServerProfile};
+use crate::process::configure_background_command;
 use crate::remote::RemoteClientError;
 
 pub(super) struct PreparedSshCommand {
@@ -43,6 +44,9 @@ pub(super) fn ssh_command(
     let mut command = Command::new("ssh");
     command
         .arg("-T")
+        // SSH 进程只承载 stdio 协议，不需要 X11；显式关闭可避免用户 ssh
+        // 配置中的 ForwardX11 设置向远端注入图形会话并产生 xauth 警告。
+        .arg("-x")
         .arg("-p")
         .arg(profile.port.to_string())
         .arg("-l")
@@ -88,6 +92,7 @@ pub(super) fn ssh_command(
         None
     };
     command.arg("--").arg(&profile.host);
+    configure_background_command(&mut command);
     Ok(PreparedSshCommand { command, askpass })
 }
 
@@ -111,4 +116,37 @@ pub(super) async fn run_ssh_capture(
     }
     String::from_utf8(output.stdout)
         .map_err(|error| RemoteClientError::Protocol(format!("ssh output is not UTF-8: {error}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn profile() -> SshServerProfile {
+        SshServerProfile {
+            id: "server-1".to_string(),
+            name: "Development".to_string(),
+            host: "example.test".to_string(),
+            port: 2222,
+            username: "dev".to_string(),
+            auth: SshAuth::AgentOrKey {
+                identity_file: None,
+            },
+        }
+    }
+
+    #[test]
+    fn command_uses_stdio_only_transport() {
+        let prepared = ssh_command(&profile(), None).expect("valid SSH profile");
+        let args = prepared
+            .command
+            .as_std()
+            .get_args()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            args,
+            vec!["-T", "-x", "-p", "2222", "-l", "dev", "--", "example.test"]
+        );
+    }
 }
