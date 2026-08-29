@@ -14,6 +14,28 @@ foreach ($workflow in $workflowFiles) {
         }
 
         $baseIndent = $match.Groups['indent'].Value.Length
+        $explicitShell = $null
+        for ($cursor = $index - 1; $cursor -ge 0; $cursor--) {
+            $line = $lines[$cursor]
+            if ($line.Trim().Length -eq 0) {
+                continue
+            }
+            $lineIndent = $line.Length - $line.TrimStart().Length
+            if ($lineIndent -lt $baseIndent) {
+                break
+            }
+            if ($lineIndent -eq $baseIndent) {
+                $shellMatch = [regex]::Match($line, '^\s*shell:\s*(?<shell>\S.*?)\s*$')
+                if ($shellMatch.Success) {
+                    $explicitShell = $shellMatch.Groups['shell'].Value
+                    break
+                }
+            }
+        }
+        if ($null -ne $explicitShell -and $explicitShell -notmatch '^(pwsh|powershell)(\s|$)') {
+            continue
+        }
+
         $block = [Collections.Generic.List[string]]::new()
         for ($cursor = $index + 1; $cursor -lt $lines.Count; $cursor++) {
             $line = $lines[$cursor]
