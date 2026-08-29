@@ -5,7 +5,7 @@
 Pure 的 SSH 远程开发是本地 runtime 的宿主能力，不是第二套远端 runtime。Flutter 只调用
 typed Studio 功能并展示 canonical snapshot；SSH 服务器管理、连接状态机、helper 安装、协议、
 重连和远端工具 backend 位于 `pl-core`。`pl-studio-runtime` 只实现 SQLite、可选系统凭据库与
-helper 资产路径/缓存等宿主 adapter；当前密码也可只保存在 core 进程的 secret lease 中。
+helper 嵌入资产 adapter；当前密码也可只保存在 core 进程的 secret lease 中。
 
 远端 helper 是随 SSH stdio channel 生存的能力代理，只维护 workspace handle 与进程 handle。
 它不包含 Thread/Turn、Tool schema、权限、Git/worktree、Skills、LSP 协议、模型、数据库、
@@ -32,7 +32,7 @@ helper 同时把完整输出写到 core 指定的 workspace capture path。Core 
 
 ## 21.3 本地工具与 SSH 管理
 
-`pl-core::remote::SshManager` 负责服务器校验、系统 OpenSSH/Askpass、架构探测、已签名 helper
+`pl-core::remote::SshManager` 负责服务器校验、系统 OpenSSH/Askpass、架构探测、内嵌 helper
 bootstrap、连接状态与自动重连，并返回 `RemoteWorkspaceHost`。host 实现或组合现有
 `WorkspaceFileBackend`、`CommandBackend`、Git `ExecutionBackend`、`WorktreeBackend`、
 `SkillProvider` 与 LSP process/file backend，再通过同一个 `BuiltinToolInstaller` 注册现有工具。
@@ -68,21 +68,20 @@ canonicalize，服务器离线是连接状态，不是项目损坏。
 
 ## 21.5 发布与验收
 
-helper 发布 stripped 静态 `aarch64-unknown-linux-musl` 与 `x86_64-unknown-linux-musl` 资产。
-xtask 只从 PATH 或标准 Cargo target linker 环境发现交叉链接器，不写死机器路径。Core 先探测
-`uname -s/-m`，在本地验证 SHA-256；生产配置还必须提供 Minisign 公钥和相邻签名，验签成功后
-才原子上传到版本化远端目录。开发构建生成相邻 SHA-256，并可由显式环境变量、Studio 缓存目录
-或仓库 `dist/remote-helper` 提供；远端不需要网络或 Rust 工具链。
+helper 构建 stripped 静态 `aarch64-unknown-linux-musl` 与 `x86_64-unknown-linux-musl` 资产。
+xtask 只从 PATH 或标准 Cargo target linker 环境发现交叉链接器，不写死机器路径。两种 helper 在
+GUI 构建 Rust bridge 时以 zstd 压缩资产嵌入同一个应用二进制，不作为独立安装文件或网络资产。
+Core 先探测 `uname -s/-m`，再请求宿主 adapter 解压唯一匹配的 helper bytes，并按内容摘要上传到
+版本化远端目录；同一摘要已有可执行文件时直接复用，不重复传输。未匹配架构保持压缩状态，也不
+产生本地解压文件。远端不需要网络或 Rust 工具链。
 
-`cargo xtask run-gui` 每次先通过 canonical helper 构建入口交叉编译全部支持架构，并把本地
-`dist/remote-helper` 路径显式注入 Studio 进程；这条开发路径只信任相邻 SHA-256。
-`cargo xtask build-gui` 不复用本地构建产物，而是下载与 Studio 版本一致的 GitHub Release
-helper、SHA-256 和 Minisign 签名，验签后复制到 GUI 的 `remote-helper/<target>/` 目录。
-正式 publisher 先在 Linux job 构建并签名两种 helper，再将相同字节注入 Windows GUI 打包并
-与 GUI 资产一起原子发布，避免构建尚未公开的同版本 Release 时产生循环依赖。runtime 优先从
-可执行文件相邻的打包目录发现 helper；带签名的任一生产资产都强制使用编译时内置公钥验签。
+`cargo xtask run-gui` 与普通 `cargo xtask build-gui` 都先通过 canonical helper 构建入口交叉编译
+全部支持架构，再构建带 `embedded-remote-helpers` feature 的 Rust bridge。正式 publisher 可在
+Linux job 构建同一提交的两种 helper，并把 CI 内部构建产物交给 Windows GUI job 嵌入；这些临时
+产物不得成为 GitHub Release 资产。安装器和便携包仅通过 bridge 二进制间接携带压缩 helper，SSH
+连接期间不访问 GitHub，也不维护额外 helper 下载缓存。
 
 确定性门禁使用 direct-stdio helper contract、fake SSH/Askpass、backend parity 与 Flutter Driver。
 `root@192.168.100.12` 是 opt-in aarch64 实机验收主机：测试只在唯一
 `/tmp/pure-ssh-validation.XXXXXX` workspace 内写入，结束后按记录的精确路径清理并验证无残留
-进程；版本化 helper 缓存作为正式产品状态保留。
+进程；远端版本化 helper 目录作为正式产品状态保留。

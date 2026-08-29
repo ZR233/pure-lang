@@ -15,7 +15,8 @@ pub use client::{RemoteClient, RemoteClientError, RemoteReply};
 pub use command::RemoteCommandBackend;
 pub use execution::RemoteExecutionBackend;
 pub use manager::{
-    SshAuth, SshConnectionSnapshot, SshConnectionState, SshManager, SshServerProfile,
+    RemoteHelperAssets, RemoteHelperTarget, SshAuth, SshConnectionSnapshot, SshConnectionState,
+    SshManager, SshServerProfile,
 };
 pub use skill::RemoteSkillProvider;
 pub use tools::remote_workspace_mutation_tools;

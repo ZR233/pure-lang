@@ -1,6 +1,5 @@
 use super::asset_name;
 use crate::process;
-use crate::remote_helper::{SUPPORTED_TARGETS, release_asset_name};
 use anyhow::{Context, Result, anyhow, bail};
 use minisign_verify::{PublicKey, Signature};
 use semver::Version;
@@ -104,7 +103,6 @@ pub(super) fn verify(workspace_root: &Path, release_dir: &Path, version: &Versio
         .with_context(|| format!("invalid update manifest: {}", manifest_path.display()))?;
     verify_manifest(&manifest, release_dir, version)?;
     verify_sums(release_dir, version)?;
-    verify_helper_checksums(release_dir, version)?;
 
     let public_key = env::var_os("MINISIGN_PUBLIC_KEY_FILE")
         .map(PathBuf::from)
@@ -131,18 +129,6 @@ fn ensure_staged_assets(release_dir: &Path, version: &Version) -> Result<()> {
         let path = release_dir.join(name);
         if !path.is_file() {
             bail!("release asset not found: {}", path.display());
-        }
-    }
-    for target in SUPPORTED_TARGETS {
-        let name = release_asset_name(version, target);
-        for path in [
-            release_dir.join(&name),
-            release_dir.join(format!("{name}.sha256")),
-            release_dir.join(format!("{name}.minisig")),
-        ] {
-            if !path.is_file() {
-                bail!("release helper asset not found: {}", path.display());
-            }
         }
     }
     Ok(())
@@ -217,29 +203,11 @@ fn verify_sums(release_dir: &Path, version: &Version) -> Result<()> {
     Ok(())
 }
 
-fn verify_helper_checksums(release_dir: &Path, version: &Version) -> Result<()> {
-    for target in SUPPORTED_TARGETS {
-        let name = release_asset_name(version, target);
-        let expected = format!("{}  {name}\n", sha256_file(&release_dir.join(&name))?);
-        let actual = fs::read_to_string(release_dir.join(format!("{name}.sha256")))?;
-        if actual.replace("\r\n", "\n") != expected {
-            bail!("helper checksum does not match release asset: {name}");
-        }
-    }
-    Ok(())
-}
-
 fn payload_names(version: &Version) -> Vec<String> {
-    let mut names = vec![
+    vec![
         asset_name(version, "setup.exe"),
         asset_name(version, "portable.zip"),
-    ];
-    names.extend(
-        SUPPORTED_TARGETS
-            .into_iter()
-            .map(|target| release_asset_name(version, target)),
-    );
-    names
+    ]
 }
 
 fn expected_files(version: &Version) -> Vec<String> {
@@ -253,14 +221,6 @@ fn expected_files(version: &Version) -> Vec<String> {
         setup,
         "latest.json".to_string(),
     ];
-    for target in SUPPORTED_TARGETS {
-        let helper = release_asset_name(version, target);
-        files.extend([
-            format!("{helper}.minisig"),
-            format!("{helper}.sha256"),
-            helper,
-        ]);
-    }
     files.sort();
     files
 }
@@ -423,16 +383,11 @@ mod tests {
     }
 
     #[test]
-    fn stable_release_file_set_includes_both_remote_helpers() -> Result<()> {
+    fn stable_release_file_set_contains_only_gui_distribution_assets() -> Result<()> {
         let version = Version::parse("1.2.3")?;
         let files = expected_files(&version);
-        assert_eq!(files.len(), 12);
-        for target in SUPPORTED_TARGETS {
-            let helper = release_asset_name(&version, target);
-            assert!(files.contains(&helper));
-            assert!(files.contains(&format!("{helper}.sha256")));
-            assert!(files.contains(&format!("{helper}.minisig")));
-        }
+        assert_eq!(files.len(), 6);
+        assert!(files.iter().all(|file| !file.contains("Remote-Helper")));
         Ok(())
     }
 }

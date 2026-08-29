@@ -1,6 +1,6 @@
 use super::asset_name;
 use crate::cli::BuildGuiOptions;
-use crate::{flutter, paths, process, remote_helper};
+use crate::{flutter, paths, process};
 use anyhow::{Context, Result, bail};
 use semver::Version;
 use std::env;
@@ -23,8 +23,6 @@ pub(super) fn stage(workspace_root: &Path, release_dir: &Path, version: &Version
         },
         &version.to_string(),
     )?;
-    remote_helper::stage_release_assets(workspace_root, version, release_dir)?;
-
     let bundle_dir = release_dir.join("bundle");
     copy_filtered_bundle(&paths::release_dist_dir(workspace_root), &bundle_dir)?;
     fs::copy(workspace_root.join("LICENSE"), bundle_dir.join("LICENSE"))

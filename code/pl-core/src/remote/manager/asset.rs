@@ -1,25 +1,27 @@
-//! Remote helper 平台选择、本地验签与原子上传。
+//! Remote helper 平台选择、按需资产加载与原子上传。
 
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::Arc;
 
-use minisign_verify::{PublicKey, Signature};
 use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 
 use super::SshServerProfile;
-use super::ssh::ssh_command;
+use super::ssh::{run_ssh_capture, ssh_command};
 use crate::remote::RemoteClientError;
 
 const HELPER_NAME: &str = "pl-remote-helper";
 
+/// 可嵌入 Pure Studio 的远端 helper 目标平台。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) enum HelperTarget {
+pub enum RemoteHelperTarget {
     Aarch64Musl,
     X8664Musl,
 }
 
-impl HelperTarget {
+impl RemoteHelperTarget {
     pub(super) fn from_uname(output: &str) -> Result<Self, RemoteClientError> {
         let mut lines = output.lines();
         let os = lines.next().unwrap_or_default().trim();
@@ -38,7 +40,8 @@ impl HelperTarget {
         }
     }
 
-    pub(super) fn triple(self) -> &'static str {
+    /// 返回目标的 canonical Rust triple。
+    pub const fn triple(self) -> &'static str {
         match self {
             Self::Aarch64Musl => "aarch64-unknown-linux-musl",
             Self::X8664Musl => "x86_64-unknown-linux-musl",
@@ -46,19 +49,57 @@ impl HelperTarget {
     }
 }
 
-pub(super) async fn verify_helper_asset(
-    helper: &Path,
-    public_key: Option<&str>,
-) -> Result<(), RemoteClientError> {
-    let checksum_path = helper.with_extension("sha256");
-    let checksum = tokio::fs::read_to_string(&checksum_path)
-        .await
-        .map_err(|error| {
+/// 在 SSH 架构探测后按需提供一个解压后的 remote helper。
+///
+/// 实现不得提前解压未请求的架构。该方法在 core 隔离的 blocking task 中调用。
+pub trait RemoteHelperAssets: std::fmt::Debug + Send + Sync {
+    /// 加载指定 target 的完整 helper bytes。
+    ///
+    /// # Errors
+    ///
+    /// 资产缺失、损坏或无法解压时返回 [`RemoteClientError`]。
+    fn load(&self, target: RemoteHelperTarget) -> Result<Arc<[u8]>, RemoteClientError>;
+}
+
+#[derive(Debug)]
+struct FileHelperAssets {
+    helpers: HashMap<RemoteHelperTarget, PathBuf>,
+}
+
+impl RemoteHelperAssets for FileHelperAssets {
+    fn load(&self, target: RemoteHelperTarget) -> Result<Arc<[u8]>, RemoteClientError> {
+        let helper = self.helpers.get(&target).ok_or_else(|| {
             RemoteClientError::Protocol(format!(
-                "failed to read helper checksum {}: {error}",
-                checksum_path.display()
+                "helper artifact for {} is not available",
+                target.triple()
             ))
         })?;
+        verify_file_helper(helper)
+    }
+}
+
+pub(super) fn file_helper_assets(
+    aarch64_helper: Option<PathBuf>,
+    x86_64_helper: Option<PathBuf>,
+) -> Option<Arc<dyn RemoteHelperAssets>> {
+    let mut helpers = HashMap::new();
+    if let Some(path) = aarch64_helper {
+        helpers.insert(RemoteHelperTarget::Aarch64Musl, path);
+    }
+    if let Some(path) = x86_64_helper {
+        helpers.insert(RemoteHelperTarget::X8664Musl, path);
+    }
+    (!helpers.is_empty()).then(|| Arc::new(FileHelperAssets { helpers }) as Arc<_>)
+}
+
+fn verify_file_helper(helper: &std::path::Path) -> Result<Arc<[u8]>, RemoteClientError> {
+    let checksum_path = helper.with_extension("sha256");
+    let checksum = std::fs::read_to_string(&checksum_path).map_err(|error| {
+        RemoteClientError::Protocol(format!(
+            "failed to read helper checksum {}: {error}",
+            checksum_path.display()
+        ))
+    })?;
     let expected = checksum
         .split_whitespace()
         .next()
@@ -69,7 +110,7 @@ pub(super) async fn verify_helper_asset(
                 checksum_path.display()
             ))
         })?;
-    let bytes = tokio::fs::read(helper).await.map_err(|error| {
+    let bytes = std::fs::read(helper).map_err(|error| {
         RemoteClientError::Protocol(format!("failed to read helper artifact: {error}"))
     })?;
     let actual = format!("{:x}", Sha256::digest(&bytes));
@@ -79,55 +120,33 @@ pub(super) async fn verify_helper_asset(
             helper.display()
         )));
     }
-    if let Some(public_key) = public_key {
-        verify_minisign(helper, public_key, &bytes).await?;
-    }
-    Ok(())
+    Ok(Arc::from(bytes))
 }
 
-async fn verify_minisign(
-    helper: &Path,
-    public_key: &str,
-    bytes: &[u8],
-) -> Result<(), RemoteClientError> {
-    let signature_path = helper.with_extension("minisig");
-    let signature = tokio::fs::read_to_string(&signature_path)
+pub(super) async fn load_helper(
+    assets: Arc<dyn RemoteHelperAssets>,
+    target: RemoteHelperTarget,
+) -> Result<Arc<[u8]>, RemoteClientError> {
+    tokio::task::spawn_blocking(move || assets.load(target))
         .await
         .map_err(|error| {
-            RemoteClientError::Protocol(format!(
-                "failed to read helper signature {}: {error}",
-                signature_path.display()
-            ))
-        })?;
-    let public_key = PublicKey::decode(public_key).map_err(|error| {
-        RemoteClientError::Protocol(format!("invalid remote helper Minisign key: {error}"))
-    })?;
-    let signature = Signature::decode(&signature).map_err(|error| {
-        RemoteClientError::Protocol(format!("invalid remote helper signature: {error}"))
-    })?;
-    let mut verifier = public_key.verify_stream(&signature).map_err(|error| {
-        RemoteClientError::Protocol(format!(
-            "failed to initialize helper signature verification: {error}"
-        ))
-    })?;
-    verifier.update(bytes);
-    verifier.finalize().map_err(|error| {
-        RemoteClientError::Protocol(format!("remote helper signature rejected: {error}"))
-    })
+            RemoteClientError::Protocol(format!("remote helper decompression task failed: {error}"))
+        })?
 }
 
 pub(super) async fn upload_helper(
     profile: &SshServerProfile,
     password: Option<&str>,
-    helper: &Path,
+    bytes: &[u8],
 ) -> Result<String, RemoteClientError> {
-    let bytes = tokio::fs::read(helper).await.map_err(|error| {
-        RemoteClientError::Protocol(format!("failed to read helper artifact: {error}"))
-    })?;
-    let digest = format!("{:x}", Sha256::digest(&bytes));
+    let digest = format!("{:x}", Sha256::digest(bytes));
     let version = env!("CARGO_PKG_VERSION");
     let directory = format!("$HOME/.pure/remote-helper/{version}/{}", &digest[..16]);
     let path = format!("{directory}/{HELPER_NAME}");
+    let probe = format!("if test -x {path}; then printf present; fi");
+    if run_ssh_capture(profile, password, &probe).await?.trim() == "present" {
+        return Ok(path);
+    }
     let temporary = format!("{path}.tmp");
     let script = format!(
         "umask 077; mkdir -p {directory} && cat > {temporary} && chmod 700 {temporary} && mv -f {temporary} {path}"
@@ -145,7 +164,7 @@ pub(super) async fn upload_helper(
     let mut stdin = child.stdin.take().ok_or_else(|| {
         RemoteClientError::Protocol("ssh upload process has no stdin".to_string())
     })?;
-    stdin.write_all(&bytes).await.map_err(|error| {
+    stdin.write_all(bytes).await.map_err(|error| {
         RemoteClientError::Protocol(format!("failed to upload helper: {error}"))
     })?;
     drop(stdin);
@@ -168,34 +187,30 @@ mod tests {
     #[test]
     fn platform_mapping_is_exhaustive() {
         assert_eq!(
-            HelperTarget::from_uname("Linux\naarch64\n").expect("aarch64"),
-            HelperTarget::Aarch64Musl
+            RemoteHelperTarget::from_uname("Linux\naarch64\n").expect("aarch64"),
+            RemoteHelperTarget::Aarch64Musl
         );
-        assert!(HelperTarget::from_uname("Linux\narmv7\n").is_err());
-        assert!(HelperTarget::from_uname("Darwin\naarch64\n").is_err());
+        assert!(RemoteHelperTarget::from_uname("Linux\narmv7\n").is_err());
+        assert!(RemoteHelperTarget::from_uname("Darwin\naarch64\n").is_err());
     }
 
-    #[tokio::test]
-    async fn helper_checksum_rejects_tampering() {
+    #[test]
+    fn helper_checksum_rejects_tampering() {
         let directory = tempfile::tempdir().expect("temporary directory");
         let helper = directory.path().join("pl-remote-helper");
-        tokio::fs::write(&helper, b"helper")
-            .await
-            .expect("write helper");
+        std::fs::write(&helper, b"helper").expect("write helper");
         let digest = format!("{:x}", Sha256::digest(b"helper"));
-        tokio::fs::write(
+        std::fs::write(
             helper.with_extension("sha256"),
             format!("{digest}  pl-remote-helper\n"),
         )
-        .await
         .expect("write checksum");
-        verify_helper_asset(&helper, None)
-            .await
-            .expect("valid checksum");
+        assert_eq!(
+            &*verify_file_helper(&helper).expect("valid checksum"),
+            b"helper"
+        );
 
-        tokio::fs::write(&helper, b"tampered")
-            .await
-            .expect("tamper helper");
-        assert!(verify_helper_asset(&helper, None).await.is_err());
+        std::fs::write(&helper, b"tampered").expect("tamper helper");
+        assert!(verify_file_helper(&helper).is_err());
     }
 }

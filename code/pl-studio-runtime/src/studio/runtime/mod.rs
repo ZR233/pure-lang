@@ -27,6 +27,7 @@ mod model_performance;
 mod plan_confirmation;
 mod prompt_runner;
 mod provider_usage;
+mod remote_helper;
 mod residency;
 mod settings_api;
 mod shutdown_progress;

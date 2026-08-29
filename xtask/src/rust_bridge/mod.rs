@@ -1,6 +1,7 @@
 use crate::cli::{BridgeConfiguration, BuildRustBridgeOptions};
 use crate::paths;
 use crate::process;
+use crate::remote_helper;
 use anyhow::{Context, Result, bail};
 use std::ffi::{OsStr, OsString};
 use std::fs;
@@ -41,6 +42,7 @@ impl RustBridgeArtifacts {
 
 pub(crate) fn build(options: BuildRustBridgeOptions) -> Result<()> {
     let workspace_root = resolve_workspace_root(&options.workspace_root)?;
+    remote_helper::prepare_for_embedding(&workspace_root)?;
     let artifacts = build_artifacts(
         &workspace_root,
         options.configuration,
@@ -95,6 +97,8 @@ fn cargo_build_args(
         OsString::from("build"),
         OsString::from("-p"),
         OsString::from(BRIDGE_PACKAGE_NAME),
+        OsString::from("--features"),
+        OsString::from("pl-studio-runtime/embedded-remote-helpers"),
     ];
     if configuration.uses_release_profile() {
         args.push(OsString::from("--release"));

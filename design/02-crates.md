@@ -180,6 +180,11 @@ interaction 和 Composer 必须从同一个 workspace 原子切换。
 并把工作目录固定为 `code/pure-studio`。Windows/Linux GUI 构建和运行仍使用专用 xtask 命令，
 不通过通用透传入口执行。
 
+原生 `run-gui`、`build-gui` 与 `build-rust-bridge` 在构建 bridge 前准备全部支持架构的
+remote helper，并以 `pl-studio-runtime/embedded-remote-helpers` feature 将压缩资产固化进
+bridge。跨 OS 发布流水线可通过校验过的 CI 内部 prebuilt 目录传递相同提交的 helper，但不得把
+它们作为独立产品资产分发。
+
 Windows/Linux 上 FRB 生成、GUI 构建和运行都必须通过 xtask。xtask 负责让 FRB
 2.12 的 Rust root、生成输出与 canonical crate path 使用同一种 Windows 路径表示，
 并在生成期间局部处理已锁定 Freezed 版本的兼容性。FRB 生成文件提交到仓库

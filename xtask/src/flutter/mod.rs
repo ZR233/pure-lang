@@ -2,7 +2,7 @@ use crate::cli::{BridgeConfiguration, BuildGuiOptions, LogLevel, RunGuiOptions, 
 use crate::paths;
 use crate::process;
 use crate::pubspec_lock::{self, LockfileChange};
-use crate::remote_helper::{self, RuntimeHelperPaths};
+use crate::remote_helper;
 use crate::rust_bridge::{self, BRIDGE_DEBUG_SYMBOLS_ENV, BRIDGE_LIBRARY_ENV, RustBridgeArtifacts};
 use crate::studio_version;
 use anyhow::{Context, Result, bail, ensure};
@@ -50,7 +50,6 @@ struct FlutterInvocation<'a> {
     process_mode: FlutterProcessMode,
     bridge_artifacts: Option<&'a RustBridgeArtifacts>,
     log_level: Option<LogLevel>,
-    remote_helpers: Option<&'a RuntimeHelperPaths>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -356,7 +355,6 @@ fn run_linux_headless_flutter(workspace_root: &Path, app_dir: &Path, args: &[&st
             process_mode: FlutterProcessMode::Batch,
             bridge_artifacts: None,
             log_level: None,
-            remote_helpers: None,
         },
     );
     command.env("GDK_BACKEND", "x11");
@@ -411,7 +409,7 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
     ensure_desktop_build_environment(target)?;
     ensure_flutter_dependencies(&workspace_root, &app_dir)?;
     GeneratedSourcesPolicy::UseCurrent.prepare(&workspace_root, &app_dir)?;
-    let remote_helpers = remote_helper::build_all_for_run(&workspace_root)?;
+    remote_helper::prepare_for_embedding(&workspace_root)?;
 
     let demo_mode = if options.demo {
         DemoMode::Demo
@@ -466,7 +464,6 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
             process_mode,
             bridge_artifacts: bridge_artifacts.as_ref(),
             log_level: options.log_level,
-            remote_helpers: Some(&remote_helpers),
         },
     )
 }
@@ -523,6 +520,7 @@ fn build_gui_with_version(options: BuildGuiOptions, release_version: Option<&str
     ensure_desktop_build_environment(target)?;
     ensure_flutter_dependencies(&workspace_root, &app_dir)?;
     generated_sources_policy(options.check_generated).prepare(&workspace_root, &app_dir)?;
+    remote_helper::prepare_for_embedding(&workspace_root)?;
 
     let version_define = format!("--dart-define=PURE_STUDIO_VERSION={app_version}");
     let args = build_gui_args(target, &version_define, options.demo);
@@ -546,14 +544,10 @@ fn build_gui_with_version(options: BuildGuiOptions, release_version: Option<&str
             process_mode: FlutterProcessMode::Batch,
             bridge_artifacts: bridge_artifacts.as_ref(),
             log_level: None,
-            remote_helpers: None,
         },
     )?;
 
     let artifact_dir = target.release_artifact_dir(&app_dir);
-    if matches!(demo_mode, DemoMode::Native) {
-        remote_helper::install_release_bundle(&workspace_root, &app_version, &artifact_dir)?;
-    }
 
     let clean_mode = if options.no_clean {
         DistCleanMode::KeepExisting
@@ -728,7 +722,6 @@ fn run_flutter(
             process_mode: FlutterProcessMode::Batch,
             bridge_artifacts: None,
             log_level: None,
-            remote_helpers: None,
         },
     )
 }
@@ -760,8 +753,6 @@ fn run_flutter_with_process_mode(
 fn configure_flutter_environment(command: &mut Command, invocation: FlutterInvocation<'_>) {
     command.env_remove(BRIDGE_LIBRARY_ENV);
     command.env_remove(BRIDGE_DEBUG_SYMBOLS_ENV);
-    command.env_remove("PURE_REMOTE_HELPER_AARCH64");
-    command.env_remove("PURE_REMOTE_HELPER_X86_64");
     match invocation.demo_mode {
         DemoMode::Native => {
             command.env_remove("PURE_STUDIO_DEMO");
@@ -783,10 +774,6 @@ fn configure_flutter_environment(command: &mut Command, invocation: FlutterInvoc
         if let Some(debug_symbols) = artifacts.debug_symbols() {
             command.env(BRIDGE_DEBUG_SYMBOLS_ENV, debug_symbols);
         }
-    }
-    if let Some(helpers) = invocation.remote_helpers {
-        command.env("PURE_REMOTE_HELPER_AARCH64", helpers.aarch64());
-        command.env("PURE_REMOTE_HELPER_X86_64", helpers.x86_64());
     }
 }
 
@@ -1065,10 +1052,6 @@ mod tests {
             PathBuf::from(r"C:\artifacts\pl_studio_bridge.dll"),
             Some(PathBuf::from(r"C:\artifacts\pl_studio_bridge.pdb")),
         );
-        let helpers = RuntimeHelperPaths::new(
-            PathBuf::from(r"C:\helpers\aarch64\pl-remote-helper"),
-            PathBuf::from(r"C:\helpers\x86_64\pl-remote-helper"),
-        );
         let mut command = Command::new("flutter");
 
         configure_flutter_environment(
@@ -1078,7 +1061,6 @@ mod tests {
                 process_mode: FlutterProcessMode::Batch,
                 bridge_artifacts: Some(&artifacts),
                 log_level: Some(LogLevel::Debug),
-                remote_helpers: Some(&helpers),
             },
         );
 
@@ -1095,14 +1077,6 @@ mod tests {
             command_env(&command, "PURE_STUDIO_LOG_LEVEL"),
             Some(Some(OsString::from("debug")))
         );
-        assert_eq!(
-            command_env(&command, "PURE_REMOTE_HELPER_AARCH64"),
-            Some(Some(helpers.aarch64().as_os_str().to_owned()))
-        );
-        assert_eq!(
-            command_env(&command, "PURE_REMOTE_HELPER_X86_64"),
-            Some(Some(helpers.x86_64().as_os_str().to_owned()))
-        );
     }
 
     #[test]
@@ -1116,7 +1090,6 @@ mod tests {
                 process_mode: FlutterProcessMode::ResidentDriver,
                 bridge_artifacts: None,
                 log_level: None,
-                remote_helpers: None,
             },
         );
 
@@ -1127,14 +1100,6 @@ mod tests {
             Some(Some(OsString::from("true")))
         );
         assert_eq!(command_env(&command, "PURE_STUDIO_LOG_LEVEL"), Some(None));
-        assert_eq!(
-            command_env(&command, "PURE_REMOTE_HELPER_AARCH64"),
-            Some(None)
-        );
-        assert_eq!(
-            command_env(&command, "PURE_REMOTE_HELPER_X86_64"),
-            Some(None)
-        );
     }
 
     fn command_env(command: &Command, name: &str) -> Option<Option<OsString>> {

@@ -8,7 +8,6 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
 
-use minisign_verify::PublicKey;
 use pl_protocol::remote::{
     REMOTE_PROTOCOL_VERSION, RemoteDirectoryListing, RemoteHello, RemoteRequest, RemoteResponse,
     RemoteWorkspaceOpened,
@@ -23,7 +22,8 @@ use super::{
     RemoteWorkspaceFileBackend, RemoteWorkspaceHost,
 };
 
-use self::asset::{HelperTarget, upload_helper, verify_helper_asset};
+pub use self::asset::{RemoteHelperAssets, RemoteHelperTarget};
+use self::asset::{file_helper_assets, load_helper, upload_helper};
 use self::ssh::{run_ssh_capture, ssh_command, validate_profile};
 
 /// 不含 secret 的 SSH 服务器配置。
@@ -102,7 +102,7 @@ impl std::fmt::Debug for SshConnection {
 #[derive(Debug, Clone)]
 pub struct SshManager {
     servers: Arc<RwLock<HashMap<String, SshServerProfile>>>,
-    helpers: HashMap<HelperTarget, PathBuf>,
+    helper_assets: Option<Arc<dyn RemoteHelperAssets>>,
     connections: Arc<Mutex<HashMap<String, SshConnection>>>,
     connection_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
     workspaces: Arc<Mutex<HashMap<(String, String), RemoteWorkspaceHost>>>,
@@ -110,25 +110,26 @@ pub struct SshManager {
     states: Arc<RwLock<HashMap<String, watch::Sender<SshConnectionState>>>>,
     desired_connections: Arc<RwLock<HashSet<String>>>,
     password_leases: Arc<RwLock<HashMap<String, SecretString>>>,
-    helper_public_key: Option<Arc<str>>,
 }
 
 impl SshManager {
     /// 使用可选的开发 helper 资产创建 manager。
     ///
     /// 每个资产仍必须带有相邻的 `.sha256` 文件；生产环境应使用
-    /// [`Self::new_signed`] 强制 Minisign 校验。
+    /// [`Self::with_helper_assets`] 提供随应用嵌入的压缩资产。
     pub fn new(aarch64_helper: Option<PathBuf>, x86_64_helper: Option<PathBuf>) -> Self {
-        let mut helpers = HashMap::new();
-        if let Some(path) = aarch64_helper {
-            helpers.insert(HelperTarget::Aarch64Musl, path);
-        }
-        if let Some(path) = x86_64_helper {
-            helpers.insert(HelperTarget::X8664Musl, path);
-        }
+        Self::with_optional_helper_assets(file_helper_assets(aarch64_helper, x86_64_helper))
+    }
+
+    /// 使用宿主提供的按需解压资产创建 manager。
+    pub fn with_helper_assets(helper_assets: Arc<dyn RemoteHelperAssets>) -> Self {
+        Self::with_optional_helper_assets(Some(helper_assets))
+    }
+
+    fn with_optional_helper_assets(helper_assets: Option<Arc<dyn RemoteHelperAssets>>) -> Self {
         Self {
             servers: Arc::new(RwLock::new(HashMap::new())),
-            helpers,
+            helper_assets,
             connections: Arc::new(Mutex::new(HashMap::new())),
             connection_locks: Arc::new(Mutex::new(HashMap::new())),
             workspaces: Arc::new(Mutex::new(HashMap::new())),
@@ -136,26 +137,7 @@ impl SshManager {
             states: Arc::new(RwLock::new(HashMap::new())),
             desired_connections: Arc::new(RwLock::new(HashSet::new())),
             password_leases: Arc::new(RwLock::new(HashMap::new())),
-            helper_public_key: None,
         }
-    }
-
-    /// 创建要求 helper 资产通过 SHA-256 与 Minisign 双重校验的 manager。
-    ///
-    /// # Errors
-    ///
-    /// 当 Minisign 公钥无法解析时返回协议配置错误。
-    pub fn new_signed(
-        aarch64_helper: Option<PathBuf>,
-        x86_64_helper: Option<PathBuf>,
-        public_key: String,
-    ) -> Result<Self, RemoteClientError> {
-        PublicKey::decode(&public_key).map_err(|error| {
-            RemoteClientError::Protocol(format!("invalid remote helper Minisign key: {error}"))
-        })?;
-        let mut manager = Self::new(aarch64_helper, x86_64_helper);
-        manager.helper_public_key = Some(Arc::from(public_key));
-        Ok(manager)
     }
 
     /// 返回按名称和 id 稳定排序的服务器配置。
@@ -455,15 +437,15 @@ impl SshManager {
         };
         let password = password.as_ref().map(|secret| secret.expose_secret());
         let platform = run_ssh_capture(profile, password, "uname -s; uname -m").await?;
-        let target = HelperTarget::from_uname(&platform)?;
-        let helper = self.helpers.get(&target).ok_or_else(|| {
+        let target = RemoteHelperTarget::from_uname(&platform)?;
+        let assets = self.helper_assets.clone().ok_or_else(|| {
             RemoteClientError::Protocol(format!(
                 "helper artifact for {} is not available",
                 target.triple()
             ))
         })?;
-        verify_helper_asset(helper, self.helper_public_key.as_deref()).await?;
-        let remote_path = upload_helper(profile, password, helper).await?;
+        let helper = load_helper(assets, target).await?;
+        let remote_path = upload_helper(profile, password, &helper).await?;
         let mut prepared = ssh_command(profile, password)?;
         prepared
             .command

@@ -133,16 +133,12 @@ jobs:
           "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
   helper:
-    name: Build and sign Linux remote helpers
+    name: Build embedded Linux remote helpers
     needs: resolve
     if: needs.resolve.outputs.draft == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
-      attestations: write
-    env:
-      RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
     steps:
       - name: Check out immutable release commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -178,58 +174,10 @@ jobs:
           PURE_REMOTE_HELPER_BUILDER: zigbuild
         run: cargo xtask build-remote-helper --all-targets
 
-      - name: Install pinned Minisign
-        shell: bash
-        run: |
-          set -euo pipefail
-          archive="$RUNNER_TEMP/minisign-0.12-linux.tar.gz"
-          curl --fail --location --silent --show-error \
-            https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-linux.tar.gz \
-            --output "$archive"
-          echo '9a599b48ba6eb7b1e80f12f36b94ceca7c00b7a5173c95c3efc88d9822957e73  '"$archive" | sha256sum --check
-          tool_dir="$RUNNER_TEMP/minisign-0.12"
-          mkdir -p "$tool_dir"
-          tar -xzf "$archive" -C "$tool_dir" minisign-linux/x86_64/minisign
-          chmod 755 "$tool_dir/minisign-linux/x86_64/minisign"
-          echo "$tool_dir/minisign-linux/x86_64" >> "$GITHUB_PATH"
-
-      - name: Sign and verify remote helpers
-        shell: bash
-        env:
-          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
-          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
-        run: |
-          set -euo pipefail
-          if [[ -z "$MINISIGN_SECRET_KEY" || -z "$MINISIGN_PASSWORD" ]]; then
-            echo 'MINISIGN_SECRET_KEY and MINISIGN_PASSWORD secrets are required' >&2
-            exit 1
-          fi
-          secret_key="$RUNNER_TEMP/pure-studio.key"
-          trap 'rm -f "$secret_key"' EXIT
-          printf '%s' "$MINISIGN_SECRET_KEY" > "$secret_key"
-          for target in aarch64-unknown-linux-musl x86_64-unknown-linux-musl; do
-            helper="dist/remote-helper/$target/pl-remote-helper"
-            printf '%s\r\n' "$MINISIGN_PASSWORD" | minisign \
-              -S -s "$secret_key" -m "$helper" -x "$helper.minisig" \
-              -t "Pure Studio $RELEASE_VERSION"
-            minisign -V -p code/pl-studio-runtime/src/updater/pure-studio.pub \
-              -m "$helper" -x "$helper.minisig"
-          done
-
-      - name: Attest aarch64 helper provenance
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
-        with:
-          subject-path: dist/remote-helper/aarch64-unknown-linux-musl/pl-remote-helper
-
-      - name: Attest x86_64 helper provenance
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
-        with:
-          subject-path: dist/remote-helper/x86_64-unknown-linux-musl/pl-remote-helper
-
-      - name: Preserve signed remote helpers
+      - name: Preserve helpers for bridge embedding
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: studio-remote-helper-${{ needs.resolve.outputs.releaseId }}
+          name: studio-embedded-helper-${{ needs.resolve.outputs.releaseId }}
           path: dist/remote-helper/**
           if-no-files-found: error
           compression-level: 0
@@ -248,7 +196,7 @@ jobs:
       attestations: write
     env:
       RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
-      PURE_REMOTE_HELPER_RELEASE_DIR: ${{ github.workspace }}/dist/remote-helper
+      PURE_REMOTE_HELPER_PREBUILT_DIR: ${{ github.workspace }}/dist/remote-helper
     steps:
       - name: Check out immutable release commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -256,10 +204,10 @@ jobs:
           ref: ${{ needs.resolve.outputs.sha }}
           fetch-depth: 0
 
-      - name: Download signed remote helpers
+      - name: Download helper embedding inputs
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: studio-remote-helper-${{ needs.resolve.outputs.releaseId }}
+          name: studio-embedded-helper-${{ needs.resolve.outputs.releaseId }}
           path: dist/remote-helper
 
       - name: Set up Flutter

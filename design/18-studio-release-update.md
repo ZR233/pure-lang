@@ -1,10 +1,9 @@
 # Pure Studio 发布与应用内升级
 
-SSH remote helper 的发布合同独立于 GUI 安装包。每个 Studio 版本必须提供 stripped 静态
-`aarch64-unknown-linux-musl` 与 `x86_64-unknown-linux-musl` helper、SHA-256 和 Minisign 签名；
-Studio runtime 从已下载的本地资产路径/缓存取用并验签，再经 SSH 原子上传，远端不访问发布网络。
-开发构建命令只生成二进制与 SHA-256，不能作为生产信任资产。helper target 由 `uname -s/-m`
-穷尽映射，未知平台明确失败。
+SSH remote helper 不建立独立发布合同。每次原生 GUI 构建都生成 stripped 静态
+`aarch64-unknown-linux-musl` 与 `x86_64-unknown-linux-musl` helper，并以 zstd 压缩资产嵌入 Rust
+bridge；GitHub Release、安装目录与本地数据目录均不出现独立 helper 文件。helper target 由
+`uname -s/-m` 穷尽映射，未知平台明确失败，runtime 只解压并上传匹配架构。
 
 本文定义 Pure Studio 稳定版的唯一发布渠道、Windows 打包格式和应用内更新信任边界。
 首版只支持 Windows x64。RC 构建只作为 GitHub Actions artifact，不进入稳定更新源。
@@ -30,10 +29,10 @@ API dispatch 串联。publisher 再从 GitHub API 和 tag 独立解析仓库、�
 既有 Release。
 
 publisher 分为 helper、GUI 构建与发布三阶段。Linux helper job 从 tag 的精确提交交叉编译两种
-musl 架构、生成 SHA-256 并用发布密钥签名，先保存为同一 workflow run 的不可变 Actions
-artifact。Windows job 只消费这组已签名、即将进入同一 GitHub Release 的 helper 资产，将其同时
-嵌入安装包/便携包并加入正式 Release 文件集，再执行 Rust/Flutter 检查、GUI 构建、签名、安装烟测、
-独立 verify 和 provenance。publish job 下载最终 artifact 并按 Release ID 对账：draft 可为空或只含部分资产，
+musl 架构并生成 SHA-256，只保存为同一 workflow run 的内部 Actions artifact。Windows job 消费
+这组 helper 并压缩嵌入 Rust bridge，再执行 Rust/Flutter 检查、GUI 构建、签名、安装烟测、独立
+verify 和 provenance；helper 本身不进入正式 Release 文件集。publish job 下载最终 artifact 并按
+Release ID 对账：draft 可为空或只含部分资产，
 但任何已有资产的名称、长度与 GitHub SHA-256 digest 必须和本地文件完全一致；只允许补传缺失资产，
 不得覆盖不同字节。全部资产一致后才能取消 draft 并标记 latest。failed job 重跑复用原 artifact
 继续补传；完整 draft 与已发布 Release 重跑均幂等成功。若存在尚未完成的稳定 draft，
@@ -51,9 +50,6 @@ GitHub draft Release 只对具备仓库 push 权限的身份可见，因此负�
 - `Pure-Studio-{version}-windows-x86_64-setup.exe`
 - `Pure-Studio-{version}-windows-x86_64-portable.zip`
 - 上述两个文件各自的 `.minisig`
-- `Pure-Remote-Helper-{version}-aarch64-unknown-linux-musl`
-- `Pure-Remote-Helper-{version}-x86_64-unknown-linux-musl`
-- 上述两个 helper 各自的 `.sha256` 与 `.minisig`
 - `latest.json`
 - `SHA256SUMS.txt`
 
@@ -70,10 +66,11 @@ GitHub draft Release 只对具备仓库 push 权限的身份可见，因此负�
 包含 LICENSE 与 THIRD_PARTY_NOTICES。便携版只供手动分发；便携用户执行应用内升级时进入
 正式安装版，不对当前运行目录做原地覆盖。
 
-普通 `cargo xtask build-gui` 按 `pubspec.yaml` 版本从 `ZR233/pure-lang` 的正式 GitHub Release
-下载两种架构的 helper、SHA-256 与 Minisign 签名，验签后嵌入 GUI 目录。稳定发布尚未公开同版本
-Release，故 publisher 通过 `PURE_REMOTE_HELPER_RELEASE_DIR` 注入前置 helper job 产生的同一组
-待发布字节；该入口只接受完整签名资产并执行相同校验，不能回退到开发 helper 或重新编译。
+普通 `cargo xtask build-gui` 在构建 Rust bridge 前交叉编译全部 remote helper，并将两种架构以
+zstd 压缩资产嵌入 bridge 二进制；安装器和便携包不包含独立 helper 文件。稳定 publisher 的
+前置 Linux job 可生成同一提交的 helper 供 Windows job 嵌入，但只作为 CI 内部 artifact 传递，
+不得上传为 GitHub Release 资产。运行时在 SSH 架构探测后只解压匹配资产并直接上传远端，不执行
+helper 网络下载。
 
 采用 `pure_studio.exe` 新文件名的首个版本要求用户先手动卸载旧版再安装。安装器继续使用
 同一 AppId、安装目录和用户数据目录，但允许直接覆盖安装，不检测也不删除旧 EXE 或旧 WER

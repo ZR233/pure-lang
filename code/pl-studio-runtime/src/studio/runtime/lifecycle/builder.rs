@@ -104,31 +104,7 @@ impl StudioRuntime {
             ModelPerformanceOwner::new(store.clone(), writer.clone(), product_events.clone());
         let task_runtime =
             TaskRuntime::with_writer(store.clone(), product_events.clone(), writer.clone());
-        let helper_cache = store
-            .attachments_dir()
-            .parent()
-            .map(|home| home.join("remote-helper"));
-        let aarch64_helper = remote_helper_path(
-            "PURE_REMOTE_HELPER_AARCH64",
-            "aarch64-unknown-linux-musl",
-            helper_cache.as_deref(),
-        );
-        let x86_64_helper = remote_helper_path(
-            "PURE_REMOTE_HELPER_X86_64",
-            "x86_64-unknown-linux-musl",
-            helper_cache.as_deref(),
-        );
-        let signed_helpers = [&aarch64_helper, &x86_64_helper]
-            .into_iter()
-            .flatten()
-            .any(|path| path.with_extension("minisig").is_file());
-        let ssh_manager = std::sync::Arc::new(if signed_helpers {
-            let public_key = std::env::var("PURE_REMOTE_HELPER_MINISIGN_PUBLIC_KEY")
-                .unwrap_or_else(|_| include_str!("../../../updater/pure-studio.pub").to_string());
-            pl_core::remote::SshManager::new_signed(aarch64_helper, x86_64_helper, public_key)?
-        } else {
-            pl_core::remote::SshManager::new(aarch64_helper, x86_64_helper)
-        });
+        let ssh_manager = std::sync::Arc::new(super::super::remote_helper::ssh_manager());
         let persistence = StudioAgentRepository::with_writer_and_performance(
             store.clone(),
             writer,
@@ -191,54 +167,5 @@ impl StudioRuntime {
             #[cfg(test)]
             initialization_entry_barrier: None,
         })
-    }
-}
-
-fn remote_helper_path(
-    variable: &str,
-    target: &str,
-    cache_root: Option<&std::path::Path>,
-) -> Option<std::path::PathBuf> {
-    let explicit = std::env::var_os(variable).map(std::path::PathBuf::from);
-    let packaged = std::env::current_exe()
-        .ok()
-        .and_then(|executable| executable.parent().map(std::path::Path::to_path_buf))
-        .map(|root| packaged_helper_path(&root, target));
-    let cached = cache_root.map(|root| root.join(target).join("pl-remote-helper"));
-    let development = std::env::current_dir().ok().map(|root| {
-        root.join("dist/remote-helper")
-            .join(target)
-            .join("pl-remote-helper")
-    });
-    explicit
-        .into_iter()
-        .chain(packaged)
-        .chain(cached)
-        .chain(development)
-        .find(|path| path.is_file() && path.with_extension("sha256").is_file())
-}
-
-fn packaged_helper_path(executable_dir: &std::path::Path, target: &str) -> std::path::PathBuf {
-    executable_dir
-        .join("remote-helper")
-        .join(target)
-        .join("pl-remote-helper")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn packaged_helpers_are_resolved_next_to_the_executable() {
-        assert_eq!(
-            packaged_helper_path(
-                std::path::Path::new("/opt/pure-studio"),
-                "aarch64-unknown-linux-musl"
-            ),
-            std::path::Path::new(
-                "/opt/pure-studio/remote-helper/aarch64-unknown-linux-musl/pl-remote-helper"
-            )
-        );
     }
 }

@@ -6,6 +6,7 @@ license.workspace = true
 
 [features]
 default = []
+embedded-remote-helpers = []
 live-tests = []
 
 [dependencies]
