@@ -9,7 +9,7 @@ import '../../shared/upward_popup_menu.dart';
 import 'status_bar_item.dart';
 
 /// 根会话的模式选择器；起始页传新会话草稿，状态栏传当前 Thread 的 mode。
-class SessionModeSelector extends StatelessWidget {
+class SessionModeSelector extends ConsumerWidget {
   const SessionModeSelector({
     required this.mode,
     required this.onSelected,
@@ -22,7 +22,21 @@ class SessionModeSelector extends StatelessWidget {
   final bool enabled;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(studioControllerProvider).value;
+    final projectId = state?.selectedProjectId;
+    final discovered = projectId == null
+        ? const <ModeDescriptorView>[]
+        : state?.skillsByProject[projectId]?.modes ??
+              const <ModeDescriptorView>[];
+    final options = discovered.isEmpty
+        ? StudioMode.values
+        : discovered.map((descriptor) => descriptor.mode).toList();
+    if (!options.contains(mode)) options.add(mode);
+    final selectedLabel = discovered
+        .where((descriptor) => descriptor.id == mode.id)
+        .firstOrNull
+        ?.displayName;
     return UpwardPopupMenu<StudioMode>(
       key: StudioDriverKeys.sessionMode,
       tooltip: enabled
@@ -32,7 +46,7 @@ class SessionModeSelector extends StatelessWidget {
       enabled: enabled,
       onSelected: onSelected,
       itemBuilder: (context) => [
-        for (final option in StudioMode.values)
+        for (final option in options)
           PopupMenuItem<StudioMode>(
             key: StudioDriverKeys.sessionModeOption(option.name),
             value: option,
@@ -40,14 +54,20 @@ class SessionModeSelector extends StatelessWidget {
               children: [
                 Icon(sessionModeIcon(option), size: 18),
                 const SizedBox(width: 10),
-                Text(context.compileModeLabel(option)),
+                Text(
+                  discovered
+                          .where((descriptor) => descriptor.id == option.id)
+                          .firstOrNull
+                          ?.displayName ??
+                      context.compileModeLabel(option),
+                ),
               ],
             ),
           ),
       ],
       child: StatusBarItem(
         icon: sessionModeIcon(mode),
-        label: context.compileModeLabel(mode),
+        label: selectedLabel ?? context.compileModeLabel(mode),
         enabled: enabled,
         trailingIcon: enabled ? Icons.keyboard_arrow_down : Icons.lock_outline,
         maxWidth: 96,
@@ -56,7 +76,7 @@ class SessionModeSelector extends StatelessWidget {
   }
 }
 
-/// 按模式映射的 role（简单→executor、任务→planner）选择模型；写 role 级 Settings 配置。
+/// 所有根模式统一使用 planner 路由；模式差异由预加载 Skill 提供。
 class ModelRoleSelector extends ConsumerWidget {
   const ModelRoleSelector({
     required this.providers,
@@ -80,9 +100,7 @@ class ModelRoleSelector extends ConsumerWidget {
     final current = modelFor(providers, roles, mode) ?? options.first;
     return UpwardPopupMenu<String>(
       key: StudioDriverKeys.model,
-      tooltip: mode == StudioMode.task
-          ? context.l10n.statusPlannerModel
-          : context.l10n.statusExecutorModel,
+      tooltip: context.l10n.statusPlannerModel,
       initialValue: current.key,
       onSelected: (key) {
         final option = options.firstWhere((option) => option.key == key);
@@ -218,18 +236,10 @@ class _ControlItem extends StatelessWidget {
 }
 
 IconData sessionModeIcon(StudioMode mode) {
-  return switch (mode) {
-    StudioMode.simple => Icons.flash_on,
-    StudioMode.task => Icons.route_outlined,
-  };
+  return mode == StudioMode.simple ? Icons.flash_on : Icons.route_outlined;
 }
 
-String roleKeyForMode(StudioMode mode) {
-  return switch (mode) {
-    StudioMode.simple => 'executor',
-    StudioMode.task => 'planner',
-  };
-}
+String roleKeyForMode(StudioMode mode) => 'planner';
 
 RoleSettingsView? roleByKey(List<RoleSettingsView> roles, String key) {
   return roles.where((role) => role.key == key).firstOrNull;

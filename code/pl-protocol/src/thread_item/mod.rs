@@ -142,10 +142,6 @@ impl ThreadItem {
                     )),
                 ))
             }
-            ThreadItemState::Plan(item) => ThreadItemState::Plan(ThreadPlanItem::new(
-                item.content().to_string(),
-                ThreadContentLifecycle::failed(failed_at, error),
-            )),
             ThreadItemState::Turn(_)
             | ThreadItemState::Skill(_)
             | ThreadItemState::File(_)
@@ -164,7 +160,6 @@ impl ThreadItem {
             | ThreadItemState::Agent(_)
             | ThreadItemState::Turn(_)
             | ThreadItemState::Inference(_)
-            | ThreadItemState::Plan(_)
             | ThreadItemState::Skill(_)
             | ThreadItemState::File(_)
             | ThreadItemState::ContextCompaction(_) => None,
@@ -175,22 +170,6 @@ impl ThreadItem {
         match &self.state {
             ThreadItemState::Thinking(value) => Some(value),
             ThreadItemState::Text(_)
-            | ThreadItemState::Tool(_)
-            | ThreadItemState::Agent(_)
-            | ThreadItemState::Turn(_)
-            | ThreadItemState::Inference(_)
-            | ThreadItemState::Plan(_)
-            | ThreadItemState::Skill(_)
-            | ThreadItemState::File(_)
-            | ThreadItemState::ContextCompaction(_) => None,
-        }
-    }
-
-    pub fn plan(&self) -> Option<&ThreadPlanItem> {
-        match &self.state {
-            ThreadItemState::Plan(value) => Some(value),
-            ThreadItemState::Text(_)
-            | ThreadItemState::Thinking(_)
             | ThreadItemState::Tool(_)
             | ThreadItemState::Agent(_)
             | ThreadItemState::Turn(_)
@@ -209,7 +188,6 @@ impl ThreadItem {
             | ThreadItemState::Agent(_)
             | ThreadItemState::Turn(_)
             | ThreadItemState::Inference(_)
-            | ThreadItemState::Plan(_)
             | ThreadItemState::Skill(_)
             | ThreadItemState::File(_)
             | ThreadItemState::ContextCompaction(_) => None,
@@ -235,9 +213,6 @@ impl ThreadItem {
                 ThreadItemState::Thinking(item),
                 ThreadItemDeltaState::ThinkingContent { chunk_index, delta },
             ) => item.append_content(*chunk_index, delta),
-            (ThreadItemState::Plan(item), ThreadItemDeltaState::Plan { delta }) => {
-                item.append(delta)
-            }
             (ThreadItemState::Tool(item), ThreadItemDeltaState::ToolArguments { delta }) => {
                 item.append_arguments(delta)
             }
@@ -261,7 +236,6 @@ pub enum ThreadItemState {
     Agent(ThreadAgentItem),
     Turn(ThreadTurnItem),
     Inference(ThreadInferenceItem),
-    Plan(ThreadPlanItem),
     Skill(ThreadSkillItem),
     File(ThreadFileItem),
     ContextCompaction(ThreadContextCompactionItem),
@@ -276,7 +250,6 @@ impl ThreadItemState {
             Self::Agent(_) => ThreadItemKind::Agent,
             Self::Turn(_) => ThreadItemKind::Turn,
             Self::Inference(_) => ThreadItemKind::Inference,
-            Self::Plan(_) => ThreadItemKind::Plan,
             Self::Skill(_) => ThreadItemKind::Skill,
             Self::File(_) => ThreadItemKind::File,
             Self::ContextCompaction(_) => ThreadItemKind::ContextCompaction,
@@ -291,7 +264,6 @@ impl ThreadItemState {
             Self::Agent(value) => value.state().is_terminal(),
             Self::Turn(value) => value.state().is_terminal(),
             Self::Inference(value) => value.state().is_terminal(),
-            Self::Plan(value) => value.lifecycle().is_terminal(),
             Self::Skill(_) | Self::File(_) | Self::ContextCompaction(_) => true,
         }
     }
@@ -304,7 +276,6 @@ impl ThreadItemState {
             Self::Agent(value) => value.state().terminal_at(),
             Self::Turn(value) => value.state().completed_at(),
             Self::Inference(value) => value.state().terminal_at(),
-            Self::Plan(value) => value.lifecycle().terminal_at(),
             Self::Skill(value) => Some(value.activation().activated_at),
             Self::File(value) => Some(value.completed_at()),
             Self::ContextCompaction(value) => Some(value.compacted_at()),
@@ -322,7 +293,6 @@ impl ThreadItemState {
                 .failure()
                 .map(|failure| failure.message.as_str()),
             Self::Inference(value) => value.state().failure(),
-            Self::Plan(value) => value.lifecycle().failure(),
             Self::Skill(_) | Self::File(_) | Self::ContextCompaction(_) => None,
         }
     }
@@ -353,7 +323,6 @@ pub enum ThreadItemKind {
     Agent,
     Turn,
     Inference,
-    Plan,
     Skill,
     File,
     ContextCompaction,
@@ -388,7 +357,6 @@ pub enum ThreadItemDeltaState {
     Text { delta: String },
     ThinkingSummary { chunk_index: u32, delta: String },
     ThinkingContent { chunk_index: u32, delta: String },
-    Plan { delta: String },
     ToolArguments { delta: String },
     ToolResult { delta: String },
 }

@@ -4,16 +4,13 @@ use crate::api::studio::bridge_runtime::active_bridge;
 use crate::api::studio::convert::records::thread_from_record;
 use crate::api::studio::convert::thread_stream::bridge_thread;
 use crate::api::studio::types::{
-    ArchiveThreadResult, BridgeError, BridgeStudioPromptInput, BridgeThreadMode,
-    StartNewThreadResponse, StartTurnResponse,
+    ArchiveThreadResult, BridgeError, BridgeStudioPromptInput, StartNewThreadResponse,
+    StartTurnResponse,
 };
 use pl_studio_runtime::StudioMode;
 
-fn studio_mode(mode: BridgeThreadMode) -> StudioMode {
-    match mode {
-        BridgeThreadMode::Simple => StudioMode::Simple,
-        BridgeThreadMode::Task => StudioMode::Task,
-    }
+fn studio_mode(mode: String) -> Result<StudioMode, BridgeError> {
+    StudioMode::new(mode).map_err(|error| anyhow::anyhow!(error).into())
 }
 
 /// Creates a root Thread with the requested mode and accepts its first Turn.
@@ -24,9 +21,9 @@ fn studio_mode(mode: BridgeThreadMode) -> StudioMode {
 pub async fn start_new_thread(
     project_id: String,
     input: BridgeStudioPromptInput,
-    mode: BridgeThreadMode,
+    mode: String,
 ) -> Result<StartNewThreadResponse, BridgeError> {
-    let mode = studio_mode(mode);
+    let mode = studio_mode(mode)?;
     let bridge = active_bridge().await?;
     let response = bridge
         .studio
@@ -71,16 +68,16 @@ pub async fn archive_thread(thread_id: String) -> Result<ArchiveThreadResult, Br
     })
 }
 
-/// Changes the selected root Thread between Simple and Task mode.
+/// Changes the selected root Thread to a discovered Mode Skill ID.
 ///
 /// # Errors
 ///
-/// Returns an error when the Thread does not exist, is a child Thread, or has an active Task.
-pub async fn set_thread_mode(thread_id: String, mode: BridgeThreadMode) -> Result<(), BridgeError> {
+/// Returns an error when the Thread does not exist, is a child Thread, or has an active workflow.
+pub async fn set_thread_mode(thread_id: String, mode: String) -> Result<(), BridgeError> {
     let bridge = active_bridge().await?;
     bridge
         .studio
-        .set_thread_mode(&thread_id, studio_mode(mode))
+        .set_thread_mode(&thread_id, studio_mode(mode)?)
         .await?;
     Ok(())
 }

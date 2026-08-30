@@ -11,6 +11,7 @@ use crate::{
 };
 
 const TOOL_SPAWN_AGENT: &str = "spawn_agent";
+const TOOL_LIST_AGENT_PROFILES: &str = "list_agent_profiles";
 const TOOL_REPORT_PROGRESS: &str = "report_progress";
 const TOOL_SEND_MESSAGE: &str = "send_message";
 const TOOL_INTERRUPT_AGENT: &str = "interrupt_agent";
@@ -47,6 +48,7 @@ pub struct AgentCollaborationTools {
     policy: AgentAccessPolicy,
     session_runtime: ToolSessionRuntime,
     workspace_root: std::path::PathBuf,
+    profiles: Arc<Vec<pl_protocol::AgentProfileSnapshot>>,
 }
 
 #[derive(Debug, Clone)]
@@ -54,6 +56,8 @@ pub struct AgentCollaborationToolConfig {
     pub policy: AgentAccessPolicy,
     pub session_runtime: ToolSessionRuntime,
     pub workspace_root: std::path::PathBuf,
+    /// 本 turn 可用的已启用 Profile；创建子 Agent 时会冻结其中的完整快照。
+    pub profiles: Vec<pl_protocol::AgentProfileSnapshot>,
 }
 
 impl AgentCollaborationTools {
@@ -68,12 +72,13 @@ impl AgentCollaborationTools {
             policy: config.policy,
             session_runtime: config.session_runtime,
             workspace_root: config.workspace_root,
+            profiles: Arc::new(config.profiles),
         }
     }
 
     /// 返回可直接注册到 `TurnEngine` 的协作工具。
     ///
-    /// 所有 agent（含 Task planner）共享同一套基础能力：send_message 仅允许
+    /// 所有 Agent Profile 共享同一套基础能力：send_message 仅允许
     /// parent→direct-child 调度，子代理向主代理的报告改由 durable 阶段提交
     /// 与 read_agent_submissions 查询承载。
     pub fn tools(&self) -> Vec<Arc<dyn Tool>> {
@@ -86,6 +91,7 @@ impl AgentCollaborationTools {
             .filter(|kind| match kind {
                 CollaborationToolKind::ReportProgress => !controller,
                 CollaborationToolKind::Spawn
+                | CollaborationToolKind::ListProfiles
                 | CollaborationToolKind::SendMessage
                 | CollaborationToolKind::Interrupt
                 | CollaborationToolKind::List
@@ -102,6 +108,7 @@ impl AgentCollaborationTools {
                     policy: self.policy.clone(),
                     session_runtime: self.session_runtime.clone(),
                     workspace_root: self.workspace_root.clone(),
+                    profiles: self.profiles.clone(),
                 }) as Arc<dyn Tool>
             })
             .collect()
@@ -111,6 +118,7 @@ impl AgentCollaborationTools {
 #[derive(Debug, Clone, Copy)]
 enum CollaborationToolKind {
     Spawn,
+    ListProfiles,
     ReportProgress,
     SendMessage,
     Interrupt,
@@ -122,8 +130,9 @@ enum CollaborationToolKind {
 }
 
 impl CollaborationToolKind {
-    const ALL: [Self; 9] = [
+    const ALL: [Self; 10] = [
         Self::Spawn,
+        Self::ListProfiles,
         Self::ReportProgress,
         Self::SendMessage,
         Self::Interrupt,
@@ -137,6 +146,7 @@ impl CollaborationToolKind {
     fn name(self) -> &'static str {
         match self {
             Self::Spawn => TOOL_SPAWN_AGENT,
+            Self::ListProfiles => TOOL_LIST_AGENT_PROFILES,
             Self::ReportProgress => TOOL_REPORT_PROGRESS,
             Self::SendMessage => TOOL_SEND_MESSAGE,
             Self::Interrupt => TOOL_INTERRUPT_AGENT,
@@ -150,7 +160,12 @@ impl CollaborationToolKind {
 
     fn description(self) -> &'static str {
         match self {
-            Self::Spawn => "Spawn a child agent using one of the roles allowed for this turn.",
+            Self::Spawn => {
+                "Spawn a child Agent from an enabled Agent Profile. The Profile instructions and model route are frozen into the new session."
+            }
+            Self::ListProfiles => {
+                "List enabled Agent Profiles available to spawn, including their intended use and model selection."
+            }
             Self::ReportProgress => {
                 "Record the caller's current execution stage, concise summary, next step, and optional detailed report. Appends a durable submission the orchestrator can read later; never creates a completion or review authorization."
             }
@@ -178,6 +193,7 @@ impl CollaborationToolKind {
         match self {
             Self::Wait => ToolBudgetTiming::PauseWhenOnlyScheduledTool,
             Self::Spawn
+            | Self::ListProfiles
             | Self::ReportProgress
             | Self::SendMessage
             | Self::Interrupt
@@ -197,6 +213,7 @@ struct CollaborationTool {
     policy: AgentAccessPolicy,
     session_runtime: ToolSessionRuntime,
     workspace_root: std::path::PathBuf,
+    profiles: Arc<Vec<pl_protocol::AgentProfileSnapshot>>,
 }
 
 impl Tool for CollaborationTool {
@@ -210,7 +227,8 @@ impl Tool for CollaborationTool {
 
     fn input_schema(&self) -> Value {
         match self.kind {
-            CollaborationToolKind::Spawn => spawn_schema(&self.policy),
+            CollaborationToolKind::Spawn => spawn_schema(&self.policy, &self.profiles),
+            CollaborationToolKind::ListProfiles => object_schema(Vec::new()),
             CollaborationToolKind::ReportProgress => progress_schema(),
             CollaborationToolKind::SendMessage => send_message_schema(),
             CollaborationToolKind::Interrupt => target_schema(
@@ -236,6 +254,7 @@ impl Tool for CollaborationTool {
             CollaborationToolKind::SendMessage
                 | CollaborationToolKind::Interrupt
                 | CollaborationToolKind::List
+                | CollaborationToolKind::ListProfiles
                 | CollaborationToolKind::ReadSession
                 | CollaborationToolKind::ReadSubmissions
         )
@@ -257,6 +276,7 @@ impl Tool for CollaborationTool {
         async move {
             match self.kind {
                 CollaborationToolKind::Spawn => self.spawn(input, context).await,
+                CollaborationToolKind::ListProfiles => self.list_profiles(input),
                 CollaborationToolKind::ReportProgress => self.report_progress(input).await,
                 CollaborationToolKind::SendMessage => self.send_message(input).await,
                 CollaborationToolKind::Interrupt => self.interrupt(input).await,
@@ -278,18 +298,35 @@ impl CollaborationTool {
         context: ToolCallContext,
     ) -> Result<ToolResult, PureError> {
         let args: SpawnArgs = parse_input(TOOL_SPAWN_AGENT, input.arguments)?;
-        let role = AgentRoleId::new(args.role)
+        let profile = self
+            .profiles
+            .iter()
+            .find(|profile| profile.profile_id == args.profile_id)
+            .cloned()
+            .ok_or_else(|| {
+                tool_error(
+                    TOOL_SPAWN_AGENT,
+                    format!(
+                        "agent profile `{}` is not enabled or available",
+                        args.profile_id
+                    ),
+                )
+            })?;
+        let role = AgentRoleId::new(profile.profile_id.clone())
             .map_err(|error| tool_error(TOOL_SPAWN_AGENT, error.to_string()))?;
         if !self.policy.spawn_roles.contains(&role) {
             return Err(tool_error(
                 TOOL_SPAWN_AGENT,
-                format!("role `{role}` is not allowed for this turn"),
+                format!("agent profile `{role}` is not allowed for this turn"),
             ));
         }
         let thread_id = ThreadId::generate();
+        let mut child_session =
+            fork_session(&self.session_runtime.parent_session(), args.fork_turns)?;
+        child_session.replace_agent_profile(Some(profile.clone()));
         let session = ThreadContextState {
             metadata: crate::ThreadContextMetadata::default(),
-            session: fork_session(&self.session_runtime.parent_session(), args.fork_turns)?,
+            session: child_session,
             usage: pl_model::TokenUsage::default(),
             billing_by_turn: std::collections::BTreeMap::new(),
             last_context_tokens: None,
@@ -314,6 +351,10 @@ impl CollaborationTool {
             "workspaceRoot".to_string(),
             Value::String(self.workspace_root.to_string_lossy().to_string()),
         );
+        metadata.insert(
+            "profileId".to_string(),
+            Value::String(profile.profile_id.clone()),
+        );
         let result = self
             .runtime
             .spawn(AgentSpawnRequest {
@@ -331,7 +372,32 @@ impl CollaborationTool {
             "agentId": result.snapshot.identity.id,
             "threadId": thread_id,
             "turnId": result.initial_turn_id,
+            "profileId": profile.profile_id,
         }))
+    }
+
+    fn list_profiles(&self, input: ToolInput) -> Result<ToolResult, PureError> {
+        let _: EmptyArgs = parse_input(TOOL_LIST_AGENT_PROFILES, input.arguments)?;
+        let profiles = self
+            .profiles
+            .iter()
+            .filter_map(|profile| {
+                let role = AgentRoleId::new(profile.profile_id.clone()).ok()?;
+                self.policy.spawn_roles.contains(&role).then(|| {
+                    json!({
+                        "profileId": profile.profile_id,
+                        "displayName": profile.display_name,
+                        "description": profile.description,
+                        "whenToUse": profile.when_to_use,
+                        "providerId": profile.provider_id,
+                        "model": profile.model,
+                        "effort": profile.effort,
+                        "system": profile.system,
+                    })
+                })
+            })
+            .collect::<Vec<_>>();
+        json_output(json!({ "profiles": profiles }))
     }
 
     async fn report_progress(&self, input: ToolInput) -> Result<ToolResult, PureError> {

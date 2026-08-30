@@ -13,13 +13,9 @@ use pl_core::{AgentRuntimeHost, AgentRuntimeOptions};
 use crate::McpRuntimeHandle;
 use crate::config::ConfigRuntime;
 use crate::studio::runtime::SkillCatalogRuntime;
-use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::{InteractionService, ProductEventBus, StudioStore};
 
 use events::StudioAgentCommitObserver;
-pub(in crate::studio) use events::{
-    materialize_pending_task_planner_wakes, materialize_task_planner_wake,
-};
 use lifecycle::StudioAgentLifecycle;
 pub(in crate::studio) use repository::{StudioAgentRepository, ThreadWriteBehindWriter};
 pub(super) use resources::{StudioAgentResources, root_agent_id};
@@ -44,7 +40,6 @@ impl StudioAgentHost {
         tool_manager: pl_core::ToolManager,
         lsp_runtime: pl_lsp::LspRuntimeRegistry,
         interactions: InteractionService,
-        coordinator: Arc<TaskCoordinator>,
         resources: StudioAgentResources,
         product_events: ProductEventBus,
         skills: SkillCatalogRuntime,
@@ -60,25 +55,12 @@ impl StudioAgentHost {
                 tool_manager,
                 lsp_runtime,
                 interactions.clone(),
-                coordinator.clone(),
                 resources.clone(),
                 skills,
                 ssh_manager.clone(),
             ),
-            lifecycle: StudioAgentLifecycle::new(
-                store.clone(),
-                product_events.clone(),
-                coordinator.clone(),
-                resources.clone(),
-                ssh_manager,
-            ),
-            observer: StudioAgentCommitObserver::new(
-                store,
-                interactions,
-                coordinator,
-                resources,
-                product_events,
-            ),
+            lifecycle: StudioAgentLifecycle::new(store, product_events.clone(), resources.clone()),
+            observer: StudioAgentCommitObserver::new(resources, product_events),
         }
     }
 
@@ -88,20 +70,6 @@ impl StudioAgentHost {
 
     pub(super) async fn detach_runtime(&self) {
         self.observer.detach_runtime().await;
-    }
-}
-
-async fn wait_for_runtime(
-    mut runtime: tokio::sync::watch::Receiver<Option<pl_core::AgentRuntimeHandle>>,
-) -> anyhow::Result<pl_core::AgentRuntimeHandle> {
-    loop {
-        if let Some(runtime) = runtime.borrow_and_update().clone() {
-            return Ok(runtime);
-        }
-        runtime
-            .changed()
-            .await
-            .map_err(|_| anyhow::anyhow!("Studio agent runtime attachment channel closed"))?;
     }
 }
 

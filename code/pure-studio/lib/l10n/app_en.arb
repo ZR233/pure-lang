@@ -8,12 +8,18 @@
   "shutdownPhaseStoppingSubscriptions": "Stopping subscriptions",
   "shutdownPhaseCancellingTurns": "Stopping active turns",
   "shutdownPhaseFlushingPersistence": "Saving sessions",
-  "shutdownPhaseSuspendingTasks": "Suspending background tasks",
+  "shutdownPhaseStoppingAgents": "Stopping collaborative agents",
   "shutdownPhaseStoppingMcp": "Stopping MCP servers",
   "shutdownPhaseStoppingLsp": "Stopping language servers",
   "shutdownPhaseStopped": "Shutdown complete",
   "shutdownPendingCommits": "{count} commits pending",
-  "@shutdownPendingCommits": {"placeholders": {"count": {"type": "int"}}},
+  "@shutdownPendingCommits": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "sidebarCloseProject": "Close project",
   "sidebarArchiveSession": "Archive session",
   "sidebarArchiveSessionFailed": "Could not archive this session. It may still be running.",
@@ -24,53 +30,70 @@
   "runtimeFatalRetry": "Retry",
   "configRecoveryMessage": "An incompatible configuration was backed up and replaced with current defaults.",
   "configRecoveryBackupPath": "Backup: {path}",
-  "@configRecoveryBackupPath": {"placeholders": {"path": {"type": "String"}}},
+  "@configRecoveryBackupPath": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
   "configRecoveryDismissTooltip": "Dismiss configuration recovery notice",
   "persistenceDegraded": "Saving is temporarily unavailable. {count} in-memory update(s) are waiting; new work is paused.",
-  "@persistenceDegraded": {"placeholders": {"count": {"type": "int"}}},
+  "@persistenceDegraded": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "persistenceRecovering": "Saving has recovered and is flushing {count} pending update(s). New work remains paused.",
-  "@persistenceRecovering": {"placeholders": {"count": {"type": "int"}}},
+  "@persistenceRecovering": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "persistenceBlocked": "Saving is blocked with {count} pending update(s) and needs attention. New work is paused.",
-  "@persistenceBlocked": {"placeholders": {"count": {"type": "int"}}},
+  "@persistenceBlocked": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "persistenceRetry": "Retry saving",
   "recoveryGlobalWarning": "{count} recovery issue(s) need attention",
-  "@recoveryGlobalWarning": {"placeholders": {"count": {"type": "int"}}},
-  "recoveryCleanupTooltip": "Review safe cleanup",
-  "recoveryRetryTooltip": "Continue merge recovery",
-  "recoveryRetryFailed": "Recovery retry failed: {error}",
-  "@recoveryRetryFailed": {"placeholders": {"error": {"type": "String"}}},
-  "recoveryCleanupTitle": "Clean up recovery issue?",
-  "recoveryCleanupBody": "Pure Studio will only remove its own task resources. Review any work that may be lost before continuing.",
-  "recoveryCleanupNoResources": "No remaining task resources were found.",
-  "recoveryCleanupPresenceAbsent": "Missing",
-  "recoveryCleanupPresenceComplete": "Complete",
-  "recoveryCleanupPresencePartial": "Partially missing",
-  "recoveryCleanupDirty": "Uncommitted changes",
-  "recoveryCleanupAhead": "{count} unmerged commit(s)",
-  "@recoveryCleanupAhead": {"placeholders": {"count": {"type": "int"}}},
-  "recoveryCleanupChangedFiles": "{count} changed file(s)",
-  "@recoveryCleanupChangedFiles": {"placeholders": {"count": {"type": "int"}}},
-  "recoveryCleanupCancel": "Cancel",
-  "recoveryCleanupConfirm": "Clean up",
-  "recoveryCleanupRefreshPreview": "Refresh preview",
-  "recoveryCleanupFailed": "Cleanup failed: {error}",
-  "@recoveryCleanupFailed": {"placeholders": {"error": {"type": "String"}}},
-  "projectCleanupTitle": "Remove project and clean up Pure worktrees?",
-  "projectCleanupBody": "This removes the project from Studio and permanently discards uncommitted changes and unmerged commits in every Pure-owned task worktree. The main workspace will not be deleted or modified.",
-  "projectCleanupConfirm": "Remove project and clean up",
+  "@recoveryGlobalWarning": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "sidebarNew": "New",
   "sidebarOpen": "Open",
   "shellNoSession": "New session",
   "startPageWelcome": "What can I help you build?",
   "startPageProject": "Working in {project}",
-  "@startPageProject": {"placeholders": {"project": {"type": "String"}}},
+  "@startPageProject": {
+    "placeholders": {
+      "project": {
+        "type": "String"
+      }
+    }
+  },
   "startPageOpenProjectTitle": "Open a project to get started",
   "startPageOpenProjectBody": "Choose a project from the sidebar before sending your first message.",
   "shellSessionUpdated": "{mode} · updated {time}",
   "@shellSessionUpdated": {
     "placeholders": {
-      "mode": { "type": "String" },
-      "time": { "type": "String" }
+      "mode": {
+        "type": "String"
+      },
+      "time": {
+        "type": "String"
+      }
     }
   },
   "settingsBack": "Back",
@@ -100,7 +123,13 @@
   "settingsSshReady": "Ready",
   "settingsSshDeleteTitle": "Delete SSH server?",
   "settingsSshDeleteBody": "Delete {name}? Projects using this server must be removed first.",
-  "@settingsSshDeleteBody": {"placeholders": {"name": {"type": "String"}}},
+  "@settingsSshDeleteBody": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "settingsSshName": "Name",
   "settingsSshHost": "Host",
   "settingsSshUsername": "Username",
@@ -128,7 +157,7 @@
   "statusModelLabel": "Model",
   "statusCapabilitiesTitle": "Active capabilities",
   "statusSessionMode": "Session mode",
-  "statusSessionModeLocked": "Session mode cannot change while the session is running or a Task is active",
+  "statusSessionModeLocked": "Session mode cannot change while the session is running or a workflow is active",
   "statusPlannerModel": "Planner model",
   "statusExecutorModel": "Executor model",
   "statusReasoningEffort": "Reasoning effort",
@@ -165,40 +194,60 @@
   "statusTurnRunningTool": "Running tool",
   "statusTurnWaitingForApproval": "Waiting for tool approval",
   "statusTurnWaitingForUserInput": "Waiting for input",
-  "statusTurnWaitingForPlanConfirmation": "Waiting for plan confirmation",
   "statusTurnPersisting": "Saving turn",
   "statusInteractionToolApproval": "Waiting for tool approval",
   "statusInteractionUserInput": "Waiting for input",
-  "statusInteractionPlanConfirmation": "Waiting for plan confirmation",
   "statusContextTooltip": "Context: {contextTokens}/{contextWindow} ({percent}%)\n\nTotal tokens: {totalTokens}\n\nModel: {model}",
   "@statusContextTooltip": {
     "placeholders": {
-      "contextTokens": { "type": "int" },
-      "contextWindow": { "type": "int" },
-      "percent": { "type": "int" },
-      "totalTokens": { "type": "int" },
-      "model": { "type": "String" }
+      "contextTokens": {
+        "type": "int"
+      },
+      "contextWindow": {
+        "type": "int"
+      },
+      "percent": {
+        "type": "int"
+      },
+      "totalTokens": {
+        "type": "int"
+      },
+      "model": {
+        "type": "String"
+      }
     }
   },
   "statusContextTooltipNoModel": "Context: {contextTokens}/{contextWindow} ({percent}%)\n\nTotal tokens: {totalTokens}",
   "@statusContextTooltipNoModel": {
     "placeholders": {
-      "contextTokens": { "type": "int" },
-      "contextWindow": { "type": "int" },
-      "percent": { "type": "int" },
-      "totalTokens": { "type": "int" }
+      "contextTokens": {
+        "type": "int"
+      },
+      "contextWindow": {
+        "type": "int"
+      },
+      "percent": {
+        "type": "int"
+      },
+      "totalTokens": {
+        "type": "int"
+      }
     }
   },
   "statusSkillsCount": "{count, plural, =1{1 skill} other{{count} skills}}",
   "@statusSkillsCount": {
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "statusMcpCount": "{count} MCP",
   "@statusMcpCount": {
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "statusLspCount": "{count} LSP",
@@ -207,97 +256,27 @@
   "statusLspActivityPercentage": "{percentage}%",
   "@statusLspActivityPercentage": {
     "placeholders": {
-      "percentage": { "type": "int" }
+      "percentage": {
+        "type": "int"
+      }
     }
   },
   "@statusLspCount": {
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "statusAgentsCount": "{count, plural, =1{1 agent} other{{count} agents}}",
   "@statusAgentsCount": {
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "composerAgentRuntimeDriven": "This agent session is driven by the runtime",
-  "statusTaskSection": "Task coordinator",
-  "statusTaskBranch": "Branch",
-  "statusTaskHead": "HEAD",
-  "statusTaskWorkUnits": "Work units",
-  "statusTaskAgents": "Agents",
-  "statusTaskCompletions": "Completions",
-  "statusTaskMerges": "Merge records",
-  "statusTaskReviews": "Reviews",
-  "statusTaskWorktree": "Worktree",
-  "statusTaskCommit": "Commit",
-  "statusTaskSource": "Source",
-  "statusTaskPreviousHead": "Previous HEAD",
-  "statusTaskDeliveryHead": "Delivery HEAD",
-  "statusTaskResultingHead": "Resulting HEAD",
-  "statusTaskCleanup": "Cleanup",
-  "statusTaskRequest": "Request",
-  "statusTaskSummary": "Summary",
-  "statusTaskStage": "Stage",
-  "statusTaskNextStep": "Next step",
-  "statusTaskSummaryAge": "Summary age",
-  "statusTaskVerification": "Verification",
-  "statusTaskScope": "Scope",
-  "statusTaskCompletionRevision": "Completion revision",
-  "statusTaskFindings": "Findings",
-  "statusTaskRecommendation": "How to fix",
-  "statusTaskError": "Error",
-  "statusTaskFailed": "Task failed",
-  "statusTaskRecoverable": "Can continue",
-  "statusTaskPaused": "Paused",
-  "statusTaskFailures": "Task failures",
-  "statusTaskFatalHint": "Fix the provider or configuration, then start a new task.",
-  "statusTaskRecoverableHint": "This task can continue after the cause is corrected.",
-  "statusTaskPausedHint": "No model turn is active. Send a message to continue this task.",
-  "statusTaskExecution": "Execution",
-  "statusTaskBudget": "Budget limit",
-  "statusTaskBudgetSlice": "Budget slice",
-  "statusTaskBudgetSliceValue": "{current}/{limit}",
-  "@statusTaskBudgetSliceValue": {"placeholders": {"current": {"type": "int"}, "limit": {"type": "int"}}},
-  "statusTaskBudgetUsage": "{modelSteps} model · {toolCalls} tools · {waitCalls} waits · {elapsedMs} ms",
-  "@statusTaskBudgetUsage": {"placeholders": {"modelSteps": {"type": "int"}, "toolCalls": {"type": "int"}, "waitCalls": {"type": "int"}, "elapsedMs": {"type": "String"}}},
-  "statusTaskContinuation": "Continuation",
-  "statusTaskBudgetModelStep": "Model-step limit",
-  "statusTaskBudgetToolCall": "Tool-call limit",
-  "statusTaskBudgetWait": "Wait-call limit",
-  "statusTaskBudgetWallClock": "Wall-clock limit",
-  "statusTaskBudgetAgentCount": "Agent-count limit",
-  "statusTaskBudgetAgentDepth": "Agent-depth limit",
-  "statusTaskBudgetFinalization": "Finalization limit",
-  "statusTaskContinuationNone": "None",
-  "statusTaskContinuationCompacting": "Compacting context",
-  "statusTaskContinuationPendingStart": "Starting next slice",
-  "statusTaskContinuationNeedsAttention": "Needs attention",
-  "statusTaskPhasePlanning": "Planning",
-  "statusTaskPhasePendingConfirmation": "Awaiting plan confirmation",
-  "statusTaskPhaseEditingDocuments": "Editing documents",
-  "statusTaskPhaseWorking": "Working",
-  "statusTaskPhaseReviewing": "Reviewing",
-  "statusTaskPhaseCompleted": "Task completed",
-  "statusTaskStatusPending": "Pending",
-  "statusTaskStatusQueued": "Queued",
-  "statusTaskStatusRunning": "Running",
-  "statusTaskStatusAwaitingCompletion": "Awaiting completion",
-  "statusTaskStatusReadyForReview": "Ready for review",
-  "statusTaskStatusReviewing": "Reviewing",
-  "statusTaskStatusChangesRequested": "Changes requested",
-  "statusTaskStatusApproved": "Approved",
-  "statusTaskStatusMerged": "Merged",
-  "statusTaskStatusNoDelivery": "No delivery",
-  "statusTaskStatusCompleted": "Completed",
-  "statusTaskStatusBudgetLimited": "Budget limited",
-  "statusTaskStatusNeedsAttention": "Needs attention",
-  "statusTaskStatusFailed": "Failed",
-  "statusTaskStatusCancelled": "Cancelled",
-  "statusTaskStatusPass": "Passed",
-  "statusTaskStatusChangesRequired": "Changes required",
-  "statusTaskStatusBlocked": "Blocked",
   "statusSkillsSection": "Skills",
   "statusMcpSection": "MCP",
   "statusLspSection": "LSP",
@@ -307,8 +286,12 @@
   "agentDetailSummary": "{count, plural, =1{1 agent · {running} running} other{{count} agents · {running} running}}",
   "@agentDetailSummary": {
     "placeholders": {
-      "count": { "type": "int" },
-      "running": { "type": "int" }
+      "count": {
+        "type": "int"
+      },
+      "running": {
+        "type": "int"
+      }
     }
   },
   "agentDetailEmpty": "No subagents",
@@ -334,7 +317,9 @@
   "timelineRemoteImageSource": "External image from {host}",
   "@timelineRemoteImageSource": {
     "placeholders": {
-      "host": {"type": "String"}
+      "host": {
+        "type": "String"
+      }
     }
   },
   "timelineRemoteImageOpen": "Click to load and preview",
@@ -349,48 +334,69 @@
   "timelineToolGroupSummary": "{count} tools",
   "@timelineToolGroupSummary": {
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "timelineToolGroupSummaryRunning": "{count} tools, {runningCount} running",
   "@timelineToolGroupSummaryRunning": {
     "placeholders": {
-      "count": { "type": "int" },
-      "runningCount": { "type": "int" }
+      "count": {
+        "type": "int"
+      },
+      "runningCount": {
+        "type": "int"
+      }
     }
   },
   "timelineToolGroupSummaryIssues": "{count} tools, {issueCount} need attention",
   "@timelineToolGroupSummaryIssues": {
     "placeholders": {
-      "count": { "type": "int" },
-      "issueCount": { "type": "int" }
+      "count": {
+        "type": "int"
+      },
+      "issueCount": {
+        "type": "int"
+      }
     }
   },
   "timelineToolGroupSummaryRunningWithIssues": "{count} tools, {runningCount} running, {issueCount} need attention",
   "@timelineToolGroupSummaryRunningWithIssues": {
     "placeholders": {
-      "count": { "type": "int" },
-      "runningCount": { "type": "int" },
-      "issueCount": { "type": "int" }
+      "count": {
+        "type": "int"
+      },
+      "runningCount": {
+        "type": "int"
+      },
+      "issueCount": {
+        "type": "int"
+      }
     }
   },
-  "timelinePlanFallback": "Plan",
   "timelineSkillActivated": "Activated skill · {name}",
   "@timelineSkillActivated": {
     "placeholders": {
-      "name": {"type": "String"}
+      "name": {
+        "type": "String"
+      }
     }
   },
   "timelineSkillAgentActivated": "Agent activated skill · {name}",
   "@timelineSkillAgentActivated": {
     "placeholders": {
-      "name": {"type": "String"}
+      "name": {
+        "type": "String"
+      }
     }
   },
   "timelineSkillUserActivated": "User activated skill · {name}",
   "@timelineSkillUserActivated": {
     "placeholders": {
-      "name": {"type": "String"}
+      "name": {
+        "type": "String"
+      }
     }
   },
   "timelineAgentFallback": "Agent",
@@ -400,43 +406,57 @@
   "timelineToolCompleted": "{name} completed",
   "@timelineToolCompleted": {
     "placeholders": {
-      "name": { "type": "String" }
+      "name": {
+        "type": "String"
+      }
     }
   },
   "timelineToolFailed": "{name} failed",
   "@timelineToolFailed": {
     "placeholders": {
-      "name": { "type": "String" }
+      "name": {
+        "type": "String"
+      }
     }
   },
   "timelineToolDenied": "{name} denied",
   "@timelineToolDenied": {
     "placeholders": {
-      "name": { "type": "String" }
+      "name": {
+        "type": "String"
+      }
     }
   },
   "timelineToolCancelled": "{name} cancelled",
   "@timelineToolCancelled": {
     "placeholders": {
-      "name": { "type": "String" }
+      "name": {
+        "type": "String"
+      }
     }
   },
   "timelineToolAwaitingApproval": "{name} awaiting approval",
   "@timelineToolAwaitingApproval": {
     "placeholders": {
-      "name": { "type": "String" }
+      "name": {
+        "type": "String"
+      }
     }
   },
   "timelineToolRunning": "{name} running",
   "@timelineToolRunning": {
     "placeholders": {
-      "name": { "type": "String" }
+      "name": {
+        "type": "String"
+      }
     }
   },
   "timelineToolExitCode": "exit code {code}",
   "@timelineToolExitCode": {
     "placeholders": {
-      "code": { "type": "int" }
+      "code": {
+        "type": "int"
+      }
     }
   },
   "timelineToolTimedOut": "timed out",
@@ -451,30 +471,17 @@
   "interactionQuestionsTitle": "A few questions",
   "interactionLastQuestion": "Last question",
   "interactionContinueAfterAnswer": "Continue after answering",
-  "taskRecoveryDialogTitle": "Recover and continue",
-  "taskRecoveryDialogBody": "Only the selected Thread model context is rolled back. Task, WorkUnit, workspace, commits, usage, and audit history are preserved.",
-  "taskRecoveryTargetLabel": "Recovery target",
-  "taskRecoveryTargetPlanner": "Planner",
-  "taskRecoveryTargetExecutor": "Executor",
-  "taskRecoveryTurnSuffixLabel": "Contiguous tail Turns to roll back",
-  "taskRecoveryModeLabel": "Recovery mode",
-  "taskRecoveryModeRewind": "Rewind conversation tail",
-  "taskRecoveryModeRebuild": "Rebuild this Thread context",
-  "taskRecoveryGitPreserved": "Git and workspace state will not be reset or cleaned. Their fingerprint must exactly match this preview when recovery is applied.",
-  "taskRecoveryRebuildWarning": "When no safe prefix can be preserved, only this Thread's ordinary transcript is cleared. Handoff, evidence, session notes, and external state remain.",
-  "taskRecoveryFirstConfirm": "Review recovery impact",
-  "taskRecoveryFinalConfirm": "Confirm recovery and continue",
-  "taskRecoveryApplying": "Recovering…",
-  "taskRecoveryItems": "items",
-  "taskRecoveryInputs": "inputs",
-  "taskRecoveryTools": "tools",
   "timelineRolledBack": "Rolled back from active context",
   "interactionSubmitEmptyAnswersHint": "Unanswered questions are submitted as empty arrays.",
   "interactionAnsweredPendingHint": "{answeredCount} answered · {pendingCount} pending",
   "@interactionAnsweredPendingHint": {
     "placeholders": {
-      "answeredCount": { "type": "int" },
-      "pendingCount": { "type": "int" }
+      "answeredCount": {
+        "type": "int"
+      },
+      "pendingCount": {
+        "type": "int"
+      }
     }
   },
   "interactionPreviousQuestion": "Previous",
@@ -487,20 +494,28 @@
   "interactionQuestionProgress": "Question {current} / {total}",
   "@interactionQuestionProgress": {
     "placeholders": {
-      "current": { "type": "int" },
-      "total": { "type": "int" }
+      "current": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
     }
   },
   "interactionAnsweredCount": "{count} answered",
   "@interactionAnsweredCount": {
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "interactionQuestionTooltip": "Question {index}",
   "@interactionQuestionTooltip": {
     "placeholders": {
-      "index": { "type": "int" }
+      "index": {
+        "type": "int"
+      }
     }
   },
   "interactionQuestionFallback": "Question",
@@ -518,7 +533,9 @@
   "interactionPlanConfirmFooterHint": "Confirming starts the document-editing checkpoint in {mode} mode.",
   "@interactionPlanConfirmFooterHint": {
     "placeholders": {
-      "mode": { "type": "String" }
+      "mode": {
+        "type": "String"
+      }
     }
   },
   "interactionPlanAdjust": "Tell Pure how to adjust",
@@ -569,7 +586,9 @@
   "settingsBundledModels": "{count} bundled",
   "@settingsBundledModels": {
     "placeholders": {
-      "count": { "type": "int" }
+      "count": {
+        "type": "int"
+      }
     }
   },
   "settingsDefaultBadge": "default",
@@ -579,7 +598,9 @@
   "settingsUsageUpdated": "Updated {updatedAt}",
   "@settingsUsageUpdated": {
     "placeholders": {
-      "updatedAt": { "type": "String" }
+      "updatedAt": {
+        "type": "String"
+      }
     }
   },
   "settingsUsageAvailableBalance": "Available balance",
@@ -587,13 +608,17 @@
   "settingsUsageGranted": "Granted {amount}",
   "@settingsUsageGranted": {
     "placeholders": {
-      "amount": { "type": "String" }
+      "amount": {
+        "type": "String"
+      }
     }
   },
   "settingsUsageToppedUp": "Topped up {amount}",
   "@settingsUsageToppedUp": {
     "placeholders": {
-      "amount": { "type": "String" }
+      "amount": {
+        "type": "String"
+      }
     }
   },
   "settingsUsageRefreshing": "Refreshing usage...",
@@ -609,7 +634,9 @@
   "settingsUsageUnsupportedForProvider": "Usage is not supported for {providerName}",
   "@settingsUsageUnsupportedForProvider": {
     "placeholders": {
-      "providerName": { "type": "String" }
+      "providerName": {
+        "type": "String"
+      }
     }
   },
   "settingsUsageNotChecked": "Not checked",
@@ -628,27 +655,39 @@
   "settingsUsageQuotaRemaining": "{remaining} of {total} remaining",
   "@settingsUsageQuotaRemaining": {
     "placeholders": {
-      "remaining": { "type": "String" },
-      "total": { "type": "String" }
+      "remaining": {
+        "type": "String"
+      },
+      "total": {
+        "type": "String"
+      }
     }
   },
   "settingsUsageQuotaUsed": "{current} of {total} used",
   "@settingsUsageQuotaUsed": {
     "placeholders": {
-      "current": { "type": "String" },
-      "total": { "type": "String" }
+      "current": {
+        "type": "String"
+      },
+      "total": {
+        "type": "String"
+      }
     }
   },
   "settingsUsagePercentRemaining": "{percent} remaining",
   "@settingsUsagePercentRemaining": {
     "placeholders": {
-      "percent": { "type": "String" }
+      "percent": {
+        "type": "String"
+      }
     }
   },
   "settingsUsageReset": "Reset {time}",
   "@settingsUsageReset": {
     "placeholders": {
-      "time": { "type": "String" }
+      "time": {
+        "type": "String"
+      }
     }
   },
   "settingsInstructionsTitle": "Instructions",
@@ -686,7 +725,6 @@
   "settingsMcpResetConfirmTitle": "Reset all MCP servers?",
   "settingsMcpResetConfirmBody": "Every configured MCP connection will be rebuilt. Active turns keep their current leased generation.",
   "settingsMcpResetConfirmAction": "Reset all",
-  "settingsCancel": "Cancel",
   "settingsEndpoint": "Endpoint",
   "settingsMcpEmptyTitle": "No MCP servers",
   "settingsMcpEmptyMessage": "Configured MCP servers will appear here.",
@@ -707,7 +745,9 @@
   "settingsCurrentMode": "Current: {mode}",
   "@settingsCurrentMode": {
     "placeholders": {
-      "mode": { "type": "String" }
+      "mode": {
+        "type": "String"
+      }
     }
   },
   "settingsWorkspaceBoundary": "Workspace boundary policy remains unchanged.",
@@ -751,23 +791,83 @@
   "settingsSaveWebSearch": "Save web search",
   "settingsStudioUpdateTitle": "Pure Studio update",
   "settingsStudioUpdateDisabled": "Version {version}. Automatic checks run only in Windows release builds.",
-  "@settingsStudioUpdateDisabled": {"placeholders": {"version": {"type": "String"}}},
+  "@settingsStudioUpdateDisabled": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
   "settingsStudioUpdateCurrent": "Current version: {version}",
-  "@settingsStudioUpdateCurrent": {"placeholders": {"version": {"type": "String"}}},
+  "@settingsStudioUpdateCurrent": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
   "settingsStudioUpdateChecking": "Version {version}. Checking for updates...",
-  "@settingsStudioUpdateChecking": {"placeholders": {"version": {"type": "String"}}},
+  "@settingsStudioUpdateChecking": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
   "settingsStudioUpdateLatest": "Version {version} is up to date.",
-  "@settingsStudioUpdateLatest": {"placeholders": {"version": {"type": "String"}}},
+  "@settingsStudioUpdateLatest": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
   "settingsStudioUpdateAvailable": "Version {current} is installed. Version {latest} is available.",
-  "@settingsStudioUpdateAvailable": {"placeholders": {"current": {"type": "String"}, "latest": {"type": "String"}}},
+  "@settingsStudioUpdateAvailable": {
+    "placeholders": {
+      "current": {
+        "type": "String"
+      },
+      "latest": {
+        "type": "String"
+      }
+    }
+  },
   "settingsStudioUpdateDownloading": "Downloading version {version}: {progress}%",
-  "@settingsStudioUpdateDownloading": {"placeholders": {"version": {"type": "String"}, "progress": {"type": "int"}}},
+  "@settingsStudioUpdateDownloading": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      },
+      "progress": {
+        "type": "int"
+      }
+    }
+  },
   "settingsStudioUpdateVerifying": "Verifying version {version}...",
-  "@settingsStudioUpdateVerifying": {"placeholders": {"version": {"type": "String"}}},
+  "@settingsStudioUpdateVerifying": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
   "settingsStudioUpdateInstallerLaunched": "Installer for version {version} started.",
-  "@settingsStudioUpdateInstallerLaunched": {"placeholders": {"version": {"type": "String"}}},
+  "@settingsStudioUpdateInstallerLaunched": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
   "settingsStudioUpdateFailed": "Update failed: {error}",
-  "@settingsStudioUpdateFailed": {"placeholders": {"error": {"type": "String"}}},
+  "@settingsStudioUpdateFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
   "settingsStudioUpdateBusy": "Finish the active turn or task before installing.",
   "settingsStudioUpdateCheck": "Check for updates",
   "settingsStudioUpdateInstall": "Download and install",
@@ -781,7 +881,9 @@
   "timelineLspQueryTitleWithDetail": "LSP query · {detail}",
   "@timelineLspQueryTitleWithDetail": {
     "placeholders": {
-      "detail": { "type": "String" }
+      "detail": {
+        "type": "String"
+      }
     }
   },
   "timelineLspCapabilitiesTitle": "LSP capabilities",

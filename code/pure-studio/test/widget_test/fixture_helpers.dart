@@ -100,12 +100,11 @@ List<TimelineRow> timelineRowsFromFixtureParts(
                 ? ThreadItemKind.userMessage
                 : ThreadItemKind.agentMessage,
           TimelineEntryType.reasoning => ThreadItemKind.reasoning,
-          TimelineEntryType.plan => ThreadItemKind.plan,
           TimelineEntryType.tool => ThreadItemKind.toolCall,
           TimelineEntryType.skill => ThreadItemKind.skill,
           TimelineEntryType.file => ThreadItemKind.file,
         },
-        text: part.planContent ?? part.text,
+        text: part.text,
         channel: part.textChannel == TimelineTextChannel.commentary
             ? AgentMessageChannel.commentary
             : AgentMessageChannel.finalAnswer,

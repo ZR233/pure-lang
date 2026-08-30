@@ -12,7 +12,6 @@ enum ThreadItemKind {
   userMessage,
   agentMessage,
   reasoning,
-  plan,
   toolCall,
   agent,
   turn,
@@ -64,11 +63,6 @@ final class ThreadThinkingSummaryDeltaView extends ThreadItemDeltaStateView {
 final class ThreadThinkingContentDeltaView extends ThreadItemDeltaStateView {
   const ThreadThinkingContentDeltaView(this.chunkIndex, this.delta);
   final int chunkIndex;
-  final String delta;
-}
-
-final class ThreadPlanDeltaView extends ThreadItemDeltaStateView {
-  const ThreadPlanDeltaView(this.delta);
   final String delta;
 }
 
@@ -157,16 +151,6 @@ final class ThreadThinkingItemStateView extends ThreadItemStateView {
 
   final List<String> summary;
   final List<String> content;
-  final ThreadContentLifecycleView lifecycle;
-}
-
-final class ThreadPlanItemStateView extends ThreadItemStateView {
-  const ThreadPlanItemStateView({
-    required this.content,
-    required this.lifecycle,
-  });
-
-  final String content;
   final ThreadContentLifecycleView lifecycle;
 }
 
@@ -508,7 +492,6 @@ class ThreadItemView {
     ThreadAgentItemStateView() => ThreadItemKind.agent,
     ThreadTurnItemStateView() => ThreadItemKind.turn,
     ThreadInferenceItemStateView() => ThreadItemKind.inference,
-    ThreadPlanItemStateView() => ThreadItemKind.plan,
     ThreadSkillItemStateView() => ThreadItemKind.skill,
     ThreadFileItemStateView() => ThreadItemKind.file,
     ThreadContextCompactionItemStateView() => ThreadItemKind.contextCompaction,
@@ -516,8 +499,7 @@ class ThreadItemView {
 
   String get status => switch (state) {
     ThreadTextItemStateView(:final lifecycle) ||
-    ThreadThinkingItemStateView(:final lifecycle) ||
-    ThreadPlanItemStateView(:final lifecycle) => lifecycle.status,
+    ThreadThinkingItemStateView(:final lifecycle) => lifecycle.status,
     ThreadToolItemStateView(:final lifecycle) => lifecycle.status,
     ThreadAgentItemStateView(:final lifecycle) => switch (lifecycle) {
       QueuedThreadAgentView() => 'queued',
@@ -541,8 +523,7 @@ class ThreadItemView {
 
   bool get isTerminal => switch (state) {
     ThreadTextItemStateView(:final lifecycle) ||
-    ThreadThinkingItemStateView(:final lifecycle) ||
-    ThreadPlanItemStateView(:final lifecycle) => lifecycle.isTerminal,
+    ThreadThinkingItemStateView(:final lifecycle) => lifecycle.isTerminal,
     ThreadToolItemStateView(:final lifecycle) => lifecycle.isTerminal,
     ThreadAgentItemStateView(:final lifecycle) =>
       lifecycle is! QueuedThreadAgentView &&
@@ -557,8 +538,7 @@ class ThreadItemView {
 
   DateTime? get completedAt => switch (state) {
     ThreadTextItemStateView(:final lifecycle) ||
-    ThreadThinkingItemStateView(:final lifecycle) ||
-    ThreadPlanItemStateView(:final lifecycle) => lifecycle.terminalAt,
+    ThreadThinkingItemStateView(:final lifecycle) => lifecycle.terminalAt,
     ThreadToolItemStateView(:final lifecycle) => switch (lifecycle) {
       SucceededThreadToolView(:final completedAt) => completedAt,
       FailedThreadToolView(:final failedAt) => failedAt,
@@ -599,8 +579,7 @@ class ThreadItemView {
 
   String? get error => switch (state) {
     ThreadTextItemStateView(:final lifecycle) ||
-    ThreadThinkingItemStateView(:final lifecycle) ||
-    ThreadPlanItemStateView(:final lifecycle) => lifecycle.failure,
+    ThreadThinkingItemStateView(:final lifecycle) => lifecycle.failure,
     ThreadToolItemStateView(:final lifecycle) => switch (lifecycle) {
       FailedThreadToolView(:final failure) => failure.message,
       _ => null,
@@ -621,7 +600,6 @@ class ThreadItemView {
 
   String get text => switch (state) {
     ThreadTextItemStateView(:final text) => text,
-    ThreadPlanItemStateView(:final content) => content,
     ThreadAgentItemStateView(:final lifecycle) => switch (lifecycle) {
       SucceededThreadAgentView(:final summary) => summary,
       DeniedThreadAgentView(:final reason) ||
@@ -767,17 +745,6 @@ class ThreadItemView {
         ThreadThinkingItemStateView(
           summary: summary,
           content: _appendChunk(content, chunkIndex, delta),
-          lifecycle: const StreamingThreadContentView(),
-        ),
-      (
-        ThreadPlanItemStateView(
-          :final content,
-          lifecycle: StreamingThreadContentView(),
-        ),
-        ThreadPlanDeltaView(:final delta),
-      ) =>
-        ThreadPlanItemStateView(
-          content: '$content$delta',
           lifecycle: const StreamingThreadContentView(),
         ),
       (

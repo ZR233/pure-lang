@@ -14,7 +14,6 @@ use crate::{
     StudioLspStateSnapshot, StudioMcpStateSnapshot, StudioModelPerformanceSnapshot,
     StudioProductEventEnvelope, StudioProductEventKind, StudioProjectDirectoryData,
     StudioProjectDirectoryState, StudioRecoveryStateSnapshot, StudioSettingsStateSnapshot,
-    StudioTaskDirectoryData, StudioTaskDirectoryEntry, StudioTaskDirectoryState,
     StudioThreadDirectoryData, StudioThreadDirectoryDelta, StudioThreadDirectoryPage,
     StudioThreadDirectoryPageData, StudioThreadDirectoryState, StudioUpdateStateSnapshot,
 };
@@ -30,7 +29,7 @@ const THREAD_DIRECTORY_PAGE_LIMIT: usize = 100;
 
 /// Studio 低频产品状态 owner 与事件通道。
 ///
-/// 启动时以 SQLite 建立 Project 小集合基线；运行期间 Project、Thread、Task 与
+/// 启动时以 SQLite 建立 Project 小集合基线；运行期间 Project、Thread 与
 /// Agent 目录快照都由内存增量提交维护。所有 `read_*` 都是纯查询，活动事件不得
 /// 回读数据库覆盖热事实。Thread 目录是"活动热集合 + SQLite 冷分页 overlay"：
 /// `thread_index` 只保存仍有内存事实的 Thread，旧数据分页回源 SQLite。
@@ -41,11 +40,10 @@ pub struct ProductEventBus {
     tx: broadcast::Sender<StudioProductEventEnvelope>,
     sequence: Arc<AtomicU64>,
     revisions: Arc<ProductStateRevisions>,
-    task_snapshot: Arc<Mutex<Option<Vec<StudioTaskDirectoryEntry>>>>,
     project_snapshot: Arc<Mutex<Vec<crate::ProjectRecord>>>,
     persistence_snapshot: Arc<std::sync::Mutex<PersistenceStateSnapshot>>,
     agents: Arc<Mutex<BTreeMap<String, StudioAgentDirectoryEntry>>>,
-    /// 活动热集合（thread id → 列表元数据）：驻留/钉住/活动 Task root 与
+    /// 活动热集合（thread id → 列表元数据）：驻留、钉住或
     /// 目录 delta 尚未耐久化的 Thread；不含纯冷数据。
     thread_index: Arc<std::sync::Mutex<HashMap<String, Thread>>>,
 }
@@ -54,7 +52,6 @@ pub struct ProductEventBus {
 struct ProductStateRevisions {
     project: DomainRevision,
     thread: DomainRevision,
-    task: DomainRevision,
     agent: DomainRevision,
     recovery: DomainRevision,
 }
@@ -86,7 +83,6 @@ impl ProductEventBus {
             tx,
             sequence: Arc::new(AtomicU64::new(0)),
             revisions: Arc::new(ProductStateRevisions::default()),
-            task_snapshot: Arc::new(Mutex::new(None)),
             project_snapshot: Arc::new(Mutex::new(Vec::new())),
             persistence_snapshot: Arc::new(std::sync::Mutex::new(
                 PersistenceStateSnapshot::default(),
@@ -118,15 +114,13 @@ impl ProductEventBus {
 
     /// 启动命令显式建立目录初始 revision 与 Project 小集合；普通 read 不改变 revision。
     ///
-    /// Thread 目录不做启动全量装载：活动热集合由钉住集合恢复、活动 Task root
-    /// 与运行期目录 delta 构成，旧数据在分页查询时回源 SQLite。
+    /// Thread 目录不做启动全量装载：活动热集合由钉住集合和运行期目录 delta
+    /// 构成，旧数据在分页查询时回源 SQLite。
     pub async fn initialize_directories(&self) -> Result<()> {
         self.initialize_revision(&self.revisions.project);
         self.initialize_revision(&self.revisions.thread);
-        self.initialize_revision(&self.revisions.task);
         self.initialize_revision(&self.revisions.agent);
         self.initialize_revision(&self.revisions.recovery);
-        self.task_snapshot.lock().await.get_or_insert_default();
         let durable_projects = self.store.list_projects().await?;
         let mut projects = self.project_snapshot.lock().await;
         for project in durable_projects {
@@ -348,20 +342,6 @@ impl ProductEventBus {
             .collect()
     }
 
-    pub async fn read_task_directory(&self) -> Result<StudioTaskDirectoryState> {
-        let tasks = self.task_snapshot.lock().await.clone().unwrap_or_default();
-        Ok(StudioTaskDirectoryState {
-            state: self.resource(&self.revisions.task, StudioTaskDirectoryData { tasks }),
-        })
-    }
-
-    pub(in crate::studio) async fn initialize_task_directory(
-        &self,
-        tasks: Vec<StudioTaskDirectoryEntry>,
-    ) {
-        *self.task_snapshot.lock().await = Some(tasks);
-    }
-
     pub async fn read_agent_directory(&self) -> StudioAgentDirectoryState {
         StudioAgentDirectoryState {
             state: self.resource(
@@ -433,60 +413,6 @@ impl ProductEventBus {
         self.agents.lock().await.insert(agent.id.clone(), agent);
         self.bump(&self.revisions.agent);
         self.emit_agent_directory(self.read_agent_directory().await)
-    }
-
-    /// 应用 TaskRuntime 已经提交的完整热投影。
-    pub async fn apply_task_entry(
-        &self,
-        entry: StudioTaskDirectoryEntry,
-    ) -> Option<StudioProductEventEnvelope> {
-        let mut previous = self.task_snapshot.lock().await;
-        let tasks = previous.get_or_insert_default();
-        if tasks
-            .iter()
-            .find(|task| task.root_thread_id == entry.root_thread_id)
-            == Some(&entry)
-        {
-            return None;
-        }
-        if let Some(existing) = tasks
-            .iter_mut()
-            .find(|task| task.root_thread_id == entry.root_thread_id)
-        {
-            *existing = entry;
-        } else {
-            tasks.push(entry);
-        }
-        tasks.sort_by(|left, right| left.root_thread_id.cmp(&right.root_thread_id));
-        let tasks = tasks.clone();
-        drop(previous);
-        self.bump(&self.revisions.task);
-        Some(self.emit(StudioProductEventKind::TaskDirectoryChanged(
-            StudioTaskDirectoryState {
-                state: self.resource(&self.revisions.task, StudioTaskDirectoryData { tasks }),
-            },
-        )))
-    }
-
-    pub async fn remove_task_entry(
-        &self,
-        root_thread_id: &str,
-    ) -> Result<Option<StudioProductEventEnvelope>> {
-        let mut previous = self.task_snapshot.lock().await;
-        let tasks = previous.get_or_insert_default();
-        let length = tasks.len();
-        tasks.retain(|task| task.root_thread_id != root_thread_id);
-        if tasks.len() == length {
-            return Ok(None);
-        }
-        let tasks = tasks.clone();
-        drop(previous);
-        self.bump(&self.revisions.task);
-        Ok(Some(self.emit(
-            StudioProductEventKind::TaskDirectoryChanged(StudioTaskDirectoryState {
-                state: self.resource(&self.revisions.task, StudioTaskDirectoryData { tasks }),
-            }),
-        )))
     }
 
     pub fn emit_settings_state(
@@ -626,7 +552,7 @@ mod tests {
                 .create_thread(
                     project_id,
                     &format!("Session {index}"),
-                    crate::StudioMode::Simple,
+                    crate::StudioMode::simple(),
                 )
                 .await
                 .expect("thread");

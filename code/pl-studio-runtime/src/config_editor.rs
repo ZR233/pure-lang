@@ -285,6 +285,7 @@ impl ProviderSettingsEdit {
         let mut config = StudioConfig {
             schema_version: STUDIO_CONFIG_SCHEMA_VERSION,
             models: AgentModelConfig { providers, routes },
+            disabled_system_agents: current.disabled_system_agents.clone(),
             web_search: current.web_search.clone(),
             runtime: current.runtime.clone(),
             instructions: current.instructions.clone(),

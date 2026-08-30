@@ -290,6 +290,7 @@ impl FirstRunConfigDraft {
                     .map(|role| (role.id(), route.clone()))
                     .collect(),
             },
+            disabled_system_agents: Default::default(),
             web_search: Default::default(),
             runtime: Default::default(),
             instructions: Default::default(),

@@ -4,7 +4,7 @@ use crate::api::studio::bridge_runtime::BridgeRuntime;
 use crate::api::studio::convert::runtime::{
     bridge_agent_directory, bridge_lsp_state, bridge_mcp_state, bridge_model_performance,
     bridge_persistence_state, bridge_project_directory, bridge_provider_usage_state,
-    bridge_recovery_state, bridge_settings_state, bridge_skills_state, bridge_task_directory,
+    bridge_recovery_state, bridge_settings_state, bridge_skills_state,
     bridge_thread_directory_page, bridge_update_state, runtime_snapshot,
 };
 use crate::api::studio::types::*;
@@ -19,7 +19,6 @@ pub(super) async fn read_studio_state_inner(
         runtime: runtime_snapshot(state.runtime),
         project_directory: bridge_project_directory(state.project_directory.state),
         thread_directory: bridge_thread_directory_page(state.thread_directory.state),
-        task_directory: bridge_task_directory(state.task_directory.state),
         agent_directory: bridge_agent_directory(state.agent_directory.state),
         settings: bridge_settings_state(state.settings.state),
         recovery: bridge_recovery_state(state.recovery.state),

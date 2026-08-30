@@ -56,13 +56,12 @@ extension BridgeInteractionContentPatterns on BridgeInteractionContent {
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeInteractionContent_UserInput value)?  userInput,TResult Function( BridgeInteractionContent_ToolApproval value)?  toolApproval,TResult Function( BridgeInteractionContent_PlanConfirmation value)?  planConfirmation,required TResult orElse(),}){
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeInteractionContent_UserInput value)?  userInput,TResult Function( BridgeInteractionContent_ToolApproval value)?  toolApproval,required TResult orElse(),}){
 final _that = this;
 switch (_that) {
 case BridgeInteractionContent_UserInput() when userInput != null:
 return userInput(_that);case BridgeInteractionContent_ToolApproval() when toolApproval != null:
-return toolApproval(_that);case BridgeInteractionContent_PlanConfirmation() when planConfirmation != null:
-return planConfirmation(_that);case _:
+return toolApproval(_that);case _:
   return orElse();
 
 }
@@ -80,13 +79,12 @@ return planConfirmation(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeInteractionContent_UserInput value)  userInput,required TResult Function( BridgeInteractionContent_ToolApproval value)  toolApproval,required TResult Function( BridgeInteractionContent_PlanConfirmation value)  planConfirmation,}){
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeInteractionContent_UserInput value)  userInput,required TResult Function( BridgeInteractionContent_ToolApproval value)  toolApproval,}){
 final _that = this;
 switch (_that) {
 case BridgeInteractionContent_UserInput():
 return userInput(_that);case BridgeInteractionContent_ToolApproval():
-return toolApproval(_that);case BridgeInteractionContent_PlanConfirmation():
-return planConfirmation(_that);}
+return toolApproval(_that);}
 }
 /// A variant of `map` that fallback to returning `null`.
 ///
@@ -100,13 +98,12 @@ return planConfirmation(_that);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeInteractionContent_UserInput value)?  userInput,TResult? Function( BridgeInteractionContent_ToolApproval value)?  toolApproval,TResult? Function( BridgeInteractionContent_PlanConfirmation value)?  planConfirmation,}){
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeInteractionContent_UserInput value)?  userInput,TResult? Function( BridgeInteractionContent_ToolApproval value)?  toolApproval,}){
 final _that = this;
 switch (_that) {
 case BridgeInteractionContent_UserInput() when userInput != null:
 return userInput(_that);case BridgeInteractionContent_ToolApproval() when toolApproval != null:
-return toolApproval(_that);case BridgeInteractionContent_PlanConfirmation() when planConfirmation != null:
-return planConfirmation(_that);case _:
+return toolApproval(_that);case _:
   return null;
 
 }
@@ -123,12 +120,11 @@ return planConfirmation(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( List<BridgeUserQuestion> questions,  BridgeUserInputInteractionState state)?  userInput,TResult Function( String name,  String argumentsJson,  String? workingDirectory,  String? parentAgentId,  BridgeToolApprovalInteractionState state)?  toolApproval,TResult Function( String planId,  String content,  BridgePlanConfirmationInteractionState state)?  planConfirmation,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( List<BridgeUserQuestion> questions,  BridgeUserInputInteractionState state)?  userInput,TResult Function( String name,  String argumentsJson,  String? workingDirectory,  String? parentAgentId,  BridgeToolApprovalInteractionState state)?  toolApproval,required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case BridgeInteractionContent_UserInput() when userInput != null:
 return userInput(_that.questions,_that.state);case BridgeInteractionContent_ToolApproval() when toolApproval != null:
-return toolApproval(_that.name,_that.argumentsJson,_that.workingDirectory,_that.parentAgentId,_that.state);case BridgeInteractionContent_PlanConfirmation() when planConfirmation != null:
-return planConfirmation(_that.planId,_that.content,_that.state);case _:
+return toolApproval(_that.name,_that.argumentsJson,_that.workingDirectory,_that.parentAgentId,_that.state);case _:
   return orElse();
 
 }
@@ -146,12 +142,11 @@ return planConfirmation(_that.planId,_that.content,_that.state);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( List<BridgeUserQuestion> questions,  BridgeUserInputInteractionState state)  userInput,required TResult Function( String name,  String argumentsJson,  String? workingDirectory,  String? parentAgentId,  BridgeToolApprovalInteractionState state)  toolApproval,required TResult Function( String planId,  String content,  BridgePlanConfirmationInteractionState state)  planConfirmation,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( List<BridgeUserQuestion> questions,  BridgeUserInputInteractionState state)  userInput,required TResult Function( String name,  String argumentsJson,  String? workingDirectory,  String? parentAgentId,  BridgeToolApprovalInteractionState state)  toolApproval,}) {final _that = this;
 switch (_that) {
 case BridgeInteractionContent_UserInput():
 return userInput(_that.questions,_that.state);case BridgeInteractionContent_ToolApproval():
-return toolApproval(_that.name,_that.argumentsJson,_that.workingDirectory,_that.parentAgentId,_that.state);case BridgeInteractionContent_PlanConfirmation():
-return planConfirmation(_that.planId,_that.content,_that.state);}
+return toolApproval(_that.name,_that.argumentsJson,_that.workingDirectory,_that.parentAgentId,_that.state);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -165,12 +160,11 @@ return planConfirmation(_that.planId,_that.content,_that.state);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( List<BridgeUserQuestion> questions,  BridgeUserInputInteractionState state)?  userInput,TResult? Function( String name,  String argumentsJson,  String? workingDirectory,  String? parentAgentId,  BridgeToolApprovalInteractionState state)?  toolApproval,TResult? Function( String planId,  String content,  BridgePlanConfirmationInteractionState state)?  planConfirmation,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( List<BridgeUserQuestion> questions,  BridgeUserInputInteractionState state)?  userInput,TResult? Function( String name,  String argumentsJson,  String? workingDirectory,  String? parentAgentId,  BridgeToolApprovalInteractionState state)?  toolApproval,}) {final _that = this;
 switch (_that) {
 case BridgeInteractionContent_UserInput() when userInput != null:
 return userInput(_that.questions,_that.state);case BridgeInteractionContent_ToolApproval() when toolApproval != null:
-return toolApproval(_that.name,_that.argumentsJson,_that.workingDirectory,_that.parentAgentId,_that.state);case BridgeInteractionContent_PlanConfirmation() when planConfirmation != null:
-return planConfirmation(_that.planId,_that.content,_that.state);case _:
+return toolApproval(_that.name,_that.argumentsJson,_that.workingDirectory,_that.parentAgentId,_that.state);case _:
   return null;
 
 }
@@ -345,85 +339,6 @@ $BridgeToolApprovalInteractionStateCopyWith<$Res> get state {
 }
 
 /// @nodoc
-
-
-class BridgeInteractionContent_PlanConfirmation extends BridgeInteractionContent {
-  const BridgeInteractionContent_PlanConfirmation({required this.planId, required this.content, required this.state}): super._();
-
-
- final  String planId;
- final  String content;
-@override final  BridgePlanConfirmationInteractionState state;
-
-/// Create a copy of BridgeInteractionContent
-/// with the given fields replaced by the non-null parameter values.
-@JsonKey(includeFromJson: false, includeToJson: false)
-@pragma('vm:prefer-inline')
-$BridgeInteractionContent_PlanConfirmationCopyWith<BridgeInteractionContent_PlanConfirmation> get copyWith => _$BridgeInteractionContent_PlanConfirmationCopyWithImpl<BridgeInteractionContent_PlanConfirmation>(this, _$identity);
-
-
-
-@override
-bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeInteractionContent_PlanConfirmation&&(identical(other.planId, planId) || other.planId == planId)&&(identical(other.content, content) || other.content == content)&&(identical(other.state, state) || other.state == state));
-}
-
-
-@override
-int get hashCode => Object.hash(runtimeType,planId,content,state);
-
-@override
-String toString() {
-  return 'BridgeInteractionContent.planConfirmation(planId: $planId, content: $content, state: $state)';
-}
-
-
-}
-
-/// @nodoc
-abstract mixin class $BridgeInteractionContent_PlanConfirmationCopyWith<$Res> implements $BridgeInteractionContentCopyWith<$Res> {
-  factory $BridgeInteractionContent_PlanConfirmationCopyWith(BridgeInteractionContent_PlanConfirmation value, $Res Function(BridgeInteractionContent_PlanConfirmation) _then) = _$BridgeInteractionContent_PlanConfirmationCopyWithImpl;
-@useResult
-$Res call({
- String planId, String content, BridgePlanConfirmationInteractionState state
-});
-
-
-$BridgePlanConfirmationInteractionStateCopyWith<$Res> get state;
-
-}
-/// @nodoc
-class _$BridgeInteractionContent_PlanConfirmationCopyWithImpl<$Res>
-    implements $BridgeInteractionContent_PlanConfirmationCopyWith<$Res> {
-  _$BridgeInteractionContent_PlanConfirmationCopyWithImpl(this._self, this._then);
-
-  final BridgeInteractionContent_PlanConfirmation _self;
-  final $Res Function(BridgeInteractionContent_PlanConfirmation) _then;
-
-/// Create a copy of BridgeInteractionContent
-/// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') $Res call({Object? planId = null,Object? content = null,Object? state = null,}) {
-  return _then(BridgeInteractionContent_PlanConfirmation(
-planId: null == planId ? _self.planId : planId // ignore: cast_nullable_to_non_nullable
-as String,content: null == content ? _self.content : content // ignore: cast_nullable_to_non_nullable
-as String,state: null == state ? _self.state : state // ignore: cast_nullable_to_non_nullable
-as BridgePlanConfirmationInteractionState,
-  ));
-}
-
-/// Create a copy of BridgeInteractionContent
-/// with the given fields replaced by the non-null parameter values.
-@override
-@pragma('vm:prefer-inline')
-$BridgePlanConfirmationInteractionStateCopyWith<$Res> get state {
-
-  return $BridgePlanConfirmationInteractionStateCopyWith<$Res>(_self.state, (value) {
-    return _then(_self.copyWith(state: value));
-  });
-}
-}
-
-/// @nodoc
 mixin _$BridgeInteractionResolution {
 
 
@@ -467,13 +382,12 @@ extension BridgeInteractionResolutionPatterns on BridgeInteractionResolution {
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeInteractionResolution_UserInput value)?  userInput,TResult Function( BridgeInteractionResolution_ToolApproval value)?  toolApproval,TResult Function( BridgeInteractionResolution_PlanConfirmation value)?  planConfirmation,required TResult orElse(),}){
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeInteractionResolution_UserInput value)?  userInput,TResult Function( BridgeInteractionResolution_ToolApproval value)?  toolApproval,required TResult orElse(),}){
 final _that = this;
 switch (_that) {
 case BridgeInteractionResolution_UserInput() when userInput != null:
 return userInput(_that);case BridgeInteractionResolution_ToolApproval() when toolApproval != null:
-return toolApproval(_that);case BridgeInteractionResolution_PlanConfirmation() when planConfirmation != null:
-return planConfirmation(_that);case _:
+return toolApproval(_that);case _:
   return orElse();
 
 }
@@ -491,13 +405,12 @@ return planConfirmation(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeInteractionResolution_UserInput value)  userInput,required TResult Function( BridgeInteractionResolution_ToolApproval value)  toolApproval,required TResult Function( BridgeInteractionResolution_PlanConfirmation value)  planConfirmation,}){
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeInteractionResolution_UserInput value)  userInput,required TResult Function( BridgeInteractionResolution_ToolApproval value)  toolApproval,}){
 final _that = this;
 switch (_that) {
 case BridgeInteractionResolution_UserInput():
 return userInput(_that);case BridgeInteractionResolution_ToolApproval():
-return toolApproval(_that);case BridgeInteractionResolution_PlanConfirmation():
-return planConfirmation(_that);}
+return toolApproval(_that);}
 }
 /// A variant of `map` that fallback to returning `null`.
 ///
@@ -511,13 +424,12 @@ return planConfirmation(_that);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeInteractionResolution_UserInput value)?  userInput,TResult? Function( BridgeInteractionResolution_ToolApproval value)?  toolApproval,TResult? Function( BridgeInteractionResolution_PlanConfirmation value)?  planConfirmation,}){
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeInteractionResolution_UserInput value)?  userInput,TResult? Function( BridgeInteractionResolution_ToolApproval value)?  toolApproval,}){
 final _that = this;
 switch (_that) {
 case BridgeInteractionResolution_UserInput() when userInput != null:
 return userInput(_that);case BridgeInteractionResolution_ToolApproval() when toolApproval != null:
-return toolApproval(_that);case BridgeInteractionResolution_PlanConfirmation() when planConfirmation != null:
-return planConfirmation(_that);case _:
+return toolApproval(_that);case _:
   return null;
 
 }
@@ -534,12 +446,11 @@ return planConfirmation(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( List<BridgeUserInputAnswer> answers)?  userInput,TResult Function( BridgeToolApprovalResolution decision,  String? reason)?  toolApproval,TResult Function( BridgePlanConfirmationResolution decision,  String? content,  String? reason)?  planConfirmation,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( List<BridgeUserInputAnswer> answers)?  userInput,TResult Function( BridgeToolApprovalResolution decision,  String? reason)?  toolApproval,required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case BridgeInteractionResolution_UserInput() when userInput != null:
 return userInput(_that.answers);case BridgeInteractionResolution_ToolApproval() when toolApproval != null:
-return toolApproval(_that.decision,_that.reason);case BridgeInteractionResolution_PlanConfirmation() when planConfirmation != null:
-return planConfirmation(_that.decision,_that.content,_that.reason);case _:
+return toolApproval(_that.decision,_that.reason);case _:
   return orElse();
 
 }
@@ -557,12 +468,11 @@ return planConfirmation(_that.decision,_that.content,_that.reason);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( List<BridgeUserInputAnswer> answers)  userInput,required TResult Function( BridgeToolApprovalResolution decision,  String? reason)  toolApproval,required TResult Function( BridgePlanConfirmationResolution decision,  String? content,  String? reason)  planConfirmation,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( List<BridgeUserInputAnswer> answers)  userInput,required TResult Function( BridgeToolApprovalResolution decision,  String? reason)  toolApproval,}) {final _that = this;
 switch (_that) {
 case BridgeInteractionResolution_UserInput():
 return userInput(_that.answers);case BridgeInteractionResolution_ToolApproval():
-return toolApproval(_that.decision,_that.reason);case BridgeInteractionResolution_PlanConfirmation():
-return planConfirmation(_that.decision,_that.content,_that.reason);}
+return toolApproval(_that.decision,_that.reason);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -576,12 +486,11 @@ return planConfirmation(_that.decision,_that.content,_that.reason);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( List<BridgeUserInputAnswer> answers)?  userInput,TResult? Function( BridgeToolApprovalResolution decision,  String? reason)?  toolApproval,TResult? Function( BridgePlanConfirmationResolution decision,  String? content,  String? reason)?  planConfirmation,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( List<BridgeUserInputAnswer> answers)?  userInput,TResult? Function( BridgeToolApprovalResolution decision,  String? reason)?  toolApproval,}) {final _that = this;
 switch (_that) {
 case BridgeInteractionResolution_UserInput() when userInput != null:
 return userInput(_that.answers);case BridgeInteractionResolution_ToolApproval() when toolApproval != null:
-return toolApproval(_that.decision,_that.reason);case BridgeInteractionResolution_PlanConfirmation() when planConfirmation != null:
-return planConfirmation(_that.decision,_that.content,_that.reason);case _:
+return toolApproval(_that.decision,_that.reason);case _:
   return null;
 
 }
@@ -723,557 +632,6 @@ class _$BridgeInteractionResolution_ToolApprovalCopyWithImpl<$Res>
 decision: null == decision ? _self.decision : decision // ignore: cast_nullable_to_non_nullable
 as BridgeToolApprovalResolution,reason: freezed == reason ? _self.reason : reason // ignore: cast_nullable_to_non_nullable
 as String?,
-  ));
-}
-
-
-}
-
-/// @nodoc
-
-
-class BridgeInteractionResolution_PlanConfirmation extends BridgeInteractionResolution {
-  const BridgeInteractionResolution_PlanConfirmation({required this.decision, this.content, this.reason}): super._();
-
-
- final  BridgePlanConfirmationResolution decision;
- final  String? content;
- final  String? reason;
-
-/// Create a copy of BridgeInteractionResolution
-/// with the given fields replaced by the non-null parameter values.
-@JsonKey(includeFromJson: false, includeToJson: false)
-@pragma('vm:prefer-inline')
-$BridgeInteractionResolution_PlanConfirmationCopyWith<BridgeInteractionResolution_PlanConfirmation> get copyWith => _$BridgeInteractionResolution_PlanConfirmationCopyWithImpl<BridgeInteractionResolution_PlanConfirmation>(this, _$identity);
-
-
-
-@override
-bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeInteractionResolution_PlanConfirmation&&(identical(other.decision, decision) || other.decision == decision)&&(identical(other.content, content) || other.content == content)&&(identical(other.reason, reason) || other.reason == reason));
-}
-
-
-@override
-int get hashCode => Object.hash(runtimeType,decision,content,reason);
-
-@override
-String toString() {
-  return 'BridgeInteractionResolution.planConfirmation(decision: $decision, content: $content, reason: $reason)';
-}
-
-
-}
-
-/// @nodoc
-abstract mixin class $BridgeInteractionResolution_PlanConfirmationCopyWith<$Res> implements $BridgeInteractionResolutionCopyWith<$Res> {
-  factory $BridgeInteractionResolution_PlanConfirmationCopyWith(BridgeInteractionResolution_PlanConfirmation value, $Res Function(BridgeInteractionResolution_PlanConfirmation) _then) = _$BridgeInteractionResolution_PlanConfirmationCopyWithImpl;
-@useResult
-$Res call({
- BridgePlanConfirmationResolution decision, String? content, String? reason
-});
-
-
-
-
-}
-/// @nodoc
-class _$BridgeInteractionResolution_PlanConfirmationCopyWithImpl<$Res>
-    implements $BridgeInteractionResolution_PlanConfirmationCopyWith<$Res> {
-  _$BridgeInteractionResolution_PlanConfirmationCopyWithImpl(this._self, this._then);
-
-  final BridgeInteractionResolution_PlanConfirmation _self;
-  final $Res Function(BridgeInteractionResolution_PlanConfirmation) _then;
-
-/// Create a copy of BridgeInteractionResolution
-/// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') $Res call({Object? decision = null,Object? content = freezed,Object? reason = freezed,}) {
-  return _then(BridgeInteractionResolution_PlanConfirmation(
-decision: null == decision ? _self.decision : decision // ignore: cast_nullable_to_non_nullable
-as BridgePlanConfirmationResolution,content: freezed == content ? _self.content : content // ignore: cast_nullable_to_non_nullable
-as String?,reason: freezed == reason ? _self.reason : reason // ignore: cast_nullable_to_non_nullable
-as String?,
-  ));
-}
-
-
-}
-
-/// @nodoc
-mixin _$BridgePlanConfirmationInteractionState {
-
- String get operationId;
-/// Create a copy of BridgePlanConfirmationInteractionState
-/// with the given fields replaced by the non-null parameter values.
-@JsonKey(includeFromJson: false, includeToJson: false)
-@pragma('vm:prefer-inline')
-$BridgePlanConfirmationInteractionStateCopyWith<BridgePlanConfirmationInteractionState> get copyWith => _$BridgePlanConfirmationInteractionStateCopyWithImpl<BridgePlanConfirmationInteractionState>(this as BridgePlanConfirmationInteractionState, _$identity);
-
-
-
-@override
-bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgePlanConfirmationInteractionState&&(identical(other.operationId, operationId) || other.operationId == operationId));
-}
-
-
-@override
-int get hashCode => Object.hash(runtimeType,operationId);
-
-@override
-String toString() {
-  return 'BridgePlanConfirmationInteractionState(operationId: $operationId)';
-}
-
-
-}
-
-/// @nodoc
-abstract mixin class $BridgePlanConfirmationInteractionStateCopyWith<$Res>  {
-  factory $BridgePlanConfirmationInteractionStateCopyWith(BridgePlanConfirmationInteractionState value, $Res Function(BridgePlanConfirmationInteractionState) _then) = _$BridgePlanConfirmationInteractionStateCopyWithImpl;
-@useResult
-$Res call({
- String operationId
-});
-
-
-
-
-}
-/// @nodoc
-class _$BridgePlanConfirmationInteractionStateCopyWithImpl<$Res>
-    implements $BridgePlanConfirmationInteractionStateCopyWith<$Res> {
-  _$BridgePlanConfirmationInteractionStateCopyWithImpl(this._self, this._then);
-
-  final BridgePlanConfirmationInteractionState _self;
-  final $Res Function(BridgePlanConfirmationInteractionState) _then;
-
-/// Create a copy of BridgePlanConfirmationInteractionState
-/// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? operationId = null,}) {
-  return _then(_self.copyWith(
-operationId: null == operationId ? _self.operationId : operationId // ignore: cast_nullable_to_non_nullable
-as String,
-  ));
-}
-
-}
-
-
-/// Adds pattern-matching-related methods to [BridgePlanConfirmationInteractionState].
-extension BridgePlanConfirmationInteractionStatePatterns on BridgePlanConfirmationInteractionState {
-/// A variant of `map` that fallback to returning `orElse`.
-///
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case final Subclass value:
-///     return ...;
-///   case _:
-///     return orElse();
-/// }
-/// ```
-
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgePlanConfirmationInteractionState_Pending value)?  pending,TResult Function( BridgePlanConfirmationInteractionState_Resolved value)?  resolved,TResult Function( BridgePlanConfirmationInteractionState_Cancelled value)?  cancelled,TResult Function( BridgePlanConfirmationInteractionState_Expired value)?  expired,required TResult orElse(),}){
-final _that = this;
-switch (_that) {
-case BridgePlanConfirmationInteractionState_Pending() when pending != null:
-return pending(_that);case BridgePlanConfirmationInteractionState_Resolved() when resolved != null:
-return resolved(_that);case BridgePlanConfirmationInteractionState_Cancelled() when cancelled != null:
-return cancelled(_that);case BridgePlanConfirmationInteractionState_Expired() when expired != null:
-return expired(_that);case _:
-  return orElse();
-
-}
-}
-/// A `switch`-like method, using callbacks.
-///
-/// Callbacks receives the raw object, upcasted.
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case final Subclass value:
-///     return ...;
-///   case final Subclass2 value:
-///     return ...;
-/// }
-/// ```
-
-@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgePlanConfirmationInteractionState_Pending value)  pending,required TResult Function( BridgePlanConfirmationInteractionState_Resolved value)  resolved,required TResult Function( BridgePlanConfirmationInteractionState_Cancelled value)  cancelled,required TResult Function( BridgePlanConfirmationInteractionState_Expired value)  expired,}){
-final _that = this;
-switch (_that) {
-case BridgePlanConfirmationInteractionState_Pending():
-return pending(_that);case BridgePlanConfirmationInteractionState_Resolved():
-return resolved(_that);case BridgePlanConfirmationInteractionState_Cancelled():
-return cancelled(_that);case BridgePlanConfirmationInteractionState_Expired():
-return expired(_that);}
-}
-/// A variant of `map` that fallback to returning `null`.
-///
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case final Subclass value:
-///     return ...;
-///   case _:
-///     return null;
-/// }
-/// ```
-
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgePlanConfirmationInteractionState_Pending value)?  pending,TResult? Function( BridgePlanConfirmationInteractionState_Resolved value)?  resolved,TResult? Function( BridgePlanConfirmationInteractionState_Cancelled value)?  cancelled,TResult? Function( BridgePlanConfirmationInteractionState_Expired value)?  expired,}){
-final _that = this;
-switch (_that) {
-case BridgePlanConfirmationInteractionState_Pending() when pending != null:
-return pending(_that);case BridgePlanConfirmationInteractionState_Resolved() when resolved != null:
-return resolved(_that);case BridgePlanConfirmationInteractionState_Cancelled() when cancelled != null:
-return cancelled(_that);case BridgePlanConfirmationInteractionState_Expired() when expired != null:
-return expired(_that);case _:
-  return null;
-
-}
-}
-/// A variant of `when` that fallback to an `orElse` callback.
-///
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case Subclass(:final field):
-///     return ...;
-///   case _:
-///     return orElse();
-/// }
-/// ```
-
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( String operationId)?  pending,TResult Function( String operationId,  PlatformInt64 resolvedAt,  BridgePlanConfirmationResolution decision,  String? content,  String? reason)?  resolved,TResult Function( String operationId,  PlatformInt64 cancelledAt,  String reason)?  cancelled,TResult Function( String operationId,  PlatformInt64 expiredAt)?  expired,required TResult orElse(),}) {final _that = this;
-switch (_that) {
-case BridgePlanConfirmationInteractionState_Pending() when pending != null:
-return pending(_that.operationId);case BridgePlanConfirmationInteractionState_Resolved() when resolved != null:
-return resolved(_that.operationId,_that.resolvedAt,_that.decision,_that.content,_that.reason);case BridgePlanConfirmationInteractionState_Cancelled() when cancelled != null:
-return cancelled(_that.operationId,_that.cancelledAt,_that.reason);case BridgePlanConfirmationInteractionState_Expired() when expired != null:
-return expired(_that.operationId,_that.expiredAt);case _:
-  return orElse();
-
-}
-}
-/// A `switch`-like method, using callbacks.
-///
-/// As opposed to `map`, this offers destructuring.
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case Subclass(:final field):
-///     return ...;
-///   case Subclass2(:final field2):
-///     return ...;
-/// }
-/// ```
-
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( String operationId)  pending,required TResult Function( String operationId,  PlatformInt64 resolvedAt,  BridgePlanConfirmationResolution decision,  String? content,  String? reason)  resolved,required TResult Function( String operationId,  PlatformInt64 cancelledAt,  String reason)  cancelled,required TResult Function( String operationId,  PlatformInt64 expiredAt)  expired,}) {final _that = this;
-switch (_that) {
-case BridgePlanConfirmationInteractionState_Pending():
-return pending(_that.operationId);case BridgePlanConfirmationInteractionState_Resolved():
-return resolved(_that.operationId,_that.resolvedAt,_that.decision,_that.content,_that.reason);case BridgePlanConfirmationInteractionState_Cancelled():
-return cancelled(_that.operationId,_that.cancelledAt,_that.reason);case BridgePlanConfirmationInteractionState_Expired():
-return expired(_that.operationId,_that.expiredAt);}
-}
-/// A variant of `when` that fallback to returning `null`
-///
-/// It is equivalent to doing:
-/// ```dart
-/// switch (sealedClass) {
-///   case Subclass(:final field):
-///     return ...;
-///   case _:
-///     return null;
-/// }
-/// ```
-
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( String operationId)?  pending,TResult? Function( String operationId,  PlatformInt64 resolvedAt,  BridgePlanConfirmationResolution decision,  String? content,  String? reason)?  resolved,TResult? Function( String operationId,  PlatformInt64 cancelledAt,  String reason)?  cancelled,TResult? Function( String operationId,  PlatformInt64 expiredAt)?  expired,}) {final _that = this;
-switch (_that) {
-case BridgePlanConfirmationInteractionState_Pending() when pending != null:
-return pending(_that.operationId);case BridgePlanConfirmationInteractionState_Resolved() when resolved != null:
-return resolved(_that.operationId,_that.resolvedAt,_that.decision,_that.content,_that.reason);case BridgePlanConfirmationInteractionState_Cancelled() when cancelled != null:
-return cancelled(_that.operationId,_that.cancelledAt,_that.reason);case BridgePlanConfirmationInteractionState_Expired() when expired != null:
-return expired(_that.operationId,_that.expiredAt);case _:
-  return null;
-
-}
-}
-
-}
-
-/// @nodoc
-
-
-class BridgePlanConfirmationInteractionState_Pending extends BridgePlanConfirmationInteractionState {
-  const BridgePlanConfirmationInteractionState_Pending({required this.operationId}): super._();
-
-
-@override final  String operationId;
-
-/// Create a copy of BridgePlanConfirmationInteractionState
-/// with the given fields replaced by the non-null parameter values.
-@override @JsonKey(includeFromJson: false, includeToJson: false)
-@pragma('vm:prefer-inline')
-$BridgePlanConfirmationInteractionState_PendingCopyWith<BridgePlanConfirmationInteractionState_Pending> get copyWith => _$BridgePlanConfirmationInteractionState_PendingCopyWithImpl<BridgePlanConfirmationInteractionState_Pending>(this, _$identity);
-
-
-
-@override
-bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgePlanConfirmationInteractionState_Pending&&(identical(other.operationId, operationId) || other.operationId == operationId));
-}
-
-
-@override
-int get hashCode => Object.hash(runtimeType,operationId);
-
-@override
-String toString() {
-  return 'BridgePlanConfirmationInteractionState.pending(operationId: $operationId)';
-}
-
-
-}
-
-/// @nodoc
-abstract mixin class $BridgePlanConfirmationInteractionState_PendingCopyWith<$Res> implements $BridgePlanConfirmationInteractionStateCopyWith<$Res> {
-  factory $BridgePlanConfirmationInteractionState_PendingCopyWith(BridgePlanConfirmationInteractionState_Pending value, $Res Function(BridgePlanConfirmationInteractionState_Pending) _then) = _$BridgePlanConfirmationInteractionState_PendingCopyWithImpl;
-@override @useResult
-$Res call({
- String operationId
-});
-
-
-
-
-}
-/// @nodoc
-class _$BridgePlanConfirmationInteractionState_PendingCopyWithImpl<$Res>
-    implements $BridgePlanConfirmationInteractionState_PendingCopyWith<$Res> {
-  _$BridgePlanConfirmationInteractionState_PendingCopyWithImpl(this._self, this._then);
-
-  final BridgePlanConfirmationInteractionState_Pending _self;
-  final $Res Function(BridgePlanConfirmationInteractionState_Pending) _then;
-
-/// Create a copy of BridgePlanConfirmationInteractionState
-/// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? operationId = null,}) {
-  return _then(BridgePlanConfirmationInteractionState_Pending(
-operationId: null == operationId ? _self.operationId : operationId // ignore: cast_nullable_to_non_nullable
-as String,
-  ));
-}
-
-
-}
-
-/// @nodoc
-
-
-class BridgePlanConfirmationInteractionState_Resolved extends BridgePlanConfirmationInteractionState {
-  const BridgePlanConfirmationInteractionState_Resolved({required this.operationId, required this.resolvedAt, required this.decision, this.content, this.reason}): super._();
-
-
-@override final  String operationId;
- final  PlatformInt64 resolvedAt;
- final  BridgePlanConfirmationResolution decision;
- final  String? content;
- final  String? reason;
-
-/// Create a copy of BridgePlanConfirmationInteractionState
-/// with the given fields replaced by the non-null parameter values.
-@override @JsonKey(includeFromJson: false, includeToJson: false)
-@pragma('vm:prefer-inline')
-$BridgePlanConfirmationInteractionState_ResolvedCopyWith<BridgePlanConfirmationInteractionState_Resolved> get copyWith => _$BridgePlanConfirmationInteractionState_ResolvedCopyWithImpl<BridgePlanConfirmationInteractionState_Resolved>(this, _$identity);
-
-
-
-@override
-bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgePlanConfirmationInteractionState_Resolved&&(identical(other.operationId, operationId) || other.operationId == operationId)&&(identical(other.resolvedAt, resolvedAt) || other.resolvedAt == resolvedAt)&&(identical(other.decision, decision) || other.decision == decision)&&(identical(other.content, content) || other.content == content)&&(identical(other.reason, reason) || other.reason == reason));
-}
-
-
-@override
-int get hashCode => Object.hash(runtimeType,operationId,resolvedAt,decision,content,reason);
-
-@override
-String toString() {
-  return 'BridgePlanConfirmationInteractionState.resolved(operationId: $operationId, resolvedAt: $resolvedAt, decision: $decision, content: $content, reason: $reason)';
-}
-
-
-}
-
-/// @nodoc
-abstract mixin class $BridgePlanConfirmationInteractionState_ResolvedCopyWith<$Res> implements $BridgePlanConfirmationInteractionStateCopyWith<$Res> {
-  factory $BridgePlanConfirmationInteractionState_ResolvedCopyWith(BridgePlanConfirmationInteractionState_Resolved value, $Res Function(BridgePlanConfirmationInteractionState_Resolved) _then) = _$BridgePlanConfirmationInteractionState_ResolvedCopyWithImpl;
-@override @useResult
-$Res call({
- String operationId, PlatformInt64 resolvedAt, BridgePlanConfirmationResolution decision, String? content, String? reason
-});
-
-
-
-
-}
-/// @nodoc
-class _$BridgePlanConfirmationInteractionState_ResolvedCopyWithImpl<$Res>
-    implements $BridgePlanConfirmationInteractionState_ResolvedCopyWith<$Res> {
-  _$BridgePlanConfirmationInteractionState_ResolvedCopyWithImpl(this._self, this._then);
-
-  final BridgePlanConfirmationInteractionState_Resolved _self;
-  final $Res Function(BridgePlanConfirmationInteractionState_Resolved) _then;
-
-/// Create a copy of BridgePlanConfirmationInteractionState
-/// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? operationId = null,Object? resolvedAt = null,Object? decision = null,Object? content = freezed,Object? reason = freezed,}) {
-  return _then(BridgePlanConfirmationInteractionState_Resolved(
-operationId: null == operationId ? _self.operationId : operationId // ignore: cast_nullable_to_non_nullable
-as String,resolvedAt: null == resolvedAt ? _self.resolvedAt : resolvedAt // ignore: cast_nullable_to_non_nullable
-as PlatformInt64,decision: null == decision ? _self.decision : decision // ignore: cast_nullable_to_non_nullable
-as BridgePlanConfirmationResolution,content: freezed == content ? _self.content : content // ignore: cast_nullable_to_non_nullable
-as String?,reason: freezed == reason ? _self.reason : reason // ignore: cast_nullable_to_non_nullable
-as String?,
-  ));
-}
-
-
-}
-
-/// @nodoc
-
-
-class BridgePlanConfirmationInteractionState_Cancelled extends BridgePlanConfirmationInteractionState {
-  const BridgePlanConfirmationInteractionState_Cancelled({required this.operationId, required this.cancelledAt, required this.reason}): super._();
-
-
-@override final  String operationId;
- final  PlatformInt64 cancelledAt;
- final  String reason;
-
-/// Create a copy of BridgePlanConfirmationInteractionState
-/// with the given fields replaced by the non-null parameter values.
-@override @JsonKey(includeFromJson: false, includeToJson: false)
-@pragma('vm:prefer-inline')
-$BridgePlanConfirmationInteractionState_CancelledCopyWith<BridgePlanConfirmationInteractionState_Cancelled> get copyWith => _$BridgePlanConfirmationInteractionState_CancelledCopyWithImpl<BridgePlanConfirmationInteractionState_Cancelled>(this, _$identity);
-
-
-
-@override
-bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgePlanConfirmationInteractionState_Cancelled&&(identical(other.operationId, operationId) || other.operationId == operationId)&&(identical(other.cancelledAt, cancelledAt) || other.cancelledAt == cancelledAt)&&(identical(other.reason, reason) || other.reason == reason));
-}
-
-
-@override
-int get hashCode => Object.hash(runtimeType,operationId,cancelledAt,reason);
-
-@override
-String toString() {
-  return 'BridgePlanConfirmationInteractionState.cancelled(operationId: $operationId, cancelledAt: $cancelledAt, reason: $reason)';
-}
-
-
-}
-
-/// @nodoc
-abstract mixin class $BridgePlanConfirmationInteractionState_CancelledCopyWith<$Res> implements $BridgePlanConfirmationInteractionStateCopyWith<$Res> {
-  factory $BridgePlanConfirmationInteractionState_CancelledCopyWith(BridgePlanConfirmationInteractionState_Cancelled value, $Res Function(BridgePlanConfirmationInteractionState_Cancelled) _then) = _$BridgePlanConfirmationInteractionState_CancelledCopyWithImpl;
-@override @useResult
-$Res call({
- String operationId, PlatformInt64 cancelledAt, String reason
-});
-
-
-
-
-}
-/// @nodoc
-class _$BridgePlanConfirmationInteractionState_CancelledCopyWithImpl<$Res>
-    implements $BridgePlanConfirmationInteractionState_CancelledCopyWith<$Res> {
-  _$BridgePlanConfirmationInteractionState_CancelledCopyWithImpl(this._self, this._then);
-
-  final BridgePlanConfirmationInteractionState_Cancelled _self;
-  final $Res Function(BridgePlanConfirmationInteractionState_Cancelled) _then;
-
-/// Create a copy of BridgePlanConfirmationInteractionState
-/// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? operationId = null,Object? cancelledAt = null,Object? reason = null,}) {
-  return _then(BridgePlanConfirmationInteractionState_Cancelled(
-operationId: null == operationId ? _self.operationId : operationId // ignore: cast_nullable_to_non_nullable
-as String,cancelledAt: null == cancelledAt ? _self.cancelledAt : cancelledAt // ignore: cast_nullable_to_non_nullable
-as PlatformInt64,reason: null == reason ? _self.reason : reason // ignore: cast_nullable_to_non_nullable
-as String,
-  ));
-}
-
-
-}
-
-/// @nodoc
-
-
-class BridgePlanConfirmationInteractionState_Expired extends BridgePlanConfirmationInteractionState {
-  const BridgePlanConfirmationInteractionState_Expired({required this.operationId, required this.expiredAt}): super._();
-
-
-@override final  String operationId;
- final  PlatformInt64 expiredAt;
-
-/// Create a copy of BridgePlanConfirmationInteractionState
-/// with the given fields replaced by the non-null parameter values.
-@override @JsonKey(includeFromJson: false, includeToJson: false)
-@pragma('vm:prefer-inline')
-$BridgePlanConfirmationInteractionState_ExpiredCopyWith<BridgePlanConfirmationInteractionState_Expired> get copyWith => _$BridgePlanConfirmationInteractionState_ExpiredCopyWithImpl<BridgePlanConfirmationInteractionState_Expired>(this, _$identity);
-
-
-
-@override
-bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgePlanConfirmationInteractionState_Expired&&(identical(other.operationId, operationId) || other.operationId == operationId)&&(identical(other.expiredAt, expiredAt) || other.expiredAt == expiredAt));
-}
-
-
-@override
-int get hashCode => Object.hash(runtimeType,operationId,expiredAt);
-
-@override
-String toString() {
-  return 'BridgePlanConfirmationInteractionState.expired(operationId: $operationId, expiredAt: $expiredAt)';
-}
-
-
-}
-
-/// @nodoc
-abstract mixin class $BridgePlanConfirmationInteractionState_ExpiredCopyWith<$Res> implements $BridgePlanConfirmationInteractionStateCopyWith<$Res> {
-  factory $BridgePlanConfirmationInteractionState_ExpiredCopyWith(BridgePlanConfirmationInteractionState_Expired value, $Res Function(BridgePlanConfirmationInteractionState_Expired) _then) = _$BridgePlanConfirmationInteractionState_ExpiredCopyWithImpl;
-@override @useResult
-$Res call({
- String operationId, PlatformInt64 expiredAt
-});
-
-
-
-
-}
-/// @nodoc
-class _$BridgePlanConfirmationInteractionState_ExpiredCopyWithImpl<$Res>
-    implements $BridgePlanConfirmationInteractionState_ExpiredCopyWith<$Res> {
-  _$BridgePlanConfirmationInteractionState_ExpiredCopyWithImpl(this._self, this._then);
-
-  final BridgePlanConfirmationInteractionState_Expired _self;
-  final $Res Function(BridgePlanConfirmationInteractionState_Expired) _then;
-
-/// Create a copy of BridgePlanConfirmationInteractionState
-/// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? operationId = null,Object? expiredAt = null,}) {
-  return _then(BridgePlanConfirmationInteractionState_Expired(
-operationId: null == operationId ? _self.operationId : operationId // ignore: cast_nullable_to_non_nullable
-as String,expiredAt: null == expiredAt ? _self.expiredAt : expiredAt // ignore: cast_nullable_to_non_nullable
-as PlatformInt64,
   ));
 }
 

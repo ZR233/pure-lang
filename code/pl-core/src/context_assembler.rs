@@ -129,7 +129,7 @@ mod tests {
 
     #[test]
     fn pinned_sections_do_not_change_the_fixed_instruction_prefix() {
-        let pinned = context_section("mai.review_manifest", 1, "Review", "base=abc").unwrap();
+        let pinned = context_section("test.pinned", 1, "Pinned", "base=abc").unwrap();
         let user = crate::user_text_message("review");
         let mut session = crate::AgentSession::from_messages(vec![user.clone()]);
         session.upsert_pinned_context(pinned);
@@ -178,13 +178,7 @@ mod tests {
     fn frozen_turn_context_stays_in_prefix_when_history_appends() {
         let mut session = crate::AgentSession::from_messages(vec![crate::user_text_message("run")]);
         session.upsert_pinned_context(
-            context_section(
-                "studio.task_executor_handoff",
-                1,
-                "Task handoff",
-                "scope=pl-model",
-            )
-            .unwrap(),
+            context_section("test.frozen_context", 1, "Frozen context", "scope=pl-model").unwrap(),
         );
         let snapshot =
             TurnContextSnapshot::capture(session.items(), session.working_context_snapshot());
@@ -207,13 +201,7 @@ mod tests {
             crate::assistant_text_message("two"),
         ]);
         session.upsert_pinned_context(
-            context_section(
-                "studio.task_executor_handoff",
-                1,
-                "Task handoff",
-                "scope=core",
-            )
-            .unwrap(),
+            context_section("test.frozen_context", 1, "Frozen context", "scope=core").unwrap(),
         );
         let mut snapshot =
             TurnContextSnapshot::capture(session.items(), session.working_context_snapshot());

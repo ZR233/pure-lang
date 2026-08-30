@@ -143,8 +143,7 @@ impl Tool for AskUserTool {
                         InteractionResolution::UserInput(value) => {
                             UserInputResponse { answers: value.answers }
                         }
-                        InteractionResolution::ToolApproval(_)
-                        | InteractionResolution::PlanConfirmation(_) => {
+                        InteractionResolution::ToolApproval(_) => {
                             UserInputResponse::default()
                         }
                     };

@@ -1,6 +1,5 @@
 //! Agent 执行 trace 的 canonical typed 生命周期与事件。
 
-mod input_projection;
 mod part;
 mod sink;
 
@@ -12,7 +11,6 @@ use pl_protocol::{
     SkillActivation, TodoListSnapshot,
 };
 
-pub use input_projection::*;
 pub use part::*;
 pub use sink::*;
 

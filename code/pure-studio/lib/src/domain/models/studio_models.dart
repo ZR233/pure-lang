@@ -1,4 +1,5 @@
 export 'agent_models.dart';
+export 'agent_profile_models.dart';
 export 'attachment_models.dart';
 export 'agent_workspace_view.dart';
 export 'collection_extensions.dart';

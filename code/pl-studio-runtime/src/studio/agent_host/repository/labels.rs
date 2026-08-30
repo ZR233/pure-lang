@@ -9,7 +9,7 @@
 //! 否则 `cargo check` 会在穷尽 match 处报错。
 
 use pl_core::{AgentState, MailboxPresentation};
-use pl_protocol::{LabeledEnum, ThreadItemState, ThreadMode, ThreadStatus};
+use pl_protocol::{ThreadItemState, ThreadMode, ThreadStatus};
 
 use crate::PureError;
 
@@ -53,7 +53,6 @@ pub(super) fn item_kind_label(state: &ThreadItemState) -> &'static str {
         ThreadItemState::Agent(_) => "agent",
         ThreadItemState::Turn(_) => "turn",
         ThreadItemState::Inference(_) => "inference",
-        ThreadItemState::Plan(_) => "plan",
         ThreadItemState::Skill(_) => "skill",
         ThreadItemState::File(_) => "file",
         ThreadItemState::ContextCompaction(_) => "contextCompaction",

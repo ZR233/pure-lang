@@ -329,6 +329,10 @@ impl PreparedSessionRuntime {
                 .as_ref()
                 .and_then(|value| value.progress.clone()),
             mcp_health: self.mcp_health.clone(),
+            workflow: current
+                .runtime
+                .as_ref()
+                .and_then(|value| value.workflow.clone()),
             updated_at,
         }
     }
@@ -509,6 +513,7 @@ mod tests {
             turn_decode_millis: 100,
             active_skills: vec!["review".to_string()],
             active_mcp_servers: vec!["old-mcp".to_string()],
+            workflow: None,
             active_lsp_servers: vec!["old-lsp".to_string()],
             todo: None,
             progress: None,

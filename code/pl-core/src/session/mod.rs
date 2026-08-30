@@ -224,6 +224,46 @@ impl AgentSession {
         self.state.working_state.session_note.as_ref()
     }
 
+    /// 返回当前 canonical 工作流状态。
+    pub fn workflow(&self) -> Option<&pl_protocol::WorkflowSessionState> {
+        self.state.working_state.workflow.as_ref()
+    }
+
+    /// 原子替换完整工作流状态；返回 canonical session 是否发生变化。
+    pub fn replace_workflow(
+        &mut self,
+        workflow: Option<pl_protocol::WorkflowSessionState>,
+    ) -> bool {
+        if self.state.working_state.workflow == workflow {
+            return false;
+        }
+        let state = Arc::make_mut(&mut self.state);
+        state.working_state.workflow = workflow;
+        state.working_state.revision = state.working_state.revision.saturating_add(1);
+        state.revision = state.revision.saturating_add(1);
+        true
+    }
+
+    /// 返回子 Agent 创建时冻结的 Profile 快照。
+    pub fn agent_profile(&self) -> Option<&pl_protocol::AgentProfileSnapshot> {
+        self.state.working_state.agent_profile.as_ref()
+    }
+
+    /// 原子替换冻结 Profile；根会话通常保持 `None`。
+    pub fn replace_agent_profile(
+        &mut self,
+        profile: Option<pl_protocol::AgentProfileSnapshot>,
+    ) -> bool {
+        if self.state.working_state.agent_profile == profile {
+            return false;
+        }
+        let state = Arc::make_mut(&mut self.state);
+        state.working_state.agent_profile = profile;
+        state.working_state.revision = state.working_state.revision.saturating_add(1);
+        state.revision = state.revision.saturating_add(1);
+        true
+    }
+
     pub fn prompt_metadata(&self) -> &ThreadPromptMetadata {
         &self.state.working_state.prompt
     }
@@ -253,6 +293,11 @@ impl AgentSession {
                 content_hash: section.content_hash.clone(),
             })
             .collect::<Vec<_>>();
+        if let Some(workflow) = &self.state.working_state.workflow
+            && let Some(section) = crate::workflow::model_context_section(workflow)
+        {
+            sections.push(section);
+        }
         sections.sort_by(|left, right| left.id.cmp(&right.id));
         ModelContextSnapshot {
             sections,

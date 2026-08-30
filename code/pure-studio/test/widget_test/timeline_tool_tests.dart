@@ -19,20 +19,19 @@ void registerTimelineToolTests() {
     );
   });
 
-  testWidgets('task_transition rejection exposes its stable code and message', (
+  testWidgets('workflow_state rejection exposes its stable code and message', (
     tester,
   ) async {
     final part = _toolTimelinePart(
-      id: 'task-complete-1',
-      groupId: 'task-complete-group',
-      turnId: 'turn-task-complete',
-      name: 'task_transition',
+      id: 'workflow-transition-1',
+      groupId: 'workflow-transition-group',
+      turnId: 'turn-workflow-transition',
+      name: 'workflow_state',
       status: 'failed',
       result: jsonEncode({
-        'status': 'rejected',
-        'code': 'reviewMissing',
-        'recoverable': true,
-        'message': 'Latest integrated review must pass',
+        'accepted': false,
+        'code': 'staleRevision',
+        'message': 'Workflow revision changed; read status and retry',
       }),
     );
 
@@ -52,23 +51,26 @@ void registerTimelineToolTests() {
     await tester.pump();
 
     expect(
-      find.textContaining('reviewMissing\nLatest integrated review must pass'),
+      find.textContaining(
+        'staleRevision\nWorkflow revision changed; read status and retry',
+      ),
       findsOneWidget,
     );
   });
 
-  testWidgets('completed task_transition hides its result payload', (
+  testWidgets('successful workflow_state hides its result payload', (
     tester,
   ) async {
     final part = _toolTimelinePart(
-      id: 'task-complete-2',
-      groupId: 'task-complete-completed-group',
-      turnId: 'turn-task-completed',
-      name: 'task_transition',
+      id: 'workflow-transition-2',
+      groupId: 'workflow-transition-completed-group',
+      turnId: 'turn-workflow-completed',
+      name: 'workflow_state',
       status: 'succeeded',
       result: jsonEncode({
-        'status': 'completed',
-        'run': {'id': 'task-run-hidden', 'phase': 'completed'},
+        'accepted': true,
+        'code': 'transitioned',
+        'snapshot': {'runId': 'workflow-run-hidden', 'stage': 'completed'},
       }),
     );
 
@@ -87,7 +89,7 @@ void registerTimelineToolTests() {
     await tester.tap(find.byKey(const ValueKey('timeline-tool-group-summary')));
     await tester.pump();
 
-    expect(find.textContaining('task-run-hidden'), findsNothing);
+    expect(find.textContaining('workflow-run-hidden'), findsNothing);
   });
 
   testWidgets('timeline renders dedicated web search action and result links', (
@@ -638,7 +640,8 @@ void registerTimelineToolTests() {
       TimelineEntry(
         id: 'plan-inline-fence',
         groupId: 'message-inline-fence',
-        type: TimelineEntryType.plan,
+        type: TimelineEntryType.text,
+        textChannel: TimelineTextChannel.finalAnswer,
         title: 'Plan',
         text:
             '```text\n'
@@ -859,7 +862,8 @@ void registerTimelineToolTests() {
       TimelineEntry(
         id: 'plan-agent-markdown',
         groupId: 'message-agent-markdown',
-        type: TimelineEntryType.plan,
+        type: TimelineEntryType.text,
+        textChannel: TimelineTextChannel.finalAnswer,
         title: 'Plan',
         text:
             'glm-intro.html代码结构单文件 HTML（~850行），GLM产品介绍落地页。\n\n'

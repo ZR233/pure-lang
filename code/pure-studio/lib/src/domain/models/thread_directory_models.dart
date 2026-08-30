@@ -193,7 +193,7 @@ enum StudioShutdownPhase {
   stoppingSubscriptions,
   cancellingTurns,
   flushingPersistence,
-  suspendingTasks,
+  stoppingAgents,
   stoppingMcp,
   stoppingLsp,
   stopped;
@@ -210,7 +210,7 @@ sealed class StudioShutdownProgress {
       StudioShutdownPhase.stoppingSubscriptions,
     CancellingTurnsProgress() => StudioShutdownPhase.cancellingTurns,
     FlushingPersistenceProgress() => StudioShutdownPhase.flushingPersistence,
-    SuspendingTasksProgress() => StudioShutdownPhase.suspendingTasks,
+    StoppingAgentsProgress() => StudioShutdownPhase.stoppingAgents,
     StoppingMcpProgress() => StudioShutdownPhase.stoppingMcp,
     StoppingLspProgress() => StudioShutdownPhase.stoppingLsp,
     StoppedProgress() => StudioShutdownPhase.stopped,
@@ -231,8 +231,8 @@ final class FlushingPersistenceProgress extends StudioShutdownProgress {
   final int pendingCommits;
 }
 
-final class SuspendingTasksProgress extends StudioShutdownProgress {
-  const SuspendingTasksProgress();
+final class StoppingAgentsProgress extends StudioShutdownProgress {
+  const StoppingAgentsProgress();
 }
 
 final class StoppingMcpProgress extends StudioShutdownProgress {

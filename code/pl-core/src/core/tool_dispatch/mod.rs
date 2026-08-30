@@ -14,8 +14,9 @@ use crate::ToolCompletion;
 use crate::permission::{PermissionDecision, decide_tool_permission};
 use crate::tool::cache::{ToolCacheExecutionRequest, ToolCachePolicy, TurnToolCacheHandle};
 use crate::tool::{
-    AgentWorkspace, SubagentContext, ToolApprovalContext, ToolBudgetTiming, ToolCallContext,
-    ToolCallIdentity, ToolDirective, ToolInput, ToolPlan, ToolRuntimeLockPolicy, WorkspaceAccess,
+    AgentWorkspace, SubagentContext, ToolApprovalContext, ToolBatchPolicy, ToolBudgetTiming,
+    ToolCallContext, ToolCallIdentity, ToolDirective, ToolInput, ToolPlan, ToolRuntimeLockPolicy,
+    WorkspaceAccess,
 };
 use crate::turn::{BudgetTracker, ToolApprovalDecision, ToolExecutionMode, TurnOptions};
 
@@ -38,7 +39,6 @@ use records::{
 pub(super) struct ToolExecutionRecord {
     pub(super) id: String,
     pub(super) call_id: String,
-    pub(super) trace_part_id: String,
     pub(super) name: String,
     pub(super) kind: ToolCallKind,
     pub(super) result: String,
@@ -147,6 +147,13 @@ pub(super) async fn execute_tool_call_batch(
         format!("{sid}:tool-progress"),
         ProgressVerbosity::from_env(),
     );
+    let solo_batch_violation = tool_calls.len() != 1
+        && tool_calls.iter().any(|tool_call| {
+            context
+                .tool_plan
+                .binding(&tool_call.name)
+                .is_some_and(|binding| binding.tool().batch_policy() == ToolBatchPolicy::Solo)
+        });
 
     for tool_call in tool_calls {
         context.options.apply_budget_refresh(budget_tracker);
@@ -191,13 +198,34 @@ pub(super) async fn execute_tool_call_batch(
         }
         budget_tracker.record_tool_call(&tool_call.name);
 
+        if solo_batch_violation {
+            scheduled.push(ScheduledToolExecution {
+                tool_call: tool_call.clone(),
+                item,
+                future: ready_tool_execution_record(
+                    tool_call.clone(),
+                    ToolExecutionError::RespondToModel(
+                        "This provider response contains a Solo tool call. The entire batch was rejected without side effects; retry the Solo call as the only tool call."
+                            .to_string(),
+                    ),
+                    ToolExecutionOutcome::Failed(TraceToolFailureKind::Execution),
+                    None,
+                    false,
+                )
+                .boxed(),
+                budget_timing: ToolBudgetTiming::Count,
+                parallel_candidate: false,
+                duplicate_suppressed: false,
+            });
+            continue;
+        }
+
         if let Some(message) = tool_call.invalid_arguments_message() {
             scheduled.push(ScheduledToolExecution {
                 tool_call: tool_call.clone(),
                 item,
                 future: ready_tool_execution_record(
                     tool_call.clone(),
-                    trace_part_id.clone(),
                     ToolExecutionError::RespondToModel(message),
                     ToolExecutionOutcome::Failed(TraceToolFailureKind::Execution),
                     None,
@@ -226,7 +254,6 @@ pub(super) async fn execute_tool_call_batch(
                 item,
                 future: ready_tool_execution_record(
                     tool_call.clone(),
-                    trace_part_id.clone(),
                     ToolExecutionError::RespondToModel(message),
                     ToolExecutionOutcome::Denied,
                     None,
@@ -252,7 +279,6 @@ pub(super) async fn execute_tool_call_batch(
                 item,
                 future: ready_tool_execution_record(
                     tool_call.clone(),
-                    trace_part_id.clone(),
                     ToolExecutionError::RespondToModel(format!("Unknown tool: {name}")),
                     ToolExecutionOutcome::Failed(TraceToolFailureKind::Execution),
                     None,
@@ -333,7 +359,6 @@ pub(super) async fn execute_tool_call_batch(
                 item,
                 future: ready_tool_execution_record(
                     tool_call.clone(),
-                    trace_part_id.clone(),
                     ToolExecutionError::RespondToModel("Tool execution interrupted".to_string()),
                     ToolExecutionOutcome::Cancelled,
                     None,
@@ -435,7 +460,6 @@ pub(super) async fn execute_tool_call_batch(
                             item,
                             future: ready_tool_execution_record(
                                 tool_call.clone(),
-                                trace_part_id.clone(),
                                 ToolExecutionError::RespondToModel(receipt),
                                 ToolExecutionOutcome::Succeeded,
                                 Some(0),
@@ -450,7 +474,6 @@ pub(super) async fn execute_tool_call_batch(
                     }
                     scheduled_exact_once_calls.insert(dedupe_key, cache_call_id.clone());
                 }
-                let trace_part_id_for_task = trace_part_id.clone();
                 scheduled.push(ScheduledToolExecution {
                     tool_call: tool_call.clone(),
                     item,
@@ -498,12 +521,8 @@ pub(super) async fn execute_tool_call_batch(
                             cache.invalidate_tool(&tool_name);
                         }
                         cache.record_effect(tool_effect, result.is_ok());
-                        let mut record = tool_execution_record(
-                            tool_call_for_task,
-                            trace_part_id_for_task,
-                            tool_name,
-                            result,
-                        )?;
+                        let mut record =
+                            tool_execution_record(tool_call_for_task, tool_name, result)?;
                         record.execution_millis = execution_elapsed.as_millis() as u64;
                         Ok(record)
                     }
@@ -519,7 +538,6 @@ pub(super) async fn execute_tool_call_batch(
                     item,
                     future: ready_tool_execution_record(
                         tool_call.clone(),
-                        trace_part_id.clone(),
                         ToolExecutionError::RespondToModel(format!(
                             "Tool execution denied: {reason}"
                         )),
@@ -643,10 +661,7 @@ async fn collect_scheduled_tools(
                     next = futures.next() => next,
                     _ = token.cancelled() => {
                         for (index, (tool_call, item)) in pending {
-                            let record = interrupted_tool_execution_record(
-                                tool_call,
-                                item.item_id().to_string(),
-                            );
+                            let record = interrupted_tool_execution_record(tool_call);
                             finalize_tool_item(recorder, item, &record);
                             emit_tool_progress(progress, recorder, &record);
                             notify_tool_completion(options, &record).await?;
@@ -672,11 +687,7 @@ async fn collect_scheduled_tools(
         let record = match record {
             Ok(record) => record,
             Err(ToolExecutionError::RespondToModel(message)) => {
-                respond_to_model_tool_execution_record(
-                    tool_call,
-                    item.item_id().to_string(),
-                    message,
-                )
+                respond_to_model_tool_execution_record(tool_call, message)
             }
             Err(ToolExecutionError::Fatal(message)) => {
                 return Err(ToolExecutionError::Fatal(message));

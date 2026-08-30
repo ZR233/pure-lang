@@ -13,7 +13,6 @@ enum TimelineRowType {
   commentary,
   toolGroup,
   reasoningSummary,
-  plan,
   skillActivation,
   agentActivity,
   finalAnswer,
@@ -302,7 +301,6 @@ class TimelineEntry {
     this.title,
     this.textChannel,
     this.tool,
-    this.planContent,
     this.skill,
     this.attachments = const [],
     this.contextDisposition = ThreadContextDisposition.active,
@@ -327,7 +325,6 @@ class TimelineEntry {
   final String? error;
   final TimelineTextChannel? textChannel;
   final TimelineToolPart? tool;
-  final String? planContent;
   final TimelineSkillActivation? skill;
   final List<ThreadAttachmentView> attachments;
   final ThreadContextDisposition contextDisposition;

@@ -5,10 +5,7 @@ use crate::studio::agent_host::{
     StudioAgentRepository, StudioAgentResources, ThreadWriteBehindWriter,
 };
 use crate::studio::runtime_lock::{RuntimeLock, RuntimeLockOwner};
-use crate::studio::task_coordinator::TaskCoordinator;
-use crate::studio::{
-    InteractionService, ProductEventBus, StudioRuntimeState, StudioStore, TaskRuntime,
-};
+use crate::studio::{InteractionService, ProductEventBus, StudioRuntimeState, StudioStore};
 use crate::{McpConnector, McpRuntime};
 
 use super::super::StudioRuntime;
@@ -73,20 +70,6 @@ impl StudioRuntime {
         Ok(runtime)
     }
 
-    #[cfg(test)]
-    pub(crate) fn new(store: StudioStore, config_store: ConfigStore) -> Result<Self> {
-        Self::with_runtime_state(store, config_store, StudioRuntimeState::ready())
-    }
-
-    #[cfg(test)]
-    pub(in crate::studio::runtime) fn with_runtime_state(
-        store: StudioStore,
-        config_store: ConfigStore,
-        runtime_state: StudioRuntimeState,
-    ) -> Result<Self> {
-        Self::with_runtime_state_and_lock(store, config_store, runtime_state, None, None)
-    }
-
     fn with_runtime_state_and_lock(
         store: StudioStore,
         config_store: ConfigStore,
@@ -95,15 +78,13 @@ impl StudioRuntime {
         system_skills_dir: Option<std::path::PathBuf>,
     ) -> Result<Self> {
         let config_runtime = ConfigRuntime::initialize(config_store)?;
-        let interactions = InteractionService::new(store.clone());
-        // 进程级共享 writer 先于所有 owner 构造：ProductEventBus 的目录提交、
-        // TaskRuntime 与 ThreadRepository 必须共用同一 write-behind 队列。
+        let interactions = InteractionService::new();
+        // 进程级共享 writer 先于所有 owner 构造：ProductEventBus 与
+        // ThreadRepository 共用同一 write-behind 队列。
         let writer = ThreadWriteBehindWriter::new(store.clone());
         let product_events = ProductEventBus::new(store.clone(), writer.clone());
         let model_performance =
             ModelPerformanceOwner::new(store.clone(), writer.clone(), product_events.clone());
-        let task_runtime =
-            TaskRuntime::with_writer(store.clone(), product_events.clone(), writer.clone());
         let ssh_manager = std::sync::Arc::new(super::super::remote_helper::ssh_manager());
         let persistence = StudioAgentRepository::with_writer_and_performance(
             store.clone(),
@@ -111,12 +92,6 @@ impl StudioRuntime {
             model_performance.clone(),
         );
         product_events.observe_persistence(persistence.writer().subscribe_state());
-        let task_coordinator = std::sync::Arc::new(TaskCoordinator::new(
-            store.clone(),
-            task_runtime.clone(),
-            interactions.clone(),
-            ssh_manager.clone(),
-        ));
         let provider_usage = ProviderUsageRuntime::new(store.clone(), product_events.clone());
         let updater = StudioUpdateRuntime::new(store.clone(), product_events.clone())?;
         let tool_manager = pl_core::ToolManager::new();
@@ -159,8 +134,6 @@ impl StudioRuntime {
             model_performance,
             updater,
             activation: Default::default(),
-            task_runtime,
-            task_coordinator,
             attachment_drafts,
             ssh_manager,
             lifecycle_lock: std::sync::Arc::new(tokio::sync::Mutex::new(())),

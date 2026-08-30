@@ -147,6 +147,7 @@ pub(super) fn runtime_from_context(
         active_lsp_servers: Vec::new(),
         progress: None,
         mcp_health: None,
+        workflow: context.session.workflow().map(Into::into),
         updated_at: latest.recorded_at,
     })
 }
@@ -257,7 +258,7 @@ mod tests {
             .await
             .unwrap();
         let thread = store
-            .create_thread(&project.id, "billing", StudioMode::Simple)
+            .create_thread(&project.id, "billing", StudioMode::simple())
             .await
             .unwrap();
         let turn_id = "turn-billing";

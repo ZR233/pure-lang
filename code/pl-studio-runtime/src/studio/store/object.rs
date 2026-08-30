@@ -141,23 +141,6 @@ where
     Ok(())
 }
 
-pub(in crate::studio) async fn delete_object<T>(
-    db: &impl ConnectionTrait,
-    owner_id: &str,
-) -> Result<()>
-where
-    T: PersistedStudioObject,
-{
-    studio_object::Entity::delete_by_id((
-        T::OWNER_KIND.to_string(),
-        owner_id.to_string(),
-        T::OBJECT_KIND.to_string(),
-    ))
-    .exec(db)
-    .await?;
-    Ok(())
-}
-
 pub(in crate::studio) fn decode_object<T>(row: studio_object::Model) -> Result<T>
 where
     T: PersistedStudioObject,

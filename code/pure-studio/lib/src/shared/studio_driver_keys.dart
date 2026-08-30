@@ -1,7 +1,5 @@
 import 'package:flutter/foundation.dart';
 
-import '../domain/models/runtime_models.dart';
-
 abstract final class StudioDriverKeys {
   static const shell = ValueKey<String>('studio-shell');
   static const startPage = ValueKey<String>('studio-start-page');
@@ -44,16 +42,6 @@ abstract final class StudioDriverKeys {
   static const attachmentUrlInput = ValueKey<String>('attachment-url-input');
   static const attachmentUrlSubmit = ValueKey<String>('attachment-url-submit');
   static const attachmentDraftRail = ValueKey<String>('attachment-draft-rail');
-  static const taskRecoveryOpen = ValueKey<String>('task-recovery-open');
-  static const taskRecoveryDialog = ValueKey<String>('task-recovery-dialog');
-  static const taskRecoveryTarget = ValueKey<String>('task-recovery-target');
-  static const taskRecoveryTailCount = ValueKey<String>(
-    'task-recovery-tail-count',
-  );
-  static const taskRecoveryMode = ValueKey<String>('task-recovery-mode');
-  static const taskRecoveryConfirm = ValueKey<String>('task-recovery-confirm');
-  static const taskRecoveryApply = ValueKey<String>('task-recovery-apply');
-  static const taskRecoveryError = ValueKey<String>('task-recovery-error');
   static const agentSwitcher = ValueKey<String>('agent-switcher');
   static const sessionCost = ValueKey<String>('session-cost');
   static const threadThroughput = ValueKey<String>('thread-throughput');
@@ -72,9 +60,6 @@ abstract final class StudioDriverKeys {
   static const providerEdit = ValueKey<String>('provider-edit');
   static const providerSave = ValueKey<String>('provider-save');
   static const providerCancel = ValueKey<String>('provider-cancel');
-  static const planConfirm = ValueKey<String>('plan-confirm');
-  static const planAdjustmentInput = ValueKey<String>('plan-adjustment-input');
-  static const planRevise = ValueKey<String>('plan-revise');
   static const toolApprove = ValueKey<String>('tool-approve');
   static const toolDeny = ValueKey<String>('tool-deny');
   static const userInputSubmit = ValueKey<String>('user-input-submit');
@@ -109,12 +94,6 @@ abstract final class StudioDriverKeys {
 
   static ValueKey<String> turnActivity(String id) =>
       ValueKey<String>('turn-activity-$id');
-
-  static ValueKey<String> taskRecoveryTurn(String id) =>
-      ValueKey<String>('task-recovery-turn-$id');
-
-  static ValueKey<String> taskRecoveryModeOption(String mode) =>
-      ValueKey<String>('task-recovery-mode-$mode');
 
   static ValueKey<String> timelineRolledBack(String id) =>
       ValueKey<String>('timeline-rolled-back-$id');
@@ -243,69 +222,6 @@ abstract final class StudioDriverKeys {
 
   static ValueKey<String> agentRow(String id) =>
       ValueKey<String>('agent-thread-$id');
-
-  static ValueKey<String> taskAgent(String id) =>
-      ValueKey<String>('task-agent-$id');
-
-  static ValueKey<String> taskRuntime(String runId) =>
-      ValueKey<String>('task-runtime-$runId');
-
-  static ValueKey<String> taskPhase(String runId, TaskStateKind phase) =>
-      ValueKey<String>('task-runtime-$runId-phase-${phase.name}');
-
-  static ValueKey<String> taskStatus(String runId, String status) =>
-      ValueKey<String>('task-runtime-$runId-status-$status');
-
-  static ValueKey<String> taskPaused(String runId) =>
-      ValueKey<String>('task-runtime-$runId-paused');
-
-  static ValueKey<String> taskAgentStatus(String id) =>
-      ValueKey<String>('task-agent-$id-status');
-
-  static ValueKey<String> taskAgentSummaryAge(String id) =>
-      ValueKey<String>('task-agent-summary-age-$id');
-
-  static ValueKey<String> taskCompletion(String id) =>
-      ValueKey<String>('task-completion-$id');
-
-  static ValueKey<String> taskCompletionExecutor(String id) =>
-      ValueKey<String>('task-completion-$id-executor');
-
-  static ValueKey<String> taskCompletionStatus(String id) =>
-      ValueKey<String>('task-completion-$id-status');
-
-  static ValueKey<String> taskCompletionRevision(String id, int revision) =>
-      ValueKey<String>('task-completion-$id-revision-$revision');
-
-  static ValueKey<String> taskWorkUnit(String id) =>
-      ValueKey<String>('task-work-unit-$id');
-
-  static ValueKey<String> taskIssue(String id) =>
-      ValueKey<String>('task-issue-$id');
-
-  static ValueKey<String> taskWorkUnitExecution(String id) =>
-      ValueKey<String>('task-work-unit-$id-execution');
-
-  static ValueKey<String> taskWorkUnitBudgetSlice(String id) =>
-      ValueKey<String>('task-work-unit-$id-budget-slice');
-
-  static ValueKey<String> taskWorkUnitContinuation(String id) =>
-      ValueKey<String>('task-work-unit-$id-continuation');
-
-  static ValueKey<String> taskReview(String id) =>
-      ValueKey<String>('task-review-$id');
-
-  static ValueKey<String> taskReviewReviewer(String id) =>
-      ValueKey<String>('task-review-$id-reviewer');
-
-  static ValueKey<String> taskReviewVerdict(String id) =>
-      ValueKey<String>('task-review-$id-verdict');
-
-  static ValueKey<String> taskFinding(String reviewId, int index) =>
-      ValueKey<String>('task-review-$reviewId-finding-$index');
-
-  static ValueKey<String> taskFindingSeverity(String reviewId, int index) =>
-      ValueKey<String>('task-review-$reviewId-finding-$index-severity');
 
   static ValueKey<String> providerRow(String id) =>
       ValueKey<String>('provider-row-$id');

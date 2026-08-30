@@ -5,7 +5,6 @@
 //! 终态收尾。
 
 mod ids;
-mod plan;
 mod text;
 mod tool;
 
@@ -28,8 +27,6 @@ pub(crate) struct TraceProjection {
     active_text_items: HashMap<String, String>,
     active_thinking_items: HashMap<String, String>,
     active_tool_items: HashMap<String, String>,
-    input_trace_projections: Arc<HashMap<String, pl_trace::ToolInputTraceProjection>>,
-    plan_projections: HashMap<String, plan::PlanProjectionState>,
     segment_occurrences: HashMap<String, u64>,
     events: Vec<TraceEvent>,
     sink: Option<Arc<dyn TraceEventSink>>,
@@ -42,18 +39,9 @@ impl TraceProjection {
         Self::with_sink(context, None)
     }
 
-    #[cfg(test)]
     pub(crate) fn with_sink(
         context: CompletionTraceContext,
         sink: Option<Arc<dyn TraceEventSink>>,
-    ) -> Self {
-        Self::with_sink_and_projections(context, sink, Arc::new(HashMap::new()))
-    }
-
-    pub(crate) fn with_sink_and_projections(
-        context: CompletionTraceContext,
-        sink: Option<Arc<dyn TraceEventSink>>,
-        input_trace_projections: Arc<HashMap<String, pl_trace::ToolInputTraceProjection>>,
     ) -> Self {
         let sequence = sink.as_ref().map_or(0, |sink| sink.next_sequence());
         Self {
@@ -65,8 +53,6 @@ impl TraceProjection {
             active_text_items: HashMap::new(),
             active_thinking_items: HashMap::new(),
             active_tool_items: HashMap::new(),
-            input_trace_projections,
-            plan_projections: HashMap::new(),
             segment_occurrences: HashMap::new(),
             events: Vec::new(),
             sink,
@@ -107,7 +93,6 @@ impl TraceProjection {
                 TracePartState::Thinking(_) => TracePartCompletion::Thinking {
                     authoritative_summary: None,
                 },
-                TracePartState::Plan(_) => continue,
                 TracePartState::Tool(_)
                 | TracePartState::Agent(_)
                 | TracePartState::Turn(_)

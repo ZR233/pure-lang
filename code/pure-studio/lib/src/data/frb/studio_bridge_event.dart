@@ -43,11 +43,6 @@ final class ThreadDirectoryChangedPayload extends StudioBridgeEventPayload {
   final List<String> removed;
 }
 
-final class TaskDirectoryChangedPayload extends StudioBridgeEventPayload {
-  const TaskDirectoryChangedPayload(this.state);
-  final TaskDirectoryState state;
-}
-
 final class AgentDirectoryChangedPayload extends StudioBridgeEventPayload {
   const AgentDirectoryChangedPayload(this.state);
   final AgentDirectoryState state;

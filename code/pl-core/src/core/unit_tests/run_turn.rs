@@ -218,8 +218,7 @@ async fn run_turn_exposes_context_compaction_snapshot() {
                 | pl_trace::TracePartState::Thinking(_)
                 | pl_trace::TracePartState::Tool(_)
                 | pl_trace::TracePartState::Agent(_)
-                | pl_trace::TracePartState::Turn(_)
-                | pl_trace::TracePartState::Plan(_) => None,
+                | pl_trace::TracePartState::Turn(_) => None,
             },
             TraceEventKind::TracePartStarted { .. }
             | TraceEventKind::TracePartDelta { .. }

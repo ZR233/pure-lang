@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     PersistenceStateSnapshot, ProjectRecord, ProviderUsageStateSnapshot, SkillsStateSnapshot,
     StudioAgentDirectoryEntry, StudioLspHealth, StudioMcpHealth, StudioRecoveryIssue,
-    StudioTaskRuntime, StudioUpdateStateSnapshot,
+    StudioUpdateStateSnapshot,
 };
 
 /// Studio 产品级事件信封。
@@ -26,7 +26,6 @@ pub struct StudioProductEventEnvelope {
 pub enum StudioProductEventKind {
     ProjectDirectoryChanged(StudioProjectDirectoryState),
     ThreadDirectoryChanged(StudioThreadDirectoryDelta),
-    TaskDirectoryChanged(StudioTaskDirectoryState),
     AgentDirectoryChanged(StudioAgentDirectoryState),
     SettingsStateChanged(Box<StudioSettingsStateSnapshot>),
     RecoveryStateChanged(StudioRecoveryStateSnapshot),
@@ -89,25 +88,6 @@ pub struct StudioThreadDirectoryPageData {
     pub threads: Vec<Thread>,
     /// `None` 表示没有更旧的页。
     pub next_cursor: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct StudioTaskDirectoryState {
-    pub state: ObservedResource<StudioTaskDirectoryData>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct StudioTaskDirectoryData {
-    pub tasks: Vec<StudioTaskDirectoryEntry>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct StudioTaskDirectoryEntry {
-    pub root_thread_id: String,
-    pub task: StudioTaskRuntime,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -239,7 +219,6 @@ pub struct StudioStateSnapshot {
     pub runtime: crate::StudioRuntimeSnapshot,
     pub project_directory: StudioProjectDirectoryState,
     pub thread_directory: StudioThreadDirectoryPage,
-    pub task_directory: StudioTaskDirectoryState,
     pub agent_directory: StudioAgentDirectoryState,
     pub settings: StudioSettingsStateSnapshot,
     pub recovery: StudioRecoveryStateSnapshot,

@@ -14,7 +14,6 @@ mod manager;
 mod model_output;
 pub mod output_format;
 mod path_policy;
-mod plan;
 mod programmatic;
 mod session_note;
 mod shell;
@@ -26,6 +25,7 @@ mod tool_result;
 mod truncation;
 mod view_image;
 mod web_search;
+mod workflow_state;
 mod workspace_file;
 
 pub use ask_user::*;
@@ -44,7 +44,6 @@ pub use lsp::*;
 pub use manager::*;
 pub use model_output::*;
 pub use path_policy::*;
-pub use plan::*;
 pub use programmatic::*;
 pub use session_note::*;
 pub use shell::*;
@@ -54,6 +53,7 @@ pub use tool_result::*;
 pub use truncation::*;
 pub use view_image::*;
 pub use web_search::*;
+pub use workflow_state::*;
 pub use workspace_file::*;
 
 pub(crate) fn estimate_tool_schema_tokens(schemas: &[pl_protocol::ToolSpec]) -> u64 {

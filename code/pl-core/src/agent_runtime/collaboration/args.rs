@@ -9,7 +9,7 @@ use super::super::AgentProgressStage;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct SpawnArgs {
     pub(super) message: String,
-    pub(super) role: String,
+    pub(super) profile_id: String,
     #[serde(default)]
     pub(super) fork_turns: ForkTurns,
     #[serde(default)]

@@ -70,9 +70,6 @@ sealed class BridgeProductEventPayload with _$BridgeProductEventPayload {
   const factory BridgeProductEventPayload.threadDirectoryChanged(
     BridgeThreadDirectoryDelta field0,
   ) = BridgeProductEventPayload_ThreadDirectoryChanged;
-  const factory BridgeProductEventPayload.taskDirectoryChanged(
-    BridgeTaskDirectoryState field0,
-  ) = BridgeProductEventPayload_TaskDirectoryChanged;
   const factory BridgeProductEventPayload.agentDirectoryChanged(
     BridgeAgentDirectoryState field0,
   ) = BridgeProductEventPayload_AgentDirectoryChanged;
@@ -119,8 +116,8 @@ sealed class BridgeShutdownProgress with _$BridgeShutdownProgress {
   const factory BridgeShutdownProgress.flushingPersistence({
     required BigInt pendingCommits,
   }) = BridgeShutdownProgress_FlushingPersistence;
-  const factory BridgeShutdownProgress.suspendingTasks() =
-      BridgeShutdownProgress_SuspendingTasks;
+  const factory BridgeShutdownProgress.stoppingAgents() =
+      BridgeShutdownProgress_StoppingAgents;
   const factory BridgeShutdownProgress.stoppingMcp() =
       BridgeShutdownProgress_StoppingMcp;
   const factory BridgeShutdownProgress.stoppingLsp() =

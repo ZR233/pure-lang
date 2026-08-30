@@ -446,6 +446,7 @@ fn disabled_skills_do_not_inject_a_frozen_catalog() {
     let catalog = crate::skill::SkillCatalog {
         project_dir: dir.join("skills"),
         skills: Vec::new(),
+        modes: Vec::new(),
         warnings: Vec::new(),
         complete: true,
     };

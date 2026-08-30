@@ -106,10 +106,6 @@ pub enum ToolDirective {
     SkillActivated {
         activation: SkillActivation,
     },
-    /// 当前工具已生成完整计划，由 turn 循环投影为 canonical plan item。
-    PlanCompleted {
-        content: String,
-    },
     ToolResultRevision {
         revision: u64,
     },
@@ -135,7 +131,7 @@ pub enum ToolDirective {
     },
     /// 声明该工具输出需要越过默认 12KB 安全阈值的硬字节上限。
     ///
-    /// 只读概览工具（如 `read_agent_submissions`、`read_review_round`、`task_status`）
+    /// 只读概览工具（如 workflow status 或目录查询）
     /// 用它保证结构化结果完整投影给模型；仍应配合分页控制总体体积。
     OutputBudget {
         max_bytes: usize,
@@ -157,7 +153,6 @@ pub struct LocalTool {
     name: String,
     description: String,
     input_schema: serde_json::Value,
-    input_trace_projection: Option<pl_trace::ToolInputTraceProjection>,
     output_schema: Option<serde_json::Value>,
     display_metadata: Option<ToolDisplayMetadata>,
     supports_parallel_tool_calls: bool,
@@ -200,7 +195,6 @@ impl LocalTool {
             name,
             description: description.into(),
             input_schema,
-            input_trace_projection: None,
             output_schema: None,
             display_metadata: None,
             supports_parallel_tool_calls: false,
@@ -228,14 +222,6 @@ impl LocalTool {
 
     pub fn with_parallel_tool_calls(mut self) -> Self {
         self.supports_parallel_tool_calls = true;
-        self
-    }
-
-    pub fn with_input_trace_projection(
-        mut self,
-        projection: pl_trace::ToolInputTraceProjection,
-    ) -> Self {
-        self.input_trace_projection = Some(projection);
         self
     }
 
@@ -307,10 +293,6 @@ impl Tool for LocalTool {
 
     fn input_schema(&self) -> serde_json::Value {
         self.input_schema.clone()
-    }
-
-    fn input_trace_projection(&self) -> Option<pl_trace::ToolInputTraceProjection> {
-        self.input_trace_projection.clone()
     }
 
     fn display_metadata(&self) -> Option<&ToolDisplayMetadata> {

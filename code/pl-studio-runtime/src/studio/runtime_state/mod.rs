@@ -45,10 +45,7 @@ pub enum StudioRecoveryIssueScope {
 pub enum StudioRecoveryIssueCategory {
     ProcessLease,
     AgentState,
-    Worktree,
     Repository,
-    Merge,
-    Conflict,
 }
 
 /// UI 可执行的恢复动作。
@@ -70,51 +67,8 @@ pub struct StudioRecoveryIssue {
     pub action: StudioRecoveryIssueAction,
     pub project_id: Option<String>,
     pub thread_id: Option<String>,
-    pub task_run_id: Option<String>,
     pub message: String,
 }
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum StudioRecoveryResourcePresence {
-    Absent,
-    Complete,
-    Partial,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct StudioRecoveryCleanupResource {
-    pub work_unit_id: String,
-    pub path: String,
-    pub branch: String,
-    pub presence: StudioRecoveryResourcePresence,
-    pub registration_exists: bool,
-    pub path_exists: bool,
-    pub branch_exists: bool,
-    pub branch_head: Option<String>,
-    pub dirty: bool,
-    pub ahead_by: u32,
-    pub changed_file_count: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct StudioRecoveryCleanupPreview {
-    pub issue_id: String,
-    pub expected_revision: String,
-    pub scope: StudioRecoveryIssueScope,
-    pub project_id: Option<String>,
-    pub thread_id: Option<String>,
-    pub message: String,
-    pub resources: Vec<StudioRecoveryCleanupResource>,
-}
-
-pub use pl_protocol::studio::{
-    StudioTaskRecoveryPreview, StudioTaskRecoveryRequest, StudioTaskRecoveryResult,
-    StudioTaskRecoveryState, StudioTaskRecoveryTarget, StudioTaskRecoveryTargetKind,
-    StudioTaskRecoveryTurn,
-};
 
 /// Studio runtime 的 canonical 生命周期状态。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

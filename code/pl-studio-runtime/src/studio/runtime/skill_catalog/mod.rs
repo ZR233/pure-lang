@@ -26,7 +26,7 @@ pub struct SkillCatalogRuntime {
     events: Option<crate::ProductEventBus>,
     system_skills_dir: Option<Arc<PathBuf>>,
     registry: SkillRegistry,
-    _provider_registration: Option<Arc<SkillProviderRegistration>>,
+    _provider_registrations: Vec<Arc<SkillProviderRegistration>>,
 }
 
 /// 某 Project 已发布且可被未来 Turn 冻结的 catalog。
@@ -52,14 +52,14 @@ impl SkillsStateSnapshot {
 impl SkillCatalogRuntime {
     /// Creates the Studio catalog owner with its product-owned system Skills directory.
     pub fn new(events: crate::ProductEventBus, system_skills_dir: PathBuf) -> Self {
-        let (registry, provider_registration) = local_registry();
+        let (registry, provider_registrations) = local_registry(Some(&system_skills_dir));
         Self {
             command_lock: Arc::new(Mutex::new(())),
             states: Arc::new(RwLock::new(BTreeMap::new())),
             events: Some(events),
             system_skills_dir: Some(Arc::new(system_skills_dir)),
             registry,
-            _provider_registration: provider_registration,
+            _provider_registrations: provider_registrations,
         }
     }
 
@@ -268,14 +268,14 @@ impl SkillCatalogRuntime {
 
 impl Default for SkillCatalogRuntime {
     fn default() -> Self {
-        let (registry, provider_registration) = local_registry();
+        let (registry, provider_registrations) = local_registry(None);
         Self {
             command_lock: Arc::new(Mutex::new(())),
             states: Arc::new(RwLock::new(BTreeMap::new())),
             events: None,
             system_skills_dir: None,
             registry,
-            _provider_registration: provider_registration,
+            _provider_registrations: provider_registrations,
         }
     }
 }
@@ -287,18 +287,42 @@ fn empty_snapshot(project_id: &str) -> SkillsStateSnapshot {
     }
 }
 
-fn local_registry() -> (SkillRegistry, Option<Arc<SkillProviderRegistration>>) {
+fn local_registry(
+    system_skills_dir: Option<&Path>,
+) -> (SkillRegistry, Vec<Arc<SkillProviderRegistration>>) {
     let registry = SkillRegistry::new();
-    let registration = registry
+    let mut registrations = Vec::new();
+    if let Some(system_skills_dir) = system_skills_dir {
+        let provider = FileSystemSkillProvider::from_directories(
+            pl_core::skill::BUILTIN_MODE_PROVIDER_ID,
+            vec![pl_core::skill::SkillDirectorySource::new(
+                // The materialized system directory is flattened so the stable
+                // `mode.*` directory sits beside the other bundled Skills.
+                system_skills_dir,
+                pl_core::skill::SkillSourceKind::System,
+            )],
+        );
+        match provider.and_then(|provider| registry.register(Arc::new(provider))) {
+            Ok(registration) => registrations.push(Arc::new(registration)),
+            Err(error) => {
+                tracing::error!(%error, "failed to register built-in Mode Skill provider")
+            }
+        }
+    }
+    if let Ok(registration) = registry
         .register(Arc::new(FileSystemSkillProvider::new()))
         .map(Arc::new)
         .map_err(|error| tracing::error!(%error, "failed to register filesystem Skill provider"))
-        .ok();
-    (registry, registration)
+    {
+        registrations.push(registration);
+    }
+    (registry, registrations)
 }
 
 fn catalog_content_eq(left: &SkillCatalog, right: &SkillCatalog) -> bool {
-    left.project_dir == right.project_dir && left.skills == right.skills
+    left.project_dir == right.project_dir
+        && left.skills == right.skills
+        && left.modes == right.modes
 }
 
 pub(super) fn skills_fingerprint(config: &SkillsConfig) -> Result<String> {

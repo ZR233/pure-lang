@@ -120,7 +120,7 @@ return newThread(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( String threadId)?  existingThread,TResult Function( BridgeThreadMode mode)?  newThread,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( String threadId)?  existingThread,TResult Function( String mode)?  newThread,required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case BridgeAttachmentAdmissionContext_ExistingThread() when existingThread != null:
 return existingThread(_that.threadId);case BridgeAttachmentAdmissionContext_NewThread() when newThread != null:
@@ -142,7 +142,7 @@ return newThread(_that.mode);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( String threadId)  existingThread,required TResult Function( BridgeThreadMode mode)  newThread,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( String threadId)  existingThread,required TResult Function( String mode)  newThread,}) {final _that = this;
 switch (_that) {
 case BridgeAttachmentAdmissionContext_ExistingThread():
 return existingThread(_that.threadId);case BridgeAttachmentAdmissionContext_NewThread():
@@ -160,7 +160,7 @@ return newThread(_that.mode);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( String threadId)?  existingThread,TResult? Function( BridgeThreadMode mode)?  newThread,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( String threadId)?  existingThread,TResult? Function( String mode)?  newThread,}) {final _that = this;
 switch (_that) {
 case BridgeAttachmentAdmissionContext_ExistingThread() when existingThread != null:
 return existingThread(_that.threadId);case BridgeAttachmentAdmissionContext_NewThread() when newThread != null:
@@ -245,7 +245,7 @@ class BridgeAttachmentAdmissionContext_NewThread extends BridgeAttachmentAdmissi
   const BridgeAttachmentAdmissionContext_NewThread({required this.mode}): super._();
 
 
- final  BridgeThreadMode mode;
+ final  String mode;
 
 /// Create a copy of BridgeAttachmentAdmissionContext
 /// with the given fields replaced by the non-null parameter values.
@@ -277,7 +277,7 @@ abstract mixin class $BridgeAttachmentAdmissionContext_NewThreadCopyWith<$Res> i
   factory $BridgeAttachmentAdmissionContext_NewThreadCopyWith(BridgeAttachmentAdmissionContext_NewThread value, $Res Function(BridgeAttachmentAdmissionContext_NewThread) _then) = _$BridgeAttachmentAdmissionContext_NewThreadCopyWithImpl;
 @useResult
 $Res call({
- BridgeThreadMode mode
+ String mode
 });
 
 
@@ -297,7 +297,7 @@ class _$BridgeAttachmentAdmissionContext_NewThreadCopyWithImpl<$Res>
 @pragma('vm:prefer-inline') $Res call({Object? mode = null,}) {
   return _then(BridgeAttachmentAdmissionContext_NewThread(
 mode: null == mode ? _self.mode : mode // ignore: cast_nullable_to_non_nullable
-as BridgeThreadMode,
+as String,
   ));
 }
 

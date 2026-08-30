@@ -136,11 +136,6 @@ StudioState _agentWorkspacePreviewState({
       ),
     ),
     threadDirectory: ThreadDirectoryWindow(threads: [root, child]),
-    taskDirectory: TaskDirectoryState.fromState(
-      state: UninitializedObservedResource(
-        updatedAt: timestamp.millisecondsSinceEpoch ~/ 1000,
-      ),
-    ),
     agentDirectory: AgentDirectoryState.fromState(
       state: UninitializedObservedResource(
         updatedAt: timestamp.millisecondsSinceEpoch ~/ 1000,

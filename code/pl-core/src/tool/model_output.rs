@@ -143,7 +143,7 @@ fn fair_output_byte_allocations(outputs: &[String], max_total_bytes: usize) -> V
 /// 对所有工具输出执行最终字节预算，任何工具或产品 adapter 都不能绕过。
 ///
 /// 硬上限被夹紧到 [`MAX_MODEL_TOOL_OUTPUT_BYTES`] 安全阈值。需要更大预算的只读
-/// 概览工具（如 `task_status`、`read_agent_submissions`、`read_review_round`）
+/// 概览工具（如 workflow status 或只读目录查询）
 /// 应改用 [`enforce_model_output_limit_with_cap`]。
 pub fn enforce_model_output_limit(output: &str, requested_max_bytes: usize) -> String {
     enforce_model_output_limit_inner(

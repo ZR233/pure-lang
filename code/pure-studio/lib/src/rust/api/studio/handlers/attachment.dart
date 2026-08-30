@@ -6,7 +6,6 @@
 import '../../../frb_generated.dart';
 import '../types/attachment.dart';
 import '../types/error.dart';
-import '../types/thread_stream.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 

@@ -1,14 +1,14 @@
 use std::collections::BTreeMap;
 use std::num::NonZeroUsize;
 
-use pl_protocol::PureError;
+use pl_protocol::{AgentProfileSnapshot, PureError};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::super::{AgentAccessPolicy, AgentSnapshot, AgentTargetSelector, ThreadId};
 use super::{ForkTurns, TOOL_SPAWN_AGENT};
 use crate::tool::tool_error;
-use crate::{AgentSession, AgentSessionForkPolicy, ToolResult};
+use crate::{AgentRoleId, AgentSession, AgentSessionForkPolicy, ToolResult};
 
 pub(super) fn fork_session(
     parent: &AgentSession,
@@ -94,15 +94,26 @@ fn root_id(id: &ThreadId, parents: &BTreeMap<ThreadId, Option<ThreadId>>) -> Thr
     current
 }
 
-pub(super) fn spawn_schema(policy: &AgentAccessPolicy) -> Value {
-    let roles = policy
-        .spawn_roles
+pub(super) fn spawn_schema(policy: &AgentAccessPolicy, profiles: &[AgentProfileSnapshot]) -> Value {
+    let profile_ids = profiles
         .iter()
-        .map(|role| Value::String(role.to_string()))
+        .filter(|profile| {
+            AgentRoleId::new(profile.profile_id.clone())
+                .is_ok_and(|role| policy.spawn_roles.contains(&role))
+        })
+        .map(|profile| Value::String(profile.profile_id.clone()))
         .collect::<Vec<_>>();
     object_schema(vec![
         ("message", json!({ "type": "string" }), true),
-        ("role", json!({ "type": "string", "enum": roles }), true),
+        (
+            "profileId",
+            json!({
+                "type": "string",
+                "enum": profile_ids,
+                "description": "Enabled Agent Profile to freeze for the new child Agent."
+            }),
+            true,
+        ),
         (
             "forkTurns",
             json!({

@@ -45,6 +45,8 @@ pub struct SkillFrontmatter {
     pub user_invocable: bool,
     #[serde(default)]
     pub metadata: SkillFrontmatterMetadata,
+    #[serde(default)]
+    pub mode: Option<ModeSkillFrontmatter>,
 }
 
 const fn default_user_invocable() -> bool {
@@ -56,6 +58,16 @@ const fn default_user_invocable() -> bool {
 pub struct SkillFrontmatterMetadata {
     #[serde(default, rename = "short-description")]
     pub short_description: Option<String>,
+}
+
+/// 只有保留 `mode.` 命名空间的 Skill 可以声明的模式元数据。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModeSkillFrontmatter {
+    #[serde(rename = "display-name")]
+    pub display_name: String,
+    #[serde(default)]
+    pub order: i32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -243,6 +255,7 @@ mod tests {
                 disable_model_invocation: false,
                 user_invocable: true,
                 metadata: SkillFrontmatterMetadata::default(),
+                mode: None,
             }
         );
         assert_eq!(document.body, "Body");
@@ -263,6 +276,22 @@ mod tests {
             error
                 .message()
                 .contains("failed to parse skill frontmatter")
+        );
+    }
+
+    #[test]
+    fn parses_mode_metadata() {
+        let mode = parse_skill_frontmatter(
+            "---\nname: mode.task\ndescription: Task\ndisable-model-invocation: true\nuser-invocable: false\nmode:\n  display-name: Task\n  order: 20\n---\nBody\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            mode.mode,
+            Some(ModeSkillFrontmatter {
+                display_name: "Task".to_string(),
+                order: 20,
+            })
         );
     }
 

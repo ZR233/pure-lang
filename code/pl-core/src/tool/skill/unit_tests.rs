@@ -111,6 +111,7 @@ fn create_writes_project_skill() {
     let catalog = SkillCatalog {
         project_dir: workspace.join("skills"),
         skills: Vec::new(),
+        modes: Vec::new(),
         warnings: Vec::new(),
         complete: true,
     };
@@ -227,7 +228,9 @@ fn patch_accepts_json_escaped_markdown_old_string() {
             resource_base: crate::skill::SkillResourceBase::Directory {
                 path: skill_dir.clone(),
             },
+            mode: None,
         }],
+        modes: Vec::new(),
         warnings: Vec::new(),
         complete: true,
     };
@@ -263,7 +266,9 @@ fn rejects_readonly_skill_patch() {
             resource_base: crate::skill::SkillResourceBase::Directory {
                 path: PathBuf::from("user/shared"),
             },
+            mode: None,
         }],
+        modes: Vec::new(),
         warnings: Vec::new(),
         complete: true,
     };

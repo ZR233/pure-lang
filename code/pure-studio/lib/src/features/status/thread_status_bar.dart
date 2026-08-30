@@ -6,12 +6,11 @@ import '../../domain/models/studio_models.dart';
 import '../../app/theme/studio_tokens.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_driver_keys.dart';
-import '../../shared/studio_driver_state.dart';
 import 'context_usage_readout.dart';
 import 'session_selectors.dart';
 import 'status_bar_item.dart';
 import 'status_detail_popover.dart';
-import 'task_runtime_detail.dart';
+import 'workflow_runtime_detail.dart';
 
 class ThreadStatusBar extends ConsumerWidget {
   const ThreadStatusBar({
@@ -33,7 +32,6 @@ class ThreadStatusBar extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final workspace = view ?? StatusBarView.fromWorkspace(this.workspace!);
     final runtime = workspace.runtime;
-    StudioDriverState.publishTask(runtime.task);
     final thread = workspace.thread;
     final capabilityLabel = _runtimeCapabilityLabel(context, runtime);
     final lspActiveServers = [
@@ -61,9 +59,7 @@ class ThreadStatusBar extends ConsumerWidget {
             alignment: Alignment.center,
             child: LayoutBuilder(
               builder: (context, constraints) {
-                final showModel =
-                    constraints.maxWidth >= 610 &&
-                    (runtime.task == null || constraints.maxWidth >= 760);
+                final showModel = constraints.maxWidth >= 610;
                 final showEffort = constraints.maxWidth >= 720;
                 final showCapabilities = constraints.maxWidth >= 840;
                 final showLspActivity = constraints.maxWidth >= 850;
@@ -115,7 +111,7 @@ class ThreadStatusBar extends ConsumerWidget {
                       SessionModeSelector(
                         mode: thread.mode,
                         enabled:
-                            !runtime.hasActiveTask &&
+                            !runtime.hasActiveWorkflow &&
                             thread.status == ThreadStatusView.idle,
                         onSelected: (mode) => ref
                             .read(studioControllerProvider.notifier)
@@ -150,12 +146,8 @@ class ThreadStatusBar extends ConsumerWidget {
                         roles: workspace.roles,
                         mode: thread.mode,
                       ),
-                    if (runtime.task case final task?)
-                      _TaskRuntimeReadout(
-                        task: task,
-                        rootThreadId: thread.rootThreadId,
-                        paused: _taskExecutionIsPaused(task, thread),
-                      ),
+                    if (runtime.workflow?.currentRun case final run?)
+                      _WorkflowRuntimeReadout(run: run),
                     ContextUsageReadout(runtime: runtime),
                     _StatusReadout(
                       key: StudioDriverKeys.threadThroughput,
@@ -312,100 +304,31 @@ class _LspActivityDetail extends StatelessWidget {
   }
 }
 
-class _TaskRuntimeReadout extends StatelessWidget {
-  const _TaskRuntimeReadout({
-    required this.task,
-    required this.rootThreadId,
-    required this.paused,
-  });
+class _WorkflowRuntimeReadout extends StatelessWidget {
+  const _WorkflowRuntimeReadout({required this.run});
 
-  final TaskRuntimeView task;
-  final String rootThreadId;
-  final bool paused;
+  final WorkflowRunView run;
 
   @override
   Widget build(BuildContext context) {
-    final issue = task.issues.lastOrNull;
-    final failedOutcome = switch (task.state) {
-      CompletedTaskStateView(outcome: final FailedTaskOutcomeView outcome) =>
-        outcome,
-      _ => null,
-    };
-    final paused = this.paused && failedOutcome == null && issue == null;
-    final status =
-        failedOutcome?.summary ??
-        issue?.message ??
-        (paused ? context.l10n.statusTaskPausedHint : task.stateSummary);
-    final fatal =
-        failedOutcome?.kind == TaskFailureKindView.fatal ||
-        (issue?.isFatal ?? false);
-    final taskLabel = paused
-        ? context.l10n.statusTaskPaused
-        : context.taskPhaseLabel(task.state.kind);
-    final tooltip = status.isEmpty
-        ? '${context.taskPhaseLabel(task.state.kind)} · ${task.runId}'
-        : '${fatal ? context.l10n.statusTaskFailed : taskLabel} · $status';
-    final readout = _StatusReadout(
-      key: StudioDriverKeys.taskPhase(task.runId, task.state.kind),
-      icon: fatal
-          ? Icons.error_outline
-          : issue != null
-          ? Icons.warning_amber_outlined
-          : paused
-          ? Icons.pause_circle_outline
-          : Icons.route_outlined,
-      label: fatal
-          ? context.l10n.statusTaskFailed
-          : issue != null
-          ? context.l10n.statusTaskRecoverable
-          : taskLabel,
-      tooltip: tooltip,
-      maxWidth: 120,
-      interactive: true,
-      detailWidth: 560,
-      detailBuilder: (context) => TaskRuntimeDetail(
-        task: task,
-        rootThreadId: rootThreadId,
-        paused: paused,
-      ),
-    );
+    final stage = run.currentStage;
+    final label = stage?.title.isNotEmpty == true
+        ? stage!.title
+        : run.currentStageId;
     return KeyedSubtree(
-      key: StudioDriverKeys.taskRuntime(task.runId),
-      child: Semantics(
-        key: StudioDriverKeys.taskStatus(task.runId, status),
-        label: tooltip,
-        child: paused
-            ? KeyedSubtree(
-                key: StudioDriverKeys.taskPaused(task.runId),
-                child: readout,
-              )
-            : readout,
+      key: ValueKey('workflow-runtime-${run.runId}'),
+      child: _StatusReadout(
+        key: ValueKey('workflow-stage-${run.currentStageId}'),
+        icon: run.terminal ? Icons.check_circle_outline : Icons.route_outlined,
+        label: label,
+        tooltip: '${run.modeDisplayName} · ${run.currentStageId}',
+        maxWidth: 140,
+        interactive: true,
+        detailWidth: 560,
+        detailBuilder: (context) => WorkflowRuntimeDetail(run: run),
       ),
     );
   }
-}
-
-bool _taskExecutionIsPaused(TaskRuntimeView task, StudioThread thread) {
-  if (!thread.isRoot ||
-      thread.status != ThreadStatusView.idle ||
-      !task.isActive ||
-      task.state.kind == TaskStateKind.pendingConfirmation) {
-    return false;
-  }
-  final activeWorkUnit = task.workUnits.any(
-    (unit) => const {
-      TaskWorkUnitStateKind.pending,
-      TaskWorkUnitStateKind.running,
-    }.contains(unit.state.kind),
-  );
-  final activeReview = task.reviews.any(
-    (review) => const {
-      TaskReviewStateKind.pendingDispatch,
-      TaskReviewStateKind.dispatched,
-      TaskReviewStateKind.running,
-    }.contains(review.state.kind),
-  );
-  return !activeWorkUnit && !activeReview;
 }
 
 String _runtimeCapabilityLabel(

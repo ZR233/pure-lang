@@ -342,7 +342,7 @@ async fn responses_websocket_reuses_the_agent_session_connection() {
     let session = ModelSession::default();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
 
-    let first_request = complete_task_wire_request();
+    let first_request = complete_workflow_wire_request();
     let first = provider
         .complete(
             first_request,
@@ -352,7 +352,7 @@ async fn responses_websocket_reuses_the_agent_session_connection() {
         .await
         .unwrap();
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    let mut second_request = complete_task_wire_request();
+    let mut second_request = complete_workflow_wire_request();
     second_request.input.extend([
         Message {
             role: MessageRole::Assistant,
@@ -400,7 +400,7 @@ async fn responses_websocket_reuses_the_agent_session_connection() {
     assert_eq!(requests[0]["prompt_cache_key"], "thread-generation-key");
     assert_eq!(requests[1]["prompt_cache_key"], "thread-generation-key");
     assert_eq!(requests[1]["previous_response_id"], "resp-1");
-    assert_complete_task_wire_body(&requests[0]);
+    assert_complete_workflow_wire_body(&requests[0]);
     assert_eq!(
         requests[1]["input"],
         serde_json::json!([{
@@ -1257,7 +1257,7 @@ async fn stream_complete_uses_chat_endpoint_without_auth_when_token_missing() {
     .unwrap();
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
 
-    let request = complete_task_wire_request();
+    let request = complete_workflow_wire_request();
     let response = provider
         .complete(
             request,
@@ -1274,7 +1274,7 @@ async fn stream_complete_uses_chat_endpoint_without_auth_when_token_missing() {
     assert!(!captured.headers.contains_key("authorization"));
     assert_eq!(captured.body["stream"], serde_json::json!(true));
     assert!(captured.body.get("prompt_cache_key").is_none());
-    assert_complete_task_wire_body(&captured.body);
+    assert_complete_workflow_wire_body(&captured.body);
 }
 
 #[tokio::test]
@@ -1350,10 +1350,6 @@ async fn stream_complete_chat_tags_project_commentary_and_final_only() {
         TraceEventKind::TracePartCompleted { item }
             if trace_text_channel(item) == Some(pl_trace::TraceTextChannel::Commentary)
                 && trace_part_text(item) == "检查配置。"
-    )));
-    assert!(!trace_events.iter().any(|event| matches!(
-        &event.kind,
-        TraceEventKind::TracePartCompleted { item } if item.kind() == TracePartKind::Plan
     )));
     assert!(trace_events.iter().any(|event| matches!(
         &event.kind,
@@ -1472,7 +1468,7 @@ async fn stream_complete_sends_responses_bearer_and_custom_headers() {
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
 
     let response = provider
-        .complete(complete_task_wire_request(), invocation(event_tx))
+        .complete(complete_workflow_wire_request(), invocation(event_tx))
         .await
         .unwrap();
     let captured = handle.await.unwrap();
@@ -1489,21 +1485,21 @@ async fn stream_complete_sends_responses_bearer_and_custom_headers() {
         Some("present")
     );
     assert_eq!(captured.body["stream"], serde_json::json!(true));
-    assert_complete_task_wire_body(&captured.body);
+    assert_complete_workflow_wire_body(&captured.body);
 }
 
-fn assert_complete_task_wire_body(body: &serde_json::Value) {
+fn assert_complete_workflow_wire_body(body: &serde_json::Value) {
     let body = body.to_string();
     for marker in [
-        "TASK_WIRE_BASE_SYSTEM",
-        "TASK_WIRE_GLOBAL_DEVELOPER",
-        "TASK_WIRE_PLANNER_ROLE",
-        "TASK_WIRE_WORKSPACE_AGENTS",
-        "TASK_WIRE_SKILLS_AND_CONSTRAINTS",
-        "TASK_WIRE_REAL_USER_PROMPT",
-        "TASK_WIRE_HOT_HISTORY",
-        "TASK_WIRE_PHASE_CONTEXT",
-        "task_status",
+        "WORKFLOW_WIRE_BASE_SYSTEM",
+        "WORKFLOW_WIRE_GLOBAL_DEVELOPER",
+        "WORKFLOW_WIRE_MODE_SKILL",
+        "WORKFLOW_WIRE_WORKSPACE_AGENTS",
+        "WORKFLOW_WIRE_CONSTRAINTS",
+        "WORKFLOW_WIRE_REAL_USER_PROMPT",
+        "WORKFLOW_WIRE_HOT_HISTORY",
+        "WORKFLOW_WIRE_CONTEXT",
+        "workflow_state",
         "additionalProperties",
     ] {
         assert!(body.contains(marker), "final wire body is missing {marker}");

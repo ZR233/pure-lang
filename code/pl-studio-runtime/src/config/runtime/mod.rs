@@ -76,6 +76,39 @@ impl ConfigRuntime {
             .map_err(|_| config_runtime_poisoned())
     }
 
+    /// 从独立 TOML 目录发现本次可用的 Agent Profile。
+    pub fn agent_profiles(&self) -> ConfigRuntimeResult<super::AgentProfileCatalog> {
+        let config = self.read()?.config;
+        Ok(super::AgentProfileCatalog::discover(
+            self.store.paths(),
+            &config,
+        ))
+    }
+
+    /// 返回设置页使用的 Profile；其中包含被禁用的内置 Profile。
+    pub fn agent_profiles_for_settings(&self) -> ConfigRuntimeResult<super::AgentProfileCatalog> {
+        let config = self.read()?.config;
+        Ok(super::AgentProfileCatalog::discover_for_settings(
+            self.store.paths(),
+            &config,
+        ))
+    }
+
+    /// 原子创建或替换一个用户 Agent Profile 文件。
+    pub fn save_user_agent_profile(
+        &self,
+        profile_id: &str,
+        profile: &super::UserAgentProfile,
+    ) -> ConfigRuntimeResult<()> {
+        let _command = self
+            .command_lock
+            .lock()
+            .map_err(|_| config_runtime_poisoned())?;
+        let config = self.read()?.config;
+        super::save_user_agent_profile(self.store.paths(), profile_id, profile, &config)?;
+        Ok(())
+    }
+
     /// 使用 expected revision 原子保存完整 desired config。
     pub fn replace(
         &self,
@@ -132,11 +165,6 @@ impl ConfigRuntime {
         *self.state.write().map_err(|_| config_runtime_poisoned())? = next.clone();
         Ok(next)
     }
-
-    #[cfg(test)]
-    pub(crate) fn store(&self) -> &ConfigStore {
-        &self.store
-    }
 }
 
 fn ensure_revision(expected: u64, actual: u64) -> ConfigRuntimeResult<()> {
@@ -168,7 +196,7 @@ mod tests {
     fn read_does_not_observe_external_file_changes() {
         let runtime = runtime("read-memory");
         let before = runtime.read().unwrap();
-        let path = runtime.store().paths().config_file();
+        let path = runtime.store.paths().config_file();
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, "invalid external content").unwrap();
 
@@ -188,7 +216,7 @@ mod tests {
         std::fs::create_dir_all(store.paths().config_dir()).unwrap();
         let legacy = toml::to_string_pretty(&StudioConfig::default_config())
             .unwrap()
-            .replace("schema_version = 15", "schema_version = 14");
+            .replace("schema_version = 16", "schema_version = 15");
         std::fs::write(store.paths().config_file(), legacy).unwrap();
 
         let runtime = ConfigRuntime::initialize(store).unwrap();
@@ -225,7 +253,7 @@ mod tests {
     fn explicit_reload_rejects_invalid_config_without_recovery() {
         let runtime = runtime("strict-reload");
         let before = runtime.read().unwrap();
-        let store = runtime.store();
+        let store = &runtime.store;
         let path = store.paths().config_file();
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, "invalid external content").unwrap();

@@ -92,13 +92,6 @@ pub(super) fn finalize_tool_item(
         | ToolExecutionOutcome::Denied
         | ToolExecutionOutcome::Cancelled => recorder.fail_item(item),
     }
-    if record.outcome != ToolExecutionOutcome::Succeeded {
-        recorder.terminalize_plan_item_for_tool(
-            &record.trace_part_id,
-            record.outcome == ToolExecutionOutcome::Cancelled,
-            &record.display_result,
-        );
-    }
     if record.outcome == ToolExecutionOutcome::Succeeded {
         for event in &record.runtime_events {
             match event {
@@ -117,7 +110,6 @@ pub(super) fn finalize_tool_item(
                         activation: activation.clone(),
                     });
                 }
-                ToolDirective::PlanCompleted { .. } => {}
                 ToolDirective::ToolResultRevision { .. } => {}
                 ToolDirective::OutputArtifacts { .. } => {}
                 ToolDirective::AuditMetadata { .. } => {}
@@ -133,7 +125,6 @@ pub(super) fn finalize_tool_item(
 
 pub(super) async fn ready_tool_execution_record(
     tool_call: pl_model::ToolCall,
-    trace_part_id: String,
     error: ToolExecutionError,
     outcome: ToolExecutionOutcome,
     exit_code: Option<i32>,
@@ -142,7 +133,6 @@ pub(super) async fn ready_tool_execution_record(
     match error {
         ToolExecutionError::RespondToModel(message) => Ok(tool_execution_record_from_envelope(
             tool_call.clone(),
-            trace_part_id,
             tool_call.name.clone(),
             ToolOutputEnvelope {
                 model_visible_text: message.clone(),
@@ -161,7 +151,6 @@ pub(super) async fn ready_tool_execution_record(
 
 pub(super) fn tool_execution_record(
     tool_call: pl_model::ToolCall,
-    trace_part_id: String,
     tool_name: String,
     result: std::result::Result<ToolResult, PureError>,
 ) -> Result<ToolExecutionRecord, ToolExecutionError> {
@@ -225,17 +214,12 @@ pub(super) fn tool_execution_record(
         }
     };
     Ok(tool_execution_record_from_envelope(
-        tool_call,
-        trace_part_id,
-        tool_name,
-        envelope,
-        outcome,
+        tool_call, tool_name, envelope, outcome,
     ))
 }
 
 fn tool_execution_record_from_envelope(
     tool_call: pl_model::ToolCall,
-    trace_part_id: String,
     tool_name: String,
     envelope: ToolOutputEnvelope,
     outcome: ToolExecutionOutcome,
@@ -260,7 +244,6 @@ fn tool_execution_record_from_envelope(
             } => Some((*raw_bytes, *model_visible_bytes, *artifact_bytes)),
             ToolDirective::InteractionRequested { .. }
             | ToolDirective::SkillActivated { .. }
-            | ToolDirective::PlanCompleted { .. }
             | ToolDirective::ToolResultRevision { .. }
             | ToolDirective::OutputArtifacts { .. }
             | ToolDirective::AuditMetadata { .. }
@@ -290,7 +273,6 @@ fn tool_execution_record_from_envelope(
     ToolExecutionRecord {
         id: tool_call.id.clone(),
         call_id: tool_call.call_id.clone(),
-        trace_part_id,
         name: tool_name,
         kind: tool_call.kind(),
         arguments: serde_json::to_string(&tool_call.arguments_for_display()).unwrap_or_default(),
@@ -312,7 +294,6 @@ fn output_artifacts(runtime_events: &[ToolDirective]) -> Vec<serde_json::Value> 
             ToolDirective::OutputArtifacts { artifacts } => Some(artifacts.as_slice()),
             ToolDirective::InteractionRequested { .. }
             | ToolDirective::SkillActivated { .. }
-            | ToolDirective::PlanCompleted { .. }
             | ToolDirective::ToolResultRevision { .. }
             | ToolDirective::AuditMetadata { .. }
             | ToolDirective::CacheHit { .. }
@@ -333,7 +314,6 @@ fn audit_metadata(runtime_events: &[ToolDirective]) -> Vec<serde_json::Value> {
             ToolDirective::AuditMetadata { metadata } => Some(metadata.clone()),
             ToolDirective::InteractionRequested { .. }
             | ToolDirective::SkillActivated { .. }
-            | ToolDirective::PlanCompleted { .. }
             | ToolDirective::ToolResultRevision { .. }
             | ToolDirective::OutputArtifacts { .. }
             | ToolDirective::ExecutionFailed
@@ -364,7 +344,6 @@ fn output_metrics(runtime_events: &[ToolDirective]) -> Option<pl_trace::TraceToo
         }),
         ToolDirective::InteractionRequested { .. }
         | ToolDirective::SkillActivated { .. }
-        | ToolDirective::PlanCompleted { .. }
         | ToolDirective::ToolResultRevision { .. }
         | ToolDirective::OutputArtifacts { .. }
         | ToolDirective::AuditMetadata { .. }
@@ -377,11 +356,9 @@ fn output_metrics(runtime_events: &[ToolDirective]) -> Option<pl_trace::TraceToo
 
 pub(super) fn interrupted_tool_execution_record(
     tool_call: pl_model::ToolCall,
-    trace_part_id: String,
 ) -> ToolExecutionRecord {
     tool_execution_record_from_envelope(
         tool_call.clone(),
-        trace_part_id,
         tool_call.name.clone(),
         ToolOutputEnvelope {
             model_visible_text: "Tool execution interrupted".to_string(),
@@ -398,12 +375,10 @@ pub(super) fn interrupted_tool_execution_record(
 
 pub(super) fn respond_to_model_tool_execution_record(
     tool_call: pl_model::ToolCall,
-    trace_part_id: String,
     message: String,
 ) -> ToolExecutionRecord {
     tool_execution_record_from_envelope(
         tool_call.clone(),
-        trace_part_id,
         tool_call.name.clone(),
         ToolOutputEnvelope {
             model_visible_text: message.clone(),

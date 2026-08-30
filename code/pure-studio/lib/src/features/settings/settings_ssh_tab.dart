@@ -142,7 +142,7 @@ class _SshTabState extends ConsumerState<SshTab> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: Text(context.l10n.recoveryCleanupCancel),
+            child: Text(context.l10n.settingsCancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
@@ -428,7 +428,7 @@ class _SshServerDialogState extends State<_SshServerDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: Text(context.l10n.recoveryCleanupCancel),
+          child: Text(context.l10n.settingsCancel),
         ),
         FilledButton(
           onPressed: () {
@@ -551,7 +551,7 @@ class _RemoteDirectoryDialogState
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: Text(context.l10n.recoveryCleanupCancel),
+          child: Text(context.l10n.settingsCancel),
         ),
         FilledButton.icon(
           key: StudioDriverKeys.sshOpenCurrentDirectory,

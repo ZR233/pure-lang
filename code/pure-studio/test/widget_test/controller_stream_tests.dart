@@ -90,7 +90,7 @@ void registerControllerStreamTests() {
     ], threadId: 'session-1');
 
     await controller.setModelRole(
-      roleKey: 'executor',
+      roleKey: 'planner',
       providerId: 'zhipu',
       model: 'glm-5.3',
     );
@@ -190,48 +190,6 @@ void registerControllerStreamTests() {
       expect(state.role('planner')?.model, 'gpt-5.6');
       expect(state.selectedWorkspace, same(initial.selectedWorkspace));
       expect(state.runtime, initial.runtime);
-    },
-  );
-
-  test(
-    'authoritative product snapshot removes a stale selected Task',
-    () async {
-      final staleTask = TaskRuntimeView(
-        runId: 'task-stale',
-        state: const WorkingTaskStateView(
-          documentEditSummary: 'test documents updated',
-        ),
-        revision: 0,
-        generation: 1,
-        workUnits: [],
-        completions: [],
-        merges: [],
-        reviews: [],
-      );
-      final initial = _twoProjectState(selectedProjectId: 'project-a').copyWith(
-        taskDirectory: TaskDirectoryState(
-          values: [
-            TaskDirectoryEntryView(rootThreadId: 'session-b', task: staleTask),
-          ],
-        ),
-      );
-      final api = _FakeStudioApi(initial);
-      api.selectProjectStates['project-b'] = _twoProjectState(
-        selectedProjectId: 'project-b',
-      ).copyWith(taskDirectory: TaskDirectoryState());
-      final container = ProviderContainer(
-        overrides: [studioApiProvider.overrideWithValue(api)],
-      );
-      addTearDown(container.dispose);
-
-      await container.read(studioControllerProvider.future);
-      await container
-          .read(studioControllerProvider.notifier)
-          .selectProject('project-b');
-
-      final next = container.read(studioControllerProvider).requireValue;
-      expect(next.selectedThreadId, 'session-b');
-      expect(next.tasksByRootThread, isNot(contains('session-b')));
     },
   );
 

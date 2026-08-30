@@ -563,8 +563,8 @@ class _ToolGroupItemRow extends StatelessWidget {
     if (item.part.status == 'succeeded') {
       return null;
     }
-    if (item.name == 'task_transition') {
-      return _taskTransitionRejectionDetail(result);
+    if (item.name == 'workflow_state') {
+      return _workflowStateDetail(result);
     }
     return result;
   }
@@ -575,7 +575,7 @@ class _ToolGroupItemRow extends StatelessWidget {
     return attachments.map(_attachmentDescription).join('\n');
   }
 
-  String _taskTransitionRejectionDetail(String result) {
+  String _workflowStateDetail(String result) {
     try {
       final decoded = jsonDecode(result);
       if (decoded is! Map) return result;

@@ -38,7 +38,7 @@ impl StudioStore {
             mode: Set(mode.label().to_string()),
             root_thread_id: Set(id.clone()),
             parent_thread_id: Set(None),
-            role: Set(mode.root_role().key().to_string()),
+            role: Set(crate::config::StudioRole::Planner.key().to_string()),
             agent_path: Set(id),
             state_json: Set(serde_json::to_string(&AgentState::idle())?),
             revision: Set(0),

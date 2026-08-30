@@ -22,7 +22,7 @@ import '../timeline/timeline_view.dart';
 import '../todo/todo_panel.dart';
 
 part 'studio_sidebar.dart';
-part 'recovery_cleanup_dialog.dart';
+part 'runtime_banners.dart';
 part 'studio_shell_chrome.dart';
 part 'agent_workspace_pane.dart';
 part 'agent_workspace_preview.dart';

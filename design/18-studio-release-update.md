@@ -156,6 +156,6 @@ Studio 在 LocalAppData 的 `Pure Studio/logs` 写入按日滚动 Rust 与 Dart 
 LocalDumps，并保留 in-process unhandled exception minidump 兜底；`0xc0000409/BEX64`
 在没有匹配 dump/PDB 时只能报告现象，不能宣称唯一根因。
 
-所有由 GUI 发起的后台 Git、worktree、task/review/merge、Docker、MCP/LSP 与终止辅助命令
+所有由 GUI 发起的后台 Git、Docker、MCP/LSP、Agent 与终止辅助命令
 在 Windows 使用 `CREATE_NO_WINDOW`；其他平台保持既有后台语义。只有用户显式打开交互终端
 或安装器等外部 UI 时允许正常显示窗口。

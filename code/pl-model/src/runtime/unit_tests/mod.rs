@@ -76,7 +76,6 @@ fn summary_started(id: &str) -> ModelStreamEvent {
 fn trace_part_text(item: &pl_trace::TracePart) -> String {
     match item.state() {
         pl_trace::TracePartState::Text(text) => text.content().to_string(),
-        pl_trace::TracePartState::Plan(plan) => plan.content().to_string(),
         pl_trace::TracePartState::Turn(_) => String::new(),
         pl_trace::TracePartState::Thinking(thinking) => {
             let summary = thinking
@@ -109,8 +108,7 @@ fn trace_delta_text(delta: &pl_trace::TraceDelta) -> String {
         | pl_trace::TraceDelta::Thinking { delta, .. }
         | pl_trace::TraceDelta::ReasoningContent { delta, .. }
         | pl_trace::TraceDelta::ToolArguments { delta }
-        | pl_trace::TraceDelta::ToolResult { delta }
-        | pl_trace::TraceDelta::Plan { delta } => delta.clone(),
+        | pl_trace::TraceDelta::ToolResult { delta } => delta.clone(),
     }
 }
 
@@ -250,17 +248,17 @@ fn minimal_request(_model: &str) -> CompletionRequest {
         .build()
 }
 
-fn complete_task_wire_request() -> CompletionRequest {
+fn complete_workflow_wire_request() -> CompletionRequest {
     CompletionRequest::builder()
         .instructions(
-            "TASK_WIRE_BASE_SYSTEM\nTASK_WIRE_GLOBAL_DEVELOPER\nTASK_WIRE_PLANNER_ROLE\n\
-             TASK_WIRE_WORKSPACE_AGENTS\nTASK_WIRE_SKILLS_AND_CONSTRAINTS",
+            "WORKFLOW_WIRE_BASE_SYSTEM\nWORKFLOW_WIRE_GLOBAL_DEVELOPER\nWORKFLOW_WIRE_MODE_SKILL\n\
+             WORKFLOW_WIRE_WORKSPACE_AGENTS\nWORKFLOW_WIRE_CONSTRAINTS",
         )
         .input(vec![
             Message {
                 role: MessageRole::User,
                 content: MessageContent::text(
-                    "TASK_WIRE_REAL_USER_PROMPT TASK_WIRE_HOT_HISTORY TASK_WIRE_PHASE_CONTEXT"
+                    "WORKFLOW_WIRE_REAL_USER_PROMPT WORKFLOW_WIRE_HOT_HISTORY WORKFLOW_WIRE_CONTEXT"
                         .to_string(),
                 ),
                 reasoning_content: None,
@@ -271,8 +269,8 @@ fn complete_task_wire_request() -> CompletionRequest {
             .into(),
         ])
         .tools(vec![pl_protocol::ToolSpec::function(
-            "task_status",
-            "Read the canonical Task state.",
+            "workflow_state",
+            "Read the canonical workflow state.",
             serde_json::json!({
                 "type": "object",
                 "properties": {},

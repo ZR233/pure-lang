@@ -4,51 +4,16 @@ use pl_protocol::studio::{StudioError, StudioErrorCode};
 use crate::ConfigRuntimeError;
 use crate::{StudioDatabaseError, StudioUpdateError, StudioUpdateErrorCode};
 
-#[derive(Debug, Clone)]
-pub(crate) struct StudioDiagnosticContext {
-    pub(crate) operation: &'static str,
-    pub(crate) task_run_id: Option<String>,
-    pub(crate) thread_id: Option<String>,
-    pub(crate) turn_id: Option<String>,
-    pub(crate) interaction_id: Option<String>,
-    pub(crate) state: Option<&'static str>,
-}
-
-#[derive(Debug, thiserror::Error)]
-#[error("Studio operation failed")]
-struct StudioDiagnosticError {
-    context: StudioDiagnosticContext,
-    #[source]
-    source: anyhow::Error,
-}
-
-pub(crate) fn with_studio_diagnostics(
-    error: anyhow::Error,
-    context: StudioDiagnosticContext,
-) -> anyhow::Error {
-    anyhow::Error::new(StudioDiagnosticError {
-        context,
-        source: error,
-    })
-}
-
 /// Maps an internal runtime failure to the shared, redacted Studio API error.
 ///
 /// Classification is based exclusively on typed error sources. Unclassified
 /// failures are logged for diagnostics and cross the adapter boundary only as
 /// a redacted internal error.
 pub fn studio_error_from_anyhow(error: anyhow::Error) -> StudioError {
-    let (error, context) = match error.downcast_ref::<StudioDiagnosticError>() {
-        Some(diagnostic) => (&diagnostic.source, Some(&diagnostic.context)),
-        None => (&error, None),
-    };
-    studio_error_from_ref(error, context)
+    studio_error_from_ref(&error)
 }
 
-fn studio_error_from_ref(
-    error: &anyhow::Error,
-    context: Option<&StudioDiagnosticContext>,
-) -> StudioError {
+fn studio_error_from_ref(error: &anyhow::Error) -> StudioError {
     if let Some(error) = error.downcast_ref::<StudioError>() {
         return error.clone();
     }
@@ -88,13 +53,8 @@ fn studio_error_from_ref(
     let studio_error = StudioError::internal();
     tracing::error!(
         correlation_id = %studio_error.correlation_id,
-        operation = context.map_or("studioRuntime", |context| context.operation),
+        operation = "studioRuntime",
         error_code = "internal",
-        task_run_id = ?context.and_then(|context| context.task_run_id.as_deref()),
-        thread_id = ?context.and_then(|context| context.thread_id.as_deref()),
-        turn_id = ?context.and_then(|context| context.turn_id.as_deref()),
-        interaction_id = ?context.and_then(|context| context.interaction_id.as_deref()),
-        state = ?context.and_then(|context| context.state),
         diagnostic_bytes = error.to_string().len(),
         "unclassified Studio runtime failure"
     );

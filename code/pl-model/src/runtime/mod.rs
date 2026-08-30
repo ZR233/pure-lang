@@ -49,7 +49,6 @@ pub struct ModelInvocationContext {
     trace: Option<CompletionTraceContext>,
     trace_sink: Option<Arc<dyn TraceEventSink>>,
     cancellation: Option<tokio_util::sync::CancellationToken>,
-    input_trace_projections: Arc<HashMap<String, pl_trace::ToolInputTraceProjection>>,
     prompt_cache_key: Option<String>,
 }
 
@@ -61,7 +60,6 @@ impl ModelInvocationContext {
             trace: None,
             trace_sink: None,
             cancellation: None,
-            input_trace_projections: Arc::new(HashMap::new()),
             prompt_cache_key: None,
         }
     }
@@ -81,14 +79,6 @@ impl ModelInvocationContext {
         cancellation: Option<tokio_util::sync::CancellationToken>,
     ) -> Self {
         self.cancellation = cancellation;
-        self
-    }
-
-    pub fn with_input_trace_projections(
-        mut self,
-        projections: Arc<HashMap<String, pl_trace::ToolInputTraceProjection>>,
-    ) -> Self {
-        self.input_trace_projections = projections;
         self
     }
 
@@ -292,7 +282,6 @@ impl ModelRuntime {
                         trace,
                         context.trace_sink.clone(),
                         context.cancellation.clone(),
-                        Arc::clone(&context.input_trace_projections),
                     )
                     .await;
                     // design/13：仅在模型流尚未产生任何 canonical 事件时允许完整重放。

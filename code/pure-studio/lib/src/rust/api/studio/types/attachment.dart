@@ -7,8 +7,6 @@ import '../../../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
-
-import 'thread_stream.dart';
 part 'attachment.freezed.dart';
 
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`
@@ -22,7 +20,7 @@ sealed class BridgeAttachmentAdmissionContext
     required String threadId,
   }) = BridgeAttachmentAdmissionContext_ExistingThread;
   const factory BridgeAttachmentAdmissionContext.newThread({
-    required BridgeThreadMode mode,
+    required String mode,
   }) = BridgeAttachmentAdmissionContext_NewThread;
 }
 

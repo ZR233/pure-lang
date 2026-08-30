@@ -9,15 +9,14 @@ use axum::http::{StatusCode, header};
 use axum::response::IntoResponse;
 use pl_protocol::studio::{
     AdmitAttachmentDraftsRequest, AdmitAttachmentDraftsResponse, CreateThreadRequest,
-    ExpectedOpaqueRevisionRequest, ExpectedRevisionRequest, HealthResponse, LspResetRequest,
-    McpResetRequest, OpenProjectRequest, ResolveInteractionRequest, SetModelRoleRequest,
-    SetThreadModeRequest, StartTurnRequest, SteerTurnRequest, StudioAttachmentAdmissionContext,
-    StudioAttachmentDraftSource, StudioError, StudioSettingsSnapshot, ThreadPageQuery,
-    UpdateGeneralSettingsRequest, UpdateInstructionsSettingsRequest, UpdateMcpSettingsRequest,
-    UpdatePermissionSettingsRequest, UpdateProviderSettingsRequest, UpdateSkillsSettingsRequest,
-    UpdateWebSearchSettingsRequest,
+    ExpectedRevisionRequest, HealthResponse, LspResetRequest, McpResetRequest, OpenProjectRequest,
+    ResolveInteractionRequest, SetModelRoleRequest, SetThreadModeRequest, StartTurnRequest,
+    SteerTurnRequest, StudioAttachmentAdmissionContext, StudioAttachmentDraftSource, StudioError,
+    StudioSettingsSnapshot, ThreadPageQuery, UpdateGeneralSettingsRequest,
+    UpdateInstructionsSettingsRequest, UpdateMcpSettingsRequest, UpdatePermissionSettingsRequest,
+    UpdateProviderSettingsRequest, UpdateSkillsSettingsRequest, UpdateWebSearchSettingsRequest,
 };
-use pl_studio_runtime::{StudioMode, StudioTaskRecoveryRequest};
+use pl_studio_runtime::StudioMode;
 use tokio::io::AsyncWriteExt;
 use utoipa::{IntoResponses, OpenApi};
 use utoipa_axum::{router::OpenApiRouter, routes};
@@ -155,13 +154,6 @@ pub(crate) fn api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(reset_lsp))
         .routes(routes!(read_update))
         .routes(routes!(check_update))
-        .routes(routes!(preview_task_recovery))
-        .routes(routes!(apply_task_recovery))
-        .routes(routes!(preview_issue_cleanup))
-        .routes(routes!(cleanup_issue))
-        .routes(routes!(retry_issue))
-        .routes(routes!(preview_project_cleanup))
-        .routes(routes!(cleanup_project))
         .routes(routes!(sse::product_events))
         .routes(routes!(sse::thread_events))
         .merge(attachment_upload)
@@ -832,106 +824,6 @@ async fn check_update(State(state): State<AppState>) -> Result<impl IntoResponse
         state
             .runtime
             .check_studio_update()
-            .await
-            .map_err(ApiError::from)?,
-    ))
-}
-
-#[utoipa::path(post, path = "/api/v1/recovery/tasks/{root_thread_id}/preview", operation_id = "recovery.taskPreview", params(("root_thread_id" = String, Path)), responses(StudioApiErrors, (status = 200)))]
-async fn preview_task_recovery(
-    State(state): State<AppState>,
-    Path(root_thread_id): Path<String>,
-) -> Result<impl IntoResponse, ApiError> {
-    Ok(Json(
-        state
-            .runtime
-            .preview_task_recovery(&root_thread_id)
-            .await
-            .map_err(ApiError::from)?,
-    ))
-}
-
-#[utoipa::path(post, path = "/api/v1/recovery/tasks/apply", operation_id = "recovery.taskApply", request_body = StudioTaskRecoveryRequest, responses(StudioApiErrors, (status = 200)))]
-async fn apply_task_recovery(
-    State(state): State<AppState>,
-    ApiJson(request): ApiJson<StudioTaskRecoveryRequest>,
-) -> Result<impl IntoResponse, ApiError> {
-    Ok(Json(
-        state
-            .runtime
-            .apply_task_recovery(request)
-            .await
-            .map_err(ApiError::from)?,
-    ))
-}
-
-#[utoipa::path(post, path = "/api/v1/recovery/issues/{issue_id}/cleanup-preview", operation_id = "recovery.issueCleanupPreview", params(("issue_id" = String, Path)), responses(StudioApiErrors, (status = 200)))]
-async fn preview_issue_cleanup(
-    State(state): State<AppState>,
-    Path(issue_id): Path<String>,
-) -> Result<impl IntoResponse, ApiError> {
-    Ok(Json(
-        state
-            .runtime
-            .preview_recovery_issue_cleanup(&issue_id)
-            .await
-            .map_err(ApiError::from)?,
-    ))
-}
-
-#[utoipa::path(post, path = "/api/v1/recovery/issues/{issue_id}/cleanup", operation_id = "recovery.issueCleanup", params(("issue_id" = String, Path)), request_body = ExpectedOpaqueRevisionRequest, responses(StudioApiErrors, (status = 200)))]
-async fn cleanup_issue(
-    State(state): State<AppState>,
-    Path(issue_id): Path<String>,
-    ApiJson(request): ApiJson<ExpectedOpaqueRevisionRequest>,
-) -> Result<impl IntoResponse, ApiError> {
-    Ok(Json(
-        state
-            .runtime
-            .cleanup_recovery_issue(&issue_id, &request.expected_revision)
-            .await
-            .map_err(ApiError::from)?,
-    ))
-}
-
-#[utoipa::path(post, path = "/api/v1/recovery/issues/{issue_id}/retry", operation_id = "recovery.issueRetry", params(("issue_id" = String, Path)), responses(StudioApiErrors, (status = 200)))]
-async fn retry_issue(
-    State(state): State<AppState>,
-    Path(issue_id): Path<String>,
-) -> Result<impl IntoResponse, ApiError> {
-    Ok(Json(
-        state
-            .runtime
-            .retry_recovery_issue(&issue_id)
-            .await
-            .map_err(ApiError::from)?,
-    ))
-}
-
-#[utoipa::path(post, path = "/api/v1/projects/{project_id}/cleanup-preview", operation_id = "recovery.projectCleanupPreview", params(("project_id" = String, Path)), responses(StudioApiErrors, (status = 200)))]
-async fn preview_project_cleanup(
-    State(state): State<AppState>,
-    Path(project_id): Path<String>,
-) -> Result<impl IntoResponse, ApiError> {
-    Ok(Json(
-        state
-            .runtime
-            .preview_project_cleanup(&project_id)
-            .await
-            .map_err(ApiError::from)?,
-    ))
-}
-
-#[utoipa::path(post, path = "/api/v1/projects/{project_id}/cleanup", operation_id = "recovery.projectCleanup", params(("project_id" = String, Path)), request_body = ExpectedOpaqueRevisionRequest, responses(StudioApiErrors, (status = 200)))]
-async fn cleanup_project(
-    State(state): State<AppState>,
-    Path(project_id): Path<String>,
-    ApiJson(request): ApiJson<ExpectedOpaqueRevisionRequest>,
-) -> Result<impl IntoResponse, ApiError> {
-    Ok(Json(
-        state
-            .runtime
-            .cleanup_project(&project_id, &request.expected_revision)
             .await
             .map_err(ApiError::from)?,
     ))

@@ -61,14 +61,14 @@ mod tests {
     fn rejects_duplicate_function_argument_fields() {
         let call = function_tool_call_from_raw(
             "item-1".to_string(),
-            "plan_exit".to_string(),
-            r##"{"plan":"# One","plan":"# Two"}"##.to_string(),
+            "workflow_state".to_string(),
+            r##"{"action":"status","action":"compile"}"##.to_string(),
             "call-1".to_string(),
         );
 
         assert!(
             call.invalid_arguments_message()
-                .is_some_and(|message| message.contains("duplicate top-level field `plan`"))
+                .is_some_and(|message| message.contains("duplicate top-level field `action`"))
         );
     }
 }

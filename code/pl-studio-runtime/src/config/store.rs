@@ -110,6 +110,11 @@ impl ConfigPaths {
     pub fn config_file(&self) -> &Path {
         &self.config_file
     }
+
+    /// 用户 Agent Profile 的独立 TOML 目录。
+    pub fn agents_dir(&self) -> PathBuf {
+        self.config_dir.join("agents")
+    }
 }
 
 impl ConfigStore {
@@ -531,7 +536,7 @@ mod tests {
         fs::create_dir_all(store.paths().config_dir()).unwrap();
         let legacy = toml::to_string_pretty(&StudioConfig::default_config())
             .unwrap()
-            .replace("schema_version = 15", "schema_version = 14");
+            .replace("schema_version = 16", "schema_version = 15");
         fs::write(store.paths().config_file(), &legacy).unwrap();
 
         let startup = store.load_for_startup().unwrap();
@@ -545,7 +550,7 @@ mod tests {
         fs::create_dir_all(store.paths().config_dir()).unwrap();
         let future = toml::to_string_pretty(&StudioConfig::default_config())
             .unwrap()
-            .replace("schema_version = 15", "schema_version = 4294967295");
+            .replace("schema_version = 16", "schema_version = 4294967295");
         fs::write(store.paths().config_file(), &future).unwrap();
 
         let startup = store.load_for_startup().unwrap();

@@ -1,12 +1,8 @@
 use std::path::Path;
 use std::sync::Arc;
-#[cfg(debug_assertions)]
-use std::time::Duration;
 
 use crate::{AttachmentModality, ContentPart, MessageContent, PureError, Result};
 use futures::FutureExt;
-#[cfg(debug_assertions)]
-use pl_core::TurnBudget;
 use pl_core::WorkspaceInstructions;
 use pl_core::instruction::{
     ExecutionInstructionProfile, InstructionAssembler, InstructionAssemblyRequest,
@@ -19,15 +15,15 @@ use pl_core::{
     TurnRequest, load_workspace_instruction_documents, plan_web_search,
 };
 
+use crate::McpRuntimeHandle;
+use crate::StudioMode;
 use crate::config::ConfigRuntime;
 use crate::studio::product_event_bus::ProductEventBus;
 use crate::studio::records::ThreadRecord;
 use crate::studio::runtime::SkillCatalogRuntime;
-use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::{InteractionService, StudioStore};
-use crate::{McpRuntimeHandle, StudioMode};
 
-use super::policy::{StudioPolicyContext, studio_execution_policy};
+use super::policy::studio_execution_policy;
 use super::resources::StudioAgentResources;
 use super::workspace_resolver::AgentWorkspaceResolver;
 
@@ -41,7 +37,6 @@ pub(in crate::studio) struct StudioAgentTurnFactory {
     tool_manager: pl_core::ToolManager,
     lsp_runtime: pl_lsp::LspRuntimeRegistry,
     interactions: InteractionService,
-    coordinator: Arc<TaskCoordinator>,
     resources: StudioAgentResources,
     skills: SkillCatalogRuntime,
     ssh_manager: Arc<pl_core::remote::SshManager>,
@@ -57,7 +52,6 @@ impl StudioAgentTurnFactory {
         tool_manager: pl_core::ToolManager,
         lsp_runtime: pl_lsp::LspRuntimeRegistry,
         interactions: InteractionService,
-        coordinator: Arc<TaskCoordinator>,
         resources: StudioAgentResources,
         skills: SkillCatalogRuntime,
         ssh_manager: Arc<pl_core::remote::SshManager>,
@@ -70,7 +64,6 @@ impl StudioAgentTurnFactory {
             tool_manager,
             lsp_runtime,
             interactions,
-            coordinator,
             resources,
             skills,
             ssh_manager,
@@ -116,43 +109,22 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
                 .ok_or_else(|| turn_error("selected Studio project not found"))?,
         };
         let config = self.config_runtime.read()?.config;
-        let mode = thread_record.mode;
-        let is_root = context.snapshot.identity.parent_id.is_none();
-        // root 角色按 mode 派生；进程内 identity.role 只是投影，切换后允许短暂陈旧。
-        let root_role = is_root.then(|| mode.root_role());
-        let active_task = if mode == StudioMode::Task {
-            self.coordinator
-                .task_runtime()
-                .aggregate(&thread_record.root_thread_id)
-                .await
-                .filter(|aggregate| !aggregate.facts.run.kind().is_terminal())
-        } else {
-            None
-        };
-        let active_task_run = active_task.as_ref().map(|aggregate| &aggregate.facts.run);
-        let task_phase = active_task_run.map(|run| run.kind());
-        #[cfg(debug_assertions)]
-        let task_driver_budget = debug_task_driver_budget_fixture()?;
-        if mode == StudioMode::Task
-            && context.snapshot.identity.parent_id.is_some()
-            && matches!(
-                context.snapshot.identity.role.as_str(),
-                "executor" | "reviewer"
-            )
-            && active_task_run.is_none()
-        {
-            return Err(turn_error(
-                "Task executor or reviewer has no active TaskRun",
-            ));
+        let agent_profile_catalog = self.config_runtime.agent_profiles()?;
+        for diagnostic in &agent_profile_catalog.diagnostics {
+            tracing::warn!(
+                path = %diagnostic.path.display(),
+                message = %diagnostic.message,
+                "ignored invalid Agent Profile"
+            );
         }
+        let available_agent_profiles = agent_profile_catalog.profiles;
+        let mode = &thread_record.mode;
+        let is_root = context.snapshot.identity.parent_id.is_none();
+        // 所有模式的 root 统一使用 planner 路由；identity.role 只是可自愈投影。
+        let root_role = is_root.then_some(crate::config::StudioRole::Planner);
 
         let workspace = AgentWorkspaceResolver::new()
-            .resolve(
-                &context.snapshot.identity,
-                &thread_record,
-                &project,
-                active_task.as_ref().map(|aggregate| &aggregate.facts),
-            )
+            .resolve(&context.snapshot.identity, &thread_record, &project)
             .await
             .map_err(anyhow_error)?;
         let workspace_root = workspace.root().to_path_buf();
@@ -216,6 +188,21 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
                     )?,
                 ))?)
             };
+            let _mode_registration = if let Some(system_dir) = self.skills.system_skills_dir() {
+                Some(registry.register(Arc::new(
+                    pl_core::skill::FileSystemSkillProvider::from_directories(
+                        pl_core::skill::BUILTIN_MODE_PROVIDER_ID,
+                        vec![pl_core::skill::SkillDirectorySource::new(
+                            // System assets are materialized with the
+                            // stable `mode.*` names at the directory root.
+                            system_dir,
+                            pl_core::skill::SkillSourceKind::System,
+                        )],
+                    )?,
+                ))?)
+            } else {
+                None
+            };
             Some(Arc::new(
                 registry
                     .discover(pl_core::skill::SkillProviderRequest {
@@ -247,6 +234,19 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
                 workspace_root.join(&config.skills.project_dir),
             ))
         });
+        let mode_snapshot = if is_root {
+            Some(
+                resolve_mode_snapshot(
+                    &context.session,
+                    &skill_catalog,
+                    mode.label(),
+                    context.cancellation_token.clone(),
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
         let workspace_instruction_documents = if let Some(remote_host) = &remote_host {
             pl_core::remote::load_remote_workspace_instructions(
                 &remote_host.files,
@@ -264,71 +264,6 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .map_err(anyhow_error)?
         };
         let workspace_instructions = workspace_instruction_documents.content();
-        let executor_handoff = if mode == StudioMode::Task
-            && context.snapshot.identity.parent_id.is_some()
-            && context.snapshot.identity.role.as_str() == crate::config::StudioRole::Executor.key()
-        {
-            let run =
-                active_task_run.ok_or_else(|| turn_error("Task executor has no active TaskRun"))?;
-            let work_unit = active_task
-                .as_ref()
-                .and_then(|aggregate| {
-                    aggregate.facts.work_units.iter().find(|unit| {
-                        unit.executor_thread_id.as_deref()
-                            == Some(context.snapshot.identity.id.as_str())
-                    })
-                })
-                .ok_or_else(|| turn_error("Task executor has no durable WorkUnit"))?;
-            let section = context
-                .session
-                .pinned_context_sections()
-                .find(|section| {
-                    section.id.as_str()
-                        == crate::studio::task_coordinator::TASK_EXECUTOR_HANDOFF_SECTION_ID
-                })
-                .cloned();
-            let validated = section
-                .ok_or_else(|| anyhow::anyhow!("Task executor handoff is missing"))
-                .and_then(|section| {
-                    let handoff =
-                        crate::studio::task_coordinator::TaskExecutorHandoff::from_context_section(
-                            &section,
-                        )?;
-                    handoff.validate_owner(
-                        run,
-                        work_unit,
-                        context.snapshot.identity.id.as_str(),
-                    )?;
-                    Ok(section)
-                });
-            let section = match validated {
-                Ok(section) => section,
-                Err(error) => {
-                    let message = error.to_string();
-                    self.coordinator
-                        .task_runtime()
-                        .mark_executor_handoff_needs_attention(
-                            context.snapshot.identity.id.as_str(),
-                            &message,
-                        )
-                        .await
-                        .map_err(anyhow_error)?;
-                    return Err(turn_error(message));
-                }
-            };
-            self.coordinator
-                .task_runtime()
-                .mark_executor_turn_started(
-                    context.snapshot.identity.id.as_str(),
-                    context.turn_id.as_str(),
-                    context.input.budget_action,
-                )
-                .await
-                .map_err(anyhow_error)?;
-            Some(section)
-        } else {
-            None
-        };
         let input_message = context.input.payload.message.clone();
         let user_skill_load = if turn_skills_config.enabled {
             skill_catalog
@@ -342,11 +277,24 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         } else {
             pl_core::skill::SkillUserInvocationLoad::default()
         };
-        let model_role = match root_role {
-            Some(role) => role.id(),
-            None => context.snapshot.identity.role.clone(),
+        let frozen_agent_profile = if is_root {
+            None
+        } else {
+            Some(
+                context
+                    .session
+                    .agent_profile()
+                    .cloned()
+                    .ok_or_else(|| turn_error("child Agent session has no frozen Profile"))?,
+            )
         };
-        let route = config.models.resolve(&model_role)?;
+        let model_role = root_role
+            .map(|role| role.id())
+            .unwrap_or_else(|| context.snapshot.identity.role.clone());
+        let route = match &frozen_agent_profile {
+            Some(profile) => resolve_frozen_profile_route(&config, profile)?,
+            None => config.models.resolve(&model_role)?,
+        };
         let attachment_runtime = attachment_runtime(
             self.store.clone(),
             self.resources.clone(),
@@ -416,23 +364,31 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         }
         .with_workspace_instructions(workspace_instructions.clone())
         .with_attachment_runtime(attachment_runtime.clone());
-        let task_name = self
+        let assignment_name = self
             .resources
             .get(&context.snapshot.identity.id)
             .await
-            .map(|resource| resource.task_name)
+            .map(|resource| resource.assignment_name)
             .unwrap_or_else(|| {
                 root_role
                     .map(|role| role.key().to_string())
                     .unwrap_or_else(|| context.snapshot.identity.role.to_string())
             });
-        let subagent_context = runtime_subagent_context(&context.snapshot.identity, task_name);
+        let subagent_context =
+            runtime_subagent_context(&context.snapshot.identity, assignment_name);
         let mut engine = builder.with_runtime_profile(profile).build();
         if let Some(subagent) = subagent_context {
             engine = engine.with_subagent_context(subagent);
         }
         if exclusive_web_search {
-            for group in ["builtin", "skills", "lsp", "task", "collaboration", "mcp"] {
+            for group in [
+                "builtin",
+                "skills",
+                "lsp",
+                "workflow",
+                "collaboration",
+                "mcp",
+            ] {
                 engine.agent_tools().uninstall(&ToolGroupId::new(group));
             }
         } else if let Some(remote_host) = remote_host {
@@ -486,27 +442,25 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             pl_core::reconcile_programmatic_tool_calling(engine.agent_tools(), &route)?;
         }
 
-        if mode == StudioMode::Simple && !exclusive_web_search {
+        engine
+            .agent_tools()
+            .uninstall(&ToolGroupId::new("finalization"));
+        engine.agent_tools().uninstall(&ToolGroupId::new("task"));
+        if let Some(mode_snapshot) = mode_snapshot.clone()
+            && !exclusive_web_search
+        {
+            let working_set = engine.tool_session_runtime().working_set();
             engine.agent_tools().install(
-                ToolGroupId::new("finalization"),
-                vec![Arc::new(pl_core::PlanExitTool)],
+                ToolGroupId::new("workflow"),
+                vec![Arc::new(pl_core::WorkflowStateTool::new(
+                    working_set,
+                    mode_snapshot,
+                ))],
             )?;
         } else {
             engine
                 .agent_tools()
-                .uninstall(&ToolGroupId::new("finalization"));
-        }
-
-        if mode == StudioMode::Task && !exclusive_web_search {
-            self.coordinator.install_tools(
-                &mut engine,
-                &thread_record.root_thread_id,
-                context.runtime.clone(),
-                &context.snapshot,
-                active_task_run,
-            )?;
-        } else {
-            engine.agent_tools().uninstall(&ToolGroupId::new("task"));
+                .uninstall(&ToolGroupId::new("workflow"));
         }
         let active_mcp_servers = self.mcp_runtime.available_server_names().await;
         let mcp_health = self.mcp_runtime.health_snapshot().await?;
@@ -515,8 +469,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .active_server_names_for_workspace(&workspace_root)
             .await;
 
-        let policy =
-            studio_execution_policy(&context.snapshot, StudioPolicyContext { mode, task_phase });
+        let policy = studio_execution_policy(&context.snapshot, &available_agent_profiles);
         let collaboration = AgentCollaborationTools::new(
             context.runtime.clone(),
             context.snapshot.identity.id.clone(),
@@ -524,9 +477,10 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
                 policy: policy.collaboration.clone(),
                 session_runtime: engine.tool_session_runtime(),
                 workspace_root: workspace_root.clone(),
+                profiles: available_agent_profiles.clone(),
             },
         );
-        // 所有 agent（含 Task planner）共享同一套协作基础能力。send_message 统一
+        // 所有 Agent Profile 共享同一套协作基础能力。send_message 统一
         // 作为 parent→direct-child 调度原语；子代理向主代理的报告改由 durable
         // 阶段提交 + read_agent_submissions 主动查询承载。
         if exclusive_web_search {
@@ -578,12 +532,26 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .iter()
             .map(crate::studio::store::attachment::trace_attachment)
             .collect();
+        let execution_instructions = if let Some(mode_snapshot) = &mode_snapshot {
+            format!(
+                "{}\n\n<preloaded_mode_skill name=\"{}\" revision=\"{}\" contentHash=\"{}\">\n{}\n</preloaded_mode_skill>",
+                StudioMode::root_instructions(),
+                mode_snapshot.mode_id,
+                mode_snapshot.revision,
+                mode_snapshot.content_hash,
+                mode_snapshot.content,
+            )
+        } else {
+            frozen_agent_profile
+                .as_ref()
+                .map(|profile| profile.system_instructions.clone())
+                .ok_or_else(|| turn_error("child Agent session has no frozen Profile"))?
+        };
         let instruction_snapshot = instruction_snapshot(StudioInstructionContext {
             config: &config,
             model: &route.model,
-            mode,
-            role: model_role.as_str(),
-            is_root,
+            execution_label: mode.label(),
+            execution_instructions: &execution_instructions,
             workspace_root: &workspace_root,
             workspace_documents: Some(&workspace_instruction_documents),
             workspace_instructions: &workspace_instructions,
@@ -608,15 +576,6 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         if let Some(instruction) = user_skill_load.instruction {
             request = request.with_skill_invocation_instruction(instruction);
         }
-        #[cfg(debug_assertions)]
-        if let Some(fixture) = task_driver_budget
-            && mode == StudioMode::Task
-            && context.snapshot.identity.parent_id.is_some()
-            && context.snapshot.identity.role.as_str() == crate::config::StudioRole::Executor.key()
-            && context.input.budget_action == pl_core::MailboxBudgetAction::Preserve
-        {
-            request = request.with_budget(TurnBudget::new(fixture.executor_wall_clock_ms));
-        }
         let emitter = interaction_emitter(
             context.runtime,
             thread_id.clone(),
@@ -628,24 +587,13 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .map(|role| role.key().to_string())
             .unwrap_or_else(|| context.snapshot.identity.role.to_string());
         let prompt_scope = format!("{}:{prompt_role}", mode.label());
-        #[cfg_attr(not(debug_assertions), allow(unused_mut))]
-        let mut options = studio_turn_options(
+        let options = studio_turn_options(
             TurnOptions::default()
                 .with_permission_mode(config.runtime.permission_mode)
                 .with_prompt_cache_namespace(prompt_cache_namespace)
                 .with_prompt_scope(prompt_scope)
                 .with_interaction_callback(interaction_callback),
         );
-        #[cfg(debug_assertions)]
-        if let Some(fixture) = task_driver_budget
-            && mode == StudioMode::Task
-            && context.snapshot.identity.parent_id.is_some()
-            && context.snapshot.identity.role.as_str() == crate::config::StudioRole::Executor.key()
-        {
-            options = options.with_debug_context_compaction_timeout(Duration::from_millis(
-                fixture.compaction_timeout_ms,
-            ));
-        }
         let mut session_runtime = PreparedSessionRuntime::new(route.model.slug.clone())
             .with_mcp_servers(active_mcp_servers)
             .with_mcp_health(mcp_health)
@@ -653,11 +601,8 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         if let Some(context_window) = route.model.resolved_context_window() {
             session_runtime = session_runtime.with_context_window(context_window);
         }
-        let mut prepared = PreparedAgentTurn::new(engine, request, options, policy)
+        let prepared = PreparedAgentTurn::new(engine, request, options, policy)
             .with_session_runtime(session_runtime);
-        if let Some(handoff) = executor_handoff {
-            prepared = prepared.with_pinned_context(handoff);
-        }
         if context
             .input
             .payload
@@ -677,71 +622,11 @@ fn studio_turn_options(options: TurnOptions) -> TurnOptions {
     options.with_user_input_end_turn()
 }
 
-#[cfg(debug_assertions)]
-const TASK_DRIVER_EXECUTOR_WALL_CLOCK_ENV: &str = "PURE_STUDIO_TASK_DRIVER_EXECUTOR_WALL_CLOCK_MS";
-#[cfg(debug_assertions)]
-const TASK_DRIVER_COMPACTION_TIMEOUT_ENV: &str = "PURE_STUDIO_TASK_DRIVER_COMPACTION_TIMEOUT_MS";
-
-#[cfg(debug_assertions)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct DebugTaskDriverBudgetFixture {
-    executor_wall_clock_ms: u64,
-    compaction_timeout_ms: u64,
-}
-
-#[cfg(debug_assertions)]
-fn debug_task_driver_budget_fixture() -> Result<Option<DebugTaskDriverBudgetFixture>> {
-    parse_debug_task_driver_budget_fixture(
-        std::env::var(TASK_DRIVER_EXECUTOR_WALL_CLOCK_ENV)
-            .ok()
-            .as_deref(),
-        std::env::var(TASK_DRIVER_COMPACTION_TIMEOUT_ENV)
-            .ok()
-            .as_deref(),
-    )
-}
-
-#[cfg(debug_assertions)]
-fn parse_debug_task_driver_budget_fixture(
-    wall_clock_ms: Option<&str>,
-    compaction_timeout_ms: Option<&str>,
-) -> Result<Option<DebugTaskDriverBudgetFixture>> {
-    let (Some(wall_clock_ms), Some(compaction_timeout_ms)) = (wall_clock_ms, compaction_timeout_ms)
-    else {
-        if wall_clock_ms.is_none() && compaction_timeout_ms.is_none() {
-            return Ok(None);
-        }
-        return Err(turn_error(format!(
-            "{TASK_DRIVER_EXECUTOR_WALL_CLOCK_ENV} and {TASK_DRIVER_COMPACTION_TIMEOUT_ENV} must be set together"
-        )));
-    };
-    let executor_wall_clock_ms = wall_clock_ms.parse::<u64>().map_err(|error| {
-        turn_error(format!(
-            "invalid {TASK_DRIVER_EXECUTOR_WALL_CLOCK_ENV}: {error}"
-        ))
-    })?;
-    let compaction_timeout_ms = compaction_timeout_ms.parse::<u64>().map_err(|error| {
-        turn_error(format!(
-            "invalid {TASK_DRIVER_COMPACTION_TIMEOUT_ENV}: {error}"
-        ))
-    })?;
-    if compaction_timeout_ms == 0 {
-        return Err(turn_error(format!(
-            "{TASK_DRIVER_COMPACTION_TIMEOUT_ENV} must be greater than zero"
-        )));
-    }
-    Ok(Some(DebugTaskDriverBudgetFixture {
-        executor_wall_clock_ms,
-        compaction_timeout_ms,
-    }))
-}
-
 struct StudioInstructionContext<'a> {
     config: &'a crate::config::StudioConfig,
     model: &'a pl_model::ModelInfo,
-    mode: StudioMode,
-    role: &'a str,
-    is_root: bool,
+    execution_label: &'a str,
+    execution_instructions: &'a str,
     workspace_root: &'a Path,
     workspace_documents: Option<&'a WorkspaceInstructions>,
     workspace_instructions: &'a str,
@@ -756,8 +641,8 @@ fn instruction_snapshot(context: StudioInstructionContext<'_>) -> Result<Instruc
         skills: Some(context.skills_config),
         skill_catalog: Some(context.skill_catalog),
         execution_profile: Some(ExecutionInstructionProfile {
-            label: context.mode.label(),
-            instructions: context.mode.instructions_for(context.role, context.is_root),
+            label: context.execution_label,
+            instructions: context.execution_instructions,
         }),
         model: context.model,
         workspace_root: context.workspace_root,
@@ -766,6 +651,55 @@ fn instruction_snapshot(context: StudioInstructionContext<'_>) -> Result<Instruc
         workspace_instructions: Some(context.workspace_instructions),
         subagent_constraint: context.subagent_constraint,
     })
+}
+
+async fn resolve_mode_snapshot(
+    session: &pl_core::AgentSession,
+    catalog: &pl_core::skill::FrozenSkillCatalog,
+    mode_id: &str,
+    cancellation: tokio_util::sync::CancellationToken,
+) -> Result<pl_protocol::ModeInstructionSnapshot> {
+    if let Some(run) = session
+        .workflow()
+        .and_then(|state| state.current_run.as_ref())
+        && run.lifecycle == pl_protocol::WorkflowRunLifecycle::Active
+    {
+        return Ok(run.mode.clone());
+    }
+    let metadata = catalog.find_mode(mode_id).ok_or_else(|| {
+        turn_error(format!(
+            "selected Mode Skill `{mode_id}` is unavailable; refresh Skills or choose an available mode"
+        ))
+    })?;
+    let definition = catalog
+        .load(
+            mode_id,
+            pl_core::skill::SkillLoadInvocation::Mode,
+            cancellation,
+        )
+        .await?;
+    let mode = metadata
+        .mode
+        .as_ref()
+        .ok_or_else(|| turn_error(format!("selected Skill `{mode_id}` has no mode metadata")))?;
+    Ok(pl_protocol::ModeInstructionSnapshot {
+        mode_id: definition.summary.name,
+        display_name: mode.display_name.clone(),
+        source: skill_source_label(definition.summary.source).to_string(),
+        provider_id: definition.summary.provider_id.as_str().to_string(),
+        revision: definition.revision,
+        content_hash: pl_core::canonical_content_hash(definition.content.as_bytes()),
+        content: definition.content,
+    })
+}
+
+fn skill_source_label(source: pl_core::skill::SkillSourceKind) -> &'static str {
+    match source {
+        pl_core::skill::SkillSourceKind::Project => "project",
+        pl_core::skill::SkillSourceKind::User => "user",
+        pl_core::skill::SkillSourceKind::System => "system",
+        pl_core::skill::SkillSourceKind::External => "external",
+    }
 }
 
 fn prompt_content(prompt: &str, attachments: &[crate::studio::AttachmentRecord]) -> MessageContent {
@@ -872,6 +806,26 @@ fn attachment_runtime(
     )
 }
 
+fn resolve_frozen_profile_route(
+    config: &crate::config::StudioConfig,
+    profile: &pl_protocol::AgentProfileSnapshot,
+) -> Result<pl_core::ResolvedModelRoute> {
+    let role = pl_core::AgentRoleId::new(profile.profile_id.clone())?;
+    let mut models = config.models.clone();
+    models.routes.insert(
+        role.clone(),
+        pl_core::ModelRouteConfig {
+            provider: pl_core::ProviderId::new(profile.provider_id.clone())?,
+            model: profile.model.clone(),
+            effort: profile
+                .effort
+                .as_ref()
+                .map(|effort| pl_core::ReasoningEffort::new(effort.clone())),
+        },
+    );
+    models.resolve(&role)
+}
+
 fn turn_error(error: impl Into<String>) -> PureError {
     PureError::MemoryError(error.into())
 }
@@ -908,29 +862,48 @@ fn anyhow_error(error: impl std::fmt::Display) -> PureError {
 mod tests {
     use super::*;
 
+    fn workflow_with_mode(
+        mode: pl_protocol::ModeInstructionSnapshot,
+        lifecycle: pl_protocol::WorkflowRunLifecycle,
+    ) -> pl_protocol::WorkflowSessionState {
+        pl_protocol::WorkflowSessionState {
+            revision: 1,
+            current_run: Some(pl_protocol::WorkflowRun {
+                lineage_id: "lineage-1".to_string(),
+                run_id: "run-1".to_string(),
+                definition: pl_protocol::WorkflowDefinition::default(),
+                definition_hash: "sha256:definition".to_string(),
+                mode,
+                lifecycle,
+                current_stage_id: "working".to_string(),
+                compiled_at: 1,
+                updated_at: 1,
+                history_tail: Vec::new(),
+                archived_transition_count: 0,
+                archived_transition_digest: String::new(),
+            }),
+            ..pl_protocol::WorkflowSessionState::default()
+        }
+    }
+
     #[test]
-    fn root_role_is_derived_from_mode_regardless_of_stale_identity() {
-        let cases = [
-            (StudioMode::Simple, "executor"),
-            (StudioMode::Task, "planner"),
-        ];
-        for (mode, expected) in cases {
-            assert_eq!(mode.root_role().key(), expected);
-            assert_eq!(
-                mode.instructions_for("stale-role", true),
-                mode.instructions_for(mode.root_role().key(), true),
-                "{} root instructions must depend only on mode",
-                mode.label()
-            );
+    fn every_mode_uses_the_unified_planner_root() {
+        let instructions = StudioMode::root_instructions();
+        for mode in [
+            StudioMode::simple(),
+            StudioMode::task(),
+            StudioMode::new("mode.release").unwrap(),
+        ] {
+            assert!(!instructions.contains(mode.label()));
         }
     }
 
     #[test]
     fn every_studio_turn_uses_durable_user_input_boundary() {
         let cases = [
-            (StudioMode::Simple, crate::config::StudioRole::Executor),
-            (StudioMode::Task, crate::config::StudioRole::Planner),
-            (StudioMode::Task, crate::config::StudioRole::Executor),
+            (StudioMode::simple(), crate::config::StudioRole::Planner),
+            (StudioMode::task(), crate::config::StudioRole::Planner),
+            (StudioMode::task(), crate::config::StudioRole::Executor),
         ];
 
         for (mode, role) in cases {
@@ -973,22 +946,91 @@ mod tests {
         assert!(tools.tool_names().is_empty());
     }
 
-    #[cfg(debug_assertions)]
-    #[test]
-    fn debug_task_driver_budget_requires_a_complete_typed_pair() {
-        assert_eq!(
-            parse_debug_task_driver_budget_fixture(None, None).unwrap(),
-            None
+    #[tokio::test]
+    async fn active_workflow_keeps_deleted_mode_snapshot_and_terminal_refreshes_latest_skill() {
+        let root = tempfile::TempDir::new().unwrap();
+        let workspace = tempfile::TempDir::new().unwrap();
+        let skill_dir = root.path().join("skills/mode.release");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        let skill_file = skill_dir.join("SKILL.md");
+        let document = |body: &str| {
+            format!(
+                "---\nname: mode.release\ndescription: Release mode\ndisable-model-invocation: true\nuser-invocable: false\nmode:\n  display-name: Release\n  order: 30\n---\n\n{body}\n"
+            )
+        };
+        std::fs::write(&skill_file, document("version one")).unwrap();
+        let registry = pl_core::skill::SkillRegistry::new();
+        let _registration = registry
+            .register(Arc::new(
+                pl_core::skill::FileSystemSkillProvider::from_directories(
+                    "custom-mode-test",
+                    vec![pl_core::skill::SkillDirectorySource::new(
+                        root.path().join("skills"),
+                        pl_core::skill::SkillSourceKind::User,
+                    )],
+                )
+                .unwrap(),
+            ))
+            .unwrap();
+        let request = || pl_core::skill::SkillProviderRequest {
+            workspace_root: workspace.path().to_path_buf(),
+            config: pl_core::config::SkillsConfig::default(),
+            system_dir: None,
+            cancellation: tokio_util::sync::CancellationToken::new(),
+        };
+        let first_catalog = registry.discover(request()).await.unwrap();
+        let initial = resolve_mode_snapshot(
+            &pl_core::AgentSession::default(),
+            &first_catalog,
+            "mode.release",
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        assert!(initial.content.contains("version one"));
+
+        let mut session = pl_core::AgentSession::default();
+        session.replace_workflow(Some(workflow_with_mode(
+            initial.clone(),
+            pl_protocol::WorkflowRunLifecycle::Active,
+        )));
+        std::fs::remove_file(&skill_file).unwrap();
+        let empty = pl_core::skill::FrozenSkillCatalog::empty(workspace.path().join("skills"));
+        let frozen = resolve_mode_snapshot(
+            &session,
+            &empty,
+            "mode.release",
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(frozen, initial);
+
+        session.replace_workflow(Some(workflow_with_mode(
+            initial,
+            pl_protocol::WorkflowRunLifecycle::Terminal,
+        )));
+        assert!(
+            resolve_mode_snapshot(
+                &session,
+                &empty,
+                "mode.release",
+                tokio_util::sync::CancellationToken::new(),
+            )
+            .await
+            .is_err()
         );
-        assert!(parse_debug_task_driver_budget_fixture(Some("0"), None).is_err());
-        assert!(parse_debug_task_driver_budget_fixture(None, Some("250")).is_err());
-        assert!(parse_debug_task_driver_budget_fixture(Some("0"), Some("0")).is_err());
-        assert_eq!(
-            parse_debug_task_driver_budget_fixture(Some("0"), Some("250")).unwrap(),
-            Some(DebugTaskDriverBudgetFixture {
-                executor_wall_clock_ms: 0,
-                compaction_timeout_ms: 250,
-            })
-        );
+
+        std::fs::write(&skill_file, document("version two")).unwrap();
+        let second_catalog = registry.discover(request()).await.unwrap();
+        let refreshed = resolve_mode_snapshot(
+            &session,
+            &second_catalog,
+            "mode.release",
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+        assert!(refreshed.content.contains("version two"));
     }
 }

@@ -23,11 +23,6 @@ impl StudioRuntime {
             .product_events
             .read_thread_directory_page(None, STATE_THREAD_PAGE_LIMIT)
             .await?;
-        let task_directory = self
-            .agent_facility
-            .product_events
-            .read_task_directory()
-            .await?;
         let agent_directory = self
             .agent_facility
             .product_events
@@ -53,7 +48,6 @@ impl StudioRuntime {
             runtime,
             project_directory,
             thread_directory,
-            task_directory,
             agent_directory,
             settings: StudioSettingsStateSnapshot {
                 state: pl_protocol::ObservedResource::ready(

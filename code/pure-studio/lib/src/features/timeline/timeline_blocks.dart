@@ -303,10 +303,6 @@ class _RowCard extends StatelessWidget {
         group: row.toolGroup!,
         isCurrentActivity: isCurrentActivity,
       ),
-      TimelineRowType.plan => _PlanPart(
-        key: ValueKey(row.part!.id),
-        part: row.part!,
-      ),
       TimelineRowType.skillActivation => _SkillActivationPart(
         key: StudioDriverKeys.timelineSkillActivation(row.part!.id),
         activation: row.part!.skill!,

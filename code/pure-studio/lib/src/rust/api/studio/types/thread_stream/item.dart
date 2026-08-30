@@ -267,8 +267,6 @@ sealed class BridgeThreadItemDeltaState with _$BridgeThreadItemDeltaState {
     required int chunkIndex,
     required String delta,
   }) = BridgeThreadItemDeltaState_ThinkingContent;
-  const factory BridgeThreadItemDeltaState.plan({required String delta}) =
-      BridgeThreadItemDeltaState_Plan;
   const factory BridgeThreadItemDeltaState.toolArguments({
     required String delta,
   }) = BridgeThreadItemDeltaState_ToolArguments;
@@ -306,10 +304,6 @@ sealed class BridgeThreadItemState with _$BridgeThreadItemState {
     required String model,
     required BridgeThreadInferenceState state,
   }) = BridgeThreadItemState_Inference;
-  const factory BridgeThreadItemState.plan({
-    required String content,
-    required BridgeThreadContentLifecycle lifecycle,
-  }) = BridgeThreadItemState_Plan;
   const factory BridgeThreadItemState.skill({
     required String name,
     required String source,

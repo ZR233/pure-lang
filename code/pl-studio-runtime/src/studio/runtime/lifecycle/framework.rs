@@ -30,7 +30,6 @@ impl StudioRuntime {
             self.agent_facility.tool_manager.clone(),
             self.external_runtimes.lsp.clone(),
             self.agent_facility.interactions.clone(),
-            self.task_coordinator.clone(),
             self.agent_facility.resources.clone(),
             self.agent_facility.product_events.clone(),
             self.skills.clone(),
@@ -43,24 +42,6 @@ impl StudioRuntime {
         );
         *framework = Some(runtime.clone());
         drop(framework);
-        // 活动 Task 引用和 pending continuation 目标必须先驻留，attach 时
-        // materialize 才不会跳过（wake）或破坏性失败（executor continuation）。
-        let mut activation_targets = self.task_runtime.active_thread_ids().await;
-        for continuation in self.store.list_pending_executor_continuations().await? {
-            activation_targets.push(continuation.agent_id);
-        }
-        activation_targets.sort();
-        activation_targets.dedup();
-        for target in activation_targets {
-            // Box::pin 引入间接层，避免与 ensure_thread_agent 的 async 递归。
-            if let Err(error) = Box::pin(self.ensure_thread_agent(&target)).await {
-                tracing::warn!(
-                    thread_id = %target,
-                    error_bytes = error.to_string().len(),
-                    "failed to activate a durable wake target at startup"
-                );
-            }
-        }
         let handle = runtime.handle();
         runtime.host().attach_runtime(handle.clone()).await;
         handle
@@ -180,13 +161,7 @@ impl StudioRuntime {
 
     /// 淘汰超出 LRU 容量的空闲驻留 actor；淘汰前先排空 pending commits。
     pub(in crate::studio::runtime) async fn enforce_residency_limit(&self) {
-        let task_pins = self
-            .task_runtime
-            .active_thread_ids()
-            .await
-            .into_iter()
-            .collect::<std::collections::HashSet<_>>();
-        let candidates = self.residency.over_capacity(&task_pins).await;
+        let candidates = self.residency.over_capacity().await;
         if candidates.is_empty() {
             return;
         }
@@ -195,7 +170,7 @@ impl StudioRuntime {
         };
         let handle = framework.handle();
         for thread_id in candidates {
-            // 候选计算已排除活跃订阅和非终态 Task；这里再次检查订阅 pin，覆盖
+            // 候选计算已排除活跃订阅；这里再次检查订阅 pin，覆盖
             // 候选快照生成后到实际逐出前新建订阅的竞争。
             if self.residency.is_pinned(&thread_id) {
                 continue;
@@ -217,11 +192,6 @@ impl StudioRuntime {
                 Ok(snapshot)
                     if snapshot.active_turn_id().is_none() && snapshot.pending_inputs == 0 =>
                 {
-                    let root_thread_id = self
-                        .agent_facility
-                        .product_events
-                        .thread_snapshot(&thread_id)
-                        .map(|thread| thread.root_thread_id);
                     if let Some(repository) = self.agent_facility.persistence.lock().await.clone()
                         && let Err(error) = repository
                             .writer()
@@ -247,9 +217,6 @@ impl StudioRuntime {
                             self.agent_facility
                                 .product_events
                                 .evict_thread_entry(&thread_id);
-                            if let Some(root_thread_id) = root_thread_id {
-                                let _ = self.task_runtime.evict_durable(&root_thread_id).await;
-                            }
                             tracing::debug!(
                                 thread_id = %thread_id,
                                 "evicted idle resident thread actor"

@@ -73,8 +73,7 @@ async fn collect_trace_delta_counts(
                 TraceDelta::Thinking { .. }
                 | TraceDelta::ReasoningContent { .. }
                 | TraceDelta::ToolArguments { .. }
-                | TraceDelta::ToolResult { .. }
-                | TraceDelta::Plan { .. } => {}
+                | TraceDelta::ToolResult { .. } => {}
             },
             Ok(_) => {}
             Err(tokio::sync::broadcast::error::RecvError::Closed) => break,

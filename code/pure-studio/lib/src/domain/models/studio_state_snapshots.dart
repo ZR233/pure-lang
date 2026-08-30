@@ -1,7 +1,6 @@
 import 'agent_models.dart';
 import 'provider_models.dart';
 import 'recovery_models.dart';
-import 'runtime_models.dart';
 import 'settings_models.dart';
 import 'studio_enums.dart';
 import 'thread_directory_models.dart';
@@ -384,6 +383,7 @@ class SkillsStateData {
     required this.catalogRevision,
     required this.skills,
     required this.warnings,
+    this.modes = const [],
     this.summaries = const [],
     this.complete = true,
   });
@@ -391,8 +391,29 @@ class SkillsStateData {
   final int catalogRevision;
   final List<String> skills;
   final List<String> warnings;
+  final List<ModeDescriptorView> modes;
   final List<SkillSummaryView> summaries;
   final bool complete;
+}
+
+class ModeDescriptorView {
+  const ModeDescriptorView({
+    required this.id,
+    required this.displayName,
+    required this.description,
+    required this.order,
+    required this.source,
+    required this.providerId,
+  });
+
+  final String id;
+  final String displayName;
+  final String description;
+  final int order;
+  final String source;
+  final String providerId;
+
+  StudioMode get mode => StudioMode.fromId(id);
 }
 
 class SkillSummaryView {
@@ -458,6 +479,7 @@ class SkillsStateSnapshot extends ObservedStateSnapshot<SkillsStateData> {
   int get catalogRevision => _data.catalogRevision;
   List<String> get skills => _data.skills;
   List<String> get warnings => _data.warnings;
+  List<ModeDescriptorView> get modes => _data.modes;
 }
 
 class ProviderUsageStateData {
@@ -738,18 +760,7 @@ class DirectoryStateSnapshot<T> extends ObservedStateSnapshot<List<T>> {
   List<T> get values => state.value ?? const [];
 }
 
-class TaskDirectoryEntryView {
-  const TaskDirectoryEntryView({
-    required this.rootThreadId,
-    required this.task,
-  });
-
-  final String rootThreadId;
-  final TaskRuntimeView task;
-}
-
 typedef ProjectDirectoryState = DirectoryStateSnapshot<StudioProject>;
 typedef ThreadDirectoryState = DirectoryStateSnapshot<StudioThread>;
-typedef TaskDirectoryState = DirectoryStateSnapshot<TaskDirectoryEntryView>;
 typedef AgentDirectoryState = DirectoryStateSnapshot<StudioAgentView>;
 typedef RecoveryStateSnapshot = DirectoryStateSnapshot<StudioRecoveryIssue>;

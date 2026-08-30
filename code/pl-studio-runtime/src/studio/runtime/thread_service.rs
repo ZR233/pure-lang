@@ -21,7 +21,7 @@ impl StudioRuntime {
     ) -> Result<StudioStartNewThreadResponse> {
         let mode = StudioMode::from_label(request.mode.trim()).map_err(|_| {
             anyhow::Error::new(pl_protocol::studio::StudioError::invalid_argument(
-                "mode must be simple or task",
+                "mode must be an available mode.* Skill id",
             ))
         })?;
         self.start_new_thread(StudioStartNewThreadRequest {
@@ -103,7 +103,7 @@ impl StudioRuntime {
     pub async fn create_thread(&self, project_id: &str, title: &str) -> Result<ThreadRecord> {
         self.ensure_persistence_accepts_new_work()?;
         let (delta, thread) =
-            DirectoryDelta::register_root_thread(project_id, title, StudioMode::Simple);
+            DirectoryDelta::register_root_thread(project_id, title, StudioMode::simple());
         self.agent_facility
             .product_events
             .commit_directory(delta)
@@ -124,10 +124,7 @@ impl StudioRuntime {
             .resolve(&request.input.attachment_draft_ids)
             .await?;
         let config = self.config_runtime.read()?;
-        let route = config
-            .config
-            .models
-            .resolve(&request.mode.root_role().id())?;
+        let route = config.config.models.resolve(&StudioRole::Planner.id())?;
         self.attachment_drafts
             .validate_for_model(&route.model, &drafts)?;
         // 校验走内存目录 owner：open_project 的落库是异步跟随的。
@@ -138,6 +135,8 @@ impl StudioRuntime {
                 .any(|project| project.id == request.project_id),
             "selected Project not found"
         );
+        self.ensure_mode_available(&request.project_id, request.mode.label())
+            .await?;
 
         let (delta, thread) =
             DirectoryDelta::register_root_thread(&request.project_id, &request.title, request.mode);
@@ -189,9 +188,6 @@ impl StudioRuntime {
             .pin_many(thread_tree.iter().map(|thread| thread.id.clone()));
         for candidate in &thread_tree {
             let _ = self.ensure_thread_agent(&candidate.id).await?;
-        }
-        if self.task_runtime.has_active_task(&thread_id).await {
-            bail!("thread cannot be archived while a task is active");
         }
         let root_index = roots
             .iter()
@@ -294,13 +290,6 @@ impl StudioRuntime {
         for thread in &active_threads {
             let _ = self.ensure_thread_agent(&thread.id).await?;
         }
-        if self
-            .task_runtime
-            .has_active_task_for_roots(&thread_ids)
-            .await
-        {
-            bail!("project has an active task");
-        }
         for thread in &active_threads {
             if self.thread_is_busy(&thread.id).await? {
                 bail!("project has an active turn");
@@ -397,9 +386,8 @@ impl StudioRuntime {
         if thread.parent_thread_id.is_some() {
             bail!("only a root Thread can change mode");
         }
-        if self.task_runtime.has_active_task(thread_id).await {
-            bail!("thread mode cannot change while a task is active");
-        }
+        self.ensure_mode_available(&thread.project_id, mode.label())
+            .await?;
         let (handle, agent_id) = self.ensure_thread_agent(thread_id).await?;
         let snapshot = handle
             .snapshot(agent_id.clone())
@@ -411,9 +399,27 @@ impl StudioRuntime {
         {
             bail!("thread mode cannot change while the Thread is running or has pending input");
         }
+        if !self
+            .pending_thread_interactions(thread_id)
+            .await?
+            .is_empty()
+        {
+            bail!("thread mode cannot change while an interaction is pending");
+        }
+        let context = handle
+            .read_thread_context(agent_id.clone())
+            .await
+            .map_err(|error| anyhow::anyhow!(error))?;
+        if context
+            .session
+            .workflow()
+            .and_then(|workflow| workflow.current_run.as_ref())
+            .is_some_and(|run| run.lifecycle == pl_protocol::WorkflowRunLifecycle::Active)
+        {
+            bail!("thread mode cannot change while a workflow run is active");
+        }
         let mut updated = pl_protocol::Thread::from(thread);
         updated.mode = pl_protocol::ThreadMode::from(mode);
-        updated.role = mode.root_role().key().to_string();
         updated.updated_at = crate::studio::unix_seconds();
         self.agent_facility
             .product_events
@@ -422,16 +428,20 @@ impl StudioRuntime {
                 ..Default::default()
             })
             .await?;
-        let desired_role = mode.root_role().id();
-        if snapshot.identity.role != desired_role
-            && let Err(error) = handle.reconfigure_idle_role(agent_id, desired_role).await
-        {
-            // mode 目录记录是 canonical；actor 角色只是投影，漂移由下一次
-            // prompt 提交的 reconcile 和 Turn 构建时的 mode 派生自愈。
-            tracing::warn!(
-                thread_id,
-                error = %error,
-                "thread mode actor role sync deferred"
+        Ok(())
+    }
+
+    async fn ensure_mode_available(&self, project_id: &str, mode_id: &str) -> Result<()> {
+        let catalog = self.skills.read(project_id).await.catalog_for_turn();
+        if let Some(catalog) = catalog {
+            anyhow::ensure!(
+                catalog.find_mode(mode_id).is_some(),
+                "selected Mode Skill `{mode_id}` is unavailable"
+            );
+        } else {
+            anyhow::ensure!(
+                pl_core::skill::BUILTIN_MODE_IDS.contains(&mode_id),
+                "custom Mode Skill `{mode_id}` requires a discovered project Skill catalog"
             );
         }
         Ok(())

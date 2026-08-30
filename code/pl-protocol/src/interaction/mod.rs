@@ -18,7 +18,6 @@ use crate::labeled::LabeledEnum;
 pub enum InteractionKind {
     UserInput,
     ToolApproval,
-    PlanConfirmation,
 }
 
 impl InteractionKind {
@@ -62,7 +61,6 @@ pub struct InteractionScope {
 pub enum InteractionContent {
     UserInput(UserInputInteraction),
     ToolApproval(ToolApprovalInteraction),
-    PlanConfirmation(PlanConfirmationInteraction),
 }
 
 /// 一个有 identity、revision 与 typed content 的 Interaction 聚合。
@@ -118,33 +116,10 @@ impl InteractionRequest {
         }
     }
 
-    pub fn plan_confirmation(
-        interaction_id: impl Into<String>,
-        scope: InteractionScope,
-        plan_id: impl Into<String>,
-        content: impl Into<String>,
-        created_at: i64,
-    ) -> Self {
-        let interaction_id = interaction_id.into();
-        Self {
-            content: InteractionContent::PlanConfirmation(PlanConfirmationInteraction::new(
-                plan_id.into(),
-                content.into(),
-                interaction_id.clone(),
-            )),
-            interaction_id,
-            scope,
-            revision: 0,
-            created_at,
-            updated_at: created_at,
-        }
-    }
-
     pub fn kind(&self) -> InteractionKind {
         match &self.content {
             InteractionContent::UserInput(_) => InteractionKind::UserInput,
             InteractionContent::ToolApproval(_) => InteractionKind::ToolApproval,
-            InteractionContent::PlanConfirmation(_) => InteractionKind::PlanConfirmation,
         }
     }
 
@@ -152,7 +127,6 @@ impl InteractionRequest {
         match &self.content {
             InteractionContent::UserInput(value) => value.status(),
             InteractionContent::ToolApproval(value) => value.status(),
-            InteractionContent::PlanConfirmation(value) => value.status(),
         }
     }
 
@@ -160,7 +134,6 @@ impl InteractionRequest {
         match &self.content {
             InteractionContent::UserInput(value) => value.resolution(),
             InteractionContent::ToolApproval(value) => value.resolution(),
-            InteractionContent::PlanConfirmation(value) => value.resolution(),
         }
     }
 
@@ -177,22 +150,8 @@ impl InteractionRequest {
                     InteractionContent::ToolApproval(left),
                     InteractionContent::ToolApproval(right),
                 ) => left.request() == right.request(),
-                (
-                    InteractionContent::PlanConfirmation(left),
-                    InteractionContent::PlanConfirmation(right),
-                ) => left.plan_id() == right.plan_id() && left.content() == right.content(),
-                (
-                    InteractionContent::UserInput(_),
-                    InteractionContent::ToolApproval(_) | InteractionContent::PlanConfirmation(_),
-                )
-                | (
-                    InteractionContent::ToolApproval(_),
-                    InteractionContent::UserInput(_) | InteractionContent::PlanConfirmation(_),
-                )
-                | (
-                    InteractionContent::PlanConfirmation(_),
-                    InteractionContent::UserInput(_) | InteractionContent::ToolApproval(_),
-                ) => false,
+                (InteractionContent::UserInput(_), InteractionContent::ToolApproval(_))
+                | (InteractionContent::ToolApproval(_), InteractionContent::UserInput(_)) => false,
             }
     }
 
@@ -232,14 +191,6 @@ impl InteractionRequest {
                     .decide(ToolApprovalCommand::Resolve(command))
                     .map_err(|error| error.at(self))?,
             ),
-            (
-                InteractionContent::PlanConfirmation(value),
-                InteractionCommand::ResolvePlanConfirmation(command),
-            ) => InteractionContent::PlanConfirmation(
-                value
-                    .decide(PlanConfirmationCommand::Resolve(command))
-                    .map_err(|error| error.at(self))?,
-            ),
             (InteractionContent::UserInput(value), InteractionCommand::Cancel(command)) => {
                 InteractionContent::UserInput(
                     value
@@ -254,13 +205,6 @@ impl InteractionRequest {
                         .map_err(|error| error.at(self))?,
                 )
             }
-            (InteractionContent::PlanConfirmation(value), InteractionCommand::Cancel(command)) => {
-                InteractionContent::PlanConfirmation(
-                    value
-                        .decide(PlanConfirmationCommand::Cancel(command))
-                        .map_err(|error| error.at(self))?,
-                )
-            }
             (InteractionContent::UserInput(value), InteractionCommand::Expire(command)) => {
                 InteractionContent::UserInput(
                     value
@@ -272,13 +216,6 @@ impl InteractionRequest {
                 InteractionContent::ToolApproval(
                     value
                         .decide(ToolApprovalCommand::Expire(command))
-                        .map_err(|error| error.at(self))?,
-                )
-            }
-            (InteractionContent::PlanConfirmation(value), InteractionCommand::Expire(command)) => {
-                InteractionContent::PlanConfirmation(
-                    value
-                        .decide(PlanConfirmationCommand::Expire(command))
                         .map_err(|error| error.at(self))?,
                 )
             }
@@ -315,7 +252,6 @@ impl InteractionRequest {
 pub enum InteractionCommand {
     ResolveUserInput(ResolveUserInput),
     ResolveToolApproval(ResolveToolApproval),
-    ResolvePlanConfirmation(ResolvePlanConfirmation),
     Cancel(CancelInteraction),
     Expire(ExpireInteraction),
     ReopenRecovered(ReopenRecoveredInteraction),
@@ -326,7 +262,6 @@ impl InteractionCommand {
         match self {
             Self::ResolveUserInput(_) => "resolveUserInput",
             Self::ResolveToolApproval(_) => "resolveToolApproval",
-            Self::ResolvePlanConfirmation(_) => "resolvePlanConfirmation",
             Self::Cancel(_) => "cancel",
             Self::Expire(_) => "expire",
             Self::ReopenRecovered(_) => "reopenRecovered",
@@ -337,7 +272,6 @@ impl InteractionCommand {
         match self {
             Self::ResolveUserInput(command) => &command.interaction_id,
             Self::ResolveToolApproval(command) => &command.interaction_id,
-            Self::ResolvePlanConfirmation(command) => &command.interaction_id,
             Self::Cancel(command) => &command.interaction_id,
             Self::Expire(command) => &command.interaction_id,
             Self::ReopenRecovered(command) => &command.interaction_id,
@@ -348,7 +282,6 @@ impl InteractionCommand {
         match self {
             Self::ResolveUserInput(command) => command.expected_revision,
             Self::ResolveToolApproval(command) => command.expected_revision,
-            Self::ResolvePlanConfirmation(command) => command.expected_revision,
             Self::Cancel(command) => command.expected_revision,
             Self::Expire(command) => command.expected_revision,
             Self::ReopenRecovered(command) => command.expected_revision,
@@ -461,7 +394,6 @@ impl std::error::Error for InteractionTransitionError {}
 pub enum InteractionResolution {
     UserInput(UserInputResolution),
     ToolApproval(ToolApprovalResolutionPayload),
-    PlanConfirmation(PlanConfirmationResolutionPayload),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -477,26 +409,11 @@ pub struct ToolApprovalResolutionPayload {
     pub reason: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct PlanConfirmationResolutionPayload {
-    pub decision: PlanConfirmationResolution,
-    pub content: Option<String>,
-    pub reason: Option<String>,
-}
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum ToolApprovalResolution {
     Approved,
     Denied,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub enum PlanConfirmationResolution {
-    Confirm,
-    RevisePlan,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -508,7 +425,6 @@ pub struct InteractionChangedEvent {
 crate::impl_labeled_enum!(InteractionKind, "InteractionKind", [
     InteractionKind::UserInput => "userInput",
     InteractionKind::ToolApproval => "toolApproval",
-    InteractionKind::PlanConfirmation => "planConfirmation",
 ]);
 
 crate::impl_labeled_enum!(InteractionStatus, "InteractionStatus", [

@@ -80,8 +80,10 @@ impl SkillCatalog {
             project_dir,
             skills: by_name
                 .into_values()
+                .filter(|(metadata, _)| metadata.mode.is_none())
                 .map(|(metadata, _)| metadata)
                 .collect(),
+            modes: Vec::new(),
             warnings,
             complete: true,
         })
@@ -91,6 +93,12 @@ impl SkillCatalog {
         self.skills
             .iter()
             .find(|skill| skill.name.eq_ignore_ascii_case(name))
+    }
+
+    pub fn find_mode(&self, mode_id: &str) -> Option<&SkillMetadata> {
+        self.modes
+            .iter()
+            .find(|skill| skill.name.eq_ignore_ascii_case(mode_id))
     }
 
     pub fn project_skill(&self, name: &str) -> Option<&SkillMetadata> {

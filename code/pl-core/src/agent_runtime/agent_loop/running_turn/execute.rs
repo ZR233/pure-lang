@@ -229,8 +229,7 @@ fn activity_for_event(event: &AgentEvent) -> Option<AgentActivityUpdate> {
             TracePartKind::Text
             | TracePartKind::Thinking
             | TracePartKind::Turn
-            | TracePartKind::Inference
-            | TracePartKind::Plan => Some(AgentActivityUpdate::Running),
+            | TracePartKind::Inference => Some(AgentActivityUpdate::Running),
         },
         AgentEvent::TracePartDelta { .. }
         | AgentEvent::TracePartCompleted { .. }

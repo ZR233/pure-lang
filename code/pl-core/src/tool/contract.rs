@@ -2,14 +2,16 @@ use std::fmt;
 use std::sync::Arc;
 
 use pl_protocol::{PureError, ToolSpec};
-use pl_trace::ToolInputTraceProjection;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 
 use crate::turn::ToolEffect;
 
 use super::cache::ToolCachePolicy;
-use super::{ToolCallContext, ToolDisplayMetadata, ToolInput, ToolResult, ToolRuntimeLockPolicy};
+use super::{
+    ToolBatchPolicy, ToolCallContext, ToolDisplayMetadata, ToolInput, ToolResult,
+    ToolRuntimeLockPolicy,
+};
 
 /// 便捷类型别名：boxed future（来自 `futures` crate 的 `BoxFuture`）。
 /// `tool/mod.rs` 以 `pub use futures::future::BoxFuture` 对外暴露同名入口。
@@ -193,10 +195,6 @@ pub trait Tool: fmt::Debug + Send + Sync {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
     fn input_schema(&self) -> serde_json::Value;
-    /// 返回随冻结 ToolPlan 传给模型流投影器的 typed 输入投影契约。
-    fn input_trace_projection(&self) -> Option<ToolInputTraceProjection> {
-        None
-    }
     /// 返回仅用于展示和审计的工具元数据。
     ///
     /// 调度器不得用这些远端声明提升 effect、权限、并行或缓存能力。
@@ -225,6 +223,9 @@ pub trait Tool: fmt::Debug + Send + Sync {
     }
     fn invalidates_cache(&self, _arguments: &serde_json::Value) -> bool {
         false
+    }
+    fn batch_policy(&self) -> ToolBatchPolicy {
+        ToolBatchPolicy::Coexist
     }
     fn runtime_lock_policy(&self) -> ToolRuntimeLockPolicy {
         if self.supports_parallel_tool_calls() {
@@ -269,10 +270,6 @@ where
         (**self).input_schema()
     }
 
-    fn input_trace_projection(&self) -> Option<ToolInputTraceProjection> {
-        (**self).input_trace_projection()
-    }
-
     fn display_metadata(&self) -> Option<&ToolDisplayMetadata> {
         (**self).display_metadata()
     }
@@ -299,6 +296,10 @@ where
 
     fn invalidates_cache(&self, arguments: &serde_json::Value) -> bool {
         (**self).invalidates_cache(arguments)
+    }
+
+    fn batch_policy(&self) -> ToolBatchPolicy {
+        (**self).batch_policy()
     }
 
     fn runtime_lock_policy(&self) -> ToolRuntimeLockPolicy {

@@ -83,7 +83,8 @@ pub struct BridgeThread {
     pub id: String,
     pub project_id: String,
     pub title: String,
-    pub mode: BridgeThreadMode,
+    /// 完整 Mode Skill ID，例如 `mode.simple` 或 `mode.release`。
+    pub mode: String,
     pub root_thread_id: String,
     pub parent_thread_id: Option<String>,
     pub role: String,
@@ -92,13 +93,6 @@ pub struct BridgeThread {
     pub created_at: i64,
     pub updated_at: i64,
     pub archived: bool,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum BridgeThreadMode {
-    Simple,
-    Task,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -237,7 +231,86 @@ pub struct BridgeThreadRuntimeSnapshot {
     pub active_lsp_servers: Vec<String>,
     pub progress: Option<String>,
     pub mcp_health: Option<BridgeThreadMcpHealthSnapshot>,
+    pub workflow: Option<BridgeWorkflowRuntimeSnapshot>,
     pub updated_at: i64,
+}
+
+/// 通用工作流面板所需的 canonical 投影。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeWorkflowRuntimeSnapshot {
+    pub revision: u64,
+    pub current_run: Option<BridgeWorkflowRun>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeWorkflowRun {
+    pub lineage_id: String,
+    pub run_id: String,
+    pub definition: BridgeWorkflowDefinition,
+    pub definition_hash: String,
+    pub mode: BridgeModeInstructionSnapshot,
+    pub lifecycle: BridgeWorkflowRunLifecycle,
+    pub current_stage_id: String,
+    pub compiled_at: i64,
+    pub updated_at: i64,
+    pub history_tail: Vec<BridgeWorkflowTransitionRecord>,
+    pub archived_transition_count: u64,
+    pub archived_transition_digest: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeWorkflowDefinition {
+    pub title: String,
+    pub goal: String,
+    pub initial_stage_id: String,
+    pub stages: Vec<BridgeWorkflowStage>,
+    pub transitions: Vec<BridgeWorkflowTransition>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeWorkflowStage {
+    pub id: String,
+    pub title: String,
+    pub instructions: String,
+    pub completion_criteria: Vec<String>,
+    pub terminal: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeWorkflowTransition {
+    pub from_stage_id: String,
+    pub to_stage_id: String,
+    pub when: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeModeInstructionSnapshot {
+    pub mode_id: String,
+    pub display_name: String,
+    pub source: String,
+    pub provider_id: String,
+    pub revision: String,
+    pub content_hash: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgeWorkflowRunLifecycle {
+    Active,
+    Terminal,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeWorkflowTransitionRecord {
+    pub revision: u64,
+    pub from_stage_id: String,
+    pub to_stage_id: String,
+    pub reason: String,
+    pub summary: String,
+    pub evidence: Vec<String>,
+    pub turn_id: String,
+    pub call_id: String,
+    pub transitioned_at: i64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -314,11 +387,6 @@ pub enum BridgeInteractionContent {
         parent_agent_id: Option<String>,
         state: BridgeToolApprovalInteractionState,
     },
-    PlanConfirmation {
-        plan_id: String,
-        content: String,
-        state: BridgePlanConfirmationInteractionState,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -365,29 +433,6 @@ pub enum BridgeToolApprovalInteractionState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BridgePlanConfirmationInteractionState {
-    Pending {
-        operation_id: String,
-    },
-    Resolved {
-        operation_id: String,
-        resolved_at: i64,
-        decision: BridgePlanConfirmationResolution,
-        content: Option<String>,
-        reason: Option<String>,
-    },
-    Cancelled {
-        operation_id: String,
-        cancelled_at: i64,
-        reason: String,
-    },
-    Expired {
-        operation_id: String,
-        expired_at: i64,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeUserQuestion {
     pub id: String,
     pub header: String,
@@ -412,11 +457,6 @@ pub enum BridgeInteractionResolution {
         decision: BridgeToolApprovalResolution,
         reason: Option<String>,
     },
-    PlanConfirmation {
-        decision: BridgePlanConfirmationResolution,
-        content: Option<String>,
-        reason: Option<String>,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -429,12 +469,6 @@ pub struct BridgeUserInputAnswer {
 pub enum BridgeToolApprovalResolution {
     Approved,
     Denied,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BridgePlanConfirmationResolution {
-    Confirm,
-    RevisePlan,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

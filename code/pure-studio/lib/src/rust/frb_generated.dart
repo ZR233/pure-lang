@@ -3,19 +3,21 @@
 
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
+import 'api/studio/handlers/agent_profiles.dart';
 import 'api/studio/handlers/attachment.dart';
 import 'api/studio/handlers/external_state.dart';
 import 'api/studio/handlers/history.dart';
 import 'api/studio/handlers/lifecycle.dart';
+import 'api/studio/handlers/persistence.dart';
 import 'api/studio/handlers/prompt.dart';
 import 'api/studio/handlers/providers.dart';
-import 'api/studio/handlers/recovery.dart';
 import 'api/studio/handlers/settings.dart';
 import 'api/studio/handlers/snapshot.dart';
 import 'api/studio/handlers/ssh.dart';
 import 'api/studio/handlers/thread.dart';
 import 'api/studio/handlers/updater.dart';
 import 'api/studio/subscription.dart';
+import 'api/studio/types/agent_profile.dart';
 import 'api/studio/types/attachment.dart';
 import 'api/studio/types/error.dart';
 import 'api/studio/types/event.dart';
@@ -92,7 +94,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => -2096054816;
+  int get rustContentHash => -1978193744;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -137,11 +139,6 @@ abstract class RustLibApi extends BaseApi {
     required List<BridgeAttachmentDraftSource> sources,
   });
 
-  Future<BridgeTaskRecoveryResultDto>
-  crateApiStudioHandlersRecoveryApplyTaskRecovery({
-    required BridgeTaskRecoveryRequestDto request,
-  });
-
   Future<ProjectDto?> crateApiStudioHandlersLifecycleArchiveProject({
     required String projectId,
   });
@@ -161,19 +158,10 @@ abstract class RustLibApi extends BaseApi {
 
   Future<BridgeIdleAgent> crateApiStudioTypesRuntimeBridgeIdleAgentDefault();
 
-  Future<BridgePendingWorkUnit>
-  crateApiStudioTypesRuntimeBridgePendingWorkUnitDefault();
-
   Future<BridgeProductEventEnvelope>
   crateApiStudioTypesEventBridgeProductEventEnvelopeStale({
     required BigInt laggedEvents,
   });
-
-  Future<BridgeReadyForReviewCompletion>
-  crateApiStudioTypesRuntimeBridgeReadyForReviewCompletionDefault();
-
-  Future<BridgeTaskNoDeliveryCompletion>
-  crateApiStudioTypesRuntimeBridgeTaskNoDeliveryCompletionDefault();
 
   Future<RemoteDirectoryListingDto>
   crateApiStudioHandlersSshBrowseRemoteDirectories({
@@ -186,16 +174,6 @@ abstract class RustLibApi extends BaseApi {
 
   Future<BridgeUpdaterStateSnapshot>
   crateApiStudioHandlersUpdaterCheckStudioUpdate();
-
-  Future<RuntimeSnapshot> crateApiStudioHandlersRecoveryCleanupProject({
-    required String projectId,
-    required String expectedRevision,
-  });
-
-  Future<RuntimeSnapshot> crateApiStudioHandlersRecoveryCleanupRecoveryIssue({
-    required String issueId,
-    required String expectedRevision,
-  });
 
   Future<BridgeEventSubscription>
   crateApiStudioSubscriptionCreateProductSubscription();
@@ -243,25 +221,13 @@ abstract class RustLibApi extends BaseApi {
     required String path,
   });
 
-  Future<BridgeRecoveryCleanupPreviewDto>
-  crateApiStudioHandlersRecoveryPreviewProjectCleanup({
-    required String projectId,
-  });
-
-  Future<BridgeRecoveryCleanupPreviewDto>
-  crateApiStudioHandlersRecoveryPreviewRecoveryIssueCleanup({
-    required String issueId,
-  });
-
-  Future<BridgeTaskRecoveryPreviewDto>
-  crateApiStudioHandlersRecoveryPreviewTaskRecovery({
-    required String rootThreadId,
-  });
-
   Future<BridgeLspStateSnapshot>
   crateApiStudioHandlersExternalStateProbeLspServer({
     required String projectId,
   });
+
+  Future<List<BridgeAgentProfileDto>>
+  crateApiStudioHandlersAgentProfilesReadAgentProfiles();
 
   Future<Uint8List> crateApiStudioHandlersAttachmentReadAttachmentDraft({
     required String draftId,
@@ -334,11 +300,7 @@ abstract class RustLibApi extends BaseApi {
   });
 
   Future<BridgePersistenceStateSnapshot>
-  crateApiStudioHandlersRecoveryRetryPersistence();
-
-  Future<RuntimeSnapshot> crateApiStudioHandlersRecoveryRetryRecoveryIssue({
-    required String issueId,
-  });
+  crateApiStudioHandlersPersistenceRetryPersistence();
 
   Future<BridgeSettingsStateSnapshot>
   crateApiStudioHandlersSettingsSaveGeneralSettings({
@@ -380,6 +342,19 @@ abstract class RustLibApi extends BaseApi {
     required SaveSshServerRequest request,
   });
 
+  Future<List<BridgeAgentProfileDto>>
+  crateApiStudioHandlersAgentProfilesSaveUserAgentProfile({
+    required String profileId,
+    required bool enabled,
+    required String displayName,
+    required String description,
+    required String whenToUse,
+    required String systemInstructions,
+    required String providerId,
+    required String model,
+    String? effort,
+  });
+
   Future<BridgeSettingsStateSnapshot>
   crateApiStudioHandlersSettingsSaveWebSearchSettings({
     required BigInt expectedSettingsRevision,
@@ -395,9 +370,15 @@ abstract class RustLibApi extends BaseApi {
     String? effort,
   });
 
+  Future<List<BridgeAgentProfileDto>>
+  crateApiStudioHandlersAgentProfilesSetSystemAgentEnabled({
+    required String profileId,
+    required bool enabled,
+  });
+
   Future<void> crateApiStudioHandlersThreadSetThreadMode({
     required String threadId,
-    required BridgeThreadMode mode,
+    required String mode,
   });
 
   Future<RuntimeSnapshot> crateApiStudioHandlersLifecycleShutdownRuntime();
@@ -405,7 +386,7 @@ abstract class RustLibApi extends BaseApi {
   Future<StartNewThreadResponse> crateApiStudioHandlersThreadStartNewThread({
     required String projectId,
     required BridgeStudioPromptInput input,
-    required BridgeThreadMode mode,
+    required String mode,
   });
 
   Future<BridgeStudioStartupResult>
@@ -751,43 +732,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<BridgeTaskRecoveryResultDto>
-  crateApiStudioHandlersRecoveryApplyTaskRecovery({
-    required BridgeTaskRecoveryRequestDto request,
-  }) {
-    return handler.executeNormal(
-      NormalTask(
-        callFfi: (port_) {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_box_autoadd_bridge_task_recovery_request_dto(
-            request,
-            serializer,
-          );
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 8,
-            port: port_,
-          );
-        },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_bridge_task_recovery_result_dto,
-          decodeErrorData: sse_decode_bridge_error,
-        ),
-        constMeta: kCrateApiStudioHandlersRecoveryApplyTaskRecoveryConstMeta,
-        argValues: [request],
-        apiImpl: this,
-      ),
-    );
-  }
-
-  TaskConstMeta get kCrateApiStudioHandlersRecoveryApplyTaskRecoveryConstMeta =>
-      const TaskConstMeta(
-        debugName: "apply_task_recovery",
-        argNames: ["request"],
-      );
-
-  @override
   Future<ProjectDto?> crateApiStudioHandlersLifecycleArchiveProject({
     required String projectId,
   }) {
@@ -799,7 +743,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 9,
+            funcId: 8,
             port: port_,
           );
         },
@@ -832,7 +776,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 10,
+            funcId: 9,
             port: port_,
           );
         },
@@ -860,7 +804,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 11,
+            funcId: 10,
             port: port_,
           );
         },
@@ -892,7 +836,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 12,
+            funcId: 11,
             port: port_,
           );
         },
@@ -925,7 +869,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 13,
+            funcId: 12,
             port: port_,
           );
         },
@@ -957,7 +901,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 14,
+            funcId: 13,
             port: port_,
           );
         },
@@ -977,39 +921,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "bridge_idle_agent_default", argNames: []);
 
   @override
-  Future<BridgePendingWorkUnit>
-  crateApiStudioTypesRuntimeBridgePendingWorkUnitDefault() {
-    return handler.executeNormal(
-      NormalTask(
-        callFfi: (port_) {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 15,
-            port: port_,
-          );
-        },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_bridge_pending_work_unit,
-          decodeErrorData: null,
-        ),
-        constMeta:
-            kCrateApiStudioTypesRuntimeBridgePendingWorkUnitDefaultConstMeta,
-        argValues: [],
-        apiImpl: this,
-      ),
-    );
-  }
-
-  TaskConstMeta
-  get kCrateApiStudioTypesRuntimeBridgePendingWorkUnitDefaultConstMeta =>
-      const TaskConstMeta(
-        debugName: "bridge_pending_work_unit_default",
-        argNames: [],
-      );
-
-  @override
   Future<BridgeProductEventEnvelope>
   crateApiStudioTypesEventBridgeProductEventEnvelopeStale({
     required BigInt laggedEvents,
@@ -1022,7 +933,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 16,
+            funcId: 14,
             port: port_,
           );
         },
@@ -1046,72 +957,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<BridgeReadyForReviewCompletion>
-  crateApiStudioTypesRuntimeBridgeReadyForReviewCompletionDefault() {
-    return handler.executeNormal(
-      NormalTask(
-        callFfi: (port_) {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 17,
-            port: port_,
-          );
-        },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_bridge_ready_for_review_completion,
-          decodeErrorData: null,
-        ),
-        constMeta:
-            kCrateApiStudioTypesRuntimeBridgeReadyForReviewCompletionDefaultConstMeta,
-        argValues: [],
-        apiImpl: this,
-      ),
-    );
-  }
-
-  TaskConstMeta
-  get kCrateApiStudioTypesRuntimeBridgeReadyForReviewCompletionDefaultConstMeta =>
-      const TaskConstMeta(
-        debugName: "bridge_ready_for_review_completion_default",
-        argNames: [],
-      );
-
-  @override
-  Future<BridgeTaskNoDeliveryCompletion>
-  crateApiStudioTypesRuntimeBridgeTaskNoDeliveryCompletionDefault() {
-    return handler.executeNormal(
-      NormalTask(
-        callFfi: (port_) {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 18,
-            port: port_,
-          );
-        },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_bridge_task_no_delivery_completion,
-          decodeErrorData: null,
-        ),
-        constMeta:
-            kCrateApiStudioTypesRuntimeBridgeTaskNoDeliveryCompletionDefaultConstMeta,
-        argValues: [],
-        apiImpl: this,
-      ),
-    );
-  }
-
-  TaskConstMeta
-  get kCrateApiStudioTypesRuntimeBridgeTaskNoDeliveryCompletionDefaultConstMeta =>
-      const TaskConstMeta(
-        debugName: "bridge_task_no_delivery_completion_default",
-        argNames: [],
-      );
-
-  @override
   Future<RemoteDirectoryListingDto>
   crateApiStudioHandlersSshBrowseRemoteDirectories({
     required String serverId,
@@ -1126,7 +971,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 19,
+            funcId: 15,
             port: port_,
           );
         },
@@ -1158,7 +1003,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 20,
+            funcId: 16,
             port: port_,
           );
         },
@@ -1187,7 +1032,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 21,
+            funcId: 17,
             port: port_,
           );
         },
@@ -1206,77 +1051,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "check_studio_update", argNames: []);
 
   @override
-  Future<RuntimeSnapshot> crateApiStudioHandlersRecoveryCleanupProject({
-    required String projectId,
-    required String expectedRevision,
-  }) {
-    return handler.executeNormal(
-      NormalTask(
-        callFfi: (port_) {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_String(projectId, serializer);
-          sse_encode_String(expectedRevision, serializer);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 22,
-            port: port_,
-          );
-        },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_runtime_snapshot,
-          decodeErrorData: sse_decode_bridge_error,
-        ),
-        constMeta: kCrateApiStudioHandlersRecoveryCleanupProjectConstMeta,
-        argValues: [projectId, expectedRevision],
-        apiImpl: this,
-      ),
-    );
-  }
-
-  TaskConstMeta get kCrateApiStudioHandlersRecoveryCleanupProjectConstMeta =>
-      const TaskConstMeta(
-        debugName: "cleanup_project",
-        argNames: ["projectId", "expectedRevision"],
-      );
-
-  @override
-  Future<RuntimeSnapshot> crateApiStudioHandlersRecoveryCleanupRecoveryIssue({
-    required String issueId,
-    required String expectedRevision,
-  }) {
-    return handler.executeNormal(
-      NormalTask(
-        callFfi: (port_) {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_String(issueId, serializer);
-          sse_encode_String(expectedRevision, serializer);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 23,
-            port: port_,
-          );
-        },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_runtime_snapshot,
-          decodeErrorData: sse_decode_bridge_error,
-        ),
-        constMeta: kCrateApiStudioHandlersRecoveryCleanupRecoveryIssueConstMeta,
-        argValues: [issueId, expectedRevision],
-        apiImpl: this,
-      ),
-    );
-  }
-
-  TaskConstMeta
-  get kCrateApiStudioHandlersRecoveryCleanupRecoveryIssueConstMeta =>
-      const TaskConstMeta(
-        debugName: "cleanup_recovery_issue",
-        argNames: ["issueId", "expectedRevision"],
-      );
-
-  @override
   Future<BridgeEventSubscription>
   crateApiStudioSubscriptionCreateProductSubscription() {
     return handler.executeNormal(
@@ -1286,7 +1060,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 24,
+            funcId: 18,
             port: port_,
           );
         },
@@ -1322,7 +1096,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 25,
+            funcId: 19,
             port: port_,
           );
         },
@@ -1354,7 +1128,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 26,
+            funcId: 20,
             port: port_,
           );
         },
@@ -1384,7 +1158,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 27,
+            funcId: 21,
             port: port_,
           );
         },
@@ -1417,7 +1191,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 28,
+            funcId: 22,
             port: port_,
           );
         },
@@ -1454,7 +1228,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 29,
+            funcId: 23,
             port: port_,
           );
         },
@@ -1484,7 +1258,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 30,
+            funcId: 24,
             port: port_,
           );
         },
@@ -1514,7 +1288,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 31,
+            funcId: 25,
             port: port_,
           );
         },
@@ -1551,7 +1325,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 32,
+            funcId: 26,
             port: port_,
           );
         },
@@ -1582,7 +1356,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 33,
+            funcId: 27,
             port: port_,
           );
         },
@@ -1613,7 +1387,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 34,
+            funcId: 28,
             port: port_,
           );
         },
@@ -1645,7 +1419,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 35,
+            funcId: 29,
             port: port_,
           );
         },
@@ -1667,113 +1441,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<BridgeRecoveryCleanupPreviewDto>
-  crateApiStudioHandlersRecoveryPreviewProjectCleanup({
-    required String projectId,
-  }) {
-    return handler.executeNormal(
-      NormalTask(
-        callFfi: (port_) {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_String(projectId, serializer);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 36,
-            port: port_,
-          );
-        },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_bridge_recovery_cleanup_preview_dto,
-          decodeErrorData: sse_decode_bridge_error,
-        ),
-        constMeta:
-            kCrateApiStudioHandlersRecoveryPreviewProjectCleanupConstMeta,
-        argValues: [projectId],
-        apiImpl: this,
-      ),
-    );
-  }
-
-  TaskConstMeta
-  get kCrateApiStudioHandlersRecoveryPreviewProjectCleanupConstMeta =>
-      const TaskConstMeta(
-        debugName: "preview_project_cleanup",
-        argNames: ["projectId"],
-      );
-
-  @override
-  Future<BridgeRecoveryCleanupPreviewDto>
-  crateApiStudioHandlersRecoveryPreviewRecoveryIssueCleanup({
-    required String issueId,
-  }) {
-    return handler.executeNormal(
-      NormalTask(
-        callFfi: (port_) {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_String(issueId, serializer);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 37,
-            port: port_,
-          );
-        },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_bridge_recovery_cleanup_preview_dto,
-          decodeErrorData: sse_decode_bridge_error,
-        ),
-        constMeta:
-            kCrateApiStudioHandlersRecoveryPreviewRecoveryIssueCleanupConstMeta,
-        argValues: [issueId],
-        apiImpl: this,
-      ),
-    );
-  }
-
-  TaskConstMeta
-  get kCrateApiStudioHandlersRecoveryPreviewRecoveryIssueCleanupConstMeta =>
-      const TaskConstMeta(
-        debugName: "preview_recovery_issue_cleanup",
-        argNames: ["issueId"],
-      );
-
-  @override
-  Future<BridgeTaskRecoveryPreviewDto>
-  crateApiStudioHandlersRecoveryPreviewTaskRecovery({
-    required String rootThreadId,
-  }) {
-    return handler.executeNormal(
-      NormalTask(
-        callFfi: (port_) {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_String(rootThreadId, serializer);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 38,
-            port: port_,
-          );
-        },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_bridge_task_recovery_preview_dto,
-          decodeErrorData: sse_decode_bridge_error,
-        ),
-        constMeta: kCrateApiStudioHandlersRecoveryPreviewTaskRecoveryConstMeta,
-        argValues: [rootThreadId],
-        apiImpl: this,
-      ),
-    );
-  }
-
-  TaskConstMeta
-  get kCrateApiStudioHandlersRecoveryPreviewTaskRecoveryConstMeta =>
-      const TaskConstMeta(
-        debugName: "preview_task_recovery",
-        argNames: ["rootThreadId"],
-      );
-
-  @override
   Future<BridgeLspStateSnapshot>
   crateApiStudioHandlersExternalStateProbeLspServer({
     required String projectId,
@@ -1786,7 +1453,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 39,
+            funcId: 30,
             port: port_,
           );
         },
@@ -1809,6 +1476,36 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<List<BridgeAgentProfileDto>>
+  crateApiStudioHandlersAgentProfilesReadAgentProfiles() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 31,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_bridge_agent_profile_dto,
+          decodeErrorData: sse_decode_bridge_error,
+        ),
+        constMeta:
+            kCrateApiStudioHandlersAgentProfilesReadAgentProfilesConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta
+  get kCrateApiStudioHandlersAgentProfilesReadAgentProfilesConstMeta =>
+      const TaskConstMeta(debugName: "read_agent_profiles", argNames: []);
+
+  @override
   Future<Uint8List> crateApiStudioHandlersAttachmentReadAttachmentDraft({
     required String draftId,
   }) {
@@ -1820,7 +1517,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 40,
+            funcId: 32,
             port: port_,
           );
         },
@@ -1853,7 +1550,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 41,
+            funcId: 33,
             port: port_,
           );
         },
@@ -1881,7 +1578,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 42,
+            funcId: 34,
             port: port_,
           );
         },
@@ -1909,7 +1606,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 43,
+            funcId: 35,
             port: port_,
           );
         },
@@ -1939,7 +1636,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 44,
+            funcId: 36,
             port: port_,
           );
         },
@@ -1968,7 +1665,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 45,
+            funcId: 37,
             port: port_,
           );
         },
@@ -1999,7 +1696,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 46,
+            funcId: 38,
             port: port_,
           );
         },
@@ -2027,7 +1724,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 47,
+            funcId: 39,
             port: port_,
           );
         },
@@ -2058,7 +1755,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 48,
+            funcId: 40,
             port: port_,
           );
         },
@@ -2090,7 +1787,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 49,
+            funcId: 41,
             port: port_,
           );
         },
@@ -2123,7 +1820,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 50,
+            funcId: 42,
             port: port_,
           );
         },
@@ -2155,7 +1852,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 51,
+            funcId: 43,
             port: port_,
           );
         },
@@ -2189,7 +1886,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 52,
+            funcId: 44,
             port: port_,
           );
         },
@@ -2224,7 +1921,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 53,
+            funcId: 45,
             port: port_,
           );
         },
@@ -2262,7 +1959,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 54,
+            funcId: 46,
             port: port_,
           );
         },
@@ -2296,7 +1993,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 55,
+            funcId: 47,
             port: port_,
           );
         },
@@ -2326,7 +2023,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 56,
+            funcId: 48,
             port: port_,
           );
         },
@@ -2362,7 +2059,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 57,
+            funcId: 49,
             port: port_,
           );
         },
@@ -2385,7 +2082,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @override
   Future<BridgePersistenceStateSnapshot>
-  crateApiStudioHandlersRecoveryRetryPersistence() {
+  crateApiStudioHandlersPersistenceRetryPersistence() {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
@@ -2393,7 +2090,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 58,
+            funcId: 50,
             port: port_,
           );
         },
@@ -2401,49 +2098,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeSuccessData: sse_decode_bridge_persistence_state_snapshot,
           decodeErrorData: sse_decode_bridge_error,
         ),
-        constMeta: kCrateApiStudioHandlersRecoveryRetryPersistenceConstMeta,
+        constMeta: kCrateApiStudioHandlersPersistenceRetryPersistenceConstMeta,
         argValues: [],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiStudioHandlersRecoveryRetryPersistenceConstMeta =>
-      const TaskConstMeta(debugName: "retry_persistence", argNames: []);
-
-  @override
-  Future<RuntimeSnapshot> crateApiStudioHandlersRecoveryRetryRecoveryIssue({
-    required String issueId,
-  }) {
-    return handler.executeNormal(
-      NormalTask(
-        callFfi: (port_) {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_String(issueId, serializer);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 59,
-            port: port_,
-          );
-        },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_runtime_snapshot,
-          decodeErrorData: sse_decode_bridge_error,
-        ),
-        constMeta: kCrateApiStudioHandlersRecoveryRetryRecoveryIssueConstMeta,
-        argValues: [issueId],
-        apiImpl: this,
-      ),
-    );
-  }
-
   TaskConstMeta
-  get kCrateApiStudioHandlersRecoveryRetryRecoveryIssueConstMeta =>
-      const TaskConstMeta(
-        debugName: "retry_recovery_issue",
-        argNames: ["issueId"],
-      );
+  get kCrateApiStudioHandlersPersistenceRetryPersistenceConstMeta =>
+      const TaskConstMeta(debugName: "retry_persistence", argNames: []);
 
   @override
   Future<BridgeSettingsStateSnapshot>
@@ -2460,7 +2124,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 60,
+            funcId: 51,
             port: port_,
           );
         },
@@ -2497,7 +2161,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 61,
+            funcId: 52,
             port: port_,
           );
         },
@@ -2535,7 +2199,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 62,
+            funcId: 53,
             port: port_,
           );
         },
@@ -2571,7 +2235,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 63,
+            funcId: 54,
             port: port_,
           );
         },
@@ -2608,7 +2272,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 64,
+            funcId: 55,
             port: port_,
           );
         },
@@ -2646,7 +2310,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 65,
+            funcId: 56,
             port: port_,
           );
         },
@@ -2680,7 +2344,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 66,
+            funcId: 57,
             port: port_,
           );
         },
@@ -2699,6 +2363,78 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "save_ssh_server", argNames: ["request"]);
 
   @override
+  Future<List<BridgeAgentProfileDto>>
+  crateApiStudioHandlersAgentProfilesSaveUserAgentProfile({
+    required String profileId,
+    required bool enabled,
+    required String displayName,
+    required String description,
+    required String whenToUse,
+    required String systemInstructions,
+    required String providerId,
+    required String model,
+    String? effort,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(profileId, serializer);
+          sse_encode_bool(enabled, serializer);
+          sse_encode_String(displayName, serializer);
+          sse_encode_String(description, serializer);
+          sse_encode_String(whenToUse, serializer);
+          sse_encode_String(systemInstructions, serializer);
+          sse_encode_String(providerId, serializer);
+          sse_encode_String(model, serializer);
+          sse_encode_opt_String(effort, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 58,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_bridge_agent_profile_dto,
+          decodeErrorData: sse_decode_bridge_error,
+        ),
+        constMeta:
+            kCrateApiStudioHandlersAgentProfilesSaveUserAgentProfileConstMeta,
+        argValues: [
+          profileId,
+          enabled,
+          displayName,
+          description,
+          whenToUse,
+          systemInstructions,
+          providerId,
+          model,
+          effort,
+        ],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta
+  get kCrateApiStudioHandlersAgentProfilesSaveUserAgentProfileConstMeta =>
+      const TaskConstMeta(
+        debugName: "save_user_agent_profile",
+        argNames: [
+          "profileId",
+          "enabled",
+          "displayName",
+          "description",
+          "whenToUse",
+          "systemInstructions",
+          "providerId",
+          "model",
+          "effort",
+        ],
+      );
+
+  @override
   Future<BridgeSettingsStateSnapshot>
   crateApiStudioHandlersSettingsSaveWebSearchSettings({
     required BigInt expectedSettingsRevision,
@@ -2713,7 +2449,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 67,
+            funcId: 59,
             port: port_,
           );
         },
@@ -2757,7 +2493,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 68,
+            funcId: 60,
             port: port_,
           );
         },
@@ -2791,20 +2527,58 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<List<BridgeAgentProfileDto>>
+  crateApiStudioHandlersAgentProfilesSetSystemAgentEnabled({
+    required String profileId,
+    required bool enabled,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(profileId, serializer);
+          sse_encode_bool(enabled, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 61,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_bridge_agent_profile_dto,
+          decodeErrorData: sse_decode_bridge_error,
+        ),
+        constMeta:
+            kCrateApiStudioHandlersAgentProfilesSetSystemAgentEnabledConstMeta,
+        argValues: [profileId, enabled],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta
+  get kCrateApiStudioHandlersAgentProfilesSetSystemAgentEnabledConstMeta =>
+      const TaskConstMeta(
+        debugName: "set_system_agent_enabled",
+        argNames: ["profileId", "enabled"],
+      );
+
+  @override
   Future<void> crateApiStudioHandlersThreadSetThreadMode({
     required String threadId,
-    required BridgeThreadMode mode,
+    required String mode,
   }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(threadId, serializer);
-          sse_encode_bridge_thread_mode(mode, serializer);
+          sse_encode_String(mode, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 69,
+            funcId: 62,
             port: port_,
           );
         },
@@ -2834,7 +2608,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 70,
+            funcId: 63,
             port: port_,
           );
         },
@@ -2856,7 +2630,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Future<StartNewThreadResponse> crateApiStudioHandlersThreadStartNewThread({
     required String projectId,
     required BridgeStudioPromptInput input,
-    required BridgeThreadMode mode,
+    required String mode,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -2864,11 +2638,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           final serializer = SseSerializer(generalizedFrbRustBinding);
           sse_encode_String(projectId, serializer);
           sse_encode_box_autoadd_bridge_studio_prompt_input(input, serializer);
-          sse_encode_bridge_thread_mode(mode, serializer);
+          sse_encode_String(mode, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 71,
+            funcId: 64,
             port: port_,
           );
         },
@@ -2899,7 +2673,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 72,
+            funcId: 65,
             port: port_,
           );
         },
@@ -2932,7 +2706,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 73,
+            funcId: 66,
             port: port_,
           );
         },
@@ -2967,7 +2741,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 74,
+            funcId: 67,
             port: port_,
           );
         },
@@ -3004,7 +2778,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 75,
+              funcId: 68,
               port: port_,
             );
           },
@@ -3041,7 +2815,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 76,
+            funcId: 69,
             port: port_,
           );
         },
@@ -3075,7 +2849,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 77,
+            funcId: 70,
             port: port_,
           );
         },
@@ -3276,34 +3050,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeBudgetLimitDto dco_decode_box_autoadd_bridge_budget_limit_dto(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_budget_limit_dto(raw);
-  }
-
-  @protected
-  BridgeCancelledWorkUnit dco_decode_box_autoadd_bridge_cancelled_work_unit(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_cancelled_work_unit(raw);
-  }
-
-  @protected
   BridgeCancellingAgent dco_decode_box_autoadd_bridge_cancelling_agent(
     dynamic raw,
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_bridge_cancelling_agent(raw);
-  }
-
-  @protected
-  BridgeChangesRequiredWorkUnit
-  dco_decode_box_autoadd_bridge_changes_required_work_unit(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_changes_required_work_unit(raw);
   }
 
   @protected
@@ -3330,22 +3081,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeClosingAgent dco_decode_box_autoadd_bridge_closing_agent(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_bridge_closing_agent(raw);
-  }
-
-  @protected
-  BridgeCompletedTaskState dco_decode_box_autoadd_bridge_completed_task_state(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_completed_task_state(raw);
-  }
-
-  @protected
-  BridgeCompletedWorkUnit dco_decode_box_autoadd_bridge_completed_work_unit(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_completed_work_unit(raw);
   }
 
   @protected
@@ -3378,30 +3113,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeEditingDocumentsTaskState
-  dco_decode_box_autoadd_bridge_editing_documents_task_state(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_editing_documents_task_state(raw);
-  }
-
-  @protected
   BridgeError dco_decode_box_autoadd_bridge_error(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_bridge_error(raw);
-  }
-
-  @protected
-  BridgeExecutorContinuationState
-  dco_decode_box_autoadd_bridge_executor_continuation_state(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_executor_continuation_state(raw);
-  }
-
-  @protected
-  BridgeExecutorTerminalOutcome
-  dco_decode_box_autoadd_bridge_executor_terminal_outcome(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_executor_terminal_outcome(raw);
   }
 
   @protected
@@ -3418,14 +3132,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_bridge_failed_runtime_state(raw);
-  }
-
-  @protected
-  BridgeFailedWorkUnit dco_decode_box_autoadd_bridge_failed_work_unit(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_failed_work_unit(raw);
   }
 
   @protected
@@ -3539,50 +3245,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgePausedWorkUnit dco_decode_box_autoadd_bridge_paused_work_unit(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_paused_work_unit(raw);
-  }
-
-  @protected
-  BridgePendingConfirmationTaskState
-  dco_decode_box_autoadd_bridge_pending_confirmation_task_state(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_pending_confirmation_task_state(raw);
-  }
-
-  @protected
-  BridgePendingWorkUnit dco_decode_box_autoadd_bridge_pending_work_unit(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_pending_work_unit(raw);
-  }
-
-  @protected
   BridgePersistenceStateSnapshot
   dco_decode_box_autoadd_bridge_persistence_state_snapshot(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_bridge_persistence_state_snapshot(raw);
-  }
-
-  @protected
-  BridgePlanConfirmationInteractionState
-  dco_decode_box_autoadd_bridge_plan_confirmation_interaction_state(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_plan_confirmation_interaction_state(raw);
-  }
-
-  @protected
-  BridgePlanningTaskState dco_decode_box_autoadd_bridge_planning_task_state(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_planning_task_state(raw);
   }
 
   @protected
@@ -3635,13 +3301,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeReadyForReviewCompletion
-  dco_decode_box_autoadd_bridge_ready_for_review_completion(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_ready_for_review_completion(raw);
-  }
-
-  @protected
   BridgeReadyResource dco_decode_box_autoadd_bridge_ready_resource(
     dynamic raw,
   ) {
@@ -3673,40 +3332,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeReviewPassedWorkUnit
-  dco_decode_box_autoadd_bridge_review_passed_work_unit(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_review_passed_work_unit(raw);
-  }
-
-  @protected
-  BridgeReviewedCompletion dco_decode_box_autoadd_bridge_reviewed_completion(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_reviewed_completion(raw);
-  }
-
-  @protected
-  BridgeReviewingTaskState dco_decode_box_autoadd_bridge_reviewing_task_state(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_reviewing_task_state(raw);
-  }
-
-  @protected
   BridgeRunningAgent dco_decode_box_autoadd_bridge_running_agent(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_bridge_running_agent(raw);
-  }
-
-  @protected
-  BridgeRunningWorkUnit dco_decode_box_autoadd_bridge_running_work_unit(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_running_work_unit(raw);
   }
 
   @protected
@@ -3784,67 +3412,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_bridge_studio_prompt_input(raw);
-  }
-
-  @protected
-  BridgeTaskDeliveryCompletion
-  dco_decode_box_autoadd_bridge_task_delivery_completion(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_task_delivery_completion(raw);
-  }
-
-  @protected
-  BridgeTaskDirectoryData dco_decode_box_autoadd_bridge_task_directory_data(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_task_directory_data(raw);
-  }
-
-  @protected
-  BridgeTaskDirectoryState dco_decode_box_autoadd_bridge_task_directory_state(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_task_directory_state(raw);
-  }
-
-  @protected
-  BridgeTaskFailureDetail dco_decode_box_autoadd_bridge_task_failure_detail(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_task_failure_detail(raw);
-  }
-
-  @protected
-  BridgeTaskNoDeliveryCompletion
-  dco_decode_box_autoadd_bridge_task_no_delivery_completion(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_task_no_delivery_completion(raw);
-  }
-
-  @protected
-  BridgeTaskRecoveryRequestDto
-  dco_decode_box_autoadd_bridge_task_recovery_request_dto(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_task_recovery_request_dto(raw);
-  }
-
-  @protected
-  BridgeTaskReviewGate dco_decode_box_autoadd_bridge_task_review_gate(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_task_review_gate(raw);
-  }
-
-  @protected
-  BridgeTaskSpawnResource dco_decode_box_autoadd_bridge_task_spawn_resource(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_task_spawn_resource(raw);
   }
 
   @protected
@@ -4051,13 +3618,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeWaitingReviewWorkUnit
-  dco_decode_box_autoadd_bridge_waiting_review_work_unit(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_waiting_review_work_unit(raw);
-  }
-
-  @protected
   BridgeWaitingToolAgent dco_decode_box_autoadd_bridge_waiting_tool_agent(
     dynamic raw,
   ) {
@@ -4066,11 +3626,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeWorkingTaskState dco_decode_box_autoadd_bridge_working_task_state(
-    dynamic raw,
-  ) {
+  BridgeWorkflowRun dco_decode_box_autoadd_bridge_workflow_run(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_working_task_state(raw);
+    return dco_decode_bridge_workflow_run(raw);
+  }
+
+  @protected
+  BridgeWorkflowRuntimeSnapshot
+  dco_decode_box_autoadd_bridge_workflow_runtime_snapshot(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_bridge_workflow_runtime_snapshot(raw);
   }
 
   @protected
@@ -4228,12 +3793,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeTaskSpawnFailure dco_decode_box_bridge_task_spawn_failure(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_task_spawn_failure(raw);
-  }
-
-  @protected
   BridgeThreadItem dco_decode_box_bridge_thread_item(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_bridge_thread_item(raw);
@@ -4375,6 +3934,29 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeAgentProfileDto dco_decode_bridge_agent_profile_dto(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 13)
+      throw Exception('unexpected arr length: expect 13 but see ${arr.length}');
+    return BridgeAgentProfileDto(
+      profileId: dco_decode_String(arr[0]),
+      displayName: dco_decode_String(arr[1]),
+      description: dco_decode_String(arr[2]),
+      whenToUse: dco_decode_String(arr[3]),
+      systemInstructions: dco_decode_String(arr[4]),
+      providerId: dco_decode_String(arr[5]),
+      model: dco_decode_String(arr[6]),
+      effort: dco_decode_opt_String(arr[7]),
+      source: dco_decode_String(arr[8]),
+      revision: dco_decode_String(arr[9]),
+      contentHash: dco_decode_String(arr[10]),
+      system: dco_decode_bool(arr[11]),
+      enabled: dco_decode_bool(arr[12]),
+    );
+  }
+
+  @protected
   BridgeAgentProgressDto dco_decode_bridge_agent_progress_dto(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -4445,7 +4027,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         );
       case 1:
         return BridgeAttachmentAdmissionContext_NewThread(
-          mode: dco_decode_bridge_thread_mode(raw[1]),
+          mode: dco_decode_String(raw[1]),
         );
       default:
         throw Exception("unreachable");
@@ -4511,74 +4093,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeBudgetLimitDto dco_decode_bridge_budget_limit_dto(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 2)
-      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
-    return BridgeBudgetLimitDto(
-      kind: dco_decode_bridge_budget_limit_kind(arr[0]),
-      usage: dco_decode_bridge_budget_usage_dto(arr[1]),
-    );
-  }
-
-  @protected
-  BridgeBudgetLimitKind dco_decode_bridge_budget_limit_kind(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return BridgeBudgetLimitKind.values[raw as int];
-  }
-
-  @protected
-  BridgeBudgetUsageDto dco_decode_bridge_budget_usage_dto(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 4)
-      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
-    return BridgeBudgetUsageDto(
-      modelSteps: dco_decode_u_32(arr[0]),
-      toolCalls: dco_decode_u_32(arr[1]),
-      waitCalls: dco_decode_u_32(arr[2]),
-      elapsedMs: dco_decode_u_64(arr[3]),
-    );
-  }
-
-  @protected
-  BridgeCancelledWorkUnit dco_decode_bridge_cancelled_work_unit(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 3)
-      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
-    return BridgeCancelledWorkUnit(
-      operationId: dco_decode_String(arr[0]),
-      reason: dco_decode_String(arr[1]),
-      worktreeDisposition: dco_decode_bridge_task_worktree_disposition(arr[2]),
-    );
-  }
-
-  @protected
   BridgeCancellingAgent dco_decode_bridge_cancelling_agent(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
     if (arr.length != 1)
       throw Exception('unexpected arr length: expect 1 but see ${arr.length}');
     return BridgeCancellingAgent(turnId: dco_decode_String(arr[0]));
-  }
-
-  @protected
-  BridgeChangesRequiredWorkUnit dco_decode_bridge_changes_required_work_unit(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 5)
-      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
-    return BridgeChangesRequiredWorkUnit(
-      completionId: dco_decode_String(arr[0]),
-      completionRevision: dco_decode_u_32(arr[1]),
-      reviewRoundId: dco_decode_String(arr[2]),
-      continuationRevision: dco_decode_u_64(arr[3]),
-      sliceCount: dco_decode_u_32(arr[4]),
-    );
   }
 
   @protected
@@ -4630,28 +4150,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeCompletedTaskState dco_decode_bridge_completed_task_state(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 1)
-      throw Exception('unexpected arr length: expect 1 but see ${arr.length}');
-    return BridgeCompletedTaskState(
-      outcome: dco_decode_bridge_task_outcome(arr[0]),
-    );
-  }
-
-  @protected
-  BridgeCompletedWorkUnit dco_decode_bridge_completed_work_unit(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 1)
-      throw Exception('unexpected arr length: expect 1 but see ${arr.length}');
-    return BridgeCompletedWorkUnit(
-      outcome: dco_decode_bridge_work_unit_completion_outcome(arr[0]),
-    );
-  }
-
-  @protected
   BridgeConfigRecoveryReport dco_decode_bridge_config_recovery_report(
     dynamic raw,
   ) {
@@ -4660,14 +4158,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     if (arr.length != 1)
       throw Exception('unexpected arr length: expect 1 but see ${arr.length}');
     return BridgeConfigRecoveryReport(backupPath: dco_decode_String(arr[0]));
-  }
-
-  @protected
-  BridgeConversationRecoveryMode dco_decode_bridge_conversation_recovery_mode(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return BridgeConversationRecoveryMode.values[raw as int];
   }
 
   @protected
@@ -4736,18 +4226,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeEditingDocumentsTaskState
-  dco_decode_bridge_editing_documents_task_state(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 1)
-      throw Exception('unexpected arr length: expect 1 but see ${arr.length}');
-    return BridgeEditingDocumentsTaskState(
-      planRevision: dco_decode_u_64(arr[0]),
-    );
-  }
-
-  @protected
   BridgeError dco_decode_bridge_error(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -4766,69 +4244,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeErrorCode dco_decode_bridge_error_code(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return BridgeErrorCode.values[raw as int];
-  }
-
-  @protected
-  BridgeExecutorContinuationState dco_decode_bridge_executor_continuation_state(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    switch (raw[0]) {
-      case 0:
-        return BridgeExecutorContinuationState_Idle(
-          revision: dco_decode_u_64(raw[1]),
-          sliceCount: dco_decode_u_32(raw[2]),
-        );
-      case 1:
-        return BridgeExecutorContinuationState_Compacting(
-          revision: dco_decode_u_64(raw[1]),
-          sourceTurnId: dco_decode_String(raw[2]),
-          sliceCount: dco_decode_u_32(raw[3]),
-        );
-      case 2:
-        return BridgeExecutorContinuationState_PendingStart(
-          revision: dco_decode_u_64(raw[1]),
-          sourceTurnId: dco_decode_String(raw[2]),
-          sliceCount: dco_decode_u_32(raw[3]),
-          limit: dco_decode_box_autoadd_bridge_budget_limit_dto(raw[4]),
-        );
-      case 3:
-        return BridgeExecutorContinuationState_PlannerWakePending(
-          revision: dco_decode_u_64(raw[1]),
-          sourceTurnId: dco_decode_String(raw[2]),
-          sliceCount: dco_decode_u_32(raw[3]),
-        );
-      case 4:
-        return BridgeExecutorContinuationState_NeedsAttention(
-          revision: dco_decode_u_64(raw[1]),
-          sourceTurnId: dco_decode_String(raw[2]),
-          sliceCount: dco_decode_u_32(raw[3]),
-          detail: dco_decode_String(raw[4]),
-        );
-      default:
-        throw Exception("unreachable");
-    }
-  }
-
-  @protected
-  BridgeExecutorTerminalOutcome dco_decode_bridge_executor_terminal_outcome(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    switch (raw[0]) {
-      case 0:
-        return BridgeExecutorTerminalOutcome_Completed(
-          sourceTurnId: dco_decode_String(raw[1]),
-          detail: dco_decode_String(raw[2]),
-        );
-      case 1:
-        return BridgeExecutorTerminalOutcome_Failed(
-          sourceTurnId: dco_decode_String(raw[1]),
-          detail: dco_decode_String(raw[2]),
-        );
-      default:
-        throw Exception("unreachable");
-    }
   }
 
   @protected
@@ -4854,18 +4269,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     return BridgeFailedRuntimeState(
       failedAt: dco_decode_i_64(arr[0]),
       error: dco_decode_bridge_state_error(arr[1]),
-    );
-  }
-
-  @protected
-  BridgeFailedWorkUnit dco_decode_bridge_failed_work_unit(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 2)
-      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
-    return BridgeFailedWorkUnit(
-      failure: dco_decode_bridge_work_unit_failure(arr[0]),
-      worktreeDisposition: dco_decode_bridge_task_worktree_disposition(arr[1]),
     );
   }
 
@@ -4962,49 +4365,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeIntegratedReviewGateDto dco_decode_bridge_integrated_review_gate_dto(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    switch (raw[0]) {
-      case 0:
-        return BridgeIntegratedReviewGateDto_Required(
-          reason: dco_decode_String(raw[1]),
-        );
-      case 1:
-        return BridgeIntegratedReviewGateDto_SatisfiedByReview(
-          reviewRoundId: dco_decode_String(raw[1]),
-          reviewedHead: dco_decode_String(raw[2]),
-        );
-      case 2:
-        return BridgeIntegratedReviewGateDto_NotRequiredNoDelivery();
-      case 3:
-        return BridgeIntegratedReviewGateDto_NotRequiredSingleExecutorEquivalent(
-          workUnitId: dco_decode_String(raw[1]),
-          completionRevision: dco_decode_u_32(raw[2]),
-          mergeRecordId: dco_decode_String(raw[3]),
-        );
-      default:
-        throw Exception("unreachable");
-    }
-  }
-
-  @protected
-  BridgeIntegratedReviewTarget dco_decode_bridge_integrated_review_target(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 3)
-      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
-    return BridgeIntegratedReviewTarget(
-      reviewRoundId: dco_decode_String(arr[0]),
-      reviewedHead: dco_decode_String(arr[1]),
-      changedFiles: dco_decode_list_String(arr[2]),
-    );
-  }
-
-  @protected
   BridgeInteractionContent dco_decode_bridge_interaction_content(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     switch (raw[0]) {
@@ -5024,15 +4384,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           state: dco_decode_box_autoadd_bridge_tool_approval_interaction_state(
             raw[5],
           ),
-        );
-      case 2:
-        return BridgeInteractionContent_PlanConfirmation(
-          planId: dco_decode_String(raw[1]),
-          content: dco_decode_String(raw[2]),
-          state:
-              dco_decode_box_autoadd_bridge_plan_confirmation_interaction_state(
-                raw[3],
-              ),
         );
       default:
         throw Exception("unreachable");
@@ -5069,12 +4420,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         return BridgeInteractionResolution_ToolApproval(
           decision: dco_decode_bridge_tool_approval_resolution(raw[1]),
           reason: dco_decode_opt_String(raw[2]),
-        );
-      case 2:
-        return BridgeInteractionResolution_PlanConfirmation(
-          decision: dco_decode_bridge_plan_confirmation_resolution(raw[1]),
-          content: dco_decode_opt_String(raw[2]),
-          reason: dco_decode_opt_String(raw[3]),
         );
       default:
         throw Exception("unreachable");
@@ -5400,43 +4745,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeMergeCleanupState dco_decode_bridge_merge_cleanup_state(dynamic raw) {
+  BridgeModeInstructionSnapshot dco_decode_bridge_mode_instruction_snapshot(
+    dynamic raw,
+  ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
-    switch (raw[0]) {
-      case 0:
-        return BridgeMergeCleanupState_Pending();
-      case 1:
-        return BridgeMergeCleanupState_Deferred();
-      case 2:
-        return BridgeMergeCleanupState_Attempting(
-          operationId: dco_decode_String(raw[1]),
-          startedAt: dco_decode_i_64(raw[2]),
-        );
-      case 3:
-        return BridgeMergeCleanupState_Discarded(
-          operationId: dco_decode_String(raw[1]),
-          completedAt: dco_decode_i_64(raw[2]),
-        );
-      case 4:
-        return BridgeMergeCleanupState_AlreadyAbsent(
-          operationId: dco_decode_String(raw[1]),
-          completedAt: dco_decode_i_64(raw[2]),
-        );
-      case 5:
-        return BridgeMergeCleanupState_Failed(
-          operationId: dco_decode_String(raw[1]),
-          failedAt: dco_decode_i_64(raw[2]),
-          detail: dco_decode_String(raw[3]),
-        );
-      default:
-        throw Exception("unreachable");
-    }
-  }
-
-  @protected
-  BridgeMergeMethod dco_decode_bridge_merge_method(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return BridgeMergeMethod.values[raw as int];
+    final arr = raw as List<dynamic>;
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
+    return BridgeModeInstructionSnapshot(
+      modeId: dco_decode_String(arr[0]),
+      displayName: dco_decode_String(arr[1]),
+      source: dco_decode_String(arr[2]),
+      providerId: dco_decode_String(arr[3]),
+      revision: dco_decode_String(arr[4]),
+      contentHash: dco_decode_String(arr[5]),
+      content: dco_decode_String(arr[6]),
+    );
   }
 
   @protected
@@ -5649,39 +4973,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgePausedWorkUnit dco_decode_bridge_paused_work_unit(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 2)
-      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
-    return BridgePausedWorkUnit(
-      reason: dco_decode_bridge_work_unit_pause_reason(arr[0]),
-      continuation: dco_decode_bridge_executor_continuation_state(arr[1]),
-    );
-  }
-
-  @protected
-  BridgePendingConfirmationTaskState
-  dco_decode_bridge_pending_confirmation_task_state(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 1)
-      throw Exception('unexpected arr length: expect 1 but see ${arr.length}');
-    return BridgePendingConfirmationTaskState(
-      planRevision: dco_decode_u_64(arr[0]),
-    );
-  }
-
-  @protected
-  BridgePendingWorkUnit dco_decode_bridge_pending_work_unit(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.isNotEmpty)
-      throw Exception('unexpected arr length: expect 0 but see ${arr.length}');
-    return BridgePendingWorkUnit();
-  }
-
-  @protected
   BridgePersistenceState dco_decode_bridge_persistence_state(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     switch (raw[0]) {
@@ -5734,55 +5025,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgePlanConfirmationInteractionState
-  dco_decode_bridge_plan_confirmation_interaction_state(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    switch (raw[0]) {
-      case 0:
-        return BridgePlanConfirmationInteractionState_Pending(
-          operationId: dco_decode_String(raw[1]),
-        );
-      case 1:
-        return BridgePlanConfirmationInteractionState_Resolved(
-          operationId: dco_decode_String(raw[1]),
-          resolvedAt: dco_decode_i_64(raw[2]),
-          decision: dco_decode_bridge_plan_confirmation_resolution(raw[3]),
-          content: dco_decode_opt_String(raw[4]),
-          reason: dco_decode_opt_String(raw[5]),
-        );
-      case 2:
-        return BridgePlanConfirmationInteractionState_Cancelled(
-          operationId: dco_decode_String(raw[1]),
-          cancelledAt: dco_decode_i_64(raw[2]),
-          reason: dco_decode_String(raw[3]),
-        );
-      case 3:
-        return BridgePlanConfirmationInteractionState_Expired(
-          operationId: dco_decode_String(raw[1]),
-          expiredAt: dco_decode_i_64(raw[2]),
-        );
-      default:
-        throw Exception("unreachable");
-    }
-  }
-
-  @protected
-  BridgePlanConfirmationResolution
-  dco_decode_bridge_plan_confirmation_resolution(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return BridgePlanConfirmationResolution.values[raw as int];
-  }
-
-  @protected
-  BridgePlanningTaskState dco_decode_bridge_planning_task_state(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 1)
-      throw Exception('unexpected arr length: expect 1 but see ${arr.length}');
-    return BridgePlanningTaskState(request: dco_decode_String(arr[0]));
-  }
-
-  @protected
   BridgeProductEventEnvelope dco_decode_bridge_product_event_envelope(
     dynamic raw,
   ) {
@@ -5813,50 +5055,46 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           dco_decode_box_autoadd_bridge_thread_directory_delta(raw[1]),
         );
       case 2:
-        return BridgeProductEventPayload_TaskDirectoryChanged(
-          dco_decode_box_autoadd_bridge_task_directory_state(raw[1]),
-        );
-      case 3:
         return BridgeProductEventPayload_AgentDirectoryChanged(
           dco_decode_box_autoadd_bridge_agent_directory_state(raw[1]),
         );
-      case 4:
+      case 3:
         return BridgeProductEventPayload_SettingsStateChanged(
           dco_decode_box_bridge_settings_state_snapshot(raw[1]),
         );
-      case 5:
+      case 4:
         return BridgeProductEventPayload_RecoveryStateChanged(
           dco_decode_box_autoadd_bridge_recovery_state_snapshot(raw[1]),
         );
-      case 6:
+      case 5:
         return BridgeProductEventPayload_McpStateChanged(
           dco_decode_box_autoadd_bridge_mcp_state_snapshot(raw[1]),
         );
-      case 7:
+      case 6:
         return BridgeProductEventPayload_LspStateChanged(
           dco_decode_box_autoadd_bridge_lsp_state_snapshot(raw[1]),
         );
-      case 8:
+      case 7:
         return BridgeProductEventPayload_SkillsStateChanged(
           dco_decode_box_autoadd_bridge_skills_state_snapshot(raw[1]),
         );
-      case 9:
+      case 8:
         return BridgeProductEventPayload_ProviderUsageStateChanged(
           dco_decode_box_autoadd_bridge_provider_usage_state_snapshot(raw[1]),
         );
-      case 10:
+      case 9:
         return BridgeProductEventPayload_ModelPerformanceStateChanged(
           dco_decode_box_autoadd_bridge_model_performance_snapshot(raw[1]),
         );
-      case 11:
+      case 10:
         return BridgeProductEventPayload_UpdaterStateChanged(
           dco_decode_box_autoadd_bridge_updater_state_snapshot(raw[1]),
         );
-      case 12:
+      case 11:
         return BridgeProductEventPayload_PersistenceStateChanged(
           dco_decode_box_autoadd_bridge_persistence_state_snapshot(raw[1]),
         );
-      case 13:
+      case 12:
         return BridgeProductEventPayload_Stale(
           laggedEvents: dco_decode_u_64(raw[1]),
         );
@@ -6166,17 +5404,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeReadyForReviewCompletion dco_decode_bridge_ready_for_review_completion(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.isNotEmpty)
-      throw Exception('unexpected arr length: expect 0 but see ${arr.length}');
-    return BridgeReadyForReviewCompletion();
-  }
-
-  @protected
   BridgeReadyResource dco_decode_bridge_ready_resource(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -6186,46 +5413,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       revision: dco_decode_u_64(arr[0]),
       updatedAt: dco_decode_i_64(arr[1]),
       lastCheckedAt: dco_decode_opt_box_autoadd_i_64(arr[2]),
-    );
-  }
-
-  @protected
-  BridgeRecoveryCleanupPreviewDto
-  dco_decode_bridge_recovery_cleanup_preview_dto(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 7)
-      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
-    return BridgeRecoveryCleanupPreviewDto(
-      issueId: dco_decode_String(arr[0]),
-      expectedRevision: dco_decode_String(arr[1]),
-      scope: dco_decode_bridge_recovery_issue_scope(arr[2]),
-      projectId: dco_decode_opt_String(arr[3]),
-      threadId: dco_decode_opt_String(arr[4]),
-      detail: dco_decode_String(arr[5]),
-      resources: dco_decode_list_bridge_recovery_cleanup_resource_dto(arr[6]),
-    );
-  }
-
-  @protected
-  BridgeRecoveryCleanupResourceDto
-  dco_decode_bridge_recovery_cleanup_resource_dto(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 11)
-      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
-    return BridgeRecoveryCleanupResourceDto(
-      workUnitId: dco_decode_String(arr[0]),
-      path: dco_decode_String(arr[1]),
-      branch: dco_decode_String(arr[2]),
-      presence: dco_decode_bridge_recovery_resource_presence(arr[3]),
-      registrationExists: dco_decode_bool(arr[4]),
-      pathExists: dco_decode_bool(arr[5]),
-      branchExists: dco_decode_bool(arr[6]),
-      branchHead: dco_decode_opt_String(arr[7]),
-      dirty: dco_decode_bool(arr[8]),
-      aheadBy: dco_decode_u_32(arr[9]),
-      changedFileCount: dco_decode_u_32(arr[10]),
     );
   }
 
@@ -6249,14 +5436,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeRecoveryIssueScope dco_decode_bridge_recovery_issue_scope(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return BridgeRecoveryIssueScope.values[raw as int];
-  }
-
-  @protected
-  BridgeRecoveryResourcePresence dco_decode_bridge_recovery_resource_presence(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return BridgeRecoveryResourcePresence.values[raw as int];
   }
 
   @protected
@@ -6333,60 +5512,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeReviewPassedOutcome dco_decode_bridge_review_passed_outcome(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return BridgeReviewPassedOutcome.values[raw as int];
-  }
-
-  @protected
-  BridgeReviewPassedWorkUnit dco_decode_bridge_review_passed_work_unit(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 5)
-      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
-    return BridgeReviewPassedWorkUnit(
-      completionId: dco_decode_String(arr[0]),
-      completionRevision: dco_decode_u_32(arr[1]),
-      reviewRoundId: dco_decode_String(arr[2]),
-      outcome: dco_decode_bridge_review_passed_outcome(arr[3]),
-      verificationSummary: dco_decode_String(arr[4]),
-    );
-  }
-
-  @protected
-  BridgeReviewScope dco_decode_bridge_review_scope(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return BridgeReviewScope.values[raw as int];
-  }
-
-  @protected
-  BridgeReviewedCompletion dco_decode_bridge_reviewed_completion(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 2)
-      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
-    return BridgeReviewedCompletion(
-      reviewRoundId: dco_decode_String(arr[0]),
-      decidedAt: dco_decode_i_64(arr[1]),
-    );
-  }
-
-  @protected
-  BridgeReviewingTaskState dco_decode_bridge_reviewing_task_state(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 1)
-      throw Exception('unexpected arr length: expect 1 but see ${arr.length}');
-    return BridgeReviewingTaskState(
-      target: dco_decode_bridge_integrated_review_target(arr[0]),
-    );
-  }
-
-  @protected
   BridgeRoleSettingsDto dco_decode_bridge_role_settings_dto(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -6407,35 +5532,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     if (arr.length != 1)
       throw Exception('unexpected arr length: expect 1 but see ${arr.length}');
     return BridgeRunningAgent(turnId: dco_decode_String(arr[0]));
-  }
-
-  @protected
-  BridgeRunningWorkUnit dco_decode_bridge_running_work_unit(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 2)
-      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
-    return BridgeRunningWorkUnit(
-      activity: dco_decode_bridge_running_work_unit_activity(arr[0]),
-      continuation: dco_decode_bridge_executor_continuation_state(arr[1]),
-    );
-  }
-
-  @protected
-  BridgeRunningWorkUnitActivity dco_decode_bridge_running_work_unit_activity(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    switch (raw[0]) {
-      case 0:
-        return BridgeRunningWorkUnitActivity_Allocated();
-      case 1:
-        return BridgeRunningWorkUnitActivity_Active(
-          turnId: dco_decode_String(raw[1]),
-        );
-      default:
-        throw Exception("unreachable");
-    }
   }
 
   @protected
@@ -6578,7 +5674,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pendingCommits: dco_decode_u_64(raw[1]),
         );
       case 3:
-        return BridgeShutdownProgress_SuspendingTasks();
+        return BridgeShutdownProgress_StoppingAgents();
       case 4:
         return BridgeShutdownProgress_StoppingMcp();
       case 5:
@@ -6697,14 +5793,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeSkillsStateData dco_decode_bridge_skills_state_data(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 5)
-      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    if (arr.length != 6)
+      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
     return BridgeSkillsStateData(
       configFingerprint: dco_decode_String(arr[0]),
       catalogRevision: dco_decode_u_64(arr[1]),
       skills: dco_decode_list_skill_summary_dto(arr[2]),
-      warnings: dco_decode_list_String(arr[3]),
-      complete: dco_decode_bool(arr[4]),
+      modes: dco_decode_list_mode_summary_dto(arr[3]),
+      warnings: dco_decode_list_String(arr[4]),
+      complete: dco_decode_bool(arr[5]),
     );
   }
 
@@ -6784,8 +5881,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 8)
-      throw Exception('unexpected arr length: expect 8 but see ${arr.length}');
+    if (arr.length != 7)
+      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
     return BridgeStudioRecoveryIssueDto(
       id: dco_decode_String(arr[0]),
       scope: dco_decode_bridge_recovery_issue_scope(arr[1]),
@@ -6793,8 +5890,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       availableActions: dco_decode_list_bridge_recovery_issue_action(arr[3]),
       projectId: dco_decode_opt_String(arr[4]),
       threadId: dco_decode_opt_String(arr[5]),
-      taskRunId: dco_decode_opt_String(arr[6]),
-      detail: dco_decode_String(arr[7]),
+      detail: dco_decode_String(arr[6]),
     );
   }
 
@@ -6839,765 +5935,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 14)
-      throw Exception('unexpected arr length: expect 14 but see ${arr.length}');
+    if (arr.length != 13)
+      throw Exception('unexpected arr length: expect 13 but see ${arr.length}');
     return BridgeStudioStateSnapshot(
       runtime: dco_decode_runtime_snapshot(arr[0]),
       projectDirectory: dco_decode_bridge_project_directory_state(arr[1]),
       threadDirectory: dco_decode_bridge_thread_directory_page(arr[2]),
-      taskDirectory: dco_decode_bridge_task_directory_state(arr[3]),
-      agentDirectory: dco_decode_bridge_agent_directory_state(arr[4]),
-      settings: dco_decode_bridge_settings_state_snapshot(arr[5]),
-      recovery: dco_decode_bridge_recovery_state_snapshot(arr[6]),
-      mcp: dco_decode_bridge_mcp_state_snapshot(arr[7]),
-      lsp: dco_decode_bridge_lsp_state_snapshot(arr[8]),
-      skillsByProject: dco_decode_list_bridge_skills_state_snapshot(arr[9]),
-      providerUsage: dco_decode_bridge_provider_usage_state_snapshot(arr[10]),
-      modelPerformance: dco_decode_bridge_model_performance_snapshot(arr[11]),
-      updater: dco_decode_bridge_updater_state_snapshot(arr[12]),
-      persistence: dco_decode_bridge_persistence_state_snapshot(arr[13]),
+      agentDirectory: dco_decode_bridge_agent_directory_state(arr[3]),
+      settings: dco_decode_bridge_settings_state_snapshot(arr[4]),
+      recovery: dco_decode_bridge_recovery_state_snapshot(arr[5]),
+      mcp: dco_decode_bridge_mcp_state_snapshot(arr[6]),
+      lsp: dco_decode_bridge_lsp_state_snapshot(arr[7]),
+      skillsByProject: dco_decode_list_bridge_skills_state_snapshot(arr[8]),
+      providerUsage: dco_decode_bridge_provider_usage_state_snapshot(arr[9]),
+      modelPerformance: dco_decode_bridge_model_performance_snapshot(arr[10]),
+      updater: dco_decode_bridge_updater_state_snapshot(arr[11]),
+      persistence: dco_decode_bridge_persistence_state_snapshot(arr[12]),
     );
-  }
-
-  @protected
-  BridgeTaskCompletionContent dco_decode_bridge_task_completion_content(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    switch (raw[0]) {
-      case 0:
-        return BridgeTaskCompletionContent_Delivery(
-          dco_decode_box_autoadd_bridge_task_delivery_completion(raw[1]),
-        );
-      case 1:
-        return BridgeTaskCompletionContent_NoDelivery(
-          dco_decode_box_autoadd_bridge_task_no_delivery_completion(raw[1]),
-        );
-      default:
-        throw Exception("unreachable");
-    }
-  }
-
-  @protected
-  BridgeTaskCompletionDto dco_decode_bridge_task_completion_dto(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 13)
-      throw Exception('unexpected arr length: expect 13 but see ${arr.length}');
-    return BridgeTaskCompletionDto(
-      id: dco_decode_String(arr[0]),
-      workUnitId: dco_decode_String(arr[1]),
-      executorAgentId: dco_decode_String(arr[2]),
-      revision: dco_decode_u_32(arr[3]),
-      content: dco_decode_bridge_task_completion_content(arr[4]),
-      state: dco_decode_bridge_task_completion_state(arr[5]),
-      stateRevision: dco_decode_u_64(arr[6]),
-      baseCommit: dco_decode_String(arr[7]),
-      verificationSummary: dco_decode_String(arr[8]),
-      worktreePath: dco_decode_String(arr[9]),
-      branch: dco_decode_String(arr[10]),
-      createdAt: dco_decode_i_64(arr[11]),
-      updatedAt: dco_decode_i_64(arr[12]),
-    );
-  }
-
-  @protected
-  BridgeTaskCompletionState dco_decode_bridge_task_completion_state(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    switch (raw[0]) {
-      case 0:
-        return BridgeTaskCompletionState_ReadyForReview(
-          dco_decode_box_autoadd_bridge_ready_for_review_completion(raw[1]),
-        );
-      case 1:
-        return BridgeTaskCompletionState_ChangesRequired(
-          dco_decode_box_autoadd_bridge_reviewed_completion(raw[1]),
-        );
-      case 2:
-        return BridgeTaskCompletionState_Approved(
-          dco_decode_box_autoadd_bridge_reviewed_completion(raw[1]),
-        );
-      default:
-        throw Exception("unreachable");
-    }
-  }
-
-  @protected
-  BridgeTaskDeliveryCompletion dco_decode_bridge_task_delivery_completion(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 2)
-      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
-    return BridgeTaskDeliveryCompletion(
-      headCommit: dco_decode_String(arr[0]),
-      changedFiles: dco_decode_list_String(arr[1]),
-    );
-  }
-
-  @protected
-  BridgeTaskDesignReferenceDto dco_decode_bridge_task_design_reference_dto(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 2)
-      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
-    return BridgeTaskDesignReferenceDto(
-      path: dco_decode_String(arr[0]),
-      section: dco_decode_String(arr[1]),
-    );
-  }
-
-  @protected
-  BridgeTaskDirectoryData dco_decode_bridge_task_directory_data(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 1)
-      throw Exception('unexpected arr length: expect 1 but see ${arr.length}');
-    return BridgeTaskDirectoryData(
-      tasks: dco_decode_list_bridge_task_directory_entry(arr[0]),
-    );
-  }
-
-  @protected
-  BridgeTaskDirectoryEntry dco_decode_bridge_task_directory_entry(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 2)
-      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
-    return BridgeTaskDirectoryEntry(
-      rootThreadId: dco_decode_String(arr[0]),
-      task: dco_decode_bridge_task_runtime_dto(arr[1]),
-    );
-  }
-
-  @protected
-  BridgeTaskDirectoryState dco_decode_bridge_task_directory_state(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    switch (raw[0]) {
-      case 0:
-        return BridgeTaskDirectoryState_Uninitialized(
-          dco_decode_box_autoadd_bridge_uninitialized_resource(raw[1]),
-        );
-      case 1:
-        return BridgeTaskDirectoryState_Loading(
-          dco_decode_box_autoadd_bridge_loading_resource(raw[1]),
-        );
-      case 2:
-        return BridgeTaskDirectoryState_Ready(
-          resource: dco_decode_box_autoadd_bridge_ready_resource(raw[1]),
-          value: dco_decode_box_autoadd_bridge_task_directory_data(raw[2]),
-        );
-      case 3:
-        return BridgeTaskDirectoryState_Refreshing(
-          resource: dco_decode_box_autoadd_bridge_refreshing_resource(raw[1]),
-          value: dco_decode_box_autoadd_bridge_task_directory_data(raw[2]),
-        );
-      case 4:
-        return BridgeTaskDirectoryState_Stale(
-          resource: dco_decode_box_autoadd_bridge_stale_resource(raw[1]),
-          value: dco_decode_box_autoadd_bridge_task_directory_data(raw[2]),
-        );
-      case 5:
-        return BridgeTaskDirectoryState_Degraded(
-          resource: dco_decode_box_autoadd_bridge_degraded_resource(raw[1]),
-          value: dco_decode_box_autoadd_bridge_task_directory_data(raw[2]),
-        );
-      case 6:
-        return BridgeTaskDirectoryState_Failed(
-          dco_decode_box_autoadd_bridge_failed_resource(raw[1]),
-        );
-      case 7:
-        return BridgeTaskDirectoryState_Stopped(
-          dco_decode_box_autoadd_bridge_stopped_resource(raw[1]),
-        );
-      default:
-        throw Exception("unreachable");
-    }
-  }
-
-  @protected
-  BridgeTaskFailureDetail dco_decode_bridge_task_failure_detail(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 6)
-      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
-    return BridgeTaskFailureDetail(
-      category: dco_decode_String(arr[0]),
-      providerKind: dco_decode_opt_String(arr[1]),
-      code: dco_decode_opt_String(arr[2]),
-      httpStatus: dco_decode_opt_box_autoadd_u_16(arr[3]),
-      message: dco_decode_String(arr[4]),
-      retryable: dco_decode_bool(arr[5]),
-    );
-  }
-
-  @protected
-  BridgeTaskFailureKind dco_decode_bridge_task_failure_kind(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return BridgeTaskFailureKind.values[raw as int];
-  }
-
-  @protected
-  BridgeTaskIssueDto dco_decode_bridge_task_issue_dto(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 9)
-      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
-    return BridgeTaskIssueDto(
-      id: dco_decode_String(arr[0]),
-      sourceThreadId: dco_decode_String(arr[1]),
-      sourceTurnId: dco_decode_String(arr[2]),
-      sourceAgentId: dco_decode_String(arr[3]),
-      sourceRole: dco_decode_String(arr[4]),
-      workUnitId: dco_decode_opt_String(arr[5]),
-      reviewRoundId: dco_decode_opt_String(arr[6]),
-      state: dco_decode_bridge_task_issue_state(arr[7]),
-      createdAt: dco_decode_i_64(arr[8]),
-    );
-  }
-
-  @protected
-  BridgeTaskIssueState dco_decode_bridge_task_issue_state(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    switch (raw[0]) {
-      case 0:
-        return BridgeTaskIssueState_OpenRecoverable(
-          failure: dco_decode_box_autoadd_bridge_task_failure_detail(raw[1]),
-        );
-      case 1:
-        return BridgeTaskIssueState_OpenFatal(
-          failure: dco_decode_box_autoadd_bridge_task_failure_detail(raw[1]),
-        );
-      case 2:
-        return BridgeTaskIssueState_Resolved(
-          failure: dco_decode_box_autoadd_bridge_task_failure_detail(raw[1]),
-          resolvedAt: dco_decode_i_64(raw[2]),
-        );
-      default:
-        throw Exception("unreachable");
-    }
-  }
-
-  @protected
-  BridgeTaskMergeDto dco_decode_bridge_task_merge_dto(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 13)
-      throw Exception('unexpected arr length: expect 13 but see ${arr.length}');
-    return BridgeTaskMergeDto(
-      id: dco_decode_String(arr[0]),
-      workUnitId: dco_decode_String(arr[1]),
-      completionId: dco_decode_String(arr[2]),
-      completionRevision: dco_decode_u_32(arr[3]),
-      executorAgentId: dco_decode_String(arr[4]),
-      expectedPreviousHead: dco_decode_String(arr[5]),
-      resultingHead: dco_decode_String(arr[6]),
-      deliveryHead: dco_decode_String(arr[7]),
-      method: dco_decode_bridge_merge_method(arr[8]),
-      summary: dco_decode_String(arr[9]),
-      cleanup: dco_decode_bridge_merge_cleanup_state(arr[10]),
-      createdAt: dco_decode_i_64(arr[11]),
-      updatedAt: dco_decode_i_64(arr[12]),
-    );
-  }
-
-  @protected
-  BridgeTaskNoDeliveryCompletion dco_decode_bridge_task_no_delivery_completion(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.isNotEmpty)
-      throw Exception('unexpected arr length: expect 0 but see ${arr.length}');
-    return BridgeTaskNoDeliveryCompletion();
-  }
-
-  @protected
-  BridgeTaskOutcome dco_decode_bridge_task_outcome(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    switch (raw[0]) {
-      case 0:
-        return BridgeTaskOutcome_Succeeded(
-          summary: dco_decode_String(raw[1]),
-          completedAt: dco_decode_i_64(raw[2]),
-          reviewGate: dco_decode_box_autoadd_bridge_task_review_gate(raw[3]),
-        );
-      case 1:
-        return BridgeTaskOutcome_Failed(
-          kind: dco_decode_bridge_task_failure_kind(raw[1]),
-          summary: dco_decode_String(raw[2]),
-          evidence: dco_decode_String(raw[3]),
-          cause: dco_decode_String(raw[4]),
-          completedAt: dco_decode_i_64(raw[5]),
-        );
-      default:
-        throw Exception("unreachable");
-    }
-  }
-
-  @protected
-  BridgeTaskRecoveryPreviewDto dco_decode_bridge_task_recovery_preview_dto(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 11)
-      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
-    return BridgeTaskRecoveryPreviewDto(
-      previewToken: dco_decode_String(arr[0]),
-      rootThreadId: dco_decode_String(arr[1]),
-      runId: dco_decode_String(arr[2]),
-      revision: dco_decode_u_64(arr[3]),
-      taskGeneration: dco_decode_u_64(arr[4]),
-      state: dco_decode_bridge_task_recovery_state(arr[5]),
-      recommendedThreadId: dco_decode_String(arr[6]),
-      targets: dco_decode_list_bridge_task_recovery_target_dto(arr[7]),
-      completionRevisionFingerprint: dco_decode_String(arr[8]),
-      reviewRevisionFingerprint: dco_decode_String(arr[9]),
-      mergeRevisionFingerprint: dco_decode_String(arr[10]),
-    );
-  }
-
-  @protected
-  BridgeTaskRecoveryRequestDto dco_decode_bridge_task_recovery_request_dto(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 6)
-      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
-    return BridgeTaskRecoveryRequestDto(
-      recoveryId: dco_decode_String(arr[0]),
-      rootThreadId: dco_decode_String(arr[1]),
-      targetThreadId: dco_decode_String(arr[2]),
-      mode: dco_decode_bridge_conversation_recovery_mode(arr[3]),
-      turnIds: dco_decode_list_String(arr[4]),
-      preview: dco_decode_bridge_task_recovery_preview_dto(arr[5]),
-    );
-  }
-
-  @protected
-  BridgeTaskRecoveryResultDto dco_decode_bridge_task_recovery_result_dto(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 14)
-      throw Exception('unexpected arr length: expect 14 but see ${arr.length}');
-    return BridgeTaskRecoveryResultDto(
-      recoveryId: dco_decode_String(arr[0]),
-      runId: dco_decode_String(arr[1]),
-      workUnitId: dco_decode_opt_String(arr[2]),
-      rootThreadId: dco_decode_String(arr[3]),
-      targetThreadId: dco_decode_String(arr[4]),
-      mode: dco_decode_bridge_conversation_recovery_mode(arr[5]),
-      recoveryRevision: dco_decode_u_64(arr[6]),
-      runtimeRevision: dco_decode_u_64(arr[7]),
-      threadRevision: dco_decode_u_64(arr[8]),
-      beforeTranscriptHash: dco_decode_String(arr[9]),
-      afterTranscriptHash: dco_decode_String(arr[10]),
-      removedItemCount: dco_decode_u_64(arr[11]),
-      removedInputCount: dco_decode_u_64(arr[12]),
-      resumeTurnId: dco_decode_String(arr[13]),
-    );
-  }
-
-  @protected
-  BridgeTaskRecoveryState dco_decode_bridge_task_recovery_state(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return BridgeTaskRecoveryState.values[raw as int];
-  }
-
-  @protected
-  BridgeTaskRecoveryTargetDto dco_decode_bridge_task_recovery_target_dto(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 13)
-      throw Exception('unexpected arr length: expect 13 but see ${arr.length}');
-    return BridgeTaskRecoveryTargetDto(
-      threadId: dco_decode_String(arr[0]),
-      kind: dco_decode_bridge_task_recovery_target_kind(arr[1]),
-      workUnitId: dco_decode_opt_String(arr[2]),
-      attempt: dco_decode_opt_box_autoadd_u_32(arr[3]),
-      continuationRevision: dco_decode_opt_box_autoadd_u_64(arr[4]),
-      expectedRuntimeRevision: dco_decode_u_64(arr[5]),
-      expectedThreadRevision: dco_decode_u_64(arr[6]),
-      branch: dco_decode_String(arr[7]),
-      worktreePath: dco_decode_String(arr[8]),
-      baseCommit: dco_decode_opt_String(arr[9]),
-      turns: dco_decode_list_bridge_task_recovery_turn_dto(arr[10]),
-      defaultTurnIds: dco_decode_list_String(arr[11]),
-      availableModes: dco_decode_list_bridge_conversation_recovery_mode(
-        arr[12],
-      ),
-    );
-  }
-
-  @protected
-  BridgeTaskRecoveryTargetKind dco_decode_bridge_task_recovery_target_kind(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return BridgeTaskRecoveryTargetKind.values[raw as int];
-  }
-
-  @protected
-  BridgeTaskRecoveryTurnDto dco_decode_bridge_task_recovery_turn_dto(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 7)
-      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
-    return BridgeTaskRecoveryTurnDto(
-      turnId: dco_decode_String(arr[0]),
-      state: dco_decode_bridge_task_recovery_turn_state(arr[1]),
-      updatedAt: dco_decode_i_64(arr[2]),
-      itemCount: dco_decode_u_64(arr[3]),
-      inputCount: dco_decode_u_64(arr[4]),
-      toolCount: dco_decode_u_64(arr[5]),
-      toolSummaries: dco_decode_list_String(arr[6]),
-    );
-  }
-
-  @protected
-  BridgeTaskRecoveryTurnState dco_decode_bridge_task_recovery_turn_state(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return BridgeTaskRecoveryTurnState.values[raw as int];
-  }
-
-  @protected
-  BridgeTaskReviewDto dco_decode_bridge_task_review_dto(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 13)
-      throw Exception('unexpected arr length: expect 13 but see ${arr.length}');
-    return BridgeTaskReviewDto(
-      id: dco_decode_String(arr[0]),
-      round: dco_decode_u_32(arr[1]),
-      scope: dco_decode_bridge_review_scope(arr[2]),
-      workUnitId: dco_decode_opt_String(arr[3]),
-      completionId: dco_decode_opt_String(arr[4]),
-      completionRevision: dco_decode_opt_box_autoadd_u_32(arr[5]),
-      reviewedHead: dco_decode_String(arr[6]),
-      state: dco_decode_bridge_task_review_state(arr[7]),
-      requestedByCallId: dco_decode_String(arr[8]),
-      designReferences: dco_decode_list_bridge_task_design_reference_dto(
-        arr[9],
-      ),
-      findings: dco_decode_list_bridge_task_review_finding_dto(arr[10]),
-      createdAt: dco_decode_i_64(arr[11]),
-      updatedAt: dco_decode_i_64(arr[12]),
-    );
-  }
-
-  @protected
-  BridgeTaskReviewFindingDto dco_decode_bridge_task_review_finding_dto(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 7)
-      throw Exception('unexpected arr length: expect 7 but see ${arr.length}');
-    return BridgeTaskReviewFindingDto(
-      severity: dco_decode_String(arr[0]),
-      title: dco_decode_String(arr[1]),
-      body: dco_decode_String(arr[2]),
-      recommendation: dco_decode_String(arr[3]),
-      path: dco_decode_opt_String(arr[4]),
-      line: dco_decode_opt_box_autoadd_u_32(arr[5]),
-      designReferences: dco_decode_list_bridge_task_design_reference_dto(
-        arr[6],
-      ),
-    );
-  }
-
-  @protected
-  BridgeTaskReviewGate dco_decode_bridge_task_review_gate(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    switch (raw[0]) {
-      case 0:
-        return BridgeTaskReviewGate_NotRequiredNoDelivery();
-      case 1:
-        return BridgeTaskReviewGate_NotRequiredSingleExecutor(
-          workUnitId: dco_decode_String(raw[1]),
-        );
-      case 2:
-        return BridgeTaskReviewGate_IntegratedReview(
-          reviewRoundId: dco_decode_String(raw[1]),
-        );
-      default:
-        throw Exception("unreachable");
-    }
-  }
-
-  @protected
-  BridgeTaskReviewState dco_decode_bridge_task_review_state(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    switch (raw[0]) {
-      case 0:
-        return BridgeTaskReviewState_PendingDispatch();
-      case 1:
-        return BridgeTaskReviewState_Dispatched(
-          reviewerAgentId: dco_decode_String(raw[1]),
-        );
-      case 2:
-        return BridgeTaskReviewState_Running(
-          reviewerAgentId: dco_decode_String(raw[1]),
-        );
-      case 3:
-        return BridgeTaskReviewState_Passed(
-          reviewerAgentId: dco_decode_String(raw[1]),
-          summary: dco_decode_String(raw[2]),
-        );
-      case 4:
-        return BridgeTaskReviewState_ChangesRequired(
-          reviewerAgentId: dco_decode_String(raw[1]),
-          summary: dco_decode_String(raw[2]),
-        );
-      case 5:
-        return BridgeTaskReviewState_Blocked(
-          reviewerAgentId: dco_decode_String(raw[1]),
-          summary: dco_decode_String(raw[2]),
-        );
-      case 6:
-        return BridgeTaskReviewState_Failed(
-          reviewerAgentId: dco_decode_opt_String(raw[1]),
-          error: dco_decode_String(raw[2]),
-          summary: dco_decode_String(raw[3]),
-        );
-      case 7:
-        return BridgeTaskReviewState_Cancelled(
-          reviewerAgentId: dco_decode_opt_String(raw[1]),
-          reason: dco_decode_String(raw[2]),
-          summary: dco_decode_String(raw[3]),
-        );
-      default:
-        throw Exception("unreachable");
-    }
-  }
-
-  @protected
-  BridgeTaskRuntimeDto dco_decode_bridge_task_runtime_dto(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 10)
-      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
-    return BridgeTaskRuntimeDto(
-      runId: dco_decode_String(arr[0]),
-      state: dco_decode_bridge_task_state(arr[1]),
-      revision: dco_decode_u_64(arr[2]),
-      generation: dco_decode_u_64(arr[3]),
-      integratedReviewGate: dco_decode_bridge_integrated_review_gate_dto(
-        arr[4],
-      ),
-      issues: dco_decode_list_bridge_task_issue_dto(arr[5]),
-      workUnits: dco_decode_list_bridge_task_work_unit_dto(arr[6]),
-      completions: dco_decode_list_bridge_task_completion_dto(arr[7]),
-      merges: dco_decode_list_bridge_task_merge_dto(arr[8]),
-      reviews: dco_decode_list_bridge_task_review_dto(arr[9]),
-    );
-  }
-
-  @protected
-  BridgeTaskSpawnCompensation dco_decode_bridge_task_spawn_compensation(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 3)
-      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
-    return BridgeTaskSpawnCompensation(
-      allocation: dco_decode_bridge_task_spawn_compensation_state(arr[0]),
-      worktree: dco_decode_bridge_task_spawn_compensation_state(arr[1]),
-      childThread: dco_decode_bridge_task_spawn_compensation_state(arr[2]),
-    );
-  }
-
-  @protected
-  BridgeTaskSpawnCompensationState
-  dco_decode_bridge_task_spawn_compensation_state(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return BridgeTaskSpawnCompensationState.values[raw as int];
-  }
-
-  @protected
-  BridgeTaskSpawnFailure dco_decode_bridge_task_spawn_failure(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 11)
-      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
-    return BridgeTaskSpawnFailure(
-      code: dco_decode_bridge_task_spawn_failure_code(arr[0]),
-      phase: dco_decode_bridge_task_spawn_failure_phase(arr[1]),
-      recoverable: dco_decode_bool(arr[2]),
-      message: dco_decode_String(arr[3]),
-      taskRunId: dco_decode_opt_String(arr[4]),
-      workUnitId: dco_decode_opt_String(arr[5]),
-      agentId: dco_decode_String(arr[6]),
-      resource: dco_decode_opt_box_autoadd_bridge_task_spawn_resource(arr[7]),
-      cause: dco_decode_bridge_worktree_failure_cause(arr[8]),
-      compensation: dco_decode_bridge_task_spawn_compensation(arr[9]),
-      nextAction: dco_decode_bridge_task_spawn_next_action(arr[10]),
-    );
-  }
-
-  @protected
-  BridgeTaskSpawnFailureCode dco_decode_bridge_task_spawn_failure_code(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return BridgeTaskSpawnFailureCode.values[raw as int];
-  }
-
-  @protected
-  BridgeTaskSpawnFailurePhase dco_decode_bridge_task_spawn_failure_phase(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return BridgeTaskSpawnFailurePhase.values[raw as int];
-  }
-
-  @protected
-  BridgeTaskSpawnNextAction dco_decode_bridge_task_spawn_next_action(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return BridgeTaskSpawnNextAction.values[raw as int];
-  }
-
-  @protected
-  BridgeTaskSpawnResource dco_decode_bridge_task_spawn_resource(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 4)
-      throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
-    return BridgeTaskSpawnResource(
-      repoRoot: dco_decode_String(arr[0]),
-      path: dco_decode_String(arr[1]),
-      branch: dco_decode_String(arr[2]),
-      baseRef: dco_decode_String(arr[3]),
-    );
-  }
-
-  @protected
-  BridgeTaskState dco_decode_bridge_task_state(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    switch (raw[0]) {
-      case 0:
-        return BridgeTaskState_Planning(
-          dco_decode_box_autoadd_bridge_planning_task_state(raw[1]),
-        );
-      case 1:
-        return BridgeTaskState_PendingConfirmation(
-          dco_decode_box_autoadd_bridge_pending_confirmation_task_state(raw[1]),
-        );
-      case 2:
-        return BridgeTaskState_EditingDocuments(
-          dco_decode_box_autoadd_bridge_editing_documents_task_state(raw[1]),
-        );
-      case 3:
-        return BridgeTaskState_Working(
-          dco_decode_box_autoadd_bridge_working_task_state(raw[1]),
-        );
-      case 4:
-        return BridgeTaskState_Reviewing(
-          dco_decode_box_autoadd_bridge_reviewing_task_state(raw[1]),
-        );
-      case 5:
-        return BridgeTaskState_Completed(
-          dco_decode_box_autoadd_bridge_completed_task_state(raw[1]),
-        );
-      default:
-        throw Exception("unreachable");
-    }
-  }
-
-  @protected
-  BridgeTaskWorkUnitDto dco_decode_bridge_task_work_unit_dto(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 15)
-      throw Exception('unexpected arr length: expect 15 but see ${arr.length}');
-    return BridgeTaskWorkUnitDto(
-      id: dco_decode_String(arr[0]),
-      title: dco_decode_String(arr[1]),
-      state: dco_decode_bridge_task_work_unit_state(arr[2]),
-      worktreePath: dco_decode_String(arr[3]),
-      branch: dco_decode_String(arr[4]),
-      agentId: dco_decode_opt_String(arr[5]),
-      attempt: dco_decode_u_32(arr[6]),
-      supersedesWorkUnitId: dco_decode_opt_String(arr[7]),
-      budgetSliceLimit: dco_decode_u_32(arr[8]),
-      executorProgressRevision: dco_decode_u_64(arr[9]),
-      blueprintFingerprint: dco_decode_opt_String(arr[10]),
-      objective: dco_decode_opt_String(arr[11]),
-      implementationStepCount: dco_decode_usize(arr[12]),
-      acceptanceCriterionCount: dco_decode_usize(arr[13]),
-      verificationCount: dco_decode_usize(arr[14]),
-    );
-  }
-
-  @protected
-  BridgeTaskWorkUnitState dco_decode_bridge_task_work_unit_state(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    switch (raw[0]) {
-      case 0:
-        return BridgeTaskWorkUnitState_Pending(
-          dco_decode_box_autoadd_bridge_pending_work_unit(raw[1]),
-        );
-      case 1:
-        return BridgeTaskWorkUnitState_Running(
-          dco_decode_box_autoadd_bridge_running_work_unit(raw[1]),
-        );
-      case 2:
-        return BridgeTaskWorkUnitState_WaitingReview(
-          dco_decode_box_autoadd_bridge_waiting_review_work_unit(raw[1]),
-        );
-      case 3:
-        return BridgeTaskWorkUnitState_ReviewPassed(
-          dco_decode_box_autoadd_bridge_review_passed_work_unit(raw[1]),
-        );
-      case 4:
-        return BridgeTaskWorkUnitState_ChangesRequired(
-          dco_decode_box_autoadd_bridge_changes_required_work_unit(raw[1]),
-        );
-      case 5:
-        return BridgeTaskWorkUnitState_Paused(
-          dco_decode_box_autoadd_bridge_paused_work_unit(raw[1]),
-        );
-      case 6:
-        return BridgeTaskWorkUnitState_Completed(
-          dco_decode_box_autoadd_bridge_completed_work_unit(raw[1]),
-        );
-      case 7:
-        return BridgeTaskWorkUnitState_Failed(
-          dco_decode_box_autoadd_bridge_failed_work_unit(raw[1]),
-        );
-      case 8:
-        return BridgeTaskWorkUnitState_Cancelled(
-          dco_decode_box_autoadd_bridge_cancelled_work_unit(raw[1]),
-        );
-      default:
-        throw Exception("unreachable");
-    }
-  }
-
-  @protected
-  BridgeTaskWorktreeDisposition dco_decode_bridge_task_worktree_disposition(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return BridgeTaskWorktreeDisposition.values[raw as int];
   }
 
   @protected
@@ -7610,7 +5964,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       id: dco_decode_String(arr[0]),
       projectId: dco_decode_String(arr[1]),
       title: dco_decode_String(arr[2]),
-      mode: dco_decode_bridge_thread_mode(arr[3]),
+      mode: dco_decode_String(arr[3]),
       rootThreadId: dco_decode_String(arr[4]),
       parentThreadId: dco_decode_opt_String(arr[5]),
       role: dco_decode_String(arr[6]),
@@ -7890,14 +6244,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           delta: dco_decode_String(raw[2]),
         );
       case 3:
-        return BridgeThreadItemDeltaState_Plan(
-          delta: dco_decode_String(raw[1]),
-        );
-      case 4:
         return BridgeThreadItemDeltaState_ToolArguments(
           delta: dco_decode_String(raw[1]),
         );
-      case 5:
+      case 4:
         return BridgeThreadItemDeltaState_ToolResult(
           delta: dco_decode_String(raw[1]),
         );
@@ -7950,13 +6300,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           state: dco_decode_box_autoadd_bridge_thread_inference_state(raw[3]),
         );
       case 6:
-        return BridgeThreadItemState_Plan(
-          content: dco_decode_String(raw[1]),
-          lifecycle: dco_decode_box_autoadd_bridge_thread_content_lifecycle(
-            raw[2],
-          ),
-        );
-      case 7:
         return BridgeThreadItemState_Skill(
           name: dco_decode_String(raw[1]),
           source: dco_decode_String(raw[2]),
@@ -7967,13 +6310,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           cause: dco_decode_box_autoadd_bridge_skill_activation_cause(raw[5]),
           activatedAt: dco_decode_i_64(raw[6]),
         );
-      case 8:
+      case 7:
         return BridgeThreadItemState_File(
           path: dco_decode_String(raw[1]),
           mediaType: dco_decode_opt_String(raw[2]),
           completedAt: dco_decode_i_64(raw[3]),
         );
-      case 9:
+      case 8:
         return BridgeThreadItemState_ContextCompaction(
           beforeTokens: dco_decode_u_64(raw[1]),
           afterTokens: dco_decode_u_64(raw[2]),
@@ -8030,12 +6373,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       endpoint: dco_decode_String(arr[3]),
       builtIn: dco_decode_bool(arr[4]),
     );
-  }
-
-  @protected
-  BridgeThreadMode dco_decode_bridge_thread_mode(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return BridgeThreadMode.values[raw as int];
   }
 
   @protected
@@ -8112,8 +6449,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 11)
-      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
+    if (arr.length != 12)
+      throw Exception('unexpected arr length: expect 12 but see ${arr.length}');
     return BridgeThreadRuntimeSnapshot(
       threadId: dco_decode_String(arr[0]),
       usage: dco_decode_bridge_thread_runtime_usage(arr[1]),
@@ -8127,7 +6464,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       mcpHealth: dco_decode_opt_box_autoadd_bridge_thread_mcp_health_snapshot(
         arr[9],
       ),
-      updatedAt: dco_decode_i_64(arr[10]),
+      workflow: dco_decode_opt_box_autoadd_bridge_workflow_runtime_snapshot(
+        arr[10],
+      ),
+      updatedAt: dco_decode_i_64(arr[11]),
     );
   }
 
@@ -8810,49 +7150,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeWaitingReviewPhase dco_decode_bridge_waiting_review_phase(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    switch (raw[0]) {
-      case 0:
-        return BridgeWaitingReviewPhase_AwaitingReport(
-          outcome: dco_decode_box_autoadd_bridge_executor_terminal_outcome(
-            raw[1],
-          ),
-          continuation:
-              dco_decode_box_autoadd_bridge_executor_continuation_state(raw[2]),
-        );
-      case 1:
-        return BridgeWaitingReviewPhase_Ready(
-          completionId: dco_decode_String(raw[1]),
-          completionRevision: dco_decode_u_32(raw[2]),
-          verificationSummary: dco_decode_String(raw[3]),
-        );
-      case 2:
-        return BridgeWaitingReviewPhase_Reviewing(
-          completionId: dco_decode_String(raw[1]),
-          completionRevision: dco_decode_u_32(raw[2]),
-          reviewRoundId: dco_decode_String(raw[3]),
-          verificationSummary: dco_decode_String(raw[4]),
-        );
-      default:
-        throw Exception("unreachable");
-    }
-  }
-
-  @protected
-  BridgeWaitingReviewWorkUnit dco_decode_bridge_waiting_review_work_unit(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 1)
-      throw Exception('unexpected arr length: expect 1 but see ${arr.length}');
-    return BridgeWaitingReviewWorkUnit(
-      phase: dco_decode_bridge_waiting_review_phase(arr[0]),
-    );
-  }
-
-  @protected
   BridgeWaitingToolAgent dco_decode_bridge_waiting_tool_agent(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -8898,95 +7195,111 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeWorkUnitCompletionOutcome
-  dco_decode_bridge_work_unit_completion_outcome(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    switch (raw[0]) {
-      case 0:
-        return BridgeWorkUnitCompletionOutcome_Merged(
-          mergeRecordId: dco_decode_String(raw[1]),
-        );
-      case 1:
-        return BridgeWorkUnitCompletionOutcome_NoDelivery(
-          completionId: dco_decode_String(raw[1]),
-        );
-      default:
-        throw Exception("unreachable");
-    }
-  }
-
-  @protected
-  BridgeWorkUnitFailure dco_decode_bridge_work_unit_failure(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    switch (raw[0]) {
-      case 0:
-        return BridgeWorkUnitFailure_Spawn(
-          failure: dco_decode_box_bridge_task_spawn_failure(raw[1]),
-        );
-      case 1:
-        return BridgeWorkUnitFailure_Execution(
-          operationId: dco_decode_String(raw[1]),
-          detail: dco_decode_String(raw[2]),
-        );
-      default:
-        throw Exception("unreachable");
-    }
-  }
-
-  @protected
-  BridgeWorkUnitPauseReason dco_decode_bridge_work_unit_pause_reason(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    switch (raw[0]) {
-      case 0:
-        return BridgeWorkUnitPauseReason_Budget(
-          limit: dco_decode_box_autoadd_bridge_budget_limit_dto(raw[1]),
-        );
-      case 1:
-        return BridgeWorkUnitPauseReason_Operational(
-          operationId: dco_decode_String(raw[1]),
-          detail: dco_decode_String(raw[2]),
-        );
-      default:
-        throw Exception("unreachable");
-    }
-  }
-
-  @protected
-  BridgeWorkingTaskState dco_decode_bridge_working_task_state(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 1)
-      throw Exception('unexpected arr length: expect 1 but see ${arr.length}');
-    return BridgeWorkingTaskState(
-      documentEditSummary: dco_decode_String(arr[0]),
-    );
-  }
-
-  @protected
-  BridgeWorktreeFailureCause dco_decode_bridge_worktree_failure_cause(
-    dynamic raw,
-  ) {
+  BridgeWorkflowDefinition dco_decode_bridge_workflow_definition(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
     if (arr.length != 5)
       throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
-    return BridgeWorktreeFailureCause(
-      kind: dco_decode_bridge_worktree_failure_cause_kind(arr[0]),
-      message: dco_decode_String(arr[1]),
-      args: dco_decode_opt_String(arr[2]),
-      exitCode: dco_decode_opt_box_autoadd_i_32(arr[3]),
-      stderr: dco_decode_opt_String(arr[4]),
+    return BridgeWorkflowDefinition(
+      title: dco_decode_String(arr[0]),
+      goal: dco_decode_String(arr[1]),
+      initialStageId: dco_decode_String(arr[2]),
+      stages: dco_decode_list_bridge_workflow_stage(arr[3]),
+      transitions: dco_decode_list_bridge_workflow_transition(arr[4]),
     );
   }
 
   @protected
-  BridgeWorktreeFailureCauseKind dco_decode_bridge_worktree_failure_cause_kind(
+  BridgeWorkflowRun dco_decode_bridge_workflow_run(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 12)
+      throw Exception('unexpected arr length: expect 12 but see ${arr.length}');
+    return BridgeWorkflowRun(
+      lineageId: dco_decode_String(arr[0]),
+      runId: dco_decode_String(arr[1]),
+      definition: dco_decode_bridge_workflow_definition(arr[2]),
+      definitionHash: dco_decode_String(arr[3]),
+      mode: dco_decode_bridge_mode_instruction_snapshot(arr[4]),
+      lifecycle: dco_decode_bridge_workflow_run_lifecycle(arr[5]),
+      currentStageId: dco_decode_String(arr[6]),
+      compiledAt: dco_decode_i_64(arr[7]),
+      updatedAt: dco_decode_i_64(arr[8]),
+      historyTail: dco_decode_list_bridge_workflow_transition_record(arr[9]),
+      archivedTransitionCount: dco_decode_u_64(arr[10]),
+      archivedTransitionDigest: dco_decode_String(arr[11]),
+    );
+  }
+
+  @protected
+  BridgeWorkflowRunLifecycle dco_decode_bridge_workflow_run_lifecycle(
     dynamic raw,
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
-    return BridgeWorktreeFailureCauseKind.values[raw as int];
+    return BridgeWorkflowRunLifecycle.values[raw as int];
+  }
+
+  @protected
+  BridgeWorkflowRuntimeSnapshot dco_decode_bridge_workflow_runtime_snapshot(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return BridgeWorkflowRuntimeSnapshot(
+      revision: dco_decode_u_64(arr[0]),
+      currentRun: dco_decode_opt_box_autoadd_bridge_workflow_run(arr[1]),
+    );
+  }
+
+  @protected
+  BridgeWorkflowStage dco_decode_bridge_workflow_stage(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    return BridgeWorkflowStage(
+      id: dco_decode_String(arr[0]),
+      title: dco_decode_String(arr[1]),
+      instructions: dco_decode_String(arr[2]),
+      completionCriteria: dco_decode_list_String(arr[3]),
+      terminal: dco_decode_bool(arr[4]),
+    );
+  }
+
+  @protected
+  BridgeWorkflowTransition dco_decode_bridge_workflow_transition(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    return BridgeWorkflowTransition(
+      fromStageId: dco_decode_String(arr[0]),
+      toStageId: dco_decode_String(arr[1]),
+      when: dco_decode_String(arr[2]),
+    );
+  }
+
+  @protected
+  BridgeWorkflowTransitionRecord dco_decode_bridge_workflow_transition_record(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 9)
+      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    return BridgeWorkflowTransitionRecord(
+      revision: dco_decode_u_64(arr[0]),
+      fromStageId: dco_decode_String(arr[1]),
+      toStageId: dco_decode_String(arr[2]),
+      reason: dco_decode_String(arr[3]),
+      summary: dco_decode_String(arr[4]),
+      evidence: dco_decode_list_String(arr[5]),
+      turnId: dco_decode_String(arr[6]),
+      callId: dco_decode_String(arr[7]),
+      transitionedAt: dco_decode_i_64(arr[8]),
+    );
   }
 
   @protected
@@ -9098,6 +7411,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<BridgeAgentProfileDto> dco_decode_list_bridge_agent_profile_dto(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_bridge_agent_profile_dto)
+        .toList();
+  }
+
+  @protected
   List<BridgeAttachmentDraft> dco_decode_list_bridge_attachment_draft(
     dynamic raw,
   ) {
@@ -9113,15 +7436,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>)
         .map(dco_decode_bridge_attachment_draft_source)
-        .toList();
-  }
-
-  @protected
-  List<BridgeConversationRecoveryMode>
-  dco_decode_list_bridge_conversation_recovery_mode(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return (raw as List<dynamic>)
-        .map(dco_decode_bridge_conversation_recovery_mode)
         .toList();
   }
 
@@ -9271,15 +7585,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  List<BridgeRecoveryCleanupResourceDto>
-  dco_decode_list_bridge_recovery_cleanup_resource_dto(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return (raw as List<dynamic>)
-        .map(dco_decode_bridge_recovery_cleanup_resource_dto)
-        .toList();
-  }
-
-  @protected
   List<BridgeRecoveryIssueAction> dco_decode_list_bridge_recovery_issue_action(
     dynamic raw,
   ) {
@@ -9335,99 +7640,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>)
         .map(dco_decode_bridge_studio_recovery_issue_dto)
-        .toList();
-  }
-
-  @protected
-  List<BridgeTaskCompletionDto> dco_decode_list_bridge_task_completion_dto(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return (raw as List<dynamic>)
-        .map(dco_decode_bridge_task_completion_dto)
-        .toList();
-  }
-
-  @protected
-  List<BridgeTaskDesignReferenceDto>
-  dco_decode_list_bridge_task_design_reference_dto(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return (raw as List<dynamic>)
-        .map(dco_decode_bridge_task_design_reference_dto)
-        .toList();
-  }
-
-  @protected
-  List<BridgeTaskDirectoryEntry> dco_decode_list_bridge_task_directory_entry(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return (raw as List<dynamic>)
-        .map(dco_decode_bridge_task_directory_entry)
-        .toList();
-  }
-
-  @protected
-  List<BridgeTaskIssueDto> dco_decode_list_bridge_task_issue_dto(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return (raw as List<dynamic>)
-        .map(dco_decode_bridge_task_issue_dto)
-        .toList();
-  }
-
-  @protected
-  List<BridgeTaskMergeDto> dco_decode_list_bridge_task_merge_dto(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return (raw as List<dynamic>)
-        .map(dco_decode_bridge_task_merge_dto)
-        .toList();
-  }
-
-  @protected
-  List<BridgeTaskRecoveryTargetDto>
-  dco_decode_list_bridge_task_recovery_target_dto(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return (raw as List<dynamic>)
-        .map(dco_decode_bridge_task_recovery_target_dto)
-        .toList();
-  }
-
-  @protected
-  List<BridgeTaskRecoveryTurnDto> dco_decode_list_bridge_task_recovery_turn_dto(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return (raw as List<dynamic>)
-        .map(dco_decode_bridge_task_recovery_turn_dto)
-        .toList();
-  }
-
-  @protected
-  List<BridgeTaskReviewDto> dco_decode_list_bridge_task_review_dto(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return (raw as List<dynamic>)
-        .map(dco_decode_bridge_task_review_dto)
-        .toList();
-  }
-
-  @protected
-  List<BridgeTaskReviewFindingDto>
-  dco_decode_list_bridge_task_review_finding_dto(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return (raw as List<dynamic>)
-        .map(dco_decode_bridge_task_review_finding_dto)
-        .toList();
-  }
-
-  @protected
-  List<BridgeTaskWorkUnitDto> dco_decode_list_bridge_task_work_unit_dto(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return (raw as List<dynamic>)
-        .map(dco_decode_bridge_task_work_unit_dto)
         .toList();
   }
 
@@ -9505,6 +7717,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<BridgeWorkflowStage> dco_decode_list_bridge_workflow_stage(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_bridge_workflow_stage)
+        .toList();
+  }
+
+  @protected
+  List<BridgeWorkflowTransition> dco_decode_list_bridge_workflow_transition(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_bridge_workflow_transition)
+        .toList();
+  }
+
+  @protected
+  List<BridgeWorkflowTransitionRecord>
+  dco_decode_list_bridge_workflow_transition_record(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>)
+        .map(dco_decode_bridge_workflow_transition_record)
+        .toList();
+  }
+
+  @protected
   List<DeepSeekBalanceInfoDto> dco_decode_list_deep_seek_balance_info_dto(
     dynamic raw,
   ) {
@@ -9518,6 +7757,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   List<McpServerInput> dco_decode_list_mcp_server_input(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return (raw as List<dynamic>).map(dco_decode_mcp_server_input).toList();
+  }
+
+  @protected
+  List<ModeSummaryDto> dco_decode_list_mode_summary_dto(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_mode_summary_dto).toList();
   }
 
   @protected
@@ -9673,6 +7918,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  ModeSummaryDto dco_decode_mode_summary_dto(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 6)
+      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
+    return ModeSummaryDto(
+      id: dco_decode_String(arr[0]),
+      displayName: dco_decode_String(arr[1]),
+      description: dco_decode_String(arr[2]),
+      order: dco_decode_i_32(arr[3]),
+      source: dco_decode_String(arr[4]),
+      providerId: dco_decode_String(arr[5]),
+    );
+  }
+
+  @protected
   String? dco_decode_opt_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_String(raw);
@@ -9726,15 +7987,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeTaskSpawnResource?
-  dco_decode_opt_box_autoadd_bridge_task_spawn_resource(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return raw == null
-        ? null
-        : dco_decode_box_autoadd_bridge_task_spawn_resource(raw);
-  }
-
-  @protected
   BridgeThread? dco_decode_opt_box_autoadd_bridge_thread(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_box_autoadd_bridge_thread(raw);
@@ -9782,6 +8034,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeTurn? dco_decode_opt_box_autoadd_bridge_turn(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_box_autoadd_bridge_turn(raw);
+  }
+
+  @protected
+  BridgeWorkflowRun? dco_decode_opt_box_autoadd_bridge_workflow_run(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_bridge_workflow_run(raw);
+  }
+
+  @protected
+  BridgeWorkflowRuntimeSnapshot?
+  dco_decode_opt_box_autoadd_bridge_workflow_runtime_snapshot(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null
+        ? null
+        : dco_decode_box_autoadd_bridge_workflow_runtime_snapshot(raw);
   }
 
   @protected
@@ -10449,36 +8718,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeBudgetLimitDto sse_decode_box_autoadd_bridge_budget_limit_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_budget_limit_dto(deserializer));
-  }
-
-  @protected
-  BridgeCancelledWorkUnit sse_decode_box_autoadd_bridge_cancelled_work_unit(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_cancelled_work_unit(deserializer));
-  }
-
-  @protected
   BridgeCancellingAgent sse_decode_box_autoadd_bridge_cancelling_agent(
     SseDeserializer deserializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_bridge_cancelling_agent(deserializer));
-  }
-
-  @protected
-  BridgeChangesRequiredWorkUnit
-  sse_decode_box_autoadd_bridge_changes_required_work_unit(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_changes_required_work_unit(deserializer));
   }
 
   @protected
@@ -10513,22 +8757,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_bridge_closing_agent(deserializer));
-  }
-
-  @protected
-  BridgeCompletedTaskState sse_decode_box_autoadd_bridge_completed_task_state(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_completed_task_state(deserializer));
-  }
-
-  @protected
-  BridgeCompletedWorkUnit sse_decode_box_autoadd_bridge_completed_work_unit(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_completed_work_unit(deserializer));
   }
 
   @protected
@@ -10567,38 +8795,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeEditingDocumentsTaskState
-  sse_decode_box_autoadd_bridge_editing_documents_task_state(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_editing_documents_task_state(deserializer));
-  }
-
-  @protected
   BridgeError sse_decode_box_autoadd_bridge_error(
     SseDeserializer deserializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_bridge_error(deserializer));
-  }
-
-  @protected
-  BridgeExecutorContinuationState
-  sse_decode_box_autoadd_bridge_executor_continuation_state(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_executor_continuation_state(deserializer));
-  }
-
-  @protected
-  BridgeExecutorTerminalOutcome
-  sse_decode_box_autoadd_bridge_executor_terminal_outcome(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_executor_terminal_outcome(deserializer));
   }
 
   @protected
@@ -10615,14 +8816,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_bridge_failed_runtime_state(deserializer));
-  }
-
-  @protected
-  BridgeFailedWorkUnit sse_decode_box_autoadd_bridge_failed_work_unit(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_failed_work_unit(deserializer));
   }
 
   @protected
@@ -10760,56 +8953,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgePausedWorkUnit sse_decode_box_autoadd_bridge_paused_work_unit(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_paused_work_unit(deserializer));
-  }
-
-  @protected
-  BridgePendingConfirmationTaskState
-  sse_decode_box_autoadd_bridge_pending_confirmation_task_state(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_pending_confirmation_task_state(deserializer));
-  }
-
-  @protected
-  BridgePendingWorkUnit sse_decode_box_autoadd_bridge_pending_work_unit(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_pending_work_unit(deserializer));
-  }
-
-  @protected
   BridgePersistenceStateSnapshot
   sse_decode_box_autoadd_bridge_persistence_state_snapshot(
     SseDeserializer deserializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_bridge_persistence_state_snapshot(deserializer));
-  }
-
-  @protected
-  BridgePlanConfirmationInteractionState
-  sse_decode_box_autoadd_bridge_plan_confirmation_interaction_state(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_plan_confirmation_interaction_state(
-      deserializer,
-    ));
-  }
-
-  @protected
-  BridgePlanningTaskState sse_decode_box_autoadd_bridge_planning_task_state(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_planning_task_state(deserializer));
   }
 
   @protected
@@ -10874,15 +9023,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeReadyForReviewCompletion
-  sse_decode_box_autoadd_bridge_ready_for_review_completion(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_ready_for_review_completion(deserializer));
-  }
-
-  @protected
   BridgeReadyResource sse_decode_box_autoadd_bridge_ready_resource(
     SseDeserializer deserializer,
   ) {
@@ -10916,44 +9056,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeReviewPassedWorkUnit
-  sse_decode_box_autoadd_bridge_review_passed_work_unit(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_review_passed_work_unit(deserializer));
-  }
-
-  @protected
-  BridgeReviewedCompletion sse_decode_box_autoadd_bridge_reviewed_completion(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_reviewed_completion(deserializer));
-  }
-
-  @protected
-  BridgeReviewingTaskState sse_decode_box_autoadd_bridge_reviewing_task_state(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_reviewing_task_state(deserializer));
-  }
-
-  @protected
   BridgeRunningAgent sse_decode_box_autoadd_bridge_running_agent(
     SseDeserializer deserializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_bridge_running_agent(deserializer));
-  }
-
-  @protected
-  BridgeRunningWorkUnit sse_decode_box_autoadd_bridge_running_work_unit(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_running_work_unit(deserializer));
   }
 
   @protected
@@ -11035,73 +9142,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_bridge_studio_prompt_input(deserializer));
-  }
-
-  @protected
-  BridgeTaskDeliveryCompletion
-  sse_decode_box_autoadd_bridge_task_delivery_completion(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_task_delivery_completion(deserializer));
-  }
-
-  @protected
-  BridgeTaskDirectoryData sse_decode_box_autoadd_bridge_task_directory_data(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_task_directory_data(deserializer));
-  }
-
-  @protected
-  BridgeTaskDirectoryState sse_decode_box_autoadd_bridge_task_directory_state(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_task_directory_state(deserializer));
-  }
-
-  @protected
-  BridgeTaskFailureDetail sse_decode_box_autoadd_bridge_task_failure_detail(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_task_failure_detail(deserializer));
-  }
-
-  @protected
-  BridgeTaskNoDeliveryCompletion
-  sse_decode_box_autoadd_bridge_task_no_delivery_completion(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_task_no_delivery_completion(deserializer));
-  }
-
-  @protected
-  BridgeTaskRecoveryRequestDto
-  sse_decode_box_autoadd_bridge_task_recovery_request_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_task_recovery_request_dto(deserializer));
-  }
-
-  @protected
-  BridgeTaskReviewGate sse_decode_box_autoadd_bridge_task_review_gate(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_task_review_gate(deserializer));
-  }
-
-  @protected
-  BridgeTaskSpawnResource sse_decode_box_autoadd_bridge_task_spawn_resource(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_task_spawn_resource(deserializer));
   }
 
   @protected
@@ -11342,15 +9382,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeWaitingReviewWorkUnit
-  sse_decode_box_autoadd_bridge_waiting_review_work_unit(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_waiting_review_work_unit(deserializer));
-  }
-
-  @protected
   BridgeWaitingToolAgent sse_decode_box_autoadd_bridge_waiting_tool_agent(
     SseDeserializer deserializer,
   ) {
@@ -11359,11 +9390,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeWorkingTaskState sse_decode_box_autoadd_bridge_working_task_state(
+  BridgeWorkflowRun sse_decode_box_autoadd_bridge_workflow_run(
     SseDeserializer deserializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_working_task_state(deserializer));
+    return (sse_decode_bridge_workflow_run(deserializer));
+  }
+
+  @protected
+  BridgeWorkflowRuntimeSnapshot
+  sse_decode_box_autoadd_bridge_workflow_runtime_snapshot(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_bridge_workflow_runtime_snapshot(deserializer));
   }
 
   @protected
@@ -11526,14 +9566,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_bridge_settings_state_snapshot(deserializer));
-  }
-
-  @protected
-  BridgeTaskSpawnFailure sse_decode_box_bridge_task_spawn_failure(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_task_spawn_failure(deserializer));
   }
 
   @protected
@@ -11726,6 +9758,41 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeAgentProfileDto sse_decode_bridge_agent_profile_dto(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_profileId = sse_decode_String(deserializer);
+    var var_displayName = sse_decode_String(deserializer);
+    var var_description = sse_decode_String(deserializer);
+    var var_whenToUse = sse_decode_String(deserializer);
+    var var_systemInstructions = sse_decode_String(deserializer);
+    var var_providerId = sse_decode_String(deserializer);
+    var var_model = sse_decode_String(deserializer);
+    var var_effort = sse_decode_opt_String(deserializer);
+    var var_source = sse_decode_String(deserializer);
+    var var_revision = sse_decode_String(deserializer);
+    var var_contentHash = sse_decode_String(deserializer);
+    var var_system = sse_decode_bool(deserializer);
+    var var_enabled = sse_decode_bool(deserializer);
+    return BridgeAgentProfileDto(
+      profileId: var_profileId,
+      displayName: var_displayName,
+      description: var_description,
+      whenToUse: var_whenToUse,
+      systemInstructions: var_systemInstructions,
+      providerId: var_providerId,
+      model: var_model,
+      effort: var_effort,
+      source: var_source,
+      revision: var_revision,
+      contentHash: var_contentHash,
+      system: var_system,
+      enabled: var_enabled,
+    );
+  }
+
+  @protected
   BridgeAgentProgressDto sse_decode_bridge_agent_progress_dto(
     SseDeserializer deserializer,
   ) {
@@ -11812,7 +9879,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           threadId: var_threadId,
         );
       case 1:
-        var var_mode = sse_decode_bridge_thread_mode(deserializer);
+        var var_mode = sse_decode_String(deserializer);
         return BridgeAttachmentAdmissionContext_NewThread(mode: var_mode);
       default:
         throw UnimplementedError('');
@@ -11890,84 +9957,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeBudgetLimitDto sse_decode_bridge_budget_limit_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_kind = sse_decode_bridge_budget_limit_kind(deserializer);
-    var var_usage = sse_decode_bridge_budget_usage_dto(deserializer);
-    return BridgeBudgetLimitDto(kind: var_kind, usage: var_usage);
-  }
-
-  @protected
-  BridgeBudgetLimitKind sse_decode_bridge_budget_limit_kind(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var inner = sse_decode_i_32(deserializer);
-    return BridgeBudgetLimitKind.values[inner];
-  }
-
-  @protected
-  BridgeBudgetUsageDto sse_decode_bridge_budget_usage_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_modelSteps = sse_decode_u_32(deserializer);
-    var var_toolCalls = sse_decode_u_32(deserializer);
-    var var_waitCalls = sse_decode_u_32(deserializer);
-    var var_elapsedMs = sse_decode_u_64(deserializer);
-    return BridgeBudgetUsageDto(
-      modelSteps: var_modelSteps,
-      toolCalls: var_toolCalls,
-      waitCalls: var_waitCalls,
-      elapsedMs: var_elapsedMs,
-    );
-  }
-
-  @protected
-  BridgeCancelledWorkUnit sse_decode_bridge_cancelled_work_unit(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_operationId = sse_decode_String(deserializer);
-    var var_reason = sse_decode_String(deserializer);
-    var var_worktreeDisposition = sse_decode_bridge_task_worktree_disposition(
-      deserializer,
-    );
-    return BridgeCancelledWorkUnit(
-      operationId: var_operationId,
-      reason: var_reason,
-      worktreeDisposition: var_worktreeDisposition,
-    );
-  }
-
-  @protected
   BridgeCancellingAgent sse_decode_bridge_cancelling_agent(
     SseDeserializer deserializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_turnId = sse_decode_String(deserializer);
     return BridgeCancellingAgent(turnId: var_turnId);
-  }
-
-  @protected
-  BridgeChangesRequiredWorkUnit sse_decode_bridge_changes_required_work_unit(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_completionId = sse_decode_String(deserializer);
-    var var_completionRevision = sse_decode_u_32(deserializer);
-    var var_reviewRoundId = sse_decode_String(deserializer);
-    var var_continuationRevision = sse_decode_u_64(deserializer);
-    var var_sliceCount = sse_decode_u_32(deserializer);
-    return BridgeChangesRequiredWorkUnit(
-      completionId: var_completionId,
-      completionRevision: var_completionRevision,
-      reviewRoundId: var_reviewRoundId,
-      continuationRevision: var_continuationRevision,
-      sliceCount: var_sliceCount,
-    );
   }
 
   @protected
@@ -12017,41 +10012,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeCompletedTaskState sse_decode_bridge_completed_task_state(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_outcome = sse_decode_bridge_task_outcome(deserializer);
-    return BridgeCompletedTaskState(outcome: var_outcome);
-  }
-
-  @protected
-  BridgeCompletedWorkUnit sse_decode_bridge_completed_work_unit(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_outcome = sse_decode_bridge_work_unit_completion_outcome(
-      deserializer,
-    );
-    return BridgeCompletedWorkUnit(outcome: var_outcome);
-  }
-
-  @protected
   BridgeConfigRecoveryReport sse_decode_bridge_config_recovery_report(
     SseDeserializer deserializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_backupPath = sse_decode_String(deserializer);
     return BridgeConfigRecoveryReport(backupPath: var_backupPath);
-  }
-
-  @protected
-  BridgeConversationRecoveryMode sse_decode_bridge_conversation_recovery_mode(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var inner = sse_decode_i_32(deserializer);
-    return BridgeConversationRecoveryMode.values[inner];
   }
 
   @protected
@@ -12129,14 +10095,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeEditingDocumentsTaskState
-  sse_decode_bridge_editing_documents_task_state(SseDeserializer deserializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_planRevision = sse_decode_u_64(deserializer);
-    return BridgeEditingDocumentsTaskState(planRevision: var_planRevision);
-  }
-
-  @protected
   BridgeError sse_decode_bridge_error(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_code = sse_decode_bridge_error_code(deserializer);
@@ -12158,95 +10116,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var inner = sse_decode_i_32(deserializer);
     return BridgeErrorCode.values[inner];
-  }
-
-  @protected
-  BridgeExecutorContinuationState sse_decode_bridge_executor_continuation_state(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var tag_ = sse_decode_i_32(deserializer);
-    switch (tag_) {
-      case 0:
-        var var_revision = sse_decode_u_64(deserializer);
-        var var_sliceCount = sse_decode_u_32(deserializer);
-        return BridgeExecutorContinuationState_Idle(
-          revision: var_revision,
-          sliceCount: var_sliceCount,
-        );
-      case 1:
-        var var_revision = sse_decode_u_64(deserializer);
-        var var_sourceTurnId = sse_decode_String(deserializer);
-        var var_sliceCount = sse_decode_u_32(deserializer);
-        return BridgeExecutorContinuationState_Compacting(
-          revision: var_revision,
-          sourceTurnId: var_sourceTurnId,
-          sliceCount: var_sliceCount,
-        );
-      case 2:
-        var var_revision = sse_decode_u_64(deserializer);
-        var var_sourceTurnId = sse_decode_String(deserializer);
-        var var_sliceCount = sse_decode_u_32(deserializer);
-        var var_limit = sse_decode_box_autoadd_bridge_budget_limit_dto(
-          deserializer,
-        );
-        return BridgeExecutorContinuationState_PendingStart(
-          revision: var_revision,
-          sourceTurnId: var_sourceTurnId,
-          sliceCount: var_sliceCount,
-          limit: var_limit,
-        );
-      case 3:
-        var var_revision = sse_decode_u_64(deserializer);
-        var var_sourceTurnId = sse_decode_String(deserializer);
-        var var_sliceCount = sse_decode_u_32(deserializer);
-        return BridgeExecutorContinuationState_PlannerWakePending(
-          revision: var_revision,
-          sourceTurnId: var_sourceTurnId,
-          sliceCount: var_sliceCount,
-        );
-      case 4:
-        var var_revision = sse_decode_u_64(deserializer);
-        var var_sourceTurnId = sse_decode_String(deserializer);
-        var var_sliceCount = sse_decode_u_32(deserializer);
-        var var_detail = sse_decode_String(deserializer);
-        return BridgeExecutorContinuationState_NeedsAttention(
-          revision: var_revision,
-          sourceTurnId: var_sourceTurnId,
-          sliceCount: var_sliceCount,
-          detail: var_detail,
-        );
-      default:
-        throw UnimplementedError('');
-    }
-  }
-
-  @protected
-  BridgeExecutorTerminalOutcome sse_decode_bridge_executor_terminal_outcome(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var tag_ = sse_decode_i_32(deserializer);
-    switch (tag_) {
-      case 0:
-        var var_sourceTurnId = sse_decode_String(deserializer);
-        var var_detail = sse_decode_String(deserializer);
-        return BridgeExecutorTerminalOutcome_Completed(
-          sourceTurnId: var_sourceTurnId,
-          detail: var_detail,
-        );
-      case 1:
-        var var_sourceTurnId = sse_decode_String(deserializer);
-        var var_detail = sse_decode_String(deserializer);
-        return BridgeExecutorTerminalOutcome_Failed(
-          sourceTurnId: var_sourceTurnId,
-          detail: var_detail,
-        );
-      default:
-        throw UnimplementedError('');
-    }
   }
 
   @protected
@@ -12274,21 +10143,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_failedAt = sse_decode_i_64(deserializer);
     var var_error = sse_decode_bridge_state_error(deserializer);
     return BridgeFailedRuntimeState(failedAt: var_failedAt, error: var_error);
-  }
-
-  @protected
-  BridgeFailedWorkUnit sse_decode_bridge_failed_work_unit(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_failure = sse_decode_bridge_work_unit_failure(deserializer);
-    var var_worktreeDisposition = sse_decode_bridge_task_worktree_disposition(
-      deserializer,
-    );
-    return BridgeFailedWorkUnit(
-      failure: var_failure,
-      worktreeDisposition: var_worktreeDisposition,
-    );
   }
 
   @protected
@@ -12390,55 +10244,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeIntegratedReviewGateDto sse_decode_bridge_integrated_review_gate_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var tag_ = sse_decode_i_32(deserializer);
-    switch (tag_) {
-      case 0:
-        var var_reason = sse_decode_String(deserializer);
-        return BridgeIntegratedReviewGateDto_Required(reason: var_reason);
-      case 1:
-        var var_reviewRoundId = sse_decode_String(deserializer);
-        var var_reviewedHead = sse_decode_String(deserializer);
-        return BridgeIntegratedReviewGateDto_SatisfiedByReview(
-          reviewRoundId: var_reviewRoundId,
-          reviewedHead: var_reviewedHead,
-        );
-      case 2:
-        return BridgeIntegratedReviewGateDto_NotRequiredNoDelivery();
-      case 3:
-        var var_workUnitId = sse_decode_String(deserializer);
-        var var_completionRevision = sse_decode_u_32(deserializer);
-        var var_mergeRecordId = sse_decode_String(deserializer);
-        return BridgeIntegratedReviewGateDto_NotRequiredSingleExecutorEquivalent(
-          workUnitId: var_workUnitId,
-          completionRevision: var_completionRevision,
-          mergeRecordId: var_mergeRecordId,
-        );
-      default:
-        throw UnimplementedError('');
-    }
-  }
-
-  @protected
-  BridgeIntegratedReviewTarget sse_decode_bridge_integrated_review_target(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_reviewRoundId = sse_decode_String(deserializer);
-    var var_reviewedHead = sse_decode_String(deserializer);
-    var var_changedFiles = sse_decode_list_String(deserializer);
-    return BridgeIntegratedReviewTarget(
-      reviewRoundId: var_reviewRoundId,
-      reviewedHead: var_reviewedHead,
-      changedFiles: var_changedFiles,
-    );
-  }
-
-  @protected
   BridgeInteractionContent sse_decode_bridge_interaction_content(
     SseDeserializer deserializer,
   ) {
@@ -12470,18 +10275,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           argumentsJson: var_argumentsJson,
           workingDirectory: var_workingDirectory,
           parentAgentId: var_parentAgentId,
-          state: var_state,
-        );
-      case 2:
-        var var_planId = sse_decode_String(deserializer);
-        var var_content = sse_decode_String(deserializer);
-        var var_state =
-            sse_decode_box_autoadd_bridge_plan_confirmation_interaction_state(
-              deserializer,
-            );
-        return BridgeInteractionContent_PlanConfirmation(
-          planId: var_planId,
-          content: var_content,
           state: var_state,
         );
       default:
@@ -12530,17 +10323,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         var var_reason = sse_decode_opt_String(deserializer);
         return BridgeInteractionResolution_ToolApproval(
           decision: var_decision,
-          reason: var_reason,
-        );
-      case 2:
-        var var_decision = sse_decode_bridge_plan_confirmation_resolution(
-          deserializer,
-        );
-        var var_content = sse_decode_opt_String(deserializer);
-        var var_reason = sse_decode_opt_String(deserializer);
-        return BridgeInteractionResolution_PlanConfirmation(
-          decision: var_decision,
-          content: var_content,
           reason: var_reason,
         );
       default:
@@ -12977,59 +10759,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeMergeCleanupState sse_decode_bridge_merge_cleanup_state(
+  BridgeModeInstructionSnapshot sse_decode_bridge_mode_instruction_snapshot(
     SseDeserializer deserializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var tag_ = sse_decode_i_32(deserializer);
-    switch (tag_) {
-      case 0:
-        return BridgeMergeCleanupState_Pending();
-      case 1:
-        return BridgeMergeCleanupState_Deferred();
-      case 2:
-        var var_operationId = sse_decode_String(deserializer);
-        var var_startedAt = sse_decode_i_64(deserializer);
-        return BridgeMergeCleanupState_Attempting(
-          operationId: var_operationId,
-          startedAt: var_startedAt,
-        );
-      case 3:
-        var var_operationId = sse_decode_String(deserializer);
-        var var_completedAt = sse_decode_i_64(deserializer);
-        return BridgeMergeCleanupState_Discarded(
-          operationId: var_operationId,
-          completedAt: var_completedAt,
-        );
-      case 4:
-        var var_operationId = sse_decode_String(deserializer);
-        var var_completedAt = sse_decode_i_64(deserializer);
-        return BridgeMergeCleanupState_AlreadyAbsent(
-          operationId: var_operationId,
-          completedAt: var_completedAt,
-        );
-      case 5:
-        var var_operationId = sse_decode_String(deserializer);
-        var var_failedAt = sse_decode_i_64(deserializer);
-        var var_detail = sse_decode_String(deserializer);
-        return BridgeMergeCleanupState_Failed(
-          operationId: var_operationId,
-          failedAt: var_failedAt,
-          detail: var_detail,
-        );
-      default:
-        throw UnimplementedError('');
-    }
-  }
-
-  @protected
-  BridgeMergeMethod sse_decode_bridge_merge_method(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var inner = sse_decode_i_32(deserializer);
-    return BridgeMergeMethod.values[inner];
+    var var_modeId = sse_decode_String(deserializer);
+    var var_displayName = sse_decode_String(deserializer);
+    var var_source = sse_decode_String(deserializer);
+    var var_providerId = sse_decode_String(deserializer);
+    var var_revision = sse_decode_String(deserializer);
+    var var_contentHash = sse_decode_String(deserializer);
+    var var_content = sse_decode_String(deserializer);
+    return BridgeModeInstructionSnapshot(
+      modeId: var_modeId,
+      displayName: var_displayName,
+      source: var_source,
+      providerId: var_providerId,
+      revision: var_revision,
+      contentHash: var_contentHash,
+      content: var_content,
+    );
   }
 
   @protected
@@ -13302,39 +11051,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgePausedWorkUnit sse_decode_bridge_paused_work_unit(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_reason = sse_decode_bridge_work_unit_pause_reason(deserializer);
-    var var_continuation = sse_decode_bridge_executor_continuation_state(
-      deserializer,
-    );
-    return BridgePausedWorkUnit(
-      reason: var_reason,
-      continuation: var_continuation,
-    );
-  }
-
-  @protected
-  BridgePendingConfirmationTaskState
-  sse_decode_bridge_pending_confirmation_task_state(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_planRevision = sse_decode_u_64(deserializer);
-    return BridgePendingConfirmationTaskState(planRevision: var_planRevision);
-  }
-
-  @protected
-  BridgePendingWorkUnit sse_decode_bridge_pending_work_unit(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return BridgePendingWorkUnit();
-  }
-
-  @protected
   BridgePersistenceState sse_decode_bridge_persistence_state(
     SseDeserializer deserializer,
   ) {
@@ -13410,73 +11126,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgePlanConfirmationInteractionState
-  sse_decode_bridge_plan_confirmation_interaction_state(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var tag_ = sse_decode_i_32(deserializer);
-    switch (tag_) {
-      case 0:
-        var var_operationId = sse_decode_String(deserializer);
-        return BridgePlanConfirmationInteractionState_Pending(
-          operationId: var_operationId,
-        );
-      case 1:
-        var var_operationId = sse_decode_String(deserializer);
-        var var_resolvedAt = sse_decode_i_64(deserializer);
-        var var_decision = sse_decode_bridge_plan_confirmation_resolution(
-          deserializer,
-        );
-        var var_content = sse_decode_opt_String(deserializer);
-        var var_reason = sse_decode_opt_String(deserializer);
-        return BridgePlanConfirmationInteractionState_Resolved(
-          operationId: var_operationId,
-          resolvedAt: var_resolvedAt,
-          decision: var_decision,
-          content: var_content,
-          reason: var_reason,
-        );
-      case 2:
-        var var_operationId = sse_decode_String(deserializer);
-        var var_cancelledAt = sse_decode_i_64(deserializer);
-        var var_reason = sse_decode_String(deserializer);
-        return BridgePlanConfirmationInteractionState_Cancelled(
-          operationId: var_operationId,
-          cancelledAt: var_cancelledAt,
-          reason: var_reason,
-        );
-      case 3:
-        var var_operationId = sse_decode_String(deserializer);
-        var var_expiredAt = sse_decode_i_64(deserializer);
-        return BridgePlanConfirmationInteractionState_Expired(
-          operationId: var_operationId,
-          expiredAt: var_expiredAt,
-        );
-      default:
-        throw UnimplementedError('');
-    }
-  }
-
-  @protected
-  BridgePlanConfirmationResolution
-  sse_decode_bridge_plan_confirmation_resolution(SseDeserializer deserializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var inner = sse_decode_i_32(deserializer);
-    return BridgePlanConfirmationResolution.values[inner];
-  }
-
-  @protected
-  BridgePlanningTaskState sse_decode_bridge_planning_task_state(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_request = sse_decode_String(deserializer);
-    return BridgePlanningTaskState(request: var_request);
-  }
-
-  @protected
   BridgeProductEventEnvelope sse_decode_bridge_product_event_envelope(
     SseDeserializer deserializer,
   ) {
@@ -13512,47 +11161,42 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         );
         return BridgeProductEventPayload_ThreadDirectoryChanged(var_field0);
       case 2:
-        var var_field0 = sse_decode_box_autoadd_bridge_task_directory_state(
-          deserializer,
-        );
-        return BridgeProductEventPayload_TaskDirectoryChanged(var_field0);
-      case 3:
         var var_field0 = sse_decode_box_autoadd_bridge_agent_directory_state(
           deserializer,
         );
         return BridgeProductEventPayload_AgentDirectoryChanged(var_field0);
-      case 4:
+      case 3:
         var var_field0 = sse_decode_box_bridge_settings_state_snapshot(
           deserializer,
         );
         return BridgeProductEventPayload_SettingsStateChanged(var_field0);
-      case 5:
+      case 4:
         var var_field0 = sse_decode_box_autoadd_bridge_recovery_state_snapshot(
           deserializer,
         );
         return BridgeProductEventPayload_RecoveryStateChanged(var_field0);
-      case 6:
+      case 5:
         var var_field0 = sse_decode_box_autoadd_bridge_mcp_state_snapshot(
           deserializer,
         );
         return BridgeProductEventPayload_McpStateChanged(var_field0);
-      case 7:
+      case 6:
         var var_field0 = sse_decode_box_autoadd_bridge_lsp_state_snapshot(
           deserializer,
         );
         return BridgeProductEventPayload_LspStateChanged(var_field0);
-      case 8:
+      case 7:
         var var_field0 = sse_decode_box_autoadd_bridge_skills_state_snapshot(
           deserializer,
         );
         return BridgeProductEventPayload_SkillsStateChanged(var_field0);
-      case 9:
+      case 8:
         var var_field0 =
             sse_decode_box_autoadd_bridge_provider_usage_state_snapshot(
               deserializer,
             );
         return BridgeProductEventPayload_ProviderUsageStateChanged(var_field0);
-      case 10:
+      case 9:
         var var_field0 =
             sse_decode_box_autoadd_bridge_model_performance_snapshot(
               deserializer,
@@ -13560,18 +11204,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         return BridgeProductEventPayload_ModelPerformanceStateChanged(
           var_field0,
         );
-      case 11:
+      case 10:
         var var_field0 = sse_decode_box_autoadd_bridge_updater_state_snapshot(
           deserializer,
         );
         return BridgeProductEventPayload_UpdaterStateChanged(var_field0);
-      case 12:
+      case 11:
         var var_field0 =
             sse_decode_box_autoadd_bridge_persistence_state_snapshot(
               deserializer,
             );
         return BridgeProductEventPayload_PersistenceStateChanged(var_field0);
-      case 13:
+      case 12:
         var var_laggedEvents = sse_decode_u_64(deserializer);
         return BridgeProductEventPayload_Stale(laggedEvents: var_laggedEvents);
       default:
@@ -13972,14 +11616,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeReadyForReviewCompletion sse_decode_bridge_ready_for_review_completion(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return BridgeReadyForReviewCompletion();
-  }
-
-  @protected
   BridgeReadyResource sse_decode_bridge_ready_resource(
     SseDeserializer deserializer,
   ) {
@@ -13991,64 +11627,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       revision: var_revision,
       updatedAt: var_updatedAt,
       lastCheckedAt: var_lastCheckedAt,
-    );
-  }
-
-  @protected
-  BridgeRecoveryCleanupPreviewDto
-  sse_decode_bridge_recovery_cleanup_preview_dto(SseDeserializer deserializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_issueId = sse_decode_String(deserializer);
-    var var_expectedRevision = sse_decode_String(deserializer);
-    var var_scope = sse_decode_bridge_recovery_issue_scope(deserializer);
-    var var_projectId = sse_decode_opt_String(deserializer);
-    var var_threadId = sse_decode_opt_String(deserializer);
-    var var_detail = sse_decode_String(deserializer);
-    var var_resources = sse_decode_list_bridge_recovery_cleanup_resource_dto(
-      deserializer,
-    );
-    return BridgeRecoveryCleanupPreviewDto(
-      issueId: var_issueId,
-      expectedRevision: var_expectedRevision,
-      scope: var_scope,
-      projectId: var_projectId,
-      threadId: var_threadId,
-      detail: var_detail,
-      resources: var_resources,
-    );
-  }
-
-  @protected
-  BridgeRecoveryCleanupResourceDto
-  sse_decode_bridge_recovery_cleanup_resource_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_workUnitId = sse_decode_String(deserializer);
-    var var_path = sse_decode_String(deserializer);
-    var var_branch = sse_decode_String(deserializer);
-    var var_presence = sse_decode_bridge_recovery_resource_presence(
-      deserializer,
-    );
-    var var_registrationExists = sse_decode_bool(deserializer);
-    var var_pathExists = sse_decode_bool(deserializer);
-    var var_branchExists = sse_decode_bool(deserializer);
-    var var_branchHead = sse_decode_opt_String(deserializer);
-    var var_dirty = sse_decode_bool(deserializer);
-    var var_aheadBy = sse_decode_u_32(deserializer);
-    var var_changedFileCount = sse_decode_u_32(deserializer);
-    return BridgeRecoveryCleanupResourceDto(
-      workUnitId: var_workUnitId,
-      path: var_path,
-      branch: var_branch,
-      presence: var_presence,
-      registrationExists: var_registrationExists,
-      pathExists: var_pathExists,
-      branchExists: var_branchExists,
-      branchHead: var_branchHead,
-      dirty: var_dirty,
-      aheadBy: var_aheadBy,
-      changedFileCount: var_changedFileCount,
     );
   }
 
@@ -14077,15 +11655,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var inner = sse_decode_i_32(deserializer);
     return BridgeRecoveryIssueScope.values[inner];
-  }
-
-  @protected
-  BridgeRecoveryResourcePresence sse_decode_bridge_recovery_resource_presence(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var inner = sse_decode_i_32(deserializer);
-    return BridgeRecoveryResourcePresence.values[inner];
   }
 
   @protected
@@ -14196,65 +11765,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeReviewPassedOutcome sse_decode_bridge_review_passed_outcome(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var inner = sse_decode_i_32(deserializer);
-    return BridgeReviewPassedOutcome.values[inner];
-  }
-
-  @protected
-  BridgeReviewPassedWorkUnit sse_decode_bridge_review_passed_work_unit(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_completionId = sse_decode_String(deserializer);
-    var var_completionRevision = sse_decode_u_32(deserializer);
-    var var_reviewRoundId = sse_decode_String(deserializer);
-    var var_outcome = sse_decode_bridge_review_passed_outcome(deserializer);
-    var var_verificationSummary = sse_decode_String(deserializer);
-    return BridgeReviewPassedWorkUnit(
-      completionId: var_completionId,
-      completionRevision: var_completionRevision,
-      reviewRoundId: var_reviewRoundId,
-      outcome: var_outcome,
-      verificationSummary: var_verificationSummary,
-    );
-  }
-
-  @protected
-  BridgeReviewScope sse_decode_bridge_review_scope(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var inner = sse_decode_i_32(deserializer);
-    return BridgeReviewScope.values[inner];
-  }
-
-  @protected
-  BridgeReviewedCompletion sse_decode_bridge_reviewed_completion(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_reviewRoundId = sse_decode_String(deserializer);
-    var var_decidedAt = sse_decode_i_64(deserializer);
-    return BridgeReviewedCompletion(
-      reviewRoundId: var_reviewRoundId,
-      decidedAt: var_decidedAt,
-    );
-  }
-
-  @protected
-  BridgeReviewingTaskState sse_decode_bridge_reviewing_task_state(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_target = sse_decode_bridge_integrated_review_target(deserializer);
-    return BridgeReviewingTaskState(target: var_target);
-  }
-
-  @protected
   BridgeRoleSettingsDto sse_decode_bridge_role_settings_dto(
     SseDeserializer deserializer,
   ) {
@@ -14278,41 +11788,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_turnId = sse_decode_String(deserializer);
     return BridgeRunningAgent(turnId: var_turnId);
-  }
-
-  @protected
-  BridgeRunningWorkUnit sse_decode_bridge_running_work_unit(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_activity = sse_decode_bridge_running_work_unit_activity(
-      deserializer,
-    );
-    var var_continuation = sse_decode_bridge_executor_continuation_state(
-      deserializer,
-    );
-    return BridgeRunningWorkUnit(
-      activity: var_activity,
-      continuation: var_continuation,
-    );
-  }
-
-  @protected
-  BridgeRunningWorkUnitActivity sse_decode_bridge_running_work_unit_activity(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var tag_ = sse_decode_i_32(deserializer);
-    switch (tag_) {
-      case 0:
-        return BridgeRunningWorkUnitActivity_Allocated();
-      case 1:
-        var var_turnId = sse_decode_String(deserializer);
-        return BridgeRunningWorkUnitActivity_Active(turnId: var_turnId);
-      default:
-        throw UnimplementedError('');
-    }
   }
 
   @protected
@@ -14498,7 +11973,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pendingCommits: var_pendingCommits,
         );
       case 3:
-        return BridgeShutdownProgress_SuspendingTasks();
+        return BridgeShutdownProgress_StoppingAgents();
       case 4:
         return BridgeShutdownProgress_StoppingMcp();
       case 5:
@@ -14663,12 +12138,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_configFingerprint = sse_decode_String(deserializer);
     var var_catalogRevision = sse_decode_u_64(deserializer);
     var var_skills = sse_decode_list_skill_summary_dto(deserializer);
+    var var_modes = sse_decode_list_mode_summary_dto(deserializer);
     var var_warnings = sse_decode_list_String(deserializer);
     var var_complete = sse_decode_bool(deserializer);
     return BridgeSkillsStateData(
       configFingerprint: var_configFingerprint,
       catalogRevision: var_catalogRevision,
       skills: var_skills,
+      modes: var_modes,
       warnings: var_warnings,
       complete: var_complete,
     );
@@ -14763,7 +12240,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     );
     var var_projectId = sse_decode_opt_String(deserializer);
     var var_threadId = sse_decode_opt_String(deserializer);
-    var var_taskRunId = sse_decode_opt_String(deserializer);
     var var_detail = sse_decode_String(deserializer);
     return BridgeStudioRecoveryIssueDto(
       id: var_id,
@@ -14772,7 +12248,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       availableActions: var_availableActions,
       projectId: var_projectId,
       threadId: var_threadId,
-      taskRunId: var_taskRunId,
       detail: var_detail,
     );
   }
@@ -14836,9 +12311,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_threadDirectory = sse_decode_bridge_thread_directory_page(
       deserializer,
     );
-    var var_taskDirectory = sse_decode_bridge_task_directory_state(
-      deserializer,
-    );
     var var_agentDirectory = sse_decode_bridge_agent_directory_state(
       deserializer,
     );
@@ -14863,7 +12335,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       runtime: var_runtime,
       projectDirectory: var_projectDirectory,
       threadDirectory: var_threadDirectory,
-      taskDirectory: var_taskDirectory,
       agentDirectory: var_agentDirectory,
       settings: var_settings,
       recovery: var_recovery,
@@ -14878,1017 +12349,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeTaskCompletionContent sse_decode_bridge_task_completion_content(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var tag_ = sse_decode_i_32(deserializer);
-    switch (tag_) {
-      case 0:
-        var var_field0 = sse_decode_box_autoadd_bridge_task_delivery_completion(
-          deserializer,
-        );
-        return BridgeTaskCompletionContent_Delivery(var_field0);
-      case 1:
-        var var_field0 =
-            sse_decode_box_autoadd_bridge_task_no_delivery_completion(
-              deserializer,
-            );
-        return BridgeTaskCompletionContent_NoDelivery(var_field0);
-      default:
-        throw UnimplementedError('');
-    }
-  }
-
-  @protected
-  BridgeTaskCompletionDto sse_decode_bridge_task_completion_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_id = sse_decode_String(deserializer);
-    var var_workUnitId = sse_decode_String(deserializer);
-    var var_executorAgentId = sse_decode_String(deserializer);
-    var var_revision = sse_decode_u_32(deserializer);
-    var var_content = sse_decode_bridge_task_completion_content(deserializer);
-    var var_state = sse_decode_bridge_task_completion_state(deserializer);
-    var var_stateRevision = sse_decode_u_64(deserializer);
-    var var_baseCommit = sse_decode_String(deserializer);
-    var var_verificationSummary = sse_decode_String(deserializer);
-    var var_worktreePath = sse_decode_String(deserializer);
-    var var_branch = sse_decode_String(deserializer);
-    var var_createdAt = sse_decode_i_64(deserializer);
-    var var_updatedAt = sse_decode_i_64(deserializer);
-    return BridgeTaskCompletionDto(
-      id: var_id,
-      workUnitId: var_workUnitId,
-      executorAgentId: var_executorAgentId,
-      revision: var_revision,
-      content: var_content,
-      state: var_state,
-      stateRevision: var_stateRevision,
-      baseCommit: var_baseCommit,
-      verificationSummary: var_verificationSummary,
-      worktreePath: var_worktreePath,
-      branch: var_branch,
-      createdAt: var_createdAt,
-      updatedAt: var_updatedAt,
-    );
-  }
-
-  @protected
-  BridgeTaskCompletionState sse_decode_bridge_task_completion_state(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var tag_ = sse_decode_i_32(deserializer);
-    switch (tag_) {
-      case 0:
-        var var_field0 =
-            sse_decode_box_autoadd_bridge_ready_for_review_completion(
-              deserializer,
-            );
-        return BridgeTaskCompletionState_ReadyForReview(var_field0);
-      case 1:
-        var var_field0 = sse_decode_box_autoadd_bridge_reviewed_completion(
-          deserializer,
-        );
-        return BridgeTaskCompletionState_ChangesRequired(var_field0);
-      case 2:
-        var var_field0 = sse_decode_box_autoadd_bridge_reviewed_completion(
-          deserializer,
-        );
-        return BridgeTaskCompletionState_Approved(var_field0);
-      default:
-        throw UnimplementedError('');
-    }
-  }
-
-  @protected
-  BridgeTaskDeliveryCompletion sse_decode_bridge_task_delivery_completion(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_headCommit = sse_decode_String(deserializer);
-    var var_changedFiles = sse_decode_list_String(deserializer);
-    return BridgeTaskDeliveryCompletion(
-      headCommit: var_headCommit,
-      changedFiles: var_changedFiles,
-    );
-  }
-
-  @protected
-  BridgeTaskDesignReferenceDto sse_decode_bridge_task_design_reference_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_path = sse_decode_String(deserializer);
-    var var_section = sse_decode_String(deserializer);
-    return BridgeTaskDesignReferenceDto(path: var_path, section: var_section);
-  }
-
-  @protected
-  BridgeTaskDirectoryData sse_decode_bridge_task_directory_data(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_tasks = sse_decode_list_bridge_task_directory_entry(deserializer);
-    return BridgeTaskDirectoryData(tasks: var_tasks);
-  }
-
-  @protected
-  BridgeTaskDirectoryEntry sse_decode_bridge_task_directory_entry(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_rootThreadId = sse_decode_String(deserializer);
-    var var_task = sse_decode_bridge_task_runtime_dto(deserializer);
-    return BridgeTaskDirectoryEntry(
-      rootThreadId: var_rootThreadId,
-      task: var_task,
-    );
-  }
-
-  @protected
-  BridgeTaskDirectoryState sse_decode_bridge_task_directory_state(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var tag_ = sse_decode_i_32(deserializer);
-    switch (tag_) {
-      case 0:
-        var var_field0 = sse_decode_box_autoadd_bridge_uninitialized_resource(
-          deserializer,
-        );
-        return BridgeTaskDirectoryState_Uninitialized(var_field0);
-      case 1:
-        var var_field0 = sse_decode_box_autoadd_bridge_loading_resource(
-          deserializer,
-        );
-        return BridgeTaskDirectoryState_Loading(var_field0);
-      case 2:
-        var var_resource = sse_decode_box_autoadd_bridge_ready_resource(
-          deserializer,
-        );
-        var var_value = sse_decode_box_autoadd_bridge_task_directory_data(
-          deserializer,
-        );
-        return BridgeTaskDirectoryState_Ready(
-          resource: var_resource,
-          value: var_value,
-        );
-      case 3:
-        var var_resource = sse_decode_box_autoadd_bridge_refreshing_resource(
-          deserializer,
-        );
-        var var_value = sse_decode_box_autoadd_bridge_task_directory_data(
-          deserializer,
-        );
-        return BridgeTaskDirectoryState_Refreshing(
-          resource: var_resource,
-          value: var_value,
-        );
-      case 4:
-        var var_resource = sse_decode_box_autoadd_bridge_stale_resource(
-          deserializer,
-        );
-        var var_value = sse_decode_box_autoadd_bridge_task_directory_data(
-          deserializer,
-        );
-        return BridgeTaskDirectoryState_Stale(
-          resource: var_resource,
-          value: var_value,
-        );
-      case 5:
-        var var_resource = sse_decode_box_autoadd_bridge_degraded_resource(
-          deserializer,
-        );
-        var var_value = sse_decode_box_autoadd_bridge_task_directory_data(
-          deserializer,
-        );
-        return BridgeTaskDirectoryState_Degraded(
-          resource: var_resource,
-          value: var_value,
-        );
-      case 6:
-        var var_field0 = sse_decode_box_autoadd_bridge_failed_resource(
-          deserializer,
-        );
-        return BridgeTaskDirectoryState_Failed(var_field0);
-      case 7:
-        var var_field0 = sse_decode_box_autoadd_bridge_stopped_resource(
-          deserializer,
-        );
-        return BridgeTaskDirectoryState_Stopped(var_field0);
-      default:
-        throw UnimplementedError('');
-    }
-  }
-
-  @protected
-  BridgeTaskFailureDetail sse_decode_bridge_task_failure_detail(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_category = sse_decode_String(deserializer);
-    var var_providerKind = sse_decode_opt_String(deserializer);
-    var var_code = sse_decode_opt_String(deserializer);
-    var var_httpStatus = sse_decode_opt_box_autoadd_u_16(deserializer);
-    var var_message = sse_decode_String(deserializer);
-    var var_retryable = sse_decode_bool(deserializer);
-    return BridgeTaskFailureDetail(
-      category: var_category,
-      providerKind: var_providerKind,
-      code: var_code,
-      httpStatus: var_httpStatus,
-      message: var_message,
-      retryable: var_retryable,
-    );
-  }
-
-  @protected
-  BridgeTaskFailureKind sse_decode_bridge_task_failure_kind(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var inner = sse_decode_i_32(deserializer);
-    return BridgeTaskFailureKind.values[inner];
-  }
-
-  @protected
-  BridgeTaskIssueDto sse_decode_bridge_task_issue_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_id = sse_decode_String(deserializer);
-    var var_sourceThreadId = sse_decode_String(deserializer);
-    var var_sourceTurnId = sse_decode_String(deserializer);
-    var var_sourceAgentId = sse_decode_String(deserializer);
-    var var_sourceRole = sse_decode_String(deserializer);
-    var var_workUnitId = sse_decode_opt_String(deserializer);
-    var var_reviewRoundId = sse_decode_opt_String(deserializer);
-    var var_state = sse_decode_bridge_task_issue_state(deserializer);
-    var var_createdAt = sse_decode_i_64(deserializer);
-    return BridgeTaskIssueDto(
-      id: var_id,
-      sourceThreadId: var_sourceThreadId,
-      sourceTurnId: var_sourceTurnId,
-      sourceAgentId: var_sourceAgentId,
-      sourceRole: var_sourceRole,
-      workUnitId: var_workUnitId,
-      reviewRoundId: var_reviewRoundId,
-      state: var_state,
-      createdAt: var_createdAt,
-    );
-  }
-
-  @protected
-  BridgeTaskIssueState sse_decode_bridge_task_issue_state(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var tag_ = sse_decode_i_32(deserializer);
-    switch (tag_) {
-      case 0:
-        var var_failure = sse_decode_box_autoadd_bridge_task_failure_detail(
-          deserializer,
-        );
-        return BridgeTaskIssueState_OpenRecoverable(failure: var_failure);
-      case 1:
-        var var_failure = sse_decode_box_autoadd_bridge_task_failure_detail(
-          deserializer,
-        );
-        return BridgeTaskIssueState_OpenFatal(failure: var_failure);
-      case 2:
-        var var_failure = sse_decode_box_autoadd_bridge_task_failure_detail(
-          deserializer,
-        );
-        var var_resolvedAt = sse_decode_i_64(deserializer);
-        return BridgeTaskIssueState_Resolved(
-          failure: var_failure,
-          resolvedAt: var_resolvedAt,
-        );
-      default:
-        throw UnimplementedError('');
-    }
-  }
-
-  @protected
-  BridgeTaskMergeDto sse_decode_bridge_task_merge_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_id = sse_decode_String(deserializer);
-    var var_workUnitId = sse_decode_String(deserializer);
-    var var_completionId = sse_decode_String(deserializer);
-    var var_completionRevision = sse_decode_u_32(deserializer);
-    var var_executorAgentId = sse_decode_String(deserializer);
-    var var_expectedPreviousHead = sse_decode_String(deserializer);
-    var var_resultingHead = sse_decode_String(deserializer);
-    var var_deliveryHead = sse_decode_String(deserializer);
-    var var_method = sse_decode_bridge_merge_method(deserializer);
-    var var_summary = sse_decode_String(deserializer);
-    var var_cleanup = sse_decode_bridge_merge_cleanup_state(deserializer);
-    var var_createdAt = sse_decode_i_64(deserializer);
-    var var_updatedAt = sse_decode_i_64(deserializer);
-    return BridgeTaskMergeDto(
-      id: var_id,
-      workUnitId: var_workUnitId,
-      completionId: var_completionId,
-      completionRevision: var_completionRevision,
-      executorAgentId: var_executorAgentId,
-      expectedPreviousHead: var_expectedPreviousHead,
-      resultingHead: var_resultingHead,
-      deliveryHead: var_deliveryHead,
-      method: var_method,
-      summary: var_summary,
-      cleanup: var_cleanup,
-      createdAt: var_createdAt,
-      updatedAt: var_updatedAt,
-    );
-  }
-
-  @protected
-  BridgeTaskNoDeliveryCompletion sse_decode_bridge_task_no_delivery_completion(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return BridgeTaskNoDeliveryCompletion();
-  }
-
-  @protected
-  BridgeTaskOutcome sse_decode_bridge_task_outcome(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var tag_ = sse_decode_i_32(deserializer);
-    switch (tag_) {
-      case 0:
-        var var_summary = sse_decode_String(deserializer);
-        var var_completedAt = sse_decode_i_64(deserializer);
-        var var_reviewGate = sse_decode_box_autoadd_bridge_task_review_gate(
-          deserializer,
-        );
-        return BridgeTaskOutcome_Succeeded(
-          summary: var_summary,
-          completedAt: var_completedAt,
-          reviewGate: var_reviewGate,
-        );
-      case 1:
-        var var_kind = sse_decode_bridge_task_failure_kind(deserializer);
-        var var_summary = sse_decode_String(deserializer);
-        var var_evidence = sse_decode_String(deserializer);
-        var var_cause = sse_decode_String(deserializer);
-        var var_completedAt = sse_decode_i_64(deserializer);
-        return BridgeTaskOutcome_Failed(
-          kind: var_kind,
-          summary: var_summary,
-          evidence: var_evidence,
-          cause: var_cause,
-          completedAt: var_completedAt,
-        );
-      default:
-        throw UnimplementedError('');
-    }
-  }
-
-  @protected
-  BridgeTaskRecoveryPreviewDto sse_decode_bridge_task_recovery_preview_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_previewToken = sse_decode_String(deserializer);
-    var var_rootThreadId = sse_decode_String(deserializer);
-    var var_runId = sse_decode_String(deserializer);
-    var var_revision = sse_decode_u_64(deserializer);
-    var var_taskGeneration = sse_decode_u_64(deserializer);
-    var var_state = sse_decode_bridge_task_recovery_state(deserializer);
-    var var_recommendedThreadId = sse_decode_String(deserializer);
-    var var_targets = sse_decode_list_bridge_task_recovery_target_dto(
-      deserializer,
-    );
-    var var_completionRevisionFingerprint = sse_decode_String(deserializer);
-    var var_reviewRevisionFingerprint = sse_decode_String(deserializer);
-    var var_mergeRevisionFingerprint = sse_decode_String(deserializer);
-    return BridgeTaskRecoveryPreviewDto(
-      previewToken: var_previewToken,
-      rootThreadId: var_rootThreadId,
-      runId: var_runId,
-      revision: var_revision,
-      taskGeneration: var_taskGeneration,
-      state: var_state,
-      recommendedThreadId: var_recommendedThreadId,
-      targets: var_targets,
-      completionRevisionFingerprint: var_completionRevisionFingerprint,
-      reviewRevisionFingerprint: var_reviewRevisionFingerprint,
-      mergeRevisionFingerprint: var_mergeRevisionFingerprint,
-    );
-  }
-
-  @protected
-  BridgeTaskRecoveryRequestDto sse_decode_bridge_task_recovery_request_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_recoveryId = sse_decode_String(deserializer);
-    var var_rootThreadId = sse_decode_String(deserializer);
-    var var_targetThreadId = sse_decode_String(deserializer);
-    var var_mode = sse_decode_bridge_conversation_recovery_mode(deserializer);
-    var var_turnIds = sse_decode_list_String(deserializer);
-    var var_preview = sse_decode_bridge_task_recovery_preview_dto(deserializer);
-    return BridgeTaskRecoveryRequestDto(
-      recoveryId: var_recoveryId,
-      rootThreadId: var_rootThreadId,
-      targetThreadId: var_targetThreadId,
-      mode: var_mode,
-      turnIds: var_turnIds,
-      preview: var_preview,
-    );
-  }
-
-  @protected
-  BridgeTaskRecoveryResultDto sse_decode_bridge_task_recovery_result_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_recoveryId = sse_decode_String(deserializer);
-    var var_runId = sse_decode_String(deserializer);
-    var var_workUnitId = sse_decode_opt_String(deserializer);
-    var var_rootThreadId = sse_decode_String(deserializer);
-    var var_targetThreadId = sse_decode_String(deserializer);
-    var var_mode = sse_decode_bridge_conversation_recovery_mode(deserializer);
-    var var_recoveryRevision = sse_decode_u_64(deserializer);
-    var var_runtimeRevision = sse_decode_u_64(deserializer);
-    var var_threadRevision = sse_decode_u_64(deserializer);
-    var var_beforeTranscriptHash = sse_decode_String(deserializer);
-    var var_afterTranscriptHash = sse_decode_String(deserializer);
-    var var_removedItemCount = sse_decode_u_64(deserializer);
-    var var_removedInputCount = sse_decode_u_64(deserializer);
-    var var_resumeTurnId = sse_decode_String(deserializer);
-    return BridgeTaskRecoveryResultDto(
-      recoveryId: var_recoveryId,
-      runId: var_runId,
-      workUnitId: var_workUnitId,
-      rootThreadId: var_rootThreadId,
-      targetThreadId: var_targetThreadId,
-      mode: var_mode,
-      recoveryRevision: var_recoveryRevision,
-      runtimeRevision: var_runtimeRevision,
-      threadRevision: var_threadRevision,
-      beforeTranscriptHash: var_beforeTranscriptHash,
-      afterTranscriptHash: var_afterTranscriptHash,
-      removedItemCount: var_removedItemCount,
-      removedInputCount: var_removedInputCount,
-      resumeTurnId: var_resumeTurnId,
-    );
-  }
-
-  @protected
-  BridgeTaskRecoveryState sse_decode_bridge_task_recovery_state(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var inner = sse_decode_i_32(deserializer);
-    return BridgeTaskRecoveryState.values[inner];
-  }
-
-  @protected
-  BridgeTaskRecoveryTargetDto sse_decode_bridge_task_recovery_target_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_threadId = sse_decode_String(deserializer);
-    var var_kind = sse_decode_bridge_task_recovery_target_kind(deserializer);
-    var var_workUnitId = sse_decode_opt_String(deserializer);
-    var var_attempt = sse_decode_opt_box_autoadd_u_32(deserializer);
-    var var_continuationRevision = sse_decode_opt_box_autoadd_u_64(
-      deserializer,
-    );
-    var var_expectedRuntimeRevision = sse_decode_u_64(deserializer);
-    var var_expectedThreadRevision = sse_decode_u_64(deserializer);
-    var var_branch = sse_decode_String(deserializer);
-    var var_worktreePath = sse_decode_String(deserializer);
-    var var_baseCommit = sse_decode_opt_String(deserializer);
-    var var_turns = sse_decode_list_bridge_task_recovery_turn_dto(deserializer);
-    var var_defaultTurnIds = sse_decode_list_String(deserializer);
-    var var_availableModes = sse_decode_list_bridge_conversation_recovery_mode(
-      deserializer,
-    );
-    return BridgeTaskRecoveryTargetDto(
-      threadId: var_threadId,
-      kind: var_kind,
-      workUnitId: var_workUnitId,
-      attempt: var_attempt,
-      continuationRevision: var_continuationRevision,
-      expectedRuntimeRevision: var_expectedRuntimeRevision,
-      expectedThreadRevision: var_expectedThreadRevision,
-      branch: var_branch,
-      worktreePath: var_worktreePath,
-      baseCommit: var_baseCommit,
-      turns: var_turns,
-      defaultTurnIds: var_defaultTurnIds,
-      availableModes: var_availableModes,
-    );
-  }
-
-  @protected
-  BridgeTaskRecoveryTargetKind sse_decode_bridge_task_recovery_target_kind(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var inner = sse_decode_i_32(deserializer);
-    return BridgeTaskRecoveryTargetKind.values[inner];
-  }
-
-  @protected
-  BridgeTaskRecoveryTurnDto sse_decode_bridge_task_recovery_turn_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_turnId = sse_decode_String(deserializer);
-    var var_state = sse_decode_bridge_task_recovery_turn_state(deserializer);
-    var var_updatedAt = sse_decode_i_64(deserializer);
-    var var_itemCount = sse_decode_u_64(deserializer);
-    var var_inputCount = sse_decode_u_64(deserializer);
-    var var_toolCount = sse_decode_u_64(deserializer);
-    var var_toolSummaries = sse_decode_list_String(deserializer);
-    return BridgeTaskRecoveryTurnDto(
-      turnId: var_turnId,
-      state: var_state,
-      updatedAt: var_updatedAt,
-      itemCount: var_itemCount,
-      inputCount: var_inputCount,
-      toolCount: var_toolCount,
-      toolSummaries: var_toolSummaries,
-    );
-  }
-
-  @protected
-  BridgeTaskRecoveryTurnState sse_decode_bridge_task_recovery_turn_state(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var inner = sse_decode_i_32(deserializer);
-    return BridgeTaskRecoveryTurnState.values[inner];
-  }
-
-  @protected
-  BridgeTaskReviewDto sse_decode_bridge_task_review_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_id = sse_decode_String(deserializer);
-    var var_round = sse_decode_u_32(deserializer);
-    var var_scope = sse_decode_bridge_review_scope(deserializer);
-    var var_workUnitId = sse_decode_opt_String(deserializer);
-    var var_completionId = sse_decode_opt_String(deserializer);
-    var var_completionRevision = sse_decode_opt_box_autoadd_u_32(deserializer);
-    var var_reviewedHead = sse_decode_String(deserializer);
-    var var_state = sse_decode_bridge_task_review_state(deserializer);
-    var var_requestedByCallId = sse_decode_String(deserializer);
-    var var_designReferences = sse_decode_list_bridge_task_design_reference_dto(
-      deserializer,
-    );
-    var var_findings = sse_decode_list_bridge_task_review_finding_dto(
-      deserializer,
-    );
-    var var_createdAt = sse_decode_i_64(deserializer);
-    var var_updatedAt = sse_decode_i_64(deserializer);
-    return BridgeTaskReviewDto(
-      id: var_id,
-      round: var_round,
-      scope: var_scope,
-      workUnitId: var_workUnitId,
-      completionId: var_completionId,
-      completionRevision: var_completionRevision,
-      reviewedHead: var_reviewedHead,
-      state: var_state,
-      requestedByCallId: var_requestedByCallId,
-      designReferences: var_designReferences,
-      findings: var_findings,
-      createdAt: var_createdAt,
-      updatedAt: var_updatedAt,
-    );
-  }
-
-  @protected
-  BridgeTaskReviewFindingDto sse_decode_bridge_task_review_finding_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_severity = sse_decode_String(deserializer);
-    var var_title = sse_decode_String(deserializer);
-    var var_body = sse_decode_String(deserializer);
-    var var_recommendation = sse_decode_String(deserializer);
-    var var_path = sse_decode_opt_String(deserializer);
-    var var_line = sse_decode_opt_box_autoadd_u_32(deserializer);
-    var var_designReferences = sse_decode_list_bridge_task_design_reference_dto(
-      deserializer,
-    );
-    return BridgeTaskReviewFindingDto(
-      severity: var_severity,
-      title: var_title,
-      body: var_body,
-      recommendation: var_recommendation,
-      path: var_path,
-      line: var_line,
-      designReferences: var_designReferences,
-    );
-  }
-
-  @protected
-  BridgeTaskReviewGate sse_decode_bridge_task_review_gate(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var tag_ = sse_decode_i_32(deserializer);
-    switch (tag_) {
-      case 0:
-        return BridgeTaskReviewGate_NotRequiredNoDelivery();
-      case 1:
-        var var_workUnitId = sse_decode_String(deserializer);
-        return BridgeTaskReviewGate_NotRequiredSingleExecutor(
-          workUnitId: var_workUnitId,
-        );
-      case 2:
-        var var_reviewRoundId = sse_decode_String(deserializer);
-        return BridgeTaskReviewGate_IntegratedReview(
-          reviewRoundId: var_reviewRoundId,
-        );
-      default:
-        throw UnimplementedError('');
-    }
-  }
-
-  @protected
-  BridgeTaskReviewState sse_decode_bridge_task_review_state(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var tag_ = sse_decode_i_32(deserializer);
-    switch (tag_) {
-      case 0:
-        return BridgeTaskReviewState_PendingDispatch();
-      case 1:
-        var var_reviewerAgentId = sse_decode_String(deserializer);
-        return BridgeTaskReviewState_Dispatched(
-          reviewerAgentId: var_reviewerAgentId,
-        );
-      case 2:
-        var var_reviewerAgentId = sse_decode_String(deserializer);
-        return BridgeTaskReviewState_Running(
-          reviewerAgentId: var_reviewerAgentId,
-        );
-      case 3:
-        var var_reviewerAgentId = sse_decode_String(deserializer);
-        var var_summary = sse_decode_String(deserializer);
-        return BridgeTaskReviewState_Passed(
-          reviewerAgentId: var_reviewerAgentId,
-          summary: var_summary,
-        );
-      case 4:
-        var var_reviewerAgentId = sse_decode_String(deserializer);
-        var var_summary = sse_decode_String(deserializer);
-        return BridgeTaskReviewState_ChangesRequired(
-          reviewerAgentId: var_reviewerAgentId,
-          summary: var_summary,
-        );
-      case 5:
-        var var_reviewerAgentId = sse_decode_String(deserializer);
-        var var_summary = sse_decode_String(deserializer);
-        return BridgeTaskReviewState_Blocked(
-          reviewerAgentId: var_reviewerAgentId,
-          summary: var_summary,
-        );
-      case 6:
-        var var_reviewerAgentId = sse_decode_opt_String(deserializer);
-        var var_error = sse_decode_String(deserializer);
-        var var_summary = sse_decode_String(deserializer);
-        return BridgeTaskReviewState_Failed(
-          reviewerAgentId: var_reviewerAgentId,
-          error: var_error,
-          summary: var_summary,
-        );
-      case 7:
-        var var_reviewerAgentId = sse_decode_opt_String(deserializer);
-        var var_reason = sse_decode_String(deserializer);
-        var var_summary = sse_decode_String(deserializer);
-        return BridgeTaskReviewState_Cancelled(
-          reviewerAgentId: var_reviewerAgentId,
-          reason: var_reason,
-          summary: var_summary,
-        );
-      default:
-        throw UnimplementedError('');
-    }
-  }
-
-  @protected
-  BridgeTaskRuntimeDto sse_decode_bridge_task_runtime_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_runId = sse_decode_String(deserializer);
-    var var_state = sse_decode_bridge_task_state(deserializer);
-    var var_revision = sse_decode_u_64(deserializer);
-    var var_generation = sse_decode_u_64(deserializer);
-    var var_integratedReviewGate = sse_decode_bridge_integrated_review_gate_dto(
-      deserializer,
-    );
-    var var_issues = sse_decode_list_bridge_task_issue_dto(deserializer);
-    var var_workUnits = sse_decode_list_bridge_task_work_unit_dto(deserializer);
-    var var_completions = sse_decode_list_bridge_task_completion_dto(
-      deserializer,
-    );
-    var var_merges = sse_decode_list_bridge_task_merge_dto(deserializer);
-    var var_reviews = sse_decode_list_bridge_task_review_dto(deserializer);
-    return BridgeTaskRuntimeDto(
-      runId: var_runId,
-      state: var_state,
-      revision: var_revision,
-      generation: var_generation,
-      integratedReviewGate: var_integratedReviewGate,
-      issues: var_issues,
-      workUnits: var_workUnits,
-      completions: var_completions,
-      merges: var_merges,
-      reviews: var_reviews,
-    );
-  }
-
-  @protected
-  BridgeTaskSpawnCompensation sse_decode_bridge_task_spawn_compensation(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_allocation = sse_decode_bridge_task_spawn_compensation_state(
-      deserializer,
-    );
-    var var_worktree = sse_decode_bridge_task_spawn_compensation_state(
-      deserializer,
-    );
-    var var_childThread = sse_decode_bridge_task_spawn_compensation_state(
-      deserializer,
-    );
-    return BridgeTaskSpawnCompensation(
-      allocation: var_allocation,
-      worktree: var_worktree,
-      childThread: var_childThread,
-    );
-  }
-
-  @protected
-  BridgeTaskSpawnCompensationState
-  sse_decode_bridge_task_spawn_compensation_state(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var inner = sse_decode_i_32(deserializer);
-    return BridgeTaskSpawnCompensationState.values[inner];
-  }
-
-  @protected
-  BridgeTaskSpawnFailure sse_decode_bridge_task_spawn_failure(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_code = sse_decode_bridge_task_spawn_failure_code(deserializer);
-    var var_phase = sse_decode_bridge_task_spawn_failure_phase(deserializer);
-    var var_recoverable = sse_decode_bool(deserializer);
-    var var_message = sse_decode_String(deserializer);
-    var var_taskRunId = sse_decode_opt_String(deserializer);
-    var var_workUnitId = sse_decode_opt_String(deserializer);
-    var var_agentId = sse_decode_String(deserializer);
-    var var_resource = sse_decode_opt_box_autoadd_bridge_task_spawn_resource(
-      deserializer,
-    );
-    var var_cause = sse_decode_bridge_worktree_failure_cause(deserializer);
-    var var_compensation = sse_decode_bridge_task_spawn_compensation(
-      deserializer,
-    );
-    var var_nextAction = sse_decode_bridge_task_spawn_next_action(deserializer);
-    return BridgeTaskSpawnFailure(
-      code: var_code,
-      phase: var_phase,
-      recoverable: var_recoverable,
-      message: var_message,
-      taskRunId: var_taskRunId,
-      workUnitId: var_workUnitId,
-      agentId: var_agentId,
-      resource: var_resource,
-      cause: var_cause,
-      compensation: var_compensation,
-      nextAction: var_nextAction,
-    );
-  }
-
-  @protected
-  BridgeTaskSpawnFailureCode sse_decode_bridge_task_spawn_failure_code(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var inner = sse_decode_i_32(deserializer);
-    return BridgeTaskSpawnFailureCode.values[inner];
-  }
-
-  @protected
-  BridgeTaskSpawnFailurePhase sse_decode_bridge_task_spawn_failure_phase(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var inner = sse_decode_i_32(deserializer);
-    return BridgeTaskSpawnFailurePhase.values[inner];
-  }
-
-  @protected
-  BridgeTaskSpawnNextAction sse_decode_bridge_task_spawn_next_action(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var inner = sse_decode_i_32(deserializer);
-    return BridgeTaskSpawnNextAction.values[inner];
-  }
-
-  @protected
-  BridgeTaskSpawnResource sse_decode_bridge_task_spawn_resource(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_repoRoot = sse_decode_String(deserializer);
-    var var_path = sse_decode_String(deserializer);
-    var var_branch = sse_decode_String(deserializer);
-    var var_baseRef = sse_decode_String(deserializer);
-    return BridgeTaskSpawnResource(
-      repoRoot: var_repoRoot,
-      path: var_path,
-      branch: var_branch,
-      baseRef: var_baseRef,
-    );
-  }
-
-  @protected
-  BridgeTaskState sse_decode_bridge_task_state(SseDeserializer deserializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var tag_ = sse_decode_i_32(deserializer);
-    switch (tag_) {
-      case 0:
-        var var_field0 = sse_decode_box_autoadd_bridge_planning_task_state(
-          deserializer,
-        );
-        return BridgeTaskState_Planning(var_field0);
-      case 1:
-        var var_field0 =
-            sse_decode_box_autoadd_bridge_pending_confirmation_task_state(
-              deserializer,
-            );
-        return BridgeTaskState_PendingConfirmation(var_field0);
-      case 2:
-        var var_field0 =
-            sse_decode_box_autoadd_bridge_editing_documents_task_state(
-              deserializer,
-            );
-        return BridgeTaskState_EditingDocuments(var_field0);
-      case 3:
-        var var_field0 = sse_decode_box_autoadd_bridge_working_task_state(
-          deserializer,
-        );
-        return BridgeTaskState_Working(var_field0);
-      case 4:
-        var var_field0 = sse_decode_box_autoadd_bridge_reviewing_task_state(
-          deserializer,
-        );
-        return BridgeTaskState_Reviewing(var_field0);
-      case 5:
-        var var_field0 = sse_decode_box_autoadd_bridge_completed_task_state(
-          deserializer,
-        );
-        return BridgeTaskState_Completed(var_field0);
-      default:
-        throw UnimplementedError('');
-    }
-  }
-
-  @protected
-  BridgeTaskWorkUnitDto sse_decode_bridge_task_work_unit_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_id = sse_decode_String(deserializer);
-    var var_title = sse_decode_String(deserializer);
-    var var_state = sse_decode_bridge_task_work_unit_state(deserializer);
-    var var_worktreePath = sse_decode_String(deserializer);
-    var var_branch = sse_decode_String(deserializer);
-    var var_agentId = sse_decode_opt_String(deserializer);
-    var var_attempt = sse_decode_u_32(deserializer);
-    var var_supersedesWorkUnitId = sse_decode_opt_String(deserializer);
-    var var_budgetSliceLimit = sse_decode_u_32(deserializer);
-    var var_executorProgressRevision = sse_decode_u_64(deserializer);
-    var var_blueprintFingerprint = sse_decode_opt_String(deserializer);
-    var var_objective = sse_decode_opt_String(deserializer);
-    var var_implementationStepCount = sse_decode_usize(deserializer);
-    var var_acceptanceCriterionCount = sse_decode_usize(deserializer);
-    var var_verificationCount = sse_decode_usize(deserializer);
-    return BridgeTaskWorkUnitDto(
-      id: var_id,
-      title: var_title,
-      state: var_state,
-      worktreePath: var_worktreePath,
-      branch: var_branch,
-      agentId: var_agentId,
-      attempt: var_attempt,
-      supersedesWorkUnitId: var_supersedesWorkUnitId,
-      budgetSliceLimit: var_budgetSliceLimit,
-      executorProgressRevision: var_executorProgressRevision,
-      blueprintFingerprint: var_blueprintFingerprint,
-      objective: var_objective,
-      implementationStepCount: var_implementationStepCount,
-      acceptanceCriterionCount: var_acceptanceCriterionCount,
-      verificationCount: var_verificationCount,
-    );
-  }
-
-  @protected
-  BridgeTaskWorkUnitState sse_decode_bridge_task_work_unit_state(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var tag_ = sse_decode_i_32(deserializer);
-    switch (tag_) {
-      case 0:
-        var var_field0 = sse_decode_box_autoadd_bridge_pending_work_unit(
-          deserializer,
-        );
-        return BridgeTaskWorkUnitState_Pending(var_field0);
-      case 1:
-        var var_field0 = sse_decode_box_autoadd_bridge_running_work_unit(
-          deserializer,
-        );
-        return BridgeTaskWorkUnitState_Running(var_field0);
-      case 2:
-        var var_field0 = sse_decode_box_autoadd_bridge_waiting_review_work_unit(
-          deserializer,
-        );
-        return BridgeTaskWorkUnitState_WaitingReview(var_field0);
-      case 3:
-        var var_field0 = sse_decode_box_autoadd_bridge_review_passed_work_unit(
-          deserializer,
-        );
-        return BridgeTaskWorkUnitState_ReviewPassed(var_field0);
-      case 4:
-        var var_field0 =
-            sse_decode_box_autoadd_bridge_changes_required_work_unit(
-              deserializer,
-            );
-        return BridgeTaskWorkUnitState_ChangesRequired(var_field0);
-      case 5:
-        var var_field0 = sse_decode_box_autoadd_bridge_paused_work_unit(
-          deserializer,
-        );
-        return BridgeTaskWorkUnitState_Paused(var_field0);
-      case 6:
-        var var_field0 = sse_decode_box_autoadd_bridge_completed_work_unit(
-          deserializer,
-        );
-        return BridgeTaskWorkUnitState_Completed(var_field0);
-      case 7:
-        var var_field0 = sse_decode_box_autoadd_bridge_failed_work_unit(
-          deserializer,
-        );
-        return BridgeTaskWorkUnitState_Failed(var_field0);
-      case 8:
-        var var_field0 = sse_decode_box_autoadd_bridge_cancelled_work_unit(
-          deserializer,
-        );
-        return BridgeTaskWorkUnitState_Cancelled(var_field0);
-      default:
-        throw UnimplementedError('');
-    }
-  }
-
-  @protected
-  BridgeTaskWorktreeDisposition sse_decode_bridge_task_worktree_disposition(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var inner = sse_decode_i_32(deserializer);
-    return BridgeTaskWorktreeDisposition.values[inner];
-  }
-
-  @protected
   BridgeThread sse_decode_bridge_thread(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_id = sse_decode_String(deserializer);
     var var_projectId = sse_decode_String(deserializer);
     var var_title = sse_decode_String(deserializer);
-    var var_mode = sse_decode_bridge_thread_mode(deserializer);
+    var var_mode = sse_decode_String(deserializer);
     var var_rootThreadId = sse_decode_String(deserializer);
     var var_parentThreadId = sse_decode_opt_String(deserializer);
     var var_role = sse_decode_String(deserializer);
@@ -16259,11 +12725,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         );
       case 3:
         var var_delta = sse_decode_String(deserializer);
-        return BridgeThreadItemDeltaState_Plan(delta: var_delta);
-      case 4:
-        var var_delta = sse_decode_String(deserializer);
         return BridgeThreadItemDeltaState_ToolArguments(delta: var_delta);
-      case 5:
+      case 4:
         var var_delta = sse_decode_String(deserializer);
         return BridgeThreadItemDeltaState_ToolResult(delta: var_delta);
       default:
@@ -16343,16 +12806,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           state: var_state,
         );
       case 6:
-        var var_content = sse_decode_String(deserializer);
-        var var_lifecycle =
-            sse_decode_box_autoadd_bridge_thread_content_lifecycle(
-              deserializer,
-            );
-        return BridgeThreadItemState_Plan(
-          content: var_content,
-          lifecycle: var_lifecycle,
-        );
-      case 7:
         var var_name = sse_decode_String(deserializer);
         var var_source = sse_decode_String(deserializer);
         var var_providerId = sse_decode_String(deserializer);
@@ -16370,7 +12823,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           cause: var_cause,
           activatedAt: var_activatedAt,
         );
-      case 8:
+      case 7:
         var var_path = sse_decode_String(deserializer);
         var var_mediaType = sse_decode_opt_String(deserializer);
         var var_completedAt = sse_decode_i_64(deserializer);
@@ -16379,7 +12832,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           mediaType: var_mediaType,
           completedAt: var_completedAt,
         );
-      case 9:
+      case 8:
         var var_beforeTokens = sse_decode_u_64(deserializer);
         var var_afterTokens = sse_decode_u_64(deserializer);
         var var_compactedAt = sse_decode_i_64(deserializer);
@@ -16446,13 +12899,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       endpoint: var_endpoint,
       builtIn: var_builtIn,
     );
-  }
-
-  @protected
-  BridgeThreadMode sse_decode_bridge_thread_mode(SseDeserializer deserializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var inner = sse_decode_i_32(deserializer);
-    return BridgeThreadMode.values[inner];
   }
 
   @protected
@@ -16548,6 +12994,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_decode_opt_box_autoadd_bridge_thread_mcp_health_snapshot(
           deserializer,
         );
+    var var_workflow =
+        sse_decode_opt_box_autoadd_bridge_workflow_runtime_snapshot(
+          deserializer,
+        );
     var var_updatedAt = sse_decode_i_64(deserializer);
     return BridgeThreadRuntimeSnapshot(
       threadId: var_threadId,
@@ -16560,6 +13010,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       activeLspServers: var_activeLspServers,
       progress: var_progress,
       mcpHealth: var_mcpHealth,
+      workflow: var_workflow,
       updatedAt: var_updatedAt,
     );
   }
@@ -17413,61 +13864,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeWaitingReviewPhase sse_decode_bridge_waiting_review_phase(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var tag_ = sse_decode_i_32(deserializer);
-    switch (tag_) {
-      case 0:
-        var var_outcome =
-            sse_decode_box_autoadd_bridge_executor_terminal_outcome(
-              deserializer,
-            );
-        var var_continuation =
-            sse_decode_box_autoadd_bridge_executor_continuation_state(
-              deserializer,
-            );
-        return BridgeWaitingReviewPhase_AwaitingReport(
-          outcome: var_outcome,
-          continuation: var_continuation,
-        );
-      case 1:
-        var var_completionId = sse_decode_String(deserializer);
-        var var_completionRevision = sse_decode_u_32(deserializer);
-        var var_verificationSummary = sse_decode_String(deserializer);
-        return BridgeWaitingReviewPhase_Ready(
-          completionId: var_completionId,
-          completionRevision: var_completionRevision,
-          verificationSummary: var_verificationSummary,
-        );
-      case 2:
-        var var_completionId = sse_decode_String(deserializer);
-        var var_completionRevision = sse_decode_u_32(deserializer);
-        var var_reviewRoundId = sse_decode_String(deserializer);
-        var var_verificationSummary = sse_decode_String(deserializer);
-        return BridgeWaitingReviewPhase_Reviewing(
-          completionId: var_completionId,
-          completionRevision: var_completionRevision,
-          reviewRoundId: var_reviewRoundId,
-          verificationSummary: var_verificationSummary,
-        );
-      default:
-        throw UnimplementedError('');
-    }
-  }
-
-  @protected
-  BridgeWaitingReviewWorkUnit sse_decode_bridge_waiting_review_work_unit(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_phase = sse_decode_bridge_waiting_review_phase(deserializer);
-    return BridgeWaitingReviewWorkUnit(phase: var_phase);
-  }
-
-  @protected
   BridgeWaitingToolAgent sse_decode_bridge_waiting_tool_agent(
     SseDeserializer deserializer,
   ) {
@@ -17522,112 +13918,144 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeWorkUnitCompletionOutcome
-  sse_decode_bridge_work_unit_completion_outcome(SseDeserializer deserializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var tag_ = sse_decode_i_32(deserializer);
-    switch (tag_) {
-      case 0:
-        var var_mergeRecordId = sse_decode_String(deserializer);
-        return BridgeWorkUnitCompletionOutcome_Merged(
-          mergeRecordId: var_mergeRecordId,
-        );
-      case 1:
-        var var_completionId = sse_decode_String(deserializer);
-        return BridgeWorkUnitCompletionOutcome_NoDelivery(
-          completionId: var_completionId,
-        );
-      default:
-        throw UnimplementedError('');
-    }
-  }
-
-  @protected
-  BridgeWorkUnitFailure sse_decode_bridge_work_unit_failure(
+  BridgeWorkflowDefinition sse_decode_bridge_workflow_definition(
     SseDeserializer deserializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var tag_ = sse_decode_i_32(deserializer);
-    switch (tag_) {
-      case 0:
-        var var_failure = sse_decode_box_bridge_task_spawn_failure(
-          deserializer,
-        );
-        return BridgeWorkUnitFailure_Spawn(failure: var_failure);
-      case 1:
-        var var_operationId = sse_decode_String(deserializer);
-        var var_detail = sse_decode_String(deserializer);
-        return BridgeWorkUnitFailure_Execution(
-          operationId: var_operationId,
-          detail: var_detail,
-        );
-      default:
-        throw UnimplementedError('');
-    }
-  }
-
-  @protected
-  BridgeWorkUnitPauseReason sse_decode_bridge_work_unit_pause_reason(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var tag_ = sse_decode_i_32(deserializer);
-    switch (tag_) {
-      case 0:
-        var var_limit = sse_decode_box_autoadd_bridge_budget_limit_dto(
-          deserializer,
-        );
-        return BridgeWorkUnitPauseReason_Budget(limit: var_limit);
-      case 1:
-        var var_operationId = sse_decode_String(deserializer);
-        var var_detail = sse_decode_String(deserializer);
-        return BridgeWorkUnitPauseReason_Operational(
-          operationId: var_operationId,
-          detail: var_detail,
-        );
-      default:
-        throw UnimplementedError('');
-    }
-  }
-
-  @protected
-  BridgeWorkingTaskState sse_decode_bridge_working_task_state(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_documentEditSummary = sse_decode_String(deserializer);
-    return BridgeWorkingTaskState(documentEditSummary: var_documentEditSummary);
-  }
-
-  @protected
-  BridgeWorktreeFailureCause sse_decode_bridge_worktree_failure_cause(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_kind = sse_decode_bridge_worktree_failure_cause_kind(deserializer);
-    var var_message = sse_decode_String(deserializer);
-    var var_args = sse_decode_opt_String(deserializer);
-    var var_exitCode = sse_decode_opt_box_autoadd_i_32(deserializer);
-    var var_stderr = sse_decode_opt_String(deserializer);
-    return BridgeWorktreeFailureCause(
-      kind: var_kind,
-      message: var_message,
-      args: var_args,
-      exitCode: var_exitCode,
-      stderr: var_stderr,
+    var var_title = sse_decode_String(deserializer);
+    var var_goal = sse_decode_String(deserializer);
+    var var_initialStageId = sse_decode_String(deserializer);
+    var var_stages = sse_decode_list_bridge_workflow_stage(deserializer);
+    var var_transitions = sse_decode_list_bridge_workflow_transition(
+      deserializer,
+    );
+    return BridgeWorkflowDefinition(
+      title: var_title,
+      goal: var_goal,
+      initialStageId: var_initialStageId,
+      stages: var_stages,
+      transitions: var_transitions,
     );
   }
 
   @protected
-  BridgeWorktreeFailureCauseKind sse_decode_bridge_worktree_failure_cause_kind(
+  BridgeWorkflowRun sse_decode_bridge_workflow_run(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_lineageId = sse_decode_String(deserializer);
+    var var_runId = sse_decode_String(deserializer);
+    var var_definition = sse_decode_bridge_workflow_definition(deserializer);
+    var var_definitionHash = sse_decode_String(deserializer);
+    var var_mode = sse_decode_bridge_mode_instruction_snapshot(deserializer);
+    var var_lifecycle = sse_decode_bridge_workflow_run_lifecycle(deserializer);
+    var var_currentStageId = sse_decode_String(deserializer);
+    var var_compiledAt = sse_decode_i_64(deserializer);
+    var var_updatedAt = sse_decode_i_64(deserializer);
+    var var_historyTail = sse_decode_list_bridge_workflow_transition_record(
+      deserializer,
+    );
+    var var_archivedTransitionCount = sse_decode_u_64(deserializer);
+    var var_archivedTransitionDigest = sse_decode_String(deserializer);
+    return BridgeWorkflowRun(
+      lineageId: var_lineageId,
+      runId: var_runId,
+      definition: var_definition,
+      definitionHash: var_definitionHash,
+      mode: var_mode,
+      lifecycle: var_lifecycle,
+      currentStageId: var_currentStageId,
+      compiledAt: var_compiledAt,
+      updatedAt: var_updatedAt,
+      historyTail: var_historyTail,
+      archivedTransitionCount: var_archivedTransitionCount,
+      archivedTransitionDigest: var_archivedTransitionDigest,
+    );
+  }
+
+  @protected
+  BridgeWorkflowRunLifecycle sse_decode_bridge_workflow_run_lifecycle(
     SseDeserializer deserializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var inner = sse_decode_i_32(deserializer);
-    return BridgeWorktreeFailureCauseKind.values[inner];
+    return BridgeWorkflowRunLifecycle.values[inner];
+  }
+
+  @protected
+  BridgeWorkflowRuntimeSnapshot sse_decode_bridge_workflow_runtime_snapshot(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_revision = sse_decode_u_64(deserializer);
+    var var_currentRun = sse_decode_opt_box_autoadd_bridge_workflow_run(
+      deserializer,
+    );
+    return BridgeWorkflowRuntimeSnapshot(
+      revision: var_revision,
+      currentRun: var_currentRun,
+    );
+  }
+
+  @protected
+  BridgeWorkflowStage sse_decode_bridge_workflow_stage(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_String(deserializer);
+    var var_title = sse_decode_String(deserializer);
+    var var_instructions = sse_decode_String(deserializer);
+    var var_completionCriteria = sse_decode_list_String(deserializer);
+    var var_terminal = sse_decode_bool(deserializer);
+    return BridgeWorkflowStage(
+      id: var_id,
+      title: var_title,
+      instructions: var_instructions,
+      completionCriteria: var_completionCriteria,
+      terminal: var_terminal,
+    );
+  }
+
+  @protected
+  BridgeWorkflowTransition sse_decode_bridge_workflow_transition(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_fromStageId = sse_decode_String(deserializer);
+    var var_toStageId = sse_decode_String(deserializer);
+    var var_when = sse_decode_String(deserializer);
+    return BridgeWorkflowTransition(
+      fromStageId: var_fromStageId,
+      toStageId: var_toStageId,
+      when: var_when,
+    );
+  }
+
+  @protected
+  BridgeWorkflowTransitionRecord sse_decode_bridge_workflow_transition_record(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_revision = sse_decode_u_64(deserializer);
+    var var_fromStageId = sse_decode_String(deserializer);
+    var var_toStageId = sse_decode_String(deserializer);
+    var var_reason = sse_decode_String(deserializer);
+    var var_summary = sse_decode_String(deserializer);
+    var var_evidence = sse_decode_list_String(deserializer);
+    var var_turnId = sse_decode_String(deserializer);
+    var var_callId = sse_decode_String(deserializer);
+    var var_transitionedAt = sse_decode_i_64(deserializer);
+    return BridgeWorkflowTransitionRecord(
+      revision: var_revision,
+      fromStageId: var_fromStageId,
+      toStageId: var_toStageId,
+      reason: var_reason,
+      summary: var_summary,
+      evidence: var_evidence,
+      turnId: var_turnId,
+      callId: var_callId,
+      transitionedAt: var_transitionedAt,
+    );
   }
 
   @protected
@@ -17769,6 +14197,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<BridgeAgentProfileDto> sse_decode_list_bridge_agent_profile_dto(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <BridgeAgentProfileDto>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_bridge_agent_profile_dto(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   List<BridgeAttachmentDraft> sse_decode_list_bridge_attachment_draft(
     SseDeserializer deserializer,
   ) {
@@ -17791,21 +14233,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var ans_ = <BridgeAttachmentDraftSource>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
       ans_.add(sse_decode_bridge_attachment_draft_source(deserializer));
-    }
-    return ans_;
-  }
-
-  @protected
-  List<BridgeConversationRecoveryMode>
-  sse_decode_list_bridge_conversation_recovery_mode(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var len_ = sse_decode_i_32(deserializer);
-    var ans_ = <BridgeConversationRecoveryMode>[];
-    for (var idx_ = 0; idx_ < len_; ++idx_) {
-      ans_.add(sse_decode_bridge_conversation_recovery_mode(deserializer));
     }
     return ans_;
   }
@@ -18042,21 +14469,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  List<BridgeRecoveryCleanupResourceDto>
-  sse_decode_list_bridge_recovery_cleanup_resource_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var len_ = sse_decode_i_32(deserializer);
-    var ans_ = <BridgeRecoveryCleanupResourceDto>[];
-    for (var idx_ = 0; idx_ < len_; ++idx_) {
-      ans_.add(sse_decode_bridge_recovery_cleanup_resource_dto(deserializer));
-    }
-    return ans_;
-  }
-
-  @protected
   List<BridgeRecoveryIssueAction> sse_decode_list_bridge_recovery_issue_action(
     SseDeserializer deserializer,
   ) {
@@ -18137,147 +14549,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var ans_ = <BridgeStudioRecoveryIssueDto>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
       ans_.add(sse_decode_bridge_studio_recovery_issue_dto(deserializer));
-    }
-    return ans_;
-  }
-
-  @protected
-  List<BridgeTaskCompletionDto> sse_decode_list_bridge_task_completion_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var len_ = sse_decode_i_32(deserializer);
-    var ans_ = <BridgeTaskCompletionDto>[];
-    for (var idx_ = 0; idx_ < len_; ++idx_) {
-      ans_.add(sse_decode_bridge_task_completion_dto(deserializer));
-    }
-    return ans_;
-  }
-
-  @protected
-  List<BridgeTaskDesignReferenceDto>
-  sse_decode_list_bridge_task_design_reference_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var len_ = sse_decode_i_32(deserializer);
-    var ans_ = <BridgeTaskDesignReferenceDto>[];
-    for (var idx_ = 0; idx_ < len_; ++idx_) {
-      ans_.add(sse_decode_bridge_task_design_reference_dto(deserializer));
-    }
-    return ans_;
-  }
-
-  @protected
-  List<BridgeTaskDirectoryEntry> sse_decode_list_bridge_task_directory_entry(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var len_ = sse_decode_i_32(deserializer);
-    var ans_ = <BridgeTaskDirectoryEntry>[];
-    for (var idx_ = 0; idx_ < len_; ++idx_) {
-      ans_.add(sse_decode_bridge_task_directory_entry(deserializer));
-    }
-    return ans_;
-  }
-
-  @protected
-  List<BridgeTaskIssueDto> sse_decode_list_bridge_task_issue_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var len_ = sse_decode_i_32(deserializer);
-    var ans_ = <BridgeTaskIssueDto>[];
-    for (var idx_ = 0; idx_ < len_; ++idx_) {
-      ans_.add(sse_decode_bridge_task_issue_dto(deserializer));
-    }
-    return ans_;
-  }
-
-  @protected
-  List<BridgeTaskMergeDto> sse_decode_list_bridge_task_merge_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var len_ = sse_decode_i_32(deserializer);
-    var ans_ = <BridgeTaskMergeDto>[];
-    for (var idx_ = 0; idx_ < len_; ++idx_) {
-      ans_.add(sse_decode_bridge_task_merge_dto(deserializer));
-    }
-    return ans_;
-  }
-
-  @protected
-  List<BridgeTaskRecoveryTargetDto>
-  sse_decode_list_bridge_task_recovery_target_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var len_ = sse_decode_i_32(deserializer);
-    var ans_ = <BridgeTaskRecoveryTargetDto>[];
-    for (var idx_ = 0; idx_ < len_; ++idx_) {
-      ans_.add(sse_decode_bridge_task_recovery_target_dto(deserializer));
-    }
-    return ans_;
-  }
-
-  @protected
-  List<BridgeTaskRecoveryTurnDto> sse_decode_list_bridge_task_recovery_turn_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var len_ = sse_decode_i_32(deserializer);
-    var ans_ = <BridgeTaskRecoveryTurnDto>[];
-    for (var idx_ = 0; idx_ < len_; ++idx_) {
-      ans_.add(sse_decode_bridge_task_recovery_turn_dto(deserializer));
-    }
-    return ans_;
-  }
-
-  @protected
-  List<BridgeTaskReviewDto> sse_decode_list_bridge_task_review_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var len_ = sse_decode_i_32(deserializer);
-    var ans_ = <BridgeTaskReviewDto>[];
-    for (var idx_ = 0; idx_ < len_; ++idx_) {
-      ans_.add(sse_decode_bridge_task_review_dto(deserializer));
-    }
-    return ans_;
-  }
-
-  @protected
-  List<BridgeTaskReviewFindingDto>
-  sse_decode_list_bridge_task_review_finding_dto(SseDeserializer deserializer) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var len_ = sse_decode_i_32(deserializer);
-    var ans_ = <BridgeTaskReviewFindingDto>[];
-    for (var idx_ = 0; idx_ < len_; ++idx_) {
-      ans_.add(sse_decode_bridge_task_review_finding_dto(deserializer));
-    }
-    return ans_;
-  }
-
-  @protected
-  List<BridgeTaskWorkUnitDto> sse_decode_list_bridge_task_work_unit_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    var len_ = sse_decode_i_32(deserializer);
-    var ans_ = <BridgeTaskWorkUnitDto>[];
-    for (var idx_ = 0; idx_ < len_; ++idx_) {
-      ans_.add(sse_decode_bridge_task_work_unit_dto(deserializer));
     }
     return ans_;
   }
@@ -18412,6 +14683,49 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<BridgeWorkflowStage> sse_decode_list_bridge_workflow_stage(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <BridgeWorkflowStage>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_bridge_workflow_stage(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<BridgeWorkflowTransition> sse_decode_list_bridge_workflow_transition(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <BridgeWorkflowTransition>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_bridge_workflow_transition(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<BridgeWorkflowTransitionRecord>
+  sse_decode_list_bridge_workflow_transition_record(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <BridgeWorkflowTransitionRecord>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_bridge_workflow_transition_record(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   List<DeepSeekBalanceInfoDto> sse_decode_list_deep_seek_balance_info_dto(
     SseDeserializer deserializer,
   ) {
@@ -18435,6 +14749,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var ans_ = <McpServerInput>[];
     for (var idx_ = 0; idx_ < len_; ++idx_) {
       ans_.add(sse_decode_mcp_server_input(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
+  List<ModeSummaryDto> sse_decode_list_mode_summary_dto(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    var len_ = sse_decode_i_32(deserializer);
+    var ans_ = <ModeSummaryDto>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_mode_summary_dto(deserializer));
     }
     return ans_;
   }
@@ -18674,6 +15002,25 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  ModeSummaryDto sse_decode_mode_summary_dto(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_id = sse_decode_String(deserializer);
+    var var_displayName = sse_decode_String(deserializer);
+    var var_description = sse_decode_String(deserializer);
+    var var_order = sse_decode_i_32(deserializer);
+    var var_source = sse_decode_String(deserializer);
+    var var_providerId = sse_decode_String(deserializer);
+    return ModeSummaryDto(
+      id: var_id,
+      displayName: var_displayName,
+      description: var_description,
+      order: var_order,
+      source: var_source,
+      providerId: var_providerId,
+    );
+  }
+
+  @protected
   String? sse_decode_opt_String(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -18759,20 +15106,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeTaskSpawnResource?
-  sse_decode_opt_box_autoadd_bridge_task_spawn_resource(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    if (sse_decode_bool(deserializer)) {
-      return (sse_decode_box_autoadd_bridge_task_spawn_resource(deserializer));
-    } else {
-      return null;
-    }
-  }
-
-  @protected
   BridgeThread? sse_decode_opt_box_autoadd_bridge_thread(
     SseDeserializer deserializer,
   ) {
@@ -18851,6 +15184,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
     if (sse_decode_bool(deserializer)) {
       return (sse_decode_box_autoadd_bridge_turn(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  BridgeWorkflowRun? sse_decode_opt_box_autoadd_bridge_workflow_run(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_bridge_workflow_run(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  BridgeWorkflowRuntimeSnapshot?
+  sse_decode_opt_box_autoadd_bridge_workflow_runtime_snapshot(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_bridge_workflow_runtime_snapshot(
+        deserializer,
+      ));
     } else {
       return null;
     }
@@ -19689,39 +16051,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_box_autoadd_bridge_budget_limit_dto(
-    BridgeBudgetLimitDto self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_budget_limit_dto(self, serializer);
-  }
-
-  @protected
-  void sse_encode_box_autoadd_bridge_cancelled_work_unit(
-    BridgeCancelledWorkUnit self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_cancelled_work_unit(self, serializer);
-  }
-
-  @protected
   void sse_encode_box_autoadd_bridge_cancelling_agent(
     BridgeCancellingAgent self,
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_bridge_cancelling_agent(self, serializer);
-  }
-
-  @protected
-  void sse_encode_box_autoadd_bridge_changes_required_work_unit(
-    BridgeChangesRequiredWorkUnit self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_changes_required_work_unit(self, serializer);
   }
 
   @protected
@@ -19761,24 +16096,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_box_autoadd_bridge_completed_task_state(
-    BridgeCompletedTaskState self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_completed_task_state(self, serializer);
-  }
-
-  @protected
-  void sse_encode_box_autoadd_bridge_completed_work_unit(
-    BridgeCompletedWorkUnit self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_completed_work_unit(self, serializer);
-  }
-
-  @protected
   void sse_encode_box_autoadd_bridge_config_recovery_report(
     BridgeConfigRecoveryReport self,
     SseSerializer serializer,
@@ -19815,39 +16132,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_box_autoadd_bridge_editing_documents_task_state(
-    BridgeEditingDocumentsTaskState self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_editing_documents_task_state(self, serializer);
-  }
-
-  @protected
   void sse_encode_box_autoadd_bridge_error(
     BridgeError self,
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_bridge_error(self, serializer);
-  }
-
-  @protected
-  void sse_encode_box_autoadd_bridge_executor_continuation_state(
-    BridgeExecutorContinuationState self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_executor_continuation_state(self, serializer);
-  }
-
-  @protected
-  void sse_encode_box_autoadd_bridge_executor_terminal_outcome(
-    BridgeExecutorTerminalOutcome self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_executor_terminal_outcome(self, serializer);
   }
 
   @protected
@@ -19866,15 +16156,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_bridge_failed_runtime_state(self, serializer);
-  }
-
-  @protected
-  void sse_encode_box_autoadd_bridge_failed_work_unit(
-    BridgeFailedWorkUnit self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_failed_work_unit(self, serializer);
   }
 
   @protected
@@ -20022,57 +16303,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_box_autoadd_bridge_paused_work_unit(
-    BridgePausedWorkUnit self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_paused_work_unit(self, serializer);
-  }
-
-  @protected
-  void sse_encode_box_autoadd_bridge_pending_confirmation_task_state(
-    BridgePendingConfirmationTaskState self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_pending_confirmation_task_state(self, serializer);
-  }
-
-  @protected
-  void sse_encode_box_autoadd_bridge_pending_work_unit(
-    BridgePendingWorkUnit self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_pending_work_unit(self, serializer);
-  }
-
-  @protected
   void sse_encode_box_autoadd_bridge_persistence_state_snapshot(
     BridgePersistenceStateSnapshot self,
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_bridge_persistence_state_snapshot(self, serializer);
-  }
-
-  @protected
-  void sse_encode_box_autoadd_bridge_plan_confirmation_interaction_state(
-    BridgePlanConfirmationInteractionState self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_plan_confirmation_interaction_state(self, serializer);
-  }
-
-  @protected
-  void sse_encode_box_autoadd_bridge_planning_task_state(
-    BridgePlanningTaskState self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_planning_task_state(self, serializer);
   }
 
   @protected
@@ -20139,15 +16375,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_box_autoadd_bridge_ready_for_review_completion(
-    BridgeReadyForReviewCompletion self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_ready_for_review_completion(self, serializer);
-  }
-
-  @protected
   void sse_encode_box_autoadd_bridge_ready_resource(
     BridgeReadyResource self,
     SseSerializer serializer,
@@ -20184,48 +16411,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_box_autoadd_bridge_review_passed_work_unit(
-    BridgeReviewPassedWorkUnit self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_review_passed_work_unit(self, serializer);
-  }
-
-  @protected
-  void sse_encode_box_autoadd_bridge_reviewed_completion(
-    BridgeReviewedCompletion self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_reviewed_completion(self, serializer);
-  }
-
-  @protected
-  void sse_encode_box_autoadd_bridge_reviewing_task_state(
-    BridgeReviewingTaskState self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_reviewing_task_state(self, serializer);
-  }
-
-  @protected
   void sse_encode_box_autoadd_bridge_running_agent(
     BridgeRunningAgent self,
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_bridge_running_agent(self, serializer);
-  }
-
-  @protected
-  void sse_encode_box_autoadd_bridge_running_work_unit(
-    BridgeRunningWorkUnit self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_running_work_unit(self, serializer);
   }
 
   @protected
@@ -20316,78 +16507,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_bridge_studio_prompt_input(self, serializer);
-  }
-
-  @protected
-  void sse_encode_box_autoadd_bridge_task_delivery_completion(
-    BridgeTaskDeliveryCompletion self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_task_delivery_completion(self, serializer);
-  }
-
-  @protected
-  void sse_encode_box_autoadd_bridge_task_directory_data(
-    BridgeTaskDirectoryData self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_task_directory_data(self, serializer);
-  }
-
-  @protected
-  void sse_encode_box_autoadd_bridge_task_directory_state(
-    BridgeTaskDirectoryState self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_task_directory_state(self, serializer);
-  }
-
-  @protected
-  void sse_encode_box_autoadd_bridge_task_failure_detail(
-    BridgeTaskFailureDetail self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_task_failure_detail(self, serializer);
-  }
-
-  @protected
-  void sse_encode_box_autoadd_bridge_task_no_delivery_completion(
-    BridgeTaskNoDeliveryCompletion self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_task_no_delivery_completion(self, serializer);
-  }
-
-  @protected
-  void sse_encode_box_autoadd_bridge_task_recovery_request_dto(
-    BridgeTaskRecoveryRequestDto self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_task_recovery_request_dto(self, serializer);
-  }
-
-  @protected
-  void sse_encode_box_autoadd_bridge_task_review_gate(
-    BridgeTaskReviewGate self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_task_review_gate(self, serializer);
-  }
-
-  @protected
-  void sse_encode_box_autoadd_bridge_task_spawn_resource(
-    BridgeTaskSpawnResource self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_task_spawn_resource(self, serializer);
   }
 
   @protected
@@ -20643,15 +16762,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_box_autoadd_bridge_waiting_review_work_unit(
-    BridgeWaitingReviewWorkUnit self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_waiting_review_work_unit(self, serializer);
-  }
-
-  @protected
   void sse_encode_box_autoadd_bridge_waiting_tool_agent(
     BridgeWaitingToolAgent self,
     SseSerializer serializer,
@@ -20661,12 +16771,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_box_autoadd_bridge_working_task_state(
-    BridgeWorkingTaskState self,
+  void sse_encode_box_autoadd_bridge_workflow_run(
+    BridgeWorkflowRun self,
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_working_task_state(self, serializer);
+    sse_encode_bridge_workflow_run(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_bridge_workflow_runtime_snapshot(
+    BridgeWorkflowRuntimeSnapshot self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bridge_workflow_runtime_snapshot(self, serializer);
   }
 
   @protected
@@ -20853,15 +16972,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_box_bridge_task_spawn_failure(
-    BridgeTaskSpawnFailure self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_task_spawn_failure(self, serializer);
-  }
-
-  @protected
   void sse_encode_box_bridge_thread_item(
     BridgeThreadItem self,
     SseSerializer serializer,
@@ -21018,6 +17128,27 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_bridge_agent_profile_dto(
+    BridgeAgentProfileDto self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.profileId, serializer);
+    sse_encode_String(self.displayName, serializer);
+    sse_encode_String(self.description, serializer);
+    sse_encode_String(self.whenToUse, serializer);
+    sse_encode_String(self.systemInstructions, serializer);
+    sse_encode_String(self.providerId, serializer);
+    sse_encode_String(self.model, serializer);
+    sse_encode_opt_String(self.effort, serializer);
+    sse_encode_String(self.source, serializer);
+    sse_encode_String(self.revision, serializer);
+    sse_encode_String(self.contentHash, serializer);
+    sse_encode_bool(self.system, serializer);
+    sse_encode_bool(self.enabled, serializer);
+  }
+
+  @protected
   void sse_encode_bridge_agent_progress_dto(
     BridgeAgentProgressDto self,
     SseSerializer serializer,
@@ -21084,7 +17215,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(threadId, serializer);
       case BridgeAttachmentAdmissionContext_NewThread(mode: final mode):
         sse_encode_i_32(1, serializer);
-        sse_encode_bridge_thread_mode(mode, serializer);
+        sse_encode_String(mode, serializer);
     }
   }
 
@@ -21144,70 +17275,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_bridge_budget_limit_dto(
-    BridgeBudgetLimitDto self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_budget_limit_kind(self.kind, serializer);
-    sse_encode_bridge_budget_usage_dto(self.usage, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_budget_limit_kind(
-    BridgeBudgetLimitKind self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.index, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_budget_usage_dto(
-    BridgeBudgetUsageDto self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_u_32(self.modelSteps, serializer);
-    sse_encode_u_32(self.toolCalls, serializer);
-    sse_encode_u_32(self.waitCalls, serializer);
-    sse_encode_u_64(self.elapsedMs, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_cancelled_work_unit(
-    BridgeCancelledWorkUnit self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.operationId, serializer);
-    sse_encode_String(self.reason, serializer);
-    sse_encode_bridge_task_worktree_disposition(
-      self.worktreeDisposition,
-      serializer,
-    );
-  }
-
-  @protected
   void sse_encode_bridge_cancelling_agent(
     BridgeCancellingAgent self,
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.turnId, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_changes_required_work_unit(
-    BridgeChangesRequiredWorkUnit self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.completionId, serializer);
-    sse_encode_u_32(self.completionRevision, serializer);
-    sse_encode_String(self.reviewRoundId, serializer);
-    sse_encode_u_64(self.continuationRevision, serializer);
-    sse_encode_u_32(self.sliceCount, serializer);
   }
 
   @protected
@@ -21249,39 +17322,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_bridge_completed_task_state(
-    BridgeCompletedTaskState self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_task_outcome(self.outcome, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_completed_work_unit(
-    BridgeCompletedWorkUnit self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_work_unit_completion_outcome(self.outcome, serializer);
-  }
-
-  @protected
   void sse_encode_bridge_config_recovery_report(
     BridgeConfigRecoveryReport self,
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.backupPath, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_conversation_recovery_mode(
-    BridgeConversationRecoveryMode self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.index, serializer);
   }
 
   @protected
@@ -21336,15 +17382,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_bridge_editing_documents_task_state(
-    BridgeEditingDocumentsTaskState self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_u_64(self.planRevision, serializer);
-  }
-
-  @protected
   void sse_encode_bridge_error(BridgeError self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_bridge_error_code(self.code, serializer);
@@ -21361,87 +17398,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.index, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_executor_continuation_state(
-    BridgeExecutorContinuationState self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    switch (self) {
-      case BridgeExecutorContinuationState_Idle(
-        revision: final revision,
-        sliceCount: final sliceCount,
-      ):
-        sse_encode_i_32(0, serializer);
-        sse_encode_u_64(revision, serializer);
-        sse_encode_u_32(sliceCount, serializer);
-      case BridgeExecutorContinuationState_Compacting(
-        revision: final revision,
-        sourceTurnId: final sourceTurnId,
-        sliceCount: final sliceCount,
-      ):
-        sse_encode_i_32(1, serializer);
-        sse_encode_u_64(revision, serializer);
-        sse_encode_String(sourceTurnId, serializer);
-        sse_encode_u_32(sliceCount, serializer);
-      case BridgeExecutorContinuationState_PendingStart(
-        revision: final revision,
-        sourceTurnId: final sourceTurnId,
-        sliceCount: final sliceCount,
-        limit: final limit,
-      ):
-        sse_encode_i_32(2, serializer);
-        sse_encode_u_64(revision, serializer);
-        sse_encode_String(sourceTurnId, serializer);
-        sse_encode_u_32(sliceCount, serializer);
-        sse_encode_box_autoadd_bridge_budget_limit_dto(limit, serializer);
-      case BridgeExecutorContinuationState_PlannerWakePending(
-        revision: final revision,
-        sourceTurnId: final sourceTurnId,
-        sliceCount: final sliceCount,
-      ):
-        sse_encode_i_32(3, serializer);
-        sse_encode_u_64(revision, serializer);
-        sse_encode_String(sourceTurnId, serializer);
-        sse_encode_u_32(sliceCount, serializer);
-      case BridgeExecutorContinuationState_NeedsAttention(
-        revision: final revision,
-        sourceTurnId: final sourceTurnId,
-        sliceCount: final sliceCount,
-        detail: final detail,
-      ):
-        sse_encode_i_32(4, serializer);
-        sse_encode_u_64(revision, serializer);
-        sse_encode_String(sourceTurnId, serializer);
-        sse_encode_u_32(sliceCount, serializer);
-        sse_encode_String(detail, serializer);
-    }
-  }
-
-  @protected
-  void sse_encode_bridge_executor_terminal_outcome(
-    BridgeExecutorTerminalOutcome self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    switch (self) {
-      case BridgeExecutorTerminalOutcome_Completed(
-        sourceTurnId: final sourceTurnId,
-        detail: final detail,
-      ):
-        sse_encode_i_32(0, serializer);
-        sse_encode_String(sourceTurnId, serializer);
-        sse_encode_String(detail, serializer);
-      case BridgeExecutorTerminalOutcome_Failed(
-        sourceTurnId: final sourceTurnId,
-        detail: final detail,
-      ):
-        sse_encode_i_32(1, serializer);
-        sse_encode_String(sourceTurnId, serializer);
-        sse_encode_String(detail, serializer);
-    }
   }
 
   @protected
@@ -21464,19 +17420,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_64(self.failedAt, serializer);
     sse_encode_bridge_state_error(self.error, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_failed_work_unit(
-    BridgeFailedWorkUnit self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_work_unit_failure(self.failure, serializer);
-    sse_encode_bridge_task_worktree_disposition(
-      self.worktreeDisposition,
-      serializer,
-    );
   }
 
   @protected
@@ -21555,48 +17498,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_bridge_integrated_review_gate_dto(
-    BridgeIntegratedReviewGateDto self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    switch (self) {
-      case BridgeIntegratedReviewGateDto_Required(reason: final reason):
-        sse_encode_i_32(0, serializer);
-        sse_encode_String(reason, serializer);
-      case BridgeIntegratedReviewGateDto_SatisfiedByReview(
-        reviewRoundId: final reviewRoundId,
-        reviewedHead: final reviewedHead,
-      ):
-        sse_encode_i_32(1, serializer);
-        sse_encode_String(reviewRoundId, serializer);
-        sse_encode_String(reviewedHead, serializer);
-      case BridgeIntegratedReviewGateDto_NotRequiredNoDelivery():
-        sse_encode_i_32(2, serializer);
-      case BridgeIntegratedReviewGateDto_NotRequiredSingleExecutorEquivalent(
-        workUnitId: final workUnitId,
-        completionRevision: final completionRevision,
-        mergeRecordId: final mergeRecordId,
-      ):
-        sse_encode_i_32(3, serializer);
-        sse_encode_String(workUnitId, serializer);
-        sse_encode_u_32(completionRevision, serializer);
-        sse_encode_String(mergeRecordId, serializer);
-    }
-  }
-
-  @protected
-  void sse_encode_bridge_integrated_review_target(
-    BridgeIntegratedReviewTarget self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.reviewRoundId, serializer);
-    sse_encode_String(self.reviewedHead, serializer);
-    sse_encode_list_String(self.changedFiles, serializer);
-  }
-
-  @protected
   void sse_encode_bridge_interaction_content(
     BridgeInteractionContent self,
     SseSerializer serializer,
@@ -21626,18 +17527,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_opt_String(workingDirectory, serializer);
         sse_encode_opt_String(parentAgentId, serializer);
         sse_encode_box_autoadd_bridge_tool_approval_interaction_state(
-          state,
-          serializer,
-        );
-      case BridgeInteractionContent_PlanConfirmation(
-        planId: final planId,
-        content: final content,
-        state: final state,
-      ):
-        sse_encode_i_32(2, serializer);
-        sse_encode_String(planId, serializer);
-        sse_encode_String(content, serializer);
-        sse_encode_box_autoadd_bridge_plan_confirmation_interaction_state(
           state,
           serializer,
         );
@@ -21674,15 +17563,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       ):
         sse_encode_i_32(1, serializer);
         sse_encode_bridge_tool_approval_resolution(decision, serializer);
-        sse_encode_opt_String(reason, serializer);
-      case BridgeInteractionResolution_PlanConfirmation(
-        decision: final decision,
-        content: final content,
-        reason: final reason,
-      ):
-        sse_encode_i_32(2, serializer);
-        sse_encode_bridge_plan_confirmation_resolution(decision, serializer);
-        sse_encode_opt_String(content, serializer);
         sse_encode_opt_String(reason, serializer);
     }
   }
@@ -22014,56 +17894,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_bridge_merge_cleanup_state(
-    BridgeMergeCleanupState self,
+  void sse_encode_bridge_mode_instruction_snapshot(
+    BridgeModeInstructionSnapshot self,
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    switch (self) {
-      case BridgeMergeCleanupState_Pending():
-        sse_encode_i_32(0, serializer);
-      case BridgeMergeCleanupState_Deferred():
-        sse_encode_i_32(1, serializer);
-      case BridgeMergeCleanupState_Attempting(
-        operationId: final operationId,
-        startedAt: final startedAt,
-      ):
-        sse_encode_i_32(2, serializer);
-        sse_encode_String(operationId, serializer);
-        sse_encode_i_64(startedAt, serializer);
-      case BridgeMergeCleanupState_Discarded(
-        operationId: final operationId,
-        completedAt: final completedAt,
-      ):
-        sse_encode_i_32(3, serializer);
-        sse_encode_String(operationId, serializer);
-        sse_encode_i_64(completedAt, serializer);
-      case BridgeMergeCleanupState_AlreadyAbsent(
-        operationId: final operationId,
-        completedAt: final completedAt,
-      ):
-        sse_encode_i_32(4, serializer);
-        sse_encode_String(operationId, serializer);
-        sse_encode_i_64(completedAt, serializer);
-      case BridgeMergeCleanupState_Failed(
-        operationId: final operationId,
-        failedAt: final failedAt,
-        detail: final detail,
-      ):
-        sse_encode_i_32(5, serializer);
-        sse_encode_String(operationId, serializer);
-        sse_encode_i_64(failedAt, serializer);
-        sse_encode_String(detail, serializer);
-    }
-  }
-
-  @protected
-  void sse_encode_bridge_merge_method(
-    BridgeMergeMethod self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.index, serializer);
+    sse_encode_String(self.modeId, serializer);
+    sse_encode_String(self.displayName, serializer);
+    sse_encode_String(self.source, serializer);
+    sse_encode_String(self.providerId, serializer);
+    sse_encode_String(self.revision, serializer);
+    sse_encode_String(self.contentHash, serializer);
+    sse_encode_String(self.content, serializer);
   }
 
   @protected
@@ -22251,36 +18093,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_bridge_paused_work_unit(
-    BridgePausedWorkUnit self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_work_unit_pause_reason(self.reason, serializer);
-    sse_encode_bridge_executor_continuation_state(
-      self.continuation,
-      serializer,
-    );
-  }
-
-  @protected
-  void sse_encode_bridge_pending_confirmation_task_state(
-    BridgePendingConfirmationTaskState self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_u_64(self.planRevision, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_pending_work_unit(
-    BridgePendingWorkUnit self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-  }
-
-  @protected
   void sse_encode_bridge_persistence_state(
     BridgePersistenceState self,
     SseSerializer serializer,
@@ -22342,68 +18154,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_bridge_plan_confirmation_interaction_state(
-    BridgePlanConfirmationInteractionState self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    switch (self) {
-      case BridgePlanConfirmationInteractionState_Pending(
-        operationId: final operationId,
-      ):
-        sse_encode_i_32(0, serializer);
-        sse_encode_String(operationId, serializer);
-      case BridgePlanConfirmationInteractionState_Resolved(
-        operationId: final operationId,
-        resolvedAt: final resolvedAt,
-        decision: final decision,
-        content: final content,
-        reason: final reason,
-      ):
-        sse_encode_i_32(1, serializer);
-        sse_encode_String(operationId, serializer);
-        sse_encode_i_64(resolvedAt, serializer);
-        sse_encode_bridge_plan_confirmation_resolution(decision, serializer);
-        sse_encode_opt_String(content, serializer);
-        sse_encode_opt_String(reason, serializer);
-      case BridgePlanConfirmationInteractionState_Cancelled(
-        operationId: final operationId,
-        cancelledAt: final cancelledAt,
-        reason: final reason,
-      ):
-        sse_encode_i_32(2, serializer);
-        sse_encode_String(operationId, serializer);
-        sse_encode_i_64(cancelledAt, serializer);
-        sse_encode_String(reason, serializer);
-      case BridgePlanConfirmationInteractionState_Expired(
-        operationId: final operationId,
-        expiredAt: final expiredAt,
-      ):
-        sse_encode_i_32(3, serializer);
-        sse_encode_String(operationId, serializer);
-        sse_encode_i_64(expiredAt, serializer);
-    }
-  }
-
-  @protected
-  void sse_encode_bridge_plan_confirmation_resolution(
-    BridgePlanConfirmationResolution self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.index, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_planning_task_state(
-    BridgePlanningTaskState self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.request, serializer);
-  }
-
-  @protected
   void sse_encode_bridge_product_event_envelope(
     BridgeProductEventEnvelope self,
     SseSerializer serializer,
@@ -22438,36 +18188,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           field0,
           serializer,
         );
-      case BridgeProductEventPayload_TaskDirectoryChanged(field0: final field0):
-        sse_encode_i_32(2, serializer);
-        sse_encode_box_autoadd_bridge_task_directory_state(field0, serializer);
       case BridgeProductEventPayload_AgentDirectoryChanged(
         field0: final field0,
       ):
-        sse_encode_i_32(3, serializer);
+        sse_encode_i_32(2, serializer);
         sse_encode_box_autoadd_bridge_agent_directory_state(field0, serializer);
       case BridgeProductEventPayload_SettingsStateChanged(field0: final field0):
-        sse_encode_i_32(4, serializer);
+        sse_encode_i_32(3, serializer);
         sse_encode_box_bridge_settings_state_snapshot(field0, serializer);
       case BridgeProductEventPayload_RecoveryStateChanged(field0: final field0):
-        sse_encode_i_32(5, serializer);
+        sse_encode_i_32(4, serializer);
         sse_encode_box_autoadd_bridge_recovery_state_snapshot(
           field0,
           serializer,
         );
       case BridgeProductEventPayload_McpStateChanged(field0: final field0):
-        sse_encode_i_32(6, serializer);
+        sse_encode_i_32(5, serializer);
         sse_encode_box_autoadd_bridge_mcp_state_snapshot(field0, serializer);
       case BridgeProductEventPayload_LspStateChanged(field0: final field0):
-        sse_encode_i_32(7, serializer);
+        sse_encode_i_32(6, serializer);
         sse_encode_box_autoadd_bridge_lsp_state_snapshot(field0, serializer);
       case BridgeProductEventPayload_SkillsStateChanged(field0: final field0):
-        sse_encode_i_32(8, serializer);
+        sse_encode_i_32(7, serializer);
         sse_encode_box_autoadd_bridge_skills_state_snapshot(field0, serializer);
       case BridgeProductEventPayload_ProviderUsageStateChanged(
         field0: final field0,
       ):
-        sse_encode_i_32(9, serializer);
+        sse_encode_i_32(8, serializer);
         sse_encode_box_autoadd_bridge_provider_usage_state_snapshot(
           field0,
           serializer,
@@ -22475,13 +18222,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       case BridgeProductEventPayload_ModelPerformanceStateChanged(
         field0: final field0,
       ):
-        sse_encode_i_32(10, serializer);
+        sse_encode_i_32(9, serializer);
         sse_encode_box_autoadd_bridge_model_performance_snapshot(
           field0,
           serializer,
         );
       case BridgeProductEventPayload_UpdaterStateChanged(field0: final field0):
-        sse_encode_i_32(11, serializer);
+        sse_encode_i_32(10, serializer);
         sse_encode_box_autoadd_bridge_updater_state_snapshot(
           field0,
           serializer,
@@ -22489,13 +18236,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       case BridgeProductEventPayload_PersistenceStateChanged(
         field0: final field0,
       ):
-        sse_encode_i_32(12, serializer);
+        sse_encode_i_32(11, serializer);
         sse_encode_box_autoadd_bridge_persistence_state_snapshot(
           field0,
           serializer,
         );
       case BridgeProductEventPayload_Stale(laggedEvents: final laggedEvents):
-        sse_encode_i_32(13, serializer);
+        sse_encode_i_32(12, serializer);
         sse_encode_u_64(laggedEvents, serializer);
     }
   }
@@ -22799,14 +18546,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_bridge_ready_for_review_completion(
-    BridgeReadyForReviewCompletion self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-  }
-
-  @protected
   void sse_encode_bridge_ready_resource(
     BridgeReadyResource self,
     SseSerializer serializer,
@@ -22815,43 +18554,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_u_64(self.revision, serializer);
     sse_encode_i_64(self.updatedAt, serializer);
     sse_encode_opt_box_autoadd_i_64(self.lastCheckedAt, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_recovery_cleanup_preview_dto(
-    BridgeRecoveryCleanupPreviewDto self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.issueId, serializer);
-    sse_encode_String(self.expectedRevision, serializer);
-    sse_encode_bridge_recovery_issue_scope(self.scope, serializer);
-    sse_encode_opt_String(self.projectId, serializer);
-    sse_encode_opt_String(self.threadId, serializer);
-    sse_encode_String(self.detail, serializer);
-    sse_encode_list_bridge_recovery_cleanup_resource_dto(
-      self.resources,
-      serializer,
-    );
-  }
-
-  @protected
-  void sse_encode_bridge_recovery_cleanup_resource_dto(
-    BridgeRecoveryCleanupResourceDto self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.workUnitId, serializer);
-    sse_encode_String(self.path, serializer);
-    sse_encode_String(self.branch, serializer);
-    sse_encode_bridge_recovery_resource_presence(self.presence, serializer);
-    sse_encode_bool(self.registrationExists, serializer);
-    sse_encode_bool(self.pathExists, serializer);
-    sse_encode_bool(self.branchExists, serializer);
-    sse_encode_opt_String(self.branchHead, serializer);
-    sse_encode_bool(self.dirty, serializer);
-    sse_encode_u_32(self.aheadBy, serializer);
-    sse_encode_u_32(self.changedFileCount, serializer);
   }
 
   @protected
@@ -22875,15 +18577,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @protected
   void sse_encode_bridge_recovery_issue_scope(
     BridgeRecoveryIssueScope self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.index, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_recovery_resource_presence(
-    BridgeRecoveryResourcePresence self,
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -22966,56 +18659,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_bridge_review_passed_outcome(
-    BridgeReviewPassedOutcome self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.index, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_review_passed_work_unit(
-    BridgeReviewPassedWorkUnit self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.completionId, serializer);
-    sse_encode_u_32(self.completionRevision, serializer);
-    sse_encode_String(self.reviewRoundId, serializer);
-    sse_encode_bridge_review_passed_outcome(self.outcome, serializer);
-    sse_encode_String(self.verificationSummary, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_review_scope(
-    BridgeReviewScope self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.index, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_reviewed_completion(
-    BridgeReviewedCompletion self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.reviewRoundId, serializer);
-    sse_encode_i_64(self.decidedAt, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_reviewing_task_state(
-    BridgeReviewingTaskState self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_integrated_review_target(self.target, serializer);
-  }
-
-  @protected
   void sse_encode_bridge_role_settings_dto(
     BridgeRoleSettingsDto self,
     SseSerializer serializer,
@@ -23034,34 +18677,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.turnId, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_running_work_unit(
-    BridgeRunningWorkUnit self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_running_work_unit_activity(self.activity, serializer);
-    sse_encode_bridge_executor_continuation_state(
-      self.continuation,
-      serializer,
-    );
-  }
-
-  @protected
-  void sse_encode_bridge_running_work_unit_activity(
-    BridgeRunningWorkUnitActivity self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    switch (self) {
-      case BridgeRunningWorkUnitActivity_Allocated():
-        sse_encode_i_32(0, serializer);
-      case BridgeRunningWorkUnitActivity_Active(turnId: final turnId):
-        sse_encode_i_32(1, serializer);
-        sse_encode_String(turnId, serializer);
-    }
   }
 
   @protected
@@ -23200,7 +18815,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       ):
         sse_encode_i_32(2, serializer);
         sse_encode_u_64(pendingCommits, serializer);
-      case BridgeShutdownProgress_SuspendingTasks():
+      case BridgeShutdownProgress_StoppingAgents():
         sse_encode_i_32(3, serializer);
       case BridgeShutdownProgress_StoppingMcp():
         sse_encode_i_32(4, serializer);
@@ -23326,6 +18941,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.configFingerprint, serializer);
     sse_encode_u_64(self.catalogRevision, serializer);
     sse_encode_list_skill_summary_dto(self.skills, serializer);
+    sse_encode_list_mode_summary_dto(self.modes, serializer);
     sse_encode_list_String(self.warnings, serializer);
     sse_encode_bool(self.complete, serializer);
   }
@@ -23406,7 +19022,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     );
     sse_encode_opt_String(self.projectId, serializer);
     sse_encode_opt_String(self.threadId, serializer);
-    sse_encode_opt_String(self.taskRunId, serializer);
     sse_encode_String(self.detail, serializer);
   }
 
@@ -23452,7 +19067,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       serializer,
     );
     sse_encode_bridge_thread_directory_page(self.threadDirectory, serializer);
-    sse_encode_bridge_task_directory_state(self.taskDirectory, serializer);
     sse_encode_bridge_agent_directory_state(self.agentDirectory, serializer);
     sse_encode_bridge_settings_state_snapshot(self.settings, serializer);
     sse_encode_bridge_recovery_state_snapshot(self.recovery, serializer);
@@ -23475,759 +19089,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_bridge_task_completion_content(
-    BridgeTaskCompletionContent self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    switch (self) {
-      case BridgeTaskCompletionContent_Delivery(field0: final field0):
-        sse_encode_i_32(0, serializer);
-        sse_encode_box_autoadd_bridge_task_delivery_completion(
-          field0,
-          serializer,
-        );
-      case BridgeTaskCompletionContent_NoDelivery(field0: final field0):
-        sse_encode_i_32(1, serializer);
-        sse_encode_box_autoadd_bridge_task_no_delivery_completion(
-          field0,
-          serializer,
-        );
-    }
-  }
-
-  @protected
-  void sse_encode_bridge_task_completion_dto(
-    BridgeTaskCompletionDto self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.id, serializer);
-    sse_encode_String(self.workUnitId, serializer);
-    sse_encode_String(self.executorAgentId, serializer);
-    sse_encode_u_32(self.revision, serializer);
-    sse_encode_bridge_task_completion_content(self.content, serializer);
-    sse_encode_bridge_task_completion_state(self.state, serializer);
-    sse_encode_u_64(self.stateRevision, serializer);
-    sse_encode_String(self.baseCommit, serializer);
-    sse_encode_String(self.verificationSummary, serializer);
-    sse_encode_String(self.worktreePath, serializer);
-    sse_encode_String(self.branch, serializer);
-    sse_encode_i_64(self.createdAt, serializer);
-    sse_encode_i_64(self.updatedAt, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_task_completion_state(
-    BridgeTaskCompletionState self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    switch (self) {
-      case BridgeTaskCompletionState_ReadyForReview(field0: final field0):
-        sse_encode_i_32(0, serializer);
-        sse_encode_box_autoadd_bridge_ready_for_review_completion(
-          field0,
-          serializer,
-        );
-      case BridgeTaskCompletionState_ChangesRequired(field0: final field0):
-        sse_encode_i_32(1, serializer);
-        sse_encode_box_autoadd_bridge_reviewed_completion(field0, serializer);
-      case BridgeTaskCompletionState_Approved(field0: final field0):
-        sse_encode_i_32(2, serializer);
-        sse_encode_box_autoadd_bridge_reviewed_completion(field0, serializer);
-    }
-  }
-
-  @protected
-  void sse_encode_bridge_task_delivery_completion(
-    BridgeTaskDeliveryCompletion self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.headCommit, serializer);
-    sse_encode_list_String(self.changedFiles, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_task_design_reference_dto(
-    BridgeTaskDesignReferenceDto self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.path, serializer);
-    sse_encode_String(self.section, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_task_directory_data(
-    BridgeTaskDirectoryData self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_list_bridge_task_directory_entry(self.tasks, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_task_directory_entry(
-    BridgeTaskDirectoryEntry self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.rootThreadId, serializer);
-    sse_encode_bridge_task_runtime_dto(self.task, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_task_directory_state(
-    BridgeTaskDirectoryState self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    switch (self) {
-      case BridgeTaskDirectoryState_Uninitialized(field0: final field0):
-        sse_encode_i_32(0, serializer);
-        sse_encode_box_autoadd_bridge_uninitialized_resource(
-          field0,
-          serializer,
-        );
-      case BridgeTaskDirectoryState_Loading(field0: final field0):
-        sse_encode_i_32(1, serializer);
-        sse_encode_box_autoadd_bridge_loading_resource(field0, serializer);
-      case BridgeTaskDirectoryState_Ready(
-        resource: final resource,
-        value: final value,
-      ):
-        sse_encode_i_32(2, serializer);
-        sse_encode_box_autoadd_bridge_ready_resource(resource, serializer);
-        sse_encode_box_autoadd_bridge_task_directory_data(value, serializer);
-      case BridgeTaskDirectoryState_Refreshing(
-        resource: final resource,
-        value: final value,
-      ):
-        sse_encode_i_32(3, serializer);
-        sse_encode_box_autoadd_bridge_refreshing_resource(resource, serializer);
-        sse_encode_box_autoadd_bridge_task_directory_data(value, serializer);
-      case BridgeTaskDirectoryState_Stale(
-        resource: final resource,
-        value: final value,
-      ):
-        sse_encode_i_32(4, serializer);
-        sse_encode_box_autoadd_bridge_stale_resource(resource, serializer);
-        sse_encode_box_autoadd_bridge_task_directory_data(value, serializer);
-      case BridgeTaskDirectoryState_Degraded(
-        resource: final resource,
-        value: final value,
-      ):
-        sse_encode_i_32(5, serializer);
-        sse_encode_box_autoadd_bridge_degraded_resource(resource, serializer);
-        sse_encode_box_autoadd_bridge_task_directory_data(value, serializer);
-      case BridgeTaskDirectoryState_Failed(field0: final field0):
-        sse_encode_i_32(6, serializer);
-        sse_encode_box_autoadd_bridge_failed_resource(field0, serializer);
-      case BridgeTaskDirectoryState_Stopped(field0: final field0):
-        sse_encode_i_32(7, serializer);
-        sse_encode_box_autoadd_bridge_stopped_resource(field0, serializer);
-    }
-  }
-
-  @protected
-  void sse_encode_bridge_task_failure_detail(
-    BridgeTaskFailureDetail self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.category, serializer);
-    sse_encode_opt_String(self.providerKind, serializer);
-    sse_encode_opt_String(self.code, serializer);
-    sse_encode_opt_box_autoadd_u_16(self.httpStatus, serializer);
-    sse_encode_String(self.message, serializer);
-    sse_encode_bool(self.retryable, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_task_failure_kind(
-    BridgeTaskFailureKind self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.index, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_task_issue_dto(
-    BridgeTaskIssueDto self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.id, serializer);
-    sse_encode_String(self.sourceThreadId, serializer);
-    sse_encode_String(self.sourceTurnId, serializer);
-    sse_encode_String(self.sourceAgentId, serializer);
-    sse_encode_String(self.sourceRole, serializer);
-    sse_encode_opt_String(self.workUnitId, serializer);
-    sse_encode_opt_String(self.reviewRoundId, serializer);
-    sse_encode_bridge_task_issue_state(self.state, serializer);
-    sse_encode_i_64(self.createdAt, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_task_issue_state(
-    BridgeTaskIssueState self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    switch (self) {
-      case BridgeTaskIssueState_OpenRecoverable(failure: final failure):
-        sse_encode_i_32(0, serializer);
-        sse_encode_box_autoadd_bridge_task_failure_detail(failure, serializer);
-      case BridgeTaskIssueState_OpenFatal(failure: final failure):
-        sse_encode_i_32(1, serializer);
-        sse_encode_box_autoadd_bridge_task_failure_detail(failure, serializer);
-      case BridgeTaskIssueState_Resolved(
-        failure: final failure,
-        resolvedAt: final resolvedAt,
-      ):
-        sse_encode_i_32(2, serializer);
-        sse_encode_box_autoadd_bridge_task_failure_detail(failure, serializer);
-        sse_encode_i_64(resolvedAt, serializer);
-    }
-  }
-
-  @protected
-  void sse_encode_bridge_task_merge_dto(
-    BridgeTaskMergeDto self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.id, serializer);
-    sse_encode_String(self.workUnitId, serializer);
-    sse_encode_String(self.completionId, serializer);
-    sse_encode_u_32(self.completionRevision, serializer);
-    sse_encode_String(self.executorAgentId, serializer);
-    sse_encode_String(self.expectedPreviousHead, serializer);
-    sse_encode_String(self.resultingHead, serializer);
-    sse_encode_String(self.deliveryHead, serializer);
-    sse_encode_bridge_merge_method(self.method, serializer);
-    sse_encode_String(self.summary, serializer);
-    sse_encode_bridge_merge_cleanup_state(self.cleanup, serializer);
-    sse_encode_i_64(self.createdAt, serializer);
-    sse_encode_i_64(self.updatedAt, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_task_no_delivery_completion(
-    BridgeTaskNoDeliveryCompletion self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-  }
-
-  @protected
-  void sse_encode_bridge_task_outcome(
-    BridgeTaskOutcome self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    switch (self) {
-      case BridgeTaskOutcome_Succeeded(
-        summary: final summary,
-        completedAt: final completedAt,
-        reviewGate: final reviewGate,
-      ):
-        sse_encode_i_32(0, serializer);
-        sse_encode_String(summary, serializer);
-        sse_encode_i_64(completedAt, serializer);
-        sse_encode_box_autoadd_bridge_task_review_gate(reviewGate, serializer);
-      case BridgeTaskOutcome_Failed(
-        kind: final kind,
-        summary: final summary,
-        evidence: final evidence,
-        cause: final cause,
-        completedAt: final completedAt,
-      ):
-        sse_encode_i_32(1, serializer);
-        sse_encode_bridge_task_failure_kind(kind, serializer);
-        sse_encode_String(summary, serializer);
-        sse_encode_String(evidence, serializer);
-        sse_encode_String(cause, serializer);
-        sse_encode_i_64(completedAt, serializer);
-    }
-  }
-
-  @protected
-  void sse_encode_bridge_task_recovery_preview_dto(
-    BridgeTaskRecoveryPreviewDto self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.previewToken, serializer);
-    sse_encode_String(self.rootThreadId, serializer);
-    sse_encode_String(self.runId, serializer);
-    sse_encode_u_64(self.revision, serializer);
-    sse_encode_u_64(self.taskGeneration, serializer);
-    sse_encode_bridge_task_recovery_state(self.state, serializer);
-    sse_encode_String(self.recommendedThreadId, serializer);
-    sse_encode_list_bridge_task_recovery_target_dto(self.targets, serializer);
-    sse_encode_String(self.completionRevisionFingerprint, serializer);
-    sse_encode_String(self.reviewRevisionFingerprint, serializer);
-    sse_encode_String(self.mergeRevisionFingerprint, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_task_recovery_request_dto(
-    BridgeTaskRecoveryRequestDto self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.recoveryId, serializer);
-    sse_encode_String(self.rootThreadId, serializer);
-    sse_encode_String(self.targetThreadId, serializer);
-    sse_encode_bridge_conversation_recovery_mode(self.mode, serializer);
-    sse_encode_list_String(self.turnIds, serializer);
-    sse_encode_bridge_task_recovery_preview_dto(self.preview, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_task_recovery_result_dto(
-    BridgeTaskRecoveryResultDto self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.recoveryId, serializer);
-    sse_encode_String(self.runId, serializer);
-    sse_encode_opt_String(self.workUnitId, serializer);
-    sse_encode_String(self.rootThreadId, serializer);
-    sse_encode_String(self.targetThreadId, serializer);
-    sse_encode_bridge_conversation_recovery_mode(self.mode, serializer);
-    sse_encode_u_64(self.recoveryRevision, serializer);
-    sse_encode_u_64(self.runtimeRevision, serializer);
-    sse_encode_u_64(self.threadRevision, serializer);
-    sse_encode_String(self.beforeTranscriptHash, serializer);
-    sse_encode_String(self.afterTranscriptHash, serializer);
-    sse_encode_u_64(self.removedItemCount, serializer);
-    sse_encode_u_64(self.removedInputCount, serializer);
-    sse_encode_String(self.resumeTurnId, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_task_recovery_state(
-    BridgeTaskRecoveryState self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.index, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_task_recovery_target_dto(
-    BridgeTaskRecoveryTargetDto self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.threadId, serializer);
-    sse_encode_bridge_task_recovery_target_kind(self.kind, serializer);
-    sse_encode_opt_String(self.workUnitId, serializer);
-    sse_encode_opt_box_autoadd_u_32(self.attempt, serializer);
-    sse_encode_opt_box_autoadd_u_64(self.continuationRevision, serializer);
-    sse_encode_u_64(self.expectedRuntimeRevision, serializer);
-    sse_encode_u_64(self.expectedThreadRevision, serializer);
-    sse_encode_String(self.branch, serializer);
-    sse_encode_String(self.worktreePath, serializer);
-    sse_encode_opt_String(self.baseCommit, serializer);
-    sse_encode_list_bridge_task_recovery_turn_dto(self.turns, serializer);
-    sse_encode_list_String(self.defaultTurnIds, serializer);
-    sse_encode_list_bridge_conversation_recovery_mode(
-      self.availableModes,
-      serializer,
-    );
-  }
-
-  @protected
-  void sse_encode_bridge_task_recovery_target_kind(
-    BridgeTaskRecoveryTargetKind self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.index, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_task_recovery_turn_dto(
-    BridgeTaskRecoveryTurnDto self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.turnId, serializer);
-    sse_encode_bridge_task_recovery_turn_state(self.state, serializer);
-    sse_encode_i_64(self.updatedAt, serializer);
-    sse_encode_u_64(self.itemCount, serializer);
-    sse_encode_u_64(self.inputCount, serializer);
-    sse_encode_u_64(self.toolCount, serializer);
-    sse_encode_list_String(self.toolSummaries, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_task_recovery_turn_state(
-    BridgeTaskRecoveryTurnState self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.index, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_task_review_dto(
-    BridgeTaskReviewDto self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.id, serializer);
-    sse_encode_u_32(self.round, serializer);
-    sse_encode_bridge_review_scope(self.scope, serializer);
-    sse_encode_opt_String(self.workUnitId, serializer);
-    sse_encode_opt_String(self.completionId, serializer);
-    sse_encode_opt_box_autoadd_u_32(self.completionRevision, serializer);
-    sse_encode_String(self.reviewedHead, serializer);
-    sse_encode_bridge_task_review_state(self.state, serializer);
-    sse_encode_String(self.requestedByCallId, serializer);
-    sse_encode_list_bridge_task_design_reference_dto(
-      self.designReferences,
-      serializer,
-    );
-    sse_encode_list_bridge_task_review_finding_dto(self.findings, serializer);
-    sse_encode_i_64(self.createdAt, serializer);
-    sse_encode_i_64(self.updatedAt, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_task_review_finding_dto(
-    BridgeTaskReviewFindingDto self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.severity, serializer);
-    sse_encode_String(self.title, serializer);
-    sse_encode_String(self.body, serializer);
-    sse_encode_String(self.recommendation, serializer);
-    sse_encode_opt_String(self.path, serializer);
-    sse_encode_opt_box_autoadd_u_32(self.line, serializer);
-    sse_encode_list_bridge_task_design_reference_dto(
-      self.designReferences,
-      serializer,
-    );
-  }
-
-  @protected
-  void sse_encode_bridge_task_review_gate(
-    BridgeTaskReviewGate self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    switch (self) {
-      case BridgeTaskReviewGate_NotRequiredNoDelivery():
-        sse_encode_i_32(0, serializer);
-      case BridgeTaskReviewGate_NotRequiredSingleExecutor(
-        workUnitId: final workUnitId,
-      ):
-        sse_encode_i_32(1, serializer);
-        sse_encode_String(workUnitId, serializer);
-      case BridgeTaskReviewGate_IntegratedReview(
-        reviewRoundId: final reviewRoundId,
-      ):
-        sse_encode_i_32(2, serializer);
-        sse_encode_String(reviewRoundId, serializer);
-    }
-  }
-
-  @protected
-  void sse_encode_bridge_task_review_state(
-    BridgeTaskReviewState self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    switch (self) {
-      case BridgeTaskReviewState_PendingDispatch():
-        sse_encode_i_32(0, serializer);
-      case BridgeTaskReviewState_Dispatched(
-        reviewerAgentId: final reviewerAgentId,
-      ):
-        sse_encode_i_32(1, serializer);
-        sse_encode_String(reviewerAgentId, serializer);
-      case BridgeTaskReviewState_Running(
-        reviewerAgentId: final reviewerAgentId,
-      ):
-        sse_encode_i_32(2, serializer);
-        sse_encode_String(reviewerAgentId, serializer);
-      case BridgeTaskReviewState_Passed(
-        reviewerAgentId: final reviewerAgentId,
-        summary: final summary,
-      ):
-        sse_encode_i_32(3, serializer);
-        sse_encode_String(reviewerAgentId, serializer);
-        sse_encode_String(summary, serializer);
-      case BridgeTaskReviewState_ChangesRequired(
-        reviewerAgentId: final reviewerAgentId,
-        summary: final summary,
-      ):
-        sse_encode_i_32(4, serializer);
-        sse_encode_String(reviewerAgentId, serializer);
-        sse_encode_String(summary, serializer);
-      case BridgeTaskReviewState_Blocked(
-        reviewerAgentId: final reviewerAgentId,
-        summary: final summary,
-      ):
-        sse_encode_i_32(5, serializer);
-        sse_encode_String(reviewerAgentId, serializer);
-        sse_encode_String(summary, serializer);
-      case BridgeTaskReviewState_Failed(
-        reviewerAgentId: final reviewerAgentId,
-        error: final error,
-        summary: final summary,
-      ):
-        sse_encode_i_32(6, serializer);
-        sse_encode_opt_String(reviewerAgentId, serializer);
-        sse_encode_String(error, serializer);
-        sse_encode_String(summary, serializer);
-      case BridgeTaskReviewState_Cancelled(
-        reviewerAgentId: final reviewerAgentId,
-        reason: final reason,
-        summary: final summary,
-      ):
-        sse_encode_i_32(7, serializer);
-        sse_encode_opt_String(reviewerAgentId, serializer);
-        sse_encode_String(reason, serializer);
-        sse_encode_String(summary, serializer);
-    }
-  }
-
-  @protected
-  void sse_encode_bridge_task_runtime_dto(
-    BridgeTaskRuntimeDto self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.runId, serializer);
-    sse_encode_bridge_task_state(self.state, serializer);
-    sse_encode_u_64(self.revision, serializer);
-    sse_encode_u_64(self.generation, serializer);
-    sse_encode_bridge_integrated_review_gate_dto(
-      self.integratedReviewGate,
-      serializer,
-    );
-    sse_encode_list_bridge_task_issue_dto(self.issues, serializer);
-    sse_encode_list_bridge_task_work_unit_dto(self.workUnits, serializer);
-    sse_encode_list_bridge_task_completion_dto(self.completions, serializer);
-    sse_encode_list_bridge_task_merge_dto(self.merges, serializer);
-    sse_encode_list_bridge_task_review_dto(self.reviews, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_task_spawn_compensation(
-    BridgeTaskSpawnCompensation self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_task_spawn_compensation_state(
-      self.allocation,
-      serializer,
-    );
-    sse_encode_bridge_task_spawn_compensation_state(self.worktree, serializer);
-    sse_encode_bridge_task_spawn_compensation_state(
-      self.childThread,
-      serializer,
-    );
-  }
-
-  @protected
-  void sse_encode_bridge_task_spawn_compensation_state(
-    BridgeTaskSpawnCompensationState self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.index, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_task_spawn_failure(
-    BridgeTaskSpawnFailure self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_task_spawn_failure_code(self.code, serializer);
-    sse_encode_bridge_task_spawn_failure_phase(self.phase, serializer);
-    sse_encode_bool(self.recoverable, serializer);
-    sse_encode_String(self.message, serializer);
-    sse_encode_opt_String(self.taskRunId, serializer);
-    sse_encode_opt_String(self.workUnitId, serializer);
-    sse_encode_String(self.agentId, serializer);
-    sse_encode_opt_box_autoadd_bridge_task_spawn_resource(
-      self.resource,
-      serializer,
-    );
-    sse_encode_bridge_worktree_failure_cause(self.cause, serializer);
-    sse_encode_bridge_task_spawn_compensation(self.compensation, serializer);
-    sse_encode_bridge_task_spawn_next_action(self.nextAction, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_task_spawn_failure_code(
-    BridgeTaskSpawnFailureCode self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.index, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_task_spawn_failure_phase(
-    BridgeTaskSpawnFailurePhase self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.index, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_task_spawn_next_action(
-    BridgeTaskSpawnNextAction self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.index, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_task_spawn_resource(
-    BridgeTaskSpawnResource self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.repoRoot, serializer);
-    sse_encode_String(self.path, serializer);
-    sse_encode_String(self.branch, serializer);
-    sse_encode_String(self.baseRef, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_task_state(
-    BridgeTaskState self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    switch (self) {
-      case BridgeTaskState_Planning(field0: final field0):
-        sse_encode_i_32(0, serializer);
-        sse_encode_box_autoadd_bridge_planning_task_state(field0, serializer);
-      case BridgeTaskState_PendingConfirmation(field0: final field0):
-        sse_encode_i_32(1, serializer);
-        sse_encode_box_autoadd_bridge_pending_confirmation_task_state(
-          field0,
-          serializer,
-        );
-      case BridgeTaskState_EditingDocuments(field0: final field0):
-        sse_encode_i_32(2, serializer);
-        sse_encode_box_autoadd_bridge_editing_documents_task_state(
-          field0,
-          serializer,
-        );
-      case BridgeTaskState_Working(field0: final field0):
-        sse_encode_i_32(3, serializer);
-        sse_encode_box_autoadd_bridge_working_task_state(field0, serializer);
-      case BridgeTaskState_Reviewing(field0: final field0):
-        sse_encode_i_32(4, serializer);
-        sse_encode_box_autoadd_bridge_reviewing_task_state(field0, serializer);
-      case BridgeTaskState_Completed(field0: final field0):
-        sse_encode_i_32(5, serializer);
-        sse_encode_box_autoadd_bridge_completed_task_state(field0, serializer);
-    }
-  }
-
-  @protected
-  void sse_encode_bridge_task_work_unit_dto(
-    BridgeTaskWorkUnitDto self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.id, serializer);
-    sse_encode_String(self.title, serializer);
-    sse_encode_bridge_task_work_unit_state(self.state, serializer);
-    sse_encode_String(self.worktreePath, serializer);
-    sse_encode_String(self.branch, serializer);
-    sse_encode_opt_String(self.agentId, serializer);
-    sse_encode_u_32(self.attempt, serializer);
-    sse_encode_opt_String(self.supersedesWorkUnitId, serializer);
-    sse_encode_u_32(self.budgetSliceLimit, serializer);
-    sse_encode_u_64(self.executorProgressRevision, serializer);
-    sse_encode_opt_String(self.blueprintFingerprint, serializer);
-    sse_encode_opt_String(self.objective, serializer);
-    sse_encode_usize(self.implementationStepCount, serializer);
-    sse_encode_usize(self.acceptanceCriterionCount, serializer);
-    sse_encode_usize(self.verificationCount, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_task_work_unit_state(
-    BridgeTaskWorkUnitState self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    switch (self) {
-      case BridgeTaskWorkUnitState_Pending(field0: final field0):
-        sse_encode_i_32(0, serializer);
-        sse_encode_box_autoadd_bridge_pending_work_unit(field0, serializer);
-      case BridgeTaskWorkUnitState_Running(field0: final field0):
-        sse_encode_i_32(1, serializer);
-        sse_encode_box_autoadd_bridge_running_work_unit(field0, serializer);
-      case BridgeTaskWorkUnitState_WaitingReview(field0: final field0):
-        sse_encode_i_32(2, serializer);
-        sse_encode_box_autoadd_bridge_waiting_review_work_unit(
-          field0,
-          serializer,
-        );
-      case BridgeTaskWorkUnitState_ReviewPassed(field0: final field0):
-        sse_encode_i_32(3, serializer);
-        sse_encode_box_autoadd_bridge_review_passed_work_unit(
-          field0,
-          serializer,
-        );
-      case BridgeTaskWorkUnitState_ChangesRequired(field0: final field0):
-        sse_encode_i_32(4, serializer);
-        sse_encode_box_autoadd_bridge_changes_required_work_unit(
-          field0,
-          serializer,
-        );
-      case BridgeTaskWorkUnitState_Paused(field0: final field0):
-        sse_encode_i_32(5, serializer);
-        sse_encode_box_autoadd_bridge_paused_work_unit(field0, serializer);
-      case BridgeTaskWorkUnitState_Completed(field0: final field0):
-        sse_encode_i_32(6, serializer);
-        sse_encode_box_autoadd_bridge_completed_work_unit(field0, serializer);
-      case BridgeTaskWorkUnitState_Failed(field0: final field0):
-        sse_encode_i_32(7, serializer);
-        sse_encode_box_autoadd_bridge_failed_work_unit(field0, serializer);
-      case BridgeTaskWorkUnitState_Cancelled(field0: final field0):
-        sse_encode_i_32(8, serializer);
-        sse_encode_box_autoadd_bridge_cancelled_work_unit(field0, serializer);
-    }
-  }
-
-  @protected
-  void sse_encode_bridge_task_worktree_disposition(
-    BridgeTaskWorktreeDisposition self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.index, serializer);
-  }
-
-  @protected
   void sse_encode_bridge_thread(BridgeThread self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.id, serializer);
     sse_encode_String(self.projectId, serializer);
     sse_encode_String(self.title, serializer);
-    sse_encode_bridge_thread_mode(self.mode, serializer);
+    sse_encode_String(self.mode, serializer);
     sse_encode_String(self.rootThreadId, serializer);
     sse_encode_opt_String(self.parentThreadId, serializer);
     sse_encode_String(self.role, serializer);
@@ -24520,14 +19387,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_i_32(2, serializer);
         sse_encode_u_32(chunkIndex, serializer);
         sse_encode_String(delta, serializer);
-      case BridgeThreadItemDeltaState_Plan(delta: final delta):
+      case BridgeThreadItemDeltaState_ToolArguments(delta: final delta):
         sse_encode_i_32(3, serializer);
         sse_encode_String(delta, serializer);
-      case BridgeThreadItemDeltaState_ToolArguments(delta: final delta):
-        sse_encode_i_32(4, serializer);
-        sse_encode_String(delta, serializer);
       case BridgeThreadItemDeltaState_ToolResult(delta: final delta):
-        sse_encode_i_32(5, serializer);
+        sse_encode_i_32(4, serializer);
         sse_encode_String(delta, serializer);
     }
   }
@@ -24597,16 +19461,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(inferenceId, serializer);
         sse_encode_String(model, serializer);
         sse_encode_box_autoadd_bridge_thread_inference_state(state, serializer);
-      case BridgeThreadItemState_Plan(
-        content: final content,
-        lifecycle: final lifecycle,
-      ):
-        sse_encode_i_32(6, serializer);
-        sse_encode_String(content, serializer);
-        sse_encode_box_autoadd_bridge_thread_content_lifecycle(
-          lifecycle,
-          serializer,
-        );
       case BridgeThreadItemState_Skill(
         name: final name,
         source: final source,
@@ -24615,7 +19469,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         cause: final cause,
         activatedAt: final activatedAt,
       ):
-        sse_encode_i_32(7, serializer);
+        sse_encode_i_32(6, serializer);
         sse_encode_String(name, serializer);
         sse_encode_String(source, serializer);
         sse_encode_String(providerId, serializer);
@@ -24630,7 +19484,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         mediaType: final mediaType,
         completedAt: final completedAt,
       ):
-        sse_encode_i_32(8, serializer);
+        sse_encode_i_32(7, serializer);
         sse_encode_String(path, serializer);
         sse_encode_opt_String(mediaType, serializer);
         sse_encode_i_64(completedAt, serializer);
@@ -24639,7 +19493,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         afterTokens: final afterTokens,
         compactedAt: final compactedAt,
       ):
-        sse_encode_i_32(9, serializer);
+        sse_encode_i_32(8, serializer);
         sse_encode_u_64(beforeTokens, serializer);
         sse_encode_u_64(afterTokens, serializer);
         sse_encode_i_64(compactedAt, serializer);
@@ -24683,15 +19537,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.transport, serializer);
     sse_encode_String(self.endpoint, serializer);
     sse_encode_bool(self.builtIn, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_thread_mode(
-    BridgeThreadMode self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.index, serializer);
   }
 
   @protected
@@ -24773,6 +19618,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.progress, serializer);
     sse_encode_opt_box_autoadd_bridge_thread_mcp_health_snapshot(
       self.mcpHealth,
+      serializer,
+    );
+    sse_encode_opt_box_autoadd_bridge_workflow_runtime_snapshot(
+      self.workflow,
       serializer,
     );
     sse_encode_i_64(self.updatedAt, serializer);
@@ -25486,58 +20335,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_bridge_waiting_review_phase(
-    BridgeWaitingReviewPhase self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    switch (self) {
-      case BridgeWaitingReviewPhase_AwaitingReport(
-        outcome: final outcome,
-        continuation: final continuation,
-      ):
-        sse_encode_i_32(0, serializer);
-        sse_encode_box_autoadd_bridge_executor_terminal_outcome(
-          outcome,
-          serializer,
-        );
-        sse_encode_box_autoadd_bridge_executor_continuation_state(
-          continuation,
-          serializer,
-        );
-      case BridgeWaitingReviewPhase_Ready(
-        completionId: final completionId,
-        completionRevision: final completionRevision,
-        verificationSummary: final verificationSummary,
-      ):
-        sse_encode_i_32(1, serializer);
-        sse_encode_String(completionId, serializer);
-        sse_encode_u_32(completionRevision, serializer);
-        sse_encode_String(verificationSummary, serializer);
-      case BridgeWaitingReviewPhase_Reviewing(
-        completionId: final completionId,
-        completionRevision: final completionRevision,
-        reviewRoundId: final reviewRoundId,
-        verificationSummary: final verificationSummary,
-      ):
-        sse_encode_i_32(2, serializer);
-        sse_encode_String(completionId, serializer);
-        sse_encode_u_32(completionRevision, serializer);
-        sse_encode_String(reviewRoundId, serializer);
-        sse_encode_String(verificationSummary, serializer);
-    }
-  }
-
-  @protected
-  void sse_encode_bridge_waiting_review_work_unit(
-    BridgeWaitingReviewWorkUnit self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_waiting_review_phase(self.phase, serializer);
-  }
-
-  @protected
   void sse_encode_bridge_waiting_tool_agent(
     BridgeWaitingToolAgent self,
     SseSerializer serializer,
@@ -25576,94 +20373,99 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_bridge_work_unit_completion_outcome(
-    BridgeWorkUnitCompletionOutcome self,
+  void sse_encode_bridge_workflow_definition(
+    BridgeWorkflowDefinition self,
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    switch (self) {
-      case BridgeWorkUnitCompletionOutcome_Merged(
-        mergeRecordId: final mergeRecordId,
-      ):
-        sse_encode_i_32(0, serializer);
-        sse_encode_String(mergeRecordId, serializer);
-      case BridgeWorkUnitCompletionOutcome_NoDelivery(
-        completionId: final completionId,
-      ):
-        sse_encode_i_32(1, serializer);
-        sse_encode_String(completionId, serializer);
-    }
+    sse_encode_String(self.title, serializer);
+    sse_encode_String(self.goal, serializer);
+    sse_encode_String(self.initialStageId, serializer);
+    sse_encode_list_bridge_workflow_stage(self.stages, serializer);
+    sse_encode_list_bridge_workflow_transition(self.transitions, serializer);
   }
 
   @protected
-  void sse_encode_bridge_work_unit_failure(
-    BridgeWorkUnitFailure self,
+  void sse_encode_bridge_workflow_run(
+    BridgeWorkflowRun self,
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    switch (self) {
-      case BridgeWorkUnitFailure_Spawn(failure: final failure):
-        sse_encode_i_32(0, serializer);
-        sse_encode_box_bridge_task_spawn_failure(failure, serializer);
-      case BridgeWorkUnitFailure_Execution(
-        operationId: final operationId,
-        detail: final detail,
-      ):
-        sse_encode_i_32(1, serializer);
-        sse_encode_String(operationId, serializer);
-        sse_encode_String(detail, serializer);
-    }
+    sse_encode_String(self.lineageId, serializer);
+    sse_encode_String(self.runId, serializer);
+    sse_encode_bridge_workflow_definition(self.definition, serializer);
+    sse_encode_String(self.definitionHash, serializer);
+    sse_encode_bridge_mode_instruction_snapshot(self.mode, serializer);
+    sse_encode_bridge_workflow_run_lifecycle(self.lifecycle, serializer);
+    sse_encode_String(self.currentStageId, serializer);
+    sse_encode_i_64(self.compiledAt, serializer);
+    sse_encode_i_64(self.updatedAt, serializer);
+    sse_encode_list_bridge_workflow_transition_record(
+      self.historyTail,
+      serializer,
+    );
+    sse_encode_u_64(self.archivedTransitionCount, serializer);
+    sse_encode_String(self.archivedTransitionDigest, serializer);
   }
 
   @protected
-  void sse_encode_bridge_work_unit_pause_reason(
-    BridgeWorkUnitPauseReason self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    switch (self) {
-      case BridgeWorkUnitPauseReason_Budget(limit: final limit):
-        sse_encode_i_32(0, serializer);
-        sse_encode_box_autoadd_bridge_budget_limit_dto(limit, serializer);
-      case BridgeWorkUnitPauseReason_Operational(
-        operationId: final operationId,
-        detail: final detail,
-      ):
-        sse_encode_i_32(1, serializer);
-        sse_encode_String(operationId, serializer);
-        sse_encode_String(detail, serializer);
-    }
-  }
-
-  @protected
-  void sse_encode_bridge_working_task_state(
-    BridgeWorkingTaskState self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.documentEditSummary, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_worktree_failure_cause(
-    BridgeWorktreeFailureCause self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_worktree_failure_cause_kind(self.kind, serializer);
-    sse_encode_String(self.message, serializer);
-    sse_encode_opt_String(self.args, serializer);
-    sse_encode_opt_box_autoadd_i_32(self.exitCode, serializer);
-    sse_encode_opt_String(self.stderr, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_worktree_failure_cause_kind(
-    BridgeWorktreeFailureCauseKind self,
+  void sse_encode_bridge_workflow_run_lifecycle(
+    BridgeWorkflowRunLifecycle self,
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_workflow_runtime_snapshot(
+    BridgeWorkflowRuntimeSnapshot self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_64(self.revision, serializer);
+    sse_encode_opt_box_autoadd_bridge_workflow_run(self.currentRun, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_workflow_stage(
+    BridgeWorkflowStage self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.id, serializer);
+    sse_encode_String(self.title, serializer);
+    sse_encode_String(self.instructions, serializer);
+    sse_encode_list_String(self.completionCriteria, serializer);
+    sse_encode_bool(self.terminal, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_workflow_transition(
+    BridgeWorkflowTransition self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.fromStageId, serializer);
+    sse_encode_String(self.toStageId, serializer);
+    sse_encode_String(self.when, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_workflow_transition_record(
+    BridgeWorkflowTransitionRecord self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_64(self.revision, serializer);
+    sse_encode_String(self.fromStageId, serializer);
+    sse_encode_String(self.toStageId, serializer);
+    sse_encode_String(self.reason, serializer);
+    sse_encode_String(self.summary, serializer);
+    sse_encode_list_String(self.evidence, serializer);
+    sse_encode_String(self.turnId, serializer);
+    sse_encode_String(self.callId, serializer);
+    sse_encode_i_64(self.transitionedAt, serializer);
   }
 
   @protected
@@ -25775,6 +20577,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_list_bridge_agent_profile_dto(
+    List<BridgeAgentProfileDto> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_bridge_agent_profile_dto(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_list_bridge_attachment_draft(
     List<BridgeAttachmentDraft> self,
     SseSerializer serializer,
@@ -25795,18 +20609,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_bridge_attachment_draft_source(item, serializer);
-    }
-  }
-
-  @protected
-  void sse_encode_list_bridge_conversation_recovery_mode(
-    List<BridgeConversationRecoveryMode> self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.length, serializer);
-    for (final item in self) {
-      sse_encode_bridge_conversation_recovery_mode(item, serializer);
     }
   }
 
@@ -26003,18 +20805,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_list_bridge_recovery_cleanup_resource_dto(
-    List<BridgeRecoveryCleanupResourceDto> self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.length, serializer);
-    for (final item in self) {
-      sse_encode_bridge_recovery_cleanup_resource_dto(item, serializer);
-    }
-  }
-
-  @protected
   void sse_encode_list_bridge_recovery_issue_action(
     List<BridgeRecoveryIssueAction> self,
     SseSerializer serializer,
@@ -26083,126 +20873,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_bridge_studio_recovery_issue_dto(item, serializer);
-    }
-  }
-
-  @protected
-  void sse_encode_list_bridge_task_completion_dto(
-    List<BridgeTaskCompletionDto> self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.length, serializer);
-    for (final item in self) {
-      sse_encode_bridge_task_completion_dto(item, serializer);
-    }
-  }
-
-  @protected
-  void sse_encode_list_bridge_task_design_reference_dto(
-    List<BridgeTaskDesignReferenceDto> self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.length, serializer);
-    for (final item in self) {
-      sse_encode_bridge_task_design_reference_dto(item, serializer);
-    }
-  }
-
-  @protected
-  void sse_encode_list_bridge_task_directory_entry(
-    List<BridgeTaskDirectoryEntry> self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.length, serializer);
-    for (final item in self) {
-      sse_encode_bridge_task_directory_entry(item, serializer);
-    }
-  }
-
-  @protected
-  void sse_encode_list_bridge_task_issue_dto(
-    List<BridgeTaskIssueDto> self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.length, serializer);
-    for (final item in self) {
-      sse_encode_bridge_task_issue_dto(item, serializer);
-    }
-  }
-
-  @protected
-  void sse_encode_list_bridge_task_merge_dto(
-    List<BridgeTaskMergeDto> self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.length, serializer);
-    for (final item in self) {
-      sse_encode_bridge_task_merge_dto(item, serializer);
-    }
-  }
-
-  @protected
-  void sse_encode_list_bridge_task_recovery_target_dto(
-    List<BridgeTaskRecoveryTargetDto> self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.length, serializer);
-    for (final item in self) {
-      sse_encode_bridge_task_recovery_target_dto(item, serializer);
-    }
-  }
-
-  @protected
-  void sse_encode_list_bridge_task_recovery_turn_dto(
-    List<BridgeTaskRecoveryTurnDto> self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.length, serializer);
-    for (final item in self) {
-      sse_encode_bridge_task_recovery_turn_dto(item, serializer);
-    }
-  }
-
-  @protected
-  void sse_encode_list_bridge_task_review_dto(
-    List<BridgeTaskReviewDto> self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.length, serializer);
-    for (final item in self) {
-      sse_encode_bridge_task_review_dto(item, serializer);
-    }
-  }
-
-  @protected
-  void sse_encode_list_bridge_task_review_finding_dto(
-    List<BridgeTaskReviewFindingDto> self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.length, serializer);
-    for (final item in self) {
-      sse_encode_bridge_task_review_finding_dto(item, serializer);
-    }
-  }
-
-  @protected
-  void sse_encode_list_bridge_task_work_unit_dto(
-    List<BridgeTaskWorkUnitDto> self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_i_32(self.length, serializer);
-    for (final item in self) {
-      sse_encode_bridge_task_work_unit_dto(item, serializer);
     }
   }
 
@@ -26315,6 +20985,42 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_list_bridge_workflow_stage(
+    List<BridgeWorkflowStage> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_bridge_workflow_stage(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_bridge_workflow_transition(
+    List<BridgeWorkflowTransition> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_bridge_workflow_transition(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_bridge_workflow_transition_record(
+    List<BridgeWorkflowTransitionRecord> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_bridge_workflow_transition_record(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_list_deep_seek_balance_info_dto(
     List<DeepSeekBalanceInfoDto> self,
     SseSerializer serializer,
@@ -26335,6 +21041,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
       sse_encode_mcp_server_input(item, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_list_mode_summary_dto(
+    List<ModeSummaryDto> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_mode_summary_dto(item, serializer);
     }
   }
 
@@ -26550,6 +21268,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_mode_summary_dto(
+    ModeSummaryDto self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.id, serializer);
+    sse_encode_String(self.displayName, serializer);
+    sse_encode_String(self.description, serializer);
+    sse_encode_i_32(self.order, serializer);
+    sse_encode_String(self.source, serializer);
+    sse_encode_String(self.providerId, serializer);
+  }
+
+  @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -26631,19 +21363,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  void sse_encode_opt_box_autoadd_bridge_task_spawn_resource(
-    BridgeTaskSpawnResource? self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    sse_encode_bool(self != null, serializer);
-    if (self != null) {
-      sse_encode_box_autoadd_bridge_task_spawn_resource(self, serializer);
-    }
-  }
-
-  @protected
   void sse_encode_opt_box_autoadd_bridge_thread(
     BridgeThread? self,
     SseSerializer serializer,
@@ -26721,6 +21440,32 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self != null, serializer);
     if (self != null) {
       sse_encode_box_autoadd_bridge_turn(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_workflow_run(
+    BridgeWorkflowRun? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_bridge_workflow_run(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_workflow_runtime_snapshot(
+    BridgeWorkflowRuntimeSnapshot? self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_bridge_workflow_runtime_snapshot(self, serializer);
     }
   }
 

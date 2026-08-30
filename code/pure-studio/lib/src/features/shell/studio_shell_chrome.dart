@@ -10,7 +10,7 @@ class _Header extends StatelessWidget {
     final thread = state.selectedRootThread;
     final project = state.selectedProject;
     final projectLabel = project?.name.trim() ?? '';
-    final taskPhase = state.runtime.task?.state.kind;
+    final workflowStage = state.runtime.workflow?.currentRun?.currentStageId;
     return SizedBox(
       height: 78,
       child: Padding(
@@ -49,7 +49,7 @@ class _Header extends StatelessWidget {
                           ),
                         ),
                       ),
-                    if (projectLabel.isNotEmpty && taskPhase != null)
+                    if (projectLabel.isNotEmpty && workflowStage != null)
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 7),
                         child: Text(
@@ -58,9 +58,9 @@ class _Header extends StatelessWidget {
                               ?.copyWith(color: context.studioInkSoft),
                         ),
                       ),
-                    if (taskPhase != null)
+                    if (workflowStage != null)
                       Text(
-                        context.taskPhaseLabel(taskPhase),
+                        workflowStage,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -329,8 +329,12 @@ String _agentDisplayName(BuildContext context, StudioThread thread) {
   return context.roleLabel(role);
 }
 
-String _threadSubtitle(BuildContext context, StudioThread thread) {
-  final mode = context.compileModeLabel(thread.mode);
+String _threadSubtitle(
+  BuildContext context,
+  StudioThread thread,
+  String? modeDisplayName,
+) {
+  final mode = modeDisplayName ?? context.compileModeLabel(thread.mode);
   final hour = thread.updatedAt.hour.toString().padLeft(2, '0');
   final minute = thread.updatedAt.minute.toString().padLeft(2, '0');
   return context.l10n.shellSessionUpdated(mode, '$hour:$minute');

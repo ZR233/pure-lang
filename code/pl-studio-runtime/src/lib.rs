@@ -1,12 +1,11 @@
 //! Pure Studio 产品运行时。
 //!
-//! 本 crate 负责 Studio 配置、SQLite projection、project/thread/task 编排与 bridge DTO；
+//! 本 crate 负责 Studio 配置、SQLite projection、project/thread 编排与 bridge DTO；
 //! 通用模型循环、agent actor、工具和协议基础类型由 `pl-core` 提供。
 
 pub(crate) use pl_core::*;
 pub use pl_protocol::*;
 
-pub mod agent;
 pub mod config;
 mod config_editor;
 mod error_mapping;
@@ -17,16 +16,11 @@ mod provider_usage;
 mod studio;
 mod updater;
 
-pub use agent::{
-    DurableWorktreeDisposition, DurableWorktreePresence, DurableWorktreeResource,
-    LocalWorktreeBackend, RemoteWorktreeBackend, WorktreeBackend, WorktreeCreateFailure,
-    WorktreeCreateSpec, WorktreeError, WorktreeHandle, WorktreeManager, WorktreeReconciliation,
-    WorktreeRef, reconcile_task_worktree_group, same_worktree_path,
-};
 pub use config::{
     ConfigPaths, ConfigRecoveryReport, ConfigRuntimeError, ConfigRuntimeSnapshot, ConfigStore,
-    STUDIO_CONFIG_SCHEMA_VERSION, StudioConfig, StudioMcpConfig, StudioMode, StudioRole,
-    StudioUiConfig, WebSearchContextSize, WebSearchLocation, WebSearchMode,
+    ProviderId, ReasoningEffort, STUDIO_CONFIG_SCHEMA_VERSION, StudioConfig, StudioMcpConfig,
+    StudioMode, StudioModeId, StudioRole, StudioUiConfig, UserAgentProfile, WebSearchContextSize,
+    WebSearchLocation, WebSearchMode,
 };
 pub use config_editor::{
     ProviderEdit, ProviderModelEdit, ProviderSettingsEdit, RoleEdit, provider_template_kind,

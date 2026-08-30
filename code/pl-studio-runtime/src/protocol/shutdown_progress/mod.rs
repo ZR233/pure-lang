@@ -3,18 +3,18 @@
 mod cancelling_turns;
 mod flushing_persistence;
 mod stopped;
+mod stopping_agents;
 mod stopping_lsp;
 mod stopping_mcp;
 mod stopping_subscriptions;
-mod suspending_tasks;
 
 pub use cancelling_turns::CancellingTurnsProgress;
 pub use flushing_persistence::FlushingPersistenceProgress;
 pub use stopped::StoppedProgress;
+pub use stopping_agents::StoppingAgentsProgress;
 pub use stopping_lsp::StoppingLspProgress;
 pub use stopping_mcp::StoppingMcpProgress;
 pub use stopping_subscriptions::StoppingSubscriptionsProgress;
-pub use suspending_tasks::SuspendingTasksProgress;
 
 use serde::{Deserialize, Serialize};
 
@@ -25,7 +25,7 @@ pub enum StudioShutdownProgress {
     StoppingSubscriptions(StoppingSubscriptionsProgress),
     CancellingTurns(CancellingTurnsProgress),
     FlushingPersistence(FlushingPersistenceProgress),
-    SuspendingTasks(SuspendingTasksProgress),
+    StoppingAgents(StoppingAgentsProgress),
     StoppingMcp(StoppingMcpProgress),
     StoppingLsp(StoppingLspProgress),
     Stopped(StoppedProgress),
@@ -38,7 +38,7 @@ impl StudioShutdownProgress {
             Self::StoppingSubscriptions(_) => 1,
             Self::CancellingTurns(_) => 2,
             Self::FlushingPersistence(_) => 3,
-            Self::SuspendingTasks(_) => 4,
+            Self::StoppingAgents(_) => 4,
             Self::StoppingMcp(_) => 5,
             Self::StoppingLsp(_) => 6,
             Self::Stopped(_) => 7,

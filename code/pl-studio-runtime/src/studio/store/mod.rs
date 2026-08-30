@@ -12,7 +12,6 @@ pub(in crate::studio) mod object;
 mod project;
 pub(in crate::studio) mod settings;
 mod ssh_server;
-mod task;
 mod thread;
 
 #[derive(Clone)]
@@ -33,5 +32,4 @@ impl StudioStore {
     }
 }
 
-#[cfg(test)]
-mod unit_tests;
+// Legacy Task persistence tests were removed with the fixed Task runtime.

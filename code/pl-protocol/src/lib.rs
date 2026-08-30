@@ -1,4 +1,5 @@
 mod agent;
+mod agent_profile;
 mod billing;
 mod error;
 mod event;
@@ -18,8 +19,10 @@ mod thread_item;
 mod tool;
 mod turn;
 mod turn_failure;
+mod workflow;
 
 pub use agent::*;
+pub use agent_profile::AgentProfileSnapshot;
 pub use billing::InferenceTokenUsage as TokenUsage;
 pub use billing::{
     InferenceBillingAppend, InferenceBillingRecord, InferenceOrchestrationMetrics, InferenceTiming,
@@ -65,10 +68,10 @@ pub use provider_catalog::{
     WebSearchResolutionDescriptor,
 };
 pub use thread::{
-    THREAD_SCHEMA_VERSION, Thread, ThreadContextDisposition, ThreadMode, ThreadNotification,
-    ThreadNotificationEnvelope, ThreadRuntimeSnapshot, ThreadRuntimeUsage, ThreadSnapshot,
-    ThreadStatus, ThreadSubscriptionRequest, ThreadSubscriptionUpdate, ThreadTurnHistory,
-    ThreadTurnPage,
+    ModeId, THREAD_SCHEMA_VERSION, Thread, ThreadContextDisposition, ThreadMode,
+    ThreadNotification, ThreadNotificationEnvelope, ThreadRuntimeSnapshot, ThreadRuntimeUsage,
+    ThreadSnapshot, ThreadStatus, ThreadSubscriptionRequest, ThreadSubscriptionUpdate,
+    ThreadTurnHistory, ThreadTurnPage,
 };
 pub use thread_item::*;
 pub use tool::{
@@ -83,4 +86,9 @@ pub use turn::{
 };
 pub use turn_failure::{
     ProviderFailure, ProviderFailureKind, RetryDisposition, TurnFailure, TurnFailureCategory,
+};
+pub use workflow::{
+    ModeInstructionSnapshot, WorkflowDefinition, WorkflowOperationReceipt, WorkflowRun,
+    WorkflowRunArchive, WorkflowRunLifecycle, WorkflowRuntimeSnapshot, WorkflowSessionState,
+    WorkflowStage, WorkflowTransition, WorkflowTransitionRecord,
 };

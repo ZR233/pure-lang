@@ -1,3 +1,4 @@
+pub mod agent_profile;
 pub mod attachment;
 pub mod error;
 pub mod event;
@@ -9,6 +10,7 @@ pub mod ssh;
 pub mod thread_stream;
 pub mod updater;
 
+pub use agent_profile::*;
 pub use attachment::*;
 pub use error::*;
 pub use event::*;

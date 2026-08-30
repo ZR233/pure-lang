@@ -37,7 +37,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get shutdownPhaseFlushingPersistence => 'Saving sessions';
 
   @override
-  String get shutdownPhaseSuspendingTasks => 'Suspending background tasks';
+  String get shutdownPhaseStoppingAgents => 'Stopping collaborative agents';
 
   @override
   String get shutdownPhaseStoppingMcp => 'Stopping MCP servers';
@@ -113,75 +113,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String recoveryGlobalWarning(int count) {
     return '$count recovery issue(s) need attention';
   }
-
-  @override
-  String get recoveryCleanupTooltip => 'Review safe cleanup';
-
-  @override
-  String get recoveryRetryTooltip => 'Continue merge recovery';
-
-  @override
-  String recoveryRetryFailed(String error) {
-    return 'Recovery retry failed: $error';
-  }
-
-  @override
-  String get recoveryCleanupTitle => 'Clean up recovery issue?';
-
-  @override
-  String get recoveryCleanupBody =>
-      'Pure Studio will only remove its own task resources. Review any work that may be lost before continuing.';
-
-  @override
-  String get recoveryCleanupNoResources =>
-      'No remaining task resources were found.';
-
-  @override
-  String get recoveryCleanupPresenceAbsent => 'Missing';
-
-  @override
-  String get recoveryCleanupPresenceComplete => 'Complete';
-
-  @override
-  String get recoveryCleanupPresencePartial => 'Partially missing';
-
-  @override
-  String get recoveryCleanupDirty => 'Uncommitted changes';
-
-  @override
-  String recoveryCleanupAhead(int count) {
-    return '$count unmerged commit(s)';
-  }
-
-  @override
-  String recoveryCleanupChangedFiles(int count) {
-    return '$count changed file(s)';
-  }
-
-  @override
-  String get recoveryCleanupCancel => 'Cancel';
-
-  @override
-  String get recoveryCleanupConfirm => 'Clean up';
-
-  @override
-  String get recoveryCleanupRefreshPreview => 'Refresh preview';
-
-  @override
-  String recoveryCleanupFailed(String error) {
-    return 'Cleanup failed: $error';
-  }
-
-  @override
-  String get projectCleanupTitle =>
-      'Remove project and clean up Pure worktrees?';
-
-  @override
-  String get projectCleanupBody =>
-      'This removes the project from Studio and permanently discards uncommitted changes and unmerged commits in every Pure-owned task worktree. The main workspace will not be deleted or modified.';
-
-  @override
-  String get projectCleanupConfirm => 'Remove project and clean up';
 
   @override
   String get sidebarNew => 'New';
@@ -381,7 +312,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get statusSessionModeLocked =>
-      'Session mode cannot change while the session is running or a Task is active';
+      'Session mode cannot change while the session is running or a workflow is active';
 
   @override
   String get statusPlannerModel => 'Planner model';
@@ -494,10 +425,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get statusTurnWaitingForUserInput => 'Waiting for input';
 
   @override
-  String get statusTurnWaitingForPlanConfirmation =>
-      'Waiting for plan confirmation';
-
-  @override
   String get statusTurnPersisting => 'Saving turn';
 
   @override
@@ -505,10 +432,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get statusInteractionUserInput => 'Waiting for input';
-
-  @override
-  String get statusInteractionPlanConfirmation =>
-      'Waiting for plan confirmation';
 
   @override
   String statusContextTooltip(
@@ -577,240 +500,6 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get composerAgentRuntimeDriven =>
       'This agent session is driven by the runtime';
-
-  @override
-  String get statusTaskSection => 'Task coordinator';
-
-  @override
-  String get statusTaskBranch => 'Branch';
-
-  @override
-  String get statusTaskHead => 'HEAD';
-
-  @override
-  String get statusTaskWorkUnits => 'Work units';
-
-  @override
-  String get statusTaskAgents => 'Agents';
-
-  @override
-  String get statusTaskCompletions => 'Completions';
-
-  @override
-  String get statusTaskMerges => 'Merge records';
-
-  @override
-  String get statusTaskReviews => 'Reviews';
-
-  @override
-  String get statusTaskWorktree => 'Worktree';
-
-  @override
-  String get statusTaskCommit => 'Commit';
-
-  @override
-  String get statusTaskSource => 'Source';
-
-  @override
-  String get statusTaskPreviousHead => 'Previous HEAD';
-
-  @override
-  String get statusTaskDeliveryHead => 'Delivery HEAD';
-
-  @override
-  String get statusTaskResultingHead => 'Resulting HEAD';
-
-  @override
-  String get statusTaskCleanup => 'Cleanup';
-
-  @override
-  String get statusTaskRequest => 'Request';
-
-  @override
-  String get statusTaskSummary => 'Summary';
-
-  @override
-  String get statusTaskStage => 'Stage';
-
-  @override
-  String get statusTaskNextStep => 'Next step';
-
-  @override
-  String get statusTaskSummaryAge => 'Summary age';
-
-  @override
-  String get statusTaskVerification => 'Verification';
-
-  @override
-  String get statusTaskScope => 'Scope';
-
-  @override
-  String get statusTaskCompletionRevision => 'Completion revision';
-
-  @override
-  String get statusTaskFindings => 'Findings';
-
-  @override
-  String get statusTaskRecommendation => 'How to fix';
-
-  @override
-  String get statusTaskError => 'Error';
-
-  @override
-  String get statusTaskFailed => 'Task failed';
-
-  @override
-  String get statusTaskRecoverable => 'Can continue';
-
-  @override
-  String get statusTaskPaused => 'Paused';
-
-  @override
-  String get statusTaskFailures => 'Task failures';
-
-  @override
-  String get statusTaskFatalHint =>
-      'Fix the provider or configuration, then start a new task.';
-
-  @override
-  String get statusTaskRecoverableHint =>
-      'This task can continue after the cause is corrected.';
-
-  @override
-  String get statusTaskPausedHint =>
-      'No model turn is active. Send a message to continue this task.';
-
-  @override
-  String get statusTaskExecution => 'Execution';
-
-  @override
-  String get statusTaskBudget => 'Budget limit';
-
-  @override
-  String get statusTaskBudgetSlice => 'Budget slice';
-
-  @override
-  String statusTaskBudgetSliceValue(int current, int limit) {
-    return '$current/$limit';
-  }
-
-  @override
-  String statusTaskBudgetUsage(
-    int modelSteps,
-    int toolCalls,
-    int waitCalls,
-    String elapsedMs,
-  ) {
-    return '$modelSteps model · $toolCalls tools · $waitCalls waits · $elapsedMs ms';
-  }
-
-  @override
-  String get statusTaskContinuation => 'Continuation';
-
-  @override
-  String get statusTaskBudgetModelStep => 'Model-step limit';
-
-  @override
-  String get statusTaskBudgetToolCall => 'Tool-call limit';
-
-  @override
-  String get statusTaskBudgetWait => 'Wait-call limit';
-
-  @override
-  String get statusTaskBudgetWallClock => 'Wall-clock limit';
-
-  @override
-  String get statusTaskBudgetAgentCount => 'Agent-count limit';
-
-  @override
-  String get statusTaskBudgetAgentDepth => 'Agent-depth limit';
-
-  @override
-  String get statusTaskBudgetFinalization => 'Finalization limit';
-
-  @override
-  String get statusTaskContinuationNone => 'None';
-
-  @override
-  String get statusTaskContinuationCompacting => 'Compacting context';
-
-  @override
-  String get statusTaskContinuationPendingStart => 'Starting next slice';
-
-  @override
-  String get statusTaskContinuationNeedsAttention => 'Needs attention';
-
-  @override
-  String get statusTaskPhasePlanning => 'Planning';
-
-  @override
-  String get statusTaskPhasePendingConfirmation => 'Awaiting plan confirmation';
-
-  @override
-  String get statusTaskPhaseEditingDocuments => 'Editing documents';
-
-  @override
-  String get statusTaskPhaseWorking => 'Working';
-
-  @override
-  String get statusTaskPhaseReviewing => 'Reviewing';
-
-  @override
-  String get statusTaskPhaseCompleted => 'Task completed';
-
-  @override
-  String get statusTaskStatusPending => 'Pending';
-
-  @override
-  String get statusTaskStatusQueued => 'Queued';
-
-  @override
-  String get statusTaskStatusRunning => 'Running';
-
-  @override
-  String get statusTaskStatusAwaitingCompletion => 'Awaiting completion';
-
-  @override
-  String get statusTaskStatusReadyForReview => 'Ready for review';
-
-  @override
-  String get statusTaskStatusReviewing => 'Reviewing';
-
-  @override
-  String get statusTaskStatusChangesRequested => 'Changes requested';
-
-  @override
-  String get statusTaskStatusApproved => 'Approved';
-
-  @override
-  String get statusTaskStatusMerged => 'Merged';
-
-  @override
-  String get statusTaskStatusNoDelivery => 'No delivery';
-
-  @override
-  String get statusTaskStatusCompleted => 'Completed';
-
-  @override
-  String get statusTaskStatusBudgetLimited => 'Budget limited';
-
-  @override
-  String get statusTaskStatusNeedsAttention => 'Needs attention';
-
-  @override
-  String get statusTaskStatusFailed => 'Failed';
-
-  @override
-  String get statusTaskStatusCancelled => 'Cancelled';
-
-  @override
-  String get statusTaskStatusPass => 'Passed';
-
-  @override
-  String get statusTaskStatusChangesRequired => 'Changes required';
-
-  @override
-  String get statusTaskStatusBlocked => 'Blocked';
 
   @override
   String get statusSkillsSection => 'Skills';
@@ -959,9 +648,6 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get timelinePlanFallback => 'Plan';
-
-  @override
   String timelineSkillActivated(String name) {
     return 'Activated skill · $name';
   }
@@ -1058,61 +744,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get interactionContinueAfterAnswer => 'Continue after answering';
-
-  @override
-  String get taskRecoveryDialogTitle => 'Recover and continue';
-
-  @override
-  String get taskRecoveryDialogBody =>
-      'Only the selected Thread model context is rolled back. Task, WorkUnit, workspace, commits, usage, and audit history are preserved.';
-
-  @override
-  String get taskRecoveryTargetLabel => 'Recovery target';
-
-  @override
-  String get taskRecoveryTargetPlanner => 'Planner';
-
-  @override
-  String get taskRecoveryTargetExecutor => 'Executor';
-
-  @override
-  String get taskRecoveryTurnSuffixLabel =>
-      'Contiguous tail Turns to roll back';
-
-  @override
-  String get taskRecoveryModeLabel => 'Recovery mode';
-
-  @override
-  String get taskRecoveryModeRewind => 'Rewind conversation tail';
-
-  @override
-  String get taskRecoveryModeRebuild => 'Rebuild this Thread context';
-
-  @override
-  String get taskRecoveryGitPreserved =>
-      'Git and workspace state will not be reset or cleaned. Their fingerprint must exactly match this preview when recovery is applied.';
-
-  @override
-  String get taskRecoveryRebuildWarning =>
-      'When no safe prefix can be preserved, only this Thread\'s ordinary transcript is cleared. Handoff, evidence, session notes, and external state remain.';
-
-  @override
-  String get taskRecoveryFirstConfirm => 'Review recovery impact';
-
-  @override
-  String get taskRecoveryFinalConfirm => 'Confirm recovery and continue';
-
-  @override
-  String get taskRecoveryApplying => 'Recovering…';
-
-  @override
-  String get taskRecoveryItems => 'items';
-
-  @override
-  String get taskRecoveryInputs => 'inputs';
-
-  @override
-  String get taskRecoveryTools => 'tools';
 
   @override
   String get timelineRolledBack => 'Rolled back from active context';

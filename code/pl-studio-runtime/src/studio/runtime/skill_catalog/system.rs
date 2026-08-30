@@ -8,10 +8,12 @@ use pl_core::path_safety::{metadata_if_real, remove_dir_all_no_follow, validate_
 use rust_embed::Embed;
 
 const LEGACY_SYSTEM_MARKER_FILE_NAME: &str = ".pl-system-skills.marker";
-const EXPECTED_SYSTEM_SKILLS: [&str; 9] = [
+const EXPECTED_SYSTEM_SKILLS: [&str; 11] = [
     "canvas-design",
     "docx",
     "frontend-design",
+    "mode.simple",
+    "mode.task",
     "pdf",
     "powerpoint",
     "skill-creator",
@@ -44,7 +46,7 @@ fn validated_bundled_assets() -> Result<Vec<BundledAsset>> {
     let mut assets = Vec::new();
     let mut skill_documents = BTreeSet::new();
     for embedded_path in BundledSystemSkills::iter() {
-        let path = validate_bundled_path(&embedded_path)?;
+        let path = flatten_mode_asset_path(validate_bundled_path(&embedded_path)?);
         let asset = BundledSystemSkills::get(&embedded_path)
             .with_context(|| format!("bundled Skill asset disappeared: {embedded_path}"))?;
         if is_main_skill_document(&path) {
@@ -76,6 +78,14 @@ fn validated_bundled_assets() -> Result<Vec<BundledAsset>> {
     Ok(assets)
 }
 
+fn flatten_mode_asset_path(path: PathBuf) -> PathBuf {
+    let mut components = path.components();
+    if components.next().and_then(|part| part.as_os_str().to_str()) != Some("modes") {
+        return path;
+    }
+    components.collect()
+}
+
 fn validate_bundled_path(raw: &str) -> Result<PathBuf> {
     let path = Path::new(raw);
     let mut normalized = PathBuf::new();
@@ -86,7 +96,7 @@ fn validate_bundled_path(raw: &str) -> Result<PathBuf> {
     let skill_name = skill_name
         .to_str()
         .context("bundled Skill path must be valid UTF-8")?;
-    if !EXPECTED_SYSTEM_SKILLS.contains(&skill_name) {
+    if skill_name != "modes" && !EXPECTED_SYSTEM_SKILLS.contains(&skill_name) {
         bail!("unexpected bundled system Skill directory: {skill_name}");
     }
     normalized.push(skill_name);
@@ -108,7 +118,8 @@ fn validate_bundled_path(raw: &str) -> Result<PathBuf> {
 }
 
 fn is_main_skill_document(path: &Path) -> bool {
-    path.components().count() == 2 && path.file_name().is_some_and(|name| name == "SKILL.md")
+    matches!(path.components().count(), 2 | 3)
+        && path.file_name().is_some_and(|name| name == "SKILL.md")
 }
 
 fn replace_system_skills_dir(system_dir: &Path, assets: &[BundledAsset]) -> Result<()> {

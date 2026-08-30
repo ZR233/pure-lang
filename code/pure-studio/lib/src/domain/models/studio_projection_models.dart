@@ -44,6 +44,7 @@ abstract class SidebarView with _$SidebarView {
     required bool isBusy,
     required Map<String, StudioRecoveryIssue> projectRecoveryIssues,
     required Map<String, StudioRecoveryIssue> threadRecoveryIssues,
+    required Map<String, String> modeDisplayNames,
     @Default(false) bool directoryHasMore,
     @Default(false) bool directoryIsLoading,
   }) = _SidebarView;
@@ -73,6 +74,10 @@ abstract class SidebarView with _$SidebarView {
       isBusy: state.isBusy,
       projectRecoveryIssues: projectRecoveryIssues,
       threadRecoveryIssues: threadRecoveryIssues,
+      modeDisplayNames: {
+        for (final snapshot in state.skillsByProject.values)
+          for (final mode in snapshot.modes) mode.id: mode.displayName,
+      },
       directoryHasMore: state.threadDirectory.hasMore,
       directoryIsLoading: state.threadDirectory.isLoading,
     );
@@ -158,7 +163,7 @@ abstract class SettingsPageView with _$SettingsPageView {
       general: state.general,
       webSearch: state.webSearch,
       modelPerformance: state.modelPerformance,
-      runtimeBusy: state.isBusy || state.runtime.hasActiveTask,
+      runtimeBusy: state.isBusy || state.runtime.hasActiveWorkflow,
     );
   }
 }

@@ -55,8 +55,7 @@ Riverpod、Freezed、l10n 和 FRB 生成必须从仓库根目录使用
 完整检查仍使用 `cargo xtask verify-gui`。xtask 会校验 codegen
 版本，并统一 FRB 2.12 用于 Rust crate 和输出的路径表示。
 
-`tool/task_driver_harness.ps1` uses a separate `GuiStartupTimeoutSeconds`
-(30 minutes by default) for the first Rust/Flutter build. Plan, Task, and stall
-timeouts start only after the VM Service is available.
+真实工作流 GUI 验收由仓库根目录的
+`cargo xtask verify-workflow --live --gui` 统一启动、计时、保存 artifact 并回收进程树。
 
 The default app path initializes the native FRB runtime and subscribes only to the selected session stream. `DemoStudioApi` is selected only by an explicit demo build flag or a test override; native runtime failures are surfaced instead of switching implementations.

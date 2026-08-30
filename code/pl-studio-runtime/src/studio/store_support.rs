@@ -1,304 +1,17 @@
-use std::path::{Path, PathBuf};
+//! Studio 当前数据库 schema。
+//!
+//! v17 是统一工作流的破坏性边界。打开旧版本时由 `store::project` 删除整个数据库
+//! family 并从这里重建，因此本模块不包含旧 Task 表或迁移逻辑。
 
-use anyhow::{Context, Result, ensure};
+use anyhow::Result;
 use sea_orm::sea_query::{Index, IndexCreateStatement, IndexOrder};
-use sea_orm::{
-    ConnectionTrait, DatabaseBackend, DatabaseConnection, Schema, Statement, TransactionTrait,
-};
-use sha2::{Digest, Sha256};
+use sea_orm::{ConnectionTrait, DatabaseConnection};
 
 use crate::studio::entity;
 
-/// 唯一支持的 Studio schema 版本；v13-v15 只允许沿 canonical 链逐级迁移。
-pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 16;
-const STUDIO_DATABASE_SCHEMA_VERSION_V14: i64 = 14;
-const STUDIO_DATABASE_SCHEMA_VERSION_V15: i64 = 15;
-
-pub(super) async fn migrate_studio_schema_v13_to_v14(
-    db: &DatabaseConnection,
-    attachments_dir: &Path,
-) -> Result<()> {
-    let rows = db
-        .query_all_raw(Statement::from_string(
-            DatabaseBackend::Sqlite,
-            "SELECT id, storage_path, byte_size FROM attachments ORDER BY id".to_string(),
-        ))
-        .await?;
-    tokio::fs::create_dir_all(attachments_dir).await?;
-    let canonical_attachments_dir = std::fs::canonicalize(attachments_dir)
-        .context("failed to resolve Studio attachments directory for v13 migration")?;
-    let mut migrations = Vec::with_capacity(rows.len());
-    let mut created_paths = Vec::new();
-
-    for row in rows {
-        let id: String = row.try_get("", "id")?;
-        let storage_path: String = row.try_get("", "storage_path")?;
-        let expected_size: i64 = row.try_get("", "byte_size")?;
-        ensure!(
-            expected_size >= 0,
-            "attachment {id} has a negative byte size"
-        );
-        let old_path = PathBuf::from(storage_path);
-        let metadata = std::fs::symlink_metadata(&old_path)
-            .with_context(|| format!("attachment {id} snapshot is unavailable"))?;
-        ensure!(
-            metadata.is_file() && !pl_core::path_safety::is_link_or_reparse(&metadata),
-            "attachment {id} snapshot is not a regular file"
-        );
-        let canonical_old_path = std::fs::canonicalize(&old_path)
-            .with_context(|| format!("attachment {id} snapshot cannot be resolved"))?;
-        ensure!(
-            canonical_old_path.starts_with(&canonical_attachments_dir),
-            "attachment {id} snapshot escapes the attachments directory"
-        );
-        let bytes = tokio::fs::read(&canonical_old_path)
-            .await
-            .with_context(|| format!("attachment {id} snapshot cannot be read"))?;
-        ensure!(
-            bytes.len() == usize::try_from(expected_size)?,
-            "attachment {id} snapshot size does not match the database"
-        );
-        let content_sha256 = format!("{:x}", Sha256::digest(&bytes));
-        let object_dir = attachments_dir.join("objects").join(&content_sha256[..2]);
-        tokio::fs::create_dir_all(&object_dir).await?;
-        let object_path = object_dir.join(&content_sha256);
-        if tokio::fs::try_exists(&object_path).await? {
-            let existing = tokio::fs::read(&object_path).await?;
-            ensure!(
-                Sha256::digest(&existing).as_slice() == Sha256::digest(&bytes).as_slice(),
-                "attachment {id} content-addressed target is inconsistent"
-            );
-        } else {
-            if let Err(error) = tokio::fs::write(&object_path, &bytes).await {
-                cleanup_migration_blobs(&created_paths).await;
-                return Err(error).context("failed to create migrated attachment snapshot");
-            }
-            created_paths.push(object_path.clone());
-        }
-        migrations.push((id, object_path, content_sha256));
-    }
-
-    let migration = async {
-        let transaction = db.begin().await?;
-        transaction
-            .execute_unprepared(
-                "DROP INDEX IF EXISTS idx_attachments_item_id;
-                 DROP INDEX IF EXISTS idx_attachments_thread_id;
-                 DROP INDEX IF EXISTS idx_thread_inputs_queue;
-                 ALTER TABLE attachments RENAME TO attachments_v13;
-                 ALTER TABLE thread_inputs RENAME TO thread_inputs_v13;
-                 CREATE TABLE thread_inputs (
-                     id TEXT PRIMARY KEY NOT NULL,
-                     thread_id TEXT NOT NULL,
-                     mail_id TEXT NOT NULL UNIQUE,
-                     turn_id TEXT NOT NULL,
-                     content TEXT NOT NULL,
-                     attachments_json TEXT NOT NULL CHECK (json_valid(attachments_json)),
-                     metadata_json TEXT NOT NULL,
-                     presentation TEXT NOT NULL,
-                     state_json TEXT NOT NULL CHECK (json_valid(state_json)),
-                     state_kind TEXT GENERATED ALWAYS AS (
-                         json_extract(state_json, '$.kind')
-                     ) STORED NOT NULL CHECK (state_kind IN ('pending', 'claimed', 'consumed')),
-                     queue_ordinal INTEGER NOT NULL,
-                     queued_at INTEGER NOT NULL,
-                     FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE
-                 );
-                 INSERT INTO thread_inputs (
-                     id, thread_id, mail_id, turn_id, content, attachments_json,
-                     metadata_json, presentation, state_json, queue_ordinal, queued_at
-                 )
-                 SELECT id, thread_id, mail_id, turn_id, content, '[]', metadata_json,
-                        presentation, state_json, queue_ordinal, queued_at
-                 FROM thread_inputs_v13;
-                 DROP TABLE thread_inputs_v13;",
-            )
-            .await?;
-        Schema::new(transaction.get_database_backend())
-            .builder()
-            .register(entity::attachment::Entity)
-            .apply(&transaction)
-            .await?;
-        for (id, object_path, content_sha256) in &migrations {
-            transaction
-                .execute_raw(Statement::from_sql_and_values(
-                    DatabaseBackend::Sqlite,
-                    "INSERT INTO attachments (
-                         id, thread_id, kind, media_type, filename, storage_path,
-                         byte_size, content_sha256, width, height, created_at
-                     )
-                     SELECT id, thread_id, 'image', media_type, filename, ?,
-                            byte_size, ?, width, height, created_at
-                     FROM attachments_v13 WHERE id = ?",
-                    [
-                        object_path.to_string_lossy().to_string().into(),
-                        content_sha256.clone().into(),
-                        id.clone().into(),
-                    ],
-                ))
-                .await?;
-        }
-        transaction
-            .execute_unprepared("DROP TABLE attachments_v13")
-            .await?;
-        create_thread_input_index(&transaction).await?;
-        create_attachment_indexes(&transaction).await?;
-        set_schema_version(&transaction, STUDIO_DATABASE_SCHEMA_VERSION_V14).await?;
-        transaction.commit().await?;
-        Ok::<_, anyhow::Error>(())
-    }
-    .await;
-    if migration.is_err() {
-        cleanup_migration_blobs(&created_paths).await;
-    }
-    migration
-}
-
-/// 把 v14 的 Thread working-state 专用表迁移到稳定的版本化对象表。
-pub(super) async fn migrate_studio_schema_v14_to_v15(db: &DatabaseConnection) -> Result<()> {
-    use pl_protocol::AgentWorkingState;
-    use sea_orm::{EntityTrait, QueryOrder};
-
-    const LEGACY_MODEL_PERFORMANCE_KEY: &str = "observed:modelPerformance:v1";
-
-    let transaction = db.begin().await?;
-    Schema::new(transaction.get_database_backend())
-        .builder()
-        .register(entity::studio_object::Entity)
-        .apply(&transaction)
-        .await?;
-    let rows = entity::thread_session_state::Entity::find()
-        .order_by_asc(entity::thread_session_state::Column::ThreadId)
-        .all(&transaction)
-        .await?;
-    for row in rows {
-        let actual_hash = pl_core::canonical_content_hash(row.state_json.as_bytes());
-        ensure!(
-            actual_hash == row.state_hash,
-            "Thread {} session state hash mismatch during v14 migration",
-            row.thread_id
-        );
-        let state = serde_json::from_str::<AgentWorkingState>(&row.state_json)?;
-        ensure!(
-            i64::try_from(state.revision)? == row.revision,
-            "Thread {} session state revision mismatch during v14 migration",
-            row.thread_id
-        );
-        crate::studio::store::object::put_object(
-            &transaction,
-            &row.thread_id,
-            &state,
-            row.updated_at,
-        )
-        .await?;
-    }
-    if let Some(row) =
-        entity::app_setting::Entity::find_by_id(LEGACY_MODEL_PERFORMANCE_KEY.to_string())
-            .one(&transaction)
-            .await?
-    {
-        let state =
-            serde_json::from_str::<crate::studio::runtime::ModelPerformanceState>(&row.value)?;
-        crate::studio::store::object::put_object(
-            &transaction,
-            crate::studio::runtime::MODEL_PERFORMANCE_OWNER_ID,
-            &state,
-            row.updated_at,
-        )
-        .await?;
-        entity::app_setting::Entity::delete_by_id(LEGACY_MODEL_PERFORMANCE_KEY.to_string())
-            .exec(&transaction)
-            .await?;
-    }
-    // ThreadContextMetadata v15 不在热状态保留 JSON null。唯一迁移把旧的空
-    // metadata 归一化成 typed struct 的 canonical 空对象，运行期无需 fallback。
-    transaction
-        .execute_unprepared("UPDATE threads SET metadata_json = '{}' WHERE metadata_json = 'null'")
-        .await?;
-    transaction
-        .execute_unprepared("DROP TABLE thread_session_state")
-        .await?;
-    set_schema_version(&transaction, STUDIO_DATABASE_SCHEMA_VERSION_V15).await?;
-    transaction.commit().await?;
-    Ok(())
-}
-
-/// 把 v15 的本地 Project schema 迁移为可关联 SSH server 的 v16 schema。
-pub(super) async fn migrate_studio_schema_v15_to_v16(db: &DatabaseConnection) -> Result<()> {
-    db.execute_unprepared("PRAGMA foreign_keys = OFF; PRAGMA legacy_alter_table = ON;")
-        .await?;
-    let migration = async {
-        let transaction = db.begin().await?;
-        Schema::new(transaction.get_database_backend())
-            .builder()
-            .register(entity::ssh_server::Entity)
-            .apply(&transaction)
-            .await?;
-        transaction
-            .execute_unprepared("ALTER TABLE projects RENAME TO projects_v15")
-            .await?;
-        Schema::new(transaction.get_database_backend())
-            .builder()
-            .register(entity::project::Entity)
-            .apply(&transaction)
-            .await?;
-        transaction
-            .execute_unprepared(
-                "INSERT INTO projects (
-                     id, name, path, ssh_server_id, created_at, updated_at,
-                     last_opened_at, closed
-                 )
-                 SELECT id, name, path, NULL, created_at, updated_at,
-                        last_opened_at, closed
-                 FROM projects_v15;
-                 DROP TABLE projects_v15;",
-            )
-            .await?;
-        create_project_indexes(&transaction).await?;
-        set_schema_version(&transaction, STUDIO_DATABASE_SCHEMA_VERSION).await?;
-        transaction.commit().await?;
-        Ok::<_, anyhow::Error>(())
-    }
-    .await;
-    let restore = db
-        .execute_unprepared("PRAGMA legacy_alter_table = OFF; PRAGMA foreign_keys = ON;")
-        .await;
-    match (migration, restore) {
-        (Ok(()), Ok(_)) => {
-            let violations = db
-                .query_all_raw(Statement::from_string(
-                    DatabaseBackend::Sqlite,
-                    "PRAGMA foreign_key_check".to_string(),
-                ))
-                .await?;
-            ensure!(
-                violations.is_empty(),
-                "Studio v15 to v16 migration produced foreign-key violations"
-            );
-            Ok(())
-        }
-        (Err(error), Ok(_)) => Err(error),
-        (Ok(()), Err(error)) => Err(error).context("failed to restore SQLite foreign keys"),
-        (Err(error), Err(restore_error)) => Err(error).context(format!(
-            "Studio v15 to v16 migration failed; restoring SQLite foreign keys also failed: {restore_error:#}"
-        )),
-    }
-}
-
-async fn cleanup_migration_blobs(paths: &[PathBuf]) {
-    for path in paths {
-        let _ = tokio::fs::remove_file(path).await;
-    }
-}
+pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 17;
 
 pub(super) async fn initialize_studio_schema(db: &DatabaseConnection) -> Result<()> {
-    create_task_run_table(db).await?;
-    create_task_stop_event_table(db).await?;
-    create_work_unit_table(db).await?;
-    create_work_completion_table(db).await?;
-    create_review_round_table(db).await?;
-    create_task_issue_table(db).await?;
-    create_merge_record_table(db).await?;
     create_thread_lifecycle_tables(db).await?;
     db.get_schema_builder()
         .register(entity::app_setting::Entity)
@@ -311,133 +24,7 @@ pub(super) async fn initialize_studio_schema(db: &DatabaseConnection) -> Result<
         .apply(db)
         .await?;
     create_state_indexes(db).await?;
-    create_task_relation_guards(db).await?;
-    set_schema_version(db, STUDIO_DATABASE_SCHEMA_VERSION).await?;
-    Ok(())
-}
-
-async fn create_task_stop_event_table(db: &DatabaseConnection) -> Result<()> {
-    db.execute_unprepared(
-        r#"
-        CREATE TABLE IF NOT EXISTS task_stop_events (
-            id TEXT PRIMARY KEY NOT NULL,
-            task_run_id TEXT NOT NULL,
-            generation INTEGER NOT NULL CHECK (generation > 0),
-            origin TEXT NOT NULL CHECK (
-                origin IN ('userRequest', 'plannerDecision', 'runtimeFailure', 'applicationShutdown')
-            ),
-            reason TEXT NOT NULL,
-            source_turn_id TEXT,
-            created_at INTEGER NOT NULL,
-            FOREIGN KEY (task_run_id) REFERENCES task_runs(id) ON DELETE CASCADE,
-            UNIQUE(task_run_id, generation)
-        )
-        "#,
-    )
-    .await?;
-    Ok(())
-}
-
-async fn create_task_issue_table(db: &DatabaseConnection) -> Result<()> {
-    db.execute_unprepared(
-        r#"
-        CREATE TABLE IF NOT EXISTS task_issues (
-            id TEXT PRIMARY KEY NOT NULL,
-            task_run_id TEXT NOT NULL,
-            source_thread_id TEXT NOT NULL,
-            source_turn_id TEXT NOT NULL,
-            source_agent_id TEXT NOT NULL,
-            source_role TEXT NOT NULL,
-            work_unit_id TEXT,
-            review_round_id TEXT,
-            state_json TEXT NOT NULL CHECK (json_valid(state_json)),
-            state_kind TEXT GENERATED ALWAYS AS (
-                json_extract(state_json, '$.kind')
-            ) STORED NOT NULL CHECK (
-                state_kind IN ('openRecoverable', 'openFatal', 'resolved')
-            ),
-            revision INTEGER NOT NULL CHECK (revision >= 0),
-            created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL,
-            FOREIGN KEY (task_run_id) REFERENCES task_runs(id) ON DELETE CASCADE,
-            FOREIGN KEY (work_unit_id) REFERENCES work_units(id) ON DELETE SET NULL,
-            FOREIGN KEY (review_round_id) REFERENCES review_rounds(id) ON DELETE SET NULL
-        )
-        "#,
-    )
-    .await?;
-    Ok(())
-}
-
-async fn create_work_completion_table(db: &DatabaseConnection) -> Result<()> {
-    db.execute_unprepared(
-        r#"
-        CREATE TABLE IF NOT EXISTS work_completions (
-            id TEXT PRIMARY KEY NOT NULL,
-            task_run_id TEXT NOT NULL,
-            work_unit_id TEXT NOT NULL,
-            executor_agent_id TEXT NOT NULL,
-            revision INTEGER NOT NULL CHECK (revision > 0),
-            content_json TEXT NOT NULL CHECK (json_valid(content_json)),
-            content_kind TEXT GENERATED ALWAYS AS (
-                json_extract(content_json, '$.kind')
-            ) STORED NOT NULL CHECK (content_kind IN ('delivery', 'noDelivery')),
-            state_json TEXT NOT NULL CHECK (json_valid(state_json)),
-            state_kind TEXT GENERATED ALWAYS AS (
-                json_extract(state_json, '$.kind')
-            ) STORED NOT NULL CHECK (
-                state_kind IN ('readyForReview', 'changesRequired', 'approved')
-            ),
-            state_revision INTEGER NOT NULL CHECK (state_revision >= 0),
-            base_commit TEXT NOT NULL,
-            verification_summary TEXT NOT NULL,
-            worktree_path TEXT NOT NULL,
-            branch TEXT NOT NULL,
-            created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL,
-            FOREIGN KEY (task_run_id) REFERENCES task_runs(id) ON DELETE CASCADE,
-            FOREIGN KEY (work_unit_id) REFERENCES work_units(id) ON DELETE CASCADE
-        )
-        "#,
-    )
-    .await?;
-    Ok(())
-}
-
-async fn create_merge_record_table(db: &DatabaseConnection) -> Result<()> {
-    db.execute_unprepared(
-        r#"
-        CREATE TABLE IF NOT EXISTS merge_records (
-            id TEXT PRIMARY KEY NOT NULL,
-            task_run_id TEXT NOT NULL,
-            work_unit_id TEXT NOT NULL,
-            completion_id TEXT NOT NULL,
-            completion_revision INTEGER NOT NULL,
-            executor_agent_id TEXT NOT NULL,
-            expected_previous_head TEXT NOT NULL,
-            resulting_head TEXT NOT NULL,
-            delivery_head TEXT NOT NULL,
-            method TEXT NOT NULL,
-            summary TEXT NOT NULL,
-            cleanup_state_json TEXT NOT NULL CHECK (json_valid(cleanup_state_json)),
-            cleanup_state_kind TEXT GENERATED ALWAYS AS (
-                json_extract(cleanup_state_json, '$.kind')
-            ) STORED NOT NULL CHECK (
-                cleanup_state_kind IN (
-                    'pending', 'deferred', 'attempting', 'discarded',
-                    'alreadyAbsent', 'failed'
-                )
-            ),
-            revision INTEGER NOT NULL CHECK (revision >= 0),
-            created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL,
-            FOREIGN KEY (task_run_id) REFERENCES task_runs(id) ON DELETE CASCADE,
-            FOREIGN KEY (work_unit_id) REFERENCES work_units(id) ON DELETE CASCADE,
-            FOREIGN KEY (completion_id) REFERENCES work_completions(id) ON DELETE CASCADE
-        )
-        "#,
-    )
-    .await?;
+    set_schema_version(db).await?;
     Ok(())
 }
 
@@ -548,7 +135,7 @@ async fn create_thread_lifecycle_tables(db: &DatabaseConnection) -> Result<()> {
             interaction_kind TEXT GENERATED ALWAYS AS (
                 json_extract(state_json, '$.kind')
             ) STORED NOT NULL CHECK (
-                interaction_kind IN ('userInput', 'toolApproval', 'planConfirmation')
+                interaction_kind IN ('userInput', 'toolApproval')
             ),
             state_kind TEXT GENERATED ALWAYS AS (
                 json_extract(state_json, '$.data.state.kind')
@@ -565,119 +152,6 @@ async fn create_thread_lifecycle_tables(db: &DatabaseConnection) -> Result<()> {
     Ok(())
 }
 
-async fn create_task_run_table(db: &DatabaseConnection) -> Result<()> {
-    db.execute_unprepared(
-        r#"
-        CREATE TABLE IF NOT EXISTS task_runs (
-            id TEXT PRIMARY KEY NOT NULL,
-            project_id TEXT NOT NULL,
-            root_thread_id TEXT NOT NULL,
-            request TEXT NOT NULL,
-            plan_json TEXT CHECK (plan_json IS NULL OR json_valid(plan_json)),
-            workspace_root TEXT NOT NULL,
-            state_json TEXT NOT NULL CHECK (json_valid(state_json)),
-            state_kind TEXT GENERATED ALWAYS AS (
-                json_extract(state_json, '$.kind')
-            ) STORED NOT NULL CHECK (
-                state_kind IN (
-                    'planning', 'pendingConfirmation', 'editingDocuments',
-                    'working', 'reviewing', 'completed'
-                )
-            ),
-            revision INTEGER NOT NULL CHECK (revision >= 0),
-            created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL,
-            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-            FOREIGN KEY (root_thread_id) REFERENCES threads(id) ON DELETE CASCADE
-        )
-        "#,
-    )
-    .await?;
-    Ok(())
-}
-
-async fn create_work_unit_table(db: &DatabaseConnection) -> Result<()> {
-    db.execute_unprepared(
-        r#"
-        CREATE TABLE IF NOT EXISTS work_units (
-            id TEXT PRIMARY KEY NOT NULL,
-            task_run_id TEXT NOT NULL,
-            title TEXT NOT NULL,
-            scope_hints_json TEXT NOT NULL,
-            base_commit TEXT NOT NULL,
-            worktree_path TEXT NOT NULL,
-            branch TEXT NOT NULL,
-            attempt INTEGER NOT NULL,
-            supersedes_work_unit_id TEXT,
-            executor_thread_id TEXT,
-            requested_by_call_id TEXT NOT NULL,
-            state_json TEXT NOT NULL CHECK (json_valid(state_json)),
-            state_kind TEXT GENERATED ALWAYS AS (
-                json_extract(state_json, '$.kind')
-            ) STORED NOT NULL CHECK (
-                state_kind IN (
-                    'pending', 'running', 'waitingReview', 'reviewPassed',
-                    'changesRequired', 'paused', 'completed', 'failed', 'cancelled'
-                )
-            ),
-            revision INTEGER NOT NULL CHECK (revision >= 0),
-            created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL,
-            FOREIGN KEY (task_run_id) REFERENCES task_runs(id) ON DELETE CASCADE,
-            FOREIGN KEY (supersedes_work_unit_id) REFERENCES work_units(id)
-        )
-        "#,
-    )
-    .await?;
-    Ok(())
-}
-
-async fn create_review_round_table(db: &DatabaseConnection) -> Result<()> {
-    db.execute_unprepared(
-        r#"
-        CREATE TABLE IF NOT EXISTS review_rounds (
-            id TEXT PRIMARY KEY NOT NULL,
-            task_run_id TEXT NOT NULL,
-            round INTEGER NOT NULL,
-            scope TEXT NOT NULL CHECK (scope IN ('delivery', 'integrated')),
-            work_unit_id TEXT,
-            completion_id TEXT,
-            completion_revision INTEGER,
-            reviewed_head TEXT NOT NULL,
-            requested_by_call_id TEXT NOT NULL,
-            reviewer_thread_id TEXT,
-            state_json TEXT NOT NULL CHECK (json_valid(state_json)),
-            state_kind TEXT GENERATED ALWAYS AS (
-                json_extract(state_json, '$.kind')
-            ) STORED NOT NULL CHECK (
-                state_kind IN (
-                    'pendingDispatch', 'dispatched', 'running', 'passed',
-                    'changesRequired', 'blocked', 'failed', 'cancelled'
-                )
-            ),
-            revision INTEGER NOT NULL CHECK (revision >= 0),
-            design_references_json TEXT NOT NULL,
-            findings_json TEXT NOT NULL,
-            created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL,
-            file_reviews_json TEXT,
-            CHECK (
-                (scope = 'delivery' AND work_unit_id IS NOT NULL
-                    AND completion_id IS NOT NULL AND completion_revision IS NOT NULL)
-                OR
-                (scope = 'integrated' AND work_unit_id IS NULL
-                    AND completion_id IS NULL AND completion_revision IS NULL)
-            ),
-            FOREIGN KEY (task_run_id) REFERENCES task_runs(id) ON DELETE CASCADE,
-            FOREIGN KEY (work_unit_id) REFERENCES work_units(id) ON DELETE CASCADE,
-            FOREIGN KEY (completion_id) REFERENCES work_completions(id) ON DELETE CASCADE
-        )
-        "#,
-    )
-    .await?;
-    Ok(())
-}
-
 pub(super) fn non_empty_title(title: &str) -> String {
     let title = title.trim();
     if title.is_empty() {
@@ -687,9 +161,11 @@ pub(super) fn non_empty_title(title: &str) -> String {
     }
 }
 
-async fn set_schema_version(db: &impl ConnectionTrait, version: i64) -> Result<()> {
-    db.execute_unprepared(&format!("PRAGMA user_version = {version}"))
-        .await?;
+async fn set_schema_version(db: &impl ConnectionTrait) -> Result<()> {
+    db.execute_unprepared(&format!(
+        "PRAGMA user_version = {STUDIO_DATABASE_SCHEMA_VERSION}"
+    ))
+    .await?;
     Ok(())
 }
 
@@ -709,55 +185,6 @@ async fn create_state_indexes(db: &DatabaseConnection) -> Result<()> {
             .table(entity::interaction::Entity)
             .col(entity::interaction::Column::ThreadId)
             .col(entity::interaction::Column::TurnId)
-            .to_owned(),
-        Index::create()
-            .name("idx_merge_records_run_updated")
-            .table(entity::merge_record::Entity)
-            .col(entity::merge_record::Column::TaskRunId)
-            .col((entity::merge_record::Column::UpdatedAt, IndexOrder::Desc))
-            .col((entity::merge_record::Column::Id, IndexOrder::Desc))
-            .to_owned(),
-        Index::create()
-            .name("idx_review_rounds_run_round")
-            .table(entity::review_round::Entity)
-            .col(entity::review_round::Column::TaskRunId)
-            .col(entity::review_round::Column::Round)
-            .unique()
-            .to_owned(),
-        Index::create()
-            .name("idx_review_rounds_run_call")
-            .table(entity::review_round::Entity)
-            .col(entity::review_round::Column::TaskRunId)
-            .col(entity::review_round::Column::RequestedByCallId)
-            .unique()
-            .to_owned(),
-        Index::create()
-            .name("idx_task_issues_run_created")
-            .table(entity::task_issue::Entity)
-            .col(entity::task_issue::Column::TaskRunId)
-            .col((entity::task_issue::Column::CreatedAt, IndexOrder::Desc))
-            .col((entity::task_issue::Column::Id, IndexOrder::Desc))
-            .to_owned(),
-        Index::create()
-            .name("idx_task_issues_run_turn")
-            .table(entity::task_issue::Entity)
-            .col(entity::task_issue::Column::TaskRunId)
-            .col(entity::task_issue::Column::SourceTurnId)
-            .unique()
-            .to_owned(),
-        Index::create()
-            .name("idx_task_runs_state_updated")
-            .table(entity::task_run::Entity)
-            .col(entity::task_run::Column::StateKind)
-            .col((entity::task_run::Column::UpdatedAt, IndexOrder::Desc))
-            .col((entity::task_run::Column::Id, IndexOrder::Desc))
-            .to_owned(),
-        Index::create()
-            .name("idx_task_runs_root_thread_updated")
-            .table(entity::task_run::Entity)
-            .col(entity::task_run::Column::RootThreadId)
-            .col((entity::task_run::Column::UpdatedAt, IndexOrder::Desc))
-            .col((entity::task_run::Column::Id, IndexOrder::Desc))
             .to_owned(),
         Index::create()
             .name("idx_threads_project_updated")
@@ -830,49 +257,10 @@ async fn create_state_indexes(db: &DatabaseConnection) -> Result<()> {
             .col(entity::thread_context_segment::Column::Revision)
             .unique()
             .to_owned(),
-        Index::create()
-            .name("idx_work_units_run_state_kind")
-            .table(entity::work_unit::Entity)
-            .col(entity::work_unit::Column::TaskRunId)
-            .col(entity::work_unit::Column::StateKind)
-            .col(entity::work_unit::Column::CreatedAt)
-            .col(entity::work_unit::Column::Id)
-            .to_owned(),
-        Index::create()
-            .name("idx_work_completions_unit_revision")
-            .table(entity::work_completion::Entity)
-            .col(entity::work_completion::Column::WorkUnitId)
-            .col(entity::work_completion::Column::Revision)
-            .unique()
-            .to_owned(),
     ];
     for index in indexes {
         execute_index(db, index).await?;
     }
-
-    db.execute_unprepared(
-        r#"
-        CREATE UNIQUE INDEX idx_task_runs_one_open_per_root
-        ON task_runs(root_thread_id)
-        WHERE state_kind != 'completed'
-        "#,
-    )
-    .await?;
-
-    db.execute_unprepared(
-        r#"
-        CREATE UNIQUE INDEX idx_review_rounds_active_delivery
-        ON review_rounds(work_unit_id)
-        WHERE scope = 'delivery'
-            AND state_kind IN ('pendingDispatch', 'dispatched', 'running');
-
-        CREATE UNIQUE INDEX idx_review_rounds_active_integrated
-        ON review_rounds(task_run_id)
-        WHERE scope = 'integrated'
-            AND state_kind IN ('pendingDispatch', 'dispatched', 'running');
-        "#,
-    )
-    .await?;
     Ok(())
 }
 
@@ -897,125 +285,12 @@ async fn create_project_indexes(db: &impl ConnectionTrait) -> Result<()> {
 }
 
 async fn create_attachment_indexes(db: &impl ConnectionTrait) -> Result<()> {
-    for index in [Index::create()
+    let index = Index::create()
         .name("idx_attachments_thread_id")
         .table(entity::attachment::Entity)
         .col(entity::attachment::Column::ThreadId)
-        .to_owned()]
-    {
-        db.execute(&index).await?;
-    }
-    Ok(())
-}
-
-async fn create_thread_input_index(db: &impl ConnectionTrait) -> Result<()> {
-    let index = Index::create()
-        .name("idx_thread_inputs_queue")
-        .table(entity::thread_input::Entity)
-        .col(entity::thread_input::Column::ThreadId)
-        .col(entity::thread_input::Column::StateKind)
-        .col(entity::thread_input::Column::QueueOrdinal)
-        .unique()
         .to_owned();
     db.execute(&index).await?;
-    Ok(())
-}
-
-async fn create_task_relation_guards(db: &DatabaseConnection) -> Result<()> {
-    db.execute_unprepared(
-        r#"
-        CREATE TRIGGER guard_work_completion_owner_insert
-        BEFORE INSERT ON work_completions
-        WHEN NOT EXISTS (
-            SELECT 1 FROM work_units
-            WHERE id = NEW.work_unit_id AND task_run_id = NEW.task_run_id
-        )
-        BEGIN
-            SELECT RAISE(ABORT, 'work completion owner mismatch');
-        END;
-
-        CREATE TRIGGER guard_work_completion_owner_update
-        BEFORE UPDATE ON work_completions
-        WHEN NOT EXISTS (
-            SELECT 1 FROM work_units
-            WHERE id = NEW.work_unit_id AND task_run_id = NEW.task_run_id
-        )
-        BEGIN
-            SELECT RAISE(ABORT, 'work completion owner mismatch');
-        END;
-
-        CREATE TRIGGER guard_review_round_owner_insert
-        BEFORE INSERT ON review_rounds
-        WHEN NEW.scope = 'delivery' AND (
-            NOT EXISTS (
-                SELECT 1 FROM work_units
-                WHERE id = NEW.work_unit_id AND task_run_id = NEW.task_run_id
-            )
-            OR NOT EXISTS (
-                SELECT 1 FROM work_completions
-                WHERE id = NEW.completion_id
-                    AND task_run_id = NEW.task_run_id
-                    AND work_unit_id = NEW.work_unit_id
-                    AND revision = NEW.completion_revision
-            )
-        )
-        BEGIN
-            SELECT RAISE(ABORT, 'review round owner mismatch');
-        END;
-
-        CREATE TRIGGER guard_review_round_owner_update
-        BEFORE UPDATE ON review_rounds
-        WHEN NEW.scope = 'delivery' AND (
-            NOT EXISTS (
-                SELECT 1 FROM work_units
-                WHERE id = NEW.work_unit_id AND task_run_id = NEW.task_run_id
-            )
-            OR NOT EXISTS (
-                SELECT 1 FROM work_completions
-                WHERE id = NEW.completion_id
-                    AND task_run_id = NEW.task_run_id
-                    AND work_unit_id = NEW.work_unit_id
-                    AND revision = NEW.completion_revision
-            )
-        )
-        BEGIN
-            SELECT RAISE(ABORT, 'review round owner mismatch');
-        END;
-
-        CREATE TRIGGER guard_merge_record_owner_insert
-        BEFORE INSERT ON merge_records
-        WHEN NOT EXISTS (
-            SELECT 1 FROM work_units
-            WHERE id = NEW.work_unit_id AND task_run_id = NEW.task_run_id
-        ) OR NOT EXISTS (
-            SELECT 1 FROM work_completions
-            WHERE id = NEW.completion_id
-                AND task_run_id = NEW.task_run_id
-                AND work_unit_id = NEW.work_unit_id
-                AND revision = NEW.completion_revision
-        )
-        BEGIN
-            SELECT RAISE(ABORT, 'merge record owner mismatch');
-        END;
-
-        CREATE TRIGGER guard_merge_record_owner_update
-        BEFORE UPDATE ON merge_records
-        WHEN NOT EXISTS (
-            SELECT 1 FROM work_units
-            WHERE id = NEW.work_unit_id AND task_run_id = NEW.task_run_id
-        ) OR NOT EXISTS (
-            SELECT 1 FROM work_completions
-            WHERE id = NEW.completion_id
-                AND task_run_id = NEW.task_run_id
-                AND work_unit_id = NEW.work_unit_id
-                AND revision = NEW.completion_revision
-        )
-        BEGIN
-            SELECT RAISE(ABORT, 'merge record owner mismatch');
-        END;
-        "#,
-    )
-    .await?;
     Ok(())
 }
 

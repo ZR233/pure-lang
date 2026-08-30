@@ -7,7 +7,6 @@ mod query;
 mod request;
 mod settings;
 mod settings_update;
-mod task_recovery;
 
 pub use attachment::*;
 pub use error::*;
@@ -16,4 +15,3 @@ pub use query::*;
 pub use request::*;
 pub use settings::*;
 pub use settings_update::*;
-pub use task_recovery::*;

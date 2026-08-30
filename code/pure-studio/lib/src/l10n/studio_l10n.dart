@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../domain/models/studio_enums.dart';
-import '../domain/models/runtime_models.dart';
 import '../domain/models/turn_models.dart';
 import 'app_localizations.dart';
 
@@ -9,10 +8,9 @@ extension StudioLocalizationsX on BuildContext {
   AppLocalizations get l10n => AppLocalizations.of(this);
 
   String compileModeLabel(StudioMode mode) {
-    return switch (mode) {
-      StudioMode.simple => l10n.compileModeSimple,
-      StudioMode.task => l10n.compileModeTask,
-    };
+    if (mode == StudioMode.simple) return l10n.compileModeSimple;
+    if (mode == StudioMode.task) return l10n.compileModeTask;
+    return mode.id;
   }
 
   String permissionModeLabel(PermissionMode mode) {
@@ -31,68 +29,6 @@ extension StudioLocalizationsX on BuildContext {
     return switch (kind) {
       InteractionKind.toolApproval => l10n.statusInteractionToolApproval,
       InteractionKind.userInput => l10n.statusInteractionUserInput,
-      InteractionKind.planConfirmation =>
-        l10n.statusInteractionPlanConfirmation,
-    };
-  }
-
-  String taskPhaseLabel(TaskStateKind phase) {
-    return switch (phase) {
-      TaskStateKind.planning => l10n.statusTaskPhasePlanning,
-      TaskStateKind.pendingConfirmation =>
-        l10n.statusTaskPhasePendingConfirmation,
-      TaskStateKind.editingDocuments => l10n.statusTaskPhaseEditingDocuments,
-      TaskStateKind.working => l10n.statusTaskPhaseWorking,
-      TaskStateKind.reviewing => l10n.statusTaskPhaseReviewing,
-      TaskStateKind.completed => l10n.statusTaskPhaseCompleted,
-    };
-  }
-
-  String taskStatusLabel(String status) {
-    return switch (status) {
-      'pending' || 'pendingDispatch' => l10n.statusTaskStatusPending,
-      'dispatched' => l10n.statusTaskStatusQueued,
-      'queued' => l10n.statusTaskStatusQueued,
-      'running' => l10n.statusTaskStatusRunning,
-      'awaitingCompletion' => l10n.statusTaskStatusAwaitingCompletion,
-      'readyForCompletion' => l10n.statusTaskStatusAwaitingCompletion,
-      'readyForReview' => l10n.statusTaskStatusReadyForReview,
-      'reviewing' => l10n.statusTaskStatusReviewing,
-      'changesRequested' => l10n.statusTaskStatusChangesRequested,
-      'approved' => l10n.statusTaskStatusApproved,
-      'merged' => l10n.statusTaskStatusMerged,
-      'noDelivery' => l10n.statusTaskStatusNoDelivery,
-      'completed' => l10n.statusTaskStatusCompleted,
-      'budgetLimited' => l10n.statusTaskStatusBudgetLimited,
-      'needsAttention' => l10n.statusTaskStatusNeedsAttention,
-      'failed' => l10n.statusTaskStatusFailed,
-      'cancelled' => l10n.statusTaskStatusCancelled,
-      'passed' => l10n.statusTaskStatusPass,
-      'changesRequired' => l10n.statusTaskStatusChangesRequired,
-      'blocked' => l10n.statusTaskStatusBlocked,
-      _ => status,
-    };
-  }
-
-  String taskBudgetKindLabel(TaskBudgetLimitKindView kind) {
-    return switch (kind) {
-      TaskBudgetLimitKindView.modelStep => l10n.statusTaskBudgetModelStep,
-      TaskBudgetLimitKindView.toolCall => l10n.statusTaskBudgetToolCall,
-      TaskBudgetLimitKindView.wait => l10n.statusTaskBudgetWait,
-      TaskBudgetLimitKindView.wallClock => l10n.statusTaskBudgetWallClock,
-      TaskBudgetLimitKindView.agentCount => l10n.statusTaskBudgetAgentCount,
-      TaskBudgetLimitKindView.agentDepth => l10n.statusTaskBudgetAgentDepth,
-      TaskBudgetLimitKindView.finalization => l10n.statusTaskBudgetFinalization,
-    };
-  }
-
-  String taskContinuationStateLabel(String state) {
-    return switch (state) {
-      'none' => l10n.statusTaskContinuationNone,
-      'compacting' => l10n.statusTaskContinuationCompacting,
-      'pendingStart' => l10n.statusTaskContinuationPendingStart,
-      'needsAttention' => l10n.statusTaskContinuationNeedsAttention,
-      _ => state,
     };
   }
 

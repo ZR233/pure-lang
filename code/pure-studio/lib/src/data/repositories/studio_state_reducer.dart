@@ -29,9 +29,6 @@ StudioReduceResult reduceStudioEvent(
           removed: removed,
         ),
       ),
-    TaskDirectoryChangedPayload(:final state) => StudioReduceResult(
-      applyTaskDirectory(current, state),
-    ),
     AgentDirectoryChangedPayload(:final state) => StudioReduceResult(
       applyAgentDirectory(current, state),
     ),
@@ -395,15 +392,6 @@ StudioState setThreadDirectoryLoading(StudioState current, bool isLoading) {
   );
 }
 
-StudioState applyTaskDirectory(StudioState current, TaskDirectoryState next) {
-  return _applyObservedSnapshot(
-    current,
-    current.taskDirectory,
-    next,
-    (snapshot) => current.copyWith(taskDirectory: snapshot),
-  );
-}
-
 StudioState applyAgentDirectory(StudioState current, AgentDirectoryState next) {
   return _applyObservedSnapshot(
     current,
@@ -498,22 +486,12 @@ String planFollowUpPrompt(
   PendingInteraction interaction,
   InteractionResolutionCommand resolution,
 ) {
-  final content = resolution is PlanConfirmationResolutionCommand
-      ? resolution.content?.trim() ?? ''
-      : '';
-  if (content.isNotEmpty) return content;
   final reason = switch (resolution) {
-    PlanConfirmationResolutionCommand(:final reason) => reason?.trim() ?? '',
     ToolApprovalResolutionCommand(:final reason) => reason?.trim() ?? '',
     UserInputResolutionCommand() => '',
   };
   if (reason.isNotEmpty) return reason;
-  return switch (interaction.payload) {
-    PlanConfirmationInteractionPayload(:final content)
-        when content.trim().isNotEmpty =>
-      content.trim(),
-    _ => interaction.body.trim(),
-  };
+  return interaction.body.trim();
 }
 
 ThreadWorkspace _sortedWorkspace(ThreadWorkspace workspace) {

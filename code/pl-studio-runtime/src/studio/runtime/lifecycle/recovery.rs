@@ -36,7 +36,6 @@ impl StudioRuntime {
                 action: StudioRecoveryIssueAction::RemoveProject,
                 project_id: Some(project.id),
                 thread_id: None,
-                task_run_id: None,
                 message: format!("Project workspace is unavailable: {error}"),
             });
         }
@@ -59,11 +58,6 @@ impl StudioRuntime {
                 .push(failure);
         }
         for ((project_id, root_thread_id), failures) in failures_by_root {
-            let task_run_id = self
-                .store
-                .find_active_task_run_for_root_thread(&root_thread_id)
-                .await?
-                .map(|run| run.id.clone());
             let affected = failures
                 .iter()
                 .map(|failure| failure.agent_thread_id.as_str())
@@ -80,7 +74,6 @@ impl StudioRuntime {
                 action: StudioRecoveryIssueAction::CleanupThread,
                 project_id: Some(project_id),
                 thread_id: Some(root_thread_id),
-                task_run_id,
                 message: format!(
                     "Durable Agent session context is invalid for {affected}: {detail}"
                 ),

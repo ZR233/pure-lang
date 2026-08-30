@@ -1,23 +1,25 @@
+pub mod agent_profiles;
 pub mod attachment;
 pub mod external_state;
 pub mod history;
 pub mod lifecycle;
+pub mod persistence;
 pub mod prompt;
 pub mod providers;
-pub mod recovery;
 pub mod settings;
 pub mod snapshot;
 pub mod ssh;
 pub mod thread;
 pub mod updater;
 
+pub use agent_profiles::*;
 pub use attachment::*;
 pub use external_state::*;
 pub use history::*;
 pub use lifecycle::*;
+pub use persistence::*;
 pub use prompt::*;
 pub use providers::*;
-pub use recovery::*;
 pub use settings::*;
 pub use snapshot::*;
 pub use ssh::*;

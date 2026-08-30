@@ -56,13 +56,12 @@ extension BridgeProductEventPayloadPatterns on BridgeProductEventPayload {
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeProductEventPayload_ProjectDirectoryChanged value)?  projectDirectoryChanged,TResult Function( BridgeProductEventPayload_ThreadDirectoryChanged value)?  threadDirectoryChanged,TResult Function( BridgeProductEventPayload_TaskDirectoryChanged value)?  taskDirectoryChanged,TResult Function( BridgeProductEventPayload_AgentDirectoryChanged value)?  agentDirectoryChanged,TResult Function( BridgeProductEventPayload_SettingsStateChanged value)?  settingsStateChanged,TResult Function( BridgeProductEventPayload_RecoveryStateChanged value)?  recoveryStateChanged,TResult Function( BridgeProductEventPayload_McpStateChanged value)?  mcpStateChanged,TResult Function( BridgeProductEventPayload_LspStateChanged value)?  lspStateChanged,TResult Function( BridgeProductEventPayload_SkillsStateChanged value)?  skillsStateChanged,TResult Function( BridgeProductEventPayload_ProviderUsageStateChanged value)?  providerUsageStateChanged,TResult Function( BridgeProductEventPayload_ModelPerformanceStateChanged value)?  modelPerformanceStateChanged,TResult Function( BridgeProductEventPayload_UpdaterStateChanged value)?  updaterStateChanged,TResult Function( BridgeProductEventPayload_PersistenceStateChanged value)?  persistenceStateChanged,TResult Function( BridgeProductEventPayload_Stale value)?  stale,required TResult orElse(),}){
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeProductEventPayload_ProjectDirectoryChanged value)?  projectDirectoryChanged,TResult Function( BridgeProductEventPayload_ThreadDirectoryChanged value)?  threadDirectoryChanged,TResult Function( BridgeProductEventPayload_AgentDirectoryChanged value)?  agentDirectoryChanged,TResult Function( BridgeProductEventPayload_SettingsStateChanged value)?  settingsStateChanged,TResult Function( BridgeProductEventPayload_RecoveryStateChanged value)?  recoveryStateChanged,TResult Function( BridgeProductEventPayload_McpStateChanged value)?  mcpStateChanged,TResult Function( BridgeProductEventPayload_LspStateChanged value)?  lspStateChanged,TResult Function( BridgeProductEventPayload_SkillsStateChanged value)?  skillsStateChanged,TResult Function( BridgeProductEventPayload_ProviderUsageStateChanged value)?  providerUsageStateChanged,TResult Function( BridgeProductEventPayload_ModelPerformanceStateChanged value)?  modelPerformanceStateChanged,TResult Function( BridgeProductEventPayload_UpdaterStateChanged value)?  updaterStateChanged,TResult Function( BridgeProductEventPayload_PersistenceStateChanged value)?  persistenceStateChanged,TResult Function( BridgeProductEventPayload_Stale value)?  stale,required TResult orElse(),}){
 final _that = this;
 switch (_that) {
 case BridgeProductEventPayload_ProjectDirectoryChanged() when projectDirectoryChanged != null:
 return projectDirectoryChanged(_that);case BridgeProductEventPayload_ThreadDirectoryChanged() when threadDirectoryChanged != null:
-return threadDirectoryChanged(_that);case BridgeProductEventPayload_TaskDirectoryChanged() when taskDirectoryChanged != null:
-return taskDirectoryChanged(_that);case BridgeProductEventPayload_AgentDirectoryChanged() when agentDirectoryChanged != null:
+return threadDirectoryChanged(_that);case BridgeProductEventPayload_AgentDirectoryChanged() when agentDirectoryChanged != null:
 return agentDirectoryChanged(_that);case BridgeProductEventPayload_SettingsStateChanged() when settingsStateChanged != null:
 return settingsStateChanged(_that);case BridgeProductEventPayload_RecoveryStateChanged() when recoveryStateChanged != null:
 return recoveryStateChanged(_that);case BridgeProductEventPayload_McpStateChanged() when mcpStateChanged != null:
@@ -91,13 +90,12 @@ return stale(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeProductEventPayload_ProjectDirectoryChanged value)  projectDirectoryChanged,required TResult Function( BridgeProductEventPayload_ThreadDirectoryChanged value)  threadDirectoryChanged,required TResult Function( BridgeProductEventPayload_TaskDirectoryChanged value)  taskDirectoryChanged,required TResult Function( BridgeProductEventPayload_AgentDirectoryChanged value)  agentDirectoryChanged,required TResult Function( BridgeProductEventPayload_SettingsStateChanged value)  settingsStateChanged,required TResult Function( BridgeProductEventPayload_RecoveryStateChanged value)  recoveryStateChanged,required TResult Function( BridgeProductEventPayload_McpStateChanged value)  mcpStateChanged,required TResult Function( BridgeProductEventPayload_LspStateChanged value)  lspStateChanged,required TResult Function( BridgeProductEventPayload_SkillsStateChanged value)  skillsStateChanged,required TResult Function( BridgeProductEventPayload_ProviderUsageStateChanged value)  providerUsageStateChanged,required TResult Function( BridgeProductEventPayload_ModelPerformanceStateChanged value)  modelPerformanceStateChanged,required TResult Function( BridgeProductEventPayload_UpdaterStateChanged value)  updaterStateChanged,required TResult Function( BridgeProductEventPayload_PersistenceStateChanged value)  persistenceStateChanged,required TResult Function( BridgeProductEventPayload_Stale value)  stale,}){
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeProductEventPayload_ProjectDirectoryChanged value)  projectDirectoryChanged,required TResult Function( BridgeProductEventPayload_ThreadDirectoryChanged value)  threadDirectoryChanged,required TResult Function( BridgeProductEventPayload_AgentDirectoryChanged value)  agentDirectoryChanged,required TResult Function( BridgeProductEventPayload_SettingsStateChanged value)  settingsStateChanged,required TResult Function( BridgeProductEventPayload_RecoveryStateChanged value)  recoveryStateChanged,required TResult Function( BridgeProductEventPayload_McpStateChanged value)  mcpStateChanged,required TResult Function( BridgeProductEventPayload_LspStateChanged value)  lspStateChanged,required TResult Function( BridgeProductEventPayload_SkillsStateChanged value)  skillsStateChanged,required TResult Function( BridgeProductEventPayload_ProviderUsageStateChanged value)  providerUsageStateChanged,required TResult Function( BridgeProductEventPayload_ModelPerformanceStateChanged value)  modelPerformanceStateChanged,required TResult Function( BridgeProductEventPayload_UpdaterStateChanged value)  updaterStateChanged,required TResult Function( BridgeProductEventPayload_PersistenceStateChanged value)  persistenceStateChanged,required TResult Function( BridgeProductEventPayload_Stale value)  stale,}){
 final _that = this;
 switch (_that) {
 case BridgeProductEventPayload_ProjectDirectoryChanged():
 return projectDirectoryChanged(_that);case BridgeProductEventPayload_ThreadDirectoryChanged():
-return threadDirectoryChanged(_that);case BridgeProductEventPayload_TaskDirectoryChanged():
-return taskDirectoryChanged(_that);case BridgeProductEventPayload_AgentDirectoryChanged():
+return threadDirectoryChanged(_that);case BridgeProductEventPayload_AgentDirectoryChanged():
 return agentDirectoryChanged(_that);case BridgeProductEventPayload_SettingsStateChanged():
 return settingsStateChanged(_that);case BridgeProductEventPayload_RecoveryStateChanged():
 return recoveryStateChanged(_that);case BridgeProductEventPayload_McpStateChanged():
@@ -122,13 +120,12 @@ return stale(_that);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeProductEventPayload_ProjectDirectoryChanged value)?  projectDirectoryChanged,TResult? Function( BridgeProductEventPayload_ThreadDirectoryChanged value)?  threadDirectoryChanged,TResult? Function( BridgeProductEventPayload_TaskDirectoryChanged value)?  taskDirectoryChanged,TResult? Function( BridgeProductEventPayload_AgentDirectoryChanged value)?  agentDirectoryChanged,TResult? Function( BridgeProductEventPayload_SettingsStateChanged value)?  settingsStateChanged,TResult? Function( BridgeProductEventPayload_RecoveryStateChanged value)?  recoveryStateChanged,TResult? Function( BridgeProductEventPayload_McpStateChanged value)?  mcpStateChanged,TResult? Function( BridgeProductEventPayload_LspStateChanged value)?  lspStateChanged,TResult? Function( BridgeProductEventPayload_SkillsStateChanged value)?  skillsStateChanged,TResult? Function( BridgeProductEventPayload_ProviderUsageStateChanged value)?  providerUsageStateChanged,TResult? Function( BridgeProductEventPayload_ModelPerformanceStateChanged value)?  modelPerformanceStateChanged,TResult? Function( BridgeProductEventPayload_UpdaterStateChanged value)?  updaterStateChanged,TResult? Function( BridgeProductEventPayload_PersistenceStateChanged value)?  persistenceStateChanged,TResult? Function( BridgeProductEventPayload_Stale value)?  stale,}){
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeProductEventPayload_ProjectDirectoryChanged value)?  projectDirectoryChanged,TResult? Function( BridgeProductEventPayload_ThreadDirectoryChanged value)?  threadDirectoryChanged,TResult? Function( BridgeProductEventPayload_AgentDirectoryChanged value)?  agentDirectoryChanged,TResult? Function( BridgeProductEventPayload_SettingsStateChanged value)?  settingsStateChanged,TResult? Function( BridgeProductEventPayload_RecoveryStateChanged value)?  recoveryStateChanged,TResult? Function( BridgeProductEventPayload_McpStateChanged value)?  mcpStateChanged,TResult? Function( BridgeProductEventPayload_LspStateChanged value)?  lspStateChanged,TResult? Function( BridgeProductEventPayload_SkillsStateChanged value)?  skillsStateChanged,TResult? Function( BridgeProductEventPayload_ProviderUsageStateChanged value)?  providerUsageStateChanged,TResult? Function( BridgeProductEventPayload_ModelPerformanceStateChanged value)?  modelPerformanceStateChanged,TResult? Function( BridgeProductEventPayload_UpdaterStateChanged value)?  updaterStateChanged,TResult? Function( BridgeProductEventPayload_PersistenceStateChanged value)?  persistenceStateChanged,TResult? Function( BridgeProductEventPayload_Stale value)?  stale,}){
 final _that = this;
 switch (_that) {
 case BridgeProductEventPayload_ProjectDirectoryChanged() when projectDirectoryChanged != null:
 return projectDirectoryChanged(_that);case BridgeProductEventPayload_ThreadDirectoryChanged() when threadDirectoryChanged != null:
-return threadDirectoryChanged(_that);case BridgeProductEventPayload_TaskDirectoryChanged() when taskDirectoryChanged != null:
-return taskDirectoryChanged(_that);case BridgeProductEventPayload_AgentDirectoryChanged() when agentDirectoryChanged != null:
+return threadDirectoryChanged(_that);case BridgeProductEventPayload_AgentDirectoryChanged() when agentDirectoryChanged != null:
 return agentDirectoryChanged(_that);case BridgeProductEventPayload_SettingsStateChanged() when settingsStateChanged != null:
 return settingsStateChanged(_that);case BridgeProductEventPayload_RecoveryStateChanged() when recoveryStateChanged != null:
 return recoveryStateChanged(_that);case BridgeProductEventPayload_McpStateChanged() when mcpStateChanged != null:
@@ -156,12 +153,11 @@ return stale(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( BridgeProjectDirectoryState field0)?  projectDirectoryChanged,TResult Function( BridgeThreadDirectoryDelta field0)?  threadDirectoryChanged,TResult Function( BridgeTaskDirectoryState field0)?  taskDirectoryChanged,TResult Function( BridgeAgentDirectoryState field0)?  agentDirectoryChanged,TResult Function( BridgeSettingsStateSnapshot field0)?  settingsStateChanged,TResult Function( BridgeRecoveryStateSnapshot field0)?  recoveryStateChanged,TResult Function( BridgeMcpStateSnapshot field0)?  mcpStateChanged,TResult Function( BridgeLspStateSnapshot field0)?  lspStateChanged,TResult Function( BridgeSkillsStateSnapshot field0)?  skillsStateChanged,TResult Function( BridgeProviderUsageStateSnapshot field0)?  providerUsageStateChanged,TResult Function( BridgeModelPerformanceSnapshot field0)?  modelPerformanceStateChanged,TResult Function( BridgeUpdaterStateSnapshot field0)?  updaterStateChanged,TResult Function( BridgePersistenceStateSnapshot field0)?  persistenceStateChanged,TResult Function( BigInt laggedEvents)?  stale,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( BridgeProjectDirectoryState field0)?  projectDirectoryChanged,TResult Function( BridgeThreadDirectoryDelta field0)?  threadDirectoryChanged,TResult Function( BridgeAgentDirectoryState field0)?  agentDirectoryChanged,TResult Function( BridgeSettingsStateSnapshot field0)?  settingsStateChanged,TResult Function( BridgeRecoveryStateSnapshot field0)?  recoveryStateChanged,TResult Function( BridgeMcpStateSnapshot field0)?  mcpStateChanged,TResult Function( BridgeLspStateSnapshot field0)?  lspStateChanged,TResult Function( BridgeSkillsStateSnapshot field0)?  skillsStateChanged,TResult Function( BridgeProviderUsageStateSnapshot field0)?  providerUsageStateChanged,TResult Function( BridgeModelPerformanceSnapshot field0)?  modelPerformanceStateChanged,TResult Function( BridgeUpdaterStateSnapshot field0)?  updaterStateChanged,TResult Function( BridgePersistenceStateSnapshot field0)?  persistenceStateChanged,TResult Function( BigInt laggedEvents)?  stale,required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case BridgeProductEventPayload_ProjectDirectoryChanged() when projectDirectoryChanged != null:
 return projectDirectoryChanged(_that.field0);case BridgeProductEventPayload_ThreadDirectoryChanged() when threadDirectoryChanged != null:
-return threadDirectoryChanged(_that.field0);case BridgeProductEventPayload_TaskDirectoryChanged() when taskDirectoryChanged != null:
-return taskDirectoryChanged(_that.field0);case BridgeProductEventPayload_AgentDirectoryChanged() when agentDirectoryChanged != null:
+return threadDirectoryChanged(_that.field0);case BridgeProductEventPayload_AgentDirectoryChanged() when agentDirectoryChanged != null:
 return agentDirectoryChanged(_that.field0);case BridgeProductEventPayload_SettingsStateChanged() when settingsStateChanged != null:
 return settingsStateChanged(_that.field0);case BridgeProductEventPayload_RecoveryStateChanged() when recoveryStateChanged != null:
 return recoveryStateChanged(_that.field0);case BridgeProductEventPayload_McpStateChanged() when mcpStateChanged != null:
@@ -190,12 +186,11 @@ return stale(_that.laggedEvents);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( BridgeProjectDirectoryState field0)  projectDirectoryChanged,required TResult Function( BridgeThreadDirectoryDelta field0)  threadDirectoryChanged,required TResult Function( BridgeTaskDirectoryState field0)  taskDirectoryChanged,required TResult Function( BridgeAgentDirectoryState field0)  agentDirectoryChanged,required TResult Function( BridgeSettingsStateSnapshot field0)  settingsStateChanged,required TResult Function( BridgeRecoveryStateSnapshot field0)  recoveryStateChanged,required TResult Function( BridgeMcpStateSnapshot field0)  mcpStateChanged,required TResult Function( BridgeLspStateSnapshot field0)  lspStateChanged,required TResult Function( BridgeSkillsStateSnapshot field0)  skillsStateChanged,required TResult Function( BridgeProviderUsageStateSnapshot field0)  providerUsageStateChanged,required TResult Function( BridgeModelPerformanceSnapshot field0)  modelPerformanceStateChanged,required TResult Function( BridgeUpdaterStateSnapshot field0)  updaterStateChanged,required TResult Function( BridgePersistenceStateSnapshot field0)  persistenceStateChanged,required TResult Function( BigInt laggedEvents)  stale,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( BridgeProjectDirectoryState field0)  projectDirectoryChanged,required TResult Function( BridgeThreadDirectoryDelta field0)  threadDirectoryChanged,required TResult Function( BridgeAgentDirectoryState field0)  agentDirectoryChanged,required TResult Function( BridgeSettingsStateSnapshot field0)  settingsStateChanged,required TResult Function( BridgeRecoveryStateSnapshot field0)  recoveryStateChanged,required TResult Function( BridgeMcpStateSnapshot field0)  mcpStateChanged,required TResult Function( BridgeLspStateSnapshot field0)  lspStateChanged,required TResult Function( BridgeSkillsStateSnapshot field0)  skillsStateChanged,required TResult Function( BridgeProviderUsageStateSnapshot field0)  providerUsageStateChanged,required TResult Function( BridgeModelPerformanceSnapshot field0)  modelPerformanceStateChanged,required TResult Function( BridgeUpdaterStateSnapshot field0)  updaterStateChanged,required TResult Function( BridgePersistenceStateSnapshot field0)  persistenceStateChanged,required TResult Function( BigInt laggedEvents)  stale,}) {final _that = this;
 switch (_that) {
 case BridgeProductEventPayload_ProjectDirectoryChanged():
 return projectDirectoryChanged(_that.field0);case BridgeProductEventPayload_ThreadDirectoryChanged():
-return threadDirectoryChanged(_that.field0);case BridgeProductEventPayload_TaskDirectoryChanged():
-return taskDirectoryChanged(_that.field0);case BridgeProductEventPayload_AgentDirectoryChanged():
+return threadDirectoryChanged(_that.field0);case BridgeProductEventPayload_AgentDirectoryChanged():
 return agentDirectoryChanged(_that.field0);case BridgeProductEventPayload_SettingsStateChanged():
 return settingsStateChanged(_that.field0);case BridgeProductEventPayload_RecoveryStateChanged():
 return recoveryStateChanged(_that.field0);case BridgeProductEventPayload_McpStateChanged():
@@ -220,12 +215,11 @@ return stale(_that.laggedEvents);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( BridgeProjectDirectoryState field0)?  projectDirectoryChanged,TResult? Function( BridgeThreadDirectoryDelta field0)?  threadDirectoryChanged,TResult? Function( BridgeTaskDirectoryState field0)?  taskDirectoryChanged,TResult? Function( BridgeAgentDirectoryState field0)?  agentDirectoryChanged,TResult? Function( BridgeSettingsStateSnapshot field0)?  settingsStateChanged,TResult? Function( BridgeRecoveryStateSnapshot field0)?  recoveryStateChanged,TResult? Function( BridgeMcpStateSnapshot field0)?  mcpStateChanged,TResult? Function( BridgeLspStateSnapshot field0)?  lspStateChanged,TResult? Function( BridgeSkillsStateSnapshot field0)?  skillsStateChanged,TResult? Function( BridgeProviderUsageStateSnapshot field0)?  providerUsageStateChanged,TResult? Function( BridgeModelPerformanceSnapshot field0)?  modelPerformanceStateChanged,TResult? Function( BridgeUpdaterStateSnapshot field0)?  updaterStateChanged,TResult? Function( BridgePersistenceStateSnapshot field0)?  persistenceStateChanged,TResult? Function( BigInt laggedEvents)?  stale,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( BridgeProjectDirectoryState field0)?  projectDirectoryChanged,TResult? Function( BridgeThreadDirectoryDelta field0)?  threadDirectoryChanged,TResult? Function( BridgeAgentDirectoryState field0)?  agentDirectoryChanged,TResult? Function( BridgeSettingsStateSnapshot field0)?  settingsStateChanged,TResult? Function( BridgeRecoveryStateSnapshot field0)?  recoveryStateChanged,TResult? Function( BridgeMcpStateSnapshot field0)?  mcpStateChanged,TResult? Function( BridgeLspStateSnapshot field0)?  lspStateChanged,TResult? Function( BridgeSkillsStateSnapshot field0)?  skillsStateChanged,TResult? Function( BridgeProviderUsageStateSnapshot field0)?  providerUsageStateChanged,TResult? Function( BridgeModelPerformanceSnapshot field0)?  modelPerformanceStateChanged,TResult? Function( BridgeUpdaterStateSnapshot field0)?  updaterStateChanged,TResult? Function( BridgePersistenceStateSnapshot field0)?  persistenceStateChanged,TResult? Function( BigInt laggedEvents)?  stale,}) {final _that = this;
 switch (_that) {
 case BridgeProductEventPayload_ProjectDirectoryChanged() when projectDirectoryChanged != null:
 return projectDirectoryChanged(_that.field0);case BridgeProductEventPayload_ThreadDirectoryChanged() when threadDirectoryChanged != null:
-return threadDirectoryChanged(_that.field0);case BridgeProductEventPayload_TaskDirectoryChanged() when taskDirectoryChanged != null:
-return taskDirectoryChanged(_that.field0);case BridgeProductEventPayload_AgentDirectoryChanged() when agentDirectoryChanged != null:
+return threadDirectoryChanged(_that.field0);case BridgeProductEventPayload_AgentDirectoryChanged() when agentDirectoryChanged != null:
 return agentDirectoryChanged(_that.field0);case BridgeProductEventPayload_SettingsStateChanged() when settingsStateChanged != null:
 return settingsStateChanged(_that.field0);case BridgeProductEventPayload_RecoveryStateChanged() when recoveryStateChanged != null:
 return recoveryStateChanged(_that.field0);case BridgeProductEventPayload_McpStateChanged() when mcpStateChanged != null:
@@ -383,81 +377,6 @@ as BridgeThreadDirectoryDelta,
 }
 
 
-}
-
-/// @nodoc
-
-
-class BridgeProductEventPayload_TaskDirectoryChanged extends BridgeProductEventPayload {
-  const BridgeProductEventPayload_TaskDirectoryChanged(this.field0): super._();
-
-
- final  BridgeTaskDirectoryState field0;
-
-/// Create a copy of BridgeProductEventPayload
-/// with the given fields replaced by the non-null parameter values.
-@JsonKey(includeFromJson: false, includeToJson: false)
-@pragma('vm:prefer-inline')
-$BridgeProductEventPayload_TaskDirectoryChangedCopyWith<BridgeProductEventPayload_TaskDirectoryChanged> get copyWith => _$BridgeProductEventPayload_TaskDirectoryChangedCopyWithImpl<BridgeProductEventPayload_TaskDirectoryChanged>(this, _$identity);
-
-
-
-@override
-bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_TaskDirectoryChanged&&(identical(other.field0, field0) || other.field0 == field0));
-}
-
-
-@override
-int get hashCode => Object.hash(runtimeType,field0);
-
-@override
-String toString() {
-  return 'BridgeProductEventPayload.taskDirectoryChanged(field0: $field0)';
-}
-
-
-}
-
-/// @nodoc
-abstract mixin class $BridgeProductEventPayload_TaskDirectoryChangedCopyWith<$Res> implements $BridgeProductEventPayloadCopyWith<$Res> {
-  factory $BridgeProductEventPayload_TaskDirectoryChangedCopyWith(BridgeProductEventPayload_TaskDirectoryChanged value, $Res Function(BridgeProductEventPayload_TaskDirectoryChanged) _then) = _$BridgeProductEventPayload_TaskDirectoryChangedCopyWithImpl;
-@useResult
-$Res call({
- BridgeTaskDirectoryState field0
-});
-
-
-$BridgeTaskDirectoryStateCopyWith<$Res> get field0;
-
-}
-/// @nodoc
-class _$BridgeProductEventPayload_TaskDirectoryChangedCopyWithImpl<$Res>
-    implements $BridgeProductEventPayload_TaskDirectoryChangedCopyWith<$Res> {
-  _$BridgeProductEventPayload_TaskDirectoryChangedCopyWithImpl(this._self, this._then);
-
-  final BridgeProductEventPayload_TaskDirectoryChanged _self;
-  final $Res Function(BridgeProductEventPayload_TaskDirectoryChanged) _then;
-
-/// Create a copy of BridgeProductEventPayload
-/// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') $Res call({Object? field0 = null,}) {
-  return _then(BridgeProductEventPayload_TaskDirectoryChanged(
-null == field0 ? _self.field0 : field0 // ignore: cast_nullable_to_non_nullable
-as BridgeTaskDirectoryState,
-  ));
-}
-
-/// Create a copy of BridgeProductEventPayload
-/// with the given fields replaced by the non-null parameter values.
-@override
-@pragma('vm:prefer-inline')
-$BridgeTaskDirectoryStateCopyWith<$Res> get field0 {
-
-  return $BridgeTaskDirectoryStateCopyWith<$Res>(_self.field0, (value) {
-    return _then(_self.copyWith(field0: value));
-  });
-}
 }
 
 /// @nodoc
@@ -1293,14 +1212,14 @@ extension BridgeShutdownProgressPatterns on BridgeShutdownProgress {
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeShutdownProgress_StoppingSubscriptions value)?  stoppingSubscriptions,TResult Function( BridgeShutdownProgress_CancellingTurns value)?  cancellingTurns,TResult Function( BridgeShutdownProgress_FlushingPersistence value)?  flushingPersistence,TResult Function( BridgeShutdownProgress_SuspendingTasks value)?  suspendingTasks,TResult Function( BridgeShutdownProgress_StoppingMcp value)?  stoppingMcp,TResult Function( BridgeShutdownProgress_StoppingLsp value)?  stoppingLsp,TResult Function( BridgeShutdownProgress_Stopped value)?  stopped,required TResult orElse(),}){
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeShutdownProgress_StoppingSubscriptions value)?  stoppingSubscriptions,TResult Function( BridgeShutdownProgress_CancellingTurns value)?  cancellingTurns,TResult Function( BridgeShutdownProgress_FlushingPersistence value)?  flushingPersistence,TResult Function( BridgeShutdownProgress_StoppingAgents value)?  stoppingAgents,TResult Function( BridgeShutdownProgress_StoppingMcp value)?  stoppingMcp,TResult Function( BridgeShutdownProgress_StoppingLsp value)?  stoppingLsp,TResult Function( BridgeShutdownProgress_Stopped value)?  stopped,required TResult orElse(),}){
 final _that = this;
 switch (_that) {
 case BridgeShutdownProgress_StoppingSubscriptions() when stoppingSubscriptions != null:
 return stoppingSubscriptions(_that);case BridgeShutdownProgress_CancellingTurns() when cancellingTurns != null:
 return cancellingTurns(_that);case BridgeShutdownProgress_FlushingPersistence() when flushingPersistence != null:
-return flushingPersistence(_that);case BridgeShutdownProgress_SuspendingTasks() when suspendingTasks != null:
-return suspendingTasks(_that);case BridgeShutdownProgress_StoppingMcp() when stoppingMcp != null:
+return flushingPersistence(_that);case BridgeShutdownProgress_StoppingAgents() when stoppingAgents != null:
+return stoppingAgents(_that);case BridgeShutdownProgress_StoppingMcp() when stoppingMcp != null:
 return stoppingMcp(_that);case BridgeShutdownProgress_StoppingLsp() when stoppingLsp != null:
 return stoppingLsp(_that);case BridgeShutdownProgress_Stopped() when stopped != null:
 return stopped(_that);case _:
@@ -1321,14 +1240,14 @@ return stopped(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeShutdownProgress_StoppingSubscriptions value)  stoppingSubscriptions,required TResult Function( BridgeShutdownProgress_CancellingTurns value)  cancellingTurns,required TResult Function( BridgeShutdownProgress_FlushingPersistence value)  flushingPersistence,required TResult Function( BridgeShutdownProgress_SuspendingTasks value)  suspendingTasks,required TResult Function( BridgeShutdownProgress_StoppingMcp value)  stoppingMcp,required TResult Function( BridgeShutdownProgress_StoppingLsp value)  stoppingLsp,required TResult Function( BridgeShutdownProgress_Stopped value)  stopped,}){
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeShutdownProgress_StoppingSubscriptions value)  stoppingSubscriptions,required TResult Function( BridgeShutdownProgress_CancellingTurns value)  cancellingTurns,required TResult Function( BridgeShutdownProgress_FlushingPersistence value)  flushingPersistence,required TResult Function( BridgeShutdownProgress_StoppingAgents value)  stoppingAgents,required TResult Function( BridgeShutdownProgress_StoppingMcp value)  stoppingMcp,required TResult Function( BridgeShutdownProgress_StoppingLsp value)  stoppingLsp,required TResult Function( BridgeShutdownProgress_Stopped value)  stopped,}){
 final _that = this;
 switch (_that) {
 case BridgeShutdownProgress_StoppingSubscriptions():
 return stoppingSubscriptions(_that);case BridgeShutdownProgress_CancellingTurns():
 return cancellingTurns(_that);case BridgeShutdownProgress_FlushingPersistence():
-return flushingPersistence(_that);case BridgeShutdownProgress_SuspendingTasks():
-return suspendingTasks(_that);case BridgeShutdownProgress_StoppingMcp():
+return flushingPersistence(_that);case BridgeShutdownProgress_StoppingAgents():
+return stoppingAgents(_that);case BridgeShutdownProgress_StoppingMcp():
 return stoppingMcp(_that);case BridgeShutdownProgress_StoppingLsp():
 return stoppingLsp(_that);case BridgeShutdownProgress_Stopped():
 return stopped(_that);}
@@ -1345,14 +1264,14 @@ return stopped(_that);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeShutdownProgress_StoppingSubscriptions value)?  stoppingSubscriptions,TResult? Function( BridgeShutdownProgress_CancellingTurns value)?  cancellingTurns,TResult? Function( BridgeShutdownProgress_FlushingPersistence value)?  flushingPersistence,TResult? Function( BridgeShutdownProgress_SuspendingTasks value)?  suspendingTasks,TResult? Function( BridgeShutdownProgress_StoppingMcp value)?  stoppingMcp,TResult? Function( BridgeShutdownProgress_StoppingLsp value)?  stoppingLsp,TResult? Function( BridgeShutdownProgress_Stopped value)?  stopped,}){
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeShutdownProgress_StoppingSubscriptions value)?  stoppingSubscriptions,TResult? Function( BridgeShutdownProgress_CancellingTurns value)?  cancellingTurns,TResult? Function( BridgeShutdownProgress_FlushingPersistence value)?  flushingPersistence,TResult? Function( BridgeShutdownProgress_StoppingAgents value)?  stoppingAgents,TResult? Function( BridgeShutdownProgress_StoppingMcp value)?  stoppingMcp,TResult? Function( BridgeShutdownProgress_StoppingLsp value)?  stoppingLsp,TResult? Function( BridgeShutdownProgress_Stopped value)?  stopped,}){
 final _that = this;
 switch (_that) {
 case BridgeShutdownProgress_StoppingSubscriptions() when stoppingSubscriptions != null:
 return stoppingSubscriptions(_that);case BridgeShutdownProgress_CancellingTurns() when cancellingTurns != null:
 return cancellingTurns(_that);case BridgeShutdownProgress_FlushingPersistence() when flushingPersistence != null:
-return flushingPersistence(_that);case BridgeShutdownProgress_SuspendingTasks() when suspendingTasks != null:
-return suspendingTasks(_that);case BridgeShutdownProgress_StoppingMcp() when stoppingMcp != null:
+return flushingPersistence(_that);case BridgeShutdownProgress_StoppingAgents() when stoppingAgents != null:
+return stoppingAgents(_that);case BridgeShutdownProgress_StoppingMcp() when stoppingMcp != null:
 return stoppingMcp(_that);case BridgeShutdownProgress_StoppingLsp() when stoppingLsp != null:
 return stoppingLsp(_that);case BridgeShutdownProgress_Stopped() when stopped != null:
 return stopped(_that);case _:
@@ -1372,13 +1291,13 @@ return stopped(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function()?  stoppingSubscriptions,TResult Function()?  cancellingTurns,TResult Function( BigInt pendingCommits)?  flushingPersistence,TResult Function()?  suspendingTasks,TResult Function()?  stoppingMcp,TResult Function()?  stoppingLsp,TResult Function()?  stopped,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function()?  stoppingSubscriptions,TResult Function()?  cancellingTurns,TResult Function( BigInt pendingCommits)?  flushingPersistence,TResult Function()?  stoppingAgents,TResult Function()?  stoppingMcp,TResult Function()?  stoppingLsp,TResult Function()?  stopped,required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case BridgeShutdownProgress_StoppingSubscriptions() when stoppingSubscriptions != null:
 return stoppingSubscriptions();case BridgeShutdownProgress_CancellingTurns() when cancellingTurns != null:
 return cancellingTurns();case BridgeShutdownProgress_FlushingPersistence() when flushingPersistence != null:
-return flushingPersistence(_that.pendingCommits);case BridgeShutdownProgress_SuspendingTasks() when suspendingTasks != null:
-return suspendingTasks();case BridgeShutdownProgress_StoppingMcp() when stoppingMcp != null:
+return flushingPersistence(_that.pendingCommits);case BridgeShutdownProgress_StoppingAgents() when stoppingAgents != null:
+return stoppingAgents();case BridgeShutdownProgress_StoppingMcp() when stoppingMcp != null:
 return stoppingMcp();case BridgeShutdownProgress_StoppingLsp() when stoppingLsp != null:
 return stoppingLsp();case BridgeShutdownProgress_Stopped() when stopped != null:
 return stopped();case _:
@@ -1399,13 +1318,13 @@ return stopped();case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function()  stoppingSubscriptions,required TResult Function()  cancellingTurns,required TResult Function( BigInt pendingCommits)  flushingPersistence,required TResult Function()  suspendingTasks,required TResult Function()  stoppingMcp,required TResult Function()  stoppingLsp,required TResult Function()  stopped,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function()  stoppingSubscriptions,required TResult Function()  cancellingTurns,required TResult Function( BigInt pendingCommits)  flushingPersistence,required TResult Function()  stoppingAgents,required TResult Function()  stoppingMcp,required TResult Function()  stoppingLsp,required TResult Function()  stopped,}) {final _that = this;
 switch (_that) {
 case BridgeShutdownProgress_StoppingSubscriptions():
 return stoppingSubscriptions();case BridgeShutdownProgress_CancellingTurns():
 return cancellingTurns();case BridgeShutdownProgress_FlushingPersistence():
-return flushingPersistence(_that.pendingCommits);case BridgeShutdownProgress_SuspendingTasks():
-return suspendingTasks();case BridgeShutdownProgress_StoppingMcp():
+return flushingPersistence(_that.pendingCommits);case BridgeShutdownProgress_StoppingAgents():
+return stoppingAgents();case BridgeShutdownProgress_StoppingMcp():
 return stoppingMcp();case BridgeShutdownProgress_StoppingLsp():
 return stoppingLsp();case BridgeShutdownProgress_Stopped():
 return stopped();}
@@ -1422,13 +1341,13 @@ return stopped();}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function()?  stoppingSubscriptions,TResult? Function()?  cancellingTurns,TResult? Function( BigInt pendingCommits)?  flushingPersistence,TResult? Function()?  suspendingTasks,TResult? Function()?  stoppingMcp,TResult? Function()?  stoppingLsp,TResult? Function()?  stopped,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function()?  stoppingSubscriptions,TResult? Function()?  cancellingTurns,TResult? Function( BigInt pendingCommits)?  flushingPersistence,TResult? Function()?  stoppingAgents,TResult? Function()?  stoppingMcp,TResult? Function()?  stoppingLsp,TResult? Function()?  stopped,}) {final _that = this;
 switch (_that) {
 case BridgeShutdownProgress_StoppingSubscriptions() when stoppingSubscriptions != null:
 return stoppingSubscriptions();case BridgeShutdownProgress_CancellingTurns() when cancellingTurns != null:
 return cancellingTurns();case BridgeShutdownProgress_FlushingPersistence() when flushingPersistence != null:
-return flushingPersistence(_that.pendingCommits);case BridgeShutdownProgress_SuspendingTasks() when suspendingTasks != null:
-return suspendingTasks();case BridgeShutdownProgress_StoppingMcp() when stoppingMcp != null:
+return flushingPersistence(_that.pendingCommits);case BridgeShutdownProgress_StoppingAgents() when stoppingAgents != null:
+return stoppingAgents();case BridgeShutdownProgress_StoppingMcp() when stoppingMcp != null:
 return stoppingMcp();case BridgeShutdownProgress_StoppingLsp() when stoppingLsp != null:
 return stoppingLsp();case BridgeShutdownProgress_Stopped() when stopped != null:
 return stopped();case _:
@@ -1572,8 +1491,8 @@ as BigInt,
 /// @nodoc
 
 
-class BridgeShutdownProgress_SuspendingTasks extends BridgeShutdownProgress {
-  const BridgeShutdownProgress_SuspendingTasks(): super._();
+class BridgeShutdownProgress_StoppingAgents extends BridgeShutdownProgress {
+  const BridgeShutdownProgress_StoppingAgents(): super._();
 
 
 
@@ -1583,7 +1502,7 @@ class BridgeShutdownProgress_SuspendingTasks extends BridgeShutdownProgress {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeShutdownProgress_SuspendingTasks);
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeShutdownProgress_StoppingAgents);
 }
 
 
@@ -1592,7 +1511,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeShutdownProgress.suspendingTasks()';
+  return 'BridgeShutdownProgress.stoppingAgents()';
 }
 
 

@@ -2,8 +2,8 @@ use anyhow::Result;
 
 use crate::studio::ids::unix_seconds;
 use crate::{
-    InteractionCommand, InteractionRequest, InteractionResolution, ResolvePlanConfirmation,
-    ResolveToolApproval, ResolveUserInput,
+    InteractionCommand, InteractionRequest, InteractionResolution, ResolveToolApproval,
+    ResolveUserInput,
 };
 
 use super::StudioRuntime;
@@ -40,17 +40,6 @@ impl StudioRuntime {
                     operation_id,
                     resolved_at: now,
                     decision: value.decision,
-                    reason: value.reason,
-                })
-            }
-            InteractionResolution::PlanConfirmation(value) => {
-                InteractionCommand::ResolvePlanConfirmation(ResolvePlanConfirmation {
-                    interaction_id: current.interaction_id.clone(),
-                    expected_revision: current.revision,
-                    operation_id,
-                    resolved_at: now,
-                    decision: value.decision,
-                    content: value.content,
                     reason: value.reason,
                 })
             }

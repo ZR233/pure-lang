@@ -155,6 +155,7 @@ class _SidebarDirectoryListState extends ConsumerState<_SidebarDirectoryList> {
           final thread = state.rootThreads[threadIndex];
           return _ThreadTile(
             thread: thread,
+            modeDisplayName: state.modeDisplayNames[thread.mode.id],
             selected: thread.id == state.selectedRootThreadId,
             compact: compact,
             recoveryIssue: state.threadRecoveryIssues[thread.id],
@@ -283,14 +284,11 @@ class _ProjectTile extends ConsumerWidget {
           onTap: issue == null
               ? () => controller.selectProject(project.id)
               : null,
-          actionTooltip: issue == null
-              ? context.l10n.sidebarCloseProject
-              : _recoveryActionTooltip(context, issue),
-          actionIcon: issue == null ? Icons.close : _recoveryActionIcon(issue),
-          actionKey: issue == null ? null : _recoveryActionKey(issue),
-          onAction: issue != null
-              ? _recoveryAction(context, ref, issue)
-              : () => _showProjectCleanupDialog(context, ref, project),
+          actionTooltip: context.l10n.sidebarCloseProject,
+          actionIcon: Icons.close,
+          onAction: issue == null
+              ? () => unawaited(controller.archiveProject(project.id))
+              : null,
         ),
       );
     }
@@ -311,23 +309,16 @@ class _ProjectTile extends ConsumerWidget {
           : colors.onSurfaceVariant,
       onTap: issue == null ? () => controller.selectProject(project.id) : null,
       trailing: IconButton(
-        key: issue == null
-            ? ValueKey('project-cleanup-${project.id}')
-            : _recoveryActionKey(issue),
-        tooltip: issue == null
-            ? context.l10n.sidebarCloseProject
-            : _recoveryActionTooltip(context, issue),
+        key: ValueKey('project-close-${project.id}'),
+        tooltip: context.l10n.sidebarCloseProject,
         style: IconButton.styleFrom(
           minimumSize: const Size.square(30),
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         ),
-        icon: Icon(
-          issue == null ? Icons.close : _recoveryActionIcon(issue),
-          size: 17,
-        ),
-        onPressed: issue != null
-            ? _recoveryAction(context, ref, issue)
-            : () => _showProjectCleanupDialog(context, ref, project),
+        icon: const Icon(Icons.close, size: 17),
+        onPressed: issue == null
+            ? () => unawaited(controller.archiveProject(project.id))
+            : null,
       ),
     );
     return KeyedSubtree(
@@ -340,6 +331,7 @@ class _ProjectTile extends ConsumerWidget {
 class _ThreadTile extends ConsumerWidget {
   const _ThreadTile({
     required this.thread,
+    required this.modeDisplayName,
     required this.selected,
     required this.compact,
     required this.recoveryIssue,
@@ -347,6 +339,7 @@ class _ThreadTile extends ConsumerWidget {
   });
 
   final StudioThread thread;
+  final String? modeDisplayName;
   final bool selected;
   final bool compact;
   final StudioRecoveryIssue? recoveryIssue;
@@ -354,9 +347,9 @@ class _ThreadTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final modeIcon = thread.mode == StudioMode.task
-        ? Icons.route
-        : Icons.flash_on;
+    final modeIcon = thread.mode == StudioMode.simple
+        ? Icons.flash_on
+        : Icons.route;
     final colors = Theme.of(context).colorScheme;
     final issue = recoveryIssue;
     if (compact) {
@@ -372,18 +365,10 @@ class _ThreadTile extends ConsumerWidget {
                     .read(studioControllerProvider.notifier)
                     .selectThread(thread.id)
               : null,
-          actionKey: issue == null
-              ? StudioDriverKeys.archiveThread(thread.id)
-              : _recoveryActionKey(issue),
-          actionTooltip: issue == null
-              ? context.l10n.sidebarArchiveSession
-              : _recoveryActionTooltip(context, issue),
-          actionIcon: issue == null
-              ? Icons.archive_outlined
-              : _recoveryActionIcon(issue),
-          onAction: issue != null
-              ? _recoveryAction(context, ref, issue)
-              : canArchive
+          actionKey: StudioDriverKeys.archiveThread(thread.id),
+          actionTooltip: context.l10n.sidebarArchiveSession,
+          actionIcon: Icons.archive_outlined,
+          onAction: issue == null && canArchive
               ? () => unawaited(
                   _archiveThreadFromSidebar(context, ref, thread.id),
                 )
@@ -395,7 +380,7 @@ class _ThreadTile extends ConsumerWidget {
       selected: selected,
       icon: issue == null ? modeIcon : Icons.error_outline,
       title: thread.title,
-      subtitle: _threadSubtitle(context, thread),
+      subtitle: _threadSubtitle(context, thread, modeDisplayName),
       dense: true,
       iconColor: issue != null
           ? colors.error
@@ -404,7 +389,7 @@ class _ThreadTile extends ConsumerWidget {
           : colors.onSurfaceVariant,
       markerColor: issue != null
           ? null
-          : thread.mode == StudioMode.task
+          : thread.mode == StudioMode.simple
           ? StudioColors.clay
           : StudioColors.sage,
       onTap: issue == null
@@ -413,23 +398,14 @@ class _ThreadTile extends ConsumerWidget {
                 .selectThread(thread.id)
           : null,
       trailing: IconButton(
-        key: issue == null
-            ? StudioDriverKeys.archiveThread(thread.id)
-            : _recoveryActionKey(issue),
-        tooltip: issue == null
-            ? context.l10n.sidebarArchiveSession
-            : _recoveryActionTooltip(context, issue),
+        key: StudioDriverKeys.archiveThread(thread.id),
+        tooltip: context.l10n.sidebarArchiveSession,
         style: IconButton.styleFrom(
           minimumSize: const Size.square(30),
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         ),
-        icon: Icon(
-          issue == null ? Icons.archive_outlined : _recoveryActionIcon(issue),
-          size: 18,
-        ),
-        onPressed: issue != null
-            ? _recoveryAction(context, ref, issue)
-            : canArchive
+        icon: const Icon(Icons.archive_outlined, size: 18),
+        onPressed: issue == null && canArchive
             ? () =>
                   unawaited(_archiveThreadFromSidebar(context, ref, thread.id))
             : null,
@@ -453,62 +429,6 @@ Future<void> _archiveThreadFromSidebar(
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(context.l10n.sidebarArchiveSessionFailed)),
-    );
-  }
-}
-
-Key? _recoveryActionKey(StudioRecoveryIssue issue) {
-  if (issue.canRetry) {
-    return StudioDriverKeys.retryRecoveryIssue(issue.id);
-  }
-  if (issue.availableActions.contains(RecoveryIssueAction.removeProject)) {
-    final projectId = issue.projectId;
-    if (projectId != null) {
-      return ValueKey('project-cleanup-$projectId');
-    }
-  }
-  return issue.canCleanup ? ValueKey('recovery-cleanup-${issue.id}') : null;
-}
-
-String _recoveryActionTooltip(BuildContext context, StudioRecoveryIssue issue) {
-  return issue.canRetry
-      ? context.l10n.recoveryRetryTooltip
-      : context.l10n.recoveryCleanupTooltip;
-}
-
-IconData _recoveryActionIcon(StudioRecoveryIssue issue) {
-  return issue.canRetry ? Icons.refresh : Icons.delete_sweep_outlined;
-}
-
-VoidCallback? _recoveryAction(
-  BuildContext context,
-  WidgetRef ref,
-  StudioRecoveryIssue issue,
-) {
-  if (issue.canRetry) {
-    return () => unawaited(_retryRecoveryIssue(context, ref, issue));
-  }
-  if (issue.canCleanup) {
-    return () => _showRecoveryCleanupDialog(context, ref, issue);
-  }
-  return null;
-}
-
-Future<void> _retryRecoveryIssue(
-  BuildContext context,
-  WidgetRef ref,
-  StudioRecoveryIssue issue,
-) async {
-  try {
-    await ref
-        .read(studioControllerProvider.notifier)
-        .retryRecoveryIssue(issue.id);
-  } catch (error) {
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(context.l10n.recoveryRetryFailed(error.toString())),
-      ),
     );
   }
 }

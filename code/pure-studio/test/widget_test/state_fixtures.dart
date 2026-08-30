@@ -216,10 +216,6 @@ StudioState _emptyState() {
   );
 }
 
-StudioState _noProjectState() {
-  return _studioStateFixture(selectedProjectId: null, selectedThreadId: null);
-}
-
 StudioState _twoProjectState({
   required String selectedProjectId,
   List<StudioProject> projects = const [
@@ -408,7 +404,6 @@ StudioState _stateWithAttachmentModels() {
 StudioState _studioStateFixture({
   List<StudioProject> projects = const [],
   List<StudioThread> threads = const [],
-  Map<String, TaskRuntimeView> tasksByRootThread = const {},
   List<StudioAgentView> agents = const [],
   List<StudioRecoveryIssue> recoveryIssues = const [],
   List<ProviderSettingsView> providers = const [],
@@ -433,12 +428,6 @@ StudioState _studioStateFixture({
       state: _testReady(projects),
     ),
     threadDirectory: ThreadDirectoryWindow(threads: threads),
-    taskDirectory: TaskDirectoryState.fromState(
-      state: _testReady([
-        for (final entry in tasksByRootThread.entries)
-          TaskDirectoryEntryView(rootThreadId: entry.key, task: entry.value),
-      ]),
-    ),
     agentDirectory: AgentDirectoryState.fromState(state: _testReady(agents)),
     settingsState: SettingsStateSnapshot.fromState(
       state: _testReady(
@@ -607,10 +596,6 @@ ThreadItemView _threadItemFixture({
       ThreadItemKind.reasoning => ThreadThinkingItemStateView(
         summary: reasoningSummary,
         content: reasoningContent,
-        lifecycle: _contentLifecycleFixture(status, terminalAt, error: error),
-      ),
-      ThreadItemKind.plan => ThreadPlanItemStateView(
-        content: text,
         lifecycle: _contentLifecycleFixture(status, terminalAt, error: error),
       ),
       ThreadItemKind.toolCall => _toolItemFixture(

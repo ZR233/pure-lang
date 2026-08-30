@@ -30,8 +30,8 @@ pub(crate) enum Command {
     CheckGuiGenerated,
     /// Generate, analyze, and test the Pure Studio desktop app.
     VerifyGui(VerifyGuiOptions),
-    /// Run the opt-in real-model Task acceptance harness.
-    VerifyTask(VerifyTaskOptions),
+    /// Run the opt-in real-model workflow acceptance harness.
+    VerifyWorkflow(VerifyWorkflowOptions),
     /// Run the Pure Studio desktop app.
     RunGui(RunGuiOptions),
     /// Build release artifacts for the current desktop OS.
@@ -80,14 +80,14 @@ pub(crate) struct VerifyGuiOptions {
         .multiple(false)
         .args(["headless", "gui"])
 ))]
-pub(crate) struct VerifyTaskOptions {
+pub(crate) struct VerifyWorkflowOptions {
     /// Confirm that real provider credentials and billable model calls may be used.
     #[arg(long, required = true)]
     pub(crate) live: bool,
-    /// Run the real-model headless Task harness.
+    /// Run the real-model headless workflow harness.
     #[arg(long)]
     pub(crate) headless: bool,
-    /// Run the real native GUI and Flutter Driver Task harness.
+    /// Run the real native GUI and Flutter Driver workflow harness.
     #[arg(long)]
     pub(crate) gui: bool,
 }
@@ -368,16 +368,18 @@ mod tests {
     #[test]
     fn live_task_verification_requires_one_execution_surface() -> Result<()> {
         assert_eq!(
-            parse(["xtask", "verify-task", "--live", "--headless"].map(OsString::from))?,
-            ParseOutcome::Run(Command::VerifyTask(VerifyTaskOptions {
+            parse(["xtask", "verify-workflow", "--live", "--headless"].map(OsString::from))?,
+            ParseOutcome::Run(Command::VerifyWorkflow(VerifyWorkflowOptions {
                 live: true,
                 headless: true,
                 gui: false,
             }))
         );
         assert!(
-            parse(["xtask", "verify-task", "--live", "--headless", "--gui"].map(OsString::from))
-                .is_err()
+            parse(
+                ["xtask", "verify-workflow", "--live", "--headless", "--gui"].map(OsString::from)
+            )
+            .is_err()
         );
         Ok(())
     }

@@ -7,11 +7,13 @@ use pl_protocol::{
     BudgetLimitKind, BudgetLimitSnapshot, McpAvailabilityDescriptor, McpHealthSnapshot,
     McpServerDescriptor, PromptPrefixChangedReason, RuntimeCostAmount, Thread, ThreadAgentState,
     ThreadAttachment, ThreadContentLifecycle, ThreadInferenceState, ThreadItem, ThreadItemDelta,
-    ThreadItemDeltaState, ThreadItemState, ThreadMode, ThreadNotification,
-    ThreadNotificationEnvelope, ThreadRuntimeSnapshot, ThreadRuntimeUsage, ThreadSnapshot,
-    ThreadStatus, ThreadSubscriptionUpdate, ThreadTextChannel, ThreadToolFailureKind,
-    ThreadToolOutput, ThreadToolState, TodoItem, TodoListSnapshot, TodoStatus, TokenUsageSnapshot,
-    Turn, TurnCancellationCause, TurnCompletion, TurnPhase, TurnRolloverOutcome, TurnState,
+    ThreadItemDeltaState, ThreadItemState, ThreadNotification, ThreadNotificationEnvelope,
+    ThreadRuntimeSnapshot, ThreadRuntimeUsage, ThreadSnapshot, ThreadStatus,
+    ThreadSubscriptionUpdate, ThreadTextChannel, ThreadToolFailureKind, ThreadToolOutput,
+    ThreadToolState, TodoItem, TodoListSnapshot, TodoStatus, TokenUsageSnapshot, Turn,
+    TurnCancellationCause, TurnCompletion, TurnPhase, TurnRolloverOutcome, TurnState,
+    WorkflowDefinition, WorkflowRun, WorkflowRunLifecycle, WorkflowRuntimeSnapshot, WorkflowStage,
+    WorkflowTransition, WorkflowTransitionRecord,
 };
 
 use crate::api::studio::types::*;
@@ -149,10 +151,7 @@ pub(crate) fn bridge_thread(value: Thread) -> BridgeThread {
         id: value.id,
         project_id: value.project_id,
         title: value.title,
-        mode: match value.mode {
-            ThreadMode::Simple => BridgeThreadMode::Simple,
-            ThreadMode::Task => BridgeThreadMode::Task,
-        },
+        mode: value.mode.as_str().to_string(),
         root_thread_id: value.root_thread_id,
         parent_thread_id: value.parent_thread_id,
         role: value.role,
@@ -386,10 +385,6 @@ fn item_state(value: &ThreadItemState) -> Result<BridgeThreadItemState> {
                 },
             },
         },
-        ThreadItemState::Plan(value) => BridgeThreadItemState::Plan {
-            content: value.content().to_string(),
-            lifecycle: content_lifecycle(value.lifecycle()),
-        },
         ThreadItemState::Skill(value) => {
             let activation = value.activation();
             BridgeThreadItemState::Skill {
@@ -533,7 +528,6 @@ fn item_delta(value: ThreadItemDelta) -> BridgeThreadItemDelta {
             ThreadItemDeltaState::ThinkingContent { chunk_index, delta } => {
                 BridgeThreadItemDeltaState::ThinkingContent { chunk_index, delta }
             }
-            ThreadItemDeltaState::Plan { delta } => BridgeThreadItemDeltaState::Plan { delta },
             ThreadItemDeltaState::ToolArguments { delta } => {
                 BridgeThreadItemDeltaState::ToolArguments { delta }
             }
@@ -556,7 +550,93 @@ fn runtime_snapshot(value: ThreadRuntimeSnapshot) -> BridgeThreadRuntimeSnapshot
         active_lsp_servers: value.active_lsp_servers,
         progress: value.progress,
         mcp_health: value.mcp_health.map(mcp_health),
+        workflow: value.workflow.map(workflow_runtime_snapshot),
         updated_at: value.updated_at,
+    }
+}
+
+fn workflow_runtime_snapshot(value: WorkflowRuntimeSnapshot) -> BridgeWorkflowRuntimeSnapshot {
+    BridgeWorkflowRuntimeSnapshot {
+        revision: value.revision,
+        current_run: value.current_run.map(workflow_run),
+    }
+}
+
+fn workflow_run(value: WorkflowRun) -> BridgeWorkflowRun {
+    BridgeWorkflowRun {
+        lineage_id: value.lineage_id,
+        run_id: value.run_id,
+        definition: workflow_definition(value.definition),
+        definition_hash: value.definition_hash,
+        mode: BridgeModeInstructionSnapshot {
+            mode_id: value.mode.mode_id,
+            display_name: value.mode.display_name,
+            source: value.mode.source,
+            provider_id: value.mode.provider_id,
+            revision: value.mode.revision,
+            content_hash: value.mode.content_hash,
+            content: value.mode.content,
+        },
+        lifecycle: match value.lifecycle {
+            WorkflowRunLifecycle::Active => BridgeWorkflowRunLifecycle::Active,
+            WorkflowRunLifecycle::Terminal => BridgeWorkflowRunLifecycle::Terminal,
+        },
+        current_stage_id: value.current_stage_id,
+        compiled_at: value.compiled_at,
+        updated_at: value.updated_at,
+        history_tail: value
+            .history_tail
+            .into_iter()
+            .map(workflow_transition_record)
+            .collect(),
+        archived_transition_count: value.archived_transition_count,
+        archived_transition_digest: value.archived_transition_digest,
+    }
+}
+
+fn workflow_definition(value: WorkflowDefinition) -> BridgeWorkflowDefinition {
+    BridgeWorkflowDefinition {
+        title: value.title,
+        goal: value.goal,
+        initial_stage_id: value.initial_stage_id,
+        stages: value.stages.into_iter().map(workflow_stage).collect(),
+        transitions: value
+            .transitions
+            .into_iter()
+            .map(workflow_transition)
+            .collect(),
+    }
+}
+
+fn workflow_stage(value: WorkflowStage) -> BridgeWorkflowStage {
+    BridgeWorkflowStage {
+        id: value.id,
+        title: value.title,
+        instructions: value.instructions,
+        completion_criteria: value.completion_criteria,
+        terminal: value.terminal,
+    }
+}
+
+fn workflow_transition(value: WorkflowTransition) -> BridgeWorkflowTransition {
+    BridgeWorkflowTransition {
+        from_stage_id: value.from_stage_id,
+        to_stage_id: value.to_stage_id,
+        when: value.when,
+    }
+}
+
+fn workflow_transition_record(value: WorkflowTransitionRecord) -> BridgeWorkflowTransitionRecord {
+    BridgeWorkflowTransitionRecord {
+        revision: value.revision,
+        from_stage_id: value.from_stage_id,
+        to_stage_id: value.to_stage_id,
+        reason: value.reason,
+        summary: value.summary,
+        evidence: value.evidence,
+        turn_id: value.turn_id,
+        call_id: value.call_id,
+        transitioned_at: value.transitioned_at,
     }
 }
 

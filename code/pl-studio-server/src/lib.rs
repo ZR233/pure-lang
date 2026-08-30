@@ -330,15 +330,17 @@ mod tests {
             .body(Body::from("x".repeat(MAX_JSON_BODY_BYTES + 1)))
             .unwrap();
         let response = app.oneshot(oversized).await.unwrap();
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        assert_eq!(json_body(response).await["code"], "invalidArgument");
+        let status = response.status();
+        let body = json_body(response).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "response body: {body}");
+        assert_eq!(body["code"], "invalidArgument");
     }
 
     #[tokio::test]
     async fn attachment_json_endpoint_rejects_local_paths() {
         let app = test_app().await;
         let body = serde_json::json!({
-            "context": {"type": "newThread", "mode": "simple"},
+            "context": {"type": "newThread", "mode": "mode.simple"},
             "sources": [{"type": "localFile", "path": "/tmp/private.png"}],
         })
         .to_string();
@@ -363,7 +365,7 @@ mod tests {
         let app = test_app().await;
         let boundary = "pure-studio-boundary";
         let body = format!(
-            "--{boundary}\r\nContent-Disposition: form-data; name=\"context\"\r\n\r\n{{\"type\":\"newThread\",\"mode\":\"simple\"}}\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"unsupported.pdf\"\r\nContent-Type: application/pdf\r\n\r\n%PDF-must-not-be-admitted\r\n--{boundary}--\r\n"
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"context\"\r\n\r\n{{\"type\":\"newThread\",\"mode\":\"mode.simple\"}}\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"unsupported.pdf\"\r\nContent-Type: application/pdf\r\n\r\n%PDF-must-not-be-admitted\r\n--{boundary}--\r\n"
         );
         let request = Request::builder()
             .method("POST")
@@ -378,8 +380,10 @@ mod tests {
 
         let response = app.oneshot(request).await.unwrap();
 
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        assert_eq!(json_body(response).await["code"], "invalidArgument");
+        let status = response.status();
+        let body = json_body(response).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "response body: {body}");
+        assert_eq!(body["code"], "invalidArgument");
     }
 
     #[tokio::test]

@@ -11,7 +11,7 @@ use super::{
     bridge_agent_directory_entry, bridge_degraded_resource, bridge_failed_resource,
     bridge_loading_resource, bridge_mcp_health, bridge_ready_resource, bridge_recovery_issue,
     bridge_refreshing_resource, bridge_stale_resource, bridge_stopped_resource,
-    bridge_task_runtime, bridge_uninitialized_resource,
+    bridge_uninitialized_resource,
 };
 
 enum BridgeObservedValue<T> {
@@ -106,25 +106,6 @@ pub(crate) fn bridge_thread_directory_page(
     )
 }
 
-pub(crate) fn bridge_task_directory(
-    state: ObservedResource<StudioTaskDirectoryData>,
-) -> BridgeTaskDirectoryState {
-    concrete_observed!(
-        state,
-        |data| BridgeTaskDirectoryData {
-            tasks: data
-                .tasks
-                .into_iter()
-                .map(|entry| BridgeTaskDirectoryEntry {
-                    root_thread_id: entry.root_thread_id,
-                    task: bridge_task_runtime(entry.task),
-                })
-                .collect(),
-        },
-        BridgeTaskDirectoryState
-    )
-}
-
 pub(crate) fn bridge_agent_directory(
     state: ObservedResource<StudioAgentDirectoryData>,
 ) -> BridgeAgentDirectoryState {
@@ -198,11 +179,32 @@ pub(crate) fn bridge_skills_state(state: StudioSkillsStateSnapshot) -> BridgeSki
                 config_fingerprint: data.config_fingerprint,
                 catalog_revision: data.catalog_revision,
                 skills: data.catalog.skills.into_iter().map(skill_summary).collect(),
+                modes: data.catalog.modes.into_iter().map(mode_summary).collect(),
                 warnings: data.catalog.warnings,
                 complete: data.catalog.complete,
             },
             BridgeSkillsResourceState
         ),
+    }
+}
+
+fn mode_summary(mode: pl_core::skill::SkillMetadata) -> ModeSummaryDto {
+    let metadata = mode
+        .mode
+        .expect("catalog Mode Skill must retain validated mode metadata");
+    ModeSummaryDto {
+        id: mode.name,
+        display_name: metadata.display_name,
+        description: mode.description,
+        order: metadata.order,
+        source: match mode.source {
+            pl_core::skill::SkillSourceKind::Project => "project",
+            pl_core::skill::SkillSourceKind::User => "user",
+            pl_core::skill::SkillSourceKind::System => "system",
+            pl_core::skill::SkillSourceKind::External => "external",
+        }
+        .to_string(),
+        provider_id: mode.provider_id.as_str().to_string(),
     }
 }
 

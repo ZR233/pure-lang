@@ -68,9 +68,9 @@ provider token 不得转发。远端 Git 只使用服务器原生配置与凭据
 
 Studio schema v16 新增非敏感 `ssh_servers` 表与 nullable `projects.ssh_server_id`。本地项目按
 `path` 唯一，远端项目按 `(ssh_server_id, path)` 唯一；远端 path 保存 canonical POSIX path。
-Session、Turn、Item、Interaction、Task、worktree path 与 tool record 不变。只允许精确 v14
-fingerprint 通过单事务从 v15 迁移到 v16；v13/v14 先沿 canonical 链逐级升级，其他未知 schema
-继续 fail closed。远端项目启动时不做本地
+Session、Turn、Item、Interaction、working state 与 tool record 的 wire 语义不因远程 host 改变。
+Studio 数据库当前 schema v17 采用破坏性重建，不再维护旧 Task/worktree 表或逐版本迁移链；其他
+未知 schema 继续 fail closed。远端项目启动时不做本地
 canonicalize，服务器离线是连接状态，不是项目损坏。
 
 ## 21.5 发布与验收

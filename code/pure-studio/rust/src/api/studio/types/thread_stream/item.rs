@@ -43,10 +43,6 @@ pub enum BridgeThreadItemState {
         model: String,
         state: BridgeThreadInferenceState,
     },
-    Plan {
-        content: String,
-        lifecycle: BridgeThreadContentLifecycle,
-    },
     Skill {
         name: String,
         source: String,
@@ -214,7 +210,6 @@ pub enum BridgeThreadItemDeltaState {
     Text { delta: String },
     ThinkingSummary { chunk_index: u32, delta: String },
     ThinkingContent { chunk_index: u32, delta: String },
-    Plan { delta: String },
     ToolArguments { delta: String },
     ToolResult { delta: String },
 }

@@ -181,7 +181,6 @@ List<TimelineRow> timelineRowsFromThreadItems(List<ThreadItemView> source) {
             item.channel == AgentMessageChannel.commentary
                 ? TimelineRowType.commentary
                 : TimelineRowType.finalAnswer,
-          ThreadItemKind.plan => TimelineRowType.plan,
           ThreadItemKind.skill => TimelineRowType.skillActivation,
           ThreadItemKind.reasoning => TimelineRowType.reasoningSummary,
           ThreadItemKind.toolCall => TimelineRowType.toolGroup,
@@ -218,7 +217,6 @@ TimelineEntry _timelineEntryFromThreadItem(ThreadItemView item) {
       ThreadItemKind.userMessage ||
       ThreadItemKind.agentMessage => TimelineEntryType.text,
       ThreadItemKind.reasoning => TimelineEntryType.reasoning,
-      ThreadItemKind.plan => TimelineEntryType.plan,
       ThreadItemKind.skill => TimelineEntryType.skill,
       ThreadItemKind.toolCall => TimelineEntryType.tool,
       ThreadItemKind.agent => TimelineEntryType.text,
@@ -247,7 +245,6 @@ TimelineEntry _timelineEntryFromThreadItem(ThreadItemView item) {
       _ => null,
     },
     tool: item.tool,
-    planContent: item.kind == ThreadItemKind.plan ? item.text : null,
     skill: switch (item.skill) {
       final skill? => TimelineSkillActivation(
         name: skill.name,
@@ -281,7 +278,6 @@ int _timelineRowRenderVersion(TimelineEntry part) {
     part.text,
     ...part.reasoningSummary,
     ...part.reasoningContent,
-    part.planContent,
     part.skill?.name,
     part.skill?.source,
     part.skill?.providerId,

@@ -240,15 +240,6 @@ impl ToolResult {
         self
     }
 
-    pub fn with_completed_plan(mut self, content: impl Into<String>) -> Self {
-        let content = content.into();
-        if !content.trim().is_empty() {
-            self.runtime_events
-                .push(ToolDirective::PlanCompleted { content });
-        }
-        self
-    }
-
     pub fn canonical_output(&self) -> String {
         self.content.canonical_text()
     }
@@ -271,7 +262,6 @@ impl ToolResult {
                 ToolDirective::OutputArtifacts { artifacts } => Some(artifacts.as_slice()),
                 ToolDirective::InteractionRequested { .. }
                 | ToolDirective::SkillActivated { .. }
-                | ToolDirective::PlanCompleted { .. }
                 | ToolDirective::ToolResultRevision { .. }
                 | ToolDirective::AuditMetadata { .. }
                 | ToolDirective::ExecutionFailed
@@ -298,7 +288,6 @@ impl ToolResult {
             } => Some(content.as_str()),
             ToolDirective::InteractionRequested { .. }
             | ToolDirective::SkillActivated { .. }
-            | ToolDirective::PlanCompleted { .. }
             | ToolDirective::ToolResultRevision { .. }
             | ToolDirective::OutputArtifacts { .. }
             | ToolDirective::AuditMetadata { .. }

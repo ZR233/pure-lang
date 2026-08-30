@@ -19,7 +19,7 @@ const expectedShutdownPhaseOrder = <String>[
   'stoppingSubscriptions',
   'cancellingTurns',
   'flushingPersistence',
-  'suspendingTasks',
+  'stoppingAgents',
   'stoppingMcp',
   'stoppingLsp',
   'stopped',

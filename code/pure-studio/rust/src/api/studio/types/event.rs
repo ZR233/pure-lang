@@ -4,7 +4,7 @@ use super::{
     BridgeAgentDirectoryState, BridgeLspStateSnapshot, BridgeMcpStateSnapshot,
     BridgeModelPerformanceSnapshot, BridgePersistenceStateSnapshot, BridgeProjectDirectoryState,
     BridgeProviderUsageStateSnapshot, BridgeRecoveryStateSnapshot, BridgeSettingsStateSnapshot,
-    BridgeSkillsStateSnapshot, BridgeTaskDirectoryState, BridgeThread, BridgeUpdaterStateSnapshot,
+    BridgeSkillsStateSnapshot, BridgeThread, BridgeUpdaterStateSnapshot,
 };
 
 /// Flutter Bridge 的 Studio 产品事件信封。
@@ -25,7 +25,6 @@ pub enum BridgeProductEventPayload {
     ProjectDirectoryChanged(BridgeProjectDirectoryState),
     /// Thread directory 增量：GUI 按身份合并进分页窗口，未加载条目的增量忽略。
     ThreadDirectoryChanged(BridgeThreadDirectoryDelta),
-    TaskDirectoryChanged(BridgeTaskDirectoryState),
     AgentDirectoryChanged(BridgeAgentDirectoryState),
     SettingsStateChanged(Box<BridgeSettingsStateSnapshot>),
     RecoveryStateChanged(BridgeRecoveryStateSnapshot),
@@ -58,7 +57,7 @@ pub enum BridgeShutdownProgress {
     StoppingSubscriptions,
     CancellingTurns,
     FlushingPersistence { pending_commits: u64 },
-    SuspendingTasks,
+    StoppingAgents,
     StoppingMcp,
     StoppingLsp,
     Stopped,

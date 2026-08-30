@@ -211,7 +211,7 @@ fn stream_accumulator_projects_tagged_raw_reasoning_without_visible_text() {
     assert!(!response.trace_events.iter().any(|event| matches!(
         &event.kind,
         TraceEventKind::TracePartCompleted { item }
-            if item.kind() == TracePartKind::Text || item.kind() == TracePartKind::Plan
+            if item.kind() == TracePartKind::Text
     )));
 }
 
@@ -326,7 +326,7 @@ fn stream_accumulator_projects_untagged_reasoning_without_visible_text() {
     assert!(!response.trace_events.iter().any(|event| matches!(
         &event.kind,
         TraceEventKind::TracePartCompleted { item }
-            if item.kind() == TracePartKind::Text || item.kind() == TracePartKind::Plan
+            if item.kind() == TracePartKind::Text
     )));
 }
 
@@ -437,7 +437,7 @@ fn stream_accumulator_creates_part_for_authoritative_completion_without_delta() 
 }
 
 #[test]
-fn stream_accumulator_does_not_extract_proposed_plan_item() {
+fn stream_accumulator_preserves_unknown_proposed_plan_tags_as_text() {
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
     let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTraceContext {
         session_id: "session-1".to_string(),
@@ -466,24 +466,4 @@ fn stream_accumulator_does_not_extract_proposed_plan_item() {
         response.content.as_deref(),
         Some("\n<proposed_plan>\n- step\n</proposed_plan>\nOutro")
     );
-    assert_eq!(
-        response.content.as_deref(),
-        Some("\n<proposed_plan>\n- step\n</proposed_plan>\nOutro")
-    );
-    let completed_plan = response
-        .trace_events
-        .iter()
-        .find_map(|event| match &event.kind {
-            TraceEventKind::TracePartCompleted { item } if item.kind() == TracePartKind::Plan => {
-                Some(item)
-            }
-            TraceEventKind::TracePartStarted { .. }
-            | TraceEventKind::TracePartDelta { .. }
-            | TraceEventKind::TracePartCompleted { .. }
-            | TraceEventKind::TracePartFailed { .. }
-            | TraceEventKind::InteractionChanged { .. }
-            | TraceEventKind::SkillActivated { .. }
-            | TraceEventKind::EnabledToolsRecorded { .. } => None,
-        });
-    assert!(completed_plan.is_none());
 }

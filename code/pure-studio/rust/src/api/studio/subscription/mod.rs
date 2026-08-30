@@ -364,7 +364,7 @@ fn bridge_shutdown_progress(progress: StudioShutdownProgress) -> BridgeShutdownP
                 pending_commits: progress.pending_commits(),
             }
         }
-        StudioShutdownProgress::SuspendingTasks(_) => BridgeShutdownProgress::SuspendingTasks,
+        StudioShutdownProgress::StoppingAgents(_) => BridgeShutdownProgress::StoppingAgents,
         StudioShutdownProgress::StoppingMcp(_) => BridgeShutdownProgress::StoppingMcp,
         StudioShutdownProgress::StoppingLsp(_) => BridgeShutdownProgress::StoppingLsp,
         StudioShutdownProgress::Stopped(_) => BridgeShutdownProgress::Stopped,

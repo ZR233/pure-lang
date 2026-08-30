@@ -1,18 +1,10 @@
 use anyhow::{Context, Result};
-use pl_core::{
-    AgentCommand, AgentRecoveryTarget, AgentState, AgentStateTransition, MailboxCommand,
-    MailboxDeliveryState, TurnId,
-};
-use pl_protocol::{Turn, TurnCancellationCause, TurnCommand, TurnState};
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter,
-    QueryOrder, TransactionTrait,
-};
+use pl_core::{AgentCommand, AgentState, AgentStateTransition};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, IntoActiveModel};
 
 use crate::studio::StudioStore;
-use crate::studio::entity::{thread, thread_context_segment, thread_input, turn};
+use crate::studio::entity::thread;
 use crate::studio::ids::unix_seconds;
-use crate::studio::store::object::{delete_object, put_object};
 
 pub(in crate::studio) struct ThreadRuntimeSeed {
     pub thread_revision: u64,
@@ -58,121 +50,6 @@ impl StudioStore {
         active.updated_at = Set(unix_seconds());
         active.update(&self.db).await?;
         Ok(UnregisteredThreadFault::Faulted)
-    }
-
-    pub(in crate::studio) async fn reset_agent_sessions_for_root(
-        &self,
-        root_thread_id: &str,
-    ) -> Result<()> {
-        let tx = self.db.begin().await?;
-        let result = async {
-            let threads = thread::Entity::find()
-                .filter(thread::Column::RootThreadId.eq(root_thread_id))
-                .order_by_asc(thread::Column::CreatedAt)
-                .order_by_asc(thread::Column::Id)
-                .all(&tx)
-                .await?;
-            anyhow::ensure!(!threads.is_empty(), "Thread reset target not found");
-            let now = unix_seconds();
-            let state = pl_protocol::AgentWorkingState::default();
-            for thread_row in threads {
-                thread_context_segment::Entity::delete_many()
-                    .filter(thread_context_segment::Column::ThreadId.eq(&thread_row.id))
-                    .exec(&tx)
-                    .await?;
-                delete_object::<pl_protocol::AgentWorkingState>(&tx, &thread_row.id).await?;
-                put_object(&tx, &thread_row.id, &state, now).await?;
-
-                let inputs = thread_input::Entity::find()
-                    .filter(thread_input::Column::ThreadId.eq(&thread_row.id))
-                    .filter(thread_input::Column::StateKind.ne("consumed"))
-                    .all(&tx)
-                    .await?;
-                for input in inputs {
-                    let mut state: MailboxDeliveryState = serde_json::from_str(&input.state_json)?;
-                    if state.is_pending() {
-                        state = state
-                            .decide(MailboxCommand::Claim {
-                                turn_id: TurnId::new(input.turn_id.clone())?,
-                            })?
-                            .next_state;
-                    }
-                    let turn_id = state
-                        .turn_id()
-                        .cloned()
-                        .context("claimed mailbox is missing its Turn identity")?;
-                    let checkpoint_seq = state.checkpoint_seq().unwrap_or_default();
-                    let state = state
-                        .decide(MailboxCommand::Consume {
-                            turn_id,
-                            checkpoint_seq,
-                        })?
-                        .next_state;
-                    let mut active = input.into_active_model();
-                    active.state_json = Set(serde_json::to_string(&state)?);
-                    active.update(&tx).await?;
-                }
-
-                let active_turns = turn::Entity::find()
-                    .filter(turn::Column::ThreadId.eq(&thread_row.id))
-                    .filter(turn::Column::StateKind.is_in(["queued", "running"]))
-                    .all(&tx)
-                    .await?;
-                for turn in active_turns {
-                    let state: TurnState = serde_json::from_str(&turn.state_json)?;
-                    let aggregate = Turn {
-                        id: turn.id.clone(),
-                        thread_id: turn.thread_id.clone(),
-                        revision: u64::try_from(turn.revision)?,
-                        state,
-                        updated_at: turn.updated_at,
-                    };
-                    let mut aggregate = aggregate;
-                    let decision = aggregate.decide(TurnCommand::Cancel {
-                        turn_id: aggregate.id.clone(),
-                        expected_revision: aggregate.revision,
-                        cause: TurnCancellationCause::Recovery,
-                        completed_at: now,
-                    })?;
-                    aggregate.apply(decision, now);
-                    let mut active = turn.into_active_model();
-                    active.revision = Set(i64::try_from(aggregate.revision)?);
-                    active.state_json = Set(serde_json::to_string(&aggregate.state)?);
-                    active.updated_at = Set(aggregate.updated_at);
-                    active.update(&tx).await?;
-                }
-
-                let is_root = thread_row.id == root_thread_id;
-                let state: AgentState = serde_json::from_str(&thread_row.state_json)?;
-                let state = state
-                    .decide(AgentCommand::Recover {
-                        target: if is_root {
-                            AgentRecoveryTarget::Idle
-                        } else {
-                            AgentRecoveryTarget::Closed
-                        },
-                    })?
-                    .next_state;
-                let mut active = thread_row.into_active_model();
-                active.runtime_revision = Set(None);
-                active.state_json = Set(serde_json::to_string(&state)?);
-                active.last_context_tokens = Set(None);
-                active.updated_at = Set(now);
-                active.update(&tx).await?;
-            }
-            Ok::<_, anyhow::Error>(())
-        }
-        .await;
-        match result {
-            Ok(()) => {
-                tx.commit().await?;
-                Ok(())
-            }
-            Err(error) => {
-                tx.rollback().await?;
-                Err(error)
-            }
-        }
     }
 
     pub(in crate::studio) async fn thread_runtime_seed(

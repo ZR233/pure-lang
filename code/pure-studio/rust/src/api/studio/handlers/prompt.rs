@@ -1,13 +1,12 @@
 use crate::api::studio::bridge_runtime::active_bridge;
 use crate::api::studio::convert::thread_stream::bridge_interaction;
 use crate::api::studio::types::{
-    BridgeError, BridgeInteractionRequest, BridgeInteractionResolution,
-    BridgePlanConfirmationResolution, BridgeStudioPromptInput, BridgeToolApprovalResolution,
-    InterruptTurnResponse, StartTurnResponse, SteerTurnResponse,
+    BridgeError, BridgeInteractionRequest, BridgeInteractionResolution, BridgeStudioPromptInput,
+    BridgeToolApprovalResolution, InterruptTurnResponse, StartTurnResponse, SteerTurnResponse,
 };
 use pl_protocol::{
-    InteractionResolution, PlanConfirmationResolution, PlanConfirmationResolutionPayload,
-    ToolApprovalResolution, ToolApprovalResolutionPayload, UserInputAnswer, UserInputResolution,
+    InteractionResolution, ToolApprovalResolution, ToolApprovalResolutionPayload, UserInputAnswer,
+    UserInputResolution,
 };
 use std::collections::HashMap;
 // ── Prompt / Interaction ──
@@ -113,19 +112,5 @@ fn interaction_resolution(
                 reason,
             })
         }
-        BridgeInteractionResolution::PlanConfirmation {
-            decision,
-            content,
-            reason,
-        } => InteractionResolution::PlanConfirmation(PlanConfirmationResolutionPayload {
-            decision: match decision {
-                BridgePlanConfirmationResolution::Confirm => PlanConfirmationResolution::Confirm,
-                BridgePlanConfirmationResolution::RevisePlan => {
-                    PlanConfirmationResolution::RevisePlan
-                }
-            },
-            content,
-            reason,
-        }),
     })
 }

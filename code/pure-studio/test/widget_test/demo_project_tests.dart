@@ -30,7 +30,7 @@ void registerDemoProjectTests() {
     expect(state.threads[0].mode, StudioMode.task);
     expect(state.threads[0].role, 'planner');
     expect(state.threads[1].mode, StudioMode.simple);
-    expect(state.threads[1].role, 'executor');
+    expect(state.threads[1].role, 'planner');
     expect(state.threads[2].mode, StudioMode.simple);
     expect(state.threads[2].role, 'reviewer');
     expect(state.workspacesByThread['thread-main']!.thread, state.threads[0]);
@@ -49,45 +49,6 @@ void registerDemoProjectTests() {
         ),
       ),
     );
-  });
-
-  test('Fake mode update rejects an active Task', () async {
-    final state = await DemoStudioApi().readStudioState();
-    final api = _FakeStudioApi(
-      state.copyWith(
-        taskDirectory: TaskDirectoryState(
-          values: [
-            TaskDirectoryEntryView(
-              rootThreadId: 'thread-main',
-              task: TaskRuntimeView(
-                runId: 'task-run-active',
-                state: const WorkingTaskStateView(
-                  documentEditSummary: 'test documents updated',
-                ),
-                revision: 0,
-                generation: 0,
-                workUnits: [],
-                completions: [],
-                merges: [],
-                reviews: [],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    await expectLater(
-      api.setThreadMode(threadId: 'thread-main', mode: StudioMode.task),
-      throwsA(
-        isA<StateError>().having(
-          (error) => error.message,
-          'message',
-          'thread mode cannot change while a task is active',
-        ),
-      ),
-    );
-    expect(api.modeUpdate, isNull);
   });
 
   test('Demo startTurn publishes typed Turn and Item notifications', () async {
@@ -135,7 +96,6 @@ void registerDemoProjectTests() {
         ThreadThinkingContentDeltaView,
         ThreadToolArgumentsDeltaView,
         ThreadToolResultDeltaView,
-        ThreadPlanDeltaView,
       ]),
     );
     final snapshot =
@@ -159,16 +119,6 @@ void registerDemoProjectTests() {
       [
         ('driver-tool', InteractionKind.toolApproval, 'driver-origin-turn'),
         ('driver-input', InteractionKind.userInput, 'driver-origin-turn'),
-        (
-          'driver-plan-revise',
-          InteractionKind.planConfirmation,
-          'driver-origin-turn',
-        ),
-        (
-          'driver-plan-confirm',
-          InteractionKind.planConfirmation,
-          'driver-origin-turn',
-        ),
       ],
     );
   });
@@ -223,7 +173,6 @@ void registerDemoProjectTests() {
 bool _demoItemIsTerminal(ThreadItemView item) => switch (item.state) {
   ThreadTextItemStateView(:final lifecycle) => lifecycle.isTerminal,
   ThreadThinkingItemStateView(:final lifecycle) => lifecycle.isTerminal,
-  ThreadPlanItemStateView(:final lifecycle) => lifecycle.isTerminal,
   ThreadToolItemStateView(:final lifecycle) => lifecycle.isTerminal,
   _ => true,
 };

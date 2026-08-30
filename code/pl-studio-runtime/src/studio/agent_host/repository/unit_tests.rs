@@ -163,7 +163,7 @@ async fn active_turn_fallback_preserves_canonical_phase() {
         .await
         .expect("project");
     let thread = store
-        .create_thread(&project.id, "active-turn-fallback", StudioMode::Simple)
+        .create_thread(&project.id, "active-turn-fallback", StudioMode::simple())
         .await
         .expect("thread");
     let thread_id = thread.id;
@@ -217,7 +217,7 @@ async fn active_turn_fallback_preserves_canonical_phase() {
 
     // 同一 Turn id 已属于另一 Thread 时，持久化必须失败且不得修改该行。
     let foreign = store
-        .create_thread(&project.id, "foreign", StudioMode::Simple)
+        .create_thread(&project.id, "foreign", StudioMode::simple())
         .await
         .expect("foreign thread");
     seed_running_turn(&store, &foreign.id, "turn-foreign", 0, TurnPhase::Thinking).await;
@@ -374,11 +374,11 @@ async fn wire_v7_skill_audit_blocks_only_legacy_root_without_rewriting_v13_rows(
     let workspace = std::env::temp_dir().join("pure-studio-strict-skill-recovery");
     let project = store.upsert_project(&workspace).await.expect("project");
     let legacy = store
-        .create_thread(&project.id, "legacy", crate::StudioMode::Simple)
+        .create_thread(&project.id, "legacy", crate::StudioMode::simple())
         .await
         .expect("legacy thread");
     let healthy = store
-        .create_thread(&project.id, "healthy", crate::StudioMode::Simple)
+        .create_thread(&project.id, "healthy", crate::StudioMode::simple())
         .await
         .expect("healthy thread");
     seed_empty_session(&store, &legacy.id).await;
@@ -449,7 +449,7 @@ async fn activation_restores_recent_four_hundred_items_and_older_active_skills()
     let workspace = std::env::temp_dir().join("pure-studio-hot-timeline-window");
     let project = store.upsert_project(&workspace).await.expect("project");
     let thread = store
-        .create_thread(&project.id, "hot window", crate::StudioMode::Simple)
+        .create_thread(&project.id, "hot window", crate::StudioMode::simple())
         .await
         .expect("thread");
     seed_empty_session(&store, &thread.id).await;

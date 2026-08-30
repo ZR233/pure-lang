@@ -8,6 +8,7 @@ import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_driver_keys.dart';
 import 'settings_provider_tab.dart';
+import 'settings_agents_tab.dart';
 import 'settings_statistics_tab.dart';
 import 'settings_ssh_tab.dart';
 import 'settings_system_tabs.dart';
@@ -43,6 +44,7 @@ const _settingsTabs = [
   _SettingsTabInfo(Icons.notes_outlined, _SettingsTab.instructions),
   _SettingsTabInfo(Icons.extension_outlined, _SettingsTab.skills),
   _SettingsTabInfo(Icons.badge_outlined, _SettingsTab.roles),
+  _SettingsTabInfo(Icons.groups_outlined, _SettingsTab.agents),
   _SettingsTabInfo(Icons.hub_outlined, _SettingsTab.mcp),
   _SettingsTabInfo(Icons.code_outlined, _SettingsTab.lsp),
   _SettingsTabInfo(Icons.dns_outlined, _SettingsTab.ssh),
@@ -63,6 +65,7 @@ class _SettingsTabInfo {
       _SettingsTab.instructions => context.l10n.settingsInstructionsTab,
       _SettingsTab.skills => context.l10n.settingsSkillsTab,
       _SettingsTab.roles => context.l10n.settingsRolesTab,
+      _SettingsTab.agents => 'Agents',
       _SettingsTab.mcp => context.l10n.settingsMcpTab,
       _SettingsTab.lsp => context.l10n.settingsLspTab,
       _SettingsTab.ssh => context.l10n.settingsSshTab,
@@ -78,6 +81,7 @@ enum _SettingsTab {
   instructions,
   skills,
   roles,
+  agents,
   mcp,
   lsp,
   ssh,
@@ -112,6 +116,7 @@ class _SettingsScaffold extends StatelessWidget {
         tabIndex: _SettingsTab.skills.index,
       ),
       RolesTab(providers: state.providers, roles: state.roles),
+      const AgentsTab(),
       McpTab(settingsServers: state.mcpServers, state: state.mcpState),
       LspTab(projectId: state.selectedProjectId, state: state.lspState),
       const SshTab(),

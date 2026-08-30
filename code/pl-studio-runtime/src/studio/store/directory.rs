@@ -5,7 +5,7 @@
 //! 只承载已经由 owner 决定的事实，不做业务校验或状态转换。
 
 use anyhow::{Result, bail};
-use pl_protocol::{LabeledEnum, Thread, ThreadMode};
+use pl_protocol::{Thread, ThreadMode};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, EntityTrait, QueryFilter,
     QueryOrder, QuerySelect,
@@ -70,9 +70,9 @@ impl DirectoryDelta {
             id,
             project_id: project_id.to_string(),
             title: non_empty_title(title),
-            mode: ThreadMode::from(mode),
+            mode: ThreadMode::from(mode.clone()),
             parent_thread_id: None,
-            role: mode.root_role().key().to_string(),
+            role: crate::config::StudioRole::Planner.key().to_string(),
             status: pl_protocol::ThreadStatus::Idle,
             created_at: now,
             updated_at: now,

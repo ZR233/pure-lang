@@ -1,6 +1,5 @@
 mod agent;
 mod inference;
-mod plan;
 mod text;
 mod thinking;
 mod tool;
@@ -11,7 +10,6 @@ use std::fmt;
 pub use agent::*;
 pub use inference::*;
 use pl_protocol::{TokenUsageSnapshot, TurnState};
-pub use plan::*;
 use serde::{Deserialize, Serialize};
 pub use text::*;
 pub use thinking::*;
@@ -126,17 +124,6 @@ impl TracePart {
             timestamp,
             TracePartSource::Model,
             TracePartState::Thinking(TraceThinkingPart::streaming()),
-        )
-    }
-
-    pub fn started_plan(turn_id: String, item_id: String, sequence: u64, timestamp: i64) -> Self {
-        Self::new(
-            turn_id,
-            item_id,
-            sequence,
-            timestamp,
-            TracePartSource::Model,
-            TracePartState::Plan(TracePlanPart::started()),
         )
     }
 
@@ -298,8 +285,7 @@ impl TracePart {
             | TracePartState::Thinking(_)
             | TracePartState::Agent(_)
             | TracePartState::Turn(_)
-            | TracePartState::Inference(_)
-            | TracePartState::Plan(_) => None,
+            | TracePartState::Inference(_) => None,
         }
     }
 
@@ -310,8 +296,7 @@ impl TracePart {
             | TracePartState::Tool(_)
             | TracePartState::Agent(_)
             | TracePartState::Turn(_)
-            | TracePartState::Inference(_)
-            | TracePartState::Plan(_) => None,
+            | TracePartState::Inference(_) => None,
         }
     }
 
@@ -319,19 +304,6 @@ impl TracePart {
         match &self.state {
             TracePartState::Thinking(thinking) => Some(thinking),
             TracePartState::Text(_)
-            | TracePartState::Tool(_)
-            | TracePartState::Agent(_)
-            | TracePartState::Turn(_)
-            | TracePartState::Inference(_)
-            | TracePartState::Plan(_) => None,
-        }
-    }
-
-    pub fn plan(&self) -> Option<&TracePlanPart> {
-        match &self.state {
-            TracePartState::Plan(plan) => Some(plan),
-            TracePartState::Text(_)
-            | TracePartState::Thinking(_)
             | TracePartState::Tool(_)
             | TracePartState::Agent(_)
             | TracePartState::Turn(_)
@@ -439,7 +411,6 @@ pub enum TracePartState {
     Agent(TraceAgentPart),
     Turn(TraceTurnPart),
     Inference(TraceInferencePart),
-    Plan(TracePlanPart),
 }
 
 impl TracePartState {
@@ -451,7 +422,6 @@ impl TracePartState {
             Self::Agent(_) => TracePartKind::Agent,
             Self::Turn(_) => TracePartKind::Turn,
             Self::Inference(_) => TracePartKind::Inference,
-            Self::Plan(_) => TracePartKind::Plan,
         }
     }
 
@@ -463,7 +433,6 @@ impl TracePartState {
             Self::Agent(part) => part.state().is_terminal(),
             Self::Turn(part) => part.state().is_terminal(),
             Self::Inference(part) => part.state().is_terminal(),
-            Self::Plan(part) => part.state().is_terminal(),
         }
     }
 
@@ -478,7 +447,6 @@ impl TracePartState {
                 .failure()
                 .map(|failure| failure.message.as_str()),
             Self::Inference(part) => part.state().failure(),
-            Self::Plan(part) => part.state().failure(),
         }
     }
 
@@ -500,9 +468,6 @@ impl TracePartState {
             }
             (Self::Tool(part), TracePartAction::Append(TraceDelta::ToolResult { delta })) => {
                 part.append_result(delta).map(Self::Tool)
-            }
-            (Self::Plan(part), TracePartAction::Append(TraceDelta::Plan { delta })) => {
-                part.append(delta).map(Self::Plan)
             }
             (
                 Self::Text(part),
@@ -532,10 +497,6 @@ impl TracePartState {
                 Self::Inference(part),
                 TracePartAction::Complete(TracePartCompletion::Inference { usage }),
             ) => part.complete(usage.clone()).map(Self::Inference),
-            (
-                Self::Plan(part),
-                TracePartAction::Complete(TracePartCompletion::Plan { content }),
-            ) => part.complete(content.clone()).map(Self::Plan),
             (Self::Text(part), TracePartAction::Fail { error, .. }) => {
                 part.fail(error.clone()).map(Self::Text)
             }
@@ -552,9 +513,6 @@ impl TracePartState {
                 .map(Self::Agent),
             (Self::Inference(part), TracePartAction::Fail { error, .. }) => {
                 part.fail(error.clone()).map(Self::Inference)
-            }
-            (Self::Plan(part), TracePartAction::Fail { error, .. }) => {
-                part.fail(error.clone()).map(Self::Plan)
             }
             (Self::Tool(part), TracePartAction::FailTool { failure, output }) => {
                 part.fail(failure.clone(), output.clone()).map(Self::Tool)
@@ -596,9 +554,6 @@ impl TracePartState {
             (Self::Inference(part), TracePartAction::Cancel { reason }) => {
                 part.cancel(reason.clone()).map(Self::Inference)
             }
-            (Self::Plan(part), TracePartAction::Cancel { reason }) => {
-                part.cancel(reason.clone()).map(Self::Plan)
-            }
             (Self::Turn(_), TracePartAction::Fail { .. } | TracePartAction::Cancel { .. }) => {
                 Err("turn trace must transition with canonical TurnState")
             }
@@ -616,7 +571,6 @@ pub enum TracePartKind {
     Agent,
     Turn,
     Inference,
-    Plan,
 }
 
 impl TracePartKind {
@@ -628,7 +582,6 @@ impl TracePartKind {
             Self::Agent => "agent",
             Self::Turn => "turn",
             Self::Inference => "inference",
-            Self::Plan => "plan",
         }
     }
 }
@@ -767,9 +720,6 @@ pub enum TracePartCompletion {
     Inference {
         usage: TokenUsageSnapshot,
     },
-    Plan {
-        content: Option<String>,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -842,9 +792,6 @@ pub enum TraceDelta {
     ToolResult {
         delta: String,
     },
-    Plan {
-        delta: String,
-    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -867,7 +814,6 @@ impl TracePartDeltaEvent {
                 TracePartKind::Thinking
             }
             TraceDelta::ToolArguments { .. } | TraceDelta::ToolResult { .. } => TracePartKind::Tool,
-            TraceDelta::Plan { .. } => TracePartKind::Plan,
         }
     }
 

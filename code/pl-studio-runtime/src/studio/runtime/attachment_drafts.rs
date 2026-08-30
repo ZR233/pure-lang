@@ -371,9 +371,11 @@ impl StudioRuntime {
                 let thread = self.read_owned_thread(thread_id).await?;
                 StudioRole::from_key(&thread.role).context("Thread has an invalid model role")?
             }
-            StudioAttachmentAdmissionContext::NewThread { mode } => StudioMode::from_label(mode)
-                .map_err(|_| anyhow::anyhow!("mode must be simple or task"))?
-                .root_role(),
+            StudioAttachmentAdmissionContext::NewThread { mode } => {
+                StudioMode::from_label(mode)
+                    .map_err(|_| anyhow::anyhow!("mode must be an available mode.* Skill id"))?;
+                StudioRole::Planner
+            }
         };
         let config = self.config_runtime.read()?;
         let route = config.config.models.resolve(&role.id())?;

@@ -438,7 +438,7 @@ fn usize_from_u64(value: u64) -> AgentRuntimeResult<usize> {
 
 fn recovery_context(record: &ConversationRecoveryRecord) -> String {
     format!(
-        "对话上下文已恢复（mode={:?}, revision={}）。被回退对话不再是有效模型上下文。Task、WorkUnit、文件、Git commit、工具副作用和其他外部状态均未回滚；继续前必须读取 canonical Task 状态并检查当前工作区，以它们作为事实源。",
+        "对话上下文已恢复（mode={:?}, revision={}）。被回退对话不再是有效模型上下文。workflow、文件、Git、工具副作用和其他外部状态均未回滚；继续前必须读取 canonical workflow 状态并检查当前工作区，以它们作为事实源。",
         record.mode, record.revision
     )
 }

@@ -20,18 +20,19 @@ Windows 下对应：
 ~/.pure/studio/studio.sqlite
 ```
 
-单库保存项目、Thread、Turn、Item、input、interaction、attachment 与 Task 产品表。Flutter
+单库保存项目、Thread、Turn、Item、input、interaction、attachment 与 typed working state。Flutter
 临时 UI 状态不入库，实时流也不保存 replay journal。数据库由 `pl-studio-runtime` 通过
-SeaORM 2.0 异步访问；schema v14 与不兼容库/一次性 v13 附件迁移合同见
+SeaORM 2.0 异步访问；数据库 schema v17 的破坏性重建合同见
 `19-studio-storage-and-diagnostics.md`。
 `pl-core` 的正常依赖树不包含 SeaORM。provider/model/role 配置仍只由
-`~/.pure/config.toml` schema 15 表达。
+`~/.pure/config.toml` schema 16 表达。用户 Agent Profile 单独保存到 `~/.pure/agents/*.toml`，
+一个文件对应一个稳定 Profile ID。
 
 `ConfigRuntime` 在 `startStudioRuntime` 时读取配置；此后普通对话和设置查询只读内存 canonical
 snapshot。当配置文件不存在时设置页展示内存中的默认配置。外部文件变化只有显式
 `reloadSettingsFromDisk` 才能应用。普通设置项在用户修改后即时写入配置；独立新增/编辑页面保留
 本地草稿，必须点击页面内保存按钮才写入配置，取消则丢弃草稿。当前且唯一支持的格式为 schema
-15。Studio 启动时，旧 schema、未知版本、无法解析、含内联 provider 凭据或无法校验的配置均视为
+16。Studio 启动时，旧 schema、未知版本、无法解析、含内联 provider 凭据或无法校验的配置均视为
 内容不兼容：不迁移、不导入旧字段或旧 provider 凭据，先把原始字节备份到同目录唯一的
 `config.toml.rejected.<timestamp>.bak`，再原子替换为当前默认配置并继续启动；仅按默认 provider id
 注入已有系统凭据。备份路径冲突时递增后缀且不得覆盖已有备份。启动成功后桌面宿主返回一次性恢复
@@ -58,26 +59,33 @@ fail closed 并保留原文件；默认配置替换失败时已经完整写入�
 
 `pl-studio-runtime` 负责：
 
-- `StudioConfig` 与唯一支持的 schema version 15。
+- `StudioConfig` 与唯一支持的 schema version 16。
 - `~/.pure/config.toml` 路径、serde TOML 解析、原子保存和默认值。
-- Studio instructions、skills、MCP、runtime 和 UI 配置。
+- Studio instructions、skills、MCP、runtime、`disabled_system_agents` 和 UI 配置。
+- `~/.pure/agents/*.toml` 的逐文件解析、诊断与原子创建/保存。
 - 生成 Thread 首轮固定的 instruction snapshot。
 
 `pl-model` 只消费已经解析好的 provider 和模型信息，不负责文件 IO 或路径定位。
 
-## 10.3 角色路由
+## 10.3 根路由与 Agent Profile
 
-配置不使用 `active_provider`。`pl-core` 的角色表是动态字符串映射；Studio 默认提供以下
-四个产品角色，但其他宿主可定义不同角色：
+配置不使用 `active_provider`。所有模式的 root Agent 统一使用 `planner` route，不再根据
+Simple/Task 切换根角色。Studio 同时注册以下四个系统 Agent Profile：
 
 | TOML key | 中文角色 | 用途 |
 | --- | --- | --- |
 | `explorer` | 探索者 | 代码、文档和上下文探索 |
-| `planner` | 计划者 | Task 根聊天、计划生成、任务协调、merge 与审查闭环 |
-| `executor` | 执行者 | Simple 根聊天，或 Task 中 planner 调用的 worktree 执行者 |
+| `planner` | 计划者 | 形成计划和约束 |
+| `executor` | 执行者 | 实施修改和验证 |
 | `reviewer` | 审查者 | 代码审查和结果检查 |
 
-桌面对话按 `compileMode = simple | task` 路由根角色：Simple 使用 executor，Task 使用 planner。Task 确认实施后仍由 planner 通过 coordinator 发起执行者、合并和 reviewer，不切换模式。
+系统 Profile 由 Rust 结构体启动注册，不生成 TOML；全部字段不可编辑、不可删除，只能通过主配置
+`disabled_system_agents` 禁用。用户 Profile 的文件名 stem 是 Agent ID，文件保存 enabled、介绍、
+适用任务、系统指令、provider、model 和 effort。单个无效文件只排除自身并产生诊断。
+
+`list_agent_profiles` 只返回启用且路由可解析的 Profile。`spawn_agent(profileId, ...)` 创建 child 时
+冻结系统指令、provider、model 与 effort；此后文件变化不改变既有 child。设置页另读完整 catalog，
+因此被禁用的用户 Profile 仍可编辑并重新启用。
 
 每个角色必须配置：
 
@@ -95,7 +103,9 @@ route 决定。旧版本、缺失必需路由或无效引用会触发 Studio 配
 本地 TOML 使用 `snake_case`，不同于 API wire 格式。
 
 ```toml
-schema_version = 15
+schema_version = 16
+
+disabled_system_agents = []
 
 [runtime]
 permission_mode = "request-approval"
@@ -185,7 +195,7 @@ catalog = "openai"
 ## 10.5 Provider 和 Model
 
 `models.providers` 可保存多个 provider，相同 preset 可重复使用；唯一性只约束 map key
-`ProviderId`。当前 StudioConfig schema 为 15，provider catalog snapshot schema 为 8。
+`ProviderId`。当前 StudioConfig schema 为 16，provider catalog snapshot schema 为 8。
 
 每个 provider 实例持久化：
 
@@ -494,8 +504,8 @@ Studio 配置的顶层 `web_search` 包含：`mode` 为 `disabled | cached | ind
 
 ## 10.14 LSP 自定义 server 配置
 
-自定义语言服务器声明在 `[lsp.servers.<server_id>]` 表，schema 15 下为可选段：没有该段的旧
-config 按默认（空表）加载，不 bump schema 版本。每个条目必须配置 `command` 与非空
+自定义语言服务器声明在 `[lsp.servers.<server_id>]` 表，schema 16 下为可选段。每个条目必须配置
+`command` 与非空
 `language_ids`，可选 `args`、`detection`（workspace 检测文件名/glob，缺省总是匹配）、
 `extensions`（文件扩展名，缺省为空）、`display_name`（缺省使用 server id）和 `operations`
 （`lsp_query` 操作子集，缺省支持全部）。示例：

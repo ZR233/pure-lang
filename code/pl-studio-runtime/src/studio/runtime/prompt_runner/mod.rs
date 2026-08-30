@@ -6,7 +6,6 @@ use futures::FutureExt;
 
 use crate::config::StudioRole;
 use crate::studio::agent_host::root_agent_id;
-use crate::studio::task_coordinator::{TaskStopOrigin, TaskStopReason};
 use crate::studio::{InteractionEmitter, resolution_matches_kind};
 use crate::studio::{ThreadKind, ThreadRecord, ThreadVisibility};
 use pl_core::ThreadRepository as _;
@@ -96,7 +95,7 @@ impl StudioRuntime {
             .resolve(&attachment_draft_ids)
             .await?;
         let role = if thread_record.parent_thread_id.is_none() {
-            thread_record.mode.root_role()
+            StudioRole::Planner
         } else {
             StudioRole::from_key(&thread_record.role).context("Thread has an invalid model role")?
         };
@@ -133,22 +132,6 @@ impl StudioRuntime {
             .await;
         let mut accepted = false;
         let result = async {
-            if thread_record.mode == crate::StudioMode::Task
-                && thread_record.thread_kind == ThreadKind::Root
-                && !self.task_runtime.has_active_task(&thread_id).await
-            {
-                let project = self
-                    .agent_facility
-                    .product_events
-                    .project_snapshot()
-                    .await
-                    .into_iter()
-                    .find(|project| project.id == thread_record.project_id)
-                    .context("Task project not found in the in-memory directory")?;
-                self.task_coordinator
-                    .start_task(&thread_record, &prompt, &project.path)
-                    .await?;
-            }
             self.ensure_prompt_runtime_ready().await?;
             let (handle, agent_id) = self
                 .ensure_thread_agent_for_record(thread_record.clone())
@@ -170,7 +153,7 @@ impl StudioRuntime {
             self.reconcile_root_role(&handle, &agent_id, &thread_record, &snapshot)
                 .await?;
             let thread = pl_core::ThreadId::new(thread_id.clone())?;
-            let metadata = submit_metadata(&options);
+            let metadata = submit_metadata();
             let presentation = options.presentation.clone();
             let turn_id = handle
                 .submit(
@@ -232,17 +215,6 @@ impl StudioRuntime {
     pub async fn stop_prompt(&self, thread_id: String) -> Result<StudioStopPromptResponse> {
         let framework = self.agent_framework().await?;
         let handle = framework.handle();
-        if self.task_runtime.has_active_task(&thread_id).await {
-            let reason = TaskStopReason::new("用户在 Studio 中请求停止任务")
-                .expect("fixed user stop reason must not be empty");
-            self.task_coordinator
-                .stop_task(&thread_id, &handle, TaskStopOrigin::UserRequest, reason)
-                .await?;
-            return Ok(StudioStopPromptResponse {
-                thread_id,
-                stopped: true,
-            });
-        }
         let agent_id = self.thread_agent_path(&thread_id).await?;
         let snapshot = match handle.snapshot(agent_id.clone()).await {
             Ok(snapshot) => snapshot,
@@ -309,8 +281,7 @@ impl StudioRuntime {
         })
     }
 
-    /// 把 root actor 的 `identity.role` 对齐到 mode 派生角色。mode 目录记录是
-    /// canonical，actor 角色只是投影；切换后的短暂漂移在每次提交前自愈。
+    /// 把 root actor 的 `identity.role` 对齐到统一 planner 模型路由。
     /// 非 root、已一致或 actor 非 idle 时是 no-op。
     async fn reconcile_root_role(
         &self,
@@ -322,7 +293,7 @@ impl StudioRuntime {
         if thread.parent_thread_id.is_some() {
             return Ok(());
         }
-        let desired = thread.mode.root_role().id();
+        let desired = StudioRole::Planner.id();
         if snapshot.identity.role == desired {
             return Ok(());
         }
@@ -354,7 +325,6 @@ impl StudioRuntime {
         let framework = self.agent_framework().await?;
         let handle = framework.handle();
         let target_agent_id = pl_core::ThreadId::new(target.agent_path.clone())?;
-        let target_root_thread_id = target.root_thread_id.clone();
         let target_thread_id = target.id.clone();
         let mut missing = Vec::new();
         let mut current = target.clone();
@@ -387,13 +357,6 @@ impl StudioRuntime {
             .apply_thread_delta(vec![pl_protocol::Thread::from(target)], Vec::new())
             .await?;
         self.enforce_residency_limit().await;
-        let _ = self.task_runtime.activate(&target_root_thread_id).await?;
-        crate::studio::agent_host::materialize_pending_task_planner_wakes(
-            &handle,
-            &self.task_runtime,
-            Some(&target_root_thread_id),
-        )
-        .await?;
         Ok((handle, target_agent_id))
     }
 
@@ -467,7 +430,7 @@ impl StudioRuntime {
                     "root Studio Thread {} has invalid canonical owner",
                     thread_record.id
                 );
-                let role = thread_record.mode.root_role();
+                let role = StudioRole::Planner;
                 (None, role, 0)
             }
             ThreadKind::Agent => {
@@ -603,29 +566,6 @@ impl StudioRuntime {
             bail!("interaction resolution kind does not match interaction");
         }
         let emitter = self.interaction_emitter(thread_id.clone());
-
-        if current.kind() == InteractionKind::PlanConfirmation {
-            // Plan confirmation belongs to an active Task and is pinned with its root owner;
-            // diagnostics must not re-read SQLite after activation.
-            let task = self.task_runtime.snapshot(&thread_id).await;
-            let context = crate::error_mapping::StudioDiagnosticContext {
-                operation: "resolvePlanConfirmation",
-                task_run_id: task.as_ref().map(|task| task.run_id.clone()),
-                thread_id: Some(thread_id),
-                turn_id: Some(current.scope.turn_id.clone()),
-                interaction_id: Some(interaction_id.clone()),
-                state: Some(match current.status() {
-                    InteractionStatus::Pending => "pending",
-                    InteractionStatus::Resolved => "resolved",
-                    InteractionStatus::Cancelled => "cancelled",
-                    InteractionStatus::Expired => "expired",
-                }),
-            };
-            return self
-                .resolve_plan_confirmation(interaction_id, current, resolution, emitter)
-                .await
-                .map_err(|error| crate::error_mapping::with_studio_diagnostics(error, context));
-        }
 
         if current.status() != InteractionStatus::Pending {
             return Ok(StudioResolveInteractionResponse {
@@ -788,24 +728,6 @@ impl StudioRuntime {
             let canonical = handle
                 .thread_snapshot(&pl_core::ThreadId::new(thread_id.clone())?)
                 .map_err(|error| anyhow::anyhow!(error))?;
-            let root_thread_id = self
-                .store
-                .read_thread(&thread_id)
-                .await?
-                .with_context(|| format!("recovered Thread {thread_id} is missing"))?
-                .root_thread_id;
-            let task_is_terminal = self
-                .store
-                .find_latest_task_run_for_root_thread(&root_thread_id)
-                .await?
-                .is_some_and(|task| task.kind().is_terminal());
-            if task_is_terminal {
-                self.agent_facility
-                    .interactions
-                    .cancel_thread(canonical.interactions, "task completed", emitter)
-                    .await?;
-                continue;
-            }
             self.agent_facility
                 .interactions
                 .cancel_recovered_tool_approvals(
@@ -828,15 +750,8 @@ pub(super) fn validate_prompt_content(
     Ok(())
 }
 
-fn submit_metadata(options: &StudioSubmitPromptOptions) -> serde_json::Value {
-    let lifecycle = options.lifecycle.as_ref().map(|lifecycle| {
-        serde_json::json!({
-            "threadId": lifecycle.thread_id,
-            "planId": lifecycle.plan_id,
-        })
-    });
+fn submit_metadata() -> serde_json::Value {
     serde_json::json!({
         "historyPolicy": "persist",
-        "planLifecycle": lifecycle,
     })
 }

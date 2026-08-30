@@ -350,9 +350,9 @@ cargo xtask verify-gui --integration
 # 在临时本地端口启动 ChromeDriver，以 Flutter Web demo 跑同一套无头交互 smoke
 cargo xtask verify-gui --web-integration
 
-# 显式使用已安装配置、真实 provider/model 与 API credential 验收 Task
-cargo xtask verify-task --live --headless
-cargo xtask verify-task --live --gui
+# 显式使用已安装配置、真实 provider/model 与 API credential 验收统一工作流
+cargo xtask verify-workflow --live --headless
+cargo xtask verify-workflow --live --gui
 
 # 从仓库根目录运行 GUI
 cargo xtask run-gui
@@ -373,12 +373,11 @@ cargo xtask run-gui --demo
 `code/pure-studio/build/web-integration-artifacts`。Playwright 可作为额外截图或可访问性观察层，
 但 canonical 交互断言仍使用 Flutter integration test 的稳定 `ValueKey`。
 
-`verify-task --live` 会产生真实模型调用和费用，不进入默认 CI，也不会回退到 scripted
-provider。Headless 与 GUI 共用 `test-fixtures/task-live/` 的 prompt、Rust Git fixture 和终态
-断言；GUI 路径启动真实 native Studio、由 Flutter Driver 输入并回读完整 prompt，在成功后执行
-durable shutdown，再重新启动并恢复同一 Task。每次运行的最终 wire body（不含认证头）、角色与
-工具 schema 清单、Task/Git/命令输出，以及 GUI screenshot、render tree 和 Driver 日志保存在
-`target/task-live-artifacts/<run-id>/`。
+`verify-workflow --live` 会产生真实模型调用和费用，不进入默认 CI，也不会回退到 scripted
+provider。Headless 与 GUI 共用 canonical prompt 和无 Git 的临时 Rust 项目；GUI 路径启动真实
+native Studio、通过通用 `request_user_input` 确认计划，完成后 durable shutdown，再以同一隔离
+Studio home 恢复相同 Thread 与 workflow run。脱敏 wire、workflow snapshot、命令输出、截图、
+render tree 和 Driver 日志保存在 `target/workflow-live-artifacts/`。
 
 本仓库要求 Flutter 端使用 `flutter_rust_bridge` v2.12.x；本机 codegen 版本应与 Dart/Rust 依赖保持同一小版本。
 
@@ -399,12 +398,12 @@ durable shutdown，再重新启动并恢复同一 Task。每次运行的最终 w
 | [09-conventions.md](./design/09-conventions.md) | 编码约定 |
 | [10-config.md](./design/10-config.md) | 配置系统 |
 | [11-studio-ui.md](./design/11-studio-ui.md) | Studio UI 设计 |
-| [12-plan-b-implementation-spec.md](./design/12-plan-b-implementation-spec.md) | 方案乙实现规约 |
+| [12-unified-workflow-implementation-spec.md](./design/12-unified-workflow-implementation-spec.md) | 统一模式与工作流实施规约 |
 | [13-skills.md](./design/13-skills.md) | 技能系统设计 |
 | [13-tool-calling-runtime.md](./design/13-tool-calling-runtime.md) | 工具调用运行时 |
 | [14-lsp-runtime.md](./design/14-lsp-runtime.md) | LSP 运行时 |
-| [15-agent-worktrees.md](./design/15-agent-worktrees.md) | Agent worktree 所有权与生命周期 |
-| [16-task-orchestration.md](./design/16-task-orchestration.md) | Simple/Task 编排与状态机 |
+| [15-agent-profiles-and-collaboration.md](./design/15-agent-profiles-and-collaboration.md) | Agent Profile 与统一协作 |
+| [16-task-orchestration.md](./design/16-task-orchestration.md) | Mode Skill 与可编译工作流 |
 | [17-agent-runtime-host.md](./design/17-agent-runtime-host.md) | Agent runtime 与宿主边界 |
 | [18-studio-release-update.md](./design/18-studio-release-update.md) | Studio 发布与更新 |
 | [19-studio-storage-and-diagnostics.md](./design/19-studio-storage-and-diagnostics.md) | Studio 存储与诊断 |

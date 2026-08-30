@@ -94,7 +94,6 @@ impl StudioStore {
             .filter(interaction::Column::InteractionKind.is_in([
                 InteractionKind::UserInput.as_str(),
                 InteractionKind::ToolApproval.as_str(),
-                InteractionKind::PlanConfirmation.as_str(),
             ]))
             .all(&self.db)
             .await?;
@@ -250,7 +249,7 @@ mod tests {
         let store = StudioStore::open_memory().await.unwrap();
         let project = store.upsert_project(path).await.unwrap();
         let session = store
-            .create_thread(&project.id, "Restart interaction", StudioMode::Task)
+            .create_thread(&project.id, "Restart interaction", StudioMode::task())
             .await
             .unwrap();
         (store, session.id)

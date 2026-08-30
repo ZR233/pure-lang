@@ -16,21 +16,6 @@ fn trace() -> TraceProjection {
     })
 }
 
-fn trace_with_projection(
-    tool: &str,
-    projection: pl_trace::ToolInputTraceProjection,
-) -> TraceProjection {
-    TraceProjection::with_sink_and_projections(
-        CompletionTraceContext {
-            session_id: "session-1".to_string(),
-            turn_id: "turn-1".to_string(),
-            inference_id: "inference-1".to_string(),
-        },
-        None,
-        Arc::new(HashMap::from([(tool.to_string(), projection)])),
-    )
-}
-
 #[derive(Debug)]
 struct RejectAfterFirstTraceSink {
     inner: pl_trace::InMemoryTraceEventSink,
@@ -89,106 +74,6 @@ fn rejected_trace_event_is_not_broadcast() {
             .expect("sink rejection must remain visible")
             .message(),
         "injected trace sink rejection"
-    );
-}
-
-#[test]
-fn plan_projection_decodes_every_escaped_json_byte_boundary() {
-    let raw = r##"{"plan":"# Plan\n\u8ba1\u5212 \uD83D\uDE80\n\n- do it"}"##;
-    let expected = "# Plan\n计划 🚀\n\n- do it";
-    for split in 0..=raw.len() {
-        let mut trace = trace_with_projection(
-            "plan_exit",
-            pl_trace::ToolInputTraceProjection::plan_markdown("plan"),
-        );
-        let first = ToolCallAccumulatorSnapshot {
-            id: "tool-1".to_string(),
-            trace_id: "tool-1".to_string(),
-            call_id: Some("call-1".to_string()),
-            name: "plan_exit".to_string(),
-            arguments: raw[..split].to_string(),
-            function_arguments: true,
-        };
-        let second = ToolCallAccumulatorSnapshot {
-            arguments: raw.to_string(),
-            ..ToolCallAccumulatorSnapshot {
-                id: first.id.clone(),
-                trace_id: first.trace_id.clone(),
-                call_id: first.call_id.clone(),
-                name: first.name.clone(),
-                arguments: String::new(),
-                function_arguments: true,
-            }
-        };
-        let events = trace
-            .append_tool_arguments_delta(&first, raw[..split].to_string())
-            .into_iter()
-            .chain(trace.append_tool_arguments_delta(&second, raw[split..].to_string()))
-            .collect::<Vec<_>>();
-        let projected = events
-            .into_iter()
-            .filter_map(|event| match event {
-                AgentEvent::TracePartDelta { event } => match event.delta {
-                    pl_trace::TraceDelta::Plan { delta } => Some(delta),
-                    _ => None,
-                },
-                _ => None,
-            })
-            .collect::<String>();
-        assert_eq!(projected, expected, "split at byte {split}");
-    }
-}
-
-#[test]
-fn conditional_plan_projection_waits_for_matching_discriminator() {
-    let projection = pl_trace::ToolInputTraceProjection::conditional_plan_markdown(
-        "summary",
-        "action",
-        "submitPlan",
-    );
-    for raw in [
-        r##"{"action":"submitPlan","summary":"# Plan"}"##,
-        r##"{"summary":"# Plan","action":"submitPlan"}"##,
-    ] {
-        let mut trace = trace_with_projection("task_transition", projection.clone());
-        let snapshot = ToolCallAccumulatorSnapshot {
-            id: "tool-1".to_string(),
-            trace_id: "tool-1".to_string(),
-            call_id: Some("call-1".to_string()),
-            name: "task_transition".to_string(),
-            arguments: raw.to_string(),
-            function_arguments: true,
-        };
-        let events = trace
-            .append_tool_arguments_delta(&snapshot, raw.to_string())
-            .into_iter()
-            .collect::<Vec<_>>();
-        assert!(
-            events.iter().any(
-                |event| matches!(event, AgentEvent::TracePartDelta { event } if matches!(event.delta, pl_trace::TraceDelta::Plan { .. }))
-            ),
-            "matching discriminator must publish plan"
-        );
-        assert!(events.iter().any(
-            |event| matches!(event, AgentEvent::TracePartStarted { item } if item.item_id() == "turn-1-tool-1:plan")
-        ));
-    }
-
-    let mut trace = trace_with_projection("task_transition", projection);
-    let raw = r##"{"summary":"# Plan","action":"complete"}"##;
-    let snapshot = ToolCallAccumulatorSnapshot {
-        id: "tool-1".to_string(),
-        trace_id: "tool-1".to_string(),
-        call_id: Some("call-1".to_string()),
-        name: "task_transition".to_string(),
-        arguments: raw.to_string(),
-        function_arguments: true,
-    };
-    assert!(
-        trace
-            .append_tool_arguments_delta(&snapshot, raw.to_string())
-            .into_iter()
-            .all(|event| !matches!(event, AgentEvent::TracePartStarted { item } if item.kind() == TracePartKind::Plan))
     );
 }
 
@@ -556,8 +441,6 @@ fn update_tool_trace_keeps_streaming_tool_status_after_arguments_delta() {
         trace_id: "provider-tool-1".to_string(),
         call_id: Some("call-1".to_string()),
         name: "exec".to_string(),
-        arguments: "{\"cmd\":\"ec".to_string(),
-        function_arguments: true,
     };
     let _ = trace.append_tool_arguments_delta(&snapshot, "{\"cmd\":\"ec".to_string());
     let updated = trace
@@ -593,16 +476,12 @@ fn late_provider_tool_id_keeps_original_trace_part_id() {
         trace_id: "call-1".to_string(),
         call_id: Some("call-1".to_string()),
         name: "exec".to_string(),
-        arguments: "{\"cmd\":\"ec".to_string(),
-        function_arguments: true,
     };
     let late = ToolCallAccumulatorSnapshot {
         id: "provider-tool-1".to_string(),
         trace_id: "call-1".to_string(),
         call_id: Some("call-1".to_string()),
         name: "exec".to_string(),
-        arguments: "{\"cmd\":\"echo hi\"}".to_string(),
-        function_arguments: true,
     };
 
     let first_delta = trace
@@ -658,16 +537,12 @@ fn tool_metadata_and_argument_deltas_share_one_revision_chain() {
         trace_id: "call-1".to_string(),
         call_id: Some("call-1".to_string()),
         name: "exec".to_string(),
-        arguments: "{\"cmd\":\"ec".to_string(),
-        function_arguments: true,
     };
     let late = ToolCallAccumulatorSnapshot {
         id: "provider-tool-1".to_string(),
         trace_id: "call-1".to_string(),
         call_id: Some("call-1".to_string()),
         name: "exec".to_string(),
-        arguments: "{\"cmd\":\"echo hi\"}".to_string(),
-        function_arguments: true,
     };
 
     let first = trace.append_tool_arguments_delta(&early, "{\"cmd\":\"ec".to_string());

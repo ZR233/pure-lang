@@ -229,31 +229,3 @@ pub mod thread_context_segment {
 
     impl ActiveModelBehavior for ActiveModel {}
 }
-
-pub mod thread_session_state {
-    use super::*;
-
-    #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
-    #[sea_orm(table_name = "thread_session_state")]
-    pub struct Model {
-        #[sea_orm(primary_key, auto_increment = false)]
-        pub thread_id: String,
-        pub revision: i64,
-        pub state_json: String,
-        pub state_hash: String,
-        pub updated_at: i64,
-    }
-
-    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-    pub enum Relation {
-        #[sea_orm(
-            belongs_to = "super::thread::Entity",
-            from = "Column::ThreadId",
-            to = "super::thread::Column::Id",
-            on_delete = "Cascade"
-        )]
-        Thread,
-    }
-
-    impl ActiveModelBehavior for ActiveModel {}
-}

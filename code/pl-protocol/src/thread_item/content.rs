@@ -113,33 +113,6 @@ impl ThreadThinkingItem {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct ThreadPlanItem {
-    content: String,
-    lifecycle: ThreadContentLifecycle,
-}
-
-impl ThreadPlanItem {
-    pub fn new(content: String, lifecycle: ThreadContentLifecycle) -> Self {
-        Self { content, lifecycle }
-    }
-
-    pub fn content(&self) -> &str {
-        &self.content
-    }
-
-    pub fn lifecycle(&self) -> &ThreadContentLifecycle {
-        &self.lifecycle
-    }
-
-    pub(super) fn append(&mut self, delta: &str) -> Result<(), &'static str> {
-        self.lifecycle.require_streaming()?;
-        self.content.push_str(delta);
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", content = "data", rename_all = "camelCase")]
 pub enum ThreadContentLifecycle {
     Streaming(StreamingThreadContent),

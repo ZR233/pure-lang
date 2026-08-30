@@ -10,7 +10,6 @@ class InteractionPayloadSnapshot {
     required this.formattedArguments,
     required this.workingDirectory,
     required this.questions,
-    required this.planContent,
   });
 
   final String rawBody;
@@ -19,7 +18,6 @@ class InteractionPayloadSnapshot {
   final String formattedArguments;
   final String workingDirectory;
   final List<UserQuestionView> questions;
-  final String planContent;
 
   static InteractionPayloadSnapshot from(PendingInteraction interaction) {
     return switch (interaction.payload) {
@@ -31,7 +29,6 @@ class InteractionPayloadSnapshot {
           formattedArguments: '',
           workingDirectory: '',
           questions: questions,
-          planContent: '',
         ),
       ToolApprovalInteractionPayload(
         :final toolName,
@@ -45,17 +42,6 @@ class InteractionPayloadSnapshot {
           formattedArguments: _formatJson(arguments),
           workingDirectory: workingDirectory,
           questions: const [],
-          planContent: '',
-        ),
-      PlanConfirmationInteractionPayload(:final content) =>
-        InteractionPayloadSnapshot(
-          rawBody: interaction.body,
-          summary: interaction.title,
-          toolName: '',
-          formattedArguments: '',
-          workingDirectory: '',
-          questions: const [],
-          planContent: content.isEmpty ? interaction.body : content,
         ),
       UnknownInteractionPayload() => InteractionPayloadSnapshot(
         rawBody: interaction.body,
@@ -64,7 +50,6 @@ class InteractionPayloadSnapshot {
         formattedArguments: '',
         workingDirectory: '',
         questions: const [],
-        planContent: interaction.body,
       ),
     };
   }

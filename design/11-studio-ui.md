@@ -1,398 +1,46 @@
 # 11 - Pure Studio UI
 
-## 11.1 UI 边界
+## 11.1 边界
 
-Pure Studio 是 Flutter 桌面应用（Windows 为发布平台，Linux 为开发/验证平台），使用 Material 3、Riverpod、`go_router` 和 typed
-FRB。UI 只能通过 bridge 访问 StudioRuntime，不读取 SQLite 或配置文件。Flutter Web 仅是
-`PURE_STUDIO_DEMO` 下的远程 UI 验收目标，不是产品 transport，也不得在 Web 中伪造 bridge、
-SQLite、文件系统、进程管理、MCP/LSP 或 provider 能力。
+Pure Studio 是 Flutter 桌面应用，使用 Material 3、Riverpod、`go_router` 与 typed FRB。UI 只能通过
+bridge 访问 StudioRuntime，不读取 SQLite、Agent TOML 或 Skill 文件。Flutter Web 只用于 demo
+integration 验收，不能伪造原生 provider、文件系统或进程能力。
 
-Flutter 分层保持简单：
+data 层负责 FRB DTO 到 domain 的一次转换；reducer 只接收 canonical snapshot/notification；Widget
+只负责展示与发命令。窗口关闭必须等待 typed shutdown 完成并回收 Flutter、DTD、MCP/LSP 和 child
+process tree。
 
-- data：FRB service 和 DTO → domain 转换；
-- domain：不可变 `ThreadWorkspace`、`WorkspaceUiState` 与纯 selector；
-- UI：timeline、interaction、status、settings 等 feature widget。
+## 11.2 动态模式
 
-Controller 负责命令和订阅生命周期，不承担 timeline 投影。Widget 只读取 view model，不直接
-订阅 bridge 或拼接多个事实表。
+新 Thread 默认选择 `mode.simple`。composer 的模式 selector 读取 Mode Skill catalog，使用稳定
+`modeId` 作为值、`displayName` 作为文案，不写死 Simple/Task enum。模式切换命令只在 root idle、无
+pending interaction 且 workflow 不存在或已终止时可用；拒绝结果由 canonical snapshot 恢复 UI。
 
-桌面窗口的可取消关闭请求必须等待 typed bridge `shutdownRuntime` 完成后才允许引擎
-销毁。`detached` 和 widget `dispose` 只是不可等待的兜底信号，它们复用同一个幂等
-shutdown future。该 future 顺序关闭 Agent、MCP 和 LSP，并等待所有后台子进程树退出；
-不得用未等待的 Dart callback 作为正常 GUI 退出路径。
+Mode Skill 不出现在普通 Skills 设置和按需调用列表。两个内置模式不可删除或覆盖。
 
-关闭请求先呈现不可关闭的关机阶段 overlay：订阅 typed `subscribeShutdownProgress` 进度流，
-按阶段（停止订阅、停止 Turn、保存会话、挂起任务、关闭 MCP、关闭 LSP）更新本地化文案与
-进度指示；`FlushingPersistence` 阶段必须等待 pending 落库归零后才进入下一阶段，关机完成的
-判定以进度流到达 `Stopped` 为准。updater 安装更新触发的 idle 关机复用同一进度流与 overlay。
+## 11.3 Workflow panel
 
-## 11.2 Canonical state
+Thread runtime 只暴露通用 workflow projection。panel 显示 mode、run、revision、lifecycle、当前阶段、
+合法后继、constraint prompt 与最近 history；graph/history 使用稳定 `ValueKey` 供 Driver 读取。未编译
+时显示 compile 指引，terminal 状态仍可展开完整路径。
 
-Flutter canonical state 只有：
+panel 不根据阶段 ID 推演动作，不等待可能瞬间经过的中间 Widget。状态变更只来自 bridge snapshot；
+GUI 不执行本地乐观 transition。旧 recovery、WorkUnit、delivery review、merge 和 completion gate UI
+全部不存在。
 
-```text
-ThreadDirectory
-workspacesByThread: Map<ThreadId, ThreadWorkspace>
-selectedThreadId
-projects / tasks / settings / health
-```
+## 11.4 通用 Interaction
 
-Flutter canonical state 不保存 authoritative `AgentWorkspace`、绝对 worktree path、workspace
-boundary 或 mutability。它们是 Rust turn/runtime 根据 durable owner 解析的执行边界；UI 只消费
-Task DTO 中经过脱敏的相对 locator 和可展示状态，不能缓存后参与工具路由。
+composer dock 只渲染 `UserInput` 与 `ToolApproval`。任务计划确认是普通 UserInput：显示 Agent 已输出的
+计划和问题选项，用户选择后提交 typed resolution。不存在模式专用确认 dock 或 continuation。
 
-`ThreadWorkspace` 包含 Thread、最近 Turn 与有序 Item、pending Interaction 和
-`ThreadRuntimeSnapshot`。authoritative snapshot 总是整体替换一个 workspace；不得把 snapshot
-与旧 runtime、旧 Turn 或旧 Item overlay 混合。
+## 11.5 Agents 设置
 
-Thread directory 唯一拥有 mode、role、title、关系、status 与 updatedAt。GUI 内 Thread directory
-是有界分页窗口：只保存已加载页的条目、`nextCursor` 与 `hasMore`；侧栏触底通过
-`listThreadsPage` keyset cursor 继续加载，目录增量事件按 ThreadId 原位合并（新会话前置、
-归档移除），未加载条目的增量直接忽略。
+Agents 页同时列出系统和用户 Profile。系统项所有字段只读且无删除入口，只提供 enabled switch；用户
+项按单 TOML 文件原子创建、保存或删除。无效文件以独立诊断展示，不阻断页面其余项。运行中的 Agent
+目录与 Profile 设置目录明确分区。
 
-`selectedThreadId` 是显式状态机，只在三种情况下变化：用户显式动作（选择/进入新会话起始页/
-跨项目切换）、归档 command 返回的选择建议、bootstrap。`null` 表示当前 Project 的未持久化
-新会话起始页，是稳定且 authoritative 的 UI 选择；目录窗口 resync、目录新增、Widget 重建和
-lag 恢复都不得把 null 隐式改写为任意 root Thread。bootstrap 和显式跨 Project 切换可以选择
-该 Project 最近的健康 root Thread；不存在 root 时进入起始页。
+## 11.6 驱动验收
 
-Timeline items 使用单一合并规则（live 帧、snapshot、历史页共用）：身份 = itemId + threadId +
-turnId + kind；同 id 时仅当 incoming revision >= existing 才替换；新 id 插入后按
-`(ordinal, id)` 全序排序。ordinal 是 Rust 事件总线一次性分配的不可变顺序事实，不参与身份
-比较；替换载荷时防御性地保留已加载 ordinal。`ThreadWorkspace`
-中的 Thread 是归一化后的 directory 引用，不是第二份事实源：thread snapshot 只能替换 Turn、
-Item、Interaction 和 runtime，并把该引用重绑到当前 directory entry，不能覆盖 directory。
-
-以下都是 UI 本地状态，放入按 Thread 隔离的 `WorkspaceUiState`：
-
-- Composer 文本 draft、typed attachment draft 列表、提交阶段和 submission revision；
-- 滚动、bottom-following 与未读计数；
-- reasoning/tool/Todo 展开状态；
-- subscription generation 与临时 delta overlay。
-
-新会话起始页的 Composer 同样是 UI 本地状态，但按 Project 隔离；它不伪造 ThreadId 或
-`ThreadWorkspace`。首次提交成功后，草稿和 submission revision 一次性转移到 Bridge 返回的
-新 Thread workspace，失败则留在起始页并恢复草稿。
-
-只保存 `selectedThreadId`。root、parent 和 child 关系从 Thread 字段派生。切换 Thread 时
-timeline、Todo、状态栏、interaction 和 Composer 同帧切换；未加载目标时显示空 loading
-workspace，不能残留上一个 Thread 的内容。
-
-## 11.3 订阅与增量
-
-选择 Thread 时增加本地 generation 并立即建立新订阅。驻留 Thread 的服务端先注册监听，再从
-ThreadActor 内存 owner 返回 authoritative `ThreadSnapshot`；未驻留 Thread 先显式冷激活 actor，
-随后走同一路径。订阅、重订阅和 lag resync 均不得把 SQLite 行合并回活动 snapshot。首帧之后发送：
-
-- `TurnStarted / TurnUpdated / TurnCompleted`
-- `ItemStarted / ItemDelta / ItemCompleted`
-- `InteractionChanged`
-- `ThreadRuntimeUpdated`
-- `Lagged`
-
-snapshot 直接覆盖对应 workspace 的实时内容，但保留 product stream 已确认的 Thread directory
-元数据。只接收相同 ThreadId 和 generation 的通知；旧订阅迟到内容直接丢弃。Item/Turn terminal
-与 transcript delta 是 lossless；收到 `Lagged`、断流或未知 revision 后重新订阅取 snapshot，
-不维护 durable cursor 或 replay journal。
-
-历史窗口遵循「窗口状态从已加载内容派生」的单一模型，只有 `hasOlder / isLoading /
-epoch` 三个标量；回源锚点永远从 `items.first.turnId` 现场派生，GUI 不保存 cursor 栈或
-页计数，items 与窗口状态不可能漂移。订阅/重订快照是窗口的重建点：wire 快照只携带最近
-400 条（整 Turn 对齐截断）与 `historyCursor`（窗口首 Turn 的 id）；快照落地时 epoch 递增，
-跨重建的在途历史响应整体丢弃。`listThreadTurns` 的 cursor 是 Turn id 的 before 语义锚点；
-历史页幂等合并进窗口，更旧方向是否还有内容由页响应的 nextCursor 决定。窗口超过 500 条
-时从最旧方向裁剪并把 `hasOlder` 置回 true，被裁内容按裁剪后新首条的锚点回源重取——
-内存未命中一律从数据库读取，GUI 不保留第二份完整历史。rolledBack 恢复标记只来自 DB
-历史查询，按 id 覆盖窗口内同 id 条目，不受 revision 门槛约束。
-
-## 11.4 Timeline
-
-Timeline 直接按 Item ordinal 排序。Item ordinal 首次插入后不可改变。可见类型为：
-
-- user message；
-- commentary 和 final agent message；
-- reasoning；
-- plan；
-- tool call；
-- skill activation；
-- file。
-
-`contextCompaction` 和 provider 私有内容不进入 Flutter。Todo、usage、context、capability 和
-瞬时 progress 来自 runtime snapshot，不伪装成 timeline row。`ProgressEmitter` milestone 已是
-canonical commentary Item，按普通 commentary 展示并进入历史。
-
-工具相邻合并和连续 reasoning 折叠只属于 `TimelineRow` 视觉投影，不能改写 Item。commentary
-是明确的 agentMessage Item；瞬时 runtime progress 只显示在状态区域，不生成或折叠伪 timeline
-消息。阶段 milestone 使用 runtime source 的 commentary Item，不由 UI 根据 snapshot 伪造。
-text、plan、reasoning 和 tool delta 到达后立即写当前 Item overlay；terminal Item 到达后清除
-overlay并以完整 payload 为准。delta 不等待模型、工具或持久化批次结束，不写 SQLite，也不由
-Flutter 从终态 payload 反推。异常退出可以丢失尚未终态的 delta 前缀，重启以最后冷存储事实恢复。
-
-Timeline row key 使用 `threadId + itemId` 或稳定工具组首 Item identity。未知 Item union 变体
-是协议错误；已知但内部不可见的变体由 Rust bridge 过滤。
-
-每个 Skill Item 投影为独立紧凑行，显示区分“代理激活”与“用户激活”的本地化文案、skill 名称、
-来源与 Provider；同一 skill 的重复代理激活
-不合并。Skill 行与普通 Item 一样参与 ordinal 排序、历史分页、rollback 样式和新事件滚动，
-不从 tool output JSON 临时推导。
-
-Markdown 使用 `GptMarkdown` 容错渲染流式不完整内容。修复只处理换行和 fenced code 的显示，
-不得在协议或 reducer 中改写正文。共享 Markdown renderer 在显示阶段识别显式 Markdown 链接与
-裸 `http://` / `https://` URL；只有清理控制字符后仍能解析出非空 host、且目标不超过 8 KiB
-的 Web URL 可以点击，并交给桌面系统默认浏览器打开。`file://`、本地相对路径、`mailto:` 与
-其他 scheme 不进入通用链接通道。裸 URL 后的普通标点和未配对闭合括号不属于目标；系统打开
-失败只显示本地化提示，不改写正文或中断 Timeline。
-
-Markdown image 使用独立于普通链接的 renderer。只有 assistant 正文和 plan 中的显式 HTTPS
-image destination 显示来源卡片，初始不创建网络 image provider；用户点击后才加载实时外部资源，
-成功后显示缩略图并打开统一图片弹层。HTTP、本地相对或绝对路径、`file:`、`data:`、`blob:`，以及
-user、reasoning、error 表面中的 image syntax 只显示替代文字或安全来源文本，不触发文件或网络 IO。
-HTTPS Markdown 图片不进入 attachment store，重新打开时仍按外部实时资源处理。
-
-整条 Timeline 共享挂在 `TimelineView` 根部的一个 `SelectionArea`，消息、plan、reasoning
-详情与工具卡正文都注册到同一选区，支持跨行、跨消息拖选；各消息块内部不再嵌套独立
-`SelectionArea`。代码块继续使用自带复制语义的 `SelectableText`，不并入共享选区。桌面右键
-唤起 `AdaptiveTextSelectionToolbar`；Flutter 3.47 桌面端右键会把选区折叠导致默认菜单缺失
-Copy，Timeline 以最近一次非空选区文本为缓存补齐 Copy 按钮（framework 修复后自动让位），
-复制线程切换时缓存失效。已知限制：列表项滚出视口销毁后其选区内容随之丢弃，复制以当前
-挂载内容为准。
-
-## 11.5 Composer 与 Interaction
-
-Composer 状态按 Thread 保存：`idle | submitting | pendingStart`。提交冻结当前 draft 并递增
-revision；只有同 Thread、同 revision 的响应能清空或恢复 draft。服务端 Turn receipt 与订阅中
-同一 Turn 对上后才解除 pending gate。
-
-attachment draft 只保存 bridge 返回的 opaque draft id 与安全展示 metadata，不保存持久 attachment
-id、Base64 或外部 URL。Composer 支持本地多选、桌面文件拖放和 HTTPS URL admission；图片显示
-缩略图，video/file 显示 typed card。模型选择器、当前模型控件和设置模型列表都从同一 typed
-capability DTO 渲染输入标签（文本、视觉、视频、文件），设置页另行展示输出能力。
-例如 `deepseek-v4-flash-vision-exp` 与 `glm-5.3-flash` 都显示“文本 / 视觉”，普通
-`deepseek-v4-flash` 仍只显示“文本”；Flutter 不按 slug 或 provider 身份拼装标签。
-
-附件入口按当前 resolved model 的 modality 与 source 过滤。选择、拖入或 URL admission 遇到不支持
-输入时必须拒绝添加，不自动切换模型、不静默删除也不保留不兼容 draft；已有 draft 时切换到不兼容
-模型同样拒绝切换。文本为空但 attachment 非空可以提交。批次 admission、提交或 Turn 创建失败时
-保留完整草稿；command receipt 接受后才清空。原始外部 URL 不进入 Widget state，Timeline 与预览
-只通过 thread/draft 授权 loader 读取本地快照。
-
-代理 `view_image` 或受支持 MCP tool 返回图片时，内部 `ToolMedia` 不投影成用户消息。对应 tool
-group 在折叠摘要下始终显示 typed attachment gallery：单图最长边不超过 240 px 且不放大，多图为
-64 px 方形缩略图；展开后保留原 tool row 的状态、结果与附件 metadata，但不重复缩略图。点击图片
-使用统一预览弹层查看大图。用户历史附件与 tool attachment 复用同一个 Thread-scoped 授权 loader、
-加载去重、失败重试、缩略图组件和 `Dialog + InteractiveViewer`，不得复制第二套 bytes 缓存或引入
-新的图片查看依赖。弹层支持关闭按钮、Escape、遮罩关闭、焦点恢复与缩放。tool attachment 使用
-typed DTO，不从 `outputArtifacts` JSON 推断，并为工具行、通用缩略图、失败重试和大图弹层提供稳定
-Driver key。
-
-receipt 已接受后，Composer 必须继续关联该 Turn，不能在首次 `TurnStarted` 时丢失 identity。
-对应 Turn 若随后 failed，Composer 解除 pending 并显示 typed failure message（缺失时回退到 Turn
-reason）；该规则也适用于 failure 晚于首次 in-progress 通知到达的情况。失败 Turn 的 terminal
-trace 还必须作为 durable Timeline error Item 投影，确保重启或历史加载后错误仍然可见。
-
-root Thread 可提交普通输入；child Thread 默认只读，但 pending interaction 与停止操作仍可用。
-footer 同时最多显示一个 pending interaction。优先级为 tool approval、user input、plan
-confirmation。计划正文在 timeline 的 plan Item 中，确认 dock 只承载实施、继续调整和忽略。
-
-只要当前 Turn 未终态，停止按钮始终可用。`busy` 只由当前 Thread 的 active Turn 决定；pending
-plan confirmation 可以在 `busy=false` 时继续阻塞普通 Composer。
-
-## 11.6 状态栏与 agent directory
-
-下部代理状态栏只读取当前 workspace 的 owner、模型、context、skills、MCP、LSP、Todo 和最近
-Turn 吞吐。上下文条目只保留进度圆环；缓存命中率、token 明细与代理费用不在该状态栏直接展示，
-统一进入点击圆环弹出的详情：
-context/total token、缓存命中、未命中、写入、reasoning token、inference 数、按币种的实际花费、
-缓存节省和部分未定价提示。读数只来自 canonical `ThreadRuntimeSnapshot`，不在 Flutter 建立逐
-inference 或计费副本。费用行固定展示，不随数据缺失隐藏。
-
-Context 条目后固定显示当前 Thread 最近一个 Turn 的加权解码速度。Turn 开始时清空读数；每个
-timing 与 usage 完整的成功 inference 累加 completion token 与 decode 毫秒，展示
-`Σ completionTokens × 1000 / Σ decodeMs`，Turn 终态后保留到下一 Turn 开始。代理切换时只读取新
-Thread 的 `ThreadRuntimeSnapshot`，不得读取产品级模型摘要。速度 `>= 10` 四舍五入为整数，低于
-10 保留一位小数；没有样本时显示 `- t/s`。
-
-Skills 摘要显示 `ThreadRuntimeSnapshot.activeSkills` 的去重数量；代理工具与用户手势激活共同参与
-该列表的首次出现顺序去重。当前 Thread 的 capability
-详情以完整列表展示全部名称，不截断，超出高度时在详情内部滚动并保持键盘与语义化访问。
-顶部 agent directory 只负责切换与目录状态，不复制该列表，也不新增独立 agent 详情面板。上部
-会话状态栏在 agent 数量 Chip 后以 8px 间隔显示同风格费用 Chip，只包含费用图标和金额，不显示
-`Total cost` 或等价文字。金额来自产品级性能快照按当前 root Thread 聚合的根会话及全部 child
-费用；在同一根会话内切换代理金额不变，切换根会话时同步切换。该值不能通过已加载 Thread 求和。
-
-费用只展示按币种聚合的实际花费：出现消费时按货币符号 + 金额展示，多币种用 ` + ` 连接（如
-`￥1.2 + $2.6`），不做汇率换算；已知币种 CNY/USD 显示 `￥`/`$`，未知币种回退为币种代码前缀。
-没有可计价花费（包括完全未定价）时费用 Chip 固定显示图标和 `-`，不回退为文案占位；tooltip
-固定说明“会话全部代理费用”，并在已展示金额时承载“部分未定价”提示。
-
-LSP 活动指示是状态栏的运行时状态条目：任一 LSP server activity 非 idle 时显示活动摘要
-（如“正在索引 40%”），详情列出各 server 的活动类型与 title/message；数据取自产品级
-`LspStateChanged`/`readLspState` 投影，不隐式触发 probe。窄宽度下直接条目收进溢出菜单，
-活动摘要与详情仍从菜单可达；详情内容超出高度约束时滚动展示。demo 构建按确定性周期推进索引
-活动（递增 revision 的 `LspStateChanged` 事件），供 GUI demo 与 Driver 验收动态显示。
-root 通过 typed mode selector 切换 Simple/Task，并展示对应角色模型；Bridge 返回的 canonical
-Thread 状态确认切换结果。活动 Task 或会话运行（Thread 非 idle）期间 selector 保持可见但禁用。
-child 只读展示实际运行模型。
-root-only、活动 Task 与会话运行锁定同时由 StudioRuntime 校验，不能只依赖 Widget 或 Controller
-拦截。模式切换只允许 actor idle 且没有 pending input；StudioRuntime 持 lifecycle 临界区后单次
-原子持久化 mode/role 目录记录，再尽力同步进程内 actor 角色，失败只告警——提交 prompt 时的
-reconcile 与 Turn 构建时的 mode 派生保证不会留下行为分叉。
-
-新会话起始页复用同一组 mode/model/effort 选择器组件：mode 选择写入按 Project 隔离的起始页
-草稿并随 `startNewThread` 请求生效，model/effort 直接写 role 配置。起始页没有 Thread 身份，
-不经过 root-only/idle 校验；首次提交创建的 Thread mode 即为所选值。
-
-agent directory 只在 header 的单一菜单中展示 root/child 层级、role、status 和 attention。
-child 的 timeline 不复制到 root，父 Thread 的 agent control tool 只作为自己的 toolCall Item。
-UI 展示固定 role 时按当前 locale 使用本地化名称（中文为探索者、计划者、执行者、审查者），
-但 Thread、Agent 和设置协议仍保存稳定的 role key。未知扩展 role 保留原始值作为展示回退，
-不能因本地化映射缺失而隐藏或改写身份；空 role 使用本地化的通用 Agent 名称。
-
-Turn phase 只在 timeline 尾部的一个活动块显示：preparing、thinking、responding、planning、
-runningTool、persisting。终态后移除活动块；失败和中断由 Turn 终态展示。“等待用户交互”
-不是 Turn phase，而是由 Thread 上挂的 pending Interaction 派生的 UI 状态——交互 dock
-出现时 composer 锁定，Interaction 消失时解锁。
-
-活动块是 timeline 的尾部活动行，不是覆盖历史内容的 sticky overlay。历史内容不足一屏时，
-活动行下沉到 timeline 可视区底部并与下方状态栏保留紧凑留白；历史内容超过一屏时，活动行自然排在
-最后一项之后，继续服从 timeline 的底部跟随与“跳到最新”规则。收束后的历史活动块仍留在原始
-ordinal 位置，不能因视觉下沉改变 row identity 或投影顺序。
-
-queued Turn 与上述所有非终态 phase 都在活动块显示统一、克制的小型时间线脉冲，明确表示客户端
-仍在等待下一项 typed 事实。`thinking` 的主标签固定使用本地化“思考中 / Thinking”；已有
-reasoning summary 可以作为次要信息继续展示或展开，但不能替换该主标签。`runningTool` 的折叠组
-显示一次组级脉冲；展开后只有 `started | streaming | approved | running` 的具体工具显示紧凑
-脉冲，已终态工具和历史活动块保持静止。`awaitingApproval` 继续使用授权语义和 Interaction dock，
-不能伪装成模型思考。
-
-折叠态活动行以脉冲本身作为领先视觉锚点，不在主标签前同时堆叠 phase 图标；主状态使用稳定强调，
-可变 reasoning/tool 摘要作为低对比次级信息，展开控制保留在行尾。展开后组标题恢复类型图标，
-具体执行项各自承载脉冲，以免组级与子项动效重复。瞬时活动行保持透明，不使用通栏背景、边框或
-阴影；卡片层级只留给持久化的结构化内容和需要用户决策的 Interaction。
-
-动效沿用 Studio 的纸张、墨色与陶土强调色，在亮色和暗色主题中保持对比，并只强调当前活动，不给
-每个历史行增加装饰。系统启用 reduced motion 时不得启动循环 ticker，改为同尺寸静态时间线标记；
-装饰性节点不参与朗读，活动文案作为 live region 提供语义反馈。动效只消费 typed Turn/Item 状态，
-不生成伪 Item、不改变 row identity、ordinal、共享 SelectionArea 或滚动跟随规则。
-
-## 11.7 Product stream 与恢复
-
-product stream 只负责 Project、Thread directory、Task、settings 和 health。选中 Thread 的高频
-内容只来自 thread stream，两种 stream 不共享 sequence，也不能按到达顺序互相覆盖。directory
-更新可重绑 workspace 的 Thread 引用，但不能改写 workspace 的 Turn、Item、Interaction 或 runtime。
-
-启动发现 SQLite 版本、结构或 fingerprint 不兼容时，store 先关闭检查连接，精确删除配置的
-数据库/WAL/SHM 并创建空 canonical schema。重建成功后 Bridge 返回正常空 snapshot，GUI 直接
-进入可用空状态；只有数据库文件被占用、删除/初始化失败，或 SQLite/Bridge 仍无法提供 canonical
-snapshot 时才是应用级致命错误并显示可重试错误页。单个 Project、Task 或 worktree 故障是
-typed recovery issue：健康内容继续可用，故障项显示错误与安全清理入口。
-
-清理必须 preview → 用户确认 → 执行时重新验证。UI 展示 path、branch、dirty、ahead、变更
-数量和 expected revision；不得在确认前写入，也不得允许清理用户主工作区。
-
-## 11.8 启动时序
-
-Bridge 只暴露一个 `startStudioRuntime` 启动 command。它完成 SQLite、ConfigRuntime、durable
-recovery、Thread framework/MCP owner 和 system Skills 固定目录的全量重建，随后发布 runtime ready。
-启动结果同时携带 runtime snapshot 与可选的配置恢复报告；报告只包含逐字备份的绝对路径，不进入
-产品事件、SQLite 或长期 Recovery state。Flutter 再调用纯查询 `readStudioState`，把该报告一次性
-附加到进程内壳层状态，本地选择健康 Project/root Thread，并通过一次 `activateProject` 执行该
-Project 的 LSP membership/probe 与 Skills discovery。配置恢复横幅说明已恢复默认设置、展示备份
-路径并允许关闭；关闭后页面重建、状态刷新和 lag resync 不得再次显示，同次启动也不得重复消费。
-
-启动后的任何页面刷新、Widget 重建、窗口恢复和 product/thread lag resync 都只读取最新
-canonical snapshot，不触发 reconcile、probe、discover、actor ensure 或默认 Thread 创建。
-完整 CQS 与 owner 合同见 `20-studio-state-runtime.md`。
-
-## 11.9 设置与视觉
-
-Settings 是独立页面，覆盖 Providers、Instructions、Skills、Roles、MCP、LSP、SSH、Statistics、
-Security、General；SSH 位于 workspace 分组，Statistics 位于系统分组的 Security 前。
-所有保存采用 typed command，并用 bridge 返回的 canonical settings snapshot 替换本地状态；
-secret 使用 preserve/replace/clear enum，不解析错误消息或 raw JSON 控制流程。
-Skills 页进入时只读取当前 catalog，并把返回的 canonical snapshot 应用到 GUI 状态；列表内容跨
-标签切换与页面重建后保留。“重新发现”仍是唯一显式发现入口；只有用户点击“重新发现”或
-Project 激活 command 才执行发现。
-MCP/LSP 页进入和“刷新”只读取各 owner 的 last-known snapshot；MCP 单 server“重新连接”、
-经确认的“全部重置”，以及 LSP probe、typed repair 和 reset 都必须调用各自的明确 command。
-这些操作使用稳定 `ValueKey`，其 command response 仍按领域 revision 应用，不能覆盖更晚事件。
-
-SSH 页只展示 `pl-core::remote::SshManager` 返回的服务器与连接 snapshot，并调用 typed 保存、测试、
-删除、连接和重连 command。Flutter 不构造 SSH argv、不选择 helper asset、不解析 stderr，也不实现
-重试。服务器编辑器支持 host、port、username、password 或 agent/key，以及可选 identity file。
-password 只通过 typed command 提交给 core 的进程内 secret lease，不回填到 canonical snapshot；
-系统 OpenSSH 经本地 Askpass 脚本读取该 lease。新建 Project 选择 SSH 时依次调用服务器选择、
-目录浏览与远端项目创建；创建完成后的 Thread、Timeline、Composer 和工具 UI 与本地 Project
-共用同一投影。
-
-Statistics 是只读实时页，上部按 Provider 实例与实际 API model 分组展示加权 t/s、样本数、累计
-completion token、平均 TTFT 和平均总响应时间；下部展示全局最近 1000 条完整成功调用，最新优先，
-支持“全部模型”或单个 Provider 实例 + model 过滤。历史条目只包含完成时间、Provider 实例 ID/
-显示名、实际模型、completion token、TTFT、decode、总响应时间和单次 t/s，不显示 prompt、工具
-参数、结果或凭据。宽布局使用表格，紧凑布局使用虚拟化卡片列表；v1 不提供刷新、容量配置或清空。
-
-聊天页保持低对比双栏桌面布局：左侧 Project/root Thread，右侧当前 Thread workspace；窄屏改为
-icon rail。普通 agent 正文无卡片背景，plan 使用轻边框，reasoning/tool 默认折叠。Composer、
-状态栏和阅读流同宽。设置页替换整个聊天页，不作为悬浮层。
-
-侧栏底部在宽布局和 icon rail 中都提供“新会话”操作；只有选中了无阻断恢复问题的 Project 时
-可用。该操作只清空 Thread 选择并进入按 Project 隔离的未持久化起始页，不创建空 Thread；首次
-提交调用 `startNewThread`，由 Bridge 在同一生命周期临界区按起始页所选 mode 创建 root Thread、
-提交首个 Turn，并返回 Thread 与 receipt。起始页 composer 在输入框下方提供模式（Simple/Task）、
-模型和思考等级选择器行，与根会话状态栏共用同一组选择器组件：模式是本次创建 Thread 的参数，
-按 Project 隔离并记住上次选择（仅内存，重启回到 Simple）；模型与思考等级沿用 role 级 Settings
-配置（Simple 映射 executor、Task 映射 planner），语义与状态栏 `setModelRole` 一致，切换模式后
-选择器跟随显示对应 role 的当前配置。每个健康 root Thread 都提供“归档会话”操作；目标 root Thread
-或其 child Thread 存在活动 Turn、pending input 或活动 Task 时必须拒绝归档。归档保留完整
-Turn/Item 历史并事务性归档整棵 Thread 树；Bridge 返回 removed ids，以及同 Project 完整排序中
-优先下一项、否则上一项的 root Thread。没有剩余 root Thread 时 `selectedThreadId` 保持 null 并
-展示新会话起始页，绝不创建兜底 Thread。故障 Thread 的同一 trailing 位置继续展示恢复清理
-操作，不能绕过 recovery issue 门禁。
-
-Task failure 是 canonical runtime 的一部分。fatal failure 在根会话状态栏显示红色
-`error_outline` 与“任务失败”，Task detail 和 agent 菜单同时展示来源 role/agent、脱敏原因、
-provider kind、code 和 HTTP status；即使 assistant Item 正文为空，Timeline 也必须回退渲染
-Item error 或 Turn failure message。recoverable failure 使用警告视觉与“可继续”语义，不伪装成
-完成或自动重试。fatal Task 不提供同 Task 恢复按钮；用户修复 Provider 后新建 Task。
-
-`task_transition.complete` 被结构门禁拒绝时，tool block 展示稳定 code 和用户可读 message；成功完成不展开
-冗余结果详情。任何 UI 投影都不得显示 API Key 原文；Bridge 已提供的 agent error/reason 在
-directory 增量更新和 selected agent 重建时必须保留。
-
-## 11.10 验收
-
-- Item timeline、reasoning、tool grouping、Composer revision 和 interaction dock 有 widget test；
-- 新建 root Thread、归档 root Thread、活动会话禁用以及宽侧栏/icon rail 操作有 widget test；
-- 零 Thread、新会话起始页、未持久化草稿、首次发送创建与归档最后 Thread 回到起始页有
-  widget test 和 Flutter Driver 验收；
-- 新会话起始页的模式/模型/思考等级选择器渲染、模式按 Project 记忆与首次提交携带所选
-  mode 有 widget test；
-- 侧栏分页窗口、触底加载与目录增量合并有 widget test；
-- 时间线窗口三迁移（快照重建、历史页扩展、上限裁剪）、锚点派生回源与跨代际响应丢弃有 widget test；
-- 关机阶段 overlay、pending 归零与全部关闭 hook 共享幂等 shutdown future 有 test；
-- root/child 切换时 canonical workspace 与 UI ephemeral 状态均正确隔离；
-- 上部会话费用在 root/child 切换时保持一致、切换 root 时隔离，且费用 Chip 不出现 `Total cost`；
-- 下部代理状态栏覆盖 `150 t/s`、`- t/s`、代理切换和 overflow；Statistics 覆盖摘要、过滤、历史、
-  空状态、1000 条窗口和紧凑布局；
-- lag、断流和旧 generation 不污染当前 workspace；
-- 空正文 provider failure、`Completed { Failed }` / recoverable issue 投影、agent directory 错误保留与
-  `task_transition.complete` 门禁拒绝 message 有 widget test；
-- Flutter analyze、widget/integration tests 通过；
-- `cargo xtask verify-gui --web-integration` 在无桌面会话和无原生 GTK/C++ 工具链的环境中，通过
-  Flutter `web-server` 无头设备执行 demo integration；测试继续使用 canonical `ValueKey`，不维护
-  与 Flutter Driver 并行的 Playwright DOM/坐标选择器。Playwright 等浏览器工具如用于外层截图、
-  console 或可访问性检查，只能作为补充观察层，不能替代 Widget 断言或证明原生 runtime；
-  xtask 托管临时 ChromeDriver 并在失败时保留 `build/web-integration-artifacts` 驱动日志；
-- Flutter Driver 验收覆盖侧栏翻页到底、时间线驱逐回源与关机阶段序列；真实 runtime harness
-  在隔离 `PURE_STUDIO_HOME` 下验证 write-behind flush、pending 归零、二次启动数据完整与
-  进程树清理；
-- Skills 页进入不扫描目录，只读取当前 catalog 并有 widget test；“重新发现”使用明确
-  command 并整体替换 catalog；启动 bootstrap 对健康选中 Project 恰好调用一次
-  `activateProject`，阻断 recovery issue 时不调用；
-- MCP/LSP 页刷新无副作用，reset/probe/repair 只由对应稳定控件触发并有 widget test；
-- Windows native Driver 使用真实 Bridge，关闭 frame sync，验证输入 read-back、SQLite 状态、
-  绝对路径截图和零 runtime error。
-- 原生多模态 Driver 使用真实视觉模型，在 Composer 不附加图片的前提下要求代理调用
-  `view_image` 读取 workspace PNG；验收折叠工具组下直接显示缩略图、展开详情不重复图片、点击大图、
-  最终识别文本和
-  `dataUrl` 安全诊断，日志不得包含图片 bytes、Base64 或凭据。
+原生 GUI 必须通过 `cargo xtask run-gui --driver` 启动，Flutter Driver 使用稳定 key 操作项目、Thread、
+模式 selector、composer、通用 Interaction、workflow panel/history 与 shutdown。workflow live harness
+在 terminal 后读取 canonical history，不以轮询瞬时阶段作为通过条件。

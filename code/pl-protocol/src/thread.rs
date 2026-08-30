@@ -1,4 +1,7 @@
-use serde::{Deserialize, Serialize};
+use std::fmt;
+use std::hash::{Hash, Hasher};
+
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::{
     InteractionRequest, McpHealthSnapshot, RuntimeCostAmount, ThreadItem, ThreadItemDelta,
@@ -33,7 +36,7 @@ impl Thread {
         Self {
             project_id: String::new(),
             title: String::new(),
-            mode: ThreadMode::Simple,
+            mode: ThreadMode::simple(),
             root_thread_id: id.clone(),
             parent_thread_id: None,
             role: String::new(),
@@ -47,12 +50,113 @@ impl Thread {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum ThreadMode {
-    Simple,
-    Task,
+/// Skill 完整名称构成的动态模式 ID。
+#[derive(Clone)]
+pub struct ModeId(String);
+
+impl ModeId {
+    pub const SIMPLE: &'static str = "mode.simple";
+    pub const TASK: &'static str = "mode.task";
+
+    pub fn new(value: impl Into<String>) -> Result<Self, crate::UnknownLabelError> {
+        let canonical = value.into();
+        let custom = canonical.strip_prefix("mode.").unwrap_or_default();
+        if custom.is_empty()
+            || canonical.len() > 64
+            || !custom.bytes().all(|byte| {
+                byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_')
+            })
+        {
+            return Err(crate::UnknownLabelError::new("ModeId", canonical));
+        }
+        Ok(Self(canonical))
+    }
+
+    pub fn simple() -> Self {
+        Self(Self::SIMPLE.to_string())
+    }
+
+    pub fn task() -> Self {
+        Self(Self::TASK.to_string())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn label(&self) -> &str {
+        self.as_str()
+    }
+
+    pub fn from_label(label: &str) -> Result<Self, crate::UnknownLabelError> {
+        Self::new(label)
+    }
 }
+
+impl Default for ModeId {
+    fn default() -> Self {
+        Self::simple()
+    }
+}
+
+impl fmt::Debug for ModeId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.debug_tuple("ModeId").field(&self.0).finish()
+    }
+}
+
+impl fmt::Display for ModeId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl PartialEq for ModeId {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_str() == other.as_str()
+    }
+}
+
+impl Eq for ModeId {}
+
+impl PartialOrd for ModeId {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ModeId {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.as_str().cmp(other.as_str())
+    }
+}
+
+impl Hash for ModeId {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.as_str().hash(state);
+    }
+}
+
+impl Serialize for ModeId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ModeId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::new(value).map_err(serde::de::Error::custom)
+    }
+}
+
+pub type ThreadMode = ModeId;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -128,6 +232,8 @@ pub struct ThreadRuntimeSnapshot {
     pub progress: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mcp_health: Option<McpHealthSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow: Option<crate::WorkflowRuntimeSnapshot>,
     pub updated_at: i64,
 }
 
@@ -249,15 +355,6 @@ pub struct ThreadTurnHistory {
     #[serde(default)]
     pub context_disposition: ThreadContextDisposition,
 }
-
-crate::impl_labeled_enum!(
-    ThreadMode,
-    "ThreadMode",
-    [
-        ThreadMode::Simple => "simple",
-        ThreadMode::Task => "task",
-    ]
-);
 
 crate::impl_labeled_enum!(
     ThreadStatus,

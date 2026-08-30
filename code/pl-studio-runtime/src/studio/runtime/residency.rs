@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::Mutex as AsyncMutex;
 
-/// 未选中、无任务、无显式 pin 的驻留 Thread actor 容量。
+/// 未选中、无显式 pin 的驻留 Thread actor 容量。
 const INACTIVE_RESIDENT_CAPACITY: usize = 4;
 
 #[derive(Clone)]
@@ -55,17 +55,13 @@ impl ThreadResidency {
 
     /// 返回超出非 pin 容量的队首候选（按最久未使用排序）。
     ///
-    /// 活跃订阅/当前选择由内部 pin 表达；非终态 Task 的 root、executor 与 reviewer
-    /// 由调用方通过 `task_pins` 传入，二者都不占用 4 个 inactive LRU 名额。
-    pub(in crate::studio) async fn over_capacity(
-        &self,
-        task_pins: &HashSet<String>,
-    ) -> Vec<String> {
+    /// 活跃订阅与当前选择由内部 pin 表达，不占用 inactive LRU 名额。
+    pub(in crate::studio) async fn over_capacity(&self) -> Vec<String> {
         let order = self.order.lock().await;
         let pinned = self.pinned.lock().expect("residency pinned lock poisoned");
         let inactive = order
             .iter()
-            .filter(|id| !pinned.contains(*id) && !task_pins.contains(*id))
+            .filter(|id| !pinned.contains(*id))
             .cloned()
             .collect::<Vec<_>>();
         if inactive.len() <= self.capacity {
@@ -131,7 +127,7 @@ mod tests {
         }
         residency.touch("a").await;
         assert_eq!(residency.snapshot().await, ["b", "c", "d", "e", "a"]);
-        assert_eq!(residency.over_capacity(&HashSet::new()).await, ["b"]);
+        assert_eq!(residency.over_capacity().await, ["b"]);
 
         residency.remove("d").await;
         assert_eq!(residency.snapshot().await, ["b", "c", "e", "a"]);
@@ -146,14 +142,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn subscription_and_task_pins_do_not_consume_inactive_capacity() {
+    async fn subscription_pins_do_not_consume_inactive_capacity() {
         let residency = ThreadResidency::new();
         residency.pin("selected");
-        for id in ["selected", "task", "a", "b", "c", "d", "e"] {
+        for id in ["selected", "a", "b", "c", "d", "e"] {
             residency.touch(id).await;
         }
-        let task_pins = HashSet::from(["task".to_string()]);
-
-        assert_eq!(residency.over_capacity(&task_pins).await, ["a"]);
+        assert_eq!(residency.over_capacity().await, ["a"]);
     }
 }

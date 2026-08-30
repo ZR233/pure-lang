@@ -59,6 +59,8 @@ class DemoStudioApi implements StudioApi {
   int _providerUsageRevision = 1;
   int _mcpRevision = 0;
   int _lspRevision = 0;
+  final Set<String> _disabledSystemAgents = <String>{};
+  final Map<String, AgentProfileView> _userAgentProfiles = {};
   String? _selectedThreadId;
   DateTime? _fixtureNow;
 
@@ -110,21 +112,11 @@ class DemoStudioApi implements StudioApi {
       StudioShutdownPhase.cancellingTurns => const CancellingTurnsProgress(),
       StudioShutdownPhase.flushingPersistence =>
         const FlushingPersistenceProgress(pendingCommits: 0),
-      StudioShutdownPhase.suspendingTasks => const SuspendingTasksProgress(),
+      StudioShutdownPhase.stoppingAgents => const StoppingAgentsProgress(),
       StudioShutdownPhase.stoppingMcp => const StoppingMcpProgress(),
       StudioShutdownPhase.stoppingLsp => const StoppingLspProgress(),
       StudioShutdownPhase.stopped => const StoppedProgress(),
     };
-  }
-
-  @override
-  Future<TaskRecoveryPreview> previewTaskRecovery(String rootThreadId) {
-    throw UnsupportedError('Task recovery is not available in demo mode');
-  }
-
-  @override
-  Future<TaskRecoveryResult> applyTaskRecovery(TaskRecoveryRequest request) {
-    throw UnsupportedError('Task recovery is not available in demo mode');
   }
 
   @override
@@ -155,9 +147,6 @@ class DemoStudioApi implements StudioApi {
           state: _demoInitialResource(),
         ),
         threadDirectory: const ThreadDirectoryWindow(),
-        taskDirectory: TaskDirectoryState.fromState(
-          state: _demoInitialResource(),
-        ),
         agentDirectory: AgentDirectoryState.fromState(
           state: _demoInitialResource(),
         ),
@@ -200,9 +189,6 @@ class DemoStudioApi implements StudioApi {
             ? _demoDirectoryCursor(directoryPageSize - 1)
             : null,
         hasMore: directory.length > directoryPageSize,
-      ),
-      taskDirectory: TaskDirectoryState.fromState(
-        state: _demoInitialResource(),
       ),
       agentDirectory: AgentDirectoryState.fromState(
         state: _demoInitialResource(),
@@ -375,7 +361,7 @@ class DemoStudioApi implements StudioApi {
     const project = StudioProject(
       id: 'project-local',
       name: 'pure-lang',
-      path: r'C:\Users\zhoudongsheng\.codex\worktrees\3bc1\pure-lang',
+      path: r'C:\Projects\pure-lang',
     );
     final rootMode = _threadModes['thread-main'] ?? StudioMode.simple;
     final reviewerMode = _threadModes['thread-reviewer'] ?? StudioMode.simple;
@@ -385,7 +371,7 @@ class DemoStudioApi implements StudioApi {
       projectId: project.id,
       title: 'Flutter + FRB 重构',
       mode: rootMode,
-      role: rootMode == StudioMode.task ? 'planner' : 'executor',
+      role: 'planner',
       createdAt: now.subtract(const Duration(minutes: 10)),
       updatedAt: now,
       agentPath: 'root',
@@ -408,7 +394,7 @@ class DemoStudioApi implements StudioApi {
       projectId: project.id,
       title: 'Riverpod selector audit',
       mode: alternateMode,
-      role: alternateMode == StudioMode.task ? 'planner' : 'executor',
+      role: 'planner',
       createdAt: now.subtract(const Duration(minutes: 3)),
       updatedAt: now.subtract(const Duration(minutes: 3)),
       agentPath: 'root-alt',
@@ -474,7 +460,7 @@ class DemoStudioApi implements StudioApi {
         projectId: projectId,
         title: '历史会话 ${index + 1}',
         mode: StudioMode.simple,
-        role: 'executor',
+        role: 'planner',
         createdAt: updated,
         updatedAt: updated,
         agentPath: 'root-page-$index',
@@ -592,19 +578,6 @@ class DemoStudioApi implements StudioApi {
           ),
         ),
         _messageItem(
-          id: 'turn-demo:plan',
-          threadId: thread.id,
-          turnId: 'turn-demo',
-          ordinal: 3,
-          kind: ThreadItemKind.plan,
-          text:
-              '## Implementation checklist\n\n'
-              '1. Keep the Flutter shell aligned with runtime contracts.\n'
-              '2. Subscribe only the selected Thread stream.\n\n'
-              '| Area | Status |\n| --- | --- |\n| FRB runtime | ready |',
-          createdAt: agentCreatedAt,
-        ),
-        _messageItem(
           id: 'turn-demo:final',
           threadId: thread.id,
           turnId: 'turn-demo',
@@ -688,6 +661,78 @@ class DemoStudioApi implements StudioApi {
 
   @override
   Future<ProviderCatalogView> loadProviderCatalog() async => _providerCatalog;
+
+  @override
+  Future<List<AgentProfileView>> readAgentProfiles() async {
+    return [
+      AgentProfileView(
+        id: 'explorer',
+        displayName: 'Explorer',
+        description: '只读探索代码、文档和现场事实。',
+        whenToUse: '需要定位边界、依赖或验证事实时。',
+        systemInstructions: '优先收集事实并引用文件与命令。',
+        providerId: 'demo',
+        model: 'demo',
+        effort: 'medium',
+        source: 'studio-builtin',
+        revision: 'studio-system-agent-v1',
+        contentHash: 'demo-explorer',
+        system: true,
+        enabled: !_disabledSystemAgents.contains('explorer'),
+      ),
+      AgentProfileView(
+        id: 'planner',
+        displayName: 'Planner',
+        description: '分析目标并形成可执行方案。',
+        whenToUse: '需要梳理复杂方案或阶段设计时。',
+        systemInstructions: '输出可验证的分阶段计划。',
+        providerId: 'demo',
+        model: 'demo',
+        effort: 'medium',
+        source: 'studio-builtin',
+        revision: 'studio-system-agent-v1',
+        contentHash: 'demo-planner',
+        system: true,
+        enabled: !_disabledSystemAgents.contains('planner'),
+      ),
+      ..._userAgentProfiles.values,
+    ];
+  }
+
+  @override
+  Future<List<AgentProfileView>> setSystemAgentEnabled({
+    required String profileId,
+    required bool enabled,
+  }) async {
+    if (enabled) {
+      _disabledSystemAgents.remove(profileId);
+    } else {
+      _disabledSystemAgents.add(profileId);
+    }
+    return readAgentProfiles();
+  }
+
+  @override
+  Future<List<AgentProfileView>> saveUserAgentProfile(
+    AgentProfileDraft draft,
+  ) async {
+    _userAgentProfiles[draft.id] = AgentProfileView(
+      id: draft.id,
+      displayName: draft.displayName,
+      description: draft.description,
+      whenToUse: draft.whenToUse,
+      systemInstructions: draft.systemInstructions,
+      providerId: draft.providerId,
+      model: draft.model,
+      effort: draft.effort,
+      source: '~/.pure/agents/${draft.id}.toml',
+      revision: 'demo-user-${draft.id}',
+      contentHash: 'demo-user-${draft.id}',
+      system: false,
+      enabled: draft.enabled,
+    );
+    return readAgentProfiles();
+  }
 
   @override
   Future<StudioProject> openProject(String path) async {
@@ -787,7 +832,7 @@ class DemoStudioApi implements StudioApi {
       projectId: projectId,
       title: 'New Session',
       mode: mode,
-      role: mode == StudioMode.task ? 'planner' : 'executor',
+      role: 'planner',
       createdAt: now,
       updatedAt: now,
     );
@@ -841,45 +886,6 @@ class DemoStudioApi implements StudioApi {
   }
 
   @override
-  Future<RecoveryCleanupPreview> previewProjectCleanup(String projectId) async {
-    return RecoveryCleanupPreview(
-      issueId: 'project-cleanup-$projectId',
-      expectedRevision: 'demo-project',
-      scope: RecoveryIssueScope.project,
-      projectId: projectId,
-      detail: 'Remove the project and its Pure-owned task worktrees.',
-      resources: const [],
-    );
-  }
-
-  @override
-  Future<void> cleanupProject(String projectId, String expectedRevision) async {
-    _archivedProjectIds.add(projectId);
-  }
-
-  @override
-  Future<RecoveryCleanupPreview> previewRecoveryIssueCleanup(
-    String issueId,
-  ) async {
-    return RecoveryCleanupPreview(
-      issueId: issueId,
-      expectedRevision: 'demo',
-      scope: RecoveryIssueScope.thread,
-      detail: 'Demo recovery issue',
-      resources: const [],
-    );
-  }
-
-  @override
-  Future<void> cleanupRecoveryIssue(
-    String issueId,
-    String expectedRevision,
-  ) async {}
-
-  @override
-  Future<void> retryRecoveryIssue(String issueId) async {}
-
-  @override
   Future<PersistenceStateSnapshot> retryPersistence() async =>
       const PersistenceStateSnapshot.ready();
 
@@ -928,8 +934,9 @@ class DemoStudioApi implements StudioApi {
         'thread mode cannot change while the Thread is running or has pending input',
       );
     }
-    if (current.tasksByRootThread[threadId]?.isActive ?? false) {
-      throw StateError('thread mode cannot change while a task is active');
+    final workflow = current.workspacesByThread[threadId]?.runtime.workflow;
+    if (workflow?.isActive ?? false) {
+      throw StateError('thread mode cannot change while a workflow is active');
     }
     _threadModes[threadId] = mode;
     final workspace = _workspaces[threadId];
@@ -938,9 +945,7 @@ class DemoStudioApi implements StudioApi {
       _workspaces[threadId] = workspace.copyWith(
         thread: thread.copyWith(
           mode: mode,
-          role: thread.isRoot
-              ? (mode == StudioMode.task ? 'planner' : 'executor')
-              : thread.role,
+          role: thread.isRoot ? 'planner' : thread.role,
         ),
       );
     }
@@ -1416,72 +1421,6 @@ class DemoStudioApi implements StudioApi {
         ),
       ),
     );
-    final planToolId = '$turnId:plan-exit';
-    final planId = '$planToolId:plan';
-    const plan =
-        '# Implementation plan\n\n'
-        '1. Keep one typed Thread stream.\n'
-        '2. Replace each overlay with its terminal payload.';
-    _emitThreadUpdate(
-      threadId,
-      ThreadItemUpsert(
-        ThreadItemView(
-          id: planId,
-          threadId: threadId,
-          turnId: turnId,
-          ordinal: _nextOrdinal(threadId),
-          revision: 0,
-          createdAt: startedAt,
-          updatedAt: startedAt,
-          state: const ThreadPlanItemStateView(
-            content: '',
-            lifecycle: StreamingThreadContentView(),
-          ),
-        ),
-      ),
-    );
-    _emitThreadUpdate(
-      threadId,
-      ThreadItemDeltaUpdate(
-        ThreadItemDeltaView(
-          itemId: planId,
-          revision: 1,
-          state: const ThreadPlanDeltaView('# Implementation plan'),
-        ),
-      ),
-    );
-    await Future<void>.delayed(promptActivityDelay);
-    if (_promptGenerations[threadId] != generation) return;
-    _emitThreadUpdate(
-      threadId,
-      ThreadItemDeltaUpdate(
-        ThreadItemDeltaView(
-          itemId: planId,
-          revision: 2,
-          state: const ThreadPlanDeltaView(
-            '\n\n1. Keep one typed Thread stream.\n'
-            '2. Replace each overlay with its terminal payload.',
-          ),
-        ),
-      ),
-    );
-    final planCompletedAt = DateTime.now();
-    final livePlan = _workspaces[threadId]!.items.firstWhere(
-      (item) => item.id == planId,
-    );
-    _emitThreadUpdate(
-      threadId,
-      ThreadItemUpsert(
-        livePlan.copyWith(
-          revision: 3,
-          updatedAt: planCompletedAt,
-          state: ThreadPlanItemStateView(
-            content: plan,
-            lifecycle: CompletedThreadContentView(planCompletedAt),
-          ),
-        ),
-      ),
-    );
     final finalId = '$turnId:final';
     _emitThreadUpdate(
       threadId,
@@ -1903,10 +1842,6 @@ ThreadItemView _messageItem({
         attachments: const [],
         lifecycle: CompletedThreadContentView(createdAt),
       ),
-      ThreadItemKind.plan => ThreadPlanItemStateView(
-        content: text,
-        lifecycle: CompletedThreadContentView(createdAt),
-      ),
       ThreadItemKind.reasoning ||
       ThreadItemKind.toolCall ||
       ThreadItemKind.agent ||
@@ -2117,30 +2052,6 @@ class DriverDemoStudioApi extends DemoStudioApi {
                           options: [],
                         ),
                       ],
-                    ),
-                  ),
-                  PendingInteraction(
-                    id: 'driver-plan-revise',
-                    threadId: threadId,
-                    turnId: 'driver-origin-turn',
-                    kind: InteractionKind.planConfirmation,
-                    title: 'Adjust demo plan',
-                    body: 'Revise the plan with deterministic feedback.',
-                    payload: PlanConfirmationInteractionPayload(
-                      planId: 'driver-plan-revise',
-                      content: '1. Verify revise-plan resolution.',
-                    ),
-                  ),
-                  PendingInteraction(
-                    id: 'driver-plan-confirm',
-                    threadId: threadId,
-                    turnId: 'driver-origin-turn',
-                    kind: InteractionKind.planConfirmation,
-                    title: 'Confirm demo plan',
-                    body: 'Confirm the deterministic demo plan.',
-                    payload: PlanConfirmationInteractionPayload(
-                      planId: 'driver-plan-confirm',
-                      content: '1. Verify confirm resolution.',
                     ),
                   ),
                 ],

@@ -29,8 +29,6 @@ Future<void> main(List<String> arguments) async {
 
     await _resolveToolApproval(session, snapshots);
     await _resolveUserInput(session, snapshots);
-    await _resolvePlanRevise(session, snapshots);
-    await _resolvePlanConfirm(session, snapshots);
     await _submitCompletedTurn(session, snapshots, options.promptFile);
 
     final finalSnapshot = await _snapshot(session, snapshots);
@@ -113,50 +111,6 @@ Future<void> _resolveUserInput(
     session.tap(find.byValueKey('user-input-submit')),
     'submit deterministic answer',
   );
-}
-
-Future<void> _resolvePlanRevise(
-  FlutterDriverSession session,
-  File snapshots,
-) async {
-  final snapshot = await _waitForInteraction(
-    session,
-    snapshots,
-    id: 'driver-plan-revise',
-    kind: 'planConfirmation',
-  );
-  _expectLockedCompletedOrigin(snapshot);
-  final input = find.byValueKey('plan-adjustment-input');
-  await _command(session.tap(input), 'focus plan adjustment');
-  const adjustment = 'Keep the typed origin-turn assertion.';
-  await _command(session.enterText(adjustment), 'enter plan adjustment');
-  final entered = await _command(
-    session.getText(input),
-    'read back plan adjustment',
-  );
-  if (entered != adjustment) {
-    throw StateError('plan adjustment read-back mismatch: $entered');
-  }
-  await _command(
-    session.waitUntilNoTransientCallbacks(timeout: const Duration(seconds: 5)),
-    'plan adjustment rebuild',
-    const Duration(seconds: 10),
-  );
-  await _command(session.tap(find.byValueKey('plan-revise')), 'revise plan');
-}
-
-Future<void> _resolvePlanConfirm(
-  FlutterDriverSession session,
-  File snapshots,
-) async {
-  final snapshot = await _waitForInteraction(
-    session,
-    snapshots,
-    id: 'driver-plan-confirm',
-    kind: 'planConfirmation',
-  );
-  _expectLockedCompletedOrigin(snapshot);
-  await _command(session.tap(find.byValueKey('plan-confirm')), 'confirm plan');
 }
 
 Future<void> _submitCompletedTurn(

@@ -12,7 +12,6 @@ fn completed_record(name: &str) -> ToolExecutionRecord {
     ToolExecutionRecord {
         id: "item-1".to_string(),
         call_id: "call-1".to_string(),
-        trace_part_id: "turn-1-item-1".to_string(),
         name: name.to_string(),
         kind: ToolCallKind::Function,
         result: String::new(),
@@ -57,11 +56,14 @@ fn redacts_secret_user_input_answers_for_display() {
 }
 
 #[test]
-fn progress_messages_describe_plan_and_subagent_lifecycle() {
-    assert_eq!(tool_start_progress_message("plan_exit"), "正在提交计划。");
+fn progress_messages_describe_workflow_and_subagent_lifecycle() {
     assert_eq!(
-        tool_terminal_progress_message(&completed_record("plan_exit")),
-        "计划已生成，等待确认。"
+        tool_start_progress_message("workflow_state"),
+        "正在更新工作流状态。"
+    );
+    assert_eq!(
+        tool_terminal_progress_message(&completed_record("workflow_state")),
+        "工作流状态已更新。"
     );
     assert_eq!(
         tool_start_progress_message("spawn_agent"),
@@ -170,55 +172,6 @@ fn finalize_tool_item_separates_output_artifacts_and_audit_metadata() {
             cache_hit: true,
         })
     );
-}
-
-#[test]
-fn failed_denied_and_cancelled_tools_terminalize_only_their_streamed_plan_item() {
-    for outcome in [
-        ToolExecutionOutcome::Failed(pl_trace::TraceToolFailureKind::Execution),
-        ToolExecutionOutcome::Denied,
-        ToolExecutionOutcome::Cancelled,
-    ] {
-        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
-        let mut recorder = crate::TraceRecorder::new("session".to_string(), event_tx, 0);
-        let trace_part_id = "turn-1-call-1";
-        let item = recorder.tool_item(
-            "turn-1",
-            trace_part_id,
-            "plan_exit".to_string(),
-            "{}".to_string(),
-            Some("call-1".to_string()),
-            Some("provider-item-1".to_string()),
-        );
-        recorder.start_item(item.clone());
-        let plan_item_id = pl_trace::plan_trace_part_id(trace_part_id);
-        recorder.start_item(pl_trace::TracePart::started_plan(
-            "turn-1".to_string(),
-            plan_item_id.clone(),
-            1,
-            0,
-        ));
-        let mut record = completed_record("plan_exit");
-        record.id = "provider-item-1".to_string();
-        record.call_id = "call-1".to_string();
-        record.trace_part_id = trace_part_id.to_string();
-        record.outcome = outcome;
-        record.display_result = "terminal reason".to_string();
-
-        finalize_tool_item(&mut recorder, item, &record);
-
-        let plan = recorder
-            .latest_trace_part(&plan_item_id)
-            .expect("streamed plan trace item");
-        assert!(plan.is_terminal(), "outcome {outcome:?}");
-        assert_eq!(
-            plan.failure().is_none(),
-            outcome == ToolExecutionOutcome::Cancelled,
-            "outcome {outcome:?}"
-        );
-        assert!(recorder.latest_trace_part("provider-item-1:plan").is_none());
-        assert!(recorder.latest_trace_part("call-1:plan").is_none());
-    }
 }
 
 #[tokio::test]

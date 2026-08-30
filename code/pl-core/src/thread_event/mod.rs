@@ -17,8 +17,8 @@ mod projector;
 pub use fact::ThreadNotificationFact;
 pub(crate) use fact::project_thread_facts;
 pub(crate) use observation::{
-    ObservedTurnEvent, TurnObservation, compaction_observation, observation_from_agent_event,
-    project_observation,
+    ObservedTurnEvent, TurnObservation, compaction_observation, empty_runtime,
+    observation_from_agent_event, project_observation,
 };
 pub(crate) use projector::{project_runtime_event, project_trace_events, runtime_event_thread_id};
 

@@ -69,7 +69,7 @@ async fn product_metadata_rebinds_only_the_subscription_bootstrap() {
         })
         .unwrap();
     let mut thread = pl_protocol::Thread::placeholder("thread-1");
-    thread.mode = pl_protocol::ThreadMode::Task;
+    thread.mode = pl_protocol::ThreadMode::task();
     thread.role = "planner".to_string();
 
     subscription.replace_bootstrap_thread(thread).unwrap();
@@ -77,12 +77,12 @@ async fn product_metadata_rebinds_only_the_subscription_bootstrap() {
     assert!(matches!(
         subscription.recv().await,
         Some(ThreadSubscriptionUpdate::Snapshot { snapshot })
-            if snapshot.thread.mode == pl_protocol::ThreadMode::Task
+            if snapshot.thread.mode == pl_protocol::ThreadMode::task()
                 && snapshot.thread.role == "planner"
     ));
     assert_eq!(
         bus.snapshot("thread-1").unwrap().thread.mode,
-        pl_protocol::ThreadMode::Simple
+        pl_protocol::ThreadMode::simple()
     );
 }
 

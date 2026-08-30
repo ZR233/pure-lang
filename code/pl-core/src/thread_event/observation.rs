@@ -246,11 +246,12 @@ fn runtime_snapshot(
             .map_or_else(Vec::new, |runtime| runtime.active_lsp_servers.clone()),
         progress: previous.and_then(|runtime| runtime.progress.clone()),
         mcp_health: previous.and_then(|runtime| runtime.mcp_health.clone()),
+        workflow: previous.and_then(|runtime| runtime.workflow.clone()),
         updated_at: delta.updated_at,
     }
 }
 
-pub(super) fn empty_runtime(thread_id: &str) -> ThreadRuntimeSnapshot {
+pub(crate) fn empty_runtime(thread_id: &str) -> ThreadRuntimeSnapshot {
     ThreadRuntimeSnapshot {
         thread_id: thread_id.to_string(),
         usage: ThreadRuntimeUsage {
@@ -282,6 +283,7 @@ pub(super) fn empty_runtime(thread_id: &str) -> ThreadRuntimeSnapshot {
         active_lsp_servers: Vec::new(),
         progress: None,
         mcp_health: None,
+        workflow: None,
         updated_at: 0,
     }
 }

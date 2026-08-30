@@ -290,11 +290,6 @@ impl ToolCallAccumulator {
             trace_id: self.trace_id.clone(),
             call_id: self.call_id.clone(),
             name: self.name.clone(),
-            arguments: self.payload.text().to_string(),
-            function_arguments: matches!(
-                &self.payload,
-                ToolCallPayloadAccumulator::FunctionArguments(_)
-            ),
         }
     }
 
@@ -339,12 +334,6 @@ impl ToolCallPayloadAccumulator {
             ToolInputDeltaPayload::CustomInput(input) => Self::CustomInput(input),
         }
     }
-
-    fn text(&self) -> &str {
-        match self {
-            Self::FunctionArguments(arguments) | Self::CustomInput(arguments) => arguments,
-        }
-    }
 }
 
 pub(crate) struct ToolCallAccumulatorSnapshot {
@@ -352,8 +341,6 @@ pub(crate) struct ToolCallAccumulatorSnapshot {
     pub(crate) trace_id: String,
     pub(crate) call_id: Option<String>,
     pub(crate) name: String,
-    pub(crate) arguments: String,
-    pub(crate) function_arguments: bool,
 }
 
 fn trace_tool_part_id(call_id: Option<&String>, id: &str, fallback_id: &str) -> String {

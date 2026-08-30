@@ -35,7 +35,6 @@ ThreadNotificationFrame _threadDeltaFrame({
           'text' => ThreadTextDeltaView(delta),
           'reasoning.summary' => ThreadThinkingSummaryDeltaView(0, delta),
           'reasoning.content' => ThreadThinkingContentDeltaView(0, delta),
-          'planContent' => ThreadPlanDeltaView(delta),
           'tool.arguments' => ThreadToolArgumentsDeltaView(delta),
           'tool.result' => ThreadToolResultDeltaView(delta),
           _ => throw ArgumentError.value(field, 'field', 'unknown delta'),

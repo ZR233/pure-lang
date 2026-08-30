@@ -3,12 +3,13 @@
 //! `pl-core` 只定义可 serde 的模型路由值对象；本模块组合 Studio 的运行时、
 //! instructions、skills、MCP 与 UI 配置，并独占文件格式、schema 版本和默认角色。
 
+mod agent_profile;
 mod credential;
 mod mode;
 mod runtime;
 mod store;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{PureError, Result};
 use pl_core::config::{
@@ -18,7 +19,11 @@ use pl_core::{AgentModelConfig, ProviderConfig};
 use pl_model::WebSearchConfig;
 use serde::{Deserialize, Serialize};
 
-pub use mode::StudioMode;
+pub use agent_profile::{
+    AgentProfileCatalog, AgentProfileDiagnostic, UserAgentProfile, is_system_profile_id,
+    save_user_agent_profile, system_profile_ids,
+};
+pub use mode::{StudioMode, StudioModeId};
 pub use pl_core::config::{
     BuiltinMcpServerState as StudioBuiltinMcpServerState, EffectiveMcpServerConfig,
     McpServerConfig as StudioMcpServerEntry, McpServerMutationPolicy, McpServerSourceKind,
@@ -29,7 +34,7 @@ pub use pl_core::{AgentRoleId, ModelRouteConfig, ProviderId, ReasoningEffort};
 pub use runtime::{ConfigRuntime, ConfigRuntimeError, ConfigRuntimeSnapshot};
 pub use store::{ConfigPaths, ConfigRecoveryReport, ConfigStore};
 
-pub const STUDIO_CONFIG_SCHEMA_VERSION: u32 = 15;
+pub const STUDIO_CONFIG_SCHEMA_VERSION: u32 = 16;
 pub const STUDIO_CONFIG_DIR_NAME: &str = ".pure";
 pub const STUDIO_CONFIG_FILE_NAME: &str = "config.toml";
 
@@ -152,6 +157,9 @@ const fn default_true() -> bool {
 pub struct StudioConfig {
     pub schema_version: u32,
     pub models: AgentModelConfig,
+    /// Rust 内置 Agent 只能在这里禁用；其余字段不可覆盖，也不存在删除语义。
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub disabled_system_agents: BTreeSet<String>,
     #[serde(default)]
     pub web_search: WebSearchConfig,
     #[serde(default, skip_serializing_if = "RuntimeConfig::is_empty")]
@@ -198,6 +206,7 @@ impl StudioConfig {
                 providers: BTreeMap::from([(provider_id, provider)]),
                 routes,
             },
+            disabled_system_agents: BTreeSet::new(),
             web_search: WebSearchConfig::default(),
             runtime: RuntimeConfig::default(),
             instructions: InstructionsConfig::default(),
@@ -216,6 +225,15 @@ impl StudioConfig {
             )));
         }
         self.models.validate()?;
+        if let Some(profile_id) = self
+            .disabled_system_agents
+            .iter()
+            .find(|profile_id| !agent_profile::is_system_profile_id(profile_id))
+        {
+            return Err(PureError::ConfigError(format!(
+                "disabled_system_agents contains unknown system Agent `{profile_id}`"
+            )));
+        }
         for role in STUDIO_ROLES {
             self.models.resolve(&AgentRoleId::new(role)?)?;
         }

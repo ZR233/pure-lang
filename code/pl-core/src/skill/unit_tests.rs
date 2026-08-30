@@ -57,6 +57,28 @@ fn rejects_missing_frontmatter() {
 }
 
 #[test]
+fn mode_skills_require_reserved_prefix_and_invocation_flags() {
+    let missing_prefix =
+        "---\nname: task-mode\ndescription: Task\nmode:\n  display-name: Task\n---\n";
+    let error = validate_skill_document(missing_prefix, None)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("mode.` prefix"));
+
+    let missing_metadata = "---\nname: mode.custom\ndescription: Custom\n---\n";
+    let error = validate_skill_document(missing_metadata, None)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("must declare mode metadata"));
+
+    let invocable = "---\nname: mode.custom\ndescription: Custom\nuser-invocable: true\ndisable-model-invocation: false\nmode:\n  display-name: Custom\n---\n";
+    let error = validate_skill_document(invocable, None)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("disable-model-invocation"));
+}
+
+#[test]
 fn project_source_shadows_user_and_external() {
     let workspace = temp_dir("shadow-workspace");
     let user = temp_dir("shadow-user");
@@ -151,6 +173,7 @@ fn usage_update_replaces_existing_file_atomically() {
         resource_base: super::SkillResourceBase::Directory {
             path: skill_dir.clone(),
         },
+        mode: None,
     };
 
     bump_project_view(&project, &skill).unwrap();
@@ -180,6 +203,7 @@ fn corrupted_usage_is_observable() {
         provider_id: super::SkillProviderId::new("local-filesystem").unwrap(),
         invocation: super::SkillInvocationPolicy::default(),
         resource_base: super::SkillResourceBase::Directory { path: skill_dir },
+        mode: None,
     };
 
     let error = bump_project_view(&project, &skill).unwrap_err().to_string();

@@ -142,30 +142,65 @@ where
             self.state.session.session.items(),
             checkpoint.session.items(),
         );
+        let workflow_changed =
+            self.state.session.session.workflow() != checkpoint.session.workflow();
+        let workflow_projection = checkpoint
+            .session
+            .workflow()
+            .map(pl_protocol::WorkflowRuntimeSnapshot::from);
         next.session.session = checkpoint.session;
-        let projection = if let Some(inference) = checkpoint.inference.as_ref() {
-            append_inference(&mut next, &checkpoint.turn_id, inference)?;
-            let current = self
+        let projection = if checkpoint.inference.is_some() || workflow_changed {
+            let mut current = self
                 .runtime
                 .thread_events
                 .snapshot(checkpoint.thread_id.as_str())
                 .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
-            let projected = project_observation(
-                checkpoint.thread_id.as_str(),
-                checkpoint.turn_id.as_str(),
-                current.revision,
-                &current,
-                TurnObservation::RuntimeDelta(Box::new(inference.runtime_delta.clone())),
-            );
-            next.session.thread_revision = projected.through_revision;
-            let projected_thread = self
-                .runtime
-                .thread_events
-                .project(checkpoint.thread_id.as_str(), &projected.notifications)
-                .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
+            let mut notifications = Vec::new();
+            if let Some(inference) = checkpoint.inference.as_ref() {
+                append_inference(&mut next, &checkpoint.turn_id, inference)?;
+                let projected = project_observation(
+                    checkpoint.thread_id.as_str(),
+                    checkpoint.turn_id.as_str(),
+                    current.revision,
+                    &current,
+                    TurnObservation::RuntimeDelta(Box::new(inference.runtime_delta.clone())),
+                );
+                let projected_thread = self
+                    .runtime
+                    .thread_events
+                    .project(checkpoint.thread_id.as_str(), &projected.notifications)
+                    .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
+                notifications.extend(projected_thread.notifications);
+                current = projected_thread.snapshot;
+            }
+            if workflow_changed {
+                let mut runtime = current.runtime.clone().unwrap_or_else(|| {
+                    crate::thread_event::empty_runtime(checkpoint.thread_id.as_str())
+                });
+                runtime.workflow = workflow_projection;
+                runtime.updated_at = next.snapshot.updated_at;
+                let projected = project_thread_facts(
+                    checkpoint.thread_id.as_str(),
+                    &current,
+                    vec![ThreadNotificationFact::durable(
+                        next.snapshot.updated_at,
+                        pl_protocol::ThreadNotification::ThreadRuntimeUpdated {
+                            runtime: Box::new(runtime),
+                        },
+                    )],
+                );
+                let projected_thread = self
+                    .runtime
+                    .thread_events
+                    .project(checkpoint.thread_id.as_str(), &projected.notifications)
+                    .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
+                notifications.extend(projected_thread.notifications);
+                current = projected_thread.snapshot;
+            }
+            next.session.thread_revision = current.revision;
             Some(ThreadProjectionCommit {
-                snapshot: projected_thread.snapshot,
-                notifications: projected_thread.notifications,
+                snapshot: current,
+                notifications,
             })
         } else {
             None

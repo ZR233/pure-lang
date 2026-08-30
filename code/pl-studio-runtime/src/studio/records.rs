@@ -1,5 +1,4 @@
 pub use crate::attachment::MaterializedAttachment;
-use pl_protocol::LabeledEnum;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

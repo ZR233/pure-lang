@@ -81,7 +81,6 @@ pub(crate) async fn collect_completion_event_stream(
     trace: Option<CompletionTraceContext>,
     trace_sink: Option<Arc<dyn TraceEventSink>>,
     cancellation: Option<tokio_util::sync::CancellationToken>,
-    input_trace_projections: Arc<HashMap<String, pl_trace::ToolInputTraceProjection>>,
 ) -> Result<CompletionResponse> {
     collect_completion_event_stream_with_idle_timeout(
         stream,
@@ -89,7 +88,6 @@ pub(crate) async fn collect_completion_event_stream(
         trace,
         trace_sink,
         cancellation,
-        input_trace_projections,
         COMPLETION_STREAM_IDLE_TIMEOUT,
     )
     .await
@@ -101,14 +99,9 @@ async fn collect_completion_event_stream_with_idle_timeout(
     trace: Option<CompletionTraceContext>,
     trace_sink: Option<Arc<dyn TraceEventSink>>,
     cancellation: Option<tokio_util::sync::CancellationToken>,
-    input_trace_projections: Arc<HashMap<String, pl_trace::ToolInputTraceProjection>>,
     idle_timeout: Duration,
 ) -> Result<CompletionResponse> {
-    let mut accumulator = StreamCompletionAccumulator::with_trace_sink_and_projections(
-        trace,
-        trace_sink,
-        input_trace_projections,
-    );
+    let mut accumulator = StreamCompletionAccumulator::with_trace_sink(trace, trace_sink);
 
     loop {
         let next_event = tokio::time::timeout(idle_timeout, stream.next());
@@ -173,18 +166,9 @@ impl StreamCompletionAccumulator {
         Self::with_trace_sink(trace, None)
     }
 
-    #[cfg(test)]
     pub(crate) fn with_trace_sink(
         trace: Option<CompletionTraceContext>,
         trace_sink: Option<Arc<dyn TraceEventSink>>,
-    ) -> Self {
-        Self::with_trace_sink_and_projections(trace, trace_sink, Arc::new(HashMap::new()))
-    }
-
-    pub(crate) fn with_trace_sink_and_projections(
-        trace: Option<CompletionTraceContext>,
-        trace_sink: Option<Arc<dyn TraceEventSink>>,
-        input_trace_projections: Arc<HashMap<String, pl_trace::ToolInputTraceProjection>>,
     ) -> Self {
         Self {
             content_parts: Vec::new(),
@@ -199,13 +183,7 @@ impl StreamCompletionAccumulator {
             final_usage: None,
             response_id: None,
             state: StreamAccumulatorState::open(),
-            trace: trace.map(|trace| {
-                TraceProjection::with_sink_and_projections(
-                    trace,
-                    trace_sink,
-                    input_trace_projections,
-                )
-            }),
+            trace: trace.map(|trace| TraceProjection::with_sink(trace, trace_sink)),
         }
     }
 

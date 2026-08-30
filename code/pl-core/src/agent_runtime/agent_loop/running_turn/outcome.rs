@@ -255,7 +255,7 @@ mod tests {
         completed.outcome = TurnOutcome::completed(TurnCompletion::InteractionRequested);
         let mut result = Ok(completed);
 
-        enforce_finalization(&mut result, &required_tool_policy("plan_exit"));
+        enforce_finalization(&mut result, &required_tool_policy("request_user_input"));
 
         let result = result.unwrap();
         assert!(result.outcome.is_interaction_boundary());

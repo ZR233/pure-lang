@@ -405,8 +405,6 @@ pub struct ToolPlan {
     specs: Arc<[ToolSpec]>,
     wire_fingerprint: Arc<str>,
     execution_fingerprint: Arc<str>,
-    input_trace_projections:
-        Arc<std::collections::HashMap<String, pl_trace::ToolInputTraceProjection>>,
 }
 
 impl fmt::Debug for ToolPlan {
@@ -459,22 +457,12 @@ impl ToolPlan {
             })
             .collect::<Vec<_>>();
         let execution_fingerprint = fingerprint_json(&serde_json::Value::Array(execution_identity));
-        let input_trace_projections = bindings
-            .iter()
-            .filter_map(|binding| {
-                binding
-                    .input_trace_projection
-                    .clone()
-                    .map(|projection| (binding.name().to_string(), projection))
-            })
-            .collect();
         Self {
             manager_id,
             bindings: bindings.into(),
             specs: specs.into(),
             wire_fingerprint: Arc::from(wire_fingerprint),
             execution_fingerprint: Arc::from(execution_fingerprint),
-            input_trace_projections: Arc::new(input_trace_projections),
         }
     }
 
@@ -511,12 +499,6 @@ impl ToolPlan {
         &self.execution_fingerprint
     }
 
-    pub fn input_trace_projections(
-        &self,
-    ) -> Arc<std::collections::HashMap<String, pl_trace::ToolInputTraceProjection>> {
-        Arc::clone(&self.input_trace_projections)
-    }
-
     pub fn executor_generation(&self, name: &str) -> Option<u64> {
         self.binding(name).map(|binding| binding.generation)
     }
@@ -536,7 +518,6 @@ pub(crate) struct ToolBinding {
     execution: ToolExecution,
     programmatic_eligible: bool,
     generation: u64,
-    input_trace_projection: Option<pl_trace::ToolInputTraceProjection>,
 }
 
 impl fmt::Debug for ToolBinding {
@@ -750,14 +731,12 @@ fn freeze_bindings(tools: Vec<Arc<dyn Tool>>, generation: u64) -> Result<Vec<Too
                 "tool replacement contains duplicate name `{name}`"
             )));
         }
-        let input_trace_projection = tool.input_trace_projection();
         bindings.push(ToolBinding {
             execution: tool.execution(),
             spec,
             tool,
             programmatic_eligible,
             generation,
-            input_trace_projection,
         });
     }
     bindings.sort_by(|left, right| left.name().cmp(right.name()));

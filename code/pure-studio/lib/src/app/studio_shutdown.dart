@@ -119,7 +119,7 @@ String shutdownPhaseLabel(
     StudioShutdownPhase.cancellingTurns => l10n.shutdownPhaseCancellingTurns,
     StudioShutdownPhase.flushingPersistence =>
       l10n.shutdownPhaseFlushingPersistence,
-    StudioShutdownPhase.suspendingTasks => l10n.shutdownPhaseSuspendingTasks,
+    StudioShutdownPhase.stoppingAgents => l10n.shutdownPhaseStoppingAgents,
     StudioShutdownPhase.stoppingMcp => l10n.shutdownPhaseStoppingMcp,
     StudioShutdownPhase.stoppingLsp => l10n.shutdownPhaseStoppingLsp,
     StudioShutdownPhase.stopped => l10n.shutdownPhaseStopped,

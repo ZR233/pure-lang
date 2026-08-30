@@ -3,17 +3,14 @@ use std::sync::Arc;
 
 use crate::{
     CancelInteraction, InteractionCommand, InteractionKind, InteractionRequest,
-    InteractionResolution, InteractionStatus, PlanConfirmationResolution,
-    PlanConfirmationResolutionPayload, ReopenRecoveredInteraction, ResolvePlanConfirmation,
-    ResolveToolApproval, ResolveUserInput, ToolApprovalResolution, ToolApprovalResolutionPayload,
-    UserInputResolution,
+    InteractionResolution, InteractionStatus, ReopenRecoveredInteraction, ResolveToolApproval,
+    ResolveUserInput, ToolApprovalResolution, ToolApprovalResolutionPayload, UserInputResolution,
 };
 use anyhow::Result;
 use futures::FutureExt;
 use tokio::sync::{Mutex, oneshot};
 
 use crate::InteractionCallback;
-use crate::studio::StudioStore;
 use crate::studio::ids::unix_seconds;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,8 +34,13 @@ pub type InteractionEmitter =
 
 #[derive(Clone)]
 pub struct InteractionService {
-    store: StudioStore,
     waiters: Arc<Mutex<HashMap<String, InteractionWaiter>>>,
+}
+
+impl Default for InteractionService {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 struct InteractionWaiter {
@@ -46,9 +48,8 @@ struct InteractionWaiter {
 }
 
 impl InteractionService {
-    pub fn new(store: StudioStore) -> Self {
+    pub fn new() -> Self {
         Self {
-            store,
             waiters: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -132,26 +133,6 @@ impl InteractionService {
         reason: &str,
         emitter: InteractionEmitter,
     ) -> Result<()> {
-        self.cancel_pending_interactions(pending, reason, emitter, InteractionCancelScope::All)
-            .await
-    }
-
-    /// 项目移除在 agent tree 退役后直接持久化剩余 pending Interaction。
-    ///
-    /// 这是仅有的冷清理原语之一（design/19 §19.4）：被移除项目中的 Thread
-    /// 可能不再驻留，不能依赖 ThreadActor emitter；项目随后整体离开目录，
-    /// 不需要再发布逐 Thread 热事件。
-    pub(in crate::studio) async fn cancel_thread_for_project_cleanup(
-        &self,
-        thread_id: &str,
-        reason: &str,
-    ) -> Result<()> {
-        let store = self.store.clone();
-        let emitter = Arc::new(move |interaction: InteractionRequest| {
-            let store = store.clone();
-            async move { store.upsert_interaction(&interaction).await }.boxed()
-        });
-        let pending = self.store.list_pending_interactions(thread_id).await?;
         self.cancel_pending_interactions(pending, reason, emitter, InteractionCancelScope::All)
             .await
     }
@@ -256,14 +237,9 @@ impl InteractionService {
 pub fn resolution_matches_kind(kind: InteractionKind, resolution: &InteractionResolution) -> bool {
     match (kind, resolution) {
         (InteractionKind::UserInput, InteractionResolution::UserInput(_))
-        | (InteractionKind::ToolApproval, InteractionResolution::ToolApproval(_))
-        | (InteractionKind::PlanConfirmation, InteractionResolution::PlanConfirmation(_)) => true,
+        | (InteractionKind::ToolApproval, InteractionResolution::ToolApproval(_)) => true,
         (InteractionKind::UserInput, InteractionResolution::ToolApproval(_))
-        | (InteractionKind::UserInput, InteractionResolution::PlanConfirmation(_))
-        | (InteractionKind::ToolApproval, InteractionResolution::UserInput(_))
-        | (InteractionKind::ToolApproval, InteractionResolution::PlanConfirmation(_))
-        | (InteractionKind::PlanConfirmation, InteractionResolution::UserInput(_))
-        | (InteractionKind::PlanConfirmation, InteractionResolution::ToolApproval(_)) => false,
+        | (InteractionKind::ToolApproval, InteractionResolution::UserInput(_)) => false,
     }
 }
 
@@ -275,13 +251,6 @@ fn cancelled_resolution(kind: InteractionKind, reason: &str) -> InteractionResol
         InteractionKind::ToolApproval => {
             InteractionResolution::ToolApproval(ToolApprovalResolutionPayload {
                 decision: ToolApprovalResolution::Denied,
-                reason: Some(reason.to_string()),
-            })
-        }
-        InteractionKind::PlanConfirmation => {
-            InteractionResolution::PlanConfirmation(PlanConfirmationResolutionPayload {
-                decision: PlanConfirmationResolution::RevisePlan,
-                content: Some(reason.to_string()),
                 reason: Some(reason.to_string()),
             })
         }
@@ -314,17 +283,6 @@ fn resolve_command(
                 reason: value.reason,
             }),
         ),
-        (InteractionKind::PlanConfirmation, InteractionResolution::PlanConfirmation(value)) => Ok(
-            InteractionCommand::ResolvePlanConfirmation(ResolvePlanConfirmation {
-                interaction_id: interaction.interaction_id.clone(),
-                expected_revision: interaction.revision,
-                operation_id,
-                resolved_at,
-                decision: value.decision,
-                content: value.content,
-                reason: value.reason,
-            }),
-        ),
         (_, _) => anyhow::bail!("interaction resolution kind mismatch"),
     }
 }
@@ -343,12 +301,13 @@ mod tests {
 
     use super::*;
     use crate::StudioMode;
+    use crate::studio::StudioStore;
 
     async fn store_with_session() -> (StudioStore, String) {
         let store = StudioStore::open_memory().await.unwrap();
         let project = store.upsert_project("C:/work/interactions").await.unwrap();
         let session = store
-            .create_thread(&project.id, "Interaction test", StudioMode::Simple)
+            .create_thread(&project.id, "Interaction test", StudioMode::simple())
             .await
             .unwrap();
         (store, session.id)
@@ -435,7 +394,7 @@ mod tests {
     #[tokio::test]
     async fn callback_persists_pending_and_waits_for_resolution() {
         let (store, session_id) = store_with_session().await;
-        let runtime = InteractionService::new(store.clone());
+        let runtime = InteractionService::new();
         let events = Arc::new(Mutex::new(Vec::new()));
         let callback = runtime.callback(session_id.clone(), emitter(store.clone(), events.clone()));
         let waiter = tokio::spawn(callback(user_input_interaction("ask-1")));
@@ -480,7 +439,7 @@ mod tests {
     #[tokio::test]
     async fn cancel_thread_marks_pending_and_releases_waiters() {
         let (store, session_id) = store_with_session().await;
-        let runtime = InteractionService::new(store.clone());
+        let runtime = InteractionService::new();
         let events = Arc::new(Mutex::new(Vec::new()));
         let callback = runtime.callback(session_id.clone(), emitter(store.clone(), events.clone()));
         let waiter = tokio::spawn(callback(tool_approval_interaction(&session_id, "call-1")));
@@ -517,33 +476,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn restart_cancellation_preserves_user_input_and_plan_confirmation() {
+    async fn restart_cancellation_preserves_user_input() {
         let (store, session_id) = store_with_session().await;
-        let runtime = InteractionService::new(store.clone());
+        let runtime = InteractionService::new();
         let events = Arc::new(Mutex::new(Vec::new()));
         let mut user_input = user_input_interaction("ask-1");
         user_input.scope.thread_id = session_id.clone();
-        let plan = InteractionRequest::plan_confirmation(
-            "plan-1",
-            InteractionScope {
-                thread_id: session_id.clone(),
-                turn_id: "turn-1".to_string(),
-                item_id: Some("plan-1".to_string()),
-                tool_id: Some("plan-1".to_string()),
-                agent_path: Some("/root/child".to_string()),
-            },
-            "turn-1-plan",
-            "1. Inspect\n2. Implement",
-            1,
-        );
         let approval = tool_approval_interaction(&session_id, "approval-1");
 
         runtime
             .create(user_input.clone(), emitter(store.clone(), events.clone()))
-            .await
-            .unwrap();
-        runtime
-            .create(plan.clone(), emitter(store.clone(), events.clone()))
             .await
             .unwrap();
         runtime
@@ -560,14 +502,12 @@ mod tests {
             .unwrap();
 
         let ask = store.read_interaction("ask-1").await.unwrap().unwrap();
-        let stored_plan = store.read_interaction("plan-1").await.unwrap().unwrap();
         let stored_approval = store.read_interaction("approval-1").await.unwrap().unwrap();
         let pending = store.list_pending_interactions(&session_id).await.unwrap();
 
         assert_eq!(ask.status(), InteractionStatus::Pending);
-        assert_eq!(stored_plan.status(), InteractionStatus::Pending);
         assert_eq!(stored_approval.status(), InteractionStatus::Cancelled);
         assert_eq!(stored_approval.resolution(), None);
-        assert_eq!(pending, vec![stored_plan, ask]);
+        assert_eq!(pending, vec![ask]);
     }
 }

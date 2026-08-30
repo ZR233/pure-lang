@@ -214,21 +214,6 @@ class StudioController extends _$StudioController {
     );
   }
 
-  Future<RecoveryCleanupPreview> previewProjectCleanup(String projectId) {
-    return _api.previewProjectCleanup(projectId);
-  }
-
-  Future<void> cleanupProject(String projectId, String expectedRevision) async {
-    final current = state.value;
-    if (!_acceptsNewWork(current)) return;
-    await _api.cleanupProject(projectId, expectedRevision);
-    await _reloadProductState(
-      selection: current?.selectedProjectId == projectId
-          ? const _ProjectDefaultSelection(null)
-          : const _PreserveSelection(),
-    );
-  }
-
   Future<void> selectThread(String threadId) => _selectThread(threadId);
 
   Future<void> selectAgentThread(String threadId) async {
@@ -732,35 +717,6 @@ class StudioController extends _$StudioController {
     );
   }
 
-  Future<TaskRecoveryPreview> previewTaskRecovery(String rootThreadId) {
-    return _api.previewTaskRecovery(rootThreadId);
-  }
-
-  Future<TaskRecoveryResult> applyTaskRecovery(
-    TaskRecoveryRequest request,
-  ) async {
-    if (!_acceptsNewWork(state.value)) {
-      throw StateError('Persistence is unavailable; recovery is paused.');
-    }
-    final result = await _api.applyTaskRecovery(request);
-    await _refreshRecoveredHistory(result.targetThreadId);
-    return result;
-  }
-
-  Future<void> _refreshRecoveredHistory(String threadId) async {
-    try {
-      final page = await _api.listThreadTurns(threadId);
-      if (!ref.mounted) return;
-      final current = state.value;
-      if (current == null || current.workspacesByThread[threadId] == null) {
-        return;
-      }
-      state = AsyncData(applyRecoveredDispositions(current, threadId, page));
-    } on Object {
-      // Recovery is already durable; a later history load will project labels.
-    }
-  }
-
   Future<void> _submitThreadInput(
     StudioState current,
     String threadId,
@@ -852,7 +808,7 @@ class StudioController extends _$StudioController {
         !thread.isRoot ||
         thread.mode == mode ||
         thread.status != ThreadStatusView.idle ||
-        current.runtime.hasActiveTask) {
+        current.runtime.hasActiveWorkflow) {
       return;
     }
     await _api.setThreadMode(threadId: thread.id, mode: mode);
@@ -883,8 +839,7 @@ class StudioController extends _$StudioController {
         .expand((provider) => provider.allModels)
         .where((candidate) => candidate.slug == model)
         .firstOrNull;
-    final selectedMode = current.selectedThread?.mode ?? current.newThreadMode;
-    final activeRole = selectedMode == StudioMode.task ? 'planner' : 'executor';
+    const activeRole = 'planner';
     final composer = current.selectedThreadId == null
         ? current.newThreadComposer
         : _workspaceUi(current, current.selectedThreadId!).composer;
@@ -1073,37 +1028,6 @@ class StudioController extends _$StudioController {
     if (latest != null) state = AsyncData(applyLspState(latest, snapshot));
   }
 
-  Future<RecoveryCleanupPreview> previewRecoveryIssueCleanup(String issueId) {
-    return _api.previewRecoveryIssueCleanup(issueId);
-  }
-
-  Future<void> cleanupRecoveryIssue(
-    String issueId,
-    String expectedRevision,
-  ) async {
-    if (!_acceptsNewWork(state.value)) return;
-    await _api.cleanupRecoveryIssue(issueId, expectedRevision);
-    await _reloadProductState(selection: const _PreserveSelection());
-  }
-
-  Future<void> retryRecoveryIssue(String issueId) async {
-    final current = state.value;
-    if (current == null || !_acceptsNewWork(current)) return;
-    final issue = current.recoveryIssue(id: issueId);
-    if (issue == null || !issue.canRetry) return;
-    await _api.retryRecoveryIssue(issueId);
-    await _reloadProductState(
-      selection: issue.threadId == null
-          ? _ProjectDefaultSelection(
-              issue.projectId ?? current.selectedProjectId,
-            )
-          : _ExactThreadSelection(
-              projectId: issue.projectId ?? current.selectedProjectId,
-              threadId: issue.threadId!,
-            ),
-    );
-  }
-
   void retryInitialization() => ref.invalidateSelf();
 
   Future<void> retryPersistence() async {
@@ -1129,13 +1053,6 @@ class StudioController extends _$StudioController {
         workspace == null ||
         interaction == null ||
         interaction.id != interactionId) {
-      throw _interactionConflict();
-    }
-    final selectedThread = current.selectedThread;
-    final task = selectedThread == null
-        ? null
-        : current.tasksByRootThread[selectedThread.effectiveRootThreadId];
-    if (task != null && !task.isActive) {
       throw _interactionConflict();
     }
     final interactionsBeforeResponse = {
@@ -1335,7 +1252,6 @@ StudioState _mergeProductSnapshots(StudioState current, StudioState incoming) {
     selectedProjectId: incoming.selectedProjectId,
     selectedThreadId: incoming.selectedThreadId,
   );
-  next = applyTaskDirectory(next, incoming.taskDirectory);
   next = applyAgentDirectory(next, incoming.agentDirectory);
   next = applySettingsState(next, incoming.settingsState);
   next = applyRecoveryState(next, incoming.recoveryState);

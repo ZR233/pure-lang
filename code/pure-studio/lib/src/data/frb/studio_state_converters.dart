@@ -145,11 +145,9 @@ String _interactionTitle(InteractionKind kind, InteractionPayload payload) {
     ToolApprovalInteractionPayload(:final toolName) =>
       toolName.isEmpty ? 'Tool approval' : toolName,
     UserInputInteractionPayload() => 'User input requested',
-    PlanConfirmationInteractionPayload() => 'Plan confirmation',
     UnknownInteractionPayload() => switch (kind) {
       InteractionKind.toolApproval => 'Tool approval',
       InteractionKind.userInput => 'User input requested',
-      InteractionKind.planConfirmation => 'Plan confirmation',
     },
   };
 }
@@ -162,7 +160,6 @@ String _interactionBody(InteractionKind kind, InteractionPayload payload) {
           .map((question) => question.question)
           .where((question) => question.isNotEmpty)
           .join('\n'),
-    PlanConfirmationInteractionPayload(:final content) => content,
     UnknownInteractionPayload() => '',
   };
 }

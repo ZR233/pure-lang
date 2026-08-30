@@ -7,11 +7,10 @@ use pl_protocol::{
     StreamingThreadTool, SucceededThreadAgent, SucceededThreadTool, ThreadAgentIdentity,
     ThreadAgentItem, ThreadAgentState, ThreadAttachment, ThreadContentLifecycle,
     ThreadInferenceItem, ThreadInferenceState, ThreadItem, ThreadItemDelta, ThreadItemDeltaState,
-    ThreadItemState, ThreadNotification, ThreadNotificationEnvelope, ThreadPlanItem,
-    ThreadSkillItem, ThreadSnapshot, ThreadTextChannel, ThreadTextItem, ThreadThinkingItem,
-    ThreadToolFailure, ThreadToolFailureKind, ThreadToolInvocation, ThreadToolItem,
-    ThreadToolOutput, ThreadToolState, ThreadTurnItem, Turn, TurnCancellationCause, TurnCompletion,
-    TurnOutcome, TurnPhase, TurnState,
+    ThreadItemState, ThreadNotification, ThreadNotificationEnvelope, ThreadSkillItem,
+    ThreadSnapshot, ThreadTextChannel, ThreadTextItem, ThreadThinkingItem, ThreadToolFailure,
+    ThreadToolFailureKind, ThreadToolInvocation, ThreadToolItem, ThreadToolOutput, ThreadToolState,
+    ThreadTurnItem, Turn, TurnCancellationCause, TurnCompletion, TurnOutcome, TurnPhase, TurnState,
 };
 use pl_trace::{
     TraceDelta, TraceEvent, TraceEventKind, TracePart, TracePartDeltaEvent, TracePartState,
@@ -386,7 +385,6 @@ fn phase_for_item(item: &TracePart) -> Option<TurnPhase> {
         },
         TracePartState::Thinking(_) | TracePartState::Inference(_) => Some(TurnPhase::Thinking),
         TracePartState::Tool(_) | TracePartState::Agent(_) => Some(TurnPhase::RunningTool),
-        TracePartState::Plan(_) => Some(TurnPhase::Planning),
         TracePartState::Turn(_) => None,
     }
 }
@@ -430,10 +428,6 @@ fn thread_item(thread_id: &str, item: &TracePart) -> Option<ThreadItem> {
         TracePartState::Agent(agent) => {
             ThreadItemState::Agent(thread_agent_item(agent, item.updated_at()))
         }
-        TracePartState::Plan(plan) => ThreadItemState::Plan(ThreadPlanItem::new(
-            plan.content().to_string(),
-            plan_lifecycle(plan.state(), item.updated_at()),
-        )),
         TracePartState::Turn(_) => {
             item.failure()?;
             let TracePartState::Turn(turn) = item.state() else {
@@ -564,21 +558,6 @@ fn thinking_lifecycle(
     }
 }
 
-fn plan_lifecycle(state: &pl_trace::TracePlanState, updated_at: i64) -> ThreadContentLifecycle {
-    match state {
-        pl_trace::TracePlanState::Started(_) | pl_trace::TracePlanState::Streaming(_) => {
-            ThreadContentLifecycle::streaming()
-        }
-        pl_trace::TracePlanState::Completed(_) => ThreadContentLifecycle::completed(updated_at),
-        pl_trace::TracePlanState::Failed(value) => {
-            ThreadContentLifecycle::failed(updated_at, value.error().to_string())
-        }
-        pl_trace::TracePlanState::Cancelled(value) => {
-            ThreadContentLifecycle::cancelled(updated_at, value.reason().to_string())
-        }
-    }
-}
-
 fn thread_agent_item(agent: &pl_trace::TraceAgentPart, updated_at: i64) -> ThreadAgentItem {
     let identity = agent.identity();
     let state = match agent.state() {
@@ -654,9 +633,6 @@ fn item_delta(event: &TracePartDeltaEvent) -> Option<ThreadItemDelta> {
             delta: delta.clone(),
         },
         TraceDelta::ToolResult { delta } => ThreadItemDeltaState::ToolResult {
-            delta: delta.clone(),
-        },
-        TraceDelta::Plan { delta } => ThreadItemDeltaState::Plan {
             delta: delta.clone(),
         },
     };

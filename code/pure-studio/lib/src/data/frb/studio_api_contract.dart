@@ -2,6 +2,12 @@ part of 'studio_api.dart';
 
 abstract class StudioApi {
   Future<ProviderCatalogView> loadProviderCatalog();
+  Future<List<AgentProfileView>> readAgentProfiles();
+  Future<List<AgentProfileView>> setSystemAgentEnabled({
+    required String profileId,
+    required bool enabled,
+  });
+  Future<List<AgentProfileView>> saveUserAgentProfile(AgentProfileDraft draft);
   Future<StudioState> readStudioState();
   Future<ThreadDirectoryPage> listThreadsPage({String? cursor, int limit = 50});
   Future<void> activateProject(String projectId);
@@ -23,14 +29,7 @@ abstract class StudioApi {
   );
   Future<ArchiveThreadResult> archiveThread(String threadId);
   Future<void> archiveProject(String projectId);
-  Future<RecoveryCleanupPreview> previewProjectCleanup(String projectId);
-  Future<void> cleanupProject(String projectId, String expectedRevision);
-  Future<RecoveryCleanupPreview> previewRecoveryIssueCleanup(String issueId);
-  Future<void> cleanupRecoveryIssue(String issueId, String expectedRevision);
-  Future<void> retryRecoveryIssue(String issueId);
   Future<PersistenceStateSnapshot> retryPersistence();
-  Future<TaskRecoveryPreview> previewTaskRecovery(String rootThreadId);
-  Future<TaskRecoveryResult> applyTaskRecovery(TaskRecoveryRequest request);
   Future<SettingsStateSnapshot> setModelRole({
     required int expectedSettingsRevision,
     required String roleKey,
@@ -241,6 +240,64 @@ class FrbStudioApi implements StudioApi {
   }
 
   @override
+  Future<List<AgentProfileView>> readAgentProfiles() async {
+    await _ensureReady();
+    final profiles = await _bridgeCall(frb.readAgentProfiles);
+    return profiles
+        .map(
+          (profile) => AgentProfileView(
+            id: profile.profileId,
+            displayName: profile.displayName,
+            description: profile.description,
+            whenToUse: profile.whenToUse,
+            systemInstructions: profile.systemInstructions,
+            providerId: profile.providerId,
+            model: profile.model,
+            effort: profile.effort,
+            source: profile.source,
+            revision: profile.revision,
+            contentHash: profile.contentHash,
+            system: profile.system,
+            enabled: profile.enabled,
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  @override
+  Future<List<AgentProfileView>> setSystemAgentEnabled({
+    required String profileId,
+    required bool enabled,
+  }) async {
+    await _ensureReady();
+    await _bridgeCall(
+      () => frb.setSystemAgentEnabled(profileId: profileId, enabled: enabled),
+    );
+    return readAgentProfiles();
+  }
+
+  @override
+  Future<List<AgentProfileView>> saveUserAgentProfile(
+    AgentProfileDraft draft,
+  ) async {
+    await _ensureReady();
+    await _bridgeCall(
+      () => frb.saveUserAgentProfile(
+        profileId: draft.id,
+        enabled: draft.enabled,
+        displayName: draft.displayName,
+        description: draft.description,
+        whenToUse: draft.whenToUse,
+        systemInstructions: draft.systemInstructions,
+        providerId: draft.providerId,
+        model: draft.model,
+        effort: draft.effort,
+      ),
+    );
+    return readAgentProfiles();
+  }
+
+  @override
   Future<StudioState> readStudioState() async {
     await _ensureReady();
     final state = studioStateFromFrbSnapshot(
@@ -395,7 +452,7 @@ class FrbStudioApi implements StudioApi {
       () => frb.startNewThread(
         projectId: projectId,
         input: _bridgePromptInput(input),
-        mode: _bridgeThreadMode(mode),
+        mode: mode.id,
       ),
     );
     return StartNewThreadResult(
@@ -430,83 +487,9 @@ class FrbStudioApi implements StudioApi {
   }
 
   @override
-  Future<RecoveryCleanupPreview> previewProjectCleanup(String projectId) async {
-    await _ensureReady();
-    return _recoveryCleanupPreviewFromFrb(
-      await _bridgeCall(() => frb.previewProjectCleanup(projectId: projectId)),
-    );
-  }
-
-  @override
-  Future<void> cleanupProject(String projectId, String expectedRevision) async {
-    await _ensureReady();
-    await _bridgeCall(
-      () => frb.cleanupProject(
-        projectId: projectId,
-        expectedRevision: expectedRevision,
-      ),
-    );
-  }
-
-  @override
-  Future<RecoveryCleanupPreview> previewRecoveryIssueCleanup(
-    String issueId,
-  ) async {
-    await _ensureReady();
-    return _recoveryCleanupPreviewFromFrb(
-      await _bridgeCall(
-        () => frb.previewRecoveryIssueCleanup(issueId: issueId),
-      ),
-    );
-  }
-
-  @override
-  Future<void> cleanupRecoveryIssue(
-    String issueId,
-    String expectedRevision,
-  ) async {
-    await _ensureReady();
-    await _bridgeCall(
-      () => frb.cleanupRecoveryIssue(
-        issueId: issueId,
-        expectedRevision: expectedRevision,
-      ),
-    );
-  }
-
-  @override
-  Future<void> retryRecoveryIssue(String issueId) async {
-    await _ensureReady();
-    await _bridgeCall(() => frb.retryRecoveryIssue(issueId: issueId));
-  }
-
-  @override
   Future<PersistenceStateSnapshot> retryPersistence() async {
     await _ensureReady();
     return _persistenceStateFromFrb(await _bridgeCall(frb.retryPersistence));
-  }
-
-  @override
-  Future<TaskRecoveryPreview> previewTaskRecovery(String rootThreadId) async {
-    await _ensureReady();
-    return _taskRecoveryPreviewFromFrb(
-      await _bridgeCall(
-        () => frb.previewTaskRecovery(rootThreadId: rootThreadId),
-      ),
-    );
-  }
-
-  @override
-  Future<TaskRecoveryResult> applyTaskRecovery(
-    TaskRecoveryRequest request,
-  ) async {
-    await _ensureReady();
-    return _taskRecoveryResultFromFrb(
-      await _bridgeCall(
-        () =>
-            frb.applyTaskRecovery(request: _taskRecoveryRequestToFrb(request)),
-      ),
-    );
   }
 
   @override
@@ -538,16 +521,8 @@ class FrbStudioApi implements StudioApi {
   }) async {
     await _ensureReady();
     await _bridgeCall(
-      () =>
-          frb.setThreadMode(threadId: threadId, mode: _bridgeThreadMode(mode)),
+      () => frb.setThreadMode(threadId: threadId, mode: mode.id),
     );
-  }
-
-  frb.BridgeThreadMode _bridgeThreadMode(StudioMode mode) {
-    return switch (mode) {
-      StudioMode.simple => frb.BridgeThreadMode.simple,
-      StudioMode.task => frb.BridgeThreadMode.task,
-    };
   }
 
   @override
@@ -580,8 +555,8 @@ class FrbStudioApi implements StudioApi {
               FlushingPersistenceProgress(
                 pendingCommits: pendingCommits.toInt(),
               ),
-            frb.BridgeShutdownProgress_SuspendingTasks() =>
-              const SuspendingTasksProgress(),
+            frb.BridgeShutdownProgress_StoppingAgents() =>
+              const StoppingAgentsProgress(),
             frb.BridgeShutdownProgress_StoppingMcp() =>
               const StoppingMcpProgress(),
             frb.BridgeShutdownProgress_StoppingLsp() =>
@@ -805,7 +780,7 @@ class FrbStudioApi implements StudioApi {
             ),
           NewThreadAttachmentAdmissionContext(:final mode) =>
             frb_attachment_types.BridgeAttachmentAdmissionContext.newThread(
-              mode: _bridgeThreadMode(mode),
+              mode: mode.id,
             ),
         },
         sources: [

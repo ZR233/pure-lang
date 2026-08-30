@@ -15,7 +15,7 @@ import 'updater.dart';
 part 'response.freezed.dart';
 
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `ProviderUsagesResponse`, `SkillsResponse`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 class ArchiveThreadResult {
   final String archivedRootId;
@@ -725,6 +725,7 @@ class BridgeSkillsStateData {
   final String configFingerprint;
   final BigInt catalogRevision;
   final List<SkillSummaryDto> skills;
+  final List<ModeSummaryDto> modes;
   final List<String> warnings;
   final bool complete;
 
@@ -732,6 +733,7 @@ class BridgeSkillsStateData {
     required this.configFingerprint,
     required this.catalogRevision,
     required this.skills,
+    required this.modes,
     required this.warnings,
     required this.complete,
   });
@@ -741,6 +743,7 @@ class BridgeSkillsStateData {
       configFingerprint.hashCode ^
       catalogRevision.hashCode ^
       skills.hashCode ^
+      modes.hashCode ^
       warnings.hashCode ^
       complete.hashCode;
 
@@ -752,6 +755,7 @@ class BridgeSkillsStateData {
           configFingerprint == other.configFingerprint &&
           catalogRevision == other.catalogRevision &&
           skills == other.skills &&
+          modes == other.modes &&
           warnings == other.warnings &&
           complete == other.complete;
 }
@@ -801,7 +805,6 @@ class BridgeStudioStateSnapshot {
 
   /// 目录分页窗口的首页；后续页通过 `listThreadsPage` keyset cursor 加载。
   final BridgeThreadDirectoryPage threadDirectory;
-  final BridgeTaskDirectoryState taskDirectory;
   final BridgeAgentDirectoryState agentDirectory;
   final BridgeSettingsStateSnapshot settings;
   final BridgeRecoveryStateSnapshot recovery;
@@ -817,7 +820,6 @@ class BridgeStudioStateSnapshot {
     required this.runtime,
     required this.projectDirectory,
     required this.threadDirectory,
-    required this.taskDirectory,
     required this.agentDirectory,
     required this.settings,
     required this.recovery,
@@ -835,7 +837,6 @@ class BridgeStudioStateSnapshot {
       runtime.hashCode ^
       projectDirectory.hashCode ^
       threadDirectory.hashCode ^
-      taskDirectory.hashCode ^
       agentDirectory.hashCode ^
       settings.hashCode ^
       recovery.hashCode ^
@@ -855,7 +856,6 @@ class BridgeStudioStateSnapshot {
           runtime == other.runtime &&
           projectDirectory == other.projectDirectory &&
           threadDirectory == other.threadDirectory &&
-          taskDirectory == other.taskDirectory &&
           agentDirectory == other.agentDirectory &&
           settings == other.settings &&
           recovery == other.recovery &&
@@ -866,74 +866,6 @@ class BridgeStudioStateSnapshot {
           modelPerformance == other.modelPerformance &&
           updater == other.updater &&
           persistence == other.persistence;
-}
-
-class BridgeTaskDirectoryData {
-  final List<BridgeTaskDirectoryEntry> tasks;
-
-  const BridgeTaskDirectoryData({required this.tasks});
-
-  @override
-  int get hashCode => tasks.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeTaskDirectoryData &&
-          runtimeType == other.runtimeType &&
-          tasks == other.tasks;
-}
-
-class BridgeTaskDirectoryEntry {
-  final String rootThreadId;
-  final BridgeTaskRuntimeDto task;
-
-  const BridgeTaskDirectoryEntry({
-    required this.rootThreadId,
-    required this.task,
-  });
-
-  @override
-  int get hashCode => rootThreadId.hashCode ^ task.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeTaskDirectoryEntry &&
-          runtimeType == other.runtimeType &&
-          rootThreadId == other.rootThreadId &&
-          task == other.task;
-}
-
-@freezed
-sealed class BridgeTaskDirectoryState with _$BridgeTaskDirectoryState {
-  const BridgeTaskDirectoryState._();
-
-  const factory BridgeTaskDirectoryState.uninitialized(
-    BridgeUninitializedResource field0,
-  ) = BridgeTaskDirectoryState_Uninitialized;
-  const factory BridgeTaskDirectoryState.loading(BridgeLoadingResource field0) =
-      BridgeTaskDirectoryState_Loading;
-  const factory BridgeTaskDirectoryState.ready({
-    required BridgeReadyResource resource,
-    required BridgeTaskDirectoryData value,
-  }) = BridgeTaskDirectoryState_Ready;
-  const factory BridgeTaskDirectoryState.refreshing({
-    required BridgeRefreshingResource resource,
-    required BridgeTaskDirectoryData value,
-  }) = BridgeTaskDirectoryState_Refreshing;
-  const factory BridgeTaskDirectoryState.stale({
-    required BridgeStaleResource resource,
-    required BridgeTaskDirectoryData value,
-  }) = BridgeTaskDirectoryState_Stale;
-  const factory BridgeTaskDirectoryState.degraded({
-    required BridgeDegradedResource resource,
-    required BridgeTaskDirectoryData value,
-  }) = BridgeTaskDirectoryState_Degraded;
-  const factory BridgeTaskDirectoryState.failed(BridgeFailedResource field0) =
-      BridgeTaskDirectoryState_Failed;
-  const factory BridgeTaskDirectoryState.stopped(BridgeStoppedResource field0) =
-      BridgeTaskDirectoryState_Stopped;
 }
 
 @freezed
@@ -1062,6 +994,45 @@ class InterruptTurnResponse {
           threadId == other.threadId &&
           turnId == other.turnId &&
           interrupted == other.interrupted;
+}
+
+class ModeSummaryDto {
+  final String id;
+  final String displayName;
+  final String description;
+  final int order;
+  final String source;
+  final String providerId;
+
+  const ModeSummaryDto({
+    required this.id,
+    required this.displayName,
+    required this.description,
+    required this.order,
+    required this.source,
+    required this.providerId,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      displayName.hashCode ^
+      description.hashCode ^
+      order.hashCode ^
+      source.hashCode ^
+      providerId.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ModeSummaryDto &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          displayName == other.displayName &&
+          description == other.description &&
+          order == other.order &&
+          source == other.source &&
+          providerId == other.providerId;
 }
 
 class ProjectDto {

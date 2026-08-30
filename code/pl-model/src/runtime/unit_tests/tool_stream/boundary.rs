@@ -359,10 +359,7 @@ fn stream_accumulator_terminal_snapshots_converge_with_live_deltas() {
         .iter()
         .filter_map(|event| match &event.kind {
             TraceEventKind::TracePartCompleted { item }
-                if matches!(
-                    item.kind(),
-                    TracePartKind::Text | TracePartKind::Thinking | TracePartKind::Plan
-                ) =>
+                if matches!(item.kind(), TracePartKind::Text | TracePartKind::Thinking) =>
             {
                 Some((item.item_id().to_string(), trace_part_text(item)))
             }

@@ -41,6 +41,12 @@ pub struct AgentWorkingState {
     pub prompt: ThreadPromptMetadata,
     #[serde(default)]
     pub conversation_recovery: ConversationRecoveryState,
+    /// Mode Skill 编译的通用工作流；完整状态不直接进入模型上下文。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow: Option<crate::WorkflowSessionState>,
+    /// 子 Agent 创建时冻结的 Profile；根 Agent 不设置此字段。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_profile: Option<crate::AgentProfileSnapshot>,
     #[serde(default)]
     pub revision: u64,
 }
@@ -167,7 +173,7 @@ pub struct ThreadPromptMetadata {
 /// 独立于可压缩时间线的上下文段标识。
 ///
 /// 标识会作为持久化协议的一部分，必须稳定且非空。产品层应使用带命名空间的
-/// 值，例如 `pl.current_todo` 或 `mai.review_manifest`。
+/// 值，例如 `pl.current_todo` 或 `pl.workflow`。
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(transparent)]
 pub struct ContextSectionId(String);

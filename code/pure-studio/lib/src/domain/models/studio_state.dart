@@ -36,7 +36,6 @@ class StudioState {
   StudioState({
     required this.projectDirectory,
     required this.threadDirectory,
-    required this.taskDirectory,
     required this.agentDirectory,
     required this.settingsState,
     required this.recoveryState,
@@ -66,7 +65,6 @@ class StudioState {
   final String? selectedThreadId;
   final ProjectDirectoryState projectDirectory;
   final ThreadDirectoryWindow threadDirectory;
-  final TaskDirectoryState taskDirectory;
   final AgentDirectoryState agentDirectory;
   final SettingsStateSnapshot settingsState;
   final RecoveryStateSnapshot recoveryState;
@@ -81,9 +79,6 @@ class StudioState {
 
   List<StudioProject> get projects => projectDirectory.values;
   List<StudioThread> get threads => threadDirectory.threads;
-  Map<String, TaskRuntimeView> get tasksByRootThread => {
-    for (final entry in taskDirectory.values) entry.rootThreadId: entry.task,
-  };
   Map<String, StudioAgentView> get agentsByThread => {
     for (final agent in agentDirectory.values) agent.threadId: agent,
   };
@@ -120,15 +115,8 @@ class StudioState {
   StudioTurnView? get turn => selectedWorkspace?.activeTurn;
 
   ThreadRuntimeView get runtime {
-    final selected = selectedThread;
     final canonical = selectedWorkspace?.runtime ?? _emptySessionRuntime;
-    final task = selected == null
-        ? null
-        : tasksByRootThread[selected.effectiveRootThreadId];
-    return canonical.copyWith(
-      task: task,
-      agentCount: threadsForSelectedRoot.length,
-    );
+    return canonical.copyWith(agentCount: threadsForSelectedRoot.length);
   }
 
   ComposerThreadState get composer => selectedWorkspaceUi.composer;
@@ -303,7 +291,6 @@ class StudioState {
     Object? selectedThreadId = _studioStateUnset,
     ProjectDirectoryState? projectDirectory,
     ThreadDirectoryWindow? threadDirectory,
-    TaskDirectoryState? taskDirectory,
     AgentDirectoryState? agentDirectory,
     SettingsStateSnapshot? settingsState,
     RecoveryStateSnapshot? recoveryState,
@@ -332,7 +319,6 @@ class StudioState {
           : selectedThreadId as String?,
       projectDirectory: projectDirectory ?? this.projectDirectory,
       threadDirectory: threadDirectory ?? this.threadDirectory,
-      taskDirectory: taskDirectory ?? this.taskDirectory,
       agentDirectory: agentDirectory ?? this.agentDirectory,
       settingsState: settingsState ?? this.settingsState,
       recoveryState: recoveryState ?? this.recoveryState,

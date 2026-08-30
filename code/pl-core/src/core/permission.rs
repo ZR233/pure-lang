@@ -165,11 +165,9 @@ pub(super) async fn request_user_approval(
                 reason: value.reason.unwrap_or_else(|| "denied by user".to_string()),
             },
         },
-        InteractionResolution::UserInput(_) | InteractionResolution::PlanConfirmation(_) => {
-            ToolApprovalDecision::Denied {
-                reason: "interaction resolved with an incompatible payload".to_string(),
-            }
-        }
+        InteractionResolution::UserInput(_) => ToolApprovalDecision::Denied {
+            reason: "interaction resolved with an incompatible payload".to_string(),
+        },
     }
 }
 

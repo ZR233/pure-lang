@@ -21,13 +21,12 @@ use super::billing::{aggregate_billing_usage, restore_billing, runtime_from_cont
 use super::context::{SessionSnapshotAuditError, audit_session_snapshot, restore_session_snapshot};
 use super::labels::agent_state_kind;
 use super::projection::latest_turn;
-use super::{StudioSessionRecoveryFailure, anyhow_into, store_error, u64_from_i64};
+use super::{StudioSessionRecoveryFailure, store_error, u64_from_i64};
 
 const HOT_TIMELINE_ITEM_LIMIT: u64 = 400;
 
 impl StudioAgentRepository {
-    /// 钉住集合：pending input、pending Interaction、活动 Turn、活动 Task root、
-    /// pending planner wake root 与 pending executor continuation agent。
+    /// 钉住集合：pending input、pending Interaction 与活动 Turn。
     pub(super) async fn pinned_thread_ids(&self) -> Result<BTreeSet<String>, PureError> {
         let database = self.store.database();
         let mut ids = BTreeSet::new();
@@ -58,30 +57,6 @@ impl StudioAgentRepository {
                 .into_iter()
                 .map(|row| row.thread_id),
         );
-        for run in self
-            .store
-            .list_active_task_runs()
-            .await
-            .map_err(anyhow_into)?
-        {
-            ids.insert(run.root_thread_id.clone());
-        }
-        for wake in self
-            .store
-            .list_pending_task_planner_wakes()
-            .await
-            .map_err(anyhow_into)?
-        {
-            ids.insert(wake.root_thread_id.clone());
-        }
-        for continuation in self
-            .store
-            .list_pending_executor_continuations()
-            .await
-            .map_err(anyhow_into)?
-        {
-            ids.insert(continuation.agent_id.clone());
-        }
         Ok(ids)
     }
 
@@ -356,7 +331,6 @@ impl StudioAgentRepository {
                 | ThreadItemState::Agent(_)
                 | ThreadItemState::Turn(_)
                 | ThreadItemState::Inference(_)
-                | ThreadItemState::Plan(_)
                 | ThreadItemState::File(_)
                 | ThreadItemState::ContextCompaction(_) => None,
             })
@@ -417,7 +391,6 @@ pub(super) fn active_skills_from_items(items: &[ThreadItem]) -> Vec<String> {
             | ThreadItemState::Agent(_)
             | ThreadItemState::Turn(_)
             | ThreadItemState::Inference(_)
-            | ThreadItemState::Plan(_)
             | ThreadItemState::File(_)
             | ThreadItemState::ContextCompaction(_) => None,
         })
@@ -453,6 +426,7 @@ fn empty_restored_runtime(thread_id: &str, updated_at: i64) -> ThreadRuntimeSnap
         turn_decode_millis: 0,
         todo: None,
         active_skills: Vec::new(),
+        workflow: None,
         active_mcp_servers: Vec::new(),
         active_lsp_servers: Vec::new(),
         progress: None,

@@ -165,29 +165,6 @@ impl StudioStore {
         result
     }
 
-    #[cfg(test)]
-    pub(crate) async fn persist_tool_image(
-        &self,
-        thread_id: &str,
-        input: pl_core::ToolImageAttachmentInput,
-    ) -> Result<ThreadAttachment> {
-        let mut attachments = self.persist_tool_images(thread_id, vec![input]).await?;
-        attachments
-            .pop()
-            .context("tool image batch returned no row")
-    }
-
-    #[cfg(test)]
-    pub(crate) async fn persist_tool_images(
-        &self,
-        thread_id: &str,
-        inputs: Vec<pl_core::ToolImageAttachmentInput>,
-    ) -> Result<Vec<ThreadAttachment>> {
-        self.persist_tool_image_records(thread_id, inputs)
-            .await
-            .map(|records| records.iter().map(thread_attachment).collect())
-    }
-
     pub(crate) async fn persist_tool_image_records(
         &self,
         thread_id: &str,

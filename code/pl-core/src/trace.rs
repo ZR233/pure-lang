@@ -303,8 +303,7 @@ impl TraceRecorder {
             | TracePartState::Thinking(_)
             | TracePartState::Tool(_)
             | TracePartState::Agent(_)
-            | TracePartState::Inference(_)
-            | TracePartState::Plan(_) => None,
+            | TracePartState::Inference(_) => None,
         };
         let state = match outcome {
             TurnOutcome::Completed(completed) => TurnState::Completed(CompletedTurnState::new(
@@ -338,68 +337,6 @@ impl TraceRecorder {
             self.remember_protocol_error(format!("failed to terminalize turn trace item: {error}"));
         }
         item
-    }
-
-    pub fn complete_plan_item(&mut self, turn_id: &str, item_id: &str, content: String) {
-        if content.trim().is_empty() {
-            return;
-        }
-        let timestamp = unix_seconds();
-        let mut item = if let Some(item) = self.latest_trace_part(item_id) {
-            item
-        } else {
-            let item = TracePart::started_plan(
-                turn_id.to_string(),
-                item_id.to_string(),
-                self.current_sequence(),
-                timestamp,
-            );
-            self.start_item(item.clone());
-            item
-        };
-        if let Err(error) = item.apply(item.command(
-            timestamp,
-            TracePartAction::Complete(TracePartCompletion::Plan {
-                content: Some(content),
-            }),
-        )) {
-            self.remember_protocol_error(format!("failed to complete plan trace item: {error}"));
-            return;
-        }
-        self.complete_item(item);
-    }
-
-    pub fn terminalize_plan_item_for_tool(
-        &mut self,
-        tool_item_id: &str,
-        cancelled: bool,
-        message: &str,
-    ) {
-        let item_id = pl_trace::plan_trace_part_id(tool_item_id);
-        let Some(mut item) = self.latest_trace_part(&item_id) else {
-            return;
-        };
-        if item.is_terminal() {
-            return;
-        }
-        let timestamp = unix_seconds();
-        let action = if cancelled {
-            TracePartAction::Cancel {
-                reason: message.to_string(),
-            }
-        } else {
-            TracePartAction::Fail {
-                error: message.to_string(),
-                tool_kind: TraceToolFailureKind::Execution,
-            }
-        };
-        if let Err(error) = item.apply(item.command(timestamp, action)) {
-            self.remember_protocol_error(format!(
-                "failed to terminalize projected plan trace item: {error}"
-            ));
-            return;
-        }
-        self.fail_item(item);
     }
 
     /// Cancel every non-terminal item owned by `turn_id`, except the turn item itself.
@@ -774,45 +711,5 @@ mod tests {
 
         let second = recorder.drain();
         assert!(second.is_empty());
-    }
-
-    #[test]
-    fn plan_terminal_joins_streamed_delta_revision_and_replaces_content() {
-        let (mut recorder, _rx) = make_recorder();
-        let item = TracePart::started_plan(
-            "t1".to_string(),
-            "tool-1:plan".to_string(),
-            recorder.current_sequence(),
-            1,
-        );
-        let started_sequence = item.started_sequence();
-        recorder.start_item(item);
-        for (revision, delta) in [(1, "# Plan"), (2, "\n\n- streamed")] {
-            recorder.record_trace_only(TraceEventKind::TracePartDelta {
-                event: pl_trace::TracePartDeltaEvent {
-                    turn_id: "t1".to_string(),
-                    item_id: "tool-1:plan".to_string(),
-                    started_sequence,
-                    revision,
-                    created_at: 1,
-                    updated_at: 2,
-                    delta: pl_trace::TraceDelta::Plan {
-                        delta: delta.to_string(),
-                    },
-                },
-            });
-        }
-
-        recorder.complete_plan_item("t1", "tool-1:plan", "# Plan\n\n- authoritative".to_string());
-
-        let item = recorder
-            .latest_trace_part("tool-1:plan")
-            .expect("completed plan");
-        assert_eq!(item.revision(), 3);
-        assert!(item.is_terminal());
-        assert!(matches!(
-            item.state(),
-            TracePartState::Plan(plan) if plan.content() == "# Plan\n\n- authoritative"
-        ));
     }
 }

@@ -111,34 +111,9 @@ class _FakeStudioApi implements StudioApi {
   String? submitReceiptSessionId;
   String submitTurnId = 'turn-1';
   ({String threadId, String turnId})? interruptedTurn;
-  final Map<String, RecoveryCleanupPreview> recoveryPreviews = {};
-  final Map<String, RecoveryCleanupPreview> projectCleanupPreviews = {};
-  int previewProjectCleanupCount = 0;
-  Object? previewProjectCleanupError;
-  StudioState? projectCleanupState;
-  Object? projectCleanupError;
-  String? cleanedProjectId;
-  String? projectCleanupExpectedRevision;
-  int previewRecoveryIssueCleanupCount = 0;
-  Object? previewRecoveryIssueCleanupError;
-  StudioState? recoveryCleanupState;
-  Object? recoveryCleanupError;
-  String? cleanedRecoveryIssueId;
-  String? cleanupExpectedRevision;
-  StudioState? recoveryRetryState;
-  Object? recoveryRetryError;
-  String? retriedRecoveryIssueId;
-  String? retrySelectedProjectId;
-  String? retrySelectedThreadId;
   int retryPersistenceCallCount = 0;
   Object? retryPersistenceError;
   PersistenceStateSnapshot? retryPersistenceState;
-  TaskRecoveryPreview? taskRecoveryPreview;
-  TaskRecoveryResult? taskRecoveryResult;
-  TaskRecoveryRequest? taskRecoveryRequest;
-  Object? taskRecoveryPreviewError;
-  Object? taskRecoveryApplyError;
-  Completer<TaskRecoveryResult>? blockedTaskRecoveryApply;
 
   void emitGlobal(StudioBridgeEvent event) => _global.add(event);
 
@@ -165,6 +140,20 @@ class _FakeStudioApi implements StudioApi {
 
   @override
   Future<ProviderCatalogView> loadProviderCatalog() async => providerCatalog;
+
+  @override
+  Future<List<AgentProfileView>> readAgentProfiles() async => const [];
+
+  @override
+  Future<List<AgentProfileView>> setSystemAgentEnabled({
+    required String profileId,
+    required bool enabled,
+  }) async => const [];
+
+  @override
+  Future<List<AgentProfileView>> saveUserAgentProfile(
+    AgentProfileDraft draft,
+  ) async => const [];
 
   @override
   Future<StudioState> readStudioState() async {
@@ -309,7 +298,7 @@ class _FakeStudioApi implements StudioApi {
         projectId: projectId,
         title: 'New Session',
         mode: mode,
-        role: mode == StudioMode.task ? 'planner' : 'executor',
+        role: 'planner',
         createdAt: now,
         updatedAt: now,
       );
@@ -391,104 +380,10 @@ class _FakeStudioApi implements StudioApi {
   }
 
   @override
-  Future<RecoveryCleanupPreview> previewProjectCleanup(String projectId) async {
-    previewProjectCleanupCount += 1;
-    if (previewProjectCleanupError case final error?) {
-      throw error;
-    }
-    return projectCleanupPreviews[projectId] ??
-        RecoveryCleanupPreview(
-          issueId: 'project-cleanup-$projectId',
-          expectedRevision: 'revision-$projectId',
-          scope: RecoveryIssueScope.project,
-          projectId: projectId,
-          detail: 'Project cleanup preview',
-          resources: const [],
-        );
-  }
-
-  @override
-  Future<void> cleanupProject(String projectId, String expectedRevision) async {
-    if (projectCleanupError case final error?) {
-      throw error;
-    }
-    cleanedProjectId = projectId;
-    projectCleanupExpectedRevision = expectedRevision;
-    if (projectCleanupState case final next?) {
-      _currentState = _asNewerProductState(_currentState, next);
-    }
-  }
-
-  @override
-  Future<RecoveryCleanupPreview> previewRecoveryIssueCleanup(
-    String issueId,
-  ) async {
-    previewRecoveryIssueCleanupCount += 1;
-    if (previewRecoveryIssueCleanupError case final error?) {
-      throw error;
-    }
-    return recoveryPreviews[issueId] ??
-        RecoveryCleanupPreview(
-          issueId: issueId,
-          expectedRevision: 'revision-$issueId',
-          scope: RecoveryIssueScope.thread,
-          detail: 'Recovery cleanup preview',
-          resources: const [],
-        );
-  }
-
-  @override
-  Future<void> cleanupRecoveryIssue(
-    String issueId,
-    String expectedRevision,
-  ) async {
-    if (recoveryCleanupError case final error?) {
-      throw error;
-    }
-    cleanedRecoveryIssueId = issueId;
-    cleanupExpectedRevision = expectedRevision;
-    if (recoveryCleanupState case final next?) {
-      _currentState = _asNewerProductState(_currentState, next);
-    }
-  }
-
-  @override
-  Future<void> retryRecoveryIssue(String issueId) async {
-    if (recoveryRetryError case final error?) {
-      throw error;
-    }
-    retriedRecoveryIssueId = issueId;
-    retrySelectedProjectId = _currentState.selectedProjectId;
-    retrySelectedThreadId = _currentState.selectedThreadId;
-    if (recoveryRetryState case final next?) {
-      _currentState = _asNewerProductState(_currentState, next);
-    }
-  }
-
-  @override
   Future<PersistenceStateSnapshot> retryPersistence() async {
     retryPersistenceCallCount += 1;
     if (retryPersistenceError case final error?) throw error;
     return retryPersistenceState ?? _currentState.persistenceState;
-  }
-
-  @override
-  Future<TaskRecoveryPreview> previewTaskRecovery(String rootThreadId) async {
-    if (taskRecoveryPreviewError case final error?) throw error;
-    return taskRecoveryPreview ??
-        (throw StateError('Missing Task recovery preview for $rootThreadId'));
-  }
-
-  @override
-  Future<TaskRecoveryResult> applyTaskRecovery(
-    TaskRecoveryRequest request,
-  ) async {
-    taskRecoveryRequest = request;
-    if (taskRecoveryApplyError case final error?) throw error;
-    final blocked = blockedTaskRecoveryApply;
-    if (blocked != null) return blocked.future;
-    return taskRecoveryResult ??
-        (throw StateError('Missing Task recovery result'));
   }
 
   @override
@@ -538,14 +433,13 @@ class _FakeStudioApi implements StudioApi {
     if (!thread.isRoot) {
       throw StateError('only a root Thread can change mode');
     }
-    if (_currentState.tasksByRootThread[threadId]?.isActive ?? false) {
-      throw StateError('thread mode cannot change while a task is active');
+    final workflow =
+        _currentState.workspacesByThread[threadId]?.runtime.workflow;
+    if (workflow?.isActive ?? false) {
+      throw StateError('thread mode cannot change while a workflow is active');
     }
     modeUpdate = (threadId: threadId, mode: mode);
-    final updated = thread.copyWith(
-      mode: mode,
-      role: mode == StudioMode.task ? 'planner' : 'executor',
-    );
+    final updated = thread.copyWith(mode: mode, role: 'planner');
     final workspace = _currentState.workspacesByThread[threadId];
     _currentState = _currentState.copyWith(
       threadDirectory: _currentState.threadDirectory.copyWith(
@@ -1091,10 +985,6 @@ StudioState _asNewerProductState(StudioState current, StudioState next) {
       nextCursor: next.threadDirectory.nextCursor,
       hasMore: next.threadDirectory.hasMore,
     ),
-    taskDirectory: TaskDirectoryState(
-      revision: current.taskDirectory.revision + 1,
-      values: next.taskDirectory.values,
-    ),
     agentDirectory: AgentDirectoryState(
       revision: current.agentDirectory.revision + 1,
       values: next.agentDirectory.values,
@@ -1254,17 +1144,6 @@ Map<String, Object?> _interactionResolutionJson(
       'decision': decision.name,
       'reason': ?reason,
     },
-    PlanConfirmationResolutionCommand(
-      :final decision,
-      :final content,
-      :final reason,
-    ) =>
-      {
-        'type': 'planConfirmation',
-        'decision': decision.name,
-        'content': ?content,
-        'reason': ?reason,
-      },
   };
 }
 

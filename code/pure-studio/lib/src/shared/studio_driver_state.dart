@@ -5,12 +5,8 @@ import '../domain/models/studio_models.dart';
 /// Read-only state exported through Flutter Driver in local acceptance builds.
 abstract final class StudioDriverState {
   static StudioProject? _project;
-  static TaskRuntimeView? _task;
   static AgentWorkspaceView? _workspace;
   static final Map<String, StudioTurnView> _lastTurnsByThread = {};
-  static String? _planContent;
-  static TaskRecoveryPreview? _taskRecoveryPreview;
-  static TaskRecoveryResult? _taskRecoveryResult;
   static final List<StudioShutdownProgress> _shutdownProgress = [];
   static List<String> _sidebarDirectoryIds = const [];
   static bool _sidebarDirectoryHasMore = false;
@@ -34,18 +30,12 @@ abstract final class StudioDriverState {
     final workspace = state.selectedAgentWorkspace;
     if (workspace == null) {
       _workspace = null;
-      _task = null;
     } else {
       publishWorkspace(workspace);
-      _task = workspace.runtime.task;
     }
     publishSidebarDirectory([
       for (final thread in state.rootThreads) thread.id,
     ], state.threadDirectory.hasMore);
-  }
-
-  static void publishTask(TaskRuntimeView? task) {
-    _task = task;
   }
 
   static void publishProject(StudioProject? project) {
@@ -62,10 +52,6 @@ abstract final class StudioDriverState {
     _lastTurnsByThread[turn.threadId] = turn;
   }
 
-  static void publishPlan(String content) {
-    _planContent = content;
-  }
-
   static void publishSidebarDirectory(List<String> threadIds, bool hasMore) {
     _sidebarDirectoryIds = List.unmodifiable(threadIds);
     _sidebarDirectoryHasMore = hasMore;
@@ -78,26 +64,12 @@ abstract final class StudioDriverState {
   static List<StudioShutdownProgress> get shutdownProgress =>
       List.unmodifiable(_shutdownProgress);
 
-  static void clearTaskRecovery() {
-    _taskRecoveryPreview = null;
-    _taskRecoveryResult = null;
-  }
-
-  static void publishTaskRecoveryPreview(TaskRecoveryPreview preview) {
-    _taskRecoveryPreview = preview;
-  }
-
-  static void publishTaskRecoveryResult(TaskRecoveryResult result) {
-    _taskRecoveryResult = result;
-  }
-
   static String snapshotJson() {
     final workspace = _workspace;
     final lastTurn = workspace == null
         ? null
         : _lastTurnsByThread[workspace.threadId];
     return jsonEncode({
-      'planContent': _planContent,
       'sidebarDirectory': {
         'count': _sidebarDirectoryIds.length,
         'hasMore': _sidebarDirectoryHasMore,
@@ -133,7 +105,7 @@ abstract final class StudioDriverState {
         for (final progress in _shutdownProgress)
           '${progress.phase.name}:${switch (progress) {
             FlushingPersistenceProgress(:final pendingCommits) => pendingCommits,
-            StoppingSubscriptionsProgress() || CancellingTurnsProgress() || SuspendingTasksProgress() || StoppingMcpProgress() || StoppingLspProgress() || StoppedProgress() => 0,
+            StoppingSubscriptionsProgress() || CancellingTurnsProgress() || StoppingAgentsProgress() || StoppingMcpProgress() || StoppingLspProgress() || StoppedProgress() => 0,
           }}',
       ],
       'persistence': {
@@ -262,16 +234,64 @@ abstract final class StudioDriverState {
               'lastTurn': lastTurn == null ? null : _turnJson(lastTurn),
               'timelineProgress': _timelineProgress(workspace),
             },
-      'task': _task == null ? null : _taskJson(_task!),
-      'taskRecovery': {
-        'preview': _taskRecoveryPreview == null
-            ? null
-            : _taskRecoveryPreviewJson(_taskRecoveryPreview!),
-        'result': _taskRecoveryResult == null
-            ? null
-            : _taskRecoveryResultJson(_taskRecoveryResult!),
-      },
+      // Workflow is the only lifecycle projection exposed to acceptance
+      // drivers. Product-specific orchestration payloads are intentionally not
+      // serialized.
+      'workflow': workspace?.runtime.workflow == null
+          ? null
+          : _workflowJson(workspace!.runtime.workflow!),
     });
+  }
+
+  static Map<String, Object?> _workflowJson(WorkflowRuntimeView workflow) {
+    final run = workflow.currentRun;
+    return {
+      'revision': workflow.revision,
+      'currentRun': run == null
+          ? null
+          : {
+              'lineageId': run.lineageId,
+              'runId': run.runId,
+              'title': run.title,
+              'goal': run.goal,
+              'definitionHash': run.definitionHash,
+              'modeId': run.modeId,
+              'modeDisplayName': run.modeDisplayName,
+              'currentStageId': run.currentStageId,
+              'terminal': run.terminal,
+              'stages': [
+                for (final stage in run.stages)
+                  {
+                    'id': stage.id,
+                    'title': stage.title,
+                    'terminal': stage.terminal,
+                  },
+              ],
+              'transitions': [
+                for (final transition in run.transitions)
+                  {
+                    'fromStageId': transition.fromStageId,
+                    'toStageId': transition.toStageId,
+                    'when': transition.when,
+                  },
+              ],
+              'history': [
+                for (final entry in run.history)
+                  {
+                    'revision': entry.revision,
+                    'fromStageId': entry.fromStageId,
+                    'toStageId': entry.toStageId,
+                    'summary': entry.summary,
+                    'evidence': entry.evidence,
+                    'turnId': entry.turnId,
+                    'callId': entry.callId,
+                    'transitionedAt': entry.transitionedAt
+                        .toUtc()
+                        .toIso8601String(),
+                  },
+              ],
+            },
+    };
   }
 
   static List<String> _modelCapabilities(AgentWorkspaceView workspace) {
@@ -302,225 +322,6 @@ abstract final class StudioDriverState {
     }
     return null;
   }
-
-  static Map<String, Object?> _taskRecoveryPreviewJson(
-    TaskRecoveryPreview preview,
-  ) => {
-    'previewToken': preview.previewToken,
-    'runId': preview.runId,
-    'taskGeneration': preview.taskGeneration,
-    'phase': preview.state.name,
-    'recommendedThreadId': preview.recommendedThreadId,
-    'targets': [
-      for (final target in preview.targets)
-        {
-          'threadId': target.threadId,
-          'kind': target.kind.name,
-          'workUnitId': target.workUnitId,
-          'attempt': target.attempt,
-          'continuationRevision': target.continuationRevision,
-          'expectedRuntimeRevision': target.expectedRuntimeRevision,
-          'expectedThreadRevision': target.expectedThreadRevision,
-          'branch': target.branch,
-          'worktreePath': target.worktreePath,
-          'baseCommit': target.baseCommit,
-          'defaultTurnIds': target.defaultTurnIds,
-          'availableModes': target.availableModes
-              .map((mode) => mode.name)
-              .toList(),
-          'turns': [
-            for (final turn in target.turns)
-              {
-                'turnId': turn.turnId,
-                'state': turn.state.name,
-                'itemCount': turn.itemCount,
-                'inputCount': turn.inputCount,
-                'toolCount': turn.toolCount,
-                'toolSummaries': turn.toolSummaries,
-              },
-          ],
-        },
-    ],
-  };
-
-  static Map<String, Object?> _taskRecoveryResultJson(
-    TaskRecoveryResult result,
-  ) => {
-    'recoveryId': result.recoveryId,
-    'runId': result.runId,
-    'workUnitId': result.workUnitId,
-    'rootThreadId': result.rootThreadId,
-    'targetThreadId': result.targetThreadId,
-    'mode': result.mode.name,
-    'recoveryRevision': result.recoveryRevision,
-    'runtimeRevision': result.runtimeRevision,
-    'threadRevision': result.threadRevision,
-    'beforeTranscriptHash': result.beforeTranscriptHash,
-    'afterTranscriptHash': result.afterTranscriptHash,
-    'removedItemCount': result.removedItemCount,
-    'removedInputCount': result.removedInputCount,
-    'resumeTurnId': result.resumeTurnId,
-  };
-
-  static Map<String, Object?> _taskJson(TaskRuntimeView task) => {
-    'runId': task.runId,
-    'phase': task.state.kind.name,
-    'stateSummary': task.stateSummary,
-    'generation': task.generation,
-    'outcome': switch (task.state) {
-      CompletedTaskStateView(outcome: final SucceededTaskOutcomeView outcome) =>
-        {
-          'kind': 'succeeded',
-          'summary': outcome.summary,
-          'completedAt': outcome.completedAt.toUtc().toIso8601String(),
-        },
-      CompletedTaskStateView(outcome: final FailedTaskOutcomeView outcome) => {
-        'kind': 'failed',
-        'failureKind': outcome.kind.name,
-        'summary': outcome.summary,
-        'evidence': outcome.evidence,
-        'cause': outcome.cause,
-        'completedAt': outcome.completedAt.toUtc().toIso8601String(),
-      },
-      PlanningTaskStateView() ||
-      PendingConfirmationTaskStateView() ||
-      EditingDocumentsTaskStateView() ||
-      WorkingTaskStateView() ||
-      ReviewingTaskStateView() => null,
-    },
-    'integratedReviewGate': _integratedReviewGateJson(
-      task.integratedReviewGate,
-    ),
-    'issues': [for (final issue in task.issues) _taskIssueJson(issue)],
-    'workUnits': [
-      for (final unit in task.workUnits)
-        {
-          'id': unit.id,
-          'title': unit.title,
-          'attempt': unit.attempt,
-          'supersedesWorkUnitId': unit.supersedesWorkUnitId,
-          'status': unit.status,
-          'worktreePath': unit.worktreePath,
-          'branch': unit.branch,
-          'agentId': unit.agentId,
-          'executionStatus': unit.executionStatus,
-          'executionError': unit.executionError,
-          'budgetLimit': unit.budgetLimit == null
-              ? null
-              : {
-                  'kind': unit.budgetLimit!.kind.name,
-                  'usage': {
-                    'modelSteps': unit.budgetLimit!.usage.modelSteps,
-                    'toolCalls': unit.budgetLimit!.usage.toolCalls,
-                    'waitCalls': unit.budgetLimit!.usage.waitCalls,
-                    'elapsedMs': unit.budgetLimit!.usage.elapsedMs.toString(),
-                  },
-                },
-          'budgetSliceCount': unit.budgetSliceCount,
-          'budgetSliceLimit': unit.budgetSliceLimit,
-          'continuationState': unit.continuationState,
-          'continuationSourceTurnId': unit.continuationSourceTurnId,
-          'continuationRevision': unit.continuationRevision.toString(),
-          'executorProgressRevision': unit.executorProgressRevision.toString(),
-          'blueprintFingerprint': unit.blueprintFingerprint,
-          'objective': unit.objective,
-          'implementationStepCount': unit.implementationStepCount,
-          'acceptanceCriterionCount': unit.acceptanceCriterionCount,
-          'verificationCount': unit.verificationCount,
-        },
-    ],
-    'completions': [
-      for (final completion in task.completions)
-        {
-          'id': completion.id,
-          'workUnitId': completion.workUnitId,
-          'executorAgentId': completion.executorAgentId,
-          'revision': completion.revision,
-          'kind': completion.kind,
-          'status': completion.status,
-          'baseCommit': completion.baseCommit,
-          'headCommit': completion.headCommit,
-          'verificationSummary': completion.verificationSummary,
-          'updatedAt': completion.updatedAt.toUtc().toIso8601String(),
-        },
-    ],
-    'merges': [
-      for (final merge in task.merges)
-        {
-          'id': merge.id,
-          'workUnitId': merge.workUnitId,
-          'completionId': merge.completionId,
-          'completionRevision': merge.completionRevision,
-          'executorAgentId': merge.executorAgentId,
-          'expectedPreviousHead': merge.expectedPreviousHead,
-          'deliveryHead': merge.deliveryHead,
-          'resultingHead': merge.resultingHead,
-          'method': merge.method.name,
-          'cleanupStatus': merge.cleanupStatus,
-          'cleanupDetail': merge.cleanupDetail,
-          'updatedAt': merge.updatedAt.toUtc().toIso8601String(),
-        },
-    ],
-    'reviews': [
-      for (final review in task.reviews)
-        {
-          'id': review.id,
-          'round': review.round,
-          'scope': review.scope.name,
-          'workUnitId': review.workUnitId,
-          'completionId': review.completionId,
-          'completionRevision': review.completionRevision,
-          'reviewedHead': review.reviewedHead,
-          'verdict': review.verdict,
-          'reviewerAgentId': review.reviewerAgentId,
-          'summary': review.summary,
-          'findingCount': review.findings.length,
-          'updatedAt': review.updatedAt.toUtc().toIso8601String(),
-        },
-    ],
-  };
-
-  static Map<String, Object?> _integratedReviewGateJson(
-    IntegratedReviewGateView gate,
-  ) => switch (gate.kind) {
-    IntegratedReviewGateKind.required => {
-      'status': 'required',
-      'reason': gate.reason,
-    },
-    IntegratedReviewGateKind.satisfiedByReview => {
-      'status': 'satisfiedByReview',
-      'reviewRoundId': gate.reviewRoundId,
-      'reviewedHead': gate.reviewedHead,
-    },
-    IntegratedReviewGateKind.notRequiredNoDelivery => {
-      'status': 'notRequiredNoDelivery',
-    },
-    IntegratedReviewGateKind.notRequiredSingleExecutorEquivalent => {
-      'status': 'notRequiredSingleExecutorEquivalent',
-      'workUnitId': gate.workUnitId,
-      'completionRevision': gate.completionRevision,
-      'mergeRecordId': gate.mergeRecordId,
-    },
-  };
-
-  static Map<String, Object?> _taskIssueJson(TaskIssueView issue) => {
-    'id': issue.id,
-    'sourceThreadId': issue.sourceThreadId,
-    'sourceTurnId': issue.sourceTurnId,
-    'sourceAgentId': issue.sourceAgentId,
-    'sourceRole': issue.sourceRole,
-    'workUnitId': issue.workUnitId,
-    'reviewRoundId': issue.reviewRoundId,
-    'disposition': issue.disposition,
-    'category': issue.category,
-    'providerKind': issue.providerKind,
-    'code': issue.code,
-    'httpStatus': issue.httpStatus,
-    'message': issue.message,
-    'retryable': issue.retryable,
-    'resolvedAt': issue.resolvedAt?.toUtc().toIso8601String(),
-    'createdAt': issue.createdAt.toUtc().toIso8601String(),
-  };
 
   static Map<String, Object?> _timelineProgress(AgentWorkspaceView workspace) {
     final rows = workspace.timelineRows;

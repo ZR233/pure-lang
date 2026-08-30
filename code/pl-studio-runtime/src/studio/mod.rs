@@ -14,10 +14,6 @@ mod runtime_lock;
 mod runtime_state;
 mod store;
 mod store_support;
-mod task_coordinator;
-mod task_persistence;
-mod task_projection;
-mod task_runtime;
 
 pub(crate) use ids::unix_seconds;
 pub use interaction_service::*;
@@ -30,4 +26,3 @@ pub use runtime_lock::{StudioHostKind, StudioRuntimeOptions};
 pub use runtime_state::*;
 pub(in crate::studio) use store::UnregisteredThreadFault;
 pub use store::{StudioDatabaseError, StudioStore};
-pub(crate) use task_runtime::TaskRuntime;

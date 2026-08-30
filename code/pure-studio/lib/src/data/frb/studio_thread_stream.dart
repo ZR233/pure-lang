@@ -179,10 +179,7 @@ StudioThread _threadFromFrb(frb.BridgeThread value) {
     id: value.id,
     projectId: value.projectId,
     title: value.title,
-    mode: switch (value.mode) {
-      frb.BridgeThreadMode.simple => StudioMode.simple,
-      frb.BridgeThreadMode.task => StudioMode.task,
-    },
+    mode: StudioMode.fromId(value.mode),
     createdAt: _dateFromUnix(value.createdAt),
     updatedAt: _dateFromUnix(value.updatedAt),
     parentThreadId: value.parentThreadId,
@@ -270,10 +267,6 @@ ThreadItemStateView _threadItemStateFromFrb(
       inferenceId: inferenceId,
       model: model,
       lifecycle: _inferenceLifecycleFromFrb(state),
-    ),
-    plan: (content, lifecycle) => ThreadPlanItemStateView(
-      content: content,
-      lifecycle: _contentLifecycleFromFrb(lifecycle),
     ),
     skill: (name, source, providerId, resourceBase, cause, activatedAt) =>
         ThreadSkillItemStateView(
@@ -439,7 +432,6 @@ ThreadItemDeltaView _threadItemDeltaFromFrb(
       text: ThreadTextDeltaView.new,
       thinkingSummary: ThreadThinkingSummaryDeltaView.new,
       thinkingContent: ThreadThinkingContentDeltaView.new,
-      plan: ThreadPlanDeltaView.new,
       toolArguments: ThreadToolArgumentsDeltaView.new,
       toolResult: ThreadToolResultDeltaView.new,
     ),
@@ -577,6 +569,66 @@ ThreadRuntimeView _threadRuntimeFromFrb(frb.BridgeThreadRuntimeSnapshot value) {
     activeMcpServers: value.activeMcpServers,
     activeLspServers: value.activeLspServers,
     agentCount: 0,
+    workflow: value.workflow == null
+        ? null
+        : _workflowRuntimeFromFrb(value.workflow!),
+  );
+}
+
+WorkflowRuntimeView _workflowRuntimeFromFrb(
+  frb.BridgeWorkflowRuntimeSnapshot value,
+) {
+  final run = value.currentRun;
+  return WorkflowRuntimeView(
+    revision: value.revision.toInt(),
+    currentRun: run == null
+        ? null
+        : WorkflowRunView(
+            lineageId: run.lineageId,
+            runId: run.runId,
+            title: run.definition.title,
+            goal: run.definition.goal,
+            definitionHash: run.definitionHash,
+            modeId: run.mode.modeId,
+            modeDisplayName: run.mode.displayName,
+            currentStageId: run.currentStageId,
+            terminal: run.lifecycle == frb.BridgeWorkflowRunLifecycle.terminal,
+            stages: [
+              for (final stage in run.definition.stages)
+                WorkflowStageView(
+                  id: stage.id,
+                  title: stage.title,
+                  instructions: stage.instructions,
+                  completionCriteria: stage.completionCriteria,
+                  terminal: stage.terminal,
+                ),
+            ],
+            transitions: [
+              for (final transition in run.definition.transitions)
+                WorkflowTransitionView(
+                  fromStageId: transition.fromStageId,
+                  toStageId: transition.toStageId,
+                  when: transition.when,
+                ),
+            ],
+            history: [
+              for (final entry in run.historyTail)
+                WorkflowHistoryEntryView(
+                  revision: entry.revision.toInt(),
+                  fromStageId: entry.fromStageId,
+                  toStageId: entry.toStageId,
+                  reason: entry.reason,
+                  summary: entry.summary,
+                  evidence: entry.evidence,
+                  turnId: entry.turnId,
+                  callId: entry.callId,
+                  transitionedAt: _dateFromUnix(entry.transitionedAt),
+                ),
+            ],
+            compiledAt: _dateFromUnix(run.compiledAt),
+            updatedAt: _dateFromUnix(run.updatedAt),
+            archivedTransitionCount: run.archivedTransitionCount.toInt(),
+          ),
   );
 }
 
@@ -629,13 +681,6 @@ PendingInteraction _interactionFromFrb(frb.BridgeInteractionRequest value) {
             parentAgentId: parentAgentId,
           ) as InteractionPayload,
         ),
-    planConfirmation: (planId, content, state) => (
-      kind: InteractionKind.planConfirmation,
-      payload: PlanConfirmationInteractionPayload(
-        planId: planId,
-        content: content,
-      ) as InteractionPayload,
-    ),
   );
   return PendingInteraction(
     id: value.interactionId,
@@ -664,13 +709,6 @@ bool _interactionIsPending(frb.BridgeInteractionRequest value) {
               cancelled: (operationId, cancelledAt, reason) => false,
               expired: (operationId, expiredAt) => false,
             ),
-    planConfirmation: (planId, content, state) => state.when(
-      pending: (operationId) => true,
-      resolved: (operationId, resolvedAt, decision, resolvedContent, reason) =>
-          false,
-      cancelled: (operationId, cancelledAt, reason) => false,
-      expired: (operationId, expiredAt) => false,
-    ),
   );
 }
 
@@ -731,21 +769,6 @@ frb.BridgeInteractionResolution _interactionResolutionFromDomain(
           ToolApprovalDecision.denied =>
             frb.BridgeToolApprovalResolution.denied,
         },
-        reason: reason,
-      ),
-    PlanConfirmationResolutionCommand(
-      :final decision,
-      :final content,
-      :final reason,
-    ) =>
-      frb.BridgeInteractionResolution.planConfirmation(
-        decision: switch (decision) {
-          PlanConfirmationDecision.confirm =>
-            frb.BridgePlanConfirmationResolution.confirm,
-          PlanConfirmationDecision.revisePlan =>
-            frb.BridgePlanConfirmationResolution.revisePlan,
-        },
-        content: content,
         reason: reason,
       ),
   };

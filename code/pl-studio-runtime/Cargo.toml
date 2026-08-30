@@ -48,13 +48,8 @@ rmcp = { workspace = true, features = [
 ] }
 
 [[test]]
-name = "task_live"
-path = "tests/task_live.rs"
-required-features = ["live-tests"]
-
-[[test]]
-name = "simple_live"
-path = "tests/simple_live.rs"
+name = "workflow_live"
+path = "tests/workflow_live.rs"
 required-features = ["live-tests"]
 
 [[test]]

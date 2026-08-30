@@ -111,7 +111,7 @@ void registerShellSettingsTests() {
     expect(find.byKey(StudioDriverKeys.model), findsOneWidget);
     expect(find.byKey(StudioDriverKeys.reasoningEffort), findsOneWidget);
     expect(find.text('Simple'), findsOneWidget);
-    expect(find.byTooltip('Executor model'), findsOneWidget);
+    expect(find.byTooltip('Planner model'), findsOneWidget);
 
     await tester.tap(find.byKey(StudioDriverKeys.sessionMode));
     await tester.pumpAndSettle();
@@ -121,7 +121,6 @@ void registerShellSettingsTests() {
     await tester.pumpAndSettle();
     expect(find.text('Task'), findsOneWidget);
     expect(find.byTooltip('Planner model'), findsOneWidget);
-    expect(find.byTooltip('Executor model'), findsNothing);
     expect(api.createdThreadProjectId, isNull);
 
     await tester.enterText(
@@ -409,7 +408,7 @@ void registerShellSettingsTests() {
   });
 
   testWidgets(
-    'project cleanup remains available while current session is busy',
+    'closing the busy selected project is rejected without legacy cleanup UI',
     (tester) async {
       tester.view.physicalSize = const Size(1280, 800);
       tester.view.devicePixelRatio = 1;
@@ -447,15 +446,8 @@ void registerShellSettingsTests() {
 
       await tester.tap(closeProjectButtons.first);
       await tester.pumpAndSettle();
-      expect(api.previewProjectCleanupCount, 1);
-      expect(
-        find.text('Remove project and clean up Pure worktrees?'),
-        findsOneWidget,
-      );
-      await tester.tap(find.text('Cancel'));
-      await tester.pumpAndSettle();
       expect(api.archivedProjectId, isNull);
-      expect(api.cleanedProjectId, isNull);
+      expect(find.textContaining('worktree'), findsNothing);
     },
   );
 
@@ -494,8 +486,7 @@ void registerShellSettingsTests() {
     expect(find.byTooltip('Session mode'), findsOneWidget);
     expect(find.byKey(StudioDriverKeys.sessionMode), findsOneWidget);
     expect(find.text('Simple'), findsOneWidget);
-    expect(find.byTooltip('Executor model'), findsOneWidget);
-    expect(find.byTooltip('Planner model'), findsNothing);
+    expect(find.byTooltip('Planner model'), findsOneWidget);
     expect(find.byTooltip('Reasoning effort'), findsOneWidget);
     expect(find.byKey(StudioDriverKeys.reasoningEffort), findsOneWidget);
     expect(find.byType(StatusBarItem), findsWidgets);
@@ -765,188 +756,6 @@ void registerShellSettingsTests() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('active task locks mode and exposes the status phase', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(760, 720);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-
-    final state = _stateWithPlannerModels();
-    final thread = state.selectedThread!.copyWith(
-      mode: StudioMode.task,
-      status: ThreadStatusView.running,
-    );
-    final api = _FakeStudioApi(
-      state.copyWith(
-        threadDirectory: ThreadDirectoryWindow(threads: [thread]),
-        workspacesByThread: {
-          thread.id: state.selectedWorkspace!.copyWith(
-            thread: thread,
-            runtime: const ThreadRuntimeView(
-              model: 'planner/local',
-              contextTokens: 1200,
-              contextWindow: 100000,
-              totalTokens: 1800,
-              costLabel: '',
-              activeSkills: [],
-              activeMcpServers: [],
-              activeLspServers: [],
-              agentCount: 1,
-            ),
-          ),
-        },
-        taskDirectory: TaskDirectoryState(
-          values: [
-            TaskDirectoryEntryView(
-              rootThreadId: 'session-1',
-              task: TaskRuntimeView(
-                runId: 'task-run-1',
-                state: const WorkingTaskStateView(
-                  documentEditSummary: 'test documents updated',
-                ),
-                revision: 0,
-                generation: 0,
-                workUnits: [],
-                completions: [],
-                merges: [],
-                reviews: [],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [studioApiProvider.overrideWithValue(api)],
-        child: _localizedApp(home: const StudioShell()),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    expect(
-      find.descendant(
-        of: find.byType(ThreadStatusBar),
-        matching: find.text('Working'),
-      ),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(StudioDriverKeys.taskRuntime('task-run-1')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(
-        StudioDriverKeys.taskPhase('task-run-1', TaskStateKind.working),
-      ),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(
-        StudioDriverKeys.taskStatus('task-run-1', 'test documents updated'),
-      ),
-      findsOneWidget,
-    );
-    expect(tester.takeException(), isNull);
-    expect(
-      find.byTooltip(
-        'Session mode cannot change while the session is running or a Task is active',
-      ),
-      findsOneWidget,
-    );
-    expect(find.text('Task'), findsOneWidget);
-    expect(find.byKey(StudioDriverKeys.sessionMode), findsOneWidget);
-    await tester.tap(find.byKey(StudioDriverKeys.sessionMode));
-    await tester.pumpAndSettle();
-    expect(
-      find.byKey(StudioDriverKeys.sessionModeOption(StudioMode.simple.name)),
-      findsNothing,
-    );
-    expect(api.modeUpdate, isNull);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets(
-    'idle active task is presented as paused without changing phase',
-    (tester) async {
-      tester.view.physicalSize = const Size(760, 720);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-
-      final state = _stateWithPlannerModels();
-      final thread = state.selectedThread!.copyWith(mode: StudioMode.task);
-      final api = _FakeStudioApi(
-        state.copyWith(
-          threadDirectory: ThreadDirectoryWindow(threads: [thread]),
-          workspacesByThread: {
-            thread.id: state.selectedWorkspace!.copyWith(
-              thread: thread,
-              runtime: const ThreadRuntimeView(
-                model: 'planner/local',
-                contextTokens: 1200,
-                contextWindow: 100000,
-                totalTokens: 1800,
-                costLabel: '',
-                activeSkills: [],
-                activeMcpServers: [],
-                activeLspServers: [],
-                agentCount: 1,
-              ),
-            ),
-          },
-          taskDirectory: TaskDirectoryState(
-            values: [
-              TaskDirectoryEntryView(
-                rootThreadId: 'session-1',
-                task: TaskRuntimeView(
-                  runId: 'task-run-1',
-                  state: const WorkingTaskStateView(
-                    documentEditSummary: 'test documents updated',
-                  ),
-                  revision: 0,
-                  generation: 0,
-                  workUnits: [],
-                  completions: [],
-                  merges: [],
-                  reviews: [],
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [studioApiProvider.overrideWithValue(api)],
-          child: _localizedApp(home: const StudioShell()),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      expect(
-        find.descendant(
-          of: find.byType(ThreadStatusBar),
-          matching: find.text('Paused'),
-        ),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(StudioDriverKeys.taskPaused('task-run-1')),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(
-          StudioDriverKeys.taskPhase('task-run-1', TaskStateKind.working),
-        ),
-        findsOneWidget,
-      );
-      expect(tester.takeException(), isNull);
-    },
-  );
-
   testWidgets('running thread locks the session mode selector', (tester) async {
     tester.view.physicalSize = const Size(760, 720);
     tester.view.devicePixelRatio = 1;
@@ -976,7 +785,7 @@ void registerShellSettingsTests() {
     expect(find.byKey(StudioDriverKeys.sessionMode), findsOneWidget);
     expect(
       find.byTooltip(
-        'Session mode cannot change while the session is running or a Task is active',
+        'Session mode cannot change while the session is running or a workflow is active',
       ),
       findsOneWidget,
     );
@@ -1069,7 +878,7 @@ void registerShellSettingsTests() {
 
     await _expectMenuOpensAboveTrigger(
       tester: tester,
-      triggerTooltip: 'Executor model',
+      triggerTooltip: 'Planner model',
       menuText: 'DeepSeek / DeepSeek Reasoner',
     );
     await _expectMenuOpensAboveTrigger(

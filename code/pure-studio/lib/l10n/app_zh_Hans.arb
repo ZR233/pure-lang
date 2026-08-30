@@ -8,12 +8,18 @@
   "shutdownPhaseStoppingSubscriptions": "正在停止订阅",
   "shutdownPhaseCancellingTurns": "正在停止会话任务",
   "shutdownPhaseFlushingPersistence": "正在保存会话",
-  "shutdownPhaseSuspendingTasks": "正在挂起后台任务",
+  "shutdownPhaseStoppingAgents": "正在停止协作 Agent",
   "shutdownPhaseStoppingMcp": "正在关闭 MCP",
   "shutdownPhaseStoppingLsp": "正在关闭语言服务",
   "shutdownPhaseStopped": "关机完成",
   "shutdownPendingCommits": "剩余 {count} 项待落库",
-  "@shutdownPendingCommits": {"placeholders": {"count": {"type": "int"}}},
+  "@shutdownPendingCommits": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "sidebarCloseProject": "关闭项目",
   "sidebarArchiveSession": "归档会话",
   "sidebarArchiveSessionFailed": "无法归档该会话，它可能仍在运行。",
@@ -30,25 +36,6 @@
   "persistenceBlocked": "保存已阻塞，仍有 {count} 项内存更新等待处理；新工作已暂停。",
   "persistenceRetry": "重试保存",
   "recoveryGlobalWarning": "有 {count} 个恢复问题需要处理",
-  "recoveryCleanupTooltip": "查看安全清理",
-  "recoveryRetryTooltip": "继续合并恢复",
-  "recoveryRetryFailed": "恢复重试失败：{error}",
-  "recoveryCleanupTitle": "清理恢复问题？",
-  "recoveryCleanupBody": "Pure Studio 只会清理自身创建的任务资源。继续前请检查可能丢失的工作。",
-  "recoveryCleanupNoResources": "未发现仍存在的任务资源。",
-  "recoveryCleanupPresenceAbsent": "已缺失",
-  "recoveryCleanupPresenceComplete": "完整",
-  "recoveryCleanupPresencePartial": "部分缺失",
-  "recoveryCleanupDirty": "有未提交修改",
-  "recoveryCleanupAhead": "{count} 个未合并提交",
-  "recoveryCleanupChangedFiles": "{count} 个变更文件",
-  "recoveryCleanupCancel": "取消",
-  "recoveryCleanupConfirm": "清理",
-  "recoveryCleanupRefreshPreview": "刷新预览",
-  "recoveryCleanupFailed": "清理失败：{error}",
-  "projectCleanupTitle": "移除项目并清理 Pure worktree？",
-  "projectCleanupBody": "这会从 Studio 移除项目，并永久放弃所有 Pure 自建任务 worktree 中的未提交修改和未合并提交。用户主工作区不会被删除或修改。",
-  "projectCleanupConfirm": "移除项目并清理",
   "sidebarNew": "新建",
   "sidebarOpen": "打开",
   "shellNoSession": "新会话",
@@ -84,7 +71,13 @@
   "settingsSshReady": "已连接",
   "settingsSshDeleteTitle": "删除 SSH 服务器？",
   "settingsSshDeleteBody": "确定删除 {name}？请先移除使用该服务器的项目。",
-  "@settingsSshDeleteBody": {"placeholders": {"name": {"type": "String"}}},
+  "@settingsSshDeleteBody": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "settingsSshName": "名称",
   "settingsSshHost": "主机",
   "settingsSshUsername": "用户名",
@@ -112,7 +105,7 @@
   "statusModelLabel": "模型",
   "statusCapabilitiesTitle": "活动能力",
   "statusSessionMode": "会话模式",
-  "statusSessionModeLocked": "会话运行或任务执行期间无法切换会话模式",
+  "statusSessionModeLocked": "会话运行或工作流活动期间无法切换会话模式",
   "statusPlannerModel": "Planner 模型",
   "statusExecutorModel": "Executor 模型",
   "statusReasoningEffort": "思考等级",
@@ -149,11 +142,9 @@
   "statusTurnRunningTool": "运行工具",
   "statusTurnWaitingForApproval": "等待工具授权",
   "statusTurnWaitingForUserInput": "等待输入",
-  "statusTurnWaitingForPlanConfirmation": "等待计划确认",
   "statusTurnPersisting": "保存本轮结果",
   "statusInteractionToolApproval": "等待工具授权",
   "statusInteractionUserInput": "等待输入",
-  "statusInteractionPlanConfirmation": "等待计划确认",
   "statusContextTooltip": "上下文：{contextTokens}/{contextWindow}（{percent}%）\n\n总 token：{totalTokens}\n\n模型：{model}",
   "statusContextTooltipNoModel": "上下文：{contextTokens}/{contextWindow}（{percent}%）\n\n总 token：{totalTokens}",
   "statusSkillsCount": "{count} 个 skill",
@@ -164,82 +155,6 @@
   "statusLspActivityPercentage": "{percentage}%",
   "statusAgentsCount": "{count} 个 agent",
   "composerAgentRuntimeDriven": "此 Agent 会话由运行时驱动",
-  "statusTaskSection": "任务协调",
-  "statusTaskBranch": "分支",
-  "statusTaskHead": "HEAD",
-  "statusTaskWorkUnits": "工作单元",
-  "statusTaskAgents": "代理",
-  "statusTaskCompletions": "完成报告",
-  "statusTaskMerges": "合并记录",
-  "statusTaskReviews": "代码审查",
-  "statusTaskWorktree": "工作树",
-  "statusTaskCommit": "提交",
-  "statusTaskSource": "来源",
-  "statusTaskPreviousHead": "合并前 HEAD",
-  "statusTaskDeliveryHead": "交付 HEAD",
-  "statusTaskResultingHead": "合并后 HEAD",
-  "statusTaskCleanup": "资源清理",
-  "statusTaskRequest": "调用请求",
-  "statusTaskSummary": "摘要",
-  "statusTaskStage": "阶段",
-  "statusTaskNextStep": "下一步",
-  "statusTaskSummaryAge": "摘要更新时间",
-  "statusTaskVerification": "验证",
-  "statusTaskScope": "范围",
-  "statusTaskCompletionRevision": "完成版本",
-  "statusTaskFindings": "审查发现",
-  "statusTaskRecommendation": "修复建议",
-  "statusTaskError": "错误",
-  "statusTaskFailed": "任务失败",
-  "statusTaskRecoverable": "可继续",
-  "statusTaskPaused": "已暂停",
-  "statusTaskFailures": "任务错误",
-  "statusTaskFatalHint": "修复 Provider 或配置后，请开启新任务。",
-  "statusTaskRecoverableHint": "修复原因后可继续当前任务。",
-  "statusTaskPausedHint": "当前没有模型执行；发送消息可继续此任务。",
-  "statusTaskExecution": "执行状态",
-  "statusTaskBudget": "预算限制",
-  "statusTaskBudgetSlice": "预算切片",
-  "statusTaskBudgetSliceValue": "{current}/{limit}",
-  "@statusTaskBudgetSliceValue": {"placeholders": {"current": {"type": "int"}, "limit": {"type": "int"}}},
-  "statusTaskBudgetUsage": "{modelSteps} 次模型 · {toolCalls} 次工具 · {waitCalls} 次等待 · {elapsedMs} 毫秒",
-  "@statusTaskBudgetUsage": {"placeholders": {"modelSteps": {"type": "int"}, "toolCalls": {"type": "int"}, "waitCalls": {"type": "int"}, "elapsedMs": {"type": "String"}}},
-  "statusTaskContinuation": "自动续轮",
-  "statusTaskBudgetModelStep": "模型步数上限",
-  "statusTaskBudgetToolCall": "工具调用上限",
-  "statusTaskBudgetWait": "等待调用上限",
-  "statusTaskBudgetWallClock": "运行时长上限",
-  "statusTaskBudgetAgentCount": "Agent 数量上限",
-  "statusTaskBudgetAgentDepth": "Agent 深度上限",
-  "statusTaskBudgetFinalization": "收尾预算上限",
-  "statusTaskContinuationNone": "无",
-  "statusTaskContinuationCompacting": "正在压缩上下文",
-  "statusTaskContinuationPendingStart": "正在启动下一切片",
-  "statusTaskContinuationNeedsAttention": "需要处理",
-  "statusTaskPhasePlanning": "规划中",
-  "statusTaskPhasePendingConfirmation": "等待确认计划",
-  "statusTaskPhaseEditingDocuments": "编辑文档中",
-  "statusTaskPhaseWorking": "执行中",
-  "statusTaskPhaseReviewing": "审查中",
-  "statusTaskPhaseCompleted": "任务已完成",
-  "statusTaskStatusPending": "待处理",
-  "statusTaskStatusQueued": "排队中",
-  "statusTaskStatusRunning": "运行中",
-  "statusTaskStatusAwaitingCompletion": "等待完成报告",
-  "statusTaskStatusReadyForReview": "等待审查",
-  "statusTaskStatusReviewing": "审查中",
-  "statusTaskStatusChangesRequested": "等待修改",
-  "statusTaskStatusApproved": "已批准",
-  "statusTaskStatusMerged": "已合并",
-  "statusTaskStatusNoDelivery": "无需交付",
-  "statusTaskStatusCompleted": "已完成",
-  "statusTaskStatusBudgetLimited": "已达预算限制",
-  "statusTaskStatusNeedsAttention": "需要处理",
-  "statusTaskStatusFailed": "失败",
-  "statusTaskStatusCancelled": "已取消",
-  "statusTaskStatusPass": "已通过",
-  "statusTaskStatusChangesRequired": "需要修改",
-  "statusTaskStatusBlocked": "已阻塞",
   "statusSkillsSection": "Skills",
   "statusMcpSection": "MCP",
   "statusLspSection": "LSP",
@@ -249,8 +164,12 @@
   "agentDetailSummary": "{count} 个 · {running} 运行中",
   "@agentDetailSummary": {
     "placeholders": {
-      "count": { "type": "int" },
-      "running": { "type": "int" }
+      "count": {
+        "type": "int"
+      },
+      "running": {
+        "type": "int"
+      }
     }
   },
   "agentDetailEmpty": "暂无子代理",
@@ -287,7 +206,6 @@
   "timelineToolGroupSummaryRunning": "{count} 个工具，{runningCount} 个运行中",
   "timelineToolGroupSummaryIssues": "{count} 个工具，{issueCount} 个需要注意",
   "timelineToolGroupSummaryRunningWithIssues": "{count} 个工具，{runningCount} 个运行中，{issueCount} 个需要注意",
-  "timelinePlanFallback": "计划",
   "timelineSkillActivated": "已激活 Skill · {name}",
   "timelineSkillAgentActivated": "代理激活 Skill · {name}",
   "timelineSkillUserActivated": "用户激活 Skill · {name}",
@@ -314,23 +232,6 @@
   "interactionQuestionsTitle": "几个问题想确认",
   "interactionLastQuestion": "最后一题",
   "interactionContinueAfterAnswer": "回答后继续",
-  "taskRecoveryDialogTitle": "恢复并继续",
-  "taskRecoveryDialogBody": "只回退所选 Thread 的模型上下文；Task、WorkUnit、工作区、提交、用量和审计历史全部保留。",
-  "taskRecoveryTargetLabel": "恢复目标",
-  "taskRecoveryTargetPlanner": "Planner",
-  "taskRecoveryTargetExecutor": "Executor",
-  "taskRecoveryTurnSuffixLabel": "回退连续尾部 Turn 数",
-  "taskRecoveryModeLabel": "恢复方式",
-  "taskRecoveryModeRewind": "回退对话尾部",
-  "taskRecoveryModeRebuild": "局部重建 Thread 上下文",
-  "taskRecoveryGitPreserved": "Git 与工作区不会被回滚、清理或重置；执行恢复时指纹必须与此预览完全一致。",
-  "taskRecoveryRebuildWarning": "无法安全保留前缀时，只清空这个 Thread 的普通 transcript；handoff、证据、会话笔记和外部状态仍保留。",
-  "taskRecoveryFirstConfirm": "检查恢复影响",
-  "taskRecoveryFinalConfirm": "确认恢复并继续",
-  "taskRecoveryApplying": "正在恢复…",
-  "taskRecoveryItems": "条目",
-  "taskRecoveryInputs": "输入",
-  "taskRecoveryTools": "工具",
   "timelineRolledBack": "已从有效上下文回退",
   "interactionSubmitEmptyAnswersHint": "提交后未答问题保留空数组。",
   "interactionAnsweredPendingHint": "已答 {answeredCount} 题 · {pendingCount} 题待答",
@@ -359,7 +260,9 @@
   "interactionPlanConfirmFooterHint": "确认后将在{mode}模式进入文档编辑检查点。",
   "@interactionPlanConfirmFooterHint": {
     "placeholders": {
-      "mode": { "type": "String" }
+      "mode": {
+        "type": "String"
+      }
     }
   },
   "interactionPlanAdjust": "告诉 Pure 如何调整",
@@ -480,7 +383,6 @@
   "settingsMcpResetConfirmTitle": "重置全部 MCP server？",
   "settingsMcpResetConfirmBody": "将重新构建所有已配置的 MCP 连接。活动 Turn 继续使用当前租约 generation。",
   "settingsMcpResetConfirmAction": "全部重置",
-  "settingsCancel": "取消",
   "settingsEndpoint": "Endpoint",
   "settingsMcpEmptyTitle": "没有 MCP servers",
   "settingsMcpEmptyMessage": "已配置的 MCP servers 会显示在这里。",
@@ -540,23 +442,83 @@
   "settingsSaveWebSearch": "保存 Web 搜索",
   "settingsStudioUpdateTitle": "Pure Studio 更新",
   "settingsStudioUpdateDisabled": "当前版本 {version}。仅 Windows 正式版会自动检查更新。",
-  "@settingsStudioUpdateDisabled": {"placeholders": {"version": {"type": "String"}}},
+  "@settingsStudioUpdateDisabled": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
   "settingsStudioUpdateCurrent": "当前版本：{version}",
-  "@settingsStudioUpdateCurrent": {"placeholders": {"version": {"type": "String"}}},
+  "@settingsStudioUpdateCurrent": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
   "settingsStudioUpdateChecking": "当前版本 {version}，正在检查更新…",
-  "@settingsStudioUpdateChecking": {"placeholders": {"version": {"type": "String"}}},
+  "@settingsStudioUpdateChecking": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
   "settingsStudioUpdateLatest": "当前版本 {version} 已是最新版。",
-  "@settingsStudioUpdateLatest": {"placeholders": {"version": {"type": "String"}}},
+  "@settingsStudioUpdateLatest": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
   "settingsStudioUpdateAvailable": "已安装 {current}，可升级到 {latest}。",
-  "@settingsStudioUpdateAvailable": {"placeholders": {"current": {"type": "String"}, "latest": {"type": "String"}}},
+  "@settingsStudioUpdateAvailable": {
+    "placeholders": {
+      "current": {
+        "type": "String"
+      },
+      "latest": {
+        "type": "String"
+      }
+    }
+  },
   "settingsStudioUpdateDownloading": "正在下载 {version}：{progress}%",
-  "@settingsStudioUpdateDownloading": {"placeholders": {"version": {"type": "String"}, "progress": {"type": "int"}}},
+  "@settingsStudioUpdateDownloading": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      },
+      "progress": {
+        "type": "int"
+      }
+    }
+  },
   "settingsStudioUpdateVerifying": "正在验证 {version}…",
-  "@settingsStudioUpdateVerifying": {"placeholders": {"version": {"type": "String"}}},
+  "@settingsStudioUpdateVerifying": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
   "settingsStudioUpdateInstallerLaunched": "{version} 安装程序已启动。",
-  "@settingsStudioUpdateInstallerLaunched": {"placeholders": {"version": {"type": "String"}}},
+  "@settingsStudioUpdateInstallerLaunched": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
   "settingsStudioUpdateFailed": "更新失败：{error}",
-  "@settingsStudioUpdateFailed": {"placeholders": {"error": {"type": "String"}}},
+  "@settingsStudioUpdateFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
   "settingsStudioUpdateBusy": "请先等待当前 turn 或 task 结束，再安装更新。",
   "settingsStudioUpdateCheck": "检查更新",
   "settingsStudioUpdateInstall": "下载并安装",
@@ -570,7 +532,9 @@
   "timelineLspQueryTitleWithDetail": "LSP 查询 · {detail}",
   "@timelineLspQueryTitleWithDetail": {
     "placeholders": {
-      "detail": { "type": "String" }
+      "detail": {
+        "type": "String"
+      }
     }
   },
   "timelineLspCapabilitiesTitle": "LSP 能力",

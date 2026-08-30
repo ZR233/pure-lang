@@ -84,6 +84,16 @@ pub enum ToolRuntimeLockPolicy {
     None,
 }
 
+/// 同一个 provider response 内工具调用的组合策略。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ToolBatchPolicy {
+    /// 可与其他调用共存，实际并行度仍由 runtime lock policy 决定。
+    #[default]
+    Coexist,
+    /// 必须是本批唯一调用；违反时整批拒绝且不执行任何工具。
+    Solo,
+}
+
 /// 一次工具调用的稳定身份。
 ///
 /// 这些字段由 dispatcher 从冻结的 model step 与 provider call 构造。工具不得自行

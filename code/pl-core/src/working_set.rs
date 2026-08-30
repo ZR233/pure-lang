@@ -3,7 +3,7 @@ use std::sync::{Arc, RwLock};
 
 use pl_protocol::{
     ContextSectionId, PinnedContextSection, PureError, SessionNote, TodoListSnapshot,
-    ToolResultReceipt,
+    ToolResultReceipt, WorkflowSessionState,
 };
 use sha2::{Digest, Sha256};
 
@@ -13,8 +13,7 @@ use crate::time::unix_seconds;
 pub const CURRENT_TODO_SECTION_ID: &str = "pl.current_todo";
 pub const CONVERSATION_RECOVERY_SECTION_ID: &str = "pl.conversation_recovery";
 pub const EVIDENCE_LEDGER_SECTION_ID: &str = "pl.evidence_ledger";
-pub const REVIEW_MANIFEST_SECTION_ID: &str = "mai.review_manifest";
-pub const REVIEW_CHECKPOINT_SECTION_ID: &str = "mai.review_checkpoint";
+pub const WORKFLOW_CONTEXT_SECTION_ID: &str = "pl.workflow";
 
 pub const MAX_PINNED_SECTION_BYTES: usize = 32 * 1024;
 pub const MAX_PINNED_CONTEXT_BYTES: usize = 96 * 1024;
@@ -43,8 +42,10 @@ impl std::fmt::Debug for TurnWorkingSetHandle {
 
 /// 对 turn working set 的原子语义变更。
 #[derive(Debug, Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum TurnWorkingSetChange {
     ReplaceTodo(TodoListSnapshot),
+    ReplaceWorkflow(Option<WorkflowSessionState>),
     UpsertSection(PinnedContextSection),
     RemoveSection(ContextSectionId),
     AppendEvidence(ToolResultReceipt),
@@ -55,6 +56,7 @@ struct TurnWorkingSet {
     sections: BTreeMap<ContextSectionId, PinnedContextSection>,
     evidence: EvidenceLedgerDocument,
     session_note: Option<SessionNote>,
+    workflow: Option<WorkflowSessionState>,
 }
 
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -87,6 +89,11 @@ impl TurnWorkingSetHandle {
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .session_note = session.session_note().cloned();
+        handle
+            .inner
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .workflow = session.workflow().cloned();
         Ok(handle)
     }
 
@@ -125,8 +132,19 @@ impl TurnWorkingSetHandle {
                 validate_section(&section)?;
                 next.sections.insert(section.id.clone(), section);
             }
+            TurnWorkingSetChange::ReplaceWorkflow(workflow) => {
+                if let Some(workflow) = &workflow {
+                    crate::workflow::validate_session_state_size(workflow)?;
+                }
+                next.workflow = workflow;
+            }
             TurnWorkingSetChange::UpsertSection(section) => {
                 validate_section(&section)?;
+                if section.id.as_str() == WORKFLOW_CONTEXT_SECTION_ID {
+                    return Err(PureError::ConfigError(
+                        "pl.workflow is a derived working-context section".to_string(),
+                    ));
+                }
                 if section.id.as_str() == CURRENT_TODO_SECTION_ID {
                     validate_todo_section(&section)?;
                 }
@@ -192,6 +210,15 @@ impl TurnWorkingSetHandle {
         serde_json::from_str(&section.content).ok()
     }
 
+    /// 返回完整 typed 工作流状态；派生的 `pl.workflow` 不存入普通 section。
+    pub fn workflow(&self) -> Option<WorkflowSessionState> {
+        self.inner
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .workflow
+            .clone()
+    }
+
     /// 返回当前会话笔记；尚未创建时返回 revision 为 0 的空快照。
     pub fn session_note(&self) -> SessionNote {
         self.inner
@@ -242,6 +269,7 @@ impl TurnWorkingSetHandle {
         if let Some(note) = note {
             changed |= session.replace_session_note(note);
         }
+        changed |= session.replace_workflow(self.workflow());
         Ok(changed)
     }
 }

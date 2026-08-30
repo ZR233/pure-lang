@@ -1,5 +1,3 @@
-use super::BridgeThreadMode;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeStudioPromptInput {
     pub text: String,
@@ -18,7 +16,7 @@ impl From<BridgeStudioPromptInput> for pl_protocol::studio::StudioPromptInput {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BridgeAttachmentAdmissionContext {
     ExistingThread { thread_id: String },
-    NewThread { mode: BridgeThreadMode },
+    NewThread { mode: String },
 }
 
 impl From<BridgeAttachmentAdmissionContext>
@@ -29,13 +27,7 @@ impl From<BridgeAttachmentAdmissionContext>
             BridgeAttachmentAdmissionContext::ExistingThread { thread_id } => {
                 Self::ExistingThread { thread_id }
             }
-            BridgeAttachmentAdmissionContext::NewThread { mode } => Self::NewThread {
-                mode: match mode {
-                    BridgeThreadMode::Simple => "simple",
-                    BridgeThreadMode::Task => "task",
-                }
-                .to_string(),
-            },
+            BridgeAttachmentAdmissionContext::NewThread { mode } => Self::NewThread { mode },
         }
     }
 }

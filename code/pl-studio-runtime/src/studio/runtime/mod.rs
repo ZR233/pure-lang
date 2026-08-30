@@ -9,11 +9,8 @@ use crate::StudioMode;
 use crate::config::ConfigRuntime;
 use crate::studio::agent_host::{StudioAgentResources, StudioAgentRuntime, root_agent_id};
 use crate::studio::records::ThreadRecord;
-use crate::studio::store::directory::{DirectoryDelta, ProjectRemoval};
-use crate::studio::task_coordinator::TaskCoordinator;
 use crate::studio::{
-    InteractionService, ProductEventBus, StudioActiveTurn, StudioRecoveryCleanupPreview,
-    StudioRecoveryIssueAction, StudioRuntimeSnapshot, StudioRuntimeState, StudioStore,
+    InteractionService, ProductEventBus, StudioActiveTurn, StudioRuntimeState, StudioStore,
 };
 use pl_protocol::studio::StudioPromptInput;
 
@@ -24,7 +21,6 @@ mod lifecycle;
 mod lsp_state;
 mod mcp_health;
 mod model_performance;
-mod plan_confirmation;
 mod prompt_runner;
 mod provider_usage;
 mod remote_helper;
@@ -34,7 +30,6 @@ mod shutdown_progress;
 mod skill_catalog;
 mod ssh;
 mod state_query;
-mod task_recovery;
 mod thread_service;
 mod updater;
 
@@ -71,15 +66,7 @@ pub struct StudioStartNewThreadRequest {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StudioSubmitPromptOptions {
     pub presentation: pl_core::MailboxPresentation,
-    pub lifecycle: Option<StudioPlanImplementationLifecycle>,
     pub turn_policy: pl_core::AgentTurnSubmitPolicy,
-}
-
-/// 计划实施 turn 的生命周期关联。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StudioPlanImplementationLifecycle {
-    pub thread_id: String,
-    pub plan_id: String,
 }
 
 /// Studio UI 提交 prompt 后得到的 framework turn 信息。
@@ -149,8 +136,6 @@ pub struct StudioRuntime {
     model_performance: ModelPerformanceOwner,
     updater: StudioUpdateRuntime,
     activation: ProjectActivationRuntime,
-    task_runtime: crate::studio::TaskRuntime,
-    task_coordinator: std::sync::Arc<TaskCoordinator>,
     attachment_drafts: attachment_drafts::AttachmentDraftRuntime,
     ssh_manager: std::sync::Arc<pl_core::remote::SshManager>,
     lifecycle_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
@@ -195,6 +180,42 @@ struct ProjectActivation {
 }
 
 impl StudioRuntime {
+    /// 返回当前配置目录中可用的 Agent Profile 快照。
+    pub fn read_agent_profiles(&self) -> Result<crate::config::AgentProfileCatalog> {
+        Ok(self.config_runtime.agent_profiles_for_settings()?)
+    }
+
+    /// 原子创建或保存一个用户 Agent Profile TOML。
+    pub fn save_user_agent_profile(
+        &self,
+        profile_id: &str,
+        profile: &crate::config::UserAgentProfile,
+    ) -> Result<()> {
+        self.config_runtime
+            .save_user_agent_profile(profile_id, profile)?;
+        Ok(())
+    }
+
+    /// 启用或禁用不可编辑、不可删除的系统 Agent Profile。
+    pub fn set_system_agent_enabled(&self, profile_id: &str, enabled: bool) -> Result<()> {
+        if !crate::config::is_system_profile_id(profile_id) {
+            anyhow::bail!("`{profile_id}` is not a system Agent Profile");
+        }
+        let current = self.config_runtime.read()?;
+        let profile_id = profile_id.to_string();
+        let state = self.config_runtime.update(current.revision, |config| {
+            let mut config = config.clone();
+            if enabled {
+                config.disabled_system_agents.remove(&profile_id);
+            } else {
+                config.disabled_system_agents.insert(profile_id.clone());
+            }
+            Ok(config)
+        })?;
+        self.publish_settings_state(state)?;
+        Ok(())
+    }
+
     /// 返回本次启动构造阶段产生的配置恢复报告。
     pub fn startup_config_recovery(&self) -> Option<crate::config::ConfigRecoveryReport> {
         self.config_runtime.startup_recovery()
@@ -220,12 +241,9 @@ impl StudioRuntime {
         Ok(persistence.writer().state_snapshot())
     }
 
-    /// Returns whether a turn or durable task prevents a safe application update.
+    /// Returns whether an active turn prevents a safe application update.
     pub async fn is_busy_for_update(&self) -> Result<bool> {
-        if !self.derive_active_turns().await?.is_empty() {
-            return Ok(true);
-        }
-        Ok(self.task_runtime.has_any_active_task().await)
+        Ok(!self.derive_active_turns().await?.is_empty())
     }
 
     /// 从 agent framework 派生当前所有活动 turn。
@@ -253,167 +271,6 @@ impl StudioRuntime {
             });
         }
         Ok(turns)
-    }
-
-    pub async fn thread_task_view(
-        &self,
-        thread_id: &str,
-    ) -> Result<Option<crate::StudioTaskRuntime>> {
-        Ok(self.task_runtime.snapshot(thread_id).await)
-    }
-
-    pub async fn preview_recovery_issue_cleanup(
-        &self,
-        issue_id: &str,
-    ) -> Result<StudioRecoveryCleanupPreview> {
-        let issue = self
-            .recovery
-            .get(issue_id)
-            .ok_or_else(|| anyhow::anyhow!("recovery issue is no longer active"))?;
-        self.task_coordinator.preview_recovery_cleanup(&issue).await
-    }
-
-    pub async fn preview_project_cleanup(
-        &self,
-        project_id: &str,
-    ) -> Result<StudioRecoveryCleanupPreview> {
-        self.task_coordinator
-            .preview_project_cleanup(project_id)
-            .await
-    }
-
-    pub async fn cleanup_project(
-        &self,
-        project_id: &str,
-        expected_revision: &str,
-    ) -> Result<StudioRuntimeSnapshot> {
-        self.ensure_persistence_accepts_new_work()?;
-        let _lifecycle_guard = self.lifecycle_lock.lock().await;
-        let issue = self
-            .task_coordinator
-            .project_cleanup_issue(project_id)
-            .await?;
-        self.cleanup_project_issue_locked(issue, expected_revision)
-            .await
-    }
-
-    pub async fn cleanup_recovery_issue(
-        &self,
-        issue_id: &str,
-        expected_revision: &str,
-    ) -> Result<StudioRuntimeSnapshot> {
-        self.ensure_persistence_accepts_new_work()?;
-        let _lifecycle_guard = self.lifecycle_lock.lock().await;
-        let issue = self
-            .recovery
-            .get(issue_id)
-            .ok_or_else(|| anyhow::anyhow!("recovery issue is no longer active"))?;
-        if issue.action == StudioRecoveryIssueAction::RemoveProject {
-            return self
-                .cleanup_project_issue_locked(issue, expected_revision)
-                .await;
-        }
-        if let Some(thread_id) = issue.thread_id.as_deref()
-            && self.thread_is_busy(thread_id).await?
-        {
-            anyhow::bail!("recovery cleanup requires an idle Thread");
-        }
-        let authorization = self
-            .task_coordinator
-            .validate_recovery_cleanup(&issue, expected_revision)
-            .await?;
-        self.task_coordinator
-            .execute_recovery_cleanup(&issue, &authorization)
-            .await?;
-        if let Some(thread_id) = issue.thread_id.as_deref() {
-            self.close_project_agent_trees(&[thread_id.to_string()])
-                .await?;
-            let emitter = self.interaction_emitter(thread_id.to_string());
-            self.agent_facility
-                .interactions
-                .cancel_thread(
-                    self.pending_thread_interactions(thread_id).await?,
-                    "recovery context reset",
-                    emitter,
-                )
-                .await?;
-            self.store.reset_agent_sessions_for_root(thread_id).await?;
-        }
-        let issues = self.recovery.remove(issue_id);
-        self.agent_facility
-            .product_events
-            .emit_recovery_state(issues);
-        self.runtime_snapshot().await
-    }
-
-    pub async fn retry_recovery_issue(&self, issue_id: &str) -> Result<StudioRuntimeSnapshot> {
-        let _lifecycle_guard = self.lifecycle_lock.lock().await;
-        let issue = self
-            .recovery
-            .get(issue_id)
-            .ok_or_else(|| anyhow::anyhow!("recovery issue is no longer active"))?;
-        if issue.action != StudioRecoveryIssueAction::Retry {
-            anyhow::bail!("recovery issue does not authorize retry");
-        }
-        self.task_coordinator.retry_recovery_issue(&issue).await?;
-        let issues = self.recovery.remove(issue_id);
-        self.agent_facility
-            .product_events
-            .emit_recovery_state(issues);
-        self.runtime_snapshot().await
-    }
-
-    async fn cleanup_project_issue_locked(
-        &self,
-        issue: crate::StudioRecoveryIssue,
-        expected_revision: &str,
-    ) -> Result<StudioRuntimeSnapshot> {
-        let project_id = issue
-            .project_id
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("project cleanup has no project"))?;
-        let preview = self
-            .task_coordinator
-            .validate_recovery_cleanup(&issue, expected_revision)
-            .await?;
-        let mut thread_ids = self.store.list_project_thread_ids(project_id).await?;
-        thread_ids.sort();
-        thread_ids.dedup();
-        let root_thread_ids = thread_ids.iter().cloned().collect::<BTreeSet<_>>();
-        self.agent_facility
-            .resources
-            .begin_cleanup_takeover(&root_thread_ids)
-            .await;
-        self.close_project_agent_trees(&thread_ids).await?;
-        for thread_id in &thread_ids {
-            self.agent_facility
-                .interactions
-                .cancel_thread_for_project_cleanup(thread_id, "project cleaned up")
-                .await?;
-        }
-        self.task_coordinator
-            .execute_recovery_cleanup(&issue, &preview)
-            .await?;
-        self.agent_facility
-            .resources
-            .complete_cleanup_takeover(&root_thread_ids)
-            .await;
-        self.agent_facility
-            .product_events
-            .commit_directory(DirectoryDelta {
-                project_removals: vec![ProjectRemoval {
-                    project_id: project_id.to_string(),
-                    thread_ids: thread_ids.clone(),
-                    closed_at: crate::studio::unix_seconds(),
-                }],
-                ..Default::default()
-            })
-            .await?;
-        let issues = self.recovery.remove_for_project(project_id);
-        self.agent_facility
-            .product_events
-            .emit_recovery_state(issues);
-        self.runtime_snapshot().await
     }
 
     async fn close_project_agent_trees(&self, thread_ids: &[String]) -> Result<()> {
@@ -496,5 +353,4 @@ fn has_project_root(
     false
 }
 
-#[cfg(test)]
-mod unit_tests;
+// Legacy Task orchestration tests were removed with the fixed Task runtime.

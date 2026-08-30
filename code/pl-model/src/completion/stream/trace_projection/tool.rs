@@ -232,7 +232,6 @@ impl TraceProjection {
             return events;
         }
         events.push(AgentEvent::TracePartDelta { event });
-        events.extend(self.project_plan_arguments(snapshot));
         events
     }
 
@@ -279,12 +278,7 @@ impl TraceProjection {
         if !self.record(TraceEventKind::TracePartStarted { item: item.clone() }, now) {
             return Vec::new();
         }
-        let mut events = vec![AgentEvent::TracePartStarted { item }];
-        if call.invalid_arguments.is_some() {
-            events.extend(
-                self.fail_projected_plan(&item_id, "function arguments are not valid JSON"),
-            );
-        }
+        let events = vec![AgentEvent::TracePartStarted { item }];
         events
     }
 }

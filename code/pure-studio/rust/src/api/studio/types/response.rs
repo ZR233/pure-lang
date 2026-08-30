@@ -2,8 +2,7 @@ use super::runtime::{
     BridgeAgentDirectoryEntryDto, BridgeDegradedResource, BridgeFailedResource,
     BridgeLoadingResource, BridgeLspHealthDto, BridgeMcpHealthDto, BridgeReadyResource,
     BridgeRefreshingResource, BridgeStaleResource, BridgeStoppedResource,
-    BridgeStudioRecoveryIssueDto, BridgeTaskRuntimeDto, BridgeUninitializedResource,
-    RuntimeSnapshot,
+    BridgeStudioRecoveryIssueDto, BridgeUninitializedResource, RuntimeSnapshot,
 };
 use super::settings::BridgeStudioSettingsDto;
 use super::thread_stream::{BridgeRuntimeCostAmount, BridgeThread};
@@ -31,7 +30,6 @@ pub struct BridgeStudioStateSnapshot {
     pub project_directory: BridgeProjectDirectoryState,
     /// 目录分页窗口的首页；后续页通过 `listThreadsPage` keyset cursor 加载。
     pub thread_directory: BridgeThreadDirectoryPage,
-    pub task_directory: BridgeTaskDirectoryState,
     pub agent_directory: BridgeAgentDirectoryState,
     pub settings: BridgeSettingsStateSnapshot,
     pub recovery: BridgeRecoveryStateSnapshot,
@@ -199,44 +197,6 @@ pub struct BridgeThreadDirectoryPageData {
 pub struct BridgeListThreadsPageRequest {
     pub cursor: Option<String>,
     pub limit: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "kind", content = "data", rename_all = "camelCase")]
-pub enum BridgeTaskDirectoryState {
-    Uninitialized(BridgeUninitializedResource),
-    Loading(BridgeLoadingResource),
-    Ready {
-        resource: BridgeReadyResource,
-        value: BridgeTaskDirectoryData,
-    },
-    Refreshing {
-        resource: BridgeRefreshingResource,
-        value: BridgeTaskDirectoryData,
-    },
-    Stale {
-        resource: BridgeStaleResource,
-        value: BridgeTaskDirectoryData,
-    },
-    Degraded {
-        resource: BridgeDegradedResource,
-        value: BridgeTaskDirectoryData,
-    },
-    Failed(BridgeFailedResource),
-    Stopped(BridgeStoppedResource),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct BridgeTaskDirectoryData {
-    pub tasks: Vec<BridgeTaskDirectoryEntry>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct BridgeTaskDirectoryEntry {
-    pub root_thread_id: String,
-    pub task: BridgeTaskRuntimeDto,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -434,8 +394,20 @@ pub struct BridgeSkillsStateData {
     pub config_fingerprint: String,
     pub catalog_revision: u64,
     pub skills: Vec<SkillSummaryDto>,
+    pub modes: Vec<ModeSummaryDto>,
     pub warnings: Vec<String>,
     pub complete: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModeSummaryDto {
+    pub id: String,
+    pub display_name: String,
+    pub description: String,
+    pub order: i32,
+    pub source: String,
+    pub provider_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

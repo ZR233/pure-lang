@@ -1,8 +1,7 @@
 use anyhow::Result;
 use pl_protocol::{
     CancelledInteractionState, ExpiredInteractionState, InteractionContent, InteractionRequest,
-    PlanConfirmationResolution, PlanConfirmationState, ToolApprovalResolution, ToolApprovalState,
-    UserInputState, UserQuestion,
+    ToolApprovalResolution, ToolApprovalState, UserInputState, UserQuestion,
 };
 
 use crate::api::studio::types::*;
@@ -40,11 +39,6 @@ fn content(value: InteractionContent) -> Result<BridgeInteractionContent> {
                 state: tool_approval_state(value.state()),
             }
         }
-        InteractionContent::PlanConfirmation(value) => BridgeInteractionContent::PlanConfirmation {
-            plan_id: value.plan_id().to_owned(),
-            content: value.content().to_owned(),
-            state: plan_confirmation_state(value.state()),
-        },
     })
 }
 
@@ -103,36 +97,6 @@ fn cancelled_tool_approval(
     }
 }
 
-fn plan_confirmation_state(
-    value: &PlanConfirmationState,
-) -> BridgePlanConfirmationInteractionState {
-    match value {
-        PlanConfirmationState::Pending(state) => BridgePlanConfirmationInteractionState::Pending {
-            operation_id: state.operation_id().to_owned(),
-        },
-        PlanConfirmationState::Resolved(state) => {
-            BridgePlanConfirmationInteractionState::Resolved {
-                operation_id: state.operation_id().to_owned(),
-                resolved_at: state.resolved_at(),
-                decision: plan_confirmation_resolution(state.decision()),
-                content: state.content().map(str::to_owned),
-                reason: state.reason().map(str::to_owned),
-            }
-        }
-        PlanConfirmationState::Cancelled(state) => {
-            BridgePlanConfirmationInteractionState::Cancelled {
-                operation_id: state.operation_id().to_owned(),
-                cancelled_at: state.cancelled_at(),
-                reason: state.reason().to_owned(),
-            }
-        }
-        PlanConfirmationState::Expired(state) => BridgePlanConfirmationInteractionState::Expired {
-            operation_id: state.operation_id().to_owned(),
-            expired_at: state.expired_at(),
-        },
-    }
-}
-
 fn sorted_answers(
     value: &std::collections::HashMap<String, pl_protocol::UserInputAnswer>,
 ) -> Vec<BridgeUserInputAnswer> {
@@ -151,15 +115,6 @@ fn tool_approval_resolution(value: ToolApprovalResolution) -> BridgeToolApproval
     match value {
         ToolApprovalResolution::Approved => BridgeToolApprovalResolution::Approved,
         ToolApprovalResolution::Denied => BridgeToolApprovalResolution::Denied,
-    }
-}
-
-fn plan_confirmation_resolution(
-    value: PlanConfirmationResolution,
-) -> BridgePlanConfirmationResolution {
-    match value {
-        PlanConfirmationResolution::Confirm => BridgePlanConfirmationResolution::Confirm,
-        PlanConfirmationResolution::RevisePlan => BridgePlanConfirmationResolution::RevisePlan,
     }
 }
 

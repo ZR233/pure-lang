@@ -542,7 +542,7 @@ mod tests {
             .await
             .unwrap();
         let thread = store
-            .create_thread(&project.id, slug, StudioMode::Simple)
+            .create_thread(&project.id, slug, StudioMode::simple())
             .await
             .unwrap();
         (store, thread.id)

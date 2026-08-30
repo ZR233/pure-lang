@@ -114,7 +114,7 @@ mod tests {
         std::fs::create_dir_all(&workspace).unwrap();
         let project = store.upsert_project(&workspace).await.unwrap();
         let thread = store
-            .create_thread(&project.id, "History anchor", StudioMode::Simple)
+            .create_thread(&project.id, "History anchor", StudioMode::simple())
             .await
             .unwrap();
         for ordinal in 1..=5 {

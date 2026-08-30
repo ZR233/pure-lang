@@ -55,7 +55,7 @@ mod restore;
 mod unit_tests;
 
 impl StudioAgentRepository {
-    /// write-behind writer 共享实例构造：与 TaskRuntime、ProductEventBus 使用
+    /// write-behind writer 共享实例构造：与 Agent runtime、ProductEventBus 使用
     /// 同一进程级 writer，恢复基线 seed 进该实例。
     #[cfg(test)]
     pub(in crate::studio) fn with_writer(
@@ -91,7 +91,7 @@ impl ThreadRepository for StudioAgentRepository {
     type Error = PureError;
 
     /// 只恢复启动钉住集合：存在 pending input、pending Interaction、活动 Turn
-    /// 或被活动 Task/唤醒/续轮引用的 Thread。其余 Thread 惰性驻留。
+    /// 或被活动协作/续轮引用的 Thread。其余 Thread 惰性驻留。
     async fn restore_runtime(&self) -> Result<Vec<RestoredAgentRuntime>, Self::Error> {
         let pinned = self.pinned_thread_ids().await?;
         if pinned.is_empty() {
@@ -575,74 +575,4 @@ pub(super) fn i64_from_u64(value: u64) -> Result<i64, PureError> {
 
 pub(super) fn store_error(error: impl std::fmt::Display) -> PureError {
     PureError::MemoryError(error.to_string())
-}
-
-fn anyhow_into(error: anyhow::Error) -> PureError {
-    PureError::MemoryError(error.to_string())
-}
-
-/// write-behind writer 与 repository 的事务级测试支撑。
-#[cfg(test)]
-pub(super) mod test_support {
-    use std::collections::VecDeque;
-
-    use pl_core::{
-        AgentIdentity, AgentRoleId, AgentSnapshot, AgentState, DurableCommitFacts,
-        PersistenceClass, ThreadActorState, ThreadCommit, ThreadContextState, ThreadId,
-        ThreadMutation,
-    };
-
-    use super::StudioStore;
-    use crate::config::StudioMode;
-
-    /// 建立内存库中的 project + thread 行，返回 thread id。
-    pub(super) async fn seed_thread(store: &StudioStore, title: &str) -> String {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let workspace = std::env::temp_dir().join(format!("pure-writer-support-{unique}-{title}"));
-        let project = store.upsert_project(&workspace).await.expect("project");
-        let thread = store
-            .create_thread(&project.id, title, StudioMode::Simple)
-            .await
-            .expect("thread");
-        thread.id
-    }
-
-    /// 构造首次注册（expected_revision=None）的最小 ThreadCommit。
-    pub(super) fn writer_test_commit(
-        thread_id: &str,
-        persistence: PersistenceClass,
-    ) -> ThreadCommit {
-        let thread_id = ThreadId::new(thread_id).expect("thread id");
-        let state = ThreadActorState {
-            snapshot: AgentSnapshot {
-                identity: AgentIdentity {
-                    id: thread_id.clone(),
-                    parent_id: None,
-                    role: AgentRoleId::new("executor").expect("role"),
-                    depth: 0,
-                },
-                state: AgentState::idle(),
-                pending_inputs: 0,
-                progress: None,
-                last_turn: None,
-                revision: 1,
-                event_sequence: 1,
-                updated_at: 1,
-            },
-            session: ThreadContextState::empty(),
-            pending_inputs: VecDeque::new(),
-            active_input: None,
-        };
-        ThreadCommit {
-            agent_id: thread_id.clone(),
-            persistence,
-            expected_revision: None,
-            facts: DurableCommitFacts::from_state(&state, Vec::new(), Vec::new(), None, None),
-            next_state: state,
-            mutation: ThreadMutation::SnapshotAndQueue,
-        }
-    }
 }

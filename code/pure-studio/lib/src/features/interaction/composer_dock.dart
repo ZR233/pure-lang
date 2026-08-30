@@ -15,7 +15,6 @@ import '../../shared/studio_driver_state.dart';
 import '../../shared/upward_popup_menu.dart';
 import '../status/session_selectors.dart';
 import 'interaction_payload.dart';
-import 'plan_confirmation_dock.dart';
 import 'tool_approval_dock.dart';
 import 'user_input_dock.dart';
 
@@ -731,13 +730,6 @@ class _InteractionDock extends StatelessWidget {
         threadId: workspace.threadId,
         interactionId: interaction.id,
         payload: payload,
-        enabled: enabled,
-        trailing: trailing,
-      ),
-      InteractionKind.planConfirmation => PlanConfirmationDock(
-        threadId: workspace.threadId,
-        interactionId: interaction.id,
-        planContent: payload.planContent,
         enabled: enabled,
         trailing: trailing,
       ),

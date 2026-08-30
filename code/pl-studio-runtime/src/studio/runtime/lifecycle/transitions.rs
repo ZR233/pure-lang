@@ -44,38 +44,14 @@ impl StudioRuntime {
                 .initialize_directories()
                 .await
                 .map_err(|error| startup_failure("initialize_product_directories", error))?;
-            let mut report = self
-                .task_coordinator
-                .recover_active_tasks()
-                .await
-                .map_err(|error| startup_failure("recover_active_tasks", error))?;
-            // 只装载非终态聚合（终态 Task 是冷数据，显式访问时冷激活）。
-            let active_runs = self
-                .store
-                .list_active_task_runs()
-                .await
-                .map_err(|error| startup_failure("initialize_task_runtime", error))?;
-            self.task_runtime
-                .initialize(active_runs)
-                .await
-                .map_err(|error| startup_failure("initialize_task_runtime", error))?;
-            // 活动 Task root 进入热集合，供目录分页以内存事实覆盖冷行。
-            for root_thread_id in self.task_runtime.active_thread_ids().await {
-                if let Ok(Some(record)) = self.store.read_thread(&root_thread_id).await {
-                    let _ = self
-                        .agent_facility
-                        .product_events
-                        .apply_thread_delta(vec![pl_protocol::Thread::from(record)], Vec::new())
-                        .await;
-                }
-            }
+            let mut recovery_issues = Vec::new();
             self.recover_interactions_after_restart()
                 .await
                 .map_err(|error| startup_failure("recover_interactions", error))?;
-            self.append_session_recovery_issues(&mut report.issues)
+            self.append_session_recovery_issues(&mut recovery_issues)
                 .await
                 .map_err(|error| startup_failure("recover_sessions", error))?;
-            self.append_unavailable_project_recovery_issues(&mut report.issues)
+            self.append_unavailable_project_recovery_issues(&mut recovery_issues)
                 .await
                 .map_err(|error| startup_failure("recover_unavailable_projects", error))?;
             // 惰性驻留：这里只启动 framework（restore_runtime 恢复钉住集合），
@@ -95,12 +71,12 @@ impl StudioRuntime {
                 .map_err(|error| startup_failure("refresh_system_skills", error))?;
             self.publish_settings_state(settings)
                 .map_err(|error| startup_failure("publish_settings", error))?;
-            Ok::<_, anyhow::Error>(report)
+            Ok::<_, anyhow::Error>(recovery_issues)
         }
         .await;
         match initialization {
-            Ok(report) => {
-                self.recovery.replace(report.issues);
+            Ok(recovery_issues) => {
+                self.recovery.replace(recovery_issues);
                 self.agent_facility
                     .product_events
                     .emit_recovery_state(self.recovery.snapshot());
@@ -192,9 +168,9 @@ impl StudioRuntime {
                 .emit(crate::StudioShutdownProgress::FlushingPersistence(
                     crate::FlushingPersistenceProgress::new(0),
                 ));
-            // 阶段 4：挂起 Task 协调。
+            // 阶段 4：停止协作 Agent。
             self.shutdown_progress
-                .emit(crate::StudioShutdownProgress::SuspendingTasks(
+                .emit(crate::StudioShutdownProgress::StoppingAgents(
                     Default::default(),
                 ));
             // 阶段 5：关闭 MCP。

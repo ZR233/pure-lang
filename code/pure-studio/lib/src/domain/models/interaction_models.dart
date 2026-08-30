@@ -28,16 +28,6 @@ class ToolApprovalInteractionPayload extends InteractionPayload {
   final String? parentAgentId;
 }
 
-class PlanConfirmationInteractionPayload extends InteractionPayload {
-  const PlanConfirmationInteractionPayload({
-    required this.planId,
-    required this.content,
-  });
-
-  final String planId;
-  final String content;
-}
-
 class UserQuestionView {
   const UserQuestionView({
     required this.id,
@@ -115,24 +105,9 @@ class ToolApprovalResolutionCommand extends InteractionResolutionCommand {
   final String? reason;
 }
 
-enum PlanConfirmationDecision { confirm, revisePlan }
-
-class PlanConfirmationResolutionCommand extends InteractionResolutionCommand {
-  const PlanConfirmationResolutionCommand({
-    required this.decision,
-    this.content,
-    this.reason,
-  });
-
-  final PlanConfirmationDecision decision;
-  final String? content;
-  final String? reason;
-}
-
 int interactionPriority(InteractionKind kind) {
   return switch (kind) {
     InteractionKind.toolApproval => 0,
     InteractionKind.userInput => 1,
-    InteractionKind.planConfirmation => 2,
   };
 }

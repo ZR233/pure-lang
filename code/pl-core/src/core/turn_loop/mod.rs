@@ -9,7 +9,6 @@ mod compaction;
 mod completion;
 pub(super) mod enabled_tools;
 mod inference;
-mod plan;
 mod prompt_cache;
 mod tool_results;
 mod turn_setup;
@@ -17,7 +16,6 @@ mod turn_setup;
 use attachments::prepare_context_items;
 use compaction::CompactionStep;
 use enabled_tools::record_enabled_tools;
-use plan::record_plan_items;
 
 use crate::context_assembler::{ContextAssembler, TurnContextSnapshot};
 use crate::context_compaction::ensure_provider_can_consume_session;
@@ -297,7 +295,6 @@ pub(super) async fn run_turn_with_trace(
                 .trace_sink()
                 .expect("enabled turn tracing must provide a canonical sink"),
         )
-        .with_input_trace_projections(tool_plan.input_trace_projections())
         .with_cancellation(cancellation_token.clone());
         progress.heartbeat(recorder, "正在等待模型响应。");
         progress.debug(recorder, format!("模型 `{model}` 流式请求已发起。"));
@@ -546,7 +543,6 @@ pub(super) async fn run_turn_with_trace(
         billing.orchestration.merge(&tool_batch.orchestration);
         let mut tool_results = tool_batch.records;
         progress.tool_detail(recorder, "工具执行完成，准备回写结果。");
-        record_plan_items(recorder, &turn_id, &tool_results);
         let requested_interaction = tool_results.iter().any(|tool_result| {
             tool_result.runtime_events.iter().any(|event| {
                 matches!(
@@ -571,7 +567,6 @@ pub(super) async fn run_turn_with_trace(
                     } => Some(content.clone()),
                     crate::tool::ToolDirective::InteractionRequested { .. }
                     | crate::tool::ToolDirective::SkillActivated { .. }
-                    | crate::tool::ToolDirective::PlanCompleted { .. }
                     | crate::tool::ToolDirective::ToolResultRevision { .. }
                     | crate::tool::ToolDirective::OutputArtifacts { .. }
                     | crate::tool::ToolDirective::AuditMetadata { .. }

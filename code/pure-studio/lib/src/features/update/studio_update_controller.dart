@@ -28,7 +28,7 @@ final studioVersionProvider = Provider<String>((ref) => _compiledStudioVersion);
 
 final studioRuntimeBusyProvider = Provider<bool>((ref) {
   final studio = ref.watch(studioControllerProvider).value;
-  return studio?.isBusy == true || studio?.runtime.hasActiveTask == true;
+  return studio?.isBusy == true || studio?.runtime.hasActiveWorkflow == true;
 });
 
 abstract class StudioUpdateApi {

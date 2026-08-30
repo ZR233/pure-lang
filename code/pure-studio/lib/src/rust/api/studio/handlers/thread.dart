@@ -21,7 +21,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 Future<StartNewThreadResponse> startNewThread({
   required String projectId,
   required BridgeStudioPromptInput input,
-  required BridgeThreadMode mode,
+  required String mode,
 }) => RustLib.instance.api.crateApiStudioHandlersThreadStartNewThread(
   projectId: projectId,
   input: input,
@@ -38,15 +38,13 @@ Future<ArchiveThreadResult> archiveThread({required String threadId}) => RustLib
     .api
     .crateApiStudioHandlersThreadArchiveThread(threadId: threadId);
 
-/// Changes the selected root Thread between Simple and Task mode.
+/// Changes the selected root Thread to a discovered Mode Skill ID.
 ///
 /// # Errors
 ///
-/// Returns an error when the Thread does not exist, is a child Thread, or has an active Task.
-Future<void> setThreadMode({
-  required String threadId,
-  required BridgeThreadMode mode,
-}) => RustLib.instance.api.crateApiStudioHandlersThreadSetThreadMode(
-  threadId: threadId,
-  mode: mode,
-);
+/// Returns an error when the Thread does not exist, is a child Thread, or has an active workflow.
+Future<void> setThreadMode({required String threadId, required String mode}) =>
+    RustLib.instance.api.crateApiStudioHandlersThreadSetThreadMode(
+      threadId: threadId,
+      mode: mode,
+    );

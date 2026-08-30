@@ -37,7 +37,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get shutdownPhaseFlushingPersistence => '正在保存会话';
 
   @override
-  String get shutdownPhaseSuspendingTasks => '正在挂起后台任务';
+  String get shutdownPhaseStoppingAgents => '正在停止协作 Agent';
 
   @override
   String get shutdownPhaseStoppingMcp => '正在关闭 MCP';
@@ -112,72 +112,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String recoveryGlobalWarning(int count) {
     return '有 $count 个恢复问题需要处理';
   }
-
-  @override
-  String get recoveryCleanupTooltip => '查看安全清理';
-
-  @override
-  String get recoveryRetryTooltip => '继续合并恢复';
-
-  @override
-  String recoveryRetryFailed(String error) {
-    return '恢复重试失败：$error';
-  }
-
-  @override
-  String get recoveryCleanupTitle => '清理恢复问题？';
-
-  @override
-  String get recoveryCleanupBody => 'Pure Studio 只会清理自身创建的任务资源。继续前请检查可能丢失的工作。';
-
-  @override
-  String get recoveryCleanupNoResources => '未发现仍存在的任务资源。';
-
-  @override
-  String get recoveryCleanupPresenceAbsent => '已缺失';
-
-  @override
-  String get recoveryCleanupPresenceComplete => '完整';
-
-  @override
-  String get recoveryCleanupPresencePartial => '部分缺失';
-
-  @override
-  String get recoveryCleanupDirty => '有未提交修改';
-
-  @override
-  String recoveryCleanupAhead(int count) {
-    return '$count 个未合并提交';
-  }
-
-  @override
-  String recoveryCleanupChangedFiles(int count) {
-    return '$count 个变更文件';
-  }
-
-  @override
-  String get recoveryCleanupCancel => '取消';
-
-  @override
-  String get recoveryCleanupConfirm => '清理';
-
-  @override
-  String get recoveryCleanupRefreshPreview => '刷新预览';
-
-  @override
-  String recoveryCleanupFailed(String error) {
-    return '清理失败：$error';
-  }
-
-  @override
-  String get projectCleanupTitle => '移除项目并清理 Pure worktree？';
-
-  @override
-  String get projectCleanupBody =>
-      '这会从 Studio 移除项目，并永久放弃所有 Pure 自建任务 worktree 中的未提交修改和未合并提交。用户主工作区不会被删除或修改。';
-
-  @override
-  String get projectCleanupConfirm => '移除项目并清理';
 
   @override
   String get sidebarNew => '新建';
@@ -372,7 +306,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statusSessionMode => '会话模式';
 
   @override
-  String get statusSessionModeLocked => '会话运行或任务执行期间无法切换会话模式';
+  String get statusSessionModeLocked => '会话运行或工作流活动期间无法切换会话模式';
 
   @override
   String get statusPlannerModel => 'Planner 模型';
@@ -483,9 +417,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statusTurnWaitingForUserInput => '等待输入';
 
   @override
-  String get statusTurnWaitingForPlanConfirmation => '等待计划确认';
-
-  @override
   String get statusTurnPersisting => '保存本轮结果';
 
   @override
@@ -493,9 +424,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get statusInteractionUserInput => '等待输入';
-
-  @override
-  String get statusInteractionPlanConfirmation => '等待计划确认';
 
   @override
   String statusContextTooltip(
@@ -551,237 +479,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get composerAgentRuntimeDriven => '此 Agent 会话由运行时驱动';
-
-  @override
-  String get statusTaskSection => '任务协调';
-
-  @override
-  String get statusTaskBranch => '分支';
-
-  @override
-  String get statusTaskHead => 'HEAD';
-
-  @override
-  String get statusTaskWorkUnits => '工作单元';
-
-  @override
-  String get statusTaskAgents => '代理';
-
-  @override
-  String get statusTaskCompletions => '完成报告';
-
-  @override
-  String get statusTaskMerges => '合并记录';
-
-  @override
-  String get statusTaskReviews => '代码审查';
-
-  @override
-  String get statusTaskWorktree => '工作树';
-
-  @override
-  String get statusTaskCommit => '提交';
-
-  @override
-  String get statusTaskSource => '来源';
-
-  @override
-  String get statusTaskPreviousHead => '合并前 HEAD';
-
-  @override
-  String get statusTaskDeliveryHead => '交付 HEAD';
-
-  @override
-  String get statusTaskResultingHead => '合并后 HEAD';
-
-  @override
-  String get statusTaskCleanup => '资源清理';
-
-  @override
-  String get statusTaskRequest => '调用请求';
-
-  @override
-  String get statusTaskSummary => '摘要';
-
-  @override
-  String get statusTaskStage => '阶段';
-
-  @override
-  String get statusTaskNextStep => '下一步';
-
-  @override
-  String get statusTaskSummaryAge => '摘要更新时间';
-
-  @override
-  String get statusTaskVerification => '验证';
-
-  @override
-  String get statusTaskScope => '范围';
-
-  @override
-  String get statusTaskCompletionRevision => '完成版本';
-
-  @override
-  String get statusTaskFindings => '审查发现';
-
-  @override
-  String get statusTaskRecommendation => '修复建议';
-
-  @override
-  String get statusTaskError => '错误';
-
-  @override
-  String get statusTaskFailed => '任务失败';
-
-  @override
-  String get statusTaskRecoverable => '可继续';
-
-  @override
-  String get statusTaskPaused => '已暂停';
-
-  @override
-  String get statusTaskFailures => '任务错误';
-
-  @override
-  String get statusTaskFatalHint => '修复 Provider 或配置后，请开启新任务。';
-
-  @override
-  String get statusTaskRecoverableHint => '修复原因后可继续当前任务。';
-
-  @override
-  String get statusTaskPausedHint => '当前没有模型执行；发送消息可继续此任务。';
-
-  @override
-  String get statusTaskExecution => '执行状态';
-
-  @override
-  String get statusTaskBudget => '预算限制';
-
-  @override
-  String get statusTaskBudgetSlice => '预算切片';
-
-  @override
-  String statusTaskBudgetSliceValue(int current, int limit) {
-    return '$current/$limit';
-  }
-
-  @override
-  String statusTaskBudgetUsage(
-    int modelSteps,
-    int toolCalls,
-    int waitCalls,
-    String elapsedMs,
-  ) {
-    return '$modelSteps 次模型 · $toolCalls 次工具 · $waitCalls 次等待 · $elapsedMs 毫秒';
-  }
-
-  @override
-  String get statusTaskContinuation => '自动续轮';
-
-  @override
-  String get statusTaskBudgetModelStep => '模型步数上限';
-
-  @override
-  String get statusTaskBudgetToolCall => '工具调用上限';
-
-  @override
-  String get statusTaskBudgetWait => '等待调用上限';
-
-  @override
-  String get statusTaskBudgetWallClock => '运行时长上限';
-
-  @override
-  String get statusTaskBudgetAgentCount => 'Agent 数量上限';
-
-  @override
-  String get statusTaskBudgetAgentDepth => 'Agent 深度上限';
-
-  @override
-  String get statusTaskBudgetFinalization => '收尾预算上限';
-
-  @override
-  String get statusTaskContinuationNone => '无';
-
-  @override
-  String get statusTaskContinuationCompacting => '正在压缩上下文';
-
-  @override
-  String get statusTaskContinuationPendingStart => '正在启动下一切片';
-
-  @override
-  String get statusTaskContinuationNeedsAttention => '需要处理';
-
-  @override
-  String get statusTaskPhasePlanning => '规划中';
-
-  @override
-  String get statusTaskPhasePendingConfirmation => '等待确认计划';
-
-  @override
-  String get statusTaskPhaseEditingDocuments => '编辑文档中';
-
-  @override
-  String get statusTaskPhaseWorking => '执行中';
-
-  @override
-  String get statusTaskPhaseReviewing => '审查中';
-
-  @override
-  String get statusTaskPhaseCompleted => '任务已完成';
-
-  @override
-  String get statusTaskStatusPending => '待处理';
-
-  @override
-  String get statusTaskStatusQueued => '排队中';
-
-  @override
-  String get statusTaskStatusRunning => '运行中';
-
-  @override
-  String get statusTaskStatusAwaitingCompletion => '等待完成报告';
-
-  @override
-  String get statusTaskStatusReadyForReview => '等待审查';
-
-  @override
-  String get statusTaskStatusReviewing => '审查中';
-
-  @override
-  String get statusTaskStatusChangesRequested => '等待修改';
-
-  @override
-  String get statusTaskStatusApproved => '已批准';
-
-  @override
-  String get statusTaskStatusMerged => '已合并';
-
-  @override
-  String get statusTaskStatusNoDelivery => '无需交付';
-
-  @override
-  String get statusTaskStatusCompleted => '已完成';
-
-  @override
-  String get statusTaskStatusBudgetLimited => '已达预算限制';
-
-  @override
-  String get statusTaskStatusNeedsAttention => '需要处理';
-
-  @override
-  String get statusTaskStatusFailed => '失败';
-
-  @override
-  String get statusTaskStatusCancelled => '已取消';
-
-  @override
-  String get statusTaskStatusPass => '已通过';
-
-  @override
-  String get statusTaskStatusChangesRequired => '需要修改';
-
-  @override
-  String get statusTaskStatusBlocked => '已阻塞';
 
   @override
   String get statusSkillsSection => 'Skills';
@@ -923,9 +620,6 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get timelinePlanFallback => '计划';
-
-  @override
   String timelineSkillActivated(String name) {
     return '已激活 Skill · $name';
   }
@@ -1022,60 +716,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get interactionContinueAfterAnswer => '回答后继续';
-
-  @override
-  String get taskRecoveryDialogTitle => '恢复并继续';
-
-  @override
-  String get taskRecoveryDialogBody =>
-      '只回退所选 Thread 的模型上下文；Task、WorkUnit、工作区、提交、用量和审计历史全部保留。';
-
-  @override
-  String get taskRecoveryTargetLabel => '恢复目标';
-
-  @override
-  String get taskRecoveryTargetPlanner => 'Planner';
-
-  @override
-  String get taskRecoveryTargetExecutor => 'Executor';
-
-  @override
-  String get taskRecoveryTurnSuffixLabel => '回退连续尾部 Turn 数';
-
-  @override
-  String get taskRecoveryModeLabel => '恢复方式';
-
-  @override
-  String get taskRecoveryModeRewind => '回退对话尾部';
-
-  @override
-  String get taskRecoveryModeRebuild => '局部重建 Thread 上下文';
-
-  @override
-  String get taskRecoveryGitPreserved =>
-      'Git 与工作区不会被回滚、清理或重置；执行恢复时指纹必须与此预览完全一致。';
-
-  @override
-  String get taskRecoveryRebuildWarning =>
-      '无法安全保留前缀时，只清空这个 Thread 的普通 transcript；handoff、证据、会话笔记和外部状态仍保留。';
-
-  @override
-  String get taskRecoveryFirstConfirm => '检查恢复影响';
-
-  @override
-  String get taskRecoveryFinalConfirm => '确认恢复并继续';
-
-  @override
-  String get taskRecoveryApplying => '正在恢复…';
-
-  @override
-  String get taskRecoveryItems => '条目';
-
-  @override
-  String get taskRecoveryInputs => '输入';
-
-  @override
-  String get taskRecoveryTools => '工具';
 
   @override
   String get timelineRolledBack => '已从有效上下文回退';
@@ -1851,7 +1491,7 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get shutdownPhaseFlushingPersistence => '正在保存会话';
 
   @override
-  String get shutdownPhaseSuspendingTasks => '正在挂起后台任务';
+  String get shutdownPhaseStoppingAgents => '正在停止协作 Agent';
 
   @override
   String get shutdownPhaseStoppingMcp => '正在关闭 MCP';
@@ -1924,72 +1564,6 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String recoveryGlobalWarning(int count) {
     return '有 $count 个恢复问题需要处理';
   }
-
-  @override
-  String get recoveryCleanupTooltip => '查看安全清理';
-
-  @override
-  String get recoveryRetryTooltip => '继续合并恢复';
-
-  @override
-  String recoveryRetryFailed(String error) {
-    return '恢复重试失败：$error';
-  }
-
-  @override
-  String get recoveryCleanupTitle => '清理恢复问题？';
-
-  @override
-  String get recoveryCleanupBody => 'Pure Studio 只会清理自身创建的任务资源。继续前请检查可能丢失的工作。';
-
-  @override
-  String get recoveryCleanupNoResources => '未发现仍存在的任务资源。';
-
-  @override
-  String get recoveryCleanupPresenceAbsent => '已缺失';
-
-  @override
-  String get recoveryCleanupPresenceComplete => '完整';
-
-  @override
-  String get recoveryCleanupPresencePartial => '部分缺失';
-
-  @override
-  String get recoveryCleanupDirty => '有未提交修改';
-
-  @override
-  String recoveryCleanupAhead(int count) {
-    return '$count 个未合并提交';
-  }
-
-  @override
-  String recoveryCleanupChangedFiles(int count) {
-    return '$count 个变更文件';
-  }
-
-  @override
-  String get recoveryCleanupCancel => '取消';
-
-  @override
-  String get recoveryCleanupConfirm => '清理';
-
-  @override
-  String get recoveryCleanupRefreshPreview => '刷新预览';
-
-  @override
-  String recoveryCleanupFailed(String error) {
-    return '清理失败：$error';
-  }
-
-  @override
-  String get projectCleanupTitle => '移除项目并清理 Pure worktree？';
-
-  @override
-  String get projectCleanupBody =>
-      '这会从 Studio 移除项目，并永久放弃所有 Pure 自建任务 worktree 中的未提交修改和未合并提交。用户主工作区不会被删除或修改。';
-
-  @override
-  String get projectCleanupConfirm => '移除项目并清理';
 
   @override
   String get sidebarNew => '新建';
@@ -2184,7 +1758,7 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get statusSessionMode => '会话模式';
 
   @override
-  String get statusSessionModeLocked => '会话运行或任务执行期间无法切换会话模式';
+  String get statusSessionModeLocked => '会话运行或工作流活动期间无法切换会话模式';
 
   @override
   String get statusPlannerModel => 'Planner 模型';
@@ -2295,9 +1869,6 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get statusTurnWaitingForUserInput => '等待输入';
 
   @override
-  String get statusTurnWaitingForPlanConfirmation => '等待计划确认';
-
-  @override
   String get statusTurnPersisting => '保存本轮结果';
 
   @override
@@ -2305,9 +1876,6 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get statusInteractionUserInput => '等待输入';
-
-  @override
-  String get statusInteractionPlanConfirmation => '等待计划确认';
 
   @override
   String statusContextTooltip(
@@ -2363,237 +1931,6 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get composerAgentRuntimeDriven => '此 Agent 会话由运行时驱动';
-
-  @override
-  String get statusTaskSection => '任务协调';
-
-  @override
-  String get statusTaskBranch => '分支';
-
-  @override
-  String get statusTaskHead => 'HEAD';
-
-  @override
-  String get statusTaskWorkUnits => '工作单元';
-
-  @override
-  String get statusTaskAgents => '代理';
-
-  @override
-  String get statusTaskCompletions => '完成报告';
-
-  @override
-  String get statusTaskMerges => '合并记录';
-
-  @override
-  String get statusTaskReviews => '代码审查';
-
-  @override
-  String get statusTaskWorktree => '工作树';
-
-  @override
-  String get statusTaskCommit => '提交';
-
-  @override
-  String get statusTaskSource => '来源';
-
-  @override
-  String get statusTaskPreviousHead => '合并前 HEAD';
-
-  @override
-  String get statusTaskDeliveryHead => '交付 HEAD';
-
-  @override
-  String get statusTaskResultingHead => '合并后 HEAD';
-
-  @override
-  String get statusTaskCleanup => '资源清理';
-
-  @override
-  String get statusTaskRequest => '调用请求';
-
-  @override
-  String get statusTaskSummary => '摘要';
-
-  @override
-  String get statusTaskStage => '阶段';
-
-  @override
-  String get statusTaskNextStep => '下一步';
-
-  @override
-  String get statusTaskSummaryAge => '摘要更新时间';
-
-  @override
-  String get statusTaskVerification => '验证';
-
-  @override
-  String get statusTaskScope => '范围';
-
-  @override
-  String get statusTaskCompletionRevision => '完成版本';
-
-  @override
-  String get statusTaskFindings => '审查发现';
-
-  @override
-  String get statusTaskRecommendation => '修复建议';
-
-  @override
-  String get statusTaskError => '错误';
-
-  @override
-  String get statusTaskFailed => '任务失败';
-
-  @override
-  String get statusTaskRecoverable => '可继续';
-
-  @override
-  String get statusTaskPaused => '已暂停';
-
-  @override
-  String get statusTaskFailures => '任务错误';
-
-  @override
-  String get statusTaskFatalHint => '修复 Provider 或配置后，请开启新任务。';
-
-  @override
-  String get statusTaskRecoverableHint => '修复原因后可继续当前任务。';
-
-  @override
-  String get statusTaskPausedHint => '当前没有模型执行；发送消息可继续此任务。';
-
-  @override
-  String get statusTaskExecution => '执行状态';
-
-  @override
-  String get statusTaskBudget => '预算限制';
-
-  @override
-  String get statusTaskBudgetSlice => '预算切片';
-
-  @override
-  String statusTaskBudgetSliceValue(int current, int limit) {
-    return '$current/$limit';
-  }
-
-  @override
-  String statusTaskBudgetUsage(
-    int modelSteps,
-    int toolCalls,
-    int waitCalls,
-    String elapsedMs,
-  ) {
-    return '$modelSteps 次模型 · $toolCalls 次工具 · $waitCalls 次等待 · $elapsedMs 毫秒';
-  }
-
-  @override
-  String get statusTaskContinuation => '自动续轮';
-
-  @override
-  String get statusTaskBudgetModelStep => '模型步数上限';
-
-  @override
-  String get statusTaskBudgetToolCall => '工具调用上限';
-
-  @override
-  String get statusTaskBudgetWait => '等待调用上限';
-
-  @override
-  String get statusTaskBudgetWallClock => '运行时长上限';
-
-  @override
-  String get statusTaskBudgetAgentCount => 'Agent 数量上限';
-
-  @override
-  String get statusTaskBudgetAgentDepth => 'Agent 深度上限';
-
-  @override
-  String get statusTaskBudgetFinalization => '收尾预算上限';
-
-  @override
-  String get statusTaskContinuationNone => '无';
-
-  @override
-  String get statusTaskContinuationCompacting => '正在压缩上下文';
-
-  @override
-  String get statusTaskContinuationPendingStart => '正在启动下一切片';
-
-  @override
-  String get statusTaskContinuationNeedsAttention => '需要处理';
-
-  @override
-  String get statusTaskPhasePlanning => '规划中';
-
-  @override
-  String get statusTaskPhasePendingConfirmation => '等待确认计划';
-
-  @override
-  String get statusTaskPhaseEditingDocuments => '编辑文档中';
-
-  @override
-  String get statusTaskPhaseWorking => '执行中';
-
-  @override
-  String get statusTaskPhaseReviewing => '审查中';
-
-  @override
-  String get statusTaskPhaseCompleted => '任务已完成';
-
-  @override
-  String get statusTaskStatusPending => '待处理';
-
-  @override
-  String get statusTaskStatusQueued => '排队中';
-
-  @override
-  String get statusTaskStatusRunning => '运行中';
-
-  @override
-  String get statusTaskStatusAwaitingCompletion => '等待完成报告';
-
-  @override
-  String get statusTaskStatusReadyForReview => '等待审查';
-
-  @override
-  String get statusTaskStatusReviewing => '审查中';
-
-  @override
-  String get statusTaskStatusChangesRequested => '等待修改';
-
-  @override
-  String get statusTaskStatusApproved => '已批准';
-
-  @override
-  String get statusTaskStatusMerged => '已合并';
-
-  @override
-  String get statusTaskStatusNoDelivery => '无需交付';
-
-  @override
-  String get statusTaskStatusCompleted => '已完成';
-
-  @override
-  String get statusTaskStatusBudgetLimited => '已达预算限制';
-
-  @override
-  String get statusTaskStatusNeedsAttention => '需要处理';
-
-  @override
-  String get statusTaskStatusFailed => '失败';
-
-  @override
-  String get statusTaskStatusCancelled => '已取消';
-
-  @override
-  String get statusTaskStatusPass => '已通过';
-
-  @override
-  String get statusTaskStatusChangesRequired => '需要修改';
-
-  @override
-  String get statusTaskStatusBlocked => '已阻塞';
 
   @override
   String get statusSkillsSection => 'Skills';
@@ -2735,9 +2072,6 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   }
 
   @override
-  String get timelinePlanFallback => '计划';
-
-  @override
   String timelineSkillActivated(String name) {
     return '已激活 Skill · $name';
   }
@@ -2834,60 +2168,6 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get interactionContinueAfterAnswer => '回答后继续';
-
-  @override
-  String get taskRecoveryDialogTitle => '恢复并继续';
-
-  @override
-  String get taskRecoveryDialogBody =>
-      '只回退所选 Thread 的模型上下文；Task、WorkUnit、工作区、提交、用量和审计历史全部保留。';
-
-  @override
-  String get taskRecoveryTargetLabel => '恢复目标';
-
-  @override
-  String get taskRecoveryTargetPlanner => 'Planner';
-
-  @override
-  String get taskRecoveryTargetExecutor => 'Executor';
-
-  @override
-  String get taskRecoveryTurnSuffixLabel => '回退连续尾部 Turn 数';
-
-  @override
-  String get taskRecoveryModeLabel => '恢复方式';
-
-  @override
-  String get taskRecoveryModeRewind => '回退对话尾部';
-
-  @override
-  String get taskRecoveryModeRebuild => '局部重建 Thread 上下文';
-
-  @override
-  String get taskRecoveryGitPreserved =>
-      'Git 与工作区不会被回滚、清理或重置；执行恢复时指纹必须与此预览完全一致。';
-
-  @override
-  String get taskRecoveryRebuildWarning =>
-      '无法安全保留前缀时，只清空这个 Thread 的普通 transcript；handoff、证据、会话笔记和外部状态仍保留。';
-
-  @override
-  String get taskRecoveryFirstConfirm => '检查恢复影响';
-
-  @override
-  String get taskRecoveryFinalConfirm => '确认恢复并继续';
-
-  @override
-  String get taskRecoveryApplying => '正在恢复…';
-
-  @override
-  String get taskRecoveryItems => '条目';
-
-  @override
-  String get taskRecoveryInputs => '输入';
-
-  @override
-  String get taskRecoveryTools => '工具';
 
   @override
   String get timelineRolledBack => '已从有效上下文回退';

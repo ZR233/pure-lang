@@ -1,6 +1,6 @@
 use super::*;
 use crate::tool::cache::ToolCachePolicy;
-use crate::tool::{ToolBudgetTiming, ToolRuntimeLockPolicy};
+use crate::tool::{ToolBatchPolicy, ToolBudgetTiming, ToolRuntimeLockPolicy};
 use futures::FutureExt;
 use pretty_assertions::assert_eq;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -59,6 +59,11 @@ struct CountingSpawnAgentTool {
 
 #[derive(Debug)]
 struct CountingExecTool {
+    executions: std::sync::Arc<AtomicUsize>,
+}
+
+#[derive(Debug)]
+struct CountingSoloTool {
     executions: std::sync::Arc<AtomicUsize>,
 }
 
@@ -227,6 +232,102 @@ impl Tool for CountingExecTool {
         }
         .boxed()
     }
+}
+
+impl Tool for CountingSoloTool {
+    fn name(&self) -> &str {
+        "solo_state"
+    }
+
+    fn description(&self) -> &str {
+        "Test-only Solo state tool"
+    }
+
+    fn input_schema(&self) -> serde_json::Value {
+        serde_json::json!({"type": "object", "additionalProperties": false})
+    }
+
+    fn effect(&self) -> Option<crate::ToolEffect> {
+        Some(crate::ToolEffect::Read)
+    }
+
+    fn batch_policy(&self) -> ToolBatchPolicy {
+        ToolBatchPolicy::Solo
+    }
+
+    fn execute<'a>(
+        &'a self,
+        _input: ToolInput,
+        _context: ToolCallContext,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = std::result::Result<ToolResult, PureError>>
+                + Send
+                + 'a,
+        >,
+    > {
+        async move {
+            self.executions.fetch_add(1, Ordering::SeqCst);
+            Ok(ToolResult::success("mutated"))
+        }
+        .boxed()
+    }
+}
+
+#[tokio::test]
+async fn solo_tool_rejects_the_entire_mixed_batch_without_side_effects() {
+    let solo_executions = std::sync::Arc::new(AtomicUsize::new(0));
+    let exec_executions = std::sync::Arc::new(AtomicUsize::new(0));
+    let mut core = test_turn_engine();
+    core.register_test_tool(CountingSoloTool {
+        executions: solo_executions.clone(),
+    });
+    core.register_test_tool(CountingExecTool {
+        executions: exec_executions.clone(),
+    });
+    let calls = [
+        ToolCall::function(
+            "solo-item",
+            "solo_state",
+            serde_json::json!({}),
+            "solo-call",
+        ),
+        ToolCall::function(
+            "exec-item",
+            "exec",
+            serde_json::json!({"command": "true"}),
+            "exec-call",
+        ),
+    ];
+    let (event_tx, _) = tokio::sync::broadcast::channel(8);
+    let mut recorder = TraceRecorder::new("session-solo".to_string(), event_tx, 0);
+    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+
+    let batch = execute_tool_call_batch(
+        &calls,
+        &mut budget,
+        &mut recorder,
+        ToolExecutionContext {
+            core: &core,
+            tool_plan: core.acquire_tool_plan(),
+            options: &TurnOptions::default(),
+            session_id: "turn-solo",
+            turn_id: "turn-solo",
+            step: 0,
+            workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
+            active_subagent: None,
+            tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(solo_executions.load(Ordering::SeqCst), 0);
+    assert_eq!(exec_executions.load(Ordering::SeqCst), 0);
+    assert_eq!(batch.records.len(), 2);
+    assert!(batch.records.iter().all(|record| {
+        matches!(record.outcome, ToolExecutionOutcome::Failed(_)) && record.result.contains("Solo")
+    }));
 }
 
 impl Tool for CountingCacheableTool {

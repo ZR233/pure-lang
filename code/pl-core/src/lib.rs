@@ -24,6 +24,7 @@ pub mod tool;
 mod trace;
 pub mod turn;
 mod web_search;
+pub mod workflow;
 mod working_set;
 mod workspace;
 
@@ -90,12 +91,11 @@ pub use pl_protocol::{
     InteractionRequest, InteractionResolution, InteractionScope, InteractionStatus,
     McpAvailabilityDescriptor, McpHealthSnapshot, McpServerDescriptor, Message, MessageContent,
     MessageRole, ModelContextItem, OutputStream, PermissionLevel, PinnedContextSection,
-    PipelineStage, PlanConfirmationResolution, ProviderCatalogSnapshot,
-    ProviderConnectionModeDescriptor, ProviderPresetDescriptor,
-    ProviderServiceCapabilitiesDescriptor, PureError, Result, RetryDisposition, RuntimeCostAmount,
-    RuntimeUsageSnapshot, SkillActivation, TokenUsageSnapshot, ToolApprovalResolution,
-    ToolResultReceipt, TurnFailure, TurnFailureCategory, UserInputAnswer, UserInputRequest,
-    UserInputResponse, UserQuestion, UserQuestionOption,
+    PipelineStage, ProviderCatalogSnapshot, ProviderConnectionModeDescriptor,
+    ProviderPresetDescriptor, ProviderServiceCapabilitiesDescriptor, PureError, Result,
+    RetryDisposition, RuntimeCostAmount, RuntimeUsageSnapshot, SkillActivation, TokenUsageSnapshot,
+    ToolApprovalResolution, ToolResultReceipt, TurnFailure, TurnFailureCategory, UserInputAnswer,
+    UserInputRequest, UserInputResponse, UserQuestion, UserQuestionOption,
 };
 pub(crate) use prompt_cache::{
     PromptCacheInput, derive_prompt_cache_key, prepare_prompt_context, stable_tool_schemas,
@@ -122,8 +122,8 @@ pub use web_search::{
 pub use working_set::{
     CONVERSATION_RECOVERY_SECTION_ID, CURRENT_TODO_SECTION_ID, EVIDENCE_LEDGER_SECTION_ID,
     MAX_PINNED_CONTEXT_BYTES, MAX_PINNED_SECTION_BYTES, MAX_SESSION_NOTE_BYTES,
-    REVIEW_CHECKPOINT_SECTION_ID, REVIEW_MANIFEST_SECTION_ID, TurnWorkingSetChange,
-    TurnWorkingSetHandle, canonical_content_hash, canonical_json_hash, context_section,
+    TurnWorkingSetChange, TurnWorkingSetHandle, WORKFLOW_CONTEXT_SECTION_ID,
+    canonical_content_hash, canonical_json_hash, context_section,
 };
 pub use workspace::{
     WorkspaceInstructionDocument, WorkspaceInstructions, load_workspace_instruction_documents,

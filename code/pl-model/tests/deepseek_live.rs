@@ -84,8 +84,7 @@ async fn run_turn(api_key: &str, messages: Vec<Message>, turn_id: &str) -> TurnO
                     TraceDelta::Thinking { .. }
                     | TraceDelta::ReasoningContent { .. }
                     | TraceDelta::ToolArguments { .. }
-                    | TraceDelta::ToolResult { .. }
-                    | TraceDelta::Plan { .. } => {}
+                    | TraceDelta::ToolResult { .. } => {}
                 },
                 Ok(_) => {}
                 Err(RecvError::Closed) => break,
