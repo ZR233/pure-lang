@@ -41,6 +41,8 @@ bootstrap、连接状态与自动重连，并返回 `RemoteWorkspaceHost`。host
 文件、Git/worktree、Skills、workspace instructions、图片与 LSP 的环境无关逻辑留在本地。
 `apply_patch` 在本地匹配并通过远端原子写提交；Git/worktree 在本地编排命令；LSP client 留在
 本地，language server 作为远端可观察进程运行。
+workspace instructions 由远端 file backend 读取后以已加载文档集合交给指令组装器，保留远端
+来源路径；远程路径不得再次交给本地文件系统做目录或文件检查。
 
 SSH 连接、平台探测、helper 上传和协议握手都通过本地后台进程工厂启动系统 OpenSSH：Windows
 使用 `CREATE_NO_WINDOW`，不得弹出额外命令行窗口；Unix 使用独立进程组并在丢弃时回收进程。
