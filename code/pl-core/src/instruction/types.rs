@@ -6,6 +6,7 @@ use pl_protocol::Message;
 use serde::{Deserialize, Serialize};
 
 use crate::config::{InstructionsConfig, SkillsConfig};
+use crate::workspace::WorkspaceInstructions;
 
 #[derive(Debug, Clone)]
 pub struct InstructionAssemblyRequest<'a> {
@@ -16,6 +17,11 @@ pub struct InstructionAssemblyRequest<'a> {
     pub model: &'a ModelInfo,
     pub workspace_root: &'a Path,
     pub current_dir: &'a Path,
+    /// 已由宿主读取的项目说明文档。
+    ///
+    /// 远程工作区的路径只存在于远程主机，不能再次交给本地文件系统读取；
+    /// 宿主若已完成读取，应通过此字段传入 canonical 文档集合。
+    pub workspace_documents: Option<&'a WorkspaceInstructions>,
     pub workspace_instructions: Option<&'a str>,
     pub subagent_constraint: Option<&'a str>,
 }

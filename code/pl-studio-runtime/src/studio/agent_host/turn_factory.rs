@@ -7,6 +7,7 @@ use crate::{AttachmentModality, ContentPart, MessageContent, PureError, Result};
 use futures::FutureExt;
 #[cfg(debug_assertions)]
 use pl_core::TurnBudget;
+use pl_core::WorkspaceInstructions;
 use pl_core::instruction::{
     ExecutionInstructionProfile, InstructionAssembler, InstructionAssemblyRequest,
     InstructionSnapshot,
@@ -246,7 +247,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
                 workspace_root.join(&config.skills.project_dir),
             ))
         });
-        let workspace_instructions = if let Some(remote_host) = &remote_host {
+        let workspace_instruction_documents = if let Some(remote_host) = &remote_host {
             pl_core::remote::load_remote_workspace_instructions(
                 &remote_host.files,
                 config.instructions.project_doc_max_bytes,
@@ -261,8 +262,8 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
                 &config.instructions.project_doc_fallback_filenames,
             )
             .map_err(anyhow_error)?
-            .content()
         };
+        let workspace_instructions = workspace_instruction_documents.content();
         let executor_handoff = if mode == StudioMode::Task
             && context.snapshot.identity.parent_id.is_some()
             && context.snapshot.identity.role.as_str() == crate::config::StudioRole::Executor.key()
@@ -584,6 +585,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             role: model_role.as_str(),
             is_root,
             workspace_root: &workspace_root,
+            workspace_documents: Some(&workspace_instruction_documents),
             workspace_instructions: &workspace_instructions,
             skill_catalog: skill_catalog.snapshot(),
             skills_config: &turn_skills_config,
@@ -741,6 +743,7 @@ struct StudioInstructionContext<'a> {
     role: &'a str,
     is_root: bool,
     workspace_root: &'a Path,
+    workspace_documents: Option<&'a WorkspaceInstructions>,
     workspace_instructions: &'a str,
     skill_catalog: &'a pl_core::skill::SkillCatalog,
     skills_config: &'a pl_core::config::SkillsConfig,
@@ -759,6 +762,7 @@ fn instruction_snapshot(context: StudioInstructionContext<'_>) -> Result<Instruc
         model: context.model,
         workspace_root: context.workspace_root,
         current_dir: context.workspace_root,
+        workspace_documents: context.workspace_documents,
         workspace_instructions: Some(context.workspace_instructions),
         subagent_constraint: context.subagent_constraint,
     })

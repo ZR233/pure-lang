@@ -467,6 +467,7 @@ impl TurnEngine {
                     model: &model_info,
                     workspace_root: &workspace_root,
                     current_dir: &workspace_root,
+                    workspace_documents: None,
                     workspace_instructions: request.workspace_instructions.as_deref(),
                     subagent_constraint: None,
                 };

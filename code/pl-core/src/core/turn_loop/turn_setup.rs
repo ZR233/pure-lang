@@ -28,6 +28,7 @@ pub(super) fn instruction_snapshot(
                 model,
                 workspace_root,
                 current_dir: workspace_root,
+                workspace_documents: None,
                 workspace_instructions: request.workspace_instructions.as_deref(),
                 subagent_constraint: None,
             };

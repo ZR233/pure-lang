@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::path::PathBuf;
 
 use pl_protocol::Result;
 use pl_protocol::remote::{
@@ -12,6 +13,7 @@ use crate::tool::{
     WorkspaceFileStat, WorkspaceFileStatRequest, WorkspaceFileWriteRequest, matches_pattern,
     tool_error,
 };
+use crate::workspace::{WorkspaceInstructionDocument, WorkspaceInstructions};
 
 use super::client::{RemoteClient, RemoteClientError, expect_ack};
 
@@ -212,9 +214,11 @@ pub async fn load_remote_workspace_instructions(
     backend: &RemoteWorkspaceFileBackend,
     max_bytes: usize,
     fallback_filenames: &[String],
-) -> Result<String> {
+) -> Result<WorkspaceInstructions> {
     if max_bytes == 0 {
-        return Ok(String::new());
+        return Ok(WorkspaceInstructions {
+            documents: Vec::new(),
+        });
     }
     let mut seen = std::collections::HashSet::new();
     let candidates = DEFAULT_INSTRUCTION_FILENAMES
@@ -237,15 +241,23 @@ pub async fn load_remote_workspace_instructions(
         }
         let bytes = backend
             .read_bytes(WorkspaceFileReadBytesRequest {
-                path,
+                path: path.clone(),
                 cwd: None,
                 max_bytes: pl_protocol::remote::REMOTE_MAX_BODY_BYTES,
             })
             .await?;
         let take = bytes.len().min(max_bytes);
-        return Ok(String::from_utf8_lossy(&bytes[..take]).into_owned());
+        return Ok(WorkspaceInstructions {
+            documents: vec![WorkspaceInstructionDocument {
+                path: PathBuf::from(backend.canonical_path()).join(&path),
+                content: String::from_utf8_lossy(&bytes[..take]).into_owned(),
+                bytes: take,
+            }],
+        });
     }
-    Ok(String::new())
+    Ok(WorkspaceInstructions {
+        documents: Vec::new(),
+    })
 }
 
 impl WorkspaceFileBackend for RemoteWorkspaceFileBackend {

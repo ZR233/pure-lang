@@ -2,6 +2,7 @@ use pl_model::ModelInfo;
 use pl_protocol::Result;
 
 use crate::config::InstructionsConfig;
+use crate::workspace::WorkspaceInstructions;
 use crate::workspace::load_workspace_instruction_documents;
 
 use super::{
@@ -106,6 +107,7 @@ impl InstructionAssembler {
                 request.workspace_root,
                 request.current_dir,
                 config,
+                request.workspace_documents,
             )?;
         } else if let Some(instructions) = request.workspace_instructions {
             snapshot.push_user(
@@ -195,13 +197,17 @@ fn add_project_documents(
     workspace_root: &std::path::Path,
     current_dir: &std::path::Path,
     config: &InstructionsConfig,
+    loaded_documents: Option<&WorkspaceInstructions>,
 ) -> Result<()> {
-    let documents = load_workspace_instruction_documents(
-        workspace_root,
-        current_dir,
-        config.project_doc_max_bytes,
-        &config.project_doc_fallback_filenames,
-    )?;
+    let documents = match loaded_documents {
+        Some(documents) => documents.clone(),
+        None => load_workspace_instruction_documents(
+            workspace_root,
+            current_dir,
+            config.project_doc_max_bytes,
+            &config.project_doc_fallback_filenames,
+        )?,
+    };
     for document in documents.documents {
         let label = document
             .path

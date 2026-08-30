@@ -59,6 +59,7 @@ fn assembles_three_layers_in_stable_order() {
         model: &ModelInfo::fallback("test-model"),
         workspace_root: &dir,
         current_dir: &dir,
+        workspace_documents: None,
         workspace_instructions: None,
         subagent_constraint: Some("subagent rule"),
     })
@@ -92,6 +93,40 @@ fn assembles_three_layers_in_stable_order() {
 }
 
 #[test]
+fn uses_preloaded_workspace_documents_for_non_local_workspace() {
+    let workspace_root = temp_dir("remote");
+    let config = crate::config::InstructionsConfig::default();
+    let documents = crate::workspace::WorkspaceInstructions {
+        documents: vec![crate::workspace::WorkspaceInstructionDocument {
+            path: std::path::PathBuf::from("/home/zhourui/opensource/pure-lang/AGENTS.md"),
+            content: "remote project rules".to_string(),
+            bytes: "remote project rules".len(),
+        }],
+    };
+
+    let snapshot = InstructionAssembler::assemble(InstructionAssemblyRequest {
+        instructions: Some(&config),
+        skills: None,
+        skill_catalog: None,
+        execution_profile: None,
+        model: &ModelInfo::fallback("test-model"),
+        workspace_root: &workspace_root,
+        current_dir: &workspace_root,
+        workspace_documents: Some(&documents),
+        workspace_instructions: Some("remote project rules"),
+        subagent_constraint: None,
+    })
+    .unwrap();
+
+    assert_eq!(snapshot.user.len(), 1);
+    assert_eq!(
+        snapshot.user[0].source.kind,
+        InstructionSourceKind::ProjectDoc
+    );
+    assert_eq!(snapshot.user[0].content, "remote project rules");
+}
+
+#[test]
 fn platform_block_is_after_mode_and_before_config_developer() {
     let dir = temp_dir("platform-order");
     fs::create_dir_all(&dir).unwrap();
@@ -111,6 +146,7 @@ fn platform_block_is_after_mode_and_before_config_developer() {
         model: &ModelInfo::fallback("test-model"),
         workspace_root: &dir,
         current_dir: &dir,
+        workspace_documents: None,
         workspace_instructions: None,
         subagent_constraint: None,
     })
@@ -173,6 +209,7 @@ fn filters_empty_blocks_and_uses_model_base() {
         model: &model,
         workspace_root: &dir,
         current_dir: &dir,
+        workspace_documents: None,
         workspace_instructions: Some(""),
         subagent_constraint: None,
     })
@@ -201,6 +238,7 @@ fn profile_can_override_base_and_add_context_blocks() {
             model: &ModelInfo::fallback("test-model"),
             workspace_root: &dir,
             current_dir: &dir,
+            workspace_documents: None,
             workspace_instructions: Some("workspace"),
             subagent_constraint: None,
         },
@@ -352,6 +390,7 @@ fn config_base_override_replaces_model_base() {
         model: &model,
         workspace_root: &dir,
         current_dir: &dir,
+        workspace_documents: None,
         workspace_instructions: None,
         subagent_constraint: None,
     })
@@ -378,6 +417,7 @@ fn built_in_base_requires_doc_first_and_final_review() {
         model: &ModelInfo::fallback("test-model"),
         workspace_root: &dir,
         current_dir: &dir,
+        workspace_documents: None,
         workspace_instructions: None,
         subagent_constraint: None,
     })
@@ -418,6 +458,7 @@ fn disabled_skills_do_not_inject_a_frozen_catalog() {
         model: &ModelInfo::fallback("test-model"),
         workspace_root: &dir,
         current_dir: &dir,
+        workspace_documents: None,
         workspace_instructions: None,
         subagent_constraint: None,
     })
