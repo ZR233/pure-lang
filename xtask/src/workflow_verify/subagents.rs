@@ -6,7 +6,7 @@ use super::{
 };
 use crate::cli::VerifySubagentsOptions;
 use crate::{paths, process};
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result, bail, ensure};
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -32,15 +32,45 @@ struct WireReceipt {
     schema_version: u32,
     capture_count: usize,
     calls: Vec<WireCall>,
+    captures: Vec<CaptureReceipt>,
     output_markers: Vec<&'static str>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WireCall {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    call_id: Option<String>,
     name: String,
     arguments: Value,
 }
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CaptureReceipt {
+    path: String,
+    actor: String,
+    calls: Vec<WireCall>,
+}
+
+const PROFILE_FIRST_LINES: &[(&str, &str)] = &[
+    (
+        "explorer",
+        "你当前是父 Agent 派出的只读 explorer，只负责在指定范围内收集事实并汇报。你使用 fresh",
+    ),
+    (
+        "executor",
+        "你是父 Agent 按冻结 Agent Profile 派出的 executor。你在 directory assignment 中工作，且不继承",
+    ),
+    (
+        "worktree_executor",
+        "你是 Worktree 执行者。只在宿主分配的独立 Git worktree 中完成边界明确的实现任务；适用于",
+    ),
+    (
+        "reviewer",
+        "你是父 Agent 按冻结 Agent Profile 派出的 reviewer。你必须使用新建的 fresh context",
+    ),
+];
 
 pub(super) fn run(options: VerifySubagentsOptions) -> Result<()> {
     ensure!(
@@ -310,6 +340,10 @@ fn validate_driver_snapshot(completed: &Value) -> Result<()> {
     let workspace = completed
         .get("workspace")
         .context("Flutter Driver receipt has no workspace")?;
+    ensure!(
+        workspace.get("threadMode").and_then(Value::as_str) == Some("mode.task"),
+        "Flutter Driver terminal workspace is not mode.task"
+    );
     let roles = workspace
         .get("agents")
         .and_then(Value::as_array)
@@ -509,6 +543,7 @@ fn validate_wire(wire_dir: &Path, artifacts: &Path) -> Result<()> {
         !captures.is_empty(),
         "live acceptance produced no wire captures"
     );
+    let mut capture_receipts = Vec::new();
     let mut calls = Vec::new();
     let mut outputs = Vec::new();
     for path in &captures {
@@ -516,14 +551,23 @@ fn validate_wire(wire_dir: &Path, artifacts: &Path) -> Result<()> {
         let body = capture
             .get("wireBody")
             .context("wire capture has no body")?;
-        collect_calls(body, &mut calls);
+        let actor = classify_capture(body)?;
+        let mut capture_calls = Vec::new();
+        collect_calls(body, &mut capture_calls);
+        calls.extend(capture_calls.iter().cloned());
+        capture_receipts.push(CaptureReceipt {
+            path: path.display().to_string(),
+            actor,
+            calls: capture_calls,
+        });
         collect_outputs(body, &mut outputs);
     }
-    let ordered_calls = calls.clone();
-    ensure_orchestration_order(&ordered_calls)?;
     deduplicate_calls(&mut calls);
     ensure_spawn_calls(&calls)?;
     ensure_workspace_receipts(&outputs)?;
+    ensure_profile_messages(&capture_receipts)?;
+    ensure_reviewer_history(&capture_receipts)?;
+    ensure_orchestration_order(&calls)?;
     ensure!(
         calls.iter().any(|call| {
             call.name == "write_file"
@@ -572,6 +616,7 @@ fn validate_wire(wire_dir: &Path, artifacts: &Path) -> Result<()> {
             schema_version: 1,
             capture_count: captures.len(),
             calls,
+            captures: capture_receipts,
             output_markers: vec![
                 "directoryRejection",
                 "directoryWorkspaceReceipt",
@@ -582,6 +627,141 @@ fn validate_wire(wire_dir: &Path, artifacts: &Path) -> Result<()> {
         })?,
     )?;
     Ok(())
+}
+
+fn classify_capture(body: &Value) -> Result<String> {
+    let rendered = body.to_string();
+    let matches = PROFILE_FIRST_LINES
+        .iter()
+        .filter(|(_, first)| rendered.contains(first))
+        .map(|(id, _)| *id)
+        .collect::<Vec<_>>();
+    ensure!(
+        matches.len() <= 1,
+        "wire capture matches multiple built-in Profile identities: {matches:?}"
+    );
+    Ok(matches.first().copied().unwrap_or("unknown").to_string())
+}
+
+fn ensure_profile_messages(captures: &[CaptureReceipt]) -> Result<()> {
+    let required = ["explorer", "executor", "worktree_executor", "reviewer"];
+    let calls = captures.iter().flat_map(|capture| capture.calls.iter());
+    let spawns = calls
+        .filter(|call| call.name == "spawn_agent")
+        .collect::<Vec<_>>();
+    for profile in required {
+        let spawn = spawns
+            .iter()
+            .find(|call| call.arguments.get("profileId").and_then(Value::as_str) == Some(profile))
+            .with_context(|| format!("wire captures contain no {profile} spawn"))?;
+        ensure!(
+            spawn.arguments.get("forkTurns").and_then(Value::as_str) == Some("none"),
+            "{profile} spawn did not freeze forkTurns:none"
+        );
+        let message = spawn
+            .arguments
+            .get("message")
+            .and_then(Value::as_str)
+            .with_context(|| format!("{profile} spawn has no message"))?;
+        let markers = [
+            "purpose",
+            "baseline",
+            "ownership",
+            "forbidden",
+            "steps",
+            "completion_failure",
+            "evidence",
+            "workspace_git_cleanup",
+        ];
+        let mut cursor = 0;
+        for marker in markers {
+            let token = format!("[[CHILD_CONTRACT:{marker}]]");
+            let at = message[cursor..]
+                .find(&token)
+                .with_context(|| format!("{profile} message lacks {token}"))?
+                + cursor;
+            let start = at + token.len();
+            let end = markers
+                .iter()
+                .skip_while(|next| **next != marker)
+                .nth(1)
+                .and_then(|next| message[start..].find(&format!("[[CHILD_CONTRACT:{next}]]")))
+                .map(|offset| start + offset)
+                .unwrap_or(message.len());
+            ensure!(
+                !message[start..end].trim().is_empty(),
+                "{profile} message has empty {token}"
+            );
+            cursor = start;
+        }
+    }
+    let explorers = spawns
+        .iter()
+        .filter(|call| call.arguments.get("profileId").and_then(Value::as_str) == Some("explorer"))
+        .filter_map(|call| call.arguments.get("message").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    ensure!(
+        explorers.len() >= 2,
+        "fewer than two explorer spawn messages"
+    );
+    ensure!(
+        explorers[0] != explorers[1],
+        "two explorer messages do not define distinct purpose/ownership"
+    );
+    Ok(())
+}
+
+fn ensure_reviewer_history(captures: &[CaptureReceipt]) -> Result<()> {
+    let reviewer = captures
+        .iter()
+        .filter(|capture| capture.actor == "reviewer")
+        .collect::<Vec<_>>();
+    ensure!(!reviewer.is_empty(), "no classified Reviewer capture");
+    for capture in reviewer {
+        for call in &capture.calls {
+            if ["write_file", "apply_patch", "delete", "copy", "move"].contains(&call.name.as_str())
+                || call.name == "exec"
+                    && call
+                        .arguments
+                        .get("command")
+                        .and_then(Value::as_str)
+                        .is_some_and(is_mutating_shell_command)
+            {
+                bail!(
+                    "classified reviewer capture contains mutation: {}",
+                    call.name
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn is_mutating_shell_command(command: &str) -> bool {
+    let words = command.split_whitespace().collect::<Vec<_>>();
+    if words
+        .iter()
+        .any(|word| [">", ">>", "tee", "touch", "sed", "rm", "mv", "cp"].contains(word))
+    {
+        return true;
+    }
+    words.windows(2).any(|pair| {
+        pair[0] == "git"
+            && [
+                "add",
+                "commit",
+                "reset",
+                "checkout",
+                "restore",
+                "clean",
+                "cherry-pick",
+                "merge",
+                "rebase",
+                "rm",
+                "mv",
+            ]
+            .contains(&pair[1])
+    })
 }
 
 fn ensure_workspace_receipts(outputs: &[String]) -> Result<()> {
@@ -601,6 +781,21 @@ fn ensure_workspace_receipts(outputs: &[String]) -> Result<()> {
         workspace.get("mode").and_then(Value::as_str) == Some("directory"),
         "executor spawn receipt does not freeze directory mode"
     );
+    for profile in ["explorer", "reviewer"] {
+        let receipt = receipts
+            .iter()
+            .find(|receipt| receipt.get("profileId").and_then(Value::as_str) == Some(profile))
+            .with_context(|| format!("wire tool results contain no {profile} workspace receipt"))?;
+        ensure!(
+            receipt
+                .get("workspace")
+                .and_then(Value::as_object)
+                .and_then(|workspace| workspace.get("mode"))
+                .and_then(Value::as_str)
+                == Some("unrestricted"),
+            "{profile} spawn receipt does not freeze unrestricted mode"
+        );
+    }
     let writable_paths = workspace
         .get("writablePaths")
         .and_then(Value::as_array)
@@ -770,6 +965,11 @@ fn collect_calls(body: &Value, calls: &mut Vec<WireCall>) {
             && let Some(arguments) = parse_arguments(item.get("arguments"))
         {
             calls.push(WireCall {
+                call_id: item
+                    .get("call_id")
+                    .or_else(|| item.get("id"))
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
                 name: name.to_string(),
                 arguments,
             });
@@ -792,6 +992,11 @@ fn collect_calls(body: &Value, calls: &mut Vec<WireCall>) {
                 && let Some(arguments) = parse_arguments(function.get("arguments"))
             {
                 calls.push(WireCall {
+                    call_id: call
+                        .get("id")
+                        .or_else(|| function.get("id"))
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
                     name: name.to_string(),
                     arguments,
                 });
@@ -836,10 +1041,14 @@ fn collect_outputs(body: &Value, outputs: &mut Vec<String>) {
 }
 
 fn deduplicate_calls(calls: &mut Vec<WireCall>) {
-    calls.sort_by(|left, right| {
-        (&left.name, left.arguments.to_string()).cmp(&(&right.name, right.arguments.to_string()))
+    let mut seen = std::collections::HashSet::new();
+    calls.retain(|call| {
+        let key = call
+            .call_id
+            .clone()
+            .unwrap_or_else(|| format!("{}:{}", call.name, call.arguments));
+        seen.insert(key)
     });
-    calls.dedup_by(|left, right| left.name == right.name && left.arguments == right.arguments);
 }
 
 fn collect_json(directory: &Path, output: &mut Vec<PathBuf>) -> Result<()> {
@@ -903,6 +1112,7 @@ mod tests {
     fn spawn_receipt_requires_two_different_profiles_and_directory_paths() {
         let calls = vec![
             WireCall {
+                call_id: None,
                 name: "spawn_agent".to_string(),
                 arguments: serde_json::json!({
                     "profileId": "executor",
@@ -910,12 +1120,18 @@ mod tests {
                 }),
             },
             WireCall {
+                call_id: None,
                 name: "spawn_agent".to_string(),
                 arguments: serde_json::json!({"profileId": "worktree_executor"}),
             },
         ];
         ensure_spawn_calls(&calls).unwrap();
         ensure_workspace_receipts(&[
+            serde_json::json!({
+                "profileId": "explorer",
+                "workspace": {"mode": "unrestricted"}
+            })
+            .to_string(),
             serde_json::json!({
                 "profileId": "executor",
                 "workspace": {
@@ -933,6 +1149,11 @@ mod tests {
                         "baseCommit": "0123456789abcdef0123456789abcdef01234567"
                     }
                 }
+            })
+            .to_string(),
+            serde_json::json!({
+                "profileId": "reviewer",
+                "workspace": {"mode": "unrestricted"}
             })
             .to_string(),
         ])
@@ -961,5 +1182,99 @@ mod tests {
     #[test]
     fn live_schema_matches_runtime_schema() {
         assert_eq!(super::super::LIVE_CONFIG_SCHEMA_VERSION, 17);
+    }
+
+    #[test]
+    fn capture_classification_accepts_responses_and_chat_and_rejects_ambiguity() {
+        let responses = serde_json::json!({"input":[{"content":[{"type":"input_text","text":PROFILE_FIRST_LINES[0].1}]}]});
+        assert_eq!(classify_capture(&responses).unwrap(), "explorer");
+        let chat =
+            serde_json::json!({"messages":[{"role":"system","content":PROFILE_FIRST_LINES[3].1}]});
+        assert_eq!(classify_capture(&chat).unwrap(), "reviewer");
+        let ambiguous = serde_json::json!({"input":[{"content":[{"text":PROFILE_FIRST_LINES[0].1},{"text":PROFILE_FIRST_LINES[3].1}]}]});
+        assert!(classify_capture(&ambiguous).is_err());
+        assert_eq!(
+            classify_capture(&serde_json::json!({"input":[]})).unwrap(),
+            "unknown"
+        );
+    }
+
+    #[test]
+    fn reviewer_mutation_is_rejected_but_read_is_allowed() {
+        let read = CaptureReceipt {
+            path: "responses.json".into(),
+            actor: "reviewer".into(),
+            calls: vec![WireCall {
+                call_id: Some("r1".into()),
+                name: "read_file".into(),
+                arguments: serde_json::json!({"path":"Cargo.toml"}),
+            }],
+        };
+        assert!(ensure_reviewer_history(&[read]).is_ok());
+        let mutation = CaptureReceipt {
+            path: "chat.json".into(),
+            actor: "reviewer".into(),
+            calls: vec![WireCall {
+                call_id: Some("r2".into()),
+                name: "exec".into(),
+                arguments: serde_json::json!({"command":"git commit -am bad"}),
+            }],
+        };
+        assert!(ensure_reviewer_history(&[mutation]).is_err());
+    }
+
+    #[test]
+    fn duplicate_call_ids_are_removed_without_reordering_first_occurrence() {
+        let mut calls = vec![
+            WireCall {
+                call_id: Some("a".into()),
+                name: "spawn_agent".into(),
+                arguments: serde_json::json!({"profileId":"explorer"}),
+            },
+            WireCall {
+                call_id: Some("a".into()),
+                name: "spawn_agent".into(),
+                arguments: serde_json::json!({"profileId":"explorer"}),
+            },
+            WireCall {
+                call_id: Some("b".into()),
+                name: "wait_agents".into(),
+                arguments: serde_json::json!({}),
+            },
+        ];
+        deduplicate_calls(&mut calls);
+        assert_eq!(
+            calls
+                .iter()
+                .map(|call| call.call_id.as_deref())
+                .collect::<Vec<_>>(),
+            vec![Some("a"), Some("b")]
+        );
+    }
+
+    #[test]
+    fn profile_message_missing_or_empty_contract_section_fails() {
+        let mut message = String::new();
+        for section in [
+            "purpose",
+            "baseline",
+            "ownership",
+            "forbidden",
+            "steps",
+            "completion_failure",
+            "evidence",
+        ] {
+            message.push_str(&format!("[[CHILD_CONTRACT:{section}]]\ncontent\n"));
+        }
+        let calls = [CaptureReceipt {
+            path: "x".into(),
+            actor: "unknown".into(),
+            calls: vec![WireCall {
+                call_id: None,
+                name: "spawn_agent".into(),
+                arguments: serde_json::json!({"profileId":"executor","forkTurns":"none","message":message}),
+            }],
+        }];
+        assert!(ensure_profile_messages(&calls).is_err());
     }
 }

@@ -138,6 +138,12 @@ Future<void> _openProjectAndSubmit(
   );
   await session.waitFor(find.byValueKey('sidebar-new-session'));
   await session.tap(find.byValueKey('sidebar-new-session'));
+  final navigationSnapshot = await session.readSnapshot();
+  final newThreadMode =
+      (navigationSnapshot['navigation'] as Map?)?['newThreadMode'];
+  if (newThreadMode != 'mode.task') {
+    throw StateError('new Thread navigation mode was not Task: $newThreadMode');
+  }
   await session.tap(find.byValueKey('session-mode-selector'));
   await session.waitFor(find.byValueKey('session-mode-mode.task'));
   await session.tap(find.byValueKey('session-mode-mode.task'));
@@ -205,6 +211,11 @@ Future<Map<String, dynamic>> _waitForCompletion(
 void _validateSnapshot(Map<String, dynamic> snapshot) {
   final workspace = snapshot['workspace'];
   if (workspace is! Map) throw StateError('terminal snapshot has no workspace');
+  if (workspace['threadMode'] != 'mode.task') {
+    throw StateError(
+      'terminal workspace mode is not Task: ${workspace['threadMode']}',
+    );
+  }
   final agents = (workspace['agents'] as List? ?? const [])
       .whereType<Map>()
       .toList();

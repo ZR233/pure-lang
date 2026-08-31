@@ -1,20 +1,25 @@
-请完成一次严格的子代理真实验收。除标准 Task confirmation 外不要询问用户，不要跳步，不要由 root 直接创建实现验收文件。
+请严格完成一次 Task 子代理验收，并在最终回复中逐项给出证据。
 
-root 先用内置 `write_file` 在 `design/subagents-orchestration.md` 写入一份简短 design marker，内容必须包含 `ROOT_DESIGN_MARKER`；该文件由 root 亲自维护。
+[[CHILD_CONTRACT:purpose]]
+探索者一负责核对 task workflow 与 live artifact；探索者二负责核对 workspace/Git 生命周期。executor 创建 allowed/directory.txt，worktree_executor 创建并提交 worktree_result.txt，reviewer 只读复审。
 
-在 planning 中先调用 `list_agent_profiles`，确认 `explorer`、`executor`、`worktree_executor`、`reviewer` 均已启用。然后在任何 `wait_agents`、`read_agent_session` 或 `read_agent_submissions` 前并行 spawn 两个独立 `explorer`，消息必须自包含写出目的、设计基线、所有权/禁区、有序步骤、完成/失败条件、证据和 workspace/Git 合同；两个 explorer 都必须报告至少一个 `file:line` 证据。
+[[CHILD_CONTRACT:baseline]]
+基线是当前仓库 HEAD；Task 使用 mode.task，四个内置 Profile 的 system instructions 与 workspace mode 必须冻结在 spawn receipt 中。
 
-1. 先调用 `list_agent_profiles`，确认 `executor` 与 `worktree_executor` 均已启用。
-2. 在已完成探索、进入 working 后，在任何等待前并行调用 `spawn_agent` 创建两个实现 child。executor 参数必须包含 `profileId: "executor"`、`forkTurns: "none"`、`writablePaths: ["allowed"]`。消息要求它严格按顺序：
-   - 必须先调用 Pure 内置 `write_file` 尝试创建 `forbidden/denied.txt`，内容为 `must be rejected\n`，并观察该调用因 writablePaths 被拒绝；不得用 shell、Git 或 MCP 绕过。
-   - 拒绝后调用 Pure 内置 `write_file` 创建 `allowed/directory.txt`，内容为 `directory child accepted\n`。
-   - 读取允许文件，调用 `report_progress` 报告 `readyForCompletion`，detail 明确包含 `DIRECTORY_DENIAL_OBSERVED` 和允许文件路径，然后结束。
-3. 同一批并行调用 `spawn_agent` 创建 `worktree_executor`，不得传 `writablePaths`，消息要求它：
-   - 调用 Pure 内置 `write_file` 创建仓库根的 `worktree_result.txt`，内容为 `worktree child committed\n`。
-   - 在自己的 workspace 运行 `cargo test`。
-   - 使用普通 Git 提交，commit subject 必须为 `feat: worktree executor marker`，随后取得 commit hash。
-   - 调用 `report_progress` 报告 `readyForCompletion`，detail 明确包含 `WORKTREE_COMMIT_READY`、commit hash 和 workspace root，然后结束。
-4. 等待两个实现 child 完成，读取并核对它们的 submissions。必须在显式整合前用普通 shell/Git 证明主 workspace 不存在 `worktree_result.txt`，并证明 `forbidden/denied.txt` 不存在、`allowed/directory.txt` 存在且内容正确。
-5. 用普通 Git 找到 `pure-agent-*` 分支并将 worktree child 的 commit 显式 `git cherry-pick` 到主 workspace；不得手工复制该文件，不得让 close_agent 自动整合。
-6. 用 `close_agent` 关闭 worktree child，必须显式传 `workspaceDisposition: "cleanup"`。关闭 directory child。随后用普通 Git 证明 Pure-owned worktree 路径和分支均已清理。
-7. 进入 integrating，完成显式整合和 cleanup 后，spawn 一个 fresh-context 的 `reviewer`。reviewer 只读检查完整主 workspace、design marker、diff、错误路径和测试，报告明确通过 verdict，不得调用任何 mutation 工具。若 reviewer 返回 finding，回到 working/editing_documents，修复后重新 integrating 并 spawn 新 reviewer；通过后在主 workspace 运行 `cargo test`，核对两个最终文件内容。最终回复必须逐项报告四种 Profile、冻结 workspace receipt、并行 spawn、目录拒绝、独立 worktree、显式 cherry-pick、显式 cleanup、只读 reviewer 和最终测试，且必须包含 `REVIEWER_READ_ONLY_APPROVED`，并把单独一行 `PURE_SUBAGENTS_LIVE_OK` 作为最后一行。
+[[CHILD_CONTRACT:ownership]]
+root 拥有 design/subagents-orchestration.md、整合、cherry-pick 和 cleanup；executor 仅拥有 allowed，worktree_executor 仅拥有自己的 worktree，explorer/reviewer 只读。
+
+[[CHILD_CONTRACT:forbidden]]
+不得写 forbidden/denied.txt，不得绕过 writablePaths，不得由 child 整合 worktree，不得由 reviewer 修改任何文件或 Git 状态。
+
+[[CHILD_CONTRACT:steps]]
+root 先并行 spawn 两个 explorer，再并行 spawn executor 与 worktree_executor；先 wait/read 并核对目录结果，再显式 cherry-pick，随后 cleanup，最后 spawn fresh-context reviewer。executor 必须先尝试 forbidden/denied.txt，再写 allowed/directory.txt；worktree_executor 必须写 worktree_result.txt、cargo test 并提交 feat: worktree executor marker。
+
+[[CHILD_CONTRACT:completion_failure]]
+executor 必须报告 DIRECTORY_DENIAL_OBSERVED；worktree_executor 必须报告 WORKTREE_COMMIT_READY、40 位 commit hash 和 workspace root；reviewer 必须报告 REVIEWER_READ_ONLY_APPROVED。任一步失败都必须保留错误证据并停止伪造成功。
+
+[[CHILD_CONTRACT:evidence]]
+记录四个 Profile 的 profileId、forkTurns:none、workspace receipt、工具调用顺序、拒绝原因、独立分支和最终测试；最终成功标记为 PURE_SUBAGENTS_LIVE_OK。
+
+[[CHILD_CONTRACT:workspace_git_cleanup]]
+directory workspace 使用 writablePaths:["allowed"]；worktree 使用 pure-agent-* 分支和独立路径；root 只能在核对未整合状态后 git cherry-pick，并在 close_agent 时显式 workspaceDisposition:"cleanup"，确认路径和分支均已删除。
