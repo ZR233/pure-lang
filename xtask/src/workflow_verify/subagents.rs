@@ -1796,22 +1796,29 @@ fn ensure_submissions(calls: &[WireCall], outputs: &[WireOutput]) -> Result<()> 
             .iter()
             .find(|output| output.call_id.as_ref() == Some(read_id))
             .context("submissions read has no bound output")?;
-        let result: Value =
-            serde_json::from_str(&output.content).context("submissions output is not JSON")?;
-        ensure!(
-            result
-                .get("total")
-                .and_then(Value::as_u64)
-                .is_some_and(|n| n >= 1),
-            "submissions total is less than one"
-        );
-        ensure!(
-            result
-                .get("items")
-                .and_then(Value::as_array)
-                .is_some_and(|items| !items.is_empty()),
-            "submissions items are empty"
-        );
+        let result = parse_submission_page(&output.content)?;
+        if result.total == 0 {
+            let read_index = calls
+                .iter()
+                .position(|call| call.call_id == read.call_id)
+                .context("submissions read is absent from flattened calls")?;
+            ensure!(
+                calls.iter().enumerate().any(|(index, call)| {
+                    index > read_index
+                        && index
+                            < if profile == "explorer" {
+                                first_impl
+                            } else {
+                                cherry_pick
+                            }
+                        && call.name == "read_agent_session"
+                        && call.arguments.get("target").and_then(Value::as_str)
+                            == Some(agent.as_str())
+                        && session_has_terminal_evidence(call, outputs, &agent).is_ok()
+                }),
+                "{profile} agent {agent} has no strictly bound terminal session fallback"
+            );
+        }
         if profile == "explorer" {
             ensure!(
                 calls
@@ -1832,6 +1839,99 @@ fn ensure_submissions(calls: &[WireCall], outputs: &[WireOutput]) -> Result<()> 
             );
         }
     }
+    Ok(())
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SubmissionPage {
+    items: Vec<Value>,
+    offset: u64,
+    limit: u64,
+    total: u64,
+    has_more: bool,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionSnapshot {
+    #[serde(default)]
+    agent_id: Option<String>,
+    #[serde(default)]
+    thread_id: Option<String>,
+    messages: Vec<SessionMessage>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct SessionMessage {
+    role: String,
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(default)]
+    content: Option<String>,
+}
+
+fn parse_submission_page(content: &str) -> Result<SubmissionPage> {
+    let page: SubmissionPage =
+        serde_json::from_str(content).context("submissions output is not canonical JSON")?;
+    ensure!(
+        page.total == 0 || !page.items.is_empty(),
+        "submissions page total/items are inconsistent"
+    );
+    ensure!(
+        page.total != 0 || page.items.is_empty(),
+        "submissions page total/items are inconsistent"
+    );
+    let _ = (page.offset, page.limit, page.has_more);
+    Ok(page)
+}
+
+fn session_has_terminal_evidence(
+    session_call: &WireCall,
+    outputs: &[WireOutput],
+    agent: &str,
+) -> Result<()> {
+    ensure!(
+        session_call.name == "read_agent_session"
+            && session_call.arguments.get("target").and_then(Value::as_str) == Some(agent),
+        "session fallback target is not bound to agent"
+    );
+    let call_id = session_call
+        .call_id
+        .as_ref()
+        .context("session fallback has no call_id")?;
+    let output = outputs
+        .iter()
+        .find(|output| output.call_id.as_ref() == Some(call_id))
+        .context("session fallback has no same-call-id output")?;
+    let session: SessionSnapshot =
+        serde_json::from_str(&output.content).context("session fallback output is not JSON")?;
+    if let Some(session_agent) = session.agent_id.as_deref() {
+        ensure!(
+            session_agent == agent,
+            "session output agentId does not match target"
+        );
+    }
+    if let Some(thread_id) = session.thread_id.as_deref() {
+        ensure!(
+            thread_id == agent,
+            "session output threadId does not match target"
+        );
+    }
+    let final_message = session
+        .messages
+        .last()
+        .filter(|message| message.role == "assistant")
+        .context("session fallback has no assistant final message")?;
+    let text = final_message
+        .text
+        .as_deref()
+        .or(final_message.content.as_deref())
+        .context("session final assistant message is not text")?;
+    ensure!(
+        !text.trim().is_empty(),
+        "session final assistant message is empty"
+    );
     Ok(())
 }
 
@@ -2368,21 +2468,13 @@ mod tests {
             );
             outputs.push(WireOutput {
                 call_id: Some(id.into()),
-                content: serde_json::json!({
-                    "total": 1,
-                    "items": [{"id": "submission"}]
-                })
-                .to_string(),
+                content: submission_page(vec![serde_json::json!({"id": "submission"})], 1),
             });
         }
         for id in ["er1", "er2"] {
             outputs.push(WireOutput {
                 call_id: Some(id.into()),
-                content: serde_json::json!({
-                    "total": 1,
-                    "items": [{"id": "submission"}]
-                })
-                .to_string(),
+                content: submission_page(vec![serde_json::json!({"id": "submission"})], 1),
             });
         }
         ensure_orchestration_order(&calls, &outputs).unwrap();
@@ -2812,7 +2904,7 @@ mod tests {
             ));
             outputs.push(WireOutput {
                 call_id: Some(read),
-                content: serde_json::json!({"total":1,"items":[{"id":"submission"}]}).to_string(),
+                content: submission_page(vec![serde_json::json!({"id":"submission"})], 1),
             });
         }
         calls.push(orchestration_call(
@@ -2827,6 +2919,171 @@ mod tests {
             .unwrap();
         calls.swap(pick, pick - 1);
         assert!(ensure_submissions(&calls, &outputs).is_err());
+    }
+
+    #[test]
+    fn empty_non_reviewer_pages_accept_bound_terminal_session_fallback() {
+        let mut calls = vec![orchestration_call(
+            "profiles",
+            "list_agent_profiles",
+            serde_json::json!({}),
+        )];
+        let mut outputs = Vec::new();
+        for (index, profile) in ["explorer", "explorer", "executor", "worktree_executor"]
+            .into_iter()
+            .enumerate()
+        {
+            let spawn = format!("spawn-{index}");
+            let agent = format!("agent-{index}");
+            calls.push(orchestration_call(
+                &spawn,
+                "spawn_agent",
+                serde_json::json!({"profileId":profile}),
+            ));
+            outputs.push(WireOutput {
+                call_id: Some(spawn),
+                content: serde_json::json!({"profileId":profile,"agentId":agent}).to_string(),
+            });
+            let read = format!("read-{index}");
+            calls.push(orchestration_call(
+                &read,
+                "read_agent_submissions",
+                serde_json::json!({"target":agent}),
+            ));
+            outputs.push(WireOutput {
+                call_id: Some(read),
+                content: submission_page(Vec::new(), 0),
+            });
+            let session = format!("session-{index}");
+            calls.push(orchestration_call(
+                &session,
+                "read_agent_session",
+                serde_json::json!({"target":agent}),
+            ));
+            outputs.push(WireOutput {
+                call_id: Some(session),
+                content: serde_json::json!({
+                    "messages": [
+                        {"role":"assistant","text":"<final>terminal child result</final>"}
+                    ],
+                    "truncated": false
+                })
+                .to_string(),
+            });
+        }
+        calls.push(orchestration_call(
+            "pick",
+            "exec",
+            serde_json::json!({"command":"git cherry-pick abc"}),
+        ));
+        ensure_submissions(&calls, &outputs).unwrap();
+    }
+
+    #[test]
+    fn session_fallback_requires_binding_shape_and_phase_boundary() {
+        let mut calls = vec![orchestration_call(
+            "profiles",
+            "list_agent_profiles",
+            serde_json::json!({}),
+        )];
+        let mut outputs = Vec::new();
+        for (index, profile) in ["explorer", "explorer", "executor", "worktree_executor"]
+            .into_iter()
+            .enumerate()
+        {
+            let spawn = format!("spawn-{index}");
+            let agent = format!("agent-{index}");
+            calls.push(orchestration_call(
+                &spawn,
+                "spawn_agent",
+                serde_json::json!({"profileId":profile}),
+            ));
+            outputs.push(WireOutput {
+                call_id: Some(spawn),
+                content: serde_json::json!({"profileId":profile,"agentId":agent}).to_string(),
+            });
+            let read = format!("read-{index}");
+            calls.push(orchestration_call(
+                &read,
+                "read_agent_submissions",
+                serde_json::json!({"target":agent}),
+            ));
+            outputs.push(WireOutput {
+                call_id: Some(read),
+                content: submission_page(Vec::new(), 0),
+            });
+            let session = format!("session-{index}");
+            calls.push(orchestration_call(
+                &session,
+                "read_agent_session",
+                serde_json::json!({"target":agent}),
+            ));
+            outputs.push(WireOutput {
+                call_id: Some(session),
+                content: serde_json::json!({
+                    "messages": [{"role":"assistant","text":"terminal child result"}]
+                })
+                .to_string(),
+            });
+        }
+        calls.push(orchestration_call(
+            "pick",
+            "exec",
+            serde_json::json!({"command":"git cherry-pick abc"}),
+        ));
+        let baseline_calls = calls.clone();
+        let baseline_outputs = outputs.clone();
+        for (call_id, mutate) in [
+            ("session-0", 0),
+            ("session-0", 1),
+            ("session-0", 2),
+            ("session-0", 3),
+        ] {
+            let mut invalid_calls = baseline_calls.clone();
+            let mut invalid_outputs = baseline_outputs.clone();
+            match mutate {
+                0 => {
+                    invalid_calls.retain(|call| call.call_id.as_deref() != Some(call_id));
+                    invalid_outputs.retain(|output| output.call_id.as_deref() != Some(call_id));
+                }
+                1 => {
+                    invalid_calls
+                        .iter_mut()
+                        .find(|call| call.call_id.as_deref() == Some(call_id))
+                        .unwrap()
+                        .arguments = serde_json::json!({"target":"wrong-agent"})
+                }
+                2 => {
+                    invalid_outputs
+                        .iter_mut()
+                        .find(|output| output.call_id.as_deref() == Some(call_id))
+                        .unwrap()
+                        .call_id = Some("wrong-call-id".into())
+                }
+                3 => {
+                    invalid_outputs
+                        .iter_mut()
+                        .find(|output| output.call_id.as_deref() == Some(call_id))
+                        .unwrap()
+                        .content = "{}".into()
+                }
+                _ => unreachable!(),
+            }
+            assert!(
+                ensure_submissions(&invalid_calls, &invalid_outputs).is_err(),
+                "mutation {mutate} unexpectedly accepted"
+            );
+        }
+        let mut late_calls = baseline_calls;
+        let mut late_outputs = baseline_outputs;
+        let session_index = late_calls
+            .iter()
+            .position(|call| call.call_id.as_deref() == Some("session-0"))
+            .unwrap();
+        let late_session = late_calls.remove(session_index);
+        late_calls.push(late_session);
+        assert!(ensure_submissions(&late_calls, &late_outputs).is_err());
+        late_outputs.retain(|output| output.call_id.as_deref() != Some("session-0"));
     }
 
     #[test]
