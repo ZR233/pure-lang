@@ -565,8 +565,9 @@ fn validate_wire(wire_dir: &Path, artifacts: &Path) -> Result<()> {
     deduplicate_calls(&mut calls);
     ensure_spawn_calls(&calls)?;
     ensure_workspace_receipts(&outputs)?;
-    ensure_profile_messages(&capture_receipts)?;
+    ensure_profile_messages(&calls)?;
     ensure_reviewer_history(&capture_receipts)?;
+    ensure_finding_re_review(&calls, &outputs)?;
     ensure_orchestration_order(&calls)?;
     ensure!(
         calls.iter().any(|call| {
@@ -643,10 +644,10 @@ fn classify_capture(body: &Value) -> Result<String> {
     Ok(matches.first().copied().unwrap_or("unknown").to_string())
 }
 
-fn ensure_profile_messages(captures: &[CaptureReceipt]) -> Result<()> {
+fn ensure_profile_messages(calls: &[WireCall]) -> Result<()> {
     let required = ["explorer", "executor", "worktree_executor", "reviewer"];
-    let calls = captures.iter().flat_map(|capture| capture.calls.iter());
     let spawns = calls
+        .iter()
         .filter(|call| call.name == "spawn_agent")
         .collect::<Vec<_>>();
     for profile in required {
@@ -719,7 +720,23 @@ fn ensure_reviewer_history(captures: &[CaptureReceipt]) -> Result<()> {
     ensure!(!reviewer.is_empty(), "no classified Reviewer capture");
     for capture in reviewer {
         for call in &capture.calls {
-            if ["write_file", "apply_patch", "delete", "copy", "move"].contains(&call.name.as_str())
+            if [
+                "write_file",
+                "apply_patch",
+                "delete_file",
+                "copy_file",
+                "move_file",
+                "delete_path",
+                "copy_path",
+                "move_path",
+                "create_directory",
+                "write_session_note",
+                "apply_session_note_patch",
+                "write_skill",
+                "apply_skill_patch",
+                "skill_manage",
+            ]
+            .contains(&call.name.as_str())
                 || call.name == "exec"
                     && call
                         .arguments
@@ -741,7 +758,11 @@ fn is_mutating_shell_command(command: &str) -> bool {
     let words = command.split_whitespace().collect::<Vec<_>>();
     if words
         .iter()
-        .any(|word| [">", ">>", "tee", "touch", "sed", "rm", "mv", "cp"].contains(word))
+        .any(|word| [">", ">>", "tee", "touch", "rm", "mv", "cp"].contains(word))
+        || command.contains('>')
+        || words
+            .iter()
+            .any(|word| *word == "sed" && words.iter().any(|arg| arg.starts_with("-i")))
     {
         return true;
     }
@@ -761,7 +782,12 @@ fn is_mutating_shell_command(command: &str) -> bool {
                 "mv",
             ]
             .contains(&pair[1])
-    })
+    }) || (words.first() == Some(&"git")
+        && words.get(1) == Some(&"branch")
+        && words.iter().any(|word| *word == "-d" || *word == "-D"))
+        || words
+            .windows(3)
+            .any(|window| window[0] == "git" && window[1] == "worktree" && window[2] == "remove")
 }
 
 fn ensure_workspace_receipts(outputs: &[String]) -> Result<()> {
@@ -905,6 +931,10 @@ fn ensure_orchestration_order(calls: &[WireCall]) -> Result<()> {
     );
     let implementation_last = *executors.iter().chain(worktrees.iter()).max().unwrap();
     ensure!(
+        implementation_last < first_wait,
+        "first wait/read occurred before both implementation spawns"
+    );
+    ensure!(
         calls
             .iter()
             .enumerate()
@@ -926,6 +956,10 @@ fn ensure_orchestration_order(calls: &[WireCall]) -> Result<()> {
                     .is_some_and(|command| command.contains("cherry-pick"))
         })
         .context("wire captures contain no explicit cherry-pick")?;
+    ensure!(
+        first_wait < cherry_pick,
+        "cherry-pick occurred before implementation wait/read"
+    );
     let cleanup = calls
         .iter()
         .position(|call| {
@@ -949,6 +983,67 @@ fn ensure_orchestration_order(calls: &[WireCall]) -> Result<()> {
     ensure!(
         calls[reviewer[0]].arguments.get("writablePaths").is_none(),
         "reviewer spawn unexpectedly requested writablePaths"
+    );
+    Ok(())
+}
+
+fn ensure_finding_re_review(calls: &[WireCall], outputs: &[String]) -> Result<()> {
+    let finding = outputs
+        .iter()
+        .any(|output| output.contains("REVIEWER_FINDING"))
+        || calls
+            .iter()
+            .any(|call| call.arguments.to_string().contains("REVIEWER_FINDING"));
+    if !finding {
+        return Ok(());
+    }
+    let reviewers = calls
+        .iter()
+        .enumerate()
+        .filter(|(_, call)| {
+            call.name == "spawn_agent"
+                && call.arguments.get("profileId").and_then(Value::as_str) == Some("reviewer")
+        })
+        .collect::<Vec<_>>();
+    ensure!(
+        reviewers.len() >= 2,
+        "REVIEWER_FINDING requires a second reviewer spawn"
+    );
+    ensure!(
+        reviewers[0].1.call_id != reviewers[1].1.call_id,
+        "finding re-review must use a different reviewer callId"
+    );
+    let second_reviewer = reviewers[1].0;
+    let first_reviewer = reviewers[0].0;
+    ensure!(
+        calls.iter().enumerate().any(|(index, call)| {
+            index > first_reviewer
+                && index < second_reviewer
+                && call.name == "spawn_agent"
+                && matches!(
+                    call.arguments.get("profileId").and_then(Value::as_str),
+                    Some("executor") | Some("worktree_executor")
+                )
+        }),
+        "REVIEWER_FINDING requires a new implementation spawn"
+    );
+    let integration = calls.iter().enumerate().any(|(index, call)| {
+        index < second_reviewer
+            && ((call.name == "exec"
+                && call
+                    .arguments
+                    .get("command")
+                    .and_then(Value::as_str)
+                    .is_some_and(|command| {
+                        command.contains("cherry-pick")
+                            || command.contains("cargo test")
+                            || command.contains("integration")
+                    }))
+                || call.arguments.to_string().contains("integration"))
+    });
+    ensure!(
+        integration,
+        "REVIEWER_FINDING lacks second integration evidence"
     );
     Ok(())
 }
@@ -1224,6 +1319,50 @@ mod tests {
     }
 
     #[test]
+    fn reviewer_mutation_command_filter_covers_real_tools_and_shell_forms() {
+        for name in [
+            "write_file",
+            "apply_patch",
+            "delete_file",
+            "copy_file",
+            "move_file",
+            "delete_path",
+            "copy_path",
+            "move_path",
+            "write_session_note",
+            "apply_session_note_patch",
+        ] {
+            let capture = CaptureReceipt {
+                path: "x".into(),
+                actor: "reviewer".into(),
+                calls: vec![WireCall {
+                    call_id: Some(name.into()),
+                    name: name.into(),
+                    arguments: serde_json::json!({}),
+                }],
+            };
+            assert!(ensure_reviewer_history(&[capture]).is_err(), "{name}");
+        }
+        for command in [
+            "sed -n '1,4p' file",
+            "git diff --stat",
+            "cargo test -p pl-xtask",
+        ] {
+            assert!(!is_mutating_shell_command(command), "{command}");
+        }
+        for command in [
+            "printf x>file",
+            "printf x >> file",
+            "tee file",
+            "sed -i s/a/b/ file",
+            "git worktree remove /tmp/x",
+            "git branch -D child",
+        ] {
+            assert!(is_mutating_shell_command(command), "{command}");
+        }
+    }
+
+    #[test]
     fn duplicate_call_ids_are_removed_without_reordering_first_occurrence() {
         let mut calls = vec![
             WireCall {
@@ -1275,6 +1414,11 @@ mod tests {
                 arguments: serde_json::json!({"profileId":"executor","forkTurns":"none","message":message}),
             }],
         }];
-        assert!(ensure_profile_messages(&calls).is_err());
+        let canonical = calls
+            .iter()
+            .flat_map(|capture| capture.calls.iter())
+            .cloned()
+            .collect::<Vec<_>>();
+        assert!(ensure_profile_messages(&canonical).is_err());
     }
 }

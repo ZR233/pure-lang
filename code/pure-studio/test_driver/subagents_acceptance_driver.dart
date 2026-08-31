@@ -138,12 +138,6 @@ Future<void> _openProjectAndSubmit(
   );
   await session.waitFor(find.byValueKey('sidebar-new-session'));
   await session.tap(find.byValueKey('sidebar-new-session'));
-  final navigationSnapshot = await session.readSnapshot();
-  final newThreadMode =
-      (navigationSnapshot['navigation'] as Map?)?['newThreadMode'];
-  if (newThreadMode != 'mode.task') {
-    throw StateError('new Thread navigation mode was not Task: $newThreadMode');
-  }
   await session.tap(find.byValueKey('session-mode-selector'));
   await session.waitFor(find.byValueKey('session-mode-mode.task'));
   await session.tap(find.byValueKey('session-mode-mode.task'));
@@ -152,6 +146,12 @@ Future<void> _openProjectAndSubmit(
   final mode = (modeSnapshot['workspace'] as Map?)?['threadMode'];
   if (mode != 'mode.task') {
     throw StateError('Task mode was not applied by the GUI: $mode');
+  }
+  final navigationSnapshot = await session.readSnapshot();
+  final newThreadMode =
+      (navigationSnapshot['navigation'] as Map?)?['newThreadMode'];
+  if (newThreadMode != 'mode.task') {
+    throw StateError('new Thread navigation mode was not Task: $newThreadMode');
   }
   await session.tap(find.byValueKey('composer-input'));
   await session.enterText(await File(options.promptFile).readAsString());
