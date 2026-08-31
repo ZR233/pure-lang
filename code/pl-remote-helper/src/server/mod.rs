@@ -42,16 +42,24 @@ pub async fn run_stdio() -> Result<(), ServerError> {
     run(stdin, stdout).await
 }
 
-async fn run<R>(
+async fn run<R>(reader: R, writer: Box<dyn AsyncWrite + Send + Unpin>) -> Result<(), ServerError>
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    let shell =
+        detect_shell().map_err(|_| io::Error::other("remote helper could not find a shell"))?;
+    run_with_shell(reader, writer, shell).await
+}
+
+async fn run_with_shell<R>(
     mut reader: R,
     writer: Box<dyn AsyncWrite + Send + Unpin>,
+    shell: RemoteShellDescriptor,
 ) -> Result<(), ServerError>
 where
     R: tokio::io::AsyncRead + Unpin,
 {
     let writer = Arc::new(Mutex::new(writer));
-    let shell =
-        detect_shell().map_err(|_| io::Error::other("remote helper could not find a shell"))?;
     let state = Arc::new(Mutex::new(ServerState {
         workspaces: WorkspaceRegistry::default(),
         shell: shell.clone(),
@@ -567,12 +575,20 @@ mod tests {
 
     use super::*;
 
+    fn test_shell() -> RemoteShellDescriptor {
+        RemoteShellDescriptor {
+            dialect: RemoteShellDialect::Sh,
+            path: "/test/sh".to_string(),
+        }
+    }
+
     #[tokio::test]
     async fn direct_stdio_supports_workspace_file_round_trip() {
         let temp = tempfile::tempdir().expect("tempdir");
         let (mut client, server) = tokio::io::duplex(64 * 1024);
-        let server_task =
-            tokio::spawn(async move { run(server, Box::new(tokio::io::sink())).await });
+        let server_task = tokio::spawn(async move {
+            run_with_shell(server, Box::new(tokio::io::sink()), test_shell()).await
+        });
 
         let request = RemoteFrameHeader {
             request_id: Some(1),
@@ -592,7 +608,7 @@ mod tests {
 
     #[test]
     fn hello_reports_the_shell_used_by_process_registry() {
-        let shell = detect_shell().expect("test host has a POSIX shell");
+        let shell = test_shell();
         let (response, _) = hello(REMOTE_PROTOCOL_VERSION, shell.clone()).expect("hello");
         let RemoteResponse::Hello(hello) = response else {
             panic!("expected hello response");
@@ -603,7 +619,7 @@ mod tests {
 
     #[test]
     fn hello_rejects_unknown_protocol_version() {
-        let shell = detect_shell().expect("test host has a POSIX shell");
+        let shell = test_shell();
         let error = hello(REMOTE_PROTOCOL_VERSION + 1, shell).expect_err("mismatch");
         assert_eq!(
             error.code,
