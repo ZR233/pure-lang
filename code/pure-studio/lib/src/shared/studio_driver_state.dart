@@ -15,6 +15,7 @@ abstract final class StudioDriverState {
   static StudioMode _newThreadMode = StudioMode.simple;
   static ComposerThreadState _newThreadComposer =
       const ComposerThreadState.idle();
+  static int _settingsRevision = 0;
   static PersistenceStateSnapshot _persistenceState =
       const PersistenceStateSnapshot.ready();
 
@@ -23,6 +24,7 @@ abstract final class StudioDriverState {
     _selectedThreadId = state.selectedThreadId;
     _newThreadMode = state.newThreadMode;
     _newThreadComposer = state.newThreadComposer;
+    _settingsRevision = state.settingsRevision;
     _persistenceState = state.persistenceState;
     _project = state.projects
         .where((project) => project.id == state.selectedProjectId)
@@ -108,6 +110,7 @@ abstract final class StudioDriverState {
             StoppingSubscriptionsProgress() || CancellingTurnsProgress() || StoppingAgentsProgress() || StoppingMcpProgress() || StoppingLspProgress() || StoppedProgress() => 0,
           }}',
       ],
+      'settings': {'revision': _settingsRevision},
       'persistence': {
         'revision': _persistenceState.revision,
         'kind': switch (_persistenceState.state) {

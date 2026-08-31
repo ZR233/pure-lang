@@ -103,20 +103,41 @@ Future<void> _configureAgents(
     // the product-level enable action and its canonical Settings revision must
     // be observed by the later spawn tool catalog.
     final before = await session.readSnapshot();
-    final beforeRevision = (before['persistence'] as Map?)?['revision'];
+    final beforeRevision = _readSettingsRevision(before);
     await session.tap(enabled);
-    await session.waitForNoPendingFrame(timeout: const Duration(seconds: 20));
-    final after = await session.readSnapshot();
-    final afterRevision = (after['persistence'] as Map?)?['revision'];
-    if (beforeRevision is! int ||
-        afterRevision is! int ||
-        afterRevision <= beforeRevision) {
-      throw StateError(
-        'agent setting did not produce a canonical revision: '
-        '$beforeRevision -> $afterRevision',
-      );
-    }
+    await _waitForSettingsRevision(
+      session,
+      beforeRevision,
+      timeout: const Duration(seconds: 20),
+    );
   }
+}
+
+int _readSettingsRevision(Map<String, dynamic> snapshot) {
+  final revision = (snapshot['settings'] as Map?)?['revision'];
+  if (revision is int) return revision;
+  throw StateError(
+    'Studio snapshot has no canonical Settings revision: $revision',
+  );
+}
+
+Future<int> _waitForSettingsRevision(
+  FlutterDriverSession session,
+  int beforeRevision, {
+  required Duration timeout,
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  Object? lastSeen;
+  while (DateTime.now().isBefore(deadline)) {
+    final snapshot = await session.readSnapshot();
+    lastSeen = (snapshot['settings'] as Map?)?['revision'];
+    if (lastSeen is int && lastSeen > beforeRevision) return lastSeen;
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+  }
+  throw StateError(
+    'agent setting did not produce a canonical Settings revision before '
+    'timeout: before=$beforeRevision, lastSeen=$lastSeen',
+  );
 }
 
 Future<void> _openProjectAndSubmit(
