@@ -314,6 +314,7 @@ Future<Map<String, dynamic>> _waitForCompletion(
       'timeline': workspace?['timeline'],
       'agents': workspace?['agents'],
       'interaction': workspace?['activeInteraction'],
+      'workflow': last['workflow'],
     });
     if (current != fingerprint) {
       fingerprint = current;
@@ -321,9 +322,6 @@ Future<Map<String, dynamic>> _waitForCompletion(
     } else if (DateTime.now().difference(changedAt) >= options.stallTimeout) {
       throw StateError('subagents acceptance made no observable progress');
     }
-    final timeline = _timelineText(last);
-    final busy = workspace?['isBusy'] == true;
-    if (!busy && timeline.contains('PURE_SUBAGENTS_LIVE_OK')) return last;
     final interaction = workspace?['activeInteraction'];
     if (interaction is Map && interaction['kind'] == 'toolApproval') {
       await session.tap(find.byValueKey('tool-approve'));
@@ -340,9 +338,47 @@ Future<Map<String, dynamic>> _waitForCompletion(
         );
       }
     }
+    if (subagentsAcceptanceCompleted(last)) return last;
     await Future<void>.delayed(const Duration(milliseconds: 300));
   }
   throw StateError('subagents acceptance timed out; last=$last');
+}
+
+/// Returns true only when the complete subagent workflow has reached its
+/// terminal state and the live acceptance marker is a root final answer.
+bool subagentsAcceptanceCompleted(Map<String, dynamic> snapshot) {
+  final workspace = snapshot['workspace'];
+  if (workspace is! Map || workspace['isBusy'] == true) return false;
+  if (workspace['activeInteraction'] != null) return false;
+
+  final workflow = snapshot['workflow'];
+  final run = workflow is Map ? workflow['currentRun'] : null;
+  if (run is! Map ||
+      run['currentStageId'] != 'completed' ||
+      run['terminal'] != true) {
+    return false;
+  }
+
+  final roles = (workspace['agents'] as List? ?? const [])
+      .whereType<Map>()
+      .map((agent) => agent['role'])
+      .whereType<String>()
+      .toSet();
+  if (!{
+    'explorer',
+    'executor',
+    'worktree_executor',
+    'reviewer',
+  }.every(roles.contains)) {
+    return false;
+  }
+
+  return (workspace['timeline'] as List? ?? const []).whereType<Map>().any(
+    (row) =>
+        row['type'] == 'finalAnswer' &&
+        row['text'] is String &&
+        (row['text'] as String).contains('PURE_SUBAGENTS_LIVE_OK'),
+  );
 }
 
 void _validateSnapshot(Map<String, dynamic> snapshot) {
