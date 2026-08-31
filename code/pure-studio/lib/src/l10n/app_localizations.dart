@@ -2556,6 +2556,12 @@ abstract class AppLocalizations {
   /// **'Available'**
   String get settingsWebSearchAvailable;
 
+  /// No description provided for @settingsWebSearchAvailableNotSelected.
+  ///
+  /// In en, this message translates to:
+  /// **'Available, not selected'**
+  String get settingsWebSearchAvailableNotSelected;
+
   /// No description provided for @settingsWebSearchDisabled.
   ///
   /// In en, this message translates to:
@@ -2568,6 +2574,12 @@ abstract class AppLocalizations {
   /// **'Missing credential'**
   String get settingsWebSearchMissingCredential;
 
+  /// No description provided for @settingsWebSearchUnsupportedProvider.
+  ///
+  /// In en, this message translates to:
+  /// **'Unsupported provider'**
+  String get settingsWebSearchUnsupportedProvider;
+
   /// No description provided for @settingsWebSearchUnsupportedModel.
   ///
   /// In en, this message translates to:
@@ -2579,6 +2591,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'No credentialed provider originating from the OpenAI preset is available. Remote web search is fully disabled.'**
   String get settingsWebSearchMissingCredentialReason;
+
+  /// No description provided for @settingsWebSearchUnsupportedProviderReason.
+  ///
+  /// In en, this message translates to:
+  /// **'The current provider does not expose this web search backend.'**
+  String get settingsWebSearchUnsupportedProviderReason;
 
   /// No description provided for @settingsWebSearchUnsupportedModelReason.
   ///
@@ -2597,6 +2615,36 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Save web search'**
   String get settingsSaveWebSearch;
+
+  /// No description provided for @settingsDeepSeekWebSearchTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'DeepSeek native web search'**
+  String get settingsDeepSeekWebSearchTitle;
+
+  /// No description provided for @settingsDeepSeekWebSearchSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Let the current eligible DeepSeek Responses model search the web. It takes priority over the OpenAI fallback.'**
+  String get settingsDeepSeekWebSearchSubtitle;
+
+  /// No description provided for @settingsDeepSeekWebSearchConfigured.
+  ///
+  /// In en, this message translates to:
+  /// **'Configured'**
+  String get settingsDeepSeekWebSearchConfigured;
+
+  /// No description provided for @settingsDeepSeekWebSearchEffective.
+  ///
+  /// In en, this message translates to:
+  /// **'Effective'**
+  String get settingsDeepSeekWebSearchEffective;
+
+  /// No description provided for @settingsDeepSeekWebSearchEnabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Enabled'**
+  String get settingsDeepSeekWebSearchEnabled;
 
   /// No description provided for @settingsStudioUpdateTitle.
   ///

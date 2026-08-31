@@ -2,9 +2,10 @@ use anyhow::{Context, Result};
 use pl_protocol::studio::{
     ProviderModelConnectionUpdate, ProviderModelUpdate, ProviderSecretUpdate,
     ProviderSettingsUpdate, RoleSettingsUpdate, SetModelRoleRequest, StudioCustomModelSettings,
-    StudioError, StudioGeneralSettings, StudioInstructionsSettings, StudioMcpServerSettings,
-    StudioModelConnectionSettings, StudioProviderSettings, StudioRoleSettings, StudioSettings,
-    StudioSettingsSnapshot, StudioSkillsSettings, StudioWebSearchSettings,
+    StudioDeepSeekWebSearchSettings, StudioError, StudioGeneralSettings,
+    StudioInstructionsSettings, StudioMcpServerSettings, StudioModelConnectionSettings,
+    StudioProviderSettings, StudioRoleSettings, StudioSettings, StudioSettingsSnapshot,
+    StudioSkillsSettings, StudioWebSearchSettings, UpdateDeepSeekWebSearchSettingsRequest,
     UpdateGeneralSettingsRequest, UpdateInstructionsSettingsRequest, UpdateMcpSettingsRequest,
     UpdatePermissionSettingsRequest, UpdateProviderSettingsRequest, UpdateSkillsSettingsRequest,
     UpdateWebSearchSettingsRequest,
@@ -16,7 +17,8 @@ use crate::{
     ProviderEdit, ProviderModelCatalogConfig, ProviderModelEdit, ProviderPresetId,
     ProviderServiceCapabilities, ProviderSettingsEdit, ProviderWireProtocol,
     ResponsesHostedToolCapabilities, RoleEdit, StandaloneWebSearchDialect, StudioRole,
-    WebSearchAvailability, WebSearchContextSize, WebSearchMode, WebSearchProviderCapabilities,
+    WebSearchAvailability, WebSearchBackendKind, WebSearchContextSize, WebSearchMode,
+    WebSearchProviderCapabilities,
 };
 
 use super::StudioRuntime;
@@ -128,6 +130,21 @@ impl StudioRuntime {
             config.web_search = web_search.1;
             Ok(config)
         })?;
+        self.publish_settings_state(state.clone())?;
+        settings_snapshot(state)
+    }
+
+    pub fn save_deepseek_web_search_settings(
+        &self,
+        request: UpdateDeepSeekWebSearchSettingsRequest,
+    ) -> Result<StudioSettingsSnapshot> {
+        let state = self
+            .config_runtime
+            .update(request.expected_revision, |config| {
+                let mut config = config.clone();
+                config.deepseek_web_search.enabled = request.enabled;
+                Ok(config)
+            })?;
         self.publish_settings_state(state.clone())?;
         settings_snapshot(state)
     }
@@ -283,6 +300,11 @@ fn settings_view(
                 }
                 .to_string(),
                 hosted_web_search: service_capabilities.web_search.hosted_responses,
+                hosted_web_search_dialect: service_capabilities
+                    .web_search
+                    .hosted_dialect
+                    .as_str()
+                    .to_string(),
                 standalone_web_search: service_capabilities
                     .web_search
                     .standalone
@@ -354,6 +376,7 @@ fn settings_view(
             mutation_policy: server.mutation_policy.as_str().to_string(),
         })
         .collect();
+    let (web_search, deepseek_web_search) = search_settings(config, web_search_role)?;
     Ok(StudioSettings {
         default_provider_id: config
             .models
@@ -389,7 +412,8 @@ fn settings_view(
             follow_active_turn: config.ui.follow_active_turn,
             compact_timeline: config.ui.compact_timeline,
         },
-        web_search: web_search_settings(config, web_search_role)?,
+        web_search,
+        deepseek_web_search,
     })
 }
 
@@ -423,41 +447,69 @@ fn custom_model_settings(model: &ModelInfo) -> StudioCustomModelSettings {
     }
 }
 
-fn web_search_settings(
+fn search_settings(
     config: &crate::StudioConfig,
     role: StudioRole,
-) -> Result<StudioWebSearchSettings> {
+) -> Result<(StudioWebSearchSettings, StudioDeepSeekWebSearchSettings)> {
     let route = config.resolve_role(role)?;
-    let resolution = crate::plan_web_search(&config.models, &route, &config.web_search)?.resolution;
+    let plans = crate::plan_web_searches(
+        &config.models,
+        &route,
+        &config.web_search,
+        config.deepseek_web_search.enabled,
+    )?;
+    let openai = plans.openai.resolution;
+    let deepseek = plans.deepseek.resolution;
+    let openai_selected = plans.selected == Some(WebSearchBackendKind::OpenAi);
+    let deepseek_selected = plans.selected == Some(WebSearchBackendKind::DeepSeek);
     let location = config.web_search.location.as_ref();
-    Ok(StudioWebSearchSettings {
-        configured_mode: web_search_mode_label(resolution.configured_mode).to_string(),
-        effective_mode: web_search_mode_label(resolution.effective_mode).to_string(),
-        availability: match resolution.availability {
-            WebSearchAvailability::Available => "available",
-            WebSearchAvailability::Disabled => "disabled",
-            WebSearchAvailability::MissingCredential => "missingCredential",
-            WebSearchAvailability::ProviderUnsupported => "providerUnsupported",
-            WebSearchAvailability::ModelUnsupported => "modelUnsupported",
-        }
-        .to_string(),
-        context_size: config
-            .web_search
-            .context_size
-            .map(|size| match size {
-                WebSearchContextSize::Low => "low",
-                WebSearchContextSize::Medium => "medium",
-                WebSearchContextSize::High => "high",
+    Ok((
+        StudioWebSearchSettings {
+            configured_mode: web_search_mode_label(openai.configured_mode).to_string(),
+            effective_mode: web_search_mode_label(if openai_selected {
+                openai.effective_mode
+            } else {
+                WebSearchMode::Disabled
             })
-            .map(str::to_string),
-        allowed_domains: config.web_search.allowed_domains.clone(),
-        country: location.and_then(|location| location.country.clone()),
-        region: location.and_then(|location| location.region.clone()),
-        city: location.and_then(|location| location.city.clone()),
-        timezone: location.and_then(|location| location.timezone.clone()),
-        provider_id: resolution.provider_id.map(|provider| provider.to_string()),
-        model: resolution.model,
-    })
+            .to_string(),
+            availability: web_search_availability_label(openai.availability).to_string(),
+            selected: openai_selected,
+            context_size: config
+                .web_search
+                .context_size
+                .map(|size| match size {
+                    WebSearchContextSize::Low => "low",
+                    WebSearchContextSize::Medium => "medium",
+                    WebSearchContextSize::High => "high",
+                })
+                .map(str::to_string),
+            allowed_domains: config.web_search.allowed_domains.clone(),
+            country: location.and_then(|location| location.country.clone()),
+            region: location.and_then(|location| location.region.clone()),
+            city: location.and_then(|location| location.city.clone()),
+            timezone: location.and_then(|location| location.timezone.clone()),
+            provider_id: openai.provider_id.map(|provider| provider.to_string()),
+            model: openai.model,
+        },
+        StudioDeepSeekWebSearchSettings {
+            configured_enabled: config.deepseek_web_search.enabled,
+            effective_enabled: deepseek_selected,
+            availability: web_search_availability_label(deepseek.availability).to_string(),
+            selected: deepseek_selected,
+            provider_id: deepseek.provider_id.map(|provider| provider.to_string()),
+            model: deepseek.model,
+        },
+    ))
+}
+
+fn web_search_availability_label(availability: WebSearchAvailability) -> &'static str {
+    match availability {
+        WebSearchAvailability::Available => "available",
+        WebSearchAvailability::Disabled => "disabled",
+        WebSearchAvailability::MissingCredential => "missingCredential",
+        WebSearchAvailability::ProviderUnsupported => "providerUnsupported",
+        WebSearchAvailability::ModelUnsupported => "modelUnsupported",
+    }
 }
 
 fn web_search_config(
@@ -558,43 +610,49 @@ fn provider_edit(
         }
         ProviderSecretUpdate::Clear => None,
     };
-    let capabilities = match input.capability_source.as_str() {
-        "preset_defaults" if preset.is_some() => ProviderCapabilitySelection::PresetDefaults,
-        "preset_defaults" => {
-            return Err(invalid_settings_argument(
-                "Custom providers must use explicit service capabilities",
-            ));
-        }
-        "explicit" => ProviderCapabilitySelection::Explicit(ProviderServiceCapabilities {
-            web_search: WebSearchProviderCapabilities {
-                hosted_responses: input.hosted_web_search,
-                standalone: input
-                    .standalone_web_search
-                    .as_deref()
-                    .filter(|value| !value.trim().is_empty())
-                    .map(str::parse::<StandaloneWebSearchDialect>)
-                    .transpose()
-                    .map_err(|_| {
-                        invalid_settings_argument("Unsupported standalone web search dialect")
-                    })?,
-            },
-            prompt_cache: PromptCacheProviderCapabilities {
-                dialect: input
-                    .prompt_cache_dialect
-                    .trim()
-                    .parse::<PromptCacheDialect>()
-                    .map_err(|_| invalid_settings_argument("Unsupported prompt cache dialect"))?,
-            },
-            responses_tools: ResponsesHostedToolCapabilities {
-                programmatic_tool_calling: input.responses_programmatic_tool_calling,
-            },
-        }),
-        _ => {
-            return Err(invalid_settings_argument(
-                "Unsupported provider capability source",
-            ));
-        }
-    };
+    let capabilities =
+        match input.capability_source.as_str() {
+            "preset_defaults" if preset.is_some() => ProviderCapabilitySelection::PresetDefaults,
+            "preset_defaults" => {
+                return Err(invalid_settings_argument(
+                    "Custom providers must use explicit service capabilities",
+                ));
+            }
+            "explicit" => ProviderCapabilitySelection::Explicit(ProviderServiceCapabilities {
+                web_search: WebSearchProviderCapabilities {
+                    hosted_responses: input.hosted_web_search,
+                    hosted_dialect: input.hosted_web_search_dialect.trim().parse().map_err(
+                        |_| invalid_settings_argument("Unsupported hosted web search dialect"),
+                    )?,
+                    standalone: input
+                        .standalone_web_search
+                        .as_deref()
+                        .filter(|value| !value.trim().is_empty())
+                        .map(str::parse::<StandaloneWebSearchDialect>)
+                        .transpose()
+                        .map_err(|_| {
+                            invalid_settings_argument("Unsupported standalone web search dialect")
+                        })?,
+                },
+                prompt_cache: PromptCacheProviderCapabilities {
+                    dialect: input
+                        .prompt_cache_dialect
+                        .trim()
+                        .parse::<PromptCacheDialect>()
+                        .map_err(|_| {
+                            invalid_settings_argument("Unsupported prompt cache dialect")
+                        })?,
+                },
+                responses_tools: ResponsesHostedToolCapabilities {
+                    programmatic_tool_calling: input.responses_programmatic_tool_calling,
+                },
+            }),
+            _ => {
+                return Err(invalid_settings_argument(
+                    "Unsupported provider capability source",
+                ));
+            }
+        };
     Ok(ProviderEdit {
         key: input.id,
         original_key: input.original_id,

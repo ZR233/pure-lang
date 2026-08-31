@@ -1347,10 +1347,16 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsWebSearchAvailable => '可用';
 
   @override
+  String get settingsWebSearchAvailableNotSelected => '可用但未选中';
+
+  @override
   String get settingsWebSearchDisabled => '已禁用';
 
   @override
   String get settingsWebSearchMissingCredential => '缺少凭证';
+
+  @override
+  String get settingsWebSearchUnsupportedProvider => 'Provider 不支持';
 
   @override
   String get settingsWebSearchUnsupportedModel => '模型不支持';
@@ -1358,6 +1364,10 @@ class AppLocalizationsZh extends AppLocalizations {
   @override
   String get settingsWebSearchMissingCredentialReason =>
       '没有源自 OpenAI preset 且凭证有效的 Provider，远程 Web 搜索已完全禁用。';
+
+  @override
+  String get settingsWebSearchUnsupportedProviderReason =>
+      '当前 Provider 未提供这一路 Web 搜索后端。';
 
   @override
   String get settingsWebSearchUnsupportedModelReason =>
@@ -1368,6 +1378,22 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get settingsSaveWebSearch => '保存 Web 搜索';
+
+  @override
+  String get settingsDeepSeekWebSearchTitle => 'DeepSeek 原生联网搜索';
+
+  @override
+  String get settingsDeepSeekWebSearchSubtitle =>
+      '允许当前符合条件的 DeepSeek Responses 模型联网搜索，并优先于 OpenAI 回退路径。';
+
+  @override
+  String get settingsDeepSeekWebSearchConfigured => '已配置';
+
+  @override
+  String get settingsDeepSeekWebSearchEffective => '当前有效';
+
+  @override
+  String get settingsDeepSeekWebSearchEnabled => '已启用';
 
   @override
   String get settingsStudioUpdateTitle => 'Pure Studio 更新';
@@ -2811,10 +2837,16 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get settingsWebSearchAvailable => '可用';
 
   @override
+  String get settingsWebSearchAvailableNotSelected => '可用但未选中';
+
+  @override
   String get settingsWebSearchDisabled => '已禁用';
 
   @override
   String get settingsWebSearchMissingCredential => '缺少凭证';
+
+  @override
+  String get settingsWebSearchUnsupportedProvider => 'Provider 不支持';
 
   @override
   String get settingsWebSearchUnsupportedModel => '模型不支持';
@@ -2822,6 +2854,10 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   @override
   String get settingsWebSearchMissingCredentialReason =>
       '没有源自 OpenAI preset 且凭证有效的 Provider，远程 Web 搜索已完全禁用。';
+
+  @override
+  String get settingsWebSearchUnsupportedProviderReason =>
+      '当前 Provider 未提供这一路 Web 搜索后端。';
 
   @override
   String get settingsWebSearchUnsupportedModelReason =>
@@ -2832,6 +2868,22 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get settingsSaveWebSearch => '保存 Web 搜索';
+
+  @override
+  String get settingsDeepSeekWebSearchTitle => 'DeepSeek 原生联网搜索';
+
+  @override
+  String get settingsDeepSeekWebSearchSubtitle =>
+      '允许当前符合条件的 DeepSeek Responses 模型联网搜索，并优先于 OpenAI 回退路径。';
+
+  @override
+  String get settingsDeepSeekWebSearchConfigured => '已配置';
+
+  @override
+  String get settingsDeepSeekWebSearchEffective => '当前有效';
+
+  @override
+  String get settingsDeepSeekWebSearchEnabled => '已启用';
 
   @override
   String get settingsStudioUpdateTitle => 'Pure Studio 更新';

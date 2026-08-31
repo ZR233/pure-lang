@@ -30,6 +30,7 @@ ProviderSettingsView _providerSettingsFromFrb(
     catalogId: value.catalogId ?? '',
     capabilitySource: value.capabilitySource,
     hostedWebSearch: value.hostedWebSearch,
+    hostedWebSearchDialect: value.hostedWebSearchDialect,
     standaloneWebSearch: value.standaloneWebSearch ?? '',
     promptCacheDialect: value.promptCacheDialect,
     responsesProgrammaticToolCalling: value.responsesProgrammaticToolCalling,

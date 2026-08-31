@@ -25,6 +25,19 @@ Future<BridgeSettingsStateSnapshot> saveWebSearchSettings({
   input: input,
 );
 
+Future<BridgeDeepSeekWebSearchSettingsDto> readDeepseekWebSearchSettings() =>
+    RustLib.instance.api
+        .crateApiStudioHandlersSettingsReadDeepseekWebSearchSettings();
+
+Future<BridgeSettingsStateSnapshot> saveDeepseekWebSearchSettings({
+  required BigInt expectedSettingsRevision,
+  required DeepSeekWebSearchSettingsInput input,
+}) => RustLib.instance.api
+    .crateApiStudioHandlersSettingsSaveDeepseekWebSearchSettings(
+      expectedSettingsRevision: expectedSettingsRevision,
+      input: input,
+    );
+
 Future<BridgeSettingsStateSnapshot> readSettingsState() =>
     RustLib.instance.api.crateApiStudioHandlersSettingsReadSettingsState();
 

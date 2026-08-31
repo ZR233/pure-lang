@@ -102,6 +102,10 @@ abstract class StudioApi {
     int expectedSettingsRevision,
     WebSearchSettingsCommand command,
   );
+  Future<SettingsStateSnapshot> saveDeepSeekWebSearchSettings(
+    int expectedSettingsRevision,
+    DeepSeekWebSearchSettingsCommand command,
+  );
   Future<ProviderUsageStateSnapshot> checkProviderUsage();
   Future<SkillsStateSnapshot> readSkillsState(String projectId);
   Future<SkillsStateSnapshot> discoverSkills(String projectId);
@@ -885,6 +889,7 @@ class FrbStudioApi implements StudioApi {
                   },
                   capabilitySource: provider.capabilitySource,
                   hostedWebSearch: provider.hostedWebSearch,
+                  hostedWebSearchDialect: provider.hostedWebSearchDialect,
                   standaloneWebSearch: provider.standaloneWebSearch,
                   promptCacheDialect: provider.promptCacheDialect,
                   responsesProgrammaticToolCalling:
@@ -1039,6 +1044,22 @@ class FrbStudioApi implements StudioApi {
             city: command.city,
             timezone: command.timezone,
           ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Future<SettingsStateSnapshot> saveDeepSeekWebSearchSettings(
+    int expectedSettingsRevision,
+    DeepSeekWebSearchSettingsCommand command,
+  ) async {
+    await _ensureReady();
+    return _settingsStateFromFrb(
+      await _bridgeCall(
+        () => frb.saveDeepseekWebSearchSettings(
+          expectedSettingsRevision: BigInt.from(expectedSettingsRevision),
+          input: frb.DeepSeekWebSearchSettingsInput(enabled: command.enabled),
         ),
       ),
     );

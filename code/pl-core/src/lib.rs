@@ -116,8 +116,9 @@ pub use turn::{
     TurnOptions, TurnRequest, TurnResult, UserInputMode,
 };
 pub use web_search::{
-    ToolVisibilityConstraint, WebSearchAvailability, WebSearchBackend, WebSearchPath,
-    WebSearchPlan, WebSearchResolution, plan_web_search,
+    ToolVisibilityConstraint, WebSearchAvailability, WebSearchBackend, WebSearchBackendKind,
+    WebSearchPath, WebSearchPlan, WebSearchPlans, WebSearchResolution, plan_web_search,
+    plan_web_searches,
 };
 pub use working_set::{
     CONVERSATION_RECOVERY_SECTION_ID, CURRENT_TODO_SECTION_ID, EVIDENCE_LEDGER_SECTION_ID,

@@ -1526,6 +1526,7 @@ void registerShellSettingsTests() {
                 secret: ProviderSecretCommand.preserve(),
                 capabilitySource: 'preset_defaults',
                 hostedWebSearch: false,
+                hostedWebSearchDialect: 'deepseek_responses',
                 promptCacheDialect: 'implicit_prefix',
                 responsesProgrammaticToolCalling: false,
                 defaultModel: 'deepseek-v4-flash',
@@ -2298,6 +2299,14 @@ void registerShellSettingsTests() {
           effectiveMode: 'disabled',
           availability: 'missingCredential',
         ),
+        deepSeekWebSearch: const DeepSeekWebSearchSettingsView(
+          configuredEnabled: true,
+          effectiveEnabled: true,
+          availability: 'available',
+          selected: true,
+          providerId: 'deepseek',
+          model: 'deepseek-v4-flash',
+        ),
       ),
     );
     await _pumpSettingsPage(tester, api);
@@ -2305,6 +2314,7 @@ void registerShellSettingsTests() {
     await tester.pumpAndSettle();
 
     expect(find.text('Web search'), findsOneWidget);
+    expect(find.text('DeepSeek native web search'), findsOneWidget);
     expect(find.text('Missing credential'), findsOneWidget);
     expect(
       find.textContaining('Remote web search is fully disabled'),
@@ -2329,6 +2339,10 @@ void registerShellSettingsTests() {
     expect(saved?.allowedDomains, ['example.com', 'docs.example.com']);
     expect(saved?.country, 'US');
     expect(saved?.timezone, 'America/New_York');
+
+    await tester.tap(find.byKey(const ValueKey('deepseek_web_search_enabled')));
+    await tester.pumpAndSettle();
+    expect(api.savedDeepSeekWebSearchSettings?.enabled, isFalse);
   });
 
   testWidgets(

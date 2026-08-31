@@ -21,6 +21,7 @@ pub struct ProviderInput {
     pub secret: ProviderSecretInput,
     pub capability_source: String,
     pub hosted_web_search: bool,
+    pub hosted_web_search_dialect: String,
     pub standalone_web_search: Option<String>,
     pub prompt_cache_dialect: String,
     pub responses_programmatic_tool_calling: bool,
@@ -145,6 +146,13 @@ pub struct WebSearchSettingsInput {
     pub timezone: Option<String>,
 }
 
+/// DeepSeek 原生 Web 搜索开关的 typed bridge 输入。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeepSeekWebSearchSettingsInput {
+    pub enabled: bool,
+}
+
 /// Web 搜索配置、有效状态和自动 OpenAI backend 的 canonical bridge 快照。
 #[derive(Debug, Clone, serde::Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -152,12 +160,25 @@ pub struct BridgeWebSearchSettingsDto {
     pub configured_mode: String,
     pub effective_mode: String,
     pub availability: String,
+    pub selected: bool,
     pub context_size: Option<String>,
     pub allowed_domains: Vec<String>,
     pub country: Option<String>,
     pub region: Option<String>,
     pub city: Option<String>,
     pub timezone: Option<String>,
+    pub provider_id: Option<String>,
+    pub model: Option<String>,
+}
+
+/// DeepSeek 原生 Web 搜索的 canonical bridge 快照。
+#[derive(Debug, Clone, serde::Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeDeepSeekWebSearchSettingsDto {
+    pub configured_enabled: bool,
+    pub effective_enabled: bool,
+    pub availability: String,
+    pub selected: bool,
     pub provider_id: Option<String>,
     pub model: Option<String>,
 }
@@ -175,6 +196,7 @@ pub struct BridgeStudioSettingsDto {
     pub mcp_servers: Vec<BridgeMcpServerSettingsDto>,
     pub general: BridgeGeneralSettingsDto,
     pub web_search: BridgeWebSearchSettingsDto,
+    pub deepseek_web_search: BridgeDeepSeekWebSearchSettingsDto,
 }
 
 /// 不含 secret 的 Provider canonical 设置视图。
@@ -188,6 +210,7 @@ pub struct BridgeProviderSettingsDto {
     pub has_bearer_token: bool,
     pub capability_source: String,
     pub hosted_web_search: bool,
+    pub hosted_web_search_dialect: String,
     pub standalone_web_search: Option<String>,
     pub prompt_cache_dialect: String,
     pub responses_programmatic_tool_calling: bool,
@@ -326,6 +349,7 @@ pub struct BridgeProviderServiceCapabilitiesDescriptor {
 #[derive(Debug, Clone)]
 pub struct BridgeWebSearchProviderCapabilitiesDescriptor {
     pub hosted_responses: bool,
+    pub hosted_dialect: String,
     pub standalone: Option<String>,
 }
 
@@ -444,6 +468,7 @@ impl From<pl_protocol::ProviderCatalogSnapshot> for BridgeProviderCatalogSnapsho
                                 .service_capabilities
                                 .web_search
                                 .hosted_responses,
+                            hosted_dialect: preset.service_capabilities.web_search.hosted_dialect,
                             standalone: preset.service_capabilities.web_search.standalone,
                         },
                         prompt_cache_dialect: preset.service_capabilities.prompt_cache_dialect,

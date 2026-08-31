@@ -1401,10 +1401,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsWebSearchAvailable => 'Available';
 
   @override
+  String get settingsWebSearchAvailableNotSelected => 'Available, not selected';
+
+  @override
   String get settingsWebSearchDisabled => 'Disabled';
 
   @override
   String get settingsWebSearchMissingCredential => 'Missing credential';
+
+  @override
+  String get settingsWebSearchUnsupportedProvider => 'Unsupported provider';
 
   @override
   String get settingsWebSearchUnsupportedModel => 'Unsupported model';
@@ -1412,6 +1418,10 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get settingsWebSearchMissingCredentialReason =>
       'No credentialed provider originating from the OpenAI preset is available. Remote web search is fully disabled.';
+
+  @override
+  String get settingsWebSearchUnsupportedProviderReason =>
+      'The current provider does not expose this web search backend.';
 
   @override
   String get settingsWebSearchUnsupportedModelReason =>
@@ -1422,6 +1432,22 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsSaveWebSearch => 'Save web search';
+
+  @override
+  String get settingsDeepSeekWebSearchTitle => 'DeepSeek native web search';
+
+  @override
+  String get settingsDeepSeekWebSearchSubtitle =>
+      'Let the current eligible DeepSeek Responses model search the web. It takes priority over the OpenAI fallback.';
+
+  @override
+  String get settingsDeepSeekWebSearchConfigured => 'Configured';
+
+  @override
+  String get settingsDeepSeekWebSearchEffective => 'Effective';
+
+  @override
+  String get settingsDeepSeekWebSearchEnabled => 'Enabled';
 
   @override
   String get settingsStudioUpdateTitle => 'Pure Studio update';

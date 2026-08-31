@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// Provider/模型目录跨产品传输协议版本。
-pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 8;
+pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 9;
 
 /// 无敏感信息、可供 Web 与桌面端直接渲染的 Provider 目录快照。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -42,6 +42,7 @@ pub struct ProviderServiceCapabilitiesDescriptor {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WebSearchProviderCapabilitiesDescriptor {
     pub hosted_responses: bool,
+    pub hosted_dialect: String,
     pub standalone: Option<String>,
 }
 

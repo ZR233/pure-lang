@@ -933,6 +933,14 @@ class StudioController extends _$StudioController {
     );
   }
 
+  Future<void> saveDeepSeekWebSearchSettings(
+    DeepSeekWebSearchSettingsCommand command,
+  ) async {
+    await _saveConfigSettings(
+      (revision) => _api.saveDeepSeekWebSearchSettings(revision, command),
+    );
+  }
+
   Future<void> _saveConfigSettings(
     Future<SettingsStateSnapshot> Function(int revision) request,
   ) async {

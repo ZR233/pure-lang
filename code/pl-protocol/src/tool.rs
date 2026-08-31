@@ -34,6 +34,7 @@ pub enum ToolSpec {
     ProgrammaticToolCalling,
     /// Provider-hosted web search tool.
     WebSearch {
+        dialect: HostedWebSearchDialect,
         external_web_access: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         indexed_web_access: Option<bool>,
@@ -46,6 +47,36 @@ pub enum ToolSpec {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         search_content_types: Option<Vec<String>>,
     },
+}
+
+/// Provider-hosted Responses Web Search wire dialect.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HostedWebSearchDialect {
+    #[default]
+    OpenAiResponses,
+    DeepSeekResponses,
+}
+
+impl HostedWebSearchDialect {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::OpenAiResponses => "open_ai_responses",
+            Self::DeepSeekResponses => "deepseek_responses",
+        }
+    }
+}
+
+impl std::str::FromStr for HostedWebSearchDialect {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "open_ai_responses" => Ok(Self::OpenAiResponses),
+            "deepseek_responses" => Ok(Self::DeepSeekResponses),
+            value => Err(format!("unsupported hosted web search dialect: {value}")),
+        }
+    }
 }
 
 impl ToolSpec {

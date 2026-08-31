@@ -430,6 +430,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn deepseek_web_search_settings_use_cas_and_return_canonical_snapshot() {
+        let app = test_app().await;
+        let settings = app
+            .clone()
+            .oneshot(request("GET", "/api/v1/settings", Body::empty()))
+            .await
+            .unwrap();
+        let revision = json_body(settings).await["revision"].as_u64().unwrap();
+        let body = serde_json::json!({
+            "expectedRevision": revision,
+            "enabled": false,
+        })
+        .to_string();
+        let save = Request::builder()
+            .method("PUT")
+            .uri("/api/v1/settings/deepseek-web-search")
+            .header("host", "localhost:1421")
+            .header("content-type", "application/json")
+            .body(Body::from(body.clone()))
+            .unwrap();
+        let response = app.clone().oneshot(save).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let snapshot = json_body(response).await;
+        assert_eq!(
+            snapshot["settings"]["deepseekWebSearch"]["configuredEnabled"],
+            false
+        );
+        assert_eq!(
+            snapshot["settings"]["deepseekWebSearch"]["availability"],
+            "disabled"
+        );
+
+        let stale = Request::builder()
+            .method("PUT")
+            .uri("/api/v1/settings/deepseek-web-search")
+            .header("host", "localhost:1421")
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap();
+        let response = app.oneshot(stale).await.unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        assert_eq!(json_body(response).await["code"], "staleRevision");
+    }
+
+    #[tokio::test]
     async fn invalid_typed_settings_return_bad_request_instead_of_internal_error() {
         let app = test_app().await;
         let settings = app

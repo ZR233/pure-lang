@@ -12,15 +12,16 @@ pub use self::handlers::{
     delete_ssh_server, discover_skills, init_app, install_studio_update, interrupt_turn,
     list_ssh_servers, list_thread_turns, list_threads_page, load_provider_catalog, open_project,
     open_remote_project, probe_lsp_server, read_agent_profiles, read_attachment_draft,
-    read_lsp_state, read_mcp_state, read_provider_usage_state, read_settings_state,
-    read_skills_state, read_studio_state, read_studio_update_state, read_thread,
-    read_thread_attachment, read_web_search_settings, reload_settings_from_disk,
+    read_deepseek_web_search_settings, read_lsp_state, read_mcp_state, read_provider_usage_state,
+    read_settings_state, read_skills_state, read_studio_state, read_studio_update_state,
+    read_thread, read_thread_attachment, read_web_search_settings, reload_settings_from_disk,
     remove_attachment_draft, repair_lsp_server, reset_lsp, reset_mcp, respond_interaction,
-    retry_persistence, save_general_settings, save_instructions_settings, save_mcp_settings,
-    save_provider_settings, save_runtime_permission_mode, save_skills_settings, save_ssh_server,
-    save_user_agent_profile, save_web_search_settings, search_skills, set_model_role,
-    set_system_agent_enabled, set_thread_mode, shutdown_runtime, start_new_thread,
-    start_studio_runtime, start_turn, steer_turn, test_ssh_connection,
+    retry_persistence, save_deepseek_web_search_settings, save_general_settings,
+    save_instructions_settings, save_mcp_settings, save_provider_settings,
+    save_runtime_permission_mode, save_skills_settings, save_ssh_server, save_user_agent_profile,
+    save_web_search_settings, search_skills, set_model_role, set_system_agent_enabled,
+    set_thread_mode, shutdown_runtime, start_new_thread, start_studio_runtime, start_turn,
+    steer_turn, test_ssh_connection,
 };
 pub use self::subscription::{
     BridgeEventSubscription, BridgeProductStreamEnvelope, BridgeThreadStreamEnvelope,
@@ -71,6 +72,7 @@ mod tests {
             ReadSettings => read_settings_state,
             ReloadSettings => reload_settings_from_disk,
             SaveWebSearchSettings => save_web_search_settings,
+            SaveDeepSeekWebSearchSettings => save_deepseek_web_search_settings,
             SavePermissionSettings => save_runtime_permission_mode,
             SaveProviderSettings => save_provider_settings,
             SaveInstructionsSettings => save_instructions_settings,
@@ -154,6 +156,11 @@ mod tests {
                 .iter()
                 .map(|preset| (
                     preset.service_capabilities.web_search.hosted_responses,
+                    preset
+                        .service_capabilities
+                        .web_search
+                        .hosted_dialect
+                        .as_str(),
                     preset.service_capabilities.web_search.standalone.as_deref(),
                     preset
                         .service_capabilities
@@ -165,6 +172,11 @@ mod tests {
                 .iter()
                 .map(|preset| (
                     preset.service_capabilities.web_search.hosted_responses,
+                    preset
+                        .service_capabilities
+                        .web_search
+                        .hosted_dialect
+                        .as_str(),
                     preset.service_capabilities.web_search.standalone.as_deref(),
                     preset
                         .service_capabilities

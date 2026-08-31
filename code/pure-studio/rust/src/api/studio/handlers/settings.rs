@@ -1,11 +1,13 @@
 use crate::api::studio::bridge_runtime::{active_bridge, installed_bridge};
 use crate::api::studio::convert::settings::{
-    bridge_settings_snapshot, bridge_web_search_settings, provider_settings_request,
+    bridge_deepseek_web_search_settings, bridge_settings_snapshot, bridge_web_search_settings,
+    provider_settings_request,
 };
 use crate::api::studio::types::{
-    BridgeError, BridgeProviderCatalogSnapshot, BridgeSettingsStateSnapshot,
-    BridgeWebSearchSettingsDto, InstructionsSettingsInput, McpSettingsInput, ProviderSettingsInput,
-    SkillsSettingsInput, WebSearchSettingsInput,
+    BridgeDeepSeekWebSearchSettingsDto, BridgeError, BridgeProviderCatalogSnapshot,
+    BridgeSettingsStateSnapshot, BridgeWebSearchSettingsDto, DeepSeekWebSearchSettingsInput,
+    InstructionsSettingsInput, McpSettingsInput, ProviderSettingsInput, SkillsSettingsInput,
+    WebSearchSettingsInput,
 };
 // ── Settings ──
 
@@ -35,6 +37,28 @@ pub async fn save_web_search_settings(
             region: input.region,
             city: input.city,
             timezone: input.timezone,
+        },
+    )?;
+    Ok(bridge_settings_snapshot(snapshot))
+}
+
+pub async fn read_deepseek_web_search_settings()
+-> Result<BridgeDeepSeekWebSearchSettingsDto, BridgeError> {
+    let bridge = active_bridge().await?;
+    Ok(bridge_deepseek_web_search_settings(
+        bridge.studio.read_settings()?.settings.deepseek_web_search,
+    ))
+}
+
+pub async fn save_deepseek_web_search_settings(
+    expected_settings_revision: u64,
+    input: DeepSeekWebSearchSettingsInput,
+) -> Result<BridgeSettingsStateSnapshot, BridgeError> {
+    let bridge = active_bridge().await?;
+    let snapshot = bridge.studio.save_deepseek_web_search_settings(
+        pl_protocol::studio::UpdateDeepSeekWebSearchSettingsRequest {
+            expected_revision: expected_settings_revision,
+            enabled: input.enabled,
         },
     )?;
     Ok(bridge_settings_snapshot(snapshot))

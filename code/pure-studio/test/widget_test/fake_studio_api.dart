@@ -67,6 +67,7 @@ class _FakeStudioApi implements StudioApi {
   Map<String, Object?>? savedMcpSettings;
   Map<String, Object?>? savedGeneralSettings;
   WebSearchSettingsCommand? savedWebSearchSettings;
+  DeepSeekWebSearchSettingsCommand? savedDeepSeekWebSearchSettings;
   PermissionMode? savedPermissionMode;
   String? resolvedInteractionId;
   Map<String, Object?>? resolvedInteraction;
@@ -951,6 +952,23 @@ class _FakeStudioApi implements StudioApi {
   }
 
   @override
+  Future<SettingsStateSnapshot> saveDeepSeekWebSearchSettings(
+    int expectedSettingsRevision,
+    DeepSeekWebSearchSettingsCommand command,
+  ) async {
+    savedDeepSeekWebSearchSettings = command;
+    final snapshot = _settingsSnapshot(
+      _currentState.settingsState,
+      revision: expectedSettingsRevision + 1,
+      deepSeekWebSearch: _currentState.deepSeekWebSearch.withConfiguredEnabled(
+        command.enabled,
+      ),
+    );
+    _currentState = _currentState.copyWith(settingsState: snapshot);
+    return snapshot;
+  }
+
+  @override
   Future<ProviderUsageStateSnapshot> checkProviderUsage() async {
     loadProviderUsagesCount += 1;
     final blocked = blockedProviderUsageLoad;
@@ -1014,6 +1032,7 @@ SettingsStateSnapshot _settingsSnapshot(
   SkillsSettingsView? skills,
   GeneralSettingsView? general,
   WebSearchSettingsView? webSearch,
+  DeepSeekWebSearchSettingsView? deepSeekWebSearch,
   PermissionMode? permissionMode,
 }) {
   return SettingsStateSnapshot(
@@ -1028,6 +1047,7 @@ SettingsStateSnapshot _settingsSnapshot(
     skills: skills ?? current.skills,
     general: general ?? current.general,
     webSearch: webSearch ?? current.webSearch,
+    deepSeekWebSearch: deepSeekWebSearch ?? current.deepSeekWebSearch,
     permissionMode: permissionMode ?? current.permissionMode,
   );
 }
@@ -1153,6 +1173,7 @@ Map<String, Object?> _providerSettingsCommandJson(
           'bearerToken': provider.secret.value ?? '',
           'capabilitySource': provider.capabilitySource,
           'hostedWebSearch': provider.hostedWebSearch,
+          'hostedWebSearchDialect': provider.hostedWebSearchDialect,
           'standaloneWebSearch': provider.standaloneWebSearch,
           'promptCacheDialect': provider.promptCacheDialect,
           'responsesProgrammaticToolCalling':

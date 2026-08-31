@@ -13,9 +13,9 @@ use pl_protocol::studio::{
     ResolveInteractionRequest, SearchSkillsRequest, SetModelRoleRequest, SetThreadModeRequest,
     StartTurnRequest, SteerTurnRequest, StudioAttachmentAdmissionContext,
     StudioAttachmentDraftSource, StudioError, StudioSettingsSnapshot, ThreadPageQuery,
-    UpdateGeneralSettingsRequest, UpdateInstructionsSettingsRequest, UpdateMcpSettingsRequest,
-    UpdatePermissionSettingsRequest, UpdateProviderSettingsRequest, UpdateSkillsSettingsRequest,
-    UpdateWebSearchSettingsRequest,
+    UpdateDeepSeekWebSearchSettingsRequest, UpdateGeneralSettingsRequest,
+    UpdateInstructionsSettingsRequest, UpdateMcpSettingsRequest, UpdatePermissionSettingsRequest,
+    UpdateProviderSettingsRequest, UpdateSkillsSettingsRequest, UpdateWebSearchSettingsRequest,
 };
 use pl_studio_runtime::StudioMode;
 use tokio::io::AsyncWriteExt;
@@ -135,6 +135,7 @@ pub(crate) fn api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(read_settings))
         .routes(routes!(reload_settings))
         .routes(routes!(save_web_search_settings))
+        .routes(routes!(save_deepseek_web_search_settings))
         .routes(routes!(save_permission_settings))
         .routes(routes!(save_provider_settings))
         .routes(routes!(save_instructions_settings))
@@ -591,6 +592,19 @@ async fn save_web_search_settings(
         state
             .runtime
             .save_web_search_settings(request)
+            .map_err(ApiError::from)?,
+    ))
+}
+
+#[utoipa::path(put, path = "/api/v1/settings/deepseek-web-search", operation_id = "settings.saveDeepSeekWebSearch", request_body = UpdateDeepSeekWebSearchSettingsRequest, responses(StudioApiErrors, (status = 200, body = StudioSettingsSnapshot)))]
+async fn save_deepseek_web_search_settings(
+    State(state): State<AppState>,
+    ApiJson(request): ApiJson<UpdateDeepSeekWebSearchSettingsRequest>,
+) -> Result<Json<StudioSettingsSnapshot>, ApiError> {
+    Ok(Json(
+        state
+            .runtime
+            .save_deepseek_web_search_settings(request)
             .map_err(ApiError::from)?,
     ))
 }

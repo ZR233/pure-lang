@@ -94,7 +94,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => 500371170;
+  int get rustContentHash => 423244160;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -233,6 +233,9 @@ abstract class RustLibApi extends BaseApi {
     required String draftId,
   });
 
+  Future<BridgeDeepSeekWebSearchSettingsDto>
+  crateApiStudioHandlersSettingsReadDeepseekWebSearchSettings();
+
   Future<BridgeLspStateSnapshot>
   crateApiStudioHandlersExternalStateReadLspState();
 
@@ -301,6 +304,12 @@ abstract class RustLibApi extends BaseApi {
 
   Future<BridgePersistenceStateSnapshot>
   crateApiStudioHandlersPersistenceRetryPersistence();
+
+  Future<BridgeSettingsStateSnapshot>
+  crateApiStudioHandlersSettingsSaveDeepseekWebSearchSettings({
+    required BigInt expectedSettingsRevision,
+    required DeepSeekWebSearchSettingsInput input,
+  });
 
   Future<BridgeSettingsStateSnapshot>
   crateApiStudioHandlersSettingsSaveGeneralSettings({
@@ -1547,6 +1556,40 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<BridgeDeepSeekWebSearchSettingsDto>
+  crateApiStudioHandlersSettingsReadDeepseekWebSearchSettings() {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 33,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData:
+              sse_decode_bridge_deep_seek_web_search_settings_dto,
+          decodeErrorData: sse_decode_bridge_error,
+        ),
+        constMeta:
+            kCrateApiStudioHandlersSettingsReadDeepseekWebSearchSettingsConstMeta,
+        argValues: [],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta
+  get kCrateApiStudioHandlersSettingsReadDeepseekWebSearchSettingsConstMeta =>
+      const TaskConstMeta(
+        debugName: "read_deepseek_web_search_settings",
+        argNames: [],
+      );
+
+  @override
   Future<BridgeLspStateSnapshot>
   crateApiStudioHandlersExternalStateReadLspState() {
     return handler.executeNormal(
@@ -1556,7 +1599,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 33,
+            funcId: 34,
             port: port_,
           );
         },
@@ -1584,7 +1627,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 34,
+            funcId: 35,
             port: port_,
           );
         },
@@ -1612,7 +1655,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 35,
+            funcId: 36,
             port: port_,
           );
         },
@@ -1642,7 +1685,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 36,
+            funcId: 37,
             port: port_,
           );
         },
@@ -1671,7 +1714,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 37,
+            funcId: 38,
             port: port_,
           );
         },
@@ -1702,7 +1745,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 38,
+            funcId: 39,
             port: port_,
           );
         },
@@ -1730,7 +1773,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 39,
+            funcId: 40,
             port: port_,
           );
         },
@@ -1761,7 +1804,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 40,
+            funcId: 41,
             port: port_,
           );
         },
@@ -1793,7 +1836,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 41,
+            funcId: 42,
             port: port_,
           );
         },
@@ -1826,7 +1869,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 42,
+            funcId: 43,
             port: port_,
           );
         },
@@ -1858,7 +1901,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 43,
+            funcId: 44,
             port: port_,
           );
         },
@@ -1892,7 +1935,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 44,
+            funcId: 45,
             port: port_,
           );
         },
@@ -1927,7 +1970,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 45,
+            funcId: 46,
             port: port_,
           );
         },
@@ -1965,7 +2008,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 46,
+            funcId: 47,
             port: port_,
           );
         },
@@ -1999,7 +2042,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 47,
+            funcId: 48,
             port: port_,
           );
         },
@@ -2029,7 +2072,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 48,
+            funcId: 49,
             port: port_,
           );
         },
@@ -2065,7 +2108,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 49,
+            funcId: 50,
             port: port_,
           );
         },
@@ -2096,7 +2139,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 50,
+            funcId: 51,
             port: port_,
           );
         },
@@ -2117,6 +2160,47 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @override
   Future<BridgeSettingsStateSnapshot>
+  crateApiStudioHandlersSettingsSaveDeepseekWebSearchSettings({
+    required BigInt expectedSettingsRevision,
+    required DeepSeekWebSearchSettingsInput input,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_u_64(expectedSettingsRevision, serializer);
+          sse_encode_box_autoadd_deep_seek_web_search_settings_input(
+            input,
+            serializer,
+          );
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 52,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bridge_settings_state_snapshot,
+          decodeErrorData: sse_decode_bridge_error,
+        ),
+        constMeta:
+            kCrateApiStudioHandlersSettingsSaveDeepseekWebSearchSettingsConstMeta,
+        argValues: [expectedSettingsRevision, input],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta
+  get kCrateApiStudioHandlersSettingsSaveDeepseekWebSearchSettingsConstMeta =>
+      const TaskConstMeta(
+        debugName: "save_deepseek_web_search_settings",
+        argNames: ["expectedSettingsRevision", "input"],
+      );
+
+  @override
+  Future<BridgeSettingsStateSnapshot>
   crateApiStudioHandlersSettingsSaveGeneralSettings({
     required BigInt expectedSettingsRevision,
     required GeneralSettingsInput input,
@@ -2130,7 +2214,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 51,
+            funcId: 53,
             port: port_,
           );
         },
@@ -2167,7 +2251,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 52,
+            funcId: 54,
             port: port_,
           );
         },
@@ -2205,7 +2289,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 53,
+            funcId: 55,
             port: port_,
           );
         },
@@ -2241,7 +2325,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 54,
+            funcId: 56,
             port: port_,
           );
         },
@@ -2278,7 +2362,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 55,
+            funcId: 57,
             port: port_,
           );
         },
@@ -2316,7 +2400,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 56,
+            funcId: 58,
             port: port_,
           );
         },
@@ -2350,7 +2434,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 57,
+            funcId: 59,
             port: port_,
           );
         },
@@ -2397,7 +2481,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 58,
+            funcId: 60,
             port: port_,
           );
         },
@@ -2455,7 +2539,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 59,
+            funcId: 61,
             port: port_,
           );
         },
@@ -2494,7 +2578,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 60,
+            funcId: 62,
             port: port_,
           );
         },
@@ -2536,7 +2620,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 61,
+            funcId: 63,
             port: port_,
           );
         },
@@ -2584,7 +2668,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 62,
+            funcId: 64,
             port: port_,
           );
         },
@@ -2621,7 +2705,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 63,
+            funcId: 65,
             port: port_,
           );
         },
@@ -2651,7 +2735,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 64,
+            funcId: 66,
             port: port_,
           );
         },
@@ -2685,7 +2769,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 65,
+            funcId: 67,
             port: port_,
           );
         },
@@ -2716,7 +2800,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 66,
+            funcId: 68,
             port: port_,
           );
         },
@@ -2749,7 +2833,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 67,
+            funcId: 69,
             port: port_,
           );
         },
@@ -2784,7 +2868,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 68,
+            funcId: 70,
             port: port_,
           );
         },
@@ -2821,7 +2905,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             pdeCallFfi(
               generalizedFrbRustBinding,
               serializer,
-              funcId: 69,
+              funcId: 71,
               port: port_,
             );
           },
@@ -2858,7 +2942,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 70,
+            funcId: 72,
             port: port_,
           );
         },
@@ -2892,7 +2976,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 71,
+            funcId: 73,
             port: port_,
           );
         },
@@ -3688,6 +3772,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  DeepSeekWebSearchSettingsInput
+  dco_decode_box_autoadd_deep_seek_web_search_settings_input(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_deep_seek_web_search_settings_input(raw);
+  }
+
+  @protected
   double dco_decode_box_autoadd_f_64(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as double;
@@ -4219,6 +4310,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       wireProtocol: dco_decode_String(arr[4]),
       supportedConnectionModes: dco_decode_list_String(arr[5]),
       defaultConnectionMode: dco_decode_String(arr[6]),
+    );
+  }
+
+  @protected
+  BridgeDeepSeekWebSearchSettingsDto
+  dco_decode_bridge_deep_seek_web_search_settings_dto(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 6)
+      throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
+    return BridgeDeepSeekWebSearchSettingsDto(
+      configuredEnabled: dco_decode_bool(arr[0]),
+      effectiveEnabled: dco_decode_bool(arr[1]),
+      availability: dco_decode_String(arr[2]),
+      selected: dco_decode_bool(arr[3]),
+      providerId: dco_decode_opt_String(arr[4]),
+      model: dco_decode_opt_String(arr[5]),
     );
   }
 
@@ -5308,8 +5416,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 14)
-      throw Exception('unexpected arr length: expect 14 but see ${arr.length}');
+    if (arr.length != 15)
+      throw Exception('unexpected arr length: expect 15 but see ${arr.length}');
     return BridgeProviderSettingsDto(
       id: dco_decode_String(arr[0]),
       templateKind: dco_decode_String(arr[1]),
@@ -5318,14 +5426,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       hasBearerToken: dco_decode_bool(arr[4]),
       capabilitySource: dco_decode_String(arr[5]),
       hostedWebSearch: dco_decode_bool(arr[6]),
-      standaloneWebSearch: dco_decode_opt_String(arr[7]),
-      promptCacheDialect: dco_decode_String(arr[8]),
-      responsesProgrammaticToolCalling: dco_decode_bool(arr[9]),
-      defaultModel: dco_decode_String(arr[10]),
-      customModels: dco_decode_list_bridge_custom_model_settings_dto(arr[11]),
+      hostedWebSearchDialect: dco_decode_String(arr[7]),
+      standaloneWebSearch: dco_decode_opt_String(arr[8]),
+      promptCacheDialect: dco_decode_String(arr[9]),
+      responsesProgrammaticToolCalling: dco_decode_bool(arr[10]),
+      defaultModel: dco_decode_String(arr[11]),
+      customModels: dco_decode_list_bridge_custom_model_settings_dto(arr[12]),
       modelConnectionModes:
-          dco_decode_list_bridge_model_connection_settings_dto(arr[12]),
-      catalogId: dco_decode_opt_String(arr[13]),
+          dco_decode_list_bridge_model_connection_settings_dto(arr[13]),
+      catalogId: dco_decode_opt_String(arr[14]),
     );
   }
 
@@ -5955,8 +6064,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeStudioSettingsDto dco_decode_bridge_studio_settings_dto(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 9)
-      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    if (arr.length != 10)
+      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
     return BridgeStudioSettingsDto(
       defaultProviderId: dco_decode_opt_String(arr[0]),
       providers: dco_decode_list_bridge_provider_settings_dto(arr[1]),
@@ -5967,6 +6076,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       mcpServers: dco_decode_list_bridge_mcp_server_settings_dto(arr[6]),
       general: dco_decode_bridge_general_settings_dto(arr[7]),
       webSearch: dco_decode_bridge_web_search_settings_dto(arr[8]),
+      deepseekWebSearch: dco_decode_bridge_deep_seek_web_search_settings_dto(
+        arr[9],
+      ),
     );
   }
 
@@ -7220,11 +7332,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   dco_decode_bridge_web_search_provider_capabilities_descriptor(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 2)
-      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
     return BridgeWebSearchProviderCapabilitiesDescriptor(
       hostedResponses: dco_decode_bool(arr[0]),
-      standalone: dco_decode_opt_String(arr[1]),
+      hostedDialect: dco_decode_String(arr[1]),
+      standalone: dco_decode_opt_String(arr[2]),
     );
   }
 
@@ -7234,20 +7347,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 11)
-      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
+    if (arr.length != 12)
+      throw Exception('unexpected arr length: expect 12 but see ${arr.length}');
     return BridgeWebSearchSettingsDto(
       configuredMode: dco_decode_String(arr[0]),
       effectiveMode: dco_decode_String(arr[1]),
       availability: dco_decode_String(arr[2]),
-      contextSize: dco_decode_opt_String(arr[3]),
-      allowedDomains: dco_decode_list_String(arr[4]),
-      country: dco_decode_opt_String(arr[5]),
-      region: dco_decode_opt_String(arr[6]),
-      city: dco_decode_opt_String(arr[7]),
-      timezone: dco_decode_opt_String(arr[8]),
-      providerId: dco_decode_opt_String(arr[9]),
-      model: dco_decode_opt_String(arr[10]),
+      selected: dco_decode_bool(arr[3]),
+      contextSize: dco_decode_opt_String(arr[4]),
+      allowedDomains: dco_decode_list_String(arr[5]),
+      country: dco_decode_opt_String(arr[6]),
+      region: dco_decode_opt_String(arr[7]),
+      city: dco_decode_opt_String(arr[8]),
+      timezone: dco_decode_opt_String(arr[9]),
+      providerId: dco_decode_opt_String(arr[10]),
+      model: dco_decode_opt_String(arr[11]),
     );
   }
 
@@ -7383,6 +7497,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       grantedBalance: dco_decode_String(arr[2]),
       toppedUpBalance: dco_decode_String(arr[3]),
     );
+  }
+
+  @protected
+  DeepSeekWebSearchSettingsInput dco_decode_deep_seek_web_search_settings_input(
+    dynamic raw,
+  ) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 1)
+      throw Exception('unexpected arr length: expect 1 but see ${arr.length}');
+    return DeepSeekWebSearchSettingsInput(enabled: dco_decode_bool(arr[0]));
   }
 
   @protected
@@ -8180,8 +8305,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ProviderInput dco_decode_provider_input(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 14)
-      throw Exception('unexpected arr length: expect 14 but see ${arr.length}');
+    if (arr.length != 15)
+      throw Exception('unexpected arr length: expect 15 but see ${arr.length}');
     return ProviderInput(
       id: dco_decode_String(arr[0]),
       originalId: dco_decode_opt_String(arr[1]),
@@ -8191,13 +8316,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       secret: dco_decode_provider_secret_input(arr[5]),
       capabilitySource: dco_decode_String(arr[6]),
       hostedWebSearch: dco_decode_bool(arr[7]),
-      standaloneWebSearch: dco_decode_opt_String(arr[8]),
-      promptCacheDialect: dco_decode_String(arr[9]),
-      responsesProgrammaticToolCalling: dco_decode_bool(arr[10]),
-      defaultModel: dco_decode_String(arr[11]),
-      customModels: dco_decode_list_provider_model_input(arr[12]),
+      hostedWebSearchDialect: dco_decode_String(arr[8]),
+      standaloneWebSearch: dco_decode_opt_String(arr[9]),
+      promptCacheDialect: dco_decode_String(arr[10]),
+      responsesProgrammaticToolCalling: dco_decode_bool(arr[11]),
+      defaultModel: dco_decode_String(arr[12]),
+      customModels: dco_decode_list_provider_model_input(arr[13]),
       modelConnectionModes: dco_decode_list_provider_model_connection_input(
-        arr[13],
+        arr[14],
       ),
     );
   }
@@ -9472,6 +9598,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  DeepSeekWebSearchSettingsInput
+  sse_decode_box_autoadd_deep_seek_web_search_settings_input(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_deep_seek_web_search_settings_input(deserializer));
+  }
+
+  @protected
   double sse_decode_box_autoadd_f_64(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_f_64(deserializer));
@@ -10097,6 +10232,28 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       wireProtocol: var_wireProtocol,
       supportedConnectionModes: var_supportedConnectionModes,
       defaultConnectionMode: var_defaultConnectionMode,
+    );
+  }
+
+  @protected
+  BridgeDeepSeekWebSearchSettingsDto
+  sse_decode_bridge_deep_seek_web_search_settings_dto(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_configuredEnabled = sse_decode_bool(deserializer);
+    var var_effectiveEnabled = sse_decode_bool(deserializer);
+    var var_availability = sse_decode_String(deserializer);
+    var var_selected = sse_decode_bool(deserializer);
+    var var_providerId = sse_decode_opt_String(deserializer);
+    var var_model = sse_decode_opt_String(deserializer);
+    return BridgeDeepSeekWebSearchSettingsDto(
+      configuredEnabled: var_configuredEnabled,
+      effectiveEnabled: var_effectiveEnabled,
+      availability: var_availability,
+      selected: var_selected,
+      providerId: var_providerId,
+      model: var_model,
     );
   }
 
@@ -11495,6 +11652,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_hasBearerToken = sse_decode_bool(deserializer);
     var var_capabilitySource = sse_decode_String(deserializer);
     var var_hostedWebSearch = sse_decode_bool(deserializer);
+    var var_hostedWebSearchDialect = sse_decode_String(deserializer);
     var var_standaloneWebSearch = sse_decode_opt_String(deserializer);
     var var_promptCacheDialect = sse_decode_String(deserializer);
     var var_responsesProgrammaticToolCalling = sse_decode_bool(deserializer);
@@ -11513,6 +11671,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       hasBearerToken: var_hasBearerToken,
       capabilitySource: var_capabilitySource,
       hostedWebSearch: var_hostedWebSearch,
+      hostedWebSearchDialect: var_hostedWebSearchDialect,
       standaloneWebSearch: var_standaloneWebSearch,
       promptCacheDialect: var_promptCacheDialect,
       responsesProgrammaticToolCalling: var_responsesProgrammaticToolCalling,
@@ -12346,6 +12505,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     );
     var var_general = sse_decode_bridge_general_settings_dto(deserializer);
     var var_webSearch = sse_decode_bridge_web_search_settings_dto(deserializer);
+    var var_deepseekWebSearch =
+        sse_decode_bridge_deep_seek_web_search_settings_dto(deserializer);
     return BridgeStudioSettingsDto(
       defaultProviderId: var_defaultProviderId,
       providers: var_providers,
@@ -12356,6 +12517,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       mcpServers: var_mcpServers,
       general: var_general,
       webSearch: var_webSearch,
+      deepseekWebSearch: var_deepseekWebSearch,
     );
   }
 
@@ -13953,9 +14115,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_hostedResponses = sse_decode_bool(deserializer);
+    var var_hostedDialect = sse_decode_String(deserializer);
     var var_standalone = sse_decode_opt_String(deserializer);
     return BridgeWebSearchProviderCapabilitiesDescriptor(
       hostedResponses: var_hostedResponses,
+      hostedDialect: var_hostedDialect,
       standalone: var_standalone,
     );
   }
@@ -13968,6 +14132,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_configuredMode = sse_decode_String(deserializer);
     var var_effectiveMode = sse_decode_String(deserializer);
     var var_availability = sse_decode_String(deserializer);
+    var var_selected = sse_decode_bool(deserializer);
     var var_contextSize = sse_decode_opt_String(deserializer);
     var var_allowedDomains = sse_decode_list_String(deserializer);
     var var_country = sse_decode_opt_String(deserializer);
@@ -13980,6 +14145,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       configuredMode: var_configuredMode,
       effectiveMode: var_effectiveMode,
       availability: var_availability,
+      selected: var_selected,
       contextSize: var_contextSize,
       allowedDomains: var_allowedDomains,
       country: var_country,
@@ -14160,6 +14326,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       grantedBalance: var_grantedBalance,
       toppedUpBalance: var_toppedUpBalance,
     );
+  }
+
+  @protected
+  DeepSeekWebSearchSettingsInput sse_decode_deep_seek_web_search_settings_input(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_enabled = sse_decode_bool(deserializer);
+    return DeepSeekWebSearchSettingsInput(enabled: var_enabled);
   }
 
   @protected
@@ -15413,6 +15588,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_secret = sse_decode_provider_secret_input(deserializer);
     var var_capabilitySource = sse_decode_String(deserializer);
     var var_hostedWebSearch = sse_decode_bool(deserializer);
+    var var_hostedWebSearchDialect = sse_decode_String(deserializer);
     var var_standaloneWebSearch = sse_decode_opt_String(deserializer);
     var var_promptCacheDialect = sse_decode_String(deserializer);
     var var_responsesProgrammaticToolCalling = sse_decode_bool(deserializer);
@@ -15429,6 +15605,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       secret: var_secret,
       capabilitySource: var_capabilitySource,
       hostedWebSearch: var_hostedWebSearch,
+      hostedWebSearchDialect: var_hostedWebSearchDialect,
       standaloneWebSearch: var_standaloneWebSearch,
       promptCacheDialect: var_promptCacheDialect,
       responsesProgrammaticToolCalling: var_responsesProgrammaticToolCalling,
@@ -16872,6 +17049,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_box_autoadd_deep_seek_web_search_settings_input(
+    DeepSeekWebSearchSettingsInput self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_deep_seek_web_search_settings_input(self, serializer);
+  }
+
+  @protected
   void sse_encode_box_autoadd_f_64(double self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_f_64(self, serializer);
@@ -17417,6 +17603,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.wireProtocol, serializer);
     sse_encode_list_String(self.supportedConnectionModes, serializer);
     sse_encode_String(self.defaultConnectionMode, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_deep_seek_web_search_settings_dto(
+    BridgeDeepSeekWebSearchSettingsDto self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bool(self.configuredEnabled, serializer);
+    sse_encode_bool(self.effectiveEnabled, serializer);
+    sse_encode_String(self.availability, serializer);
+    sse_encode_bool(self.selected, serializer);
+    sse_encode_opt_String(self.providerId, serializer);
+    sse_encode_opt_String(self.model, serializer);
   }
 
   @protected
@@ -18483,6 +18683,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self.hasBearerToken, serializer);
     sse_encode_String(self.capabilitySource, serializer);
     sse_encode_bool(self.hostedWebSearch, serializer);
+    sse_encode_String(self.hostedWebSearchDialect, serializer);
     sse_encode_opt_String(self.standaloneWebSearch, serializer);
     sse_encode_String(self.promptCacheDialect, serializer);
     sse_encode_bool(self.responsesProgrammaticToolCalling, serializer);
@@ -19126,6 +19327,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_list_bridge_mcp_server_settings_dto(self.mcpServers, serializer);
     sse_encode_bridge_general_settings_dto(self.general, serializer);
     sse_encode_bridge_web_search_settings_dto(self.webSearch, serializer);
+    sse_encode_bridge_deep_seek_web_search_settings_dto(
+      self.deepseekWebSearch,
+      serializer,
+    );
   }
 
   @protected
@@ -20436,6 +20641,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_bool(self.hostedResponses, serializer);
+    sse_encode_String(self.hostedDialect, serializer);
     sse_encode_opt_String(self.standalone, serializer);
   }
 
@@ -20448,6 +20654,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.configuredMode, serializer);
     sse_encode_String(self.effectiveMode, serializer);
     sse_encode_String(self.availability, serializer);
+    sse_encode_bool(self.selected, serializer);
     sse_encode_opt_String(self.contextSize, serializer);
     sse_encode_list_String(self.allowedDomains, serializer);
     sse_encode_opt_String(self.country, serializer);
@@ -20574,6 +20781,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.totalBalance, serializer);
     sse_encode_String(self.grantedBalance, serializer);
     sse_encode_String(self.toppedUpBalance, serializer);
+  }
+
+  @protected
+  void sse_encode_deep_seek_web_search_settings_input(
+    DeepSeekWebSearchSettingsInput self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bool(self.enabled, serializer);
   }
 
   @protected
@@ -21665,6 +21881,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_provider_secret_input(self.secret, serializer);
     sse_encode_String(self.capabilitySource, serializer);
     sse_encode_bool(self.hostedWebSearch, serializer);
+    sse_encode_String(self.hostedWebSearchDialect, serializer);
     sse_encode_opt_String(self.standaloneWebSearch, serializer);
     sse_encode_String(self.promptCacheDialect, serializer);
     sse_encode_bool(self.responsesProgrammaticToolCalling, serializer);

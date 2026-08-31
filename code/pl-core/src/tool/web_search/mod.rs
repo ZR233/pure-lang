@@ -3,8 +3,8 @@ mod input;
 
 use futures::FutureExt;
 use pl_model::{
-    SearchCommands, SearchRequest, SearchSettings, ToolSpec, WebSearchAction, WebSearchConfig,
-    WebSearchFilters, WebSearchMode, WebSearchUserLocation,
+    HostedWebSearchDialect, SearchCommands, SearchRequest, SearchSettings, ToolSpec,
+    WebSearchAction, WebSearchConfig, WebSearchFilters, WebSearchMode, WebSearchUserLocation,
 };
 use pl_protocol::{MessageRole, PureError};
 use serde_json::{Value, json};
@@ -137,6 +137,7 @@ impl HostedWebSearchTool {
         };
         Some(Self {
             schema: ToolSpec::WebSearch {
+                dialect: HostedWebSearchDialect::OpenAiResponses,
                 external_web_access,
                 indexed_web_access,
                 filters: (!config.allowed_domains.is_empty()).then(|| WebSearchFilters {
@@ -151,6 +152,20 @@ impl HostedWebSearchTool {
                 search_content_types: None,
             },
         })
+    }
+
+    pub fn deepseek() -> Self {
+        Self {
+            schema: ToolSpec::WebSearch {
+                dialect: HostedWebSearchDialect::DeepSeekResponses,
+                external_web_access: true,
+                indexed_web_access: None,
+                filters: None,
+                user_location: None,
+                search_context_size: None,
+                search_content_types: None,
+            },
+        }
     }
 }
 

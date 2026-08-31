@@ -340,6 +340,10 @@ class ProviderEditor extends StatelessWidget {
                           hostedWebSearch: source == 'preset_defaults'
                               ? preset?.hostedWebSearch ?? false
                               : item.hostedWebSearch,
+                          hostedWebSearchDialect: source == 'preset_defaults'
+                              ? preset?.hostedWebSearchDialect ??
+                                    'open_ai_responses'
+                              : item.hostedWebSearchDialect,
                           standaloneWebSearch: source == 'preset_defaults'
                               ? preset?.standaloneWebSearch ?? ''
                               : item.standaloneWebSearch,
@@ -371,6 +375,33 @@ class ProviderEditor extends StatelessWidget {
                             if (value != null) {
                               onUpdate(
                                 (item) => item.copyWith(hostedWebSearch: value),
+                              );
+                            }
+                          },
+                  ),
+                  DropdownButtonFormField<String>(
+                    initialValue: provider.hostedWebSearchDialect,
+                    decoration: const InputDecoration(
+                      labelText: 'Hosted Web Search dialect',
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'open_ai_responses',
+                        child: Text('OpenAI Responses'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'deepseek_responses',
+                        child: Text('DeepSeek Responses'),
+                      ),
+                    ],
+                    onChanged: saving
+                        ? null
+                        : (value) {
+                            if (value != null) {
+                              onUpdate(
+                                (item) => item.copyWith(
+                                  hostedWebSearchDialect: value,
+                                ),
                               );
                             }
                           },

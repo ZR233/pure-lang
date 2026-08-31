@@ -145,6 +145,12 @@ auto_learn_min_tool_calls = 5
 [skills.system]
 enabled = true
 
+[web_search]
+mode = "cached"
+
+[deepseek_web_search]
+enabled = true
+
 [models.routes.explorer]
 provider = "deepseek"
 model = "deepseek-v4-flash"
@@ -195,7 +201,7 @@ catalog = "openai"
 ## 10.5 Provider 和 Model
 
 `models.providers` 可保存多个 provider，相同 preset 可重复使用；唯一性只约束 map key
-`ProviderId`。当前 StudioConfig schema 为 16，provider catalog snapshot schema 为 8。
+`ProviderId`。当前 StudioConfig schema 为 16，provider catalog snapshot schema 为 9。
 
 每个 provider 实例持久化：
 
@@ -213,10 +219,11 @@ Provider 不保存协议或连接方式。`AgentModelConfig::resolve()` 从当�
 Chat+HTTP。
 
 服务能力不是模型能力的别名：provider 服务能力表示 endpoint 可以执行 Responses hosted tools、
-hosted 或 standalone Web Search，`ModelCapabilities` 仍表示当前模型能否使用 native search 或
+hosted 或 standalone Web Search；hosted search 还携带 `OpenAiResponses` 或 `DeepSeekResponses`
+dialect，`ModelCapabilities` 仍表示当前模型能否使用 native search 或
 function tools。核心编排必须同时检查 endpoint 服务能力、模型能力与模型 request profile。官方
 OpenAI endpoint 默认开启 Responses hosted tools；覆盖自定义 `base_url` 后默认关闭，只有显式配置
-才能重新开启。产品 UI 从 catalog schema 7 的无密钥 descriptor 动态渲染能力选项，
+才能重新开启。产品 UI 从 catalog schema 9 的无密钥 descriptor 动态渲染能力选项，
 不得识别 OpenAI、muxai 或其他具体 id。
 
 OpenAI、MiMo API、MiMo Token Plan、DeepSeek、Zhipu 与 Zhipu Coding Plan 都只是 catalog
@@ -431,6 +438,7 @@ schema、常用配置段、凭据处理和安全编辑行为。其 canonical 源
 - MCP 标签页管理用户 `[mcp.servers]`，包括 server id、启用状态、stdio/Streamable HTTP 传输方式、命令参数、环境变量、HTTP URL 和 token 环境变量；同时展示不可删除的内置 Zhipu Coding Plan MCP server。
 - Provider 列表卡片展示供应商身份、默认模型、模型数量和只读额度状态，不把 base URL 作为主卡片信息。base URL 仍保留在编辑页和 TOML 配置中。
 - Provider 额度查询由后端执行，前端只消费脱敏 DTO。DeepSeek provider 查询账户余额；Zhipu Coding Plan provider 查询 5 小时、7 天和 MCP 工具额度；普通 Zhipu provider 不查询 Coding Plan 额度。
+- General 标签页分别展示 OpenAI Web Search 与 DeepSeek 原生联网搜索两张卡片。两者都展示 configured、effective、availability、selected provider/model；DeepSeek 优先时 OpenAI 卡片显示“可用但未选中”，而不是把 OpenAI 配置泛化成全部联网搜索。
 - 供应商设置页打开时只展示 last-known state；只有手动“检查额度”命令访问网络，不做后台定时
   轮询。缺少 API key、网络失败和 provider 业务失败必须作为 failed/stale 卡片状态展示，不能阻塞
   配置编辑。
@@ -496,11 +504,23 @@ MCP stdio server 的 `env` 会按配置原样传给子进程，可能包含明�
 
 ## 10.13 Web 搜索配置与凭据门控
 
-Studio 配置的顶层 `web_search` 包含：`mode` 为 `disabled | cached | indexed | live`，默认 `cached`；`context_size`、`allowed_domains` 和近似位置 `country/region/city/timezone` 均可省略。不兼容 schema 按 10.1 直接报错，不迁移旧 web search 状态，也不虚构位置、域名或 context size。
+Studio 保留两段互不混用的顶层配置。`[web_search]` 只配置 OpenAI 搜索：`mode` 为
+`disabled | cached | indexed | live`，默认 `cached`；`context_size`、`allowed_domains` 和近似位置
+`country/region/city/timezone` 均可省略。`[deepseek_web_search]` 只包含 `enabled`，默认 `true`；
+缺失整段时同样按启用处理，以覆盖既有 schema 16 配置。DeepSeek 不接受 cached/indexed、域名、
+位置或 context size 等 OpenAI 专属字段，也不因此提升 StudioConfig schema。
 
-配置值与生效值必须分离：没有有凭据的 OpenAI preset 时保留 configured mode，但 effective mode 为 `disabled`。此状态下工具规划不得注册独立搜索或 hosted 搜索，且运行时不得创建 `/alpha/search` 客户端。可用账户优先当前 turn 的 OpenAI provider；否则按 provider id 稳定排序，并按 `explorer -> planner -> executor -> reviewer` 选择首个指向该 provider 的有效模型，最后才回退到目录首个模型。
+规划先独立解析两边状态，再统一仲裁。当前 route 的 provider 有凭据、使用 Responses transport、
+模型支持 web search、endpoint 声明 DeepSeek hosted dialect，且 DeepSeek 开关启用时，选择 DeepSeek
+原生搜索并保持其他普通工具可见；否则沿用 OpenAI standalone/hosted 规划。DeepSeek 不跨 provider
+借用，跨 provider 回退只由 OpenAI 搜索承担。两边均不可用时分别保留 `disabled`、
+`missingCredential`、`providerUnsupported` 或 `modelUnsupported`，不能合并为模糊状态。
 
-`cached` 映射为禁止外部实时访问；`indexed` 映射为显式 indexed 访问；`live` 允许实时外网；`disabled` 完全移除搜索能力。设置保存返回 canonical config 和 availability，前端不得仅修改本地 draft。
+配置值、可用性与最终选中值必须分离。DeepSeek 被选中时，OpenAI 仍可显示 availability 为
+`available`，但 `selected = false` 且 effective mode 为 `disabled`。`cached` 映射为禁止 OpenAI
+外部实时访问；`indexed` 映射为显式 indexed 访问；`live` 允许实时外网；`disabled` 完全关闭该
+OpenAI 路径。两张卡片的保存命令都携带 Settings CAS revision，成功后以完整 canonical snapshot
+回写，前端不得只修改本地 draft。
 
 ## 10.14 LSP 自定义 server 配置
 

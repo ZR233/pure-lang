@@ -289,7 +289,8 @@ enum ResponsesTool {
     },
     ProgrammaticToolCalling,
     WebSearch {
-        external_web_access: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        external_web_access: Option<bool>,
         #[serde(skip_serializing_if = "Option::is_none")]
         indexed_web_access: Option<bool>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -334,20 +335,26 @@ impl From<&ToolSpec> for ResponsesTool {
             },
             ToolSpec::ProgrammaticToolCalling => Self::ProgrammaticToolCalling,
             ToolSpec::WebSearch {
+                dialect,
                 external_web_access,
                 indexed_web_access,
                 filters,
                 user_location,
                 search_context_size,
                 search_content_types,
-            } => Self::WebSearch {
-                external_web_access: *external_web_access,
-                indexed_web_access: *indexed_web_access,
-                filters: filters.clone(),
-                user_location: user_location.clone(),
-                search_context_size: *search_context_size,
-                search_content_types: search_content_types.clone(),
-            },
+            } => {
+                let deepseek = *dialect == crate::HostedWebSearchDialect::DeepSeekResponses;
+                Self::WebSearch {
+                    external_web_access: (!deepseek).then_some(*external_web_access),
+                    indexed_web_access: (!deepseek).then_some(*indexed_web_access).flatten(),
+                    filters: (!deepseek).then_some(filters.clone()).flatten(),
+                    user_location: (!deepseek).then_some(user_location.clone()).flatten(),
+                    search_context_size: (!deepseek).then_some(*search_context_size).flatten(),
+                    search_content_types: (!deepseek)
+                        .then_some(search_content_types.clone())
+                        .flatten(),
+                }
+            }
         }
     }
 }

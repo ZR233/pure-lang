@@ -45,11 +45,20 @@ class DemoStudioApi implements StudioApi {
   SkillsSettingsView _skills = const SkillsSettingsView();
   GeneralSettingsView _general = const GeneralSettingsView();
   WebSearchSettingsView _webSearch = const WebSearchSettingsView(
-    effectiveMode: 'cached',
+    effectiveMode: 'disabled',
     availability: 'available',
+    selected: false,
     providerId: 'openai',
     model: 'gpt-5',
   );
+  DeepSeekWebSearchSettingsView _deepSeekWebSearch =
+      const DeepSeekWebSearchSettingsView(
+        effectiveEnabled: true,
+        availability: 'available',
+        selected: true,
+        providerId: 'deepseek-primary',
+        model: 'deepseek-v4-flash',
+      );
   PermissionMode _permissionMode = PermissionMode.requestApproval;
   int _turnSequence = 0;
   int _threadSequence = 0;
@@ -265,6 +274,7 @@ class DemoStudioApi implements StudioApi {
           skills: _skills,
           general: _general,
           webSearch: _webSearch,
+          deepSeekWebSearch: _deepSeekWebSearch,
           permissionMode: _permissionMode,
         ),
       ),
@@ -1640,6 +1650,7 @@ class DemoStudioApi implements StudioApi {
       configuredMode: command.mode,
       effectiveMode: command.mode,
       availability: command.mode == 'disabled' ? 'disabled' : 'available',
+      selected: command.mode != 'disabled' && !_deepSeekWebSearch.selected,
       contextSize: command.contextSize,
       allowedDomains: command.allowedDomains,
       country: command.country,
@@ -1649,6 +1660,35 @@ class DemoStudioApi implements StudioApi {
       providerId: 'openai',
       model: 'gpt-5',
     );
+    _settingsRevision += 1;
+    return (await readStudioState()).settingsState;
+  }
+
+  @override
+  Future<SettingsStateSnapshot> saveDeepSeekWebSearchSettings(
+    int expectedSettingsRevision,
+    DeepSeekWebSearchSettingsCommand command,
+  ) async {
+    _checkSettingsRevision(expectedSettingsRevision);
+    _deepSeekWebSearch = _deepSeekWebSearch.withConfiguredEnabled(
+      command.enabled,
+    );
+    if (!command.enabled && _webSearch.isAvailable) {
+      _webSearch = WebSearchSettingsView(
+        configuredMode: _webSearch.configuredMode,
+        effectiveMode: _webSearch.configuredMode,
+        availability: _webSearch.availability,
+        selected: true,
+        contextSize: _webSearch.contextSize,
+        allowedDomains: _webSearch.allowedDomains,
+        country: _webSearch.country,
+        region: _webSearch.region,
+        city: _webSearch.city,
+        timezone: _webSearch.timezone,
+        providerId: _webSearch.providerId,
+        model: _webSearch.model,
+      );
+    }
     _settingsRevision += 1;
     return (await readStudioState()).settingsState;
   }

@@ -223,6 +223,7 @@ fn custom_openai_endpoint_requires_explicit_programmatic_tool_capability() {
             .responses_tools
             .programmatic_tool_calling
     );
+    assert!(!default_capabilities.web_search.hosted_responses);
 
     provider.capabilities = ProviderCapabilitySelection::Explicit(official_capabilities);
     let explicit_capabilities = provider.service_capabilities().unwrap();
@@ -230,5 +231,26 @@ fn custom_openai_endpoint_requires_explicit_programmatic_tool_capability() {
         explicit_capabilities
             .responses_tools
             .programmatic_tool_calling
+    );
+    assert!(explicit_capabilities.web_search.hosted_responses);
+}
+
+#[test]
+fn custom_deepseek_base_url_disables_inherited_hosted_search_only() {
+    let mut provider = ProviderConfig::deepseek_preset();
+    let inherited = provider.service_capabilities().unwrap();
+    assert!(inherited.web_search.hosted_responses);
+    assert_eq!(
+        inherited.web_search.hosted_dialect,
+        pl_model::HostedWebSearchDialect::DeepSeekResponses
+    );
+
+    provider.base_url = "https://deepseek-proxy.example/v1".to_string();
+    let overridden = provider.service_capabilities().unwrap();
+
+    assert!(!overridden.web_search.hosted_responses);
+    assert_eq!(
+        overridden.prompt_cache.dialect,
+        pl_model::PromptCacheDialect::ImplicitPrefix
     );
 }

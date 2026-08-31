@@ -158,7 +158,7 @@ fn bundled_chat_models_opt_in_to_parallel_wire_only_when_supported() {
 fn default_models_include_deepseek_v4_models() {
     let models = default_models();
 
-    for slug in deepseek_default_model_slugs() {
+    for &slug in deepseek_default_model_slugs() {
         let model = models.iter().find(|model| model.slug == *slug).unwrap();
 
         assert_eq!(model.context_window, Some(1_000_000));
@@ -170,6 +170,28 @@ fn default_models_include_deepseek_v4_models() {
                 .iter()
                 .any(|effort| effort == "max")
         );
+    }
+}
+
+#[test]
+fn deepseek_default_models_declare_native_web_search_capability() {
+    let models = default_models();
+
+    for &slug in deepseek_default_model_slugs() {
+        let model = models
+            .iter()
+            .find(|model| model.slug == slug)
+            .unwrap_or_else(|| panic!("missing bundled DeepSeek model: {slug}"));
+        assert_eq!(
+            model.transport.protocol,
+            crate::ProviderWireProtocol::Responses,
+            "DeepSeek native web search requires Responses: {slug}"
+        );
+        assert!(
+            model.capabilities.web_search,
+            "DeepSeek model must declare native web search: {slug}"
+        );
+        assert!(model.capabilities.tools.function_calling);
     }
 }
 

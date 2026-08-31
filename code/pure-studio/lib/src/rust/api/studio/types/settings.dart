@@ -10,7 +10,7 @@ import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'settings.freezed.dart';
 
 // These functions are ignored because they are not marked as `pub`: `bridge_input_source`, `bridge_modality`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
 
 /// Provider 配置中由用户定义的模型，不复制内置 catalog 元数据。
 class BridgeCustomModelSettingsDto {
@@ -54,6 +54,46 @@ class BridgeCustomModelSettingsDto {
           wireProtocol == other.wireProtocol &&
           supportedConnectionModes == other.supportedConnectionModes &&
           defaultConnectionMode == other.defaultConnectionMode;
+}
+
+/// DeepSeek 原生 Web 搜索的 canonical bridge 快照。
+class BridgeDeepSeekWebSearchSettingsDto {
+  final bool configuredEnabled;
+  final bool effectiveEnabled;
+  final String availability;
+  final bool selected;
+  final String? providerId;
+  final String? model;
+
+  const BridgeDeepSeekWebSearchSettingsDto({
+    required this.configuredEnabled,
+    required this.effectiveEnabled,
+    required this.availability,
+    required this.selected,
+    this.providerId,
+    this.model,
+  });
+
+  @override
+  int get hashCode =>
+      configuredEnabled.hashCode ^
+      effectiveEnabled.hashCode ^
+      availability.hashCode ^
+      selected.hashCode ^
+      providerId.hashCode ^
+      model.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeDeepSeekWebSearchSettingsDto &&
+          runtimeType == other.runtimeType &&
+          configuredEnabled == other.configuredEnabled &&
+          effectiveEnabled == other.effectiveEnabled &&
+          availability == other.availability &&
+          selected == other.selected &&
+          providerId == other.providerId &&
+          model == other.model;
 }
 
 /// Flutter 本地通用设置的 typed 快照。
@@ -603,6 +643,7 @@ class BridgeProviderSettingsDto {
   final bool hasBearerToken;
   final String capabilitySource;
   final bool hostedWebSearch;
+  final String hostedWebSearchDialect;
   final String? standaloneWebSearch;
   final String promptCacheDialect;
   final bool responsesProgrammaticToolCalling;
@@ -619,6 +660,7 @@ class BridgeProviderSettingsDto {
     required this.hasBearerToken,
     required this.capabilitySource,
     required this.hostedWebSearch,
+    required this.hostedWebSearchDialect,
     this.standaloneWebSearch,
     required this.promptCacheDialect,
     required this.responsesProgrammaticToolCalling,
@@ -637,6 +679,7 @@ class BridgeProviderSettingsDto {
       hasBearerToken.hashCode ^
       capabilitySource.hashCode ^
       hostedWebSearch.hashCode ^
+      hostedWebSearchDialect.hashCode ^
       standaloneWebSearch.hashCode ^
       promptCacheDialect.hashCode ^
       responsesProgrammaticToolCalling.hashCode ^
@@ -657,6 +700,7 @@ class BridgeProviderSettingsDto {
           hasBearerToken == other.hasBearerToken &&
           capabilitySource == other.capabilitySource &&
           hostedWebSearch == other.hostedWebSearch &&
+          hostedWebSearchDialect == other.hostedWebSearchDialect &&
           standaloneWebSearch == other.standaloneWebSearch &&
           promptCacheDialect == other.promptCacheDialect &&
           responsesProgrammaticToolCalling ==
@@ -755,6 +799,7 @@ class BridgeStudioSettingsDto {
   final List<BridgeMcpServerSettingsDto> mcpServers;
   final BridgeGeneralSettingsDto general;
   final BridgeWebSearchSettingsDto webSearch;
+  final BridgeDeepSeekWebSearchSettingsDto deepseekWebSearch;
 
   const BridgeStudioSettingsDto({
     this.defaultProviderId,
@@ -766,6 +811,7 @@ class BridgeStudioSettingsDto {
     required this.mcpServers,
     required this.general,
     required this.webSearch,
+    required this.deepseekWebSearch,
   });
 
   @override
@@ -778,7 +824,8 @@ class BridgeStudioSettingsDto {
       skills.hashCode ^
       mcpServers.hashCode ^
       general.hashCode ^
-      webSearch.hashCode;
+      webSearch.hashCode ^
+      deepseekWebSearch.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -793,20 +840,24 @@ class BridgeStudioSettingsDto {
           skills == other.skills &&
           mcpServers == other.mcpServers &&
           general == other.general &&
-          webSearch == other.webSearch;
+          webSearch == other.webSearch &&
+          deepseekWebSearch == other.deepseekWebSearch;
 }
 
 class BridgeWebSearchProviderCapabilitiesDescriptor {
   final bool hostedResponses;
+  final String hostedDialect;
   final String? standalone;
 
   const BridgeWebSearchProviderCapabilitiesDescriptor({
     required this.hostedResponses,
+    required this.hostedDialect,
     this.standalone,
   });
 
   @override
-  int get hashCode => hostedResponses.hashCode ^ standalone.hashCode;
+  int get hashCode =>
+      hostedResponses.hashCode ^ hostedDialect.hashCode ^ standalone.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -814,6 +865,7 @@ class BridgeWebSearchProviderCapabilitiesDescriptor {
       other is BridgeWebSearchProviderCapabilitiesDescriptor &&
           runtimeType == other.runtimeType &&
           hostedResponses == other.hostedResponses &&
+          hostedDialect == other.hostedDialect &&
           standalone == other.standalone;
 }
 
@@ -822,6 +874,7 @@ class BridgeWebSearchSettingsDto {
   final String configuredMode;
   final String effectiveMode;
   final String availability;
+  final bool selected;
   final String? contextSize;
   final List<String> allowedDomains;
   final String? country;
@@ -835,6 +888,7 @@ class BridgeWebSearchSettingsDto {
     required this.configuredMode,
     required this.effectiveMode,
     required this.availability,
+    required this.selected,
     this.contextSize,
     required this.allowedDomains,
     this.country,
@@ -850,6 +904,7 @@ class BridgeWebSearchSettingsDto {
       configuredMode.hashCode ^
       effectiveMode.hashCode ^
       availability.hashCode ^
+      selected.hashCode ^
       contextSize.hashCode ^
       allowedDomains.hashCode ^
       country.hashCode ^
@@ -867,6 +922,7 @@ class BridgeWebSearchSettingsDto {
           configuredMode == other.configuredMode &&
           effectiveMode == other.effectiveMode &&
           availability == other.availability &&
+          selected == other.selected &&
           contextSize == other.contextSize &&
           allowedDomains == other.allowedDomains &&
           country == other.country &&
@@ -875,6 +931,23 @@ class BridgeWebSearchSettingsDto {
           timezone == other.timezone &&
           providerId == other.providerId &&
           model == other.model;
+}
+
+/// DeepSeek 原生 Web 搜索开关的 typed bridge 输入。
+class DeepSeekWebSearchSettingsInput {
+  final bool enabled;
+
+  const DeepSeekWebSearchSettingsInput({required this.enabled});
+
+  @override
+  int get hashCode => enabled.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is DeepSeekWebSearchSettingsInput &&
+          runtimeType == other.runtimeType &&
+          enabled == other.enabled;
 }
 
 class GeneralSettingsInput {
@@ -1014,6 +1087,7 @@ class ProviderInput {
   final ProviderSecretInput secret;
   final String capabilitySource;
   final bool hostedWebSearch;
+  final String hostedWebSearchDialect;
   final String? standaloneWebSearch;
   final String promptCacheDialect;
   final bool responsesProgrammaticToolCalling;
@@ -1030,6 +1104,7 @@ class ProviderInput {
     required this.secret,
     required this.capabilitySource,
     required this.hostedWebSearch,
+    required this.hostedWebSearchDialect,
     this.standaloneWebSearch,
     required this.promptCacheDialect,
     required this.responsesProgrammaticToolCalling,
@@ -1048,6 +1123,7 @@ class ProviderInput {
       secret.hashCode ^
       capabilitySource.hashCode ^
       hostedWebSearch.hashCode ^
+      hostedWebSearchDialect.hashCode ^
       standaloneWebSearch.hashCode ^
       promptCacheDialect.hashCode ^
       responsesProgrammaticToolCalling.hashCode ^
@@ -1068,6 +1144,7 @@ class ProviderInput {
           secret == other.secret &&
           capabilitySource == other.capabilitySource &&
           hostedWebSearch == other.hostedWebSearch &&
+          hostedWebSearchDialect == other.hostedWebSearchDialect &&
           standaloneWebSearch == other.standaloneWebSearch &&
           promptCacheDialect == other.promptCacheDialect &&
           responsesProgrammaticToolCalling ==

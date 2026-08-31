@@ -75,8 +75,8 @@ pub use thread::{
 };
 pub use thread_item::*;
 pub use tool::{
-    ToolCallerMode, ToolFormat, ToolSpec, WebSearchContextSize, WebSearchFilters,
-    WebSearchUserLocation, WebSearchUserLocationType,
+    HostedWebSearchDialect, ToolCallerMode, ToolFormat, ToolSpec, WebSearchContextSize,
+    WebSearchFilters, WebSearchUserLocation, WebSearchUserLocationType,
 };
 pub use turn::{
     BudgetLimitedTurnOutcome, BudgetLimitedTurnState, CancelledTurnOutcome, CancelledTurnState,

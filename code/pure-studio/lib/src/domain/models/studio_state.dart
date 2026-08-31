@@ -96,6 +96,8 @@ class StudioState {
   SkillsSettingsView get skills => settingsState.skills;
   GeneralSettingsView get general => settingsState.general;
   WebSearchSettingsView get webSearch => settingsState.webSearch;
+  DeepSeekWebSearchSettingsView get deepSeekWebSearch =>
+      settingsState.deepSeekWebSearch;
   PermissionMode get permissionMode => settingsState.permissionMode;
   List<StudioRecoveryIssue> get recoveryIssues => recoveryState.values;
   int get settingsRevision => settingsState.revision;

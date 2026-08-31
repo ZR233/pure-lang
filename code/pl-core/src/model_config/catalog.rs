@@ -291,6 +291,7 @@ pub fn provider_service_capabilities_descriptor(
     ProviderServiceCapabilitiesDescriptor {
         web_search: WebSearchProviderCapabilitiesDescriptor {
             hosted_responses: capabilities.web_search.hosted_responses,
+            hosted_dialect: capabilities.web_search.hosted_dialect.as_str().to_string(),
             standalone: capabilities
                 .web_search
                 .standalone
@@ -476,6 +477,23 @@ mod tests {
                 .filter(|preset| preset.model_catalog_id == "mimo")
                 .count(),
             2
+        );
+    }
+
+    #[test]
+    fn deepseek_preset_exposes_native_hosted_search_dialect() {
+        let snapshot = ProviderCatalogRegistry::builtin().snapshot().unwrap();
+        let deepseek = snapshot
+            .presets
+            .iter()
+            .find(|preset| preset.id == "deepseek")
+            .unwrap();
+
+        assert_eq!(snapshot.schema_version, 9);
+        assert!(deepseek.service_capabilities.web_search.hosted_responses);
+        assert_eq!(
+            deepseek.service_capabilities.web_search.hosted_dialect,
+            "deepseek_responses"
         );
     }
 

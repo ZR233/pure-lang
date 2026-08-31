@@ -178,6 +178,7 @@ class SettingsStateData {
     this.skills = const SkillsSettingsView(),
     this.general = const GeneralSettingsView(),
     this.webSearch = const WebSearchSettingsView(),
+    this.deepSeekWebSearch = const DeepSeekWebSearchSettingsView(),
     this.permissionMode = PermissionMode.requestApproval,
   });
   final List<ProviderSettingsView> providers;
@@ -188,6 +189,7 @@ class SettingsStateData {
   final SkillsSettingsView skills;
   final GeneralSettingsView general;
   final WebSearchSettingsView webSearch;
+  final DeepSeekWebSearchSettingsView deepSeekWebSearch;
   final PermissionMode permissionMode;
 }
 
@@ -201,6 +203,8 @@ class SettingsStateSnapshot extends ObservedStateSnapshot<SettingsStateData> {
     SkillsSettingsView skills = const SkillsSettingsView(),
     GeneralSettingsView general = const GeneralSettingsView(),
     WebSearchSettingsView webSearch = const WebSearchSettingsView(),
+    DeepSeekWebSearchSettingsView deepSeekWebSearch =
+        const DeepSeekWebSearchSettingsView(),
     PermissionMode permissionMode = PermissionMode.requestApproval,
     int revision = 0,
   }) : state = ReadyObservedResource<SettingsStateData>(
@@ -216,6 +220,7 @@ class SettingsStateSnapshot extends ObservedStateSnapshot<SettingsStateData> {
            skills: skills,
            general: general,
            webSearch: webSearch,
+           deepSeekWebSearch: deepSeekWebSearch,
            permissionMode: permissionMode,
          ),
        );
@@ -233,6 +238,8 @@ class SettingsStateSnapshot extends ObservedStateSnapshot<SettingsStateData> {
   SkillsSettingsView get skills => _data.skills;
   GeneralSettingsView get general => _data.general;
   WebSearchSettingsView get webSearch => _data.webSearch;
+  DeepSeekWebSearchSettingsView get deepSeekWebSearch =>
+      _data.deepSeekWebSearch;
   PermissionMode get permissionMode => _data.permissionMode;
 }
 

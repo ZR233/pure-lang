@@ -94,6 +94,7 @@ SettingsStateSnapshot _settingsStateFromFrb(
       skills: _skillsSettingsFromFrb(settings.skills),
       general: _generalSettingsFromFrb(settings.general),
       webSearch: _webSearchFromFrb(settings.webSearch),
+      deepSeekWebSearch: _deepSeekWebSearchFromFrb(settings.deepseekWebSearch),
       permissionMode: _permissionMode(settings.permissionMode),
     );
   }
@@ -129,12 +130,26 @@ WebSearchSettingsView _webSearchFromFrb(frb.BridgeWebSearchSettingsDto value) {
     configuredMode: value.configuredMode,
     effectiveMode: value.effectiveMode,
     availability: value.availability,
+    selected: value.selected,
     contextSize: value.contextSize,
     allowedDomains: value.allowedDomains,
     country: value.country,
     region: value.region,
     city: value.city,
     timezone: value.timezone,
+    providerId: value.providerId,
+    model: value.model,
+  );
+}
+
+DeepSeekWebSearchSettingsView _deepSeekWebSearchFromFrb(
+  frb.BridgeDeepSeekWebSearchSettingsDto value,
+) {
+  return DeepSeekWebSearchSettingsView(
+    configuredEnabled: value.configuredEnabled,
+    effectiveEnabled: value.effectiveEnabled,
+    availability: value.availability,
+    selected: value.selected,
     providerId: value.providerId,
     model: value.model,
   );

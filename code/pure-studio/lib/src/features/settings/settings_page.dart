@@ -127,6 +127,7 @@ class _SettingsScaffold extends StatelessWidget {
       GeneralTab(
         settings: state.general,
         webSearch: state.webSearch,
+        deepSeekWebSearch: state.deepSeekWebSearch,
         runtimeBusy: state.runtimeBusy,
       ),
     ];

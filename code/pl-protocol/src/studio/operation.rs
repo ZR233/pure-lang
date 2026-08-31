@@ -30,6 +30,7 @@ pub enum StudioOperation {
     ReadSettings,
     ReloadSettings,
     SaveWebSearchSettings,
+    SaveDeepSeekWebSearchSettings,
     SavePermissionSettings,
     SaveProviderSettings,
     SaveInstructionsSettings,
@@ -56,7 +57,7 @@ pub enum StudioOperation {
 }
 
 impl StudioOperation {
-    pub const ALL: [Self; 46] = [
+    pub const ALL: [Self; 47] = [
         Self::ReadState,
         Self::OpenProject,
         Self::ActivateProject,
@@ -80,6 +81,7 @@ impl StudioOperation {
         Self::ReadSettings,
         Self::ReloadSettings,
         Self::SaveWebSearchSettings,
+        Self::SaveDeepSeekWebSearchSettings,
         Self::SavePermissionSettings,
         Self::SaveProviderSettings,
         Self::SaveInstructionsSettings,
@@ -130,6 +132,7 @@ impl StudioOperation {
             Self::ReadSettings => "settings.read",
             Self::ReloadSettings => "settings.reload",
             Self::SaveWebSearchSettings => "settings.saveWebSearch",
+            Self::SaveDeepSeekWebSearchSettings => "settings.saveDeepSeekWebSearch",
             Self::SavePermissionSettings => "settings.savePermission",
             Self::SaveProviderSettings => "settings.saveProviders",
             Self::SaveInstructionsSettings => "settings.saveInstructions",

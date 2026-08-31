@@ -3,8 +3,8 @@
 use std::collections::BTreeSet;
 
 use pl_model::{
-    ProviderEndpoint, ProviderWireProtocol, StandaloneWebSearchDialect, WebSearchConfig,
-    WebSearchMode,
+    HostedWebSearchDialect, ProviderEndpoint, ProviderWireProtocol, StandaloneWebSearchDialect,
+    WebSearchConfig, WebSearchMode,
 };
 use pl_protocol::{PureError, Result, WebSearchResolutionDescriptor};
 
@@ -25,6 +25,13 @@ pub enum ToolVisibilityConstraint {
 pub enum WebSearchPath {
     Standalone,
     Hosted,
+}
+
+/// 当前 turn 最终选中的 Web Search backend。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WebSearchBackendKind {
+    OpenAi,
+    DeepSeek,
 }
 
 /// Web Search 规划结果的可用性。
@@ -78,6 +85,7 @@ pub struct WebSearchPlan {
     pub resolution: WebSearchResolution,
     pub visibility: ToolVisibilityConstraint,
     backend: Option<WebSearchBackend>,
+    hosted_dialect: Option<HostedWebSearchDialect>,
 }
 
 impl WebSearchPlan {
@@ -112,11 +120,18 @@ impl WebSearchPlan {
                 }
             }
             Some(WebSearchPath::Hosted) => {
-                let tool = HostedWebSearchTool::from_config(config).ok_or_else(|| {
-                    PureError::ConfigError(
-                        "hosted web search requires an enabled effective mode".to_string(),
-                    )
-                })?;
+                let tool = match self.hosted_dialect {
+                    Some(HostedWebSearchDialect::DeepSeekResponses) => {
+                        HostedWebSearchTool::deepseek()
+                    }
+                    Some(HostedWebSearchDialect::OpenAiResponses) | None => {
+                        HostedWebSearchTool::from_config(config).ok_or_else(|| {
+                            PureError::ConfigError(
+                                "hosted web search requires an enabled effective mode".to_string(),
+                            )
+                        })?
+                    }
+                };
                 std::sync::Arc::new(tool) as std::sync::Arc<dyn crate::tool::Tool>
             }
             None => {
@@ -135,6 +150,69 @@ impl WebSearchPlan {
     }
 }
 
+/// OpenAI 与 DeepSeek 两套搜索配置经当前 route 仲裁后的计划。
+#[derive(Debug, Clone)]
+pub struct WebSearchPlans {
+    pub openai: WebSearchPlan,
+    pub deepseek: WebSearchPlan,
+    pub selected: Option<WebSearchBackendKind>,
+}
+
+impl WebSearchPlans {
+    pub fn visibility(&self) -> ToolVisibilityConstraint {
+        self.active()
+            .map(|plan| plan.visibility)
+            .unwrap_or(ToolVisibilityConstraint::Unavailable)
+    }
+
+    pub fn exclusive_tool_name(&self) -> Option<&'static str> {
+        self.active().and_then(WebSearchPlan::exclusive_tool_name)
+    }
+
+    /// 安装最终选中的搜索工具；没有可用 backend 时卸载旧 generation。
+    pub fn install(&self, core: &mut TurnEngine, openai_config: &WebSearchConfig) -> Result<()> {
+        match self.active() {
+            Some(plan) => plan.install(core, openai_config),
+            None => {
+                core.agent_tools()
+                    .uninstall(&crate::tool::ToolGroupId::new("web_search"));
+                Ok(())
+            }
+        }
+    }
+
+    fn active(&self) -> Option<&WebSearchPlan> {
+        match self.selected {
+            Some(WebSearchBackendKind::OpenAi) => Some(&self.openai),
+            Some(WebSearchBackendKind::DeepSeek) => Some(&self.deepseek),
+            None => None,
+        }
+    }
+}
+
+/// 独立规划两套配置，并让当前 DeepSeek route 的原生搜索优先。
+pub fn plan_web_searches(
+    models: &AgentModelConfig,
+    current: &ResolvedModelRoute,
+    openai_config: &WebSearchConfig,
+    deepseek_enabled: bool,
+) -> Result<WebSearchPlans> {
+    let openai = plan_web_search(models, current, openai_config)?;
+    let deepseek = plan_deepseek_web_search(current, deepseek_enabled);
+    let selected = if deepseek.resolution.availability == WebSearchAvailability::Available {
+        Some(WebSearchBackendKind::DeepSeek)
+    } else if openai.resolution.availability == WebSearchAvailability::Available {
+        Some(WebSearchBackendKind::OpenAi)
+    } else {
+        None
+    };
+    Ok(WebSearchPlans {
+        openai,
+        deepseek,
+        selected,
+    })
+}
+
 /// 根据 provider 服务能力和模型能力确定性规划 Web Search。
 pub fn plan_web_search(
     models: &AgentModelConfig,
@@ -150,11 +228,9 @@ pub fn plan_web_search(
     }
 
     let current_has_credential = current.endpoint.bearer_token.is_some();
-    let hosted_declared = current
-        .endpoint
-        .service_capabilities
-        .web_search
-        .hosted_responses;
+    let hosted_capabilities = &current.endpoint.service_capabilities.web_search;
+    let hosted_declared = hosted_capabilities.hosted_responses
+        && hosted_capabilities.hosted_dialect == HostedWebSearchDialect::OpenAiResponses;
     let hosted_supported = hosted_declared
         && current.model.transport.protocol == ProviderWireProtocol::Responses
         && current.model.capabilities.supports_web_search()
@@ -174,6 +250,7 @@ pub fn plan_web_search(
             resolution,
             visibility: ToolVisibilityConstraint::Additive,
             backend: Some(backend),
+            hosted_dialect: None,
         });
     }
 
@@ -187,6 +264,7 @@ pub fn plan_web_search(
             ),
             visibility: ToolVisibilityConstraint::Exclusive,
             backend: None,
+            hosted_dialect: Some(HostedWebSearchDialect::OpenAiResponses),
         });
     }
 
@@ -201,6 +279,42 @@ pub fn plan_web_search(
         WebSearchAvailability::ModelUnsupported
     };
     Ok(unavailable_plan(configured_mode, availability))
+}
+
+fn plan_deepseek_web_search(current: &ResolvedModelRoute, enabled: bool) -> WebSearchPlan {
+    let configured_mode = if enabled {
+        WebSearchMode::Live
+    } else {
+        WebSearchMode::Disabled
+    };
+    if !enabled {
+        return unavailable_plan(configured_mode, WebSearchAvailability::Disabled);
+    }
+    let capabilities = &current.endpoint.service_capabilities.web_search;
+    let declared = capabilities.hosted_responses
+        && capabilities.hosted_dialect == HostedWebSearchDialect::DeepSeekResponses;
+    if !declared {
+        return unavailable_plan(configured_mode, WebSearchAvailability::ProviderUnsupported);
+    }
+    if current.endpoint.bearer_token.is_none() {
+        return unavailable_plan(configured_mode, WebSearchAvailability::MissingCredential);
+    }
+    if current.model.transport.protocol != ProviderWireProtocol::Responses
+        || !current.model.capabilities.supports_web_search()
+    {
+        return unavailable_plan(configured_mode, WebSearchAvailability::ModelUnsupported);
+    }
+    WebSearchPlan {
+        resolution: available_resolution(
+            configured_mode,
+            WebSearchPath::Hosted,
+            current.provider_id.clone(),
+            current.model.slug.clone(),
+        ),
+        visibility: ToolVisibilityConstraint::Additive,
+        backend: None,
+        hosted_dialect: Some(HostedWebSearchDialect::DeepSeekResponses),
+    }
 }
 
 #[derive(Debug, Default)]
@@ -314,6 +428,7 @@ fn unavailable_plan(
         },
         visibility: ToolVisibilityConstraint::Unavailable,
         backend: None,
+        hosted_dialect: None,
     }
 }
 

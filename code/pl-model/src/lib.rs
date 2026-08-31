@@ -28,7 +28,7 @@ pub use model::{
     mimo_default_model_slugs, openai_default_model_slugs, wire_assignments_from_value,
     zhipu_default_model_slugs,
 };
-pub use pl_protocol::{ToolCallKind, ToolCallerMode, ToolFormat, ToolSpec};
+pub use pl_protocol::{HostedWebSearchDialect, ToolCallKind, ToolCallerMode, ToolFormat, ToolSpec};
 pub use provider::{
     ApplyPatchToolType, EffectivePromptCachePolicy, PromptCacheDialect,
     PromptCacheProviderCapabilities, ProviderConnectionMode, ProviderEndpoint,

@@ -24,6 +24,7 @@ pub struct StudioSettings {
     pub mcp_servers: Vec<StudioMcpServerSettings>,
     pub general: StudioGeneralSettings,
     pub web_search: StudioWebSearchSettings,
+    pub deepseek_web_search: StudioDeepSeekWebSearchSettings,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ToSchema)]
@@ -36,6 +37,7 @@ pub struct StudioProviderSettings {
     pub has_bearer_token: bool,
     pub capability_source: String,
     pub hosted_web_search: bool,
+    pub hosted_web_search_dialect: String,
     pub standalone_web_search: Option<String>,
     pub prompt_cache_dialect: String,
     pub responses_programmatic_tool_calling: bool,
@@ -129,12 +131,24 @@ pub struct StudioWebSearchSettings {
     pub configured_mode: String,
     pub effective_mode: String,
     pub availability: String,
+    pub selected: bool,
     pub context_size: Option<String>,
     pub allowed_domains: Vec<String>,
     pub country: Option<String>,
     pub region: Option<String>,
     pub city: Option<String>,
     pub timezone: Option<String>,
+    pub provider_id: Option<String>,
+    pub model: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StudioDeepSeekWebSearchSettings {
+    pub configured_enabled: bool,
+    pub effective_enabled: bool,
+    pub availability: String,
+    pub selected: bool,
     pub provider_id: Option<String>,
     pub model: Option<String>,
 }

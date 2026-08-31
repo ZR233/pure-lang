@@ -14,6 +14,7 @@ const demoProviderCatalogFixture = ProviderCatalogView(
       modelCatalogId: 'future-catalog',
       suggestedModel: 'future-model',
       hostedWebSearch: true,
+      hostedWebSearchDialect: 'open_ai_responses',
       standaloneWebSearch: 'future_search_dialect',
       promptCacheDialect: 'implicit_prefix',
       responsesProgrammaticToolCalling: false,
@@ -129,6 +130,7 @@ List<ProviderSettingsView> _providersFromSettingsCommand(
           ? 'preset_defaults'
           : provider.capabilitySource,
       hostedWebSearch: provider.hostedWebSearch,
+      hostedWebSearchDialect: provider.hostedWebSearchDialect,
       standaloneWebSearch:
           provider.standaloneWebSearch ?? template.standaloneWebSearch,
       promptCacheDialect: provider.promptCacheDialect,

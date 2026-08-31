@@ -49,6 +49,13 @@ pub struct UpdateWebSearchSettingsRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UpdateDeepSeekWebSearchSettingsRequest {
+    pub expected_revision: u64,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SetModelRoleRequest {
     pub expected_revision: u64,
     pub role: String,
@@ -93,6 +100,7 @@ pub struct ProviderSettingsUpdate {
     pub secret: ProviderSecretUpdate,
     pub capability_source: String,
     pub hosted_web_search: bool,
+    pub hosted_web_search_dialect: String,
     pub standalone_web_search: Option<String>,
     pub prompt_cache_dialect: String,
     pub responses_programmatic_tool_calling: bool,

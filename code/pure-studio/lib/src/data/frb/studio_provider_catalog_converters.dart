@@ -18,6 +18,8 @@ ProviderCatalogView providerCatalogFromFrb(
           modelCatalogId: preset.modelCatalogId,
           suggestedModel: preset.suggestedModel,
           hostedWebSearch: preset.serviceCapabilities.webSearch.hostedResponses,
+          hostedWebSearchDialect:
+              preset.serviceCapabilities.webSearch.hostedDialect,
           standaloneWebSearch:
               preset.serviceCapabilities.webSearch.standalone ?? '',
           promptCacheDialect: preset.serviceCapabilities.promptCacheDialect,

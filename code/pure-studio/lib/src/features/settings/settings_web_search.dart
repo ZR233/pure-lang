@@ -341,6 +341,134 @@ class _WebSearchStatusValue extends StatelessWidget {
   }
 }
 
+class DeepSeekWebSearchSettingsCard extends ConsumerStatefulWidget {
+  const DeepSeekWebSearchSettingsCard({super.key, required this.settings});
+
+  final DeepSeekWebSearchSettingsView settings;
+
+  @override
+  ConsumerState<DeepSeekWebSearchSettingsCard> createState() =>
+      _DeepSeekWebSearchSettingsCardState();
+}
+
+class _DeepSeekWebSearchSettingsCardState
+    extends ConsumerState<DeepSeekWebSearchSettingsCard> {
+  bool _saving = false;
+  String? _error;
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = widget.settings;
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.public, color: context.studioInkSoft),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      context.l10n.settingsDeepSeekWebSearchTitle,
+                      style: context.text.titleMedium?.copyWith(
+                        color: context.studioInk,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      context.l10n.settingsDeepSeekWebSearchSubtitle,
+                      style: context.text.bodySmall?.copyWith(
+                        color: context.studioInkSoft,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (_saving)
+                const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                )
+              else
+                Switch(
+                  key: const ValueKey('deepseek_web_search_enabled'),
+                  value: settings.configuredEnabled,
+                  onChanged: _save,
+                ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              _WebSearchStatusValue(
+                label: context.l10n.settingsDeepSeekWebSearchConfigured,
+                value: _enabledLabel(context, settings.configuredEnabled),
+              ),
+              _WebSearchStatusValue(
+                label: context.l10n.settingsDeepSeekWebSearchEffective,
+                value: _enabledLabel(context, settings.effectiveEnabled),
+              ),
+              _WebSearchStatusValue(
+                label: context.l10n.settingsWebSearchProvider,
+                value: settings.providerId ?? context.l10n.settingsNotAvailable,
+              ),
+              _WebSearchStatusValue(
+                label: context.l10n.settingsWebSearchModel,
+                value: settings.model ?? context.l10n.settingsNotAvailable,
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            _availabilityLabelForValue(
+              context,
+              settings.availability,
+              selected: settings.selected,
+            ),
+            style: context.text.bodySmall?.copyWith(
+              color: settings.isAvailable
+                  ? context.studioInkSoft
+                  : context.colors.error,
+            ),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 10),
+            SettingsInlineError(message: _error!),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _save(bool enabled) async {
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await ref
+          .read(studioControllerProvider.notifier)
+          .saveDeepSeekWebSearchSettings(
+            DeepSeekWebSearchSettingsCommand(enabled: enabled),
+          );
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+}
+
 String _modeLabel(BuildContext context, String mode) {
   return switch (mode) {
     'disabled' => context.l10n.settingsWebSearchModeDisabled,
@@ -362,17 +490,38 @@ String _availabilityLabel(
   BuildContext context,
   WebSearchSettingsView settings,
 ) {
-  return switch (settings.availability) {
+  return _availabilityLabelForValue(
+    context,
+    settings.availability,
+    selected: settings.selected,
+  );
+}
+
+String _availabilityLabelForValue(
+  BuildContext context,
+  String availability, {
+  required bool selected,
+}) {
+  return switch (availability) {
+    'available' when !selected =>
+      context.l10n.settingsWebSearchAvailableNotSelected,
     'available' => context.l10n.settingsWebSearchAvailable,
     'disabled' => context.l10n.settingsWebSearchDisabled,
-    'unsupportedModel' => context.l10n.settingsWebSearchUnsupportedModel,
+    'providerUnsupported' => context.l10n.settingsWebSearchUnsupportedProvider,
+    'modelUnsupported' => context.l10n.settingsWebSearchUnsupportedModel,
     _ => context.l10n.settingsWebSearchMissingCredential,
   };
 }
 
 String _availabilityReason(BuildContext context, String availability) {
   return switch (availability) {
-    'unsupportedModel' => context.l10n.settingsWebSearchUnsupportedModelReason,
+    'providerUnsupported' =>
+      context.l10n.settingsWebSearchUnsupportedProviderReason,
+    'modelUnsupported' => context.l10n.settingsWebSearchUnsupportedModelReason,
     _ => context.l10n.settingsWebSearchMissingCredentialReason,
   };
 }
+
+String _enabledLabel(BuildContext context, bool enabled) => enabled
+    ? context.l10n.settingsDeepSeekWebSearchEnabled
+    : context.l10n.settingsWebSearchDisabled;

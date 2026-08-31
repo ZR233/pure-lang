@@ -1,6 +1,6 @@
 use pl_model::{
     ModelInfo, ModelTransportProfile, ProviderEndpoint, ProviderServiceCapabilities,
-    WebSearchConfig,
+    WebSearchConfig, WebSearchProviderCapabilities,
 };
 use pretty_assertions::assert_eq;
 
@@ -54,6 +54,23 @@ fn custom_responses_provider(model: ModelInfo, bearer_token: Option<&str>) -> Pr
     info.bearer_token = bearer_token.map(str::to_string);
     info.service_capabilities = ProviderServiceCapabilities::openai_web_search();
     ProviderConfig::from_explicit_models(info, vec![model])
+}
+
+fn deepseek_provider_with_hosted_search() -> (ProviderConfig, ModelInfo) {
+    let mut provider = ProviderConfig::deepseek_preset();
+    provider.bearer_token = Some("deepseek-secret".to_string());
+    provider.bearer_token_env = None;
+    provider.capabilities = ProviderCapabilitySelection::Explicit(ProviderServiceCapabilities {
+        web_search: WebSearchProviderCapabilities {
+            hosted_responses: true,
+            hosted_dialect: pl_model::HostedWebSearchDialect::DeepSeekResponses,
+            standalone: None,
+        },
+        ..ProviderServiceCapabilities::default()
+    });
+    let mut model = provider.effective_models().unwrap().remove(0);
+    model.capabilities.web_search = true;
+    (provider, model)
 }
 
 #[test]
@@ -172,6 +189,49 @@ fn standalone_backend_can_be_selected_from_another_routed_provider() {
 }
 
 #[test]
+fn deepseek_hosted_search_is_preferred_and_coexists_with_function_tools() {
+    let (deepseek, deepseek_model) = deepseek_provider_with_hosted_search();
+    let openai = openai_provider_with_secret();
+    let openai_model = openai.effective_models().unwrap().remove(0);
+    let deepseek_id = provider_id("deepseek");
+    let openai_id = provider_id("openai");
+    let models = AgentModelConfig {
+        providers: [(deepseek_id.clone(), deepseek), (openai_id.clone(), openai)]
+            .into_iter()
+            .collect(),
+        routes: [
+            (
+                role_id("executor"),
+                ModelRouteConfig {
+                    provider: deepseek_id.clone(),
+                    model: deepseek_model.slug.clone(),
+                    effort: deepseek_model.default_effort().map(ReasoningEffort::new),
+                },
+            ),
+            (
+                role_id("search"),
+                ModelRouteConfig {
+                    provider: openai_id,
+                    model: openai_model.slug,
+                    effort: None,
+                },
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    };
+    let route = models.resolve(&role_id("executor")).unwrap();
+
+    let plans = plan_web_searches(&models, &route, &WebSearchConfig::default(), true).unwrap();
+    assert_eq!(plans.selected, Some(WebSearchBackendKind::DeepSeek));
+    let plan = plans.deepseek;
+
+    assert_eq!(plan.resolution.path, Some(WebSearchPath::Hosted));
+    assert_eq!(plan.resolution.provider_id, Some(deepseek_id));
+    assert_eq!(plan.visibility, ToolVisibilityConstraint::Additive);
+}
+
+#[test]
 fn planner_distinguishes_disabled_missing_credential_and_model_support() {
     let mut provider = openai_provider_with_secret();
     let mut model = provider.effective_models().unwrap().remove(0);
@@ -213,4 +273,76 @@ fn planner_distinguishes_disabled_missing_credential_and_model_support() {
             .availability,
         WebSearchAvailability::ModelUnsupported
     );
+}
+
+#[test]
+fn disabled_deepseek_search_falls_back_to_openai_search() {
+    let (deepseek, deepseek_model) = deepseek_provider_with_hosted_search();
+    let openai = openai_provider_with_secret();
+    let openai_model = openai.effective_models().unwrap().remove(0);
+    let deepseek_id = provider_id("deepseek");
+    let openai_id = provider_id("openai");
+    let models = AgentModelConfig {
+        providers: [(deepseek_id.clone(), deepseek), (openai_id.clone(), openai)]
+            .into_iter()
+            .collect(),
+        routes: [
+            (
+                role_id("executor"),
+                ModelRouteConfig {
+                    provider: deepseek_id,
+                    model: deepseek_model.slug.clone(),
+                    effort: deepseek_model.default_effort().map(ReasoningEffort::new),
+                },
+            ),
+            (
+                role_id("search"),
+                ModelRouteConfig {
+                    provider: openai_id.clone(),
+                    model: openai_model.slug,
+                    effort: None,
+                },
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    };
+    let route = models.resolve(&role_id("executor")).unwrap();
+
+    let plans = plan_web_searches(&models, &route, &WebSearchConfig::default(), false).unwrap();
+
+    assert_eq!(plans.selected, Some(WebSearchBackendKind::OpenAi));
+    assert_eq!(
+        plans.deepseek.resolution.availability,
+        WebSearchAvailability::Disabled
+    );
+    assert_eq!(plans.openai.resolution.provider_id, Some(openai_id));
+}
+
+#[test]
+fn deepseek_search_reports_missing_credential_and_unsupported_model() {
+    let (mut provider, model) = deepseek_provider_with_hosted_search();
+    provider.bearer_token = None;
+    let models = models_with_current(provider, model.clone());
+    let route = models.resolve(&role_id("executor")).unwrap();
+    let missing = plan_web_searches(&models, &route, &WebSearchConfig::default(), true).unwrap();
+    assert_eq!(
+        missing.deepseek.resolution.availability,
+        WebSearchAvailability::MissingCredential
+    );
+    assert_eq!(missing.selected, None);
+
+    let (provider, mut model) = deepseek_provider_with_hosted_search();
+    model.capabilities.web_search = false;
+    let provider =
+        ProviderConfig::from_explicit_models(provider.to_endpoint().unwrap(), vec![model.clone()]);
+    let models = models_with_current(provider, model);
+    let route = models.resolve(&role_id("executor")).unwrap();
+    let unsupported =
+        plan_web_searches(&models, &route, &WebSearchConfig::default(), true).unwrap();
+    assert_eq!(
+        unsupported.deepseek.resolution.availability,
+        WebSearchAvailability::ModelUnsupported
+    );
+    assert_eq!(unsupported.selected, None);
 }

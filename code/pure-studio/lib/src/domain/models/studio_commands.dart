@@ -59,6 +59,7 @@ class ProviderCommand {
     required this.secret,
     required this.capabilitySource,
     required this.hostedWebSearch,
+    required this.hostedWebSearchDialect,
     this.standaloneWebSearch,
     required this.promptCacheDialect,
     required this.responsesProgrammaticToolCalling,
@@ -75,6 +76,7 @@ class ProviderCommand {
   final ProviderSecretCommand secret;
   final String capabilitySource;
   final bool hostedWebSearch;
+  final String hostedWebSearchDialect;
   final String? standaloneWebSearch;
   final String promptCacheDialect;
   final bool responsesProgrammaticToolCalling;
@@ -177,6 +179,7 @@ abstract final class ProviderSettingsCommandBuilder {
                 : const ProviderSecretCommand.clear(),
             capabilitySource: provider.capabilitySource,
             hostedWebSearch: provider.hostedWebSearch,
+            hostedWebSearchDialect: provider.hostedWebSearchDialect,
             standaloneWebSearch: provider.standaloneWebSearch.trim().isEmpty
                 ? null
                 : provider.standaloneWebSearch.trim(),
@@ -340,6 +343,12 @@ class WebSearchSettingsCommand {
   final String? region;
   final String? city;
   final String? timezone;
+}
+
+class DeepSeekWebSearchSettingsCommand {
+  const DeepSeekWebSearchSettingsCommand({required this.enabled});
+
+  final bool enabled;
 }
 
 extension<T> on List<T> {

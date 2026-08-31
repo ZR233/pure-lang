@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
+use pl_protocol::HostedWebSearchDialect;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -44,6 +45,8 @@ impl std::str::FromStr for StandaloneWebSearchDialect {
 pub struct WebSearchProviderCapabilities {
     #[serde(default)]
     pub hosted_responses: bool,
+    #[serde(default)]
+    pub hosted_dialect: HostedWebSearchDialect,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub standalone: Option<StandaloneWebSearchDialect>,
 }
@@ -138,6 +141,7 @@ impl ProviderServiceCapabilities {
         Self {
             web_search: WebSearchProviderCapabilities {
                 hosted_responses: true,
+                hosted_dialect: HostedWebSearchDialect::OpenAiResponses,
                 standalone: Some(StandaloneWebSearchDialect::OpenAiSearchApi),
             },
             prompt_cache: PromptCacheProviderCapabilities {
@@ -265,6 +269,11 @@ impl ProviderEndpoint {
             tool_wire_policy: ToolWirePolicy::FunctionFallback,
             apply_patch_tool_type: None,
             service_capabilities: ProviderServiceCapabilities {
+                web_search: WebSearchProviderCapabilities {
+                    hosted_responses: true,
+                    hosted_dialect: HostedWebSearchDialect::DeepSeekResponses,
+                    standalone: None,
+                },
                 prompt_cache: PromptCacheProviderCapabilities {
                     dialect: PromptCacheDialect::ImplicitPrefix,
                 },

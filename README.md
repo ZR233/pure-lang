@@ -222,6 +222,11 @@ Flutter 端通过 `pl-studio-bridge` 调用同一个 `pl-studio-runtime`。每�
 ~/.pure/studio/studio.sqlite        # Studio 的单一 canonical 数据库
 ```
 
+DeepSeek V4 的 Responses route 支持服务端原生联网搜索；Studio 默认启用
+`[deepseek_web_search]`，当前 DeepSeek route 满足凭据、transport 和模型能力门控时优先使用，
+否则回退到 `[web_search]` 配置的 OpenAI 搜索。模型保持 `tool_choice = auto`，并可同时使用普通函数、
+MCP、LSP、文件和命令工具。
+
 ### 项目结构
 
 ```
@@ -289,6 +294,7 @@ pure-lang/
 | 用户交互 | `request_user_input` |
 | 技能 | `skills_list`, `skill_view`, `skill_manage` |
 | MCP | 动态注册（`mcp__<server>__<tool>`） |
+| 联网搜索 | DeepSeek/OpenAI Responses hosted search，或 OpenAI standalone search；由当前 route 能力自动仲裁 |
 
 ### 在其他应用中注册工具
 

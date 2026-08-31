@@ -101,6 +101,7 @@ abstract final class ProviderDraftFactory {
       credentialEnv: '',
       capabilitySource: 'explicit',
       hostedWebSearch: false,
+      hostedWebSearchDialect: 'open_ai_responses',
       standaloneWebSearch: '',
       promptCacheDialect: 'none',
       responsesProgrammaticToolCalling: false,

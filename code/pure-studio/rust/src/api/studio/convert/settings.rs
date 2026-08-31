@@ -1,11 +1,11 @@
 use crate::api::studio::types::{
-    BridgeCustomModelSettingsDto, BridgeGeneralSettingsDto, BridgeInstructionsSettingsDto,
-    BridgeMcpServerConfiguration, BridgeMcpServerSettingsDto, BridgeModelConnectionSettingsDto,
-    BridgeProviderSettingsDto, BridgeProviderUsageData, BridgeProviderUsageState,
-    BridgeRoleSettingsDto, BridgeSettingsStateSnapshot, BridgeSkillsSettingsDto,
-    BridgeStudioSettingsDto, BridgeWebSearchSettingsDto, DeepSeekBalanceDto,
-    DeepSeekBalanceInfoDto, ProviderSecretInput, ProviderSettingsInput, ProviderUsageDto,
-    ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
+    BridgeCustomModelSettingsDto, BridgeDeepSeekWebSearchSettingsDto, BridgeGeneralSettingsDto,
+    BridgeInstructionsSettingsDto, BridgeMcpServerConfiguration, BridgeMcpServerSettingsDto,
+    BridgeModelConnectionSettingsDto, BridgeProviderSettingsDto, BridgeProviderUsageData,
+    BridgeProviderUsageState, BridgeRoleSettingsDto, BridgeSettingsStateSnapshot,
+    BridgeSkillsSettingsDto, BridgeStudioSettingsDto, BridgeWebSearchSettingsDto,
+    DeepSeekBalanceDto, DeepSeekBalanceInfoDto, ProviderSecretInput, ProviderSettingsInput,
+    ProviderUsageDto, ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
 };
 use pl_studio_runtime::{ProviderUsageData, ProviderUsageState, ZhipuQuotaWindow};
 
@@ -35,6 +35,7 @@ pub(crate) fn bridge_settings(
                 has_bearer_token: provider.has_bearer_token,
                 capability_source: provider.capability_source,
                 hosted_web_search: provider.hosted_web_search,
+                hosted_web_search_dialect: provider.hosted_web_search_dialect,
                 standalone_web_search: provider.standalone_web_search,
                 prompt_cache_dialect: provider.prompt_cache_dialect,
                 responses_programmatic_tool_calling: provider.responses_programmatic_tool_calling,
@@ -111,6 +112,7 @@ pub(crate) fn bridge_settings(
             compact_timeline: settings.general.compact_timeline,
         },
         web_search: bridge_web_search_settings(settings.web_search),
+        deepseek_web_search: bridge_deepseek_web_search_settings(settings.deepseek_web_search),
     }
 }
 
@@ -121,12 +123,26 @@ pub(crate) fn bridge_web_search_settings(
         configured_mode: settings.configured_mode,
         effective_mode: settings.effective_mode,
         availability: settings.availability,
+        selected: settings.selected,
         context_size: settings.context_size,
         allowed_domains: settings.allowed_domains,
         country: settings.country,
         region: settings.region,
         city: settings.city,
         timezone: settings.timezone,
+        provider_id: settings.provider_id,
+        model: settings.model,
+    }
+}
+
+pub(crate) fn bridge_deepseek_web_search_settings(
+    settings: pl_protocol::studio::StudioDeepSeekWebSearchSettings,
+) -> BridgeDeepSeekWebSearchSettingsDto {
+    BridgeDeepSeekWebSearchSettingsDto {
+        configured_enabled: settings.configured_enabled,
+        effective_enabled: settings.effective_enabled,
+        availability: settings.availability,
+        selected: settings.selected,
         provider_id: settings.provider_id,
         model: settings.model,
     }
@@ -173,6 +189,7 @@ pub(crate) fn provider_settings_request(
                 },
                 capability_source: provider.capability_source,
                 hosted_web_search: provider.hosted_web_search,
+                hosted_web_search_dialect: provider.hosted_web_search_dialect,
                 standalone_web_search: provider.standalone_web_search,
                 prompt_cache_dialect: provider.prompt_cache_dialect,
                 responses_programmatic_tool_calling: provider.responses_programmatic_tool_calling,

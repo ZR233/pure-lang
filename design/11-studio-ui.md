@@ -39,7 +39,18 @@ Agents 页同时列出系统和用户 Profile。系统项所有字段只读且�
 项按单 TOML 文件原子创建、保存或删除。无效文件以独立诊断展示，不阻断页面其余项。运行中的 Agent
 目录与 Profile 设置目录明确分区。
 
-## 11.6 驱动验收
+## 11.6 联网搜索设置
+
+General 页把 OpenAI Web Search 与 DeepSeek 原生联网搜索显示为两张独立卡片。OpenAI 卡片保留
+mode、context size、域名和位置等配置，并明确文案只表示 OpenAI 搜索；DeepSeek 卡片只提供启用
+开关，不展示官方未承诺的 cached/indexed、域名、位置或上下文选项。
+
+两张卡片都消费 bridge 返回的 configured、effective、availability、selected provider/model。
+当前 DeepSeek route 可用时其原生搜索优先，OpenAI 卡片仍可显示“可用但未选中”。保存必须携带
+Settings CAS revision，并以返回的完整 canonical snapshot 原子更新 UI；不得本地推演 backend
+仲裁、凭据或模型能力。
+
+## 11.7 驱动验收
 
 原生 GUI 必须通过 `cargo xtask run-gui --driver` 启动，Flutter Driver 使用稳定 key 操作项目、Thread、
 模式 selector、composer、通用 Interaction、workflow panel/history 与 shutdown。workflow live harness

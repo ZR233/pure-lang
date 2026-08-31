@@ -27,7 +27,7 @@ Product state (projects, threads, tasks) lives in `<home>/studio/studio.sqlite`;
 
 ## Format Rules
 
-- TOML with snake_case keys; only `schema_version = 15` is accepted.
+- TOML with snake_case keys; only `schema_version = 16` is accepted.
 - A missing file means in-memory defaults shown in Settings; nothing is written until you save.
 - At startup, an unparsable, invalid, inline-credential, old-schema, or unknown-schema file is not migrated. Studio first saves the original bytes beside it as `config.toml.rejected.<timestamp>.bak`, then atomically replaces it with the current default config. A failed backup or replacement keeps startup closed and preserves the original file.
 - Explicit reload while Studio is running remains strict: it reports the invalid file instead of replacing it.
@@ -43,9 +43,12 @@ Product state (projects, threads, tasks) lives in `<home>/studio/studio.sqlite`;
 - `[lsp.servers.<id>]` — command-based LSP servers outside the bundled catalog.
 - `[ui]` — `follow_system_theme`, `follow_active_turn`, `compact_timeline`.
 - `[web_search]` — search mode, context size, allowed domains, location.
+- `[deepseek_web_search]` — DeepSeek native hosted search toggle. The section and `enabled` field both default to `true`; it deliberately has no OpenAI-specific mode, domain, location, or context options.
 - `[instructions]` — base override, developer/user instructions, project doc limits.
 
-A few sections are omitted when left at defaults (`runtime`, `instructions`, `lsp`, `ui`); a default Studio save still writes `[skills]` with `user_dir = "~/.pure/skills"` and `[web_search]` with `mode = "cached"`, so do not delete them assuming they are unused.
+A few sections are omitted when left at defaults (`runtime`, `instructions`, `lsp`, `ui`); a default Studio save still writes `[skills]` with `user_dir = "~/.pure/skills"`, `[web_search]` with `mode = "cached"`, and `[deepseek_web_search]` with `enabled = true`, so do not delete them assuming they are unused.
+
+When the current route is an eligible credentialed DeepSeek Responses model, DeepSeek native search takes priority. Disabling it falls back to the separately configured OpenAI search when available. Provider instances that override a preset's canonical base URL do not inherit hosted search capability unless they explicitly declare the matching hosted dialect.
 
 ## Credentials
 
@@ -56,7 +59,10 @@ Tokens never live in `config.toml`. Saving from Settings clears any inline token
 Every provider needs `name`, `base_url`, and a `catalog` section; every role needs a route. `effort` is optional and must match the model's supported effort candidates.
 
 ```toml
-schema_version = 15
+schema_version = 16
+
+[deepseek_web_search]
+enabled = true
 
 [models.providers.deepseek]
 name = "DeepSeek"

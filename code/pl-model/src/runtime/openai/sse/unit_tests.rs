@@ -57,6 +57,88 @@ fn process_chat_content_as_output_text_delta() {
 }
 
 #[test]
+fn deepseek_web_search_sse_preserves_lifecycle_actions_and_native_context() {
+    let events = [
+        serde_json::json!({
+            "type": "response.web_search_call.searching",
+            "item_id": "search_1"
+        }),
+        serde_json::json!({
+            "type": "response.output_item.added",
+            "item": {
+                "type": "web_search_call",
+                "id": "search_1",
+                "action": {"type": "search", "query": "DeepSeek Responses API"}
+            }
+        }),
+        serde_json::json!({
+            "type": "response.output_item.done",
+            "item": {
+                "type": "web_search_call",
+                "id": "search_1",
+                "action": {"type": "open_page", "url": "https://api-docs.deepseek.com"},
+                "results": [{"url": "https://api-docs.deepseek.com", "opaque": {"rank": 1}}]
+            }
+        }),
+        serde_json::json!({
+            "type": "response.output_item.done",
+            "item": {
+                "type": "web_search_call",
+                "id": "find_1",
+                "action": {
+                    "type": "find_in_page",
+                    "url": "https://api-docs.deepseek.com",
+                    "pattern": "web_search"
+                }
+            }
+        }),
+        serde_json::json!({
+            "type": "response.web_search_call.completed",
+            "item_id": "search_1"
+        }),
+    ];
+    let decoded = events
+        .into_iter()
+        .flat_map(|event| {
+            let event: SseStreamEvent = serde_json::from_value(event).unwrap();
+            process_sse_events(&event)
+        })
+        .collect::<Vec<_>>();
+
+    assert!(matches!(
+        &decoded[0],
+        ModelStreamEvent::WebSearchStarted { item_id, .. } if item_id == "search_1"
+    ));
+    assert!(decoded.iter().any(|event| matches!(
+        event,
+        ModelStreamEvent::WebSearchStarted {
+            action: crate::WebSearchAction::Search { query: Some(query), .. },
+            ..
+        } if query == "DeepSeek Responses API"
+    )));
+    assert!(decoded.iter().any(|event| matches!(
+        event,
+        ModelStreamEvent::WebSearchCompleted {
+            action: crate::WebSearchAction::OpenPage { url: Some(url) },
+            results: Some(results),
+            ..
+        } if url == "https://api-docs.deepseek.com" && results[0]["opaque"]["rank"] == 1
+    )));
+    assert!(decoded.iter().any(|event| matches!(
+        event,
+        ModelStreamEvent::WebSearchCompleted {
+            action: crate::WebSearchAction::FindInPage { pattern: Some(pattern), .. },
+            ..
+        } if pattern == "web_search"
+    )));
+    assert!(decoded.iter().any(|event| matches!(
+        event,
+        ModelStreamEvent::ResponsesContextItem { item }
+            if item.value["results"][0]["opaque"]["rank"] == 1
+    )));
+}
+
+#[test]
 fn process_chat_reasoning_and_content_from_same_chunk() {
     let event = chat_event(serde_json::json!({
         "reasoning_content": "先比较整数位。",

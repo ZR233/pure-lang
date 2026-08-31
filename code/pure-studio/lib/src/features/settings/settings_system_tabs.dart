@@ -1015,11 +1015,13 @@ class GeneralTab extends ConsumerStatefulWidget {
     super.key,
     required this.settings,
     required this.webSearch,
+    required this.deepSeekWebSearch,
     required this.runtimeBusy,
   });
 
   final GeneralSettingsView settings;
   final WebSearchSettingsView webSearch;
+  final DeepSeekWebSearchSettingsView deepSeekWebSearch;
   final bool runtimeBusy;
 
   @override
@@ -1065,6 +1067,7 @@ class GeneralTabState extends ConsumerState<GeneralTab> {
                   _save(widget.settings.copyWith(compactTimeline: value)),
             ),
             WebSearchSettingsCard(settings: widget.webSearch),
+            DeepSeekWebSearchSettingsCard(settings: widget.deepSeekWebSearch),
             StudioUpdateSettingsRow(runtimeBusy: widget.runtimeBusy),
           ],
         ),

@@ -1192,6 +1192,7 @@ fn responses_parse_response_preserves_unknown_native_items_for_stateless_replay(
 fn responses_body_writes_current_hosted_web_search_shape() {
     let mut request = request_with_effort("xhigh");
     request.tools = vec![ToolSpec::WebSearch {
+        dialect: crate::HostedWebSearchDialect::OpenAiResponses,
         external_web_access: true,
         indexed_web_access: Some(true),
         filters: Some(crate::WebSearchFilters {
@@ -1220,6 +1221,25 @@ fn responses_body_writes_current_hosted_web_search_shape() {
     assert_eq!(body["tools"][0]["user_location"]["type"], "approximate");
     assert_eq!(body["tools"][0]["search_context_size"], "high");
     assert!(body["tools"][0].get("search_content_types").is_none());
+}
+
+#[test]
+fn deepseek_responses_body_writes_only_native_web_search_type() {
+    let mut request = request_with_effort("high");
+    request.tools = vec![ToolSpec::WebSearch {
+        dialect: crate::HostedWebSearchDialect::DeepSeekResponses,
+        external_web_access: true,
+        indexed_web_access: None,
+        filters: None,
+        user_location: None,
+        search_context_size: None,
+        search_content_types: None,
+    }];
+    let model = bundled_model("deepseek-v4-flash");
+
+    let body = OpenAiProtocol::responses().build_request_body_with_model(&request, &model);
+
+    assert_eq!(body["tools"], serde_json::json!([{"type": "web_search"}]));
 }
 
 #[test]
@@ -1478,6 +1498,21 @@ fn responses_parse_response_preserves_hosted_web_search_context_items() {
         response.responses_context_items[3].value["action"]["type"],
         "future_action"
     );
+
+    let expected = response
+        .responses_context_items
+        .iter()
+        .map(|item| item.value.clone())
+        .collect::<Vec<_>>();
+    let mut request = request_with_effort("high");
+    request.input = response
+        .responses_context_items
+        .into_iter()
+        .map(|item| ModelContextItem::Responses { item })
+        .collect();
+    let body = OpenAiProtocol::responses().build_request_body(&request);
+
+    assert_eq!(body["input"], serde_json::json!(expected));
 }
 
 #[test]

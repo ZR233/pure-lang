@@ -13,6 +13,8 @@ const _testProviderCatalog = ProviderCatalogView(
       credentialEnv: 'DEEPSEEK_API_KEY',
       modelCatalogId: 'deepseek',
       suggestedModel: 'deepseek-v4-flash',
+      hostedWebSearch: true,
+      hostedWebSearchDialect: 'deepseek_responses',
       promptCacheDialect: 'implicit_prefix',
     ),
     ProviderPresetView(
@@ -414,6 +416,8 @@ StudioState _studioStateFixture({
   SkillsSettingsView skills = const SkillsSettingsView(),
   GeneralSettingsView general = const GeneralSettingsView(),
   WebSearchSettingsView webSearch = const WebSearchSettingsView(),
+  DeepSeekWebSearchSettingsView deepSeekWebSearch =
+      const DeepSeekWebSearchSettingsView(),
   PermissionMode permissionMode = PermissionMode.requestApproval,
   List<ProviderUsageView> providerUsages = const [],
   Map<String, SkillsStateSnapshot> skillsByProject = const {},
@@ -440,6 +444,7 @@ StudioState _studioStateFixture({
           skills: skills,
           general: general,
           webSearch: webSearch,
+          deepSeekWebSearch: deepSeekWebSearch,
           permissionMode: permissionMode,
         ),
       ),
@@ -504,6 +509,7 @@ StudioState _withSettingsFixture(
   List<McpServerSettingsView>? mcpServers,
   SkillsSettingsView? skills,
   WebSearchSettingsView? webSearch,
+  DeepSeekWebSearchSettingsView? deepSeekWebSearch,
   PermissionMode? permissionMode,
 }) {
   final current = state.settingsState;
@@ -521,6 +527,7 @@ StudioState _withSettingsFixture(
           skills: skills ?? current.skills,
           general: current.general,
           webSearch: webSearch ?? current.webSearch,
+          deepSeekWebSearch: deepSeekWebSearch ?? current.deepSeekWebSearch,
           permissionMode: permissionMode ?? current.permissionMode,
         ),
         revision: current.revision,

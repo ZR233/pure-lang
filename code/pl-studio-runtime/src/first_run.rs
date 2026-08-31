@@ -292,6 +292,7 @@ impl FirstRunConfigDraft {
             },
             disabled_system_agents: Default::default(),
             web_search: Default::default(),
+            deepseek_web_search: Default::default(),
             runtime: Default::default(),
             instructions: Default::default(),
             skills: Default::default(),

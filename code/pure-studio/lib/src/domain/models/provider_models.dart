@@ -154,6 +154,7 @@ class ProviderSettingsView {
     this.credentialEnv = '',
     this.capabilitySource = 'explicit',
     this.hostedWebSearch = false,
+    this.hostedWebSearchDialect = 'open_ai_responses',
     this.standaloneWebSearch = '',
     this.promptCacheDialect = 'none',
     this.responsesProgrammaticToolCalling = false,
@@ -181,6 +182,7 @@ class ProviderSettingsView {
   final String credentialEnv;
   final String capabilitySource;
   final bool hostedWebSearch;
+  final String hostedWebSearchDialect;
   final String standaloneWebSearch;
   final String promptCacheDialect;
   final bool responsesProgrammaticToolCalling;
@@ -226,6 +228,7 @@ class ProviderSettingsView {
     String? credentialEnv,
     String? capabilitySource,
     bool? hostedWebSearch,
+    String? hostedWebSearchDialect,
     String? standaloneWebSearch,
     String? promptCacheDialect,
     bool? responsesProgrammaticToolCalling,
@@ -253,6 +256,8 @@ class ProviderSettingsView {
       credentialEnv: credentialEnv ?? this.credentialEnv,
       capabilitySource: capabilitySource ?? this.capabilitySource,
       hostedWebSearch: hostedWebSearch ?? this.hostedWebSearch,
+      hostedWebSearchDialect:
+          hostedWebSearchDialect ?? this.hostedWebSearchDialect,
       standaloneWebSearch: standaloneWebSearch ?? this.standaloneWebSearch,
       promptCacheDialect: promptCacheDialect ?? this.promptCacheDialect,
       responsesProgrammaticToolCalling:
@@ -309,6 +314,7 @@ class ProviderPresetView {
     required this.modelCatalogId,
     required this.suggestedModel,
     this.hostedWebSearch = false,
+    this.hostedWebSearchDialect = 'open_ai_responses',
     this.standaloneWebSearch = '',
     this.promptCacheDialect = 'none',
     this.responsesProgrammaticToolCalling = false,
@@ -324,6 +330,7 @@ class ProviderPresetView {
   final String modelCatalogId;
   final String suggestedModel;
   final bool hostedWebSearch;
+  final String hostedWebSearchDialect;
   final String standaloneWebSearch;
   final String promptCacheDialect;
   final bool responsesProgrammaticToolCalling;
@@ -354,6 +361,7 @@ class ProviderPresetView {
       credentialEnv: credentialEnv,
       capabilitySource: 'preset_defaults',
       hostedWebSearch: hostedWebSearch,
+      hostedWebSearchDialect: hostedWebSearchDialect,
       standaloneWebSearch: standaloneWebSearch,
       promptCacheDialect: promptCacheDialect,
       responsesProgrammaticToolCalling: responsesProgrammaticToolCalling,

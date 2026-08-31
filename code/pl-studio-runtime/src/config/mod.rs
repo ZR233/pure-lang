@@ -152,6 +152,19 @@ const fn default_true() -> bool {
     true
 }
 
+/// DeepSeek Responses 原生 Web Search 的独立产品开关。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DeepSeekWebSearchConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+impl Default for DeepSeekWebSearchConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
 /// Pure Studio 的完整配置文档。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StudioConfig {
@@ -162,6 +175,8 @@ pub struct StudioConfig {
     pub disabled_system_agents: BTreeSet<String>,
     #[serde(default)]
     pub web_search: WebSearchConfig,
+    #[serde(default)]
+    pub deepseek_web_search: DeepSeekWebSearchConfig,
     #[serde(default, skip_serializing_if = "RuntimeConfig::is_empty")]
     pub runtime: RuntimeConfig,
     #[serde(default, skip_serializing_if = "InstructionsConfig::is_default")]
@@ -208,6 +223,7 @@ impl StudioConfig {
             },
             disabled_system_agents: BTreeSet::new(),
             web_search: WebSearchConfig::default(),
+            deepseek_web_search: DeepSeekWebSearchConfig::default(),
             runtime: RuntimeConfig::default(),
             instructions: InstructionsConfig::default(),
             skills,
@@ -317,6 +333,18 @@ mod tests {
 
         assert_eq!(parsed.lsp, StudioLspConfig::default());
         parsed.validate().unwrap();
+    }
+
+    #[test]
+    fn missing_deepseek_web_search_section_defaults_to_enabled() {
+        let content = toml::to_string_pretty(&StudioConfig::default_config())
+            .unwrap()
+            .replace("[deepseek_web_search]\nenabled = true\n", "");
+
+        let parsed: StudioConfig = toml::from_str(&content).unwrap();
+
+        assert!(parsed.deepseek_web_search.enabled);
+        assert_eq!(parsed.schema_version, STUDIO_CONFIG_SCHEMA_VERSION);
     }
 
     #[test]

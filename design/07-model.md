@@ -432,6 +432,24 @@ full replay retry 和 HTTP fallback 的稳定原因；compaction 记录替换前
 
 ## 7.11 Web 搜索 Provider 边界
 
-Web 搜索只把 `ProviderConfig.preset = "openai"` 且 `resolved_bearer_token()` 非空的 provider 实例视为可用 OpenAI 账户。实例 id、显示名或 base URL 可以修改而不改变 preset 身份；普通 custom Responses-compatible provider 即使协议和模型名称相同，也不能获得 OpenAI hosted 或 `/alpha/search` 能力。
+Web 搜索同时维护 OpenAI 与 DeepSeek 两份独立 resolution，再按当前 route 仲裁。OpenAI 路径保留
+standalone `/alpha/search` 与 Responses hosted search；DeepSeek 原生搜索只允许当前 route 自身满足：
+endpoint 有凭据、模型使用 Responses transport、模型声明 `capabilities.web_search`，且 provider
+服务能力声明 `HostedWebSearchDialect::DeepSeekResponses`。DeepSeek 不跨 provider 借用；不满足或
+配置关闭时才允许现有 OpenAI resolution 成为回退。
 
-Responses 原生搜索通过 `ToolSpec::WebSearch` 表达，并只允许在当前 agent 的 step 刷新窗口确认上述 OpenAI preset、Responses wire、有效凭据且模型声明 `capabilities.web_search` 后注册。跨 provider 搜索只能走普通函数工具，由该工具使用另一个已解析的 OpenAI provider 调用 `/alpha/search`；provider adapter 不得自行把 hosted tool 注入请求。
+Responses 原生搜索统一通过携带 hosted dialect 的 `ToolSpec::WebSearch` 表达。OpenAI dialect 可发送
+external/indexed access、context size、允许域名与近似位置；DeepSeek dialect 严格只序列化
+`{"type":"web_search"}`，不得伪装支持官方未承诺的过滤、位置、上下文或 cached/indexed 语义。
+tool choice 保持 `auto`。DeepSeek hosted search 是 additive 工具，必须与普通函数、MCP、LSP、文件和
+命令工具共存；旧 OpenAI hosted-only 路径仍可按其约束进入 exclusive 模式。
+
+Provider 服务能力同时包含 `hosted_responses` 与 `hosted_dialect`。内置 DeepSeek preset 使用
+`DeepSeekResponses`，OpenAI preset 与旧显式配置默认使用 `OpenAiResponses`。preset 实例覆盖
+非 canonical `base_url` 时不得继承 hosted search 或其他 Responses hosted 能力；显式 capability
+仍可由用户重新声明。Provider catalog schema 9 暴露 dialect，产品层不得从 provider id 或 URL 猜测。
+
+DeepSeek `/responses` 返回的 `web_search_call` 与 OpenAI Responses 共用 canonical SSE decoder、
+timeline 和历史回放：`searching` / `completed` 生命周期、search/open/find action 都投影为统一事件；
+完整 native item（包括未知字段和 opaque results）作为 Responses context 持久化，并在下一轮按原始
+JSON 顺序回放。provider adapter 不自行注入未进入本轮冻结 `ToolPlan` 的 hosted tool。

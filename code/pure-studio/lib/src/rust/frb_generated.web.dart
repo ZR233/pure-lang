@@ -486,6 +486,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   DeepSeekBalanceDto dco_decode_box_autoadd_deep_seek_balance_dto(dynamic raw);
 
   @protected
+  DeepSeekWebSearchSettingsInput
+  dco_decode_box_autoadd_deep_seek_web_search_settings_input(dynamic raw);
+
+  @protected
   double dco_decode_box_autoadd_f_64(dynamic raw);
 
   @protected
@@ -666,6 +670,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeCustomModelSettingsDto dco_decode_bridge_custom_model_settings_dto(
     dynamic raw,
   );
+
+  @protected
+  BridgeDeepSeekWebSearchSettingsDto
+  dco_decode_bridge_deep_seek_web_search_settings_dto(dynamic raw);
 
   @protected
   BridgeDegradedResource dco_decode_bridge_degraded_resource(dynamic raw);
@@ -1316,6 +1324,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   DeepSeekBalanceInfoDto dco_decode_deep_seek_balance_info_dto(dynamic raw);
+
+  @protected
+  DeepSeekWebSearchSettingsInput dco_decode_deep_seek_web_search_settings_input(
+    dynamic raw,
+  );
 
   @protected
   double dco_decode_f_64(dynamic raw);
@@ -2302,6 +2315,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  DeepSeekWebSearchSettingsInput
+  sse_decode_box_autoadd_deep_seek_web_search_settings_input(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   double sse_decode_box_autoadd_f_64(SseDeserializer deserializer);
 
   @protected
@@ -2514,6 +2533,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeCustomModelSettingsDto sse_decode_bridge_custom_model_settings_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeDeepSeekWebSearchSettingsDto
+  sse_decode_bridge_deep_seek_web_search_settings_dto(
     SseDeserializer deserializer,
   );
 
@@ -3336,6 +3361,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   DeepSeekBalanceInfoDto sse_decode_deep_seek_balance_info_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  DeepSeekWebSearchSettingsInput sse_decode_deep_seek_web_search_settings_input(
     SseDeserializer deserializer,
   );
 
@@ -4499,6 +4529,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_deep_seek_web_search_settings_input(
+    DeepSeekWebSearchSettingsInput self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_f_64(double self, SseSerializer serializer);
 
   @protected
@@ -4759,6 +4795,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_custom_model_settings_dto(
     BridgeCustomModelSettingsDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_deep_seek_web_search_settings_dto(
+    BridgeDeepSeekWebSearchSettingsDto self,
     SseSerializer serializer,
   );
 
@@ -5764,6 +5806,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_deep_seek_balance_info_dto(
     DeepSeekBalanceInfoDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_deep_seek_web_search_settings_input(
+    DeepSeekWebSearchSettingsInput self,
     SseSerializer serializer,
   );
 

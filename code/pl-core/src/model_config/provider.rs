@@ -141,6 +141,7 @@ impl ProviderConfig {
                             != preset.provider.base_url.trim_end_matches('/')
                         {
                             capabilities.responses_tools = Default::default();
+                            capabilities.web_search.hosted_responses = false;
                         }
                         capabilities
                     })

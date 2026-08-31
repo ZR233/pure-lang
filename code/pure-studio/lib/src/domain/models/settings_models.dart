@@ -178,6 +178,7 @@ class WebSearchSettingsView {
     this.configuredMode = 'cached',
     this.effectiveMode = 'disabled',
     this.availability = 'missingCredential',
+    this.selected = false,
     this.contextSize,
     this.allowedDomains = const [],
     this.country,
@@ -191,6 +192,7 @@ class WebSearchSettingsView {
   final String configuredMode;
   final String effectiveMode;
   final String availability;
+  final bool selected;
   final String? contextSize;
   final List<String> allowedDomains;
   final String? country;
@@ -215,12 +217,50 @@ class WebSearchSettingsView {
       configuredMode: configuredMode,
       effectiveMode: effectiveMode,
       availability: availability,
+      selected: selected,
       contextSize: contextSize,
       allowedDomains: allowedDomains,
       country: country,
       region: region,
       city: city,
       timezone: timezone,
+      providerId: providerId,
+      model: model,
+    );
+  }
+}
+
+class DeepSeekWebSearchSettingsView {
+  const DeepSeekWebSearchSettingsView({
+    this.configuredEnabled = true,
+    this.effectiveEnabled = false,
+    this.availability = 'providerUnsupported',
+    this.selected = false,
+    this.providerId,
+    this.model,
+  });
+
+  final bool configuredEnabled;
+  final bool effectiveEnabled;
+  final String availability;
+  final bool selected;
+  final String? providerId;
+  final String? model;
+
+  bool get isAvailable => availability == 'available';
+
+  DeepSeekWebSearchSettingsView withConfiguredEnabled(bool enabled) {
+    final nextAvailability = enabled && availability == 'disabled'
+        ? 'available'
+        : enabled
+        ? availability
+        : 'disabled';
+    final nextSelected = enabled && nextAvailability == 'available';
+    return DeepSeekWebSearchSettingsView(
+      configuredEnabled: enabled,
+      effectiveEnabled: nextSelected,
+      availability: nextAvailability,
+      selected: nextSelected,
       providerId: providerId,
       model: model,
     );

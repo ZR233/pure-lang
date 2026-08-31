@@ -5,7 +5,10 @@ use pl_model::{
     ProviderEndpoint, ReasoningConfig, ReasoningSummary, deepseek_default_model_slugs,
     default_models,
 };
-use pl_protocol::{Message, MessageContent, MessageRole};
+use pl_protocol::{
+    HostedWebSearchDialect, Message, MessageContent, MessageRole, ModelContextItem,
+    ResponsesContextItem, ResponsesContextItemKind, ToolSpec,
+};
 use pl_trace::{AgentEvent, TraceDelta, TraceEvent, TraceEventKind};
 use tokio::sync::broadcast::error::RecvError;
 
@@ -62,9 +65,14 @@ struct TurnOutcome {
     reasoning_content: String,
     text_delta_count: usize,
     trace_events: Vec<TraceEvent>,
+    responses_context_items: Vec<ResponsesContextItem>,
 }
 
 async fn run_turn(api_key: &str, messages: Vec<Message>, turn_id: &str) -> TurnOutcome {
+    run_request(api_key, deepseek_request(messages), turn_id).await
+}
+
+async fn run_request(api_key: &str, request: CompletionRequest, turn_id: &str) -> TurnOutcome {
     let mut info = ProviderEndpoint::deepseek(None);
     info.bearer_token = Some(api_key.to_string());
     let model_slug = deepseek_default_model_slugs()[0];
@@ -103,17 +111,32 @@ async fn run_turn(api_key: &str, messages: Vec<Message>, turn_id: &str) -> TurnO
         },
         trace_sink.clone(),
     );
-    let response = runtime
-        .complete(deepseek_request(messages), context)
-        .await
-        .unwrap();
+    let response = runtime.complete(request, context).await.unwrap();
     let text_delta_count = event_counter.await.unwrap();
     TurnOutcome {
         content: response.content.unwrap_or_default(),
         reasoning_content: response.reasoning_content.unwrap_or_default(),
         text_delta_count,
         trace_events: trace_sink.events(),
+        responses_context_items: response.responses_context_items,
     }
+}
+
+fn deepseek_web_search_request(input: Vec<ModelContextItem>) -> CompletionRequest {
+    CompletionRequest::builder()
+        .instructions("需要最新信息时必须使用联网搜索；回答保持简短。")
+        .input(input)
+        .tools(vec![ToolSpec::WebSearch {
+            dialect: HostedWebSearchDialect::DeepSeekResponses,
+            external_web_access: true,
+            indexed_web_access: None,
+            filters: None,
+            user_location: None,
+            search_context_size: None,
+            search_content_types: None,
+        }])
+        .max_tokens(2048)
+        .build()
 }
 
 /// 提取 trace events 涉及的所有 item_id（去重）。
@@ -123,7 +146,7 @@ fn trace_part_ids(events: &[TraceEvent]) -> Vec<String> {
         .filter_map(|event| match &event.kind {
             TraceEventKind::TracePartStarted { item }
             | TraceEventKind::TracePartCompleted { item }
-            | TraceEventKind::TracePartFailed { item, .. } => Some(item.item_id.clone()),
+            | TraceEventKind::TracePartFailed { item, .. } => Some(item.item_id().to_owned()),
             TraceEventKind::TracePartDelta { event } => Some(event.item_id.clone()),
             _ => None,
         })
@@ -193,4 +216,52 @@ async fn deepseek_streams_multi_turn_with_thinking_mode() {
     // 注：pl-model projection sequence 每 turn 从 0 独立分配（不跨 turn 衔接）；
     // 跨 turn 的全局单调由 pl-core store 用 DB envelope.sequence 回填保证（Phase 2）。
     // 此处只验证 pl-model 层 turn_id/item_id 隔离 + 单 turn sequence 单调。
+}
+
+#[tokio::test]
+async fn deepseek_native_web_search_can_replay_opaque_context_next_turn() {
+    let Some(api_key) = live_api_key() else {
+        return;
+    };
+
+    let question = user_message(
+        "联网搜索 DeepSeek Responses API 当前支持的 web_search 工具，并用一句话回答。",
+    );
+    let first = run_request(
+        &api_key,
+        deepseek_web_search_request(vec![ModelContextItem::from(question.clone())]),
+        "web-search-turn-1",
+    )
+    .await;
+
+    assert!(!first.content.trim().is_empty());
+    assert!(
+        first
+            .responses_context_items
+            .iter()
+            .any(|item| { item.kind == ResponsesContextItemKind::WebSearchCall })
+    );
+
+    let mut replay_input = vec![ModelContextItem::from(question)];
+    replay_input.extend(
+        first
+            .responses_context_items
+            .into_iter()
+            .map(|item| ModelContextItem::Responses { item }),
+    );
+    replay_input.push(ModelContextItem::from(assistant_message(
+        first.content,
+        first.reasoning_content,
+    )));
+    replay_input.push(ModelContextItem::from(user_message(
+        "只基于上一轮搜索结果，把答案改写为不超过 20 个字。",
+    )));
+
+    let second = run_request(
+        &api_key,
+        deepseek_web_search_request(replay_input),
+        "web-search-turn-2",
+    )
+    .await;
+    assert!(!second.content.trim().is_empty());
 }

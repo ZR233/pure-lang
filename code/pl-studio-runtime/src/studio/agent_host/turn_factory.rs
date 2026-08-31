@@ -12,7 +12,7 @@ use pl_core::{
     AgentCollaborationTools, AgentIdentity, AgentTurnFactory, AgentTurnPreparationContext,
     AttachmentRuntime, BeforeModelStepHook, CoreRuntimeProfile, PreparedAgentTurn,
     PreparedSessionRuntime, SubagentContext, ToolGroupId, TurnEngineBuilder, TurnOptions,
-    TurnRequest, load_workspace_instruction_documents, plan_web_search,
+    TurnRequest, load_workspace_instruction_documents, plan_web_searches,
 };
 
 use crate::McpRuntimeHandle;
@@ -307,13 +307,18 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         );
         let mcp_image_output =
             pl_core::McpImageOutputContext::for_model(&route.model, attachment_runtime.clone());
-        let web_search = plan_web_search(&config.models, &route, &config.web_search)?;
+        let web_search = plan_web_searches(
+            &config.models,
+            &route,
+            &config.web_search,
+            config.deepseek_web_search.enabled,
+        )?;
         let agent_tools = self
             .resources
             .tool_set(&context.snapshot.identity.id, &self.tool_manager)
             .await;
         let exclusive_web_search =
-            web_search.visibility == pl_core::ToolVisibilityConstraint::Exclusive;
+            web_search.visibility() == pl_core::ToolVisibilityConstraint::Exclusive;
         let refresh_mcp = config.runtime.tool_capabilities.mcp && !exclusive_web_search;
         let refresh_lsp = config.runtime.tool_capabilities.lsp && !exclusive_web_search;
         let mut builder = TurnEngineBuilder::from_route(&route)?

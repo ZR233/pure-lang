@@ -40,7 +40,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 500371170;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 423244160;
 
 // Section: executor
 
@@ -1204,6 +1204,21 @@ fn wire__crate__api__studio__handlers__attachment__read_attachment_draft_impl(
         },
     )
 }
+fn wire__crate__api__studio__handlers__settings__read_deepseek_web_search_settings_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec,_,_,_>(flutter_rust_bridge::for_generated::TaskInfo{ debug_name: "read_deepseek_web_search_settings", port: Some(port_), mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal }, move || {
+            let message = unsafe { flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(ptr_, rust_vec_len_, data_len_) };
+            let mut deserializer = flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end(); move |context| async move {
+                    transform_result_sse::<_, crate::api::studio::types::error::BridgeError>((move || async move {
+                         let output_ok = crate::api::studio::handlers::settings::read_deepseek_web_search_settings().await?;   Ok(output_ok)
+                    })().await)
+                } })
+}
 fn wire__crate__api__studio__handlers__external_state__read_lsp_state_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -1895,6 +1910,22 @@ fn wire__crate__api__studio__handlers__persistence__retry_persistence_impl(
             }
         },
     )
+}
+fn wire__crate__api__studio__handlers__settings__save_deepseek_web_search_settings_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec,_,_,_>(flutter_rust_bridge::for_generated::TaskInfo{ debug_name: "save_deepseek_web_search_settings", port: Some(port_), mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal }, move || {
+            let message = unsafe { flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(ptr_, rust_vec_len_, data_len_) };
+            let mut deserializer = flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_expected_settings_revision = <u64>::sse_decode(&mut deserializer);
+let api_input = <crate::api::studio::types::settings::DeepSeekWebSearchSettingsInput>::sse_decode(&mut deserializer);deserializer.end(); move |context| async move {
+                    transform_result_sse::<_, crate::api::studio::types::error::BridgeError>((move || async move {
+                         let output_ok = crate::api::studio::handlers::settings::save_deepseek_web_search_settings(api_expected_settings_revision, api_input).await?;   Ok(output_ok)
+                    })().await)
+                } })
 }
 fn wire__crate__api__studio__handlers__settings__save_general_settings_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
@@ -3521,6 +3552,26 @@ impl SseDecode for crate::api::studio::types::settings::BridgeCustomModelSetting
     }
 }
 
+impl SseDecode for crate::api::studio::types::settings::BridgeDeepSeekWebSearchSettingsDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_configuredEnabled = <bool>::sse_decode(deserializer);
+        let mut var_effectiveEnabled = <bool>::sse_decode(deserializer);
+        let mut var_availability = <String>::sse_decode(deserializer);
+        let mut var_selected = <bool>::sse_decode(deserializer);
+        let mut var_providerId = <Option<String>>::sse_decode(deserializer);
+        let mut var_model = <Option<String>>::sse_decode(deserializer);
+        return crate::api::studio::types::settings::BridgeDeepSeekWebSearchSettingsDto {
+            configured_enabled: var_configuredEnabled,
+            effective_enabled: var_effectiveEnabled,
+            availability: var_availability,
+            selected: var_selected,
+            provider_id: var_providerId,
+            model: var_model,
+        };
+    }
+}
+
 impl SseDecode for crate::api::studio::types::runtime::BridgeDegradedResource {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -5087,6 +5138,7 @@ impl SseDecode for crate::api::studio::types::settings::BridgeProviderSettingsDt
         let mut var_hasBearerToken = <bool>::sse_decode(deserializer);
         let mut var_capabilitySource = <String>::sse_decode(deserializer);
         let mut var_hostedWebSearch = <bool>::sse_decode(deserializer);
+        let mut var_hostedWebSearchDialect = <String>::sse_decode(deserializer);
         let mut var_standaloneWebSearch = <Option<String>>::sse_decode(deserializer);
         let mut var_promptCacheDialect = <String>::sse_decode(deserializer);
         let mut var_responsesProgrammaticToolCalling = <bool>::sse_decode(deserializer);
@@ -5106,6 +5158,7 @@ impl SseDecode for crate::api::studio::types::settings::BridgeProviderSettingsDt
             has_bearer_token: var_hasBearerToken,
             capability_source: var_capabilitySource,
             hosted_web_search: var_hostedWebSearch,
+            hosted_web_search_dialect: var_hostedWebSearchDialect,
             standalone_web_search: var_standaloneWebSearch,
             prompt_cache_dialect: var_promptCacheDialect,
             responses_programmatic_tool_calling: var_responsesProgrammaticToolCalling,
@@ -6086,6 +6139,10 @@ impl SseDecode for crate::api::studio::types::settings::BridgeStudioSettingsDto 
             <crate::api::studio::types::settings::BridgeWebSearchSettingsDto>::sse_decode(
                 deserializer,
             );
+        let mut var_deepseekWebSearch =
+            <crate::api::studio::types::settings::BridgeDeepSeekWebSearchSettingsDto>::sse_decode(
+                deserializer,
+            );
         return crate::api::studio::types::settings::BridgeStudioSettingsDto {
             default_provider_id: var_defaultProviderId,
             providers: var_providers,
@@ -6096,6 +6153,7 @@ impl SseDecode for crate::api::studio::types::settings::BridgeStudioSettingsDto 
             mcp_servers: var_mcpServers,
             general: var_general,
             web_search: var_webSearch,
+            deepseek_web_search: var_deepseekWebSearch,
         };
     }
 }
@@ -7792,8 +7850,9 @@ impl SseDecode
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_hostedResponses = <bool>::sse_decode(deserializer);
+        let mut var_hostedDialect = <String>::sse_decode(deserializer);
         let mut var_standalone = <Option<String>>::sse_decode(deserializer);
-        return crate::api::studio::types::settings::BridgeWebSearchProviderCapabilitiesDescriptor{hosted_responses: var_hostedResponses, standalone: var_standalone};
+        return crate::api::studio::types::settings::BridgeWebSearchProviderCapabilitiesDescriptor{hosted_responses: var_hostedResponses, hosted_dialect: var_hostedDialect, standalone: var_standalone};
     }
 }
 
@@ -7803,6 +7862,7 @@ impl SseDecode for crate::api::studio::types::settings::BridgeWebSearchSettingsD
         let mut var_configuredMode = <String>::sse_decode(deserializer);
         let mut var_effectiveMode = <String>::sse_decode(deserializer);
         let mut var_availability = <String>::sse_decode(deserializer);
+        let mut var_selected = <bool>::sse_decode(deserializer);
         let mut var_contextSize = <Option<String>>::sse_decode(deserializer);
         let mut var_allowedDomains = <Vec<String>>::sse_decode(deserializer);
         let mut var_country = <Option<String>>::sse_decode(deserializer);
@@ -7815,6 +7875,7 @@ impl SseDecode for crate::api::studio::types::settings::BridgeWebSearchSettingsD
             configured_mode: var_configuredMode,
             effective_mode: var_effectiveMode,
             availability: var_availability,
+            selected: var_selected,
             context_size: var_contextSize,
             allowed_domains: var_allowedDomains,
             country: var_country,
@@ -8004,6 +8065,16 @@ impl SseDecode for crate::api::studio::types::response::DeepSeekBalanceInfoDto {
             total_balance: var_totalBalance,
             granted_balance: var_grantedBalance,
             topped_up_balance: var_toppedUpBalance,
+        };
+    }
+}
+
+impl SseDecode for crate::api::studio::types::settings::DeepSeekWebSearchSettingsInput {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_enabled = <bool>::sse_decode(deserializer);
+        return crate::api::studio::types::settings::DeepSeekWebSearchSettingsInput {
+            enabled: var_enabled,
         };
     }
 }
@@ -9320,6 +9391,7 @@ impl SseDecode for crate::api::studio::types::settings::ProviderInput {
             <crate::api::studio::types::settings::ProviderSecretInput>::sse_decode(deserializer);
         let mut var_capabilitySource = <String>::sse_decode(deserializer);
         let mut var_hostedWebSearch = <bool>::sse_decode(deserializer);
+        let mut var_hostedWebSearchDialect = <String>::sse_decode(deserializer);
         let mut var_standaloneWebSearch = <Option<String>>::sse_decode(deserializer);
         let mut var_promptCacheDialect = <String>::sse_decode(deserializer);
         let mut var_responsesProgrammaticToolCalling = <bool>::sse_decode(deserializer);
@@ -9340,6 +9412,7 @@ impl SseDecode for crate::api::studio::types::settings::ProviderInput {
             secret: var_secret,
             capability_source: var_capabilitySource,
             hosted_web_search: var_hostedWebSearch,
+            hosted_web_search_dialect: var_hostedWebSearchDialect,
             standalone_web_search: var_standaloneWebSearch,
             prompt_cache_dialect: var_promptCacheDialect,
             responses_programmatic_tool_calling: var_responsesProgrammaticToolCalling,
@@ -9886,45 +9959,47 @@ fn pde_ffi_dispatcher_primary_impl(
 30 => wire__crate__api__studio__handlers__external_state__probe_lsp_server_impl(port, ptr, rust_vec_len, data_len),
 31 => wire__crate__api__studio__handlers__agent_profiles__read_agent_profiles_impl(port, ptr, rust_vec_len, data_len),
 32 => wire__crate__api__studio__handlers__attachment__read_attachment_draft_impl(port, ptr, rust_vec_len, data_len),
-33 => wire__crate__api__studio__handlers__external_state__read_lsp_state_impl(port, ptr, rust_vec_len, data_len),
-34 => wire__crate__api__studio__handlers__external_state__read_mcp_state_impl(port, ptr, rust_vec_len, data_len),
-35 => wire__crate__api__studio__handlers__providers__read_provider_usage_state_impl(port, ptr, rust_vec_len, data_len),
-36 => wire__crate__api__studio__handlers__settings__read_settings_state_impl(port, ptr, rust_vec_len, data_len),
-37 => wire__crate__api__studio__handlers__providers__read_skills_state_impl(port, ptr, rust_vec_len, data_len),
-38 => wire__crate__api__studio__handlers__snapshot__read_studio_state_impl(port, ptr, rust_vec_len, data_len),
-39 => wire__crate__api__studio__handlers__updater__read_studio_update_state_impl(port, ptr, rust_vec_len, data_len),
-40 => wire__crate__api__studio__handlers__history__read_thread_impl(port, ptr, rust_vec_len, data_len),
-41 => wire__crate__api__studio__handlers__attachment__read_thread_attachment_impl(port, ptr, rust_vec_len, data_len),
-42 => wire__crate__api__studio__handlers__settings__read_web_search_settings_impl(port, ptr, rust_vec_len, data_len),
-43 => wire__crate__api__studio__handlers__ssh__reconnect_ssh_server_impl(port, ptr, rust_vec_len, data_len),
-44 => wire__crate__api__studio__handlers__settings__reload_settings_from_disk_impl(port, ptr, rust_vec_len, data_len),
-45 => wire__crate__api__studio__handlers__attachment__remove_attachment_draft_impl(port, ptr, rust_vec_len, data_len),
-46 => wire__crate__api__studio__handlers__external_state__repair_lsp_server_impl(port, ptr, rust_vec_len, data_len),
-47 => wire__crate__api__studio__handlers__external_state__reset_lsp_impl(port, ptr, rust_vec_len, data_len),
-48 => wire__crate__api__studio__handlers__external_state__reset_mcp_impl(port, ptr, rust_vec_len, data_len),
-49 => wire__crate__api__studio__handlers__prompt__respond_interaction_impl(port, ptr, rust_vec_len, data_len),
-50 => wire__crate__api__studio__handlers__persistence__retry_persistence_impl(port, ptr, rust_vec_len, data_len),
-51 => wire__crate__api__studio__handlers__settings__save_general_settings_impl(port, ptr, rust_vec_len, data_len),
-52 => wire__crate__api__studio__handlers__settings__save_instructions_settings_impl(port, ptr, rust_vec_len, data_len),
-53 => wire__crate__api__studio__handlers__settings__save_mcp_settings_impl(port, ptr, rust_vec_len, data_len),
-54 => wire__crate__api__studio__handlers__settings__save_provider_settings_impl(port, ptr, rust_vec_len, data_len),
-55 => wire__crate__api__studio__handlers__settings__save_runtime_permission_mode_impl(port, ptr, rust_vec_len, data_len),
-56 => wire__crate__api__studio__handlers__settings__save_skills_settings_impl(port, ptr, rust_vec_len, data_len),
-57 => wire__crate__api__studio__handlers__ssh__save_ssh_server_impl(port, ptr, rust_vec_len, data_len),
-58 => wire__crate__api__studio__handlers__agent_profiles__save_user_agent_profile_impl(port, ptr, rust_vec_len, data_len),
-59 => wire__crate__api__studio__handlers__settings__save_web_search_settings_impl(port, ptr, rust_vec_len, data_len),
-60 => wire__crate__api__studio__handlers__providers__search_skills_impl(port, ptr, rust_vec_len, data_len),
-61 => wire__crate__api__studio__handlers__settings__set_model_role_impl(port, ptr, rust_vec_len, data_len),
-62 => wire__crate__api__studio__handlers__agent_profiles__set_system_agent_enabled_impl(port, ptr, rust_vec_len, data_len),
-63 => wire__crate__api__studio__handlers__thread__set_thread_mode_impl(port, ptr, rust_vec_len, data_len),
-64 => wire__crate__api__studio__handlers__lifecycle__shutdown_runtime_impl(port, ptr, rust_vec_len, data_len),
-65 => wire__crate__api__studio__handlers__thread__start_new_thread_impl(port, ptr, rust_vec_len, data_len),
-66 => wire__crate__api__studio__handlers__lifecycle__start_studio_runtime_impl(port, ptr, rust_vec_len, data_len),
-67 => wire__crate__api__studio__handlers__prompt__start_turn_impl(port, ptr, rust_vec_len, data_len),
-68 => wire__crate__api__studio__handlers__prompt__steer_turn_impl(port, ptr, rust_vec_len, data_len),
-69 => wire__crate__api__studio__subscription__subscribe_shutdown_progress_impl(port, ptr, rust_vec_len, data_len),
-70 => wire__crate__api__studio__subscription__subscribe_thread_impl(port, ptr, rust_vec_len, data_len),
-71 => wire__crate__api__studio__handlers__ssh__test_ssh_connection_impl(port, ptr, rust_vec_len, data_len),
+33 => wire__crate__api__studio__handlers__settings__read_deepseek_web_search_settings_impl(port, ptr, rust_vec_len, data_len),
+34 => wire__crate__api__studio__handlers__external_state__read_lsp_state_impl(port, ptr, rust_vec_len, data_len),
+35 => wire__crate__api__studio__handlers__external_state__read_mcp_state_impl(port, ptr, rust_vec_len, data_len),
+36 => wire__crate__api__studio__handlers__providers__read_provider_usage_state_impl(port, ptr, rust_vec_len, data_len),
+37 => wire__crate__api__studio__handlers__settings__read_settings_state_impl(port, ptr, rust_vec_len, data_len),
+38 => wire__crate__api__studio__handlers__providers__read_skills_state_impl(port, ptr, rust_vec_len, data_len),
+39 => wire__crate__api__studio__handlers__snapshot__read_studio_state_impl(port, ptr, rust_vec_len, data_len),
+40 => wire__crate__api__studio__handlers__updater__read_studio_update_state_impl(port, ptr, rust_vec_len, data_len),
+41 => wire__crate__api__studio__handlers__history__read_thread_impl(port, ptr, rust_vec_len, data_len),
+42 => wire__crate__api__studio__handlers__attachment__read_thread_attachment_impl(port, ptr, rust_vec_len, data_len),
+43 => wire__crate__api__studio__handlers__settings__read_web_search_settings_impl(port, ptr, rust_vec_len, data_len),
+44 => wire__crate__api__studio__handlers__ssh__reconnect_ssh_server_impl(port, ptr, rust_vec_len, data_len),
+45 => wire__crate__api__studio__handlers__settings__reload_settings_from_disk_impl(port, ptr, rust_vec_len, data_len),
+46 => wire__crate__api__studio__handlers__attachment__remove_attachment_draft_impl(port, ptr, rust_vec_len, data_len),
+47 => wire__crate__api__studio__handlers__external_state__repair_lsp_server_impl(port, ptr, rust_vec_len, data_len),
+48 => wire__crate__api__studio__handlers__external_state__reset_lsp_impl(port, ptr, rust_vec_len, data_len),
+49 => wire__crate__api__studio__handlers__external_state__reset_mcp_impl(port, ptr, rust_vec_len, data_len),
+50 => wire__crate__api__studio__handlers__prompt__respond_interaction_impl(port, ptr, rust_vec_len, data_len),
+51 => wire__crate__api__studio__handlers__persistence__retry_persistence_impl(port, ptr, rust_vec_len, data_len),
+52 => wire__crate__api__studio__handlers__settings__save_deepseek_web_search_settings_impl(port, ptr, rust_vec_len, data_len),
+53 => wire__crate__api__studio__handlers__settings__save_general_settings_impl(port, ptr, rust_vec_len, data_len),
+54 => wire__crate__api__studio__handlers__settings__save_instructions_settings_impl(port, ptr, rust_vec_len, data_len),
+55 => wire__crate__api__studio__handlers__settings__save_mcp_settings_impl(port, ptr, rust_vec_len, data_len),
+56 => wire__crate__api__studio__handlers__settings__save_provider_settings_impl(port, ptr, rust_vec_len, data_len),
+57 => wire__crate__api__studio__handlers__settings__save_runtime_permission_mode_impl(port, ptr, rust_vec_len, data_len),
+58 => wire__crate__api__studio__handlers__settings__save_skills_settings_impl(port, ptr, rust_vec_len, data_len),
+59 => wire__crate__api__studio__handlers__ssh__save_ssh_server_impl(port, ptr, rust_vec_len, data_len),
+60 => wire__crate__api__studio__handlers__agent_profiles__save_user_agent_profile_impl(port, ptr, rust_vec_len, data_len),
+61 => wire__crate__api__studio__handlers__settings__save_web_search_settings_impl(port, ptr, rust_vec_len, data_len),
+62 => wire__crate__api__studio__handlers__providers__search_skills_impl(port, ptr, rust_vec_len, data_len),
+63 => wire__crate__api__studio__handlers__settings__set_model_role_impl(port, ptr, rust_vec_len, data_len),
+64 => wire__crate__api__studio__handlers__agent_profiles__set_system_agent_enabled_impl(port, ptr, rust_vec_len, data_len),
+65 => wire__crate__api__studio__handlers__thread__set_thread_mode_impl(port, ptr, rust_vec_len, data_len),
+66 => wire__crate__api__studio__handlers__lifecycle__shutdown_runtime_impl(port, ptr, rust_vec_len, data_len),
+67 => wire__crate__api__studio__handlers__thread__start_new_thread_impl(port, ptr, rust_vec_len, data_len),
+68 => wire__crate__api__studio__handlers__lifecycle__start_studio_runtime_impl(port, ptr, rust_vec_len, data_len),
+69 => wire__crate__api__studio__handlers__prompt__start_turn_impl(port, ptr, rust_vec_len, data_len),
+70 => wire__crate__api__studio__handlers__prompt__steer_turn_impl(port, ptr, rust_vec_len, data_len),
+71 => wire__crate__api__studio__subscription__subscribe_shutdown_progress_impl(port, ptr, rust_vec_len, data_len),
+72 => wire__crate__api__studio__subscription__subscribe_thread_impl(port, ptr, rust_vec_len, data_len),
+73 => wire__crate__api__studio__handlers__ssh__test_ssh_connection_impl(port, ptr, rust_vec_len, data_len),
                         _ => unreachable!(),
                     }
 }
@@ -10558,6 +10633,37 @@ impl
     > for crate::api::studio::types::settings::BridgeCustomModelSettingsDto
 {
     fn into_into_dart(self) -> crate::api::studio::types::settings::BridgeCustomModelSettingsDto {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::settings::BridgeDeepSeekWebSearchSettingsDto
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.configured_enabled.into_into_dart().into_dart(),
+            self.effective_enabled.into_into_dart().into_dart(),
+            self.availability.into_into_dart().into_dart(),
+            self.selected.into_into_dart().into_dart(),
+            self.provider_id.into_into_dart().into_dart(),
+            self.model.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::settings::BridgeDeepSeekWebSearchSettingsDto
+{
+}
+impl
+    flutter_rust_bridge::IntoIntoDart<
+        crate::api::studio::types::settings::BridgeDeepSeekWebSearchSettingsDto,
+    > for crate::api::studio::types::settings::BridgeDeepSeekWebSearchSettingsDto
+{
+    fn into_into_dart(
+        self,
+    ) -> crate::api::studio::types::settings::BridgeDeepSeekWebSearchSettingsDto {
         self
     }
 }
@@ -12410,6 +12516,7 @@ impl flutter_rust_bridge::IntoDart
             self.has_bearer_token.into_into_dart().into_dart(),
             self.capability_source.into_into_dart().into_dart(),
             self.hosted_web_search.into_into_dart().into_dart(),
+            self.hosted_web_search_dialect.into_into_dart().into_dart(),
             self.standalone_web_search.into_into_dart().into_dart(),
             self.prompt_cache_dialect.into_into_dart().into_dart(),
             self.responses_programmatic_tool_calling
@@ -13479,6 +13586,7 @@ impl flutter_rust_bridge::IntoDart
             self.mcp_servers.into_into_dart().into_dart(),
             self.general.into_into_dart().into_dart(),
             self.web_search.into_into_dart().into_dart(),
+            self.deepseek_web_search.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -15508,6 +15616,7 @@ impl flutter_rust_bridge::IntoDart
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
             self.hosted_responses.into_into_dart().into_dart(),
+            self.hosted_dialect.into_into_dart().into_dart(),
             self.standalone.into_into_dart().into_dart(),
         ]
         .into_dart()
@@ -15537,6 +15646,7 @@ impl flutter_rust_bridge::IntoDart
             self.configured_mode.into_into_dart().into_dart(),
             self.effective_mode.into_into_dart().into_dart(),
             self.availability.into_into_dart().into_dart(),
+            self.selected.into_into_dart().into_dart(),
             self.context_size.into_into_dart().into_dart(),
             self.allowed_domains.into_into_dart().into_dart(),
             self.country.into_into_dart().into_dart(),
@@ -15807,6 +15917,27 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::response::Deep
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::settings::DeepSeekWebSearchSettingsInput
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [self.enabled.into_into_dart().into_dart()].into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::settings::DeepSeekWebSearchSettingsInput
+{
+}
+impl
+    flutter_rust_bridge::IntoIntoDart<
+        crate::api::studio::types::settings::DeepSeekWebSearchSettingsInput,
+    > for crate::api::studio::types::settings::DeepSeekWebSearchSettingsInput
+{
+    fn into_into_dart(self) -> crate::api::studio::types::settings::DeepSeekWebSearchSettingsInput {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::studio::types::settings::GeneralSettingsInput {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
@@ -16062,6 +16193,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::studio::types::settings::Prov
             self.secret.into_into_dart().into_dart(),
             self.capability_source.into_into_dart().into_dart(),
             self.hosted_web_search.into_into_dart().into_dart(),
+            self.hosted_web_search_dialect.into_into_dart().into_dart(),
             self.standalone_web_search.into_into_dart().into_dart(),
             self.prompt_cache_dialect.into_into_dart().into_dart(),
             self.responses_programmatic_tool_calling
@@ -17251,6 +17383,18 @@ impl SseEncode for crate::api::studio::types::settings::BridgeCustomModelSetting
     }
 }
 
+impl SseEncode for crate::api::studio::types::settings::BridgeDeepSeekWebSearchSettingsDto {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.configured_enabled, serializer);
+        <bool>::sse_encode(self.effective_enabled, serializer);
+        <String>::sse_encode(self.availability, serializer);
+        <bool>::sse_encode(self.selected, serializer);
+        <Option<String>>::sse_encode(self.provider_id, serializer);
+        <Option<String>>::sse_encode(self.model, serializer);
+    }
+}
+
 impl SseEncode for crate::api::studio::types::runtime::BridgeDegradedResource {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -18431,6 +18575,7 @@ impl SseEncode for crate::api::studio::types::settings::BridgeProviderSettingsDt
         <bool>::sse_encode(self.has_bearer_token, serializer);
         <String>::sse_encode(self.capability_source, serializer);
         <bool>::sse_encode(self.hosted_web_search, serializer);
+        <String>::sse_encode(self.hosted_web_search_dialect, serializer);
         <Option<String>>::sse_encode(self.standalone_web_search, serializer);
         <String>::sse_encode(self.prompt_cache_dialect, serializer);
         <bool>::sse_encode(self.responses_programmatic_tool_calling, serializer);
@@ -19213,6 +19358,10 @@ impl SseEncode for crate::api::studio::types::settings::BridgeStudioSettingsDto 
         );
         <crate::api::studio::types::settings::BridgeWebSearchSettingsDto>::sse_encode(
             self.web_search,
+            serializer,
+        );
+        <crate::api::studio::types::settings::BridgeDeepSeekWebSearchSettingsDto>::sse_encode(
+            self.deepseek_web_search,
             serializer,
         );
     }
@@ -20415,6 +20564,7 @@ impl SseEncode
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <bool>::sse_encode(self.hosted_responses, serializer);
+        <String>::sse_encode(self.hosted_dialect, serializer);
         <Option<String>>::sse_encode(self.standalone, serializer);
     }
 }
@@ -20425,6 +20575,7 @@ impl SseEncode for crate::api::studio::types::settings::BridgeWebSearchSettingsD
         <String>::sse_encode(self.configured_mode, serializer);
         <String>::sse_encode(self.effective_mode, serializer);
         <String>::sse_encode(self.availability, serializer);
+        <bool>::sse_encode(self.selected, serializer);
         <Option<String>>::sse_encode(self.context_size, serializer);
         <Vec<String>>::sse_encode(self.allowed_domains, serializer);
         <Option<String>>::sse_encode(self.country, serializer);
@@ -20562,6 +20713,13 @@ impl SseEncode for crate::api::studio::types::response::DeepSeekBalanceInfoDto {
         <String>::sse_encode(self.total_balance, serializer);
         <String>::sse_encode(self.granted_balance, serializer);
         <String>::sse_encode(self.topped_up_balance, serializer);
+    }
+}
+
+impl SseEncode for crate::api::studio::types::settings::DeepSeekWebSearchSettingsInput {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.enabled, serializer);
     }
 }
 
@@ -21597,6 +21755,7 @@ impl SseEncode for crate::api::studio::types::settings::ProviderInput {
         );
         <String>::sse_encode(self.capability_source, serializer);
         <bool>::sse_encode(self.hosted_web_search, serializer);
+        <String>::sse_encode(self.hosted_web_search_dialect, serializer);
         <Option<String>>::sse_encode(self.standalone_web_search, serializer);
         <String>::sse_encode(self.prompt_cache_dialect, serializer);
         <bool>::sse_encode(self.responses_programmatic_tool_calling, serializer);
