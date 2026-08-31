@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_driver/flutter_driver.dart' as driver;
 import 'package:flutter_test/flutter_test.dart';
 
@@ -81,6 +83,49 @@ void main() {
     expect(client.tapCount, 1);
   });
 
+  test(
+    'scroll deadline terminates a stuck side effect without replaying it',
+    () async {
+      final client = _FakeDriverClient(neverCompletesScroll: true);
+      var connectCount = 0;
+      final session = await FlutterDriverSession.connect(
+        vmServiceUrl: 'http://vm.test',
+        connector: (_) async {
+          connectCount += 1;
+          return client;
+        },
+        delay: (_) async {},
+      );
+
+      await expectLater(
+        session.scrollUntilVisible(
+          driver.find.byValueKey('scrollable'),
+          driver.find.byValueKey('item'),
+          dyScroll: -100,
+          timeout: const Duration(milliseconds: 20),
+        ),
+        throwsA(
+          isA<TimeoutException>()
+              .having(
+                (error) => error.message,
+                'message',
+                'scrollUntilVisible timed out after 20 ms',
+              )
+              .having(
+                (error) => error.duration,
+                'duration',
+                const Duration(milliseconds: 20),
+              ),
+        ),
+      );
+
+      expect(connectCount, 1);
+      expect(client.scrollCount, 1);
+      expect(client.closeCount, 1);
+    },
+    timeout: const Timeout(Duration(seconds: 1)),
+  );
+
   test('non-transport snapshot errors do not reconnect', () async {
     final client = _FakeDriverClient(
       snapshotError: const FormatException('bad'),
@@ -129,16 +174,19 @@ class _FakeDriverClient implements FlutterDriverClient {
     this.snapshotError,
     this.tapError,
     this.failSnapshotAfterClose = false,
+    this.neverCompletesScroll = false,
   });
 
   final String snapshot;
   final Object? snapshotError;
   final Object? tapError;
   final bool failSnapshotAfterClose;
+  final bool neverCompletesScroll;
   int healthCount = 0;
   int requestCount = 0;
   int closeCount = 0;
   int tapCount = 0;
+  int scrollCount = 0;
   final frameSyncValues = <bool>[];
 
   @override
@@ -208,7 +256,11 @@ class _FakeDriverClient implements FlutterDriverClient {
     driver.SerializableFinder item, {
     required double dyScroll,
     Duration? timeout,
-  }) async {}
+  }) {
+    scrollCount += 1;
+    if (neverCompletesScroll) return Completer<void>().future;
+    return Future<void>.value();
+  }
 
   @override
   Future<void> waitUntilNoTransientCallbacks({Duration? timeout}) async {}

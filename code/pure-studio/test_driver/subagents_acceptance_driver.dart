@@ -79,38 +79,78 @@ Future<void> _configureAgents(
     options.worktreeExecutor,
     options.reviewer,
   ]) {
-    final model = find.byValueKey('settings-role-${route.role}-model');
-    await session.scrollUntilVisible(
-      find.byValueKey('settings-pane-scroll'),
-      model,
-      dyScroll: -280,
-      timeout: const Duration(minutes: 1),
+    await _configureAgentSetting(
+      route,
+      'model ${route.provider}/${route.model}',
+      () async {
+        final beforeModelRevision = _readSettingsRevision(
+          await session.readSnapshot(),
+        );
+        final model = find.byValueKey('settings-role-${route.role}-model');
+        await session.scrollUntilVisible(
+          find.byValueKey('settings-pane-scroll'),
+          model,
+          dyScroll: -280,
+          timeout: const Duration(minutes: 1),
+        );
+        await session.tap(model);
+        final option = find.byValueKey(
+          'settings-role-${route.role}-model-'
+          '${route.provider}-${route.model}',
+        );
+        await session.waitFor(option, timeout: const Duration(seconds: 30));
+        await session.tap(option);
+        await _waitForSettingsRevision(
+          session,
+          beforeModelRevision,
+          timeout: const Duration(seconds: 20),
+        );
+        await _waitForStableFrame(session);
+      },
     );
-    await session.tap(model);
-    final option = find.byValueKey(
-      'settings-role-${route.role}-model-${route.provider}-${route.model}',
-    );
-    await session.waitFor(option, timeout: const Duration(seconds: 30));
-    await session.tap(option);
-    final enabled = find.byValueKey('system-agent-enabled-${route.role}');
-    await session.scrollUntilVisible(
-      find.byValueKey('settings-pane-scroll'),
-      enabled,
-      dyScroll: -200,
-      timeout: const Duration(minutes: 1),
-    );
-    // The isolated live config starts all four Profiles disabled. This tap is
-    // the product-level enable action and its canonical Settings revision must
-    // be observed by the later spawn tool catalog.
-    final before = await session.readSnapshot();
-    final beforeRevision = _readSettingsRevision(before);
-    await session.tap(enabled);
-    await _waitForSettingsRevision(
-      session,
-      beforeRevision,
-      timeout: const Duration(seconds: 20),
+
+    await _configureAgentSetting(route, 'enabled', () async {
+      final beforeEnableRevision = _readSettingsRevision(
+        await session.readSnapshot(),
+      );
+      final enabled = find.byValueKey('system-agent-enabled-${route.role}');
+      await session.scrollUntilVisible(
+        find.byValueKey('settings-pane-scroll'),
+        enabled,
+        dyScroll: -200,
+        timeout: const Duration(minutes: 1),
+      );
+      // The isolated live config starts all four Profiles disabled. This tap
+      // is the product-level enable action and its canonical Settings revision
+      // must be observed by the later spawn tool catalog.
+      await session.tap(enabled);
+      await _waitForSettingsRevision(
+        session,
+        beforeEnableRevision,
+        timeout: const Duration(seconds: 20),
+      );
+      await _waitForStableFrame(session);
+    });
+  }
+}
+
+Future<void> _configureAgentSetting(
+  _Route route,
+  String stage,
+  Future<void> Function() configure,
+) async {
+  try {
+    await configure();
+  } catch (error, stackTrace) {
+    Error.throwWithStackTrace(
+      StateError('failed to configure ${route.role} $stage: $error'),
+      stackTrace,
     );
   }
+}
+
+Future<void> _waitForStableFrame(FlutterDriverSession session) {
+  return session.waitForNoPendingFrame(timeout: const Duration(seconds: 20));
 }
 
 int _readSettingsRevision(Map<String, dynamic> snapshot) {

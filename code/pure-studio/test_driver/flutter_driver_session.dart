@@ -188,13 +188,30 @@ class FlutterDriverSession {
     SerializableFinder item, {
     required double dyScroll,
     Duration? timeout,
-  }) {
-    return _client.scrollUntilVisible(
+  }) async {
+    final operation = _client.scrollUntilVisible(
       scrollable,
       item,
       dyScroll: dyScroll,
       timeout: timeout,
     );
+    if (timeout == null) return operation;
+    try {
+      await operation.timeout(timeout);
+    } on TimeoutException catch (_, stackTrace) {
+      // A timed-out Driver side effect may still own the transport. Dispose the
+      // connection without delaying the caller's deadline; the command itself
+      // is deliberately never reconnected or replayed.
+      unawaited(_closeClientBestEffort());
+      Error.throwWithStackTrace(
+        TimeoutException(
+          'scrollUntilVisible timed out after '
+          '${timeout.inMilliseconds} ms',
+          timeout,
+        ),
+        stackTrace,
+      );
+    }
   }
 
   Future<void> tap(SerializableFinder finder) => _client.tap(finder);
@@ -319,12 +336,43 @@ class _RealFlutterDriverClient implements FlutterDriverClient {
     SerializableFinder item, {
     required double dyScroll,
     Duration? timeout,
-  }) {
-    return _driver.scrollUntilVisible(
-      scrollable,
+  }) async {
+    assert(dyScroll != 0.0);
+    final elapsed = Stopwatch()..start();
+    var isVisible = false;
+    Object? waitForError;
+    StackTrace? waitForStackTrace;
+    final visibilityWait = _driver
+        .waitFor(item, timeout: timeout)
+        .then<void>(
+          (_) {
+            isVisible = true;
+          },
+          onError: (Object error, StackTrace stackTrace) {
+            waitForError = error;
+            waitForStackTrace = stackTrace;
+          },
+        );
+    unawaited(visibilityWait);
+
+    await _waitForScrollCadence(elapsed, timeout);
+    while (!isVisible && waitForError == null) {
+      await _driver.scroll(
+        scrollable,
+        0,
+        dyScroll,
+        const Duration(milliseconds: 100),
+        timeout: _remainingScrollTimeout(elapsed, timeout),
+      );
+      await _waitForScrollCadence(elapsed, timeout);
+    }
+    if (waitForError != null) {
+      Error.throwWithStackTrace(waitForError!, waitForStackTrace!);
+    }
+
+    await _driver.scrollIntoView(
       item,
-      dyScroll: dyScroll,
-      timeout: timeout,
+      timeout: _remainingScrollTimeout(elapsed, timeout),
     );
   }
 
@@ -366,4 +414,25 @@ class _RealFlutterDriverClient implements FlutterDriverClient {
 
   @override
   Future<void> close() => _driver.close();
+}
+
+Future<void> _waitForScrollCadence(Stopwatch elapsed, Duration? timeout) async {
+  const cadence = Duration(milliseconds: 500);
+  final remaining = _remainingScrollTimeout(elapsed, timeout);
+  await Future<void>.delayed(
+    remaining != null && remaining < cadence ? remaining : cadence,
+  );
+  _remainingScrollTimeout(elapsed, timeout);
+}
+
+Duration? _remainingScrollTimeout(Stopwatch elapsed, Duration? timeout) {
+  if (timeout == null) return null;
+  final remaining = timeout - elapsed.elapsed;
+  if (remaining <= Duration.zero) {
+    throw TimeoutException(
+      'scrollUntilVisible timed out after ${timeout.inMilliseconds} ms',
+      timeout,
+    );
+  }
+  return remaining;
 }
