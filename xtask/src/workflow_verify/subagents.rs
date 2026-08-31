@@ -946,6 +946,7 @@ const REVIEWER_READ_ONLY: &[&str] = &[
     "git_workspace_info",
     "read_session_note",
     "search_session_note",
+    "report_progress",
 ];
 
 #[allow(dead_code)]
@@ -1719,6 +1720,57 @@ mod tests {
     }
 
     #[test]
+    fn durable_reviewer_verdict_is_prompted_end_to_end() {
+        let reviewer = include_str!("../../../code/pl-studio-runtime/src/prompts/reviewer.md");
+        let workflow = include_str!(
+            "../../../code/pl-studio-runtime/assets/skills/subagent-workflow/SKILL.md"
+        );
+        let task =
+            include_str!("../../../code/pl-studio-runtime/assets/skills/modes/mode.task/SKILL.md");
+        let live = include_str!("../../../test-fixtures/subagents-live/prompt.md");
+
+        for (name, prompt) in [
+            ("reviewer", reviewer),
+            ("subagent-workflow", workflow),
+            ("mode.task", task),
+            ("live acceptance", live),
+        ] {
+            assert!(
+                prompt.contains("report_progress")
+                    && prompt.contains("REVIEWER_FINDING")
+                    && prompt.contains("REVIEWER_READ_ONLY_APPROVED"),
+                "{name} must require a durable reviewer verdict with fixed markers"
+            );
+        }
+        assert!(
+            reviewer.contains("final reply 前调用一次 `report_progress`")
+                && reviewer.contains("不得修改 workspace、Git")
+                && reviewer.contains("不得使用 `exec`"),
+            "fixed reviewer prompt must submit exactly once without weakening read-only scope"
+        );
+        assert!(
+            workflow.contains("call `read_agent_submissions` with the reviewer agentId")
+                && workflow.contains("A root retelling or `read_agent_session` does not count"),
+            "subagent-workflow must require the root to consume canonical durable reviewer evidence"
+        );
+        assert!(
+            task.contains("按 reviewer agentId 调用 `read_agent_submissions`")
+                && task.contains("root 转述或 `read_agent_session` 不算"),
+            "mode.task must require the root to consume canonical durable reviewer evidence"
+        );
+        let reviewer_read = live
+            .find("按 reviewer agentId 调用 read_agent_submissions")
+            .expect("live prompt must require a targeted reviewer submissions read");
+        let final_test = live
+            .find("读取到 durable verdict 后才执行最终 cargo test")
+            .expect("live prompt must gate the final test on the durable verdict");
+        assert!(
+            reviewer_read < final_test,
+            "live prompt must read the reviewer durable verdict before the final test"
+        );
+    }
+
+    #[test]
     fn fixture_is_a_git_repository_with_an_initial_head() {
         let root = tempfile::tempdir().unwrap();
         prepare_fixture(root.path()).unwrap();
@@ -2002,6 +2054,23 @@ mod tests {
             }],
         };
         assert!(ensure_reviewer_history(&[read]).is_ok());
+        let durable_verdict = CaptureReceipt {
+            path: "reviewer-progress.json".into(),
+            actor: "reviewer".into(),
+            calls: vec![WireCall {
+                call_id: Some("reviewer-verdict".into()),
+                name: "report_progress".into(),
+                arguments: serde_json::json!({
+                    "stage": "verifying",
+                    "summary": "REVIEWER_READ_ONLY_APPROVED",
+                    "nextStep": "root integrates the durable verdict",
+                }),
+            }],
+        };
+        assert!(
+            ensure_reviewer_history(&[durable_verdict]).is_ok(),
+            "report_progress is the reviewer's only allowed durable collaboration write"
+        );
         let mutation = CaptureReceipt {
             path: "chat.json".into(),
             actor: "reviewer".into(),

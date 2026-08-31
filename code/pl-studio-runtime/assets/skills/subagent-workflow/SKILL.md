@@ -58,5 +58,14 @@ wait for capacity and narrow/re-dispatch once; only a second failure permits min
 spawn a new fresh-context read-only `reviewer`; it never fixes. Route code findings to `working` and
 design findings to `editing_documents`; every repair must be re-integrated and receive a new reviewer.
 
+The reviewer remains read-only for workspace, Git, shell, and external state, but after finishing its
+review and before its final reply it must call `report_progress` exactly once to append a durable
+collaboration verdict. Use `REVIEWER_FINDING` for a blocking verdict or
+`REVIEWER_READ_ONLY_APPROVED` for approval. Root must take the reviewer agentId from the bound spawn
+receipt and call `read_agent_submissions` with the reviewer agentId; only a canonical nonempty page
+carrying that marker authorizes the next step. A root retelling or `read_agent_session` does not count,
+and an unbound tool result does not count. A finding returns to implementation/design repair and a
+fresh reviewer; only a durable approval allows root to run the final verification gates.
+
 If collaboration capacity is unavailable, continue useful work in the root Agent and report the
 constraint only when it affects the result.
