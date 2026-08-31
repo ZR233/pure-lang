@@ -6,7 +6,7 @@ use super::{
 };
 use crate::cli::VerifySubagentsOptions;
 use crate::{paths, process};
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result, bail, ensure};
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -1010,9 +1010,20 @@ fn bound_receipts(calls: &[WireCall], outputs: &[WireOutput]) -> Result<Vec<(Wir
             .with_context(|| format!("spawn {id} has no same-call-id output"))?;
         // A failed tool invocation is captured as plain text. Keep the call in the
         // audit trail, but only bind a successfully parsed JSON receipt below.
-        let receipt: Value = match serde_json::from_str(&output.content) {
+        let content = output.content.trim();
+        let receipt: Value = match serde_json::from_str(content) {
             Ok(receipt) => receipt,
-            Err(_) => continue,
+            Err(error) if looks_like_json_output(content) => {
+                bail!(
+                    "spawn {id} output looks like JSON but is malformed (bound_receipts): {error}"
+                )
+            }
+            Err(_) if is_plain_text_failed_spawn(content) => continue,
+            Err(error) => {
+                bail!(
+                    "spawn {id} output is neither a canonical JSON receipt nor an explicit plain-text tool failure (bound_receipts): {error}"
+                )
+            }
         };
         ensure!(
             receipt.is_object(),
@@ -1042,6 +1053,17 @@ fn bound_receipts(calls: &[WireCall], outputs: &[WireOutput]) -> Result<Vec<(Wir
         receipts.push((spawn.clone(), receipt));
     }
     Ok(receipts)
+}
+
+fn looks_like_json_output(content: &str) -> bool {
+    matches!(content.chars().next(), Some('{' | '[' | '"'))
+        || content.starts_with("null")
+        || content.starts_with("true")
+        || content.starts_with("false")
+}
+
+fn is_plain_text_failed_spawn(content: &str) -> bool {
+    content.starts_with("Tool execution error:")
 }
 
 fn ensure_workspace_receipts(calls: &[WireCall], outputs: &[WireOutput]) -> Result<()> {
@@ -2189,6 +2211,49 @@ mod tests {
     }
 
     #[test]
+    fn bound_receipts_rejects_malformed_json_like_failed_output() {
+        let calls = vec![WireCall {
+            call_id: Some("malformed".into()),
+            name: "spawn_agent".into(),
+            arguments: serde_json::json!({"profileId": "explorer"}),
+        }];
+        for content in [" {\"profileId\":", "[", "\"unterminated", "false trailing"] {
+            let outputs = vec![WireOutput {
+                call_id: Some("malformed".into()),
+                content: content.into(),
+            }];
+            let error = bound_receipts(&calls, &outputs).unwrap_err();
+            assert!(error.to_string().contains("spawn malformed"));
+            assert!(error.to_string().contains("looks like JSON"));
+        }
+    }
+
+    #[test]
+    fn bound_receipts_rejects_valid_non_object_and_invalid_canonical_receipts() {
+        let calls = vec![WireCall {
+            call_id: Some("invalid".into()),
+            name: "spawn_agent".into(),
+            arguments: serde_json::json!({"profileId": "explorer"}),
+        }];
+        for content in [
+            "null",
+            "[]",
+            "{\"agentId\":\"explorer-a\"}",
+            "{\"profileId\":\"executor\",\"agentId\":\"explorer-a\"}",
+            "unrecognized tool output",
+        ] {
+            let outputs = vec![WireOutput {
+                call_id: Some("invalid".into()),
+                content: content.into(),
+            }];
+            assert!(
+                bound_receipts(&calls, &outputs).is_err(),
+                "accepted {content}"
+            );
+        }
+    }
+
+    #[test]
     fn bound_receipts_rejects_reused_successful_agent_ids_across_profiles() {
         let (calls, mut outputs) = valid_orchestration_calls();
         outputs
@@ -2235,6 +2300,107 @@ mod tests {
                 .to_string()
                 .contains("wire tool results contain no executor workspace receipt")
         );
+    }
+
+    #[test]
+    fn failed_attempts_are_ignored_but_two_explorers_are_required_consistently() {
+        let (mut calls, mut outputs) = valid_orchestration_calls();
+        let failures = ["failed-empty", "failed-malicious"];
+        for (offset, id) in failures.into_iter().enumerate() {
+            calls.insert(
+                1 + offset,
+                orchestration_call(
+                    id,
+                    "spawn_agent",
+                    serde_json::json!({"profileId":"explorer"}),
+                ),
+            );
+            outputs.push(WireOutput {
+                call_id: Some(id.into()),
+                content: if offset == 0 {
+                    "Tool execution error: capacity unavailable".into()
+                } else {
+                    "  Tool execution error: invalid writablePaths  ".into()
+                },
+            });
+        }
+        let cherry_pick = calls
+            .iter()
+            .position(|call| call.call_id.as_deref() == Some("i1"))
+            .unwrap();
+        for (id, target) in [("xr1", "executor-a"), ("xr2", "worktree-a")] {
+            calls.insert(
+                cherry_pick,
+                orchestration_call(
+                    id,
+                    "read_agent_submissions",
+                    serde_json::json!({"target":target}),
+                ),
+            );
+            outputs.push(WireOutput {
+                call_id: Some(id.into()),
+                content: serde_json::json!({
+                    "total": 1,
+                    "items": [{"id": "submission"}]
+                })
+                .to_string(),
+            });
+        }
+        for id in ["er1", "er2"] {
+            outputs.push(WireOutput {
+                call_id: Some(id.into()),
+                content: serde_json::json!({
+                    "total": 1,
+                    "items": [{"id": "submission"}]
+                })
+                .to_string(),
+            });
+        }
+        ensure_orchestration_order(&calls, &outputs).unwrap();
+        ensure_submissions(&calls, &outputs).unwrap();
+
+        let mut profile_calls = profile_message_calls();
+        let mut profile_outputs = profile_message_outputs(&profile_calls);
+        for id in failures {
+            let failed = WireCall {
+                call_id: Some(id.into()),
+                name: "spawn_agent".into(),
+                arguments: serde_json::json!({
+                    "profileId": "explorer",
+                    "forkTurns": "none",
+                    "message": "failed attempt"
+                }),
+            };
+            profile_calls.insert(0, failed);
+            profile_outputs.push(WireOutput {
+                call_id: Some(id.into()),
+                content: "Tool execution error: capacity unavailable".into(),
+            });
+        }
+        ensure_profile_messages(&profile_calls, &profile_outputs).unwrap();
+
+        let third = calls[3].clone();
+        calls.push(WireCall {
+            call_id: Some("explorer-success-3".into()),
+            ..third
+        });
+        outputs.push(spawn_output(
+            "explorer-success-3",
+            "explorer",
+            "explorer-success-3",
+        ));
+        assert!(ensure_orchestration_order(&calls, &outputs).is_err());
+        assert!(ensure_submissions(&calls, &outputs).is_err());
+
+        let mut third_profile = profile_calls[2].clone();
+        third_profile.call_id = Some("explorer-success-3".into());
+        profile_calls.push(third_profile);
+        profile_outputs.push(spawn_output(
+            "explorer-success-3",
+            "explorer",
+            "explorer-success-3",
+        ));
+        assert!(ensure_profile_messages(&profile_calls, &profile_outputs).is_err());
     }
 
     #[test]
