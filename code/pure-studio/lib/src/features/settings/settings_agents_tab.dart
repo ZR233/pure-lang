@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/theme/studio_tokens.dart';
 import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
+import '../../l10n/studio_l10n.dart';
 import 'settings_common.dart';
 
 /// Agent Profile 设置页。系统 Profile 只读；用户 Profile 由各自 TOML 文件管理。
@@ -56,9 +57,9 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
         final profiles = snapshot.data ?? const <AgentProfileView>[];
         return SettingsPane(
           children: [
-            const SettingsHeader(
-              title: 'Agent Profiles',
-              subtitle: '系统 Profile 只读；用户 Profile 保存在 ~/.pure/agents/*.toml。',
+            SettingsHeader(
+              title: context.l10n.settingsAgentsTitle,
+              subtitle: context.l10n.settingsAgentsSubtitle,
             ),
             Align(
               alignment: Alignment.centerLeft,
@@ -66,7 +67,7 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
                 key: const ValueKey('agent-profile-add'),
                 onPressed: _editProfile,
                 icon: const Icon(Icons.add),
-                label: const Text('添加用户 Profile'),
+                label: Text(context.l10n.settingsAgentsAdd),
               ),
             ),
             const SizedBox(height: 16),
@@ -86,7 +87,11 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
                       ? Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Chip(label: Text('内置 · 只读')),
+                            Chip(
+                              label: Text(
+                                context.l10n.settingsAgentsBuiltinReadonly,
+                              ),
+                            ),
                             const SizedBox(width: 8),
                             Switch(
                               key: ValueKey(
@@ -104,7 +109,7 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
                             const Chip(label: Text('TOML')),
                             IconButton(
                               key: ValueKey('agent-profile-edit-${profile.id}'),
-                              tooltip: '编辑',
+                              tooltip: context.l10n.settingsAgentsEditTooltip,
                               onPressed: () => _editProfile(profile),
                               icon: const Icon(Icons.edit_outlined),
                             ),
@@ -178,7 +183,9 @@ class _AgentProfileDialogState extends State<_AgentProfileDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text(
-        widget.profile == null ? '添加用户 Agent Profile' : '编辑用户 Agent Profile',
+        widget.profile == null
+            ? context.l10n.settingsAgentsDialogAddTitle
+            : context.l10n.settingsAgentsDialogEditTitle,
       ),
       content: SizedBox(
         width: 560,
@@ -188,19 +195,37 @@ class _AgentProfileDialogState extends State<_AgentProfileDialog> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _field(_id, 'Agent ID', enabled: widget.profile == null),
-                _field(_displayName, '显示名称'),
-                _field(_description, '介绍'),
-                _field(_whenToUse, '适用任务'),
-                _field(_instructions, '系统指令', maxLines: 6),
-                _field(_provider, 'Provider ID'),
-                _field(_model, 'Model'),
-                _field(_effort, 'Effort（可选）', required: false),
+                _field(
+                  _id,
+                  context.l10n.settingsAgentsFieldId,
+                  enabled: widget.profile == null,
+                ),
+                _field(
+                  _displayName,
+                  context.l10n.settingsAgentsFieldDisplayName,
+                ),
+                _field(
+                  _description,
+                  context.l10n.settingsAgentsFieldDescription,
+                ),
+                _field(_whenToUse, context.l10n.settingsAgentsFieldWhenToUse),
+                _field(
+                  _instructions,
+                  context.l10n.settingsAgentsFieldInstructions,
+                  maxLines: 6,
+                ),
+                _field(_provider, context.l10n.settingsAgentsFieldProvider),
+                _field(_model, context.l10n.settingsAgentsFieldModel),
+                _field(
+                  _effort,
+                  context.l10n.settingsAgentsFieldEffort,
+                  required: false,
+                ),
                 SwitchListTile(
                   key: const ValueKey('agent-profile-enabled'),
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('启用'),
-                  subtitle: const Text('禁用后仍保留 TOML，但不会出现在 Agent 工具目录。'),
+                  title: Text(context.l10n.settingsAgentsEnabled),
+                  subtitle: Text(context.l10n.settingsAgentsEnabledSubtitle),
                   value: _enabled,
                   onChanged: (value) => setState(() => _enabled = value),
                 ),
@@ -212,12 +237,12 @@ class _AgentProfileDialogState extends State<_AgentProfileDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('取消'),
+          child: Text(context.l10n.settingsAgentsCancel),
         ),
         FilledButton(
           key: const ValueKey('agent-profile-save'),
           onPressed: _save,
-          child: const Text('原子保存 TOML'),
+          child: Text(context.l10n.settingsAgentsSave),
         ),
       ],
     );
@@ -238,7 +263,9 @@ class _AgentProfileDialogState extends State<_AgentProfileDialog> {
         maxLines: maxLines,
         decoration: InputDecoration(labelText: label),
         validator: required
-            ? (value) => value == null || value.trim().isEmpty ? '必填' : null
+            ? (value) => value == null || value.trim().isEmpty
+                  ? context.l10n.settingsRequired
+                  : null
             : null,
       ),
     );

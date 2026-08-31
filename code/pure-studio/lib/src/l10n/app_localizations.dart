@@ -96,7 +96,6 @@ abstract class AppLocalizations {
   static const List<Locale> supportedLocales = <Locale>[
     Locale('en'),
     Locale('zh'),
-    Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
   ];
 
   /// No description provided for @appTitle.
@@ -374,6 +373,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Roles'**
   String get settingsRolesTab;
+
+  /// No description provided for @settingsAgentsTab.
+  ///
+  /// In en, this message translates to:
+  /// **'Agents'**
+  String get settingsAgentsTab;
 
   /// No description provided for @settingsMcpTab.
   ///
@@ -1118,6 +1123,12 @@ abstract class AppLocalizations {
   /// **'Open a project or start a session to begin.'**
   String get timelineEmptyMessage;
 
+  /// No description provided for @workflowHistoryTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'History'**
+  String get workflowHistoryTitle;
+
   /// No description provided for @timelineExternalLinkOpenFailed.
   ///
   /// In en, this message translates to:
@@ -1129,6 +1140,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Attachment'**
   String get timelineAttachment;
+
+  /// No description provided for @timelineImageFallback.
+  ///
+  /// In en, this message translates to:
+  /// **'Image'**
+  String get timelineImageFallback;
 
   /// No description provided for @timelineImageLoadFailed.
   ///
@@ -1500,6 +1517,12 @@ abstract class AppLocalizations {
   /// **'Permission needed'**
   String get interactionPermissionTitle;
 
+  /// No description provided for @interactionToolApprovalFallback.
+  ///
+  /// In en, this message translates to:
+  /// **'Tool approval'**
+  String get interactionToolApprovalFallback;
+
   /// No description provided for @interactionPermissionSubtitle.
   ///
   /// In en, this message translates to:
@@ -1668,6 +1691,18 @@ abstract class AppLocalizations {
   /// **'No provider selected'**
   String get settingsNoProviderSelected;
 
+  /// No description provided for @settingsProviderCatalogUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Provider catalog is unavailable.'**
+  String get settingsProviderCatalogUnavailable;
+
+  /// No description provided for @settingsProviderPresetUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Provider preset is unavailable.'**
+  String get settingsProviderPresetUnavailable;
+
   /// No description provided for @settingsProviderTitle.
   ///
   /// In en, this message translates to:
@@ -1697,6 +1732,120 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Custom models'**
   String get settingsProviderCustomModelsTitle;
+
+  /// No description provided for @settingsProviderCapabilitiesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Service capabilities'**
+  String get settingsProviderCapabilitiesTitle;
+
+  /// No description provided for @settingsProviderCapabilitySource.
+  ///
+  /// In en, this message translates to:
+  /// **'Capability source'**
+  String get settingsProviderCapabilitySource;
+
+  /// No description provided for @settingsProviderCapabilityPresetDefaults.
+  ///
+  /// In en, this message translates to:
+  /// **'Follow preset defaults'**
+  String get settingsProviderCapabilityPresetDefaults;
+
+  /// No description provided for @settingsProviderCapabilityExplicit.
+  ///
+  /// In en, this message translates to:
+  /// **'Explicit override'**
+  String get settingsProviderCapabilityExplicit;
+
+  /// No description provided for @settingsProviderHostedWebSearch.
+  ///
+  /// In en, this message translates to:
+  /// **'Hosted web search'**
+  String get settingsProviderHostedWebSearch;
+
+  /// No description provided for @settingsProviderHostedWebSearchDialect.
+  ///
+  /// In en, this message translates to:
+  /// **'Hosted web search dialect'**
+  String get settingsProviderHostedWebSearchDialect;
+
+  /// No description provided for @settingsProviderStandaloneWebSearch.
+  ///
+  /// In en, this message translates to:
+  /// **'Standalone web search'**
+  String get settingsProviderStandaloneWebSearch;
+
+  /// No description provided for @settingsProviderProgrammaticToolCalling.
+  ///
+  /// In en, this message translates to:
+  /// **'Programmatic tool calling'**
+  String get settingsProviderProgrammaticToolCalling;
+
+  /// No description provided for @settingsProviderDialectOpenAiResponses.
+  ///
+  /// In en, this message translates to:
+  /// **'OpenAI Responses'**
+  String get settingsProviderDialectOpenAiResponses;
+
+  /// No description provided for @settingsProviderDialectDeepSeekResponses.
+  ///
+  /// In en, this message translates to:
+  /// **'DeepSeek Responses'**
+  String get settingsProviderDialectDeepSeekResponses;
+
+  /// No description provided for @settingsEnabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Enabled'**
+  String get settingsEnabled;
+
+  /// No description provided for @settingsDisabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Disabled'**
+  String get settingsDisabled;
+
+  /// No description provided for @settingsProtocolResponses.
+  ///
+  /// In en, this message translates to:
+  /// **'Responses'**
+  String get settingsProtocolResponses;
+
+  /// No description provided for @settingsProtocolChatCompletions.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat Completions'**
+  String get settingsProtocolChatCompletions;
+
+  /// No description provided for @settingsConnectionDefault.
+  ///
+  /// In en, this message translates to:
+  /// **'Default connection'**
+  String get settingsConnectionDefault;
+
+  /// No description provided for @settingsConnectionsSupported.
+  ///
+  /// In en, this message translates to:
+  /// **'Supported connections'**
+  String get settingsConnectionsSupported;
+
+  /// No description provided for @settingsConnectionCurrent.
+  ///
+  /// In en, this message translates to:
+  /// **'Current connection'**
+  String get settingsConnectionCurrent;
+
+  /// No description provided for @settingsConnectionWebSocket.
+  ///
+  /// In en, this message translates to:
+  /// **'WS'**
+  String get settingsConnectionWebSocket;
+
+  /// No description provided for @settingsConnectionHttp.
+  ///
+  /// In en, this message translates to:
+  /// **'HTTP'**
+  String get settingsConnectionHttp;
 
   /// No description provided for @settingsNewProvider.
   ///
@@ -1805,6 +1954,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Add model'**
   String get settingsAddModel;
+
+  /// No description provided for @settingsCustomModelName.
+  ///
+  /// In en, this message translates to:
+  /// **'Custom model'**
+  String get settingsCustomModelName;
 
   /// No description provided for @settingsRemoveModel.
   ///
@@ -2172,6 +2327,126 @@ abstract class AppLocalizations {
   /// **'Choose provider/model defaults for each fixed agent role.'**
   String get settingsRolesSubtitle;
 
+  /// No description provided for @settingsAgentsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Agent profiles'**
+  String get settingsAgentsTitle;
+
+  /// No description provided for @settingsAgentsSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'System profiles are read-only; user profiles are stored in ~/.pure/agents/*.toml.'**
+  String get settingsAgentsSubtitle;
+
+  /// No description provided for @settingsAgentsAdd.
+  ///
+  /// In en, this message translates to:
+  /// **'Add user profile'**
+  String get settingsAgentsAdd;
+
+  /// No description provided for @settingsAgentsBuiltinReadonly.
+  ///
+  /// In en, this message translates to:
+  /// **'Built-in · read-only'**
+  String get settingsAgentsBuiltinReadonly;
+
+  /// No description provided for @settingsAgentsEditTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit'**
+  String get settingsAgentsEditTooltip;
+
+  /// No description provided for @settingsAgentsDialogAddTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Add user agent profile'**
+  String get settingsAgentsDialogAddTitle;
+
+  /// No description provided for @settingsAgentsDialogEditTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit user agent profile'**
+  String get settingsAgentsDialogEditTitle;
+
+  /// No description provided for @settingsAgentsFieldId.
+  ///
+  /// In en, this message translates to:
+  /// **'Agent ID'**
+  String get settingsAgentsFieldId;
+
+  /// No description provided for @settingsAgentsFieldDisplayName.
+  ///
+  /// In en, this message translates to:
+  /// **'Display name'**
+  String get settingsAgentsFieldDisplayName;
+
+  /// No description provided for @settingsAgentsFieldDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Description'**
+  String get settingsAgentsFieldDescription;
+
+  /// No description provided for @settingsAgentsFieldWhenToUse.
+  ///
+  /// In en, this message translates to:
+  /// **'Applicable tasks'**
+  String get settingsAgentsFieldWhenToUse;
+
+  /// No description provided for @settingsAgentsFieldInstructions.
+  ///
+  /// In en, this message translates to:
+  /// **'System instructions'**
+  String get settingsAgentsFieldInstructions;
+
+  /// No description provided for @settingsAgentsFieldProvider.
+  ///
+  /// In en, this message translates to:
+  /// **'Provider ID'**
+  String get settingsAgentsFieldProvider;
+
+  /// No description provided for @settingsAgentsFieldModel.
+  ///
+  /// In en, this message translates to:
+  /// **'Model'**
+  String get settingsAgentsFieldModel;
+
+  /// No description provided for @settingsAgentsFieldEffort.
+  ///
+  /// In en, this message translates to:
+  /// **'Effort (optional)'**
+  String get settingsAgentsFieldEffort;
+
+  /// No description provided for @settingsAgentsEnabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Enabled'**
+  String get settingsAgentsEnabled;
+
+  /// No description provided for @settingsAgentsEnabledSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Disabled profiles remain in TOML but are removed from the Agent tool catalog.'**
+  String get settingsAgentsEnabledSubtitle;
+
+  /// No description provided for @settingsAgentsCancel.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel'**
+  String get settingsAgentsCancel;
+
+  /// No description provided for @settingsAgentsSave.
+  ///
+  /// In en, this message translates to:
+  /// **'Save TOML atomically'**
+  String get settingsAgentsSave;
+
+  /// No description provided for @settingsRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Required'**
+  String get settingsRequired;
+
   /// No description provided for @settingsRoleExplorerDescription.
   ///
   /// In en, this message translates to:
@@ -2262,6 +2537,54 @@ abstract class AppLocalizations {
   /// **'Endpoint'**
   String get settingsEndpoint;
 
+  /// No description provided for @settingsMcpStatusDisabled.
+  ///
+  /// In en, this message translates to:
+  /// **'disabled'**
+  String get settingsMcpStatusDisabled;
+
+  /// No description provided for @settingsMcpStatusMissingCredential.
+  ///
+  /// In en, this message translates to:
+  /// **'missingCredential'**
+  String get settingsMcpStatusMissingCredential;
+
+  /// No description provided for @settingsMcpStatusChecking.
+  ///
+  /// In en, this message translates to:
+  /// **'checking'**
+  String get settingsMcpStatusChecking;
+
+  /// No description provided for @settingsMcpStatusAvailable.
+  ///
+  /// In en, this message translates to:
+  /// **'available'**
+  String get settingsMcpStatusAvailable;
+
+  /// No description provided for @settingsMcpStatusUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'unavailable'**
+  String get settingsMcpStatusUnavailable;
+
+  /// No description provided for @settingsMcpHealthCheckPending.
+  ///
+  /// In en, this message translates to:
+  /// **'MCP health check is pending'**
+  String get settingsMcpHealthCheckPending;
+
+  /// No description provided for @settingsMcpDisabledMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'MCP server is disabled in configuration'**
+  String get settingsMcpDisabledMessage;
+
+  /// No description provided for @settingsMcpMissingCredentialMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'MCP server credential is not configured'**
+  String get settingsMcpMissingCredentialMessage;
+
   /// No description provided for @settingsMcpEmptyTitle.
   ///
   /// In en, this message translates to:
@@ -2327,6 +2650,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Busy'**
   String get settingsLspActivityBusy;
+
+  /// No description provided for @settingsLspStatusChecking.
+  ///
+  /// In en, this message translates to:
+  /// **'checking'**
+  String get settingsLspStatusChecking;
+
+  /// No description provided for @settingsLspStatusAvailable.
+  ///
+  /// In en, this message translates to:
+  /// **'available'**
+  String get settingsLspStatusAvailable;
+
+  /// No description provided for @settingsLspStatusUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'unavailable'**
+  String get settingsLspStatusUnavailable;
+
+  /// No description provided for @settingsLspStatusDisabled.
+  ///
+  /// In en, this message translates to:
+  /// **'disabled'**
+  String get settingsLspStatusDisabled;
 
   /// No description provided for @settingsLspEmptyTitle.
   ///
@@ -2827,18 +3174,6 @@ class _AppLocalizationsDelegate
 }
 
 AppLocalizations lookupAppLocalizations(Locale locale) {
-  // Lookup logic when language+script codes are specified.
-  switch (locale.languageCode) {
-    case 'zh':
-      {
-        switch (locale.scriptCode) {
-          case 'Hans':
-            return AppLocalizationsZhHans();
-        }
-        break;
-      }
-  }
-
   // Lookup logic when only language code is specified.
   switch (locale.languageCode) {
     case 'en':

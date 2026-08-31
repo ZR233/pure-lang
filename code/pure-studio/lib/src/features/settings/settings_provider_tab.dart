@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
+import '../../l10n/studio_l10n.dart';
 import 'provider_usage_controller.dart';
 import 'settings_provider_drafts.dart';
 import 'settings_provider_editor.dart';
@@ -87,7 +88,7 @@ class ProvidersTabState extends ConsumerState<ProvidersTab> {
               onSave: _saveDraft,
               onChangeTemplate: _changeDraftTemplate,
               onUpdate: _updateDraft,
-              onAddCustomModel: _addCustomModel,
+              onAddCustomModel: () => _addCustomModel(context),
               onUpdateCustomModel: _updateCustomModel,
               onRemoveCustomModel: _removeCustomModel,
             ),
@@ -176,7 +177,9 @@ class ProvidersTabState extends ConsumerState<ProvidersTab> {
         .providerCatalog;
     final template = catalog?.presets.firstOrNull;
     if (catalog == null || template == null) {
-      setState(() => _draftError = 'Provider catalog is unavailable.');
+      setState(
+        () => _draftError = context.l10n.settingsProviderCatalogUnavailable,
+      );
       return;
     }
     final id = _suggestProviderId(template.id);
@@ -186,7 +189,9 @@ class ProvidersTabState extends ConsumerState<ProvidersTab> {
       providerId: id,
     );
     if (draft == null) {
-      setState(() => _draftError = 'Provider preset is unavailable.');
+      setState(
+        () => _draftError = context.l10n.settingsProviderPresetUnavailable,
+      );
       return;
     }
     setState(() {
@@ -243,7 +248,7 @@ class ProvidersTabState extends ConsumerState<ProvidersTab> {
     );
   }
 
-  void _addCustomModel() {
+  void _addCustomModel(BuildContext context) {
     _updateDraft((provider) {
       final existing = provider.allModels.map((model) => model.slug).toSet();
       var slug = 'custom-model';
@@ -252,7 +257,7 @@ class ProvidersTabState extends ConsumerState<ProvidersTab> {
       }
       final model = ProviderModelView(
         slug: slug,
-        displayName: 'Custom model',
+        displayName: context.l10n.settingsCustomModelName,
         reasoningEfforts: const [],
         wireProtocol: 'chat_completions',
         supportedConnectionModes: const ['http'],

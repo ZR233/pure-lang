@@ -471,7 +471,7 @@ class _ToolGroupItemRow extends StatelessWidget {
       tool?.denialReason,
       item.part.error,
       _resultDetail(item, tool),
-      _attachmentDetail(tool),
+      _attachmentDetail(context, tool),
     ].whereType<String>().where((value) => value.trim().isNotEmpty).toList();
     return Padding(
       key: tool?.name == 'view_image'
@@ -548,10 +548,12 @@ class _ToolGroupItemRow extends StatelessWidget {
     return result;
   }
 
-  String? _attachmentDetail(TimelineToolPart? tool) {
+  String? _attachmentDetail(BuildContext context, TimelineToolPart? tool) {
     final attachments = tool?.attachments ?? const <ThreadAttachmentView>[];
     if (attachments.isEmpty) return null;
-    return attachments.map(_attachmentDescription).join('\n');
+    return attachments
+        .map((attachment) => _attachmentDescription(context, attachment))
+        .join('\n');
   }
 
   String _workflowStateDetail(String result) {

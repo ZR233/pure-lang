@@ -86,7 +86,7 @@ class ProviderDetails extends StatelessWidget {
             SettingsInfoPill(
               icon: Icons.hub_outlined,
               label: provider.allModels
-                  .map((model) => _protocolLabel(model.wireProtocol))
+                  .map((model) => _protocolLabel(context, model.wireProtocol))
                   .toSet()
                   .join(' / '),
             ),
@@ -267,6 +267,8 @@ class ProviderEditor extends StatelessWidget {
             SettingsTextEdit(
               label: provider.hasBearerToken
                   ? context.l10n.settingsApiKeyKeepCurrent
+                  : provider.credentialLabel == 'API Key'
+                  ? context.l10n.settingsApiKey
                   : provider.credentialLabel,
               value: provider.bearerToken,
               enabled: !saving,
@@ -314,20 +316,24 @@ class ProviderEditor extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         SettingsSectionPanel(
-          title: 'Service capabilities',
+          title: context.l10n.settingsProviderCapabilitiesTitle,
           children: [
             DropdownButtonFormField<String>(
               initialValue: provider.capabilitySource,
-              decoration: const InputDecoration(labelText: 'Capability source'),
+              decoration: InputDecoration(
+                labelText: context.l10n.settingsProviderCapabilitySource,
+              ),
               items: [
                 if (preset != null)
-                  const DropdownMenuItem(
+                  DropdownMenuItem(
                     value: 'preset_defaults',
-                    child: Text('Follow preset defaults'),
+                    child: Text(
+                      context.l10n.settingsProviderCapabilityPresetDefaults,
+                    ),
                   ),
-                const DropdownMenuItem(
+                DropdownMenuItem(
                   value: 'explicit',
-                  child: Text('Explicit override'),
+                  child: Text(context.l10n.settingsProviderCapabilityExplicit),
                 ),
               ],
               onChanged: saving
@@ -362,12 +368,18 @@ class ProviderEditor extends StatelessWidget {
                 children: [
                   DropdownButtonFormField<bool>(
                     initialValue: provider.hostedWebSearch,
-                    decoration: const InputDecoration(
-                      labelText: 'Hosted Web Search',
+                    decoration: InputDecoration(
+                      labelText: context.l10n.settingsProviderHostedWebSearch,
                     ),
-                    items: const [
-                      DropdownMenuItem(value: false, child: Text('Disabled')),
-                      DropdownMenuItem(value: true, child: Text('Enabled')),
+                    items: [
+                      DropdownMenuItem(
+                        value: false,
+                        child: Text(context.l10n.settingsDisabled),
+                      ),
+                      DropdownMenuItem(
+                        value: true,
+                        child: Text(context.l10n.settingsEnabled),
+                      ),
                     ],
                     onChanged: saving
                         ? null
@@ -381,17 +393,22 @@ class ProviderEditor extends StatelessWidget {
                   ),
                   DropdownButtonFormField<String>(
                     initialValue: provider.hostedWebSearchDialect,
-                    decoration: const InputDecoration(
-                      labelText: 'Hosted Web Search dialect',
+                    decoration: InputDecoration(
+                      labelText:
+                          context.l10n.settingsProviderHostedWebSearchDialect,
                     ),
-                    items: const [
+                    items: [
                       DropdownMenuItem(
                         value: 'open_ai_responses',
-                        child: Text('OpenAI Responses'),
+                        child: Text(
+                          _webSearchDialectLabel(context, 'open_ai_responses'),
+                        ),
                       ),
                       DropdownMenuItem(
                         value: 'deepseek_responses',
-                        child: Text('DeepSeek Responses'),
+                        child: Text(
+                          _webSearchDialectLabel(context, 'deepseek_responses'),
+                        ),
                       ),
                     ],
                     onChanged: saving
@@ -408,16 +425,20 @@ class ProviderEditor extends StatelessWidget {
                   ),
                   DropdownButtonFormField<String>(
                     initialValue: provider.standaloneWebSearch,
-                    decoration: const InputDecoration(
-                      labelText: 'Standalone Web Search',
+                    decoration: InputDecoration(
+                      labelText:
+                          context.l10n.settingsProviderStandaloneWebSearch,
                     ),
                     items: [
-                      const DropdownMenuItem(
+                      DropdownMenuItem(
                         value: '',
-                        child: Text('Disabled'),
+                        child: Text(context.l10n.settingsDisabled),
                       ),
                       for (final dialect in standaloneDialects)
-                        DropdownMenuItem(value: dialect, child: Text(dialect)),
+                        DropdownMenuItem(
+                          value: dialect,
+                          child: Text(_webSearchDialectLabel(context, dialect)),
+                        ),
                     ],
                     onChanged: saving
                         ? null
@@ -428,12 +449,19 @@ class ProviderEditor extends StatelessWidget {
                   ),
                   DropdownButtonFormField<bool>(
                     initialValue: provider.responsesProgrammaticToolCalling,
-                    decoration: const InputDecoration(
-                      labelText: 'Programmatic Tool Calling',
+                    decoration: InputDecoration(
+                      labelText:
+                          context.l10n.settingsProviderProgrammaticToolCalling,
                     ),
-                    items: const [
-                      DropdownMenuItem(value: false, child: Text('Disabled')),
-                      DropdownMenuItem(value: true, child: Text('Enabled')),
+                    items: [
+                      DropdownMenuItem(
+                        value: false,
+                        child: Text(context.l10n.settingsDisabled),
+                      ),
+                      DropdownMenuItem(
+                        value: true,
+                        child: Text(context.l10n.settingsEnabled),
+                      ),
                     ],
                     onChanged: saving
                         ? null
@@ -451,20 +479,25 @@ class ProviderEditor extends StatelessWidget {
               )
             else ...[
               SettingsReadonlyField(
-                label: 'Hosted Web Search',
-                value: provider.hostedWebSearch ? 'Enabled' : 'Disabled',
+                label: context.l10n.settingsProviderHostedWebSearch,
+                value: provider.hostedWebSearch
+                    ? context.l10n.settingsEnabled
+                    : context.l10n.settingsDisabled,
               ),
               SettingsReadonlyField(
-                label: 'Programmatic Tool Calling',
+                label: context.l10n.settingsProviderProgrammaticToolCalling,
                 value: provider.responsesProgrammaticToolCalling
-                    ? 'Enabled'
-                    : 'Disabled',
+                    ? context.l10n.settingsEnabled
+                    : context.l10n.settingsDisabled,
               ),
               SettingsReadonlyField(
-                label: 'Standalone Web Search',
+                label: context.l10n.settingsProviderStandaloneWebSearch,
                 value: provider.standaloneWebSearch.isEmpty
-                    ? 'Disabled'
-                    : provider.standaloneWebSearch,
+                    ? context.l10n.settingsDisabled
+                    : _webSearchDialectLabel(
+                        context,
+                        provider.standaloneWebSearch,
+                      ),
               ),
             ],
           ],
@@ -598,14 +631,16 @@ class _CustomModelEditor extends StatelessWidget {
                     decoration: InputDecoration(
                       labelText: context.l10n.settingsProtocolType,
                     ),
-                    items: const [
+                    items: [
                       DropdownMenuItem(
                         value: 'responses',
-                        child: Text('Responses'),
+                        child: Text(context.l10n.settingsProtocolResponses),
                       ),
                       DropdownMenuItem(
                         value: 'chat_completions',
-                        child: Text('Chat Completions'),
+                        child: Text(
+                          context.l10n.settingsProtocolChatCompletions,
+                        ),
                       ),
                     ],
                     onChanged: enabled
@@ -638,14 +673,14 @@ class _CustomModelEditor extends StatelessWidget {
                   ),
                   DropdownButtonFormField<String>(
                     initialValue: model.defaultConnectionMode,
-                    decoration: const InputDecoration(
-                      labelText: 'Default connection',
+                    decoration: InputDecoration(
+                      labelText: context.l10n.settingsConnectionDefault,
                     ),
                     items: [
                       for (final mode in model.supportedConnectionModes)
                         DropdownMenuItem(
                           value: mode,
-                          child: Text(_connectionLabel(mode)),
+                          child: Text(_connectionLabel(context, mode)),
                         ),
                     ],
                     onChanged: enabled
@@ -664,7 +699,7 @@ class _CustomModelEditor extends StatelessWidget {
               Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  'Supported connections',
+                  context.l10n.settingsConnectionsSupported,
                   style: Theme.of(context).textTheme.labelLarge,
                 ),
               ),
@@ -672,9 +707,15 @@ class _CustomModelEditor extends StatelessWidget {
               Align(
                 alignment: Alignment.centerLeft,
                 child: SegmentedButton<String>(
-                  segments: const [
-                    ButtonSegment(value: 'web_socket', label: Text('WS')),
-                    ButtonSegment(value: 'http', label: Text('HTTP')),
+                  segments: [
+                    ButtonSegment(
+                      value: 'web_socket',
+                      label: Text(context.l10n.settingsConnectionWebSocket),
+                    ),
+                    ButtonSegment(
+                      value: 'http',
+                      label: Text(context.l10n.settingsConnectionHttp),
+                    ),
                   ],
                   selected: model.supportedConnectionModes.toSet(),
                   multiSelectionEnabled: true,
@@ -712,14 +753,14 @@ class _CustomModelEditor extends StatelessWidget {
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
                   initialValue: model.connectionMode,
-                  decoration: const InputDecoration(
-                    labelText: 'Current connection',
+                  decoration: InputDecoration(
+                    labelText: context.l10n.settingsConnectionCurrent,
                   ),
                   items: [
                     for (final mode in model.supportedConnectionModes)
                       DropdownMenuItem(
                         value: mode,
-                        child: Text(_connectionLabel(mode)),
+                        child: Text(_connectionLabel(context, mode)),
                       ),
                   ],
                   onChanged: enabled
@@ -795,7 +836,7 @@ class _ModelReadout extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  '${_protocolLabel(model.wireProtocol)} · ${_connectionLabel(model.connectionMode)}',
+                  '${_protocolLabel(context, model.wireProtocol)} · ${_connectionLabel(context, model.connectionMode)}',
                   style: context.text.labelSmall?.copyWith(
                     color: context.studioInkSoft,
                   ),
@@ -866,7 +907,7 @@ class _ModelReadout extends StatelessWidget {
                           model.slug,
                           mode,
                         ),
-                        child: Text(_connectionLabel(mode)),
+                        child: Text(_connectionLabel(context, mode)),
                       ),
                     ),
                 ],
@@ -903,14 +944,24 @@ String _modelModalityLabel(ModelModalityView modality) => switch (modality) {
   ModelModalityView.file => '文件',
 };
 
-String _protocolLabel(String protocol) => switch (protocol) {
-  'responses' => 'Responses',
-  'chat_completions' => 'Chat Completions',
-  _ => protocol,
+String _protocolLabel(BuildContext context, String protocol) =>
+    switch (protocol) {
+      'responses' => context.l10n.settingsProtocolResponses,
+      'chat_completions' => context.l10n.settingsProtocolChatCompletions,
+      _ => protocol,
+    };
+
+String _connectionLabel(BuildContext context, String mode) => switch (mode) {
+  'web_socket' => context.l10n.settingsConnectionWebSocket,
+  'http' => context.l10n.settingsConnectionHttp,
+  _ => mode,
 };
 
-String _connectionLabel(String mode) => switch (mode) {
-  'web_socket' => 'WS',
-  'http' => 'HTTP',
-  _ => mode,
+String _webSearchDialectLabel(
+  BuildContext context,
+  String dialect,
+) => switch (dialect) {
+  'open_ai_responses' => context.l10n.settingsProviderDialectOpenAiResponses,
+  'deepseek_responses' => context.l10n.settingsProviderDialectDeepSeekResponses,
+  _ => dialect,
 };

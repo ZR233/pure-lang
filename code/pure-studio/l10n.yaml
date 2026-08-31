@@ -7,4 +7,3 @@ nullable-getter: false
 preferred-supported-locales:
   - en
   - zh
-  - zh_Hans

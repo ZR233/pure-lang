@@ -47,6 +47,9 @@ class _ToolApprovalDockState extends ConsumerState<ToolApprovalDock> {
   Widget build(BuildContext context) {
     final payload = widget.payload;
     final arguments = payload.formattedArguments;
+    final toolName = payload.toolName.isEmpty
+        ? context.l10n.interactionToolApprovalFallback
+        : payload.toolName;
     return InteractionDockShell(
       kind: InteractionDockKind.permission,
       trailing: widget.trailing,
@@ -81,7 +84,7 @@ class _ToolApprovalDockState extends ConsumerState<ToolApprovalDock> {
             spacing: 8,
             runSpacing: 8,
             children: [
-              InfoChip(icon: Icons.build_outlined, label: payload.toolName),
+              InfoChip(icon: Icons.build_outlined, label: toolName),
               if (payload.workingDirectory.isNotEmpty)
                 InfoChip(
                   icon: Icons.folder_outlined,

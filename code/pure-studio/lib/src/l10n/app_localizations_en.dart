@@ -168,6 +168,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsRolesTab => 'Roles';
 
   @override
+  String get settingsAgentsTab => 'Agents';
+
+  @override
   String get settingsMcpTab => 'MCP';
 
   @override
@@ -589,10 +592,16 @@ class AppLocalizationsEn extends AppLocalizations {
       'Open a project or start a session to begin.';
 
   @override
+  String get workflowHistoryTitle => 'History';
+
+  @override
   String get timelineExternalLinkOpenFailed => 'Unable to open this link.';
 
   @override
   String get timelineAttachment => 'Attachment';
+
+  @override
+  String get timelineImageFallback => 'Image';
 
   @override
   String get timelineImageLoadFailed => 'Unable to load this image.';
@@ -822,6 +831,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get interactionPermissionTitle => 'Permission needed';
 
   @override
+  String get interactionToolApprovalFallback => 'Tool approval';
+
+  @override
   String get interactionPermissionSubtitle => 'Pure wants to run a tool call';
 
   @override
@@ -913,6 +925,14 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsNoProviderSelected => 'No provider selected';
 
   @override
+  String get settingsProviderCatalogUnavailable =>
+      'Provider catalog is unavailable.';
+
+  @override
+  String get settingsProviderPresetUnavailable =>
+      'Provider preset is unavailable.';
+
+  @override
   String get settingsProviderTitle => 'Provider';
 
   @override
@@ -926,6 +946,66 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsProviderCustomModelsTitle => 'Custom models';
+
+  @override
+  String get settingsProviderCapabilitiesTitle => 'Service capabilities';
+
+  @override
+  String get settingsProviderCapabilitySource => 'Capability source';
+
+  @override
+  String get settingsProviderCapabilityPresetDefaults =>
+      'Follow preset defaults';
+
+  @override
+  String get settingsProviderCapabilityExplicit => 'Explicit override';
+
+  @override
+  String get settingsProviderHostedWebSearch => 'Hosted web search';
+
+  @override
+  String get settingsProviderHostedWebSearchDialect =>
+      'Hosted web search dialect';
+
+  @override
+  String get settingsProviderStandaloneWebSearch => 'Standalone web search';
+
+  @override
+  String get settingsProviderProgrammaticToolCalling =>
+      'Programmatic tool calling';
+
+  @override
+  String get settingsProviderDialectOpenAiResponses => 'OpenAI Responses';
+
+  @override
+  String get settingsProviderDialectDeepSeekResponses => 'DeepSeek Responses';
+
+  @override
+  String get settingsEnabled => 'Enabled';
+
+  @override
+  String get settingsDisabled => 'Disabled';
+
+  @override
+  String get settingsProtocolResponses => 'Responses';
+
+  @override
+  String get settingsProtocolChatCompletions => 'Chat Completions';
+
+  @override
+  String get settingsConnectionDefault => 'Default connection';
+
+  @override
+  String get settingsConnectionsSupported => 'Supported connections';
+
+  @override
+  String get settingsConnectionCurrent => 'Current connection';
+
+  @override
+  String get settingsConnectionWebSocket => 'WS';
+
+  @override
+  String get settingsConnectionHttp => 'HTTP';
 
   @override
   String get settingsNewProvider => 'New provider';
@@ -981,6 +1061,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsAddModel => 'Add model';
+
+  @override
+  String get settingsCustomModelName => 'Custom model';
 
   @override
   String get settingsRemoveModel => 'Remove model';
@@ -1191,6 +1274,68 @@ class AppLocalizationsEn extends AppLocalizations {
       'Choose provider/model defaults for each fixed agent role.';
 
   @override
+  String get settingsAgentsTitle => 'Agent profiles';
+
+  @override
+  String get settingsAgentsSubtitle =>
+      'System profiles are read-only; user profiles are stored in ~/.pure/agents/*.toml.';
+
+  @override
+  String get settingsAgentsAdd => 'Add user profile';
+
+  @override
+  String get settingsAgentsBuiltinReadonly => 'Built-in · read-only';
+
+  @override
+  String get settingsAgentsEditTooltip => 'Edit';
+
+  @override
+  String get settingsAgentsDialogAddTitle => 'Add user agent profile';
+
+  @override
+  String get settingsAgentsDialogEditTitle => 'Edit user agent profile';
+
+  @override
+  String get settingsAgentsFieldId => 'Agent ID';
+
+  @override
+  String get settingsAgentsFieldDisplayName => 'Display name';
+
+  @override
+  String get settingsAgentsFieldDescription => 'Description';
+
+  @override
+  String get settingsAgentsFieldWhenToUse => 'Applicable tasks';
+
+  @override
+  String get settingsAgentsFieldInstructions => 'System instructions';
+
+  @override
+  String get settingsAgentsFieldProvider => 'Provider ID';
+
+  @override
+  String get settingsAgentsFieldModel => 'Model';
+
+  @override
+  String get settingsAgentsFieldEffort => 'Effort (optional)';
+
+  @override
+  String get settingsAgentsEnabled => 'Enabled';
+
+  @override
+  String get settingsAgentsEnabledSubtitle =>
+      'Disabled profiles remain in TOML but are removed from the Agent tool catalog.';
+
+  @override
+  String get settingsAgentsCancel => 'Cancel';
+
+  @override
+  String get settingsAgentsSave => 'Save TOML atomically';
+
+  @override
+  String get settingsRequired => 'Required';
+
+  @override
   String get settingsRoleExplorerDescription =>
       'Explore code and collect context.';
 
@@ -1241,6 +1386,32 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsEndpoint => 'Endpoint';
 
   @override
+  String get settingsMcpStatusDisabled => 'disabled';
+
+  @override
+  String get settingsMcpStatusMissingCredential => 'missingCredential';
+
+  @override
+  String get settingsMcpStatusChecking => 'checking';
+
+  @override
+  String get settingsMcpStatusAvailable => 'available';
+
+  @override
+  String get settingsMcpStatusUnavailable => 'unavailable';
+
+  @override
+  String get settingsMcpHealthCheckPending => 'MCP health check is pending';
+
+  @override
+  String get settingsMcpDisabledMessage =>
+      'MCP server is disabled in configuration';
+
+  @override
+  String get settingsMcpMissingCredentialMessage =>
+      'MCP server credential is not configured';
+
+  @override
   String get settingsMcpEmptyTitle => 'No MCP servers';
 
   @override
@@ -1274,6 +1445,18 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsLspActivityBusy => 'Busy';
+
+  @override
+  String get settingsLspStatusChecking => 'checking';
+
+  @override
+  String get settingsLspStatusAvailable => 'available';
+
+  @override
+  String get settingsLspStatusUnavailable => 'unavailable';
+
+  @override
+  String get settingsLspStatusDisabled => 'disabled';
 
   @override
   String get settingsLspEmptyTitle => 'No language servers';

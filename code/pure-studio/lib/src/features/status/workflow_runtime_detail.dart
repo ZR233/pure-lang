@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme/studio_tokens.dart';
 import '../../domain/models/studio_models.dart';
+import '../../l10n/studio_l10n.dart';
 import 'status_detail_popover.dart';
 
 /// 展示任意 Mode Skill 编译出的阶段图与 canonical 转换历史。
@@ -41,7 +42,10 @@ class WorkflowRuntimeDetail extends StatelessWidget {
           ),
         if (run.history.isNotEmpty) ...[
           const SizedBox(height: 12),
-          Text('History', style: Theme.of(context).textTheme.titleSmall),
+          Text(
+            context.l10n.workflowHistoryTitle,
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
           const SizedBox(height: 6),
           for (final entry in run.history)
             ListTile(

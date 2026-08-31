@@ -231,7 +231,7 @@ class _ThreadImageThumbnailState extends ConsumerState<_ThreadImageThumbnail> {
     _image ??= _loadImage();
     final size = _toolImagePreviewSize(widget.attachment, widget.compact);
     return Tooltip(
-      message: _attachmentDescription(widget.attachment),
+      message: _attachmentDescription(context, widget.attachment),
       child: InkWell(
         key: StudioDriverKeys.viewImageThumbnail(widget.attachment.id),
         borderRadius: BorderRadius.circular(10),
@@ -338,11 +338,14 @@ Size _toolImagePreviewSize(ThreadAttachmentView attachment, bool compact) {
   return Size(math.max(64, 240 * ratio), 240);
 }
 
-String _attachmentDescription(ThreadAttachmentView attachment) {
+String _attachmentDescription(
+  BuildContext context,
+  ThreadAttachmentView attachment,
+) {
   final dimensions = attachment.width != null && attachment.height != null
       ? ' · ${attachment.width}×${attachment.height}'
       : '';
-  return '${attachment.filename ?? "Image"}$dimensions · ${_formatBytes(attachment.byteSize)}';
+  return '${attachment.filename ?? context.l10n.timelineImageFallback}$dimensions · ${_formatBytes(attachment.byteSize)}';
 }
 
 Future<void> _showStudioImageDialog(

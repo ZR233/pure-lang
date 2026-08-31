@@ -162,11 +162,17 @@ String providerUsageSummary(
     MissingCredentialProviderUsageView() =>
       context.l10n.settingsUsageMissingKey,
     FailedProviderUsageView() => context.l10n.settingsUsageFailed,
-    ReadyProviderUsageView(:final data) => _readyProviderUsageSummary(data),
+    ReadyProviderUsageView(:final data) => _readyProviderUsageSummary(
+      context,
+      data,
+    ),
   };
 }
 
-String _readyProviderUsageSummary(ProviderUsageDataView data) {
+String _readyProviderUsageSummary(
+  BuildContext context,
+  ProviderUsageDataView data,
+) {
   if (data case DeepSeekBalanceProviderUsageView(:final balance)) {
     final primary =
         balance.balances
@@ -174,7 +180,7 @@ String _readyProviderUsageSummary(ProviderUsageDataView data) {
             .firstOrNull ??
         balance.balances.firstOrNull;
     return primary == null
-        ? 'Usage unavailable'
+        ? context.l10n.settingsUsageUnavailable
         : '${primary.currency} ${primary.totalBalance}';
   }
   if (data case ZhipuCodingPlanProviderUsageView(:final codingPlan)) {
@@ -184,7 +190,7 @@ String _readyProviderUsageSummary(ProviderUsageDataView data) {
       return '5h ${formatPercent(quotaRemainingPercent(fiveHour))} · 7d ${formatPercent(quotaRemainingPercent(weekly))}';
     }
   }
-  return 'Usage unavailable';
+  return context.l10n.settingsUsageUnavailable;
 }
 
 String providerUsageMessage(

@@ -55,4 +55,26 @@ void main() {
     expect(context.roleLabel('custom-role'), 'custom-role');
     expect(context.roleLabel('explorer '), '探索者');
   });
+
+  testWidgets('canonical Chinese locale covers recovery and settings labels', (
+    tester,
+  ) async {
+    final context = await pumpContext(tester, const Locale('zh'));
+    expect(context.l10n.configRecoveryMessage, contains('不兼容配置'));
+    expect(
+      context.l10n.configRecoveryBackupPath('/tmp/backup'),
+      '备份位置：/tmp/backup',
+    );
+    expect(context.l10n.configRecoveryDismissTooltip, '关闭配置恢复提示');
+    expect(context.l10n.settingsProviderCapabilitiesTitle, '服务能力');
+    expect(context.l10n.settingsMcpStatusChecking, '检查中');
+  });
+
+  testWidgets('scripted Chinese locale falls back to canonical Chinese table', (
+    tester,
+  ) async {
+    final context = await pumpContext(tester, const Locale('zh', 'Hans'));
+    expect(context.l10n.configRecoveryMessage, contains('不兼容配置'));
+    expect(context.l10n.settingsAgentsTitle, 'Agent 配置');
+  });
 }

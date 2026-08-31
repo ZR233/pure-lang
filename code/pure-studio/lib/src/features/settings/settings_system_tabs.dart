@@ -21,7 +21,7 @@ class RolesTab extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     const roleKeys = ['explorer', 'planner', 'executor', 'reviewer'];
-    final options = _roleModelOptions(providers);
+    final options = _roleModelOptions(context, providers);
     return SettingsPane(
       children: [
         SettingsHeader(
@@ -108,6 +108,7 @@ class RolesTab extends ConsumerWidget {
   }
 
   List<_RoleModelOption> _roleModelOptions(
+    BuildContext context,
     List<ProviderSettingsView> providers,
   ) {
     final options = <_RoleModelOption>[];
@@ -135,8 +136,8 @@ class RolesTab extends ConsumerWidget {
             label: [
               '${provider.name} / ${model.displayName.isEmpty ? model.slug : model.displayName}',
               if (modalities.isNotEmpty) modalities,
-              _roleProtocolLabel(model.wireProtocol),
-              _roleConnectionLabel(model.connectionMode),
+              _roleProtocolLabel(context, model.wireProtocol),
+              _roleConnectionLabel(context, model.connectionMode),
             ].join(' · '),
             efforts: model.reasoningEfforts,
             defaultEffort: model.defaultReasoningEffort.isNotEmpty
@@ -150,17 +151,19 @@ class RolesTab extends ConsumerWidget {
   }
 }
 
-String _roleProtocolLabel(String protocol) => switch (protocol) {
-  'responses' => 'Responses',
-  'chat_completions' => 'Chat Completions',
-  _ => protocol,
-};
+String _roleProtocolLabel(BuildContext context, String protocol) =>
+    switch (protocol) {
+      'responses' => context.l10n.settingsProtocolResponses,
+      'chat_completions' => context.l10n.settingsProtocolChatCompletions,
+      _ => protocol,
+    };
 
-String _roleConnectionLabel(String mode) => switch (mode) {
-  'web_socket' => 'WS',
-  'http' => 'HTTP',
-  _ => mode,
-};
+String _roleConnectionLabel(BuildContext context, String mode) =>
+    switch (mode) {
+      'web_socket' => context.l10n.settingsConnectionWebSocket,
+      'http' => context.l10n.settingsConnectionHttp,
+      _ => mode,
+    };
 
 String _roleModalityLabel(ModelModalityView modality) => switch (modality) {
   ModelModalityView.text => '文本',
@@ -575,11 +578,12 @@ class _McpSettingsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final unavailable = switch (server.state) {
-      McpUnavailableState() => server.state as McpUnavailableState,
-      McpDisabledState() ||
-      McpMissingCredentialState() ||
-      McpCheckingState() ||
+    final unavailableMessage = switch (server.state) {
+      McpDisabledState() => context.l10n.settingsMcpDisabledMessage,
+      McpMissingCredentialState() =>
+        context.l10n.settingsMcpMissingCredentialMessage,
+      McpCheckingState() => context.l10n.settingsMcpHealthCheckPending,
+      McpUnavailableState(:final message) => message,
       McpAvailableState() => null,
     };
     return Padding(
@@ -621,14 +625,14 @@ class _McpSettingsRow extends StatelessWidget {
               ),
               SettingsInfoPill(
                 icon: Icons.circle_outlined,
-                label: _mcpAvailabilityLabel(server.state),
+                label: _mcpAvailabilityLabel(context, server.state),
               ),
             ],
           ),
-          if (unavailable != null) ...[
+          if (unavailableMessage != null) ...[
             const SizedBox(height: 8),
             Text(
-              unavailable.message,
+              unavailableMessage,
               key: StudioDriverKeys.mcpServerError(server.id),
               style: context.text.bodySmall?.copyWith(
                 color: context.colors.error,
@@ -823,7 +827,7 @@ class _LspSettingsRow extends StatelessWidget {
             children: [
               SettingsInfoPill(
                 icon: Icons.circle_outlined,
-                label: _lspAvailabilityLabel(server.state),
+                label: _lspAvailabilityLabel(context, server.state),
               ),
               if (server.state case LspAvailableState(:final diagnosticCount))
                 SettingsInfoPill(
@@ -862,20 +866,23 @@ class _LspSettingsRow extends StatelessWidget {
   }
 }
 
-String _mcpAvailabilityLabel(McpServerState state) => switch (state) {
-  McpDisabledState() => 'disabled',
-  McpMissingCredentialState() => 'missingCredential',
-  McpCheckingState() => 'checking',
-  McpAvailableState() => 'available',
-  McpUnavailableState() => 'unavailable',
-};
+String _mcpAvailabilityLabel(BuildContext context, McpServerState state) =>
+    switch (state) {
+      McpDisabledState() => context.l10n.settingsMcpStatusDisabled,
+      McpMissingCredentialState() =>
+        context.l10n.settingsMcpStatusMissingCredential,
+      McpCheckingState() => context.l10n.settingsMcpStatusChecking,
+      McpAvailableState() => context.l10n.settingsMcpStatusAvailable,
+      McpUnavailableState() => context.l10n.settingsMcpStatusUnavailable,
+    };
 
-String _lspAvailabilityLabel(LspServerState state) => switch (state) {
-  LspCheckingState() => 'checking',
-  LspAvailableState() => 'available',
-  LspUnavailableState() => 'unavailable',
-  LspDisabledState() => 'disabled',
-};
+String _lspAvailabilityLabel(BuildContext context, LspServerState state) =>
+    switch (state) {
+      LspCheckingState() => context.l10n.settingsLspStatusChecking,
+      LspAvailableState() => context.l10n.settingsLspStatusAvailable,
+      LspUnavailableState() => context.l10n.settingsLspStatusUnavailable,
+      LspDisabledState() => context.l10n.settingsLspStatusDisabled,
+    };
 
 String? _lspInformationalMessage(LspServerState state) => switch (state) {
   LspCheckingState(:final message) ||

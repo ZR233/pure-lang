@@ -38,7 +38,7 @@ class InteractionPayloadSnapshot {
         InteractionPayloadSnapshot(
           rawBody: interaction.body,
           summary: interaction.body,
-          toolName: toolName.isEmpty ? interaction.title : toolName,
+          toolName: toolName,
           formattedArguments: _formatJson(arguments),
           workingDirectory: workingDirectory,
           questions: const [],
@@ -46,7 +46,7 @@ class InteractionPayloadSnapshot {
       UnknownInteractionPayload() => InteractionPayloadSnapshot(
         rawBody: interaction.body,
         summary: interaction.body,
-        toolName: interaction.title,
+        toolName: '',
         formattedArguments: '',
         workingDirectory: '',
         questions: const [],

@@ -95,15 +95,13 @@ McpServerSettingsView _mcpSettingsFromFrb(
     endpoint: value.endpoint,
     state: switch (value.configuration) {
       frb.BridgeMcpServerConfiguration.enabled => const McpCheckingState(
-        message: 'MCP health check is pending',
+        message: '',
       ),
       frb.BridgeMcpServerConfiguration.disabled => const McpDisabledState(
-        message: 'MCP server is disabled in configuration',
+        message: '',
       ),
       frb.BridgeMcpServerConfiguration.missingCredential =>
-        const McpMissingCredentialState(
-          message: 'MCP server credential is not configured',
-        ),
+        const McpMissingCredentialState(message: ''),
     },
     sourceKind: value.sourceKind,
     mutationPolicy: value.mutationPolicy,

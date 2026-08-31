@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme/studio_tokens.dart';
 import '../../domain/models/studio_models.dart';
+import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_chrome.dart';
 
 class SettingsHeader extends StatelessWidget {
@@ -256,7 +257,9 @@ class SettingsProviderStatusChip extends StatelessWidget {
     final ready = provider.status == 'ready';
     return StudioPill(
       icon: ready ? Icons.check_circle_outline : Icons.error_outline,
-      label: ready ? 'ready' : 'setup',
+      label: ready
+          ? context.l10n.settingsReadyBadge
+          : context.l10n.settingsSetupBadge,
       backgroundColor: ready
           ? colors.secondaryContainer.withValues(alpha: 0.42)
           : colors.tertiaryContainer.withValues(alpha: 0.38),
