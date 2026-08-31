@@ -59,6 +59,36 @@ async fn apply_patch_rejects_read_only_workspace() {
 }
 
 #[tokio::test]
+async fn apply_patch_enforces_directory_workspace_prefixes() {
+    let root = unique_temp_dir("patch-directory-prefix");
+    tokio::fs::create_dir_all(root.join("allowed"))
+        .await
+        .unwrap();
+    let tool = LocalWorkspaceFileTool::new(
+        WorkspaceFileToolKind::ApplyPatch,
+        directory_workspace(&root, Some(&["allowed"])),
+    );
+    let patch = "*** Begin Patch\n*** Add File: denied.txt\n+denied\n*** End Patch";
+
+    let error = tool
+        .execute(
+            input(serde_json::json!({ "input": patch })),
+            context(&root).await,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("writablePaths"), "{error}");
+    assert!(
+        !tokio::fs::try_exists(root.join("denied.txt"))
+            .await
+            .unwrap()
+    );
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
 async fn apply_patch_context_mismatch_does_not_write() {
     let root = unique_temp_dir("patch-mismatch");
     tokio::fs::create_dir_all(root.join("src")).await.unwrap();

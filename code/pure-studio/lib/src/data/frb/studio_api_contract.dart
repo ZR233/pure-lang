@@ -3,11 +3,19 @@ part of 'studio_api.dart';
 abstract class StudioApi {
   Future<ProviderCatalogView> loadProviderCatalog();
   Future<List<AgentProfileView>> readAgentProfiles();
-  Future<List<AgentProfileView>> setSystemAgentEnabled({
+  Future<SettingsStateSnapshot> setSystemAgentEnabled({
+    required int expectedSettingsRevision,
     required String profileId,
     required bool enabled,
   });
-  Future<List<AgentProfileView>> saveUserAgentProfile(AgentProfileDraft draft);
+  Future<SettingsStateSnapshot> saveUserAgentProfile(
+    int expectedSettingsRevision,
+    AgentProfileDraft draft,
+  );
+  Future<void> cleanupPreservedWorktree({
+    required String childId,
+    required int expectedLeaseRevision,
+  });
   Future<StudioState> readStudioState();
   Future<ThreadDirectoryPage> listThreadsPage({String? cursor, int limit = 50});
   Future<void> activateProject(String projectId);
@@ -268,42 +276,81 @@ class FrbStudioApi implements StudioApi {
             contentHash: profile.contentHash,
             system: profile.system,
             enabled: profile.enabled,
+            workspaceMode: switch (profile.workspaceMode) {
+              frb.BridgeAgentWorkspaceMode.unrestricted =>
+                AgentWorkspaceMode.unrestricted,
+              frb.BridgeAgentWorkspaceMode.directory =>
+                AgentWorkspaceMode.directory,
+              frb.BridgeAgentWorkspaceMode.worktree =>
+                AgentWorkspaceMode.worktree,
+            },
           ),
         )
         .toList(growable: false);
   }
 
   @override
-  Future<List<AgentProfileView>> setSystemAgentEnabled({
+  Future<SettingsStateSnapshot> setSystemAgentEnabled({
+    required int expectedSettingsRevision,
     required String profileId,
     required bool enabled,
   }) async {
     await _ensureReady();
-    await _bridgeCall(
-      () => frb.setSystemAgentEnabled(profileId: profileId, enabled: enabled),
+    return _settingsStateFromFrb(
+      await _bridgeCall(
+        () => frb.setSystemAgentEnabled(
+          expectedSettingsRevision: BigInt.from(expectedSettingsRevision),
+          profileId: profileId,
+          enabled: enabled,
+        ),
+      ),
     );
-    return readAgentProfiles();
   }
 
   @override
-  Future<List<AgentProfileView>> saveUserAgentProfile(
+  Future<SettingsStateSnapshot> saveUserAgentProfile(
+    int expectedSettingsRevision,
     AgentProfileDraft draft,
   ) async {
     await _ensureReady();
-    await _bridgeCall(
-      () => frb.saveUserAgentProfile(
-        profileId: draft.id,
-        enabled: draft.enabled,
-        displayName: draft.displayName,
-        description: draft.description,
-        whenToUse: draft.whenToUse,
-        systemInstructions: draft.systemInstructions,
-        providerId: draft.providerId,
-        model: draft.model,
-        effort: draft.effort,
+    return _settingsStateFromFrb(
+      await _bridgeCall(
+        () => frb.saveUserAgentProfile(
+          expectedSettingsRevision: BigInt.from(expectedSettingsRevision),
+          profileId: draft.id,
+          enabled: draft.enabled,
+          displayName: draft.displayName,
+          description: draft.description,
+          whenToUse: draft.whenToUse,
+          systemInstructions: draft.systemInstructions,
+          providerId: draft.providerId,
+          model: draft.model,
+          effort: draft.effort,
+          workspaceMode: switch (draft.workspaceMode) {
+            AgentWorkspaceMode.unrestricted =>
+              frb.BridgeAgentWorkspaceMode.unrestricted,
+            AgentWorkspaceMode.directory =>
+              frb.BridgeAgentWorkspaceMode.directory,
+            AgentWorkspaceMode.worktree =>
+              frb.BridgeAgentWorkspaceMode.worktree,
+          },
+        ),
       ),
     );
-    return readAgentProfiles();
+  }
+
+  @override
+  Future<void> cleanupPreservedWorktree({
+    required String childId,
+    required int expectedLeaseRevision,
+  }) async {
+    await _ensureReady();
+    await _bridgeCall(
+      () => frb.cleanupPreservedWorktree(
+        childId: childId,
+        expectedLeaseRevision: BigInt.from(expectedLeaseRevision),
+      ),
+    );
   }
 
   @override

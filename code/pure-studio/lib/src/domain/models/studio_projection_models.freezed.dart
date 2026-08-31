@@ -26,16 +26,21 @@ $ShellChromeViewCopyWith<ShellChromeView> get copyWith => _$ShellChromeViewCopyW
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is ShellChromeView&&const DeepCollectionEquality().equals(other.applicationRecoveryIssues, applicationRecoveryIssues)&&(identical(other.configRecoveryNotice, configRecoveryNotice) || other.configRecoveryNotice == configRecoveryNotice)&&(identical(other.persistenceState, persistenceState) || other.persistenceState == persistenceState));
+  final _this = this as ShellChromeView;
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is ShellChromeView&&const DeepCollectionEquality().equals(other.applicationRecoveryIssues, _this.applicationRecoveryIssues)&&(identical(other.configRecoveryNotice, _this.configRecoveryNotice) || other.configRecoveryNotice == _this.configRecoveryNotice)&&(identical(other.persistenceState, _this.persistenceState) || other.persistenceState == _this.persistenceState));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(applicationRecoveryIssues),configRecoveryNotice,persistenceState);
+int get hashCode {
+  final _this = this as ShellChromeView;
+  return Object.hash(runtimeType,const DeepCollectionEquality().hash(_this.applicationRecoveryIssues),_this.configRecoveryNotice,_this.persistenceState);
+}
 
 @override
 String toString() {
-  return 'ShellChromeView(applicationRecoveryIssues: $applicationRecoveryIssues, configRecoveryNotice: $configRecoveryNotice, persistenceState: $persistenceState)';
+  final _this = this as ShellChromeView;
+  return 'ShellChromeView(applicationRecoveryIssues: ${_this.applicationRecoveryIssues}, configRecoveryNotice: ${_this.configRecoveryNotice}, persistenceState: ${_this.persistenceState})';
 }
 
 
@@ -232,16 +237,18 @@ _$ShellChromeViewCopyWith<_ShellChromeView> get copyWith => __$ShellChromeViewCo
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _ShellChromeView&&const DeepCollectionEquality().equals(other._applicationRecoveryIssues, _applicationRecoveryIssues)&&(identical(other.configRecoveryNotice, configRecoveryNotice) || other.configRecoveryNotice == configRecoveryNotice)&&(identical(other.persistenceState, persistenceState) || other.persistenceState == persistenceState));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is _ShellChromeView&&const DeepCollectionEquality().equals(other.applicationRecoveryIssues, _applicationRecoveryIssues)&&(identical(other.configRecoveryNotice, configRecoveryNotice) || other.configRecoveryNotice == configRecoveryNotice)&&(identical(other.persistenceState, persistenceState) || other.persistenceState == persistenceState));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(_applicationRecoveryIssues),configRecoveryNotice,persistenceState);
+int get hashCode {
+    return Object.hash(runtimeType,const DeepCollectionEquality().hash(_applicationRecoveryIssues),configRecoveryNotice,persistenceState);
+}
 
 @override
 String toString() {
-  return 'ShellChromeView(applicationRecoveryIssues: $applicationRecoveryIssues, configRecoveryNotice: $configRecoveryNotice, persistenceState: $persistenceState)';
+    return 'ShellChromeView(applicationRecoveryIssues: $applicationRecoveryIssues, configRecoveryNotice: $configRecoveryNotice, persistenceState: $persistenceState)';
 }
 
 
@@ -295,16 +302,21 @@ $SidebarViewCopyWith<SidebarView> get copyWith => _$SidebarViewCopyWithImpl<Side
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is SidebarView&&const DeepCollectionEquality().equals(other.projects, projects)&&const DeepCollectionEquality().equals(other.rootThreads, rootThreads)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&(identical(other.selectedRootThreadId, selectedRootThreadId) || other.selectedRootThreadId == selectedRootThreadId)&&(identical(other.isBusy, isBusy) || other.isBusy == isBusy)&&const DeepCollectionEquality().equals(other.projectRecoveryIssues, projectRecoveryIssues)&&const DeepCollectionEquality().equals(other.threadRecoveryIssues, threadRecoveryIssues)&&const DeepCollectionEquality().equals(other.modeDisplayNames, modeDisplayNames)&&(identical(other.directoryHasMore, directoryHasMore) || other.directoryHasMore == directoryHasMore)&&(identical(other.directoryIsLoading, directoryIsLoading) || other.directoryIsLoading == directoryIsLoading));
+  final _this = this as SidebarView;
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is SidebarView&&const DeepCollectionEquality().equals(other.projects, _this.projects)&&const DeepCollectionEquality().equals(other.rootThreads, _this.rootThreads)&&(identical(other.selectedProjectId, _this.selectedProjectId) || other.selectedProjectId == _this.selectedProjectId)&&(identical(other.selectedRootThreadId, _this.selectedRootThreadId) || other.selectedRootThreadId == _this.selectedRootThreadId)&&(identical(other.isBusy, _this.isBusy) || other.isBusy == _this.isBusy)&&const DeepCollectionEquality().equals(other.projectRecoveryIssues, _this.projectRecoveryIssues)&&const DeepCollectionEquality().equals(other.threadRecoveryIssues, _this.threadRecoveryIssues)&&const DeepCollectionEquality().equals(other.modeDisplayNames, _this.modeDisplayNames)&&(identical(other.directoryHasMore, _this.directoryHasMore) || other.directoryHasMore == _this.directoryHasMore)&&(identical(other.directoryIsLoading, _this.directoryIsLoading) || other.directoryIsLoading == _this.directoryIsLoading));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(projects),const DeepCollectionEquality().hash(rootThreads),selectedProjectId,selectedRootThreadId,isBusy,const DeepCollectionEquality().hash(projectRecoveryIssues),const DeepCollectionEquality().hash(threadRecoveryIssues),const DeepCollectionEquality().hash(modeDisplayNames),directoryHasMore,directoryIsLoading);
+int get hashCode {
+  final _this = this as SidebarView;
+  return Object.hash(runtimeType,const DeepCollectionEquality().hash(_this.projects),const DeepCollectionEquality().hash(_this.rootThreads),_this.selectedProjectId,_this.selectedRootThreadId,_this.isBusy,const DeepCollectionEquality().hash(_this.projectRecoveryIssues),const DeepCollectionEquality().hash(_this.threadRecoveryIssues),const DeepCollectionEquality().hash(_this.modeDisplayNames),_this.directoryHasMore,_this.directoryIsLoading);
+}
 
 @override
 String toString() {
-  return 'SidebarView(projects: $projects, rootThreads: $rootThreads, selectedProjectId: $selectedProjectId, selectedRootThreadId: $selectedRootThreadId, isBusy: $isBusy, projectRecoveryIssues: $projectRecoveryIssues, threadRecoveryIssues: $threadRecoveryIssues, modeDisplayNames: $modeDisplayNames, directoryHasMore: $directoryHasMore, directoryIsLoading: $directoryIsLoading)';
+  final _this = this as SidebarView;
+  return 'SidebarView(projects: ${_this.projects}, rootThreads: ${_this.rootThreads}, selectedProjectId: ${_this.selectedProjectId}, selectedRootThreadId: ${_this.selectedRootThreadId}, isBusy: ${_this.isBusy}, projectRecoveryIssues: ${_this.projectRecoveryIssues}, threadRecoveryIssues: ${_this.threadRecoveryIssues}, modeDisplayNames: ${_this.modeDisplayNames}, directoryHasMore: ${_this.directoryHasMore}, directoryIsLoading: ${_this.directoryIsLoading})';
 }
 
 
@@ -539,16 +551,18 @@ _$SidebarViewCopyWith<_SidebarView> get copyWith => __$SidebarViewCopyWithImpl<_
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _SidebarView&&const DeepCollectionEquality().equals(other._projects, _projects)&&const DeepCollectionEquality().equals(other._rootThreads, _rootThreads)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&(identical(other.selectedRootThreadId, selectedRootThreadId) || other.selectedRootThreadId == selectedRootThreadId)&&(identical(other.isBusy, isBusy) || other.isBusy == isBusy)&&const DeepCollectionEquality().equals(other._projectRecoveryIssues, _projectRecoveryIssues)&&const DeepCollectionEquality().equals(other._threadRecoveryIssues, _threadRecoveryIssues)&&const DeepCollectionEquality().equals(other._modeDisplayNames, _modeDisplayNames)&&(identical(other.directoryHasMore, directoryHasMore) || other.directoryHasMore == directoryHasMore)&&(identical(other.directoryIsLoading, directoryIsLoading) || other.directoryIsLoading == directoryIsLoading));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is _SidebarView&&const DeepCollectionEquality().equals(other.projects, _projects)&&const DeepCollectionEquality().equals(other.rootThreads, _rootThreads)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&(identical(other.selectedRootThreadId, selectedRootThreadId) || other.selectedRootThreadId == selectedRootThreadId)&&(identical(other.isBusy, isBusy) || other.isBusy == isBusy)&&const DeepCollectionEquality().equals(other.projectRecoveryIssues, _projectRecoveryIssues)&&const DeepCollectionEquality().equals(other.threadRecoveryIssues, _threadRecoveryIssues)&&const DeepCollectionEquality().equals(other.modeDisplayNames, _modeDisplayNames)&&(identical(other.directoryHasMore, directoryHasMore) || other.directoryHasMore == directoryHasMore)&&(identical(other.directoryIsLoading, directoryIsLoading) || other.directoryIsLoading == directoryIsLoading));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(_projects),const DeepCollectionEquality().hash(_rootThreads),selectedProjectId,selectedRootThreadId,isBusy,const DeepCollectionEquality().hash(_projectRecoveryIssues),const DeepCollectionEquality().hash(_threadRecoveryIssues),const DeepCollectionEquality().hash(_modeDisplayNames),directoryHasMore,directoryIsLoading);
+int get hashCode {
+    return Object.hash(runtimeType,const DeepCollectionEquality().hash(_projects),const DeepCollectionEquality().hash(_rootThreads),selectedProjectId,selectedRootThreadId,isBusy,const DeepCollectionEquality().hash(_projectRecoveryIssues),const DeepCollectionEquality().hash(_threadRecoveryIssues),const DeepCollectionEquality().hash(_modeDisplayNames),directoryHasMore,directoryIsLoading);
+}
 
 @override
 String toString() {
-  return 'SidebarView(projects: $projects, rootThreads: $rootThreads, selectedProjectId: $selectedProjectId, selectedRootThreadId: $selectedRootThreadId, isBusy: $isBusy, projectRecoveryIssues: $projectRecoveryIssues, threadRecoveryIssues: $threadRecoveryIssues, modeDisplayNames: $modeDisplayNames, directoryHasMore: $directoryHasMore, directoryIsLoading: $directoryIsLoading)';
+    return 'SidebarView(projects: $projects, rootThreads: $rootThreads, selectedProjectId: $selectedProjectId, selectedRootThreadId: $selectedRootThreadId, isBusy: $isBusy, projectRecoveryIssues: $projectRecoveryIssues, threadRecoveryIssues: $threadRecoveryIssues, modeDisplayNames: $modeDisplayNames, directoryHasMore: $directoryHasMore, directoryIsLoading: $directoryIsLoading)';
 }
 
 
@@ -609,16 +623,21 @@ $HeaderViewCopyWith<HeaderView> get copyWith => _$HeaderViewCopyWithImpl<HeaderV
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is HeaderView&&(identical(other.selectedRootThread, selectedRootThread) || other.selectedRootThread == selectedRootThread)&&(identical(other.selectedProject, selectedProject) || other.selectedProject == selectedProject)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&const DeepCollectionEquality().equals(other.workspaceThreads, workspaceThreads)&&const DeepCollectionEquality().equals(other.agents, agents)&&(identical(other.selectedThreadId, selectedThreadId) || other.selectedThreadId == selectedThreadId)&&(identical(other.runtime, runtime) || other.runtime == runtime)&&(identical(other.sessionCost, sessionCost) || other.sessionCost == sessionCost)&&const DeepCollectionEquality().equals(other.pendingInteractions, pendingInteractions));
+  final _this = this as HeaderView;
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is HeaderView&&(identical(other.selectedRootThread, _this.selectedRootThread) || other.selectedRootThread == _this.selectedRootThread)&&(identical(other.selectedProject, _this.selectedProject) || other.selectedProject == _this.selectedProject)&&(identical(other.selectedProjectId, _this.selectedProjectId) || other.selectedProjectId == _this.selectedProjectId)&&const DeepCollectionEquality().equals(other.workspaceThreads, _this.workspaceThreads)&&const DeepCollectionEquality().equals(other.agents, _this.agents)&&(identical(other.selectedThreadId, _this.selectedThreadId) || other.selectedThreadId == _this.selectedThreadId)&&(identical(other.runtime, _this.runtime) || other.runtime == _this.runtime)&&(identical(other.sessionCost, _this.sessionCost) || other.sessionCost == _this.sessionCost)&&const DeepCollectionEquality().equals(other.pendingInteractions, _this.pendingInteractions));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,selectedRootThread,selectedProject,selectedProjectId,const DeepCollectionEquality().hash(workspaceThreads),const DeepCollectionEquality().hash(agents),selectedThreadId,runtime,sessionCost,const DeepCollectionEquality().hash(pendingInteractions));
+int get hashCode {
+  final _this = this as HeaderView;
+  return Object.hash(runtimeType,_this.selectedRootThread,_this.selectedProject,_this.selectedProjectId,const DeepCollectionEquality().hash(_this.workspaceThreads),const DeepCollectionEquality().hash(_this.agents),_this.selectedThreadId,_this.runtime,_this.sessionCost,const DeepCollectionEquality().hash(_this.pendingInteractions));
+}
 
 @override
 String toString() {
-  return 'HeaderView(selectedRootThread: $selectedRootThread, selectedProject: $selectedProject, selectedProjectId: $selectedProjectId, workspaceThreads: $workspaceThreads, agents: $agents, selectedThreadId: $selectedThreadId, runtime: $runtime, sessionCost: $sessionCost, pendingInteractions: $pendingInteractions)';
+  final _this = this as HeaderView;
+  return 'HeaderView(selectedRootThread: ${_this.selectedRootThread}, selectedProject: ${_this.selectedProject}, selectedProjectId: ${_this.selectedProjectId}, workspaceThreads: ${_this.workspaceThreads}, agents: ${_this.agents}, selectedThreadId: ${_this.selectedThreadId}, runtime: ${_this.runtime}, sessionCost: ${_this.sessionCost}, pendingInteractions: ${_this.pendingInteractions})';
 }
 
 
@@ -839,16 +858,18 @@ _$HeaderViewCopyWith<_HeaderView> get copyWith => __$HeaderViewCopyWithImpl<_Hea
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _HeaderView&&(identical(other.selectedRootThread, selectedRootThread) || other.selectedRootThread == selectedRootThread)&&(identical(other.selectedProject, selectedProject) || other.selectedProject == selectedProject)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&const DeepCollectionEquality().equals(other._workspaceThreads, _workspaceThreads)&&const DeepCollectionEquality().equals(other._agents, _agents)&&(identical(other.selectedThreadId, selectedThreadId) || other.selectedThreadId == selectedThreadId)&&(identical(other.runtime, runtime) || other.runtime == runtime)&&(identical(other.sessionCost, sessionCost) || other.sessionCost == sessionCost)&&const DeepCollectionEquality().equals(other._pendingInteractions, _pendingInteractions));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is _HeaderView&&(identical(other.selectedRootThread, selectedRootThread) || other.selectedRootThread == selectedRootThread)&&(identical(other.selectedProject, selectedProject) || other.selectedProject == selectedProject)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&const DeepCollectionEquality().equals(other.workspaceThreads, _workspaceThreads)&&const DeepCollectionEquality().equals(other.agents, _agents)&&(identical(other.selectedThreadId, selectedThreadId) || other.selectedThreadId == selectedThreadId)&&(identical(other.runtime, runtime) || other.runtime == runtime)&&(identical(other.sessionCost, sessionCost) || other.sessionCost == sessionCost)&&const DeepCollectionEquality().equals(other.pendingInteractions, _pendingInteractions));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,selectedRootThread,selectedProject,selectedProjectId,const DeepCollectionEquality().hash(_workspaceThreads),const DeepCollectionEquality().hash(_agents),selectedThreadId,runtime,sessionCost,const DeepCollectionEquality().hash(_pendingInteractions));
+int get hashCode {
+    return Object.hash(runtimeType,selectedRootThread,selectedProject,selectedProjectId,const DeepCollectionEquality().hash(_workspaceThreads),const DeepCollectionEquality().hash(_agents),selectedThreadId,runtime,sessionCost,const DeepCollectionEquality().hash(_pendingInteractions));
+}
 
 @override
 String toString() {
-  return 'HeaderView(selectedRootThread: $selectedRootThread, selectedProject: $selectedProject, selectedProjectId: $selectedProjectId, workspaceThreads: $workspaceThreads, agents: $agents, selectedThreadId: $selectedThreadId, runtime: $runtime, sessionCost: $sessionCost, pendingInteractions: $pendingInteractions)';
+    return 'HeaderView(selectedRootThread: $selectedRootThread, selectedProject: $selectedProject, selectedProjectId: $selectedProjectId, workspaceThreads: $workspaceThreads, agents: $agents, selectedThreadId: $selectedThreadId, runtime: $runtime, sessionCost: $sessionCost, pendingInteractions: $pendingInteractions)';
 }
 
 
@@ -908,16 +929,21 @@ $SettingsPageViewCopyWith<SettingsPageView> get copyWith => _$SettingsPageViewCo
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is SettingsPageView&&const DeepCollectionEquality().equals(other.providers, providers)&&(identical(other.providerCatalog, providerCatalog) || other.providerCatalog == providerCatalog)&&(identical(other.defaultProviderId, defaultProviderId) || other.defaultProviderId == defaultProviderId)&&const DeepCollectionEquality().equals(other.roles, roles)&&(identical(other.instructions, instructions) || other.instructions == instructions)&&(identical(other.skills, skills) || other.skills == skills)&&const DeepCollectionEquality().equals(other.activeSkills, activeSkills)&&const DeepCollectionEquality().equals(other.catalogSkills, catalogSkills)&&const DeepCollectionEquality().equals(other.catalogSkillSummaries, catalogSkillSummaries)&&(identical(other.catalogRevision, catalogRevision) || other.catalogRevision == catalogRevision)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&const DeepCollectionEquality().equals(other.mcpServers, mcpServers)&&(identical(other.mcpState, mcpState) || other.mcpState == mcpState)&&(identical(other.lspState, lspState) || other.lspState == lspState)&&(identical(other.permissionMode, permissionMode) || other.permissionMode == permissionMode)&&(identical(other.general, general) || other.general == general)&&(identical(other.webSearch, webSearch) || other.webSearch == webSearch)&&(identical(other.deepSeekWebSearch, deepSeekWebSearch) || other.deepSeekWebSearch == deepSeekWebSearch)&&(identical(other.modelPerformance, modelPerformance) || other.modelPerformance == modelPerformance)&&(identical(other.runtimeBusy, runtimeBusy) || other.runtimeBusy == runtimeBusy));
+  final _this = this as SettingsPageView;
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is SettingsPageView&&const DeepCollectionEquality().equals(other.providers, _this.providers)&&(identical(other.providerCatalog, _this.providerCatalog) || other.providerCatalog == _this.providerCatalog)&&(identical(other.defaultProviderId, _this.defaultProviderId) || other.defaultProviderId == _this.defaultProviderId)&&const DeepCollectionEquality().equals(other.roles, _this.roles)&&(identical(other.instructions, _this.instructions) || other.instructions == _this.instructions)&&(identical(other.skills, _this.skills) || other.skills == _this.skills)&&const DeepCollectionEquality().equals(other.activeSkills, _this.activeSkills)&&const DeepCollectionEquality().equals(other.catalogSkills, _this.catalogSkills)&&const DeepCollectionEquality().equals(other.catalogSkillSummaries, _this.catalogSkillSummaries)&&(identical(other.catalogRevision, _this.catalogRevision) || other.catalogRevision == _this.catalogRevision)&&(identical(other.selectedProjectId, _this.selectedProjectId) || other.selectedProjectId == _this.selectedProjectId)&&const DeepCollectionEquality().equals(other.mcpServers, _this.mcpServers)&&(identical(other.mcpState, _this.mcpState) || other.mcpState == _this.mcpState)&&(identical(other.lspState, _this.lspState) || other.lspState == _this.lspState)&&(identical(other.permissionMode, _this.permissionMode) || other.permissionMode == _this.permissionMode)&&(identical(other.general, _this.general) || other.general == _this.general)&&(identical(other.webSearch, _this.webSearch) || other.webSearch == _this.webSearch)&&(identical(other.deepSeekWebSearch, _this.deepSeekWebSearch) || other.deepSeekWebSearch == _this.deepSeekWebSearch)&&(identical(other.modelPerformance, _this.modelPerformance) || other.modelPerformance == _this.modelPerformance)&&(identical(other.runtimeBusy, _this.runtimeBusy) || other.runtimeBusy == _this.runtimeBusy));
 }
 
 
 @override
-int get hashCode => Object.hashAll([runtimeType,const DeepCollectionEquality().hash(providers),providerCatalog,defaultProviderId,const DeepCollectionEquality().hash(roles),instructions,skills,const DeepCollectionEquality().hash(activeSkills),const DeepCollectionEquality().hash(catalogSkills),const DeepCollectionEquality().hash(catalogSkillSummaries),catalogRevision,selectedProjectId,const DeepCollectionEquality().hash(mcpServers),mcpState,lspState,permissionMode,general,webSearch,deepSeekWebSearch,modelPerformance,runtimeBusy]);
+int get hashCode {
+  final _this = this as SettingsPageView;
+  return Object.hashAll([runtimeType,const DeepCollectionEquality().hash(_this.providers),_this.providerCatalog,_this.defaultProviderId,const DeepCollectionEquality().hash(_this.roles),_this.instructions,_this.skills,const DeepCollectionEquality().hash(_this.activeSkills),const DeepCollectionEquality().hash(_this.catalogSkills),const DeepCollectionEquality().hash(_this.catalogSkillSummaries),_this.catalogRevision,_this.selectedProjectId,const DeepCollectionEquality().hash(_this.mcpServers),_this.mcpState,_this.lspState,_this.permissionMode,_this.general,_this.webSearch,_this.deepSeekWebSearch,_this.modelPerformance,_this.runtimeBusy]);
+}
 
 @override
 String toString() {
-  return 'SettingsPageView(providers: $providers, providerCatalog: $providerCatalog, defaultProviderId: $defaultProviderId, roles: $roles, instructions: $instructions, skills: $skills, activeSkills: $activeSkills, catalogSkills: $catalogSkills, catalogSkillSummaries: $catalogSkillSummaries, catalogRevision: $catalogRevision, selectedProjectId: $selectedProjectId, mcpServers: $mcpServers, mcpState: $mcpState, lspState: $lspState, permissionMode: $permissionMode, general: $general, webSearch: $webSearch, deepSeekWebSearch: $deepSeekWebSearch, modelPerformance: $modelPerformance, runtimeBusy: $runtimeBusy)';
+  final _this = this as SettingsPageView;
+  return 'SettingsPageView(providers: ${_this.providers}, providerCatalog: ${_this.providerCatalog}, defaultProviderId: ${_this.defaultProviderId}, roles: ${_this.roles}, instructions: ${_this.instructions}, skills: ${_this.skills}, activeSkills: ${_this.activeSkills}, catalogSkills: ${_this.catalogSkills}, catalogSkillSummaries: ${_this.catalogSkillSummaries}, catalogRevision: ${_this.catalogRevision}, selectedProjectId: ${_this.selectedProjectId}, mcpServers: ${_this.mcpServers}, mcpState: ${_this.mcpState}, lspState: ${_this.lspState}, permissionMode: ${_this.permissionMode}, general: ${_this.general}, webSearch: ${_this.webSearch}, deepSeekWebSearch: ${_this.deepSeekWebSearch}, modelPerformance: ${_this.modelPerformance}, runtimeBusy: ${_this.runtimeBusy})';
 }
 
 
@@ -1178,16 +1204,18 @@ _$SettingsPageViewCopyWith<_SettingsPageView> get copyWith => __$SettingsPageVie
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _SettingsPageView&&const DeepCollectionEquality().equals(other._providers, _providers)&&(identical(other.providerCatalog, providerCatalog) || other.providerCatalog == providerCatalog)&&(identical(other.defaultProviderId, defaultProviderId) || other.defaultProviderId == defaultProviderId)&&const DeepCollectionEquality().equals(other._roles, _roles)&&(identical(other.instructions, instructions) || other.instructions == instructions)&&(identical(other.skills, skills) || other.skills == skills)&&const DeepCollectionEquality().equals(other._activeSkills, _activeSkills)&&const DeepCollectionEquality().equals(other._catalogSkills, _catalogSkills)&&const DeepCollectionEquality().equals(other._catalogSkillSummaries, _catalogSkillSummaries)&&(identical(other.catalogRevision, catalogRevision) || other.catalogRevision == catalogRevision)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&const DeepCollectionEquality().equals(other._mcpServers, _mcpServers)&&(identical(other.mcpState, mcpState) || other.mcpState == mcpState)&&(identical(other.lspState, lspState) || other.lspState == lspState)&&(identical(other.permissionMode, permissionMode) || other.permissionMode == permissionMode)&&(identical(other.general, general) || other.general == general)&&(identical(other.webSearch, webSearch) || other.webSearch == webSearch)&&(identical(other.deepSeekWebSearch, deepSeekWebSearch) || other.deepSeekWebSearch == deepSeekWebSearch)&&(identical(other.modelPerformance, modelPerformance) || other.modelPerformance == modelPerformance)&&(identical(other.runtimeBusy, runtimeBusy) || other.runtimeBusy == runtimeBusy));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is _SettingsPageView&&const DeepCollectionEquality().equals(other.providers, _providers)&&(identical(other.providerCatalog, providerCatalog) || other.providerCatalog == providerCatalog)&&(identical(other.defaultProviderId, defaultProviderId) || other.defaultProviderId == defaultProviderId)&&const DeepCollectionEquality().equals(other.roles, _roles)&&(identical(other.instructions, instructions) || other.instructions == instructions)&&(identical(other.skills, skills) || other.skills == skills)&&const DeepCollectionEquality().equals(other.activeSkills, _activeSkills)&&const DeepCollectionEquality().equals(other.catalogSkills, _catalogSkills)&&const DeepCollectionEquality().equals(other.catalogSkillSummaries, _catalogSkillSummaries)&&(identical(other.catalogRevision, catalogRevision) || other.catalogRevision == catalogRevision)&&(identical(other.selectedProjectId, selectedProjectId) || other.selectedProjectId == selectedProjectId)&&const DeepCollectionEquality().equals(other.mcpServers, _mcpServers)&&(identical(other.mcpState, mcpState) || other.mcpState == mcpState)&&(identical(other.lspState, lspState) || other.lspState == lspState)&&(identical(other.permissionMode, permissionMode) || other.permissionMode == permissionMode)&&(identical(other.general, general) || other.general == general)&&(identical(other.webSearch, webSearch) || other.webSearch == webSearch)&&(identical(other.deepSeekWebSearch, deepSeekWebSearch) || other.deepSeekWebSearch == deepSeekWebSearch)&&(identical(other.modelPerformance, modelPerformance) || other.modelPerformance == modelPerformance)&&(identical(other.runtimeBusy, runtimeBusy) || other.runtimeBusy == runtimeBusy));
 }
 
 
 @override
-int get hashCode => Object.hashAll([runtimeType,const DeepCollectionEquality().hash(_providers),providerCatalog,defaultProviderId,const DeepCollectionEquality().hash(_roles),instructions,skills,const DeepCollectionEquality().hash(_activeSkills),const DeepCollectionEquality().hash(_catalogSkills),const DeepCollectionEquality().hash(_catalogSkillSummaries),catalogRevision,selectedProjectId,const DeepCollectionEquality().hash(_mcpServers),mcpState,lspState,permissionMode,general,webSearch,deepSeekWebSearch,modelPerformance,runtimeBusy]);
+int get hashCode {
+    return Object.hashAll([runtimeType,const DeepCollectionEquality().hash(_providers),providerCatalog,defaultProviderId,const DeepCollectionEquality().hash(_roles),instructions,skills,const DeepCollectionEquality().hash(_activeSkills),const DeepCollectionEquality().hash(_catalogSkills),const DeepCollectionEquality().hash(_catalogSkillSummaries),catalogRevision,selectedProjectId,const DeepCollectionEquality().hash(_mcpServers),mcpState,lspState,permissionMode,general,webSearch,deepSeekWebSearch,modelPerformance,runtimeBusy]);
+}
 
 @override
 String toString() {
-  return 'SettingsPageView(providers: $providers, providerCatalog: $providerCatalog, defaultProviderId: $defaultProviderId, roles: $roles, instructions: $instructions, skills: $skills, activeSkills: $activeSkills, catalogSkills: $catalogSkills, catalogSkillSummaries: $catalogSkillSummaries, catalogRevision: $catalogRevision, selectedProjectId: $selectedProjectId, mcpServers: $mcpServers, mcpState: $mcpState, lspState: $lspState, permissionMode: $permissionMode, general: $general, webSearch: $webSearch, deepSeekWebSearch: $deepSeekWebSearch, modelPerformance: $modelPerformance, runtimeBusy: $runtimeBusy)';
+    return 'SettingsPageView(providers: $providers, providerCatalog: $providerCatalog, defaultProviderId: $defaultProviderId, roles: $roles, instructions: $instructions, skills: $skills, activeSkills: $activeSkills, catalogSkills: $catalogSkills, catalogSkillSummaries: $catalogSkillSummaries, catalogRevision: $catalogRevision, selectedProjectId: $selectedProjectId, mcpServers: $mcpServers, mcpState: $mcpState, lspState: $lspState, permissionMode: $permissionMode, general: $general, webSearch: $webSearch, deepSeekWebSearch: $deepSeekWebSearch, modelPerformance: $modelPerformance, runtimeBusy: $runtimeBusy)';
 }
 
 
@@ -1258,16 +1286,21 @@ $StatusBarViewCopyWith<StatusBarView> get copyWith => _$StatusBarViewCopyWithImp
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is StatusBarView&&(identical(other.thread, thread) || other.thread == thread)&&(identical(other.runtime, runtime) || other.runtime == runtime)&&(identical(other.permissionMode, permissionMode) || other.permissionMode == permissionMode)&&const DeepCollectionEquality().equals(other.providers, providers)&&const DeepCollectionEquality().equals(other.roles, roles)&&(identical(other.isBusy, isBusy) || other.isBusy == isBusy));
+  final _this = this as StatusBarView;
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is StatusBarView&&(identical(other.thread, _this.thread) || other.thread == _this.thread)&&(identical(other.runtime, _this.runtime) || other.runtime == _this.runtime)&&(identical(other.permissionMode, _this.permissionMode) || other.permissionMode == _this.permissionMode)&&const DeepCollectionEquality().equals(other.providers, _this.providers)&&const DeepCollectionEquality().equals(other.roles, _this.roles)&&(identical(other.isBusy, _this.isBusy) || other.isBusy == _this.isBusy));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,thread,runtime,permissionMode,const DeepCollectionEquality().hash(providers),const DeepCollectionEquality().hash(roles),isBusy);
+int get hashCode {
+  final _this = this as StatusBarView;
+  return Object.hash(runtimeType,_this.thread,_this.runtime,_this.permissionMode,const DeepCollectionEquality().hash(_this.providers),const DeepCollectionEquality().hash(_this.roles),_this.isBusy);
+}
 
 @override
 String toString() {
-  return 'StatusBarView(thread: $thread, runtime: $runtime, permissionMode: $permissionMode, providers: $providers, roles: $roles, isBusy: $isBusy)';
+  final _this = this as StatusBarView;
+  return 'StatusBarView(thread: ${_this.thread}, runtime: ${_this.runtime}, permissionMode: ${_this.permissionMode}, providers: ${_this.providers}, roles: ${_this.roles}, isBusy: ${_this.isBusy})';
 }
 
 
@@ -1476,16 +1509,18 @@ _$StatusBarViewCopyWith<_StatusBarView> get copyWith => __$StatusBarViewCopyWith
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _StatusBarView&&(identical(other.thread, thread) || other.thread == thread)&&(identical(other.runtime, runtime) || other.runtime == runtime)&&(identical(other.permissionMode, permissionMode) || other.permissionMode == permissionMode)&&const DeepCollectionEquality().equals(other._providers, _providers)&&const DeepCollectionEquality().equals(other._roles, _roles)&&(identical(other.isBusy, isBusy) || other.isBusy == isBusy));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is _StatusBarView&&(identical(other.thread, thread) || other.thread == thread)&&(identical(other.runtime, runtime) || other.runtime == runtime)&&(identical(other.permissionMode, permissionMode) || other.permissionMode == permissionMode)&&const DeepCollectionEquality().equals(other.providers, _providers)&&const DeepCollectionEquality().equals(other.roles, _roles)&&(identical(other.isBusy, isBusy) || other.isBusy == isBusy));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,thread,runtime,permissionMode,const DeepCollectionEquality().hash(_providers),const DeepCollectionEquality().hash(_roles),isBusy);
+int get hashCode {
+    return Object.hash(runtimeType,thread,runtime,permissionMode,const DeepCollectionEquality().hash(_providers),const DeepCollectionEquality().hash(_roles),isBusy);
+}
 
 @override
 String toString() {
-  return 'StatusBarView(thread: $thread, runtime: $runtime, permissionMode: $permissionMode, providers: $providers, roles: $roles, isBusy: $isBusy)';
+    return 'StatusBarView(thread: $thread, runtime: $runtime, permissionMode: $permissionMode, providers: $providers, roles: $roles, isBusy: $isBusy)';
 }
 
 

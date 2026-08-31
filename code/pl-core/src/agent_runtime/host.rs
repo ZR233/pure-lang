@@ -457,6 +457,7 @@ pub struct SpawnRollbackReason {
 #[derive(Debug, Clone)]
 pub struct CloseLifecycleRequest {
     pub agent: AgentSnapshot,
+    pub workspace_disposition: pl_protocol::AgentWorkspaceDisposition,
 }
 
 /// 产品容器、worktree 等外部资源的幂等 saga 端口。
@@ -479,6 +480,15 @@ pub trait AgentLifecycleAdapter: Clone + Send + Sync + 'static {
         _lease: &Self::SpawnLease,
     ) -> std::result::Result<Vec<crate::PinnedContextSection>, Self::Error> {
         Ok(Vec::new())
+    }
+
+    /// 返回与 Profile 一起冻结进 child working state 的 canonical workspace assignment。
+    fn workspace_assignment(
+        &self,
+        _lease: &Self::SpawnLease,
+    ) -> std::result::Result<Option<pl_protocol::AgentWorkspaceAssignmentSnapshot>, Self::Error>
+    {
+        Ok(None)
     }
 
     fn activate_spawn(

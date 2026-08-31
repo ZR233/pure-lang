@@ -21,16 +21,21 @@ mixin _$BridgeInteractionContent {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeInteractionContent&&const DeepCollectionEquality().equals(other.state, state));
+  final _this = this as BridgeInteractionContent;
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeInteractionContent&&const DeepCollectionEquality().equals(other.state, _this.state));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(state));
+int get hashCode {
+  final _this = this as BridgeInteractionContent;
+  return Object.hash(runtimeType,const DeepCollectionEquality().hash(_this.state));
+}
 
 @override
 String toString() {
-  return 'BridgeInteractionContent(state: $state)';
+  final _this = this as BridgeInteractionContent;
+  return 'BridgeInteractionContent(state: ${_this.state})';
 }
 
 
@@ -198,16 +203,18 @@ $BridgeInteractionContent_UserInputCopyWith<BridgeInteractionContent_UserInput> 
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeInteractionContent_UserInput&&const DeepCollectionEquality().equals(other._questions, _questions)&&(identical(other.state, state) || other.state == state));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeInteractionContent_UserInput&&const DeepCollectionEquality().equals(other.questions, _questions)&&(identical(other.state, state) || other.state == state));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(_questions),state);
+int get hashCode {
+    return Object.hash(runtimeType,const DeepCollectionEquality().hash(_questions),state);
+}
 
 @override
 String toString() {
-  return 'BridgeInteractionContent.userInput(questions: $questions, state: $state)';
+    return 'BridgeInteractionContent.userInput(questions: $questions, state: $state)';
 }
 
 
@@ -278,16 +285,18 @@ $BridgeInteractionContent_ToolApprovalCopyWith<BridgeInteractionContent_ToolAppr
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeInteractionContent_ToolApproval&&(identical(other.name, name) || other.name == name)&&(identical(other.argumentsJson, argumentsJson) || other.argumentsJson == argumentsJson)&&(identical(other.workingDirectory, workingDirectory) || other.workingDirectory == workingDirectory)&&(identical(other.parentAgentId, parentAgentId) || other.parentAgentId == parentAgentId)&&(identical(other.state, state) || other.state == state));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeInteractionContent_ToolApproval&&(identical(other.name, name) || other.name == name)&&(identical(other.argumentsJson, argumentsJson) || other.argumentsJson == argumentsJson)&&(identical(other.workingDirectory, workingDirectory) || other.workingDirectory == workingDirectory)&&(identical(other.parentAgentId, parentAgentId) || other.parentAgentId == parentAgentId)&&(identical(other.state, state) || other.state == state));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,name,argumentsJson,workingDirectory,parentAgentId,state);
+int get hashCode {
+    return Object.hash(runtimeType,name,argumentsJson,workingDirectory,parentAgentId,state);
+}
 
 @override
 String toString() {
-  return 'BridgeInteractionContent.toolApproval(name: $name, argumentsJson: $argumentsJson, workingDirectory: $workingDirectory, parentAgentId: $parentAgentId, state: $state)';
+    return 'BridgeInteractionContent.toolApproval(name: $name, argumentsJson: $argumentsJson, workingDirectory: $workingDirectory, parentAgentId: $parentAgentId, state: $state)';
 }
 
 
@@ -347,7 +356,7 @@ mixin _$BridgeInteractionResolution {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeInteractionResolution);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeInteractionResolution);
 }
 
 
@@ -356,7 +365,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeInteractionResolution()';
+    return 'BridgeInteractionResolution()';
 }
 
 
@@ -523,16 +532,18 @@ $BridgeInteractionResolution_UserInputCopyWith<BridgeInteractionResolution_UserI
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeInteractionResolution_UserInput&&const DeepCollectionEquality().equals(other._answers, _answers));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeInteractionResolution_UserInput&&const DeepCollectionEquality().equals(other.answers, _answers));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(_answers));
+int get hashCode {
+    return Object.hash(runtimeType,const DeepCollectionEquality().hash(_answers));
+}
 
 @override
 String toString() {
-  return 'BridgeInteractionResolution.userInput(answers: $answers)';
+    return 'BridgeInteractionResolution.userInput(answers: $answers)';
 }
 
 
@@ -590,16 +601,18 @@ $BridgeInteractionResolution_ToolApprovalCopyWith<BridgeInteractionResolution_To
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeInteractionResolution_ToolApproval&&(identical(other.decision, decision) || other.decision == decision)&&(identical(other.reason, reason) || other.reason == reason));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeInteractionResolution_ToolApproval&&(identical(other.decision, decision) || other.decision == decision)&&(identical(other.reason, reason) || other.reason == reason));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,decision,reason);
+int get hashCode {
+    return Object.hash(runtimeType,decision,reason);
+}
 
 @override
 String toString() {
-  return 'BridgeInteractionResolution.toolApproval(decision: $decision, reason: $reason)';
+    return 'BridgeInteractionResolution.toolApproval(decision: $decision, reason: $reason)';
 }
 
 
@@ -647,7 +660,7 @@ mixin _$BridgeThreadNotification {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadNotification);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadNotification);
 }
 
 
@@ -656,7 +669,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeThreadNotification()';
+    return 'BridgeThreadNotification()';
 }
 
 
@@ -859,16 +872,18 @@ $BridgeThreadNotification_TurnStartedCopyWith<BridgeThreadNotification_TurnStart
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadNotification_TurnStarted&&(identical(other.turn, turn) || other.turn == turn));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadNotification_TurnStarted&&(identical(other.turn, turn) || other.turn == turn));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,turn);
+int get hashCode {
+    return Object.hash(runtimeType,turn);
+}
 
 @override
 String toString() {
-  return 'BridgeThreadNotification.turnStarted(turn: $turn)';
+    return 'BridgeThreadNotification.turnStarted(turn: $turn)';
 }
 
 
@@ -925,16 +940,18 @@ $BridgeThreadNotification_TurnUpdatedCopyWith<BridgeThreadNotification_TurnUpdat
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadNotification_TurnUpdated&&(identical(other.turn, turn) || other.turn == turn));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadNotification_TurnUpdated&&(identical(other.turn, turn) || other.turn == turn));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,turn);
+int get hashCode {
+    return Object.hash(runtimeType,turn);
+}
 
 @override
 String toString() {
-  return 'BridgeThreadNotification.turnUpdated(turn: $turn)';
+    return 'BridgeThreadNotification.turnUpdated(turn: $turn)';
 }
 
 
@@ -991,16 +1008,18 @@ $BridgeThreadNotification_TurnCompletedCopyWith<BridgeThreadNotification_TurnCom
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadNotification_TurnCompleted&&(identical(other.turn, turn) || other.turn == turn));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadNotification_TurnCompleted&&(identical(other.turn, turn) || other.turn == turn));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,turn);
+int get hashCode {
+    return Object.hash(runtimeType,turn);
+}
 
 @override
 String toString() {
-  return 'BridgeThreadNotification.turnCompleted(turn: $turn)';
+    return 'BridgeThreadNotification.turnCompleted(turn: $turn)';
 }
 
 
@@ -1057,16 +1076,18 @@ $BridgeThreadNotification_ItemStartedCopyWith<BridgeThreadNotification_ItemStart
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadNotification_ItemStarted&&(identical(other.item, item) || other.item == item));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadNotification_ItemStarted&&(identical(other.item, item) || other.item == item));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,item);
+int get hashCode {
+    return Object.hash(runtimeType,item);
+}
 
 @override
 String toString() {
-  return 'BridgeThreadNotification.itemStarted(item: $item)';
+    return 'BridgeThreadNotification.itemStarted(item: $item)';
 }
 
 
@@ -1123,16 +1144,18 @@ $BridgeThreadNotification_ItemDeltaCopyWith<BridgeThreadNotification_ItemDelta> 
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadNotification_ItemDelta&&(identical(other.delta, delta) || other.delta == delta));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadNotification_ItemDelta&&(identical(other.delta, delta) || other.delta == delta));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,delta);
+int get hashCode {
+    return Object.hash(runtimeType,delta);
+}
 
 @override
 String toString() {
-  return 'BridgeThreadNotification.itemDelta(delta: $delta)';
+    return 'BridgeThreadNotification.itemDelta(delta: $delta)';
 }
 
 
@@ -1189,16 +1212,18 @@ $BridgeThreadNotification_ItemCompletedCopyWith<BridgeThreadNotification_ItemCom
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadNotification_ItemCompleted&&(identical(other.item, item) || other.item == item));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadNotification_ItemCompleted&&(identical(other.item, item) || other.item == item));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,item);
+int get hashCode {
+    return Object.hash(runtimeType,item);
+}
 
 @override
 String toString() {
-  return 'BridgeThreadNotification.itemCompleted(item: $item)';
+    return 'BridgeThreadNotification.itemCompleted(item: $item)';
 }
 
 
@@ -1255,16 +1280,18 @@ $BridgeThreadNotification_InteractionChangedCopyWith<BridgeThreadNotification_In
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadNotification_InteractionChanged&&(identical(other.interaction, interaction) || other.interaction == interaction));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadNotification_InteractionChanged&&(identical(other.interaction, interaction) || other.interaction == interaction));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,interaction);
+int get hashCode {
+    return Object.hash(runtimeType,interaction);
+}
 
 @override
 String toString() {
-  return 'BridgeThreadNotification.interactionChanged(interaction: $interaction)';
+    return 'BridgeThreadNotification.interactionChanged(interaction: $interaction)';
 }
 
 
@@ -1321,16 +1348,18 @@ $BridgeThreadNotification_ThreadRuntimeUpdatedCopyWith<BridgeThreadNotification_
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadNotification_ThreadRuntimeUpdated&&(identical(other.runtime, runtime) || other.runtime == runtime));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadNotification_ThreadRuntimeUpdated&&(identical(other.runtime, runtime) || other.runtime == runtime));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,runtime);
+int get hashCode {
+    return Object.hash(runtimeType,runtime);
+}
 
 @override
 String toString() {
-  return 'BridgeThreadNotification.threadRuntimeUpdated(runtime: $runtime)';
+    return 'BridgeThreadNotification.threadRuntimeUpdated(runtime: $runtime)';
 }
 
 
@@ -1387,16 +1416,18 @@ $BridgeThreadNotification_LaggedCopyWith<BridgeThreadNotification_Lagged> get co
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadNotification_Lagged&&(identical(other.dropped, dropped) || other.dropped == dropped));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadNotification_Lagged&&(identical(other.dropped, dropped) || other.dropped == dropped));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,dropped);
+int get hashCode {
+    return Object.hash(runtimeType,dropped);
+}
 
 @override
 String toString() {
-  return 'BridgeThreadNotification.lagged(dropped: $dropped)';
+    return 'BridgeThreadNotification.lagged(dropped: $dropped)';
 }
 
 
@@ -1443,7 +1474,7 @@ mixin _$BridgeThreadSubscriptionUpdate {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadSubscriptionUpdate);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadSubscriptionUpdate);
 }
 
 
@@ -1452,7 +1483,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeThreadSubscriptionUpdate()';
+    return 'BridgeThreadSubscriptionUpdate()';
 }
 
 
@@ -1613,16 +1644,18 @@ $BridgeThreadSubscriptionUpdate_SnapshotCopyWith<BridgeThreadSubscriptionUpdate_
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadSubscriptionUpdate_Snapshot&&(identical(other.snapshot, snapshot) || other.snapshot == snapshot));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadSubscriptionUpdate_Snapshot&&(identical(other.snapshot, snapshot) || other.snapshot == snapshot));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,snapshot);
+int get hashCode {
+    return Object.hash(runtimeType,snapshot);
+}
 
 @override
 String toString() {
-  return 'BridgeThreadSubscriptionUpdate.snapshot(snapshot: $snapshot)';
+    return 'BridgeThreadSubscriptionUpdate.snapshot(snapshot: $snapshot)';
 }
 
 
@@ -1679,16 +1712,18 @@ $BridgeThreadSubscriptionUpdate_NotificationCopyWith<BridgeThreadSubscriptionUpd
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadSubscriptionUpdate_Notification&&(identical(other.notification, notification) || other.notification == notification));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadSubscriptionUpdate_Notification&&(identical(other.notification, notification) || other.notification == notification));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,notification);
+int get hashCode {
+    return Object.hash(runtimeType,notification);
+}
 
 @override
 String toString() {
-  return 'BridgeThreadSubscriptionUpdate.notification(notification: $notification)';
+    return 'BridgeThreadSubscriptionUpdate.notification(notification: $notification)';
 }
 
 
@@ -1740,16 +1775,21 @@ $BridgeToolApprovalInteractionStateCopyWith<BridgeToolApprovalInteractionState> 
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeToolApprovalInteractionState&&(identical(other.operationId, operationId) || other.operationId == operationId));
+  final _this = this as BridgeToolApprovalInteractionState;
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeToolApprovalInteractionState&&(identical(other.operationId, _this.operationId) || other.operationId == _this.operationId));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,operationId);
+int get hashCode {
+  final _this = this as BridgeToolApprovalInteractionState;
+  return Object.hash(runtimeType,_this.operationId);
+}
 
 @override
 String toString() {
-  return 'BridgeToolApprovalInteractionState(operationId: $operationId)';
+  final _this = this as BridgeToolApprovalInteractionState;
+  return 'BridgeToolApprovalInteractionState(operationId: ${_this.operationId})';
 }
 
 
@@ -1948,16 +1988,18 @@ $BridgeToolApprovalInteractionState_PendingCopyWith<BridgeToolApprovalInteractio
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeToolApprovalInteractionState_Pending&&(identical(other.operationId, operationId) || other.operationId == operationId));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeToolApprovalInteractionState_Pending&&(identical(other.operationId, operationId) || other.operationId == operationId));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,operationId);
+int get hashCode {
+    return Object.hash(runtimeType,operationId);
+}
 
 @override
 String toString() {
-  return 'BridgeToolApprovalInteractionState.pending(operationId: $operationId)';
+    return 'BridgeToolApprovalInteractionState.pending(operationId: $operationId)';
 }
 
 
@@ -2017,16 +2059,18 @@ $BridgeToolApprovalInteractionState_ResolvedCopyWith<BridgeToolApprovalInteracti
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeToolApprovalInteractionState_Resolved&&(identical(other.operationId, operationId) || other.operationId == operationId)&&(identical(other.resolvedAt, resolvedAt) || other.resolvedAt == resolvedAt)&&(identical(other.decision, decision) || other.decision == decision)&&(identical(other.reason, reason) || other.reason == reason));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeToolApprovalInteractionState_Resolved&&(identical(other.operationId, operationId) || other.operationId == operationId)&&(identical(other.resolvedAt, resolvedAt) || other.resolvedAt == resolvedAt)&&(identical(other.decision, decision) || other.decision == decision)&&(identical(other.reason, reason) || other.reason == reason));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,operationId,resolvedAt,decision,reason);
+int get hashCode {
+    return Object.hash(runtimeType,operationId,resolvedAt,decision,reason);
+}
 
 @override
 String toString() {
-  return 'BridgeToolApprovalInteractionState.resolved(operationId: $operationId, resolvedAt: $resolvedAt, decision: $decision, reason: $reason)';
+    return 'BridgeToolApprovalInteractionState.resolved(operationId: $operationId, resolvedAt: $resolvedAt, decision: $decision, reason: $reason)';
 }
 
 
@@ -2088,16 +2132,18 @@ $BridgeToolApprovalInteractionState_CancelledCopyWith<BridgeToolApprovalInteract
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeToolApprovalInteractionState_Cancelled&&(identical(other.operationId, operationId) || other.operationId == operationId)&&(identical(other.cancelledAt, cancelledAt) || other.cancelledAt == cancelledAt)&&(identical(other.reason, reason) || other.reason == reason));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeToolApprovalInteractionState_Cancelled&&(identical(other.operationId, operationId) || other.operationId == operationId)&&(identical(other.cancelledAt, cancelledAt) || other.cancelledAt == cancelledAt)&&(identical(other.reason, reason) || other.reason == reason));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,operationId,cancelledAt,reason);
+int get hashCode {
+    return Object.hash(runtimeType,operationId,cancelledAt,reason);
+}
 
 @override
 String toString() {
-  return 'BridgeToolApprovalInteractionState.cancelled(operationId: $operationId, cancelledAt: $cancelledAt, reason: $reason)';
+    return 'BridgeToolApprovalInteractionState.cancelled(operationId: $operationId, cancelledAt: $cancelledAt, reason: $reason)';
 }
 
 
@@ -2157,16 +2203,18 @@ $BridgeToolApprovalInteractionState_ExpiredCopyWith<BridgeToolApprovalInteractio
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeToolApprovalInteractionState_Expired&&(identical(other.operationId, operationId) || other.operationId == operationId)&&(identical(other.expiredAt, expiredAt) || other.expiredAt == expiredAt));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeToolApprovalInteractionState_Expired&&(identical(other.operationId, operationId) || other.operationId == operationId)&&(identical(other.expiredAt, expiredAt) || other.expiredAt == expiredAt));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,operationId,expiredAt);
+int get hashCode {
+    return Object.hash(runtimeType,operationId,expiredAt);
+}
 
 @override
 String toString() {
-  return 'BridgeToolApprovalInteractionState.expired(operationId: $operationId, expiredAt: $expiredAt)';
+    return 'BridgeToolApprovalInteractionState.expired(operationId: $operationId, expiredAt: $expiredAt)';
 }
 
 
@@ -2214,7 +2262,7 @@ mixin _$BridgeTurnCancellationCause {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnCancellationCause);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnCancellationCause);
 }
 
 
@@ -2223,7 +2271,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeTurnCancellationCause()';
+    return 'BridgeTurnCancellationCause()';
 }
 
 
@@ -2397,7 +2445,7 @@ class BridgeTurnCancellationCause_UserRequested extends BridgeTurnCancellationCa
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnCancellationCause_UserRequested);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnCancellationCause_UserRequested);
 }
 
 
@@ -2406,7 +2454,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeTurnCancellationCause.userRequested()';
+    return 'BridgeTurnCancellationCause.userRequested()';
 }
 
 
@@ -2429,7 +2477,7 @@ class BridgeTurnCancellationCause_RuntimeShutdown extends BridgeTurnCancellation
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnCancellationCause_RuntimeShutdown);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnCancellationCause_RuntimeShutdown);
 }
 
 
@@ -2438,7 +2486,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeTurnCancellationCause.runtimeShutdown()';
+    return 'BridgeTurnCancellationCause.runtimeShutdown()';
 }
 
 
@@ -2461,7 +2509,7 @@ class BridgeTurnCancellationCause_AgentClosed extends BridgeTurnCancellationCaus
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnCancellationCause_AgentClosed);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnCancellationCause_AgentClosed);
 }
 
 
@@ -2470,7 +2518,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeTurnCancellationCause.agentClosed()';
+    return 'BridgeTurnCancellationCause.agentClosed()';
 }
 
 
@@ -2493,7 +2541,7 @@ class BridgeTurnCancellationCause_Recovery extends BridgeTurnCancellationCause {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnCancellationCause_Recovery);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnCancellationCause_Recovery);
 }
 
 
@@ -2502,7 +2550,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeTurnCancellationCause.recovery()';
+    return 'BridgeTurnCancellationCause.recovery()';
 }
 
 
@@ -2530,16 +2578,18 @@ $BridgeTurnCancellationCause_CoalescedCopyWith<BridgeTurnCancellationCause_Coale
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnCancellationCause_Coalesced&&(identical(other.targetTurnId, targetTurnId) || other.targetTurnId == targetTurnId));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnCancellationCause_Coalesced&&(identical(other.targetTurnId, targetTurnId) || other.targetTurnId == targetTurnId));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,targetTurnId);
+int get hashCode {
+    return Object.hash(runtimeType,targetTurnId);
+}
 
 @override
 String toString() {
-  return 'BridgeTurnCancellationCause.coalesced(targetTurnId: $targetTurnId)';
+    return 'BridgeTurnCancellationCause.coalesced(targetTurnId: $targetTurnId)';
 }
 
 
@@ -2586,7 +2636,7 @@ mixin _$BridgeTurnRolloverOutcome {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnRolloverOutcome);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnRolloverOutcome);
 }
 
 
@@ -2595,7 +2645,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeTurnRolloverOutcome()';
+    return 'BridgeTurnRolloverOutcome()';
 }
 
 
@@ -2757,7 +2807,7 @@ class BridgeTurnRolloverOutcome_NotAttempted extends BridgeTurnRolloverOutcome {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnRolloverOutcome_NotAttempted);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnRolloverOutcome_NotAttempted);
 }
 
 
@@ -2766,7 +2816,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeTurnRolloverOutcome.notAttempted()';
+    return 'BridgeTurnRolloverOutcome.notAttempted()';
 }
 
 
@@ -2789,7 +2839,7 @@ class BridgeTurnRolloverOutcome_Succeeded extends BridgeTurnRolloverOutcome {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnRolloverOutcome_Succeeded);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnRolloverOutcome_Succeeded);
 }
 
 
@@ -2798,7 +2848,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeTurnRolloverOutcome.succeeded()';
+    return 'BridgeTurnRolloverOutcome.succeeded()';
 }
 
 
@@ -2826,16 +2876,18 @@ $BridgeTurnRolloverOutcome_FailedCopyWith<BridgeTurnRolloverOutcome_Failed> get 
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnRolloverOutcome_Failed&&(identical(other.error, error) || other.error == error));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnRolloverOutcome_Failed&&(identical(other.error, error) || other.error == error));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,error);
+int get hashCode {
+    return Object.hash(runtimeType,error);
+}
 
 @override
 String toString() {
-  return 'BridgeTurnRolloverOutcome.failed(error: $error)';
+    return 'BridgeTurnRolloverOutcome.failed(error: $error)';
 }
 
 
@@ -2882,7 +2934,7 @@ mixin _$BridgeTurnState {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnState);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnState);
 }
 
 
@@ -2891,7 +2943,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeTurnState()';
+    return 'BridgeTurnState()';
 }
 
 
@@ -3076,16 +3128,18 @@ $BridgeTurnState_QueuedCopyWith<BridgeTurnState_Queued> get copyWith => _$Bridge
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnState_Queued&&(identical(other.queuedAt, queuedAt) || other.queuedAt == queuedAt));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnState_Queued&&(identical(other.queuedAt, queuedAt) || other.queuedAt == queuedAt));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,queuedAt);
+int get hashCode {
+    return Object.hash(runtimeType,queuedAt);
+}
 
 @override
 String toString() {
-  return 'BridgeTurnState.queued(queuedAt: $queuedAt)';
+    return 'BridgeTurnState.queued(queuedAt: $queuedAt)';
 }
 
 
@@ -3143,16 +3197,18 @@ $BridgeTurnState_RunningCopyWith<BridgeTurnState_Running> get copyWith => _$Brid
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnState_Running&&(identical(other.startedAt, startedAt) || other.startedAt == startedAt)&&(identical(other.phase, phase) || other.phase == phase));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnState_Running&&(identical(other.startedAt, startedAt) || other.startedAt == startedAt)&&(identical(other.phase, phase) || other.phase == phase));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,startedAt,phase);
+int get hashCode {
+    return Object.hash(runtimeType,startedAt,phase);
+}
 
 @override
 String toString() {
-  return 'BridgeTurnState.running(startedAt: $startedAt, phase: $phase)';
+    return 'BridgeTurnState.running(startedAt: $startedAt, phase: $phase)';
 }
 
 
@@ -3212,16 +3268,18 @@ $BridgeTurnState_CompletedCopyWith<BridgeTurnState_Completed> get copyWith => _$
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnState_Completed&&(identical(other.startedAt, startedAt) || other.startedAt == startedAt)&&(identical(other.completedAt, completedAt) || other.completedAt == completedAt)&&(identical(other.completion, completion) || other.completion == completion));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnState_Completed&&(identical(other.startedAt, startedAt) || other.startedAt == startedAt)&&(identical(other.completedAt, completedAt) || other.completedAt == completedAt)&&(identical(other.completion, completion) || other.completion == completion));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,startedAt,completedAt,completion);
+int get hashCode {
+    return Object.hash(runtimeType,startedAt,completedAt,completion);
+}
 
 @override
 String toString() {
-  return 'BridgeTurnState.completed(startedAt: $startedAt, completedAt: $completedAt, completion: $completion)';
+    return 'BridgeTurnState.completed(startedAt: $startedAt, completedAt: $completedAt, completion: $completion)';
 }
 
 
@@ -3283,16 +3341,18 @@ $BridgeTurnState_CancelledCopyWith<BridgeTurnState_Cancelled> get copyWith => _$
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnState_Cancelled&&(identical(other.startedAt, startedAt) || other.startedAt == startedAt)&&(identical(other.requestedAt, requestedAt) || other.requestedAt == requestedAt)&&(identical(other.completedAt, completedAt) || other.completedAt == completedAt)&&(identical(other.cause, cause) || other.cause == cause));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnState_Cancelled&&(identical(other.startedAt, startedAt) || other.startedAt == startedAt)&&(identical(other.requestedAt, requestedAt) || other.requestedAt == requestedAt)&&(identical(other.completedAt, completedAt) || other.completedAt == completedAt)&&(identical(other.cause, cause) || other.cause == cause));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,startedAt,requestedAt,completedAt,cause);
+int get hashCode {
+    return Object.hash(runtimeType,startedAt,requestedAt,completedAt,cause);
+}
 
 @override
 String toString() {
-  return 'BridgeTurnState.cancelled(startedAt: $startedAt, requestedAt: $requestedAt, completedAt: $completedAt, cause: $cause)';
+    return 'BridgeTurnState.cancelled(startedAt: $startedAt, requestedAt: $requestedAt, completedAt: $completedAt, cause: $cause)';
 }
 
 
@@ -3363,16 +3423,18 @@ $BridgeTurnState_FailedCopyWith<BridgeTurnState_Failed> get copyWith => _$Bridge
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnState_Failed&&(identical(other.startedAt, startedAt) || other.startedAt == startedAt)&&(identical(other.completedAt, completedAt) || other.completedAt == completedAt)&&(identical(other.failure, failure) || other.failure == failure));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnState_Failed&&(identical(other.startedAt, startedAt) || other.startedAt == startedAt)&&(identical(other.completedAt, completedAt) || other.completedAt == completedAt)&&(identical(other.failure, failure) || other.failure == failure));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,startedAt,completedAt,failure);
+int get hashCode {
+    return Object.hash(runtimeType,startedAt,completedAt,failure);
+}
 
 @override
 String toString() {
-  return 'BridgeTurnState.failed(startedAt: $startedAt, completedAt: $completedAt, failure: $failure)';
+    return 'BridgeTurnState.failed(startedAt: $startedAt, completedAt: $completedAt, failure: $failure)';
 }
 
 
@@ -3434,16 +3496,18 @@ $BridgeTurnState_BudgetLimitedCopyWith<BridgeTurnState_BudgetLimited> get copyWi
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnState_BudgetLimited&&(identical(other.startedAt, startedAt) || other.startedAt == startedAt)&&(identical(other.completedAt, completedAt) || other.completedAt == completedAt)&&(identical(other.limit, limit) || other.limit == limit)&&(identical(other.rollover, rollover) || other.rollover == rollover));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnState_BudgetLimited&&(identical(other.startedAt, startedAt) || other.startedAt == startedAt)&&(identical(other.completedAt, completedAt) || other.completedAt == completedAt)&&(identical(other.limit, limit) || other.limit == limit)&&(identical(other.rollover, rollover) || other.rollover == rollover));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,startedAt,completedAt,limit,rollover);
+int get hashCode {
+    return Object.hash(runtimeType,startedAt,completedAt,limit,rollover);
+}
 
 @override
 String toString() {
-  return 'BridgeTurnState.budgetLimited(startedAt: $startedAt, completedAt: $completedAt, limit: $limit, rollover: $rollover)';
+    return 'BridgeTurnState.budgetLimited(startedAt: $startedAt, completedAt: $completedAt, limit: $limit, rollover: $rollover)';
 }
 
 
@@ -3507,16 +3571,21 @@ $BridgeUserInputInteractionStateCopyWith<BridgeUserInputInteractionState> get co
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUserInputInteractionState&&(identical(other.operationId, operationId) || other.operationId == operationId));
+  final _this = this as BridgeUserInputInteractionState;
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUserInputInteractionState&&(identical(other.operationId, _this.operationId) || other.operationId == _this.operationId));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,operationId);
+int get hashCode {
+  final _this = this as BridgeUserInputInteractionState;
+  return Object.hash(runtimeType,_this.operationId);
+}
 
 @override
 String toString() {
-  return 'BridgeUserInputInteractionState(operationId: $operationId)';
+  final _this = this as BridgeUserInputInteractionState;
+  return 'BridgeUserInputInteractionState(operationId: ${_this.operationId})';
 }
 
 
@@ -3715,16 +3784,18 @@ $BridgeUserInputInteractionState_PendingCopyWith<BridgeUserInputInteractionState
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUserInputInteractionState_Pending&&(identical(other.operationId, operationId) || other.operationId == operationId));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUserInputInteractionState_Pending&&(identical(other.operationId, operationId) || other.operationId == operationId));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,operationId);
+int get hashCode {
+    return Object.hash(runtimeType,operationId);
+}
 
 @override
 String toString() {
-  return 'BridgeUserInputInteractionState.pending(operationId: $operationId)';
+    return 'BridgeUserInputInteractionState.pending(operationId: $operationId)';
 }
 
 
@@ -3789,16 +3860,18 @@ $BridgeUserInputInteractionState_ResolvedCopyWith<BridgeUserInputInteractionStat
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUserInputInteractionState_Resolved&&(identical(other.operationId, operationId) || other.operationId == operationId)&&(identical(other.resolvedAt, resolvedAt) || other.resolvedAt == resolvedAt)&&const DeepCollectionEquality().equals(other._answers, _answers));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUserInputInteractionState_Resolved&&(identical(other.operationId, operationId) || other.operationId == operationId)&&(identical(other.resolvedAt, resolvedAt) || other.resolvedAt == resolvedAt)&&const DeepCollectionEquality().equals(other.answers, _answers));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,operationId,resolvedAt,const DeepCollectionEquality().hash(_answers));
+int get hashCode {
+    return Object.hash(runtimeType,operationId,resolvedAt,const DeepCollectionEquality().hash(_answers));
+}
 
 @override
 String toString() {
-  return 'BridgeUserInputInteractionState.resolved(operationId: $operationId, resolvedAt: $resolvedAt, answers: $answers)';
+    return 'BridgeUserInputInteractionState.resolved(operationId: $operationId, resolvedAt: $resolvedAt, answers: $answers)';
 }
 
 
@@ -3859,16 +3932,18 @@ $BridgeUserInputInteractionState_CancelledCopyWith<BridgeUserInputInteractionSta
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUserInputInteractionState_Cancelled&&(identical(other.operationId, operationId) || other.operationId == operationId)&&(identical(other.cancelledAt, cancelledAt) || other.cancelledAt == cancelledAt)&&(identical(other.reason, reason) || other.reason == reason));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUserInputInteractionState_Cancelled&&(identical(other.operationId, operationId) || other.operationId == operationId)&&(identical(other.cancelledAt, cancelledAt) || other.cancelledAt == cancelledAt)&&(identical(other.reason, reason) || other.reason == reason));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,operationId,cancelledAt,reason);
+int get hashCode {
+    return Object.hash(runtimeType,operationId,cancelledAt,reason);
+}
 
 @override
 String toString() {
-  return 'BridgeUserInputInteractionState.cancelled(operationId: $operationId, cancelledAt: $cancelledAt, reason: $reason)';
+    return 'BridgeUserInputInteractionState.cancelled(operationId: $operationId, cancelledAt: $cancelledAt, reason: $reason)';
 }
 
 
@@ -3928,16 +4003,18 @@ $BridgeUserInputInteractionState_ExpiredCopyWith<BridgeUserInputInteractionState
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUserInputInteractionState_Expired&&(identical(other.operationId, operationId) || other.operationId == operationId)&&(identical(other.expiredAt, expiredAt) || other.expiredAt == expiredAt));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUserInputInteractionState_Expired&&(identical(other.operationId, operationId) || other.operationId == operationId)&&(identical(other.expiredAt, expiredAt) || other.expiredAt == expiredAt));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,operationId,expiredAt);
+int get hashCode {
+    return Object.hash(runtimeType,operationId,expiredAt);
+}
 
 @override
 String toString() {
-  return 'BridgeUserInputInteractionState.expired(operationId: $operationId, expiredAt: $expiredAt)';
+    return 'BridgeUserInputInteractionState.expired(operationId: $operationId, expiredAt: $expiredAt)';
 }
 
 

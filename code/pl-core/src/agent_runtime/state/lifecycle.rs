@@ -79,6 +79,7 @@ pub struct AgentSpawnRequest {
 pub struct AgentSpawnResult {
     pub snapshot: AgentSnapshot,
     pub initial_turn_id: Option<TurnId>,
+    pub workspace_assignment: Option<pl_protocol::AgentWorkspaceAssignmentSnapshot>,
 }
 
 impl AgentRegistration {

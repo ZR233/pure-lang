@@ -188,32 +188,43 @@ impl StudioRuntime {
     /// 原子创建或保存一个用户 Agent Profile TOML。
     pub fn save_user_agent_profile(
         &self,
+        expected_settings_revision: u64,
         profile_id: &str,
         profile: &crate::config::UserAgentProfile,
-    ) -> Result<()> {
-        self.config_runtime
-            .save_user_agent_profile(profile_id, profile)?;
-        Ok(())
+    ) -> Result<pl_protocol::studio::StudioSettingsSnapshot> {
+        let state = self.config_runtime.save_user_agent_profile(
+            expected_settings_revision,
+            profile_id,
+            profile,
+        )?;
+        self.publish_settings_state(state.clone())?;
+        settings_api::settings_snapshot(state)
     }
 
     /// 启用或禁用不可编辑、不可删除的系统 Agent Profile。
-    pub fn set_system_agent_enabled(&self, profile_id: &str, enabled: bool) -> Result<()> {
+    pub fn set_system_agent_enabled(
+        &self,
+        expected_settings_revision: u64,
+        profile_id: &str,
+        enabled: bool,
+    ) -> Result<pl_protocol::studio::StudioSettingsSnapshot> {
         if !crate::config::is_system_profile_id(profile_id) {
             anyhow::bail!("`{profile_id}` is not a system Agent Profile");
         }
-        let current = self.config_runtime.read()?;
         let profile_id = profile_id.to_string();
-        let state = self.config_runtime.update(current.revision, |config| {
-            let mut config = config.clone();
-            if enabled {
-                config.disabled_system_agents.remove(&profile_id);
-            } else {
-                config.disabled_system_agents.insert(profile_id.clone());
-            }
-            Ok(config)
-        })?;
-        self.publish_settings_state(state)?;
-        Ok(())
+        let state = self
+            .config_runtime
+            .update(expected_settings_revision, |config| {
+                let mut config = config.clone();
+                if enabled {
+                    config.disabled_system_agents.remove(&profile_id);
+                } else {
+                    config.disabled_system_agents.insert(profile_id.clone());
+                }
+                Ok(config)
+            })?;
+        self.publish_settings_state(state.clone())?;
+        settings_api::settings_snapshot(state)
     }
 
     /// 返回本次启动构造阶段产生的配置恢复报告。

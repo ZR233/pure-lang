@@ -9,7 +9,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'runtime.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 class BridgeActiveTurn {
   final String threadId;
@@ -564,7 +564,12 @@ class BridgeReadyResource {
           lastCheckedAt == other.lastCheckedAt;
 }
 
-enum BridgeRecoveryIssueAction { retry, cleanupThread, removeProject }
+enum BridgeRecoveryIssueAction {
+  retry,
+  cleanupThread,
+  removeProject,
+  cleanupWorktree,
+}
 
 enum BridgeRecoveryIssueCategory { processLease, agentState, repository }
 
@@ -747,6 +752,7 @@ class BridgeStudioRecoveryIssueDto {
   final String? projectId;
   final String? threadId;
   final String detail;
+  final BridgeWorktreeRecoveryPreviewDto? worktree;
 
   const BridgeStudioRecoveryIssueDto({
     required this.id,
@@ -756,6 +762,7 @@ class BridgeStudioRecoveryIssueDto {
     this.projectId,
     this.threadId,
     required this.detail,
+    this.worktree,
   });
 
   @override
@@ -766,7 +773,8 @@ class BridgeStudioRecoveryIssueDto {
       availableActions.hashCode ^
       projectId.hashCode ^
       threadId.hashCode ^
-      detail.hashCode;
+      detail.hashCode ^
+      worktree.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -779,7 +787,8 @@ class BridgeStudioRecoveryIssueDto {
           availableActions == other.availableActions &&
           projectId == other.projectId &&
           threadId == other.threadId &&
-          detail == other.detail;
+          detail == other.detail &&
+          worktree == other.worktree;
 }
 
 class BridgeUninitializedResource {
@@ -838,6 +847,61 @@ class BridgeWaitingToolAgent {
       other is BridgeWaitingToolAgent &&
           runtimeType == other.runtimeType &&
           turnId == other.turnId;
+}
+
+class BridgeWorktreeRecoveryPreviewDto {
+  final String childId;
+  final BigInt leaseRevision;
+  final String state;
+  final String repositoryRoot;
+  final String path;
+  final String branch;
+  final String baseCommit;
+  final String? headCommit;
+  final bool dirty;
+  final List<String> changedFiles;
+
+  const BridgeWorktreeRecoveryPreviewDto({
+    required this.childId,
+    required this.leaseRevision,
+    required this.state,
+    required this.repositoryRoot,
+    required this.path,
+    required this.branch,
+    required this.baseCommit,
+    this.headCommit,
+    required this.dirty,
+    required this.changedFiles,
+  });
+
+  @override
+  int get hashCode =>
+      childId.hashCode ^
+      leaseRevision.hashCode ^
+      state.hashCode ^
+      repositoryRoot.hashCode ^
+      path.hashCode ^
+      branch.hashCode ^
+      baseCommit.hashCode ^
+      headCommit.hashCode ^
+      dirty.hashCode ^
+      changedFiles.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeWorktreeRecoveryPreviewDto &&
+          runtimeType == other.runtimeType &&
+          childId == other.childId &&
+          leaseRevision == other.leaseRevision &&
+          state == other.state &&
+          repositoryRoot == other.repositoryRoot &&
+          path == other.path &&
+          branch == other.branch &&
+          baseCommit == other.baseCommit &&
+          headCommit == other.headCommit &&
+          dirty == other.dirty &&
+          changedFiles == other.changedFiles;
 }
 
 class RuntimeSnapshot {

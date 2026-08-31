@@ -22,7 +22,10 @@ mod turn_failure;
 mod workflow;
 
 pub use agent::*;
-pub use agent_profile::AgentProfileSnapshot;
+pub use agent_profile::{
+    AgentProfileSnapshot, AgentWorkspaceAssignmentSnapshot, AgentWorkspaceDisposition,
+    AgentWorkspaceMode, AgentWorktreeSnapshot,
+};
 pub use billing::InferenceTokenUsage as TokenUsage;
 pub use billing::{
     InferenceBillingAppend, InferenceBillingRecord, InferenceOrchestrationMetrics, InferenceTiming,

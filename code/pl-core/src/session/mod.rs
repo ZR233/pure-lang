@@ -264,6 +264,26 @@ impl AgentSession {
         true
     }
 
+    /// 返回子 Agent 创建时冻结的有效工作区。
+    pub fn workspace_assignment(&self) -> Option<&pl_protocol::AgentWorkspaceAssignmentSnapshot> {
+        self.state.working_state.workspace_assignment.as_ref()
+    }
+
+    /// 原子替换冻结工作区；根会话通常保持 `None`。
+    pub fn replace_workspace_assignment(
+        &mut self,
+        assignment: Option<pl_protocol::AgentWorkspaceAssignmentSnapshot>,
+    ) -> bool {
+        if self.state.working_state.workspace_assignment == assignment {
+            return false;
+        }
+        let state = Arc::make_mut(&mut self.state);
+        state.working_state.workspace_assignment = assignment;
+        state.working_state.revision = state.working_state.revision.saturating_add(1);
+        state.revision = state.revision.saturating_add(1);
+        true
+    }
+
     pub fn prompt_metadata(&self) -> &ThreadPromptMetadata {
         &self.state.working_state.prompt
     }

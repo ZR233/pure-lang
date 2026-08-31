@@ -31,8 +31,9 @@ workflow projection 与 session 同时恢复，不存在独立 TaskRuntime 恢�
 ## 20.4 配置目录
 
 Mode catalog 扫描通过 Skill Provider 触发，结果是动态 selector 的事实源。Agent Profile catalog 合并
-Rust builtin 与用户 TOML；系统禁用状态来自主配置。设置命令保存成功后必须返回或发布最新 canonical
-snapshot，Flutter 不只修改本地 draft。
+Rust builtin 与用户 TOML；完整 Agent 配置投影属于 Settings snapshot。系统启停、系统 route 更新和
+用户 Profile 保存都携带 `expectedSettingsRevision`；成功后返回最新完整 canonical snapshot，Flutter
+原子替换 Settings 领域，不只修改本地 draft。
 
 ## 20.5 Shutdown
 

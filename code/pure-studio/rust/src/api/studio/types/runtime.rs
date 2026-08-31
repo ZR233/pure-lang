@@ -155,6 +155,22 @@ pub enum BridgeRecoveryIssueAction {
     Retry,
     CleanupThread,
     RemoveProject,
+    CleanupWorktree,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeWorktreeRecoveryPreviewDto {
+    pub child_id: String,
+    pub lease_revision: u64,
+    pub state: String,
+    pub repository_root: String,
+    pub path: String,
+    pub branch: String,
+    pub base_commit: String,
+    pub head_commit: Option<String>,
+    pub dirty: bool,
+    pub changed_files: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -167,6 +183,7 @@ pub struct BridgeStudioRecoveryIssueDto {
     pub project_id: Option<String>,
     pub thread_id: Option<String>,
     pub detail: String,
+    pub worktree: Option<BridgeWorktreeRecoveryPreviewDto>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

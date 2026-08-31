@@ -1,5 +1,8 @@
 use crate::api::studio::bridge_runtime::active_bridge;
-use crate::api::studio::types::{BridgeAgentProfileDto, BridgeError};
+use crate::api::studio::convert::settings::bridge_settings_snapshot;
+use crate::api::studio::types::{
+    BridgeAgentProfileDto, BridgeAgentWorkspaceMode, BridgeError, BridgeSettingsStateSnapshot,
+};
 
 /// Reads every valid Agent Profile for settings, including disabled profiles.
 /// Built-in profiles are immutable and marked with `system: true`.
@@ -23,25 +26,29 @@ pub async fn read_agent_profiles() -> Result<Vec<BridgeAgentProfileDto>, BridgeE
             content_hash: profile.content_hash,
             system: profile.system,
             enabled: profile.enabled,
+            workspace_mode: profile.workspace_mode.into(),
         })
         .collect())
 }
 
 /// Enables or disables an immutable built-in Agent Profile.
 pub async fn set_system_agent_enabled(
+    expected_settings_revision: u64,
     profile_id: String,
     enabled: bool,
-) -> Result<Vec<BridgeAgentProfileDto>, BridgeError> {
+) -> Result<BridgeSettingsStateSnapshot, BridgeError> {
     let bridge = active_bridge().await?;
-    bridge
-        .studio
-        .set_system_agent_enabled(&profile_id, enabled)?;
-    read_agent_profiles().await
+    Ok(bridge_settings_snapshot(
+        bridge
+            .studio
+            .set_system_agent_enabled(expected_settings_revision, &profile_id, enabled)?,
+    ))
 }
 
 /// Atomically creates or replaces one user Agent Profile TOML file.
 #[allow(clippy::too_many_arguments)]
 pub async fn save_user_agent_profile(
+    expected_settings_revision: u64,
     profile_id: String,
     enabled: bool,
     display_name: String,
@@ -51,7 +58,8 @@ pub async fn save_user_agent_profile(
     provider_id: String,
     model: String,
     effort: Option<String>,
-) -> Result<Vec<BridgeAgentProfileDto>, BridgeError> {
+    workspace_mode: BridgeAgentWorkspaceMode,
+) -> Result<BridgeSettingsStateSnapshot, BridgeError> {
     let bridge = active_bridge().await?;
     let profile = pl_studio_runtime::UserAgentProfile {
         enabled,
@@ -65,9 +73,28 @@ pub async fn save_user_agent_profile(
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty())
             .map(pl_studio_runtime::ReasoningEffort::new),
+        workspace_mode: match workspace_mode {
+            BridgeAgentWorkspaceMode::Unrestricted => pl_protocol::AgentWorkspaceMode::Unrestricted,
+            BridgeAgentWorkspaceMode::Directory => pl_protocol::AgentWorkspaceMode::Directory,
+            BridgeAgentWorkspaceMode::Worktree => pl_protocol::AgentWorkspaceMode::Worktree,
+        },
     };
+    Ok(bridge_settings_snapshot(
+        bridge
+            .studio
+            .save_user_agent_profile(expected_settings_revision, &profile_id, &profile)?,
+    ))
+}
+
+/// Explicitly removes one revision-matched preserved Pure worktree and branch.
+pub async fn cleanup_preserved_worktree(
+    child_id: String,
+    expected_lease_revision: u64,
+) -> Result<(), BridgeError> {
+    let bridge = active_bridge().await?;
     bridge
         .studio
-        .save_user_agent_profile(&profile_id, &profile)?;
-    read_agent_profiles().await
+        .cleanup_preserved_worktree(&child_id, expected_lease_revision)
+        .await?;
+    Ok(())
 }

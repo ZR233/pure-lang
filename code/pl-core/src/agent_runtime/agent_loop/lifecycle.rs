@@ -86,8 +86,32 @@ where
         Ok(self.state.snapshot.clone())
     }
 
-    pub(super) async fn close(&mut self) -> AgentRuntimeResult<AgentSnapshot> {
+    pub(super) async fn close(
+        &mut self,
+        workspace_disposition: pl_protocol::AgentWorkspaceDisposition,
+    ) -> AgentRuntimeResult<AgentSnapshot> {
         if matches!(self.state.snapshot.state, AgentState::Closed(_)) {
+            if workspace_disposition == pl_protocol::AgentWorkspaceDisposition::Cleanup {
+                let lease = self
+                    .host
+                    .lifecycle()
+                    .prepare_close(CloseLifecycleRequest {
+                        agent: self.state.snapshot.clone(),
+                        workspace_disposition,
+                    })
+                    .await
+                    .map_err(|error| AgentRuntimeError::Lifecycle(error.to_string()))?;
+                if let Err(error) = self.host.lifecycle().commit_close(&lease).await {
+                    let rollback = self.host.lifecycle().rollback_close(lease).await;
+                    let reason = match rollback {
+                        Ok(()) => error.to_string(),
+                        Err(rollback_error) => {
+                            format!("{error}; close rollback failed: {rollback_error}")
+                        }
+                    };
+                    return Err(AgentRuntimeError::Lifecycle(reason));
+                }
+            }
             return Ok(self.state.snapshot.clone());
         }
         let lease = self
@@ -95,6 +119,7 @@ where
             .lifecycle()
             .prepare_close(CloseLifecycleRequest {
                 agent: self.state.snapshot.clone(),
+                workspace_disposition,
             })
             .await
             .map_err(|error| AgentRuntimeError::Lifecycle(error.to_string()))?;

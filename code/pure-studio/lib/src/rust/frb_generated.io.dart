@@ -481,6 +481,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   dco_decode_box_autoadd_bridge_workflow_runtime_snapshot(dynamic raw);
 
   @protected
+  BridgeWorktreeRecoveryPreviewDto
+  dco_decode_box_autoadd_bridge_worktree_recovery_preview_dto(dynamic raw);
+
+  @protected
   DeepSeekBalanceDto dco_decode_box_autoadd_deep_seek_balance_dto(dynamic raw);
 
   @protected
@@ -619,6 +623,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeAgentState dco_decode_bridge_agent_state(dynamic raw);
+
+  @protected
+  BridgeAgentWorkspaceMode dco_decode_bridge_agent_workspace_mode(dynamic raw);
 
   @protected
   BridgeAttachmentAdmissionContext
@@ -1318,6 +1325,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeWorktreeRecoveryPreviewDto
+  dco_decode_bridge_worktree_recovery_preview_dto(dynamic raw);
+
+  @protected
   DeepSeekBalanceDto dco_decode_deep_seek_balance_dto(dynamic raw);
 
   @protected
@@ -1639,6 +1650,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   BridgeWorkflowRuntimeSnapshot?
   dco_decode_opt_box_autoadd_bridge_workflow_runtime_snapshot(dynamic raw);
+
+  @protected
+  BridgeWorktreeRecoveryPreviewDto?
+  dco_decode_opt_box_autoadd_bridge_worktree_recovery_preview_dto(dynamic raw);
 
   @protected
   double? dco_decode_opt_box_autoadd_f_64(dynamic raw);
@@ -2308,6 +2323,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeWorktreeRecoveryPreviewDto
+  sse_decode_box_autoadd_bridge_worktree_recovery_preview_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   DeepSeekBalanceDto sse_decode_box_autoadd_deep_seek_balance_dto(
     SseDeserializer deserializer,
   );
@@ -2474,6 +2495,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeAgentState sse_decode_bridge_agent_state(SseDeserializer deserializer);
+
+  @protected
+  BridgeAgentWorkspaceMode sse_decode_bridge_agent_workspace_mode(
+    SseDeserializer deserializer,
+  );
 
   @protected
   BridgeAttachmentAdmissionContext
@@ -3353,6 +3379,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeWorktreeRecoveryPreviewDto
+  sse_decode_bridge_worktree_recovery_preview_dto(SseDeserializer deserializer);
+
+  @protected
   DeepSeekBalanceDto sse_decode_deep_seek_balance_dto(
     SseDeserializer deserializer,
   );
@@ -3752,6 +3782,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   BridgeWorkflowRuntimeSnapshot?
   sse_decode_opt_box_autoadd_bridge_workflow_runtime_snapshot(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeWorktreeRecoveryPreviewDto?
+  sse_decode_opt_box_autoadd_bridge_worktree_recovery_preview_dto(
     SseDeserializer deserializer,
   );
 
@@ -4521,6 +4557,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_bridge_worktree_recovery_preview_dto(
+    BridgeWorktreeRecoveryPreviewDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_deep_seek_balance_dto(
     DeepSeekBalanceDto self,
     SseSerializer serializer,
@@ -4721,6 +4763,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_agent_state(
     BridgeAgentState self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_agent_workspace_mode(
+    BridgeAgentWorkspaceMode self,
     SseSerializer serializer,
   );
 
@@ -5796,6 +5844,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_worktree_recovery_preview_dto(
+    BridgeWorktreeRecoveryPreviewDto self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_deep_seek_balance_dto(
     DeepSeekBalanceDto self,
     SseSerializer serializer,
@@ -6275,6 +6329,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_bridge_workflow_runtime_snapshot(
     BridgeWorkflowRuntimeSnapshot? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_worktree_recovery_preview_dto(
+    BridgeWorktreeRecoveryPreviewDto? self,
     SseSerializer serializer,
   );
 

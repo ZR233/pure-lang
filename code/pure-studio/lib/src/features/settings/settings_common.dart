@@ -491,6 +491,7 @@ class SettingsPane extends StatelessWidget {
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: maxWidth),
         child: ListView(
+          key: const ValueKey('settings-pane-scroll'),
           padding: const EdgeInsets.fromLTRB(28, 22, 28, 30),
           children: children,
         ),

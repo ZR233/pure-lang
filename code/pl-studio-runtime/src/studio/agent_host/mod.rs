@@ -5,6 +5,7 @@ mod repository;
 mod resources;
 mod turn_factory;
 mod workspace_resolver;
+pub(in crate::studio) mod worktree_lease;
 
 use std::sync::Arc;
 
@@ -59,7 +60,12 @@ impl StudioAgentHost {
                 skills,
                 ssh_manager.clone(),
             ),
-            lifecycle: StudioAgentLifecycle::new(store, product_events.clone(), resources.clone()),
+            lifecycle: StudioAgentLifecycle::new(
+                store,
+                product_events.clone(),
+                resources.clone(),
+                ssh_manager,
+            ),
             observer: StudioAgentCommitObserver::new(resources, product_events),
         }
     }

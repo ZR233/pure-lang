@@ -183,6 +183,6 @@ JSON discriminator 生成的 stored column。普通分类、配置、能力、sc
 - 配置文件固定为 `~/.pure/config.toml`。
 - 本地 TOML 使用 `snake_case`。
 - 不设置 `active_provider`。
-- 固定角色 key：`explorer`、`planner`、`executor`、`reviewer`。
+- 固定角色 key：`explorer`、`planner`、`executor`、`worktree_executor`、`reviewer`。
 - 普通对话默认使用 `planner`。
 - provider 必须持久化完整 models 列表，以支持用户自定义模型。

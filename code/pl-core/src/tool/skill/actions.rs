@@ -12,11 +12,13 @@ use super::{
     SkillPathOutput, WriteSkillFileInput, json_output, tool_error,
 };
 use crate::tool::ToolResult;
+use crate::tool::ToolWorkspace;
 use crate::tool::text_escape::decode_json_escaped_fragment_once;
 
 pub(super) fn create_skill(
     tool: &str,
     catalog: &SkillCatalog,
+    workspace: &ToolWorkspace,
     input: CreateSkillInput,
 ) -> Result<ToolResult, PureError> {
     if catalog.project_skill(&input.target.name).is_some() {
@@ -38,6 +40,7 @@ pub(super) fn create_skill(
         ProjectPathRequirement::AllowMissing,
         tool,
     )?;
+    workspace.ensure_path_writable(&skill_dir)?;
     let skill_file = skill_dir.join("SKILL.md");
     ensure_project_path(
         &catalog.project_dir,
@@ -73,6 +76,7 @@ pub(super) fn create_skill(
 pub(super) fn edit_skill(
     tool: &str,
     catalog: &SkillCatalog,
+    workspace: &ToolWorkspace,
     input: EditSkillInput,
 ) -> Result<ToolResult, PureError> {
     let skill = writable_project_skill(tool, catalog, &input.target.name)?;
@@ -86,6 +90,7 @@ pub(super) fn edit_skill(
         ProjectPathRequirement::MustExist,
         tool,
     )?;
+    workspace.ensure_path_writable(&skill_file)?;
     fs::write(skill_file, content)
         .map_err(|error| tool_error(tool, format!("failed to write SKILL.md: {error}")))?;
     bump_project_patch(&catalog.project_dir, &skill.path)
@@ -103,6 +108,7 @@ pub(super) fn edit_skill(
 pub(super) fn patch_skill(
     tool: &str,
     catalog: &SkillCatalog,
+    workspace: &ToolWorkspace,
     input: PatchSkillInput,
 ) -> Result<ToolResult, PureError> {
     let skill = writable_project_skill(tool, catalog, &input.target.name)?;
@@ -124,6 +130,7 @@ pub(super) fn patch_skill(
         ProjectPathRequirement::MustExist,
         tool,
     )?;
+    workspace.ensure_path_writable(&path)?;
     let content = fs::read_to_string(&path)
         .map_err(|error| tool_error(tool, format!("failed to read SKILL.md: {error}")))?;
     let (needle, matches) = patch_needle(&content, &old_string).ok_or_else(|| {
@@ -179,6 +186,7 @@ fn patch_needle(content: &str, old_string: &str) -> Option<(String, usize)> {
 pub(super) fn delete_skill(
     tool: &str,
     catalog: &SkillCatalog,
+    workspace: &ToolWorkspace,
     input: DeleteSkillInput,
 ) -> Result<ToolResult, PureError> {
     let skill = writable_project_skill(tool, catalog, &input.target.name)?;
@@ -188,6 +196,7 @@ pub(super) fn delete_skill(
         ProjectPathRequirement::MustExist,
         tool,
     )?;
+    workspace.ensure_path_writable(&skill.path)?;
     remove_dir_all_no_follow(&catalog.project_dir, &skill.path)
         .map_err(|error| tool_error(tool, format!("failed to delete skill: {error}")))?;
     json_output(SkillDeleteOutput {
@@ -203,6 +212,7 @@ pub(super) fn delete_skill(
 pub(super) fn write_support_file(
     tool: &str,
     catalog: &SkillCatalog,
+    workspace: &ToolWorkspace,
     input: WriteSkillFileInput,
 ) -> Result<ToolResult, PureError> {
     let skill = writable_project_skill(tool, catalog, &input.target.name)?;
@@ -216,6 +226,7 @@ pub(super) fn write_support_file(
         ProjectPathRequirement::AllowMissing,
         tool,
     )?;
+    workspace.ensure_path_writable(&path)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| {
             tool_error(
@@ -241,6 +252,7 @@ pub(super) fn write_support_file(
 pub(super) fn remove_support_file(
     tool: &str,
     catalog: &SkillCatalog,
+    workspace: &ToolWorkspace,
     input: RemoveSkillFileInput,
 ) -> Result<ToolResult, PureError> {
     let skill = writable_project_skill(tool, catalog, &input.target.name)?;
@@ -253,6 +265,7 @@ pub(super) fn remove_support_file(
         ProjectPathRequirement::MustExist,
         tool,
     )?;
+    workspace.ensure_path_writable(&path)?;
     if !path.is_file() {
         return Err(tool_error(
             tool,

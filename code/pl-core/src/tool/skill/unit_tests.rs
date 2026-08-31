@@ -244,7 +244,7 @@ fn create_writes_project_skill() {
         category: None,
     };
 
-    create_skill("skill_manage", &catalog, input).unwrap();
+    create_skill("skill_manage", &catalog, &tool_workspace(&workspace), input).unwrap();
 
     assert!(workspace.join("skills/local-flow/SKILL.md").exists());
     fs::remove_dir_all(workspace).unwrap();
@@ -364,7 +364,7 @@ fn patch_accepts_json_escaped_markdown_old_string() {
         replace_mode: None,
     };
 
-    patch_skill("skill_manage", &catalog, input).unwrap();
+    patch_skill("skill_manage", &catalog, &tool_workspace(&workspace), input).unwrap();
 
     let updated = fs::read_to_string(skill_dir.join("SKILL.md")).unwrap();
     assert!(updated.contains("Snippet: `\"known\\nusage\"`"));

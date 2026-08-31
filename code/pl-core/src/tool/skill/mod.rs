@@ -546,20 +546,22 @@ impl Tool for SkillManageTool {
                 catalog_for(&self.source, self.workspace.root(), &context, self.name()).await?;
             let result = match input {
                 SkillManageInput::Create(input) => {
-                    create_skill(self.name(), catalog.snapshot(), input)
+                    create_skill(self.name(), catalog.snapshot(), &self.workspace, input)
                 }
                 SkillManageInput::Patch(input) => {
-                    patch_skill(self.name(), catalog.snapshot(), input)
+                    patch_skill(self.name(), catalog.snapshot(), &self.workspace, input)
                 }
-                SkillManageInput::Edit(input) => edit_skill(self.name(), catalog.snapshot(), input),
+                SkillManageInput::Edit(input) => {
+                    edit_skill(self.name(), catalog.snapshot(), &self.workspace, input)
+                }
                 SkillManageInput::Delete(input) => {
-                    delete_skill(self.name(), catalog.snapshot(), input)
+                    delete_skill(self.name(), catalog.snapshot(), &self.workspace, input)
                 }
                 SkillManageInput::WriteFile(input) => {
-                    write_support_file(self.name(), catalog.snapshot(), input)
+                    write_support_file(self.name(), catalog.snapshot(), &self.workspace, input)
                 }
                 SkillManageInput::RemoveFile(input) => {
-                    remove_support_file(self.name(), catalog.snapshot(), input)
+                    remove_support_file(self.name(), catalog.snapshot(), &self.workspace, input)
                 }
             };
             if result.is_ok() {

@@ -76,6 +76,7 @@ pub(crate) enum AgentLoopCommand {
         reply: oneshot::Sender<AgentRuntimeResult<()>>,
     },
     Close {
+        workspace_disposition: pl_protocol::AgentWorkspaceDisposition,
         reply: oneshot::Sender<AgentRuntimeResult<AgentSnapshot>>,
     },
     TurnFinished(Box<TurnCompletion>),

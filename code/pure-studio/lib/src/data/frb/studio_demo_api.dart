@@ -689,6 +689,7 @@ class DemoStudioApi implements StudioApi {
         contentHash: 'demo-explorer',
         system: true,
         enabled: !_disabledSystemAgents.contains('explorer'),
+        workspaceMode: AgentWorkspaceMode.unrestricted,
       ),
       AgentProfileView(
         id: 'planner',
@@ -704,28 +705,82 @@ class DemoStudioApi implements StudioApi {
         contentHash: 'demo-planner',
         system: true,
         enabled: !_disabledSystemAgents.contains('planner'),
+        workspaceMode: AgentWorkspaceMode.unrestricted,
+      ),
+      AgentProfileView(
+        id: 'executor',
+        displayName: 'Executor',
+        description: '在项目目录内实施边界明确的修改。',
+        whenToUse: '需要限制 Pure 内置文件写工具的修改目录时。',
+        systemInstructions: '遵守冻结的 writablePaths。',
+        providerId: 'demo',
+        model: 'demo',
+        effort: 'medium',
+        source: 'studio-builtin',
+        revision: 'studio-system-agent-v2',
+        contentHash: 'demo-executor',
+        system: true,
+        enabled: !_disabledSystemAgents.contains('executor'),
+        workspaceMode: AgentWorkspaceMode.directory,
+      ),
+      AgentProfileView(
+        id: 'worktree_executor',
+        displayName: 'Worktree Executor',
+        description: '在独立 Git worktree 内实施修改。',
+        whenToUse: '需要物理隔离并显式整合 commit 时。',
+        systemInstructions: '只修改分配的 worktree，不自动整合。',
+        providerId: 'demo',
+        model: 'demo',
+        effort: 'medium',
+        source: 'studio-builtin',
+        revision: 'studio-system-agent-v2',
+        contentHash: 'demo-worktree-executor',
+        system: true,
+        enabled: !_disabledSystemAgents.contains('worktree_executor'),
+        workspaceMode: AgentWorkspaceMode.worktree,
+      ),
+      AgentProfileView(
+        id: 'reviewer',
+        displayName: 'Reviewer',
+        description: '独立审查实现和验证证据。',
+        whenToUse: '需要复核实现质量时。',
+        systemInstructions: '只读审查并报告具体证据。',
+        providerId: 'demo',
+        model: 'demo',
+        effort: 'medium',
+        source: 'studio-builtin',
+        revision: 'studio-system-agent-v2',
+        contentHash: 'demo-reviewer',
+        system: true,
+        enabled: !_disabledSystemAgents.contains('reviewer'),
+        workspaceMode: AgentWorkspaceMode.unrestricted,
       ),
       ..._userAgentProfiles.values,
     ];
   }
 
   @override
-  Future<List<AgentProfileView>> setSystemAgentEnabled({
+  Future<SettingsStateSnapshot> setSystemAgentEnabled({
+    required int expectedSettingsRevision,
     required String profileId,
     required bool enabled,
   }) async {
+    _checkSettingsRevision(expectedSettingsRevision);
     if (enabled) {
       _disabledSystemAgents.remove(profileId);
     } else {
       _disabledSystemAgents.add(profileId);
     }
-    return readAgentProfiles();
+    _settingsRevision += 1;
+    return (await readStudioState()).settingsState;
   }
 
   @override
-  Future<List<AgentProfileView>> saveUserAgentProfile(
+  Future<SettingsStateSnapshot> saveUserAgentProfile(
+    int expectedSettingsRevision,
     AgentProfileDraft draft,
   ) async {
+    _checkSettingsRevision(expectedSettingsRevision);
     _userAgentProfiles[draft.id] = AgentProfileView(
       id: draft.id,
       displayName: draft.displayName,
@@ -740,9 +795,17 @@ class DemoStudioApi implements StudioApi {
       contentHash: 'demo-user-${draft.id}',
       system: false,
       enabled: draft.enabled,
+      workspaceMode: draft.workspaceMode,
     );
-    return readAgentProfiles();
+    _settingsRevision += 1;
+    return (await readStudioState()).settingsState;
   }
+
+  @override
+  Future<void> cleanupPreservedWorktree({
+    required String childId,
+    required int expectedLeaseRevision,
+  }) async {}
 
   @override
   Future<StudioProject> openProject(String path) async {

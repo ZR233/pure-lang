@@ -42,8 +42,14 @@ Workflow 阶段不能收缩文件、命令、Git、MCP、Agent 或最终回复�
 approval/sandbox 策略。协作 `spawn_agent` 接受 `profileId` 并冻结 Profile；child 不注册 root 的
 `workflow_state`，因此不能替 root 改写 run。
 
+`spawn_agent` 对 directory Profile 接受 `writablePaths`；省略、空数组和非空数组分别表示项目内全可写、
+只读和目录前缀白名单。所有 Pure 内置文件 mutation 通过中央策略检查，读取与项目外访问不受该字段
+扩张或收缩。该策略不是 OS 沙箱，exec、Git 和 MCP 的 schema/固定 prompt 必须明确其可绕过目录限制，
+并要求 child 不借这些工具修改白名单外项目文件。
+
 ## 13.5 统一完成
 
 所有 root Mode 在完成请求后调用 `complete`，提交非空 `summary` 和可选、有界的 `evidence` 列表。
 工具返回结构化完成事实并结束当前 turn；普通文本不能替代该调用。未选择 workflow 的 Mode 不需要
-调用 `workflow_state`，但仍必须通过 `complete` 结束。
+调用 `workflow_state`，但仍必须通过 `complete` 结束。child（包括 `worktree_executor`）保持直接结束，
+不得要求其调用 root 专用的 `complete`。

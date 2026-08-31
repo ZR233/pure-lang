@@ -14,6 +14,7 @@ pub(super) struct SpawnArgs {
     pub(super) fork_turns: ForkTurns,
     #[serde(default)]
     pub(super) metadata: Value,
+    pub(super) writable_paths: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -59,6 +60,14 @@ pub(super) struct SendMessageArgs {
 #[serde(deny_unknown_fields)]
 pub(super) struct TargetArgs {
     pub(super) target: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct CloseArgs {
+    pub(super) target: String,
+    #[serde(default)]
+    pub(super) workspace_disposition: pl_protocol::AgentWorkspaceDisposition,
 }
 
 #[derive(Debug, Deserialize)]

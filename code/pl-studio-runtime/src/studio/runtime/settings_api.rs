@@ -253,7 +253,7 @@ impl StudioRuntime {
     }
 }
 
-pub(super) fn settings_snapshot(state: ConfigRuntimeSnapshot) -> Result<StudioSettingsSnapshot> {
+pub(crate) fn settings_snapshot(state: ConfigRuntimeSnapshot) -> Result<StudioSettingsSnapshot> {
     let settings = settings_view(&state.config, StudioRole::Executor)?;
     Ok(StudioSettingsSnapshot {
         revision: state.revision,

@@ -27,16 +27,16 @@ Product state (projects, threads, tasks) lives in `<home>/studio/studio.sqlite`;
 
 ## Format Rules
 
-- TOML with snake_case keys; only `schema_version = 16` is accepted.
+- TOML with snake_case keys; only `schema_version = 17` is accepted after startup migration.
 - A missing file means in-memory defaults shown in Settings; nothing is written until you save.
-- At startup, an unparsable, invalid, inline-credential, old-schema, or unknown-schema file is not migrated. Studio first saves the original bytes beside it as `config.toml.rejected.<timestamp>.bak`, then atomically replaces it with the current default config. A failed backup or replacement keeps startup closed and preserves the original file.
+- At startup, schemas 15 and 16 are typed-migrated to 17 after a byte-for-byte `config.toml.migrated.<timestamp>.bak` backup. Other unparsable, invalid, inline-credential, or unknown-schema files use the rejected-backup recovery path. A failed backup or replacement keeps startup closed and preserves the original file.
 - Explicit reload while Studio is running remains strict: it reports the invalid file instead of replacing it.
 - Saving from Settings writes atomically. External file edits are not picked up automatically; restart Studio after editing config.toml by hand.
 
 ## Common Sections
 
 - `[models.providers.<id>]` — provider endpoint, preset, credential reference, model catalog.
-- `[models.routes.<role>]` — model route per role: `explorer`, `planner`, `executor`, `reviewer`. All four must resolve.
+- `[models.routes.<role>]` — model route per role: `explorer`, `planner`, `executor`, `worktree_executor`, `reviewer`. All five must resolve.
 - `[runtime]` — `permission_mode` (`request-approval` | `auto-review` | `full-access`), tool capabilities, active skills and MCP servers.
 - `[skills]` — enable/disable, auto-learn, project/user/external skill directories, disabled skills. In addition to configured `user_dir`, Pure always discovers the read-only user compatibility directory at `$HOME/.agents/skills` on Linux and `%USERPROFILE%\.agents\skills` on Windows.
 - `[mcp]` — custom servers under `[mcp.servers.<id>]` plus builtin server states.
@@ -59,7 +59,7 @@ Tokens never live in `config.toml`. Saving from Settings clears any inline token
 Every provider needs `name`, `base_url`, and a `catalog` section; every role needs a route. `effort` is optional and must match the model's supported effort candidates.
 
 ```toml
-schema_version = 16
+schema_version = 17
 
 [deepseek_web_search]
 enabled = true
@@ -86,6 +86,10 @@ effort = "high"
 provider = "deepseek"
 model = "deepseek-v4-flash"
 
+[models.routes.worktree_executor]
+provider = "deepseek"
+model = "deepseek-v4-flash"
+
 [models.routes.reviewer]
 provider = "deepseek"
 model = "deepseek-v4-flash"
@@ -95,7 +99,7 @@ model = "deepseek-v4-flash"
 
 1. Prefer the Settings page; it validates and persists correctly.
 2. For manual edits, copy `config.toml` aside first.
-3. Keep `schema_version` and all four role routes valid.
+3. Keep `schema_version` and all five role routes valid.
 4. Reference tokens via `bearer_token_env`; never paste raw tokens.
 5. Add providers from Settings or a preset (`deepseek`, `openai`, `zhipu`, ...) rather than hand-writing catalog metadata.
 6. After external edits, restart Studio and confirm the change took effect.

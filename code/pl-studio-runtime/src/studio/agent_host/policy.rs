@@ -51,10 +51,16 @@ mod tests {
 
     #[test]
     fn root_keeps_all_ordinary_effects_and_requires_complete() {
-        let profiles = ["explorer", "planner", "executor", "reviewer"]
-            .into_iter()
-            .map(profile)
-            .collect::<Vec<_>>();
+        let profiles = [
+            "explorer",
+            "planner",
+            "executor",
+            "reviewer",
+            "worktree_executor",
+        ]
+        .into_iter()
+        .map(profile)
+        .collect::<Vec<_>>();
         let policy = studio_execution_policy(&snapshot("planner", true), &profiles);
         for effect in [
             ToolEffect::Read,
@@ -78,7 +84,13 @@ mod tests {
                 .iter()
                 .map(AgentRoleId::as_str)
                 .collect::<Vec<_>>(),
-            ["executor", "explorer", "planner", "reviewer"]
+            [
+                "executor",
+                "explorer",
+                "planner",
+                "reviewer",
+                "worktree_executor"
+            ]
         );
     }
 
@@ -103,6 +115,7 @@ mod tests {
             content_hash: "hash".to_string(),
             system: true,
             enabled: true,
+            workspace_mode: pl_protocol::AgentWorkspaceMode::Unrestricted,
         }
     }
 

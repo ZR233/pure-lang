@@ -21,7 +21,7 @@ mixin _$BridgeProductEventPayload {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload);
 }
 
 
@@ -30,7 +30,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeProductEventPayload()';
+    return 'BridgeProductEventPayload()';
 }
 
 
@@ -257,16 +257,18 @@ $BridgeProductEventPayload_ProjectDirectoryChangedCopyWith<BridgeProductEventPay
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_ProjectDirectoryChanged&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_ProjectDirectoryChanged&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeProductEventPayload.projectDirectoryChanged(field0: $field0)';
+    return 'BridgeProductEventPayload.projectDirectoryChanged(field0: $field0)';
 }
 
 
@@ -332,16 +334,18 @@ $BridgeProductEventPayload_ThreadDirectoryChangedCopyWith<BridgeProductEventPayl
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_ThreadDirectoryChanged&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_ThreadDirectoryChanged&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeProductEventPayload.threadDirectoryChanged(field0: $field0)';
+    return 'BridgeProductEventPayload.threadDirectoryChanged(field0: $field0)';
 }
 
 
@@ -398,16 +402,18 @@ $BridgeProductEventPayload_AgentDirectoryChangedCopyWith<BridgeProductEventPaylo
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_AgentDirectoryChanged&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_AgentDirectoryChanged&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeProductEventPayload.agentDirectoryChanged(field0: $field0)';
+    return 'BridgeProductEventPayload.agentDirectoryChanged(field0: $field0)';
 }
 
 
@@ -473,16 +479,18 @@ $BridgeProductEventPayload_SettingsStateChangedCopyWith<BridgeProductEventPayloa
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_SettingsStateChanged&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_SettingsStateChanged&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeProductEventPayload.settingsStateChanged(field0: $field0)';
+    return 'BridgeProductEventPayload.settingsStateChanged(field0: $field0)';
 }
 
 
@@ -548,16 +556,18 @@ $BridgeProductEventPayload_RecoveryStateChangedCopyWith<BridgeProductEventPayloa
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_RecoveryStateChanged&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_RecoveryStateChanged&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeProductEventPayload.recoveryStateChanged(field0: $field0)';
+    return 'BridgeProductEventPayload.recoveryStateChanged(field0: $field0)';
 }
 
 
@@ -623,16 +633,18 @@ $BridgeProductEventPayload_McpStateChangedCopyWith<BridgeProductEventPayload_Mcp
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_McpStateChanged&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_McpStateChanged&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeProductEventPayload.mcpStateChanged(field0: $field0)';
+    return 'BridgeProductEventPayload.mcpStateChanged(field0: $field0)';
 }
 
 
@@ -698,16 +710,18 @@ $BridgeProductEventPayload_LspStateChangedCopyWith<BridgeProductEventPayload_Lsp
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_LspStateChanged&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_LspStateChanged&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeProductEventPayload.lspStateChanged(field0: $field0)';
+    return 'BridgeProductEventPayload.lspStateChanged(field0: $field0)';
 }
 
 
@@ -773,16 +787,18 @@ $BridgeProductEventPayload_SkillsStateChangedCopyWith<BridgeProductEventPayload_
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_SkillsStateChanged&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_SkillsStateChanged&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeProductEventPayload.skillsStateChanged(field0: $field0)';
+    return 'BridgeProductEventPayload.skillsStateChanged(field0: $field0)';
 }
 
 
@@ -839,16 +855,18 @@ $BridgeProductEventPayload_ProviderUsageStateChangedCopyWith<BridgeProductEventP
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_ProviderUsageStateChanged&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_ProviderUsageStateChanged&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeProductEventPayload.providerUsageStateChanged(field0: $field0)';
+    return 'BridgeProductEventPayload.providerUsageStateChanged(field0: $field0)';
 }
 
 
@@ -914,16 +932,18 @@ $BridgeProductEventPayload_ModelPerformanceStateChangedCopyWith<BridgeProductEve
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_ModelPerformanceStateChanged&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_ModelPerformanceStateChanged&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeProductEventPayload.modelPerformanceStateChanged(field0: $field0)';
+    return 'BridgeProductEventPayload.modelPerformanceStateChanged(field0: $field0)';
 }
 
 
@@ -980,16 +1000,18 @@ $BridgeProductEventPayload_UpdaterStateChangedCopyWith<BridgeProductEventPayload
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_UpdaterStateChanged&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_UpdaterStateChanged&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeProductEventPayload.updaterStateChanged(field0: $field0)';
+    return 'BridgeProductEventPayload.updaterStateChanged(field0: $field0)';
 }
 
 
@@ -1055,16 +1077,18 @@ $BridgeProductEventPayload_PersistenceStateChangedCopyWith<BridgeProductEventPay
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_PersistenceStateChanged&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_PersistenceStateChanged&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeProductEventPayload.persistenceStateChanged(field0: $field0)';
+    return 'BridgeProductEventPayload.persistenceStateChanged(field0: $field0)';
 }
 
 
@@ -1121,16 +1145,18 @@ $BridgeProductEventPayload_StaleCopyWith<BridgeProductEventPayload_Stale> get co
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_Stale&&(identical(other.laggedEvents, laggedEvents) || other.laggedEvents == laggedEvents));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductEventPayload_Stale&&(identical(other.laggedEvents, laggedEvents) || other.laggedEvents == laggedEvents));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,laggedEvents);
+int get hashCode {
+    return Object.hash(runtimeType,laggedEvents);
+}
 
 @override
 String toString() {
-  return 'BridgeProductEventPayload.stale(laggedEvents: $laggedEvents)';
+    return 'BridgeProductEventPayload.stale(laggedEvents: $laggedEvents)';
 }
 
 
@@ -1177,7 +1203,7 @@ mixin _$BridgeShutdownProgress {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeShutdownProgress);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeShutdownProgress);
 }
 
 
@@ -1186,7 +1212,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeShutdownProgress()';
+    return 'BridgeShutdownProgress()';
 }
 
 
@@ -1372,7 +1398,7 @@ class BridgeShutdownProgress_StoppingSubscriptions extends BridgeShutdownProgres
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeShutdownProgress_StoppingSubscriptions);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeShutdownProgress_StoppingSubscriptions);
 }
 
 
@@ -1381,7 +1407,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeShutdownProgress.stoppingSubscriptions()';
+    return 'BridgeShutdownProgress.stoppingSubscriptions()';
 }
 
 
@@ -1404,7 +1430,7 @@ class BridgeShutdownProgress_CancellingTurns extends BridgeShutdownProgress {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeShutdownProgress_CancellingTurns);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeShutdownProgress_CancellingTurns);
 }
 
 
@@ -1413,7 +1439,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeShutdownProgress.cancellingTurns()';
+    return 'BridgeShutdownProgress.cancellingTurns()';
 }
 
 
@@ -1441,16 +1467,18 @@ $BridgeShutdownProgress_FlushingPersistenceCopyWith<BridgeShutdownProgress_Flush
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeShutdownProgress_FlushingPersistence&&(identical(other.pendingCommits, pendingCommits) || other.pendingCommits == pendingCommits));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeShutdownProgress_FlushingPersistence&&(identical(other.pendingCommits, pendingCommits) || other.pendingCommits == pendingCommits));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,pendingCommits);
+int get hashCode {
+    return Object.hash(runtimeType,pendingCommits);
+}
 
 @override
 String toString() {
-  return 'BridgeShutdownProgress.flushingPersistence(pendingCommits: $pendingCommits)';
+    return 'BridgeShutdownProgress.flushingPersistence(pendingCommits: $pendingCommits)';
 }
 
 
@@ -1502,7 +1530,7 @@ class BridgeShutdownProgress_StoppingAgents extends BridgeShutdownProgress {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeShutdownProgress_StoppingAgents);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeShutdownProgress_StoppingAgents);
 }
 
 
@@ -1511,7 +1539,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeShutdownProgress.stoppingAgents()';
+    return 'BridgeShutdownProgress.stoppingAgents()';
 }
 
 
@@ -1534,7 +1562,7 @@ class BridgeShutdownProgress_StoppingMcp extends BridgeShutdownProgress {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeShutdownProgress_StoppingMcp);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeShutdownProgress_StoppingMcp);
 }
 
 
@@ -1543,7 +1571,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeShutdownProgress.stoppingMcp()';
+    return 'BridgeShutdownProgress.stoppingMcp()';
 }
 
 
@@ -1566,7 +1594,7 @@ class BridgeShutdownProgress_StoppingLsp extends BridgeShutdownProgress {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeShutdownProgress_StoppingLsp);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeShutdownProgress_StoppingLsp);
 }
 
 
@@ -1575,7 +1603,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeShutdownProgress.stoppingLsp()';
+    return 'BridgeShutdownProgress.stoppingLsp()';
 }
 
 
@@ -1598,7 +1626,7 @@ class BridgeShutdownProgress_Stopped extends BridgeShutdownProgress {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeShutdownProgress_Stopped);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeShutdownProgress_Stopped);
 }
 
 
@@ -1607,7 +1635,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeShutdownProgress.stopped()';
+    return 'BridgeShutdownProgress.stopped()';
 }
 
 

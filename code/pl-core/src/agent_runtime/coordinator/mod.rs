@@ -42,6 +42,7 @@ pub(crate) enum CoordinatorCommand {
     },
     Close {
         agent_id: ThreadId,
+        workspace_disposition: pl_protocol::AgentWorkspaceDisposition,
         reply: oneshot::Sender<AgentRuntimeResult<AgentSnapshot>>,
     },
     /// 完成关闭事务并释放整棵 Thread actor 树及事件投影。
@@ -129,8 +130,12 @@ async fn run_coordinator<H>(
                 let result = spawn_child_agent(&host, &runtime, &actors, request, options).await;
                 let _ = reply.send(result);
             }
-            CoordinatorCommand::Close { agent_id, reply } => {
-                let result = close_agent_tree(&actors, &agent_id).await;
+            CoordinatorCommand::Close {
+                agent_id,
+                workspace_disposition,
+                reply,
+            } => {
+                let result = close_agent_tree(&actors, &agent_id, workspace_disposition).await;
                 let _ = reply.send(result);
             }
             CoordinatorCommand::Retire { agent_id, reply } => {
@@ -212,9 +217,10 @@ async fn snapshot_for(
 async fn close_agent_tree(
     actors: &AgentRegistry,
     agent_id: &ThreadId,
+    workspace_disposition: pl_protocol::AgentWorkspaceDisposition,
 ) -> AgentRuntimeResult<AgentSnapshot> {
     let close_order = agent_tree_snapshots(actors, agent_id).await?;
-    close_snapshots(actors, agent_id, &close_order).await
+    close_snapshots(actors, agent_id, &close_order, workspace_disposition).await
 }
 
 async fn retire_agent_tree<H>(
@@ -227,7 +233,13 @@ where
     H: AgentRuntimeHost,
 {
     let close_order = agent_tree_snapshots(actors, agent_id).await?;
-    let target = close_snapshots(actors, agent_id, &close_order).await?;
+    let target = close_snapshots(
+        actors,
+        agent_id,
+        &close_order,
+        pl_protocol::AgentWorkspaceDisposition::Preserve,
+    )
+    .await?;
     for snapshot in close_order {
         evict_agent(host, actors, runtime, &snapshot.identity.id).await?;
     }
@@ -275,10 +287,11 @@ async fn close_snapshots(
     actors: &AgentRegistry,
     agent_id: &ThreadId,
     close_order: &[AgentSnapshot],
+    workspace_disposition: pl_protocol::AgentWorkspaceDisposition,
 ) -> AgentRuntimeResult<AgentSnapshot> {
     let mut target = None;
     for snapshot in close_order {
-        let closed = close_actor(actors, &snapshot.identity.id).await?;
+        let closed = close_actor(actors, &snapshot.identity.id, workspace_disposition).await?;
         if snapshot.identity.id == *agent_id {
             target = Some(closed);
         }
@@ -309,6 +322,7 @@ fn has_ancestor(
 async fn close_actor(
     actors: &AgentRegistry,
     agent_id: &ThreadId,
+    workspace_disposition: pl_protocol::AgentWorkspaceDisposition,
 ) -> AgentRuntimeResult<AgentSnapshot> {
     let actor = actors
         .read()
@@ -317,7 +331,12 @@ async fn close_actor(
         .cloned()
         .ok_or_else(|| AgentRuntimeError::NotFound(agent_id.clone()))?;
     let (reply, receiver) = oneshot::channel();
-    actor.send(AgentLoopCommand::Close { reply }).await?;
+    actor
+        .send(AgentLoopCommand::Close {
+            workspace_disposition,
+            reply,
+        })
+        .await?;
     receiver
         .await
         .map_err(|_| AgentRuntimeError::ChannelClosed)?

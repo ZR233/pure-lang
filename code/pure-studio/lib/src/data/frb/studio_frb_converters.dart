@@ -756,11 +756,27 @@ StudioRecoveryIssue _recoveryIssueFromFrb(
             RecoveryIssueAction.cleanupThread,
           frb.BridgeRecoveryIssueAction.removeProject =>
             RecoveryIssueAction.removeProject,
+          frb.BridgeRecoveryIssueAction.cleanupWorktree =>
+            RecoveryIssueAction.cleanupWorktree,
         },
     ],
     projectId: issue.projectId,
     threadId: issue.threadId,
     detail: issue.detail,
+    worktree: issue.worktree == null
+        ? null
+        : WorktreeRecoveryPreview(
+            childId: issue.worktree!.childId,
+            leaseRevision: issue.worktree!.leaseRevision.toInt(),
+            state: issue.worktree!.state,
+            repositoryRoot: issue.worktree!.repositoryRoot,
+            path: issue.worktree!.path,
+            branch: issue.worktree!.branch,
+            baseCommit: issue.worktree!.baseCommit,
+            headCommit: issue.worktree!.headCommit,
+            dirty: issue.worktree!.dirty,
+            changedFiles: issue.worktree!.changedFiles,
+          ),
   );
 }
 

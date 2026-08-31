@@ -55,6 +55,22 @@ pub enum StudioRecoveryIssueAction {
     Retry,
     CleanupThread,
     RemoveProject,
+    CleanupWorktree,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioWorktreeRecoveryPreview {
+    pub child_id: String,
+    pub lease_revision: u64,
+    pub state: String,
+    pub repository_root: String,
+    pub path: String,
+    pub branch: String,
+    pub base_commit: String,
+    pub head_commit: Option<String>,
+    pub dirty: bool,
+    pub changed_files: Vec<String>,
 }
 
 /// 单个项目或 Thread 的可隔离恢复问题。
@@ -68,6 +84,7 @@ pub struct StudioRecoveryIssue {
     pub project_id: Option<String>,
     pub thread_id: Option<String>,
     pub message: String,
+    pub worktree: Option<StudioWorktreeRecoveryPreview>,
 }
 
 /// Studio runtime 的 canonical 生命周期状态。

@@ -7,7 +7,7 @@ import '../../../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `eq`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `eq`, `eq`, `fmt`, `fmt`, `from`
 
 /// Agent Profile 设置页使用的只读快照；系统 Profile 的 `system` 为 true。
 class BridgeAgentProfileDto {
@@ -24,6 +24,7 @@ class BridgeAgentProfileDto {
   final String contentHash;
   final bool system;
   final bool enabled;
+  final BridgeAgentWorkspaceMode workspaceMode;
 
   const BridgeAgentProfileDto({
     required this.profileId,
@@ -39,6 +40,7 @@ class BridgeAgentProfileDto {
     required this.contentHash,
     required this.system,
     required this.enabled,
+    required this.workspaceMode,
   });
 
   @override
@@ -55,7 +57,8 @@ class BridgeAgentProfileDto {
       revision.hashCode ^
       contentHash.hashCode ^
       system.hashCode ^
-      enabled.hashCode;
+      enabled.hashCode ^
+      workspaceMode.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -74,5 +77,8 @@ class BridgeAgentProfileDto {
           revision == other.revision &&
           contentHash == other.contentHash &&
           system == other.system &&
-          enabled == other.enabled;
+          enabled == other.enabled &&
+          workspaceMode == other.workspaceMode;
 }
+
+enum BridgeAgentWorkspaceMode { unrestricted, directory, worktree }

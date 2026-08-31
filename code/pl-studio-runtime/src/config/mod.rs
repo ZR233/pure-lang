@@ -34,14 +34,20 @@ pub use pl_core::{AgentRoleId, ModelRouteConfig, ProviderId, ReasoningEffort};
 pub use runtime::{ConfigRuntime, ConfigRuntimeError, ConfigRuntimeSnapshot};
 pub use store::{ConfigPaths, ConfigRecoveryReport, ConfigStore};
 
-pub const STUDIO_CONFIG_SCHEMA_VERSION: u32 = 16;
+pub const STUDIO_CONFIG_SCHEMA_VERSION: u32 = 17;
 pub const STUDIO_CONFIG_DIR_NAME: &str = ".pure";
 pub const STUDIO_CONFIG_FILE_NAME: &str = "config.toml";
 
 const DEFAULT_PROVIDER_ID: &str = "deepseek";
 const DEFAULT_MODEL_ID: &str = "deepseek-v4-flash";
 const STUDIO_USER_SKILLS_DIR: &str = "~/.pure/skills";
-const STUDIO_ROLES: [&str; 4] = ["explorer", "planner", "executor", "reviewer"];
+const STUDIO_ROLES: [&str; 5] = [
+    "explorer",
+    "planner",
+    "executor",
+    "worktree_executor",
+    "reviewer",
+];
 
 /// Studio 产品定义的固定角色；框架层仍通过动态 `AgentRoleId` 接收它们。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -49,15 +55,17 @@ pub enum StudioRole {
     Explorer,
     Planner,
     Executor,
+    WorktreeExecutor,
     Reviewer,
 }
 
 impl StudioRole {
-    pub const fn all() -> [Self; 4] {
+    pub const fn all() -> [Self; 5] {
         [
             Self::Explorer,
             Self::Planner,
             Self::Executor,
+            Self::WorktreeExecutor,
             Self::Reviewer,
         ]
     }
@@ -67,6 +75,7 @@ impl StudioRole {
             Self::Explorer => "explorer",
             Self::Planner => "planner",
             Self::Executor => "executor",
+            Self::WorktreeExecutor => "worktree_executor",
             Self::Reviewer => "reviewer",
         }
     }
@@ -76,6 +85,7 @@ impl StudioRole {
             "explorer" => Some(Self::Explorer),
             "planner" => Some(Self::Planner),
             "executor" => Some(Self::Executor),
+            "worktree_executor" => Some(Self::WorktreeExecutor),
             "reviewer" => Some(Self::Reviewer),
             _ => None,
         }
@@ -86,6 +96,7 @@ impl StudioRole {
             Self::Explorer => "探索者",
             Self::Planner => "计划者",
             Self::Executor => "执行者",
+            Self::WorktreeExecutor => "Worktree 执行者",
             Self::Reviewer => "审查者",
         }
     }

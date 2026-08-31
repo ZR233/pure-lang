@@ -6,6 +6,9 @@
 import '../../../frb_generated.dart';
 import '../types/agent_profile.dart';
 import '../types/error.dart';
+import '../types/response.dart';
+import '../types/runtime.dart';
+import '../types/settings.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
@@ -15,17 +18,20 @@ Future<List<BridgeAgentProfileDto>> readAgentProfiles() =>
     RustLib.instance.api.crateApiStudioHandlersAgentProfilesReadAgentProfiles();
 
 /// Enables or disables an immutable built-in Agent Profile.
-Future<List<BridgeAgentProfileDto>> setSystemAgentEnabled({
+Future<BridgeSettingsStateSnapshot> setSystemAgentEnabled({
+  required BigInt expectedSettingsRevision,
   required String profileId,
   required bool enabled,
 }) => RustLib.instance.api
     .crateApiStudioHandlersAgentProfilesSetSystemAgentEnabled(
+      expectedSettingsRevision: expectedSettingsRevision,
       profileId: profileId,
       enabled: enabled,
     );
 
 /// Atomically creates or replaces one user Agent Profile TOML file.
-Future<List<BridgeAgentProfileDto>> saveUserAgentProfile({
+Future<BridgeSettingsStateSnapshot> saveUserAgentProfile({
+  required BigInt expectedSettingsRevision,
   required String profileId,
   required bool enabled,
   required String displayName,
@@ -35,8 +41,10 @@ Future<List<BridgeAgentProfileDto>> saveUserAgentProfile({
   required String providerId,
   required String model,
   String? effort,
+  required BridgeAgentWorkspaceMode workspaceMode,
 }) => RustLib.instance.api
     .crateApiStudioHandlersAgentProfilesSaveUserAgentProfile(
+      expectedSettingsRevision: expectedSettingsRevision,
       profileId: profileId,
       enabled: enabled,
       displayName: displayName,
@@ -46,4 +54,15 @@ Future<List<BridgeAgentProfileDto>> saveUserAgentProfile({
       providerId: providerId,
       model: model,
       effort: effort,
+      workspaceMode: workspaceMode,
+    );
+
+/// Explicitly removes one revision-matched preserved Pure worktree and branch.
+Future<void> cleanupPreservedWorktree({
+  required String childId,
+  required BigInt expectedLeaseRevision,
+}) => RustLib.instance.api
+    .crateApiStudioHandlersAgentProfilesCleanupPreservedWorktree(
+      childId: childId,
+      expectedLeaseRevision: expectedLeaseRevision,
     );

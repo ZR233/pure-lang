@@ -2698,6 +2698,34 @@ async fn close_prepare_failure_keeps_agent_active() {
 }
 
 #[tokio::test]
+async fn closed_agent_accepts_explicit_workspace_cleanup_without_state_transition() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository, FactoryMode::Fail);
+    let runtime = AgentRuntime::start(host.clone(), test_options())
+        .await
+        .unwrap();
+    let handle = runtime.handle();
+    let root = ThreadId::new("root").unwrap();
+    handle.register(registration("root", "chat")).await.unwrap();
+
+    let closed = handle.close(root.clone()).await.unwrap();
+    let cleaned = handle
+        .close_with_disposition(
+            root.clone(),
+            pl_protocol::AgentWorkspaceDisposition::Cleanup,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(cleaned, closed);
+    assert_eq!(
+        host.lifecycle.close_order.lock().unwrap().as_slice(),
+        &[root.clone(), root]
+    );
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn closing_admission_failure_keeps_hot_state_and_rolls_back_prepared_close() {
     let repository = TestRepository::empty();
     let host = TestHost::new(repository.clone(), FactoryMode::Fail);

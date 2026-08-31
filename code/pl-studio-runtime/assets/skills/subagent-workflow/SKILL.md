@@ -15,7 +15,7 @@ Call `list_agent_profiles` before spawning when the suitable profile is not alre
 the selected stable `profileId` to `spawn_agent`; the child freezes that profile's instructions,
 provider, model, and effort for its lifetime. Disabled or unavailable profiles cannot be spawned.
 
-The built-in profiles are `explorer`, `planner`, `executor`, and `reviewer`. They are immutable and
+The built-in profiles are `explorer`, `planner`, `executor`, `worktree_executor`, and `reviewer`. They are immutable and
 may be disabled. User profiles are loaded from one TOML file per profile. Select by capability,
 not by assuming that a workflow stage requires a particular profile.
 

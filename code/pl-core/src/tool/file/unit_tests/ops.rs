@@ -1,4 +1,5 @@
 use super::*;
+use crate::{ToolApprovalContext, WorkspaceAccess};
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
@@ -32,6 +33,98 @@ async fn write_file_waits_for_workspace_write_lock() {
         "after\n"
     );
     let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn directory_workspace_allows_only_configured_project_prefixes() {
+    let root = unique_temp_dir("directory-write-prefixes");
+    tokio::fs::create_dir_all(root.join("allowed"))
+        .await
+        .unwrap();
+    let tool = WriteFileTool::new(directory_workspace(&root, Some(&["allowed"])));
+
+    tool.execute(
+        input(serde_json::json!({
+            "path": "allowed/ok.txt",
+            "content": "ok",
+            "mode": "create"
+        })),
+        context(&root).await,
+    )
+    .await
+    .unwrap();
+    let error = tool
+        .execute(
+            input(serde_json::json!({
+                "path": "denied.txt",
+                "content": "denied",
+                "mode": "create"
+            })),
+            context(&root).await,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("writablePaths"), "{error}");
+    assert_eq!(
+        tokio::fs::read_to_string(root.join("allowed/ok.txt"))
+            .await
+            .unwrap(),
+        "ok"
+    );
+    assert!(
+        !tokio::fs::try_exists(root.join("denied.txt"))
+            .await
+            .unwrap()
+    );
+    let _ = tokio::fs::remove_dir_all(root).await;
+}
+
+#[tokio::test]
+async fn directory_workspace_empty_list_is_project_read_only_but_not_an_external_sandbox() {
+    let root = unique_temp_dir("directory-empty");
+    let outside = unique_temp_dir("directory-external");
+    tokio::fs::create_dir_all(&root).await.unwrap();
+    tokio::fs::create_dir_all(&outside).await.unwrap();
+    let tool = WriteFileTool::new(directory_workspace(&root, Some(&[])));
+
+    let project_error = tool
+        .execute(
+            input(serde_json::json!({
+                "path": "denied.txt",
+                "content": "denied",
+                "mode": "create"
+            })),
+            context(&root).await,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+    let external_context = context(&root).await.with_approval(ToolApprovalContext::new(
+        crate::turn::PermissionMode::FullAccess,
+        WorkspaceAccess::ExternalAllowed,
+    ));
+    tool.execute(
+        input(serde_json::json!({
+            "path": outside.join("allowed.txt").to_string_lossy(),
+            "content": "outside",
+            "mode": "create"
+        })),
+        external_context,
+    )
+    .await
+    .unwrap();
+
+    assert!(project_error.contains("writablePaths"), "{project_error}");
+    assert_eq!(
+        tokio::fs::read_to_string(outside.join("allowed.txt"))
+            .await
+            .unwrap(),
+        "outside"
+    );
+    let _ = tokio::fs::remove_dir_all(root).await;
+    let _ = tokio::fs::remove_dir_all(outside).await;
 }
 
 #[tokio::test]

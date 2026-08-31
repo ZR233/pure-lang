@@ -222,8 +222,11 @@ where
                             self.begin_next_turn().boxed().await;
                             let _ = reply.send(Ok(()));
                         }
-                        AgentLoopCommand::Close { reply } => {
-                            let result = self.close().boxed().await;
+                        AgentLoopCommand::Close {
+                            workspace_disposition,
+                            reply,
+                        } => {
+                            let result = self.close(workspace_disposition).boxed().await;
                             let _ = reply.send(result);
                         }
                         AgentLoopCommand::TurnFinished(completion) => {

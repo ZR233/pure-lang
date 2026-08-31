@@ -13,7 +13,7 @@ GUI snapshot 与普通工具不得再次回读 SQLite 构造活动状态。SQLit
 
 ## 21.2 Working state 与 checkpoint
 
-`AgentWorkingState` 可包含 `WorkflowSessionState`。工作流定义、冻结的 Mode Skill、run、
+`AgentWorkingState` 可包含 `WorkflowSessionState` 和冻结的 `AgentWorkspaceAssignmentSnapshot`。工作流定义、冻结的 Mode Skill、run、
 CAS revision、转换尾部与幂等 receipt 都随 Thread working state 原子持久化，不新增工作流业务表。
 完整状态上限、历史归档和 digest 规则由 [16-task-orchestration.md](./16-task-orchestration.md) 定义。
 
@@ -50,7 +50,8 @@ Thread 会被 pin。GUI 切换不能淘汰后台工作。未选中且无活动�
 ## 21.5 验收
 
 确定性测试覆盖 activation、checkpoint 共同提交/回滚、Solo 无副作用拒绝、同 Turn 与下一 Turn
-阶段提示、压缩后 projection、CAS、幂等 replay、模式 Skill 冻结和重启恢复。
+阶段提示、压缩后 projection、CAS、幂等 replay、模式 Skill、Agent Profile/workspace assignment 冻结和
+重启恢复。
 
 真实验收入口为：
 

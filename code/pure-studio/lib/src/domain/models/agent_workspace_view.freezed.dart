@@ -26,16 +26,21 @@ $AgentWorkspaceViewCopyWith<AgentWorkspaceView> get copyWith => _$AgentWorkspace
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is AgentWorkspaceView&&(identical(other.thread, thread) || other.thread == thread)&&(identical(other.rootThread, rootThread) || other.rootThread == rootThread)&&(identical(other.syncState, syncState) || other.syncState == syncState)&&const DeepCollectionEquality().equals(other.timelineRows, timelineRows)&&(identical(other.todo, todo) || other.todo == todo)&&(identical(other.runtime, runtime) || other.runtime == runtime)&&(identical(other.turn, turn) || other.turn == turn)&&(identical(other.activeInteraction, activeInteraction) || other.activeInteraction == activeInteraction)&&(identical(other.composer, composer) || other.composer == composer)&&(identical(other.composerMode, composerMode) || other.composerMode == composerMode)&&(identical(other.permissionMode, permissionMode) || other.permissionMode == permissionMode)&&const DeepCollectionEquality().equals(other.providers, providers)&&const DeepCollectionEquality().equals(other.roles, roles)&&const DeepCollectionEquality().equals(other.agents, agents));
+  final _this = this as AgentWorkspaceView;
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is AgentWorkspaceView&&(identical(other.thread, _this.thread) || other.thread == _this.thread)&&(identical(other.rootThread, _this.rootThread) || other.rootThread == _this.rootThread)&&(identical(other.syncState, _this.syncState) || other.syncState == _this.syncState)&&const DeepCollectionEquality().equals(other.timelineRows, _this.timelineRows)&&(identical(other.todo, _this.todo) || other.todo == _this.todo)&&(identical(other.runtime, _this.runtime) || other.runtime == _this.runtime)&&(identical(other.turn, _this.turn) || other.turn == _this.turn)&&(identical(other.activeInteraction, _this.activeInteraction) || other.activeInteraction == _this.activeInteraction)&&(identical(other.composer, _this.composer) || other.composer == _this.composer)&&(identical(other.composerMode, _this.composerMode) || other.composerMode == _this.composerMode)&&(identical(other.permissionMode, _this.permissionMode) || other.permissionMode == _this.permissionMode)&&const DeepCollectionEquality().equals(other.providers, _this.providers)&&const DeepCollectionEquality().equals(other.roles, _this.roles)&&const DeepCollectionEquality().equals(other.agents, _this.agents));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,thread,rootThread,syncState,const DeepCollectionEquality().hash(timelineRows),todo,runtime,turn,activeInteraction,composer,composerMode,permissionMode,const DeepCollectionEquality().hash(providers),const DeepCollectionEquality().hash(roles),const DeepCollectionEquality().hash(agents));
+int get hashCode {
+  final _this = this as AgentWorkspaceView;
+  return Object.hash(runtimeType,_this.thread,_this.rootThread,_this.syncState,const DeepCollectionEquality().hash(_this.timelineRows),_this.todo,_this.runtime,_this.turn,_this.activeInteraction,_this.composer,_this.composerMode,_this.permissionMode,const DeepCollectionEquality().hash(_this.providers),const DeepCollectionEquality().hash(_this.roles),const DeepCollectionEquality().hash(_this.agents));
+}
 
 @override
 String toString() {
-  return 'AgentWorkspaceView(thread: $thread, rootThread: $rootThread, syncState: $syncState, timelineRows: $timelineRows, todo: $todo, runtime: $runtime, turn: $turn, activeInteraction: $activeInteraction, composer: $composer, composerMode: $composerMode, permissionMode: $permissionMode, providers: $providers, roles: $roles, agents: $agents)';
+  final _this = this as AgentWorkspaceView;
+  return 'AgentWorkspaceView(thread: ${_this.thread}, rootThread: ${_this.rootThread}, syncState: ${_this.syncState}, timelineRows: ${_this.timelineRows}, todo: ${_this.todo}, runtime: ${_this.runtime}, turn: ${_this.turn}, activeInteraction: ${_this.activeInteraction}, composer: ${_this.composer}, composerMode: ${_this.composerMode}, permissionMode: ${_this.permissionMode}, providers: ${_this.providers}, roles: ${_this.roles}, agents: ${_this.agents})';
 }
 
 
@@ -272,16 +277,18 @@ _$AgentWorkspaceViewCopyWith<_AgentWorkspaceView> get copyWith => __$AgentWorksp
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _AgentWorkspaceView&&(identical(other.thread, thread) || other.thread == thread)&&(identical(other.rootThread, rootThread) || other.rootThread == rootThread)&&(identical(other.syncState, syncState) || other.syncState == syncState)&&const DeepCollectionEquality().equals(other._timelineRows, _timelineRows)&&(identical(other.todo, todo) || other.todo == todo)&&(identical(other.runtime, runtime) || other.runtime == runtime)&&(identical(other.turn, turn) || other.turn == turn)&&(identical(other.activeInteraction, activeInteraction) || other.activeInteraction == activeInteraction)&&(identical(other.composer, composer) || other.composer == composer)&&(identical(other.composerMode, composerMode) || other.composerMode == composerMode)&&(identical(other.permissionMode, permissionMode) || other.permissionMode == permissionMode)&&const DeepCollectionEquality().equals(other._providers, _providers)&&const DeepCollectionEquality().equals(other._roles, _roles)&&const DeepCollectionEquality().equals(other._agents, _agents));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is _AgentWorkspaceView&&(identical(other.thread, thread) || other.thread == thread)&&(identical(other.rootThread, rootThread) || other.rootThread == rootThread)&&(identical(other.syncState, syncState) || other.syncState == syncState)&&const DeepCollectionEquality().equals(other.timelineRows, _timelineRows)&&(identical(other.todo, todo) || other.todo == todo)&&(identical(other.runtime, runtime) || other.runtime == runtime)&&(identical(other.turn, turn) || other.turn == turn)&&(identical(other.activeInteraction, activeInteraction) || other.activeInteraction == activeInteraction)&&(identical(other.composer, composer) || other.composer == composer)&&(identical(other.composerMode, composerMode) || other.composerMode == composerMode)&&(identical(other.permissionMode, permissionMode) || other.permissionMode == permissionMode)&&const DeepCollectionEquality().equals(other.providers, _providers)&&const DeepCollectionEquality().equals(other.roles, _roles)&&const DeepCollectionEquality().equals(other.agents, _agents));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,thread,rootThread,syncState,const DeepCollectionEquality().hash(_timelineRows),todo,runtime,turn,activeInteraction,composer,composerMode,permissionMode,const DeepCollectionEquality().hash(_providers),const DeepCollectionEquality().hash(_roles),const DeepCollectionEquality().hash(_agents));
+int get hashCode {
+    return Object.hash(runtimeType,thread,rootThread,syncState,const DeepCollectionEquality().hash(_timelineRows),todo,runtime,turn,activeInteraction,composer,composerMode,permissionMode,const DeepCollectionEquality().hash(_providers),const DeepCollectionEquality().hash(_roles),const DeepCollectionEquality().hash(_agents));
+}
 
 @override
 String toString() {
-  return 'AgentWorkspaceView(thread: $thread, rootThread: $rootThread, syncState: $syncState, timelineRows: $timelineRows, todo: $todo, runtime: $runtime, turn: $turn, activeInteraction: $activeInteraction, composer: $composer, composerMode: $composerMode, permissionMode: $permissionMode, providers: $providers, roles: $roles, agents: $agents)';
+    return 'AgentWorkspaceView(thread: $thread, rootThread: $rootThread, syncState: $syncState, timelineRows: $timelineRows, todo: $todo, runtime: $runtime, turn: $turn, activeInteraction: $activeInteraction, composer: $composer, composerMode: $composerMode, permissionMode: $permissionMode, providers: $providers, roles: $roles, agents: $agents)';
 }
 
 

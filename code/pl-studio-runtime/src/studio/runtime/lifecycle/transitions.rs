@@ -51,6 +51,9 @@ impl StudioRuntime {
             self.append_session_recovery_issues(&mut recovery_issues)
                 .await
                 .map_err(|error| startup_failure("recover_sessions", error))?;
+            self.append_worktree_recovery_issues(&mut recovery_issues)
+                .await
+                .map_err(|error| startup_failure("recover_worktrees", error))?;
             self.append_unavailable_project_recovery_issues(&mut recovery_issues)
                 .await
                 .map_err(|error| startup_failure("recover_unavailable_projects", error))?;

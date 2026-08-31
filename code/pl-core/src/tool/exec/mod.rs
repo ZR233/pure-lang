@@ -202,7 +202,7 @@ where
     }
 
     fn description(&self) -> &str {
-        "Start a shell command in the agent workspace and return a compact JSON result. If the command is still running after yieldTimeMs, use write_stdin with the returned processId. Full output is saved to a workspace-relative outputFile."
+        "Start a shell command in the agent workspace and return a compact JSON result. Shell commands are not constrained by a directory Profile's writablePaths; obey the frozen workspace assignment and do not modify project files outside it. If the command is still running after yieldTimeMs, use write_stdin with the returned processId. Full output is saved to a workspace-relative outputFile."
     }
 
     fn input_schema(&self) -> serde_json::Value {

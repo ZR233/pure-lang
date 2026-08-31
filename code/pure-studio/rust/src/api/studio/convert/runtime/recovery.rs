@@ -34,9 +34,26 @@ pub(crate) fn bridge_recovery_issue(issue: StudioRecoveryIssue) -> BridgeStudioR
             pl_studio_runtime::StudioRecoveryIssueAction::RemoveProject => {
                 BridgeRecoveryIssueAction::RemoveProject
             }
+            pl_studio_runtime::StudioRecoveryIssueAction::CleanupWorktree => {
+                BridgeRecoveryIssueAction::CleanupWorktree
+            }
         }],
         project_id: issue.project_id,
         thread_id: issue.thread_id,
         detail: issue.message,
+        worktree: issue
+            .worktree
+            .map(|worktree| BridgeWorktreeRecoveryPreviewDto {
+                child_id: worktree.child_id,
+                lease_revision: worktree.lease_revision,
+                state: worktree.state,
+                repository_root: worktree.repository_root,
+                path: worktree.path,
+                branch: worktree.branch,
+                base_commit: worktree.base_commit,
+                head_commit: worktree.head_commit,
+                dirty: worktree.dirty,
+                changed_files: worktree.changed_files,
+            }),
     }
 }

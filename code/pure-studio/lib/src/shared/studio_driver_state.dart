@@ -150,6 +150,20 @@ abstract final class StudioDriverState {
                     },
                 ],
               },
+              'agents': [
+                for (final agent in workspace.agents)
+                  {
+                    'id': agent.id,
+                    'threadId': agent.threadId,
+                    'rootThreadId': agent.rootThreadId,
+                    'path': agent.path,
+                    'parentPath': agent.parentPath,
+                    'role': agent.role,
+                    'task': agent.task,
+                    'status': agent.status,
+                    'error': agent.error,
+                  },
+              ],
               'historyAttachments': [
                 for (final row in workspace.timelineRows)
                   for (final attachment in row.part?.attachments ?? const [])
@@ -185,6 +199,11 @@ abstract final class StudioDriverState {
                             'name': tool.name,
                             'callId': tool.callId,
                             'status': item.status,
+                            'arguments': tool.arguments,
+                            'result': tool.result,
+                            'denialReason': tool.denialReason,
+                            'workingDirectory': tool.workingDirectory,
+                            'exitCode': tool.exitCode,
                             'attachments': [
                               for (final attachment in tool.attachments)
                                 {

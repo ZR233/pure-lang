@@ -203,6 +203,14 @@ class _FakeDriverClient implements FlutterDriverClient {
   }) async {}
 
   @override
+  Future<void> scrollUntilVisible(
+    driver.SerializableFinder scrollable,
+    driver.SerializableFinder item, {
+    required double dyScroll,
+    Duration? timeout,
+  }) async {}
+
+  @override
   Future<void> waitUntilNoTransientCallbacks({Duration? timeout}) async {}
 
   @override

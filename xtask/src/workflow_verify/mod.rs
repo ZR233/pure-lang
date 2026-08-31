@@ -1,4 +1,4 @@
-use crate::cli::VerifyWorkflowOptions;
+use crate::cli::{VerifySubagentsOptions, VerifyWorkflowOptions};
 use crate::{paths, process};
 use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
@@ -12,10 +12,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 mod artifact;
 mod resident;
+mod subagents;
 
 const LIVE_TEST_NAME: &str = "installed_config_workflow_mode_delivers_rust_project";
 const VERIFY_MARKER: &str = "PURE_WORKFLOW_GUI_VERIFY_OK";
-const LIVE_CONFIG_SCHEMA_VERSION: i64 = 16;
+const LIVE_CONFIG_SCHEMA_VERSION: i64 = 17;
 const TOTAL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const STALL_TIMEOUT_SECONDS: u64 = 10 * 60;
 const WORKFLOW_FIXTURE_USAGE_PATH: &str = "skills/workflow-fixture-rust/.usage.json";
@@ -150,6 +151,10 @@ pub(crate) fn run(options: VerifyWorkflowOptions) -> Result<()> {
             artifact_dir.display()
         ))),
     }
+}
+
+pub(crate) fn run_subagents(options: VerifySubagentsOptions) -> Result<()> {
+    subagents::run(options)
 }
 
 fn run_headless(
@@ -785,9 +790,22 @@ fn upgrade_live_config_copy(config: &mut toml::Table) -> Result<()> {
         return Ok(());
     }
     ensure!(
-        schema_version.checked_add(1) == Some(LIVE_CONFIG_SCHEMA_VERSION),
+        matches!(schema_version, 15 | 16),
         "installed Studio config schema {schema_version} cannot be upgraded in the live acceptance copy to schema {LIVE_CONFIG_SCHEMA_VERSION}"
     );
+    let routes = config
+        .get_mut("models")
+        .and_then(toml::Value::as_table_mut)
+        .and_then(|models| models.get_mut("routes"))
+        .and_then(toml::Value::as_table_mut)
+        .context("installed Studio config has no models.routes table")?;
+    if !routes.contains_key("worktree_executor") {
+        let executor = routes
+            .get("executor")
+            .cloned()
+            .context("installed Studio config has no executor route to migrate")?;
+        routes.insert("worktree_executor".to_string(), executor);
+    }
     config.insert(
         "schema_version".to_string(),
         toml::Value::Integer(LIVE_CONFIG_SCHEMA_VERSION),
@@ -809,7 +827,13 @@ fn validate_live_routes(config: &toml::Table) -> Result<LiveRouteManifest> {
         .and_then(toml::Value::as_table)
         .context("installed Studio config has no models.routes table")?;
     let mut manifest = Vec::new();
-    for role in ["planner", "executor", "reviewer"] {
+    for role in [
+        "explorer",
+        "planner",
+        "executor",
+        "worktree_executor",
+        "reviewer",
+    ] {
         let route = routes
             .get(role)
             .and_then(toml::Value::as_table)
@@ -1085,16 +1109,36 @@ mod tests {
 
     #[test]
     fn live_config_copy_upgrades_only_the_immediately_previous_schema() {
-        let mut previous = toml::toml! { schema_version = 15 };
-        upgrade_live_config_copy(&mut previous).unwrap();
-        assert_eq!(
-            previous
-                .get("schema_version")
-                .and_then(toml::Value::as_integer),
-            Some(LIVE_CONFIG_SCHEMA_VERSION)
-        );
+        for schema_version in [15, 16] {
+            let mut previous = toml::toml! {
+                schema_version = schema_version
+                [models.routes.executor]
+                provider = "provider"
+                model = "model"
+            };
+            upgrade_live_config_copy(&mut previous).unwrap();
+            assert_eq!(
+                previous
+                    .get("schema_version")
+                    .and_then(toml::Value::as_integer),
+                Some(LIVE_CONFIG_SCHEMA_VERSION)
+            );
+            assert!(
+                previous
+                    .get("models")
+                    .and_then(toml::Value::as_table)
+                    .and_then(|models| models.get("routes"))
+                    .and_then(toml::Value::as_table)
+                    .is_some_and(|routes| routes.contains_key("worktree_executor"))
+            );
+        }
 
-        let mut stale = toml::toml! { schema_version = 14 };
+        let mut stale = toml::toml! {
+            schema_version = 14
+            [models.routes.executor]
+            provider = "provider"
+            model = "model"
+        };
         let error = upgrade_live_config_copy(&mut stale).unwrap_err();
         assert!(error.to_string().contains("cannot be upgraded"));
     }

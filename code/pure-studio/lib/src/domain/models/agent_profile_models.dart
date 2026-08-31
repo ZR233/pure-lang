@@ -1,3 +1,5 @@
+enum AgentWorkspaceMode { unrestricted, directory, worktree }
+
 /// Agent Profile 的只读 UI 快照。
 class AgentProfileView {
   const AgentProfileView({
@@ -14,6 +16,7 @@ class AgentProfileView {
     required this.contentHash,
     required this.system,
     required this.enabled,
+    required this.workspaceMode,
   });
 
   final String id;
@@ -29,6 +32,7 @@ class AgentProfileView {
   final String contentHash;
   final bool system;
   final bool enabled;
+  final AgentWorkspaceMode workspaceMode;
 }
 
 class AgentProfileDraft {
@@ -42,6 +46,7 @@ class AgentProfileDraft {
     required this.model,
     this.effort,
     this.enabled = true,
+    this.workspaceMode = AgentWorkspaceMode.directory,
   });
 
   factory AgentProfileDraft.fromView(AgentProfileView profile) =>
@@ -55,6 +60,7 @@ class AgentProfileDraft {
         model: profile.model,
         effort: profile.effort,
         enabled: profile.enabled,
+        workspaceMode: profile.workspaceMode,
       );
 
   final String id;
@@ -66,4 +72,5 @@ class AgentProfileDraft {
   final String model;
   final String? effort;
   final bool enabled;
+  final AgentWorkspaceMode workspaceMode;
 }

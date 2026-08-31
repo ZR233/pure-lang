@@ -97,16 +97,25 @@ impl ConfigRuntime {
     /// 原子创建或替换一个用户 Agent Profile 文件。
     pub fn save_user_agent_profile(
         &self,
+        expected_revision: u64,
         profile_id: &str,
         profile: &super::UserAgentProfile,
-    ) -> ConfigRuntimeResult<()> {
+    ) -> ConfigRuntimeResult<ConfigRuntimeSnapshot> {
         let _command = self
             .command_lock
             .lock()
             .map_err(|_| config_runtime_poisoned())?;
-        let config = self.read()?.config;
-        super::save_user_agent_profile(self.store.paths(), profile_id, profile, &config)?;
-        Ok(())
+        let current = self.read()?;
+        ensure_revision(expected_revision, current.revision)?;
+        let mut state = self.state.write().map_err(|_| config_runtime_poisoned())?;
+        super::save_user_agent_profile(self.store.paths(), profile_id, profile, &current.config)?;
+        let next = ConfigRuntimeSnapshot {
+            revision: current.revision.saturating_add(1),
+            updated_at: unix_seconds(),
+            config: current.config,
+        };
+        *state = next.clone();
+        Ok(next)
     }
 
     /// 使用 expected revision 原子保存完整 desired config。
@@ -182,6 +191,7 @@ fn config_runtime_poisoned() -> ConfigRuntimeError {
 mod tests {
     use super::*;
     use crate::config::ConfigPaths;
+    use crate::{AgentWorkspaceMode, StudioRole};
 
     fn runtime(name: &str) -> ConfigRuntime {
         let home = tempfile::Builder::new()
@@ -216,7 +226,7 @@ mod tests {
         std::fs::create_dir_all(store.paths().config_dir()).unwrap();
         let legacy = toml::to_string_pretty(&StudioConfig::default_config())
             .unwrap()
-            .replace("schema_version = 16", "schema_version = 15");
+            .replace("schema_version = 17", "schema_version = 14");
         std::fs::write(store.paths().config_file(), legacy).unwrap();
 
         let runtime = ConfigRuntime::initialize(store).unwrap();
@@ -275,5 +285,50 @@ mod tests {
                     .to_string_lossy()
                     .starts_with("config.toml.rejected."))
         );
+    }
+
+    #[test]
+    fn user_agent_profile_save_uses_settings_revision_cas_and_advances_snapshot() {
+        let runtime = runtime("agent-profile-cas");
+        let current = runtime.read().unwrap();
+        let route = current.config.resolve_role(StudioRole::Executor).unwrap();
+        let profile = super::super::UserAgentProfile {
+            enabled: true,
+            display_name: "Scoped executor".to_string(),
+            description: "Writes a selected directory".to_string(),
+            when_to_use: "A bounded implementation task".to_string(),
+            system_instructions: "Stay inside the assigned paths.".to_string(),
+            provider: route.provider_id,
+            model: route.model.slug,
+            effort: route.effort,
+            workspace_mode: AgentWorkspaceMode::Directory,
+        };
+
+        let saved = runtime
+            .save_user_agent_profile(current.revision, "scoped-executor", &profile)
+            .unwrap();
+
+        assert_eq!(saved.revision, current.revision + 1);
+        assert!(
+            runtime
+                .store
+                .paths()
+                .agents_dir()
+                .join("scoped-executor.toml")
+                .exists()
+        );
+        let stale = runtime
+            .save_user_agent_profile(current.revision, "stale-executor", &profile)
+            .unwrap_err();
+        assert!(stale.to_string().contains("revision conflict"));
+        assert!(
+            !runtime
+                .store
+                .paths()
+                .agents_dir()
+                .join("stale-executor.toml")
+                .exists()
+        );
+        assert_eq!(runtime.read().unwrap(), saved);
     }
 }

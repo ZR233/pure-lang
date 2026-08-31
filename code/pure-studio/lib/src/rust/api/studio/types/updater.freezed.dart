@@ -21,16 +21,21 @@ mixin _$BridgeUpdaterStateSnapshot {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUpdaterStateSnapshot&&const DeepCollectionEquality().equals(other.field0, field0));
+  final _this = this as BridgeUpdaterStateSnapshot;
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUpdaterStateSnapshot&&const DeepCollectionEquality().equals(other.field0, _this.field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(field0));
+int get hashCode {
+  final _this = this as BridgeUpdaterStateSnapshot;
+  return Object.hash(runtimeType,const DeepCollectionEquality().hash(_this.field0));
+}
 
 @override
 String toString() {
-  return 'BridgeUpdaterStateSnapshot(field0: $field0)';
+  final _this = this as BridgeUpdaterStateSnapshot;
+  return 'BridgeUpdaterStateSnapshot(field0: ${_this.field0})';
 }
 
 
@@ -239,16 +244,18 @@ $BridgeUpdaterStateSnapshot_DisabledCopyWith<BridgeUpdaterStateSnapshot_Disabled
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUpdaterStateSnapshot_Disabled&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUpdaterStateSnapshot_Disabled&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeUpdaterStateSnapshot.disabled(field0: $field0)';
+    return 'BridgeUpdaterStateSnapshot.disabled(field0: $field0)';
 }
 
 
@@ -305,16 +312,18 @@ $BridgeUpdaterStateSnapshot_IdleCopyWith<BridgeUpdaterStateSnapshot_Idle> get co
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUpdaterStateSnapshot_Idle&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUpdaterStateSnapshot_Idle&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeUpdaterStateSnapshot.idle(field0: $field0)';
+    return 'BridgeUpdaterStateSnapshot.idle(field0: $field0)';
 }
 
 
@@ -371,16 +380,18 @@ $BridgeUpdaterStateSnapshot_CheckingCopyWith<BridgeUpdaterStateSnapshot_Checking
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUpdaterStateSnapshot_Checking&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUpdaterStateSnapshot_Checking&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeUpdaterStateSnapshot.checking(field0: $field0)';
+    return 'BridgeUpdaterStateSnapshot.checking(field0: $field0)';
 }
 
 
@@ -437,16 +448,18 @@ $BridgeUpdaterStateSnapshot_UpToDateCopyWith<BridgeUpdaterStateSnapshot_UpToDate
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUpdaterStateSnapshot_UpToDate&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUpdaterStateSnapshot_UpToDate&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeUpdaterStateSnapshot.upToDate(field0: $field0)';
+    return 'BridgeUpdaterStateSnapshot.upToDate(field0: $field0)';
 }
 
 
@@ -503,16 +516,18 @@ $BridgeUpdaterStateSnapshot_AvailableCopyWith<BridgeUpdaterStateSnapshot_Availab
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUpdaterStateSnapshot_Available&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUpdaterStateSnapshot_Available&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeUpdaterStateSnapshot.available(field0: $field0)';
+    return 'BridgeUpdaterStateSnapshot.available(field0: $field0)';
 }
 
 
@@ -569,16 +584,18 @@ $BridgeUpdaterStateSnapshot_DownloadingCopyWith<BridgeUpdaterStateSnapshot_Downl
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUpdaterStateSnapshot_Downloading&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUpdaterStateSnapshot_Downloading&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeUpdaterStateSnapshot.downloading(field0: $field0)';
+    return 'BridgeUpdaterStateSnapshot.downloading(field0: $field0)';
 }
 
 
@@ -635,16 +652,18 @@ $BridgeUpdaterStateSnapshot_VerifyingCopyWith<BridgeUpdaterStateSnapshot_Verifyi
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUpdaterStateSnapshot_Verifying&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUpdaterStateSnapshot_Verifying&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeUpdaterStateSnapshot.verifying(field0: $field0)';
+    return 'BridgeUpdaterStateSnapshot.verifying(field0: $field0)';
 }
 
 
@@ -701,16 +720,18 @@ $BridgeUpdaterStateSnapshot_InstallerLaunchedCopyWith<BridgeUpdaterStateSnapshot
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUpdaterStateSnapshot_InstallerLaunched&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUpdaterStateSnapshot_InstallerLaunched&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeUpdaterStateSnapshot.installerLaunched(field0: $field0)';
+    return 'BridgeUpdaterStateSnapshot.installerLaunched(field0: $field0)';
 }
 
 
@@ -767,16 +788,18 @@ $BridgeUpdaterStateSnapshot_CheckFailedCopyWith<BridgeUpdaterStateSnapshot_Check
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUpdaterStateSnapshot_CheckFailed&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUpdaterStateSnapshot_CheckFailed&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeUpdaterStateSnapshot.checkFailed(field0: $field0)';
+    return 'BridgeUpdaterStateSnapshot.checkFailed(field0: $field0)';
 }
 
 
@@ -833,16 +856,18 @@ $BridgeUpdaterStateSnapshot_InstallFailedCopyWith<BridgeUpdaterStateSnapshot_Ins
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUpdaterStateSnapshot_InstallFailed&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeUpdaterStateSnapshot_InstallFailed&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeUpdaterStateSnapshot.installFailed(field0: $field0)';
+    return 'BridgeUpdaterStateSnapshot.installFailed(field0: $field0)';
 }
 
 

@@ -91,7 +91,7 @@ HTTP 与 FRB 统一返回脱敏 `StudioError { code, message, retryable, correla
 
 ## 4.7 数据切换安全
 
-Studio 运行期只读写 `studio.sqlite`；配置只接受 `config.toml` schema 16，provider API token
+Studio 运行期只读写 `studio.sqlite`；配置只接受 `config.toml` schema 17，provider API token
 保存在系统凭据库。启动发现不兼容配置时不迁移、不导入其中的凭据，先逐字备份到配置目录中的
 唯一 `.rejected.<timestamp>.bak` 文件，再原子替换为当前初始配置；系统凭据库保持独立，替换后
 只按初始 provider id 注入已有凭据。配置文件、备份或凭据库 IO 失败不得触发替换，运行期显式

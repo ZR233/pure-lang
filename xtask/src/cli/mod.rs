@@ -32,6 +32,8 @@ pub(crate) enum Command {
     VerifyGui(VerifyGuiOptions),
     /// Run the opt-in real-model workflow acceptance harness.
     VerifyWorkflow(VerifyWorkflowOptions),
+    /// Run real directory/worktree child Agents through the native GUI.
+    VerifySubagents(VerifySubagentsOptions),
     /// Run the Pure Studio desktop app.
     RunGui(RunGuiOptions),
     /// Build release artifacts for the current desktop OS.
@@ -89,6 +91,16 @@ pub(crate) struct VerifyWorkflowOptions {
     pub(crate) headless: bool,
     /// Run the real native GUI and Flutter Driver workflow harness.
     #[arg(long)]
+    pub(crate) gui: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Args)]
+pub(crate) struct VerifySubagentsOptions {
+    /// Confirm that real provider credentials and billable model calls may be used.
+    #[arg(long, required = true)]
+    pub(crate) live: bool,
+    /// Confirm that the native GUI and Flutter Driver acceptance surface is required.
+    #[arg(long, required = true)]
     pub(crate) gui: bool,
 }
 
@@ -381,6 +393,19 @@ mod tests {
             )
             .is_err()
         );
+        Ok(())
+    }
+
+    #[test]
+    fn live_subagents_verification_requires_gui_surface() -> Result<()> {
+        assert_eq!(
+            parse(["xtask", "verify-subagents", "--live", "--gui"].map(OsString::from))?,
+            ParseOutcome::Run(Command::VerifySubagents(VerifySubagentsOptions {
+                live: true,
+                gui: true,
+            }))
+        );
+        assert!(parse(["xtask", "verify-subagents", "--live"].map(OsString::from)).is_err());
         Ok(())
     }
 }

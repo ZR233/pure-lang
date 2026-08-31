@@ -35,6 +35,13 @@ fn tool_workspace(root: &std::path::Path) -> ToolWorkspace {
     ToolWorkspace::new(crate::tool::AgentWorkspace::local(root.to_path_buf()))
 }
 
+fn directory_tool_workspace(root: &std::path::Path) -> ToolWorkspace {
+    ToolWorkspace::new(crate::tool::AgentWorkspace::directory(
+        root.to_path_buf(),
+        Some(vec![root.join("allowed")]),
+    ))
+}
+
 fn test_tool() -> TestExecTool {
     let root = test_root();
     std::fs::create_dir_all(&root).unwrap();
@@ -52,6 +59,33 @@ fn test_tool_with_root() -> (TestExecTool, PathBuf) {
         tool_workspace(&root),
     );
     (tool, root)
+}
+
+#[tokio::test]
+async fn directory_workspace_explicitly_documents_that_shell_can_bypass_writable_paths() {
+    let root = test_root();
+    std::fs::create_dir_all(root.join("allowed")).unwrap();
+    let tool = ExecTool::new(
+        Arc::new(LocalCommandBackend::new(root.clone())),
+        directory_tool_workspace(&root),
+    );
+    let command = if cfg!(target_os = "windows") {
+        "Set-Content -Path bypassed.txt -Value bypassed"
+    } else {
+        "printf bypassed > bypassed.txt"
+    };
+
+    let output = tool
+        .execute(tool_input(command, "session", "tool"), test_context())
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        command_json(&output).state,
+        CommandProcessLifecycle::Final(_)
+    ));
+    assert!(root.join("bypassed.txt").exists());
+    std::fs::remove_dir_all(root).unwrap();
 }
 
 fn shared_tools() -> (TestExecTool, TestWriteStdinTool) {

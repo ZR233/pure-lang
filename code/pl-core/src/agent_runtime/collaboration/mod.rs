@@ -35,9 +35,10 @@ use crate::tool::tool_error;
 use args::*;
 use summary::*;
 use support::{
-    filter_visible, fork_session, json_output, json_output_with_budget, object_schema,
-    parse_agent_id, parse_input, progress_schema, send_message_schema, spawn_schema,
-    submissions_schema, target_schema, wait_schema,
+    close_schema, filter_visible, fork_session, json_output, json_output_with_budget,
+    normalize_directory_writable_paths, object_schema, parse_agent_id, parse_input,
+    progress_schema, send_message_schema, spawn_schema, submissions_schema, target_schema,
+    wait_schema,
 };
 
 /// 为一次 turn 构造由 `AgentRuntimeHandle` 驱动的协作工具。
@@ -161,7 +162,7 @@ impl CollaborationToolKind {
     fn description(self) -> &'static str {
         match self {
             Self::Spawn => {
-                "Spawn a child Agent from an enabled Agent Profile. The Profile instructions and model route are frozen into the new session."
+                "Spawn a child Agent from an enabled Agent Profile. The Profile instructions, model route, and workspace assignment are frozen into the new session. Directory writablePaths constrain only Pure built-in file mutation tools; shell, Git, and MCP can bypass them."
             }
             Self::ListProfiles => {
                 "List enabled Agent Profiles available to spawn, including their intended use and model selection."
@@ -185,7 +186,9 @@ impl CollaborationToolKind {
             Self::ReadSubmissions => {
                 "Read the durable stage submission history for an agent (full content, paginated, not truncated; works after the target has closed)."
             }
-            Self::Close => "Close an accessible child agent and its product resources.",
+            Self::Close => {
+                "Close an accessible child agent. Worktree resources are preserved by default and are cleaned only by explicit workspaceDisposition=cleanup after integration."
+            }
         }
     }
 
@@ -242,9 +245,7 @@ impl Tool for CollaborationTool {
                 "Agent id whose bounded session digest should be read.",
             ),
             CollaborationToolKind::ReadSubmissions => submissions_schema(&self.policy.list_targets),
-            CollaborationToolKind::Close => {
-                target_schema(&self.policy.close_targets, "Agent id to close.")
-            }
+            CollaborationToolKind::Close => close_schema(&self.policy.close_targets),
         }
     }
 
@@ -320,6 +321,25 @@ impl CollaborationTool {
                 format!("agent profile `{role}` is not allowed for this turn"),
             ));
         }
+        let writable_paths = match profile.workspace_mode {
+            pl_protocol::AgentWorkspaceMode::Directory => {
+                normalize_directory_writable_paths(&self.workspace_root, args.writable_paths)?
+            }
+            pl_protocol::AgentWorkspaceMode::Unrestricted
+            | pl_protocol::AgentWorkspaceMode::Worktree => {
+                if args.writable_paths.is_some() {
+                    return Err(tool_error(
+                        TOOL_SPAWN_AGENT,
+                        format!(
+                            "writablePaths is only valid for directory Profiles; `{}` uses {} mode",
+                            profile.profile_id,
+                            profile.workspace_mode.label()
+                        ),
+                    ));
+                }
+                None
+            }
+        };
         let thread_id = ThreadId::generate();
         let mut child_session =
             fork_session(&self.session_runtime.parent_session(), args.fork_turns)?;
@@ -355,6 +375,15 @@ impl CollaborationTool {
             "profileId".to_string(),
             Value::String(profile.profile_id.clone()),
         );
+        metadata.insert(
+            "workspaceMode".to_string(),
+            serde_json::to_value(profile.workspace_mode)
+                .expect("Agent workspace mode must serialize"),
+        );
+        metadata.insert(
+            "writablePaths".to_string(),
+            serde_json::to_value(&writable_paths).expect("writable paths must serialize"),
+        );
         let result = self
             .runtime
             .spawn(AgentSpawnRequest {
@@ -373,6 +402,7 @@ impl CollaborationTool {
             "threadId": thread_id,
             "turnId": result.initial_turn_id,
             "profileId": profile.profile_id,
+            "workspace": result.workspace_assignment,
         }))
     }
 
@@ -393,6 +423,7 @@ impl CollaborationTool {
                         "model": profile.model,
                         "effort": profile.effort,
                         "system": profile.system,
+                        "workspaceMode": profile.workspace_mode,
                     })
                 })
             })
@@ -611,7 +642,7 @@ impl CollaborationTool {
     }
 
     async fn close(&self, input: ToolInput) -> Result<ToolResult, PureError> {
-        let args: TargetArgs = parse_input(TOOL_CLOSE_AGENT, input.arguments)?;
+        let args: CloseArgs = parse_input(TOOL_CLOSE_AGENT, input.arguments)?;
         let target = parse_agent_id(TOOL_CLOSE_AGENT, args.target)?;
         if target == self.caller {
             return Err(tool_error(
@@ -622,7 +653,7 @@ impl CollaborationTool {
         self.authorize(&self.policy.close_targets, &target).await?;
         let snapshot = self
             .runtime
-            .close(target)
+            .close_with_disposition(target, args.workspace_disposition)
             .await
             .map_err(|error| tool_error(TOOL_CLOSE_AGENT, error.to_string()))?;
         json_output(json!({ "snapshot": snapshot }))

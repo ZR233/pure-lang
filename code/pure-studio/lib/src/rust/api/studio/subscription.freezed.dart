@@ -21,7 +21,7 @@ mixin _$BridgeProductStreamEnvelope {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductStreamEnvelope);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductStreamEnvelope);
 }
 
 
@@ -30,7 +30,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeProductStreamEnvelope()';
+    return 'BridgeProductStreamEnvelope()';
 }
 
 
@@ -197,16 +197,18 @@ $BridgeProductStreamEnvelope_DataCopyWith<BridgeProductStreamEnvelope_Data> get 
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductStreamEnvelope_Data&&(identical(other.event, event) || other.event == event));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductStreamEnvelope_Data&&(identical(other.event, event) || other.event == event));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,event);
+int get hashCode {
+    return Object.hash(runtimeType,event);
+}
 
 @override
 String toString() {
-  return 'BridgeProductStreamEnvelope.data(event: $event)';
+    return 'BridgeProductStreamEnvelope.data(event: $event)';
 }
 
 
@@ -263,16 +265,18 @@ $BridgeProductStreamEnvelope_FailureCopyWith<BridgeProductStreamEnvelope_Failure
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductStreamEnvelope_Failure&&(identical(other.error, error) || other.error == error));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductStreamEnvelope_Failure&&(identical(other.error, error) || other.error == error));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,error);
+int get hashCode {
+    return Object.hash(runtimeType,error);
+}
 
 @override
 String toString() {
-  return 'BridgeProductStreamEnvelope.failure(error: $error)';
+    return 'BridgeProductStreamEnvelope.failure(error: $error)';
 }
 
 
@@ -324,7 +328,7 @@ class BridgeProductStreamEnvelope_Closed extends BridgeProductStreamEnvelope {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductStreamEnvelope_Closed);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeProductStreamEnvelope_Closed);
 }
 
 
@@ -333,7 +337,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeProductStreamEnvelope.closed()';
+    return 'BridgeProductStreamEnvelope.closed()';
 }
 
 
@@ -351,7 +355,7 @@ mixin _$BridgeThreadStreamEnvelope {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadStreamEnvelope);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadStreamEnvelope);
 }
 
 
@@ -360,7 +364,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeThreadStreamEnvelope()';
+    return 'BridgeThreadStreamEnvelope()';
 }
 
 
@@ -527,16 +531,18 @@ $BridgeThreadStreamEnvelope_DataCopyWith<BridgeThreadStreamEnvelope_Data> get co
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadStreamEnvelope_Data&&(identical(other.update, update) || other.update == update));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadStreamEnvelope_Data&&(identical(other.update, update) || other.update == update));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,update);
+int get hashCode {
+    return Object.hash(runtimeType,update);
+}
 
 @override
 String toString() {
-  return 'BridgeThreadStreamEnvelope.data(update: $update)';
+    return 'BridgeThreadStreamEnvelope.data(update: $update)';
 }
 
 
@@ -602,16 +608,18 @@ $BridgeThreadStreamEnvelope_FailureCopyWith<BridgeThreadStreamEnvelope_Failure> 
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadStreamEnvelope_Failure&&(identical(other.error, error) || other.error == error));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadStreamEnvelope_Failure&&(identical(other.error, error) || other.error == error));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,error);
+int get hashCode {
+    return Object.hash(runtimeType,error);
+}
 
 @override
 String toString() {
-  return 'BridgeThreadStreamEnvelope.failure(error: $error)';
+    return 'BridgeThreadStreamEnvelope.failure(error: $error)';
 }
 
 
@@ -663,7 +671,7 @@ class BridgeThreadStreamEnvelope_Closed extends BridgeThreadStreamEnvelope {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadStreamEnvelope_Closed);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadStreamEnvelope_Closed);
 }
 
 
@@ -672,7 +680,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeThreadStreamEnvelope.closed()';
+    return 'BridgeThreadStreamEnvelope.closed()';
 }
 
 

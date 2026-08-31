@@ -42,24 +42,60 @@ pub enum WorkspaceMutability {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AgentWorkspace {
     root: PathBuf,
+    project_root: PathBuf,
     boundary: WorkspaceBoundary,
     mutability: WorkspaceMutability,
+    project_writable_paths: Option<Vec<PathBuf>>,
 }
 
 impl AgentWorkspace {
     pub fn local(root: impl Into<PathBuf>) -> Self {
+        let root = root.into();
         Self {
-            root: root.into(),
+            project_root: root.clone(),
+            root,
             boundary: WorkspaceBoundary::HostPermitted,
             mutability: WorkspaceMutability::ReadWrite,
+            project_writable_paths: None,
+        }
+    }
+
+    /// 构造仅由 Pure 内置文件 mutation 工具实施目录写策略的 workspace。
+    ///
+    /// `None` 表示整个项目可写，`Some([])` 表示项目内只读。该策略不约束 shell、Git 或 MCP。
+    pub fn directory(
+        project_root: impl Into<PathBuf>,
+        writable_paths: Option<Vec<PathBuf>>,
+    ) -> Self {
+        let project_root = project_root.into();
+        Self {
+            root: project_root.clone(),
+            project_root,
+            boundary: WorkspaceBoundary::HostPermitted,
+            mutability: WorkspaceMutability::ReadWrite,
+            project_writable_paths: writable_paths,
+        }
+    }
+
+    /// 构造物理隔离的 Git worktree workspace。
+    pub fn worktree(project_root: impl Into<PathBuf>, root: impl Into<PathBuf>) -> Self {
+        Self {
+            root: root.into(),
+            project_root: project_root.into(),
+            boundary: WorkspaceBoundary::Confined,
+            mutability: WorkspaceMutability::ReadWrite,
+            project_writable_paths: None,
         }
     }
 
     pub fn confined(root: impl Into<PathBuf>, mutability: WorkspaceMutability) -> Self {
+        let root = root.into();
         Self {
-            root: root.into(),
+            project_root: root.clone(),
+            root,
             boundary: WorkspaceBoundary::Confined,
             mutability,
+            project_writable_paths: None,
         }
     }
 
@@ -73,6 +109,42 @@ impl AgentWorkspace {
 
     pub fn mutability(&self) -> WorkspaceMutability {
         self.mutability
+    }
+
+    pub fn project_root(&self) -> &std::path::Path {
+        &self.project_root
+    }
+
+    pub fn project_writable_paths(&self) -> Option<&[PathBuf]> {
+        self.project_writable_paths.as_deref()
+    }
+
+    fn ensure_path_writable(&self, path: &std::path::Path) -> crate::Result<()> {
+        if self.mutability == WorkspaceMutability::ReadOnly {
+            return Err(crate::PureError::ToolExecutionFailed {
+                tool: "workspace".to_string(),
+                error: "agent workspace is read-only".to_string(),
+            });
+        }
+        let Some(writable_paths) = &self.project_writable_paths else {
+            return Ok(());
+        };
+        if !path.starts_with(&self.project_root) {
+            return Ok(());
+        }
+        if writable_paths
+            .iter()
+            .any(|allowed| path == allowed || path.starts_with(allowed))
+        {
+            return Ok(());
+        }
+        Err(crate::PureError::ToolExecutionFailed {
+            tool: "workspace".to_string(),
+            error: format!(
+                "project path '{}' is outside the directory Agent writablePaths boundary",
+                path.display()
+            ),
+        })
     }
 }
 
@@ -460,6 +532,11 @@ impl ToolWorkspace {
             });
         }
         Ok(())
+    }
+
+    /// 校验一次 Pure 内置文件 mutation 的最终解析路径。
+    pub fn ensure_path_writable(&self, path: &std::path::Path) -> crate::Result<()> {
+        self.workspace.ensure_path_writable(path)
     }
 
     pub(crate) async fn write_lock(&self) -> WorkspaceWriteGuard {

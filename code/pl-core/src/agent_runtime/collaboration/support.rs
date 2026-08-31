@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::num::NonZeroUsize;
+use std::path::{Component, Path, PathBuf};
 
 use pl_protocol::{AgentProfileSnapshot, PureError};
 use serde::Deserialize;
@@ -9,6 +10,109 @@ use super::super::{AgentAccessPolicy, AgentSnapshot, AgentTargetSelector, Thread
 use super::{ForkTurns, TOOL_SPAWN_AGENT};
 use crate::tool::tool_error;
 use crate::{AgentRoleId, AgentSession, AgentSessionForkPolicy, ToolResult};
+
+pub(super) fn normalize_directory_writable_paths(
+    project_root: &Path,
+    requested: Option<Vec<String>>,
+) -> Result<Option<Vec<String>>, PureError> {
+    let Some(requested) = requested else {
+        return Ok(None);
+    };
+    let mut normalized = Vec::with_capacity(requested.len());
+    for raw in requested {
+        let value = raw.trim();
+        if value.is_empty()
+            || value.contains('\\')
+            || value.contains('\0')
+            || value.contains(':')
+            || value.contains("//")
+        {
+            return Err(tool_error(
+                TOOL_SPAWN_AGENT,
+                format!("writablePaths contains invalid project-relative directory `{raw}`"),
+            ));
+        }
+        let path = Path::new(value);
+        if path.is_absolute() {
+            return Err(tool_error(
+                TOOL_SPAWN_AGENT,
+                format!("writablePaths must not contain absolute path `{raw}`"),
+            ));
+        }
+        let mut parts = PathBuf::new();
+        for component in path.components() {
+            match component {
+                Component::CurDir => {}
+                Component::Normal(part) => parts.push(part),
+                Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                    return Err(tool_error(
+                        TOOL_SPAWN_AGENT,
+                        format!("writablePaths must not escape the project: `{raw}`"),
+                    ));
+                }
+            }
+        }
+        let canonical = if parts.as_os_str().is_empty() {
+            ".".to_string()
+        } else {
+            parts.to_string_lossy().replace('\\', "/")
+        };
+        let mut cursor = project_root.to_path_buf();
+        for component in parts.components() {
+            let Component::Normal(part) = component else {
+                continue;
+            };
+            cursor.push(part);
+            match std::fs::symlink_metadata(&cursor) {
+                Ok(metadata) if metadata.file_type().is_symlink() => {
+                    return Err(tool_error(
+                        TOOL_SPAWN_AGENT,
+                        format!(
+                            "writablePaths directory `{raw}` traverses symbolic link or reparse point `{}`",
+                            cursor.display()
+                        ),
+                    ));
+                }
+                Ok(metadata) if !metadata.is_dir() => {
+                    return Err(tool_error(
+                        TOOL_SPAWN_AGENT,
+                        format!(
+                            "writablePaths entry `{raw}` resolves through non-directory `{}`",
+                            cursor.display()
+                        ),
+                    ));
+                }
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+                Err(error) => {
+                    return Err(tool_error(
+                        TOOL_SPAWN_AGENT,
+                        format!("failed to inspect writablePaths entry `{raw}`: {error}"),
+                    ));
+                }
+            }
+        }
+        normalized.push(canonical);
+    }
+    normalized.sort();
+    normalized.dedup();
+    if normalized.iter().any(|path| path == ".") {
+        return Ok(Some(vec![".".to_string()]));
+    }
+    let mut compact: Vec<String> = Vec::with_capacity(normalized.len());
+    for candidate in normalized {
+        if compact.iter().any(|parent| {
+            candidate == *parent
+                || candidate
+                    .strip_prefix(parent)
+                    .is_some_and(|suffix| suffix.starts_with('/'))
+        }) {
+            continue;
+        }
+        compact.push(candidate);
+    }
+    Ok(Some(compact))
+}
 
 pub(super) fn fork_session(
     parent: &AgentSession,
@@ -130,6 +234,16 @@ pub(super) fn spawn_schema(policy: &AgentAccessPolicy, profiles: &[AgentProfileS
             }),
             false,
         ),
+        (
+            "writablePaths",
+            json!({
+                "type": "array",
+                "items": { "type": "string" },
+                "uniqueItems": true,
+                "description": "Only valid for directory Profiles. Project-relative directory prefixes enforced by Pure built-in file mutation tools. Omit for the whole project; [] makes project files read-only. This is not an OS sandbox: shell, Git, and MCP can bypass it."
+            }),
+            false,
+        ),
         ("metadata", json!({ "type": "object" }), false),
     ])
 }
@@ -245,6 +359,26 @@ pub(super) fn target_schema(selector: &AgentTargetSelector, description: &str) -
     )])
 }
 
+pub(super) fn close_schema(selector: &AgentTargetSelector) -> Value {
+    object_schema(vec![
+        (
+            "target",
+            target_property_schema(selector, Some("Agent id to close.")),
+            true,
+        ),
+        (
+            "workspaceDisposition",
+            json!({
+                "type": "string",
+                "enum": ["preserve", "cleanup"],
+                "default": "preserve",
+                "description": "Worktree Agents are preserved by default. Use cleanup only after reviewing and explicitly integrating the child commit."
+            }),
+            false,
+        ),
+    ])
+}
+
 fn target_property_schema(selector: &AgentTargetSelector, description: Option<&str>) -> Value {
     let mut schema =
         serde_json::Map::from_iter([("type".to_string(), Value::String("string".to_string()))]);
@@ -319,4 +453,58 @@ pub(super) fn json_output_with_budget(
         max_bytes,
     )
     .map_err(|error| tool_error("agent", format!("failed to serialize output: {error}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn writable_paths_are_normalized_deduplicated_and_compacted() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("src/nested")).unwrap();
+
+        let normalized = normalize_directory_writable_paths(
+            root.path(),
+            Some(vec![
+                "src/nested".to_string(),
+                "./src".to_string(),
+                "src".to_string(),
+            ]),
+        )
+        .unwrap();
+
+        assert_eq!(normalized, Some(vec!["src".to_string()]));
+        assert_eq!(
+            normalize_directory_writable_paths(root.path(), Some(Vec::new())).unwrap(),
+            Some(Vec::new())
+        );
+    }
+
+    #[test]
+    fn writable_paths_reject_unsafe_syntax() {
+        let root = tempfile::tempdir().unwrap();
+        for invalid in ["/absolute", "../escape", "a\\b", "a//b", "C:path"] {
+            let error =
+                normalize_directory_writable_paths(root.path(), Some(vec![invalid.to_string()]))
+                    .unwrap_err()
+                    .to_string();
+            assert!(error.contains("writablePaths"), "{invalid}: {error}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn writable_paths_reject_existing_symlink_ancestors() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(outside.path(), root.path().join("linked")).unwrap();
+
+        let error =
+            normalize_directory_writable_paths(root.path(), Some(vec!["linked/child".to_string()]))
+                .unwrap_err()
+                .to_string();
+
+        assert!(error.contains("symbolic link"), "{error}");
+    }
 }

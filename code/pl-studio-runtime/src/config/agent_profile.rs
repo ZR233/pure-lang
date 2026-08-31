@@ -2,15 +2,21 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use pl_protocol::AgentProfileSnapshot;
+use pl_protocol::{AgentProfileSnapshot, AgentWorkspaceMode};
 use serde::{Deserialize, Serialize};
 
 use crate::{PureError, Result};
 
 use super::{ConfigPaths, ModelRouteConfig, ProviderId, ReasoningEffort, StudioConfig, StudioRole};
 
-const SYSTEM_PROFILE_REVISION: &str = "studio-system-agent-v1";
-const SYSTEM_PROFILE_IDS: [&str; 4] = ["explorer", "planner", "executor", "reviewer"];
+const SYSTEM_PROFILE_REVISION: &str = "studio-system-agent-v2";
+const SYSTEM_PROFILE_IDS: [&str; 5] = [
+    "explorer",
+    "planner",
+    "executor",
+    "worktree_executor",
+    "reviewer",
+];
 
 /// 单个用户 Agent TOML 的 canonical 格式。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -25,6 +31,8 @@ pub struct UserAgentProfile {
     pub model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<ReasoningEffort>,
+    #[serde(default)]
+    pub workspace_mode: AgentWorkspaceMode,
 }
 
 /// 单文件诊断只排除对应 Profile，不阻断其余系统或用户 Profile。
@@ -156,6 +164,11 @@ fn system_profile(role: StudioRole, config: &StudioConfig) -> Result<AgentProfil
             "已有目标和范围，需要修改与验证代码时。",
             include_str!("../prompts/executor.md"),
         ),
+        StudioRole::WorktreeExecutor => (
+            "在独立 Git worktree 中实施明确任务。",
+            "需要物理隔离修改，并由主代理审查、整合和清理时。",
+            include_str!("../prompts/worktree_executor.md"),
+        ),
         StudioRole::Reviewer => (
             "检查实现、测试、错误路径和需求一致性。",
             "需要独立复核已完成工作并报告具体问题时。",
@@ -176,6 +189,13 @@ fn system_profile(role: StudioRole, config: &StudioConfig) -> Result<AgentProfil
         content_hash: String::new(),
         system: true,
         enabled: !config.disabled_system_agents.contains(role.key()),
+        workspace_mode: match role {
+            StudioRole::Explorer | StudioRole::Planner | StudioRole::Reviewer => {
+                AgentWorkspaceMode::Unrestricted
+            }
+            StudioRole::Executor => AgentWorkspaceMode::Directory,
+            StudioRole::WorktreeExecutor => AgentWorkspaceMode::Worktree,
+        },
     };
     Ok(with_content_hash(snapshot))
 }
@@ -219,6 +239,7 @@ fn load_user_profile(
         content_hash: String::new(),
         system: false,
         enabled: profile.enabled,
+        workspace_mode: profile.workspace_mode,
     };
     Ok(Some(with_content_hash(snapshot)))
 }
@@ -301,8 +322,46 @@ mod tests {
 
         let catalog = AgentProfileCatalog::discover(&paths, &StudioConfig::default());
 
-        assert_eq!(catalog.profiles.len(), 4);
+        assert_eq!(catalog.profiles.len(), 5);
         assert_eq!(catalog.diagnostics.len(), 1);
+    }
+
+    #[test]
+    fn built_in_profiles_have_fixed_workspace_modes() {
+        let home = TempDir::new().unwrap();
+        let catalog = AgentProfileCatalog::discover_for_settings(
+            &ConfigPaths::from_home(home.path()),
+            &StudioConfig::default_config(),
+        );
+        let modes = catalog
+            .profiles
+            .iter()
+            .map(|profile| (profile.profile_id.as_str(), profile.workspace_mode))
+            .collect::<std::collections::BTreeMap<_, _>>();
+
+        assert_eq!(modes["explorer"], AgentWorkspaceMode::Unrestricted);
+        assert_eq!(modes["planner"], AgentWorkspaceMode::Unrestricted);
+        assert_eq!(modes["reviewer"], AgentWorkspaceMode::Unrestricted);
+        assert_eq!(modes["executor"], AgentWorkspaceMode::Directory);
+        assert_eq!(modes["worktree_executor"], AgentWorkspaceMode::Worktree);
+    }
+
+    #[test]
+    fn older_user_profile_without_workspace_mode_defaults_to_directory() {
+        let profile: UserAgentProfile = toml::from_str(
+            r#"
+enabled = true
+display_name = "Legacy"
+description = "Legacy profile"
+when_to_use = "Legacy tasks"
+system_instructions = "Do the task."
+provider = "openai"
+model = "gpt-5"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(profile.workspace_mode, AgentWorkspaceMode::Directory);
     }
 
     #[test]
@@ -320,6 +379,7 @@ mod tests {
             provider: route.provider_id,
             model: route.model.slug,
             effort: route.effort,
+            workspace_mode: AgentWorkspaceMode::Directory,
         };
 
         let error = save_user_agent_profile(&paths, "explorer", &profile, &config).unwrap_err();
@@ -360,6 +420,7 @@ mod tests {
             provider: route.provider_id,
             model: route.model.slug,
             effort: route.effort,
+            workspace_mode: AgentWorkspaceMode::Worktree,
         };
 
         let path = save_user_agent_profile(&paths, "rust-executor", &profile, &config).unwrap();
@@ -389,6 +450,7 @@ mod tests {
             provider: route.provider_id,
             model: route.model.slug,
             effort: route.effort,
+            workspace_mode: AgentWorkspaceMode::Unrestricted,
         };
         save_user_agent_profile(&paths, "paused-agent", &profile, &config).unwrap();
 

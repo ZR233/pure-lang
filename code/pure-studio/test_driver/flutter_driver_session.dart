@@ -22,6 +22,13 @@ abstract interface class FlutterDriverClient {
 
   Future<void> waitForAbsent(SerializableFinder finder, {Duration? timeout});
 
+  Future<void> scrollUntilVisible(
+    SerializableFinder scrollable,
+    SerializableFinder item, {
+    required double dyScroll,
+    Duration? timeout,
+  });
+
   Future<void> tap(SerializableFinder finder);
 
   Future<void> enterText(String text);
@@ -176,6 +183,20 @@ class FlutterDriverSession {
     return _client.waitForAbsent(finder, timeout: timeout);
   }
 
+  Future<void> scrollUntilVisible(
+    SerializableFinder scrollable,
+    SerializableFinder item, {
+    required double dyScroll,
+    Duration? timeout,
+  }) {
+    return _client.scrollUntilVisible(
+      scrollable,
+      item,
+      dyScroll: dyScroll,
+      timeout: timeout,
+    );
+  }
+
   Future<void> tap(SerializableFinder finder) => _client.tap(finder);
 
   Future<void> enterText(String text) => _client.enterText(text);
@@ -290,6 +311,21 @@ class _RealFlutterDriverClient implements FlutterDriverClient {
   @override
   Future<void> waitForAbsent(SerializableFinder finder, {Duration? timeout}) {
     return _driver.waitForAbsent(finder, timeout: timeout);
+  }
+
+  @override
+  Future<void> scrollUntilVisible(
+    SerializableFinder scrollable,
+    SerializableFinder item, {
+    required double dyScroll,
+    Duration? timeout,
+  }) {
+    return _driver.scrollUntilVisible(
+      scrollable,
+      item,
+      dyScroll: dyScroll,
+      timeout: timeout,
+    );
   }
 
   @override

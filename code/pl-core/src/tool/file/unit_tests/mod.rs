@@ -27,6 +27,13 @@ fn tool_workspace(root: &Path) -> ToolWorkspace {
     ToolWorkspace::new(AgentWorkspace::local(root.to_path_buf()))
 }
 
+fn directory_workspace(root: &Path, paths: Option<&[&str]>) -> ToolWorkspace {
+    ToolWorkspace::new(AgentWorkspace::directory(
+        root.to_path_buf(),
+        paths.map(|paths| paths.iter().map(|path| root.join(path)).collect()),
+    ))
+}
+
 fn input(arguments: serde_json::Value) -> ToolInput {
     ToolInput { arguments }
 }

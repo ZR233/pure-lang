@@ -1998,7 +1998,12 @@ void registerShellSettingsTests() {
       );
       await _pumpSettingsPage(tester, api);
 
-      for (final tab in const ['Roles', 'Skills', 'MCP', 'General']) {
+      await tester.tap(find.text('Agents'));
+      await tester.pumpAndSettle();
+      expect(find.text('Agent Profiles'), findsOneWidget);
+      expect(find.byType(Card), findsWidgets);
+
+      for (final tab in const ['Skills', 'MCP', 'General']) {
         await tester.tap(find.text(tab));
         await tester.pumpAndSettle();
         expect(
@@ -2149,14 +2154,20 @@ void registerShellSettingsTests() {
 
       expect(find.text('Save draft'), findsNothing);
 
-      await tester.tap(find.text('Roles'));
+      await tester.tap(find.text('Agents'));
       await tester.pumpAndSettle();
       for (final role in const [
         'explorer',
         'planner',
         'executor',
+        'worktree_executor',
         'reviewer',
       ]) {
+        await tester.scrollUntilVisible(
+          find.byKey(StudioDriverKeys.settingsRoleModel(role)),
+          300,
+          scrollable: find.byType(Scrollable).first,
+        );
         expect(
           find.byKey(StudioDriverKeys.settingsRoleModel(role)),
           findsOneWidget,
@@ -2167,6 +2178,11 @@ void registerShellSettingsTests() {
         );
       }
 
+      await tester.scrollUntilVisible(
+        find.byKey(StudioDriverKeys.settingsRoleModel('explorer')),
+        -300,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tester.tap(
         find.byKey(StudioDriverKeys.settingsRoleModel('explorer')),
       );
@@ -2404,6 +2420,149 @@ void registerShellSettingsTests() {
       expect(find.text('描述你的需求...'), findsOneWidget);
       expect(find.text('deepseek-v4-flash · 文本'), findsOneWidget);
       expect(find.text('high'), findsOneWidget);
+    },
+  );
+  testWidgets(
+    'Agents page renders five fixed system modes and typed user profile controls',
+    (tester) async {
+      tester.view.physicalSize = const Size(760, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final api = _FakeStudioApi(_stateWithPlannerModels());
+      await _pumpSettingsPage(tester, api);
+
+      await tester.tap(find.text('Agents'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('agent-profile-add')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('agent-profile-provider')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('agent-profile-model-deepseek')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(
+          const ValueKey('agent-profile-effort-deepseek-deepseek-v4-flash'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('agent-profile-workspace-mode')),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('取消'));
+      await tester.pumpAndSettle();
+
+      for (final role in const [
+        'explorer',
+        'planner',
+        'executor',
+        'worktree_executor',
+        'reviewer',
+      ]) {
+        await tester.scrollUntilVisible(
+          find.byKey(ValueKey('system-agent-workspace-$role')),
+          300,
+          scrollable: find.byType(Scrollable).first,
+        );
+        expect(
+          find.byKey(ValueKey('system-agent-workspace-$role')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(StudioDriverKeys.settingsRoleModel(role)),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(StudioDriverKeys.settingsRoleEffort(role)),
+          findsOneWidget,
+        );
+      }
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('system-agent-workspace-executor')),
+        -300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('system-agent-workspace-executor')),
+          matching: find.text('Directory'),
+        ),
+        findsOneWidget,
+      );
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('system-agent-workspace-worktree_executor')),
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(
+            const ValueKey('system-agent-workspace-worktree_executor'),
+          ),
+          matching: find.text('Worktree'),
+        ),
+        findsOneWidget,
+      );
+
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'Agents Recovery previews preserved worktree and cleans by revision',
+    (tester) async {
+      _configureSettingsTestView(tester);
+      final state = _stateWithPlannerModels().copyWith(
+        recoveryState: RecoveryStateSnapshot(
+          revision: 7,
+          values: const [
+            StudioRecoveryIssue(
+              id: 'worktree-lease-child-1',
+              scope: RecoveryIssueScope.thread,
+              category: RecoveryIssueCategory.repository,
+              availableActions: [RecoveryIssueAction.cleanupWorktree],
+              detail: 'Preserved for review',
+              projectId: 'project-1',
+              threadId: 'thread-1',
+              worktree: WorktreeRecoveryPreview(
+                childId: 'child-1',
+                leaseRevision: 9,
+                state: 'preserved',
+                repositoryRoot: '/repo',
+                path: '/repo/.pure/worktrees/thread-1/child-1',
+                branch: 'pure-agent-child-1',
+                baseCommit: 'base-commit',
+                headCommit: 'head-commit',
+                dirty: true,
+                changedFiles: ['src/agent.rs'],
+              ),
+            ),
+          ],
+        ),
+      );
+      final api = _FakeStudioApi(state);
+      await _pumpSettingsPage(tester, api);
+
+      await tester.tap(find.text('Agents'));
+      await tester.pumpAndSettle();
+      expect(find.text('pure-agent-child-1'), findsOneWidget);
+      expect(find.textContaining('base base-commit'), findsOneWidget);
+      expect(find.textContaining('src/agent.rs'), findsOneWidget);
+      final cleanup = find.byKey(const ValueKey('worktree-cleanup-child-1'));
+      await tester.ensureVisible(cleanup);
+      await tester.tap(cleanup);
+      await tester.pump();
+
+      expect(api.cleanedWorktree, (
+        childId: 'child-1',
+        expectedLeaseRevision: 9,
+      ));
     },
   );
 }

@@ -120,6 +120,7 @@ class _FakeStudioApi implements StudioApi {
   int retryPersistenceCallCount = 0;
   Object? retryPersistenceError;
   PersistenceStateSnapshot? retryPersistenceState;
+  ({String childId, int expectedLeaseRevision})? cleanedWorktree;
 
   void emitGlobal(StudioBridgeEvent event) => _global.add(event);
 
@@ -148,18 +149,73 @@ class _FakeStudioApi implements StudioApi {
   Future<ProviderCatalogView> loadProviderCatalog() async => providerCatalog;
 
   @override
-  Future<List<AgentProfileView>> readAgentProfiles() async => const [];
+  Future<List<AgentProfileView>> readAgentProfiles() async => [
+    for (final role in const [
+      'explorer',
+      'planner',
+      'executor',
+      'worktree_executor',
+      'reviewer',
+    ])
+      AgentProfileView(
+        id: role,
+        displayName: role,
+        description: 'System $role profile',
+        whenToUse: 'Use for $role work',
+        systemInstructions: 'Follow the frozen assignment.',
+        providerId: _currentState.role(role)?.providerId ?? 'deepseek',
+        model: _currentState.role(role)?.model ?? 'deepseek-v4-flash',
+        effort: _currentState.role(role)?.effort,
+        source: 'studio-builtin',
+        revision: 'system-v2',
+        contentHash: 'system-$role',
+        system: true,
+        enabled: true,
+        workspaceMode: switch (role) {
+          'executor' => AgentWorkspaceMode.directory,
+          'worktree_executor' => AgentWorkspaceMode.worktree,
+          _ => AgentWorkspaceMode.unrestricted,
+        },
+      ),
+  ];
 
   @override
-  Future<List<AgentProfileView>> setSystemAgentEnabled({
+  Future<SettingsStateSnapshot> setSystemAgentEnabled({
+    required int expectedSettingsRevision,
     required String profileId,
     required bool enabled,
-  }) async => const [];
+  }) async {
+    final snapshot = _settingsSnapshot(
+      _currentState.settingsState,
+      revision: expectedSettingsRevision + 1,
+    );
+    _currentState = _currentState.copyWith(settingsState: snapshot);
+    return snapshot;
+  }
 
   @override
-  Future<List<AgentProfileView>> saveUserAgentProfile(
+  Future<SettingsStateSnapshot> saveUserAgentProfile(
+    int expectedSettingsRevision,
     AgentProfileDraft draft,
-  ) async => const [];
+  ) async {
+    final snapshot = _settingsSnapshot(
+      _currentState.settingsState,
+      revision: expectedSettingsRevision + 1,
+    );
+    _currentState = _currentState.copyWith(settingsState: snapshot);
+    return snapshot;
+  }
+
+  @override
+  Future<void> cleanupPreservedWorktree({
+    required String childId,
+    required int expectedLeaseRevision,
+  }) async {
+    cleanedWorktree = (
+      childId: childId,
+      expectedLeaseRevision: expectedLeaseRevision,
+    );
+  }
 
   @override
   Future<StudioState> readStudioState() async {

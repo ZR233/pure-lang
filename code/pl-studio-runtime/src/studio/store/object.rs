@@ -3,7 +3,10 @@
 use anyhow::{Context, Result, bail};
 use pl_core::canonical_content_hash;
 use pl_protocol::AgentWorkingState;
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, ConnectionTrait, EntityTrait, IntoActiveModel};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel,
+    QueryFilter,
+};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -92,6 +95,20 @@ where
         return Ok(None);
     };
     decode_object::<T>(row).map(Some)
+}
+
+pub(in crate::studio) async fn load_objects<T>(db: &impl ConnectionTrait) -> Result<Vec<T>>
+where
+    T: PersistedStudioObject,
+{
+    studio_object::Entity::find()
+        .filter(studio_object::Column::OwnerKind.eq(T::OWNER_KIND))
+        .filter(studio_object::Column::ObjectKind.eq(T::OBJECT_KIND))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(decode_object::<T>)
+        .collect()
 }
 
 pub(in crate::studio) async fn put_object<T>(

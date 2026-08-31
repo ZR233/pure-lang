@@ -146,6 +146,25 @@ where
         })
         .await
         .map_err(|error| AgentRuntimeError::Lifecycle(error.to_string()))?;
+    let workspace_assignment = match host.lifecycle().workspace_assignment(&lease) {
+        Ok(assignment) => assignment,
+        Err(error) => {
+            let reason = SpawnRollbackReason {
+                phase: SpawnRollbackPhase::InitialContext,
+                message: error.to_string(),
+            };
+            return match host.lifecycle().rollback_spawn(lease, reason).await {
+                Ok(()) => Err(AgentRuntimeError::Lifecycle(error.to_string())),
+                Err(rollback_error) => Err(AgentRuntimeError::Lifecycle(format!(
+                    "spawn workspace assignment failed: {error}; spawn rollback failed: {rollback_error}"
+                ))),
+            };
+        }
+    };
+    state
+        .session
+        .session
+        .replace_workspace_assignment(workspace_assignment.clone());
     let initial_context = match host.lifecycle().initial_context(&lease) {
         Ok(context) => context,
         Err(error) => {
@@ -278,6 +297,7 @@ where
     Ok(AgentSpawnResult {
         snapshot: state.snapshot,
         initial_turn_id,
+        workspace_assignment,
     })
 }
 

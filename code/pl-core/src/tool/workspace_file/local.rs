@@ -18,6 +18,7 @@ use crate::tool::tool_error;
 pub struct LocalWorkspaceFileBackend {
     paths: WorkspacePaths,
     lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
+    workspace: Option<ToolWorkspace>,
 }
 
 impl LocalWorkspaceFileBackend {
@@ -25,6 +26,7 @@ impl LocalWorkspaceFileBackend {
         Ok(Self {
             paths: WorkspacePaths::new(root, allow_workspace_escape).await?,
             lsp_runtime: None,
+            workspace: None,
         })
     }
 
@@ -35,6 +37,7 @@ impl LocalWorkspaceFileBackend {
         )
         .await?;
         backend.lsp_runtime = workspace.lsp_runtime();
+        backend.workspace = Some(workspace.clone());
         Ok(backend)
     }
 
@@ -198,6 +201,9 @@ impl WorkspaceFileBackend for LocalWorkspaceFileBackend {
         let path = self
             .resolve_for_write(request.cwd.as_deref(), &request.path)
             .await?;
+        if let Some(workspace) = &self.workspace {
+            workspace.ensure_path_writable(&path)?;
+        }
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
@@ -220,6 +226,9 @@ impl WorkspaceFileBackend for LocalWorkspaceFileBackend {
         let path = self
             .resolve_existing(request.cwd.as_deref(), &request.path)
             .await?;
+        if let Some(workspace) = &self.workspace {
+            workspace.ensure_path_writable(&path)?;
+        }
         let metadata = tokio::fs::metadata(&path).await?;
         if !metadata.is_file() {
             return Err(tool_error(

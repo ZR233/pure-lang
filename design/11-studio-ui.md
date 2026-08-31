@@ -35,9 +35,12 @@ composer dock 只渲染 `UserInput` 与 `ToolApproval`。任务计划确认是�
 
 ## 11.5 Agents 设置
 
-Agents 页同时列出系统和用户 Profile。系统项所有字段只读且无删除入口，只提供 enabled switch；用户
-项按单 TOML 文件原子创建、保存或删除。无效文件以独立诊断展示，不阻断页面其余项。运行中的 Agent
-目录与 Profile 设置目录明确分区。
+Agents 页是唯一 Agent 配置中心，不再保留重复 Roles 页。系统项名称、用途、指令和固定 workspace
+mode 只读，无删除入口；可配置 enabled、provider/model 与模型声明驱动的 effort。用户项按单 TOML
+文件原子创建、保存或删除，并可选择三种 workspace mode。无效文件以独立诊断展示，不阻断页面其余项。
+preserved worktree 显示 revision、branch、base/head、dirty/changed-files preview 与显式 cleanup。运行中
+Agent 目录与 Profile 设置目录明确分区；所有 mutation 使用 settings revision CAS 并以 canonical
+snapshot 原子刷新。
 
 ## 11.6 联网搜索设置
 

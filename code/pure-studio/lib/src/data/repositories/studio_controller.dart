@@ -941,6 +941,31 @@ class StudioController extends _$StudioController {
     );
   }
 
+  Future<void> setSystemAgentEnabled({
+    required String profileId,
+    required bool enabled,
+  }) async {
+    await _saveConfigSettings(
+      (revision) => _api.setSystemAgentEnabled(
+        expectedSettingsRevision: revision,
+        profileId: profileId,
+        enabled: enabled,
+      ),
+    );
+  }
+
+  Future<void> saveUserAgentProfile(AgentProfileDraft draft) async {
+    await _saveConfigSettings(
+      (revision) => _api.saveUserAgentProfile(revision, draft),
+    );
+  }
+
+  Future<void> cleanupPreservedWorktree(WorktreeRecoveryPreview worktree) =>
+      _api.cleanupPreservedWorktree(
+        childId: worktree.childId,
+        expectedLeaseRevision: worktree.leaseRevision,
+      );
+
   Future<void> _saveConfigSettings(
     Future<SettingsStateSnapshot> Function(int revision) request,
   ) async {

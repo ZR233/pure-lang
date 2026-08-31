@@ -1,5 +1,23 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum BridgeAgentWorkspaceMode {
+    Unrestricted,
+    Directory,
+    Worktree,
+}
+
+impl From<pl_protocol::AgentWorkspaceMode> for BridgeAgentWorkspaceMode {
+    fn from(value: pl_protocol::AgentWorkspaceMode) -> Self {
+        match value {
+            pl_protocol::AgentWorkspaceMode::Unrestricted => Self::Unrestricted,
+            pl_protocol::AgentWorkspaceMode::Directory => Self::Directory,
+            pl_protocol::AgentWorkspaceMode::Worktree => Self::Worktree,
+        }
+    }
+}
+
 /// Agent Profile 设置页使用的只读快照；系统 Profile 的 `system` 为 true。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -17,4 +35,5 @@ pub struct BridgeAgentProfileDto {
     pub content_hash: String,
     pub system: bool,
     pub enabled: bool,
+    pub workspace_mode: BridgeAgentWorkspaceMode,
 }

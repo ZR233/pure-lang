@@ -6,9 +6,13 @@ Studio 默认使用 `~/.pure/studio/studio.sqlite`。统一工作流版本采用
 Thread、附件和 Task 历史不迁移。启动前取得 Studio home 的跨进程独占 lock；数据库使用 WAL、foreign
 keys、busy timeout 与串行 write-behind transaction。
 
-核心持久化只包含项目、Thread、Turn/input、Item、Interaction、working state、附件、设置与观测缓存。
+核心持久化只包含项目、Thread、Turn/input、Item、Interaction、working state、附件、设置、观测缓存与
+版本化 Studio object。
 Workflow 是 `AgentWorkingState` 的 typed 字段，不新增 workflow 阶段/边/转换业务表。旧 TaskRun、
-WorkUnit、ReviewRound、MergeRecord、worktree registration 与 Task recovery 表全部删除。
+WorkUnit、ReviewRound、MergeRecord、旧 worktree registration 与 Task recovery 表全部删除。新的 worktree
+lease 复用 `studio_objects`，不新增 Task 表；lease 保存
+`prepared | active | preserved | cleanupRequested | cleaned`、repo/path/branch/base 和 revision，仅表达
+物理资源 ownership，不恢复旧任务业务模型。
 
 ## 19.2 checkpoint
 
@@ -30,8 +34,9 @@ Mode Skill 仍由 Skill Provider 提供，不复制到数据库。run 内保存�
 
 ## 19.4 恢复与诊断
 
-启动恢复只处理进程 lease、Agent session snapshot 和不可用项目路径。恢复 DTO 不携带 Task run、
-worktree、branch、merge 或 cleanup preview。日志错误包含 operation、Thread/Turn/Interaction identity 与
+启动恢复处理进程 lease、Agent session snapshot、不可用项目路径和 durable worktree lease。worktree
+部分缺失或身份不匹配时保留现场并发布带 revision、branch/base/head、dirty/changed-files 的 Recovery
+preview；显式 cleanup 才能删除。恢复 DTO 不携带 Task run、merge 或自动整合状态。日志错误包含 operation、Thread/Turn/Interaction identity 与
 redacted correlation id，不记录 provider token、Mode Skill 私密正文或用户 Profile credential。
 
 Live artifact 对 wire capture、配置和日志执行 credential redaction；失败 artifact 保留 workflow

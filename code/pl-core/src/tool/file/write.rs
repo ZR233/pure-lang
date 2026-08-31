@@ -95,6 +95,7 @@ impl Tool for WriteFileTool {
             let input: WriteFileInput = deserialize_tool_input(self.name(), input.arguments)?;
             let paths = workspace(&self.workspace, &context).await?;
             let path = paths.resolve_for_write(&input.path).await?;
+            self.workspace.ensure_path_writable(&path)?;
             if let Some(parent) = path.parent() {
                 tokio::fs::create_dir_all(parent).await?;
             }
@@ -159,6 +160,7 @@ impl Tool for CreateDirectoryTool {
             let input: PathInput = deserialize_tool_input(self.name(), input.arguments)?;
             let paths = workspace(&self.workspace, &context).await?;
             let path = paths.resolve_for_write(&input.path).await?;
+            self.workspace.ensure_path_writable(&path)?;
             tokio::fs::create_dir_all(&path).await?;
             Ok(text_output(format!(
                 "Created directory {}",
@@ -197,6 +199,7 @@ impl Tool for DeletePathTool {
             let input: DeletePathInput = deserialize_tool_input(self.name(), input.arguments)?;
             let paths = workspace(&self.workspace, &context).await?;
             let path = paths.resolve_existing(&input.path).await?;
+            self.workspace.ensure_path_writable(&path)?;
             let metadata = tokio::fs::metadata(&path).await?;
             match (metadata.is_dir(), input.delete_mode()) {
                 (false, DeleteMode::File) => tokio::fs::remove_file(&path).await?,
@@ -258,6 +261,7 @@ impl Tool for CopyPathTool {
             let paths = workspace(&self.workspace, &context).await?;
             let from = paths.resolve_existing(&input.from).await?;
             let to = paths.resolve_for_write(&input.to).await?;
+            self.workspace.ensure_path_writable(&to)?;
             ensure_overwrite(
                 &to,
                 input.collision() == PathCollision::Overwrite,
@@ -308,6 +312,8 @@ impl Tool for MovePathTool {
             let paths = workspace(&self.workspace, &context).await?;
             let from = paths.resolve_existing(&input.from).await?;
             let to = paths.resolve_for_write(&input.to).await?;
+            self.workspace.ensure_path_writable(&from)?;
+            self.workspace.ensure_path_writable(&to)?;
             ensure_overwrite(
                 &to,
                 input.collision() == PathCollision::Overwrite,

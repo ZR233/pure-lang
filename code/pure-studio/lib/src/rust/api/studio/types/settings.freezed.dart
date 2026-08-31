@@ -21,7 +21,7 @@ mixin _$LspScopeInput {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is LspScopeInput);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is LspScopeInput);
 }
 
 
@@ -30,7 +30,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'LspScopeInput()';
+    return 'LspScopeInput()';
 }
 
 
@@ -198,16 +198,18 @@ $LspScopeInput_ServerCopyWith<LspScopeInput_Server> get copyWith => _$LspScopeIn
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is LspScopeInput_Server&&(identical(other.projectId, projectId) || other.projectId == projectId)&&(identical(other.serverId, serverId) || other.serverId == serverId));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is LspScopeInput_Server&&(identical(other.projectId, projectId) || other.projectId == projectId)&&(identical(other.serverId, serverId) || other.serverId == serverId));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,projectId,serverId);
+int get hashCode {
+    return Object.hash(runtimeType,projectId,serverId);
+}
 
 @override
 String toString() {
-  return 'LspScopeInput.server(projectId: $projectId, serverId: $serverId)';
+    return 'LspScopeInput.server(projectId: $projectId, serverId: $serverId)';
 }
 
 
@@ -265,16 +267,18 @@ $LspScopeInput_WorkspaceCopyWith<LspScopeInput_Workspace> get copyWith => _$LspS
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is LspScopeInput_Workspace&&(identical(other.projectId, projectId) || other.projectId == projectId));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is LspScopeInput_Workspace&&(identical(other.projectId, projectId) || other.projectId == projectId));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,projectId);
+int get hashCode {
+    return Object.hash(runtimeType,projectId);
+}
 
 @override
 String toString() {
-  return 'LspScopeInput.workspace(projectId: $projectId)';
+    return 'LspScopeInput.workspace(projectId: $projectId)';
 }
 
 
@@ -326,7 +330,7 @@ class LspScopeInput_All extends LspScopeInput {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is LspScopeInput_All);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is LspScopeInput_All);
 }
 
 
@@ -335,7 +339,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'LspScopeInput.all()';
+    return 'LspScopeInput.all()';
 }
 
 
@@ -353,7 +357,7 @@ mixin _$McpResetInput {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is McpResetInput);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is McpResetInput);
 }
 
 
@@ -362,7 +366,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'McpResetInput()';
+    return 'McpResetInput()';
 }
 
 
@@ -523,16 +527,18 @@ $McpResetInput_ServerCopyWith<McpResetInput_Server> get copyWith => _$McpResetIn
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is McpResetInput_Server&&(identical(other.serverId, serverId) || other.serverId == serverId));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is McpResetInput_Server&&(identical(other.serverId, serverId) || other.serverId == serverId));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,serverId);
+int get hashCode {
+    return Object.hash(runtimeType,serverId);
+}
 
 @override
 String toString() {
-  return 'McpResetInput.server(serverId: $serverId)';
+    return 'McpResetInput.server(serverId: $serverId)';
 }
 
 
@@ -584,7 +590,7 @@ class McpResetInput_All extends McpResetInput {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is McpResetInput_All);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is McpResetInput_All);
 }
 
 
@@ -593,7 +599,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'McpResetInput.all()';
+    return 'McpResetInput.all()';
 }
 
 
@@ -611,7 +617,7 @@ mixin _$ProviderSecretInput {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is ProviderSecretInput);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is ProviderSecretInput);
 }
 
 
@@ -620,7 +626,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'ProviderSecretInput()';
+    return 'ProviderSecretInput()';
 }
 
 
@@ -782,7 +788,7 @@ class ProviderSecretInput_Preserve extends ProviderSecretInput {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is ProviderSecretInput_Preserve);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is ProviderSecretInput_Preserve);
 }
 
 
@@ -791,7 +797,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'ProviderSecretInput.preserve()';
+    return 'ProviderSecretInput.preserve()';
 }
 
 
@@ -819,16 +825,18 @@ $ProviderSecretInput_ReplaceCopyWith<ProviderSecretInput_Replace> get copyWith =
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is ProviderSecretInput_Replace&&(identical(other.value, value) || other.value == value));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is ProviderSecretInput_Replace&&(identical(other.value, value) || other.value == value));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,value);
+int get hashCode {
+    return Object.hash(runtimeType,value);
+}
 
 @override
 String toString() {
-  return 'ProviderSecretInput.replace(value: $value)';
+    return 'ProviderSecretInput.replace(value: $value)';
 }
 
 
@@ -880,7 +888,7 @@ class ProviderSecretInput_Clear extends ProviderSecretInput {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is ProviderSecretInput_Clear);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is ProviderSecretInput_Clear);
 }
 
 
@@ -889,7 +897,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'ProviderSecretInput.clear()';
+    return 'ProviderSecretInput.clear()';
 }
 
 

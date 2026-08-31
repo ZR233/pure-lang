@@ -342,9 +342,22 @@ impl AgentRuntimeHandle {
 
     /// 关闭 agent 及其产品资源。
     pub async fn close(&self, agent_id: ThreadId) -> AgentRuntimeResult<AgentSnapshot> {
+        self.close_with_disposition(agent_id, pl_protocol::AgentWorkspaceDisposition::Preserve)
+            .await
+    }
+
+    pub async fn close_with_disposition(
+        &self,
+        agent_id: ThreadId,
+        workspace_disposition: pl_protocol::AgentWorkspaceDisposition,
+    ) -> AgentRuntimeResult<AgentSnapshot> {
         let (reply, receiver) = oneshot::channel();
-        self.send(CoordinatorCommand::Close { agent_id, reply })
-            .await?;
+        self.send(CoordinatorCommand::Close {
+            agent_id,
+            workspace_disposition,
+            reply,
+        })
+        .await?;
         receive(receiver).await?
     }
 

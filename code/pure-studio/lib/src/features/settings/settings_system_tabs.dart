@@ -12,23 +12,37 @@ import 'settings_common.dart';
 import 'settings_update_row.dart';
 import 'settings_web_search.dart';
 
-class RolesTab extends ConsumerWidget {
-  const RolesTab({super.key, required this.providers, required this.roles});
+class AgentRoutesSection extends ConsumerWidget {
+  const AgentRoutesSection({
+    super.key,
+    required this.providers,
+    required this.roles,
+  });
 
   final List<ProviderSettingsView> providers;
   final List<RoleSettingsView> roles;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    const roleKeys = ['explorer', 'planner', 'executor', 'reviewer'];
+    const roleKeys = [
+      'explorer',
+      'planner',
+      'executor',
+      'worktree_executor',
+      'reviewer',
+    ];
     final options = _roleModelOptions(providers);
-    return SettingsPane(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        SettingsHeader(
-          title: context.l10n.settingsRolesTitle,
-          subtitle: context.l10n.settingsRolesSubtitle,
+        Text(
+          '系统 Agent 模型路由',
+          style: context.text.titleMedium?.copyWith(
+            color: context.studioInk,
+            fontWeight: FontWeight.w700,
+          ),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 8),
         SettingsGroup(
           children: [
             for (final role in roleKeys) _buildRoleRow(ref, role, options),
@@ -147,6 +161,27 @@ class RolesTab extends ConsumerWidget {
       }
     }
     return options;
+  }
+}
+
+/// One built-in Agent route editor embedded in its canonical Agent card.
+class AgentRouteControls extends ConsumerWidget {
+  const AgentRouteControls({
+    super.key,
+    required this.role,
+    required this.providers,
+    required this.roles,
+  });
+
+  final String role;
+  final List<ProviderSettingsView> providers;
+  final List<RoleSettingsView> roles;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final section = AgentRoutesSection(providers: providers, roles: roles);
+    final options = section._roleModelOptions(providers);
+    return section._buildRoleRow(ref, role, options);
   }
 }
 

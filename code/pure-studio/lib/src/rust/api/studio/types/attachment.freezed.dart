@@ -21,7 +21,7 @@ mixin _$BridgeAttachmentAdmissionContext {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAttachmentAdmissionContext);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAttachmentAdmissionContext);
 }
 
 
@@ -30,7 +30,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeAttachmentAdmissionContext()';
+    return 'BridgeAttachmentAdmissionContext()';
 }
 
 
@@ -191,16 +191,18 @@ $BridgeAttachmentAdmissionContext_ExistingThreadCopyWith<BridgeAttachmentAdmissi
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAttachmentAdmissionContext_ExistingThread&&(identical(other.threadId, threadId) || other.threadId == threadId));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAttachmentAdmissionContext_ExistingThread&&(identical(other.threadId, threadId) || other.threadId == threadId));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,threadId);
+int get hashCode {
+    return Object.hash(runtimeType,threadId);
+}
 
 @override
 String toString() {
-  return 'BridgeAttachmentAdmissionContext.existingThread(threadId: $threadId)';
+    return 'BridgeAttachmentAdmissionContext.existingThread(threadId: $threadId)';
 }
 
 
@@ -257,16 +259,18 @@ $BridgeAttachmentAdmissionContext_NewThreadCopyWith<BridgeAttachmentAdmissionCon
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAttachmentAdmissionContext_NewThread&&(identical(other.mode, mode) || other.mode == mode));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAttachmentAdmissionContext_NewThread&&(identical(other.mode, mode) || other.mode == mode));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,mode);
+int get hashCode {
+    return Object.hash(runtimeType,mode);
+}
 
 @override
 String toString() {
-  return 'BridgeAttachmentAdmissionContext.newThread(mode: $mode)';
+    return 'BridgeAttachmentAdmissionContext.newThread(mode: $mode)';
 }
 
 
@@ -313,7 +317,7 @@ mixin _$BridgeAttachmentDraftSource {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAttachmentDraftSource);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAttachmentDraftSource);
 }
 
 
@@ -322,7 +326,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeAttachmentDraftSource()';
+    return 'BridgeAttachmentDraftSource()';
 }
 
 
@@ -483,16 +487,18 @@ $BridgeAttachmentDraftSource_LocalFileCopyWith<BridgeAttachmentDraftSource_Local
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAttachmentDraftSource_LocalFile&&(identical(other.path, path) || other.path == path));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAttachmentDraftSource_LocalFile&&(identical(other.path, path) || other.path == path));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,path);
+int get hashCode {
+    return Object.hash(runtimeType,path);
+}
 
 @override
 String toString() {
-  return 'BridgeAttachmentDraftSource.localFile(path: $path)';
+    return 'BridgeAttachmentDraftSource.localFile(path: $path)';
 }
 
 
@@ -550,16 +556,18 @@ $BridgeAttachmentDraftSource_RemoteUrlCopyWith<BridgeAttachmentDraftSource_Remot
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAttachmentDraftSource_RemoteUrl&&(identical(other.url, url) || other.url == url)&&(identical(other.filename, filename) || other.filename == filename));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAttachmentDraftSource_RemoteUrl&&(identical(other.url, url) || other.url == url)&&(identical(other.filename, filename) || other.filename == filename));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,url,filename);
+int get hashCode {
+    return Object.hash(runtimeType,url,filename);
+}
 
 @override
 String toString() {
-  return 'BridgeAttachmentDraftSource.remoteUrl(url: $url, filename: $filename)';
+    return 'BridgeAttachmentDraftSource.remoteUrl(url: $url, filename: $filename)';
 }
 
 

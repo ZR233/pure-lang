@@ -47,6 +47,9 @@ pub struct AgentWorkingState {
     /// 子 Agent 创建时冻结的 Profile；根 Agent 不设置此字段。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_profile: Option<crate::AgentProfileSnapshot>,
+    /// 子 Agent 创建时冻结的有效工作区；根 Agent 不设置此字段。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_assignment: Option<crate::AgentWorkspaceAssignmentSnapshot>,
     #[serde(default)]
     pub revision: u64,
 }

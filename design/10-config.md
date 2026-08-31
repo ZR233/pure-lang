@@ -25,14 +25,16 @@ Windows 下对应：
 SeaORM 2.0 异步访问；数据库 schema v17 的破坏性重建合同见
 `19-studio-storage-and-diagnostics.md`。
 `pl-core` 的正常依赖树不包含 SeaORM。provider/model/role 配置仍只由
-`~/.pure/config.toml` schema 16 表达。用户 Agent Profile 单独保存到 `~/.pure/agents/*.toml`，
+`~/.pure/config.toml` schema 17 表达。用户 Agent Profile 单独保存到 `~/.pure/agents/*.toml`，
 一个文件对应一个稳定 Profile ID。
 
 `ConfigRuntime` 在 `startStudioRuntime` 时读取配置；此后普通对话和设置查询只读内存 canonical
 snapshot。当配置文件不存在时设置页展示内存中的默认配置。外部文件变化只有显式
 `reloadSettingsFromDisk` 才能应用。普通设置项在用户修改后即时写入配置；独立新增/编辑页面保留
 本地草稿，必须点击页面内保存按钮才写入配置，取消则丢弃草稿。当前且唯一支持的格式为 schema
-16。Studio 启动时，旧 schema、未知版本、无法解析、含内联 provider 凭据或无法校验的配置均视为
+17。Studio 启动时，schema 15 与 16 使用 typed 一次性迁移：先备份原文件，再原子写入 schema 17，
+并从旧 `executor` route 复制出 `worktree_executor` route。迁移或写回失败时保留原配置并 fail closed；
+成功后不保留旧 schema 双读或 fallback。其他旧 schema、未知版本、无法解析、含内联 provider 凭据或无法校验的配置均视为
 内容不兼容：不迁移、不导入旧字段或旧 provider 凭据，先把原始字节备份到同目录唯一的
 `config.toml.rejected.<timestamp>.bak`，再原子替换为当前默认配置并继续启动；仅按默认 provider id
 注入已有系统凭据。备份路径冲突时递增后缀且不得覆盖已有备份。启动成功后桌面宿主返回一次性恢复
@@ -59,7 +61,7 @@ fail closed 并保留原文件；默认配置替换失败时已经完整写入�
 
 `pl-studio-runtime` 负责：
 
-- `StudioConfig` 与唯一支持的 schema version 16。
+- `StudioConfig` 与唯一支持的 schema version 17，以及启动期 schema 15/16 typed 一次性迁移。
 - `~/.pure/config.toml` 路径、serde TOML 解析、原子保存和默认值。
 - Studio instructions、skills、MCP、runtime、`disabled_system_agents` 和 UI 配置。
 - `~/.pure/agents/*.toml` 的逐文件解析、诊断与原子创建/保存。
@@ -70,18 +72,20 @@ fail closed 并保留原文件；默认配置替换失败时已经完整写入�
 ## 10.3 根路由与 Agent Profile
 
 配置不使用 `active_provider`。所有模式的 root Agent 统一使用 `planner` route，不再根据
-Simple/Task 切换根角色。Studio 同时注册以下四个系统 Agent Profile：
+Simple/Task 切换根角色。Studio 同时注册以下五个系统 Agent Profile：
 
 | TOML key | 中文角色 | 用途 |
 | --- | --- | --- |
 | `explorer` | 探索者 | 代码、文档和上下文探索 |
 | `planner` | 计划者 | 形成计划和约束 |
 | `executor` | 执行者 | 实施修改和验证 |
+| `worktree_executor` | Worktree 执行者 | 在独立 Git worktree 实施修改和验证 |
 | `reviewer` | 审查者 | 代码审查和结果检查 |
 
 系统 Profile 由 Rust 结构体启动注册，不生成 TOML；全部字段不可编辑、不可删除，只能通过主配置
-`disabled_system_agents` 禁用。用户 Profile 的文件名 stem 是 Agent ID，文件保存 enabled、介绍、
-适用任务、系统指令、provider、model 和 effort。单个无效文件只排除自身并产生诊断。
+`disabled_system_agents` 禁用。系统 route 的 provider/model/effort 在 Agents 页统一配置；禁用 planner
+不影响 root 使用 planner route。用户 Profile 的文件名 stem 是 Agent ID，文件保存 enabled、介绍、
+适用任务、系统指令、provider、model、effort 和 `workspace_mode`。单个无效文件只排除自身并产生诊断。
 
 `list_agent_profiles` 只返回启用且路由可解析的 Profile。`spawn_agent(profileId, ...)` 创建 child 时
 冻结系统指令、provider、model 与 effort；此后文件变化不改变既有 child。设置页另读完整 catalog，
@@ -103,7 +107,7 @@ route 决定。旧版本、缺失必需路由或无效引用会触发 Studio 配
 本地 TOML 使用 `snake_case`，不同于 API wire 格式。
 
 ```toml
-schema_version = 16
+schema_version = 17
 
 disabled_system_agents = []
 
@@ -166,6 +170,11 @@ provider = "deepseek"
 model = "deepseek-v4-flash"
 effort = "high"
 
+[models.routes.worktree_executor]
+provider = "deepseek"
+model = "deepseek-v4-flash"
+effort = "high"
+
 [models.routes.reviewer]
 provider = "deepseek"
 model = "deepseek-v4-flash"
@@ -201,7 +210,7 @@ catalog = "openai"
 ## 10.5 Provider 和 Model
 
 `models.providers` 可保存多个 provider，相同 preset 可重复使用；唯一性只约束 map key
-`ProviderId`。当前 StudioConfig schema 为 16，provider catalog snapshot schema 为 9。
+`ProviderId`。当前 StudioConfig schema 为 17，provider catalog snapshot schema 为 9。
 
 每个 provider 实例持久化：
 
@@ -411,8 +420,8 @@ schema、常用配置段、凭据处理和安全编辑行为。其 canonical 源
 - preset、endpoint、凭证提示、协议、允许连接模式、suggested model 和 bundled catalog 全部来自
   `ProviderCatalogSnapshot`；Flutter 不保存生产目录副本。
 - preset provider 引用只读 bundled catalog，并可追加不冲突的模型；Custom provider 使用 explicit models。
-- Studio 草稿选择一个默认 provider；四个模型角色初始化为创建时选择的 suggested/default model
-  和该模型声明的默认 effort。该选择只投影为四条 route，不写入 provider runtime。
+- Studio 草稿选择一个默认 provider；五个模型角色初始化为创建时选择的 suggested/default model
+  和该模型声明的默认 effort。该选择只投影为五条 route，不写入 provider runtime。
 
 设置项写入前必须完成本地校验：
 
@@ -432,7 +441,7 @@ schema、常用配置段、凭据处理和安全编辑行为。其 canonical 源
 - catalog 中的全部 preset 与 Custom Responses/Chat provider。
 - API key、base URL、provider key 和显示名。
 - Studio 路由编辑投影中的 provider 默认模型和自定义模型；runtime provider 不保存默认模型。
-- 四个模型角色到 provider/model/effort 的路由。
+- 五个模型角色到 provider/model/effort 的路由。
 - Security 标签页选择权限模式：请求批准、替我审批、完全访问。选择后即时写入 `[runtime].permission_mode`。
 - Instructions 标签页编辑 `[instructions]` 的 base override、developer、user 和项目文档预算；保存前由 `pl-core` 校验并即时写入配置。
 - MCP 标签页管理用户 `[mcp.servers]`，包括 server id、启用状态、stdio/Streamable HTTP 传输方式、命令参数、环境变量、HTTP URL 和 token 环境变量；同时展示不可删除的内置 Zhipu Coding Plan MCP server。
@@ -472,7 +481,7 @@ Provider 标签页必须提供结构化编辑能力：
 - Zhipu 请求固定使用流式 `chat/completions`；effort 由模型 `parameters` 声明驱动（见 07-model.md 7.8）。默认模型 effort 候选值为 `enabled` / `none`，直接映射到 `thinking.type`，不发送 wire-level `reasoning_effort`。`glm-5.2` 候选值为 `high` / `max` / `none`，其中 `high` / `max` 会作为 `reasoning_effort` 透传给 API 并设置 `thinking.type = enabled` 与 `clear_thinking = false`，`none` 设置 `thinking.type = disabled` 并移除 `reasoning_effort`。`glm-5.3` 候选值为 `high` / `low` / `max`，三档均作为 `reasoning_effort` 透传并设置 `thinking.type = enabled` 与 `clear_thinking = false`；GLM-5.3 始终思考，不提供禁用思考候选。历史回放仍通过 assistant message 的 `reasoning_content` 字段保留。
 - 写入前由 `pl-studio-runtime` 构造 `StudioConfig` 并执行完整校验；校验失败时只在 UI 中展示错误，不写入磁盘。更新 API key 时，空输入表示保留现有 secret；provider key 重命名必须携带 `originalId`，以便服务端保留 secret、headers、catalog metadata 和模型能力。
 
-Roles 标签页必须展示固定四个角色：探索者、计划者、执行者、审查者。每个角色将模型与“思考强度”作为两个独立下拉控件展示；模型选项使用 `Provider / Model · Protocol · Connection`，思考强度候选值来自当前模型声明的 `supported_efforts()`。模型改变时，有候选的模型切换为其声明的默认 effort，没有显式默认时使用首个候选；无候选模型保存空选择并禁用强度控件。仅改变思考强度时必须保持当前 provider 和 model 不变。模型与思考强度变更都即时保存，但 Flutter 不进行持久 optimistic 更新，也不保存第二份 selection；成功后以 bridge 返回的 typed canonical settings snapshot 更新 store，失败时保持原 canonical 状态。`pl-studio-runtime` 统一校验后写入 `~/.pure/config.toml`。
+Agents 标签页是唯一 Agent 配置中心，展示 `explorer`、`planner`、`executor`、`worktree_executor`、`reviewer` 五个系统 Profile。每个系统卡片将模型与“思考强度”作为两个独立下拉控件展示；模型选项使用 `Provider / Model · Protocol · Connection`，思考强度候选值来自当前模型声明的 `supported_efforts()`。模型改变时，有候选的模型切换为其声明的默认 effort，没有显式默认时使用首个候选；无候选模型保存空选择并禁用强度控件。仅改变思考强度时必须保持当前 provider 和 model 不变。模型、思考强度与启用状态变更都携带 `expectedSettingsRevision` 即时保存，但 Flutter 不进行持久 optimistic 更新，也不保存第二份 selection；成功后以 bridge 返回的完整 typed canonical settings snapshot 原子更新 store，失败时保持原 canonical 状态。`pl-studio-runtime` 统一校验后写入 `~/.pure/config.toml`；不再保留重复 Roles 标签页。
 
 桌面窗口必须支持自由缩放。`pure-studio` 只声明首选窗口尺寸，不把 UI 绑定到固定宽高；设置页内容跟随窗口尺寸自适应。Provider 标签页在常规桌面宽度使用单栏 provider 卡片列表，卡片内部承载摘要、操作和展开编辑内容；在窄窗口下保持单栏滚动并压缩卡片元信息，避免表格和编辑区域被裁剪。聊天状态栏在窄窗口下保留左侧高频控制，并把右侧只读状态按断点收入更多菜单。
 
@@ -516,6 +525,8 @@ Studio 保留两段互不混用的顶层配置。`[web_search]` 只配置 OpenAI
 借用，跨 provider 回退只由 OpenAI 搜索承担。两边均不可用时分别保留 `disabled`、
 `missingCredential`、`providerUnsupported` 或 `modelUnsupported`，不能合并为模糊状态。
 
+配置值与生效值必须分离：没有有凭据的 OpenAI preset 时保留 configured mode，但 effective mode 为 `disabled`。此状态下工具规划不得注册独立搜索或 hosted 搜索，且运行时不得创建 `/alpha/search` 客户端。可用账户优先当前 turn 的 OpenAI provider；否则按 provider id 稳定排序，并按 `explorer -> planner -> executor -> worktree_executor -> reviewer` 选择首个指向该 provider 的有效模型，最后才回退到目录首个模型。
+
 配置值、可用性与最终选中值必须分离。DeepSeek 被选中时，OpenAI 仍可显示 availability 为
 `available`，但 `selected = false` 且 effective mode 为 `disabled`。`cached` 映射为禁止 OpenAI
 外部实时访问；`indexed` 映射为显式 indexed 访问；`live` 允许实时外网；`disabled` 完全关闭该
@@ -524,7 +535,7 @@ OpenAI 路径。两张卡片的保存命令都携带 Settings CAS revision，成
 
 ## 10.14 LSP 自定义 server 配置
 
-自定义语言服务器声明在 `[lsp.servers.<server_id>]` 表，schema 16 下为可选段。每个条目必须配置
+自定义语言服务器声明在 `[lsp.servers.<server_id>]` 表，schema 17 下为可选段。每个条目必须配置
 `command` 与非空
 `language_ids`，可选 `args`、`detection`（workspace 检测文件名/glob，缺省总是匹配）、
 `extensions`（文件扩展名，缺省为空）、`display_name`（缺省使用 server id）和 `operations`

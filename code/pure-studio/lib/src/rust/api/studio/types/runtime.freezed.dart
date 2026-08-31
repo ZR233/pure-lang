@@ -21,16 +21,21 @@ mixin _$BridgeAgentState {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAgentState&&const DeepCollectionEquality().equals(other.field0, field0));
+  final _this = this as BridgeAgentState;
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAgentState&&const DeepCollectionEquality().equals(other.field0, _this.field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(field0));
+int get hashCode {
+  final _this = this as BridgeAgentState;
+  return Object.hash(runtimeType,const DeepCollectionEquality().hash(_this.field0));
+}
 
 @override
 String toString() {
-  return 'BridgeAgentState(field0: $field0)';
+  final _this = this as BridgeAgentState;
+  return 'BridgeAgentState(field0: ${_this.field0})';
 }
 
 
@@ -233,16 +238,18 @@ $BridgeAgentState_IdleCopyWith<BridgeAgentState_Idle> get copyWith => _$BridgeAg
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAgentState_Idle&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAgentState_Idle&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeAgentState.idle(field0: $field0)';
+    return 'BridgeAgentState.idle(field0: $field0)';
 }
 
 
@@ -299,16 +306,18 @@ $BridgeAgentState_QueuedCopyWith<BridgeAgentState_Queued> get copyWith => _$Brid
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAgentState_Queued&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAgentState_Queued&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeAgentState.queued(field0: $field0)';
+    return 'BridgeAgentState.queued(field0: $field0)';
 }
 
 
@@ -365,16 +374,18 @@ $BridgeAgentState_RunningCopyWith<BridgeAgentState_Running> get copyWith => _$Br
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAgentState_Running&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAgentState_Running&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeAgentState.running(field0: $field0)';
+    return 'BridgeAgentState.running(field0: $field0)';
 }
 
 
@@ -431,16 +442,18 @@ $BridgeAgentState_WaitingToolCopyWith<BridgeAgentState_WaitingTool> get copyWith
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAgentState_WaitingTool&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAgentState_WaitingTool&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeAgentState.waitingTool(field0: $field0)';
+    return 'BridgeAgentState.waitingTool(field0: $field0)';
 }
 
 
@@ -497,16 +510,18 @@ $BridgeAgentState_WaitingInteractionCopyWith<BridgeAgentState_WaitingInteraction
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAgentState_WaitingInteraction&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAgentState_WaitingInteraction&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeAgentState.waitingInteraction(field0: $field0)';
+    return 'BridgeAgentState.waitingInteraction(field0: $field0)';
 }
 
 
@@ -563,16 +578,18 @@ $BridgeAgentState_CancellingCopyWith<BridgeAgentState_Cancelling> get copyWith =
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAgentState_Cancelling&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAgentState_Cancelling&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeAgentState.cancelling(field0: $field0)';
+    return 'BridgeAgentState.cancelling(field0: $field0)';
 }
 
 
@@ -629,16 +646,18 @@ $BridgeAgentState_ClosingCopyWith<BridgeAgentState_Closing> get copyWith => _$Br
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAgentState_Closing&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAgentState_Closing&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeAgentState.closing(field0: $field0)';
+    return 'BridgeAgentState.closing(field0: $field0)';
 }
 
 
@@ -695,16 +714,18 @@ $BridgeAgentState_ClosedCopyWith<BridgeAgentState_Closed> get copyWith => _$Brid
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAgentState_Closed&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAgentState_Closed&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeAgentState.closed(field0: $field0)';
+    return 'BridgeAgentState.closed(field0: $field0)';
 }
 
 
@@ -761,16 +782,18 @@ $BridgeAgentState_FaultedCopyWith<BridgeAgentState_Faulted> get copyWith => _$Br
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAgentState_Faulted&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeAgentState_Faulted&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeAgentState.faulted(field0: $field0)';
+    return 'BridgeAgentState.faulted(field0: $field0)';
 }
 
 
@@ -817,7 +840,7 @@ mixin _$BridgeLspActivity {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeLspActivity);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeLspActivity);
 }
 
 
@@ -826,7 +849,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeLspActivity()';
+    return 'BridgeLspActivity()';
 }
 
 
@@ -988,7 +1011,7 @@ class BridgeLspActivity_Idle extends BridgeLspActivity {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeLspActivity_Idle);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeLspActivity_Idle);
 }
 
 
@@ -997,7 +1020,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeLspActivity.idle()';
+    return 'BridgeLspActivity.idle()';
 }
 
 
@@ -1027,16 +1050,18 @@ $BridgeLspActivity_BusyCopyWith<BridgeLspActivity_Busy> get copyWith => _$Bridge
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeLspActivity_Busy&&(identical(other.title, title) || other.title == title)&&(identical(other.message, message) || other.message == message)&&(identical(other.percentage, percentage) || other.percentage == percentage));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeLspActivity_Busy&&(identical(other.title, title) || other.title == title)&&(identical(other.message, message) || other.message == message)&&(identical(other.percentage, percentage) || other.percentage == percentage));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,title,message,percentage);
+int get hashCode {
+    return Object.hash(runtimeType,title,message,percentage);
+}
 
 @override
 String toString() {
-  return 'BridgeLspActivity.busy(title: $title, message: $message, percentage: $percentage)';
+    return 'BridgeLspActivity.busy(title: $title, message: $message, percentage: $percentage)';
 }
 
 
@@ -1097,16 +1122,18 @@ $BridgeLspActivity_IndexingCopyWith<BridgeLspActivity_Indexing> get copyWith => 
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeLspActivity_Indexing&&(identical(other.title, title) || other.title == title)&&(identical(other.message, message) || other.message == message)&&(identical(other.percentage, percentage) || other.percentage == percentage));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeLspActivity_Indexing&&(identical(other.title, title) || other.title == title)&&(identical(other.message, message) || other.message == message)&&(identical(other.percentage, percentage) || other.percentage == percentage));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,title,message,percentage);
+int get hashCode {
+    return Object.hash(runtimeType,title,message,percentage);
+}
 
 @override
 String toString() {
-  return 'BridgeLspActivity.indexing(title: $title, message: $message, percentage: $percentage)';
+    return 'BridgeLspActivity.indexing(title: $title, message: $message, percentage: $percentage)';
 }
 
 
@@ -1155,7 +1182,7 @@ mixin _$BridgeLspServerState {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeLspServerState);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeLspServerState);
 }
 
 
@@ -1164,7 +1191,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeLspServerState()';
+    return 'BridgeLspServerState()';
 }
 
 
@@ -1337,16 +1364,18 @@ $BridgeLspServerState_CheckingCopyWith<BridgeLspServerState_Checking> get copyWi
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeLspServerState_Checking&&(identical(other.message, message) || other.message == message));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeLspServerState_Checking&&(identical(other.message, message) || other.message == message));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,message);
+int get hashCode {
+    return Object.hash(runtimeType,message);
+}
 
 @override
 String toString() {
-  return 'BridgeLspServerState.checking(message: $message)';
+    return 'BridgeLspServerState.checking(message: $message)';
 }
 
 
@@ -1405,16 +1434,18 @@ $BridgeLspServerState_AvailableCopyWith<BridgeLspServerState_Available> get copy
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeLspServerState_Available&&(identical(other.checkedAt, checkedAt) || other.checkedAt == checkedAt)&&(identical(other.diagnosticCount, diagnosticCount) || other.diagnosticCount == diagnosticCount)&&(identical(other.activity, activity) || other.activity == activity));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeLspServerState_Available&&(identical(other.checkedAt, checkedAt) || other.checkedAt == checkedAt)&&(identical(other.diagnosticCount, diagnosticCount) || other.diagnosticCount == diagnosticCount)&&(identical(other.activity, activity) || other.activity == activity));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,checkedAt,diagnosticCount,activity);
+int get hashCode {
+    return Object.hash(runtimeType,checkedAt,diagnosticCount,activity);
+}
 
 @override
 String toString() {
-  return 'BridgeLspServerState.available(checkedAt: $checkedAt, diagnosticCount: $diagnosticCount, activity: $activity)';
+    return 'BridgeLspServerState.available(checkedAt: $checkedAt, diagnosticCount: $diagnosticCount, activity: $activity)';
 }
 
 
@@ -1483,16 +1514,18 @@ $BridgeLspServerState_UnavailableCopyWith<BridgeLspServerState_Unavailable> get 
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeLspServerState_Unavailable&&(identical(other.checkedAt, checkedAt) || other.checkedAt == checkedAt)&&(identical(other.error, error) || other.error == error));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeLspServerState_Unavailable&&(identical(other.checkedAt, checkedAt) || other.checkedAt == checkedAt)&&(identical(other.error, error) || other.error == error));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,checkedAt,error);
+int get hashCode {
+    return Object.hash(runtimeType,checkedAt,error);
+}
 
 @override
 String toString() {
-  return 'BridgeLspServerState.unavailable(checkedAt: $checkedAt, error: $error)';
+    return 'BridgeLspServerState.unavailable(checkedAt: $checkedAt, error: $error)';
 }
 
 
@@ -1550,16 +1583,18 @@ $BridgeLspServerState_DisabledCopyWith<BridgeLspServerState_Disabled> get copyWi
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeLspServerState_Disabled&&(identical(other.message, message) || other.message == message));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeLspServerState_Disabled&&(identical(other.message, message) || other.message == message));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,message);
+int get hashCode {
+    return Object.hash(runtimeType,message);
+}
 
 @override
 String toString() {
-  return 'BridgeLspServerState.disabled(message: $message)';
+    return 'BridgeLspServerState.disabled(message: $message)';
 }
 
 
@@ -1606,7 +1641,7 @@ mixin _$BridgeMcpServerState {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeMcpServerState);
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeMcpServerState);
 }
 
 
@@ -1615,7 +1650,7 @@ int get hashCode => runtimeType.hashCode;
 
 @override
 String toString() {
-  return 'BridgeMcpServerState()';
+    return 'BridgeMcpServerState()';
 }
 
 
@@ -1794,16 +1829,18 @@ $BridgeMcpServerState_DisabledCopyWith<BridgeMcpServerState_Disabled> get copyWi
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeMcpServerState_Disabled&&(identical(other.message, message) || other.message == message));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeMcpServerState_Disabled&&(identical(other.message, message) || other.message == message));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,message);
+int get hashCode {
+    return Object.hash(runtimeType,message);
+}
 
 @override
 String toString() {
-  return 'BridgeMcpServerState.disabled(message: $message)';
+    return 'BridgeMcpServerState.disabled(message: $message)';
 }
 
 
@@ -1860,16 +1897,18 @@ $BridgeMcpServerState_MissingCredentialCopyWith<BridgeMcpServerState_MissingCred
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeMcpServerState_MissingCredential&&(identical(other.message, message) || other.message == message));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeMcpServerState_MissingCredential&&(identical(other.message, message) || other.message == message));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,message);
+int get hashCode {
+    return Object.hash(runtimeType,message);
+}
 
 @override
 String toString() {
-  return 'BridgeMcpServerState.missingCredential(message: $message)';
+    return 'BridgeMcpServerState.missingCredential(message: $message)';
 }
 
 
@@ -1926,16 +1965,18 @@ $BridgeMcpServerState_CheckingCopyWith<BridgeMcpServerState_Checking> get copyWi
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeMcpServerState_Checking&&(identical(other.message, message) || other.message == message));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeMcpServerState_Checking&&(identical(other.message, message) || other.message == message));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,message);
+int get hashCode {
+    return Object.hash(runtimeType,message);
+}
 
 @override
 String toString() {
-  return 'BridgeMcpServerState.checking(message: $message)';
+    return 'BridgeMcpServerState.checking(message: $message)';
 }
 
 
@@ -1993,16 +2034,18 @@ $BridgeMcpServerState_AvailableCopyWith<BridgeMcpServerState_Available> get copy
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeMcpServerState_Available&&(identical(other.checkedAt, checkedAt) || other.checkedAt == checkedAt)&&(identical(other.toolCount, toolCount) || other.toolCount == toolCount));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeMcpServerState_Available&&(identical(other.checkedAt, checkedAt) || other.checkedAt == checkedAt)&&(identical(other.toolCount, toolCount) || other.toolCount == toolCount));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,checkedAt,toolCount);
+int get hashCode {
+    return Object.hash(runtimeType,checkedAt,toolCount);
+}
 
 @override
 String toString() {
-  return 'BridgeMcpServerState.available(checkedAt: $checkedAt, toolCount: $toolCount)';
+    return 'BridgeMcpServerState.available(checkedAt: $checkedAt, toolCount: $toolCount)';
 }
 
 
@@ -2061,16 +2104,18 @@ $BridgeMcpServerState_UnavailableCopyWith<BridgeMcpServerState_Unavailable> get 
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeMcpServerState_Unavailable&&(identical(other.checkedAt, checkedAt) || other.checkedAt == checkedAt)&&(identical(other.error, error) || other.error == error));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeMcpServerState_Unavailable&&(identical(other.checkedAt, checkedAt) || other.checkedAt == checkedAt)&&(identical(other.error, error) || other.error == error));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,checkedAt,error);
+int get hashCode {
+    return Object.hash(runtimeType,checkedAt,error);
+}
 
 @override
 String toString() {
-  return 'BridgeMcpServerState.unavailable(checkedAt: $checkedAt, error: $error)';
+    return 'BridgeMcpServerState.unavailable(checkedAt: $checkedAt, error: $error)';
 }
 
 
@@ -2118,16 +2163,21 @@ mixin _$BridgeRuntimeState {
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeRuntimeState&&const DeepCollectionEquality().equals(other.field0, field0));
+  final _this = this as BridgeRuntimeState;
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeRuntimeState&&const DeepCollectionEquality().equals(other.field0, _this.field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(field0));
+int get hashCode {
+  final _this = this as BridgeRuntimeState;
+  return Object.hash(runtimeType,const DeepCollectionEquality().hash(_this.field0));
+}
 
 @override
 String toString() {
-  return 'BridgeRuntimeState(field0: $field0)';
+  final _this = this as BridgeRuntimeState;
+  return 'BridgeRuntimeState(field0: ${_this.field0})';
 }
 
 
@@ -2312,16 +2362,18 @@ $BridgeRuntimeState_UninitializedCopyWith<BridgeRuntimeState_Uninitialized> get 
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeRuntimeState_Uninitialized&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeRuntimeState_Uninitialized&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeRuntimeState.uninitialized(field0: $field0)';
+    return 'BridgeRuntimeState.uninitialized(field0: $field0)';
 }
 
 
@@ -2378,16 +2430,18 @@ $BridgeRuntimeState_InitializingCopyWith<BridgeRuntimeState_Initializing> get co
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeRuntimeState_Initializing&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeRuntimeState_Initializing&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeRuntimeState.initializing(field0: $field0)';
+    return 'BridgeRuntimeState.initializing(field0: $field0)';
 }
 
 
@@ -2444,16 +2498,18 @@ $BridgeRuntimeState_ReadyCopyWith<BridgeRuntimeState_Ready> get copyWith => _$Br
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeRuntimeState_Ready&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeRuntimeState_Ready&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeRuntimeState.ready(field0: $field0)';
+    return 'BridgeRuntimeState.ready(field0: $field0)';
 }
 
 
@@ -2510,16 +2566,18 @@ $BridgeRuntimeState_ShuttingDownCopyWith<BridgeRuntimeState_ShuttingDown> get co
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeRuntimeState_ShuttingDown&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeRuntimeState_ShuttingDown&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeRuntimeState.shuttingDown(field0: $field0)';
+    return 'BridgeRuntimeState.shuttingDown(field0: $field0)';
 }
 
 
@@ -2576,16 +2634,18 @@ $BridgeRuntimeState_StoppedCopyWith<BridgeRuntimeState_Stopped> get copyWith => 
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeRuntimeState_Stopped&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeRuntimeState_Stopped&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeRuntimeState.stopped(field0: $field0)';
+    return 'BridgeRuntimeState.stopped(field0: $field0)';
 }
 
 
@@ -2642,16 +2702,18 @@ $BridgeRuntimeState_FailedCopyWith<BridgeRuntimeState_Failed> get copyWith => _$
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeRuntimeState_Failed&&(identical(other.field0, field0) || other.field0 == field0));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeRuntimeState_Failed&&(identical(other.field0, field0) || other.field0 == field0));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,field0);
+int get hashCode {
+    return Object.hash(runtimeType,field0);
+}
 
 @override
 String toString() {
-  return 'BridgeRuntimeState.failed(field0: $field0)';
+    return 'BridgeRuntimeState.failed(field0: $field0)';
 }
 
 

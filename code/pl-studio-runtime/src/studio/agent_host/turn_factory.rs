@@ -124,7 +124,12 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         let root_role = is_root.then_some(crate::config::StudioRole::Planner);
 
         let workspace = AgentWorkspaceResolver::new()
-            .resolve(&context.snapshot.identity, &thread_record, &project)
+            .resolve(
+                &context.snapshot.identity,
+                &thread_record,
+                &project,
+                context.session.workspace_assignment(),
+            )
             .await
             .map_err(anyhow_error)?;
         let workspace_root = workspace.root().to_path_buf();

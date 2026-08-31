@@ -6,6 +6,7 @@
 pub(crate) use pl_core::*;
 pub use pl_protocol::*;
 
+pub mod agent;
 pub mod config;
 mod config_editor;
 mod error_mapping;
