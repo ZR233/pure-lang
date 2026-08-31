@@ -651,63 +651,72 @@ fn ensure_profile_messages(calls: &[WireCall]) -> Result<()> {
         .filter(|call| call.name == "spawn_agent")
         .collect::<Vec<_>>();
     for profile in required {
-        let spawn = spawns
+        let profile_spawns = spawns
             .iter()
-            .find(|call| call.arguments.get("profileId").and_then(Value::as_str) == Some(profile))
-            .with_context(|| format!("wire captures contain no {profile} spawn"))?;
+            .filter(|call| call.arguments.get("profileId").and_then(Value::as_str) == Some(profile))
+            .collect::<Vec<_>>();
         ensure!(
-            spawn.arguments.get("forkTurns").and_then(Value::as_str) == Some("none"),
-            "{profile} spawn did not freeze forkTurns:none"
+            !profile_spawns.is_empty(),
+            "wire captures contain no {profile} spawn"
         );
-        let message = spawn
-            .arguments
-            .get("message")
-            .and_then(Value::as_str)
-            .with_context(|| format!("{profile} spawn has no message"))?;
-        let markers = [
-            "purpose",
-            "baseline",
-            "ownership",
-            "forbidden",
-            "steps",
-            "completion_failure",
-            "evidence",
-            "workspace_git_cleanup",
-        ];
-        let mut cursor = 0;
-        for marker in markers {
-            let token = format!("[[CHILD_CONTRACT:{marker}]]");
-            let at = message[cursor..]
-                .find(&token)
-                .with_context(|| format!("{profile} message lacks {token}"))?
-                + cursor;
-            let start = at + token.len();
-            let end = markers
-                .iter()
-                .skip_while(|next| **next != marker)
-                .nth(1)
-                .and_then(|next| message[start..].find(&format!("[[CHILD_CONTRACT:{next}]]")))
-                .map(|offset| start + offset)
-                .unwrap_or(message.len());
+        for spawn in profile_spawns {
             ensure!(
-                !message[start..end].trim().is_empty(),
-                "{profile} message has empty {token}"
+                spawn.arguments.get("forkTurns").and_then(Value::as_str) == Some("none"),
+                "{profile} spawn did not freeze forkTurns:none"
             );
-            cursor = start;
+            let message = spawn
+                .arguments
+                .get("message")
+                .and_then(Value::as_str)
+                .with_context(|| format!("{profile} spawn has no message"))?;
+            let markers = [
+                "purpose",
+                "baseline",
+                "ownership",
+                "forbidden",
+                "steps",
+                "completion_failure",
+                "evidence",
+                "workspace_git_cleanup",
+            ];
+            let mut cursor = 0;
+            for (index, marker) in markers.iter().enumerate() {
+                let token = format!("[[CHILD_CONTRACT:{marker}]]");
+                let at = message[cursor..]
+                    .find(&token)
+                    .with_context(|| format!("{profile} message lacks {token}"))?
+                    + cursor;
+                let start = at + token.len();
+                let end = markers
+                    .get(index + 1)
+                    .and_then(|next| message[start..].find(&format!("[[CHILD_CONTRACT:{next}]]")))
+                    .map(|offset| start + offset)
+                    .unwrap_or(message.len());
+                ensure!(
+                    !message[start..end].trim().is_empty(),
+                    "{profile} message has empty {token}"
+                );
+                cursor = end;
+            }
         }
     }
     let explorers = spawns
         .iter()
         .filter(|call| call.arguments.get("profileId").and_then(Value::as_str) == Some("explorer"))
-        .filter_map(|call| call.arguments.get("message").and_then(Value::as_str))
         .collect::<Vec<_>>();
     ensure!(
         explorers.len() >= 2,
         "fewer than two explorer spawn messages"
     );
     ensure!(
-        explorers[0] != explorers[1],
+        explorers[0].arguments.get("message") != explorers[1].arguments.get("message"),
         "two explorer messages do not define distinct purpose/ownership"
+    );
+    ensure!(
+        explorers[0].call_id.is_some()
+            && explorers[1].call_id.is_some()
+            && explorers[0].call_id != explorers[1].call_id,
+        "two explorer spawns do not have distinct call IDs"
     );
     Ok(())
 }
@@ -1423,6 +1432,39 @@ mod tests {
     #[test]
     fn profile_message_contract_requires_all_profiles_and_sections() {
         ensure_profile_messages(&profile_message_calls()).unwrap();
+    }
+
+    #[test]
+    fn every_reviewer_message_requires_the_complete_contract() {
+        let mut calls = profile_message_calls();
+        let mut second = calls
+            .iter()
+            .find(|call| {
+                call.arguments.get("profileId").and_then(Value::as_str) == Some("reviewer")
+            })
+            .cloned()
+            .unwrap();
+        second.call_id = Some("reviewer-2".into());
+        second.arguments["message"] = Value::String(
+            second.arguments["message"]
+                .as_str()
+                .unwrap()
+                .replace("[[CHILD_CONTRACT:evidence]]", ""),
+        );
+        calls.push(second);
+        assert!(ensure_profile_messages(&calls).is_err());
+
+        let mut complete = profile_message_calls();
+        let mut second = complete
+            .iter()
+            .find(|call| {
+                call.arguments.get("profileId").and_then(Value::as_str) == Some("reviewer")
+            })
+            .cloned()
+            .unwrap();
+        second.call_id = Some("reviewer-2".into());
+        complete.push(second);
+        ensure_profile_messages(&complete).unwrap();
     }
 
     fn profile_message_calls() -> Vec<WireCall> {
