@@ -1,27 +1,29 @@
 请严格完成一次 Task 子代理验收，并在最终回复中逐项给出证据。
 
+以下八段是不可省略的 live acceptance hard gates；root 必须将对应段落的具体要求原样落实到每个 child message，并以 wire receipts 证明调用顺序。
+
 根 Agent 必须在每一个 spawn_agent 的 message（两个 explorer、executor、worktree_executor、reviewer）中，按以下同一顺序逐字包含八个 CHILD_CONTRACT marker；每一段必须是该 child 的具体内容，不能只引用本文件。两个 explorer 的目的和 ownership 必须不同。
 
 [[CHILD_CONTRACT:purpose]]
-探索者一只读核对 task workflow 与 live artifact；探索者二只读核对 workspace/Git 生命周期。executor 在 directory assignment 中创建 allowed/directory.txt；worktree_executor 在独立 worktree 中创建并提交 worktree_result.txt；reviewer 只读复审。
+探索者一只读核对 task workflow 与 live artifact；探索者二只读核对 workspace/Git 生命周期。executor 在 directory assignment 中创建 allowed/directory.txt，且该文件内容必须逐字包含 DIRECTORY_MARKER；worktree_executor 在独立 worktree 中创建 worktree_result.txt，且该文件内容必须逐字包含 WORKTREE_RESULT_MARKER，再提交该文件；reviewer 只读复审。
 
 [[CHILD_CONTRACT:baseline]]
-基线是当前仓库 HEAD；Task 使用 mode.task，四个内置 Profile 的 system instructions 与 workspace mode 必须冻结在 spawn receipt 中；禁止复制 immutable Profile 首行到本段或 child message。
+基线是当前仓库 HEAD；Task 使用 mode.task，四个内置 Profile 的 system instructions 与 workspace mode 必须冻结在 spawn receipt 中；validator 固定要求 allowed/directory.txt 含 DIRECTORY_MARKER、worktree_result.txt 含 WORKTREE_RESULT_MARKER，不得以修改 validator 或只报告 completion marker 替代文件内容；禁止复制 immutable Profile 首行到本段或 child message。
 
 [[CHILD_CONTRACT:ownership]]
-root 在 confirmation 后亲自使用内置 write_file 创建 design/subagents-orchestration.md，内容包含 ROOT_DESIGN_MARKER，并拥有整合、cherry-pick 和 cleanup；executor 仅拥有 allowed，worktree_executor 仅拥有自己的 worktree，explorer/reviewer 只读。
+root 在 confirmation 后亲自使用内置 write_file 创建 design/subagents-orchestration.md，内容包含 ROOT_DESIGN_MARKER，并拥有整合、cherry-pick 和 cleanup；executor 仅拥有 allowed，负责写入含 DIRECTORY_MARKER 的 directory.txt；worktree_executor 仅拥有自己的 worktree，负责写入含 WORKTREE_RESULT_MARKER 的 worktree_result.txt 并提交；explorer/reviewer 只读。directory 变更留在主 workspace 由 root 最终组合，root 不得为 directory child 产物额外提交后再 spawn worktree。
 
 [[CHILD_CONTRACT:forbidden]]
-executor 必须先尝试用内置 write_file 写 forbidden/denied.txt，预期被 writablePaths 拒绝，不得绕过边界；不得由 child 整合 worktree，不得由 reviewer 修改任何文件或 Git 状态。
+executor 必须先尝试用内置 write_file 写 forbidden/denied.txt，预期被 writablePaths 拒绝，不得绕过边界；拒绝后仍须用内置 write_file 创建 allowed/directory.txt，并让内容逐字包含 DIRECTORY_MARKER；不得由 child 整合 worktree，不得由 reviewer 修改任何文件或 Git 状态。
 
 [[CHILD_CONTRACT:steps]]
- confirmation 后 root 必须先调用 list_agent_profiles 确认四个 Profile，再亲自 write_file design/subagents-orchestration.md，再并行 spawn 两个 explorer；root 必须分别调用 read_agent_submissions({target:agentId}) 读取两个 explorer submissions，之后才能 spawn executor 与 worktree_executor。executor 先观察拒绝，再写 allowed/directory.txt，root 必须针对其 agentId 调用 read_agent_submissions。worktree_executor 写 worktree_result.txt，运行 cargo test，提交固定 subject feat: worktree executor marker 并报告 40 位 hash；root 必须针对其 agentId 调用 read_agent_submissions 后才 cherry-pick。root 隔离证明后 cherry-pick、close_agent(workspaceDisposition:cleanup)，最后 spawn reviewer。reviewer 只能使用 read_file、list_files、stat_path、lsp_capabilities、lsp_query、git_status、git_diff、git_workspace_info、read_session_note、search_session_note，不得 exec/cargo test；最终 cargo test 必须由 root 在 reviewer approval 后执行。
+ confirmation 后 root 必须先调用 list_agent_profiles 确认四个 Profile，再亲自 write_file design/subagents-orchestration.md，再并行 spawn 两个 explorer；root 必须分别调用 read_agent_submissions({target:agentId}) 读取两个 explorer submissions，之后才能开始 implementation spawn。两个 explorer submissions 都读取后，root 必须在同一并行工具批次（或至少不插入任何 wait/read/submission/session/tool 结果消费）依次发出 executor 与 worktree_executor 两个 spawn_agent；两次 implementation spawn 均完成后才能对任一实现调用 wait/read。不得让 directory child 的提交、产物读取或其他真实结果成为 worktree_executor spawn 的前置条件；directory 变更可留在主 workspace 由 root 最终组合。executor 先观察拒绝，再写 allowed/directory.txt，且文件内容逐字包含 DIRECTORY_MARKER；root 必须针对其 agentId 调用 read_agent_submissions。worktree_executor 写 worktree_result.txt，且文件内容逐字包含 WORKTREE_RESULT_MARKER，运行 cargo test，提交固定 subject feat: worktree executor marker 并报告 40 位 hash；root 必须针对其 agentId 调用 read_agent_submissions 后才 cherry-pick。root 隔离证明后 cherry-pick、close_agent(workspaceDisposition:cleanup)，最后 spawn reviewer。reviewer 只能使用 read_file、list_files、stat_path、lsp_capabilities、lsp_query、git_status、git_diff、git_workspace_info、read_session_note、search_session_note，不得 exec/cargo test；最终 cargo test 必须由 root 在 reviewer approval 后执行。
 
 [[CHILD_CONTRACT:completion_failure]]
-executor 必须报告 DIRECTORY_DENIAL_OBSERVED；worktree_executor 必须报告 WORKTREE_COMMIT_READY、40 位 commit hash 和 workspace root；reviewer 只读核对文件、marker、sentinel，并报告 REVIEWER_READ_ONLY_APPROVED；root 在 approval 后执行最终 cargo test。任一步失败都必须保留错误证据并停止伪造成功。
+executor 必须报告 DIRECTORY_DENIAL_OBSERVED，并确认 allowed/directory.txt 内容含 DIRECTORY_MARKER；worktree_executor 必须报告 WORKTREE_COMMIT_READY、40 位 commit hash 和 workspace root，并确认 worktree_result.txt 内容含 WORKTREE_RESULT_MARKER；reviewer 只读核对文件、marker、sentinel，并报告 REVIEWER_READ_ONLY_APPROVED；root 在 approval 后执行最终 cargo test。任一步失败都必须保留错误证据并停止伪造成功。
 
 [[CHILD_CONTRACT:evidence]]
-记录四个 Profile 的 profileId、forkTurns:none、workspace receipt、工具调用顺序、拒绝原因、独立分支和最终测试；最终成功标记为 PURE_SUBAGENTS_LIVE_OK。若 reviewer 输出 REVIEWER_FINDING，必须重新 spawn 不同 callId 的 implementation 与 reviewer，并提供第二次 integration 证据后才可 approval。
+记录四个 Profile 的 profileId、forkTurns:none、workspace receipt、工具调用顺序（尤其是两个 explorer submissions 都读取后，executor 与 worktree_executor 两次 spawn 在任一 implementation wait/read 之前完成）、拒绝原因、独立分支和最终测试；记录两个固定文件的逐字 marker DIRECTORY_MARKER 与 WORKTREE_RESULT_MARKER；最终成功标记为 PURE_SUBAGENTS_LIVE_OK。若 reviewer 输出 REVIEWER_FINDING，必须重新 spawn 不同 callId 的 implementation 与 reviewer，并提供第二次 integration 证据后才可 approval。
 
 [[CHILD_CONTRACT:workspace_git_cleanup]]
-directory workspace 使用 writablePaths:["allowed"]；worktree 使用 pure-agent-* 分支和独立路径；root 只能在核对未整合状态后 git cherry-pick，并在 close_agent 时显式 workspaceDisposition:"cleanup"，确认路径和分支均已删除。
+directory workspace 使用 writablePaths:["allowed"]，只保留含 DIRECTORY_MARKER 的 allowed/directory.txt 作为 root 可组合产物；worktree 使用 pure-agent-* 分支和独立路径，只提交含 WORKTREE_RESULT_MARKER 的 worktree_result.txt；root 只能在核对未整合状态后 git cherry-pick，并在 close_agent 时显式 workspaceDisposition:"cleanup"，确认路径和分支均已删除。不得先额外提交 directory child 产物再 spawn worktree。

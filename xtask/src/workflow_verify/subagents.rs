@@ -1681,6 +1681,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn live_prompt_contains_deterministic_implementation_contract() {
+        let prompt = include_str!("../../../test-fixtures/subagents-live/prompt.md");
+        assert!(
+            prompt.contains("DIRECTORY_MARKER"),
+            "live prompt must require DIRECTORY_MARKER in directory.txt"
+        );
+        assert!(
+            prompt.contains("WORKTREE_RESULT_MARKER"),
+            "live prompt must require WORKTREE_RESULT_MARKER in worktree_result.txt"
+        );
+        assert!(
+            prompt.contains("两个 explorer submissions 都读取后")
+                && prompt.contains("executor 与 worktree_executor 两个 spawn_agent")
+                && prompt
+                    .contains("两次 implementation spawn 均完成后才能对任一实现调用 wait/read"),
+            "live prompt must require both implementation spawns before wait/read"
+        );
+        assert!(
+            prompt.contains("root 不得为 directory child 产物额外提交后再 spawn worktree")
+                && prompt.contains("不得先额外提交 directory child 产物再 spawn worktree"),
+            "live prompt must forbid serializing worktree spawn behind a directory commit"
+        );
+    }
+
+    #[test]
     fn fixture_is_a_git_repository_with_an_initial_head() {
         let root = tempfile::tempdir().unwrap();
         prepare_fixture(root.path()).unwrap();
