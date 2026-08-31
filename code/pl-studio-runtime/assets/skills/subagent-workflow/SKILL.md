@@ -24,9 +24,16 @@ transitions remain the root Agent's responsibility.
 
 ## When to spawn
 
-Use `spawn_agent` for bounded asynchronous work. Use `list_agents` to inspect live instances and
-`wait_agents` only when the parent has no independent work. Avoid subagents when the task is small,
-strongly sequential, or requires one shared edit context.
+Use `spawn_agent` for bounded asynchronous work. Independent explorers use fresh context with
+`forkTurns:none` and run in parallel; root synthesizes their evidence. Use `list_agents` to inspect
+live instances and `wait_agents` when the parent has no independent work. Preserve real semantic
+dependencies in order; do not parallelize overlapping ownership. In Task `editing_documents`, only
+root writes `design/**`.
+
+Give each child a self-contained message with eight sections: purpose and user value; design baseline
+and prerequisite facts; owned files/modules and invariants; forbidden scope; ordered
+exploration/implementation/test/submit steps; checkable completion and failure conditions;
+diff/commit/test/risk evidence; workspace, `writablePaths`, Git, and cleanup contract.
 
 Give each child a narrow role and explicit output contract:
 
@@ -36,8 +43,20 @@ Give each child a narrow role and explicit output contract:
 - what evidence and summary the parent needs.
 
 The root Agent owns coordination, reconciles conflicting findings, integrates changes, performs
-final verification, and advances the workflow state. Agent Profiles do not imply worktrees,
-branches, commits, merge records, delivery gates, or fixed review rounds.
+final verification, and advances the workflow state. For a single bounded implementation or mutually
+exclusive directories use `executor` with the narrowest non-overlapping `writablePaths`; directory
+restrictions apply only to Pure built-in mutation and shell/Git/MCP can bypass them, so children must
+not use that to cross scope or stage/commit/reset. Shared interfaces, manifests, lockfiles, generated
+files, whole-tree formatting, or high-risk Git state use `worktree_executor`; it must commit in its
+isolated worktree and root explicitly adopts then cleans up. Worktrees isolate the scene, not semantic
+dependencies.
+
+After working, root enters `integrating`: inspect directory diffs, explicitly cherry-pick/merge
+worktree commits, resolve only adjacent necessary conflicts, and request cleanup. If a child fails,
+wait for capacity and narrow/re-dispatch once; only a second failure permits minimal
+`ROOT_IMPLEMENTATION_FALLBACK`, recording reason and directly modified files. After integration always
+spawn a new fresh-context read-only `reviewer`; it never fixes. Route code findings to `working` and
+design findings to `editing_documents`; every repair must be re-integrated and receive a new reviewer.
 
 If collaboration capacity is unavailable, continue useful work in the root Agent and report the
 constraint only when it affects the result.
