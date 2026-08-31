@@ -2,6 +2,7 @@ use pl_model::ModelInfo;
 use pl_protocol::Result;
 
 use crate::config::InstructionsConfig;
+use crate::execution_environment::{ExecutionEnvironment, ExecutionTransport, ShellDialect};
 use crate::workspace::WorkspaceInstructions;
 use crate::workspace::load_workspace_instruction_documents;
 
@@ -12,12 +13,8 @@ use super::{
 
 const DEFAULT_BASE_INSTRUCTIONS: &str = include_str!("../prompts/system.md");
 const PLATFORM_COMMON_INSTRUCTIONS: &str = include_str!("../prompts/platform/common.md");
-#[cfg(windows)]
-const PLATFORM_SPECIFIC_INSTRUCTIONS: &str = include_str!("../prompts/platform/windows.md");
-#[cfg(unix)]
-const PLATFORM_SPECIFIC_INSTRUCTIONS: &str = include_str!("../prompts/platform/unix.md");
-#[cfg(not(any(windows, unix)))]
-const PLATFORM_SPECIFIC_INSTRUCTIONS: &str = "";
+const PLATFORM_UNIX_INSTRUCTIONS: &str = include_str!("../prompts/platform/unix.md");
+const PLATFORM_WINDOWS_INSTRUCTIONS: &str = include_str!("../prompts/platform/windows.md");
 
 pub struct InstructionAssembler;
 
@@ -50,9 +47,16 @@ impl InstructionAssembler {
                 execution.instructions,
             );
         }
+        let environment = request
+            .execution_environment
+            .cloned()
+            .unwrap_or_else(ExecutionEnvironment::detect_local);
         snapshot.push_developer(
-            InstructionSource::new(InstructionSourceKind::Platform, platform_label()),
-            &platform_instructions(),
+            InstructionSource::new(
+                InstructionSourceKind::Platform,
+                platform_label(&environment),
+            ),
+            &platform_instructions(&environment),
         );
         if let Some(config) = config_instructions {
             snapshot.push_developer(
@@ -183,26 +187,44 @@ fn base_block(
     }
 }
 
-fn platform_label() -> &'static str {
-    #[cfg(windows)]
-    {
-        "platform: windows"
-    }
-    #[cfg(unix)]
-    {
-        "platform: unix"
-    }
-    #[cfg(not(any(windows, unix)))]
-    {
-        "platform"
-    }
+fn platform_label(environment: &ExecutionEnvironment) -> String {
+    format!(
+        "platform: {}/{}",
+        environment.os.as_str(),
+        environment.shell.as_str()
+    )
 }
 
-fn platform_instructions() -> String {
+fn platform_instructions(environment: &ExecutionEnvironment) -> String {
+    let target = match environment.transport {
+        ExecutionTransport::Local => "local process",
+        ExecutionTransport::Ssh => "SSH remote helper",
+    };
+    let os_specific = if environment.os.is_windows() {
+        PLATFORM_WINDOWS_INSTRUCTIONS
+    } else {
+        PLATFORM_UNIX_INSTRUCTIONS
+    };
+    let shell_rules = match environment.shell {
+        ShellDialect::Bash => "Use Bash/POSIX command syntax; commands are started as `bash -c`.",
+        ShellDialect::Sh => {
+            "Use portable POSIX `sh` syntax only; Bash-only extensions are unavailable. Commands are started as `sh -c`."
+        }
+        ShellDialect::Pwsh => {
+            "Use PowerShell 7+ syntax; commands are started as `pwsh -NoProfile -Command`."
+        }
+        ShellDialect::PowerShell => {
+            "Use Windows PowerShell syntax; commands are started as `powershell -NoProfile -Command`."
+        }
+        ShellDialect::Cmd => "Use Windows cmd.exe syntax; commands are started as `cmd /C`.",
+    };
     format!(
-        "{}\n\n{}",
+        "{}\n\n{}\n\n## Runtime execution environment\n- Execution target: {target}\n- Target OS: {}\n- Shell dialect: {}\n- Shell executable: `{}`\n- {shell_rules}\n- Follow this runtime shell exactly. Do not infer syntax from the controller OS, your model defaults, or `$SHELL`.",
         PLATFORM_COMMON_INSTRUCTIONS.trim(),
-        PLATFORM_SPECIFIC_INSTRUCTIONS.trim()
+        os_specific.trim(),
+        environment.os.as_str(),
+        environment.shell.as_str(),
+        environment.shell_path_display(),
     )
     .trim()
     .to_string()

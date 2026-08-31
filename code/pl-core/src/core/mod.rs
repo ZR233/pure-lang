@@ -14,6 +14,7 @@ use crate::context_compaction::{
     ContextCompactionPhase, ContextCompactionRequest, ContextCompactionSnapshot,
     ContextCompactionTrigger, ManualContextCompactionRequest, maybe_compact_session,
 };
+use crate::execution_environment::ExecutionEnvironment;
 use crate::instruction::{InstructionAssembler, InstructionAssemblyRequest};
 use crate::permission::parse_reviewer_decision;
 use crate::session::AgentSession;
@@ -82,6 +83,13 @@ pub struct TurnEngine {
     before_model_step: Option<BeforeModelStepHook>,
     /// 仅由需要 session/working-set 的具体工具捕获。
     tool_session_runtime: crate::tool::ToolSessionRuntime,
+    execution_environment: ExecutionEnvironment,
+}
+
+impl TurnEngine {
+    pub fn execution_environment(&self) -> &ExecutionEnvironment {
+        &self.execution_environment
+    }
 }
 
 impl TurnEngine {
@@ -471,6 +479,7 @@ impl TurnEngine {
                     workspace_instructions: request.workspace_instructions.as_deref(),
                     subagent_constraint: None,
                     skill_suggestions: None,
+                    execution_environment: Some(&self.execution_environment),
                 };
                 match self.instruction_profile.as_ref() {
                     Some(profile) => {

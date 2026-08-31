@@ -5,6 +5,7 @@ pub mod config;
 mod context_assembler;
 mod context_compaction;
 mod core;
+pub mod execution_environment;
 pub mod instruction;
 mod interaction;
 pub mod mcp;
@@ -47,6 +48,9 @@ pub use context_compaction::{
 pub use core::{
     BuiltinToolInstaller, CoreRuntimeProfile, ModelTurnClient, ModelTurnOptions, ModelTurnRequest,
     ToolProfile, TurnEngine, TurnEngineBuilder,
+};
+pub use execution_environment::{
+    ExecutionEnvironment, ExecutionOs, ExecutionTransport, ShellDialect, resolve_local_shell,
 };
 pub use interaction::{
     UserInputOptionProjection, UserInputProjection, UserInputQuestionProjection,

@@ -1,5 +1,7 @@
 //! SSH remote helper 的本地管理、协议客户端与工具宿主。
 
+use crate::execution_environment::ExecutionEnvironment;
+
 mod client;
 mod codec;
 mod command;
@@ -30,4 +32,5 @@ pub struct RemoteWorkspaceHost {
     pub files: RemoteWorkspaceFileBackend,
     pub commands: RemoteCommandBackend,
     pub git: RemoteExecutionBackend,
+    pub execution_environment: ExecutionEnvironment,
 }

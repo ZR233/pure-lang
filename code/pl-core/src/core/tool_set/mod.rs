@@ -10,7 +10,8 @@ use crate::tool::{
     LocalCommandBackend, LocalExecutionBackend, LocalWorkspaceFileBackend, LocalWorkspaceFileTool,
     MovePathTool, NoGitCredentialProvider, SessionNoteTool, SessionNoteToolKind, StatPathTool,
     TodoListTool, Tool, ToolGroupId, ToolWorkspace, WorkspaceFileBackend, WorkspaceFileTool,
-    WorkspaceFileToolKind, WriteFileTool, command_tool_pair, local_command_tool_pair, lsp_tools,
+    WorkspaceFileToolKind, WriteFileTool, command_tool_pair,
+    local_command_tool_pair_with_environment, lsp_tools,
 };
 
 use super::TurnEngine;
@@ -150,7 +151,10 @@ where
         let mut tools = Vec::<Arc<dyn Tool>>::new();
 
         if self.capabilities.exec && self.local_backends {
-            let (exec, write_stdin) = local_command_tool_pair(tool_workspace.clone());
+            let (exec, write_stdin) = local_command_tool_pair_with_environment(
+                tool_workspace.clone(),
+                core.execution_environment.clone(),
+            );
             tools.push(Arc::new(exec));
             tools.push(Arc::new(write_stdin));
         }

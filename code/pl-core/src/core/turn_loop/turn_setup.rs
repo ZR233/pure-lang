@@ -41,6 +41,7 @@ pub(super) fn instruction_snapshot(
                     query: &request.prompt,
                     excluded_names: &excluded_skill_names,
                 }),
+                execution_environment: Some(&core.execution_environment),
             };
             match core.instruction_profile.as_ref() {
                 Some(profile) => {

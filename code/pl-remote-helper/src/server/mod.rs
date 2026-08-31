@@ -7,7 +7,8 @@ use pl_protocol::remote::{
     REMOTE_PROTOCOL_VERSION, RemoteCapability, RemoteCopyRequest, RemoteDirectoryEntry,
     RemoteDirectoryListing, RemoteError, RemoteErrorCode, RemoteFileStat, RemoteHello,
     RemoteMessage, RemotePathRequest, RemoteReadRequest, RemoteRemoveRequest, RemoteRenameRequest,
-    RemoteRequest, RemoteResponse, RemoteWorkspaceOpened,
+    RemoteRequest, RemoteResponse, RemoteShellDescriptor, RemoteShellDialect,
+    RemoteWorkspaceOpened,
 };
 use tokio::io::AsyncWrite;
 use tokio::sync::Mutex;
@@ -29,9 +30,10 @@ pub enum ServerError {
     Io(#[from] io::Error),
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct ServerState {
     workspaces: WorkspaceRegistry,
+    shell: RemoteShellDescriptor,
 }
 
 pub async fn run_stdio() -> Result<(), ServerError> {
@@ -48,8 +50,13 @@ where
     R: tokio::io::AsyncRead + Unpin,
 {
     let writer = Arc::new(Mutex::new(writer));
-    let state = Arc::new(Mutex::new(ServerState::default()));
-    let processes = ProcessRegistry::new(writer.clone());
+    let shell =
+        detect_shell().map_err(|_| io::Error::other("remote helper could not find a shell"))?;
+    let state = Arc::new(Mutex::new(ServerState {
+        workspaces: WorkspaceRegistry::default(),
+        shell: shell.clone(),
+    }));
+    let processes = ProcessRegistry::new(writer.clone(), shell);
     while let Some(frame) = read_frame(&mut reader).await? {
         let request_id = frame.request_id;
         let request = match frame.message {
@@ -108,7 +115,10 @@ async fn handle_request(
     body: Vec<u8>,
 ) -> Result<(RemoteResponse, Vec<u8>), RemoteError> {
     match request {
-        RemoteRequest::Hello { protocol_version } => hello(protocol_version),
+        RemoteRequest::Hello { protocol_version } => {
+            let shell = state.lock().await.shell.clone();
+            hello(protocol_version, shell)
+        }
         RemoteRequest::BrowseDirectories { path } => browse_directories(path).await,
         RemoteRequest::OpenWorkspace { path } => open_workspace(state, &path).await,
         RemoteRequest::CloseWorkspace { workspace_id } => {
@@ -157,7 +167,10 @@ async fn handle_request(
     }
 }
 
-fn hello(protocol_version: u32) -> Result<(RemoteResponse, Vec<u8>), RemoteError> {
+fn hello(
+    protocol_version: u32,
+    shell: RemoteShellDescriptor,
+) -> Result<(RemoteResponse, Vec<u8>), RemoteError> {
     if protocol_version != REMOTE_PROTOCOL_VERSION {
         return Err(remote_error(
             RemoteErrorCode::ProtocolMismatch,
@@ -177,9 +190,46 @@ fn hello(protocol_version: u32) -> Result<(RemoteResponse, Vec<u8>), RemoteError
                 RemoteCapability::WorkspaceFiles,
                 RemoteCapability::ObservableExec,
             ],
+            shell,
         }),
         Vec::new(),
     ))
+}
+
+fn detect_shell() -> Result<RemoteShellDescriptor, RemoteError> {
+    for (dialect, path) in [
+        (RemoteShellDialect::Bash, "/bin/bash"),
+        (RemoteShellDialect::Sh, "/bin/sh"),
+    ] {
+        if is_executable(Path::new(path)) {
+            return Ok(RemoteShellDescriptor {
+                dialect,
+                path: path.to_string(),
+            });
+        }
+    }
+    Err(remote_error(
+        RemoteErrorCode::Io,
+        "remote helper could not find /bin/bash or /bin/sh",
+    ))
+}
+
+fn is_executable(path: &Path) -> bool {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
+    }
 }
 
 async fn browse_directories(
@@ -510,7 +560,9 @@ fn ack() -> (RemoteResponse, Vec<u8>) {
 
 #[cfg(test)]
 mod tests {
-    use pl_protocol::remote::{RemoteFrameHeader, RemoteRequest};
+    use pl_protocol::remote::{
+        REMOTE_PROTOCOL_VERSION, RemoteFrameHeader, RemoteRequest, RemoteResponse,
+    };
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use super::*;
@@ -536,5 +588,26 @@ mod tests {
         let mut discard = Vec::new();
         client.read_to_end(&mut discard).await.expect("read end");
         server_task.await.expect("join server").expect("server");
+    }
+
+    #[test]
+    fn hello_reports_the_shell_used_by_process_registry() {
+        let shell = detect_shell().expect("test host has a POSIX shell");
+        let (response, _) = hello(REMOTE_PROTOCOL_VERSION, shell.clone()).expect("hello");
+        let RemoteResponse::Hello(hello) = response else {
+            panic!("expected hello response");
+        };
+        assert_eq!(hello.shell, shell);
+        assert!(!hello.shell.path.is_empty());
+    }
+
+    #[test]
+    fn hello_rejects_unknown_protocol_version() {
+        let shell = detect_shell().expect("test host has a POSIX shell");
+        let error = hello(REMOTE_PROTOCOL_VERSION + 1, shell).expect_err("mismatch");
+        assert_eq!(
+            error.code,
+            pl_protocol::remote::RemoteErrorCode::ProtocolMismatch
+        );
     }
 }

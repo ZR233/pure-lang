@@ -15,8 +15,12 @@ Timeline、重试或会话持久化；不监听端口、不 daemonize，也不�
 ## 21.2 最小协议
 
 协议以 request/process id 多路复用长度受限的 typed control frame 与原始二进制 chunk。握手严格
-协商协议版本、helper build、远端 OS/架构和 capability；未知版本或未知穷尽变体必须失败，不能
+协商协议版本、helper build、远端 OS/架构、实际 shell descriptor 和 capability；未知版本或未知穷尽变体必须失败，不能
 降级猜测。
+
+`hello` 返回结构化 shell descriptor（dialect 与已验证的可执行路径）。Linux helper 启动时优先
+验证 `/bin/bash`，缺失时验证 `/bin/sh`；不会读取 `$SHELL` 或注入完整环境变量。descriptor 是
+远端 helper 的唯一命令启动事实，所有 `exec`、Git 与 LSP 进程都复用它。
 
 控制面只提供 `hello`、GUI 专用的 `browseDirectories`、`openWorkspace`、`closeWorkspace` 和
 `shutdown`。文件面只提供远端事实所必需的 `stat`、`readBytes`、`writeAtomic`、
@@ -27,13 +31,14 @@ canonicalize、链接分类与 workspace 越界拒绝。
 进程面提供 `spawn`、`writeStdin`、`closeStdin` 和 `terminate`，并发布 `processOutput` 与
 `processExit`。输出事件携带 process id、全局单调 sequence、stdout/stderr 分类与原始 bytes；
 helper 同时把完整输出写到 core 指定的 workspace capture path。Core 继续拥有超时、模型输出
-截断、tool record、Timeline、artifact 与最终 JSON。v1 不提供 PTY、终端面板、端口转发、调试器
+截断、tool record、Timeline、artifact 与最终 JSON。v2 不提供 PTY、终端面板、端口转发、调试器
 或后台任务恢复。
 
 ## 21.3 本地工具与 SSH 管理
 
 `pl-core::remote::SshManager` 负责服务器校验、系统 OpenSSH/Askpass、架构探测、内嵌 helper
-bootstrap、连接状态与自动重连，并返回 `RemoteWorkspaceHost`。host 实现或组合现有
+bootstrap、握手 shell descriptor、连接状态与自动重连，并返回带有 `ExecutionEnvironment` 的
+`RemoteWorkspaceHost`。host 实现或组合现有
 `WorkspaceFileBackend`、`CommandBackend`、Git `ExecutionBackend`、`WorktreeBackend`、
 `SkillProvider` 与 LSP process/file backend，再通过同一个 `BuiltinToolInstaller` 注册现有工具。
 模型不得看到 `remote_read`、`remote_exec` 等环境专用名字。
@@ -44,6 +49,11 @@ bootstrap、连接状态与自动重连，并返回 `RemoteWorkspaceHost`。host
 workspace instructions 由远端 file backend 读取后以已加载文档集合交给指令组装器，保留远端
 来源路径；远程路径不得再次交给本地文件系统做目录或文件检查。
 
+本地与远端 prompt 使用同一份 `ExecutionEnvironment`：Platform developer 段声明 transport、目标
+OS、shell dialect 和路径，并按该 dialect 生成命令语法。shell descriptor 只缓存在当前连接和
+workspace host；断线自动重连完成新的 hello 后替换旧 descriptor。环境变化会改变动态
+`globalDeveloper` 内容及其 prompt cache generation。
+
 SSH 连接、平台探测、helper 上传和协议握手都通过本地后台进程工厂启动系统 OpenSSH：Windows
 使用 `CREATE_NO_WINDOW`，不得弹出额外命令行窗口；Unix 使用独立进程组并在丢弃时回收进程。
 SSH 通道只承载标准输入输出协议，因此固定关闭伪终端（`-T`）与 X11 转发（`-x`），不打开
@@ -51,7 +61,8 @@ SSH 通道只承载标准输入输出协议，因此固定关闭伪终端（`-T`
 
 连接状态穷尽为 disconnected、connecting、waiting-for-input、ready、reconnecting 与 failed。
 断线使当前远端 tool 立即以稳定 `remoteDisconnected` 失败，不透明重放写入或 stdin；core 以
-1、2、4、8、15、30 秒退避重连。重连成功后 core 主动重开已知 workspace；下一次 Turn
+1、2、4、8、15、30 秒退避重连。重连成功后 core 主动重开已知 workspace、重新取得 shell
+descriptor；下一次 Turn
 重新读取远端 Skills，并在 host identity 变化后重新探测 LSP。
 
 ## 21.4 凭据、路径与持久化
@@ -61,6 +72,9 @@ Pure 调用 PATH 中的系统 OpenSSH，复用 ssh config、known_hosts、ProxyJ
 存在于系统凭据库或当前进程 secret lease。凭据不得进入 SQLite、DTO、
 日志、helper 参数、helper 环境或远端协议；Askpass secret 只注入本地 OpenSSH 子进程环境。
 provider token 不得转发。远端 Git 只使用服务器原生配置与凭据。
+
+shell descriptor 不是 login shell 配置，也不携带完整环境变量；它只描述 Pure 实际启动命令所用
+的解释器与已验证路径。
 
 远端文件 backend 与 `exec.cwd` 始终 confined；`full-access` 不放宽该 backend。该约束仍是 Pure
 策略而非 OS shell 沙箱，命令正文拥有 SSH 用户本身的系统权限。GUI 目录浏览是独立宿主功能，

@@ -6,6 +6,7 @@ use pl_protocol::Result;
 use crate::ResolvedModelRoute;
 use crate::config::{ReasoningEffort, SkillsConfig, ToolCapabilityConfig};
 use crate::context_compaction::ContextCompactionConfig;
+use crate::execution_environment::ExecutionEnvironment;
 use crate::instruction::InstructionProfile;
 use crate::tool::AgentWorkspace;
 use crate::turn::TurnOptions;
@@ -37,6 +38,7 @@ pub struct CoreRuntimeProfile {
     pub default_turn_options: TurnOptions,
     pub context_compaction: ContextCompactionConfig,
     pub attachment_runtime: Option<crate::AttachmentRuntime>,
+    pub execution_environment: Option<ExecutionEnvironment>,
 }
 
 impl CoreRuntimeProfile {
@@ -94,6 +96,11 @@ impl CoreRuntimeProfile {
     /// 绑定当前线程的附件持久化与授权读取运行时。
     pub fn with_attachment_runtime(mut self, runtime: crate::AttachmentRuntime) -> Self {
         self.attachment_runtime = Some(runtime);
+        self
+    }
+
+    pub fn with_execution_environment(mut self, environment: ExecutionEnvironment) -> Self {
+        self.execution_environment = Some(environment);
         self
     }
 }
@@ -184,6 +191,7 @@ impl TurnEngineBuilder {
             default_turn_options,
             context_compaction,
             attachment_runtime,
+            execution_environment,
         } = self.runtime_profile;
         let agent_tools = self.agent_tools.unwrap_or_else(|| {
             crate::tool::ToolManager::new()
@@ -205,6 +213,8 @@ impl TurnEngineBuilder {
             default_turn_options,
             context_compaction,
             attachment_runtime,
+            execution_environment: execution_environment
+                .unwrap_or_else(ExecutionEnvironment::detect_local),
             active_subagent: None,
             tool_session_runtime: crate::tool::ToolSessionRuntime::default(),
         }

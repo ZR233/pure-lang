@@ -12,7 +12,8 @@ use crate::process::{
 };
 use crate::tool::ToolPathPolicy;
 
-use super::shell::shell_command;
+use super::shell::command_for_environment;
+use crate::execution_environment::ExecutionEnvironment;
 
 /// 命令执行后端收到的启动请求。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -227,13 +228,24 @@ pub trait CommandBackend: std::fmt::Debug + Send + Sync + 'static {
 #[derive(Debug, Clone)]
 pub struct LocalCommandBackend {
     workspace_root: PathBuf,
+    execution_environment: ExecutionEnvironment,
 }
 
 impl LocalCommandBackend {
     pub fn new(workspace_root: impl Into<PathBuf>) -> Self {
         Self {
             workspace_root: workspace_root.into(),
+            execution_environment: ExecutionEnvironment::detect_local(),
         }
+    }
+
+    pub fn execution_environment(&self) -> &ExecutionEnvironment {
+        &self.execution_environment
+    }
+
+    pub fn with_execution_environment(mut self, environment: ExecutionEnvironment) -> Self {
+        self.execution_environment = environment;
+        self
     }
 }
 
@@ -269,7 +281,7 @@ impl CommandBackend for LocalCommandBackend {
     }
 
     async fn spawn(&self, request: CommandSpawnRequest) -> Result<ManagedCommand> {
-        let mut command = shell_command(&request.command);
+        let mut command = command_for_environment(&self.execution_environment, &request.command);
         command.current_dir(&request.cwd);
         command
             .stdin(Stdio::piped())
