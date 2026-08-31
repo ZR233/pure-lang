@@ -21,6 +21,8 @@ const STALL_TIMEOUT_SECONDS: u64 = 10 * 60;
 const SENTINEL: &str = "PURE_SUBAGENTS_LIVE_OK";
 const DIRECTORY_MARKER: &str = "DIRECTORY_MARKER";
 const WORKTREE_RESULT_MARKER: &str = "WORKTREE_RESULT_MARKER";
+const EXPLORER_STEPS_FIXTURE_SOURCE_V1: &str = "LIVE_EXPLORER_STEPS_V1: fixture-source\n1. 只读读取 Cargo.toml。\n2. 只读读取 src/lib.rs。\n3. 输出要求：总结这两个文件中与 Task workflow 和 live artifact 相关的有限源码事实，并与 root 注入的已编译阶段图及 Profile/spawn facts 对照；完成后直接 final reply。";
+const EXPLORER_STEPS_WORKSPACE_GIT_V1: &str = "LIVE_EXPLORER_STEPS_V1: workspace-git\n1. 只读读取 .gitignore。\n2. 只调用 git_workspace_info。\n3. 只调用 git_status。\n4. 输出要求：总结 workspace/Git lifecycle 元数据，并在完成后直接 final reply。";
 
 #[derive(Debug, Clone)]
 struct Route {
@@ -771,8 +773,8 @@ fn ensure_profile_messages(calls: &[WireCall]) -> Result<()> {
         .filter(|call| call.arguments.get("profileId").and_then(Value::as_str) == Some("explorer"))
         .collect::<Vec<_>>();
     ensure!(
-        explorers.len() >= 2,
-        "fewer than two explorer spawn messages"
+        explorers.len() == 2,
+        "wire captures must contain exactly two explorer spawn messages"
     );
     ensure!(
         explorers[0].arguments.get("message") != explorers[1].arguments.get("message"),
@@ -817,194 +819,19 @@ fn ensure_profile_messages(calls: &[WireCall]) -> Result<()> {
         .iter()
         .map(|explorer| section(explorer, "steps"))
         .collect::<Result<Vec<_>>>()?;
-    for steps in &explorer_steps {
-        let normalized = steps.to_ascii_lowercase();
-        for forbidden in [
-            "list_agent_profiles",
-            "skill_view",
-            "studio-config",
-            "studio home",
-            "studio config",
-            "studio 配置",
-            "target/",
-            ".git/",
-            "cargo test",
-            " rg ",
-            "`rg`",
-            "运行 rg",
-            "调用 rg",
-            "用 rg",
-            "全仓 rg",
-            "list_files",
-            "exec",
-        ] {
-            ensure!(
-                !contains_non_negated_operation(&normalized, forbidden),
-                "explorer steps contain forbidden broad or unavailable operation `{forbidden}`"
-            );
-        }
-    }
-    ensure_bounded_explorer_steps(&explorer_steps[0], true)?;
-    ensure_bounded_explorer_steps(&explorer_steps[1], false)?;
-    ensure!(
-        explorer_steps.iter().any(|steps| {
-            steps.contains("Cargo.toml")
-                && steps.contains("src/lib.rs")
-                && !steps.contains("git_workspace_info")
-        }),
-        "no explorer has the bounded fixture source-file scope"
-    );
-    ensure!(
-        explorer_steps.iter().any(|steps| {
-            steps.contains(".gitignore")
-                && steps.contains("git_workspace_info")
-                && steps.contains("git_status")
-                && !steps.contains("Cargo.toml")
-        }),
-        "no explorer has the bounded Git metadata scope"
-    );
-    Ok(())
-}
-
-fn ensure_bounded_explorer_steps(steps: &str, fixture_source: bool) -> Result<()> {
-    let required: &[&str] = if fixture_source {
-        &["Cargo.toml", "src/lib.rs"]
-    } else {
-        &[".gitignore", "git_workspace_info", "git_status"]
-    };
-    for target in required {
-        ensure!(
-            steps.contains(target),
-            "explorer steps omit required bounded target `{target}`"
-        );
-    }
-    let forbidden: &[&str] = if fixture_source {
-        &[".gitignore", "git_workspace_info", "git_status"]
-    } else {
-        &["Cargo.toml", "src/lib.rs"]
-    };
-    for target in forbidden {
-        ensure!(
-            !steps.contains(target),
-            "explorer steps cross bounded scope with `{target}`"
-        );
-    }
-    // Keep file reads finite: only the contract's explicitly named files may
-    // follow a read operation. This deliberately examines steps only; the
-    // forbidden section may mention any operation as a prohibition.
-    let mut remainder = steps;
-    while let Some(index) = remainder.find("读取") {
-        let after = remainder[index + "读取".len()..].trim_start();
-        let target = after
-            .split(['；', ';', '，', ',', '。', '\n', ' ', '、'])
-            .next()
-            .unwrap_or("");
-        ensure!(
-            required.contains(&target),
-            "explorer steps read outside bounded files: `{target}`"
-        );
-        remainder = after;
-    }
-    let operations = [
-        "list_agent_profiles",
-        "skill_view",
-        "exec",
-        "git_diff",
-        "git_workspace_info",
-        "git_status",
-        "read_file",
-        "list_files",
-        "stat_path",
-        "lsp_query",
+    let canonical = [
+        EXPLORER_STEPS_FIXTURE_SOURCE_V1,
+        EXPLORER_STEPS_WORKSPACE_GIT_V1,
     ];
-    for operation in operations {
-        let permitted = !fixture_source && matches!(operation, "git_workspace_info" | "git_status");
-        if !permitted {
-            ensure!(
-                !contains_non_negated_operation(&steps.to_ascii_lowercase(), operation),
-                "explorer steps contain extra operation `{operation}`"
-            );
-        }
-    }
-    let allowed_calls = if fixture_source {
-        &[][..]
-    } else {
-        &["git_workspace_info", "git_status"][..]
-    };
-    let mut remainder = steps;
-    while let Some(index) = remainder.find("调用") {
-        let prefix = &steps[..steps.len() - remainder.len() + index];
-        let after = remainder[index + "调用".len()..].trim_start();
-        let operation = after
-            .split(['；', ';', '，', ',', '。', '\n', ' ', '、'])
-            .next()
-            .unwrap_or("");
-        if !allowed_calls.contains(&operation) && !operation_is_negated(prefix, operation) {
-            ensure!(false, "explorer steps call extra operation `{operation}`");
-        }
-        remainder = after;
+    for (index, (steps, expected)) in explorer_steps.iter().zip(canonical).enumerate() {
+        let normalized = steps.replace("\r\n", "\n").trim().to_owned();
+        ensure!(
+            normalized == expected,
+            "explorer {} steps do not exactly match canonical block",
+            index + 1
+        );
     }
     Ok(())
-}
-
-fn contains_non_negated_operation(text: &str, operation: &str) -> bool {
-    text.split(['；', ';', '。', '\n', '！', '!', '？', '?', '，', ','])
-        .any(|clause| {
-            let mut remainder = clause;
-            while let Some(index) = remainder.find(operation) {
-                let prefix = &remainder[..index];
-                if !operation_is_negated(prefix, operation) {
-                    return true;
-                }
-                remainder = &remainder[index + operation.len()..];
-            }
-            false
-        })
-}
-
-fn operation_is_negated(prefix: &str, operation: &str) -> bool {
-    const NEGATIONS: &[&str] = &[
-        "禁止",
-        "不得",
-        "不要",
-        "不可",
-        "严禁",
-        "不能",
-        "不允许",
-        "without",
-        "do not",
-        "don't",
-        "never",
-        "must not",
-        "may not",
-        "shall not",
-    ];
-    let Some((position, negation)) = NEGATIONS
-        .iter()
-        .filter_map(|negation| prefix.rfind(negation).map(|position| (position, *negation)))
-        .max_by_key(|(position, _)| *position)
-    else {
-        return false;
-    };
-    let between = prefix[position + negation.len()..].trim();
-    between.chars().count() <= 24
-        && !between.contains('.')
-        && !between.contains(operation)
-        && ![
-            "然后",
-            "随后",
-            "但是",
-            "但 ",
-            " but ",
-            " then ",
-            " and then ",
-            "再",
-            "并",
-            "and",
-            "call ",
-        ]
-        .iter()
-        .any(|transition| between.contains(transition))
 }
 
 fn ensure_reviewer_history(captures: &[CaptureReceipt]) -> Result<()> {
@@ -2087,6 +1914,13 @@ mod tests {
                 && prompt.contains("探索者二只读核对 workspace 与 Git lifecycle"),
             "live prompt must keep the explorers semantically distinct while bounding their tools"
         );
+        assert!(
+            prompt.contains(EXPLORER_STEPS_FIXTURE_SOURCE_V1)
+                && prompt.contains(EXPLORER_STEPS_WORKSPACE_GIT_V1)
+                && prompt.contains("原样复制以下版本化 canonical block")
+                && prompt.contains("不能增删、改写或追加动作"),
+            "live prompt must require exact versioned explorer steps"
+        );
     }
 
     #[test]
@@ -2901,7 +2735,7 @@ mod tests {
             let message = if profile == "explorer" && id == "explorer-1" {
                 message.replace(
                     "[[CHILD_CONTRACT:steps]]\ncontent",
-                    "[[CHILD_CONTRACT:steps]]\n读取 Cargo.toml；读取 src/lib.rs；汇总后 final reply",
+                    &format!("[[CHILD_CONTRACT:steps]]\n{EXPLORER_STEPS_FIXTURE_SOURCE_V1}"),
                 )
             } else if profile == "explorer" && id == "explorer-2" {
                 message
@@ -2915,7 +2749,7 @@ mod tests {
                     )
                     .replace(
                         "[[CHILD_CONTRACT:steps]]\ncontent",
-                        "[[CHILD_CONTRACT:steps]]\n读取 .gitignore；调用 git_workspace_info；调用 git_status；汇总后 final reply",
+                        &format!("[[CHILD_CONTRACT:steps]]\n{EXPLORER_STEPS_WORKSPACE_GIT_V1}"),
                     )
             } else {
                 message
@@ -3012,63 +2846,24 @@ mod tests {
     }
 
     #[test]
-    fn explorer_messages_reject_configuration_or_unbounded_steps() {
-        for forbidden in [
-            "调用 list_agent_profiles",
-            "调用 skill_view",
-            "读取 studio-config",
-            "读取 Studio home",
-            "读取 Studio config",
-            "读取 Studio 配置",
-            "扫描 target/",
-            "扫描 .git/",
-            "运行 cargo test",
-            "全仓 rg pattern",
-        ] {
-            let mut calls = profile_message_calls();
-            let message = calls[0].arguments["message"].as_str().unwrap();
-            calls[0].arguments["message"] = Value::String(message.replace(
-                "汇总后 final reply",
-                &format!("{forbidden}；汇总后 final reply"),
-            ));
-            assert!(
-                ensure_profile_messages(&calls).is_err(),
-                "explorer steps unexpectedly accepted `{forbidden}`"
-            );
-        }
-    }
+    fn explorer_messages_reject_third_explorer_and_any_steps_suffix() {
+        let mut calls = profile_message_calls();
+        let mut third = calls[0].clone();
+        third.call_id = Some("explorer-3".into());
+        calls.push(third);
+        assert!(ensure_profile_messages(&calls).is_err());
 
-    #[test]
-    fn explorer_messages_accept_explicitly_negated_unavailable_operations() {
-        for prohibition in [
+        for extra in [
+            "查看 README.md",
+            "检查 Cargo.lock",
+            "使用 unexpected_tool",
             "禁止调用 list_agent_profiles",
-            "不得调用 skill_view",
-            "不要运行 cargo test",
-            "不可使用 exec",
-            "do not call list_agent_profiles",
-            "never use exec",
+            "改写目标",
         ] {
             let mut calls = profile_message_calls();
             let message = calls[0].arguments["message"].as_str().unwrap();
-            calls[0].arguments["message"] = Value::String(message.replace(
-                "汇总后 final reply",
-                &format!("{prohibition}；汇总后 final reply"),
-            ));
-            ensure_profile_messages(&calls).unwrap_or_else(|error| {
-                panic!("rejected explicit prohibition `{prohibition}`: {error}")
-            });
-        }
-    }
-
-    #[test]
-    fn explorer_messages_reject_extra_scope_and_tools() {
-        for extra in ["读取 README.md", "调用 git_diff", "调用 unexpected_tool"] {
-            let mut calls = profile_message_calls();
-            let message = calls[0].arguments["message"].as_str().unwrap();
-            calls[0].arguments["message"] = Value::String(message.replace(
-                "汇总后 final reply",
-                &format!("{extra}；汇总后 final reply"),
-            ));
+            calls[0].arguments["message"] =
+                Value::String(message.replace("。", &format!("。{extra}")));
             assert!(
                 ensure_profile_messages(&calls).is_err(),
                 "accepted `{extra}`"
@@ -3077,30 +2872,21 @@ mod tests {
 
         let mut calls = profile_message_calls();
         let message = calls[1].arguments["message"].as_str().unwrap();
-        calls[1].arguments["message"] = Value::String(
-            message.replace("汇总后 final reply", "读取 Cargo.lock；汇总后 final reply"),
-        );
+        calls[1].arguments["message"] = Value::String(message.replace("。", "。读取 Cargo.lock"));
         assert!(ensure_profile_messages(&calls).is_err());
     }
 
     #[test]
-    fn explorer_messages_reject_repeated_operation_after_negation() {
-        for extra in [
-            "禁止调用 list_agent_profiles 再调用 list_agent_profiles",
-            "do not call skill_view and call skill_view",
-            "禁止调用 list_agent_profiles并调用 list_agent_profiles",
-        ] {
-            let mut calls = profile_message_calls();
-            let message = calls[0].arguments["message"].as_str().unwrap();
-            calls[0].arguments["message"] = Value::String(message.replace(
-                "汇总后 final reply",
-                &format!("{extra}；汇总后 final reply"),
-            ));
-            assert!(
-                ensure_profile_messages(&calls).is_err(),
-                "accepted `{extra}`"
-            );
+    fn explorer_messages_accept_crlf_and_outer_whitespace() {
+        let mut calls = profile_message_calls();
+        for call in calls.iter_mut().take(2) {
+            let message = call.arguments["message"]
+                .as_str()
+                .unwrap()
+                .replace('\n', "\r\n");
+            call.arguments["message"] = Value::String(format!("  {message}  "));
         }
+        ensure_profile_messages(&calls).unwrap();
     }
 
     fn valid_orchestration_calls() -> (Vec<WireCall>, Vec<WireOutput>) {
