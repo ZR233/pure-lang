@@ -671,10 +671,10 @@ fn role_text(value: &Value) -> String {
             Value::Array(items) => items.iter().for_each(|item| visit(item, out)),
             Value::Object(object) => {
                 let role = object.get("role").and_then(Value::as_str);
-                if matches!(role, Some("system" | "developer")) {
-                    if let Some(content) = object.get("content") {
-                        collect_text(content, out);
-                    }
+                if matches!(role, Some("system" | "developer"))
+                    && let Some(content) = object.get("content")
+                {
+                    collect_text(content, out);
                 }
                 object.values().for_each(|item| visit(item, out));
             }
@@ -1622,7 +1622,7 @@ fn deduplicate_outputs(outputs: &mut Vec<WireOutput>) {
         output
             .call_id
             .as_ref()
-            .map_or(true, |id| seen.insert(id.clone()))
+            .is_none_or(|id| seen.insert(id.clone()))
     });
 }
 
