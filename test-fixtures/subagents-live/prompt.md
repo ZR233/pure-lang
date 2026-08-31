@@ -1,4 +1,4 @@
-请完成一次严格的子代理真实验收。不要询问用户，不要跳步，不要由 root 直接创建实现验收文件。
+请完成一次严格的子代理真实验收。除标准 Task confirmation 外不要询问用户，不要跳步，不要由 root 直接创建实现验收文件。
 
 root 先用内置 `write_file` 在 `design/subagents-orchestration.md` 写入一份简短 design marker，内容必须包含 `ROOT_DESIGN_MARKER`；该文件由 root 亲自维护。
 
@@ -17,4 +17,4 @@ root 先用内置 `write_file` 在 `design/subagents-orchestration.md` 写入一
 4. 等待两个实现 child 完成，读取并核对它们的 submissions。必须在显式整合前用普通 shell/Git 证明主 workspace 不存在 `worktree_result.txt`，并证明 `forbidden/denied.txt` 不存在、`allowed/directory.txt` 存在且内容正确。
 5. 用普通 Git 找到 `pure-agent-*` 分支并将 worktree child 的 commit 显式 `git cherry-pick` 到主 workspace；不得手工复制该文件，不得让 close_agent 自动整合。
 6. 用 `close_agent` 关闭 worktree child，必须显式传 `workspaceDisposition: "cleanup"`。关闭 directory child。随后用普通 Git 证明 Pure-owned worktree 路径和分支均已清理。
-7. 进入 integrating，完成显式整合和 cleanup 后，spawn 一个 fresh-context 的 `reviewer`。reviewer 只读检查完整主 workspace、design marker、diff、错误路径和测试，报告明确通过 verdict，不得调用任何 mutation 工具。若 reviewer 返回 finding，回到 working/editing_documents，修复后重新 integrating 并 spawn 新 reviewer；通过后在主 workspace 运行 `cargo test`，核对两个最终文件内容。最终回复必须逐项报告四种 Profile、冻结 workspace receipt、并行 spawn、目录拒绝、独立 worktree、显式 cherry-pick、显式 cleanup、只读 reviewer 和最终测试，并把单独一行 `PURE_SUBAGENTS_LIVE_OK` 作为最后一行。
+7. 进入 integrating，完成显式整合和 cleanup 后，spawn 一个 fresh-context 的 `reviewer`。reviewer 只读检查完整主 workspace、design marker、diff、错误路径和测试，报告明确通过 verdict，不得调用任何 mutation 工具。若 reviewer 返回 finding，回到 working/editing_documents，修复后重新 integrating 并 spawn 新 reviewer；通过后在主 workspace 运行 `cargo test`，核对两个最终文件内容。最终回复必须逐项报告四种 Profile、冻结 workspace receipt、并行 spawn、目录拒绝、独立 worktree、显式 cherry-pick、显式 cleanup、只读 reviewer 和最终测试，且必须包含 `REVIEWER_READ_ONLY_APPROVED`，并把单独一行 `PURE_SUBAGENTS_LIVE_OK` 作为最后一行。

@@ -79,7 +79,7 @@ pub(super) fn run(options: VerifySubagentsOptions) -> Result<()> {
         &isolated_config,
         &artifact_dir.join("model-routes.json"),
     )?;
-    disable_executor_profiles(&isolated_config)?;
+    disable_all_live_profiles(&isolated_config)?;
     let executor = read_route(&isolated_config, "executor")?;
     let worktree_executor = read_route(&isolated_config, "worktree_executor")?;
     let explorer = read_route(&isolated_config, "explorer")?;
@@ -294,6 +294,7 @@ fn write_driver_receipt(log: &Path, output: &Path) -> Result<()> {
         rendered.contains(SENTINEL),
         "Flutter Driver receipt does not contain {SENTINEL}"
     );
+    validate_driver_snapshot(&completed)?;
     fs::write(
         output,
         serde_json::to_vec_pretty(&serde_json::json!({
@@ -302,6 +303,51 @@ fn write_driver_receipt(log: &Path, output: &Path) -> Result<()> {
             "shutdown": shutdown,
         }))?,
     )?;
+    Ok(())
+}
+
+fn validate_driver_snapshot(completed: &Value) -> Result<()> {
+    let workspace = completed
+        .get("workspace")
+        .context("Flutter Driver receipt has no workspace")?;
+    let roles = workspace
+        .get("agents")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|agent| agent.get("role").and_then(Value::as_str))
+        .collect::<std::collections::HashSet<_>>();
+    for role in ["explorer", "executor", "worktree_executor", "reviewer"] {
+        ensure!(roles.contains(role), "Driver receipt lacks {role} Profile");
+    }
+    let timeline = workspace
+        .get("timeline")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|row| row.get("text").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    ensure!(
+        timeline
+            .iter()
+            .any(|text| text.contains("REVIEWER_READ_ONLY_APPROVED")),
+        "Driver receipt lacks reviewer approval marker"
+    );
+    let workflow = completed
+        .get("workflow")
+        .context("Driver receipt has no workflow")?;
+    let history = workflow
+        .get("currentRun")
+        .and_then(|run| run.get("history"))
+        .and_then(Value::as_array)
+        .context("Driver receipt workflow has no history")?;
+    ensure!(
+        history.iter().any(|entry| {
+            entry.get("fromStageId").and_then(Value::as_str) == Some("integrating")
+                || entry.get("toStageId").and_then(Value::as_str) == Some("integrating")
+        }),
+        "Driver receipt workflow history lacks integrating"
+    );
     Ok(())
 }
 
@@ -412,14 +458,14 @@ fn file_receipt(root: &Path, relative: &str) -> Result<Value> {
     }))
 }
 
-fn disable_executor_profiles(path: &Path) -> Result<()> {
+fn disable_all_live_profiles(path: &Path) -> Result<()> {
     let mut config = fs::read_to_string(path)?.parse::<toml::Table>()?;
     let mut disabled = config
         .get("disabled_system_agents")
         .and_then(toml::Value::as_array)
         .cloned()
         .unwrap_or_default();
-    for profile in ["executor", "worktree_executor"] {
+    for profile in ["explorer", "executor", "worktree_executor", "reviewer"] {
         if !disabled.iter().any(|value| value.as_str() == Some(profile)) {
             disabled.push(toml::Value::String(profile.to_string()));
         }
@@ -891,6 +937,25 @@ mod tests {
             .to_string(),
         ])
         .unwrap();
+    }
+
+    #[test]
+    fn isolated_live_config_disables_all_four_profiles() {
+        let root = tempfile::tempdir().unwrap();
+        let config = root.path().join("config.toml");
+        fs::write(&config, "disabled_system_agents = []\n").unwrap();
+        disable_all_live_profiles(&config).unwrap();
+        let table = fs::read_to_string(config)
+            .unwrap()
+            .parse::<toml::Table>()
+            .unwrap();
+        let disabled = table
+            .get("disabled_system_agents")
+            .and_then(toml::Value::as_array)
+            .unwrap();
+        for profile in ["explorer", "executor", "worktree_executor", "reviewer"] {
+            assert!(disabled.iter().any(|value| value.as_str() == Some(profile)));
+        }
     }
 
     #[test]

@@ -15,7 +15,7 @@ mode:
 - `planning`：root 建立依赖图、文件所有权和验证边界；把独立探索交给 fresh-context `explorer` 并行执行，root 综合结果形成完整实施计划。
 - `awaiting_confirmation`：展示计划，并用通用 `request_user_input` 请求用户确认；确认前不得实施。
 - `editing_documents`：架构、协议、运行时行为或长期约定变化时，只允许 root 亲自更新 `design/**`；若任务不涉及这些变化，可在图中给出明确跳过路径。
-- `working`：按依赖顺序把实现委派给 `executor` 或 `worktree_executor`；无依赖且写集合互斥的任务尽量并行，完成后再进入整合。每条 child 消息必须八段式自包含：目的与用户价值、设计基线、所有权不变量、禁区、步骤、完成/失败条件、证据、workspace/Git/cleanup 合同。
+- `working`：按依赖顺序把实现委派给 `executor` 或 `worktree_executor`；无依赖且写集合互斥的任务尽量并行，完成后再进入整合。每条 child 消息必须八段式自包含：目的与用户价值、设计基线、所有权不变量、禁止范围（禁区）、步骤、完成/失败条件、证据、workspace 隔离/Git/cleanup 合同。
 - `integrating`：root 检查 directory 组合 diff，显式审查并 cherry-pick/merge worktree commit，处理必要冲突和 cleanup。child 失败先等待容量并收窄重派一次，仍失败才记录 `ROOT_IMPLEMENTATION_FALLBACK` 并由 root 最小兜底。
 - `reviewing`：新建 fresh-context、`forkTurns:none` 的只读 `reviewer` 综合检查整合后的主 workspace；发现问题按代码/设计分流返工。
 - `completed`：成功终态并交付。

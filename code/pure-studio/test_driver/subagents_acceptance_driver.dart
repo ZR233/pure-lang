@@ -33,7 +33,11 @@ Future<void> main(List<String> arguments) async {
     await File('${options.finalScreenshot}.render-tree.txt')
         .writeAsString(await session.renderTree(), flush: true);
     stdout.writeln(
-      jsonEncode({'result': 'completed', 'workspace': snapshot['workspace']}),
+      jsonEncode({
+        'result': 'completed',
+        'workspace': snapshot['workspace'],
+        'workflow': snapshot['workflow'],
+      }),
     );
     final response = await session.requestData(
       'shutdown-await',
@@ -95,11 +99,23 @@ Future<void> _configureAgents(
       dyScroll: -200,
       timeout: const Duration(minutes: 1),
     );
-    // The isolated live config starts both Profiles disabled. This tap is the
-    // product-level enable action and its canonical Settings revision must be
-    // observed by the later spawn tool catalog.
+    // The isolated live config starts all four Profiles disabled. This tap is
+    // the product-level enable action and its canonical Settings revision must
+    // be observed by the later spawn tool catalog.
+    final before = await session.readSnapshot();
+    final beforeRevision = (before['persistence'] as Map?)?['revision'];
     await session.tap(enabled);
     await session.waitForNoPendingFrame(timeout: const Duration(seconds: 20));
+    final after = await session.readSnapshot();
+    final afterRevision = (after['persistence'] as Map?)?['revision'];
+    if (beforeRevision is! int ||
+        afterRevision is! int ||
+        afterRevision <= beforeRevision) {
+      throw StateError(
+        'agent setting did not produce a canonical revision: '
+        '$beforeRevision -> $afterRevision',
+      );
+    }
   }
 }
 
@@ -122,6 +138,15 @@ Future<void> _openProjectAndSubmit(
   );
   await session.waitFor(find.byValueKey('sidebar-new-session'));
   await session.tap(find.byValueKey('sidebar-new-session'));
+  await session.tap(find.byValueKey('session-mode-selector'));
+  await session.waitFor(find.byValueKey('session-mode-mode.task'));
+  await session.tap(find.byValueKey('session-mode-mode.task'));
+  await session.waitForNoPendingFrame(timeout: const Duration(seconds: 10));
+  final modeSnapshot = await session.readSnapshot();
+  final mode = (modeSnapshot['workspace'] as Map?)?['threadMode'];
+  if (mode != 'mode.task') {
+    throw StateError('Task mode was not applied by the GUI: $mode');
+  }
   await session.tap(find.byValueKey('composer-input'));
   await session.enterText(await File(options.promptFile).readAsString());
   await session.waitForNoPendingFrame(timeout: const Duration(seconds: 20));
@@ -135,6 +160,7 @@ Future<Map<String, dynamic>> _waitForCompletion(
   final deadline = DateTime.now().add(options.timeout);
   var changedAt = DateTime.now();
   String? fingerprint;
+  var confirmationHandled = false;
   Map<String, dynamic>? last;
   while (DateTime.now().isBefore(deadline)) {
     last = await session.readSnapshot();
@@ -159,7 +185,17 @@ Future<Map<String, dynamic>> _waitForCompletion(
     if (interaction is Map && interaction['kind'] == 'toolApproval') {
       await session.tap(find.byValueKey('tool-approve'));
     } else if (interaction is Map && interaction['kind'] == 'userInput') {
-      throw StateError('root requested unexpected user input: $interaction');
+      final workflow = last['workflow'];
+      final run = workflow is Map ? workflow['currentRun'] : null;
+      final stage = run is Map ? run['currentStageId'] : null;
+      if (stage == 'awaiting_confirmation' && !confirmationHandled) {
+        await _tapFirstUserInputOption(session);
+        confirmationHandled = true;
+      } else {
+        throw StateError(
+          'root requested unexpected user input at $stage: $interaction',
+        );
+      }
     }
     await Future<void>.delayed(const Duration(milliseconds: 300));
   }
@@ -176,8 +212,15 @@ void _validateSnapshot(Map<String, dynamic> snapshot) {
       .map((agent) => agent['role'])
       .whereType<String>()
       .toSet();
-  if (!roles.contains('executor') || !roles.contains('worktree_executor')) {
-    throw StateError('terminal snapshot lacks both executor Profiles: $roles');
+  for (final role in [
+    'explorer',
+    'executor',
+    'worktree_executor',
+    'reviewer',
+  ]) {
+    if (!roles.contains(role)) {
+      throw StateError('terminal snapshot lacks $role Profile: $roles');
+    }
   }
   final tools = (workspace['timeline'] as List? ?? const [])
       .whereType<Map>()
@@ -205,6 +248,49 @@ void _validateSnapshot(Map<String, dynamic> snapshot) {
     if (!joined.replaceAll(' ', '').contains(marker)) {
       throw StateError('terminal receipt lacks $marker');
     }
+  }
+  final workflow = snapshot['workflow'];
+  final run = workflow is Map ? workflow['currentRun'] : null;
+  final history = run is Map ? run['history'] : null;
+  final stages = <String>{
+    if (history is List)
+      for (final entry in history.whereType<Map>()) ...[
+        if (entry['fromStageId'] is String) entry['fromStageId'] as String,
+        if (entry['toStageId'] is String) entry['toStageId'] as String,
+      ],
+  };
+  if (!stages.contains('integrating')) {
+    throw StateError('terminal workflow history lacks integrating: $stages');
+  }
+  if (!_timelineText(snapshot).contains('REVIEWER_READ_ONLY_APPROVED')) {
+    throw StateError('terminal timeline lacks reviewer approval marker');
+  }
+}
+
+Future<void> _tapFirstUserInputOption(FlutterDriverSession session) async {
+  if (await _isVisible(session, 'user-input-first-option')) {
+    await session.tap(find.byValueKey('user-input-first-option'));
+    await session.tap(find.byValueKey('user-input-submit'));
+  } else if (await _isVisible(session, 'user-input-first-text')) {
+    await session.tap(find.byValueKey('user-input-first-text'));
+    await session.enterText('确认');
+    await session.tap(find.byValueKey('user-input-submit'));
+  } else {
+    await session.tap(find.byValueKey('fallback-user-input'));
+    await session.enterText('确认');
+    await session.tap(find.byValueKey('fallback-user-input-submit'));
+  }
+}
+
+Future<bool> _isVisible(FlutterDriverSession session, String key) async {
+  try {
+    await session.waitFor(
+      find.byValueKey(key),
+      timeout: const Duration(seconds: 5),
+    );
+    return true;
+  } on Object {
+    return false;
   }
 }
 
