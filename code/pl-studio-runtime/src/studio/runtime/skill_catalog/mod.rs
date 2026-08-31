@@ -17,7 +17,14 @@ use pl_protocol::{
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
 
+mod remote;
 mod system;
+
+/// 一次显式发现的 provider 来源。
+enum DiscoverySource {
+    Local,
+    Remote(Arc<pl_core::remote::RemoteWorkspaceFileBackend>),
+}
 
 /// Project skills catalog 的唯一内存 owner。
 #[derive(Clone)]
@@ -149,6 +156,19 @@ impl SkillCatalogRuntime {
             .map(|path| path.as_ref().clone())
     }
 
+    /// 组合远端 workspace 与本地只读目录的 Skill registry。
+    ///
+    /// Turn 执行与 Settings 显式发现共用这一组合，保证两边看到同一份
+    /// 远端 Project、本地 user/system 与内置 Mode Skill 目录。
+    pub(in crate::studio) fn remote_workspace_registry(
+        &self,
+        config: &SkillsConfig,
+        system_skills_dir: Option<&Path>,
+        remote_backend: Arc<pl_core::remote::RemoteWorkspaceFileBackend>,
+    ) -> Result<(SkillRegistry, Vec<Arc<SkillProviderRegistration>>)> {
+        remote::remote_workspace_registry(config, system_skills_dir, remote_backend)
+    }
+
     /// 显式扫描并原子发布 Project catalog。
     pub async fn discover(
         &self,
@@ -165,12 +185,52 @@ impl SkillCatalogRuntime {
         .await
     }
 
+    /// 对一个远端 workspace 执行显式扫描并发布 Project catalog。
+    ///
+    /// 远端 provider 贡献 Project 源；本地 user/system 目录与内置 Mode Skill 与
+    /// Turn 使用同一套组合，保证设置页与 Turn 看到一致的技能目录。
+    pub async fn discover_remote(
+        &self,
+        project_id: &str,
+        workspace_root: &Path,
+        config: &SkillsConfig,
+        cancellation: tokio_util::sync::CancellationToken,
+        remote_backend: Arc<pl_core::remote::RemoteWorkspaceFileBackend>,
+    ) -> Result<SkillsStateSnapshot> {
+        self.discover_from_source(
+            project_id,
+            workspace_root,
+            config,
+            cancellation,
+            DiscoverySource::Remote(remote_backend),
+        )
+        .await
+    }
+
     pub async fn discover_with_cancellation(
         &self,
         project_id: &str,
         workspace_root: &Path,
         config: &SkillsConfig,
         cancellation: tokio_util::sync::CancellationToken,
+    ) -> Result<SkillsStateSnapshot> {
+        self.discover_from_source(
+            project_id,
+            workspace_root,
+            config,
+            cancellation,
+            DiscoverySource::Local,
+        )
+        .await
+    }
+
+    async fn discover_from_source(
+        &self,
+        project_id: &str,
+        workspace_root: &Path,
+        config: &SkillsConfig,
+        cancellation: tokio_util::sync::CancellationToken,
+        source: DiscoverySource,
     ) -> Result<SkillsStateSnapshot> {
         let _command = self.command_lock.lock().await;
         let fingerprint = skills_fingerprint(config)?;
@@ -194,20 +254,43 @@ impl SkillCatalogRuntime {
 
         let workspace_root = workspace_root.to_path_buf();
         let config = config.clone();
-        let system_skills_dir = self
-            .system_skills_dir
-            .as_ref()
-            .map(|path| path.as_ref().clone());
-        let discovered = self
-            .registry
-            .discover(SkillProviderRequest {
-                workspace_root,
-                config,
-                system_dir: system_skills_dir,
-                cancellation,
-            })
-            .await
-            .map_err(Error::from);
+        let discovered = match source {
+            DiscoverySource::Local => {
+                let system_skills_dir = self
+                    .system_skills_dir
+                    .as_ref()
+                    .map(|path| path.as_ref().clone());
+                self.registry
+                    .discover(SkillProviderRequest {
+                        workspace_root,
+                        config,
+                        system_dir: system_skills_dir,
+                        cancellation,
+                    })
+                    .await
+                    .map_err(Error::from)
+            }
+            DiscoverySource::Remote(remote_backend) => {
+                // 系统目录通过 explicit provider 注册，request 不再携带 system_dir。
+                let system_skills_dir = self.system_skills_dir();
+                let (registry, registrations) = remote::remote_workspace_registry(
+                    &config,
+                    system_skills_dir.as_deref(),
+                    remote_backend,
+                )?;
+                let discovered = registry
+                    .discover(SkillProviderRequest {
+                        workspace_root,
+                        config,
+                        system_dir: None,
+                        cancellation,
+                    })
+                    .await
+                    .map_err(Error::from);
+                drop(registrations);
+                discovered
+            }
+        };
         let catalog = match discovered {
             Ok(catalog) => catalog,
             Err(error) => {

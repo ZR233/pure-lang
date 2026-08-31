@@ -65,6 +65,11 @@ SSH 通道只承载标准输入输出协议，因此固定关闭伪终端（`-T`
 descriptor；下一次 Turn
 重新读取远端 Skills，并在 host identity 变化后重新探测 LSP。
 
+SSH workspace 的 Skill catalog 由一个共享 registry 组合构成：远端 provider 贡献 Project 源，
+本地 user 目录与 Studio 物化的系统技能目录（含内置 Mode Skill）以只读来源并行注册。Turn
+执行与 Settings 的显式技能发现共用同一组合，因此设置页技能目录展示远端 Project 技能与本地
+系统/用户技能，且激活 fingerprint 包含 Skills 配置指纹；配置变化后的下一次激活会重新发现。
+
 ## 21.4 凭据、路径与持久化
 
 Pure 调用 PATH 中的系统 OpenSSH，复用 ssh config、known_hosts、ProxyJump、ssh-agent 和用户
