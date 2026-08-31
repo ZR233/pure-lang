@@ -822,12 +822,14 @@ fn ensure_reviewer_history(captures: &[CaptureReceipt]) -> Result<()> {
 }
 
 fn ensure_root_history(captures: &[CaptureReceipt]) -> Result<()> {
-    let root = captures
+    let root_calls = captures
         .iter()
-        .find(|capture| capture.actor == "root")
-        .context("no classified Root capture")?;
+        .filter(|capture| capture.actor == "root")
+        .flat_map(|capture| capture.calls.iter())
+        .collect::<Vec<_>>();
+    ensure!(!root_calls.is_empty(), "no classified Root capture");
     let has = |name: &str, pred: fn(&WireCall) -> bool| {
-        root.calls
+        root_calls
             .iter()
             .any(|call| call.name == name && pred(call))
     };
@@ -1388,6 +1390,17 @@ fn ensure_submissions(calls: &[WireCall], outputs: &[WireOutput]) -> Result<()> 
         .map(|(_, _, i)| *i)
         .min()
         .context("no implementation spawn")?;
+    let cherry_pick = calls
+        .iter()
+        .position(|call| {
+            call.name == "exec"
+                && call
+                    .arguments
+                    .get("command")
+                    .and_then(Value::as_str)
+                    .is_some_and(|command| command.contains("cherry-pick"))
+        })
+        .context("no explicit cherry-pick")?;
     for (profile, agent, spawn_index) in required {
         let read = calls
             .iter()
@@ -1434,6 +1447,15 @@ fn ensure_submissions(calls: &[WireCall], outputs: &[WireOutput]) -> Result<()> 
                     .unwrap()
                     < first_impl,
                 "explorer submissions read occurred after implementation spawn"
+            );
+        } else {
+            ensure!(
+                calls
+                    .iter()
+                    .position(|call| call.call_id == read.call_id)
+                    .unwrap()
+                    < cherry_pick,
+                "implementation submissions read occurred after cherry-pick"
             );
         }
     }
@@ -1667,6 +1689,137 @@ mod tests {
         ] {
             assert!(is_mutating_shell_command(command), "{command}");
         }
+    }
+
+    fn root_call(name: &str, arguments: Value) -> WireCall {
+        orchestration_call(name, name, arguments)
+    }
+
+    #[test]
+    fn root_history_aggregates_all_root_captures() {
+        let captures = vec![
+            CaptureReceipt {
+                path: "root-1.json".into(),
+                actor: "root".into(),
+                calls: vec![root_call(
+                    "write_file",
+                    serde_json::json!({"path":"design/subagents-orchestration.md"}),
+                )],
+            },
+            CaptureReceipt {
+                path: "root-2.json".into(),
+                actor: "root".into(),
+                calls: vec![root_call(
+                    "exec",
+                    serde_json::json!({"command":"git cherry-pick abc"}),
+                )],
+            },
+            CaptureReceipt {
+                path: "root-3.json".into(),
+                actor: "root".into(),
+                calls: vec![root_call(
+                    "close_agent",
+                    serde_json::json!({"workspaceDisposition":"cleanup"}),
+                )],
+            },
+            CaptureReceipt {
+                path: "root-4.json".into(),
+                actor: "root".into(),
+                calls: vec![root_call(
+                    "exec",
+                    serde_json::json!({"command":"cargo test --workspace"}),
+                )],
+            },
+        ];
+        ensure_root_history(&captures).unwrap();
+    }
+
+    #[test]
+    fn root_history_rejects_missing_or_non_root_required_actions() {
+        let base = vec![CaptureReceipt {
+            path: "root.json".into(),
+            actor: "root".into(),
+            calls: vec![
+                root_call(
+                    "write_file",
+                    serde_json::json!({"path":"design/subagents-orchestration.md"}),
+                ),
+                root_call("exec", serde_json::json!({"command":"git cherry-pick abc"})),
+                root_call(
+                    "close_agent",
+                    serde_json::json!({"workspaceDisposition":"cleanup"}),
+                ),
+                root_call("exec", serde_json::json!({"command":"cargo test"})),
+            ],
+        }];
+        for missing in 0..4 {
+            let mut captures = base.clone();
+            captures[0].calls.remove(missing);
+            assert!(
+                ensure_root_history(&captures).is_err(),
+                "missing action {missing}"
+            );
+        }
+        for actor in ["explorer", "reviewer"] {
+            let mut captures = base.clone();
+            captures.push(CaptureReceipt {
+                path: format!("{actor}.json"),
+                actor: actor.into(),
+                calls: vec![root_call(
+                    "exec",
+                    serde_json::json!({"command":"git cherry-pick abc"}),
+                )],
+            });
+            assert!(ensure_root_history(&captures).is_err(), "{actor}");
+        }
+    }
+
+    #[test]
+    fn submissions_require_implementation_reads_before_cherry_pick() {
+        let mut calls = vec![orchestration_call(
+            "profiles",
+            "list_agent_profiles",
+            serde_json::json!({}),
+        )];
+        let mut outputs = Vec::new();
+        for (index, profile) in ["explorer", "explorer", "executor", "worktree_executor"]
+            .into_iter()
+            .enumerate()
+        {
+            let spawn = format!("spawn-{index}");
+            let agent = format!("agent-{index}");
+            calls.push(orchestration_call(
+                &spawn,
+                "spawn_agent",
+                serde_json::json!({"profileId":profile}),
+            ));
+            outputs.push(WireOutput {
+                call_id: Some(spawn),
+                content: serde_json::json!({"profileId":profile,"agentId":agent}).to_string(),
+            });
+            let read = format!("read-{index}");
+            calls.push(orchestration_call(
+                &read,
+                "read_agent_submissions",
+                serde_json::json!({"target":agent}),
+            ));
+            outputs.push(WireOutput {
+                call_id: Some(read),
+                content: serde_json::json!({"total":1,"items":[{"id":"submission"}]}).to_string(),
+            });
+        }
+        calls.push(orchestration_call(
+            "pick",
+            "exec",
+            serde_json::json!({"command":"git cherry-pick abc"}),
+        ));
+        ensure_submissions(&calls, &outputs).unwrap();
+        let pick = calls
+            .iter()
+            .position(|call| call.call_id.as_deref() == Some("pick"))
+            .unwrap();
+        calls.swap(pick, pick - 1);
+        assert!(ensure_submissions(&calls, &outputs).is_err());
     }
 
     #[test]
