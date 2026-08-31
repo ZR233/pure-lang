@@ -18,9 +18,9 @@ pub use self::handlers::{
     remove_attachment_draft, repair_lsp_server, reset_lsp, reset_mcp, respond_interaction,
     retry_persistence, save_general_settings, save_instructions_settings, save_mcp_settings,
     save_provider_settings, save_runtime_permission_mode, save_skills_settings, save_ssh_server,
-    save_user_agent_profile, save_web_search_settings, set_model_role, set_system_agent_enabled,
-    set_thread_mode, shutdown_runtime, start_new_thread, start_studio_runtime, start_turn,
-    steer_turn, test_ssh_connection,
+    save_user_agent_profile, save_web_search_settings, search_skills, set_model_role,
+    set_system_agent_enabled, set_thread_mode, shutdown_runtime, start_new_thread,
+    start_studio_runtime, start_turn, steer_turn, test_ssh_connection,
 };
 pub use self::subscription::{
     BridgeEventSubscription, BridgeProductStreamEnvelope, BridgeThreadStreamEnvelope,
@@ -82,6 +82,7 @@ mod tests {
             CheckProviderUsage => check_provider_usage,
             ReadSkills => read_skills_state,
             DiscoverSkills => discover_skills,
+            SearchSkills => search_skills,
             ReadMcp => read_mcp_state,
             ResetMcp => reset_mcp,
             ReadLsp => read_lsp_state,

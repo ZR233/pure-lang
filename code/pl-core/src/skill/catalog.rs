@@ -5,7 +5,9 @@ use pl_protocol::Result;
 
 use super::scanning::{find_skill_files, metadata_from_file};
 use super::util::platform_matches;
-use super::{SkillCatalog, SkillMetadata, SkillSource, SkillSourceKind};
+use super::{
+    SkillCatalog, SkillMetadata, SkillSelectionRequest, SkillSelector, SkillSource, SkillSourceKind,
+};
 use crate::config::SkillsConfig;
 
 impl SkillCatalog {
@@ -125,11 +127,17 @@ pub fn build_skills_prompt(
 }
 
 pub fn build_skills_prompt_from_catalog(catalog: &SkillCatalog) -> String {
-    let model_skills = catalog
+    let mut model_skills = catalog
         .skills
         .iter()
         .filter(|skill| skill.invocation.model_invocable)
         .collect::<Vec<_>>();
+    model_skills.sort_by(|left, right| {
+        left.name
+            .to_ascii_lowercase()
+            .cmp(&right.name.to_ascii_lowercase())
+            .then_with(|| left.name.cmp(&right.name))
+    });
     if model_skills.is_empty() {
         return "# Skills\n当前项目未发现可用 skills。完成可复用流程后，可用 `skill_manage` 写入项目 `skills/` 目录。".to_string();
     }
@@ -141,13 +149,64 @@ pub fn build_skills_prompt_from_catalog(catalog: &SkillCatalog) -> String {
         prompt.push_str(&format!(
             "- `{}`: {}\n",
             pl_skill_core::sanitize_single_line(&skill.name),
-            pl_skill_core::sanitize_single_line(&skill.description)
+            model_description(&skill.description)
         ));
     }
     prompt.push_str(
         "\nSystem/User/External skills 是只读来源。完成复杂任务、修复非平凡问题或发现可复用项目流程后，优先用 `skill_manage` 修补已有项目 skill；没有合适 skill 时创建新的项目 skill。不要记录一次性任务、瞬时环境失败或纯用户私密偏好。",
     );
     prompt
+}
+
+pub(crate) fn build_skill_suggestions_from_catalog(
+    catalog: &SkillCatalog,
+    query: &str,
+    excluded_names: &[String],
+) -> Option<String> {
+    let selection = SkillSelector.select(
+        &catalog.skills,
+        SkillSelectionRequest {
+            query,
+            limit: 5,
+            category: None,
+            excluded_names,
+            model_invocable_only: true,
+        },
+    );
+    if selection.matches.is_empty() {
+        return None;
+    }
+
+    let mut prompt = String::from(
+        "<skill_suggestions>\n以下 skills 与当前任务的 name 或 description 存在确定性词法匹配；这些只是摘要，不代表正文已经加载：\n",
+    );
+    for skill in selection.matches {
+        prompt.push_str(&format!(
+            "- `{}`: {}\n",
+            pl_skill_core::sanitize_single_line(&skill.name),
+            model_description(&skill.description)
+        ));
+    }
+    prompt.push_str(
+        "如需使用其中某个 skill，必须先以精确 name 调用 `skill_view`。已由用户直接加载的 skill 不要重复调用。\n</skill_suggestions>",
+    );
+    Some(prompt)
+}
+
+fn model_description(description: &str) -> String {
+    const MAX_CHARS: usize = 500;
+    const ELLIPSIS_CHARS: usize = 3;
+
+    let normalized = pl_skill_core::sanitize_single_line(description);
+    if normalized.chars().count() <= MAX_CHARS {
+        return normalized;
+    }
+    let mut truncated = normalized
+        .chars()
+        .take(MAX_CHARS - ELLIPSIS_CHARS)
+        .collect::<String>();
+    truncated.push_str("...");
+    truncated
 }
 
 pub(super) fn skill_sources(

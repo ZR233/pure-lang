@@ -1673,6 +1673,29 @@ class DemoStudioApi implements StudioApi {
   }
 
   @override
+  Future<SkillSearchResultView> searchSkills(
+    String projectId,
+    String query, {
+    int limit = 50,
+  }) async {
+    final snapshot = await readSkillsState(projectId);
+    final normalizedQuery = query.trim().toLowerCase();
+    final allMatches = snapshot.summaries
+        .where(
+          (skill) =>
+              skill.name.toLowerCase().contains(normalizedQuery) ||
+              skill.description.toLowerCase().contains(normalizedQuery),
+        )
+        .toList();
+    return SkillSearchResultView(
+      projectId: projectId,
+      catalogRevision: snapshot.catalogRevision,
+      matches: allMatches.take(limit).toList(),
+      truncated: allMatches.length > limit,
+    );
+  }
+
+  @override
   Future<McpStateSnapshot> readMcpState() async => _demoMcpState();
 
   @override
@@ -2090,6 +2113,29 @@ SkillsStateSnapshot _demoSkillsState(
         configFingerprint: 'demo',
         catalogRevision: revision,
         skills: skills,
+        summaries: [
+          for (final skill in skills)
+            SkillSummaryView(
+              name: skill,
+              description: switch (skill) {
+                'flutter-ui-polish' =>
+                  'Polish Flutter layouts, interactions, and visual details.',
+                'runtime-review' =>
+                  'Review runtime behavior, lifecycle, and concurrency.',
+                'studio-settings' =>
+                  'Manage Studio providers, skills, and application settings.',
+                _ => 'Installed Studio skill.',
+              },
+              source: 'demo',
+              providerId: 'demo',
+              modelInvocable: true,
+              userInvocable: true,
+              resourceBase: const SkillResourceBaseView(
+                SkillResourceBaseKind.opaque,
+                'demo',
+              ),
+            ),
+        ],
         warnings: const [],
       ),
     ),

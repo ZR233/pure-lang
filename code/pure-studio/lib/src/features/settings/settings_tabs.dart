@@ -218,14 +218,18 @@ class SkillsTab extends ConsumerStatefulWidget {
   const SkillsTab({
     super.key,
     required this.skills,
+    required this.fallbackSkillNames,
     required this.settings,
     required this.projectId,
+    required this.catalogRevision,
     required this.tabIndex,
   });
 
-  final List<String> skills;
+  final List<SkillSummaryView> skills;
+  final List<String> fallbackSkillNames;
   final SkillsSettingsView settings;
   final String? projectId;
+  final int catalogRevision;
   final int tabIndex;
 
   @override
@@ -237,6 +241,9 @@ class SkillsTabState extends ConsumerState<SkillsTab> {
   bool _discovering = false;
   String? _discoverError;
   String? _saveError;
+  Timer? _searchTimer;
+  int _searchRequest = 0;
+  List<SkillSummaryView>? _searchMatches;
 
   @override
   void initState() {
@@ -245,12 +252,31 @@ class SkillsTabState extends ConsumerState<SkillsTab> {
   }
 
   @override
+  void didUpdateWidget(covariant SkillsTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.projectId != widget.projectId ||
+        oldWidget.catalogRevision != widget.catalogRevision) {
+      _searchTimer?.cancel();
+      _searchRequest += 1;
+      _searchMatches = null;
+      if (_query.isNotEmpty) {
+        _scheduleSearch(_query);
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _searchTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final skills = widget.skills.toList()..sort();
+    final skills = _query.isEmpty
+        ? _allSkills()
+        : (_searchMatches ?? const <SkillSummaryView>[]);
     final disabledSkills = widget.settings.disabled.toSet();
-    final filteredSkills = skills
-        .where((skill) => skill.toLowerCase().contains(_query.toLowerCase()))
-        .toList();
     return SettingsPane(
       children: [
         SettingsHeader(
@@ -277,33 +303,37 @@ class SkillsTabState extends ConsumerState<SkillsTab> {
         const SizedBox(height: 16),
         SettingsSearchField(
           hintText: context.l10n.settingsFilterSkills,
-          onChanged: (value) => setState(() => _query = value),
+          onChanged: _onSearchChanged,
         ),
         const SizedBox(height: 14),
-        if (filteredSkills.isNotEmpty)
+        if (skills.isNotEmpty)
           SettingsGroup(
             children: [
-              for (final skill in filteredSkills)
+              for (final skill in skills)
                 SettingsToggleRow(
                   icon: Icons.extension_outlined,
-                  title: skill,
-                  subtitle: disabledSkills.contains(skill)
-                      ? context.l10n.settingsSkillDisabled
-                      : context.l10n.settingsSkillEnabled,
-                  value: !disabledSkills.contains(skill),
+                  title: skill.name,
+                  subtitle: [
+                    if (skill.description.trim().isNotEmpty)
+                      skill.description.trim(),
+                    disabledSkills.contains(skill.name)
+                        ? context.l10n.settingsSkillDisabled
+                        : context.l10n.settingsSkillEnabled,
+                  ].join('\n'),
+                  value: !disabledSkills.contains(skill.name),
                   onChanged: (selected) {
                     final disabled = {...disabledSkills};
                     if (selected) {
-                      disabled.remove(skill);
+                      disabled.remove(skill.name);
                     } else {
-                      disabled.add(skill);
+                      disabled.add(skill.name);
                     }
                     unawaited(_saveDisabled(disabled));
                   },
                 ),
             ],
           ),
-        if (filteredSkills.isEmpty) ...[
+        if (skills.isEmpty) ...[
           const SizedBox(height: 12),
           SettingsEmptyMessage(
             icon: Icons.extension_outlined,
@@ -325,6 +355,71 @@ class SkillsTabState extends ConsumerState<SkillsTab> {
         ],
       ],
     );
+  }
+
+  List<SkillSummaryView> _allSkills() {
+    final byName = {for (final skill in widget.skills) skill.name: skill};
+    for (final name in widget.fallbackSkillNames) {
+      byName.putIfAbsent(
+        name,
+        () => SkillSummaryView(
+          name: name,
+          description: '',
+          source: '',
+          providerId: '',
+          modelInvocable: true,
+          userInvocable: true,
+          resourceBase: const SkillResourceBaseView(
+            SkillResourceBaseKind.opaque,
+            '',
+          ),
+        ),
+      );
+    }
+    return byName.values.toList()..sort(
+      (left, right) =>
+          left.name.toLowerCase().compareTo(right.name.toLowerCase()),
+    );
+  }
+
+  void _onSearchChanged(String value) {
+    final query = value.trim();
+    _searchTimer?.cancel();
+    _searchRequest += 1;
+    setState(() {
+      _query = query;
+      _searchMatches = null;
+    });
+    if (query.isNotEmpty) {
+      _scheduleSearch(query);
+    }
+  }
+
+  void _scheduleSearch(String query) {
+    final request = _searchRequest;
+    _searchTimer = Timer(const Duration(milliseconds: 150), () {
+      unawaited(_searchSkills(query, request));
+    });
+  }
+
+  Future<void> _searchSkills(String query, int request) async {
+    try {
+      final result = await ref
+          .read(studioControllerProvider.notifier)
+          .searchSkills(query);
+      if (!mounted || request != _searchRequest || result == null) {
+        return;
+      }
+      if (result.projectId != widget.projectId ||
+          result.catalogRevision != widget.catalogRevision) {
+        return;
+      }
+      setState(() => _searchMatches = result.matches);
+    } catch (error) {
+      if (mounted && request == _searchRequest) {
+        setState(() => _discoverError = error.toString());
+      }
+    }
   }
 
   Future<void> _saveDisabled(Set<String> disabled) async {

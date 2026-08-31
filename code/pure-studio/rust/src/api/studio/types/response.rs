@@ -581,6 +581,15 @@ pub struct SkillsResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct BridgeSkillSearchResult {
+    pub project_id: String,
+    pub catalog_revision: u64,
+    pub matches: Vec<SkillSummaryDto>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct SkillSummaryDto {
     pub name: String,
     pub description: String,

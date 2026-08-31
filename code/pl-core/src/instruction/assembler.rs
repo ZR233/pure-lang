@@ -120,6 +120,22 @@ impl InstructionAssembler {
                 snapshot.push_user(block.source.clone(), &block.content);
             }
         }
+        if let (Some(catalog), Some(suggestions)) =
+            (request.skill_catalog, request.skill_suggestions)
+            && let Some(prompt) = crate::skill::build_skill_suggestions_from_catalog(
+                catalog,
+                suggestions.query,
+                suggestions.excluded_names,
+            )
+        {
+            snapshot.push_user(
+                InstructionSource::new(
+                    InstructionSourceKind::SkillSuggestions,
+                    "skill suggestions",
+                ),
+                &prompt,
+            );
+        }
 
         Ok(snapshot)
     }

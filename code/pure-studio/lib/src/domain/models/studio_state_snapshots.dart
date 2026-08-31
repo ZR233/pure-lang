@@ -439,6 +439,20 @@ class SkillSummaryView {
   final SkillResourceBaseView resourceBase;
 }
 
+class SkillSearchResultView {
+  const SkillSearchResultView({
+    required this.projectId,
+    required this.catalogRevision,
+    required this.matches,
+    required this.truncated,
+  });
+
+  final String projectId;
+  final int catalogRevision;
+  final List<SkillSummaryView> matches;
+  final bool truncated;
+}
+
 class SkillsStateSnapshot extends ObservedStateSnapshot<SkillsStateData> {
   SkillsStateSnapshot({
     required this.projectId,
@@ -480,6 +494,7 @@ class SkillsStateSnapshot extends ObservedStateSnapshot<SkillsStateData> {
   List<String> get skills => _data.skills;
   List<String> get warnings => _data.warnings;
   List<ModeDescriptorView> get modes => _data.modes;
+  List<SkillSummaryView> get summaries => _data.summaries;
 }
 
 class ProviderUsageStateData {

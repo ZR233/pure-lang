@@ -41,6 +41,7 @@ pub enum StudioOperation {
     CheckProviderUsage,
     ReadSkills,
     DiscoverSkills,
+    SearchSkills,
     ReadMcp,
     ResetMcp,
     ReadLsp,
@@ -55,7 +56,7 @@ pub enum StudioOperation {
 }
 
 impl StudioOperation {
-    pub const ALL: [Self; 45] = [
+    pub const ALL: [Self; 46] = [
         Self::ReadState,
         Self::OpenProject,
         Self::ActivateProject,
@@ -90,6 +91,7 @@ impl StudioOperation {
         Self::CheckProviderUsage,
         Self::ReadSkills,
         Self::DiscoverSkills,
+        Self::SearchSkills,
         Self::ReadMcp,
         Self::ResetMcp,
         Self::ReadLsp,
@@ -139,6 +141,7 @@ impl StudioOperation {
             Self::CheckProviderUsage => "providerUsage.check",
             Self::ReadSkills => "skills.read",
             Self::DiscoverSkills => "skills.discover",
+            Self::SearchSkills => "skills.search",
             Self::ReadMcp => "mcp.read",
             Self::ResetMcp => "mcp.reset",
             Self::ReadLsp => "lsp.read",

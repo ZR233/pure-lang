@@ -140,6 +140,27 @@ skills 索引和使用规则。索引只包含空白规范化后的名称和 des
 locator 或正文。任务明显匹配某个 skill 时，模型必须先调用 `skill_view(name)` 读取完整内容。
 `enabled = false` 同时关闭目录、工具和用户 `/name` 手势，工具不可见时不得注入调用指引。
 
+模型目录按名称稳定排序并保留全部允许模型调用的 skills。description 只在模型目录投影时折叠
+空白并截断为 500 个 Unicode 字符；catalog、Studio 与 Provider 仍保存完整 description。模型目录
+是摘要而不是指令，正文、路径、Provider、来源 rank 和 category 不进入该目录；只有成功的精确
+`skill_view(name)` 或直接用户手势才表示内容已经进入模型上下文。
+
+每个普通 agent turn 还根据本轮原始文本，从冻结 catalog 的 name 与完整 description 中确定性召回
+最多 5 个候选，并将摘要作为 Turn 级 user overlay 追加在稳定 instructions 前缀之后。召回只考虑
+允许模型调用的普通 Skill，排除本轮已由用户手势直接加载的名称；无正分候选时不注入 overlay。
+候选建议不读取正文、不激活 Skill，也不替代 `skill_view`。独立 compaction 不重新生成候选建议。
+
+召回器是 `pl-core` 的共享纯函数边界：query 最多 4 KiB/64 个去重词项，单个 name/description
+文档最多 4 KiB/256 个词项，最多处理 1000 个候选、返回 50 个结果。文本按 Unicode 字母数字
+小写化，其他字符作为分隔符，并过滤固定英文停用词。评分依次奖励完整 name 短语、精确 name、
+name 词项与前缀、description 词项与前缀，再加命中 query 词项数平方作为覆盖奖励；零分候选不
+返回，同分按大小写不敏感 name 与原始 name 稳定排序。Provider rank 只决定同名 winner，不能
+混入相关度分数。
+
+`skills_list` 在原有 category 精确过滤之外接受可选 `query` 和 `limit`。无 query 时仍返回完整、
+按名称排序的 model-invocable catalog；有 query 时 category 先过滤，再使用同一召回器返回正分
+结果和截断状态。`skill_view` 始终保持精确名称语义，不接受模糊名称。
+
 `register_default_tools` 是 root agent 和 subagent 的共同工具入口，因此 subagent 与父 agent 使用同一项目 skills 上下文和同一加载优先级。
 
 系统 skills 与用户/外部 skills 一样对 root agent 和 subagent 可见，但只读。模型如需沉淀新的项目经验，必须通过 `skill_manage` 写入项目目录。
@@ -163,6 +184,11 @@ Provider、warning 和完整性。进入标签页只读缓存，不访问文件�
 `discoverSkills(projectId)` 强制扫描。每个新代理 Turn 的准备阶段也强制扫描一次；完整 catalog
 内容不变时不增加公开 revision。该列表不调用 `skill_view`，不改变会话 active skills，也不写入
 使用统计。
+
+Studio 的非空搜索通过 runtime 对已发布 catalog 执行同一召回器，返回 catalog revision、完整
+Skill summaries 与截断状态；它不触发 discover、revision 变化或 activation。Studio 搜索包含全部
+普通 skills，Agent 与 `skills_list` 调用方则先过滤为 model-invocable skills。前端清空 query 时
+直接恢复当前 snapshot 的完整名称排序，非空 query 只消费后端排序结果，不在 Dart 侧复制评分器。
 
 注册表发现返回 `SkillProviderObservation { candidates, complete, warnings }`。确认缺失的目录是完整
 空结果；单个格式错误产生 warning 并跳过；意外 I/O、Provider 暂时失败或发现期间代次连续变化

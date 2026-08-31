@@ -6,6 +6,11 @@ mod security;
 mod skills_schema;
 mod sse;
 
+#[cfg(all(test, feature = "live-tests"))]
+mod skill_discovery_live;
+#[cfg(test)]
+mod skill_discovery_scripted;
+
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;

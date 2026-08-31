@@ -470,6 +470,7 @@ impl TurnEngine {
                     workspace_documents: None,
                     workspace_instructions: request.workspace_instructions.as_deref(),
                     subagent_constraint: None,
+                    skill_suggestions: None,
                 };
                 match self.instruction_profile.as_ref() {
                     Some(profile) => {

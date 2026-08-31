@@ -40,6 +40,23 @@ fn write_project_skill(workspace: &Path, name: &str) {
     fs::write(skill_dir.join("references/example.md"), "support").unwrap();
 }
 
+fn write_project_skill_with_metadata(
+    workspace: &Path,
+    name: &str,
+    description: &str,
+    category: &str,
+) {
+    let skill_dir = workspace.join("skills").join(name);
+    fs::create_dir_all(&skill_dir).unwrap();
+    fs::write(
+        skill_dir.join("SKILL.md"),
+        format!(
+            "---\nname: {name}\ndescription: {description}\ncategory: {category}\n---\n# {name}\n"
+        ),
+    )
+    .unwrap();
+}
+
 #[tokio::test]
 async fn read_only_catalog_tool_group_omits_project_mutation() {
     let workspace = tempfile::tempdir().unwrap();
@@ -103,6 +120,110 @@ struct SkillViewOutputSnapshot {
     resource_base: crate::skill::SkillResourceBase,
     resource_hint: String,
     content: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SkillsListOutputSnapshot {
+    count: usize,
+    truncated: bool,
+    skills: Vec<SkillsListRowSnapshot>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct SkillsListRowSnapshot {
+    name: String,
+    description: String,
+}
+
+#[tokio::test]
+async fn skills_list_preserves_full_listing_and_supports_ranked_search() {
+    let workspace = temp_dir("list-search");
+    let category = "selector-test-category";
+    write_project_skill_with_metadata(
+        &workspace,
+        "release-build-triage",
+        "Diagnose Rust release linker and Cargo profile failures.",
+        category,
+    );
+    write_project_skill_with_metadata(
+        &workspace,
+        "rust-formatting",
+        "Format Rust source code.",
+        category,
+    );
+    write_project_skill_with_metadata(
+        &workspace,
+        "slide-deck-authoring",
+        "Create presentations and speaker notes.",
+        category,
+    );
+    let mut config = SkillsConfig {
+        project_dir: "skills".to_string(),
+        user_dir: workspace
+            .join("missing-user")
+            .to_string_lossy()
+            .into_owned(),
+        ..SkillsConfig::default()
+    };
+    config.system.enabled = false;
+    let tool = SkillsListTool::new(config, tool_workspace(&workspace));
+
+    let full = tool
+        .execute(
+            ToolInput {
+                arguments: json!({"category": category}),
+            },
+            tool_context(workspace.clone()),
+        )
+        .await
+        .unwrap();
+    let full = serde_json::from_str::<SkillsListOutputSnapshot>(&full.canonical_output()).unwrap();
+    assert_eq!(full.count, 3);
+    assert!(!full.truncated);
+    assert_eq!(
+        full.skills
+            .iter()
+            .map(|skill| skill.name.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "release-build-triage",
+            "rust-formatting",
+            "slide-deck-authoring"
+        ]
+    );
+
+    let ranked = tool
+        .execute(
+            ToolInput {
+                arguments: json!({
+                    "category": category,
+                    "query": "diagnose a Rust release linker failure",
+                    "limit": 1,
+                }),
+            },
+            tool_context(workspace.clone()),
+        )
+        .await
+        .unwrap();
+    let ranked =
+        serde_json::from_str::<SkillsListOutputSnapshot>(&ranked.canonical_output()).unwrap();
+    assert_eq!(ranked.count, 1);
+    assert!(ranked.truncated);
+    assert_eq!(ranked.skills[0].name, "release-build-triage");
+    assert!(ranked.skills[0].description.contains("Cargo profile"));
+
+    let error = tool
+        .execute(
+            ToolInput {
+                arguments: json!({"query": "Rust", "limit": 51}),
+            },
+            tool_context(workspace.clone()),
+        )
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("between 1 and 50"));
+    fs::remove_dir_all(workspace).unwrap();
 }
 
 #[test]

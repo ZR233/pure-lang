@@ -10,11 +10,12 @@ use axum::response::IntoResponse;
 use pl_protocol::studio::{
     AdmitAttachmentDraftsRequest, AdmitAttachmentDraftsResponse, CreateThreadRequest,
     ExpectedRevisionRequest, HealthResponse, LspResetRequest, McpResetRequest, OpenProjectRequest,
-    ResolveInteractionRequest, SetModelRoleRequest, SetThreadModeRequest, StartTurnRequest,
-    SteerTurnRequest, StudioAttachmentAdmissionContext, StudioAttachmentDraftSource, StudioError,
-    StudioSettingsSnapshot, ThreadPageQuery, UpdateGeneralSettingsRequest,
-    UpdateInstructionsSettingsRequest, UpdateMcpSettingsRequest, UpdatePermissionSettingsRequest,
-    UpdateProviderSettingsRequest, UpdateSkillsSettingsRequest, UpdateWebSearchSettingsRequest,
+    ResolveInteractionRequest, SearchSkillsRequest, SetModelRoleRequest, SetThreadModeRequest,
+    StartTurnRequest, SteerTurnRequest, StudioAttachmentAdmissionContext,
+    StudioAttachmentDraftSource, StudioError, StudioSettingsSnapshot, ThreadPageQuery,
+    UpdateGeneralSettingsRequest, UpdateInstructionsSettingsRequest, UpdateMcpSettingsRequest,
+    UpdatePermissionSettingsRequest, UpdateProviderSettingsRequest, UpdateSkillsSettingsRequest,
+    UpdateWebSearchSettingsRequest,
 };
 use pl_studio_runtime::StudioMode;
 use tokio::io::AsyncWriteExt;
@@ -146,6 +147,7 @@ pub(crate) fn api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(retry_persistence))
         .routes(routes!(read_skills))
         .routes(routes!(discover_skills))
+        .routes(routes!(search_skills))
         .routes(routes!(read_mcp))
         .routes(routes!(reset_mcp))
         .routes(routes!(read_lsp))
@@ -737,6 +739,21 @@ async fn discover_skills(
     Ok(Json(pl_studio_runtime::StudioSkillsStateSnapshot::from(
         snapshot,
     )))
+}
+
+#[utoipa::path(post, path = "/api/v1/runtime/projects/{project_id}/skills/search", operation_id = "skills.search", params(("project_id" = String, Path)), request_body = SearchSkillsRequest, responses(StudioApiErrors, (status = 200, body = crate::skills_schema::SkillSearchResultSchema)))]
+async fn search_skills(
+    State(state): State<AppState>,
+    Path(project_id): Path<String>,
+    ApiJson(request): ApiJson<SearchSkillsRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(
+        state
+            .runtime
+            .search_skills(&project_id, &request.query, request.limit.unwrap_or(50))
+            .await
+            .map_err(ApiError::from)?,
+    ))
 }
 
 #[utoipa::path(get, path = "/api/v1/runtime/mcp", operation_id = "mcp.read", responses(StudioApiErrors, (status = 200)))]

@@ -9,11 +9,12 @@ use anyhow::{Context, Error, Result};
 use pl_core::config::SkillsConfig;
 use pl_core::skill::{
     FileSystemSkillProvider, FrozenSkillCatalog, SkillCatalog, SkillProviderRegistration,
-    SkillProviderRequest, SkillRegistry,
+    SkillProviderRequest, SkillRegistry, SkillSelectionRequest, SkillSelector, SkillSummary,
 };
 use pl_protocol::{
     ObservedResource, ObservedResourceCommand, ObservedResourceKind, StateError, StateOperation,
 };
+use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
 
 mod system;
@@ -41,6 +42,16 @@ pub struct SkillsStateData {
     pub config_fingerprint: String,
     pub catalog_revision: u64,
     pub catalog: Arc<FrozenSkillCatalog>,
+}
+
+/// Cached Studio Skill search result over one published catalog revision.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillSearchResult {
+    pub project_id: String,
+    pub catalog_revision: u64,
+    pub matches: Vec<SkillSummary>,
+    pub truncated: bool,
 }
 
 impl SkillsStateSnapshot {
@@ -86,6 +97,50 @@ impl SkillCatalogRuntime {
             .get(project_id)
             .cloned()
             .unwrap_or_else(|| empty_snapshot(project_id))
+    }
+
+    /// Searches the last published catalog without performing discovery.
+    pub async fn search(
+        &self,
+        project_id: &str,
+        query: &str,
+        limit: usize,
+    ) -> Result<SkillSearchResult> {
+        anyhow::ensure!(
+            !query.trim().is_empty(),
+            "skill search query must not be empty"
+        );
+        anyhow::ensure!(
+            (1..=50).contains(&limit),
+            "skill search limit must be between 1 and 50"
+        );
+        let snapshot = self.read(project_id).await;
+        let data = snapshot
+            .state
+            .value()
+            .context("skills catalog is not initialized for the selected project")?;
+        let selection = SkillSelector.select(
+            &data.catalog.snapshot().skills,
+            SkillSelectionRequest {
+                query,
+                limit,
+                category: None,
+                excluded_names: &[],
+                model_invocable_only: false,
+            },
+        );
+        let truncated = selection.truncated();
+        Ok(SkillSearchResult {
+            project_id: project_id.to_string(),
+            catalog_revision: data.catalog_revision,
+            matches: selection
+                .matches
+                .into_iter()
+                .cloned()
+                .map(Into::into)
+                .collect(),
+            truncated,
+        })
     }
 
     pub(in crate::studio) fn system_skills_dir(&self) -> Option<PathBuf> {
@@ -448,5 +503,61 @@ mod tests {
             .find("demo")
             .expect("global disable must not hide the project Skill from settings");
         assert_eq!(skill.source, pl_core::skill::SkillSourceKind::Project);
+    }
+
+    #[tokio::test]
+    async fn search_uses_cached_full_catalog_without_discovery_or_revision_change() {
+        let root = tempfile::tempdir().unwrap();
+        let release_dir = root.path().join("skills/release-build-triage");
+        let slide_dir = root.path().join("skills/slide-deck-authoring");
+        std::fs::create_dir_all(&release_dir).unwrap();
+        std::fs::create_dir_all(&slide_dir).unwrap();
+        std::fs::write(
+            release_dir.join("SKILL.md"),
+            "---\nname: release-build-triage\ndescription: Diagnose Rust release linker failures\n---\nBody\n",
+        )
+        .unwrap();
+        std::fs::write(
+            slide_dir.join("SKILL.md"),
+            "---\nname: slide-deck-authoring\ndescription: Create presentations and speaker notes\ndisable-model-invocation: true\n---\nBody\n",
+        )
+        .unwrap();
+        let runtime = SkillCatalogRuntime::default();
+        let published = runtime
+            .discover("project", root.path(), &SkillsConfig::default())
+            .await
+            .unwrap();
+        let published_revision = published.state.revision();
+        let catalog_revision = published.state.value().unwrap().catalog_revision;
+
+        std::fs::write(
+            release_dir.join("SKILL.md"),
+            "---\nname: release-build-triage\ndescription: changed on disk\n---\nBody\n",
+        )
+        .unwrap();
+        let release = runtime
+            .search("project", "Rust release linker", 10)
+            .await
+            .unwrap();
+        let slide = runtime
+            .search("project", "presentation speaker notes", 10)
+            .await
+            .unwrap();
+        let after = runtime.read("project").await;
+
+        assert_eq!(release.catalog_revision, catalog_revision);
+        assert_eq!(release.matches[0].name, "release-build-triage");
+        assert!(release.matches[0].description.contains("Diagnose Rust"));
+        let slide = slide
+            .matches
+            .iter()
+            .find(|skill| skill.name == "slide-deck-authoring")
+            .expect("description search must return the model-disabled project Skill");
+        assert!(!slide.invocation.model_invocable);
+        assert_eq!(after.state.revision(), published_revision);
+        assert_eq!(
+            after.state.value().unwrap().catalog_revision,
+            catalog_revision
+        );
     }
 }

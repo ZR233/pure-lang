@@ -24,6 +24,14 @@ pub struct InstructionAssemblyRequest<'a> {
     pub workspace_documents: Option<&'a WorkspaceInstructions>,
     pub workspace_instructions: Option<&'a str>,
     pub subagent_constraint: Option<&'a str>,
+    pub skill_suggestions: Option<SkillSuggestionRequest<'a>>,
+}
+
+/// Turn-local task text used to suggest Skill summaries without loading them.
+#[derive(Debug, Clone, Copy)]
+pub struct SkillSuggestionRequest<'a> {
+    pub query: &'a str,
+    pub excluded_names: &'a [String],
 }
 
 /// 产品层为一次 turn 提供的角色或模式指令。
@@ -85,6 +93,7 @@ pub enum InstructionSourceKind {
     ProjectDoc,
     WorkspaceFallback,
     SkillInvocation,
+    SkillSuggestions,
 }
 
 impl InstructionSnapshot {
@@ -115,6 +124,7 @@ impl InstructionSourceKind {
                 | Self::SubagentConstraint
                 | Self::SubagentForce
                 | Self::SkillInvocation
+                | Self::SkillSuggestions
         )
     }
 }

@@ -30,3 +30,13 @@ Future<BridgeSkillsStateSnapshot> discoverSkills({required String projectId}) =>
     RustLib.instance.api.crateApiStudioHandlersProvidersDiscoverSkills(
       projectId: projectId,
     );
+
+Future<BridgeSkillSearchResult> searchSkills({
+  required String projectId,
+  required String query,
+  required int limit,
+}) => RustLib.instance.api.crateApiStudioHandlersProvidersSearchSkills(
+  projectId: projectId,
+  query: query,
+  limit: limit,
+);

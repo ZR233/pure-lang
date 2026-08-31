@@ -88,6 +88,10 @@ enum SkillCatalogSource {
 struct SkillsListInput {
     /// Optional category filter.
     category: Option<String>,
+    /// Optional natural-language name and description query.
+    query: Option<String>,
+    /// Maximum query results. Defaults to 10 and must be between 1 and 50.
+    limit: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -192,6 +196,7 @@ enum ReplaceMode {
 struct SkillsListOutput<'a> {
     success: bool,
     count: usize,
+    truncated: bool,
     skills: Vec<SkillModelSummary<'a>>,
 }
 
@@ -308,7 +313,7 @@ impl Tool for SkillsListTool {
     }
 
     fn description(&self) -> &str {
-        "List available project, user, and external skills with short metadata."
+        "List or search available skills by name and description before loading one by exact name."
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -341,18 +346,52 @@ impl Tool for SkillsListTool {
             let catalog =
                 catalog_for(&self.source, self.workspace.root(), &context, self.name()).await?;
             let snapshot = catalog.snapshot();
-            let skills = snapshot
-                .skills
-                .iter()
-                .filter(|skill| skill.invocation.model_invocable)
-                .filter(|skill| {
-                    input.category.as_deref().is_none_or(|category| {
-                        skill
-                            .category
-                            .as_deref()
-                            .is_some_and(|value| value.eq_ignore_ascii_case(category))
+            let query = input
+                .query
+                .as_deref()
+                .map(str::trim)
+                .filter(|query| !query.is_empty());
+            let (selected, truncated) = if let Some(query) = query {
+                let limit = input.limit.unwrap_or(10);
+                if !(1..=50).contains(&limit) {
+                    return Err(tool_error(self.name(), "limit must be between 1 and 50"));
+                }
+                let selection = SkillSelector.select(
+                    &snapshot.skills,
+                    SkillSelectionRequest {
+                        query,
+                        limit,
+                        category: input.category.as_deref(),
+                        excluded_names: &[],
+                        model_invocable_only: true,
+                    },
+                );
+                let truncated = selection.truncated();
+                (selection.matches, truncated)
+            } else {
+                let mut skills = snapshot
+                    .skills
+                    .iter()
+                    .filter(|skill| skill.invocation.model_invocable)
+                    .filter(|skill| {
+                        input.category.as_deref().is_none_or(|category| {
+                            skill
+                                .category
+                                .as_deref()
+                                .is_some_and(|value| value.eq_ignore_ascii_case(category))
+                        })
                     })
-                })
+                    .collect::<Vec<_>>();
+                skills.sort_by(|left, right| {
+                    left.name
+                        .to_ascii_lowercase()
+                        .cmp(&right.name.to_ascii_lowercase())
+                        .then_with(|| left.name.cmp(&right.name))
+                });
+                (skills, false)
+            };
+            let skills = selected
+                .into_iter()
                 .map(|skill| SkillModelSummary {
                     name: &skill.name,
                     description: &skill.description,
@@ -361,6 +400,7 @@ impl Tool for SkillsListTool {
             json_output(SkillsListOutput {
                 success: true,
                 count: skills.len(),
+                truncated,
                 skills,
             })
         }

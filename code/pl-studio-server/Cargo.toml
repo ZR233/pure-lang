@@ -5,6 +5,10 @@ edition.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+default = []
+live-tests = []
+
 [dependencies]
 pl-protocol = { workspace = true }
 pl-studio-runtime = { workspace = true }
@@ -26,5 +30,7 @@ utoipa-swagger-ui = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]
+reqwest = { workspace = true }
 tempfile = { workspace = true }
+toml = { workspace = true }
 tower = { workspace = true }

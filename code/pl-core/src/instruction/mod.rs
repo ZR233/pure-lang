@@ -9,7 +9,7 @@ pub use assembler::InstructionAssembler;
 pub use profile::InstructionProfile;
 pub use types::{
     ExecutionInstructionProfile, InstructionAssemblyRequest, InstructionBlock, InstructionBundle,
-    InstructionSnapshot, InstructionSource, InstructionSourceKind,
+    InstructionSnapshot, InstructionSource, InstructionSourceKind, SkillSuggestionRequest,
 };
 
 #[cfg(test)]

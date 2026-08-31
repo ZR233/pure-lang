@@ -5,6 +5,7 @@ use pl_protocol::Result;
 
 use super::super::TurnEngine;
 use crate::ReasoningEffort;
+use crate::instruction::SkillSuggestionRequest;
 use crate::instruction::{InstructionAssembler, InstructionAssemblyRequest, InstructionSnapshot};
 use crate::turn::TurnRequest;
 
@@ -17,6 +18,11 @@ pub(super) fn instruction_snapshot(
     let mut snapshot = match request.instruction_snapshot.clone() {
         Some(snapshot) => snapshot,
         None => {
+            let excluded_skill_names = request
+                .skill_activations
+                .iter()
+                .map(|activation| activation.name.clone())
+                .collect::<Vec<_>>();
             let assembly_request = InstructionAssemblyRequest {
                 instructions: None,
                 skills: core.skills.as_ref(),
@@ -31,6 +37,10 @@ pub(super) fn instruction_snapshot(
                 workspace_documents: None,
                 workspace_instructions: request.workspace_instructions.as_deref(),
                 subagent_constraint: None,
+                skill_suggestions: Some(SkillSuggestionRequest {
+                    query: &request.prompt,
+                    excluded_names: &excluded_skill_names,
+                }),
             };
             match core.instruction_profile.as_ref() {
                 Some(profile) => {

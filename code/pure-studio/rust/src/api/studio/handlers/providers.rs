@@ -1,7 +1,10 @@
 use crate::api::studio::bridge_runtime::active_bridge;
-use crate::api::studio::convert::runtime::{bridge_provider_usage_state, bridge_skills_state};
+use crate::api::studio::convert::runtime::{
+    bridge_provider_usage_state, bridge_skill_search_result, bridge_skills_state,
+};
 use crate::api::studio::types::{
-    BridgeError, BridgeProviderUsageStateSnapshot, BridgeSkillsStateSnapshot,
+    BridgeError, BridgeProviderUsageStateSnapshot, BridgeSkillSearchResult,
+    BridgeSkillsStateSnapshot,
 };
 // ── Provider usage ──
 
@@ -38,6 +41,20 @@ pub async fn discover_skills(project_id: String) -> Result<BridgeSkillsStateSnap
     let bridge = active_bridge().await?;
     Ok(skills_state(
         bridge.studio.discover_skills(&project_id).await?,
+    ))
+}
+
+pub async fn search_skills(
+    project_id: String,
+    query: String,
+    limit: u32,
+) -> Result<BridgeSkillSearchResult, BridgeError> {
+    let bridge = active_bridge().await?;
+    Ok(bridge_skill_search_result(
+        bridge
+            .studio
+            .search_skills(&project_id, &query, limit as usize)
+            .await?,
     ))
 }
 

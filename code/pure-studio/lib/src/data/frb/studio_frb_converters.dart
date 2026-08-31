@@ -495,30 +495,7 @@ SkillsStateSnapshot _skillsStateFromFrb(
     ],
     warnings: data.warnings,
     complete: data.complete,
-    summaries: data.skills
-        .map(
-          (skill) => SkillSummaryView(
-            name: skill.name,
-            description: skill.description,
-            category: skill.category,
-            platforms: skill.platforms,
-            source: skill.source,
-            providerId: skill.providerId,
-            modelInvocable: skill.invocation.modelInvocable,
-            userInvocable: skill.invocation.userInvocable,
-            resourceBase: skill.resourceBase.when(
-              directory: (path) =>
-                  SkillResourceBaseView(SkillResourceBaseKind.directory, path),
-              url: (url) =>
-                  SkillResourceBaseView(SkillResourceBaseKind.url, url),
-              opaque: (description) => SkillResourceBaseView(
-                SkillResourceBaseKind.opaque,
-                description,
-              ),
-            ),
-          ),
-        )
-        .toList(),
+    summaries: data.skills.map(_skillSummaryFromFrb).toList(),
   );
   return SkillsStateSnapshot.fromState(
     projectId: snapshot.projectId,
@@ -543,6 +520,37 @@ SkillsStateSnapshot _skillsStateFromFrb(
         field0,
       ),
     },
+  );
+}
+
+SkillSearchResultView _skillSearchResultFromFrb(
+  frb.BridgeSkillSearchResult result,
+) {
+  return SkillSearchResultView(
+    projectId: result.projectId,
+    catalogRevision: result.catalogRevision.toInt(),
+    matches: result.matches.map(_skillSummaryFromFrb).toList(),
+    truncated: result.truncated,
+  );
+}
+
+SkillSummaryView _skillSummaryFromFrb(frb.SkillSummaryDto skill) {
+  return SkillSummaryView(
+    name: skill.name,
+    description: skill.description,
+    category: skill.category,
+    platforms: skill.platforms,
+    source: skill.source,
+    providerId: skill.providerId,
+    modelInvocable: skill.invocation.modelInvocable,
+    userInvocable: skill.invocation.userInvocable,
+    resourceBase: skill.resourceBase.when(
+      directory: (path) =>
+          SkillResourceBaseView(SkillResourceBaseKind.directory, path),
+      url: (url) => SkillResourceBaseView(SkillResourceBaseKind.url, url),
+      opaque: (description) =>
+          SkillResourceBaseView(SkillResourceBaseKind.opaque, description),
+    ),
   );
 }
 

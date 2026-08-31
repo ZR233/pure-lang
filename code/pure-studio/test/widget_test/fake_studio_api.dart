@@ -76,8 +76,13 @@ class _FakeStudioApi implements StudioApi {
   String? discoverProjectId;
   int discoverCallCount = 0;
   int readSkillsCallCount = 0;
+  int searchSkillsCallCount = 0;
+  final List<({String projectId, String query, int limit})>
+  skillSearchRequests = [];
+  final List<Completer<SkillSearchResultView>> blockedSkillSearchResponses = [];
   int _skillsCatalogRevision = 0;
   List<String> _discoveredSkills = const [];
+  List<SkillSummaryView> discoveredSkillSummaries = const [];
   int loadProviderUsagesCount = 0;
   Completer<List<ProviderUsageView>>? blockedProviderUsageLoad;
   Completer<void>? blockedThreadCancellation;
@@ -663,6 +668,33 @@ class _FakeStudioApi implements StudioApi {
   }
 
   @override
+  Future<SkillSearchResultView> searchSkills(
+    String projectId,
+    String query, {
+    int limit = 50,
+  }) async {
+    searchSkillsCallCount += 1;
+    skillSearchRequests.add((projectId: projectId, query: query, limit: limit));
+    if (blockedSkillSearchResponses.isNotEmpty) {
+      return blockedSkillSearchResponses.removeAt(0).future;
+    }
+    final normalizedQuery = query.toLowerCase();
+    final allMatches = _skillSummaries()
+        .where(
+          (skill) =>
+              skill.name.toLowerCase().contains(normalizedQuery) ||
+              skill.description.toLowerCase().contains(normalizedQuery),
+        )
+        .toList();
+    return SkillSearchResultView(
+      projectId: projectId,
+      catalogRevision: _skillsCatalogRevision,
+      matches: allMatches.take(limit).toList(),
+      truncated: allMatches.length > limit,
+    );
+  }
+
+  @override
   Future<McpStateSnapshot> readMcpState() async {
     readMcpStateCount += 1;
     return _currentState.mcpState;
@@ -932,14 +964,42 @@ class _FakeStudioApi implements StudioApi {
   }
 
   SkillsStateSnapshot _skillsState(String projectId, {int revision = 0}) {
-    return SkillsStateSnapshot(
+    return SkillsStateSnapshot.fromState(
       projectId: projectId,
-      configFingerprint: 'fake-skills',
-      catalogRevision: revision,
-      skills: discoveredSkills,
-      warnings: const [],
-      revision: revision,
+      state: ReadyObservedResource(
+        revision: revision,
+        updatedAt: revision,
+        lastCheckedAt: null,
+        value: SkillsStateData(
+          configFingerprint: 'fake-skills',
+          catalogRevision: revision,
+          skills: discoveredSkills,
+          summaries: _skillSummaries(),
+          warnings: const [],
+        ),
+      ),
     );
+  }
+
+  List<SkillSummaryView> _skillSummaries() {
+    if (discoveredSkillSummaries.isNotEmpty) {
+      return discoveredSkillSummaries;
+    }
+    return [
+      for (final skill in discoveredSkills)
+        SkillSummaryView(
+          name: skill,
+          description: 'Description for $skill',
+          source: 'fake',
+          providerId: 'fake',
+          modelInvocable: true,
+          userInvocable: true,
+          resourceBase: const SkillResourceBaseView(
+            SkillResourceBaseKind.opaque,
+            'fake',
+          ),
+        ),
+    ];
   }
 }
 

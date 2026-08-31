@@ -188,6 +188,22 @@ pub(crate) fn bridge_skills_state(state: StudioSkillsStateSnapshot) -> BridgeSki
     }
 }
 
+pub(crate) fn bridge_skill_search_result(
+    result: pl_studio_runtime::SkillSearchResult,
+) -> BridgeSkillSearchResult {
+    BridgeSkillSearchResult {
+        project_id: result.project_id,
+        catalog_revision: result.catalog_revision,
+        matches: result
+            .matches
+            .into_iter()
+            .map(Into::into)
+            .map(skill_summary)
+            .collect(),
+        truncated: result.truncated,
+    }
+}
+
 fn mode_summary(mode: pl_core::skill::SkillMetadata) -> ModeSummaryDto {
     let metadata = mode
         .mode

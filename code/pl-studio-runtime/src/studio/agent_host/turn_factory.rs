@@ -277,6 +277,11 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         } else {
             pl_core::skill::SkillUserInvocationLoad::default()
         };
+        let excluded_skill_names = user_skill_load
+            .activations
+            .iter()
+            .map(|activation| activation.name.clone())
+            .collect::<Vec<_>>();
         let frozen_agent_profile = if is_root {
             None
         } else {
@@ -557,6 +562,8 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             workspace_instructions: &workspace_instructions,
             skill_catalog: skill_catalog.snapshot(),
             skills_config: &turn_skills_config,
+            skill_query: &input_message,
+            excluded_skill_names: &excluded_skill_names,
             subagent_constraint: context
                 .input
                 .payload
@@ -632,6 +639,8 @@ struct StudioInstructionContext<'a> {
     workspace_instructions: &'a str,
     skill_catalog: &'a pl_core::skill::SkillCatalog,
     skills_config: &'a pl_core::config::SkillsConfig,
+    skill_query: &'a str,
+    excluded_skill_names: &'a [String],
     subagent_constraint: Option<&'a str>,
 }
 
@@ -650,6 +659,10 @@ fn instruction_snapshot(context: StudioInstructionContext<'_>) -> Result<Instruc
         workspace_documents: context.workspace_documents,
         workspace_instructions: Some(context.workspace_instructions),
         subagent_constraint: context.subagent_constraint,
+        skill_suggestions: Some(pl_core::instruction::SkillSuggestionRequest {
+            query: context.skill_query,
+            excluded_names: context.excluded_skill_names,
+        }),
     })
 }
 

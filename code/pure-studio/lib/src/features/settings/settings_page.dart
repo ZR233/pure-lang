@@ -106,13 +106,15 @@ class _SettingsScaffold extends StatelessWidget {
       ),
       InstructionsTab(settings: state.instructions),
       SkillsTab(
-        skills: {
+        skills: state.catalogSkillSummaries,
+        fallbackSkillNames: {
           ...state.activeSkills,
           ...state.catalogSkills,
           ...state.skills.disabled,
         }.toList(),
         settings: state.skills,
         projectId: state.selectedProjectId,
+        catalogRevision: state.catalogRevision,
         tabIndex: _SettingsTab.skills.index,
       ),
       RolesTab(providers: state.providers, roles: state.roles),

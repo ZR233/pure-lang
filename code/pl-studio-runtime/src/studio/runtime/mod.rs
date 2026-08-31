@@ -39,7 +39,7 @@ pub(crate) use provider_usage::ProviderUsageRuntime;
 pub use provider_usage::{ProviderUsageStateData, ProviderUsageStateSnapshot};
 pub(crate) use shutdown_progress::ShutdownProgressBus;
 pub(crate) use skill_catalog::SkillCatalogRuntime;
-pub use skill_catalog::SkillsStateSnapshot;
+pub use skill_catalog::{SkillSearchResult, SkillsStateSnapshot};
 pub(crate) use updater::StudioUpdateRuntime;
 pub use updater::*;
 

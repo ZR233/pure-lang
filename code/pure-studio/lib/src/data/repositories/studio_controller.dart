@@ -970,6 +970,15 @@ class StudioController extends _$StudioController {
     return snapshot.skills;
   }
 
+  Future<SkillSearchResultView?> searchSkills(
+    String query, {
+    int limit = 50,
+  }) async {
+    final projectId = state.value?.selectedProjectId;
+    if (projectId == null) return null;
+    return _api.searchSkills(projectId, query, limit: limit);
+  }
+
   Future<void> refreshMcpState() async {
     await _applyMcpCommand(_api.readMcpState);
   }

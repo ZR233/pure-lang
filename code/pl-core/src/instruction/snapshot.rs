@@ -117,7 +117,13 @@ impl InstructionSnapshot {
             "turnSkills",
             MessageRole::User,
             "# Turn Skill Instructions",
-            select_blocks(&self.user, &[InstructionSourceKind::SkillInvocation]),
+            select_blocks(
+                &self.user,
+                &[
+                    InstructionSourceKind::SkillSuggestions,
+                    InstructionSourceKind::SkillInvocation,
+                ],
+            ),
         );
         InstructionBundle {
             instructions: self.base.content.clone(),

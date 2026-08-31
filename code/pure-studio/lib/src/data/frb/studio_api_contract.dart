@@ -105,6 +105,11 @@ abstract class StudioApi {
   Future<ProviderUsageStateSnapshot> checkProviderUsage();
   Future<SkillsStateSnapshot> readSkillsState(String projectId);
   Future<SkillsStateSnapshot> discoverSkills(String projectId);
+  Future<SkillSearchResultView> searchSkills(
+    String projectId,
+    String query, {
+    int limit = 50,
+  });
   Future<McpStateSnapshot> readMcpState();
   Future<McpStateSnapshot> resetMcpServer(String serverId);
   Future<McpStateSnapshot> resetAllMcp();
@@ -1060,6 +1065,21 @@ class FrbStudioApi implements StudioApi {
     await _ensureReady();
     return _skillsStateFromFrb(
       await _bridgeCall(() => frb.discoverSkills(projectId: projectId)),
+    );
+  }
+
+  @override
+  Future<SkillSearchResultView> searchSkills(
+    String projectId,
+    String query, {
+    int limit = 50,
+  }) async {
+    await _ensureReady();
+    return _skillSearchResultFromFrb(
+      await _bridgeCall(
+        () =>
+            frb.searchSkills(projectId: projectId, query: query, limit: limit),
+      ),
     );
   }
 

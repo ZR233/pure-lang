@@ -1,6 +1,7 @@
 mod catalog;
 mod provider;
 mod scanning;
+mod selection;
 mod util;
 
 use std::path::{Path, PathBuf};
@@ -10,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::SkillsConfig;
 
+pub(crate) use catalog::build_skill_suggestions_from_catalog;
 pub use catalog::{build_skills_prompt, build_skills_prompt_from_catalog};
 pub use provider::{
     BUILTIN_MODE_IDS, BUILTIN_MODE_PROVIDER_ID, FileSystemSkillProvider, FrozenSkillCatalog,
@@ -23,6 +25,7 @@ pub use scanning::{
     list_support_files, project_skill_dir_for_create, read_skill_file, support_file_path,
     validate_skill_document,
 };
+pub use selection::{SkillSelection, SkillSelectionRequest, SkillSelector};
 
 pub const SKILL_FILE_NAME: &str = "SKILL.md";
 pub const USAGE_FILE_NAME: &str = ".usage.json";

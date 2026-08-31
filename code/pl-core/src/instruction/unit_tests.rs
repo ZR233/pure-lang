@@ -15,6 +15,26 @@ fn temp_dir(name: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("pure-instruction-{name}-{stamp}"))
 }
 
+fn instruction_skill(
+    root: &std::path::Path,
+    name: &str,
+    description: &str,
+) -> crate::skill::SkillMetadata {
+    let path = root.join("skills").join(name);
+    crate::skill::SkillMetadata {
+        name: name.to_string(),
+        description: description.to_string(),
+        category: None,
+        platforms: Vec::new(),
+        source: crate::skill::SkillSourceKind::Project,
+        path: path.clone(),
+        provider_id: crate::skill::SkillProviderId::new("test").unwrap(),
+        invocation: crate::skill::SkillInvocationPolicy::default(),
+        resource_base: crate::skill::SkillResourceBase::Directory { path },
+        mode: None,
+    }
+}
+
 #[test]
 fn profile_base_override_snapshot_constructs_host_instruction_block() {
     let snapshot =
@@ -62,6 +82,7 @@ fn assembles_three_layers_in_stable_order() {
         workspace_documents: None,
         workspace_instructions: None,
         subagent_constraint: Some("subagent rule"),
+        skill_suggestions: None,
     })
     .unwrap();
 
@@ -115,6 +136,7 @@ fn uses_preloaded_workspace_documents_for_non_local_workspace() {
         workspace_documents: Some(&documents),
         workspace_instructions: Some("remote project rules"),
         subagent_constraint: None,
+        skill_suggestions: None,
     })
     .unwrap();
 
@@ -149,6 +171,7 @@ fn platform_block_is_after_mode_and_before_config_developer() {
         workspace_documents: None,
         workspace_instructions: None,
         subagent_constraint: None,
+        skill_suggestions: None,
     })
     .unwrap();
 
@@ -212,6 +235,7 @@ fn filters_empty_blocks_and_uses_model_base() {
         workspace_documents: None,
         workspace_instructions: Some(""),
         subagent_constraint: None,
+        skill_suggestions: None,
     })
     .unwrap();
 
@@ -241,6 +265,7 @@ fn profile_can_override_base_and_add_context_blocks() {
             workspace_documents: None,
             workspace_instructions: Some("workspace"),
             subagent_constraint: None,
+            skill_suggestions: None,
         },
         &profile,
     )
@@ -393,6 +418,7 @@ fn config_base_override_replaces_model_base() {
         workspace_documents: None,
         workspace_instructions: None,
         subagent_constraint: None,
+        skill_suggestions: None,
     })
     .unwrap();
 
@@ -420,6 +446,7 @@ fn built_in_base_requires_doc_first_and_final_review() {
         workspace_documents: None,
         workspace_instructions: None,
         subagent_constraint: None,
+        skill_suggestions: None,
     })
     .unwrap();
 
@@ -462,6 +489,7 @@ fn disabled_skills_do_not_inject_a_frozen_catalog() {
         workspace_documents: None,
         workspace_instructions: None,
         subagent_constraint: None,
+        skill_suggestions: None,
     })
     .unwrap();
 
@@ -470,6 +498,155 @@ fn disabled_skills_do_not_inject_a_frozen_catalog() {
             .developer
             .iter()
             .all(|block| block.source.kind != InstructionSourceKind::Skills)
+    );
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn skill_suggestions_are_turn_overlays_and_exclude_loaded_names() {
+    let dir = temp_dir("skill-suggestions");
+    fs::create_dir_all(&dir).unwrap();
+    let skills = crate::config::SkillsConfig::default();
+    let catalog = crate::skill::SkillCatalog {
+        project_dir: dir.join("skills"),
+        skills: vec![
+            instruction_skill(
+                &dir,
+                "release-build-triage",
+                "Diagnose Rust release linker and Cargo profile failures.",
+            ),
+            instruction_skill(&dir, "rust-formatting", "Format Rust source files."),
+        ],
+        modes: Vec::new(),
+        warnings: Vec::new(),
+        complete: true,
+    };
+    let model = ModelInfo::fallback("test-model");
+    let first = InstructionAssembler::assemble(InstructionAssemblyRequest {
+        instructions: None,
+        skills: Some(&skills),
+        skill_catalog: Some(&catalog),
+        execution_profile: None,
+        model: &model,
+        workspace_root: &dir,
+        current_dir: &dir,
+        workspace_documents: None,
+        workspace_instructions: None,
+        subagent_constraint: None,
+        skill_suggestions: Some(SkillSuggestionRequest {
+            query: "diagnose a Rust release linker failure",
+            excluded_names: &[],
+        }),
+    })
+    .unwrap();
+    let excluded = vec!["RELEASE-BUILD-TRIAGE".to_string()];
+    let second = InstructionAssembler::assemble(InstructionAssemblyRequest {
+        instructions: None,
+        skills: Some(&skills),
+        skill_catalog: Some(&catalog),
+        execution_profile: None,
+        model: &model,
+        workspace_root: &dir,
+        current_dir: &dir,
+        workspace_documents: None,
+        workspace_instructions: None,
+        subagent_constraint: None,
+        skill_suggestions: Some(SkillSuggestionRequest {
+            query: "diagnose a Rust release linker failure",
+            excluded_names: &excluded,
+        }),
+    })
+    .unwrap();
+
+    let first_catalog = first
+        .developer
+        .iter()
+        .find(|block| block.source.kind == InstructionSourceKind::Skills)
+        .unwrap();
+    let second_catalog = second
+        .developer
+        .iter()
+        .find(|block| block.source.kind == InstructionSourceKind::Skills)
+        .unwrap();
+    assert_eq!(first_catalog.content, second_catalog.content);
+    let suggestion = first.user.last().unwrap();
+    assert_eq!(
+        suggestion.source.kind,
+        InstructionSourceKind::SkillSuggestions
+    );
+    assert!(suggestion.content.contains("release-build-triage"));
+    assert!(suggestion.content.contains("skill_view"));
+    let turn_overlay = first
+        .to_bundle()
+        .prelude_messages
+        .into_iter()
+        .find(|message| {
+            message
+                .content
+                .text_value()
+                .starts_with("# Turn Skill Instructions")
+        })
+        .expect("Skill suggestions must enter the model-visible Turn overlay");
+    assert_eq!(turn_overlay.role, MessageRole::User);
+    assert!(
+        turn_overlay
+            .content
+            .text_value()
+            .contains("<skill_suggestions>")
+    );
+    let excluded_suggestion = second
+        .user
+        .iter()
+        .find(|block| block.source.kind == InstructionSourceKind::SkillSuggestions)
+        .unwrap();
+    assert!(!excluded_suggestion.content.contains("release-build-triage"));
+    assert!(excluded_suggestion.content.contains("rust-formatting"));
+    assert!(
+        first
+            .user
+            .iter()
+            .all(|block| block.source.kind != InstructionSourceKind::SkillInvocation)
+    );
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn unmatched_skill_query_does_not_add_a_turn_overlay() {
+    let dir = temp_dir("skill-suggestions-empty");
+    fs::create_dir_all(&dir).unwrap();
+    let skills = crate::config::SkillsConfig::default();
+    let catalog = crate::skill::SkillCatalog {
+        project_dir: dir.join("skills"),
+        skills: vec![instruction_skill(&dir, "rust-formatting", "Format Rust")],
+        modes: Vec::new(),
+        warnings: Vec::new(),
+        complete: true,
+    };
+    let model = ModelInfo::fallback("test-model");
+
+    let snapshot = InstructionAssembler::assemble(InstructionAssemblyRequest {
+        instructions: None,
+        skills: Some(&skills),
+        skill_catalog: Some(&catalog),
+        execution_profile: None,
+        model: &model,
+        workspace_root: &dir,
+        current_dir: &dir,
+        workspace_documents: None,
+        workspace_instructions: None,
+        subagent_constraint: None,
+        skill_suggestions: Some(SkillSuggestionRequest {
+            query: "tell me a joke about penguins",
+            excluded_names: &[],
+        }),
+    })
+    .unwrap();
+
+    assert!(
+        snapshot
+            .user
+            .iter()
+            .all(|block| block.source.kind != InstructionSourceKind::SkillSuggestions)
     );
     fs::remove_dir_all(dir).unwrap();
 }

@@ -984,6 +984,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeSkillResourceBase dco_decode_bridge_skill_resource_base(dynamic raw);
 
   @protected
+  BridgeSkillSearchResult dco_decode_bridge_skill_search_result(dynamic raw);
+
+  @protected
   BridgeSkillsResourceState dco_decode_bridge_skills_resource_state(
     dynamic raw,
   );
@@ -2917,6 +2920,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeSkillResourceBase sse_decode_bridge_skill_resource_base(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeSkillSearchResult sse_decode_bridge_skill_search_result(
     SseDeserializer deserializer,
   );
 
@@ -5244,6 +5252,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_skill_resource_base(
     BridgeSkillResourceBase self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_skill_search_result(
+    BridgeSkillSearchResult self,
     SseSerializer serializer,
   );
 

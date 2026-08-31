@@ -5,9 +5,9 @@ use anyhow::{Context, Result};
 
 use crate::resolve_workspace_root;
 
-use super::super::SkillsStateSnapshot;
 use super::super::StudioRuntime;
 use super::super::lsp_state::health;
+use super::super::{SkillSearchResult, SkillsStateSnapshot};
 
 impl StudioRuntime {
     pub async fn activate_project(&self, project_id: &str) -> Result<()> {
@@ -17,11 +17,7 @@ impl StudioRuntime {
         }) {
             anyhow::bail!("selected project is blocked by a recovery issue");
         }
-        let project = self
-            .store
-            .read_project(project_id)
-            .await?
-            .context("selected project not found")?;
+        let project = self.project_record(project_id).await?;
         if let Some(server_id) = &project.ssh_server_id {
             let host = self
                 .ssh_manager
@@ -119,11 +115,7 @@ impl StudioRuntime {
     }
 
     pub async fn discover_skills(&self, project_id: &str) -> Result<SkillsStateSnapshot> {
-        let project = self
-            .store
-            .read_project(project_id)
-            .await?
-            .context("selected project not found")?;
+        let project = self.project_record(project_id).await?;
         if project.ssh_server_id.is_some() {
             return Ok(self.skills.read(project_id).await);
         }
@@ -132,6 +124,16 @@ impl StudioRuntime {
         self.skills
             .discover(project_id, &workspace_root, &settings.config.skills)
             .await
+    }
+
+    pub async fn search_skills(
+        &self,
+        project_id: &str,
+        query: &str,
+        limit: usize,
+    ) -> Result<SkillSearchResult> {
+        self.project_record(project_id).await?;
+        self.skills.search(project_id, query, limit).await
     }
 
     pub async fn probe_lsp_server(&self, project_id: &str) -> Result<()> {
@@ -228,15 +230,21 @@ impl StudioRuntime {
     }
 
     async fn project_workspace_root(&self, project_id: &str) -> Result<std::path::PathBuf> {
-        let project = self
-            .store
-            .read_project(project_id)
-            .await?
-            .context("selected project not found")?;
+        let project = self.project_record(project_id).await?;
         if project.ssh_server_id.is_some() {
             Ok(std::path::PathBuf::from(project.path))
         } else {
             Ok(resolve_workspace_root(Path::new(&project.path))?)
         }
+    }
+
+    async fn project_record(&self, project_id: &str) -> Result<crate::ProjectRecord> {
+        self.agent_facility
+            .product_events
+            .project_snapshot()
+            .await
+            .into_iter()
+            .find(|project| project.id == project_id)
+            .context("selected project not found")
     }
 }

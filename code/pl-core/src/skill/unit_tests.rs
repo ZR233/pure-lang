@@ -8,7 +8,7 @@ use pretty_assertions::assert_eq;
 use super::scanning::{find_skill_files, support_file_path, validate_skill_document};
 use super::{
     MAX_SKILL_SCAN_DEPTH, SKILL_FILE_NAME, SkillCatalog, SkillMetadata, SkillSourceKind,
-    SkillsConfig, build_skills_prompt, bump_project_view,
+    SkillsConfig, build_skills_prompt, build_skills_prompt_from_catalog, bump_project_view,
 };
 
 fn temp_dir(name: &str) -> PathBuf {
@@ -34,6 +34,22 @@ fn discover_without_agents_home(
     system: Option<&Path>,
 ) -> SkillCatalog {
     SkillCatalog::discover_with_agents_user_dir(workspace, config, system, None).unwrap()
+}
+
+fn catalog_skill(name: &str, description: &str) -> SkillMetadata {
+    let path = PathBuf::from("skills").join(name);
+    SkillMetadata {
+        name: name.to_string(),
+        description: description.to_string(),
+        category: None,
+        platforms: Vec::new(),
+        source: SkillSourceKind::Project,
+        path: path.clone(),
+        provider_id: super::SkillProviderId::new("test").unwrap(),
+        invocation: super::SkillInvocationPolicy::default(),
+        resource_base: super::SkillResourceBase::Directory { path },
+        mode: None,
+    }
 }
 
 #[test]
@@ -444,4 +460,42 @@ fn skills_prompt_includes_system_readonly_guidance() {
     let _ = fs::remove_dir_all(workspace);
     let _ = fs::remove_dir_all(user);
     fs::remove_dir_all(system).unwrap();
+}
+
+#[test]
+fn skills_prompt_sorts_and_only_normalizes_the_model_projection() {
+    let long_description = format!("first\n\tsecond   {}", "界".repeat(510));
+    let mut hidden = catalog_skill("hidden", "not model visible");
+    hidden.invocation.model_invocable = false;
+    let catalog = SkillCatalog {
+        project_dir: PathBuf::from("skills"),
+        skills: vec![
+            catalog_skill("Zulu", "last"),
+            catalog_skill("alpha", &long_description),
+            hidden,
+        ],
+        modes: Vec::new(),
+        warnings: Vec::new(),
+        complete: true,
+    };
+
+    let prompt = build_skills_prompt_from_catalog(&catalog);
+
+    assert!(prompt.find("`alpha`").unwrap() < prompt.find("`Zulu`").unwrap());
+    assert!(!prompt.contains("`hidden`"));
+    assert!(prompt.contains("first second"));
+    let projected = prompt
+        .lines()
+        .find(|line| line.starts_with("- `alpha`:"))
+        .unwrap();
+    assert_eq!(
+        projected
+            .strip_prefix("- `alpha`: ")
+            .unwrap()
+            .chars()
+            .count(),
+        500
+    );
+    assert!(projected.ends_with("..."));
+    assert_eq!(catalog.find("alpha").unwrap().description, long_description);
 }
