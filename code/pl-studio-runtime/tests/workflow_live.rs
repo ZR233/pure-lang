@@ -167,6 +167,7 @@ async fn run_live_mode(
             "awaiting_confirmation",
             "editing_documents",
             "working",
+            "integrating",
             "reviewing",
             "completed",
         ] {

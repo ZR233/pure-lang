@@ -69,7 +69,12 @@ Future<void> _configureAgents(
   await session.tap(find.byValueKey('settings-open'));
   await session.waitFor(find.byValueKey('settings-page'));
   await session.tap(find.byValueKey('settings-tab-agents'));
-  for (final route in [options.executor, options.worktreeExecutor]) {
+  for (final route in [
+    options.explorer,
+    options.executor,
+    options.worktreeExecutor,
+    options.reviewer,
+  ]) {
     final model = find.byValueKey('settings-role-${route.role}-model');
     await session.scrollUntilVisible(
       find.byValueKey('settings-pane-scroll'),
@@ -227,6 +232,8 @@ class _Options {
     required this.finalScreenshot,
     required this.executor,
     required this.worktreeExecutor,
+    required this.explorer,
+    required this.reviewer,
     required this.timeout,
     required this.stallTimeout,
   });
@@ -238,6 +245,8 @@ class _Options {
   final String finalScreenshot;
   final _Route executor;
   final _Route worktreeExecutor;
+  final _Route explorer;
+  final _Route reviewer;
   final Duration timeout;
   final Duration stallTimeout;
 
@@ -254,6 +263,10 @@ class _Options {
     final executorModel = required('--executor-model');
     final worktreeProvider = required('--worktree-provider');
     final worktreeModel = required('--worktree-model');
+    final explorerProvider = required('--explorer-provider');
+    final explorerModel = required('--explorer-model');
+    final reviewerProvider = required('--reviewer-provider');
+    final reviewerModel = required('--reviewer-model');
     return _Options(
       vmServiceUrl: required('--vm-service-url'),
       workspace: required('--workspace'),
@@ -266,6 +279,8 @@ class _Options {
         worktreeProvider,
         worktreeModel,
       ),
+      explorer: _Route('explorer', explorerProvider, explorerModel),
+      reviewer: _Route('reviewer', reviewerProvider, reviewerModel),
       timeout: Duration(seconds: int.parse(required('--timeout-seconds'))),
       stallTimeout: Duration(
         seconds: int.parse(required('--stall-timeout-seconds')),

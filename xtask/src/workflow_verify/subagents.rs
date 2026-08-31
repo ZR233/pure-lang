@@ -82,6 +82,8 @@ pub(super) fn run(options: VerifySubagentsOptions) -> Result<()> {
     disable_executor_profiles(&isolated_config)?;
     let executor = read_route(&isolated_config, "executor")?;
     let worktree_executor = read_route(&isolated_config, "worktree_executor")?;
+    let explorer = read_route(&isolated_config, "explorer")?;
+    let reviewer = read_route(&isolated_config, "reviewer")?;
     let installed_agents = installed_home.join("agents");
     if installed_agents.is_dir() {
         copy_directory(&installed_agents, &studio_home.join("agents"))?;
@@ -105,6 +107,8 @@ pub(super) fn run(options: VerifySubagentsOptions) -> Result<()> {
         prompt: &prompt,
         executor: &executor,
         worktree_executor: &worktree_executor,
+        explorer: &explorer,
+        reviewer: &reviewer,
         deadline,
     })
     .and_then(|_| validate_fixture(&fixture, &artifact_dir))
@@ -155,6 +159,8 @@ struct GuiRun<'a> {
     prompt: &'a Path,
     executor: &'a Route,
     worktree_executor: &'a Route,
+    explorer: &'a Route,
+    reviewer: &'a Route,
     deadline: Instant,
 }
 
@@ -253,6 +259,10 @@ fn driver_args(run: &GuiRun<'_>, vm_service: &str) -> Vec<OsString> {
             run.worktree_executor.provider.as_str(),
         ),
         ("--worktree-model", run.worktree_executor.model.as_str()),
+        ("--explorer-provider", run.explorer.provider.as_str()),
+        ("--explorer-model", run.explorer.model.as_str()),
+        ("--reviewer-provider", run.reviewer.provider.as_str()),
+        ("--reviewer-model", run.reviewer.model.as_str()),
         ("--timeout-seconds", "1800"),
     ] {
         args.push(OsString::from(name));
@@ -297,6 +307,7 @@ fn write_driver_receipt(log: &Path, output: &Path) -> Result<()> {
 
 fn prepare_fixture(path: &Path) -> Result<()> {
     fs::create_dir_all(path.join("src"))?;
+    fs::create_dir_all(path.join("design"))?;
     fs::create_dir_all(path.join("allowed"))?;
     fs::create_dir_all(path.join("forbidden"))?;
     fs::write(
@@ -328,6 +339,11 @@ fn prepare_fixture(path: &Path) -> Result<()> {
 }
 
 fn validate_fixture(fixture: &Path, artifacts: &Path) -> Result<()> {
+    ensure!(
+        fs::read_to_string(fixture.join("design/subagents-orchestration.md"))?
+            .contains("ROOT_DESIGN_MARKER"),
+        "root did not create the required design marker"
+    );
     ensure!(
         fs::read_to_string(fixture.join("allowed/directory.txt"))? == "directory child accepted\n",
         "directory child output is missing or incorrect"
@@ -457,6 +473,8 @@ fn validate_wire(wire_dir: &Path, artifacts: &Path) -> Result<()> {
         collect_calls(body, &mut calls);
         collect_outputs(body, &mut outputs);
     }
+    let ordered_calls = calls.clone();
+    ensure_orchestration_order(&ordered_calls)?;
     deduplicate_calls(&mut calls);
     ensure_spawn_calls(&calls)?;
     ensure_workspace_receipts(&outputs)?;
@@ -495,6 +513,7 @@ fn validate_wire(wire_dir: &Path, artifacts: &Path) -> Result<()> {
         "outside the directory Agent writablePaths boundary",
         "DIRECTORY_DENIAL_OBSERVED",
         "WORKTREE_COMMIT_READY",
+        "ROOT_DESIGN_MARKER",
     ] {
         ensure!(
             output.replace(' ', "").contains(&marker.replace(' ', "")),
@@ -603,6 +622,92 @@ fn ensure_spawn_calls(calls: &[WireCall]) -> Result<()> {
                 && call.arguments.get("writablePaths").is_none()
         }),
         "wire captures contain no canonical worktree_executor spawn"
+    );
+    Ok(())
+}
+
+fn ensure_orchestration_order(calls: &[WireCall]) -> Result<()> {
+    let spawn_indices = |profile: &str| {
+        calls
+            .iter()
+            .enumerate()
+            .filter(|(_, call)| {
+                call.name == "spawn_agent"
+                    && call.arguments.get("profileId").and_then(Value::as_str) == Some(profile)
+            })
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>()
+    };
+    let first_wait = calls
+        .iter()
+        .position(|call| {
+            matches!(
+                call.name.as_str(),
+                "wait_agents" | "read_agent_session" | "read_agent_submissions"
+            )
+        })
+        .context("wire captures contain no child wait/read operation")?;
+    let explorers = spawn_indices("explorer");
+    ensure!(
+        explorers.len() >= 2,
+        "wire captures contain fewer than two explorer spawns"
+    );
+    ensure!(
+        explorers[1] < first_wait,
+        "explorer spawns were not both issued before the first wait/read"
+    );
+    let executors = spawn_indices("executor");
+    let worktrees = spawn_indices("worktree_executor");
+    ensure!(
+        !executors.is_empty() && !worktrees.is_empty(),
+        "wire captures contain no implementation profiles"
+    );
+    let implementation_last = *executors.iter().chain(worktrees.iter()).max().unwrap();
+    ensure!(
+        calls
+            .iter()
+            .enumerate()
+            .skip(implementation_last + 1)
+            .any(|(_, call)| matches!(
+                call.name.as_str(),
+                "wait_agents" | "read_agent_session" | "read_agent_submissions"
+            )),
+        "implementation spawns were not issued before waiting"
+    );
+    let cherry_pick = calls
+        .iter()
+        .position(|call| {
+            call.name == "exec"
+                && call
+                    .arguments
+                    .get("command")
+                    .and_then(Value::as_str)
+                    .is_some_and(|command| command.contains("cherry-pick"))
+        })
+        .context("wire captures contain no explicit cherry-pick")?;
+    let cleanup = calls
+        .iter()
+        .position(|call| {
+            call.name == "close_agent"
+                && call
+                    .arguments
+                    .get("workspaceDisposition")
+                    .and_then(Value::as_str)
+                    == Some("cleanup")
+        })
+        .context("wire captures contain no explicit cleanup")?;
+    let reviewer = spawn_indices("reviewer");
+    ensure!(
+        !reviewer.is_empty(),
+        "wire captures contain no reviewer spawn"
+    );
+    ensure!(
+        reviewer[0] > cherry_pick && reviewer[0] > cleanup,
+        "reviewer was not spawned after integration and cleanup"
+    );
+    ensure!(
+        calls[reviewer[0]].arguments.get("writablePaths").is_none(),
+        "reviewer spawn unexpectedly requested writablePaths"
     );
     Ok(())
 }

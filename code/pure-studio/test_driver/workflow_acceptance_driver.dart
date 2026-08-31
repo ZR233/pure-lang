@@ -58,6 +58,7 @@ Future<void> main(List<String> arguments) async {
         'awaiting_confirmation',
         'editing_documents',
         'working',
+        'integrating',
         'reviewing',
         'completed',
       ]) {

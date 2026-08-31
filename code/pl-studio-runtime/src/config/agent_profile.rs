@@ -467,4 +467,79 @@ model = "gpt-5"
                 .any(|item| item.profile_id == "paused-agent" && !item.enabled)
         );
     }
+
+    #[test]
+    fn built_in_profile_prompts_preserve_role_boundaries() {
+        let home = TempDir::new().unwrap();
+        let catalog = AgentProfileCatalog::discover_for_settings(
+            &ConfigPaths::from_home(home.path()),
+            &StudioConfig::default_config(),
+        );
+        let prompt = |id: &str| {
+            catalog
+                .profiles
+                .iter()
+                .find(|profile| profile.profile_id == id)
+                .unwrap_or_else(|| panic!("missing built-in profile {id}"))
+                .system_instructions
+                .as_str()
+        };
+
+        let explorer = prompt("explorer");
+        assert!(explorer.contains("只读"));
+        assert!(explorer.contains("不得修改"));
+        assert!(explorer.contains("file:line"));
+        let planner = prompt("planner");
+        assert!(planner.contains("方案"));
+        assert!(planner.contains("父 Agent"));
+        let executor = prompt("executor");
+        assert!(executor.contains("writablePaths"));
+        assert!(executor.contains("不得") && executor.contains("Git"));
+        let worktree = prompt("worktree_executor");
+        assert!(worktree.contains("独立 Git worktree"));
+        assert!(worktree.contains("commit"));
+        assert!(worktree.contains("不得") && worktree.contains("cherry-pick"));
+        let reviewer = prompt("reviewer");
+        assert!(reviewer.contains("只读"));
+        assert!(reviewer.contains("不得修改"));
+        assert!(!reviewer.contains("可以直接修改"));
+    }
+
+    #[test]
+    fn embedded_task_skill_describes_full_orchestration_contract() {
+        let task = include_str!("../../assets/skills/modes/mode.task/SKILL.md");
+        for stage in [
+            "planning",
+            "awaiting_confirmation",
+            "editing_documents",
+            "working",
+            "integrating",
+            "reviewing",
+            "completed",
+        ] {
+            assert!(task.contains(stage), "task skill omits stage {stage}");
+        }
+        assert!(task.contains("executor") && task.contains("worktree_executor"));
+        assert!(task.contains("explorer") && task.contains("reviewer"));
+        for contract in [
+            "目的",
+            "设计基线",
+            "所有权",
+            "禁止范围",
+            "完成/失败条件",
+            "证据",
+            "workspace",
+            "Git",
+            "并行",
+            "隔离",
+            "review",
+        ] {
+            assert!(
+                task.contains(contract),
+                "task skill omits contract {contract}"
+            );
+        }
+        assert!(task.contains("fresh-context"));
+        assert!(task.contains("重新") && task.contains("review"));
+    }
 }
