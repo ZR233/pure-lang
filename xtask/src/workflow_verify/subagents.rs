@@ -1304,36 +1304,9 @@ fn ensure_orchestration_order(calls: &[WireCall], outputs: &[WireOutput]) -> Res
     );
     let mut terminal_targets = std::collections::HashSet::new();
     for (_, wait) in explorer_waits {
-        let call_id = wait
-            .call_id
-            .as_ref()
-            .context("wait_agents has no call_id")?;
-        let output = outputs
-            .iter()
-            .find(|output| output.call_id.as_ref() == Some(call_id))
-            .with_context(|| format!("wait_agents {call_id} has no same-call-id output"))?;
-        let result: Value = serde_json::from_str(&output.content)
-            .with_context(|| format!("wait_agents {call_id} output is not canonical JSON"))?;
-        if result.get("reason").and_then(Value::as_str) != Some("terminal") {
-            continue;
-        }
-        let call_targets = wait
-            .arguments
-            .get("targets")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-            .collect::<std::collections::HashSet<_>>();
-        for agent_id in result
-            .get("messages")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(|message| message.get("agentId").and_then(Value::as_str))
-        {
-            if call_targets.contains(agent_id) {
-                terminal_targets.insert(agent_id.to_string());
+        for agent_id in &explorer_agent_ids {
+            if wait_has_terminal_evidence(wait, outputs, agent_id).is_ok() {
+                terminal_targets.insert(agent_id.clone());
             }
         }
     }
@@ -1802,15 +1775,24 @@ fn ensure_submissions(calls: &[WireCall], outputs: &[WireOutput]) -> Result<()> 
                 .iter()
                 .position(|call| call.call_id == read.call_id)
                 .context("submissions read is absent from flattened calls")?;
+            let boundary = if profile == "explorer" {
+                first_impl
+            } else {
+                cherry_pick
+            };
+            let terminal_wait = calls.iter().enumerate().find(|(index, call)| {
+                *index > spawn_index
+                    && *index < read_index
+                    && call.name == "wait_agents"
+                    && wait_has_terminal_evidence(call, outputs, &agent).is_ok()
+            });
+            terminal_wait.map(|(index, _)| index).with_context(|| {
+                format!("{profile} agent {agent} has no strictly bound terminal wait")
+            })?;
             ensure!(
                 calls.iter().enumerate().any(|(index, call)| {
                     index > read_index
-                        && index
-                            < if profile == "explorer" {
-                                first_impl
-                            } else {
-                                cherry_pick
-                            }
+                        && index < boundary
                         && call.name == "read_agent_session"
                         && call.arguments.get("target").and_then(Value::as_str)
                             == Some(agent.as_str())
@@ -1838,6 +1820,72 @@ fn ensure_submissions(calls: &[WireCall], outputs: &[WireOutput]) -> Result<()> 
                 "implementation submissions read occurred after cherry-pick"
             );
         }
+    }
+    Ok(())
+}
+
+fn wait_has_terminal_evidence(
+    wait_call: &WireCall,
+    outputs: &[WireOutput],
+    agent: &str,
+) -> Result<()> {
+    ensure!(
+        wait_call.name == "wait_agents",
+        "terminal evidence is not wait_agents"
+    );
+    let targets = wait_call
+        .arguments
+        .get("targets")
+        .and_then(Value::as_array)
+        .context("wait_agents has no targets")?;
+    ensure!(
+        targets.iter().any(|target| target.as_str() == Some(agent)),
+        "wait_agents targets do not contain {agent}"
+    );
+    let call_id = wait_call
+        .call_id
+        .as_ref()
+        .context("wait_agents has no call_id")?;
+    let output = outputs
+        .iter()
+        .find(|output| output.call_id.as_ref() == Some(call_id))
+        .with_context(|| format!("wait_agents {call_id} has no same-call-id output"))?;
+    let result: Value = serde_json::from_str(&output.content)
+        .with_context(|| format!("wait_agents {call_id} output is not canonical JSON"))?;
+    ensure!(
+        result.is_object(),
+        "wait_agents output is not a canonical object"
+    );
+    ensure!(
+        result.get("reason").and_then(Value::as_str) == Some("terminal"),
+        "wait_agents output is not terminal"
+    );
+    let messages = result
+        .get("messages")
+        .and_then(Value::as_array)
+        .context("terminal wait output has no messages")?;
+    let message = messages
+        .iter()
+        .find(|message| message.get("agentId").and_then(Value::as_str) == Some(agent))
+        .context("terminal wait output has no message bound to agent")?;
+    if let Some(state) = message.get("state") {
+        ensure!(
+            state
+                .get("agent")
+                .and_then(|agent| agent.get("kind"))
+                .and_then(Value::as_str)
+                == Some("idle"),
+            "terminal wait message agent state is not idle"
+        );
+        ensure!(
+            state
+                .get("lastTurnOutcome")
+                .and_then(|outcome| outcome.get("outcome"))
+                .and_then(|outcome| outcome.get("kind"))
+                .and_then(Value::as_str)
+                == Some("completed"),
+            "terminal wait message has no completed lastTurnOutcome"
+        );
     }
     Ok(())
 }
@@ -2944,6 +2992,13 @@ mod tests {
                 call_id: Some(spawn),
                 content: serde_json::json!({"profileId":profile,"agentId":agent}).to_string(),
             });
+            let wait = format!("wait-{index}");
+            calls.push(orchestration_call(
+                &wait,
+                "wait_agents",
+                serde_json::json!({"targets":[agent]}),
+            ));
+            outputs.push(terminal_wait_output(&wait, &agent));
             let read = format!("read-{index}");
             calls.push(orchestration_call(
                 &read,
@@ -3002,6 +3057,13 @@ mod tests {
                 call_id: Some(spawn),
                 content: serde_json::json!({"profileId":profile,"agentId":agent}).to_string(),
             });
+            let wait = format!("wait-{index}");
+            calls.push(orchestration_call(
+                &wait,
+                "wait_agents",
+                serde_json::json!({"targets":[agent]}),
+            ));
+            outputs.push(terminal_wait_output(&wait, &agent));
             let read = format!("read-{index}");
             calls.push(orchestration_call(
                 &read,
@@ -3074,16 +3136,115 @@ mod tests {
                 "mutation {mutate} unexpectedly accepted"
             );
         }
-        let mut late_calls = baseline_calls;
-        let mut late_outputs = baseline_outputs;
+        for mutation in ["target", "call_id", "reason", "message_agent"] {
+            let mut invalid_calls = baseline_calls.clone();
+            let mut invalid_outputs = baseline_outputs.clone();
+            if mutation == "target" {
+                invalid_calls
+                    .iter_mut()
+                    .find(|call| call.call_id.as_deref() == Some("wait-0"))
+                    .unwrap()
+                    .arguments = serde_json::json!({"targets":["wrong-agent"]});
+            } else {
+                let output = invalid_outputs
+                    .iter_mut()
+                    .find(|output| output.call_id.as_deref() == Some("wait-0"))
+                    .unwrap();
+                match mutation {
+                    "call_id" => output.call_id = Some("wrong-call-id".into()),
+                    "reason" => {
+                        output.content = serde_json::json!({
+                            "messages": [{"agentId":"agent-0"}],
+                            "reason":"progress"
+                        })
+                        .to_string()
+                    }
+                    "message_agent" => {
+                        output.content = serde_json::json!({
+                            "messages": [{"agentId":"wrong-agent"}],
+                            "reason":"terminal"
+                        })
+                        .to_string()
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            assert!(
+                ensure_submissions(&invalid_calls, &invalid_outputs).is_err(),
+                "wait mutation {mutation} unexpectedly accepted"
+            );
+        }
+        let mut wait_before_spawn_calls = baseline_calls.clone();
+        let wait_index = wait_before_spawn_calls
+            .iter()
+            .position(|call| call.call_id.as_deref() == Some("wait-0"))
+            .unwrap();
+        let wait = wait_before_spawn_calls.remove(wait_index);
+        let spawn_index = wait_before_spawn_calls
+            .iter()
+            .position(|call| call.call_id.as_deref() == Some("spawn-0"))
+            .unwrap();
+        wait_before_spawn_calls.insert(spawn_index, wait);
+        assert!(ensure_submissions(&wait_before_spawn_calls, &baseline_outputs).is_err());
+
+        let mut session_before_read_calls = baseline_calls.clone();
+        let session_index = session_before_read_calls
+            .iter()
+            .position(|call| call.call_id.as_deref() == Some("session-2"))
+            .unwrap();
+        let session = session_before_read_calls.remove(session_index);
+        let read_index = session_before_read_calls
+            .iter()
+            .position(|call| call.call_id.as_deref() == Some("read-2"))
+            .unwrap();
+        session_before_read_calls.insert(read_index, session);
+        assert!(ensure_submissions(&session_before_read_calls, &baseline_outputs).is_err());
+
+        let mut late_calls = baseline_calls.clone();
+        let wait_index = late_calls
+            .iter()
+            .position(|call| call.call_id.as_deref() == Some("wait-2"))
+            .unwrap();
+        let wait = late_calls.remove(wait_index);
+        let session_index = late_calls
+            .iter()
+            .position(|call| call.call_id.as_deref() == Some("session-2"))
+            .unwrap();
+        late_calls.insert(session_index + 1, wait);
+        assert!(ensure_submissions(&late_calls, &baseline_outputs).is_err());
+        let mut late_worktree_calls = baseline_calls.clone();
+        let wait_index = late_worktree_calls
+            .iter()
+            .position(|call| call.call_id.as_deref() == Some("wait-3"))
+            .unwrap();
+        let wait = late_worktree_calls.remove(wait_index);
+        let pick_index = late_worktree_calls
+            .iter()
+            .position(|call| call.call_id.as_deref() == Some("pick"))
+            .unwrap();
+        late_worktree_calls.insert(pick_index + 1, wait);
+        assert!(ensure_submissions(&late_worktree_calls, &baseline_outputs).is_err());
+        let mut late_calls = baseline_calls.clone();
         let session_index = late_calls
             .iter()
             .position(|call| call.call_id.as_deref() == Some("session-0"))
             .unwrap();
         let late_session = late_calls.remove(session_index);
         late_calls.push(late_session);
-        assert!(ensure_submissions(&late_calls, &late_outputs).is_err());
-        late_outputs.retain(|output| output.call_id.as_deref() != Some("session-0"));
+        assert!(ensure_submissions(&late_calls, &baseline_outputs).is_err());
+
+        let mut late_worktree_session_calls = baseline_calls;
+        let session_index = late_worktree_session_calls
+            .iter()
+            .position(|call| call.call_id.as_deref() == Some("session-3"))
+            .unwrap();
+        let session = late_worktree_session_calls.remove(session_index);
+        let pick_index = late_worktree_session_calls
+            .iter()
+            .position(|call| call.call_id.as_deref() == Some("pick"))
+            .unwrap();
+        late_worktree_session_calls.insert(pick_index + 1, session);
+        assert!(ensure_submissions(&late_worktree_session_calls, &baseline_outputs).is_err());
     }
 
     #[test]
