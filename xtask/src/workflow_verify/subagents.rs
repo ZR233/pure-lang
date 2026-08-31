@@ -980,34 +980,47 @@ fn is_mutating_shell_command(command: &str) -> bool {
 }
 
 fn bound_receipts(calls: &[WireCall], outputs: &[WireOutput]) -> Result<Vec<(WireCall, Value)>> {
-    calls
-        .iter()
-        .filter(|call| call.name == "spawn_agent")
-        .map(|spawn| {
-            let id = spawn
-                .call_id
-                .as_ref()
-                .context("spawn_agent has no call_id")?;
-            let output = outputs
-                .iter()
-                .find(|output| output.call_id.as_ref() == Some(id))
-                .with_context(|| format!("spawn {id} has no same-call-id output"))?;
-            let receipt: Value =
-                serde_json::from_str(&output.content).context("spawn output is not JSON")?;
-            ensure!(
-                receipt.get("profileId") == spawn.arguments.get("profileId"),
-                "spawn receipt profileId does not match call args"
-            );
-            ensure!(
-                receipt
-                    .get("agentId")
-                    .and_then(Value::as_str)
-                    .is_some_and(|id| !id.is_empty()),
-                "spawn receipt has no agentId"
-            );
-            Ok((spawn.clone(), receipt))
-        })
-        .collect()
+    let mut receipts = Vec::new();
+    for spawn in calls.iter().filter(|call| call.name == "spawn_agent") {
+        let id = spawn
+            .call_id
+            .as_ref()
+            .context("spawn_agent has no call_id")?;
+        let output = outputs
+            .iter()
+            .find(|output| output.call_id.as_ref() == Some(id))
+            .with_context(|| format!("spawn {id} has no same-call-id output"))?;
+        // A failed tool invocation is captured as plain text. Keep the call in the
+        // audit trail, but only bind a successfully parsed JSON receipt below.
+        let receipt: Value = match serde_json::from_str(&output.content) {
+            Ok(receipt) => receipt,
+            Err(_) => continue,
+        };
+        ensure!(
+            receipt.is_object(),
+            "spawn receipt is not a canonical JSON object"
+        );
+        ensure!(
+            receipt
+                .get("profileId")
+                .and_then(Value::as_str)
+                .is_some_and(|profile| !profile.is_empty()),
+            "spawn receipt has no profileId"
+        );
+        ensure!(
+            receipt.get("profileId") == spawn.arguments.get("profileId"),
+            "spawn receipt profileId does not match call args"
+        );
+        ensure!(
+            receipt
+                .get("agentId")
+                .and_then(Value::as_str)
+                .is_some_and(|id| !id.is_empty()),
+            "spawn receipt has no agentId"
+        );
+        receipts.push((spawn.clone(), receipt));
+    }
+    Ok(receipts)
 }
 
 fn ensure_workspace_receipts(calls: &[WireCall], outputs: &[WireOutput]) -> Result<()> {
@@ -1869,6 +1882,66 @@ mod tests {
             ("r", "reviewer", serde_json::json!({"mode":"unrestricted"})),
         ].into_iter().map(|(id, profile, workspace)| WireOutput { call_id: Some(id.into()), content: serde_json::json!({"profileId":profile,"agentId":id,"workspace":workspace}).to_string() }).collect::<Vec<_>>();
         ensure_workspace_receipts(&calls, &receipts).unwrap();
+    }
+
+    #[test]
+    fn bound_receipts_ignores_failed_spawn_output_and_keeps_successful_receipt() {
+        let calls = vec![
+            WireCall {
+                call_id: Some("failed".into()),
+                name: "spawn_agent".into(),
+                arguments: serde_json::json!({"profileId": "explorer"}),
+            },
+            WireCall {
+                call_id: Some("retry".into()),
+                name: "spawn_agent".into(),
+                arguments: serde_json::json!({"profileId": "explorer"}),
+            },
+        ];
+        let outputs = vec![
+            WireOutput {
+                call_id: Some("failed".into()),
+                content: "Tool execution error: invalid writablePaths".into(),
+            },
+            WireOutput {
+                call_id: Some("retry".into()),
+                content: serde_json::json!({
+                    "profileId": "explorer",
+                    "agentId": "explorer-retry"
+                })
+                .to_string(),
+            },
+        ];
+
+        let receipts = bound_receipts(&calls, &outputs).unwrap();
+        assert_eq!(
+            calls.len(),
+            2,
+            "failed call remains in the audit call history"
+        );
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].0.call_id.as_deref(), Some("retry"));
+        assert_eq!(receipts[0].1["agentId"], "explorer-retry");
+    }
+
+    #[test]
+    fn failed_spawn_output_alone_cannot_satisfy_required_receipts() {
+        let calls = vec![WireCall {
+            call_id: Some("failed".into()),
+            name: "spawn_agent".into(),
+            arguments: serde_json::json!({"profileId": "executor"}),
+        }];
+        let outputs = vec![WireOutput {
+            call_id: Some("failed".into()),
+            content: "Tool execution error: invalid writablePaths".into(),
+        }];
+
+        let error = ensure_workspace_receipts(&calls, &outputs).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("wire tool results contain no executor workspace receipt")
+        );
     }
 
     #[test]
