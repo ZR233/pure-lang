@@ -813,6 +813,54 @@ fn ensure_profile_messages(calls: &[WireCall]) -> Result<()> {
             && explorers[0].call_id != explorers[1].call_id,
         "two explorer spawns do not have distinct call IDs"
     );
+    let explorer_steps = explorers
+        .iter()
+        .map(|explorer| section(explorer, "steps"))
+        .collect::<Result<Vec<_>>>()?;
+    for steps in &explorer_steps {
+        let normalized = steps.to_ascii_lowercase();
+        for forbidden in [
+            "list_agent_profiles",
+            "skill_view",
+            "studio-config",
+            "studio home",
+            "studio config",
+            "studio 配置",
+            "target/",
+            ".git/",
+            "cargo test",
+            " rg ",
+            "`rg`",
+            "运行 rg",
+            "调用 rg",
+            "用 rg",
+            "全仓 rg",
+            "list_files",
+            "exec",
+        ] {
+            ensure!(
+                !normalized.contains(forbidden),
+                "explorer steps contain forbidden broad or unavailable operation `{forbidden}`"
+            );
+        }
+    }
+    ensure!(
+        explorer_steps.iter().any(|steps| {
+            steps.contains("Cargo.toml")
+                && steps.contains("src/lib.rs")
+                && !steps.contains("git_workspace_info")
+        }),
+        "no explorer has the bounded fixture source-file scope"
+    );
+    ensure!(
+        explorer_steps.iter().any(|steps| {
+            steps.contains(".gitignore")
+                && steps.contains("git_workspace_info")
+                && steps.contains("git_status")
+                && !steps.contains("Cargo.toml")
+        }),
+        "no explorer has the bounded Git metadata scope"
+    );
     Ok(())
 }
 
@@ -1145,6 +1193,22 @@ fn ensure_orchestration_order(calls: &[WireCall]) -> Result<()> {
             "wait_agents" | "read_agent_session" | "read_agent_submissions"
         )
     };
+    let profiles = calls
+        .iter()
+        .position(|call| call.name == "list_agent_profiles")
+        .context("wire captures contain no root Profile query")?;
+    let confirmation = calls
+        .iter()
+        .position(|call| call.name == "request_user_input")
+        .context("wire captures contain no plan confirmation")?;
+    let design_write = calls
+        .iter()
+        .position(|call| {
+            call.name == "write_file"
+                && call.arguments.get("path").and_then(Value::as_str)
+                    == Some("design/subagents-orchestration.md")
+        })
+        .context("wire captures contain no root design write")?;
     let explorer_wait = calls
         .iter()
         .position(is_wait)
@@ -1155,8 +1219,35 @@ fn ensure_orchestration_order(calls: &[WireCall]) -> Result<()> {
         "wire captures contain fewer than two explorer spawns"
     );
     ensure!(
+        profiles < explorers[0],
+        "root Profile query must precede explorer spawns"
+    );
+    ensure!(
         explorers[1] < explorer_wait,
         "explorer spawns were not both issued before the first wait/read"
+    );
+    let explorer_reads = calls
+        .iter()
+        .enumerate()
+        .filter(|(index, call)| {
+            *index > explorers[1] && *index < confirmation && call.name == "read_agent_submissions"
+        })
+        .collect::<Vec<_>>();
+    ensure!(
+        explorer_reads.len() >= 2,
+        "both explorer submissions must be read before confirmation"
+    );
+    let explorer_targets = explorer_reads
+        .iter()
+        .filter_map(|(_, call)| call.arguments.get("target").and_then(Value::as_str))
+        .collect::<std::collections::HashSet<_>>();
+    ensure!(
+        explorer_targets.len() >= 2,
+        "explorer submission reads must target two distinct agents"
+    );
+    ensure!(
+        confirmation < design_write,
+        "root design write occurred before plan confirmation"
     );
     let executors = spawn_indices("executor");
     let worktrees = spawn_indices("worktree_executor");
@@ -1166,8 +1257,8 @@ fn ensure_orchestration_order(calls: &[WireCall]) -> Result<()> {
     );
     let implementation_first = *executors.iter().chain(worktrees.iter()).min().unwrap();
     ensure!(
-        explorer_wait < implementation_first,
-        "implementation spawn occurred before the explorer wait/read"
+        design_write < implementation_first,
+        "implementation spawn occurred before the confirmed design baseline"
     );
     let implementation_wait = calls
         .iter()
@@ -1716,6 +1807,28 @@ mod tests {
             prompt.contains("root 不得为 directory child 产物额外提交后再 spawn worktree")
                 && prompt.contains("不得先额外提交 directory child 产物再 spawn worktree"),
             "live prompt must forbid serializing worktree spawn behind a directory commit"
+        );
+    }
+
+    #[test]
+    fn live_prompt_plans_with_bounded_explorers_before_confirmation() {
+        let prompt = include_str!("../../../test-fixtures/subagents-live/prompt.md");
+        assert!(
+            prompt.contains(
+                "planning 阶段由 root 调用 list_agent_profiles，随后并行 spawn 两个 explorer"
+            ) && prompt.contains("两个 explorer 都进入 terminal")
+                && prompt.contains("再调用 request_user_input 请求确认")
+                && prompt.contains("确认后 root 才能写入 design/subagents-orchestration.md"),
+            "live prompt must explore and synthesize the plan before confirmation and design edits"
+        );
+        assert!(
+            prompt.contains("explorer child 不得调用 list_agent_profiles")
+                && prompt.contains("不得调用 skill_view")
+                && prompt.contains("不得读取 Studio home 或配置")
+                && prompt.contains("不得全仓 rg")
+                && prompt.contains("不得扫描 target/ 或 .git/ 内部")
+                && prompt.contains("不得运行 cargo test"),
+            "live prompt must keep explorer work finite and independent of Studio configuration"
         );
     }
 
@@ -2499,7 +2612,12 @@ mod tests {
             .into_iter()
             .map(|section| format!("[[CHILD_CONTRACT:{section}]]\ncontent\n"))
             .collect::<String>();
-            let message = if profile == "explorer" && id == "explorer-2" {
+            let message = if profile == "explorer" && id == "explorer-1" {
+                message.replace(
+                    "[[CHILD_CONTRACT:steps]]\ncontent",
+                    "[[CHILD_CONTRACT:steps]]\n读取 Cargo.toml；读取 src/lib.rs；汇总后 final reply",
+                )
+            } else if profile == "explorer" && id == "explorer-2" {
                 message
                     .replace(
                         "[[CHILD_CONTRACT:purpose]]\ncontent",
@@ -2508,6 +2626,10 @@ mod tests {
                     .replace(
                         "[[CHILD_CONTRACT:ownership]]\ncontent",
                         "[[CHILD_CONTRACT:ownership]]\nsecond ownership",
+                    )
+                    .replace(
+                        "[[CHILD_CONTRACT:steps]]\ncontent",
+                        "[[CHILD_CONTRACT:steps]]\n读取 .gitignore；调用 git_workspace_info；调用 git_status；汇总后 final reply",
                     )
             } else {
                 message
@@ -2533,9 +2655,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn orchestration_order_accepts_explorer_wait_then_both_implementations() {
-        let calls = vec![
+    fn orchestration_planning_calls() -> Vec<WireCall> {
+        vec![
+            orchestration_call("profiles", "list_agent_profiles", serde_json::json!({})),
             orchestration_call(
                 "e1",
                 "spawn_agent",
@@ -2546,7 +2668,60 @@ mod tests {
                 "spawn_agent",
                 serde_json::json!({"profileId":"explorer"}),
             ),
-            orchestration_call("w1", "wait_agents", serde_json::json!({})),
+            orchestration_call(
+                "w1",
+                "wait_agents",
+                serde_json::json!({"targets":["explorer-a","explorer-b"]}),
+            ),
+            orchestration_call(
+                "er1",
+                "read_agent_submissions",
+                serde_json::json!({"target":"explorer-a"}),
+            ),
+            orchestration_call(
+                "er2",
+                "read_agent_submissions",
+                serde_json::json!({"target":"explorer-b"}),
+            ),
+            orchestration_call("confirm", "request_user_input", serde_json::json!({})),
+            orchestration_call(
+                "design",
+                "write_file",
+                serde_json::json!({"path":"design/subagents-orchestration.md"}),
+            ),
+        ]
+    }
+
+    #[test]
+    fn explorer_messages_reject_configuration_or_unbounded_steps() {
+        for forbidden in [
+            "调用 list_agent_profiles",
+            "调用 skill_view",
+            "读取 studio-config",
+            "读取 Studio home",
+            "读取 Studio config",
+            "读取 Studio 配置",
+            "扫描 target/",
+            "扫描 .git/",
+            "运行 cargo test",
+            "全仓 rg pattern",
+        ] {
+            let mut calls = profile_message_calls();
+            let message = calls[0].arguments["message"].as_str().unwrap();
+            calls[0].arguments["message"] = Value::String(message.replace(
+                "汇总后 final reply",
+                &format!("{forbidden}；汇总后 final reply"),
+            ));
+            assert!(
+                ensure_profile_messages(&calls).is_err(),
+                "explorer steps unexpectedly accepted `{forbidden}`"
+            );
+        }
+    }
+
+    fn valid_orchestration_calls() -> Vec<WireCall> {
+        let mut calls = orchestration_planning_calls();
+        calls.extend([
             orchestration_call(
                 "x1",
                 "spawn_agent",
@@ -2573,95 +2748,53 @@ mod tests {
                 "spawn_agent",
                 serde_json::json!({"profileId":"reviewer"}),
             ),
-        ];
+        ]);
+        calls
+    }
+
+    fn swap_calls(calls: &mut [WireCall], left: &str, right: &str) {
+        let left = calls
+            .iter()
+            .position(|call| call.call_id.as_deref() == Some(left))
+            .unwrap();
+        let right = calls
+            .iter()
+            .position(|call| call.call_id.as_deref() == Some(right))
+            .unwrap();
+        calls.swap(left, right);
+    }
+
+    #[test]
+    fn orchestration_order_accepts_explorer_wait_then_both_implementations() {
+        let calls = valid_orchestration_calls();
         ensure_orchestration_order(&calls).unwrap();
     }
 
     #[test]
     fn orchestration_order_rejects_wait_after_only_one_implementation_spawn() {
-        let calls = vec![
-            orchestration_call(
-                "e1",
-                "spawn_agent",
-                serde_json::json!({"profileId":"explorer"}),
-            ),
-            orchestration_call(
-                "e2",
-                "spawn_agent",
-                serde_json::json!({"profileId":"explorer"}),
-            ),
-            orchestration_call("w1", "wait_agents", serde_json::json!({})),
-            orchestration_call(
-                "x1",
-                "spawn_agent",
-                serde_json::json!({"profileId":"executor"}),
-            ),
-            orchestration_call("w2", "read_agent_session", serde_json::json!({})),
-            orchestration_call(
-                "x2",
-                "spawn_agent",
-                serde_json::json!({"profileId":"worktree_executor"}),
-            ),
-            orchestration_call(
-                "i1",
-                "exec",
-                serde_json::json!({"command":"git cherry-pick abc"}),
-            ),
-            orchestration_call(
-                "c1",
-                "close_agent",
-                serde_json::json!({"workspaceDisposition":"cleanup"}),
-            ),
-            orchestration_call(
-                "r1",
-                "spawn_agent",
-                serde_json::json!({"profileId":"reviewer"}),
-            ),
-        ];
+        let mut calls = valid_orchestration_calls();
+        swap_calls(&mut calls, "x2", "w2");
+        assert!(ensure_orchestration_order(&calls).is_err());
+    }
+
+    #[test]
+    fn orchestration_order_rejects_confirmation_before_all_explorer_reads() {
+        let mut calls = valid_orchestration_calls();
+        swap_calls(&mut calls, "er2", "confirm");
+        assert!(ensure_orchestration_order(&calls).is_err());
+    }
+
+    #[test]
+    fn orchestration_order_rejects_design_write_before_confirmation() {
+        let mut calls = valid_orchestration_calls();
+        swap_calls(&mut calls, "confirm", "design");
         assert!(ensure_orchestration_order(&calls).is_err());
     }
 
     #[test]
     fn orchestration_order_rejects_cleanup_before_cherry_pick() {
-        let calls = vec![
-            orchestration_call(
-                "e1",
-                "spawn_agent",
-                serde_json::json!({"profileId":"explorer"}),
-            ),
-            orchestration_call(
-                "e2",
-                "spawn_agent",
-                serde_json::json!({"profileId":"explorer"}),
-            ),
-            orchestration_call("w1", "wait_agents", serde_json::json!({})),
-            orchestration_call(
-                "x1",
-                "spawn_agent",
-                serde_json::json!({"profileId":"executor"}),
-            ),
-            orchestration_call(
-                "x2",
-                "spawn_agent",
-                serde_json::json!({"profileId":"worktree_executor"}),
-            ),
-            orchestration_call("w2", "read_agent_session", serde_json::json!({})),
-            orchestration_call(
-                "c1",
-                "close_agent",
-                serde_json::json!({"workspaceDisposition":"cleanup"}),
-            ),
-            orchestration_call(
-                "i1",
-                "exec",
-                serde_json::json!({"command":"git cherry-pick abc"}),
-            ),
-            orchestration_call(
-                "r1",
-                "spawn_agent",
-                serde_json::json!({"profileId":"reviewer"}),
-            ),
-        ];
+        let mut calls = valid_orchestration_calls();
+        swap_calls(&mut calls, "i1", "c1");
         assert!(ensure_orchestration_order(&calls).is_err());
     }
 
