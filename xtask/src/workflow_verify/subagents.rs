@@ -844,6 +844,8 @@ fn ensure_profile_messages(calls: &[WireCall]) -> Result<()> {
             );
         }
     }
+    ensure_bounded_explorer_steps(&explorer_steps[0], true)?;
+    ensure_bounded_explorer_steps(&explorer_steps[1], false)?;
     ensure!(
         explorer_steps.iter().any(|steps| {
             steps.contains("Cargo.toml")
@@ -864,13 +866,94 @@ fn ensure_profile_messages(calls: &[WireCall]) -> Result<()> {
     Ok(())
 }
 
+fn ensure_bounded_explorer_steps(steps: &str, fixture_source: bool) -> Result<()> {
+    let required: &[&str] = if fixture_source {
+        &["Cargo.toml", "src/lib.rs"]
+    } else {
+        &[".gitignore", "git_workspace_info", "git_status"]
+    };
+    for target in required {
+        ensure!(
+            steps.contains(target),
+            "explorer steps omit required bounded target `{target}`"
+        );
+    }
+    let forbidden: &[&str] = if fixture_source {
+        &[".gitignore", "git_workspace_info", "git_status"]
+    } else {
+        &["Cargo.toml", "src/lib.rs"]
+    };
+    for target in forbidden {
+        ensure!(
+            !steps.contains(target),
+            "explorer steps cross bounded scope with `{target}`"
+        );
+    }
+    // Keep file reads finite: only the contract's explicitly named files may
+    // follow a read operation. This deliberately examines steps only; the
+    // forbidden section may mention any operation as a prohibition.
+    let mut remainder = steps;
+    while let Some(index) = remainder.find("读取") {
+        let after = remainder[index + "读取".len()..].trim_start();
+        let target = after
+            .split(['；', ';', '，', ',', '。', '\n', ' ', '、'])
+            .next()
+            .unwrap_or("");
+        ensure!(
+            required.contains(&target),
+            "explorer steps read outside bounded files: `{target}`"
+        );
+        remainder = after;
+    }
+    let operations = [
+        "list_agent_profiles",
+        "skill_view",
+        "exec",
+        "git_diff",
+        "git_workspace_info",
+        "git_status",
+        "read_file",
+        "list_files",
+        "stat_path",
+        "lsp_query",
+    ];
+    for operation in operations {
+        let permitted = !fixture_source && matches!(operation, "git_workspace_info" | "git_status");
+        if !permitted {
+            ensure!(
+                !contains_non_negated_operation(&steps.to_ascii_lowercase(), operation),
+                "explorer steps contain extra operation `{operation}`"
+            );
+        }
+    }
+    let allowed_calls = if fixture_source {
+        &[][..]
+    } else {
+        &["git_workspace_info", "git_status"][..]
+    };
+    let mut remainder = steps;
+    while let Some(index) = remainder.find("调用") {
+        let prefix = &steps[..steps.len() - remainder.len() + index];
+        let after = remainder[index + "调用".len()..].trim_start();
+        let operation = after
+            .split(['；', ';', '，', ',', '。', '\n', ' ', '、'])
+            .next()
+            .unwrap_or("");
+        if !allowed_calls.contains(&operation) && !operation_is_negated(prefix, operation) {
+            ensure!(false, "explorer steps call extra operation `{operation}`");
+        }
+        remainder = after;
+    }
+    Ok(())
+}
+
 fn contains_non_negated_operation(text: &str, operation: &str) -> bool {
     text.split(['；', ';', '。', '\n', '！', '!', '？', '?', '，', ','])
         .any(|clause| {
             let mut remainder = clause;
             while let Some(index) = remainder.find(operation) {
                 let prefix = &remainder[..index];
-                if !operation_is_negated(prefix) {
+                if !operation_is_negated(prefix, operation) {
                     return true;
                 }
                 remainder = &remainder[index + operation.len()..];
@@ -879,7 +962,7 @@ fn contains_non_negated_operation(text: &str, operation: &str) -> bool {
         })
 }
 
-fn operation_is_negated(prefix: &str) -> bool {
+fn operation_is_negated(prefix: &str, operation: &str) -> bool {
     const NEGATIONS: &[&str] = &[
         "禁止",
         "不得",
@@ -906,6 +989,7 @@ fn operation_is_negated(prefix: &str) -> bool {
     let between = prefix[position + negation.len()..].trim();
     between.chars().count() <= 24
         && !between.contains('.')
+        && !between.contains(operation)
         && ![
             "然后",
             "随后",
@@ -914,6 +998,10 @@ fn operation_is_negated(prefix: &str) -> bool {
             " but ",
             " then ",
             " and then ",
+            "再",
+            "并",
+            "and",
+            "call ",
         ]
         .iter()
         .any(|transition| between.contains(transition))
@@ -1085,6 +1173,7 @@ fn is_mutating_shell_command(command: &str) -> bool {
 
 fn bound_receipts(calls: &[WireCall], outputs: &[WireOutput]) -> Result<Vec<(WireCall, Value)>> {
     let mut receipts = Vec::new();
+    let mut agent_ids = std::collections::HashSet::new();
     for spawn in calls.iter().filter(|call| call.name == "spawn_agent") {
         let id = spawn
             .call_id
@@ -1115,12 +1204,15 @@ fn bound_receipts(calls: &[WireCall], outputs: &[WireOutput]) -> Result<Vec<(Wir
             receipt.get("profileId") == spawn.arguments.get("profileId"),
             "spawn receipt profileId does not match call args"
         );
+        let agent_id = receipt
+            .get("agentId")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+            .map(str::to_string)
+            .context("spawn receipt has no agentId")?;
         ensure!(
-            receipt
-                .get("agentId")
-                .and_then(Value::as_str)
-                .is_some_and(|id| !id.is_empty()),
-            "spawn receipt has no agentId"
+            agent_ids.insert(agent_id.clone()),
+            "successful spawn receipts reuse agentId `{agent_id}`"
         );
         receipts.push((spawn.clone(), receipt));
     }
@@ -2265,6 +2357,35 @@ mod tests {
     }
 
     #[test]
+    fn bound_receipts_rejects_reused_successful_agent_ids_across_profiles() {
+        let (calls, mut outputs) = valid_orchestration_calls();
+        outputs
+            .iter_mut()
+            .filter(|output| output.call_id.as_deref() == Some("e2"))
+            .for_each(|output| {
+                output.content = serde_json::json!({
+                    "profileId": "explorer",
+                    "agentId": "explorer-a"
+                })
+                .to_string();
+            });
+        assert!(bound_receipts(&calls, &outputs).is_err());
+
+        let (calls, mut outputs) = valid_orchestration_calls();
+        outputs
+            .iter_mut()
+            .filter(|output| output.call_id.as_deref() == Some("r1"))
+            .for_each(|output| {
+                output.content = serde_json::json!({
+                    "profileId": "reviewer",
+                    "agentId": "executor-a"
+                })
+                .to_string();
+            });
+        assert!(bound_receipts(&calls, &outputs).is_err());
+    }
+
+    #[test]
     fn failed_spawn_output_alone_cannot_satisfy_required_receipts() {
         let calls = vec![WireCall {
             call_id: Some("failed".into()),
@@ -2936,6 +3057,49 @@ mod tests {
             ensure_profile_messages(&calls).unwrap_or_else(|error| {
                 panic!("rejected explicit prohibition `{prohibition}`: {error}")
             });
+        }
+    }
+
+    #[test]
+    fn explorer_messages_reject_extra_scope_and_tools() {
+        for extra in ["读取 README.md", "调用 git_diff", "调用 unexpected_tool"] {
+            let mut calls = profile_message_calls();
+            let message = calls[0].arguments["message"].as_str().unwrap();
+            calls[0].arguments["message"] = Value::String(message.replace(
+                "汇总后 final reply",
+                &format!("{extra}；汇总后 final reply"),
+            ));
+            assert!(
+                ensure_profile_messages(&calls).is_err(),
+                "accepted `{extra}`"
+            );
+        }
+
+        let mut calls = profile_message_calls();
+        let message = calls[1].arguments["message"].as_str().unwrap();
+        calls[1].arguments["message"] = Value::String(
+            message.replace("汇总后 final reply", "读取 Cargo.lock；汇总后 final reply"),
+        );
+        assert!(ensure_profile_messages(&calls).is_err());
+    }
+
+    #[test]
+    fn explorer_messages_reject_repeated_operation_after_negation() {
+        for extra in [
+            "禁止调用 list_agent_profiles 再调用 list_agent_profiles",
+            "do not call skill_view and call skill_view",
+            "禁止调用 list_agent_profiles并调用 list_agent_profiles",
+        ] {
+            let mut calls = profile_message_calls();
+            let message = calls[0].arguments["message"].as_str().unwrap();
+            calls[0].arguments["message"] = Value::String(message.replace(
+                "汇总后 final reply",
+                &format!("{extra}；汇总后 final reply"),
+            ));
+            assert!(
+                ensure_profile_messages(&calls).is_err(),
+                "accepted `{extra}`"
+            );
         }
     }
 
