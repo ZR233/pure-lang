@@ -889,10 +889,18 @@ fn ensure_root_history(
         .context("no reviewer approval evidence")?
         .approval_index
         .context("last reviewer lacks approval")?;
-    let root_call_ids = captures
+    let root_final_test_ids = captures
         .iter()
         .filter(|capture| capture.actor == "root")
         .flat_map(|capture| capture.calls.iter())
+        .filter(|call| {
+            call.name == "exec"
+                && call
+                    .arguments
+                    .get("command")
+                    .and_then(Value::as_str)
+                    .is_some_and(|command| command.contains("cargo test"))
+        })
         .filter_map(|call| call.call_id.as_deref())
         .collect::<std::collections::HashSet<_>>();
     ensure!(
@@ -902,7 +910,7 @@ fn ensure_root_history(
                 && call
                     .call_id
                     .as_deref()
-                    .is_some_and(|id| root_call_ids.contains(id))
+                    .is_some_and(|id| root_final_test_ids.contains(id))
                 && call
                     .arguments
                     .get("command")
@@ -1193,7 +1201,7 @@ fn ensure_orchestration_order(calls: &[WireCall]) -> Result<()> {
 struct ReviewerSubmissionEvidence {
     spawn_index: usize,
     agent_id: String,
-    finding: bool,
+    finding_index: Option<usize>,
     approval_index: Option<usize>,
 }
 
@@ -1223,51 +1231,79 @@ fn reviewer_submission_evidence(
                 .and_then(Value::as_str)
                 .context("reviewer receipt has no agentId")?
                 .to_string();
-            let (read_index, read) = calls
+            let targeted_reads = calls
                 .iter()
                 .enumerate()
-                .find(|(index, call)| {
+                .filter(|(index, call)| {
                     *index > spawn_index
                         && call.name == "read_agent_submissions"
                         && call.arguments.get("target").and_then(Value::as_str)
                             == Some(agent_id.as_str())
                 })
-                .context("reviewer has no targeted submissions read")?;
-            let read_id = read
-                .call_id
-                .as_ref()
-                .context("reviewer read has no call_id")?;
-            let output = outputs
-                .iter()
-                .find(|output| output.call_id.as_ref() == Some(read_id))
-                .context("reviewer read has no same-call-id output")?;
-            let page = serde_json::from_str::<Value>(&output.content)
-                .context("reviewer submissions output is not JSON")?;
-            let items = page
-                .get("items")
-                .and_then(Value::as_array)
-                .context("reviewer submissions output has no items")?;
-            ensure!(!items.is_empty(), "reviewer submissions items are empty");
+                .collect::<Vec<_>>();
             ensure!(
-                page.get("total")
-                    .and_then(Value::as_u64)
-                    .is_some_and(|n| n >= 1),
-                "reviewer submissions total is less than one"
+                !targeted_reads.is_empty(),
+                "reviewer has no targeted submissions read"
             );
-            let marker = |name: &str| {
-                items.iter().any(|item| {
-                    ["summary", "nextStep", "detail"].iter().any(|field| {
-                        item.get(*field)
-                            .and_then(Value::as_str)
-                            .is_some_and(|text| text.contains(name))
+            let mut finding_index = None;
+            let mut approval_index = None;
+            for (read_index, read) in targeted_reads {
+                let Some(read_id) = read.call_id.as_ref() else {
+                    continue;
+                };
+                let Some(output) = outputs
+                    .iter()
+                    .find(|output| output.call_id.as_ref() == Some(read_id))
+                else {
+                    continue;
+                };
+                let page = serde_json::from_str::<Value>(&output.content)
+                    .context("reviewer submissions output is not JSON")?;
+                let items = page
+                    .get("items")
+                    .and_then(Value::as_array)
+                    .context("reviewer submissions output has no items")?;
+                ensure!(
+                    page.get("offset").and_then(Value::as_u64).is_some()
+                        && page.get("limit").and_then(Value::as_u64).is_some()
+                        && page.get("total").and_then(Value::as_u64).is_some()
+                        && page.get("hasMore").and_then(Value::as_bool).is_some(),
+                    "reviewer submissions output is not a canonical page"
+                );
+                for item in items {
+                    ensure!(
+                        item.get("stage").and_then(Value::as_str).is_some()
+                            && item.get("summary").and_then(Value::as_str).is_some()
+                            && item.get("nextStep").and_then(Value::as_str).is_some()
+                            && item.get("createdAt").and_then(Value::as_i64).is_some()
+                            && item.get("detail").is_none_or(|detail| detail.is_string()),
+                        "reviewer submission item is not canonical"
+                    );
+                }
+                if items.is_empty() || page.get("total").and_then(Value::as_u64) == Some(0) {
+                    continue;
+                }
+                let marker = |name: &str| {
+                    items.iter().any(|item| {
+                        ["summary", "nextStep", "detail"].iter().any(|field| {
+                            item.get(*field)
+                                .and_then(Value::as_str)
+                                .is_some_and(|text| text.contains(name))
+                        })
                     })
-                })
-            };
+                };
+                if marker("REVIEWER_FINDING") {
+                    finding_index = Some(read_index);
+                }
+                if marker("REVIEWER_READ_ONLY_APPROVED") && approval_index.is_none() {
+                    approval_index = Some(read_index);
+                }
+            }
             Ok(ReviewerSubmissionEvidence {
                 spawn_index,
                 agent_id,
-                finding: marker("REVIEWER_FINDING"),
-                approval_index: marker("REVIEWER_READ_ONLY_APPROVED").then_some(read_index),
+                finding_index,
+                approval_index,
             })
         })
         .collect()
@@ -1275,7 +1311,9 @@ fn reviewer_submission_evidence(
 
 fn ensure_finding_re_review(calls: &[WireCall], outputs: &[WireOutput]) -> Result<()> {
     let evidence = reviewer_submission_evidence(calls, outputs)?;
-    let finding = evidence.iter().any(|reviewer| reviewer.finding);
+    let finding = evidence
+        .iter()
+        .any(|reviewer| reviewer.finding_index.is_some());
     let final_reviewer = evidence.last().context("no reviewer spawn")?;
     ensure!(
         final_reviewer.approval_index.is_some(),
@@ -1297,29 +1335,25 @@ fn ensure_finding_re_review(calls: &[WireCall], outputs: &[WireOutput]) -> Resul
     ensure!(
         evidence[..evidence.len() - 1]
             .iter()
-            .any(|reviewer| reviewer.finding),
+            .any(|reviewer| reviewer.finding_index.is_some()),
         "REVIEWER_FINDING must come from a non-final reviewer submission"
     );
-    let second_reviewer = final_reviewer.spawn_index;
-    let first_reviewer = evidence[0].spawn_index;
+    let (finding_reviewer, finding_index) = evidence[..evidence.len() - 1]
+        .iter()
+        .filter_map(|reviewer| reviewer.finding_index.map(|index| (reviewer, index)))
+        .max_by_key(|(_, index)| *index)
+        .context("REVIEWER_FINDING must come from a non-final reviewer submission")?;
     ensure!(
-        calls.iter().enumerate().any(|(index, call)| {
-            index > first_reviewer
-                && index < second_reviewer
-                && call.name == "spawn_agent"
-                && matches!(
-                    call.arguments.get("profileId").and_then(Value::as_str),
-                    Some("executor") | Some("worktree_executor")
-                )
-        }),
-        "REVIEWER_FINDING requires a new implementation spawn"
+        finding_reviewer.agent_id != final_reviewer.agent_id,
+        "finding re-review requires a different final reviewer agentId"
     );
+    let final_reviewer_spawn = final_reviewer.spawn_index;
     let implementation_spawn = calls
         .iter()
         .enumerate()
         .find(|(index, call)| {
-            *index > first_reviewer
-                && *index < second_reviewer
+            *index > finding_index
+                && *index < final_reviewer_spawn
                 && call.name == "spawn_agent"
                 && matches!(
                     call.arguments.get("profileId").and_then(Value::as_str),
@@ -1330,7 +1364,7 @@ fn ensure_finding_re_review(calls: &[WireCall], outputs: &[WireOutput]) -> Resul
         .context("REVIEWER_FINDING requires a new implementation spawn")?;
     let integration = calls.iter().enumerate().any(|(index, call)| {
         index > implementation_spawn
-            && index < second_reviewer
+            && index < final_reviewer_spawn
             && call.name == "exec"
             && call
                 .arguments
@@ -1804,104 +1838,218 @@ mod tests {
         orchestration_call(name, name, arguments)
     }
 
+    fn submission_item(fields: &[(&str, &str)]) -> Value {
+        let mut item = serde_json::json!({
+            "stage": "readyForReview",
+            "summary": "review completed",
+            "nextStep": "continue orchestration",
+            "createdAt": 1,
+        });
+        for (field, value) in fields {
+            item[*field] = Value::String((*value).to_string());
+        }
+        item
+    }
+
+    fn submission_page(items: Vec<Value>, total: usize) -> String {
+        serde_json::json!({
+            "items": items,
+            "offset": 0,
+            "limit": 50,
+            "total": total,
+            "hasMore": false,
+        })
+        .to_string()
+    }
+
+    fn reviewer_receipt(call_id: &str, agent_id: &str) -> WireOutput {
+        WireOutput {
+            call_id: Some(call_id.into()),
+            content: serde_json::json!({
+                "profileId": "reviewer",
+                "agentId": agent_id,
+            })
+            .to_string(),
+        }
+    }
+
+    fn reviewer_read_output(call_id: Option<&str>, items: Vec<Value>, total: usize) -> WireOutput {
+        WireOutput {
+            call_id: call_id.map(str::to_string),
+            content: submission_page(items, total),
+        }
+    }
+
+    fn valid_root_history() -> (Vec<CaptureReceipt>, Vec<WireCall>, Vec<WireOutput>) {
+        let root_calls = vec![
+            orchestration_call(
+                "design",
+                "write_file",
+                serde_json::json!({"path":"design/subagents-orchestration.md"}),
+            ),
+            orchestration_call(
+                "pick",
+                "exec",
+                serde_json::json!({"command":"git cherry-pick abc"}),
+            ),
+            orchestration_call(
+                "cleanup",
+                "close_agent",
+                serde_json::json!({"workspaceDisposition":"cleanup"}),
+            ),
+            orchestration_call(
+                "r1",
+                "spawn_agent",
+                serde_json::json!({"profileId":"reviewer"}),
+            ),
+            orchestration_call(
+                "rr1",
+                "read_agent_submissions",
+                serde_json::json!({"target":"reviewer-agent"}),
+            ),
+            orchestration_call(
+                "final-test",
+                "exec",
+                serde_json::json!({"command":"cargo test --workspace"}),
+            ),
+        ];
+        let captures = vec![CaptureReceipt {
+            path: "root.json".into(),
+            actor: "root".into(),
+            calls: root_calls.clone(),
+        }];
+        let outputs = vec![
+            reviewer_receipt("r1", "reviewer-agent"),
+            reviewer_read_output(
+                Some("rr1"),
+                vec![submission_item(&[(
+                    "detail",
+                    "REVIEWER_READ_ONLY_APPROVED",
+                )])],
+                1,
+            ),
+        ];
+        (captures, root_calls, outputs)
+    }
+
     #[test]
     fn root_history_aggregates_all_root_captures() {
-        let captures = vec![
-            CaptureReceipt {
-                path: "root-1.json".into(),
+        let (mut captures, calls, outputs) = valid_root_history();
+        let root_calls = captures.pop().unwrap().calls;
+        captures = root_calls
+            .chunks(2)
+            .enumerate()
+            .map(|(index, calls)| CaptureReceipt {
+                path: format!("root-{index}.json"),
                 actor: "root".into(),
-                calls: vec![root_call(
-                    "write_file",
-                    serde_json::json!({"path":"design/subagents-orchestration.md"}),
-                )],
-            },
-            CaptureReceipt {
-                path: "root-2.json".into(),
-                actor: "root".into(),
-                calls: vec![root_call(
-                    "exec",
-                    serde_json::json!({"command":"git cherry-pick abc"}),
-                )],
-            },
-            CaptureReceipt {
-                path: "root-3.json".into(),
-                actor: "root".into(),
-                calls: vec![root_call(
-                    "close_agent",
-                    serde_json::json!({"workspaceDisposition":"cleanup"}),
-                )],
-            },
-            CaptureReceipt {
-                path: "root-4.json".into(),
-                actor: "root".into(),
-                calls: vec![
-                    orchestration_call(
-                        "r1",
-                        "spawn_agent",
-                        serde_json::json!({"profileId":"reviewer"}),
-                    ),
-                    orchestration_call(
-                        "rr1",
-                        "read_agent_submissions",
-                        serde_json::json!({"target":"reviewer-agent"}),
-                    ),
-                    orchestration_call(
-                        "final-test",
-                        "exec",
-                        serde_json::json!({"command":"cargo test --workspace"}),
-                    ),
-                ],
-            },
-        ];
-        let calls = captures
-            .iter()
-            .flat_map(|capture| capture.calls.clone())
-            .collect::<Vec<_>>();
-        let outputs = vec![
-            WireOutput { call_id: Some("r1".into()), content: serde_json::json!({"profileId":"reviewer","agentId":"reviewer-agent"}).to_string() },
-            WireOutput { call_id: Some("rr1".into()), content: serde_json::json!({"total":1,"items":[{"detail":"REVIEWER_READ_ONLY_APPROVED"}]}).to_string() },
-        ];
+                calls: calls.to_vec(),
+            })
+            .collect();
         ensure_root_history(&captures, &calls, &outputs).unwrap();
     }
 
     #[test]
-    fn root_history_rejects_missing_or_non_root_required_actions() {
-        let base = vec![CaptureReceipt {
-            path: "root.json".into(),
-            actor: "root".into(),
-            calls: vec![
-                root_call(
-                    "write_file",
-                    serde_json::json!({"path":"design/subagents-orchestration.md"}),
-                ),
-                root_call("exec", serde_json::json!({"command":"git cherry-pick abc"})),
-                root_call(
-                    "close_agent",
-                    serde_json::json!({"workspaceDisposition":"cleanup"}),
-                ),
-                root_call("exec", serde_json::json!({"command":"cargo test"})),
-            ],
-        }];
-        for missing in 0..4 {
-            let mut captures = base.clone();
-            captures[0].calls.remove(missing);
+    fn root_history_rejects_each_root_only_action_for_every_child_actor() {
+        let root_only_calls = [
+            root_call(
+                "write_file",
+                serde_json::json!({"path":"design/subagents-orchestration.md"}),
+            ),
+            root_call("exec", serde_json::json!({"command":"git cherry-pick abc"})),
+            root_call(
+                "close_agent",
+                serde_json::json!({"workspaceDisposition":"cleanup"}),
+            ),
+        ];
+        for actor in ["explorer", "executor", "worktree_executor", "reviewer"] {
+            for forbidden in &root_only_calls {
+                let (mut captures, calls, outputs) = valid_root_history();
+                captures.push(CaptureReceipt {
+                    path: format!("{actor}.json"),
+                    actor: actor.into(),
+                    calls: vec![forbidden.clone()],
+                });
+                assert!(
+                    ensure_root_history(&captures, &calls, &outputs).is_err(),
+                    "{actor} unexpectedly performed {}",
+                    forbidden.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn root_history_requires_all_root_owned_actions() {
+        for missing_call_id in ["design", "pick", "cleanup"] {
+            let (mut captures, calls, outputs) = valid_root_history();
+            captures[0]
+                .calls
+                .retain(|call| call.call_id.as_deref() != Some(missing_call_id));
             assert!(
-                ensure_root_history(&captures, &[], &[]).is_err(),
-                "missing action {missing}"
+                ensure_root_history(&captures, &calls, &outputs).is_err(),
+                "missing root action {missing_call_id}"
             );
         }
-        for actor in ["explorer", "reviewer"] {
-            let mut captures = base.clone();
-            captures.push(CaptureReceipt {
-                path: format!("{actor}.json"),
-                actor: actor.into(),
-                calls: vec![root_call(
-                    "exec",
-                    serde_json::json!({"command":"git cherry-pick abc"}),
-                )],
-            });
-            assert!(ensure_root_history(&captures, &[], &[]).is_err(), "{actor}");
-        }
+    }
+
+    #[test]
+    fn root_history_allows_child_implementation_write_and_pre_review_cargo_test() {
+        let (mut captures, mut calls, outputs) = valid_root_history();
+        let executor_write = orchestration_call(
+            "executor-write",
+            "write_file",
+            serde_json::json!({"path":"allowed/directory.txt"}),
+        );
+        let worktree_test = orchestration_call(
+            "worktree-test",
+            "exec",
+            serde_json::json!({"command":"cargo test"}),
+        );
+        captures.push(CaptureReceipt {
+            path: "executor.json".into(),
+            actor: "executor".into(),
+            calls: vec![executor_write.clone()],
+        });
+        captures.push(CaptureReceipt {
+            path: "worktree.json".into(),
+            actor: "worktree_executor".into(),
+            calls: vec![worktree_test.clone()],
+        });
+        let reviewer_spawn = calls
+            .iter()
+            .position(|call| call.call_id.as_deref() == Some("r1"))
+            .unwrap();
+        calls.splice(
+            reviewer_spawn..reviewer_spawn,
+            [executor_write, worktree_test],
+        );
+        ensure_root_history(&captures, &calls, &outputs).unwrap();
+    }
+
+    #[test]
+    fn root_history_rejects_final_cargo_test_before_reviewer_approval() {
+        let (mut captures, mut calls, outputs) = valid_root_history();
+        calls.swap(4, 5);
+        captures[0].calls.swap(4, 5);
+        assert!(ensure_root_history(&captures, &calls, &outputs).is_err());
+    }
+
+    #[test]
+    fn root_history_rejects_final_cargo_test_owned_only_by_executor() {
+        let (mut captures, calls, outputs) = valid_root_history();
+        let final_test = captures[0].calls.pop().unwrap();
+        captures.push(CaptureReceipt {
+            path: "executor.json".into(),
+            actor: "executor".into(),
+            calls: vec![final_test],
+        });
+        assert!(ensure_root_history(&captures, &calls, &outputs).is_err());
+    }
+
+    #[test]
+    fn root_history_accepts_root_final_cargo_test_after_reviewer_approval() {
+        let (captures, calls, outputs) = valid_root_history();
+        ensure_root_history(&captures, &calls, &outputs).unwrap();
     }
 
     #[test]
@@ -2214,7 +2362,7 @@ mod tests {
         assert!(ensure_orchestration_order(&calls).is_err());
     }
 
-    fn finding_calls() -> Vec<WireCall> {
+    fn single_reviewer_calls(target: &str) -> Vec<WireCall> {
         vec![
             orchestration_call(
                 "r1",
@@ -2224,7 +2372,64 @@ mod tests {
             orchestration_call(
                 "rr1",
                 "read_agent_submissions",
-                serde_json::json!({"target":"a"}),
+                serde_json::json!({"target":target}),
+            ),
+        ]
+    }
+
+    fn single_reviewer_outputs(read: WireOutput) -> Vec<WireOutput> {
+        vec![reviewer_receipt("r1", "reviewer-a"), read]
+    }
+
+    fn approval_output(call_id: Option<&str>) -> WireOutput {
+        reviewer_read_output(
+            call_id,
+            vec![submission_item(&[(
+                "detail",
+                "REVIEWER_READ_ONLY_APPROVED",
+            )])],
+            1,
+        )
+    }
+
+    fn finding_output(call_id: &str) -> WireOutput {
+        reviewer_read_output(
+            Some(call_id),
+            vec![submission_item(&[("detail", "REVIEWER_FINDING")])],
+            1,
+        )
+    }
+
+    fn markerless_output(call_id: &str) -> WireOutput {
+        reviewer_read_output(
+            Some(call_id),
+            vec![submission_item(&[("detail", "review notes")])],
+            1,
+        )
+    }
+
+    fn executor_receipt(call_id: &str, agent_id: &str) -> WireOutput {
+        WireOutput {
+            call_id: Some(call_id.into()),
+            content: serde_json::json!({
+                "profileId": "executor",
+                "agentId": agent_id,
+            })
+            .to_string(),
+        }
+    }
+
+    fn valid_finding_re_review() -> (Vec<WireCall>, Vec<WireOutput>) {
+        let calls = vec![
+            orchestration_call(
+                "r1",
+                "spawn_agent",
+                serde_json::json!({"profileId":"reviewer"}),
+            ),
+            orchestration_call(
+                "rr1",
+                "read_agent_submissions",
+                serde_json::json!({"target":"reviewer-a"}),
             ),
             orchestration_call(
                 "x1",
@@ -2240,59 +2445,220 @@ mod tests {
             orchestration_call(
                 "rr2",
                 "read_agent_submissions",
-                serde_json::json!({"target":"b"}),
+                serde_json::json!({"target":"reviewer-b"}),
             ),
-        ]
+        ];
+        let outputs = vec![
+            reviewer_receipt("r1", "reviewer-a"),
+            finding_output("rr1"),
+            executor_receipt("x1", "executor-a"),
+            reviewer_receipt("r2", "reviewer-b"),
+            approval_output(Some("rr2")),
+        ];
+        (calls, outputs)
     }
 
-    fn reviewer_outputs(finding: bool, approval: bool) -> Vec<WireOutput> {
-        vec![
-            WireOutput { call_id: Some("r1".into()), content: serde_json::json!({"profileId":"reviewer","agentId":"a"}).to_string() },
-            WireOutput { call_id: Some("r2".into()), content: serde_json::json!({"profileId":"reviewer","agentId":"b"}).to_string() },
-            WireOutput { call_id: Some("x1".into()), content: serde_json::json!({"profileId":"executor","agentId":"x"}).to_string() },
-            WireOutput { call_id: Some("rr1".into()), content: serde_json::json!({"total":1,"items":[{"detail":if finding {"REVIEWER_FINDING"} else {"review"}}]}).to_string() },
-            WireOutput { call_id: Some("rr2".into()), content: serde_json::json!({"total":1,"items":[{"detail":if approval {"REVIEWER_READ_ONLY_APPROVED"} else {"review"}}]}).to_string() },
-        ]
+    #[test]
+    fn reviewer_approval_requires_exact_target_agent_id() {
+        let calls = single_reviewer_calls("another-agent");
+        let outputs = single_reviewer_outputs(approval_output(Some("rr1")));
+        assert!(ensure_finding_re_review(&calls, &outputs).is_err());
+    }
+
+    #[test]
+    fn reviewer_approval_requires_same_call_id_output() {
+        let calls = single_reviewer_calls("reviewer-a");
+        let outputs = single_reviewer_outputs(approval_output(Some("another-read")));
+        assert!(ensure_finding_re_review(&calls, &outputs).is_err());
+    }
+
+    #[test]
+    fn reviewer_approval_rejects_output_without_call_id() {
+        let calls = single_reviewer_calls("reviewer-a");
+        let outputs = single_reviewer_outputs(approval_output(None));
+        assert!(ensure_finding_re_review(&calls, &outputs).is_err());
+    }
+
+    #[test]
+    fn reviewer_unbound_arbitrary_approval_does_not_authorize() {
+        let calls = single_reviewer_calls("reviewer-a");
+        let mut outputs = single_reviewer_outputs(markerless_output("rr1"));
+        outputs.push(approval_output(None));
+        assert!(ensure_finding_re_review(&calls, &outputs).is_err());
+    }
+
+    #[test]
+    fn reviewer_empty_submission_page_does_not_authorize() {
+        let calls = single_reviewer_calls("reviewer-a");
+        let outputs = single_reviewer_outputs(reviewer_read_output(Some("rr1"), vec![], 0));
+        assert!(ensure_finding_re_review(&calls, &outputs).is_err());
+    }
+
+    #[test]
+    fn reviewer_zero_total_page_with_marker_does_not_authorize() {
+        let calls = single_reviewer_calls("reviewer-a");
+        let outputs = single_reviewer_outputs(reviewer_read_output(
+            Some("rr1"),
+            vec![submission_item(&[(
+                "detail",
+                "REVIEWER_READ_ONLY_APPROVED",
+            )])],
+            0,
+        ));
+        assert!(ensure_finding_re_review(&calls, &outputs).is_err());
+    }
+
+    #[test]
+    fn reviewer_polling_skips_empty_page_until_bound_approval() {
+        let mut calls = single_reviewer_calls("reviewer-a");
+        calls.push(orchestration_call(
+            "rr2",
+            "read_agent_submissions",
+            serde_json::json!({"target":"reviewer-a"}),
+        ));
+        let outputs = vec![
+            reviewer_receipt("r1", "reviewer-a"),
+            reviewer_read_output(Some("rr1"), vec![], 0),
+            approval_output(Some("rr2")),
+        ];
+        ensure_finding_re_review(&calls, &outputs).unwrap();
+    }
+
+    #[test]
+    fn reviewer_polling_skips_markerless_page_until_bound_approval() {
+        let mut calls = single_reviewer_calls("reviewer-a");
+        calls.push(orchestration_call(
+            "rr2",
+            "read_agent_submissions",
+            serde_json::json!({"target":"reviewer-a"}),
+        ));
+        let outputs = vec![
+            reviewer_receipt("r1", "reviewer-a"),
+            markerless_output("rr1"),
+            approval_output(Some("rr2")),
+        ];
+        ensure_finding_re_review(&calls, &outputs).unwrap();
+    }
+
+    #[test]
+    fn reviewer_marker_outside_payload_fields_does_not_authorize() {
+        let calls = single_reviewer_calls("reviewer-a");
+        let outputs = single_reviewer_outputs(reviewer_read_output(
+            Some("rr1"),
+            vec![submission_item(&[("stage", "REVIEWER_READ_ONLY_APPROVED")])],
+            1,
+        ));
+        assert!(ensure_finding_re_review(&calls, &outputs).is_err());
+    }
+
+    #[test]
+    fn reviewer_marker_is_accepted_from_each_payload_field() {
+        for field in ["summary", "nextStep", "detail"] {
+            let calls = single_reviewer_calls("reviewer-a");
+            let outputs = single_reviewer_outputs(reviewer_read_output(
+                Some("rr1"),
+                vec![submission_item(&[(field, "REVIEWER_READ_ONLY_APPROVED")])],
+                1,
+            ));
+            ensure_finding_re_review(&calls, &outputs).unwrap();
+        }
     }
 
     #[test]
     fn finding_re_review_without_finding_allows_one_reviewer() {
-        let calls = vec![orchestration_call(
-            "r1",
-            "spawn_agent",
-            serde_json::json!({"profileId":"reviewer"}),
-        )];
-        let outputs = vec![WireOutput { call_id: Some("r1".into()), content: serde_json::json!({"profileId":"reviewer","agentId":"a"}).to_string() }, WireOutput { call_id: Some("rr1".into()), content: serde_json::json!({"total":1,"items":[{"detail":"REVIEWER_READ_ONLY_APPROVED"}]}).to_string() }];
-        let calls = [
-            calls,
-            vec![orchestration_call(
-                "rr1",
-                "read_agent_submissions",
-                serde_json::json!({"target":"a"}),
-            )],
-        ]
-        .concat();
+        let calls = single_reviewer_calls("reviewer-a");
+        let outputs = single_reviewer_outputs(approval_output(Some("rr1")));
         ensure_finding_re_review(&calls, &outputs).unwrap();
     }
 
     #[test]
     fn finding_re_review_requires_second_reviewer() {
-        let calls = finding_calls();
-        assert!(
-            ensure_finding_re_review(
-                &calls[..2],
-                &[WireOutput {
-                    call_id: None,
-                    content: "REVIEWER_FINDING".into()
-                }]
-            )
-            .is_err()
-        );
+        let calls = single_reviewer_calls("reviewer-a");
+        let outputs = single_reviewer_outputs(finding_output("rr1"));
+        assert!(ensure_finding_re_review(&calls, &outputs).is_err());
     }
 
     #[test]
     fn finding_re_review_accepts_complete_rework_sequence() {
-        let calls = finding_calls();
-        ensure_finding_re_review(&calls, &reviewer_outputs(true, true)).unwrap();
+        let (calls, outputs) = valid_finding_re_review();
+        ensure_finding_re_review(&calls, &outputs).unwrap();
+    }
+
+    #[test]
+    fn finding_re_review_requires_implementation_after_actual_finding_read() {
+        let (mut calls, outputs) = valid_finding_re_review();
+        calls.swap(1, 2);
+        assert!(ensure_finding_re_review(&calls, &outputs).is_err());
+    }
+
+    #[test]
+    fn finding_re_review_requires_integration_after_implementation() {
+        let (mut calls, outputs) = valid_finding_re_review();
+        calls.swap(2, 3);
+        assert!(ensure_finding_re_review(&calls, &outputs).is_err());
+    }
+
+    #[test]
+    fn finding_re_review_uses_last_non_final_finding_as_repair_boundary() {
+        let (mut calls, mut outputs) = valid_finding_re_review();
+        calls[4].arguments["profileId"] = Value::String("reviewer".into());
+        calls[5].arguments["target"] = Value::String("reviewer-b".into());
+        outputs.pop();
+        outputs.push(finding_output("rr2"));
+        calls.push(orchestration_call(
+            "r3",
+            "spawn_agent",
+            serde_json::json!({"profileId":"reviewer"}),
+        ));
+        calls.push(orchestration_call(
+            "rr3",
+            "read_agent_submissions",
+            serde_json::json!({"target":"reviewer-c"}),
+        ));
+        outputs.push(reviewer_receipt("r3", "reviewer-c"));
+        outputs.push(approval_output(Some("rr3")));
+        assert!(ensure_finding_re_review(&calls, &outputs).is_err());
+    }
+
+    #[test]
+    fn finding_re_review_rejects_first_reviewer_approval_for_final_reviewer() {
+        let (mut calls, mut outputs) = valid_finding_re_review();
+        calls.insert(
+            5,
+            orchestration_call(
+                "rr1-approval",
+                "read_agent_submissions",
+                serde_json::json!({"target":"reviewer-a"}),
+            ),
+        );
+        outputs.pop();
+        outputs.push(approval_output(Some("rr1-approval")));
+        outputs.push(markerless_output("rr2"));
+        assert!(ensure_finding_re_review(&calls, &outputs).is_err());
+    }
+
+    #[test]
+    fn finding_re_review_rejects_unbound_approval_for_final_reviewer() {
+        let (calls, mut outputs) = valid_finding_re_review();
+        outputs.pop();
+        outputs.push(markerless_output("rr2"));
+        outputs.push(approval_output(None));
+        assert!(ensure_finding_re_review(&calls, &outputs).is_err());
+    }
+
+    #[test]
+    fn finding_re_review_requires_different_final_reviewer_agent_id() {
+        let (mut calls, mut outputs) = valid_finding_re_review();
+        calls[5].arguments["target"] = Value::String("reviewer-a".into());
+        outputs
+            .iter_mut()
+            .find(|output| output.call_id.as_deref() == Some("r2"))
+            .unwrap()
+            .content = serde_json::json!({
+            "profileId": "reviewer",
+            "agentId": "reviewer-a",
+        })
+        .to_string();
+        assert!(ensure_finding_re_review(&calls, &outputs).is_err());
     }
 }
