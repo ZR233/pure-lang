@@ -19,6 +19,8 @@ use std::time::{Duration, Instant};
 const TOTAL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const STALL_TIMEOUT_SECONDS: u64 = 10 * 60;
 const SENTINEL: &str = "PURE_SUBAGENTS_LIVE_OK";
+const DIRECTORY_MARKER: &str = "DIRECTORY_MARKER";
+const WORKTREE_RESULT_MARKER: &str = "WORKTREE_RESULT_MARKER";
 
 #[derive(Debug, Clone)]
 struct Route {
@@ -431,18 +433,22 @@ fn validate_fixture(fixture: &Path, artifacts: &Path) -> Result<()> {
             .contains("ROOT_DESIGN_MARKER"),
         "root did not create the required design marker"
     );
-    ensure!(
-        fs::read_to_string(fixture.join("allowed/directory.txt"))? == "directory child accepted\n",
-        "directory child output is missing or incorrect"
-    );
+    ensure_marker_file(
+        fixture,
+        "allowed/directory.txt",
+        DIRECTORY_MARKER,
+        "directory child output is missing or incorrect",
+    )?;
     ensure!(
         !fixture.join("forbidden/denied.txt").exists(),
         "directory child bypassed writablePaths"
     );
-    ensure!(
-        fs::read_to_string(fixture.join("worktree_result.txt"))? == "worktree child committed\n",
-        "worktree child commit was not integrated"
-    );
+    ensure_marker_file(
+        fixture,
+        "worktree_result.txt",
+        WORKTREE_RESULT_MARKER,
+        "worktree child commit was not integrated",
+    )?;
     let log = run_git(fixture, &["log", "--format=%H%x09%s"])?;
     ensure!(
         log.lines()
@@ -474,6 +480,7 @@ fn validate_fixture(fixture: &Path, artifacts: &Path) -> Result<()> {
         serde_json::to_vec_pretty(&serde_json::json!({
             "schemaVersion": 1,
             "files": [
+                file_receipt(fixture, "design/subagents-orchestration.md")?,
                 file_receipt(fixture, "allowed/directory.txt")?,
                 file_receipt(fixture, "worktree_result.txt")?,
             ],
@@ -488,6 +495,12 @@ fn validate_fixture(fixture: &Path, artifacts: &Path) -> Result<()> {
         &artifacts.join("final-cargo-test.stdout.log"),
         &artifacts.join("final-cargo-test.stderr.log"),
     )
+}
+
+fn ensure_marker_file(fixture: &Path, relative: &str, marker: &str, error: &str) -> Result<()> {
+    let content = fs::read_to_string(fixture.join(relative))?;
+    ensure!(content.contains(marker), "{error}");
+    Ok(())
 }
 
 fn file_receipt(root: &Path, relative: &str) -> Result<Value> {
@@ -1681,6 +1694,119 @@ mod tests {
             fs::read_to_string(root.path().join("src/lib.rs")).unwrap(),
             "pub fn fixture_ready() -> bool { true }\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn fixture_is_ready() { assert!(super::fixture_ready()); }\n}\n"
         );
+    }
+
+    #[test]
+    fn validate_fixture_accepts_live_marker_outputs_and_writes_receipts() {
+        let root = tempfile::tempdir().unwrap();
+        let fixture = root.path().join("fixture");
+        let artifacts = root.path().join("artifacts");
+        prepare_fixture(&fixture).unwrap();
+        fs::create_dir_all(&artifacts).unwrap();
+        fs::write(
+            fixture.join("design/subagents-orchestration.md"),
+            "ROOT_DESIGN_MARKER: orchestration contract\n",
+        )
+        .unwrap();
+        fs::write(
+            fixture.join("allowed/directory.txt"),
+            "DIRECTORY_MARKER: this file was created by the directory executor inside the allowed boundary.\n",
+        )
+        .unwrap();
+        fs::write(
+            fixture.join("worktree_result.txt"),
+            "WORKTREE_RESULT_MARKER: worktree child committed\n",
+        )
+        .unwrap();
+        run_git(&fixture, &["add", "worktree_result.txt"]).unwrap();
+        run_git(
+            &fixture,
+            &[
+                "-c",
+                "user.name=Pure Acceptance",
+                "-c",
+                "user.email=pure-acceptance@example.invalid",
+                "commit",
+                "-m",
+                "feat: worktree executor marker",
+            ],
+        )
+        .unwrap();
+
+        validate_fixture(&fixture, &artifacts).unwrap();
+
+        for name in [
+            "final-git-status.txt",
+            "final-git-log.txt",
+            "final-worktree-list.txt",
+            "final-file-diff.json",
+        ] {
+            assert!(artifacts.join(name).is_file(), "missing receipt {name}");
+        }
+        let diff: Value =
+            serde_json::from_slice(&fs::read(artifacts.join("final-file-diff.json")).unwrap())
+                .unwrap();
+        let files = diff.get("files").and_then(Value::as_array).unwrap();
+        assert_eq!(files.len(), 3);
+        let rendered = serde_json::to_string(files).unwrap();
+        for marker in [
+            "ROOT_DESIGN_MARKER",
+            DIRECTORY_MARKER,
+            WORKTREE_RESULT_MARKER,
+        ] {
+            assert!(rendered.contains(marker), "receipt lacks marker {marker}");
+        }
+    }
+
+    #[test]
+    fn validate_fixture_rejects_missing_output_markers() {
+        for (relative, content, expected) in [
+            (
+                "allowed/directory.txt",
+                "directory child accepted\n",
+                "directory child output is missing or incorrect",
+            ),
+            (
+                "worktree_result.txt",
+                "worktree child committed\n",
+                "worktree child commit was not integrated",
+            ),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let fixture = root.path().join("fixture");
+            let artifacts = root.path().join("artifacts");
+            prepare_fixture(&fixture).unwrap();
+            fs::create_dir_all(&artifacts).unwrap();
+            fs::write(
+                fixture.join("design/subagents-orchestration.md"),
+                "ROOT_DESIGN_MARKER\n",
+            )
+            .unwrap();
+            fs::write(fixture.join("allowed/directory.txt"), "DIRECTORY_MARKER\n").unwrap();
+            fs::write(
+                fixture.join("worktree_result.txt"),
+                "WORKTREE_RESULT_MARKER\n",
+            )
+            .unwrap();
+            fs::write(fixture.join(relative), content).unwrap();
+            run_git(&fixture, &["add", "worktree_result.txt"]).unwrap();
+            run_git(
+                &fixture,
+                &[
+                    "-c",
+                    "user.name=Pure Acceptance",
+                    "-c",
+                    "user.email=pure-acceptance@example.invalid",
+                    "commit",
+                    "-m",
+                    "feat: worktree executor marker",
+                ],
+            )
+            .unwrap();
+
+            let error = validate_fixture(&fixture, &artifacts).unwrap_err();
+            assert!(error.to_string().contains(expected));
+        }
     }
 
     #[test]
