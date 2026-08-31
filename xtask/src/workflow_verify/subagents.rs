@@ -588,7 +588,7 @@ fn validate_wire(wire_dir: &Path, artifacts: &Path) -> Result<()> {
     deduplicate_outputs(&mut outputs);
     ensure_spawn_calls(&calls)?;
     ensure_workspace_receipts(&calls, &outputs)?;
-    ensure_profile_messages(&calls)?;
+    ensure_profile_messages(&calls, &outputs)?;
     ensure_reviewer_history(&capture_receipts)?;
     ensure_root_history(&capture_receipts, &calls, &outputs)?;
     ensure_submissions(&calls, &outputs)?;
@@ -712,12 +712,10 @@ fn role_text(value: &Value) -> String {
     out
 }
 
-fn ensure_profile_messages(calls: &[WireCall]) -> Result<()> {
+fn ensure_profile_messages(calls: &[WireCall], outputs: &[WireOutput]) -> Result<()> {
     let required = ["explorer", "executor", "worktree_executor", "reviewer"];
-    let spawns = calls
-        .iter()
-        .filter(|call| call.name == "spawn_agent")
-        .collect::<Vec<_>>();
+    let receipts = bound_receipts(calls, outputs)?;
+    let spawns = receipts.iter().map(|(spawn, _)| spawn).collect::<Vec<_>>();
     for profile in required {
         let profile_spawns = spawns
             .iter()
@@ -1203,8 +1201,8 @@ fn ensure_orchestration_order(calls: &[WireCall], outputs: &[WireOutput]) -> Res
         .context("wire captures contain no child wait/read operation")?;
     let explorers = successful_spawns("explorer")?;
     ensure!(
-        explorers.len() >= 2,
-        "wire captures contain fewer than two successful explorer spawns"
+        explorers.len() == 2,
+        "wire captures contain exactly two successful explorer spawns"
     );
     ensure!(
         profiles < explorers[0].0,
@@ -1720,8 +1718,8 @@ fn ensure_submissions(calls: &[WireCall], outputs: &[WireOutput]) -> Result<()> 
         }
     }
     ensure!(
-        required.iter().filter(|(p, _, _)| *p == "explorer").count() >= 2,
-        "fewer than two explorer receipts"
+        required.iter().filter(|(p, _, _)| *p == "explorer").count() == 2,
+        "wire captures contain exactly two explorer receipts"
     );
     let first_impl = required
         .iter()
@@ -2669,12 +2667,48 @@ mod tests {
     fn profile_message_missing_or_empty_contract_section_fails() {
         let mut canonical = profile_message_calls();
         canonical[2].arguments["message"] = Value::String(String::new());
-        assert!(ensure_profile_messages(&canonical).is_err());
+        let outputs = profile_message_outputs(&canonical);
+        assert!(ensure_profile_messages(&canonical, &outputs).is_err());
     }
 
     #[test]
     fn profile_message_contract_requires_all_profiles_and_sections() {
-        ensure_profile_messages(&profile_message_calls()).unwrap();
+        let calls = profile_message_calls();
+        let outputs = profile_message_outputs(&calls);
+        ensure_profile_messages(&calls, &outputs).unwrap();
+    }
+
+    #[test]
+    fn profile_messages_ignore_failed_explorer_retry_but_reject_third_success() {
+        let mut calls = profile_message_calls();
+        let failed = WireCall {
+            call_id: Some("explorer-failed".into()),
+            name: "spawn_agent".into(),
+            arguments: serde_json::json!({
+                "profileId": "explorer",
+                "forkTurns": "none",
+                "message": "failed attempt may not satisfy the child contract"
+            }),
+        };
+        calls.insert(0, failed);
+        let mut outputs = profile_message_outputs(&calls[1..]);
+        outputs.push(WireOutput {
+            call_id: Some("explorer-failed".into()),
+            content: "Tool execution error: capacity unavailable".into(),
+        });
+        ensure_profile_messages(&calls, &outputs).unwrap();
+
+        let third = calls[2].clone();
+        calls.push(WireCall {
+            call_id: Some("explorer-success-3".into()),
+            ..third
+        });
+        outputs.push(spawn_output(
+            "explorer-success-3",
+            "explorer",
+            "explorer-success-3",
+        ));
+        assert!(ensure_profile_messages(&calls, &outputs).is_err());
     }
 
     #[test]
@@ -2695,7 +2729,8 @@ mod tests {
                 .replace("[[CHILD_CONTRACT:evidence]]", ""),
         );
         calls.push(second);
-        assert!(ensure_profile_messages(&calls).is_err());
+        let outputs = profile_message_outputs(&calls);
+        assert!(ensure_profile_messages(&calls, &outputs).is_err());
 
         let mut complete = profile_message_calls();
         let mut second = complete
@@ -2707,7 +2742,8 @@ mod tests {
             .unwrap();
         second.call_id = Some("reviewer-2".into());
         complete.push(second);
-        ensure_profile_messages(&complete).unwrap();
+        let outputs = profile_message_outputs(&complete);
+        ensure_profile_messages(&complete, &outputs).unwrap();
     }
 
     fn profile_message_calls() -> Vec<WireCall> {
@@ -2765,6 +2801,21 @@ mod tests {
             });
         }
         calls
+    }
+
+    fn profile_message_outputs(calls: &[WireCall]) -> Vec<WireOutput> {
+        calls
+            .iter()
+            .filter(|call| call.name == "spawn_agent")
+            .map(|call| WireOutput {
+                call_id: call.call_id.clone(),
+                content: serde_json::json!({
+                    "profileId": call.arguments["profileId"],
+                    "agentId": call.call_id,
+                })
+                .to_string(),
+            })
+            .collect()
     }
 
     fn orchestration_call(id: &str, name: &str, arguments: Value) -> WireCall {
@@ -2851,7 +2902,8 @@ mod tests {
         let mut third = calls[0].clone();
         third.call_id = Some("explorer-3".into());
         calls.push(third);
-        assert!(ensure_profile_messages(&calls).is_err());
+        let outputs = profile_message_outputs(&calls);
+        assert!(ensure_profile_messages(&calls, &outputs).is_err());
 
         for extra in [
             "查看 README.md",
@@ -2864,8 +2916,9 @@ mod tests {
             let message = calls[0].arguments["message"].as_str().unwrap();
             calls[0].arguments["message"] =
                 Value::String(message.replace("。", &format!("。{extra}")));
+            let outputs = profile_message_outputs(&calls);
             assert!(
-                ensure_profile_messages(&calls).is_err(),
+                ensure_profile_messages(&calls, &outputs).is_err(),
                 "accepted `{extra}`"
             );
         }
@@ -2873,7 +2926,8 @@ mod tests {
         let mut calls = profile_message_calls();
         let message = calls[1].arguments["message"].as_str().unwrap();
         calls[1].arguments["message"] = Value::String(message.replace("。", "。读取 Cargo.lock"));
-        assert!(ensure_profile_messages(&calls).is_err());
+        let outputs = profile_message_outputs(&calls);
+        assert!(ensure_profile_messages(&calls, &outputs).is_err());
     }
 
     #[test]
@@ -2886,7 +2940,8 @@ mod tests {
                 .replace('\n', "\r\n");
             call.arguments["message"] = Value::String(format!("  {message}  "));
         }
-        ensure_profile_messages(&calls).unwrap();
+        let outputs = profile_message_outputs(&calls);
+        ensure_profile_messages(&calls, &outputs).unwrap();
     }
 
     fn valid_orchestration_calls() -> (Vec<WireCall>, Vec<WireOutput>) {
