@@ -6,7 +6,8 @@ Studio 不再拥有 Simple/Task 两套运行时。所有 root Thread 使用相�
 store 与 collaboration 框架；模式只是预加载的系统指令 Skill。`ModeId` 是动态字符串，内置值为
 `mode.simple` 与 `mode.task`，自定义模式为 `mode.<id>`。
 
-工作流只影响模型提示和合法状态边，不关闭文件、命令、Git、Agent 或最终回复能力。产品不再拥有
+工作流只影响模型提示和合法状态边，不关闭文件、命令、Git、Agent 或最终回复能力；是否使用工作流
+由 Mode Skill 决定。所有 root Mode 统一通过 `complete` 工具提交完成事实并结束 turn。产品不再拥有
 TaskRun、WorkUnit、Completion、ReviewRound、MergeRecord、TaskIssue、worktree、completion gate
 或 recovery 状态。
 
@@ -63,7 +64,7 @@ definition hash、Mode snapshot、active/terminal、当前 stage、时间和最�
 成功操作以 `(turnId, callId, argumentHash)` 记录。相同身份与参数重放返回 `alreadyApplied`；相同身份
 不同参数返回 `operationIdentityConflict`。run id、revision 与 stage id 同时参与 CAS。
 
-`workflow_state` 使用 `ToolBatchPolicy::Solo`。同一 provider response 若还包含其他调用，整批不执行。
+`workflow_state` 与 `complete` 使用 `ToolBatchPolicy::Solo`。同一 provider response 若还包含其他调用，整批不执行。
 工具只在 working-set clone 上计算；tool call、result 与新 working state 由随后同一个 Thread checkpoint
 共同提交，失败则保持旧 canonical revision。
 
@@ -72,25 +73,26 @@ definition hash、Mode snapshot、active/terminal、当前 stage、时间和最�
 
 ## 16.6 内置流程 Skill
 
-`mode.simple` 默认编译 `prepare -> execute -> verify -> deliver`，允许 verify 回到 execute、纯回答从
-prepare 直接 deliver，并提供 stopped 终态。它要求直接工作、按风险验证、架构变化先更新设计，但不
-增加 Git 或固定审查约束。
+`mode.simple` 不编译 workflow，也不要求阶段转换；它直接工作、按风险验证，并在完成时调用 `complete`。
+它不增加 Git、固定审查轮次或交付门禁。
 
 `mode.task` 默认编译 `planning -> awaiting_confirmation -> editing_documents -> working -> reviewing ->
 completed`，允许确认修改回到 planning、review finding 回到 working，并提供 stopped 终态。确认使用
-通用 `request_user_input`；working 中可由 root 调用 Agent Profile；不存在专用 executor/reviewer 生命周期。
+通用 `request_user_input`；working 中可由 root 调用 Agent Profile；进入 `completed` 后调用 `complete`；
+不存在专用 executor/reviewer 生命周期。
 
 ## 16.7 GUI 与 live 验收
 
 GUI 动态展示 ModeCatalog、当前 stage、允许边和 transition history。Driver 使用稳定 ValueKey，不等待
 可能瞬间经过的中间 Widget，而是在终态读取 canonical history。
 
-wire replay 对 provider 请求历史中被重试替换的 transition 增量草稿只做形状校验：若 CAS、reason
-与 evidence 已齐全但 `completion.summary` 尚未随流式参数到达，验收边界按空 summary 验证后继续；
-运行时执行仍使用严格 typed schema，并由业务校验拒绝空 summary。
+wire replay 对 provider 请求历史中被重试替换的 transition 增量草稿只做形状校验：流式阶段允许
+completion 字段尚未完整到达，验收边界仍可继续；运行时执行 `workflow_state` 与 `complete` 时使用
+严格 typed schema，并由业务校验拒绝空 summary。
 
-最终入口是 `cargo xtask verify-workflow --live --gui`。它必须使用真实非本地 provider 和真实原生 GUI，
-不得 fallback 到 scripted/demo provider。harness 在无 `.git` 的临时 Rust 项目中选择 `mode.task`，提交
-不含内部工具名的产品 prompt，等待 planning/confirmation，确认后走完文档、实施、review、completed，
-运行 `cargo test` 与 verifier，并重启 GUI 验证 run id/revision/history 持久化。失败 artifacts 保存到
-`target/workflow-live-artifacts/`，同时回收 GUI、DTD 与 Driver 进程树。
+最终入口是 `cargo xtask verify-workflow --live --headless` 与 `cargo xtask verify-workflow --live --gui`。
+它们必须使用真实非本地 provider 和真实 Prompt，不得 fallback 到 scripted/demo provider。harness 在无
+`.git` 的隔离 Rust 项目中分别选择 `mode.simple` 与 `mode.task`：简洁模式直接完成且不产生 workflow
+调用，任务模式走完 planning/confirmation/document/edit/review/completed 并调用 `complete`。两种模式
+都运行 `cargo test` 与 verifier；GUI 额外重启任务模式验证 run id/revision/history 持久化。失败 artifacts
+保存到 `target/workflow-live-artifacts/`，同时回收 GUI、DTD 与 Driver 进程树。

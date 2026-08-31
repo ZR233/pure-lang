@@ -3,10 +3,10 @@ use pl_core::{
     ToolEffect, ToolEffectSet, TurnFinalizationPolicy,
 };
 
-/// Studio 不再按 Simple/Task 或工作流阶段裁剪普通工具能力。
+/// Studio 不按 Mode 或 workflow 阶段裁剪普通工具能力。
 ///
-/// Mode Skill 和 `workflow_state` 只约束模型接下来应该完成的阶段；文件、命令、Git、
-/// Agent 与最终回复能力始终由统一的根会话策略提供。
+/// `workflow_state` 是否使用完全由 Mode Skill 决定；root 统一以 `complete` 记录
+/// 完成事实并结束 turn。文件、命令、Git 和 Agent 能力始终保持可用。
 pub(super) fn studio_execution_policy(
     snapshot: &AgentSnapshot,
     profiles: &[pl_protocol::AgentProfileSnapshot],
@@ -33,7 +33,13 @@ pub(super) fn studio_execution_policy(
             ToolEffect::BranchControl,
         ]),
         collaboration,
-        finalization: TurnFinalizationPolicy::Direct,
+        finalization: if snapshot.identity.parent_id.is_none() {
+            TurnFinalizationPolicy::RequiredTool {
+                name: pl_core::TOOL_COMPLETE.to_string(),
+            }
+        } else {
+            TurnFinalizationPolicy::Direct
+        },
     }
 }
 
@@ -44,7 +50,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_stage_keeps_all_ordinary_effects_and_direct_finalization() {
+    fn root_keeps_all_ordinary_effects_and_requires_complete() {
         let profiles = ["explorer", "planner", "executor", "reviewer"]
             .into_iter()
             .map(profile)
@@ -59,7 +65,12 @@ mod tests {
         ] {
             assert!(policy.allows_effect(Some(effect)), "{effect:?}");
         }
-        assert_eq!(policy.finalization, TurnFinalizationPolicy::Direct);
+        assert_eq!(
+            policy.finalization,
+            TurnFinalizationPolicy::RequiredTool {
+                name: pl_core::TOOL_COMPLETE.to_string(),
+            }
+        );
         assert_eq!(
             policy
                 .collaboration
@@ -69,6 +80,12 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["executor", "explorer", "planner", "reviewer"]
         );
+    }
+
+    #[test]
+    fn child_profiles_keep_direct_finalization() {
+        let policy = studio_execution_policy(&snapshot("explorer", false), &[]);
+        assert_eq!(policy.finalization, TurnFinalizationPolicy::Direct);
     }
 
     fn profile(profile_id: &str) -> pl_protocol::AgentProfileSnapshot {

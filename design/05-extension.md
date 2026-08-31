@@ -18,8 +18,9 @@ override 与模型选择，不在 runtime 依据厂商名称猜测能力。
 来源优先级选 winner；`mode.simple` 与 `mode.task` 只接受 Studio 内置 Provider，外部同名候选忽略并
 告警。
 
-Mode Skill 负责要求 Agent 在开始时调用 `workflow_state.compile`，定义阶段、完成标准、terminal 与
-转换路径；运行时只编译和执行通用图协议，不理解阶段业务含义。
+Mode Skill 可以要求 Agent 使用 `workflow_state.compile`，定义阶段、完成标准、terminal 与转换路径；
+不使用 workflow 的 Mode 可以直接执行。运行时只编译和执行通用图协议，不理解阶段业务含义。所有
+root Mode 都通过统一 `complete` 工具提交完成摘要并结束 turn。
 
 ## 5.4 Agent Profile
 

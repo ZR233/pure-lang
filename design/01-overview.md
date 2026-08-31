@@ -17,7 +17,7 @@ Pure-Lang 是一个自然语言编译器。Pure Studio 的业务核心只有
 - `Interaction`：等待用户回答的 user input 或 tool approval；它不是普通聊天 Item。
 
 Simple、Task 与自定义模式不是独立会话类型。它们都是预加载 `mode.*` Skill 的同一 root Agent，
-差异只存在于冻结的模式指令与该指令要求编译的工作流图。
+差异只存在于冻结的模式指令；是否编译和推进工作流由各 Mode Skill 自主决定。
 
 ## 1.2 运行路径
 
@@ -34,8 +34,8 @@ pl-studio-server ─ REST / typed SSE ─┘        ↓
 - 每个 `ThreadActor` 串行拥有一个 Thread 的输入队列、活动 Turn、取消句柄、live Item overlay
   与 `AgentWorkingState`。
 - `TurnEngine` 只负责模型采样、工具调用、Interaction 等待和上下文压缩。
-- root Thread 预加载动态 Mode Skill，并独占 `workflow_state`；child Thread 使用冻结的 Agent
-  Profile 且不拥有该工具。
+- root Thread 预加载动态 Mode Skill，拥有可选的 `workflow_state` 和统一 `complete` 工具；child
+  Thread 使用冻结的 Agent Profile 且不拥有 root workflow 工具。
 - `studio.sqlite` 是 durable Thread/Turn/Item/Interaction、working state 与 Studio 产品事实的
   唯一数据库。
 

@@ -211,7 +211,7 @@ mod tests {
     use pl_trace::TraceEvent;
 
     use super::*;
-    use crate::TraceRecorder;
+    use crate::{TOOL_COMPLETE, TraceRecorder};
 
     #[test]
     fn projection_failure_is_a_turn_protocol_failure_not_an_agent_fault() {
@@ -247,6 +247,21 @@ mod tests {
 
         let result = result.unwrap();
         assert!(matches!(result.outcome, TurnOutcome::Completed(_)));
+    }
+
+    #[test]
+    fn root_complete_finalization_rejects_plain_text() {
+        let mut result = Ok(completed_result(Vec::new()));
+
+        enforce_finalization(&mut result, &required_tool_policy(TOOL_COMPLETE));
+
+        let result = result.unwrap();
+        let failure = result
+            .outcome
+            .failure()
+            .expect("plain text must not finalize a root turn");
+        assert_eq!(failure.category, TurnFailureCategory::Validation);
+        assert_eq!(failure.message, "turn must finalize with tool `complete`");
     }
 
     #[test]

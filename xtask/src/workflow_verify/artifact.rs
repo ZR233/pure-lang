@@ -3,13 +3,14 @@
 //! The acceptance harness deliberately validates the protocol boundary rather
 //! than a provider-specific transcript.  A mode is a preloaded skill and the
 //! root agent is the same agent in every mode, so captures must contain the
-//! frozen `mode.task` skill and the single `workflow_state` tool.  The validator
+//! frozen Mode Skill and the mode-specific workflow contract. The validator
 //! rejects the removed Task/WorkUnit/review/merge surface everywhere.
 
 use anyhow::{Context, Result, bail, ensure};
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -38,6 +39,7 @@ struct WireManifest<'a> {
     schema_version: u32,
     surface: &'a str,
     fixture_prompt_sha256: &'a str,
+    simple_fixture_prompt_sha256: &'a str,
     captures: Vec<WireManifestEntry>,
 }
 
@@ -51,6 +53,7 @@ struct WireManifestEntry {
     mode_id: Option<&'static str>,
     workflow_call_count: usize,
     workflow_result_count: usize,
+    complete_call_count: usize,
     prompt_sections: Vec<&'static str>,
     tool_names: Vec<String>,
     tool_schema_sha256: String,
@@ -67,12 +70,19 @@ pub(super) fn finalize(
     wire_dir: &Path,
     surface: &str,
     prompt_hash: &str,
+    simple_prompt_hash: &str,
 ) -> Result<()> {
     let prompt_bytes = fs::read(artifact_dir.join("fixture-prompt.md"))?;
     let artifact_prompt_hash = format!("{:x}", Sha256::digest(&prompt_bytes));
     ensure!(
         artifact_prompt_hash == prompt_hash,
         "fixture prompt artifact does not match the canonical prompt hash"
+    );
+    let simple_prompt_bytes = fs::read(artifact_dir.join("simple-fixture-prompt.md"))?;
+    let artifact_simple_prompt_hash = format!("{:x}", Sha256::digest(&simple_prompt_bytes));
+    ensure!(
+        artifact_simple_prompt_hash == simple_prompt_hash,
+        "simple fixture prompt artifact does not match the canonical prompt hash"
     );
 
     let mut paths = Vec::new();
@@ -84,20 +94,82 @@ pub(super) fn finalize(
             wire_dir.display()
         );
     }
-    let captures = paths
-        .into_iter()
-        .map(|path| capture_entry(artifact_dir, &path))
-        .collect::<Result<Vec<_>>>()?;
+    let mut active_mode = None;
+    let mut captures = Vec::with_capacity(paths.len());
+    for path in paths {
+        let mut capture = capture_entry(artifact_dir, &path)?;
+        if capture.mode_id.is_some() {
+            active_mode = capture.mode_id;
+        } else {
+            capture.mode_id = active_mode;
+        }
+        captures.push(capture);
+    }
+    assert_completion_receipts(artifact_dir, surface)?;
     assert_workflow_contract(&captures)?;
     fs::write(
         artifact_dir.join("wire-request-manifest.json"),
         serde_json::to_vec_pretty(&WireManifest {
-            schema_version: 1,
+            schema_version: 2,
             surface,
             fixture_prompt_sha256: prompt_hash,
+            simple_fixture_prompt_sha256: simple_prompt_hash,
             captures,
         })?,
     )?;
+    Ok(())
+}
+
+fn assert_completion_receipts(artifact_dir: &Path, surface: &str) -> Result<()> {
+    if surface == "gui" {
+        return assert_gui_completion_receipts(artifact_dir);
+    }
+    for mode_id in ["mode.simple", "mode.task"] {
+        let path = artifact_dir.join(format!(
+            "completion-receipt-{}.json",
+            mode_id.replace('.', "-")
+        ));
+        let receipt: Value = serde_json::from_slice(&fs::read(&path).with_context(|| {
+            format!("missing {mode_id} completion receipt `{}`", path.display())
+        })?)
+        .with_context(|| format!("invalid {mode_id} completion receipt `{}`", path.display()))?;
+        ensure!(
+            receipt.get("tool").and_then(Value::as_str) == Some("complete"),
+            "{mode_id} completion receipt does not identify the complete tool"
+        );
+        ensure!(
+            receipt.get("modeId").and_then(Value::as_str) == Some(mode_id),
+            "{mode_id} completion receipt has the wrong mode identity"
+        );
+        ensure!(
+            receipt.pointer("/receipt/status").and_then(Value::as_str) == Some("completed"),
+            "{mode_id} completion receipt is not successful"
+        );
+        ensure!(
+            receipt
+                .pointer("/receipt/summary")
+                .and_then(Value::as_str)
+                .is_some_and(|summary| !summary.trim().is_empty()),
+            "{mode_id} completion receipt has an empty summary"
+        );
+    }
+    Ok(())
+}
+
+fn assert_gui_completion_receipts(artifact_dir: &Path) -> Result<()> {
+    for attempt in [1, 2, 3] {
+        let path = artifact_dir.join(format!("gui-attempt-{attempt}-workflow-receipt.json"));
+        let receipt: Value = serde_json::from_slice(
+            &fs::read(&path)
+                .with_context(|| format!("missing GUI completion receipt `{}`", path.display()))?,
+        )
+        .with_context(|| format!("invalid GUI completion receipt `{}`", path.display()))?;
+        ensure!(
+            receipt.pointer("/complete/name").and_then(Value::as_str) == Some("complete")
+                && receipt.pointer("/complete/status").and_then(Value::as_str) == Some("succeeded"),
+            "GUI attempt {attempt} has no successful complete tool receipt"
+        );
+    }
     Ok(())
 }
 
@@ -111,59 +183,75 @@ fn assert_workflow_contract(captures: &[WireManifestEntry]) -> Result<()> {
         }),
         "wire captures contain a removed Task/review/merge tool"
     );
-    let root = captures.iter().filter(|capture| {
-        capture.request_mode == "full"
-            && capture.mode_id == Some("mode.task")
-            && capture
-                .tool_names
-                .iter()
-                .any(|name| name == "workflow_state")
-            && capture
-                .model
-                .as_deref()
-                .is_some_and(|model| !model.is_empty())
-    });
-    ensure!(
-        root.clone().count() > 0,
-        "no full provider request contains the frozen mode.task skill and workflow_state"
-    );
-    ensure!(
-        root.clone().any(|capture| {
-            capture.prompt_sections.contains(&"modeSkill")
-                && capture.prompt_sections.contains(&"canonicalUserPrompt")
-                && capture.tool_names.iter().any(|name| name == "exec")
-                && capture.tool_names.iter().any(|name| {
-                    matches!(
-                        name.as_str(),
-                        "read_file" | "apply_patch" | "workspace_file"
-                    )
-                })
+    for mode_id in ["mode.simple", "mode.task"] {
+        let root = captures.iter().filter(|capture| {
+            capture.request_mode == "full"
+                && capture.mode_id == Some(mode_id)
                 && capture
-                    .tool_names
+                    .model
+                    .as_deref()
+                    .is_some_and(|model| !model.is_empty())
+        });
+        ensure!(
+            root.clone().count() > 0,
+            "no full provider request contains the frozen {mode_id} skill"
+        );
+        ensure!(
+            root.clone().any(|capture| {
+                capture.prompt_sections.contains(&"modeSkill")
+                    && capture.prompt_sections.contains(&"canonicalUserPrompt")
+                    && capture.tool_names.iter().any(|name| name == "complete")
+                    && capture.tool_names.iter().any(|name| name == "exec")
+                    && capture.tool_names.iter().any(|name| {
+                        matches!(
+                            name.as_str(),
+                            "read_file" | "apply_patch" | "workspace_file"
+                        )
+                    })
+                    && capture
+                        .tool_names
+                        .iter()
+                        .any(|name| name == "list_agent_profiles")
+                    && capture.tool_names.iter().any(|name| name == "spawn_agent")
+            }),
+            "one root request did not preserve {mode_id}, completion, collaboration tools, and ordinary workspace tools"
+        );
+        if mode_id == "mode.task" {
+            ensure!(
+                captures
                     .iter()
-                    .any(|name| name == "list_agent_profiles")
-                && capture.tool_names.iter().any(|name| name == "spawn_agent")
-        }),
-        "one root request did not preserve mode.task, the user prompt, collaboration tools, and ordinary workspace tools"
-    );
-    ensure!(
-        captures
-            .iter()
-            .any(|capture| capture.workflow_call_count > 0),
-        "wire captures contain no workflow_state call"
-    );
-    ensure!(
-        captures
-            .iter()
-            .any(|capture| capture.workflow_result_count > 0),
-        "wire captures contain no workflow_state result"
-    );
-    ensure!(
-        captures
-            .iter()
-            .any(|capture| capture.prompt_sections.contains(&"workflowProjection")),
-        "no subsequent request contains the derived pl.workflow projection"
-    );
+                    .filter(|capture| capture.mode_id == Some(mode_id))
+                    .any(|capture| capture.workflow_call_count > 0),
+                "mode.task wire captures contain no workflow_state call"
+            );
+            ensure!(
+                captures
+                    .iter()
+                    .filter(|capture| capture.mode_id == Some(mode_id))
+                    .any(|capture| capture.workflow_result_count > 0),
+                "mode.task wire captures contain no workflow_state result"
+            );
+            ensure!(
+                captures
+                    .iter()
+                    .filter(|capture| capture.mode_id == Some(mode_id))
+                    .any(|capture| { capture.prompt_sections.contains(&"workflowProjection") }),
+                "mode.task has no subsequent request containing the derived pl.workflow projection"
+            );
+        } else {
+            ensure!(
+                captures
+                    .iter()
+                    .filter(|capture| capture.mode_id == Some(mode_id))
+                    .all(|capture| {
+                        capture.workflow_call_count == 0
+                            && capture.workflow_result_count == 0
+                            && !capture.prompt_sections.contains(&"workflowProjection")
+                    }),
+                "mode.simple wire captures contain workflow calls, results, or projection"
+            );
+        }
+    }
     Ok(())
 }
 
@@ -220,10 +308,14 @@ fn capture_entry(artifact_dir: &Path, path: &Path) -> Result<WireManifestEntry> 
     let prompt_sections = detected_prompt_sections(body, &prompt_text, &message_texts);
     let workflow_call_count = function_call_count(body, "workflow_state");
     let workflow_result_count = workflow_result_count(body);
-    let mode_id = prompt_text
-        .contains("name: mode.task")
-        .then_some("mode.task")
-        .or_else(|| prompt_text.contains("mode.task").then_some("mode.task"));
+    let complete_call_count = function_call_count(body, "complete");
+    let mode_id = if prompt_text.contains("<preloaded_mode_skill name=\"mode.simple\"") {
+        Some("mode.simple")
+    } else if prompt_text.contains("<preloaded_mode_skill name=\"mode.task\"") {
+        Some("mode.task")
+    } else {
+        None
+    };
     let tools_json = serde_json::to_vec(&tools)?;
     let relative = path
         .strip_prefix(artifact_dir)
@@ -238,6 +330,7 @@ fn capture_entry(artifact_dir: &Path, path: &Path) -> Result<WireManifestEntry> 
         mode_id,
         workflow_call_count,
         workflow_result_count,
+        complete_call_count,
         prompt_sections,
         tool_names,
         tool_schema_sha256: format!("{:x}", Sha256::digest(tools_json)),
@@ -308,6 +401,7 @@ fn workflow_result_count(body: &Value) -> usize {
 }
 
 fn validate_workflow_call_arguments(body: &Value) -> Result<()> {
+    let failed_call_ids = failed_workflow_call_ids(body);
     let response_calls = body
         .get("input")
         .and_then(Value::as_array)
@@ -329,6 +423,13 @@ fn validate_workflow_call_arguments(body: &Value) -> Result<()> {
     for call in response_calls
         .chain(chat_calls)
         .filter(|call| tool_name(call) == Some("workflow_state"))
+        .filter(|call| {
+            let call_id = call
+                .get("call_id")
+                .or_else(|| call.pointer("/function/id"))
+                .and_then(Value::as_str);
+            call_id.is_none_or(|call_id| !failed_call_ids.contains(call_id))
+        })
     {
         let raw = call
             .get("arguments")
@@ -344,6 +445,37 @@ fn validate_workflow_call_arguments(body: &Value) -> Result<()> {
             .map_err(|error| anyhow::anyhow!("invalid workflow_state call arguments: {error}"))?;
     }
     Ok(())
+}
+
+fn failed_workflow_call_ids(body: &Value) -> HashSet<String> {
+    let mut failed = HashSet::new();
+    if let Some(input) = body.get("input").and_then(Value::as_array) {
+        for item in input {
+            if item.get("type").and_then(Value::as_str) == Some("function_call_output")
+                && item
+                    .get("output")
+                    .and_then(Value::as_str)
+                    .is_some_and(|output| output.starts_with("Tool execution error"))
+                && let Some(call_id) = item.get("call_id").and_then(Value::as_str)
+            {
+                failed.insert(call_id.to_owned());
+            }
+        }
+    }
+    if let Some(messages) = body.get("messages").and_then(Value::as_array) {
+        for message in messages {
+            if message.get("role").and_then(Value::as_str) == Some("tool")
+                && message
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .is_some_and(|content| content.starts_with("Tool execution error"))
+                && let Some(call_id) = message.get("tool_call_id").and_then(Value::as_str)
+            {
+                failed.insert(call_id.to_owned());
+            }
+        }
+    }
+    failed
 }
 
 fn tool_name(tool: &Value) -> Option<&str> {
@@ -404,7 +536,8 @@ fn detected_prompt_sections(
 ) -> Vec<&'static str> {
     let candidates = [
         ("baseInstructions", "你是 Pure-Lang 的工程协作代理"),
-        ("modeSkill", "mode.task"),
+        ("modeSkill", "<preloaded_mode_skill name=\"mode.simple\""),
+        ("modeSkill", "<preloaded_mode_skill name=\"mode.task\""),
         ("workspaceInstructions", "AGENTS.md"),
         ("canonicalUserPrompt", "normalize_key"),
         ("canonicalUserPrompt", "validate_key"),
@@ -479,50 +612,55 @@ mod tests {
     }
 
     #[test]
-    fn workflow_contract_requires_mode_skill_and_projection() {
-        let captures = vec![WireManifestEntry {
-            file: "capture.json".to_string(),
-            protocol: "responsesHttp".to_string(),
-            request_mode: "full".to_string(),
-            model: Some("model".to_string()),
-            mode_id: Some("mode.task"),
-            workflow_call_count: 1,
-            workflow_result_count: 1,
-            prompt_sections: vec!["modeSkill", "canonicalUserPrompt", "workflowProjection"],
-            tool_names: vec![
-                "apply_patch".to_string(),
-                "exec".to_string(),
-                "list_agent_profiles".to_string(),
-                "spawn_agent".to_string(),
-                "workflow_state".to_string(),
-            ],
-            tool_schema_sha256: "hash".to_string(),
-        }];
+    fn workflow_contract_requires_both_mode_contracts() {
+        let captures = vec![valid_capture("mode.task"), valid_capture("mode.simple")];
         assert!(assert_workflow_contract(&captures).is_ok());
     }
 
     #[test]
     fn workflow_contract_rejects_removed_tools() {
-        let captures = vec![WireManifestEntry {
-            file: "capture.json".to_string(),
+        let mut task = valid_capture("mode.task");
+        task.tool_names.push("task_transition".to_string());
+        let captures = vec![task, valid_capture("mode.simple")];
+        assert!(assert_workflow_contract(&captures).is_err());
+    }
+
+    #[test]
+    fn workflow_contract_requires_simple_mode_without_workflow() {
+        let captures = vec![valid_capture("mode.simple"), valid_capture("mode.task")];
+        assert!(assert_workflow_contract(&captures).is_ok());
+    }
+
+    fn valid_capture(mode_id: &'static str) -> WireManifestEntry {
+        let task = mode_id == "mode.task";
+        let mut tool_names = vec![
+            "apply_patch".to_string(),
+            "complete".to_string(),
+            "exec".to_string(),
+            "list_agent_profiles".to_string(),
+            "read_file".to_string(),
+            "spawn_agent".to_string(),
+        ];
+        if task {
+            tool_names.push("workflow_state".to_string());
+        }
+        WireManifestEntry {
+            file: format!("{mode_id}.json"),
             protocol: "responsesHttp".to_string(),
             request_mode: "full".to_string(),
             model: Some("model".to_string()),
-            mode_id: Some("mode.task"),
-            workflow_call_count: 1,
-            workflow_result_count: 1,
-            prompt_sections: vec!["modeSkill", "canonicalUserPrompt", "workflowProjection"],
-            tool_names: vec![
-                "apply_patch".to_string(),
-                "exec".to_string(),
-                "list_agent_profiles".to_string(),
-                "spawn_agent".to_string(),
-                "workflow_state".to_string(),
-                "task_transition".to_string(),
-            ],
+            mode_id: Some(mode_id),
+            workflow_call_count: if task { 1 } else { 0 },
+            workflow_result_count: if task { 1 } else { 0 },
+            complete_call_count: 1,
+            prompt_sections: if task {
+                vec!["modeSkill", "canonicalUserPrompt", "workflowProjection"]
+            } else {
+                vec!["modeSkill", "canonicalUserPrompt"]
+            },
+            tool_names,
             tool_schema_sha256: "hash".to_string(),
-        }];
-        assert!(assert_workflow_contract(&captures).is_err());
+        }
     }
 
     #[test]
@@ -644,6 +782,9 @@ mod tests {
             &artifact_dir.join("wire"),
             "replay",
             prompt_hash.trim(),
+            std::fs::read_to_string(artifact_dir.join("simple-fixture-prompt.sha256"))
+                .expect("simple fixture prompt hash")
+                .trim(),
         )
         .expect("wire manifest replay");
     }

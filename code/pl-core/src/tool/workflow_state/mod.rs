@@ -232,7 +232,7 @@ impl Tool for WorkflowStateTool {
     }
 
     fn description(&self) -> &str {
-        "Compile, inspect, transition, or supersede the root conversation's canonical workflow. Call compile before doing stage work, and call transition exactly once after completing the current stage. This tool must be the only tool call in its provider response."
+        "Optionally compile, inspect, transition, or supersede the root conversation's canonical workflow when the active Mode Skill requires it. This tool must be the only tool call in its provider response."
     }
 
     fn input_schema(&self) -> serde_json::Value {

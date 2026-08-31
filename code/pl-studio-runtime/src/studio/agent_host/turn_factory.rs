@@ -452,12 +452,8 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             pl_core::reconcile_programmatic_tool_calling(engine.agent_tools(), &route)?;
         }
 
-        engine
-            .agent_tools()
-            .uninstall(&ToolGroupId::new("finalization"));
-        engine.agent_tools().uninstall(&ToolGroupId::new("task"));
-        if let Some(mode_snapshot) = mode_snapshot.clone()
-            && !exclusive_web_search
+        if let Some(mode_snapshot) =
+            workflow_mode_snapshot(mode_snapshot.as_ref(), exclusive_web_search)
         {
             let working_set = engine.tool_session_runtime().working_set();
             engine.agent_tools().install(
@@ -471,6 +467,16 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             engine
                 .agent_tools()
                 .uninstall(&ToolGroupId::new("workflow"));
+        }
+        if is_root {
+            engine.agent_tools().install(
+                ToolGroupId::new("completion"),
+                vec![Arc::new(pl_core::CompleteTool)],
+            )?;
+        } else {
+            engine
+                .agent_tools()
+                .uninstall(&ToolGroupId::new("completion"));
         }
         let active_mcp_servers = self.mcp_runtime.available_server_names().await;
         let mcp_health = self.mcp_runtime.health_snapshot().await?;
@@ -628,6 +634,16 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             Ok(prepared)
         }
     }
+}
+
+fn workflow_mode_snapshot(
+    mode_snapshot: Option<&pl_protocol::ModeInstructionSnapshot>,
+    exclusive_web_search: bool,
+) -> Option<pl_protocol::ModeInstructionSnapshot> {
+    (!exclusive_web_search)
+        .then(|| mode_snapshot.filter(|snapshot| snapshot.mode_id != pl_protocol::ModeId::SIMPLE))
+        .flatten()
+        .cloned()
 }
 
 fn studio_turn_options(options: TurnOptions) -> TurnOptions {
@@ -914,6 +930,23 @@ mod tests {
         ] {
             assert!(!instructions.contains(mode.label()));
         }
+    }
+
+    #[test]
+    fn workflow_tool_is_not_installed_for_simple_mode() {
+        let snapshot = |mode_id: &str| pl_protocol::ModeInstructionSnapshot {
+            mode_id: mode_id.to_string(),
+            display_name: mode_id.to_string(),
+            source: "test".to_string(),
+            provider_id: "provider".to_string(),
+            revision: "1".to_string(),
+            content_hash: "hash".to_string(),
+            content: String::new(),
+        };
+        assert!(workflow_mode_snapshot(Some(&snapshot("mode.task")), false).is_some());
+        assert!(workflow_mode_snapshot(Some(&snapshot("mode.release")), false).is_some());
+        assert!(workflow_mode_snapshot(Some(&snapshot("mode.simple")), false).is_none());
+        assert!(workflow_mode_snapshot(Some(&snapshot("mode.task")), true).is_none());
     }
 
     #[test]

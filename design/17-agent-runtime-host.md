@@ -16,10 +16,11 @@ working state。root 和 child 都走同一 actor/engine；差异只来自预加
 
 root TurnFactory 使用统一 `unified_root` 指令和 planner route。它解析 Thread 的动态 ModeId：无 active
 run 时读取当前 Mode Skill winner，active/terminal run 的执行上下文使用 run 内冻结 snapshot。模型
-上下文按固定 section 注入项目指令、Mode Skill 与 `pl.workflow`。
+上下文按固定 section 注入项目指令、Mode Skill 与（存在 active workflow 时）`pl.workflow`。
 
-root 注册 `workflow_state` 和通用 collaboration/workspace tools。阶段只改变 constraint prompt，不能
-改变工具授权。模式切换由 runtime 命令校验 idle、pending interaction 与 workflow lifecycle。
+root 注册可选 `workflow_state`、统一 `complete` 和通用 collaboration/workspace tools。阶段只改变
+constraint prompt，不能改变工具授权；所有 root turn 由 `complete` 形成统一完成边界。模式切换由
+runtime 命令校验 idle、pending interaction 与 workflow lifecycle。
 
 ## 17.3 child 会话
 

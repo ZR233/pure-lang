@@ -63,7 +63,8 @@ cargo xtask verify-workflow --live --gui
 `cargo xtask run-gui --driver --log-level debug` 启动原生 Studio，在无 `.git` 的临时 Rust 项目中
 完成计划展示、通用用户确认、文档更新、实施、验证、复核、`completed` 终态与重启恢复。
 
-wire capture 必须包含冻结的 `mode.task`、`workflow_state`、普通工作区与通用协作工具以及
-compile 后的工具结果或 `pl.workflow`；不得包含旧 planner/Task prompt、`task_*`、WorkUnit、
-review 或 merge 工具。artifact 写入 `target/workflow-live-artifacts/`，只保留脱敏协议、
+wire capture 必须分别包含冻结的 `mode.simple`、`mode.task`、统一 `complete`、普通工作区与通用协作工具；
+任务模式还必须包含 `workflow_state`、compile 后的工具结果和 `pl.workflow`，简洁模式不得包含这些
+workflow 调用或投影；不得包含旧 planner/Task prompt、`task_*`、WorkUnit、review 或 merge 工具。
+artifact 写入 `target/workflow-live-artifacts/`，只保留脱敏协议、
 workflow snapshot、日志、截图、文件 diff、验证输出与进程树，不记录认证头。

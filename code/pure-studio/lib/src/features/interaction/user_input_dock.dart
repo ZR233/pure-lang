@@ -488,18 +488,15 @@ class _QuestionStep extends StatelessWidget {
           const SizedBox(height: 10),
           for (final (optionIndex, option) in question.options.indexed)
             Padding(
+              key: optionIndex == 0 && isFirstQuestion
+                  ? StudioDriverKeys.userInputFirstOption
+                  : StudioDriverKeys.userInputOption(questionKey, optionIndex),
               padding: const EdgeInsets.only(bottom: 7),
               child: KeyedSubtree(
                 key: optionIndex == 0 && isFirstQuestion
                     ? firstOptionKey
                     : null,
                 child: _QuestionOptionRow(
-                  key: optionIndex == 0 && isFirstQuestion
-                      ? StudioDriverKeys.userInputFirstOption
-                      : StudioDriverKeys.userInputOption(
-                          questionKey,
-                          optionIndex,
-                        ),
                   option: option,
                   selected: selected.contains(option.label),
                   onChanged: enabled
@@ -546,7 +543,6 @@ class _QuestionOptionRow extends StatelessWidget {
     required this.option,
     required this.selected,
     required this.onChanged,
-    super.key,
   });
 
   final UserQuestionOptionView option;

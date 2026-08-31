@@ -7,11 +7,11 @@
 审批拒绝与执行失败都形成 typed tool result，不伪造成功。
 
 `Coexist` 工具可按普通 batch 执行；包含 `Solo` 工具的 response 必须恰好只有该一个调用，否则整批在
-任何工具执行前拒绝。该规则通用，不依赖工具名；`workflow_state` 使用 `Solo`。
+任何工具执行前拒绝。该规则通用，不依赖工具名；`workflow_state` 与 `complete` 都使用 `Solo`。
 
 ## 13.2 workflow_state
 
-唯一状态工具支持：
+当活动 Mode Skill 选择工作流时，状态工具支持：
 
 - `compile`：在无 workflow 或前一 run 已 terminal 时编译新定义并冻结 Mode Skill；
 - `status`：读取 current、graph 或 history，不修改 revision；
@@ -41,3 +41,9 @@ state 派生 `pl.workflow`；context compaction 后重新捕获最新 projection
 Workflow 阶段不能收缩文件、命令、Git、MCP、Agent 或最终回复工具目录。工具权限继续使用既有通用
 approval/sandbox 策略。协作 `spawn_agent` 接受 `profileId` 并冻结 Profile；child 不注册 root 的
 `workflow_state`，因此不能替 root 改写 run。
+
+## 13.5 统一完成
+
+所有 root Mode 在完成请求后调用 `complete`，提交非空 `summary` 和可选、有界的 `evidence` 列表。
+工具返回结构化完成事实并结束当前 turn；普通文本不能替代该调用。未选择 workflow 的 Mode 不需要
+调用 `workflow_state`，但仍必须通过 `complete` 结束。

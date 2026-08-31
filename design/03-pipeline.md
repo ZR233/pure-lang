@@ -7,13 +7,13 @@
 成功后更新 owner snapshot 并广播 typed notification。
 
 TurnFactory 从同一 Thread 事实构造：统一 root 指令、项目 `AGENTS.md`、当前 Mode Skill 或冻结
-Mode snapshot、`pl.workflow` projection、普通 Skill、工具快照与 provider route。Simple/Task 不选择
+Mode snapshot、可选的 `pl.workflow` projection、普通 Skill、工具快照与 provider route。Simple/Task 不选择
 不同的模型循环；root 一律继承统一 planner route。
 
 ## 3.2 模型循环与工具
 
 provider response 依次形成 assistant Item、tool call、tool result 与下一轮输入。普通工具可以并批；
-`workflow_state` 声明 `Solo`，同一 response 中若还有任何其他调用则整批拒绝且无副作用。
+`workflow_state` 与 `complete` 都声明 `Solo`，同一 response 中若还有任何其他调用则整批拒绝且无副作用。
 
 工作流状态调用在 working-state clone 上计算。成功调用的 assistant tool call、tool result 与新
 working state 必须由一个 Thread checkpoint 原子提交；失败时三者共同回滚。工具结果在同一 Turn
@@ -27,10 +27,10 @@ Interaction 只有通用 `UserInput` 与 `ToolApproval`。模式确认、澄清�
 
 ## 3.4 工作流生命周期
 
-首次 `workflow_state.compile` 生成 lineage/run 并冻结 Mode Skill。`transition` 用 run/revision/stage
+当 Mode Skill 选择使用 workflow 时，首次 `workflow_state.compile` 生成 lineage/run 并冻结 Mode Skill。`transition` 用 run/revision/stage
 三重 CAS 完成当前阶段并沿直接边进入下一阶段；进入 terminal stage 后 run 立即终止但 Turn 可继续
 交付。活跃目标发生实质变化时使用 `supersede` 原子归档旧 run 并创建同 lineage replacement；正常
-终态后的新任务用 `compile` 创建新 lineage。
+终态后的新任务用 `compile` 创建新 lineage。所有 root Mode 在完成工作后都调用 `complete` 结束当前 Turn。
 
 Workflow 不拥有代码、文件、Git 或 Agent。任何阶段都可使用普通工具；图只约束状态记录和后续提示。
 

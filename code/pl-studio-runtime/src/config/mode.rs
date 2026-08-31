@@ -131,7 +131,24 @@ mod tests {
     fn root_prompt_delegates_behavior_to_the_mode_skill() {
         let instructions = StudioMode::root_instructions();
         assert!(instructions.contains("Mode Skill"));
+        assert!(instructions.contains("optional `workflow_state`"));
+        assert!(instructions.contains("`complete`"));
+        assert!(!instructions.contains("compile a complete workflow"));
         assert!(!instructions.contains("mode.simple"));
         assert!(!instructions.contains("mode.task"));
+    }
+
+    #[test]
+    fn builtin_mode_skills_define_their_own_workflow_contract() {
+        let simple = include_str!("../../assets/skills/modes/mode.simple/SKILL.md");
+        assert!(simple.contains("直接理解用户目标"));
+        assert!(simple.contains("complete"));
+        assert!(!simple.contains("workflow_state.compile"));
+        assert!(!simple.contains("workflow_state.transition"));
+
+        let task = include_str!("../../assets/skills/modes/mode.task/SKILL.md");
+        assert!(task.contains("workflow_state.compile"));
+        assert!(task.contains("workflow_state.transition"));
+        assert!(task.contains("complete"));
     }
 }

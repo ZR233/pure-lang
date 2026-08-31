@@ -22,6 +22,6 @@ mode:
 
 推荐主路径是 `planning -> awaiting_confirmation -> editing_documents -> working -> reviewing -> completed`。用户要求修改计划时从 `awaiting_confirmation` 回到 `planning`。用户实质改变目标时使用 `workflow_state.supersede`，先完整编译 replacement，再原子替换当前 run。所有活动阶段都应提供合理的停止路径。
 
-每完成一个阶段，单独调用一次 `workflow_state.transition`，并严格使用工具返回的 run ID、revision、当前阶段和直接出边。阶段的 `when` 与 completion criteria 由你依据证据判断；Runtime 只保证图和 CAS。工具拒绝时以 canonical snapshot 恢复，不猜测状态。进入终态不强制结束当前 Turn，仍需正常总结交付。
+每完成一个阶段，单独调用一次 `workflow_state.transition`，并严格使用工具返回的 run ID、revision、当前阶段和直接出边。阶段的 `when` 与 completion criteria 由你依据证据判断；Runtime 只保证图和 CAS。工具拒绝时以 canonical snapshot 恢复，不猜测状态。进入 `completed` 终态后仍需调用 `complete` 结束当前 Turn，并提交最终摘要与关键证据。
 
 确认统一使用 `request_user_input`。框架不创建专用工作单元、恢复、交付审查或合并记录，也不自动要求 worktree、commit 或 clean-tree 门禁；这些不是代理使用 Git 的限制。文件、命令、Git、Agent 与最终回复能力不受阶段限制。

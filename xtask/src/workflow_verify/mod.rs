@@ -69,6 +69,25 @@ pub(crate) fn run(options: VerifyWorkflowOptions) -> Result<()> {
         artifact_dir.join("fixture-prompt.sha256"),
         format!("{prompt_hash}\n"),
     )?;
+    let simple_prompt = workspace_root
+        .join("test-fixtures")
+        .join("workflow-live")
+        .join("simple-prompt.md");
+    let simple_prompt_bytes = fs::read(&simple_prompt).with_context(|| {
+        format!(
+            "failed to read canonical simple-mode prompt `{}`",
+            simple_prompt.display()
+        )
+    })?;
+    let simple_prompt_hash = format!("{:x}", Sha256::digest(&simple_prompt_bytes));
+    fs::write(
+        artifact_dir.join("simple-fixture-prompt.md"),
+        &simple_prompt_bytes,
+    )?;
+    fs::write(
+        artifact_dir.join("simple-fixture-prompt.sha256"),
+        format!("{simple_prompt_hash}\n"),
+    )?;
     fs::write(
         artifact_dir.join("acceptance-surface.txt"),
         format!("surface={surface}\nscriptedProvider=false\nlive=true\n"),
@@ -100,7 +119,13 @@ pub(crate) fn run(options: VerifyWorkflowOptions) -> Result<()> {
             )?;
             Ok(())
         }
-        Ok(_) => artifact::finalize(&artifact_dir, &wire_dir, surface, &prompt_hash),
+        Ok(_) => artifact::finalize(
+            &artifact_dir,
+            &wire_dir,
+            surface,
+            &prompt_hash,
+            &simple_prompt_hash,
+        ),
         Err(error) => Err(error),
     };
     match (acceptance, manifest) {
@@ -194,65 +219,120 @@ fn run_gui(
         .prefix("pure-workflow-live-gui-")
         .tempdir()
         .context("failed to create isolated GUI acceptance root")?;
-    let studio_home = root.path().join("studio-home");
-    let fixture_workspace = root.path().join("workspace");
-    fs::create_dir_all(&studio_home)?;
-    fs::create_dir_all(&fixture_workspace)?;
+    let simple_studio_home = root.path().join("studio-home-simple");
+    let task_studio_home = root.path().join("studio-home-task");
+    let simple_fixture_workspace = root.path().join("workspace-simple");
+    let task_fixture_workspace = root.path().join("workspace-task");
+    fs::create_dir_all(&simple_studio_home)?;
+    fs::create_dir_all(&task_studio_home)?;
+    fs::create_dir_all(&simple_fixture_workspace)?;
+    fs::create_dir_all(&task_fixture_workspace)?;
     write_isolated_live_config(
         &installed_config,
-        &studio_home.join("config.toml"),
+        &simple_studio_home.join("config.toml"),
+        &artifact_dir.join("model-routes.json"),
+    )?;
+    write_isolated_live_config(
+        &installed_config,
+        &task_studio_home.join("config.toml"),
         &artifact_dir.join("model-routes.json"),
     )?;
     let installed_agents = installed_home.join("agents");
     if installed_agents.is_dir() {
-        copy_directory(&installed_agents, &studio_home.join("agents"))?;
+        copy_directory(&installed_agents, &simple_studio_home.join("agents"))?;
+        copy_directory(&installed_agents, &task_studio_home.join("agents"))?;
     }
     let canonical_workspace = workspace_root
         .join("test-fixtures")
         .join("workflow-live")
         .join("workspace");
-    copy_directory(&canonical_workspace, &fixture_workspace)?;
+    copy_directory(&canonical_workspace, &simple_fixture_workspace)?;
+    copy_directory(&canonical_workspace, &task_fixture_workspace)?;
+    let simple_prompt = workspace_root
+        .join("test-fixtures")
+        .join("workflow-live")
+        .join("simple-prompt.md");
 
     let acceptance = (|| {
-        let first = run_gui_attempt(GuiAttempt {
+        let simple = run_gui_attempt(GuiAttempt {
             workspace_root,
             artifact_dir,
-            wire_dir: &wire_dir.join("new"),
-            studio_home: &studio_home,
-            fixture_workspace: &fixture_workspace,
-            prompt,
+            wire_dir: &wire_dir.join("simple"),
+            studio_home: &simple_studio_home,
+            fixture_workspace: &simple_fixture_workspace,
+            prompt: &simple_prompt,
             mode: "new",
             attempt: 1,
+            studio_mode: "mode.simple",
+            deadline,
+        })?;
+        ensure!(
+            simple.workflow_run_id.is_none(),
+            "mode.simple GUI receipt unexpectedly contains a workflow identity: {simple:?}"
+        );
+        let task = run_gui_attempt(GuiAttempt {
+            workspace_root,
+            artifact_dir,
+            wire_dir: &wire_dir.join("task-new"),
+            studio_home: &task_studio_home,
+            fixture_workspace: &task_fixture_workspace,
+            prompt,
+            mode: "new",
+            attempt: 2,
+            studio_mode: "mode.task",
             deadline,
         })?;
         let reopened = run_gui_attempt(GuiAttempt {
             workspace_root,
             artifact_dir,
-            wire_dir: &wire_dir.join("resume"),
-            studio_home: &studio_home,
-            fixture_workspace: &fixture_workspace,
+            wire_dir: &wire_dir.join("task-resume"),
+            studio_home: &task_studio_home,
+            fixture_workspace: &task_fixture_workspace,
             prompt,
             mode: "resume",
-            attempt: 2,
+            attempt: 3,
+            studio_mode: "mode.task",
             deadline,
         })?;
         ensure!(
-            first == reopened,
-            "GUI reopen selected a different durable workflow: first={first:?}, reopened={reopened:?}"
+            task == reopened,
+            "GUI reopen selected a different durable workflow: first={task:?}, reopened={reopened:?}"
         );
         fs::write(
             artifact_dir.join("gui-shutdown-reopen.json"),
             serde_json::to_vec_pretty(&serde_json::json!({
                 "schemaVersion": 1,
-                "first": first,
+                "simple": simple,
+                "first": task,
                 "reopened": reopened,
                 "sameWorkflow": true,
             }))?,
         )?;
-        validate_delivered_fixture(&canonical_workspace, &fixture_workspace, artifact_dir)
+        validate_delivered_fixture(
+            &canonical_workspace,
+            &simple_fixture_workspace,
+            &artifact_dir.join("simple"),
+        )?;
+        validate_delivered_fixture(
+            &canonical_workspace,
+            &task_fixture_workspace,
+            &artifact_dir.join("task"),
+        )
     })();
-    let diff_artifact =
-        write_workspace_diff(&canonical_workspace, &fixture_workspace, artifact_dir);
+    let diff_artifact = (|| {
+        write_workspace_diff(
+            &canonical_workspace,
+            &simple_fixture_workspace,
+            artifact_dir,
+            "workspace-file-diff-simple.json",
+        )?;
+        write_workspace_diff(
+            &canonical_workspace,
+            &task_fixture_workspace,
+            artifact_dir,
+            "workspace-file-diff-task.json",
+        )
+    })();
     let installed_state_after = user_config_state(&installed_home);
     let state_check = installed_state_after.and_then(|after| {
         fs::write(
@@ -282,6 +362,7 @@ struct GuiAttempt<'a> {
     prompt: &'a Path,
     mode: &'static str,
     attempt: u32,
+    studio_mode: &'static str,
     deadline: Instant,
 }
 
@@ -290,7 +371,7 @@ struct GuiAttempt<'a> {
 struct DriverWorkflowIdentity {
     project_id: String,
     thread_id: String,
-    workflow_run_id: String,
+    workflow_run_id: Option<String>,
 }
 
 fn run_gui_attempt(attempt: GuiAttempt<'_>) -> Result<DriverWorkflowIdentity> {
@@ -355,6 +436,7 @@ fn run_gui_attempt(attempt: GuiAttempt<'_>) -> Result<DriverWorkflowIdentity> {
             &attempt
                 .artifact_dir
                 .join(format!("{prefix}-workflow-receipt.json")),
+            attempt.studio_mode,
         )
     })();
     let process_tree = gui.write_process_tree(
@@ -380,6 +462,8 @@ fn driver_args(
         attempt.mode,
         "--vm-service-url",
         vm_service,
+        "--studio-mode",
+        attempt.studio_mode,
         "--workspace",
     ] {
         args.push(OsString::from(value));
@@ -410,6 +494,7 @@ fn driver_args(
 }
 
 fn validate_delivered_fixture(canonical: &Path, workspace: &Path, artifacts: &Path) -> Result<()> {
+    fs::create_dir_all(artifacts)?;
     for path in [
         "Cargo.toml",
         "Cargo.lock",
@@ -542,7 +627,11 @@ fn collect_relative_files(root: &Path, current: &Path, output: &mut Vec<String>)
     Ok(())
 }
 
-fn write_driver_receipt(log: &Path, output: &Path) -> Result<DriverWorkflowIdentity> {
+fn write_driver_receipt(
+    log: &Path,
+    output: &Path,
+    studio_mode: &str,
+) -> Result<DriverWorkflowIdentity> {
     let mut completed = None;
     let mut shutdown = None;
     for line in fs::read_to_string(log)?.lines() {
@@ -560,13 +649,49 @@ fn write_driver_receipt(log: &Path, output: &Path) -> Result<DriverWorkflowIdent
     }
     let completed = completed.context("Flutter Driver emitted no completed workflow receipt")?;
     let shutdown = shutdown.context("Flutter Driver emitted no durable shutdown receipt")?;
-    ensure!(
-        completed
-            .pointer("/workflow/currentRun/currentStageId")
-            .and_then(serde_json::Value::as_str)
-            .is_some_and(|stage| stage == "completed"),
-        "Flutter Driver completed receipt does not contain a terminal workflow"
-    );
+    let complete = completed
+        .pointer("/workspace/timeline")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .flat_map(|item| {
+            item.get("tools")
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten()
+        })
+        .find(|tool| {
+            tool.get("name").and_then(serde_json::Value::as_str) == Some("complete")
+                && tool.get("status").and_then(serde_json::Value::as_str) == Some("succeeded")
+        })
+        .cloned()
+        .context("Flutter Driver emitted no successful complete tool receipt")?;
+    if studio_mode == "mode.task" {
+        ensure!(
+            completed
+                .pointer("/workflow/currentRun/currentStageId")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|stage| stage == "completed"),
+            "Flutter Driver completed receipt does not contain a terminal workflow"
+        );
+    } else {
+        ensure!(
+            completed
+                .get("workflow")
+                .is_some_and(serde_json::Value::is_null),
+            "Flutter Driver simple receipt unexpectedly contains a workflow"
+        );
+    }
+    let workflow_run_id = completed
+        .pointer("/workflow/currentRun/runId")
+        .and_then(serde_json::Value::as_str)
+        .map(ToOwned::to_owned);
+    if studio_mode == "mode.task" {
+        ensure!(
+            workflow_run_id.is_some(),
+            "Flutter Driver task receipt has no workflow run id"
+        );
+    }
     let identity = DriverWorkflowIdentity {
         project_id: completed
             .pointer("/workspace/projectId")
@@ -578,11 +703,7 @@ fn write_driver_receipt(log: &Path, output: &Path) -> Result<DriverWorkflowIdent
             .and_then(serde_json::Value::as_str)
             .context("Flutter Driver receipt has no Thread id")?
             .to_string(),
-        workflow_run_id: completed
-            .pointer("/workflow/currentRun/runId")
-            .and_then(serde_json::Value::as_str)
-            .context("Flutter Driver receipt has no workflow run id")?
-            .to_string(),
+        workflow_run_id,
     };
     fs::write(
         output,
@@ -590,6 +711,7 @@ fn write_driver_receipt(log: &Path, output: &Path) -> Result<DriverWorkflowIdent
             "schemaVersion": 1,
             "identity": identity,
             "completed": completed,
+            "complete": complete,
             "shutdown": shutdown,
         }))?,
     )?;
@@ -827,7 +949,12 @@ fn collect_owned_toml_files(directory: &Path, output: &mut Vec<PathBuf>) -> Resu
     Ok(())
 }
 
-fn write_workspace_diff(canonical: &Path, workspace: &Path, artifacts: &Path) -> Result<()> {
+fn write_workspace_diff(
+    canonical: &Path,
+    workspace: &Path,
+    artifacts: &Path,
+    output_name: &str,
+) -> Result<()> {
     let mut canonical_files = Vec::new();
     let mut workspace_files = Vec::new();
     collect_relative_files(canonical, canonical, &mut canonical_files)?;
@@ -851,7 +978,7 @@ fn write_workspace_diff(canonical: &Path, workspace: &Path, artifacts: &Path) ->
         })
         .collect::<Vec<_>>();
     fs::write(
-        artifacts.join("workspace-file-diff.json"),
+        artifacts.join(output_name),
         serde_json::to_vec_pretty(&serde_json::json!({
             "schemaVersion": 1,
             "changed": changed,

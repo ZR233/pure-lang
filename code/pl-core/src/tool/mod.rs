@@ -1,6 +1,7 @@
 mod ask_user;
 pub mod cache;
 mod command;
+mod complete;
 mod container;
 mod context;
 mod contract;
@@ -30,6 +31,7 @@ mod workspace_file;
 
 pub use ask_user::*;
 pub use command::*;
+pub use complete::*;
 pub use container::*;
 pub use context::*;
 pub use contract::*;

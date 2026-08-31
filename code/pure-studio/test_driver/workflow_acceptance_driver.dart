@@ -21,42 +21,49 @@ Future<void> main(List<String> arguments) async {
     if (options.mode == 'new') {
       await _startNewWorkflow(session, options, snapshots);
     }
-    final finalSnapshot = await _waitForTerminal(
-      session,
-      options,
-      snapshots,
-      'completed',
-    );
+    final finalSnapshot = options.studioMode == 'mode.simple'
+        ? await _waitForSimpleCompletion(session, options, snapshots)
+        : await _waitForTerminal(session, options, snapshots, 'completed');
     final workflow = _workflow(finalSnapshot);
-    final run = workflow?['currentRun'];
-    if (run is! Map<String, dynamic> ||
-        run['currentStageId'] != 'completed' ||
-        run['terminal'] != true) {
-      throw StateError('workflow did not reach completed terminal: $workflow');
-    }
-    final history = (run['history'] as List<dynamic>? ?? const [])
-        .whereType<Map<String, dynamic>>()
-        .toList();
-    final visited = <String>{
-      if (run['currentStageId'] is String) run['currentStageId'] as String,
-      if (run['stages'] is List<dynamic> &&
-          (run['stages'] as List<dynamic>).isNotEmpty)
-        ((run['stages'] as List<dynamic>).first as Map)['id'] as String,
-      for (final entry in history)
-        if (entry['fromStageId'] is String) entry['fromStageId'] as String,
-      for (final entry in history)
-        if (entry['toStageId'] is String) entry['toStageId'] as String,
-    };
-    for (final stage in [
-      'planning',
-      'awaiting_confirmation',
-      'editing_documents',
-      'working',
-      'reviewing',
-      'completed',
-    ]) {
-      if (!visited.contains(stage)) {
-        throw StateError('workflow history is missing $stage: $visited');
+    if (options.studioMode == 'mode.simple') {
+      if (workflow != null) {
+        throw StateError(
+          'mode.simple unexpectedly exposed a workflow: $workflow',
+        );
+      }
+    } else {
+      final run = workflow?['currentRun'];
+      if (run is! Map<String, dynamic> ||
+          run['currentStageId'] != 'completed' ||
+          run['terminal'] != true) {
+        throw StateError(
+          'workflow did not reach completed terminal: $workflow',
+        );
+      }
+      final history = (run['history'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .toList();
+      final visited = <String>{
+        if (run['currentStageId'] is String) run['currentStageId'] as String,
+        if (run['stages'] is List<dynamic> &&
+            (run['stages'] as List<dynamic>).isNotEmpty)
+          ((run['stages'] as List<dynamic>).first as Map)['id'] as String,
+        for (final entry in history)
+          if (entry['fromStageId'] is String) entry['fromStageId'] as String,
+        for (final entry in history)
+          if (entry['toStageId'] is String) entry['toStageId'] as String,
+      };
+      for (final stage in [
+        'planning',
+        'awaiting_confirmation',
+        'editing_documents',
+        'working',
+        'reviewing',
+        'completed',
+      ]) {
+        if (!visited.contains(stage)) {
+          throw StateError('workflow history is missing $stage: $visited');
+        }
       }
     }
     final timeline =
@@ -155,26 +162,78 @@ Future<void> _startNewWorkflow(
   await session.waitFor(find.byValueKey('sidebar-new-session'));
   await session.tap(find.byValueKey('sidebar-new-session'));
   await session.tap(find.byValueKey('session-mode-selector'));
-  await session.waitFor(find.byValueKey('session-mode-mode.task'));
-  await session.tap(find.byValueKey('session-mode-mode.task'));
+  await session.waitFor(find.byValueKey('session-mode-${options.studioMode}'));
+  await session.tap(find.byValueKey('session-mode-${options.studioMode}'));
+  await session.waitForNoPendingFrame(timeout: const Duration(seconds: 10));
+  await _waitForSnapshot(
+    session,
+    snapshots,
+    'mode-selected',
+    (snapshot) =>
+        (snapshot['workspace'] as Map?)?['threadMode'] == options.studioMode ||
+        (snapshot['navigation'] as Map?)?['newThreadMode'] ==
+            options.studioMode,
+    timeout: const Duration(seconds: 30),
+  );
   await session.tap(find.byValueKey('composer-input'));
   await session.enterText(await File(options.promptFile!).readAsString());
   await session.waitForNoPendingFrame(timeout: const Duration(seconds: 20));
   await session.tap(find.byValueKey('composer-submit'));
-  await _waitForSnapshot(
-    session,
-    snapshots,
-    'submitted',
-    (snapshot) => _workflow(snapshot) != null,
-    timeout: const Duration(minutes: 10),
-  );
-  await _resolveVisibleInteractionUntilStage(
-    session,
-    snapshots,
-    options,
-    'awaiting_confirmation',
-    protectedFiles,
-  );
+  if (options.studioMode == 'mode.task') {
+    await _waitForSnapshot(
+      session,
+      snapshots,
+      'submitted',
+      (snapshot) => _workflow(snapshot) != null,
+      timeout: const Duration(minutes: 10),
+    );
+    await _resolveVisibleInteractionUntilStage(
+      session,
+      snapshots,
+      options,
+      'awaiting_confirmation',
+      protectedFiles,
+    );
+  } else {
+    await _waitForSnapshot(
+      session,
+      snapshots,
+      'submitted',
+      (snapshot) =>
+          _workflow(snapshot) == null &&
+          (snapshot['workspace'] as Map?)?['turn'] != null,
+      timeout: const Duration(minutes: 2),
+    );
+  }
+}
+
+Future<Map<String, dynamic>> _waitForSimpleCompletion(
+  FlutterDriverSession session,
+  _Options options,
+  File snapshots,
+) async {
+  final deadline = DateTime.now().add(options.workflowTimeout);
+  final progress = _ProgressWatch();
+  Map<String, dynamic>? last;
+  while (DateTime.now().isBefore(deadline)) {
+    last = await _appendSnapshot(session, snapshots, 'simple-completed');
+    progress.observe(last, options.stallTimeout, 'simple completion');
+    final workspace = last['workspace'] as Map?;
+    final lastTurn = workspace?['lastTurn'] as Map?;
+    if (_workflow(last) == null &&
+        lastTurn?['status'] == 'completed' &&
+        _hasSuccessfulComplete(last)) {
+      return last;
+    }
+    final interaction = workspace?['activeInteraction'];
+    if (interaction is Map && interaction['kind'] == 'toolApproval') {
+      await session.tap(find.byValueKey('tool-approve'));
+    } else if (interaction is Map && interaction['kind'] == 'userInput') {
+      throw StateError('mode.simple requested unexpected user input');
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+  }
+  throw StateError('simple completion timed out; last=$last');
 }
 
 Future<void> _resolveVisibleInteractionUntilStage(
@@ -191,10 +250,22 @@ Future<void> _resolveVisibleInteractionUntilStage(
     progress.observe(snapshot, options.stallTimeout, 'plan confirmation');
     final workflow = _workflow(snapshot);
     final current = (workflow?['currentRun'] as Map?)?['currentStageId'];
+    final interaction = snapshot['workspace'] is Map
+        ? (snapshot['workspace'] as Map)['activeInteraction']
+        : null;
+    if (current == 'planning' &&
+        interaction is Map &&
+        interaction['kind'] == 'userInput') {
+      _assertPlanVisible(snapshot);
+      await _tapFirstUserInputOption(session);
+      await _waitForSnapshot(session, snapshots, 'confirmed', (next) {
+        final nextStage =
+            (_workflow(next)?['currentRun'] as Map?)?['currentStageId'];
+        return nextStage != 'planning';
+      }, timeout: const Duration(minutes: 2));
+      return;
+    }
     if (current == stage) {
-      final interaction = snapshot['workspace'] is Map
-          ? (snapshot['workspace'] as Map)['activeInteraction']
-          : null;
       if (interaction is! Map || interaction['kind'] != 'userInput') {
         await Future<void>.delayed(const Duration(milliseconds: 250));
         continue;
@@ -212,9 +283,6 @@ Future<void> _resolveVisibleInteractionUntilStage(
     if (current == 'editing_documents' || current == 'working') {
       throw StateError('workflow skipped visible plan confirmation');
     }
-    final interaction = snapshot['workspace'] is Map
-        ? (snapshot['workspace'] as Map)['activeInteraction']
-        : null;
     if (interaction is Map && interaction['kind'] == 'userInput') {
       throw StateError(
         'workflow requested unnecessary clarification before its plan',
@@ -243,7 +311,8 @@ Future<Map<String, dynamic>> _waitForTerminal(
     final run = workflow?['currentRun'];
     if (run is Map<String, dynamic> &&
         run['terminal'] == true &&
-        run['currentStageId'] == 'completed') {
+        run['currentStageId'] == 'completed' &&
+        _hasSuccessfulComplete(last)) {
       return last;
     }
     final interaction = (last['workspace'] as Map?)?['activeInteraction'];
@@ -257,6 +326,22 @@ Future<Map<String, dynamic>> _waitForTerminal(
     await Future<void>.delayed(const Duration(milliseconds: 250));
   }
   throw StateError('$label timed out; last=$last');
+}
+
+bool _hasSuccessfulComplete(Map<String, dynamic> snapshot) {
+  final timeline =
+      ((snapshot['workspace'] as Map?)?['timeline'] as List? ?? const [])
+          .whereType<Map>();
+  for (final row in timeline) {
+    final tools = row['tools'];
+    if (tools is! List) continue;
+    for (final tool in tools.whereType<Map>()) {
+      if (tool['name'] == 'complete' && tool['status'] == 'succeeded') {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 Future<Map<String, String?>> _protectedFileSnapshot(String workspace) async {
@@ -307,18 +392,17 @@ void _assertPlanVisible(Map<String, dynamic> snapshot) {
 Future<void> _tapFirstUserInputOption(FlutterDriverSession session) async {
   if (await _isVisible(session, 'user-input-first-option')) {
     await session.tap(find.byValueKey('user-input-first-option'));
+    await session.tap(find.byValueKey('user-input-submit'));
   } else if (await _isVisible(session, 'user-input-first-text')) {
     await session.tap(find.byValueKey('user-input-first-text'));
     await session.enterText('确认');
+    await session.tap(find.byValueKey('user-input-submit'));
   } else {
-    await session.waitFor(
-      find.byValueKey('fallback-user-input'),
-      timeout: const Duration(seconds: 5),
-    );
-    await session.tap(find.byValueKey('fallback-user-input'));
+    final input = find.byValueKey('fallback-user-input');
+    await session.tap(input);
     await session.enterText('确认');
+    await session.tap(find.byValueKey('fallback-user-input-submit'));
   }
-  await session.tap(find.byValueKey('user-input-submit'));
 }
 
 Future<bool> _isVisible(FlutterDriverSession session, String key) async {
@@ -375,6 +459,7 @@ class _Options {
   _Options({
     required this.vmServiceUrl,
     required this.mode,
+    required this.studioMode,
     required this.workspace,
     required this.promptFile,
     required this.snapshotOutput,
@@ -386,6 +471,7 @@ class _Options {
 
   final String vmServiceUrl;
   final String mode;
+  final String studioMode;
   final String? workspace;
   final String? promptFile;
   final String snapshotOutput;
@@ -402,6 +488,10 @@ class _Options {
 
     final vm = value('--vm-service-url');
     final mode = value('--mode') ?? 'new';
+    final studioMode = value('--studio-mode') ?? 'mode.task';
+    if (studioMode != 'mode.simple' && studioMode != 'mode.task') {
+      throw ArgumentError('--studio-mode must be mode.simple or mode.task');
+    }
     final output = value('--snapshot-output');
     if (vm == null || output == null) {
       throw ArgumentError(
@@ -418,6 +508,7 @@ class _Options {
     return _Options(
       vmServiceUrl: vm,
       mode: mode,
+      studioMode: studioMode,
       workspace: workspace,
       promptFile: prompt,
       snapshotOutput: output,

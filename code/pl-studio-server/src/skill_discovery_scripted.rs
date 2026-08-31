@@ -27,7 +27,7 @@ const RELEASE_DESCRIPTION: &str = "Diagnose Rust release builds, linker failures
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn scripted_agent_api_exposes_suggestions_and_activates_skill() -> Result<()> {
     let (model_base_url, model_requests, model_server) =
-        serve_model_sequence(vec![tool_call_sse(), final_answer_sse()]).await?;
+        serve_model_sequence(vec![tool_call_sse(), complete_sse()]).await?;
     let root = tempfile::Builder::new()
         .prefix("pure-skill-discovery-scripted-")
         .tempdir()?;
@@ -335,9 +335,9 @@ fn tool_call_sse() -> String {
     .to_string()
 }
 
-fn final_answer_sse() -> String {
+fn complete_sse() -> String {
     format!(
-        "data: {{\"id\":\"scripted-2\",\"model\":\"deepseek-v4-flash\",\"choices\":[{{\"delta\":{{\"content\":\"<final>Scripted final {RELEASE_MARKER}</final>\"}},\"finish_reason\":null}}]}}\n\ndata: {{\"id\":\"scripted-2\",\"model\":\"deepseek-v4-flash\",\"choices\":[{{\"delta\":{{}},\"finish_reason\":\"stop\"}}],\"usage\":{{\"prompt_tokens\":1,\"completion_tokens\":2,\"total_tokens\":3}}}}\n\ndata: [DONE]\n\n"
+        "data: {{\"id\":\"scripted-2\",\"model\":\"deepseek-v4-flash\",\"choices\":[{{\"delta\":{{\"role\":\"assistant\",\"tool_calls\":[{{\"index\":0,\"id\":\"call_complete\",\"type\":\"function\",\"function\":{{\"name\":\"complete\",\"arguments\":\"{{\\\"summary\\\":\\\"Scripted final {RELEASE_MARKER}\\\"}}\"}}}}]}},\"finish_reason\":null}}]}}\n\ndata: {{\"id\":\"scripted-2\",\"model\":\"deepseek-v4-flash\",\"choices\":[{{\"delta\":{{}},\"finish_reason\":\"tool_calls\"}}],\"usage\":{{\"prompt_tokens\":1,\"completion_tokens\":2,\"total_tokens\":3}}}}\n\ndata: [DONE]\n\n"
     )
 }
 
