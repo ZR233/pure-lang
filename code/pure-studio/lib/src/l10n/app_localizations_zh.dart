@@ -258,6 +258,18 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsSshSave => '保存';
 
   @override
+  String get settingsSshNameRequired => '请输入服务器名称';
+
+  @override
+  String get settingsSshHostRequired => '请输入主机地址';
+
+  @override
+  String get settingsSshUsernameRequired => '请输入用户名';
+
+  @override
+  String get settingsSshPortInvalid => '端口必须是 1 到 65535 之间的数字';
+
+  @override
   String get settingsSshChooseDirectory => '选择远端目录';
 
   @override
@@ -1708,6 +1720,18 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get settingsSshSave => '保存';
+
+  @override
+  String get settingsSshNameRequired => '请输入服务器名称';
+
+  @override
+  String get settingsSshHostRequired => '请输入主机地址';
+
+  @override
+  String get settingsSshUsernameRequired => '请输入用户名';
+
+  @override
+  String get settingsSshPortInvalid => '端口必须是 1 到 65535 之间的数字';
 
   @override
   String get settingsSshChooseDirectory => '选择远端目录';

@@ -263,6 +263,18 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsSshSave => 'Save';
 
   @override
+  String get settingsSshNameRequired => 'Enter a server name';
+
+  @override
+  String get settingsSshHostRequired => 'Enter a host address';
+
+  @override
+  String get settingsSshUsernameRequired => 'Enter a username';
+
+  @override
+  String get settingsSshPortInvalid => 'Port must be a number from 1 to 65535';
+
+  @override
   String get settingsSshChooseDirectory => 'Choose remote directory';
 
   @override

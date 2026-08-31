@@ -26,6 +26,24 @@ abstract final class StudioDriverKeys {
   static const lspProbe = ValueKey<String>('lsp-probe');
   static const lspResetWorkspace = ValueKey<String>('lsp-reset-workspace');
   static const sshAddServer = ValueKey<String>('ssh-add-server');
+  static const sshServerDialog = ValueKey<String>('ssh-server-dialog');
+  static const sshServerNameInput = ValueKey<String>('ssh-server-name-input');
+  static const sshServerHostInput = ValueKey<String>('ssh-server-host-input');
+  static const sshServerUsernameInput = ValueKey<String>(
+    'ssh-server-username-input',
+  );
+  static const sshServerPortInput = ValueKey<String>('ssh-server-port-input');
+  static const sshServerAuthInput = ValueKey<String>('ssh-server-auth-input');
+  static const sshServerIdentityInput = ValueKey<String>(
+    'ssh-server-identity-input',
+  );
+  static const sshServerPasswordInput = ValueKey<String>(
+    'ssh-server-password-input',
+  );
+  static const sshServerValidationError = ValueKey<String>(
+    'ssh-server-validation-error',
+  );
+  static const sshServerSave = ValueKey<String>('ssh-server-save');
   static const sshDirectoryDialog = ValueKey<String>('ssh-directory-dialog');
   static const sshOpenCurrentDirectory = ValueKey<String>(
     'ssh-open-current-directory',

@@ -1011,6 +1011,52 @@ void registerShellSettingsTests() {
     expect(api.openedRemoteProject, (serverId: server.id, path: '/workspace'));
   });
 
+  testWidgets('SSH server dialog validates and saves a complete profile', (
+    tester,
+  ) async {
+    _configureSettingsTestView(tester);
+    final api = _FakeStudioApi(_emptyState());
+    await _pumpSettingsPage(tester, api);
+
+    await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(StudioDriverKeys.sshAddServer));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(StudioDriverKeys.sshServerSave));
+    await tester.pump();
+    expect(
+      find.byKey(StudioDriverKeys.sshServerValidationError),
+      findsOneWidget,
+    );
+    expect(find.text('Enter a server name'), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(StudioDriverKeys.sshServerNameInput),
+      'qcl-server',
+    );
+    await tester.enterText(
+      find.byKey(StudioDriverKeys.sshServerHostInput),
+      '10.3.10.9',
+    );
+    await tester.enterText(
+      find.byKey(StudioDriverKeys.sshServerUsernameInput),
+      'zhourui',
+    );
+    await tester.enterText(
+      find.byKey(StudioDriverKeys.sshServerPortInput),
+      '22',
+    );
+    await tester.tap(find.byKey(StudioDriverKeys.sshServerSave));
+    await tester.pumpAndSettle();
+
+    expect(api.savedSshServer?.name, 'qcl-server');
+    expect(api.savedSshServer?.host, '10.3.10.9');
+    expect(api.savedSshServer?.username, 'zhourui');
+    expect(api.savedSshServer?.port, 22);
+    expect(find.text('zhourui@10.3.10.9:22'), findsOneWidget);
+  });
+
   testWidgets('MCP runtime errors stay scoped to the unavailable server', (
     tester,
   ) async {

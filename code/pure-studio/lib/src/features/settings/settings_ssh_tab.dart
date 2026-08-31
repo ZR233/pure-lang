@@ -310,6 +310,7 @@ class _SshServerDialogState extends State<_SshServerDialog> {
   late final TextEditingController _identity;
   late final TextEditingController _password;
   late SshAuthKind _authKind;
+  String? _validationError;
 
   @override
   void initState() {
@@ -338,6 +339,7 @@ class _SshServerDialogState extends State<_SshServerDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
+      key: StudioDriverKeys.sshServerDialog,
       title: Text(
         widget.server == null
             ? context.l10n.settingsSshAdd
@@ -350,12 +352,14 @@ class _SshServerDialogState extends State<_SshServerDialog> {
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
+                key: StudioDriverKeys.sshServerNameInput,
                 controller: _name,
                 decoration: InputDecoration(
                   labelText: context.l10n.settingsSshName,
                 ),
               ),
               TextField(
+                key: StudioDriverKeys.sshServerHostInput,
                 controller: _host,
                 decoration: InputDecoration(
                   labelText: context.l10n.settingsSshHost,
@@ -365,6 +369,7 @@ class _SshServerDialogState extends State<_SshServerDialog> {
                 children: [
                   Expanded(
                     child: TextField(
+                      key: StudioDriverKeys.sshServerUsernameInput,
                       controller: _username,
                       decoration: InputDecoration(
                         labelText: context.l10n.settingsSshUsername,
@@ -375,6 +380,7 @@ class _SshServerDialogState extends State<_SshServerDialog> {
                   SizedBox(
                     width: 100,
                     child: TextField(
+                      key: StudioDriverKeys.sshServerPortInput,
                       controller: _port,
                       keyboardType: TextInputType.number,
                       decoration: InputDecoration(
@@ -385,6 +391,7 @@ class _SshServerDialogState extends State<_SshServerDialog> {
                 ],
               ),
               DropdownButtonFormField<SshAuthKind>(
+                key: StudioDriverKeys.sshServerAuthInput,
                 initialValue: _authKind,
                 decoration: InputDecoration(
                   labelText: context.l10n.settingsSshAuth,
@@ -405,6 +412,7 @@ class _SshServerDialogState extends State<_SshServerDialog> {
               ),
               if (_authKind == SshAuthKind.agentOrKey)
                 TextField(
+                  key: StudioDriverKeys.sshServerIdentityInput,
                   controller: _identity,
                   decoration: InputDecoration(
                     labelText: context.l10n.settingsSshIdentityFile,
@@ -412,6 +420,7 @@ class _SshServerDialogState extends State<_SshServerDialog> {
                 )
               else
                 TextField(
+                  key: StudioDriverKeys.sshServerPasswordInput,
                   controller: _password,
                   obscureText: true,
                   autocorrect: false,
@@ -419,6 +428,20 @@ class _SshServerDialogState extends State<_SshServerDialog> {
                   decoration: InputDecoration(
                     labelText: context.l10n.settingsSshPassword,
                     helperText: context.l10n.settingsSshPasswordLease,
+                  ),
+                ),
+              if (_validationError case final error?)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Text(
+                      error,
+                      key: StudioDriverKeys.sshServerValidationError,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
                   ),
                 ),
             ],
@@ -431,16 +454,35 @@ class _SshServerDialogState extends State<_SshServerDialog> {
           child: Text(context.l10n.settingsCancel),
         ),
         FilledButton(
+          key: StudioDriverKeys.sshServerSave,
           onPressed: () {
             final port = int.tryParse(_port.text);
-            if (_name.text.trim().isEmpty ||
-                _host.text.trim().isEmpty ||
-                _username.text.trim().isEmpty ||
-                port == null ||
-                port <= 0 ||
-                port > 65535) {
+            if (_name.text.trim().isEmpty) {
+              setState(
+                () => _validationError = context.l10n.settingsSshNameRequired,
+              );
               return;
             }
+            if (_host.text.trim().isEmpty) {
+              setState(
+                () => _validationError = context.l10n.settingsSshHostRequired,
+              );
+              return;
+            }
+            if (_username.text.trim().isEmpty) {
+              setState(
+                () =>
+                    _validationError = context.l10n.settingsSshUsernameRequired,
+              );
+              return;
+            }
+            if (port == null || port <= 0 || port > 65535) {
+              setState(
+                () => _validationError = context.l10n.settingsSshPortInvalid,
+              );
+              return;
+            }
+            setState(() => _validationError = null);
             Navigator.pop(
               context,
               SaveSshServerCommand(

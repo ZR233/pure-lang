@@ -555,6 +555,30 @@ abstract class AppLocalizations {
   /// **'Save'**
   String get settingsSshSave;
 
+  /// No description provided for @settingsSshNameRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a server name'**
+  String get settingsSshNameRequired;
+
+  /// No description provided for @settingsSshHostRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a host address'**
+  String get settingsSshHostRequired;
+
+  /// No description provided for @settingsSshUsernameRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a username'**
+  String get settingsSshUsernameRequired;
+
+  /// No description provided for @settingsSshPortInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Port must be a number from 1 to 65535'**
+  String get settingsSshPortInvalid;
+
   /// No description provided for @settingsSshChooseDirectory.
   ///
   /// In en, this message translates to:
