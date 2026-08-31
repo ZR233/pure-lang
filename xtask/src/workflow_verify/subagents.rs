@@ -6,7 +6,7 @@ use super::{
 };
 use crate::cli::VerifySubagentsOptions;
 use crate::{paths, process};
-use anyhow::{Context, Result, bail, ensure};
+use anyhow::{Context, Result, ensure};
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -43,6 +43,13 @@ struct WireCall {
     call_id: Option<String>,
     name: String,
     arguments: Value,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct WireOutput {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    call_id: Option<String>,
+    content: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -545,7 +552,7 @@ fn validate_wire(wire_dir: &Path, artifacts: &Path) -> Result<()> {
     );
     let mut capture_receipts = Vec::new();
     let mut calls = Vec::new();
-    let mut outputs = Vec::new();
+    let mut outputs: Vec<WireOutput> = Vec::new();
     for path in &captures {
         let capture: Value = serde_json::from_slice(&fs::read(path)?)?;
         let body = capture
@@ -563,10 +570,13 @@ fn validate_wire(wire_dir: &Path, artifacts: &Path) -> Result<()> {
         collect_outputs(body, &mut outputs);
     }
     deduplicate_calls(&mut calls);
+    deduplicate_outputs(&mut outputs);
     ensure_spawn_calls(&calls)?;
-    ensure_workspace_receipts(&outputs)?;
+    ensure_workspace_receipts(&calls, &outputs)?;
     ensure_profile_messages(&calls)?;
     ensure_reviewer_history(&capture_receipts)?;
+    ensure_root_history(&capture_receipts)?;
+    ensure_submissions(&calls, &outputs)?;
     ensure_finding_re_review(&calls, &outputs)?;
     ensure_orchestration_order(&calls)?;
     ensure!(
@@ -599,7 +609,11 @@ fn validate_wire(wire_dir: &Path, artifacts: &Path) -> Result<()> {
         }),
         "wire captures contain no explicit worktree cleanup"
     );
-    let output = outputs.join("\n");
+    let output = outputs
+        .iter()
+        .map(|output| output.content.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
     for marker in [
         "outside the directory Agent writablePaths boundary",
         "DIRECTORY_DENIAL_OBSERVED",
@@ -631,7 +645,7 @@ fn validate_wire(wire_dir: &Path, artifacts: &Path) -> Result<()> {
 }
 
 fn classify_capture(body: &Value) -> Result<String> {
-    let rendered = body.to_string();
+    let rendered = role_text(body);
     let matches = PROFILE_FIRST_LINES
         .iter()
         .filter(|(_, first)| rendered.contains(first))
@@ -641,7 +655,46 @@ fn classify_capture(body: &Value) -> Result<String> {
         matches.len() <= 1,
         "wire capture matches multiple built-in Profile identities: {matches:?}"
     );
+    if rendered.contains("# Unified Root Agent") {
+        ensure!(
+            matches.is_empty(),
+            "wire capture matches root and built-in Profile identities"
+        );
+        return Ok("root".to_string());
+    }
     Ok(matches.first().copied().unwrap_or("unknown").to_string())
+}
+
+fn role_text(value: &Value) -> String {
+    fn visit(value: &Value, out: &mut String) {
+        match value {
+            Value::Array(items) => items.iter().for_each(|item| visit(item, out)),
+            Value::Object(object) => {
+                let role = object.get("role").and_then(Value::as_str);
+                if matches!(role, Some("system" | "developer")) {
+                    if let Some(content) = object.get("content") {
+                        collect_text(content, out);
+                    }
+                }
+                object.values().for_each(|item| visit(item, out));
+            }
+            _ => {}
+        }
+    }
+    fn collect_text(value: &Value, out: &mut String) {
+        match value {
+            Value::String(text) => {
+                out.push_str(text);
+                out.push('\n');
+            }
+            Value::Array(items) => items.iter().for_each(|item| collect_text(item, out)),
+            Value::Object(object) => object.values().for_each(|item| collect_text(item, out)),
+            _ => {}
+        }
+    }
+    let mut out = String::new();
+    visit(value, &mut out);
+    out
 }
 
 fn ensure_profile_messages(calls: &[WireCall]) -> Result<()> {
@@ -712,6 +765,35 @@ fn ensure_profile_messages(calls: &[WireCall]) -> Result<()> {
         explorers[0].arguments.get("message") != explorers[1].arguments.get("message"),
         "two explorer messages do not define distinct purpose/ownership"
     );
+    let section = |call: &WireCall, name: &str| -> Result<String> {
+        let message = call
+            .arguments
+            .get("message")
+            .and_then(Value::as_str)
+            .context("spawn message missing")?;
+        let marker = format!("[[CHILD_CONTRACT:{name}]]");
+        let start = message
+            .find(&marker)
+            .map(|i| i + marker.len())
+            .context("contract section missing")?;
+        let end = message[start..]
+            .find("[[CHILD_CONTRACT:")
+            .map(|i| start + i)
+            .unwrap_or(message.len());
+        ensure!(
+            !message[start..end].trim().is_empty(),
+            "contract section empty"
+        );
+        Ok(message[start..end].trim().to_string())
+    };
+    ensure!(
+        section(explorers[0], "purpose")? != section(explorers[1], "purpose")?,
+        "explorer purposes are not distinct"
+    );
+    ensure!(
+        section(explorers[0], "ownership")? != section(explorers[1], "ownership")?,
+        "explorer ownership sections are not distinct"
+    );
     ensure!(
         explorers[0].call_id.is_some()
             && explorers[1].call_id.is_some()
@@ -729,83 +811,158 @@ fn ensure_reviewer_history(captures: &[CaptureReceipt]) -> Result<()> {
     ensure!(!reviewer.is_empty(), "no classified Reviewer capture");
     for capture in reviewer {
         for call in &capture.calls {
-            if [
-                "write_file",
-                "apply_patch",
-                "delete_file",
-                "copy_file",
-                "move_file",
-                "delete_path",
-                "copy_path",
-                "move_path",
-                "create_directory",
-                "write_session_note",
-                "apply_session_note_patch",
-                "write_skill",
-                "apply_skill_patch",
-                "skill_manage",
-            ]
-            .contains(&call.name.as_str())
-                || call.name == "exec"
-                    && call
-                        .arguments
-                        .get("command")
-                        .and_then(Value::as_str)
-                        .is_some_and(is_mutating_shell_command)
-            {
-                bail!(
-                    "classified reviewer capture contains mutation: {}",
-                    call.name
-                );
-            }
+            ensure!(
+                REVIEWER_READ_ONLY.contains(&call.name.as_str()),
+                "classified reviewer capture contains non-read-only tool: {}",
+                call.name
+            );
         }
     }
     Ok(())
 }
 
-fn is_mutating_shell_command(command: &str) -> bool {
-    let words = command.split_whitespace().collect::<Vec<_>>();
-    if words
+fn ensure_root_history(captures: &[CaptureReceipt]) -> Result<()> {
+    let root = captures
         .iter()
-        .any(|word| [">", ">>", "tee", "touch", "rm", "mv", "cp"].contains(word))
-        || command.contains('>')
-        || words
+        .find(|capture| capture.actor == "root")
+        .context("no classified Root capture")?;
+    let has = |name: &str, pred: fn(&WireCall) -> bool| {
+        root.calls
             .iter()
-            .any(|word| *word == "sed" && words.iter().any(|arg| arg.starts_with("-i")))
+            .any(|call| call.name == name && pred(call))
+    };
+    ensure!(
+        has("write_file", |call| call
+            .arguments
+            .get("path")
+            .and_then(Value::as_str)
+            == Some("design/subagents-orchestration.md")),
+        "root capture lacks design write_file"
+    );
+    ensure!(
+        has("exec", |call| call
+            .arguments
+            .get("command")
+            .and_then(Value::as_str)
+            .is_some_and(|c| c.contains("cherry-pick"))),
+        "root capture lacks cherry-pick exec"
+    );
+    ensure!(
+        has("close_agent", |call| call
+            .arguments
+            .get("workspaceDisposition")
+            .and_then(Value::as_str)
+            == Some("cleanup")),
+        "root capture lacks cleanup close_agent"
+    );
+    ensure!(
+        has("exec", |call| call
+            .arguments
+            .get("command")
+            .and_then(Value::as_str)
+            .is_some_and(|c| c.contains("cargo test"))),
+        "root capture lacks final cargo test"
+    );
+    for capture in captures
+        .iter()
+        .filter(|capture| matches!(capture.actor.as_str(), "explorer" | "reviewer"))
     {
-        return true;
+        ensure!(
+            !capture.calls.iter().any(|call| call.name == "write_file"
+                || call.name == "close_agent"
+                || call.name == "exec"
+                    && call
+                        .arguments
+                        .get("command")
+                        .and_then(Value::as_str)
+                        .is_some_and(|c| c.contains("cherry-pick") || c.contains("cargo test"))),
+            "root-only call observed in {} capture",
+            capture.actor
+        );
     }
-    words.windows(2).any(|pair| {
-        pair[0] == "git"
-            && [
-                "add",
-                "commit",
-                "reset",
-                "checkout",
-                "restore",
-                "clean",
-                "cherry-pick",
-                "merge",
-                "rebase",
-                "rm",
-                "mv",
-            ]
-            .contains(&pair[1])
-    }) || (words.first() == Some(&"git")
-        && words.get(1) == Some(&"branch")
-        && words.iter().any(|word| *word == "-d" || *word == "-D"))
-        || words
-            .windows(3)
-            .any(|window| window[0] == "git" && window[1] == "worktree" && window[2] == "remove")
+    Ok(())
 }
 
-fn ensure_workspace_receipts(outputs: &[String]) -> Result<()> {
-    let receipts = outputs
+const REVIEWER_READ_ONLY: &[&str] = &[
+    "read_file",
+    "list_files",
+    "stat_path",
+    "lsp_capabilities",
+    "lsp_query",
+    "git_status",
+    "git_diff",
+    "git_workspace_info",
+    "read_session_note",
+    "search_session_note",
+];
+
+#[allow(dead_code)]
+fn is_mutating_shell_command(command: &str) -> bool {
+    let words = command.split_whitespace().collect::<Vec<_>>();
+    command.contains('>')
+        || (words.contains(&"sed") && words.iter().any(|word| word.starts_with("-i")))
+        || words
+            .iter()
+            .any(|word| ["tee", "touch", "rm", "mv", "cp"].contains(word))
+        || words.windows(2).any(|pair| {
+            pair[0] == "git"
+                && [
+                    "add",
+                    "commit",
+                    "reset",
+                    "checkout",
+                    "restore",
+                    "clean",
+                    "cherry-pick",
+                    "merge",
+                    "rebase",
+                    "rm",
+                    "mv",
+                ]
+                .contains(&pair[1])
+        })
+        || words.first() == Some(&"git")
+            && words.get(1) == Some(&"branch")
+            && words.iter().any(|word| *word == "-d" || *word == "-D")
+        || words.windows(3).any(|w| w == ["git", "worktree", "remove"])
+}
+
+fn bound_receipts(calls: &[WireCall], outputs: &[WireOutput]) -> Result<Vec<(WireCall, Value)>> {
+    calls
         .iter()
-        .filter_map(|output| serde_json::from_str::<Value>(output).ok())
-        .collect::<Vec<_>>();
+        .filter(|call| call.name == "spawn_agent")
+        .map(|spawn| {
+            let id = spawn
+                .call_id
+                .as_ref()
+                .context("spawn_agent has no call_id")?;
+            let output = outputs
+                .iter()
+                .find(|output| output.call_id.as_ref() == Some(id))
+                .with_context(|| format!("spawn {id} has no same-call-id output"))?;
+            let receipt: Value =
+                serde_json::from_str(&output.content).context("spawn output is not JSON")?;
+            ensure!(
+                receipt.get("profileId") == spawn.arguments.get("profileId"),
+                "spawn receipt profileId does not match call args"
+            );
+            ensure!(
+                receipt
+                    .get("agentId")
+                    .and_then(Value::as_str)
+                    .is_some_and(|id| !id.is_empty()),
+                "spawn receipt has no agentId"
+            );
+            Ok((spawn.clone(), receipt))
+        })
+        .collect()
+}
+
+fn ensure_workspace_receipts(calls: &[WireCall], outputs: &[WireOutput]) -> Result<()> {
+    let receipts = bound_receipts(calls, outputs)?;
     let directory = receipts
         .iter()
+        .map(|(_, receipt)| receipt)
         .find(|receipt| receipt.get("profileId").and_then(Value::as_str) == Some("executor"))
         .context("wire tool results contain no executor workspace receipt")?;
     let workspace = directory
@@ -819,6 +976,7 @@ fn ensure_workspace_receipts(outputs: &[String]) -> Result<()> {
     for profile in ["explorer", "reviewer"] {
         let receipt = receipts
             .iter()
+            .map(|(_, receipt)| receipt)
             .find(|receipt| receipt.get("profileId").and_then(Value::as_str) == Some(profile))
             .with_context(|| format!("wire tool results contain no {profile} workspace receipt"))?;
         ensure!(
@@ -845,6 +1003,7 @@ fn ensure_workspace_receipts(outputs: &[String]) -> Result<()> {
 
     let worktree = receipts
         .iter()
+        .map(|(_, receipt)| receipt)
         .find(|receipt| {
             receipt.get("profileId").and_then(Value::as_str) == Some("worktree_executor")
         })
@@ -999,10 +1158,10 @@ fn ensure_orchestration_order(calls: &[WireCall]) -> Result<()> {
     Ok(())
 }
 
-fn ensure_finding_re_review(calls: &[WireCall], outputs: &[String]) -> Result<()> {
+fn ensure_finding_re_review(calls: &[WireCall], outputs: &[WireOutput]) -> Result<()> {
     let finding = outputs
         .iter()
-        .any(|output| output.contains("REVIEWER_FINDING"));
+        .any(|output| output.content.contains("REVIEWER_FINDING"));
     if !finding {
         return Ok(());
     }
@@ -1073,7 +1232,7 @@ fn ensure_finding_re_review(calls: &[WireCall], outputs: &[String]) -> Result<()
     ensure!(
         outputs
             .iter()
-            .any(|output| output.contains("REVIEWER_READ_ONLY_APPROVED")),
+            .any(|output| output.content.contains("REVIEWER_READ_ONLY_APPROVED")),
         "REVIEWER_FINDING lacks final reviewer approval"
     );
     Ok(())
@@ -1139,7 +1298,7 @@ fn parse_arguments(value: Option<&Value>) -> Option<Value> {
     }
 }
 
-fn collect_outputs(body: &Value, outputs: &mut Vec<String>) {
+fn collect_outputs(body: &Value, outputs: &mut Vec<WireOutput>) {
     for item in body
         .get("input")
         .and_then(Value::as_array)
@@ -1149,7 +1308,13 @@ fn collect_outputs(body: &Value, outputs: &mut Vec<String>) {
         if item.get("type").and_then(Value::as_str) == Some("function_call_output")
             && let Some(output) = item.get("output").and_then(Value::as_str)
         {
-            outputs.push(output.to_string());
+            outputs.push(WireOutput {
+                call_id: item
+                    .get("call_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                content: output.to_string(),
+            });
         }
     }
     for message in body
@@ -1161,9 +1326,118 @@ fn collect_outputs(body: &Value, outputs: &mut Vec<String>) {
         if message.get("role").and_then(Value::as_str) == Some("tool")
             && let Some(output) = message.get("content").and_then(Value::as_str)
         {
-            outputs.push(output.to_string());
+            outputs.push(WireOutput {
+                call_id: message
+                    .get("tool_call_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                content: output.to_string(),
+            });
         }
     }
+}
+
+fn ensure_submissions(calls: &[WireCall], outputs: &[WireOutput]) -> Result<()> {
+    let profiles = calls
+        .iter()
+        .position(|call| call.name == "list_agent_profiles")
+        .context("no list_agent_profiles")?;
+    let first_spawn = calls
+        .iter()
+        .position(|call| call.name == "spawn_agent")
+        .context("no spawn")?;
+    ensure!(
+        profiles < first_spawn,
+        "list_agent_profiles occurred after spawn"
+    );
+    let receipts = bound_receipts(calls, outputs)?;
+    let mut required = Vec::new();
+    for (spawn, receipt) in receipts {
+        let profile = spawn
+            .arguments
+            .get("profileId")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        if matches!(
+            profile.as_str(),
+            "explorer" | "executor" | "worktree_executor"
+        ) {
+            let agent = receipt
+                .get("agentId")
+                .and_then(Value::as_str)
+                .unwrap()
+                .to_string();
+            required.push((
+                profile,
+                agent,
+                calls
+                    .iter()
+                    .position(|call| call.call_id == spawn.call_id)
+                    .unwrap(),
+            ));
+        }
+    }
+    ensure!(
+        required.iter().filter(|(p, _, _)| *p == "explorer").count() >= 2,
+        "fewer than two explorer receipts"
+    );
+    let first_impl = required
+        .iter()
+        .filter(|(p, _, _)| *p != "explorer")
+        .map(|(_, _, i)| *i)
+        .min()
+        .context("no implementation spawn")?;
+    for (profile, agent, spawn_index) in required {
+        let read = calls
+            .iter()
+            .enumerate()
+            .find(|(i, call)| {
+                *i > if profile == "explorer" {
+                    first_spawn
+                } else {
+                    spawn_index
+                } && call.name == "read_agent_submissions"
+                    && call.arguments.get("target").and_then(Value::as_str) == Some(agent.as_str())
+            })
+            .map(|(_, c)| c)
+            .with_context(|| format!("{profile} agent {agent} has no targeted submissions read"))?;
+        let read_id = read
+            .call_id
+            .as_ref()
+            .context("read_agent_submissions has no call_id")?;
+        let output = outputs
+            .iter()
+            .find(|output| output.call_id.as_ref() == Some(read_id))
+            .context("submissions read has no bound output")?;
+        let result: Value =
+            serde_json::from_str(&output.content).context("submissions output is not JSON")?;
+        ensure!(
+            result
+                .get("total")
+                .and_then(Value::as_u64)
+                .is_some_and(|n| n >= 1),
+            "submissions total is less than one"
+        );
+        ensure!(
+            result
+                .get("items")
+                .and_then(Value::as_array)
+                .is_some_and(|items| !items.is_empty()),
+            "submissions items are empty"
+        );
+        if profile == "explorer" {
+            ensure!(
+                calls
+                    .iter()
+                    .position(|call| call.call_id == read.call_id)
+                    .unwrap()
+                    < first_impl,
+                "explorer submissions read occurred after implementation spawn"
+            );
+        }
+    }
+    Ok(())
 }
 
 fn deduplicate_calls(calls: &mut Vec<WireCall>) {
@@ -1174,6 +1448,16 @@ fn deduplicate_calls(calls: &mut Vec<WireCall>) {
             .clone()
             .unwrap_or_else(|| format!("{}:{}", call.name, call.arguments));
         seen.insert(key)
+    });
+}
+
+fn deduplicate_outputs(outputs: &mut Vec<WireOutput>) {
+    let mut seen = std::collections::HashSet::new();
+    outputs.retain(|output| {
+        output
+            .call_id
+            .as_ref()
+            .map_or(true, |id| seen.insert(id.clone()))
     });
 }
 
@@ -1238,7 +1522,12 @@ mod tests {
     fn spawn_receipt_requires_two_different_profiles_and_directory_paths() {
         let calls = vec![
             WireCall {
-                call_id: None,
+                call_id: Some("e".into()),
+                name: "spawn_agent".to_string(),
+                arguments: serde_json::json!({"profileId":"explorer"}),
+            },
+            WireCall {
+                call_id: Some("x".into()),
                 name: "spawn_agent".to_string(),
                 arguments: serde_json::json!({
                     "profileId": "executor",
@@ -1246,44 +1535,24 @@ mod tests {
                 }),
             },
             WireCall {
-                call_id: None,
+                call_id: Some("w".into()),
                 name: "spawn_agent".to_string(),
                 arguments: serde_json::json!({"profileId": "worktree_executor"}),
             },
+            WireCall {
+                call_id: Some("r".into()),
+                name: "spawn_agent".into(),
+                arguments: serde_json::json!({"profileId":"reviewer"}),
+            },
         ];
         ensure_spawn_calls(&calls).unwrap();
-        ensure_workspace_receipts(&[
-            serde_json::json!({
-                "profileId": "explorer",
-                "workspace": {"mode": "unrestricted"}
-            })
-            .to_string(),
-            serde_json::json!({
-                "profileId": "executor",
-                "workspace": {
-                    "mode": "directory",
-                    "writablePaths": ["/tmp/fixture/allowed"]
-                }
-            })
-            .to_string(),
-            serde_json::json!({
-                "profileId": "worktree_executor",
-                "workspace": {
-                    "mode": "worktree",
-                    "worktree": {
-                        "branch": "pure-agent-child",
-                        "baseCommit": "0123456789abcdef0123456789abcdef01234567"
-                    }
-                }
-            })
-            .to_string(),
-            serde_json::json!({
-                "profileId": "reviewer",
-                "workspace": {"mode": "unrestricted"}
-            })
-            .to_string(),
-        ])
-        .unwrap();
+        let receipts = [
+            ("e", "explorer", serde_json::json!({"mode":"unrestricted"})),
+            ("x", "executor", serde_json::json!({"mode":"directory","writablePaths":["/tmp/fixture/allowed"]})),
+            ("w", "worktree_executor", serde_json::json!({"mode":"worktree","worktree":{"branch":"pure-agent-child","baseCommit":"0123456789abcdef0123456789abcdef01234567"}})),
+            ("r", "reviewer", serde_json::json!({"mode":"unrestricted"})),
+        ].into_iter().map(|(id, profile, workspace)| WireOutput { call_id: Some(id.into()), content: serde_json::json!({"profileId":profile,"agentId":id,"workspace":workspace}).to_string() }).collect::<Vec<_>>();
+        ensure_workspace_receipts(&calls, &receipts).unwrap();
     }
 
     #[test]
@@ -1312,15 +1581,22 @@ mod tests {
 
     #[test]
     fn capture_classification_accepts_responses_and_chat_and_rejects_ambiguity() {
-        let responses = serde_json::json!({"input":[{"content":[{"type":"input_text","text":PROFILE_FIRST_LINES[0].1}]}]});
+        let responses = serde_json::json!({"input":[{"role":"system","content":[{"type":"input_text","text":PROFILE_FIRST_LINES[0].1}]}]});
         assert_eq!(classify_capture(&responses).unwrap(), "explorer");
         let chat =
             serde_json::json!({"messages":[{"role":"system","content":PROFILE_FIRST_LINES[3].1}]});
         assert_eq!(classify_capture(&chat).unwrap(), "reviewer");
-        let ambiguous = serde_json::json!({"input":[{"content":[{"text":PROFILE_FIRST_LINES[0].1},{"text":PROFILE_FIRST_LINES[3].1}]}]});
+        let ambiguous = serde_json::json!({"input":[{"role":"system","content":[{"text":PROFILE_FIRST_LINES[0].1},{"text":PROFILE_FIRST_LINES[3].1}]}]});
         assert!(classify_capture(&ambiguous).is_err());
         assert_eq!(
             classify_capture(&serde_json::json!({"input":[]})).unwrap(),
+            "unknown"
+        );
+        assert_eq!(
+            classify_capture(
+                &serde_json::json!({"input":[{"role":"user","content":PROFILE_FIRST_LINES[0].1}]})
+            )
+            .unwrap(),
             "unknown"
         );
     }
@@ -1489,17 +1765,26 @@ mod tests {
             .into_iter()
             .map(|section| format!("[[CHILD_CONTRACT:{section}]]\ncontent\n"))
             .collect::<String>();
+            let message = if profile == "explorer" && id == "explorer-2" {
+                message
+                    .replace(
+                        "[[CHILD_CONTRACT:purpose]]\ncontent",
+                        "[[CHILD_CONTRACT:purpose]]\nsecond purpose",
+                    )
+                    .replace(
+                        "[[CHILD_CONTRACT:ownership]]\ncontent",
+                        "[[CHILD_CONTRACT:ownership]]\nsecond ownership",
+                    )
+            } else {
+                message
+            };
             calls.push(WireCall {
                 call_id: Some(id.into()),
                 name: "spawn_agent".into(),
                 arguments: serde_json::json!({
                     "profileId": profile,
                     "forkTurns": "none",
-                    "message": if profile == "explorer" && id == "explorer-2" {
-                        format!("{message}second explorer purpose and ownership")
-                    } else {
-                        message
-                    }
+                    "message": message
                 }),
             });
         }
@@ -1680,7 +1965,16 @@ mod tests {
     #[test]
     fn finding_re_review_requires_second_reviewer() {
         let calls = finding_calls();
-        assert!(ensure_finding_re_review(&calls[..2], &["REVIEWER_FINDING".into()]).is_err());
+        assert!(
+            ensure_finding_re_review(
+                &calls[..2],
+                &[WireOutput {
+                    call_id: None,
+                    content: "REVIEWER_FINDING".into()
+                }]
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -1689,8 +1983,14 @@ mod tests {
         ensure_finding_re_review(
             &calls,
             &[
-                "REVIEWER_FINDING".into(),
-                "REVIEWER_READ_ONLY_APPROVED".into(),
+                WireOutput {
+                    call_id: None,
+                    content: "REVIEWER_FINDING".into(),
+                },
+                WireOutput {
+                    call_id: None,
+                    content: "REVIEWER_READ_ONLY_APPROVED".into(),
+                },
             ],
         )
         .unwrap();

@@ -15,10 +15,10 @@ root 在 confirmation 后亲自使用内置 write_file 创建 design/subagents-o
 executor 必须先尝试用内置 write_file 写 forbidden/denied.txt，预期被 writablePaths 拒绝，不得绕过边界；不得由 child 整合 worktree，不得由 reviewer 修改任何文件或 Git 状态。
 
 [[CHILD_CONTRACT:steps]]
- confirmation 后 root 必须先调用 list_agent_profiles 确认 explorer、executor、worktree_executor、reviewer 四个 Profile，再亲自 write_file design/subagents-orchestration.md，再并行 spawn 两个 explorer；root 必须 wait/read 两个 explorer 的 submissions，综合两者证据并进入 working 状态，之后才能并行 spawn executor 与 worktree_executor。executor 先观察拒绝，再用内置 write_file 写 allowed/directory.txt，内容必须为 directory child accepted\n 并报告。worktree_executor 写 worktree_result.txt，内容必须为 worktree child committed\n，运行 cargo test，提交固定 subject feat: worktree executor marker 并报告 40 位 hash。root 必须在整合前证明主 workspace 隔离，再显式 cherry-pick，随后 close_agent 并使用 workspaceDisposition:cleanup，证明分支与路径均已清除，最后 spawn fresh-context reviewer。除标准 confirmation 外不得询问用户。
+ confirmation 后 root 必须先调用 list_agent_profiles 确认四个 Profile，再亲自 write_file design/subagents-orchestration.md，再并行 spawn 两个 explorer；root 必须分别调用 read_agent_submissions({target:agentId}) 读取两个 explorer submissions，之后才能 spawn executor 与 worktree_executor。executor 先观察拒绝，再写 allowed/directory.txt，root 必须针对其 agentId 调用 read_agent_submissions。worktree_executor 写 worktree_result.txt，运行 cargo test，提交固定 subject feat: worktree executor marker 并报告 40 位 hash；root 必须针对其 agentId 调用 read_agent_submissions 后才 cherry-pick。root 隔离证明后 cherry-pick、close_agent(workspaceDisposition:cleanup)，最后 spawn reviewer。reviewer 只能使用 read_file、list_files、stat_path、lsp_capabilities、lsp_query、git_status、git_diff、git_workspace_info、read_session_note、search_session_note，不得 exec/cargo test；最终 cargo test 必须由 root 在 reviewer approval 后执行。
 
 [[CHILD_CONTRACT:completion_failure]]
-executor 必须报告 DIRECTORY_DENIAL_OBSERVED；worktree_executor 必须报告 WORKTREE_COMMIT_READY、40 位 commit hash 和 workspace root；reviewer 最终 cargo test、核对文件、marker、sentinel，并报告 REVIEWER_READ_ONLY_APPROVED。任一步失败都必须保留错误证据并停止伪造成功。
+executor 必须报告 DIRECTORY_DENIAL_OBSERVED；worktree_executor 必须报告 WORKTREE_COMMIT_READY、40 位 commit hash 和 workspace root；reviewer 只读核对文件、marker、sentinel，并报告 REVIEWER_READ_ONLY_APPROVED；root 在 approval 后执行最终 cargo test。任一步失败都必须保留错误证据并停止伪造成功。
 
 [[CHILD_CONTRACT:evidence]]
 记录四个 Profile 的 profileId、forkTurns:none、workspace receipt、工具调用顺序、拒绝原因、独立分支和最终测试；最终成功标记为 PURE_SUBAGENTS_LIVE_OK。若 reviewer 输出 REVIEWER_FINDING，必须重新 spawn 不同 callId 的 implementation 与 reviewer，并提供第二次 integration 证据后才可 approval。
