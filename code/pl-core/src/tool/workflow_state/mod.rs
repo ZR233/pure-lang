@@ -145,6 +145,57 @@ pub fn validate_workflow_state_arguments(arguments: serde_json::Value) -> Result
     deserialize_tool_input::<WorkflowStateInput>(TOOL_WORKFLOW_STATE, arguments).map(|_| ())
 }
 
+/// 验证 provider wire capture 中的 `workflow_state` 调用。
+///
+/// 完整调用沿用运行时的严格 typed contract。历史请求可能包含一次被模型
+/// 重试替换的流式 transition 草稿：它已经带有完整 CAS、reason 和 evidence，
+/// 但在参数增量尚未结束时尚未写入 `completion.summary`。该草稿只在 wire
+/// replay 边界允许按空 summary 做形状验证，绝不会改变运行时执行语义。
+pub fn validate_workflow_state_wire_arguments(
+    arguments: serde_json::Value,
+) -> Result<(), PureError> {
+    match validate_workflow_state_arguments(arguments.clone()) {
+        Ok(()) => Ok(()),
+        Err(strict_error) => {
+            let Some(mut partial) = arguments.as_object().cloned() else {
+                return Err(strict_error);
+            };
+            if partial.get("action").and_then(serde_json::Value::as_str) != Some("transition") {
+                return Err(strict_error);
+            }
+            let Some(mut completion) = partial
+                .get("completion")
+                .and_then(serde_json::Value::as_object)
+                .cloned()
+            else {
+                return Err(strict_error);
+            };
+            if completion.contains_key("summary") {
+                return Err(strict_error);
+            }
+            if !completion
+                .get("evidence")
+                .is_some_and(serde_json::Value::is_array)
+            {
+                return Err(strict_error);
+            }
+            completion.insert(
+                "summary".to_string(),
+                serde_json::Value::String(String::new()),
+            );
+            partial.insert(
+                "completion".to_string(),
+                serde_json::Value::Object(completion),
+            );
+            deserialize_tool_input::<WorkflowStateInput>(
+                TOOL_WORKFLOW_STATE,
+                serde_json::Value::Object(partial),
+            )
+            .map(|_| ())
+        }
+    }
+}
+
 impl From<WorkflowTransitionInput> for WorkflowTransition {
     fn from(input: WorkflowTransitionInput) -> Self {
         Self {

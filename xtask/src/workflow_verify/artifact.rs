@@ -340,7 +340,7 @@ fn validate_workflow_call_arguments(body: &Value) -> Result<()> {
             Value::Object(_) => raw.clone(),
             _ => bail!("workflow_state call arguments are not an object"),
         };
-        pl_core::tool::validate_workflow_state_arguments(arguments)
+        pl_core::tool::validate_workflow_state_wire_arguments(arguments)
             .map_err(|error| anyhow::anyhow!("invalid workflow_state call arguments: {error}"))?;
     }
     Ok(())
@@ -604,6 +604,30 @@ mod tests {
                 "{arguments}"
             );
         }
+    }
+
+    #[test]
+    fn workflow_call_validation_accepts_a_partial_transition_from_a_retry() {
+        let body = serde_json::json!({
+            "input": [{
+                "type": "function_call",
+                "name": "workflow_state",
+                "arguments": serde_json::json!({
+                    "action": "transition",
+                    "expectedRunId": "run-1",
+                    "expectedRevision": 1,
+                    "expectedStageId": "planning",
+                    "toStageId": "awaiting_confirmation",
+                    "reason": "Plan is ready",
+                    "completion": {
+                        "evidence": ["plan is complete"]
+                    }
+                }).to_string()
+            }]
+        });
+
+        validate_workflow_call_arguments(&body)
+            .expect("a retryable partial transition should be shape-validated");
     }
 
     #[test]

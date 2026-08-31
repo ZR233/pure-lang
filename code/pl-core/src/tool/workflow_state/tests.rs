@@ -172,6 +172,24 @@ fn workflow_state_wire_contract_uses_camel_case_variant_fields() {
 }
 
 #[test]
+fn wire_validation_allows_only_a_partial_transition_without_summary() {
+    let arguments = serde_json::json!({
+        "action": "transition",
+        "expectedRunId": "run-1",
+        "expectedRevision": 1,
+        "expectedStageId": "planning",
+        "toStageId": "awaiting_confirmation",
+        "reason": "Plan is ready",
+        "completion": {
+            "evidence": ["plan is complete"]
+        }
+    });
+
+    assert!(validate_workflow_state_arguments(arguments.clone()).is_err());
+    assert!(validate_workflow_state_wire_arguments(arguments).is_ok());
+}
+
+#[test]
 fn compile_transition_and_replay_use_canonical_cas() {
     let tool = tool();
     let compile_context = context("turn-1", "call-1");
