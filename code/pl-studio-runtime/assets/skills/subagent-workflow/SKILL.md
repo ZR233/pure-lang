@@ -58,9 +58,10 @@ wait for capacity and narrow/re-dispatch once; only a second failure permits min
 spawn a new fresh-context read-only `reviewer`; it never fixes. Route code findings to `working` and
 design findings to `editing_documents`; every repair must be re-integrated and receive a new reviewer.
 
-The reviewer remains read-only for workspace, Git, shell, and external state, but after finishing its
-review and before its final reply it must call `report_progress` exactly once to append a durable
-collaboration verdict. Use `REVIEWER_FINDING` for a blocking verdict or
+The reviewer remains read-only for workspace, Git, shell, and external state. After finishing its
+review and before its final reply it must call `report_progress` to append the final durable
+collaboration verdict. Earlier markerless intermediate progress submissions are permitted but do not
+replace that final verdict. The final submission uses `REVIEWER_FINDING` for a blocking verdict or
 `REVIEWER_READ_ONLY_APPROVED` for approval. Root must take the reviewer agentId from the bound spawn
 receipt and call `read_agent_submissions` with the reviewer agentId; only a canonical nonempty page
 carrying that marker authorizes the next step. A root retelling or `read_agent_session` does not count,

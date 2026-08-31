@@ -17,7 +17,7 @@ mode:
 - `editing_documents`：架构、协议、运行时行为或长期约定变化时，只允许 root 亲自更新 `design/**`；若任务不涉及这些变化，可在图中给出明确跳过路径。
 - `working`：按依赖顺序把实现委派给 `executor` 或 `worktree_executor`；无依赖且写集合互斥的任务尽量并行，完成后再进入整合。每条 child 消息必须八段式自包含：目的与用户价值、设计基线、所有权不变量、禁止范围（禁区）、步骤、完成/失败条件、证据、workspace 隔离/Git/cleanup 合同。
 - `integrating`：root 检查 directory 组合 diff，显式审查并 cherry-pick/merge worktree commit，处理必要冲突和 cleanup。child 失败先等待容量并收窄重派一次，仍失败才记录 `ROOT_IMPLEMENTATION_FALLBACK` 并由 root 最小兜底。
-- `reviewing`：新建 fresh-context、`forkTurns:none` 的只读 `reviewer` 综合检查整合后的主 workspace；reviewer 在 final reply 前仅调用一次 `report_progress`，用 `REVIEWER_FINDING` 或 `REVIEWER_READ_ONLY_APPROVED` 写入 durable verdict，发现问题按代码/设计分流返工。
+- `reviewing`：新建 fresh-context、`forkTurns:none` 的只读 `reviewer` 综合检查整合后的主 workspace；reviewer 完成综合审查后必须在 final reply 前调用 `report_progress` 写入最终 durable verdict，此前允许不含最终 marker 的中间 progress，但不可替代最终 submission；最终 submission 用 `REVIEWER_FINDING` 或 `REVIEWER_READ_ONLY_APPROVED`，发现问题按代码/设计分流返工。
 - `completed`：成功终态并交付。
 - `stopped`：失败或取消终态。
 

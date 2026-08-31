@@ -1743,11 +1743,21 @@ mod tests {
             );
         }
         assert!(
-            reviewer.contains("final reply 前调用一次 `report_progress`")
+            reviewer.contains("final reply 前必须调用 `report_progress` 提交最终 durable verdict")
+                && reviewer.contains("中间 submission 不能替代最终")
                 && reviewer.contains("不得修改 workspace、Git")
                 && reviewer.contains("不得使用 `exec`"),
-            "fixed reviewer prompt must submit exactly once without weakening read-only scope"
+            "fixed reviewer prompt must submit a final durable verdict without weakening read-only scope"
         );
+        for prompt in [reviewer, workflow, task, live] {
+            assert!(
+                !prompt.contains("report_progress` exactly once")
+                    && !prompt.contains("仅调用一次 `report_progress`")
+                    && !prompt.contains("必须调用且仅调用一次 report_progress")
+                    && !prompt.contains("并且只能调用一次"),
+                "reviewer contracts must allow intermediate progress before the final durable verdict"
+            );
+        }
         assert!(
             workflow.contains("call `read_agent_submissions` with the reviewer agentId")
                 && workflow.contains("A root retelling or `read_agent_session` does not count"),
@@ -1762,7 +1772,7 @@ mod tests {
             .find("按 reviewer agentId 调用 read_agent_submissions")
             .expect("live prompt must require a targeted reviewer submissions read");
         let final_test = live
-            .find("读取到 durable verdict 后才执行最终 cargo test")
+            .find("targeted read 到该最终 durable verdict 后才执行最终 cargo test")
             .expect("live prompt must gate the final test on the durable verdict");
         assert!(
             reviewer_read < final_test,
@@ -2818,17 +2828,23 @@ mod tests {
     }
 
     #[test]
-    fn reviewer_polling_skips_markerless_page_until_bound_approval() {
+    fn reviewer_polling_skips_multiple_markerless_pages_until_bound_approval() {
         let mut calls = single_reviewer_calls("reviewer-a");
         calls.push(orchestration_call(
             "rr2",
             "read_agent_submissions",
             serde_json::json!({"target":"reviewer-a"}),
         ));
+        calls.push(orchestration_call(
+            "rr3",
+            "read_agent_submissions",
+            serde_json::json!({"target":"reviewer-a"}),
+        ));
         let outputs = vec![
             reviewer_receipt("r1", "reviewer-a"),
             markerless_output("rr1"),
-            approval_output(Some("rr2")),
+            markerless_output("rr2"),
+            approval_output(Some("rr3")),
         ];
         ensure_finding_re_review(&calls, &outputs).unwrap();
     }
