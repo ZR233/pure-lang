@@ -62,7 +62,35 @@ spawn receipt 返回模式、实际 root、canonical 可写目录；worktree 模
 所有 Pure 内置文件 mutation（apply patch、write/delete/copy/move、项目 Skill 写入）都调用同一中央
 路径策略。读取不受 `writablePaths` 限制，项目外路径仍只由 Permission Mode 决定。
 
-## 15.5 worktree 生命周期
+## 15.5 Task Mode 编排合同
+
+Task root 先建立依赖图、文件所有权与验证边界。跨目录检索、历史核验和相互独立的事实收集优先拆成
+多个 `explorer` 并行执行；复杂方案比较可以使用 `planner`。这两类 child 默认使用 fresh context，父消息
+必须自包含，explorer 返回 `file:line`、符号名、必要原文和不确定项。root 负责综合结论和亲自维护
+`design/**`，child 不替代 root 编译或转换 workflow。
+
+实现 child 的任务消息必须完整声明：任务目的与用户价值、设计基线与前置事实、拥有的文件/模块和
+不变量、禁止修改范围、按顺序执行的探索/实现/测试/提交步骤、可检查的完成与失败条件、最终 diff/
+commit/测试/风险证据，以及 workspace、`writablePaths`、Git 与 cleanup 合同。root 应先按依赖边排序；
+无依赖且写集合互斥的任务并行，有真实语义依赖的任务保持顺序。
+
+- 单个边界清晰的实现，或多个写集合完全互斥的并行实现，使用 `executor`；并行时为每个 child 传入
+  最窄且互不重叠的 `writablePaths`，禁止 child 借 shell、Git 或 MCP 越界修改、stage、commit 或 reset。
+- 会触及共同接口、manifest、lockfile、生成文件、全仓格式化或高风险 Git 状态的任务使用
+  `worktree_executor`。每个 child 在独立 worktree 提交，root 顺序审查和采纳；worktree 不能替代真实
+  前后依赖的顺序执行。
+
+Task 默认在 working 后进入 integrating。directory 成果由 root 检查组合 diff 并形成最终提交；worktree
+成果由 root 审查 commit、用普通 Git 显式整合并 cleanup。root 可在解决冲突时完成保持合并语义所需的
+相邻实现和测试修复，但不得借机展开无关重构。合适 child 不可用或失败时，root 先等待容量并收窄重派
+一次；仍失败才允许最小实现兜底，并在交付中记录 `ROOT_IMPLEMENTATION_FALLBACK`、原因和直接修改文件。
+
+所有成果整合后必须创建 fresh-context 的只读 `reviewer`，综合检查目标、设计、完整 diff、错误路径、
+测试、冲突和 fallback。reviewer 不直接修复：代码 finding 回到 working 交给 executor，设计 finding 回到
+editing_documents 由 root 修订；重新整合后必须再派新的 reviewer。reviewer 通过后 root 才执行最终门禁
+并完成 workflow。
+
+## 15.6 worktree 生命周期
 
 本地和 SSH 后端都以 spawn 时解析的 `HEAD` 执行 `git worktree add -b`，禁用 hooks 和 credential
 helper，最长 120 秒。路径为 `<repo>/.pure/worktrees/<root-thread-id>/<child-id>`，分支使用 Pure-owned
@@ -78,7 +106,7 @@ Thread、热资源、worktree 与 branch。启动恢复只按 durable lease 对�
 整合，再请求 cleanup。已经 preserved 的 lease 在 Agents/Recovery 中显示 revision、branch、base/head、
 dirty 与 changed-files 预览，并提供显式清理。
 
-## 15.6 GUI 与验证
+## 15.7 GUI 与验证
 
 Agents 是 canonical Agent 配置中心；不再保留重复 Roles 设置页。系统卡片显示固定模式徽标、启用开关、
 provider/model/effort 控件，用户编辑器额外显示三模式选择。所有设置 mutation 携带
@@ -87,5 +115,5 @@ provider/model/effort 控件，用户编辑器额外显示三模式选择。所�
 确定性验收覆盖 schema 迁移、模式冻结、目录允许/拒绝/外部路径/symlink、shell 可绕过的显式合同、
 本地与 SSH worktree 创建和补偿、preserve/cleanup、重启 reconcile 及 GUI revision。真实验收入口为
 `cargo xtask verify-subagents --live --gui`：使用隔离的临时 Studio home 与 Git fixture，从 GUI 配置并
-提交真实 prompt，证明两种 executor 的 spawn receipt、目录拒绝、worktree 分支、显式整合、cleanup、
-最终测试、截图和 terminal receipt。
+提交真实 Task prompt，证明并行 explorer、两种 executor 的 spawn receipt、详细任务合同、目录拒绝、
+worktree 分支、显式整合、cleanup、整合后的只读 reviewer、最终测试、截图和 terminal receipt。

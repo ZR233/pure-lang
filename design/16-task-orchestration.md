@@ -76,10 +76,24 @@ definition hash、Mode snapshot、active/terminal、当前 stage、时间和最�
 `mode.simple` 不编译 workflow，也不要求阶段转换；它直接工作、按风险验证，并在完成时调用 `complete`。
 它不增加 Git、固定审查轮次或交付门禁。
 
-`mode.task` 默认编译 `planning -> awaiting_confirmation -> editing_documents -> working -> reviewing ->
-completed`，允许确认修改回到 planning、review finding 回到 working，并提供 stopped 终态。确认使用
-通用 `request_user_input`；working 中可由 root 调用 Agent Profile；进入 `completed` 后调用 `complete`；
-不存在专用 executor/reviewer 生命周期。
+`mode.task` 默认编译 `planning -> awaiting_confirmation -> editing_documents -> working -> integrating ->
+reviewing -> completed`，并提供 stopped 终态。确认修改回到 planning；代码 finding 回到 working，设计
+finding 回到 editing_documents；两条返工路径都必须重新经过 integrating 和 reviewing。确认使用通用
+`request_user_input`，进入 `completed` 后调用 `complete`。
+
+planning 中 root 优先把相互独立的探索并行交给 fresh-context `explorer`，自己综合依赖图、文件所有权与
+验证边界。editing_documents 中 root 亲自更新设计。working 中普通实现必须交给 `executor` 或
+`worktree_executor`：单任务和互斥目录并行优先 directory，可能交叉影响共同接口、清单、生成边界或 Git
+状态时使用 worktree；真实前后依赖始终顺序执行。每个 child 消息必须详细描述目的、基线、所有权、
+禁止范围、有序步骤、完成/失败条件、证据和 workspace/Git 合同。
+
+integrating 中 root 审查 directory 组合 diff、显式采纳 worktree commit、cleanup 并处理冲突。冲突处理中
+允许完成相邻必要实现或测试修复，但不能展开无关工作。child 持续不可用时，root 收窄重派一次后可以
+最小兜底，并显式记录 `ROOT_IMPLEMENTATION_FALLBACK`。reviewing 必须由新创建的只读 `reviewer` 检查
+整合后的主 workspace；root 自审不能替代它，阻塞 finding 修复后必须创建新的 reviewer 复审。
+
+上述职责由冻结 Mode/Profile 指令约束，不新增专用 executor/reviewer runtime 生命周期，也不按阶段裁剪
+普通工具能力。
 
 ## 16.7 GUI 与 live 验收
 
@@ -91,8 +105,10 @@ completion 字段尚未完整到达，验收边界仍可继续；运行时执行
 严格 typed schema，并由业务校验拒绝空 summary。
 
 最终入口是 `cargo xtask verify-workflow --live --headless` 与 `cargo xtask verify-workflow --live --gui`。
-它们必须使用真实非本地 provider 和真实 Prompt，不得 fallback 到 scripted/demo provider。harness 在无
-`.git` 的隔离 Rust 项目中分别选择 `mode.simple` 与 `mode.task`：简洁模式直接完成且不产生 workflow
-调用，任务模式走完 planning/confirmation/document/edit/review/completed 并调用 `complete`。两种模式
-都运行 `cargo test` 与 verifier；GUI 额外重启任务模式验证 run id/revision/history 持久化。失败 artifacts
-保存到 `target/workflow-live-artifacts/`，同时回收 GUI、DTD 与 Driver 进程树。
+它们必须使用真实非本地 provider 和真实 Prompt，不得 fallback 到 scripted/demo provider。workflow
+harness 在隔离 Rust 项目中分别选择 `mode.simple` 与 `mode.task`：简洁模式直接完成且不产生 workflow
+调用，任务模式走完 planning/confirmation/document/working/integrating/review/completed 并调用
+`complete`。子代理 GUI harness 另使用带初始 commit 的隔离 Git fixture，验证 explorer、两种 executor、
+显式整合和只读 reviewer。两种模式都运行 `cargo test` 与 verifier；GUI 额外重启任务模式验证 run id/
+revision/history 持久化。失败 artifacts 保存到 `target/workflow-live-artifacts/` 或
+`target/subagents-live-artifacts/`，同时回收 GUI、DTD 与 Driver 进程树。

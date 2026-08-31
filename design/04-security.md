@@ -18,10 +18,12 @@ Pure v1 的权限模式是本地策略层，不是 OS 沙箱、网络沙箱或�
 - `auto-review`：workspace 内行为同 `request-approval`；工具请求访问 workspace 外路径或 workspace 外 cwd 时交给 reviewer 模型审批。reviewer 只返回是否批准，不执行工具。
 - `full-access`：所有已注册工具在策略层直接放行；本地文件 backend 可解析 workspace 外路径，`exec.cwd` 可指向 workspace 外已存在目录。
 
-execution profile 的工具 effect 白名单优先于权限模式。即使当前权限模式是 `full-access`，task
-planner、explorer 和 reviewer 也不能获得未声明或越权的写入工具。Planner 仅在 design 更新和
-存在 approved MergeCandidate 的 merging 阶段获得主 workspace 的普通 Git/文件写能力；Task
-child 的 confined workspace 边界始终不能被权限模式放宽。
+execution profile 的工具 effect 白名单优先于权限模式。当前 Studio root 与 child policy 允许其普通
+effect，再由 Permission Mode、workspace assignment 和各工具 schema 共同约束实际调用。Task Mode 中
+“root 只亲自修改设计与整合代码”、explorer/reviewer 只读等属于 Mode/Profile 提示词的合作式角色合同，
+不是按 workflow stage 动态切换的硬权限，也不能对抗 shell、Git 或 MCP 的命令正文。directory child 的
+`writablePaths` 只约束 Pure 内置 mutation；worktree child 的 `Confined` boundary 则始终不能被权限模式
+放宽。GUI、工具描述和固定上下文必须如实区分这两类边界。
 
 ## 4.2 分层边界
 
