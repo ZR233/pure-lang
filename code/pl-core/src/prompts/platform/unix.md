@@ -1,6 +1,6 @@
-Current platform: unix.
+目标为 Unix-like workspace；其实际 shell dialect 和路径由上方 Runtime execution environment 段声明。
 
-- Shell commands run through a POSIX-style shell. Quote paths that contain spaces or shell metacharacters.
+- Quote paths that contain spaces or shell metacharacters.
 - Absolute paths start at `/`; workspace-relative paths are usually safer for tool input. Do not use `..` to escape the workspace unless the user granted full-access and the task truly requires it.
 - Respect Unix permissions and symlinks. If a path crosses a symlink, the runtime checks the resolved target before workspace-only access is allowed.
 - Prefer `rg` for search when available, and use `find` for filesystem traversal only when needed.

@@ -6,7 +6,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use pl_protocol::remote::{
     RemoteError, RemoteErrorCode, RemoteEvent, RemoteMessage, RemoteOutputStream,
-    RemoteProcessExit, RemoteProcessOutput, RemoteSpawnRequest,
+    RemoteProcessExit, RemoteProcessOutput, RemoteShellDescriptor, RemoteShellDialect,
+    RemoteSpawnRequest,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::process::{ChildStdin, Command};
@@ -28,6 +29,7 @@ pub(super) struct ProcessRegistry {
     processes: Arc<Mutex<HashMap<String, ProcessHandle>>>,
     writer: SharedWriter,
     output_sequence: Arc<AtomicU64>,
+    shell: RemoteShellDescriptor,
 }
 
 impl std::fmt::Debug for ProcessRegistry {
@@ -41,11 +43,12 @@ impl std::fmt::Debug for ProcessRegistry {
 }
 
 impl ProcessRegistry {
-    pub(super) fn new(writer: SharedWriter) -> Self {
+    pub(super) fn new(writer: SharedWriter, shell: RemoteShellDescriptor) -> Self {
         Self {
             processes: Arc::new(Mutex::new(HashMap::new())),
             writer,
             output_sequence: Arc::new(AtomicU64::new(0)),
+            shell,
         }
     }
 
@@ -84,9 +87,13 @@ impl ProcessRegistry {
             .await
             .map_err(|error| io_error("failed to write capture header", error))?;
 
-        let mut command = Command::new("/bin/sh");
+        let mut command = Command::new(&self.shell.path);
         command
-            .arg("-c")
+            .arg(match self.shell.dialect {
+                RemoteShellDialect::Bash | RemoteShellDialect::Sh => "-c",
+                RemoteShellDialect::Pwsh | RemoteShellDialect::PowerShell => "-Command",
+                RemoteShellDialect::Cmd => "/C",
+            })
             .arg(&request.command)
             .current_dir(cwd)
             .envs(&request.environment)

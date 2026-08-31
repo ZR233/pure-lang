@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use crate::{AttachmentModality, ContentPart, MessageContent, PureError, Result};
 use futures::FutureExt;
+use pl_core::ExecutionEnvironment;
 use pl_core::WorkspaceInstructions;
 use pl_core::instruction::{
     ExecutionInstructionProfile, InstructionAssembler, InstructionAssemblyRequest,
@@ -142,6 +143,10 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             ),
             None => None,
         };
+        let execution_environment = remote_host
+            .as_ref()
+            .map(|host| host.execution_environment.clone())
+            .unwrap_or_else(ExecutionEnvironment::detect_local);
         if let Some(remote_host) = &remote_host {
             self.lsp_runtime
                 .apply_user_servers(&config.lsp.servers)
@@ -378,7 +383,8 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             CoreRuntimeProfile::local_agent_workspace(workspace.clone())
         }
         .with_workspace_instructions(workspace_instructions.clone())
-        .with_attachment_runtime(attachment_runtime.clone());
+        .with_attachment_runtime(attachment_runtime.clone())
+        .with_execution_environment(execution_environment.clone());
         let assignment_name = self
             .resources
             .get(&context.snapshot.identity.id)
@@ -586,6 +592,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
                 .metadata
                 .get("subagentConstraint")
                 .and_then(pl_core::MailboxMetadataValue::as_str),
+            execution_environment: &execution_environment,
         })?;
         #[cfg_attr(not(debug_assertions), allow(unused_mut))]
         let mut request = TurnRequest::new(input_message)
@@ -668,6 +675,7 @@ struct StudioInstructionContext<'a> {
     skill_query: &'a str,
     excluded_skill_names: &'a [String],
     subagent_constraint: Option<&'a str>,
+    execution_environment: &'a ExecutionEnvironment,
 }
 
 fn instruction_snapshot(context: StudioInstructionContext<'_>) -> Result<InstructionSnapshot> {
@@ -689,6 +697,7 @@ fn instruction_snapshot(context: StudioInstructionContext<'_>) -> Result<Instruc
             query: context.skill_query,
             excluded_names: context.excluded_skill_names,
         }),
+        execution_environment: Some(context.execution_environment),
     })
 }
 

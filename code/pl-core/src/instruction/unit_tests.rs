@@ -1,6 +1,7 @@
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::{ExecutionEnvironment, ExecutionOs, ExecutionTransport, ShellDialect};
 use pl_model::ModelInfo;
 use pl_protocol::MessageRole;
 use pretty_assertions::assert_eq;
@@ -33,6 +34,109 @@ fn instruction_skill(
         resource_base: crate::skill::SkillResourceBase::Directory { path },
         mode: None,
     }
+}
+
+#[test]
+fn platform_prompt_tracks_runtime_shell_and_target() {
+    let dir = temp_dir("platform-matrix");
+    fs::create_dir_all(&dir).unwrap();
+    let model = ModelInfo::fallback("test-model");
+    let cases = [
+        (
+            ExecutionOs::Linux,
+            ShellDialect::Bash,
+            "/bin/bash",
+            "local process",
+            "bash -c",
+        ),
+        (
+            ExecutionOs::Linux,
+            ShellDialect::Sh,
+            "/bin/sh",
+            "local process",
+            "sh -c",
+        ),
+        (
+            ExecutionOs::Windows,
+            ShellDialect::Pwsh,
+            "pwsh.exe",
+            "local process",
+            "pwsh -NoProfile",
+        ),
+        (
+            ExecutionOs::Windows,
+            ShellDialect::Cmd,
+            "cmd.exe",
+            "local process",
+            "cmd /C",
+        ),
+    ];
+    for (os, shell, path, target, syntax) in cases {
+        let os_label = os.as_str().to_string();
+        let shell_label = shell.as_str();
+        let environment = ExecutionEnvironment {
+            transport: ExecutionTransport::Local,
+            os,
+            shell,
+            shell_path: path.into(),
+        };
+        let snapshot = InstructionAssembler::assemble(InstructionAssemblyRequest {
+            instructions: None,
+            skills: None,
+            skill_catalog: None,
+            execution_profile: None,
+            model: &model,
+            workspace_root: &dir,
+            current_dir: &dir,
+            workspace_documents: None,
+            workspace_instructions: None,
+            subagent_constraint: None,
+            skill_suggestions: None,
+            execution_environment: Some(&environment),
+        })
+        .unwrap();
+        let platform = &snapshot.developer[0];
+        assert_eq!(
+            platform.source.label,
+            format!("platform: {os_label}/{shell_label}")
+        );
+        assert!(platform.content.contains(target));
+        assert!(platform.content.contains(path));
+        assert!(platform.content.contains(syntax));
+    }
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn ssh_platform_prompt_never_uses_local_platform_template() {
+    let dir = temp_dir("platform-ssh");
+    fs::create_dir_all(&dir).unwrap();
+    let environment = ExecutionEnvironment {
+        transport: ExecutionTransport::Ssh,
+        os: ExecutionOs::Linux,
+        shell: ShellDialect::Sh,
+        shell_path: "/bin/sh".into(),
+    };
+    let snapshot = InstructionAssembler::assemble(InstructionAssemblyRequest {
+        instructions: None,
+        skills: None,
+        skill_catalog: None,
+        execution_profile: None,
+        model: &ModelInfo::fallback("test-model"),
+        workspace_root: &dir,
+        current_dir: &dir,
+        workspace_documents: None,
+        workspace_instructions: None,
+        subagent_constraint: None,
+        skill_suggestions: None,
+        execution_environment: Some(&environment),
+    })
+    .unwrap();
+    let platform = &snapshot.developer[0];
+    assert_eq!(platform.source.label, "platform: linux/sh");
+    assert!(platform.content.contains("SSH remote helper"));
+    assert!(!platform.content.contains("Current platform: windows"));
+    fs::remove_dir_all(dir).unwrap();
 }
 
 #[test]
@@ -83,6 +187,7 @@ fn assembles_three_layers_in_stable_order() {
         workspace_instructions: None,
         subagent_constraint: Some("subagent rule"),
         skill_suggestions: None,
+        execution_environment: None,
     })
     .unwrap();
 
@@ -137,6 +242,7 @@ fn uses_preloaded_workspace_documents_for_non_local_workspace() {
         workspace_instructions: Some("remote project rules"),
         subagent_constraint: None,
         skill_suggestions: None,
+        execution_environment: None,
     })
     .unwrap();
 
@@ -172,6 +278,7 @@ fn platform_block_is_after_mode_and_before_config_developer() {
         workspace_instructions: None,
         subagent_constraint: None,
         skill_suggestions: None,
+        execution_environment: None,
     })
     .unwrap();
 
@@ -187,33 +294,25 @@ fn platform_block_is_after_mode_and_before_config_developer() {
         snapshot.developer[2].source.kind,
         InstructionSourceKind::ConfigDeveloper
     );
-    assert!(snapshot.developer[1].content.contains("workspace root"));
-    if cfg!(windows) {
-        assert_eq!(snapshot.developer[1].source.label, "platform: windows");
-        assert!(
-            snapshot.developer[1]
-                .content
-                .contains("Current platform: windows.")
-        );
-        assert!(
-            !snapshot.developer[1]
-                .content
-                .contains("Current platform: unix.")
-        );
-    }
-    if cfg!(unix) {
-        assert_eq!(snapshot.developer[1].source.label, "platform: unix");
-        assert!(
-            snapshot.developer[1]
-                .content
-                .contains("Current platform: unix.")
-        );
-        assert!(
-            !snapshot.developer[1]
-                .content
-                .contains("Current platform: windows.")
-        );
-    }
+    let environment = crate::ExecutionEnvironment::detect_local();
+    assert_eq!(
+        snapshot.developer[1].source.label,
+        format!(
+            "platform: {}/{}",
+            environment.os.as_str(),
+            environment.shell.as_str()
+        )
+    );
+    assert!(
+        snapshot.developer[1]
+            .content
+            .contains("Runtime execution environment")
+    );
+    assert!(
+        snapshot.developer[1]
+            .content
+            .contains(&environment.shell_path_display())
+    );
     fs::remove_dir_all(dir).unwrap();
 }
 
@@ -236,6 +335,7 @@ fn filters_empty_blocks_and_uses_model_base() {
         workspace_instructions: Some(""),
         subagent_constraint: None,
         skill_suggestions: None,
+        execution_environment: None,
     })
     .unwrap();
 
@@ -266,6 +366,7 @@ fn profile_can_override_base_and_add_context_blocks() {
             workspace_instructions: Some("workspace"),
             subagent_constraint: None,
             skill_suggestions: None,
+            execution_environment: None,
         },
         &profile,
     )
@@ -419,6 +520,7 @@ fn config_base_override_replaces_model_base() {
         workspace_instructions: None,
         subagent_constraint: None,
         skill_suggestions: None,
+        execution_environment: None,
     })
     .unwrap();
 
@@ -447,6 +549,7 @@ fn built_in_base_requires_doc_first_and_final_review() {
         workspace_instructions: None,
         subagent_constraint: None,
         skill_suggestions: None,
+        execution_environment: None,
     })
     .unwrap();
 
@@ -490,6 +593,7 @@ fn disabled_skills_do_not_inject_a_frozen_catalog() {
         workspace_instructions: None,
         subagent_constraint: None,
         skill_suggestions: None,
+        execution_environment: None,
     })
     .unwrap();
 
@@ -537,6 +641,7 @@ fn skill_suggestions_are_turn_overlays_and_exclude_loaded_names() {
             query: "diagnose a Rust release linker failure",
             excluded_names: &[],
         }),
+        execution_environment: None,
     })
     .unwrap();
     let excluded = vec!["RELEASE-BUILD-TRIAGE".to_string()];
@@ -555,6 +660,7 @@ fn skill_suggestions_are_turn_overlays_and_exclude_loaded_names() {
             query: "diagnose a Rust release linker failure",
             excluded_names: &excluded,
         }),
+        execution_environment: None,
     })
     .unwrap();
 
@@ -639,6 +745,7 @@ fn unmatched_skill_query_does_not_add_a_turn_overlay() {
             query: "tell me a joke about penguins",
             excluded_names: &[],
         }),
+        execution_environment: None,
     })
     .unwrap();
 

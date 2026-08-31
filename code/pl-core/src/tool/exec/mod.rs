@@ -14,6 +14,7 @@ use super::{
     Tool, ToolCallContext, ToolDirective, ToolInput, ToolResult, ToolWorkspace, TypedTool,
     deserialize_tool_input,
 };
+use crate::execution_environment::ExecutionEnvironment;
 use crate::turn::ToolEffect;
 
 pub const TOOL_EXEC: &str = "exec";
@@ -174,13 +175,17 @@ where
     )
 }
 
-pub(crate) fn local_command_tool_pair(
+pub(crate) fn local_command_tool_pair_with_environment(
     workspace: ToolWorkspace,
+    execution_environment: ExecutionEnvironment,
 ) -> (
     ExecTool<LocalCommandBackend>,
     WriteStdinTool<LocalCommandBackend>,
 ) {
-    let backend = Arc::new(LocalCommandBackend::new(workspace.root().to_path_buf()));
+    let backend = Arc::new(
+        LocalCommandBackend::new(workspace.root().to_path_buf())
+            .with_execution_environment(execution_environment),
+    );
     command_tool_pair(backend, workspace)
 }
 

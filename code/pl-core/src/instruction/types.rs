@@ -6,6 +6,7 @@ use pl_protocol::Message;
 use serde::{Deserialize, Serialize};
 
 use crate::config::{InstructionsConfig, SkillsConfig};
+use crate::execution_environment::ExecutionEnvironment;
 use crate::workspace::WorkspaceInstructions;
 
 #[derive(Debug, Clone)]
@@ -25,6 +26,9 @@ pub struct InstructionAssemblyRequest<'a> {
     pub workspace_instructions: Option<&'a str>,
     pub subagent_constraint: Option<&'a str>,
     pub skill_suggestions: Option<SkillSuggestionRequest<'a>>,
+    /// Runtime facts for the command execution target. When absent, the local
+    /// resolver is used; no login-shell environment variable is consulted.
+    pub execution_environment: Option<&'a ExecutionEnvironment>,
 }
 
 /// Turn-local task text used to suggest Skill summaries without loading them.

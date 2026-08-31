@@ -21,6 +21,8 @@ use super::{
     RemoteClient, RemoteClientError, RemoteCommandBackend, RemoteExecutionBackend,
     RemoteWorkspaceFileBackend, RemoteWorkspaceHost,
 };
+use crate::execution_environment::{ExecutionEnvironment, ExecutionOs, ShellDialect};
+use pl_protocol::remote::RemoteShellDialect;
 
 pub use self::asset::{RemoteHelperAssets, RemoteHelperTarget};
 use self::asset::{file_helper_assets, load_helper, upload_helper};
@@ -87,6 +89,7 @@ struct SshConnection {
     client: RemoteClient,
     process: Arc<Mutex<Child>>,
     _askpass: Option<tempfile::NamedTempFile>,
+    execution_environment: ExecutionEnvironment,
 }
 
 impl std::fmt::Debug for SshConnection {
@@ -269,11 +272,13 @@ impl SshManager {
         match result {
             Ok((connection, hello)) => {
                 let client = connection.client.clone();
+                let execution_environment = connection.execution_environment.clone();
                 self.connections
                     .lock()
                     .await
                     .insert(server_id.to_string(), connection);
-                self.reopen_known_workspaces(server_id, &client).await;
+                self.reopen_known_workspaces(server_id, &client, &execution_environment)
+                    .await;
                 self.set_state(
                     server_id,
                     SshConnectionState::Ready {
@@ -401,10 +406,18 @@ impl SshManager {
         let canonical_path = files.canonical_path().to_string();
         let commands = RemoteCommandBackend::new(client.clone(), workspace_id.clone());
         let git = RemoteExecutionBackend::new(client, workspace_id, canonical_path);
+        let execution_environment = self
+            .connections
+            .lock()
+            .await
+            .get(server_id)
+            .map(|connection| connection.execution_environment.clone())
+            .ok_or_else(|| RemoteClientError::Protocol("SSH connection disappeared".to_string()))?;
         let host = RemoteWorkspaceHost {
             files,
             commands,
             git,
+            execution_environment,
         };
         let canonical_path = host.files.canonical_path().to_string();
         self.workspace_paths
@@ -482,11 +495,18 @@ impl SshManager {
                 )));
             }
         };
+        if hello.protocol_version != REMOTE_PROTOCOL_VERSION {
+            return Err(RemoteClientError::Protocol(format!(
+                "helper negotiated protocol version {}, expected {}",
+                hello.protocol_version, REMOTE_PROTOCOL_VERSION
+            )));
+        }
         Ok((
             SshConnection {
                 client,
                 process: Arc::new(Mutex::new(child)),
                 _askpass: prepared.askpass,
+                execution_environment: execution_environment_from_hello(&hello)?,
             },
             hello,
         ))
@@ -587,7 +607,12 @@ impl SshManager {
         }
     }
 
-    async fn reopen_known_workspaces(&self, server_id: &str, client: &RemoteClient) {
+    async fn reopen_known_workspaces(
+        &self,
+        server_id: &str,
+        client: &RemoteClient,
+        execution_environment: &ExecutionEnvironment,
+    ) {
         let paths = self
             .workspace_paths
             .read()
@@ -610,10 +635,39 @@ impl SshManager {
                     files,
                     commands,
                     git,
+                    execution_environment: execution_environment.clone(),
                 },
             );
         }
     }
+}
+
+fn execution_environment_from_hello(
+    hello: &RemoteHello,
+) -> Result<ExecutionEnvironment, RemoteClientError> {
+    let os = match hello.os.to_ascii_lowercase().as_str() {
+        "windows" => ExecutionOs::Windows,
+        "linux" => ExecutionOs::Linux,
+        "macos" | "darwin" => ExecutionOs::Macos,
+        value => ExecutionOs::Other(value.to_string()),
+    };
+    let shell = match hello.shell.dialect {
+        RemoteShellDialect::Bash => ShellDialect::Bash,
+        RemoteShellDialect::Sh => ShellDialect::Sh,
+        RemoteShellDialect::Pwsh => ShellDialect::Pwsh,
+        RemoteShellDialect::PowerShell => ShellDialect::PowerShell,
+        RemoteShellDialect::Cmd => ShellDialect::Cmd,
+    };
+    if hello.shell.path.trim().is_empty() {
+        return Err(RemoteClientError::Protocol(
+            "helper hello returned an empty shell path".to_string(),
+        ));
+    }
+    Ok(ExecutionEnvironment::for_ssh(
+        os,
+        shell,
+        hello.shell.path.clone(),
+    ))
 }
 
 async fn open_workspace(

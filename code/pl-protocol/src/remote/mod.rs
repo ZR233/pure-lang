@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-pub const REMOTE_PROTOCOL_VERSION: u32 = 1;
+pub const REMOTE_PROTOCOL_VERSION: u32 = 2;
 pub const REMOTE_MAX_HEADER_BYTES: usize = 64 * 1024;
 pub const REMOTE_MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
 
@@ -95,6 +95,26 @@ pub struct RemoteHello {
     pub os: String,
     pub architecture: String,
     pub capabilities: Vec<RemoteCapability>,
+    pub shell: RemoteShellDescriptor,
+}
+
+/// Shell selected by the helper for all remote command processes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RemoteShellDialect {
+    Bash,
+    Sh,
+    Pwsh,
+    #[serde(rename = "powershell")]
+    PowerShell,
+    Cmd,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteShellDescriptor {
+    pub dialect: RemoteShellDialect,
+    pub path: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -246,7 +266,10 @@ mod tests {
 
         assert_eq!(value["kind"], "request");
         assert_eq!(value["payload"]["method"], "hello");
-        assert_eq!(value["payload"]["params"]["protocolVersion"], 1);
+        assert_eq!(
+            value["payload"]["params"]["protocolVersion"],
+            REMOTE_PROTOCOL_VERSION
+        );
 
         let output = serde_json::to_value(RemoteMessage::Event(RemoteEvent::ProcessOutput(
             RemoteProcessOutput {
@@ -257,5 +280,31 @@ mod tests {
         )))
         .expect("serialize output");
         assert_eq!(output["payload"]["payload"]["processId"], "process-1");
+    }
+
+    #[test]
+    fn hello_round_trips_shell_descriptor() {
+        let hello = RemoteHello {
+            protocol_version: REMOTE_PROTOCOL_VERSION,
+            helper_version: "test".to_string(),
+            os: "linux".to_string(),
+            architecture: "x86_64".to_string(),
+            capabilities: vec![RemoteCapability::ObservableExec],
+            shell: RemoteShellDescriptor {
+                dialect: RemoteShellDialect::Bash,
+                path: "/bin/bash".to_string(),
+            },
+        };
+        let encoded = serde_json::to_vec(&hello).expect("serialize hello");
+        let value: serde_json::Value = serde_json::from_slice(&encoded).expect("hello json");
+        assert_eq!(value["shell"]["dialect"], "bash");
+        assert_eq!(value["shell"]["path"], "/bin/bash");
+        let decoded: RemoteHello = serde_json::from_slice(&encoded).expect("deserialize hello");
+        assert_eq!(decoded, hello);
+    }
+
+    #[test]
+    fn protocol_version_is_bumped_for_shell_contract() {
+        assert_eq!(REMOTE_PROTOCOL_VERSION, 2);
     }
 }
