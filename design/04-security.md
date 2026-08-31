@@ -25,6 +25,10 @@ effect，再由 Permission Mode、workspace assignment 和各工具 schema 共�
 `writablePaths` 只约束 Pure 内置 mutation；worktree child 的 `Confined` boundary 则始终不能被权限模式
 放宽。GUI、工具描述和固定上下文必须如实区分这两类边界。
 
+只读 reviewer 可以调用 `report_progress` 追加协作层的结构化审查报告；这不会修改项目 workspace、Git
+或外部系统，不属于实现写入。验收与 root 编排只能把绑定到 reviewer `agentId` 的 canonical
+submission 作为 approval/finding 证据，不能把 root 转述、任意 session 文本或空 submission 当作授权。
+
 ## 4.2 分层边界
 
 安全边界按端口-适配器落位：

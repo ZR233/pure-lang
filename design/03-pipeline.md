@@ -44,6 +44,10 @@ Profile 指令、模型路由与 workspace assignment。child 使用普通 Threa
 所有权与依赖图把实现交给 `executor` 或 `worktree_executor`，并在 integrating 中审查和显式整合结果。
 整合后的主 workspace 必须由新的只读 `reviewer` 总审；阻塞 finding 回到 working 或
 editing_documents，修复和重新整合后再次 review。不存在隐式 merge 或 delivery gate。
+这里的只读约束针对项目文件、Git、worktree 和外部持久状态；reviewer 应以 `report_progress` 写入
+协作层的 durable 审查报告，root 再按该 reviewer 的冻结 `agentId` 通过
+`read_agent_submissions` 读取 verdict。该报告只承载 finding 或 approval，不授予 reviewer 修复权，
+也不能由 root 自述或自由文本 session 摘要替代。
 
 每个 child 消息必须自包含地给出目的、设计基线、所有权、禁止范围、有序步骤、完成/失败条件、证据
 输出和 workspace/Git 合同。语义独立且写集合互斥的任务应并行；真实前后依赖保持顺序。directory child

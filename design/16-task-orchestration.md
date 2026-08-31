@@ -91,6 +91,9 @@ integrating 中 root 审查 directory 组合 diff、显式采纳 worktree commit
 允许完成相邻必要实现或测试修复，但不能展开无关工作。child 持续不可用时，root 收窄重派一次后可以
 最小兜底，并显式记录 `ROOT_IMPLEMENTATION_FALLBACK`。reviewing 必须由新创建的只读 `reviewer` 检查
 整合后的主 workspace；root 自审不能替代它，阻塞 finding 修复后必须创建新的 reviewer 复审。
+reviewer 只读完成后以 `report_progress` 提交 durable finding/approval，root 按冻结 reviewer `agentId`
+调用 `read_agent_submissions` 获取结构化 verdict；只有该证据到达后才能执行最终门禁。该提交不改变
+workspace 或 Git，不能扩张 reviewer 的修复权限，也不能由 root 自述或自由文本 session 摘要替代。
 
 上述职责由冻结 Mode/Profile 指令约束，不新增专用 executor/reviewer runtime 生命周期，也不按阶段裁剪
 普通工具能力。

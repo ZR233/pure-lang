@@ -88,7 +88,9 @@ Task 默认在 working 后进入 integrating。directory 成果由 root 检查�
 所有成果整合后必须创建 fresh-context 的只读 `reviewer`，综合检查目标、设计、完整 diff、错误路径、
 测试、冲突和 fallback。reviewer 不直接修复：代码 finding 回到 working 交给 executor，设计 finding 回到
 editing_documents 由 root 修订；重新整合后必须再派新的 reviewer。reviewer 通过后 root 才执行最终门禁
-并完成 workflow。
+并完成 workflow。reviewer 在最终回复前调用 `report_progress` 形成 durable verdict；root 必须通过
+`read_agent_submissions` 读取与冻结 reviewer `agentId`、读取 call ID 绑定的 canonical page。该协作报告
+是只读审查的结构化交付，不允许文件/Git/exec 修复，也不能用 root 转述或 session 摘要伪造 approval。
 
 ## 15.6 worktree 生命周期
 
