@@ -1901,6 +1901,18 @@ mod tests {
     fn live_prompt_contains_deterministic_implementation_contract() {
         let prompt = include_str!("../../../test-fixtures/subagents-live/prompt.md");
         assert!(
+            prompt.contains("spawn 调用参数硬门禁")
+                && prompt.contains("每一次 `spawn_agent` 都必须在顶层参数中显式传入")
+                && prompt.contains("不接受省略后依赖默认值")
+                && prompt.contains("不接受只把 `forkTurns:none` 写进 child message")
+                && prompt.contains("这两次 explorer `spawn_agent` 的顶层参数都必须显式包含")
+                && prompt.contains("只有 executor 额外传 `writablePaths:[\"allowed\"]`")
+                && prompt.contains(
+                    "reviewer 的 `spawn_agent` 也必须显式传顶层 `\"forkTurns\":\"none\"`"
+                ),
+            "live prompt must require explicit top-level forkTurns:none for every spawn stage"
+        );
+        assert!(
             prompt.contains("DIRECTORY_MARKER"),
             "live prompt must require DIRECTORY_MARKER in directory.txt"
         );
