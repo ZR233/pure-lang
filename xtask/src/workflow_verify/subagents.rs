@@ -822,7 +822,7 @@ fn ensure_profile_messages(calls: &[WireCall], outputs: &[WireOutput]) -> Result
         EXPLORER_STEPS_WORKSPACE_GIT_V1,
     ];
     for (index, (steps, expected)) in explorer_steps.iter().zip(canonical).enumerate() {
-        let normalized = steps.replace("\r\n", "\n").trim().to_owned();
+        let normalized = normalize_explorer_steps(steps);
         ensure!(
             normalized == expected,
             "explorer {} steps do not exactly match canonical block",
@@ -830,6 +830,20 @@ fn ensure_profile_messages(calls: &[WireCall], outputs: &[WireOutput]) -> Result
         );
     }
     Ok(())
+}
+
+fn normalize_explorer_steps(steps: &str) -> String {
+    let normalized = steps.replace("\r\n", "\n").trim().to_owned();
+    let opening = "```text\n";
+    let closing = "\n```";
+    if normalized.len() >= opening.len() + closing.len()
+        && normalized.starts_with(opening)
+        && normalized.ends_with(closing)
+    {
+        normalized[opening.len()..normalized.len() - closing.len()].to_owned()
+    } else {
+        normalized
+    }
 }
 
 fn ensure_reviewer_history(captures: &[CaptureReceipt]) -> Result<()> {
@@ -1938,7 +1952,10 @@ mod tests {
             prompt.contains(EXPLORER_STEPS_FIXTURE_SOURCE_V1)
                 && prompt.contains(EXPLORER_STEPS_WORKSPACE_GIT_V1)
                 && prompt.contains("原样复制以下版本化 canonical block")
-                && prompt.contains("不能增删、改写或追加动作"),
+                && prompt.contains("不能增删、改写或追加动作")
+                && prompt
+                    .contains("只允许在完整 canonical block 外包一层 Markdown `text` 展示围栏")
+                && prompt.contains("不得使用其它围栏语言、嵌套围栏"),
             "live prompt must require exact versioned explorer steps"
         );
     }
@@ -3108,6 +3125,41 @@ mod tests {
         }
         let outputs = profile_message_outputs(&calls);
         ensure_profile_messages(&calls, &outputs).unwrap();
+    }
+
+    #[test]
+    fn explorer_steps_accept_only_one_outer_text_fence() {
+        let canonical = EXPLORER_STEPS_FIXTURE_SOURCE_V1;
+        assert_eq!(normalize_explorer_steps(canonical), canonical);
+        assert_eq!(
+            normalize_explorer_steps(&format!("```text\n{canonical}\n```")),
+            canonical
+        );
+        assert_eq!(
+            normalize_explorer_steps(&format!("  ```text\r\n{canonical}\r\n```  ")),
+            canonical
+        );
+        let mut calls = profile_message_calls();
+        let message = calls[0].arguments["message"].as_str().unwrap();
+        calls[0].arguments["message"] =
+            Value::String(message.replace(canonical, &format!("```text\n{canonical}\n```")));
+        let outputs = profile_message_outputs(&calls);
+        ensure_profile_messages(&calls, &outputs).unwrap();
+
+        for invalid in [
+            format!("```markdown\n{canonical}\n```"),
+            format!("```text\n{canonical}"),
+            format!("```text\n{canonical}\n```\nextra"),
+            format!("extra\n```text\n{canonical}\n```"),
+            format!("```text\n```text\n{canonical}\n```\n```"),
+            format!("```text\n{canonical}\n\nextra action\n```"),
+        ] {
+            assert_ne!(
+                normalize_explorer_steps(&invalid),
+                canonical,
+                "accepted {invalid:?}"
+            );
+        }
     }
 
     fn valid_orchestration_calls() -> (Vec<WireCall>, Vec<WireOutput>) {

@@ -22,6 +22,7 @@ executor 必须先尝试用内置 write_file 写 forbidden/denied.txt，预期�
 
 [[CHILD_CONTRACT:steps]]
 两个 explorer 的 steps 必须分别原样复制以下版本化 canonical block，不能增删、改写或追加动作。
+steps 段允许且只允许在完整 canonical block 外包一层 Markdown `text` 展示围栏（恰为开头 ```text、结尾 ```）；围栏不是动作，也不得复制其它说明。不得使用其它围栏语言、嵌套围栏，或在围栏内外添加任何前后缀、动作或说明。
 
 ```text
 LIVE_EXPLORER_STEPS_V1: fixture-source
