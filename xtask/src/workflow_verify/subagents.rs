@@ -591,7 +591,7 @@ fn validate_wire(wire_dir: &Path, artifacts: &Path) -> Result<()> {
     ensure_root_history(&capture_receipts, &calls, &outputs)?;
     ensure_submissions(&calls, &outputs)?;
     ensure_finding_re_review(&calls, &outputs)?;
-    ensure_orchestration_order(&calls)?;
+    ensure_orchestration_order(&calls, &outputs)?;
     ensure!(
         calls.iter().any(|call| {
             call.name == "write_file"
@@ -839,7 +839,7 @@ fn ensure_profile_messages(calls: &[WireCall]) -> Result<()> {
             "exec",
         ] {
             ensure!(
-                !normalized.contains(forbidden),
+                !contains_non_negated_operation(&normalized, forbidden),
                 "explorer steps contain forbidden broad or unavailable operation `{forbidden}`"
             );
         }
@@ -862,6 +862,61 @@ fn ensure_profile_messages(calls: &[WireCall]) -> Result<()> {
         "no explorer has the bounded Git metadata scope"
     );
     Ok(())
+}
+
+fn contains_non_negated_operation(text: &str, operation: &str) -> bool {
+    text.split(['；', ';', '。', '\n', '！', '!', '？', '?', '，', ','])
+        .any(|clause| {
+            let mut remainder = clause;
+            while let Some(index) = remainder.find(operation) {
+                let prefix = &remainder[..index];
+                if !operation_is_negated(prefix) {
+                    return true;
+                }
+                remainder = &remainder[index + operation.len()..];
+            }
+            false
+        })
+}
+
+fn operation_is_negated(prefix: &str) -> bool {
+    const NEGATIONS: &[&str] = &[
+        "禁止",
+        "不得",
+        "不要",
+        "不可",
+        "严禁",
+        "不能",
+        "不允许",
+        "without",
+        "do not",
+        "don't",
+        "never",
+        "must not",
+        "may not",
+        "shall not",
+    ];
+    let Some((position, negation)) = NEGATIONS
+        .iter()
+        .filter_map(|negation| prefix.rfind(negation).map(|position| (position, *negation)))
+        .max_by_key(|(position, _)| *position)
+    else {
+        return false;
+    };
+    let between = prefix[position + negation.len()..].trim();
+    between.chars().count() <= 24
+        && !between.contains('.')
+        && ![
+            "然后",
+            "随后",
+            "但是",
+            "但 ",
+            " but ",
+            " then ",
+            " and then ",
+        ]
+        .iter()
+        .any(|transition| between.contains(transition))
 }
 
 fn ensure_reviewer_history(captures: &[CaptureReceipt]) -> Result<()> {
@@ -1175,17 +1230,31 @@ fn ensure_spawn_calls(calls: &[WireCall]) -> Result<()> {
     Ok(())
 }
 
-fn ensure_orchestration_order(calls: &[WireCall]) -> Result<()> {
-    let spawn_indices = |profile: &str| {
-        calls
+fn ensure_orchestration_order(calls: &[WireCall], outputs: &[WireOutput]) -> Result<()> {
+    let receipts = bound_receipts(calls, outputs)?;
+    let successful_spawns = |profile: &str| -> Result<Vec<(usize, String)>> {
+        receipts
             .iter()
-            .enumerate()
-            .filter(|(_, call)| {
-                call.name == "spawn_agent"
-                    && call.arguments.get("profileId").and_then(Value::as_str) == Some(profile)
+            .filter(|(spawn, receipt)| {
+                spawn.arguments.get("profileId").and_then(Value::as_str) == Some(profile)
+                    && receipt.get("profileId").and_then(Value::as_str) == Some(profile)
             })
-            .map(|(index, _)| index)
-            .collect::<Vec<_>>()
+            .map(|(spawn, receipt)| {
+                let call_id = spawn
+                    .call_id
+                    .as_ref()
+                    .context("successful spawn has no call_id")?;
+                let index = calls
+                    .iter()
+                    .position(|call| call.call_id.as_ref() == Some(call_id))
+                    .context("successful spawn is absent from flattened calls")?;
+                let agent_id = receipt
+                    .get("agentId")
+                    .and_then(Value::as_str)
+                    .context("successful spawn receipt has no agentId")?;
+                Ok((index, agent_id.to_string()))
+            })
+            .collect()
     };
     let is_wait = |call: &WireCall| {
         matches!(
@@ -1213,49 +1282,128 @@ fn ensure_orchestration_order(calls: &[WireCall]) -> Result<()> {
         .iter()
         .position(is_wait)
         .context("wire captures contain no child wait/read operation")?;
-    let explorers = spawn_indices("explorer");
+    let explorers = successful_spawns("explorer")?;
     ensure!(
         explorers.len() >= 2,
-        "wire captures contain fewer than two explorer spawns"
+        "wire captures contain fewer than two successful explorer spawns"
     );
     ensure!(
-        profiles < explorers[0],
+        profiles < explorers[0].0,
         "root Profile query must precede explorer spawns"
     );
     ensure!(
-        explorers[1] < explorer_wait,
+        explorers[1].0 == explorers[0].0 + 1,
+        "two successful explorer spawns must be adjacent in flattened calls"
+    );
+    ensure!(
+        explorers[1].0 < explorer_wait,
         "explorer spawns were not both issued before the first wait/read"
     );
+    let explorer_agent_ids = explorers
+        .iter()
+        .take(2)
+        .map(|(_, agent_id)| agent_id.clone())
+        .collect::<std::collections::HashSet<_>>();
     let explorer_reads = calls
         .iter()
         .enumerate()
         .filter(|(index, call)| {
-            *index > explorers[1] && *index < confirmation && call.name == "read_agent_submissions"
+            *index > explorers[1].0
+                && *index < confirmation
+                && call.name == "read_agent_submissions"
         })
         .collect::<Vec<_>>();
-    ensure!(
-        explorer_reads.len() >= 2,
-        "both explorer submissions must be read before confirmation"
-    );
     let explorer_targets = explorer_reads
         .iter()
-        .filter_map(|(_, call)| call.arguments.get("target").and_then(Value::as_str))
+        .filter_map(|(_, call)| {
+            call.arguments
+                .get("target")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
         .collect::<std::collections::HashSet<_>>();
     ensure!(
-        explorer_targets.len() >= 2,
-        "explorer submission reads must target two distinct agents"
+        explorer_agent_ids.is_subset(&explorer_targets),
+        "explorer submission reads before confirmation must cover both receipt-bound agentIds"
+    );
+    let explorer_waits = calls
+        .iter()
+        .enumerate()
+        .filter(|(index, call)| {
+            *index > explorers[1].0 && *index < confirmation && call.name == "wait_agents"
+        })
+        .collect::<Vec<_>>();
+    let waited_targets = explorer_waits
+        .iter()
+        .flat_map(|(_, call)| {
+            call.arguments
+                .get("targets")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+        })
+        .collect::<std::collections::HashSet<_>>();
+    ensure!(
+        explorer_agent_ids.is_subset(&waited_targets),
+        "wait_agents targets before confirmation must cover both receipt-bound explorer agentIds"
+    );
+    let mut terminal_targets = std::collections::HashSet::new();
+    for (_, wait) in explorer_waits {
+        let call_id = wait
+            .call_id
+            .as_ref()
+            .context("wait_agents has no call_id")?;
+        let output = outputs
+            .iter()
+            .find(|output| output.call_id.as_ref() == Some(call_id))
+            .with_context(|| format!("wait_agents {call_id} has no same-call-id output"))?;
+        let result: Value = serde_json::from_str(&output.content)
+            .with_context(|| format!("wait_agents {call_id} output is not canonical JSON"))?;
+        if result.get("reason").and_then(Value::as_str) != Some("terminal") {
+            continue;
+        }
+        let call_targets = wait
+            .arguments
+            .get("targets")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect::<std::collections::HashSet<_>>();
+        for agent_id in result
+            .get("messages")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|message| message.get("agentId").and_then(Value::as_str))
+        {
+            if call_targets.contains(agent_id) {
+                terminal_targets.insert(agent_id.to_string());
+            }
+        }
+    }
+    ensure!(
+        explorer_agent_ids.is_subset(&terminal_targets),
+        "same-call-id canonical wait outputs must provide terminal evidence for both explorer agentIds"
     );
     ensure!(
         confirmation < design_write,
         "root design write occurred before plan confirmation"
     );
-    let executors = spawn_indices("executor");
-    let worktrees = spawn_indices("worktree_executor");
+    let executors = successful_spawns("executor")?;
+    let worktrees = successful_spawns("worktree_executor")?;
     ensure!(
         !executors.is_empty() && !worktrees.is_empty(),
         "wire captures contain no implementation profiles"
     );
-    let implementation_first = *executors.iter().chain(worktrees.iter()).min().unwrap();
+    let implementation_first = executors
+        .iter()
+        .chain(worktrees.iter())
+        .map(|(index, _)| *index)
+        .min()
+        .unwrap();
     ensure!(
         design_write < implementation_first,
         "implementation spawn occurred before the confirmed design baseline"
@@ -1268,8 +1416,16 @@ fn ensure_orchestration_order(calls: &[WireCall]) -> Result<()> {
         .map(|(index, _)| index)
         .context("implementation spawns were not followed by a wait/read")?;
     ensure!(
-        executors.iter().all(|index| *index < implementation_wait)
-            && worktrees.iter().all(|index| *index < implementation_wait),
+        executors[0].0 + 1 == worktrees[0].0,
+        "successful executor and worktree_executor spawns must be adjacent in flattened calls"
+    );
+    ensure!(
+        executors
+            .iter()
+            .all(|(index, _)| *index < implementation_wait)
+            && worktrees
+                .iter()
+                .all(|(index, _)| *index < implementation_wait),
         "both implementation spawns must precede the implementation wait/read"
     );
     let cherry_pick = calls
@@ -1298,18 +1454,21 @@ fn ensure_orchestration_order(calls: &[WireCall]) -> Result<()> {
                     == Some("cleanup")
         })
         .context("wire captures contain no explicit cleanup")?;
-    let reviewer = spawn_indices("reviewer");
+    let reviewer = successful_spawns("reviewer")?;
     ensure!(
         !reviewer.is_empty(),
         "wire captures contain no reviewer spawn"
     );
     ensure!(cleanup > cherry_pick, "cleanup occurred before cherry-pick");
     ensure!(
-        reviewer[0] > cleanup,
+        reviewer[0].0 > cleanup,
         "reviewer was not spawned after integration and cleanup"
     );
     ensure!(
-        calls[reviewer[0]].arguments.get("writablePaths").is_none(),
+        calls[reviewer[0].0]
+            .arguments
+            .get("writablePaths")
+            .is_none(),
         "reviewer spawn unexpectedly requested writablePaths"
     );
     Ok(())
@@ -1829,6 +1988,12 @@ mod tests {
                 && prompt.contains("不得扫描 target/ 或 .git/ 内部")
                 && prompt.contains("不得运行 cargo test"),
             "live prompt must keep explorer work finite and independent of Studio configuration"
+        );
+        assert!(
+            prompt.contains("探索者一只读核对 Task workflow 与 live artifact")
+                && prompt.contains("root 注入的已编译阶段图")
+                && prompt.contains("探索者二只读核对 workspace 与 Git lifecycle"),
+            "live prompt must keep the explorers semantically distinct while bounding their tools"
         );
     }
 
@@ -2674,6 +2839,11 @@ mod tests {
                 serde_json::json!({"targets":["explorer-a","explorer-b"]}),
             ),
             orchestration_call(
+                "w1b",
+                "wait_agents",
+                serde_json::json!({"targets":["explorer-b"]}),
+            ),
+            orchestration_call(
                 "er1",
                 "read_agent_submissions",
                 serde_json::json!({"target":"explorer-a"}),
@@ -2690,6 +2860,34 @@ mod tests {
                 serde_json::json!({"path":"design/subagents-orchestration.md"}),
             ),
         ]
+    }
+
+    fn spawn_output(call_id: &str, profile: &str, agent_id: &str) -> WireOutput {
+        WireOutput {
+            call_id: Some(call_id.into()),
+            content: serde_json::json!({
+                "profileId": profile,
+                "agentId": agent_id,
+            })
+            .to_string(),
+        }
+    }
+
+    fn terminal_wait_output(call_id: &str, agent_id: &str) -> WireOutput {
+        WireOutput {
+            call_id: Some(call_id.into()),
+            content: serde_json::json!({
+                "messages": [{
+                    "agentId": agent_id,
+                    "state": {
+                        "agent": {"data": null, "kind": "idle"},
+                        "lastTurnOutcome": {"outcome": {"kind": "completed"}},
+                    },
+                }],
+                "reason": "terminal",
+            })
+            .to_string(),
+        }
     }
 
     #[test]
@@ -2719,7 +2917,29 @@ mod tests {
         }
     }
 
-    fn valid_orchestration_calls() -> Vec<WireCall> {
+    #[test]
+    fn explorer_messages_accept_explicitly_negated_unavailable_operations() {
+        for prohibition in [
+            "禁止调用 list_agent_profiles",
+            "不得调用 skill_view",
+            "不要运行 cargo test",
+            "不可使用 exec",
+            "do not call list_agent_profiles",
+            "never use exec",
+        ] {
+            let mut calls = profile_message_calls();
+            let message = calls[0].arguments["message"].as_str().unwrap();
+            calls[0].arguments["message"] = Value::String(message.replace(
+                "汇总后 final reply",
+                &format!("{prohibition}；汇总后 final reply"),
+            ));
+            ensure_profile_messages(&calls).unwrap_or_else(|error| {
+                panic!("rejected explicit prohibition `{prohibition}`: {error}")
+            });
+        }
+    }
+
+    fn valid_orchestration_calls() -> (Vec<WireCall>, Vec<WireOutput>) {
         let mut calls = orchestration_planning_calls();
         calls.extend([
             orchestration_call(
@@ -2749,7 +2969,16 @@ mod tests {
                 serde_json::json!({"profileId":"reviewer"}),
             ),
         ]);
-        calls
+        let outputs = vec![
+            spawn_output("e1", "explorer", "explorer-a"),
+            spawn_output("e2", "explorer", "explorer-b"),
+            terminal_wait_output("w1", "explorer-a"),
+            terminal_wait_output("w1b", "explorer-b"),
+            spawn_output("x1", "executor", "executor-a"),
+            spawn_output("x2", "worktree_executor", "worktree-a"),
+            spawn_output("r1", "reviewer", "reviewer-a"),
+        ];
+        (calls, outputs)
     }
 
     fn swap_calls(calls: &mut [WireCall], left: &str, right: &str) {
@@ -2766,36 +2995,117 @@ mod tests {
 
     #[test]
     fn orchestration_order_accepts_explorer_wait_then_both_implementations() {
-        let calls = valid_orchestration_calls();
-        ensure_orchestration_order(&calls).unwrap();
+        let (calls, outputs) = valid_orchestration_calls();
+        ensure_orchestration_order(&calls, &outputs).unwrap();
     }
 
     #[test]
     fn orchestration_order_rejects_wait_after_only_one_implementation_spawn() {
-        let mut calls = valid_orchestration_calls();
+        let (mut calls, outputs) = valid_orchestration_calls();
         swap_calls(&mut calls, "x2", "w2");
-        assert!(ensure_orchestration_order(&calls).is_err());
+        assert!(ensure_orchestration_order(&calls, &outputs).is_err());
+    }
+
+    #[test]
+    fn orchestration_order_rejects_ordinary_call_between_explorer_spawns() {
+        let (mut calls, outputs) = valid_orchestration_calls();
+        calls.insert(
+            2,
+            orchestration_call("interposed", "git_status", serde_json::json!({})),
+        );
+        assert!(ensure_orchestration_order(&calls, &outputs).is_err());
+    }
+
+    #[test]
+    fn orchestration_order_rejects_ordinary_call_between_implementation_spawns() {
+        let (mut calls, outputs) = valid_orchestration_calls();
+        let worktree = calls
+            .iter()
+            .position(|call| call.call_id.as_deref() == Some("x2"))
+            .unwrap();
+        calls.insert(
+            worktree,
+            orchestration_call("interposed", "git_status", serde_json::json!({})),
+        );
+        assert!(ensure_orchestration_order(&calls, &outputs).is_err());
     }
 
     #[test]
     fn orchestration_order_rejects_confirmation_before_all_explorer_reads() {
-        let mut calls = valid_orchestration_calls();
+        let (mut calls, outputs) = valid_orchestration_calls();
         swap_calls(&mut calls, "er2", "confirm");
-        assert!(ensure_orchestration_order(&calls).is_err());
+        assert!(ensure_orchestration_order(&calls, &outputs).is_err());
+    }
+
+    #[test]
+    fn orchestration_order_rejects_submission_reads_for_unbound_targets() {
+        let (mut calls, outputs) = valid_orchestration_calls();
+        for call in calls
+            .iter_mut()
+            .filter(|call| call.name == "read_agent_submissions")
+        {
+            call.arguments["target"] = Value::String(format!(
+                "fake-{}",
+                call.arguments["target"].as_str().unwrap()
+            ));
+        }
+        assert!(ensure_orchestration_order(&calls, &outputs).is_err());
+    }
+
+    #[test]
+    fn orchestration_order_rejects_waits_for_unbound_targets() {
+        let (mut calls, outputs) = valid_orchestration_calls();
+        for call in calls.iter_mut().filter(|call| call.name == "wait_agents") {
+            call.arguments["targets"] = serde_json::json!(["fake-a", "fake-b"]);
+        }
+        assert!(ensure_orchestration_order(&calls, &outputs).is_err());
+    }
+
+    #[test]
+    fn orchestration_order_requires_terminal_wait_output_for_each_explorer() {
+        let (calls, mut outputs) = valid_orchestration_calls();
+        let second_wait = outputs
+            .iter_mut()
+            .find(|output| output.call_id.as_deref() == Some("w1b"))
+            .unwrap();
+        second_wait.content = serde_json::json!({
+            "messages": [{"agentId": "explorer-b"}],
+            "reason": "progress",
+        })
+        .to_string();
+        assert!(ensure_orchestration_order(&calls, &outputs).is_err());
+    }
+
+    #[test]
+    fn orchestration_order_ignores_failed_spawn_receipt() {
+        let (mut calls, mut outputs) = valid_orchestration_calls();
+        calls.insert(
+            1,
+            orchestration_call(
+                "failed-explorer",
+                "spawn_agent",
+                serde_json::json!({"profileId":"explorer"}),
+            ),
+        );
+        outputs.push(WireOutput {
+            call_id: Some("failed-explorer".into()),
+            content: "Tool execution error: capacity unavailable".into(),
+        });
+        ensure_orchestration_order(&calls, &outputs).unwrap();
     }
 
     #[test]
     fn orchestration_order_rejects_design_write_before_confirmation() {
-        let mut calls = valid_orchestration_calls();
+        let (mut calls, outputs) = valid_orchestration_calls();
         swap_calls(&mut calls, "confirm", "design");
-        assert!(ensure_orchestration_order(&calls).is_err());
+        assert!(ensure_orchestration_order(&calls, &outputs).is_err());
     }
 
     #[test]
     fn orchestration_order_rejects_cleanup_before_cherry_pick() {
-        let mut calls = valid_orchestration_calls();
+        let (mut calls, outputs) = valid_orchestration_calls();
         swap_calls(&mut calls, "i1", "c1");
-        assert!(ensure_orchestration_order(&calls).is_err());
+        assert!(ensure_orchestration_order(&calls, &outputs).is_err());
     }
 
     fn single_reviewer_calls(target: &str) -> Vec<WireCall> {
