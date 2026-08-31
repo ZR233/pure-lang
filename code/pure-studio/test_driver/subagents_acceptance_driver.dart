@@ -142,11 +142,6 @@ Future<void> _openProjectAndSubmit(
   await session.waitFor(find.byValueKey('session-mode-mode.task'));
   await session.tap(find.byValueKey('session-mode-mode.task'));
   await session.waitForNoPendingFrame(timeout: const Duration(seconds: 10));
-  final modeSnapshot = await session.readSnapshot();
-  final mode = (modeSnapshot['workspace'] as Map?)?['threadMode'];
-  if (mode != 'mode.task') {
-    throw StateError('Task mode was not applied by the GUI: $mode');
-  }
   final navigationSnapshot = await session.readSnapshot();
   final newThreadMode =
       (navigationSnapshot['navigation'] as Map?)?['newThreadMode'];

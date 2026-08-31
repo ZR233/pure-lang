@@ -15,7 +15,7 @@ root 在 confirmation 后亲自使用内置 write_file 创建 design/subagents-o
 executor 必须先尝试用内置 write_file 写 forbidden/denied.txt，预期被 writablePaths 拒绝，不得绕过边界；不得由 child 整合 worktree，不得由 reviewer 修改任何文件或 Git 状态。
 
 [[CHILD_CONTRACT:steps]]
-confirmation 后 root 先亲自 write_file design/subagents-orchestration.md，再并行 spawn 两个 explorer；随后并行 spawn executor 与 worktree_executor。executor 先观察拒绝，再用内置 write_file 写 allowed/directory.txt，内容必须为 directory child accepted\n 并报告。worktree_executor 写 worktree_result.txt，内容必须为 worktree child committed\n，运行 cargo test，提交固定 subject feat: worktree executor marker 并报告 40 位 hash。root 必须在整合前证明主 workspace 隔离，再显式 cherry-pick，随后 close_agent 并使用 workspaceDisposition:cleanup，证明分支与路径均已清除，最后 spawn fresh-context reviewer。除标准 confirmation 外不得询问用户。
+ confirmation 后 root 必须先调用 list_agent_profiles 确认 explorer、executor、worktree_executor、reviewer 四个 Profile，再亲自 write_file design/subagents-orchestration.md，再并行 spawn 两个 explorer；随后并行 spawn executor 与 worktree_executor。executor 先观察拒绝，再用内置 write_file 写 allowed/directory.txt，内容必须为 directory child accepted\n 并报告。worktree_executor 写 worktree_result.txt，内容必须为 worktree child committed\n，运行 cargo test，提交固定 subject feat: worktree executor marker 并报告 40 位 hash。root 必须在整合前证明主 workspace 隔离，再显式 cherry-pick，随后 close_agent 并使用 workspaceDisposition:cleanup，证明分支与路径均已清除，最后 spawn fresh-context reviewer。除标准 confirmation 外不得询问用户。
 
 [[CHILD_CONTRACT:completion_failure]]
 executor 必须报告 DIRECTORY_DENIAL_OBSERVED；worktree_executor 必须报告 WORKTREE_COMMIT_READY、40 位 commit hash 和 workspace root；reviewer 最终 cargo test、核对文件、marker、sentinel，并报告 REVIEWER_READ_ONLY_APPROVED。任一步失败都必须保留错误证据并停止伪造成功。

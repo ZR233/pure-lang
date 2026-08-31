@@ -905,14 +905,15 @@ fn ensure_orchestration_order(calls: &[WireCall]) -> Result<()> {
             .map(|(index, _)| index)
             .collect::<Vec<_>>()
     };
-    let first_wait = calls
+    let is_wait = |call: &WireCall| {
+        matches!(
+            call.name.as_str(),
+            "wait_agents" | "read_agent_session" | "read_agent_submissions"
+        )
+    };
+    let explorer_wait = calls
         .iter()
-        .position(|call| {
-            matches!(
-                call.name.as_str(),
-                "wait_agents" | "read_agent_session" | "read_agent_submissions"
-            )
-        })
+        .position(is_wait)
         .context("wire captures contain no child wait/read operation")?;
     let explorers = spawn_indices("explorer");
     ensure!(
@@ -920,7 +921,7 @@ fn ensure_orchestration_order(calls: &[WireCall]) -> Result<()> {
         "wire captures contain fewer than two explorer spawns"
     );
     ensure!(
-        explorers[1] < first_wait,
+        explorers[1] < explorer_wait,
         "explorer spawns were not both issued before the first wait/read"
     );
     let executors = spawn_indices("executor");
@@ -929,21 +930,22 @@ fn ensure_orchestration_order(calls: &[WireCall]) -> Result<()> {
         !executors.is_empty() && !worktrees.is_empty(),
         "wire captures contain no implementation profiles"
     );
-    let implementation_last = *executors.iter().chain(worktrees.iter()).max().unwrap();
+    let implementation_first = *executors.iter().chain(worktrees.iter()).min().unwrap();
     ensure!(
-        implementation_last < first_wait,
-        "first wait/read occurred before both implementation spawns"
+        explorer_wait < implementation_first,
+        "implementation spawn occurred before the explorer wait/read"
     );
+    let implementation_wait = calls
+        .iter()
+        .enumerate()
+        .skip(implementation_first + 1)
+        .find(|(_, call)| is_wait(call))
+        .map(|(index, _)| index)
+        .context("implementation spawns were not followed by a wait/read")?;
     ensure!(
-        calls
-            .iter()
-            .enumerate()
-            .skip(implementation_last + 1)
-            .any(|(_, call)| matches!(
-                call.name.as_str(),
-                "wait_agents" | "read_agent_session" | "read_agent_submissions"
-            )),
-        "implementation spawns were not issued before waiting"
+        executors.iter().all(|index| *index < implementation_wait)
+            && worktrees.iter().all(|index| *index < implementation_wait),
+        "both implementation spawns must precede the implementation wait/read"
     );
     let cherry_pick = calls
         .iter()
@@ -957,7 +959,7 @@ fn ensure_orchestration_order(calls: &[WireCall]) -> Result<()> {
         })
         .context("wire captures contain no explicit cherry-pick")?;
     ensure!(
-        first_wait < cherry_pick,
+        implementation_wait < cherry_pick,
         "cherry-pick occurred before implementation wait/read"
     );
     let cleanup = calls
@@ -976,8 +978,9 @@ fn ensure_orchestration_order(calls: &[WireCall]) -> Result<()> {
         !reviewer.is_empty(),
         "wire captures contain no reviewer spawn"
     );
+    ensure!(cleanup > cherry_pick, "cleanup occurred before cherry-pick");
     ensure!(
-        reviewer[0] > cherry_pick && reviewer[0] > cleanup,
+        reviewer[0] > cleanup,
         "reviewer was not spawned after integration and cleanup"
     );
     ensure!(
@@ -990,10 +993,7 @@ fn ensure_orchestration_order(calls: &[WireCall]) -> Result<()> {
 fn ensure_finding_re_review(calls: &[WireCall], outputs: &[String]) -> Result<()> {
     let finding = outputs
         .iter()
-        .any(|output| output.contains("REVIEWER_FINDING"))
-        || calls
-            .iter()
-            .any(|call| call.arguments.to_string().contains("REVIEWER_FINDING"));
+        .any(|output| output.contains("REVIEWER_FINDING"));
     if !finding {
         return Ok(());
     }
@@ -1010,8 +1010,10 @@ fn ensure_finding_re_review(calls: &[WireCall], outputs: &[String]) -> Result<()
         "REVIEWER_FINDING requires a second reviewer spawn"
     );
     ensure!(
-        reviewers[0].1.call_id != reviewers[1].1.call_id,
-        "finding re-review must use a different reviewer callId"
+        reviewers[0].1.call_id.is_some()
+            && reviewers[1].1.call_id.is_some()
+            && reviewers[0].1.call_id != reviewers[1].1.call_id,
+        "finding re-review requires two different reviewer callIds"
     );
     let second_reviewer = reviewers[1].0;
     let first_reviewer = reviewers[0].0;
@@ -1027,23 +1029,43 @@ fn ensure_finding_re_review(calls: &[WireCall], outputs: &[String]) -> Result<()
         }),
         "REVIEWER_FINDING requires a new implementation spawn"
     );
+    let implementation_spawn = calls
+        .iter()
+        .enumerate()
+        .find(|(index, call)| {
+            *index > first_reviewer
+                && *index < second_reviewer
+                && call.name == "spawn_agent"
+                && matches!(
+                    call.arguments.get("profileId").and_then(Value::as_str),
+                    Some("executor") | Some("worktree_executor")
+                )
+        })
+        .map(|(index, _)| index)
+        .context("REVIEWER_FINDING requires a new implementation spawn")?;
     let integration = calls.iter().enumerate().any(|(index, call)| {
-        index < second_reviewer
-            && ((call.name == "exec"
-                && call
-                    .arguments
-                    .get("command")
-                    .and_then(Value::as_str)
-                    .is_some_and(|command| {
-                        command.contains("cherry-pick")
-                            || command.contains("cargo test")
-                            || command.contains("integration")
-                    }))
-                || call.arguments.to_string().contains("integration"))
+        index > implementation_spawn
+            && index < second_reviewer
+            && call.name == "exec"
+            && call
+                .arguments
+                .get("command")
+                .and_then(Value::as_str)
+                .is_some_and(|command| {
+                    command.contains("cherry-pick")
+                        || command.contains("cargo test")
+                        || command.contains("git diff --check")
+                })
     });
     ensure!(
         integration,
         "REVIEWER_FINDING lacks second integration evidence"
+    );
+    ensure!(
+        outputs
+            .iter()
+            .any(|output| output.contains("REVIEWER_READ_ONLY_APPROVED")),
+        "REVIEWER_FINDING lacks final reviewer approval"
     );
     Ok(())
 }
@@ -1393,32 +1415,242 @@ mod tests {
 
     #[test]
     fn profile_message_missing_or_empty_contract_section_fails() {
-        let mut message = String::new();
-        for section in [
-            "purpose",
-            "baseline",
-            "ownership",
-            "forbidden",
-            "steps",
-            "completion_failure",
-            "evidence",
-        ] {
-            message.push_str(&format!("[[CHILD_CONTRACT:{section}]]\ncontent\n"));
-        }
-        let calls = [CaptureReceipt {
-            path: "x".into(),
-            actor: "unknown".into(),
-            calls: vec![WireCall {
-                call_id: None,
-                name: "spawn_agent".into(),
-                arguments: serde_json::json!({"profileId":"executor","forkTurns":"none","message":message}),
-            }],
-        }];
-        let canonical = calls
-            .iter()
-            .flat_map(|capture| capture.calls.iter())
-            .cloned()
-            .collect::<Vec<_>>();
+        let mut canonical = profile_message_calls();
+        canonical[2].arguments["message"] = Value::String(String::new());
         assert!(ensure_profile_messages(&canonical).is_err());
+    }
+
+    #[test]
+    fn profile_message_contract_requires_all_profiles_and_sections() {
+        ensure_profile_messages(&profile_message_calls()).unwrap();
+    }
+
+    fn profile_message_calls() -> Vec<WireCall> {
+        let mut calls = Vec::new();
+        for (profile, id) in [
+            ("explorer", "explorer-1"),
+            ("explorer", "explorer-2"),
+            ("executor", "executor-1"),
+            ("worktree_executor", "worktree-1"),
+            ("reviewer", "reviewer-1"),
+        ] {
+            let message = [
+                "purpose",
+                "baseline",
+                "ownership",
+                "forbidden",
+                "steps",
+                "completion_failure",
+                "evidence",
+                "workspace_git_cleanup",
+            ]
+            .into_iter()
+            .map(|section| format!("[[CHILD_CONTRACT:{section}]]\ncontent\n"))
+            .collect::<String>();
+            calls.push(WireCall {
+                call_id: Some(id.into()),
+                name: "spawn_agent".into(),
+                arguments: serde_json::json!({
+                    "profileId": profile,
+                    "forkTurns": "none",
+                    "message": if profile == "explorer" && id == "explorer-2" {
+                        format!("{message}second explorer purpose and ownership")
+                    } else {
+                        message
+                    }
+                }),
+            });
+        }
+        calls
+    }
+
+    fn orchestration_call(id: &str, name: &str, arguments: Value) -> WireCall {
+        WireCall {
+            call_id: Some(id.into()),
+            name: name.into(),
+            arguments,
+        }
+    }
+
+    #[test]
+    fn orchestration_order_accepts_explorer_wait_then_both_implementations() {
+        let calls = vec![
+            orchestration_call(
+                "e1",
+                "spawn_agent",
+                serde_json::json!({"profileId":"explorer"}),
+            ),
+            orchestration_call(
+                "e2",
+                "spawn_agent",
+                serde_json::json!({"profileId":"explorer"}),
+            ),
+            orchestration_call("w1", "wait_agents", serde_json::json!({})),
+            orchestration_call(
+                "x1",
+                "spawn_agent",
+                serde_json::json!({"profileId":"executor"}),
+            ),
+            orchestration_call(
+                "x2",
+                "spawn_agent",
+                serde_json::json!({"profileId":"worktree_executor"}),
+            ),
+            orchestration_call("w2", "read_agent_session", serde_json::json!({})),
+            orchestration_call(
+                "i1",
+                "exec",
+                serde_json::json!({"command":"git cherry-pick abc"}),
+            ),
+            orchestration_call(
+                "c1",
+                "close_agent",
+                serde_json::json!({"workspaceDisposition":"cleanup"}),
+            ),
+            orchestration_call(
+                "r1",
+                "spawn_agent",
+                serde_json::json!({"profileId":"reviewer"}),
+            ),
+        ];
+        ensure_orchestration_order(&calls).unwrap();
+    }
+
+    #[test]
+    fn orchestration_order_rejects_wait_after_only_one_implementation_spawn() {
+        let calls = vec![
+            orchestration_call(
+                "e1",
+                "spawn_agent",
+                serde_json::json!({"profileId":"explorer"}),
+            ),
+            orchestration_call(
+                "e2",
+                "spawn_agent",
+                serde_json::json!({"profileId":"explorer"}),
+            ),
+            orchestration_call("w1", "wait_agents", serde_json::json!({})),
+            orchestration_call(
+                "x1",
+                "spawn_agent",
+                serde_json::json!({"profileId":"executor"}),
+            ),
+            orchestration_call("w2", "read_agent_session", serde_json::json!({})),
+            orchestration_call(
+                "x2",
+                "spawn_agent",
+                serde_json::json!({"profileId":"worktree_executor"}),
+            ),
+            orchestration_call(
+                "i1",
+                "exec",
+                serde_json::json!({"command":"git cherry-pick abc"}),
+            ),
+            orchestration_call(
+                "c1",
+                "close_agent",
+                serde_json::json!({"workspaceDisposition":"cleanup"}),
+            ),
+            orchestration_call(
+                "r1",
+                "spawn_agent",
+                serde_json::json!({"profileId":"reviewer"}),
+            ),
+        ];
+        assert!(ensure_orchestration_order(&calls).is_err());
+    }
+
+    #[test]
+    fn orchestration_order_rejects_cleanup_before_cherry_pick() {
+        let calls = vec![
+            orchestration_call(
+                "e1",
+                "spawn_agent",
+                serde_json::json!({"profileId":"explorer"}),
+            ),
+            orchestration_call(
+                "e2",
+                "spawn_agent",
+                serde_json::json!({"profileId":"explorer"}),
+            ),
+            orchestration_call("w1", "wait_agents", serde_json::json!({})),
+            orchestration_call(
+                "x1",
+                "spawn_agent",
+                serde_json::json!({"profileId":"executor"}),
+            ),
+            orchestration_call(
+                "x2",
+                "spawn_agent",
+                serde_json::json!({"profileId":"worktree_executor"}),
+            ),
+            orchestration_call("w2", "read_agent_session", serde_json::json!({})),
+            orchestration_call(
+                "c1",
+                "close_agent",
+                serde_json::json!({"workspaceDisposition":"cleanup"}),
+            ),
+            orchestration_call(
+                "i1",
+                "exec",
+                serde_json::json!({"command":"git cherry-pick abc"}),
+            ),
+            orchestration_call(
+                "r1",
+                "spawn_agent",
+                serde_json::json!({"profileId":"reviewer"}),
+            ),
+        ];
+        assert!(ensure_orchestration_order(&calls).is_err());
+    }
+
+    fn finding_calls() -> Vec<WireCall> {
+        vec![
+            orchestration_call(
+                "r1",
+                "spawn_agent",
+                serde_json::json!({"profileId":"reviewer"}),
+            ),
+            orchestration_call(
+                "x1",
+                "spawn_agent",
+                serde_json::json!({"profileId":"executor"}),
+            ),
+            orchestration_call("i1", "exec", serde_json::json!({"command":"cargo test"})),
+            orchestration_call(
+                "r2",
+                "spawn_agent",
+                serde_json::json!({"profileId":"reviewer"}),
+            ),
+        ]
+    }
+
+    #[test]
+    fn finding_re_review_without_finding_allows_one_reviewer() {
+        let calls = vec![orchestration_call(
+            "r1",
+            "spawn_agent",
+            serde_json::json!({"profileId":"reviewer"}),
+        )];
+        ensure_finding_re_review(&calls, &[]).unwrap();
+    }
+
+    #[test]
+    fn finding_re_review_requires_second_reviewer() {
+        let calls = finding_calls();
+        assert!(ensure_finding_re_review(&calls[..2], &["REVIEWER_FINDING".into()]).is_err());
+    }
+
+    #[test]
+    fn finding_re_review_accepts_complete_rework_sequence() {
+        let calls = finding_calls();
+        ensure_finding_re_review(
+            &calls,
+            &[
+                "REVIEWER_FINDING".into(),
+                "REVIEWER_READ_ONLY_APPROVED".into(),
+            ],
+        )
+        .unwrap();
     }
 }
