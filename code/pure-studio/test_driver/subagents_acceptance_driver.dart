@@ -83,9 +83,9 @@ Future<void> _configureAgents(
       route,
       'model ${route.provider}/${route.model}',
       () async {
-        final beforeModelRevision = _readSettingsRevision(
-          await session.readSnapshot(),
-        );
+        final beforeSnapshot = await session.readSnapshot();
+        final beforeModelRevision = _readSettingsRevision(beforeSnapshot);
+        final beforeRoute = _readCanonicalRoute(beforeSnapshot, route.role);
         final model = find.byValueKey('settings-role-${route.role}-model');
         await session.scrollUntilVisible(
           find.byValueKey('settings-pane-scroll'),
@@ -100,9 +100,11 @@ Future<void> _configureAgents(
         );
         await session.waitFor(option, timeout: const Duration(seconds: 30));
         await session.tap(option);
-        await _waitForSettingsRevision(
+        await _waitForCanonicalRoute(
           session,
-          beforeModelRevision,
+          route,
+          beforeRoute: beforeRoute,
+          beforeRevision: beforeModelRevision,
           timeout: const Duration(seconds: 20),
         );
         await _waitForStableFrame(session);
@@ -178,6 +180,85 @@ Future<int> _waitForSettingsRevision(
     'agent setting did not produce a canonical Settings revision before '
     'timeout: before=$beforeRevision, lastSeen=$lastSeen',
   );
+}
+
+_CanonicalRoute _readCanonicalRoute(
+  Map<String, dynamic> snapshot,
+  String roleKey,
+) {
+  final roles = (snapshot['settings'] as Map?)?['roles'];
+  if (roles is List) {
+    for (final value in roles) {
+      if (value is Map && value['key'] == roleKey) {
+        final provider = value['providerId'];
+        final model = value['model'];
+        if (provider is String && model is String) {
+          return _CanonicalRoute(provider, model);
+        }
+      }
+    }
+  }
+  throw StateError('Studio snapshot has no canonical route for role $roleKey');
+}
+
+Future<void> _waitForCanonicalRoute(
+  FlutterDriverSession session,
+  _Route target, {
+  required _CanonicalRoute beforeRoute,
+  required int beforeRevision,
+  required Duration timeout,
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  _CanonicalRoute lastRoute = beforeRoute;
+  var lastRevision = beforeRevision;
+  while (DateTime.now().isBefore(deadline)) {
+    final snapshot = await session.readSnapshot();
+    lastRoute = _readCanonicalRoute(snapshot, target.role);
+    lastRevision = _readSettingsRevision(snapshot);
+    if (canonicalRouteReached(
+      beforeProvider: beforeRoute.provider,
+      beforeModel: beforeRoute.model,
+      beforeRevision: beforeRevision,
+      currentProvider: lastRoute.provider,
+      currentModel: lastRoute.model,
+      currentRevision: lastRevision,
+      targetProvider: target.provider,
+      targetModel: target.model,
+    )) {
+      return;
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+  }
+  throw StateError(
+    'agent model did not reach canonical route before timeout: '
+    'role=${target.role}, target=${target.provider}/${target.model}, '
+    'beforeRoute=$beforeRoute, lastRoute=$lastRoute, '
+    'beforeRevision=$beforeRevision, lastRevision=$lastRevision',
+  );
+}
+
+/// Returns whether the observed canonical route satisfies a route transition.
+///
+/// A route change must advance the canonical Settings revision. Re-selecting
+/// the already-canonical route is a controller no-op and may keep the revision
+/// unchanged.
+bool canonicalRouteReached({
+  required String beforeProvider,
+  required String beforeModel,
+  required int beforeRevision,
+  required String currentProvider,
+  required String currentModel,
+  required int currentRevision,
+  required String targetProvider,
+  required String targetModel,
+}) {
+  final routeMatches =
+      currentProvider == targetProvider && currentModel == targetModel;
+  if (!routeMatches) return false;
+
+  final beforeAlreadyMatches =
+      beforeProvider == targetProvider && beforeModel == targetModel;
+  return beforeAlreadyMatches || currentRevision > beforeRevision;
 }
 
 Future<void> _openProjectAndSubmit(
@@ -374,6 +455,16 @@ class _Route {
   final String role;
   final String provider;
   final String model;
+}
+
+class _CanonicalRoute {
+  const _CanonicalRoute(this.provider, this.model);
+
+  final String provider;
+  final String model;
+
+  @override
+  String toString() => '$provider/$model';
 }
 
 class _Options {

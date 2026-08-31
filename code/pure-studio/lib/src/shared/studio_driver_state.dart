@@ -16,6 +16,7 @@ abstract final class StudioDriverState {
   static ComposerThreadState _newThreadComposer =
       const ComposerThreadState.idle();
   static int _settingsRevision = 0;
+  static List<RoleSettingsView> _roles = const [];
   static PersistenceStateSnapshot _persistenceState =
       const PersistenceStateSnapshot.ready();
 
@@ -25,6 +26,15 @@ abstract final class StudioDriverState {
     _newThreadMode = state.newThreadMode;
     _newThreadComposer = state.newThreadComposer;
     _settingsRevision = state.settingsRevision;
+    _roles = List.unmodifiable([
+      for (final role in state.roles)
+        RoleSettingsView(
+          key: role.key,
+          providerId: role.providerId,
+          model: role.model,
+          effort: role.effort,
+        ),
+    ]);
     _persistenceState = state.persistenceState;
     _project = state.projects
         .where((project) => project.id == state.selectedProjectId)
@@ -110,7 +120,18 @@ abstract final class StudioDriverState {
             StoppingSubscriptionsProgress() || CancellingTurnsProgress() || StoppingAgentsProgress() || StoppingMcpProgress() || StoppingLspProgress() || StoppedProgress() => 0,
           }}',
       ],
-      'settings': {'revision': _settingsRevision},
+      'settings': {
+        'revision': _settingsRevision,
+        'roles': [
+          for (final role in _roles)
+            {
+              'key': role.key,
+              'providerId': role.providerId,
+              'model': role.model,
+              'effort': role.effort,
+            },
+        ],
+      },
       'persistence': {
         'revision': _persistenceState.revision,
         'kind': switch (_persistenceState.state) {
