@@ -41,7 +41,12 @@ impl WorkflowStateTool {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", tag = "action", deny_unknown_fields)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "action",
+    deny_unknown_fields
+)]
 enum WorkflowStateInput {
     Compile {
         expected_revision: u64,

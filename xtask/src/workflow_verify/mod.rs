@@ -1,6 +1,7 @@
 use crate::cli::VerifyWorkflowOptions;
 use crate::{paths, process};
 use anyhow::{Context, Result, bail, ensure};
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::ffi::OsString;
@@ -17,6 +18,27 @@ const VERIFY_MARKER: &str = "PURE_WORKFLOW_GUI_VERIFY_OK";
 const LIVE_CONFIG_SCHEMA_VERSION: i64 = 16;
 const TOTAL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const STALL_TIMEOUT_SECONDS: u64 = 10 * 60;
+const WORKFLOW_FIXTURE_USAGE_PATH: &str = "skills/workflow-fixture-rust/.usage.json";
+const EXPECTED_DELIVERY_PATHS: &[&str] = &[
+    "design/task-workflows.md",
+    "src/normalize.rs",
+    "src/validate.rs",
+    "tests/normalize.rs",
+    "tests/validate.rs",
+];
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WorkflowFixtureSkillUsage {
+    created_by: String,
+    views: u64,
+    uses: u64,
+    patches: u64,
+    created_at: i64,
+    updated_at: i64,
+    last_viewed_at: Option<i64>,
+    pinned: bool,
+}
 
 pub(crate) fn run(options: VerifyWorkflowOptions) -> Result<()> {
     let deadline = Instant::now() + TOTAL_TIMEOUT;
@@ -391,23 +413,13 @@ fn validate_delivered_fixture(canonical: &Path, workspace: &Path, artifacts: &Pa
             "GUI workflow modified protected fixture file `{path}`"
         );
     }
+    validate_fixture_skill_usage(workspace)?;
     let mut changed = Vec::new();
     collect_relative_files(workspace, workspace, &mut changed)?;
     changed
         .retain(|path| fs::read(canonical.join(path)).ok() != fs::read(workspace.join(path)).ok());
     changed.sort_unstable();
-    let mut expected = vec![
-        "design/task-workflows.md",
-        "src/normalize.rs",
-        "src/validate.rs",
-        "tests/normalize.rs",
-        "tests/validate.rs",
-    ];
-    expected.sort_unstable();
-    ensure!(
-        changed == expected,
-        "GUI workflow changed unexpected files: {changed:?}"
-    );
+    validate_delivery_changes(&changed)?;
 
     let mut tests = Command::new("cargo");
     tests.args(["test"]).current_dir(workspace);
@@ -443,6 +455,49 @@ fn validate_delivered_fixture(canonical: &Path, workspace: &Path, artifacts: &Pa
         "workflow fixture must not create .pure state"
     );
     fs::write(artifacts.join("workspace-git-check.txt"), "git=false\n")?;
+    Ok(())
+}
+
+fn validate_delivery_changes(changed: &[String]) -> Result<()> {
+    let mut delivery_changes = changed
+        .iter()
+        .map(String::as_str)
+        .filter(|path| *path != WORKFLOW_FIXTURE_USAGE_PATH)
+        .collect::<Vec<_>>();
+    delivery_changes.sort_unstable();
+    let mut expected = EXPECTED_DELIVERY_PATHS.to_vec();
+    expected.sort_unstable();
+    ensure!(
+        delivery_changes == expected,
+        "GUI workflow changed unexpected files: {changed:?}"
+    );
+    Ok(())
+}
+
+fn validate_fixture_skill_usage(workspace: &Path) -> Result<()> {
+    let path = workspace.join(WORKFLOW_FIXTURE_USAGE_PATH);
+    let usage = serde_json::from_slice::<WorkflowFixtureSkillUsage>(
+        &fs::read(&path).with_context(|| {
+            format!(
+                "workflow fixture Skill was not activated: {}",
+                path.display()
+            )
+        })?,
+    )
+    .with_context(|| format!("invalid workflow fixture Skill usage: {}", path.display()))?;
+    ensure!(
+        usage.created_by == "agent"
+            && usage.views > 0
+            && usage.views == usage.uses
+            && usage.patches == 0
+            && usage.created_at > 0
+            && usage.updated_at >= usage.created_at
+            && usage.last_viewed_at.is_some_and(|last_viewed_at| {
+                last_viewed_at >= usage.created_at && last_viewed_at <= usage.updated_at
+            })
+            && !usage.pinned,
+        "workflow fixture Skill usage does not describe read-only agent activation: {usage:?}"
+    );
     Ok(())
 }
 
@@ -878,5 +933,54 @@ mod tests {
         let mut stale = toml::toml! { schema_version = 14 };
         let error = upgrade_live_config_copy(&mut stale).unwrap_err();
         assert!(error.to_string().contains("cannot be upgraded"));
+    }
+
+    #[test]
+    fn runtime_skill_usage_is_not_counted_as_a_delivery_change() {
+        let mut changed = EXPECTED_DELIVERY_PATHS
+            .iter()
+            .map(|path| (*path).to_string())
+            .collect::<Vec<_>>();
+        changed.push(WORKFLOW_FIXTURE_USAGE_PATH.to_string());
+        changed.sort_unstable();
+
+        validate_delivery_changes(&changed)
+            .expect("project Skill usage is runtime metadata, not agent delivery output");
+    }
+
+    #[test]
+    fn only_the_fixture_skill_usage_sidecar_is_excluded() {
+        let mut changed = EXPECTED_DELIVERY_PATHS
+            .iter()
+            .map(|path| (*path).to_string())
+            .collect::<Vec<_>>();
+        changed.push("skills/another-skill/.usage.json".to_string());
+        changed.sort_unstable();
+
+        assert!(validate_delivery_changes(&changed).is_err());
+    }
+
+    #[test]
+    fn fixture_skill_usage_proves_read_only_agent_activation() {
+        let workspace = tempfile::tempdir().unwrap();
+        let usage_path = workspace.path().join(WORKFLOW_FIXTURE_USAGE_PATH);
+        fs::create_dir_all(usage_path.parent().unwrap()).unwrap();
+        fs::write(
+            &usage_path,
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "createdBy": "agent",
+                "views": 1,
+                "uses": 1,
+                "patches": 0,
+                "createdAt": 10,
+                "updatedAt": 11,
+                "lastViewedAt": 11,
+                "pinned": false
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        validate_fixture_skill_usage(workspace.path()).unwrap();
     }
 }

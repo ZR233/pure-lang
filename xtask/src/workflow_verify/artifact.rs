@@ -345,7 +345,7 @@ fn validate_workflow_call_arguments(body: &Value) -> Result<()> {
             .and_then(Value::as_str)
             .context("workflow_state call has no action")?;
         let required = match action {
-            "compile" => &["expectedRevision", "expectedRunId", "definition"][..],
+            "compile" => &["expectedRevision", "definition"][..],
             "status" => &[][..],
             "transition" => &[
                 "expectedRunId",
@@ -561,6 +561,24 @@ mod tests {
         let texts = wire_message_texts(&body);
         let sections = detected_prompt_sections(&body, &prompt_text(&body, &texts), &texts);
         assert!(!sections.contains(&"workflowProjection"));
+    }
+
+    #[test]
+    fn compile_call_accepts_camel_case_cas_without_terminal_run_id() {
+        let body = serde_json::json!({
+            "input": [{
+                "type": "function_call",
+                "name": "workflow_state",
+                "arguments": serde_json::json!({
+                    "action": "compile",
+                    "expectedRevision": 0,
+                    "definition": {}
+                }).to_string()
+            }]
+        });
+
+        validate_workflow_call_arguments(&body)
+            .expect("a first compile has no previous workflow run id");
     }
 
     #[test]
