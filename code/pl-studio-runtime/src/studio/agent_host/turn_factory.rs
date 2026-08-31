@@ -170,49 +170,15 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             }
         }
         let skill_catalog = if let Some(remote_host) = &remote_host {
-            let registry = pl_core::skill::SkillRegistry::new();
-            let remote_provider = Arc::new(pl_core::remote::RemoteSkillProvider::new(Arc::new(
-                remote_host.files.clone(),
-            ))?);
-            let _remote_registration = registry.register(remote_provider)?;
-            let mut local_sources = Vec::new();
-            if let Ok(user_dir) = pl_core::skill::resolve_user_skills_dir(&config.skills) {
-                local_sources.push(pl_core::skill::SkillDirectorySource::new(
-                    user_dir,
-                    pl_core::skill::SkillSourceKind::User,
-                ));
-            }
-            if let Some(system_dir) = self.skills.system_skills_dir() {
-                local_sources.push(pl_core::skill::SkillDirectorySource::new(
-                    system_dir,
-                    pl_core::skill::SkillSourceKind::System,
-                ));
-            }
-            let _local_registration = if local_sources.is_empty() {
-                None
-            } else {
-                Some(registry.register(Arc::new(
-                    pl_core::skill::FileSystemSkillProvider::from_directories(
-                        "remote-local-skills",
-                        local_sources,
-                    )?,
-                ))?)
-            };
-            let _mode_registration = if let Some(system_dir) = self.skills.system_skills_dir() {
-                Some(registry.register(Arc::new(
-                    pl_core::skill::FileSystemSkillProvider::from_directories(
-                        pl_core::skill::BUILTIN_MODE_PROVIDER_ID,
-                        vec![pl_core::skill::SkillDirectorySource::new(
-                            // System assets are materialized with the
-                            // stable `mode.*` names at the directory root.
-                            system_dir,
-                            pl_core::skill::SkillSourceKind::System,
-                        )],
-                    )?,
-                ))?)
-            } else {
-                None
-            };
+            let system_dir = self.skills.system_skills_dir();
+            let (registry, _registrations) = self
+                .skills
+                .remote_workspace_registry(
+                    &config.skills,
+                    system_dir.as_deref(),
+                    Arc::new(remote_host.files.clone()),
+                )
+                .map_err(|error| turn_error(format!("{error:#}")))?;
             Some(Arc::new(
                 registry
                     .discover(pl_core::skill::SkillProviderRequest {

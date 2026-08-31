@@ -31,11 +31,24 @@ impl StudioRuntime {
                 .await
                 .map_err(|error| anyhow::anyhow!("invalid [lsp.servers] configuration: {error}"))?;
             let fingerprint = format!(
-                "ssh:{server_id}:{}:{}",
+                "ssh:{server_id}:{}:{}:{}",
                 workspace_root.display(),
-                host.files.workspace_id()
+                host.files.workspace_id(),
+                super::super::skill_catalog::skills_fingerprint(&settings.config.skills)?,
             );
             let _activation_command = self.activation.command_lock.lock().await;
+            if self
+                .activation
+                .applied
+                .read()
+                .await
+                .as_ref()
+                .is_some_and(|applied| {
+                    applied.project_id == project_id && applied.fingerprint == fingerprint
+                })
+            {
+                return Ok(());
+            }
             let _command = self.external_runtimes.lsp_state.command().await;
             self.external_runtimes
                 .lsp_state
@@ -43,7 +56,7 @@ impl StudioRuntime {
                 .await?;
             self.external_runtimes
                 .lsp
-                .reconcile_workspace_membership_with_host(&workspace_root, Arc::new(host))
+                .reconcile_workspace_membership_with_host(&workspace_root, Arc::new(host.clone()))
                 .await;
             self.external_runtimes
                 .lsp
@@ -51,6 +64,16 @@ impl StudioRuntime {
                 .await;
             let health = health(&self.external_runtimes.lsp).await;
             self.external_runtimes.lsp_state.ready(health, true).await?;
+            let _ = self
+                .skills
+                .discover_remote(
+                    project_id,
+                    &workspace_root,
+                    &settings.config.skills,
+                    tokio_util::sync::CancellationToken::new(),
+                    Arc::new(host.files.clone()),
+                )
+                .await?;
             *self.activation.applied.write().await = Some(super::super::ProjectActivation {
                 project_id: project_id.to_string(),
                 fingerprint,
@@ -116,8 +139,23 @@ impl StudioRuntime {
 
     pub async fn discover_skills(&self, project_id: &str) -> Result<SkillsStateSnapshot> {
         let project = self.project_record(project_id).await?;
-        if project.ssh_server_id.is_some() {
-            return Ok(self.skills.read(project_id).await);
+        if let Some(server_id) = &project.ssh_server_id {
+            let host = self
+                .ssh_manager
+                .open_workspace_host(server_id, project.path.clone())
+                .await?;
+            let workspace_root = std::path::PathBuf::from(host.files.canonical_path());
+            let settings = self.config_runtime.read()?;
+            return self
+                .skills
+                .discover_remote(
+                    project_id,
+                    &workspace_root,
+                    &settings.config.skills,
+                    tokio_util::sync::CancellationToken::new(),
+                    Arc::new(host.files.clone()),
+                )
+                .await;
         }
         let workspace_root = resolve_workspace_root(Path::new(&project.path))?;
         let settings = self.config_runtime.read()?;
