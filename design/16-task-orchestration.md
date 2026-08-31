@@ -85,6 +85,10 @@ completed`，允许确认修改回到 planning、review finding 回到 working�
 GUI 动态展示 ModeCatalog、当前 stage、允许边和 transition history。Driver 使用稳定 ValueKey，不等待
 可能瞬间经过的中间 Widget，而是在终态读取 canonical history。
 
+wire replay 对 provider 请求历史中被重试替换的 transition 增量草稿只做形状校验：若 CAS、reason
+与 evidence 已齐全但 `completion.summary` 尚未随流式参数到达，验收边界按空 summary 验证后继续；
+运行时执行仍使用严格 typed schema，并由业务校验拒绝空 summary。
+
 最终入口是 `cargo xtask verify-workflow --live --gui`。它必须使用真实非本地 provider 和真实原生 GUI，
 不得 fallback 到 scripted/demo provider。harness 在无 `.git` 的临时 Rust 项目中选择 `mode.task`，提交
 不含内部工具名的产品 prompt，等待 planning/confirmation，确认后走完文档、实施、review、completed，
