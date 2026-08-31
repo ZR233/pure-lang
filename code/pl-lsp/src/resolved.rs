@@ -60,4 +60,15 @@ impl ResolvedLspServer {
             .and_then(|index| self.language_ids.get(index))
             .map(String::as_str)
     }
+
+    /// 判断文件扩展名是否由该 server 声明，供所有路径路由复用同一解析规则。
+    pub(crate) fn matches_path(&self, path: &Path) -> bool {
+        let Some(extension) = path.extension() else {
+            return false;
+        };
+        let extension = format!(".{}", extension.to_string_lossy().to_ascii_lowercase());
+        self.extensions
+            .iter()
+            .any(|candidate| candidate == &extension)
+    }
 }

@@ -35,11 +35,7 @@ pub(crate) fn runtime_snapshot(snapshot: StudioRuntimeSnapshot) -> RuntimeSnapsh
             StudioRuntimeLifecycleState::Failed(state) => {
                 BridgeRuntimeState::Failed(BridgeFailedRuntimeState {
                     failed_at: state.failed_at(),
-                    error: BridgeStateError {
-                        code: state.error().code.clone(),
-                        message: state.error().message.clone(),
-                        retryable: state.error().retryable,
-                    },
+                    error: state.error().into(),
                 })
             }
         },

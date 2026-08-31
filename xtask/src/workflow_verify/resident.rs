@@ -29,13 +29,39 @@ impl ResidentProcess {
         let mut child = command
             .spawn()
             .context("failed to start the native GUI acceptance process")?;
-        let stdout = child.stdout.take().context("GUI stdout pipe is missing")?;
-        let stderr = child.stderr.take().context("GUI stderr pipe is missing")?;
+        let stdout = match child.stdout.take() {
+            Some(stdout) => stdout,
+            None => {
+                terminate_process_tree(&mut child)?;
+                bail!("GUI stdout pipe is missing");
+            }
+        };
+        let stderr = match child.stderr.take() {
+            Some(stderr) => stderr,
+            None => {
+                terminate_process_tree(&mut child)?;
+                bail!("GUI stderr pipe is missing");
+            }
+        };
         let (sender, lines) = mpsc::channel();
-        let readers = vec![
-            spawn_reader(stdout, stdout_path, false, Some(sender.clone()))?,
-            spawn_reader(stderr, stderr_path, true, Some(sender))?,
-        ];
+        let stdout_reader = match spawn_reader(stdout, stdout_path, false, Some(sender.clone())) {
+            Ok(reader) => reader,
+            Err(error) => {
+                terminate_process_tree(&mut child)?;
+                return Err(error);
+            }
+        };
+        let stderr_reader = match spawn_reader(stderr, stderr_path, true, Some(sender)) {
+            Ok(reader) => reader,
+            Err(error) => {
+                terminate_process_tree(&mut child)?;
+                stdout_reader
+                    .join()
+                    .map_err(|_| anyhow::anyhow!("GUI log reader panicked"))??;
+                return Err(error);
+            }
+        };
+        let readers = vec![stdout_reader, stderr_reader];
         Ok(Self {
             child,
             lines,
@@ -119,35 +145,7 @@ pub(super) fn run_logged(
     stdout_path: &Path,
     stderr_path: &Path,
 ) -> Result<()> {
-    println!("==> {display}");
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = command
-        .spawn()
-        .with_context(|| format!("failed to start {display}"))?;
-    let stdout = child
-        .stdout
-        .take()
-        .context("command stdout pipe is missing")?;
-    let stderr = child
-        .stderr
-        .take()
-        .context("command stderr pipe is missing")?;
-    let readers = [
-        spawn_reader(stdout, stdout_path, false, None)?,
-        spawn_reader(stderr, stderr_path, true, None)?,
-    ];
-    let status = child
-        .wait()
-        .with_context(|| format!("failed to wait for {display}"))?;
-    for reader in readers {
-        reader
-            .join()
-            .map_err(|_| anyhow::anyhow!("command log reader panicked"))??;
-    }
-    ensure_success(status, display)
+    run_logged_inner(command, display, stdout_path, stderr_path, None)
 }
 
 pub(super) fn run_logged_with_timeout(
@@ -156,6 +154,16 @@ pub(super) fn run_logged_with_timeout(
     stdout_path: &Path,
     stderr_path: &Path,
     timeout: Duration,
+) -> Result<()> {
+    run_logged_inner(command, display, stdout_path, stderr_path, Some(timeout))
+}
+
+fn run_logged_inner(
+    command: &mut Command,
+    display: &str,
+    stdout_path: &Path,
+    stderr_path: &Path,
+    timeout: Option<Duration>,
 ) -> Result<()> {
     println!("==> {display}");
     configure_process_group(command);
@@ -166,44 +174,79 @@ pub(super) fn run_logged_with_timeout(
     let mut child = command
         .spawn()
         .with_context(|| format!("failed to start {display}"))?;
-    let stdout = child
-        .stdout
-        .take()
-        .context("command stdout pipe is missing")?;
-    let stderr = child
-        .stderr
-        .take()
-        .context("command stderr pipe is missing")?;
-    let readers = [
-        spawn_reader(stdout, stdout_path, false, None)?,
-        spawn_reader(stderr, stderr_path, true, None)?,
-    ];
-    let deadline = Instant::now() + timeout;
-    let status = loop {
-        if let Some(status) = child
-            .try_wait()
-            .with_context(|| format!("failed to poll {display}"))?
-        {
-            break Some(status);
-        }
-        if Instant::now() >= deadline {
+    let stdout = match child.stdout.take() {
+        Some(stdout) => stdout,
+        None => {
             terminate_process_tree(&mut child)?;
-            break None;
+            bail!("command stdout pipe is missing");
         }
-        thread::sleep(Duration::from_millis(100));
+    };
+    let stderr = match child.stderr.take() {
+        Some(stderr) => stderr,
+        None => {
+            terminate_process_tree(&mut child)?;
+            bail!("command stderr pipe is missing");
+        }
+    };
+    let stdout_reader = match spawn_reader(stdout, stdout_path, false, None) {
+        Ok(reader) => reader,
+        Err(error) => {
+            terminate_process_tree(&mut child)?;
+            return Err(error);
+        }
+    };
+    let stderr_reader = match spawn_reader(stderr, stderr_path, true, None) {
+        Ok(reader) => reader,
+        Err(error) => {
+            terminate_process_tree(&mut child)?;
+            stdout_reader
+                .join()
+                .map_err(|_| anyhow::anyhow!("command log reader panicked"))??;
+            return Err(error);
+        }
+    };
+    let readers = [stdout_reader, stderr_reader];
+    let mut timed_out = false;
+    let status = match timeout {
+        None => Some(
+            child
+                .wait()
+                .with_context(|| format!("failed to wait for {display}"))?,
+        ),
+        Some(timeout) => {
+            let deadline = Instant::now() + timeout;
+            loop {
+                if let Some(status) = child
+                    .try_wait()
+                    .with_context(|| format!("failed to poll {display}"))?
+                {
+                    break Some(status);
+                }
+                if Instant::now() >= deadline {
+                    timed_out = true;
+                    terminate_process_tree(&mut child)?;
+                    break None;
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+        }
     };
     for reader in readers {
         reader
             .join()
             .map_err(|_| anyhow::anyhow!("command log reader panicked"))??;
     }
-    match status {
-        Some(status) => ensure_success(status, display),
-        None => bail!(
+    if timed_out {
+        let timeout = timeout.expect("timed_out only occurs with a configured timeout");
+        bail!(
             "command exceeded its timeout of {} seconds: {display}",
             timeout.as_secs()
-        ),
+        );
     }
+    ensure_success(
+        status.expect("non-timeout command must have an exit status"),
+        display,
+    )
 }
 
 fn spawn_reader(

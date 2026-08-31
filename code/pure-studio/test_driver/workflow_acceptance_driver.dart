@@ -305,16 +305,32 @@ void _assertPlanVisible(Map<String, dynamic> snapshot) {
 }
 
 Future<void> _tapFirstUserInputOption(FlutterDriverSession session) async {
-  final tree = await session.renderTree();
-  final match = RegExp(r'user-input-option-[A-Za-z0-9_.:-]+-0')
-      .firstMatch(tree);
-  if (match != null) {
-    await session.tap(find.byValueKey(match.group(0)!));
+  if (await _isVisible(session, 'user-input-first-option')) {
+    await session.tap(find.byValueKey('user-input-first-option'));
+  } else if (await _isVisible(session, 'user-input-first-text')) {
+    await session.tap(find.byValueKey('user-input-first-text'));
+    await session.enterText('确认');
   } else {
+    await session.waitFor(
+      find.byValueKey('fallback-user-input'),
+      timeout: const Duration(seconds: 5),
+    );
     await session.tap(find.byValueKey('fallback-user-input'));
     await session.enterText('确认');
   }
   await session.tap(find.byValueKey('user-input-submit'));
+}
+
+Future<bool> _isVisible(FlutterDriverSession session, String key) async {
+  try {
+    await session.waitFor(
+      find.byValueKey(key),
+      timeout: const Duration(seconds: 5),
+    );
+    return true;
+  } on Object {
+    return false;
+  }
 }
 
 Future<Map<String, dynamic>> _waitForSnapshot(

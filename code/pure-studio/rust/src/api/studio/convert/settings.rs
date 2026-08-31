@@ -2,7 +2,7 @@ use crate::api::studio::types::{
     BridgeCustomModelSettingsDto, BridgeGeneralSettingsDto, BridgeInstructionsSettingsDto,
     BridgeMcpServerConfiguration, BridgeMcpServerSettingsDto, BridgeModelConnectionSettingsDto,
     BridgeProviderSettingsDto, BridgeProviderUsageData, BridgeProviderUsageState,
-    BridgeRoleSettingsDto, BridgeSettingsStateSnapshot, BridgeSkillsSettingsDto, BridgeStateError,
+    BridgeRoleSettingsDto, BridgeSettingsStateSnapshot, BridgeSkillsSettingsDto,
     BridgeStudioSettingsDto, BridgeWebSearchSettingsDto, DeepSeekBalanceDto,
     DeepSeekBalanceInfoDto, ProviderSecretInput, ProviderSettingsInput, ProviderUsageDto,
     ZhipuCodingPlanUsageDto, ZhipuQuotaLimitDto, ZhipuToolUsageDetailDto,
@@ -223,11 +223,7 @@ pub(crate) fn provider_usage_dto(
             }
         }
         ProviderUsageState::Failed(state) => BridgeProviderUsageState::Failed {
-            error: BridgeStateError {
-                code: state.error().code.clone(),
-                message: state.error().message.clone(),
-                retryable: state.error().retryable,
-            },
+            error: state.error().into(),
         },
         ProviderUsageState::Ready(state) => match state.data() {
             ProviderUsageData::DeepSeekBalance(balance) => BridgeProviderUsageState::Ready {

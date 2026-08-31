@@ -15,12 +15,9 @@ impl LspRuntimeRegistry {
         let mut names = state
             .workspaces
             .values()
-            .flat_map(|workspace| workspace.servers.iter())
-            .filter(|(_, server)| server.availability_kind == LspAvailabilityKind::Available)
-            .map(|(id, _)| id.clone())
+            .flat_map(active_server_names_for_state)
             .collect::<Vec<_>>();
-        names.sort();
-        names.dedup();
+        normalize_server_names(&mut names);
         names
     }
 
@@ -29,16 +26,16 @@ impl LspRuntimeRegistry {
         workspace_root: impl AsRef<Path>,
     ) -> Vec<String> {
         let workspace_root = canonical_workspace_root(workspace_root.as_ref());
-        self.state
+        let mut names = self
+            .state
             .lock()
             .await
             .workspaces
             .get(&workspace_root)
-            .into_iter()
-            .flat_map(|workspace| workspace.servers.iter())
-            .filter(|(_, server)| server.availability_kind == LspAvailabilityKind::Available)
-            .map(|(id, _)| id.clone())
-            .collect()
+            .map(active_server_names_for_state)
+            .unwrap_or_default();
+        normalize_server_names(&mut names);
+        names
     }
 
     /// 返回当前 Available 状态的所有语言工具信息。
@@ -71,6 +68,14 @@ impl LspRuntimeRegistry {
         if let Some(workspace) = state.workspaces.get(&workspace_root) {
             append_available_languages(&mut result, workspace);
         }
+        result.sort_by(|left, right| {
+            left.language_id
+                .cmp(&right.language_id)
+                .then(left.server_id.cmp(&right.server_id))
+        });
+        result.dedup_by(|left, right| {
+            left.language_id == right.language_id && left.server_id == right.server_id
+        });
         result
     }
 
@@ -106,6 +111,20 @@ impl LspRuntimeRegistry {
             .collect::<Vec<_>>();
         LspWorkspaceCapabilities { servers }
     }
+}
+
+fn active_server_names_for_state(workspace: &LspWorkspaceState) -> Vec<String> {
+    workspace
+        .servers
+        .iter()
+        .filter(|(_, server)| server.availability_kind == LspAvailabilityKind::Available)
+        .map(|(id, _)| id.clone())
+        .collect()
+}
+
+fn normalize_server_names(names: &mut Vec<String>) {
+    names.sort();
+    names.dedup();
 }
 
 fn project_server_capabilities(

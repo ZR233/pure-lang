@@ -1,7 +1,6 @@
-import 'dart:convert';
-
 import 'studio_enums.dart';
 import 'thread_models.dart';
+import '../../shared/typed_json.dart';
 
 part 'timeline_agent_events.dart';
 part 'timeline_row_projection.dart';
@@ -343,14 +342,14 @@ String _toolActivityText(TimelineToolPart? tool) {
 }
 
 String? _commandSummary(String arguments) {
-  final json = _tryDecodeMap(arguments);
-  final command = _stringValue(json['command']);
+  final json = decodeJsonObject(arguments);
+  final command = jsonStringValue(json['command']);
   final path =
-      _stringValue(json['path']) ??
-      _stringValue(json['filePath']) ??
-      _stringValue(json['targetPath']) ??
-      _stringValue(json['workingDirectory']);
-  final query = _stringValue(json['query']);
+      jsonStringValue(json['path']) ??
+      jsonStringValue(json['filePath']) ??
+      jsonStringValue(json['targetPath']) ??
+      jsonStringValue(json['workingDirectory']);
+  final query = jsonStringValue(json['query']);
   final value = command?.isNotEmpty == true
       ? command!.split('\n').first
       : path?.isNotEmpty == true
@@ -403,29 +402,4 @@ bool isTerminalTimelineStatus(String status) {
     'denied',
     'budgetLimited',
   }.contains(status);
-}
-
-Map<String, Object?> _tryDecodeMap(String value) {
-  if (value.trim().isEmpty) {
-    return const {};
-  }
-  try {
-    final decoded = jsonDecode(value);
-    if (decoded is Map<String, Object?>) {
-      return decoded;
-    }
-    if (decoded is Map) {
-      return decoded.map((key, value) => MapEntry(key.toString(), value));
-    }
-  } catch (_) {
-    return const {};
-  }
-  return const {};
-}
-
-String? _stringValue(Object? value) {
-  if (value == null) {
-    return null;
-  }
-  return value.toString();
 }

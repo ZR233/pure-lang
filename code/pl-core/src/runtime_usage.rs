@@ -189,44 +189,6 @@ impl From<&TokenUsage> for ModelTokenUsageSnapshot {
     }
 }
 
-pub fn cost_for_usage(
-    usage: &TokenUsageSnapshot,
-    model: Option<&ModelInfo>,
-) -> (Vec<RuntimeCostAmount>, bool) {
-    if usage.total_tokens == 0 {
-        return (Vec::new(), false);
-    }
-
-    let Some(model) = model else {
-        return (Vec::new(), true);
-    };
-    let Some(currency) = model.currency.as_ref().filter(|value| !value.is_empty()) else {
-        return (Vec::new(), true);
-    };
-    let normalized = InferenceTokenUsage {
-        prompt_tokens: usage.prompt_tokens,
-        cached_prompt_tokens: usage.cached_prompt_tokens,
-        cache_write_tokens: usage.cache_write_tokens,
-        completion_tokens: usage.completion_tokens,
-        reasoning_tokens: usage.reasoning_tokens,
-        total_tokens: usage.total_tokens,
-    }
-    .normalized();
-    let pricing = ModelPricingSnapshot {
-        currency: model.currency.clone(),
-        input_per_mtok: model.input_price_per_mtok,
-        output_per_mtok: model.output_price_per_mtok,
-        cache_read_per_mtok: model.cache_read_price_per_mtok,
-        cache_write_per_mtok: model.cache_write_price_per_mtok,
-    };
-    let (costs, has_unpriced_usage) = cost_for_inference(&normalized, &pricing);
-    if has_unpriced_usage {
-        return (Vec::new(), true);
-    }
-    debug_assert_eq!(pricing.currency.as_deref(), Some(currency.as_str()));
-    (costs, false)
-}
-
 pub(crate) fn agent_runtime_delta(
     identity: RuntimeAgentIdentity,
     billing: &InferenceBillingRecord,
@@ -299,16 +261,6 @@ pub fn aggregate_runtime_usage(
     if aggregate.updated_at == 0 {
         aggregate.model = session_id.to_string();
     }
-    aggregate.estimated_costs.sort_by(|left, right| {
-        left.currency
-            .cmp(&right.currency)
-            .then_with(|| left.amount.total_cmp(&right.amount))
-    });
-    aggregate.estimated_cache_savings.sort_by(|left, right| {
-        left.currency
-            .cmp(&right.currency)
-            .then_with(|| left.amount.total_cmp(&right.amount))
-    });
     aggregate
 }
 
@@ -322,6 +274,11 @@ pub fn merge_costs(target: &mut Vec<RuntimeCostAmount>, incoming: &[RuntimeCostA
             None => target.push(cost.clone()),
         }
     }
+    target.sort_by(|left, right| {
+        left.currency
+            .cmp(&right.currency)
+            .then_with(|| left.amount.total_cmp(&right.amount))
+    });
 }
 
 fn estimate_cost(usage: &InferenceTokenUsage, pricing: &ModelPricingSnapshot) -> Option<f64> {

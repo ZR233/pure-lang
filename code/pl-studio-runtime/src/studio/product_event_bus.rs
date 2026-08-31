@@ -22,7 +22,9 @@ use super::StudioStore;
 use super::agent_host::ThreadWriteBehindWriter;
 use super::ids::unix_seconds;
 use super::merged_page::{HotColdEntry, merge_page_desc};
-use super::store::directory::{DirectoryDelta, RegisteredChildThread, ThreadDirectoryCursor};
+use super::store::directory::{
+    DirectoryDelta, ProjectRemoval, RegisteredChildThread, ThreadDirectoryCursor,
+};
 
 /// Thread 目录分页的默认页大小上限。
 const THREAD_DIRECTORY_PAGE_LIMIT: usize = 100;
@@ -243,6 +245,23 @@ impl ProductEventBus {
         )))
     }
 
+    /// 将已从持久化层加载的目录条目加入热集合，但不改变 revision 或广播事件。
+    ///
+    /// 激活路径只是建立查询缓存，不代表目录事实发生了变化；真正的目录
+    /// mutation 必须继续通过 [`Self::apply_thread_delta`] 提交。
+    pub(in crate::studio) fn warm_thread_index(&self, entries: Vec<Thread>) {
+        if entries.is_empty() {
+            return;
+        }
+        let mut index = self
+            .thread_index
+            .lock()
+            .expect("thread index lock poisoned");
+        for thread in entries {
+            index.insert(thread.id.clone(), thread);
+        }
+    }
+
     /// 提交一次目录事实：先加入 write-behind 队列，再更新内存热集合并广播。
     ///
     /// 这是 Thread/Project 目录 mutation 的唯一命令通道；admission 失败时不发布
@@ -251,6 +270,9 @@ impl ProductEventBus {
         &self,
         delta: DirectoryDelta,
     ) -> Result<StudioProductEventEnvelope> {
+        if delta.is_empty() {
+            return Err(anyhow::anyhow!("directory delta is empty"));
+        }
         self.writer.accept_directory(delta.clone())?;
         let (thread_upserts, thread_removals): (Vec<Thread>, Vec<String>) = (
             delta.thread_upserts.clone(),
@@ -266,23 +288,64 @@ impl ProductEventBus {
                 )
                 .collect(),
         );
-        let envelope = self
-            .apply_thread_delta(thread_upserts, thread_removals)
-            .await?;
-        for project in &delta.project_upserts {
-            self.apply_project_entry(crate::ProjectRecord {
+        let mut envelope = None;
+        if !thread_upserts.is_empty() || !thread_removals.is_empty() {
+            envelope = Some(
+                self.apply_thread_delta(thread_upserts, thread_removals)
+                    .await?,
+            );
+        }
+        let project_upserts = delta
+            .project_upserts
+            .iter()
+            .map(|project| crate::ProjectRecord {
                 id: project.id.clone(),
                 name: project.name.clone(),
                 path: project.path.clone(),
                 ssh_server_id: project.ssh_server_id.clone(),
                 updated_at: project.updated_at,
             })
-            .await?;
+            .collect::<Vec<_>>();
+        if let Some(project_event) = self
+            .apply_project_delta(&project_upserts, &delta.project_removals)
+            .await?
+        {
+            envelope = Some(project_event);
         }
-        for removal in &delta.project_removals {
-            self.remove_project_entry(&removal.project_id).await?;
+        envelope.ok_or_else(|| anyhow::anyhow!("directory delta has no observable changes"))
+    }
+
+    async fn apply_project_delta(
+        &self,
+        upserted: &[crate::ProjectRecord],
+        removed: &[ProjectRemoval],
+    ) -> Result<Option<StudioProductEventEnvelope>> {
+        if upserted.is_empty() && removed.is_empty() {
+            return Ok(None);
         }
-        Ok(envelope)
+        let mut projects = self.project_snapshot.lock().await;
+        for project in upserted {
+            if let Some(existing) = projects.iter_mut().find(|entry| entry.id == project.id) {
+                *existing = project.clone();
+            } else {
+                projects.push(project.clone());
+            }
+        }
+        for removal in removed {
+            projects.retain(|project| project.id != removal.project_id);
+        }
+        projects.sort_by(|left, right| {
+            right
+                .updated_at
+                .cmp(&left.updated_at)
+                .then_with(|| right.id.cmp(&left.id))
+        });
+        drop(projects);
+        self.bump(&self.revisions.project);
+        let state = self.read_project_directory().await?;
+        Ok(Some(self.emit(
+            StudioProductEventKind::ProjectDirectoryChanged(state),
+        )))
     }
 
     fn sorted_thread_index(&self) -> Vec<Thread> {
@@ -367,22 +430,9 @@ impl ProductEventBus {
         &self,
         project: crate::ProjectRecord,
     ) -> Result<StudioProductEventEnvelope> {
-        let mut projects = self.project_snapshot.lock().await;
-        if let Some(existing) = projects.iter_mut().find(|entry| entry.id == project.id) {
-            *existing = project;
-        } else {
-            projects.push(project);
-        }
-        projects.sort_by(|left, right| {
-            right
-                .updated_at
-                .cmp(&left.updated_at)
-                .then_with(|| right.id.cmp(&left.id))
-        });
-        drop(projects);
-        self.bump(&self.revisions.project);
-        let state = self.read_project_directory().await?;
-        Ok(self.emit(StudioProductEventKind::ProjectDirectoryChanged(state)))
+        self.apply_project_delta(std::slice::from_ref(&project), &[])
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("project upsert did not produce an event"))
     }
 
     /// 从活动 Project 目录移除一个已归档或隔离的 Project。
@@ -390,13 +440,16 @@ impl ProductEventBus {
         &self,
         project_id: &str,
     ) -> Result<StudioProductEventEnvelope> {
-        self.project_snapshot
-            .lock()
-            .await
-            .retain(|project| project.id != project_id);
-        self.bump(&self.revisions.project);
-        let state = self.read_project_directory().await?;
-        Ok(self.emit(StudioProductEventKind::ProjectDirectoryChanged(state)))
+        self.apply_project_delta(
+            &[],
+            &[ProjectRemoval {
+                project_id: project_id.to_string(),
+                thread_ids: Vec::new(),
+                closed_at: unix_seconds(),
+            }],
+        )
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("project removal did not produce an event"))
     }
 
     pub fn emit_agent_directory(
@@ -601,6 +654,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn project_only_commit_does_not_emit_an_empty_thread_directory_change() {
+        let (_store, bus) = memory_bus().await;
+        let mut events = bus.subscribe();
+        let now = unix_seconds();
+
+        bus.commit_directory(DirectoryDelta::upsert_project(
+            super::super::store::directory::ProjectDirectoryRecord {
+                id: "project-only".to_string(),
+                name: "Project only".to_string(),
+                path: "/tmp/project-only".to_string(),
+                ssh_server_id: None,
+                created_at: now,
+                updated_at: now,
+                last_opened_at: Some(now),
+                closed: false,
+            },
+        ))
+        .await
+        .expect("project directory commit");
+
+        let mut kinds = Vec::new();
+        while let Ok(event) = events.try_recv() {
+            kinds.push(event.kind);
+        }
+        assert_eq!(kinds.len(), 1);
+        assert!(matches!(
+            kinds[0],
+            StudioProductEventKind::ProjectDirectoryChanged(_)
+        ));
+    }
+
+    #[tokio::test]
     async fn thread_directory_page_walks_cold_keyset_cursor_without_overlap() {
         let (store, runtime) = memory_bus().await;
         let project = seed_project(&store).await;
@@ -712,5 +797,25 @@ mod tests {
         let page = page.state.value().expect("ready page");
         assert_eq!(page.threads.len(), 1);
         assert_eq!(page.threads.first().unwrap().id, thread.id);
+    }
+
+    #[tokio::test]
+    async fn warming_thread_metadata_does_not_change_revision_or_emit_event() {
+        let (_store, bus) = memory_bus().await;
+        let mut events = bus.subscribe();
+        let before = bus.read_thread_directory().await.expect("directory");
+        let before_revision = before.state.revision();
+        let mut entry = Thread::placeholder("warm-only");
+        entry.agent_path = entry.id.clone();
+        entry.project_id = "project".to_string();
+        entry.title = "Warm only".to_string();
+        entry.updated_at = unix_seconds();
+
+        bus.warm_thread_index(vec![entry.clone()]);
+
+        let after = bus.read_thread_directory().await.expect("directory");
+        assert_eq!(after.state.revision(), before_revision);
+        assert_eq!(after.state.value().unwrap().threads, vec![entry]);
+        assert!(events.try_recv().is_err());
     }
 }

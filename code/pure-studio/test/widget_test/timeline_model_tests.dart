@@ -19,6 +19,17 @@ class _ImmediateTestImageProvider extends ImageProvider<String> {
 }
 
 void registerTimelineModelTests() {
+  test(
+    'tool JSON projections share tolerant object and string normalization',
+    () {
+      expect(decodeJsonObject('not-json'), isEmpty);
+      expect(decodeJsonObject('{"query":" rust "}')['query'], ' rust ');
+      expect(jsonStringValue('  rust  '), 'rust');
+      expect(jsonStringValue('   '), isNull);
+      expect(jsonObject(<dynamic, dynamic>{1: 'value'})['1'], 'value');
+    },
+  );
+
   testWidgets(
     'view_image is visible in the collapsed tool gallery and opens its authorized thumbnail',
     (tester) async {

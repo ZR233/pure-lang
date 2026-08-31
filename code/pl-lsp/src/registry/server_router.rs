@@ -123,12 +123,6 @@ impl LspRuntimeRegistry {
         } else if let Some(path) = &query.file_path {
             self.server_id_for_path_in_workspace(workspace_root, path)
                 .await
-                .ok_or_else(|| {
-                    LspRuntimeError::Unavailable(format!(
-                        "no LSP server found for file: {}",
-                        path.display()
-                    ))
-                })
         } else {
             Err(LspRuntimeError::InvalidQuery(
                 "language_id or file_path is required".to_string(),
@@ -182,25 +176,38 @@ impl LspRuntimeRegistry {
         &self,
         workspace_root: &Path,
         path: &Path,
-    ) -> Option<String> {
+    ) -> LspResult<String> {
         let extension = extension_for_path(path);
         let workspace_root = canonical_workspace_root(workspace_root);
-        self.state
+        let matches = self
+            .state
             .lock()
             .await
             .workspaces
-            .get(&workspace_root)?
-            .servers
-            .iter()
-            .filter(|(_, server)| server.availability_kind != LspAvailabilityKind::Disabled)
-            .find(|(_, server)| {
-                server
-                    .resolved
-                    .extensions
+            .get(&workspace_root)
+            .map(|workspace| {
+                workspace
+                    .servers
                     .iter()
-                    .any(|item| item == &extension)
+                    .filter(|(_, server)| {
+                        server.availability_kind != LspAvailabilityKind::Disabled
+                            && server.resolved.matches_path(path)
+                    })
+                    .map(|(server_id, _)| server_id.clone())
+                    .collect::<Vec<_>>()
             })
-            .map(|(server_id, _)| server_id.clone())
+            .unwrap_or_default();
+        match matches.as_slice() {
+            [server_id] => Ok(server_id.clone()),
+            [] => Err(LspRuntimeError::Unavailable(format!(
+                "no LSP server found for file: {}",
+                path.display()
+            ))),
+            _ => Err(LspRuntimeError::Routing(LspRoutingError::AmbiguousPath {
+                extension,
+                servers: matches,
+            })),
+        }
     }
 
     /// Diagnostics 查询的 server 端操作校验（不启动 client）。
@@ -232,7 +239,8 @@ impl LspRuntimeRegistry {
         let workspace_root = self.workspace_root_for_path(path).await?;
         let server_id = self
             .server_id_for_path_in_workspace(&workspace_root, path)
-            .await?;
+            .await
+            .ok()?;
         self.state
             .lock()
             .await

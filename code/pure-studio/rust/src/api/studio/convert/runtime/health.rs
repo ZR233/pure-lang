@@ -166,11 +166,7 @@ fn bridge_lsp_activity(activity: &LspAvailableActivity) -> BridgeLspActivity {
 }
 
 pub(crate) fn bridge_state_error(error: &pl_protocol::StateError) -> BridgeStateError {
-    BridgeStateError {
-        code: error.code.clone(),
-        message: error.message.clone(),
-        retryable: error.retryable,
-    }
+    error.into()
 }
 
 pub(crate) fn bridge_uninitialized_resource(
@@ -260,6 +256,16 @@ impl From<pl_protocol::StateError> for BridgeStateError {
         Self {
             code: error.code,
             message: error.message,
+            retryable: error.retryable,
+        }
+    }
+}
+
+impl From<&pl_protocol::StateError> for BridgeStateError {
+    fn from(error: &pl_protocol::StateError) -> Self {
+        Self {
+            code: error.code.clone(),
+            message: error.message.clone(),
             retryable: error.retryable,
         }
     }

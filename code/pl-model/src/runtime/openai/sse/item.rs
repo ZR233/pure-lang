@@ -4,24 +4,17 @@ use crate::WebSearchAction;
 use crate::completion::stream::event::{
     ModelStreamEvent, ToolInputDeltaPayload, ToolInputPayloadKind,
 };
+use crate::runtime::openai::identity::responses_tool_identity;
 use pl_protocol::{ResponsesContextItem, ToolCallCaller};
 use pl_trace::TraceTextChannel;
 
-pub(super) fn cached_tokens_from_details(details: &Value) -> Option<u64> {
-    details
-        .get("cached_tokens")
-        .or_else(|| details.get("cache_read_tokens"))
-        .or_else(|| details.get("cached_input_tokens"))
-        .and_then(Value::as_u64)
-}
-
-pub(super) fn cache_write_tokens_from_details(details: &Value) -> Option<u64> {
-    details.get("cache_write_tokens").and_then(Value::as_u64)
-}
-
 pub(super) fn output_item_tool_started(item: &Value) -> Option<ModelStreamEvent> {
     let kind = item.get("type")?.as_str()?;
-    let (item_id, call_id) = responses_tool_identity(item);
+    let (item_id, call_id) = responses_tool_identity(
+        item.get("id").and_then(Value::as_str),
+        item.get("call_id").and_then(Value::as_str),
+        kind,
+    );
     let name = item.get("name").and_then(Value::as_str).map(String::from);
 
     match kind {
@@ -49,7 +42,11 @@ pub(super) fn output_item_tool_started(item: &Value) -> Option<ModelStreamEvent>
 
 pub(super) fn output_item_tool_completed(item: &Value) -> Option<Vec<ModelStreamEvent>> {
     let kind = item.get("type")?.as_str()?;
-    let (item_id, call_id) = responses_tool_identity(item);
+    let (item_id, call_id) = responses_tool_identity(
+        item.get("id").and_then(Value::as_str),
+        item.get("call_id").and_then(Value::as_str),
+        kind,
+    );
     let name = item.get("name").and_then(Value::as_str).map(String::from);
     match kind {
         "function_call" => {
@@ -123,39 +120,6 @@ fn tool_caller_event(item: &Value, item_id: &str) -> Option<ModelStreamEvent> {
         item_id: item_id.to_string(),
         caller,
     })
-}
-
-/// 解析 Responses output item 携带的工具调用身份。
-///
-/// `item_id` 取 `item.id`（缺失时回落 `call_id`）；`call_id` 取 `item.call_id`，
-/// 缺失时确定性赋 `item_id` 并记录——这是 late call_id 升级场景的确定性赋值，
-/// 不是 optional 语义。两者都缺失由 accumulator 以协议错误拒绝。
-fn responses_tool_identity(item: &Value) -> (String, String) {
-    let item_id = item
-        .get("id")
-        .and_then(Value::as_str)
-        .filter(|id| !id.is_empty())
-        .or_else(|| {
-            item.get("call_id")
-                .and_then(Value::as_str)
-                .filter(|call_id| !call_id.is_empty())
-        })
-        .unwrap_or_default()
-        .to_string();
-    let call_id = item
-        .get("call_id")
-        .and_then(Value::as_str)
-        .filter(|call_id| !call_id.is_empty())
-        .map(String::from)
-        .unwrap_or_else(|| {
-            tracing::trace!(
-                item_id = %item_id,
-                kind = item.get("type").and_then(serde_json::Value::as_str).unwrap_or(""),
-                "responses tool item missing call_id; assigning item id"
-            );
-            item_id.clone()
-        });
-    (item_id, call_id)
 }
 
 pub(super) fn web_search_lifecycle_event(

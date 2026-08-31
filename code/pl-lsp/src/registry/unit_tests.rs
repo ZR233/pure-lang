@@ -404,6 +404,52 @@ async fn ambiguous_language_lists_candidate_servers() {
     fs::remove_dir_all(dir).unwrap();
 }
 
+#[tokio::test]
+async fn ambiguous_file_extension_does_not_pick_a_server_by_registration_order() {
+    let dir = temp_dir("ambiguous-extension");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("project.toml"), "schema = 1\n").unwrap();
+    let source = dir.join("main.shared");
+    fs::write(&source, "main\n").unwrap();
+    let registry = LspRuntimeRegistry::with_catalog(LspServerCatalog::empty());
+    let mut alpha = language_server(
+        "alpha-server",
+        "Alpha",
+        "alpha",
+        "project.toml",
+        FakeDriver::ready("alpha 1.0"),
+    );
+    alpha.definition.extensions = vec![".shared".to_string()];
+    let mut beta = language_server(
+        "beta-server",
+        "Beta",
+        "beta",
+        "project.toml",
+        FakeDriver::ready("beta 1.0"),
+    );
+    beta.definition.extensions = vec![".shared".to_string()];
+    registry.register_server(alpha).await.unwrap();
+    registry.register_server(beta).await.unwrap();
+    registry.reconcile_workspace_membership(&dir).await;
+    registry.probe_lsp_server(&dir).await;
+
+    let error = registry
+        .server_id_for_query(&LspQuery {
+            operation: LspQueryOperation::DocumentSymbol,
+            file_path: Some(source),
+            line: None,
+            character: None,
+            query: None,
+            max_results: None,
+            language_id: None,
+        })
+        .await
+        .expect_err("an ambiguous extension must be rejected");
+
+    assert!(matches!(error, LspRuntimeError::Routing(_)));
+    fs::remove_dir_all(dir).unwrap();
+}
+
 /// 未知语言错误列出当前可用语言。
 #[tokio::test]
 async fn unknown_language_lists_available_languages() {

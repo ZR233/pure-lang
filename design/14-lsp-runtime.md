@@ -18,6 +18,9 @@ command 解析（program + args 模板，占位符当前仅支持 `{workspaceRoo
 重复 server id 或 language id 冲突在配置解析时以 typed 错误 fail-loud。同一 language id
 被多个 server 声明且都匹配 workspace 时，路由以 typed `LspRoutingError::AmbiguousLanguage`
 拒绝并列出候选，不按注册顺序或名称猜测；零匹配返回列出可用语言的 unknown language 错误。
+未显式提供 language id 的文件路径路由遵循同一原则：扩展名零匹配返回 unavailable，唯一匹配
+返回对应 server，多个非 Disabled server 声明同一扩展名时以 typed
+`LspRoutingError::AmbiguousPath` 拒绝并列出候选。
 
 `LspServerDriver` 是 server 生命周期的唯一 adapter 边界：环境探测（typed 就绪/缺失原因）、
 修复（repair）、进程启动参数解析与 server 特殊初始化（如 rust-analyzer 的 client watcher

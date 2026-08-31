@@ -16,6 +16,7 @@ import '../../l10n/studio_l10n.dart';
 import '../../platform/external_url_launcher.dart';
 import '../../shared/studio_chrome.dart';
 import '../../shared/studio_driver_keys.dart';
+import '../../shared/typed_json.dart';
 import 'markdown_repair.dart';
 
 part 'timeline_blocks.dart';

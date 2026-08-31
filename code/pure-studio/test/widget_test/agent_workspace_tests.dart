@@ -121,6 +121,64 @@ void registerAgentWorkspaceTests() {
     expect(find.text('child timeline'), findsOneWidget);
     expect(find.text('reviewer/model'), findsWidgets);
   });
+
+  testWidgets('large interaction dock stays within a short window', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1047, 641));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final base = _rootAndChildState().copyWith(selectedThreadId: 'child-1');
+    final childWorkspace = base.workspacesByThread['child-1']!;
+    final interaction = PendingInteraction(
+      id: 'large-interaction',
+      threadId: 'child-1',
+      turnId: 'child-turn',
+      kind: InteractionKind.userInput,
+      title: 'Review input',
+      body: 'Choose an option',
+      payload: UserInputInteractionPayload(
+        questions: [
+          UserQuestionView(
+            id: 'review',
+            header: 'Review scope',
+            question: 'Choose the applicable review scope.',
+            isOther: false,
+            isSecret: false,
+            options: [
+              for (var index = 0; index < 8; index++)
+                UserQuestionOptionView(
+                  label: 'Scope ${index + 1}',
+                  description:
+                      'A deliberately long option description that exercises '
+                      'the interaction dock at a compact window size.',
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+    final initial = base.copyWith(
+      workspacesByThread: {
+        ...base.workspacesByThread,
+        'child-1': childWorkspace.copyWith(interactions: [interaction]),
+      },
+    );
+    final api = _FakeStudioApi(initial);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const Scaffold(body: AgentWorkspacePane())),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('Choose the applicable review scope.'), findsOneWidget);
+    expect(find.byKey(StudioDriverKeys.userInputFirstOption), findsOneWidget);
+    expect(find.byKey(StudioDriverKeys.userInputSubmit), findsOneWidget);
+  });
 }
 
 StudioState _rootAndChildState() {

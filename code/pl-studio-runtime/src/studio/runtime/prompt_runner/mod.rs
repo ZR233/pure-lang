@@ -354,8 +354,7 @@ impl StudioRuntime {
         // 激活即入热集合：目录分页在此之后能以内存事实覆盖冷行。
         self.agent_facility
             .product_events
-            .apply_thread_delta(vec![pl_protocol::Thread::from(target)], Vec::new())
-            .await?;
+            .warm_thread_index(vec![pl_protocol::Thread::from(target)]);
         self.enforce_residency_limit().await;
         Ok((handle, target_agent_id))
     }

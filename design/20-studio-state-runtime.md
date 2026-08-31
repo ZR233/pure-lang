@@ -18,6 +18,9 @@ ThreadRuntimeView 和 `WorkflowSessionState` projection。不存在 taskDirector
 Product event 携带完整领域 snapshot 或明确 revision：ProjectDirectoryChanged、
 ThreadDirectoryChanged、AgentDirectoryChanged、ModeCatalogChanged、ThreadRuntimeChanged 等。Dart reducer
 拒绝旧 revision，并可用一次全量 snapshot 从 stream lag 恢复；它不自行推导 workflow transition。
+一次目录命令可以同时改变 Project 与 Thread，但每个实际变化的领域最多发布一次事件；空 delta
+不得提升 revision 或发布空事件。冷记录进入驻留/归档命令的内存索引属于 owner 准备步骤，不单独
+形成产品事实或广播，最终业务 mutation 才通过 directory command 发布 canonical delta。
 
 ## 20.3 Activation
 

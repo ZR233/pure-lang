@@ -29,6 +29,7 @@ import 'package:pure_studio/src/l10n/app_localizations.dart';
 import 'package:pure_studio/src/platform/external_url_launcher.dart';
 import 'package:pure_studio/src/shared/studio_chrome.dart';
 import 'package:pure_studio/src/shared/studio_driver_keys.dart';
+import 'package:pure_studio/src/shared/typed_json.dart';
 
 part 'widget_test/controller_stream_tests.dart';
 part 'widget_test/reducer_recovery_tests.dart';

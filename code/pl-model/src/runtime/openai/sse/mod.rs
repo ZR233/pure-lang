@@ -2,17 +2,17 @@ use std::collections::HashMap;
 
 use serde::Deserialize;
 
-use crate::completion::TokenUsage;
 use crate::completion::stream::event::{ModelBlockKind, ModelStreamEvent, ToolInputDeltaPayload};
+use crate::runtime::openai::identity::responses_tool_identity;
+use crate::runtime::openai::usage::ProviderTokenUsage;
 use pl_trace::TraceTextChannel;
 
 mod item;
 
 use item::{
-    assistant_message_identity, assistant_message_text, cache_write_tokens_from_details,
-    cached_tokens_from_details, output_item_native_context, output_item_tool_completed,
-    output_item_tool_started, reasoning_item_id, reasoning_summary_texts,
-    web_search_lifecycle_event,
+    assistant_message_identity, assistant_message_text, output_item_native_context,
+    output_item_tool_completed, output_item_tool_started, reasoning_item_id,
+    reasoning_summary_texts, web_search_lifecycle_event,
 };
 
 /// SSE 流事件原始结构（从 JSON 解析）
@@ -36,7 +36,7 @@ pub struct SseStreamEvent {
     pub summary_index: Option<i64>,
     pub content_index: Option<i64>,
     pub choices: Option<Vec<ChatStreamChoice>>,
-    pub usage: Option<ChatTokenUsage>,
+    pub usage: Option<ProviderTokenUsage>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -77,22 +77,6 @@ pub struct ChatStreamFunctionDelta {
 pub struct ChatStreamCustomDelta {
     pub name: Option<String>,
     pub input: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
-pub struct ChatTokenUsage {
-    pub prompt_tokens: Option<u64>,
-    pub input_tokens: Option<u64>,
-    pub completion_tokens: Option<u64>,
-    pub output_tokens: Option<u64>,
-    pub total_tokens: Option<u64>,
-    pub prompt_tokens_details: Option<serde_json::Value>,
-    pub input_tokens_details: Option<serde_json::Value>,
-    pub completion_tokens_details: Option<serde_json::Value>,
-    pub output_tokens_details: Option<serde_json::Value>,
-    pub prompt_cache_hit_tokens: Option<u64>,
-    pub cached_prompt_tokens: Option<u64>,
 }
 
 const DEFAULT_TEXT_ID: &str = "final";
@@ -543,47 +527,10 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
         }
 
         if choice.finish_reason.is_some() {
-            let usage = event.usage.as_ref().map(|u| TokenUsage {
-                prompt_tokens: u.prompt_tokens.or(u.input_tokens).unwrap_or(0),
-                completion_tokens: u.completion_tokens.or(u.output_tokens).unwrap_or(0),
-                total_tokens: u.total_tokens.unwrap_or(0),
-                cached_prompt_tokens: u
-                    .prompt_cache_hit_tokens
-                    .or(u.cached_prompt_tokens)
-                    .or_else(|| {
-                        u.prompt_tokens_details
-                            .as_ref()
-                            .and_then(cached_tokens_from_details)
-                    })
-                    .or_else(|| {
-                        u.input_tokens_details
-                            .as_ref()
-                            .and_then(cached_tokens_from_details)
-                    })
-                    .unwrap_or(0),
-                cache_write_tokens: u
-                    .input_tokens_details
-                    .as_ref()
-                    .and_then(cache_write_tokens_from_details)
-                    .or_else(|| {
-                        u.prompt_tokens_details
-                            .as_ref()
-                            .and_then(cache_write_tokens_from_details)
-                    })
-                    .unwrap_or(0),
-                reasoning_tokens: u
-                    .output_tokens_details
-                    .as_ref()
-                    .and_then(|details| details.get("reasoning_tokens"))
-                    .and_then(serde_json::Value::as_u64)
-                    .or_else(|| {
-                        u.completion_tokens_details
-                            .as_ref()
-                            .and_then(|details| details.get("reasoning_tokens"))
-                            .and_then(serde_json::Value::as_u64)
-                    })
-                    .unwrap_or(0),
-            });
+            let usage = event
+                .usage
+                .as_ref()
+                .and_then(ProviderTokenUsage::to_chat_usage);
             if let Some(usage) = usage {
                 events.push(ModelStreamEvent::Usage(usage));
             }
@@ -641,7 +588,11 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
         }
 
         "response.function_call_arguments.delta" => {
-            let (item_id, call_id) = responses_tool_identity(event);
+            let (item_id, call_id) = responses_tool_identity(
+                event.item_id.as_deref(),
+                event.call_id.as_deref(),
+                &event.kind,
+            );
             Some(StreamEventBatch::Single(ModelStreamEvent::ToolInputDelta {
                 stream_id: None,
                 item_id,
@@ -654,7 +605,11 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
         }
 
         "response.custom_tool_call_input.delta" => {
-            let (item_id, call_id) = responses_tool_identity(event);
+            let (item_id, call_id) = responses_tool_identity(
+                event.item_id.as_deref(),
+                event.call_id.as_deref(),
+                &event.kind,
+            );
             Some(StreamEventBatch::Single(ModelStreamEvent::ToolInputDelta {
                 stream_id: None,
                 item_id,
@@ -681,42 +636,12 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
         }),
 
         "response.completed" => {
-            let usage = event.response.as_ref().and_then(|r| {
-                r.get("usage").and_then(|u| {
-                    Some(TokenUsage {
-                        prompt_tokens: u.get("input_tokens")?.as_u64()?,
-                        completion_tokens: u.get("output_tokens")?.as_u64()?,
-                        total_tokens: u.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
-                        cached_prompt_tokens: u
-                            .get("input_tokens_details")
-                            .and_then(cached_tokens_from_details)
-                            .or_else(|| {
-                                u.get("prompt_tokens_details")
-                                    .and_then(cached_tokens_from_details)
-                            })
-                            .or_else(|| u.get("prompt_cache_hit_tokens").and_then(|v| v.as_u64()))
-                            .unwrap_or(0),
-                        cache_write_tokens: u
-                            .get("input_tokens_details")
-                            .and_then(cache_write_tokens_from_details)
-                            .or_else(|| {
-                                u.get("prompt_tokens_details")
-                                    .and_then(cache_write_tokens_from_details)
-                            })
-                            .unwrap_or(0),
-                        reasoning_tokens: u
-                            .get("output_tokens_details")
-                            .and_then(|details| details.get("reasoning_tokens"))
-                            .and_then(serde_json::Value::as_u64)
-                            .or_else(|| {
-                                u.get("completion_tokens_details")
-                                    .and_then(|details| details.get("reasoning_tokens"))
-                                    .and_then(serde_json::Value::as_u64)
-                            })
-                            .unwrap_or(0),
-                    })
-                })
-            });
+            let usage = event
+                .response
+                .as_ref()
+                .and_then(|response| response.get("usage"))
+                .and_then(ProviderTokenUsage::from_value)
+                .and_then(|usage| usage.to_responses_usage());
             let mut events = Vec::new();
             if let Some(usage) = usage {
                 events.push(ModelStreamEvent::Usage(usage));
@@ -818,40 +743,6 @@ fn provider_status_value(value: &serde_json::Value) -> Option<u16> {
         .as_u64()
         .and_then(|status| u16::try_from(status).ok())
         .or_else(|| value.as_str()?.parse().ok())
-}
-
-/// 解析 Responses 流事件携带的工具调用身份。
-///
-/// `item_id` 取事件 `item_id`（缺失时回落 `call_id`）；`call_id` 取事件
-/// `call_id`，缺失时确定性赋 `item_id` 并记录——这是 late call_id 升级场景的
-/// 确定性赋值，不是 optional 语义。两者都缺失由 accumulator 以协议错误拒绝。
-fn responses_tool_identity(event: &SseStreamEvent) -> (String, String) {
-    let item_id = event
-        .item_id
-        .as_deref()
-        .filter(|item_id| !item_id.is_empty())
-        .or_else(|| {
-            event
-                .call_id
-                .as_deref()
-                .filter(|call_id| !call_id.is_empty())
-        })
-        .unwrap_or_default()
-        .to_string();
-    let call_id = event
-        .call_id
-        .as_deref()
-        .filter(|call_id| !call_id.is_empty())
-        .map(String::from)
-        .unwrap_or_else(|| {
-            tracing::trace!(
-                item_id = %item_id,
-                kind = %event.kind,
-                "responses tool event missing call_id; assigning item id"
-            );
-            item_id.clone()
-        });
-    (item_id, call_id)
 }
 
 #[cfg(test)]

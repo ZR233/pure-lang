@@ -5,10 +5,12 @@ use crate::completion::CompletionRequest;
 use crate::completion::CompletionResponse;
 use crate::model::info::ModelInfo;
 
+mod identity;
 mod request;
 #[cfg(test)]
 mod response;
 pub(crate) mod sse;
+mod usage;
 
 pub(crate) use request::OpenAiRequestBody;
 use request::build_openai_request_body;

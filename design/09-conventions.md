@@ -157,6 +157,9 @@ JSON discriminator 生成的 stored column。普通分类、配置、能力、sc
   输出目录时必须扩展该规则及其测试，不能只修改 CI pathspec 或单个格式化分支。全仓
   `cargo fmt` 和 `dart format` 只作为只读门禁运行；可写格式化只能作用于明确的生成输出，
   禁止重新写入无关手写源码。
+- xtask 启动驻留 GUI、Driver 或 live fixture 子进程时必须把绝对 deadline 传到统一的进程 supervisor；
+  headless 与 GUI 验收具有相同的总超时、日志保留和进程树回收语义。fixture 复制、diff 与 artifact
+  遍历使用不跟随符号链接的目录项类型，并对任何 symlink fail-loud，不能读取 workspace 根之外的内容。
 
 ## 9.10 测试分层与放置
 

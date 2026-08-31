@@ -6,6 +6,8 @@ mod mailbox_delivery;
 mod snapshot;
 mod transition;
 
+pub(crate) use crate::time::unix_seconds as unix_timestamp;
+
 pub use error::*;
 pub use event::*;
 pub use lifecycle::*;

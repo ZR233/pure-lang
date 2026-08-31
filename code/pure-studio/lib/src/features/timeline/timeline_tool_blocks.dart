@@ -343,7 +343,7 @@ class _WebSearchCardData {
   });
 
   factory _WebSearchCardData.fromTool(TimelineToolPart? tool) {
-    final arguments = _decodeWebSearchArguments(tool?.arguments ?? '');
+    final arguments = decodeJsonObject(tool?.arguments ?? '');
     final details = <String>[];
     var kind = _WebSearchActionKind.other;
     final type = arguments['type']?.toString();
@@ -364,7 +364,7 @@ class _WebSearchCardData {
       final commands = arguments[key];
       if (commands is List) {
         for (final command in commands) {
-          final query = _webSearchMap(command)['q']?.toString().trim();
+          final query = jsonObject(command)['q']?.toString().trim();
           if (query?.isNotEmpty == true) {
             queries.add(query!);
           }
@@ -427,27 +427,6 @@ class _WebSearchCardData {
       _WebSearchActionKind.other => context.l10n.timelineWebSearchTitle,
     };
   }
-}
-
-Map<String, Object?> _decodeWebSearchArguments(String value) {
-  if (value.trim().isEmpty) {
-    return const {};
-  }
-  try {
-    return _webSearchMap(jsonDecode(value));
-  } catch (_) {
-    return const {};
-  }
-}
-
-Map<String, Object?> _webSearchMap(Object? value) {
-  if (value is Map<String, Object?>) {
-    return value;
-  }
-  if (value is Map) {
-    return value.map((key, value) => MapEntry(key.toString(), value));
-  }
-  return const {};
 }
 
 void _collectWebLinks(Object? value, Set<String> links) {
@@ -634,23 +613,15 @@ String _toolDisplayName(BuildContext context, TimelineToolGroupItem item) {
 
 /// 从 `lsp_query` 参数中提取 languageId 与查询目标摘要（沿用命令摘要思路）。
 String _lspQueryDetail(String arguments) {
-  final json = _decodeWebSearchArguments(arguments);
+  final json = decodeJsonObject(arguments);
   return [
-        _stringValue(json['languageId']),
-        _stringValue(json['operation']),
-        _stringValue(json['filePath']) ??
-            _stringValue(json['query']) ??
-            _stringValue(json['path']),
+        jsonStringValue(json['languageId']),
+        jsonStringValue(json['operation']),
+        jsonStringValue(json['filePath']) ??
+            jsonStringValue(json['query']) ??
+            jsonStringValue(json['path']),
       ]
       .map((value) => value?.trim() ?? '')
       .where((value) => value.isNotEmpty)
       .join(' · ');
-}
-
-String? _stringValue(Object? value) {
-  if (value == null) {
-    return null;
-  }
-  final text = value.toString().trim();
-  return text.isEmpty ? null : text;
 }

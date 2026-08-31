@@ -33,6 +33,9 @@ class _UserInputDockState extends ConsumerState<UserInputDock> {
   late final TextEditingController _fallbackController;
   final Map<String, TextEditingController> _textControllers = {};
   final Map<String, Set<String>> _selectedOptions = {};
+  final _firstOptionKey = GlobalKey();
+  final _submitKey = GlobalKey();
+  String? _ensuredQuestionKey;
   int _index = 0;
 
   @override
@@ -81,6 +84,9 @@ class _UserInputDockState extends ConsumerState<UserInputDock> {
     }
     final question = questions[index];
     final key = _questionKey(question, index);
+    if (index == 0 && question.options.isNotEmpty) {
+      _ensureFirstOptionVisible(key);
+    }
     final total = questions.length;
     final answeredCount = questions.where(_answered).length;
     final isLast = index >= total - 1;
@@ -105,23 +111,26 @@ class _UserInputDockState extends ConsumerState<UserInputDock> {
               label: Text(context.l10n.interactionPreviousQuestion),
               onPressed: () => setState(() => _index -= 1),
             ),
-          FilledButton.icon(
-            key: StudioDriverKeys.userInputSubmit,
-            icon: Icon(isLast ? Icons.check : Icons.chevron_right),
-            label: Text(
-              isLast
-                  ? context.l10n.interactionSubmitAnswers
-                  : context.l10n.interactionNextQuestion,
-            ),
-            onPressed: widget.enabled
-                ? () {
-                    if (isLast) {
-                      _submitAnswers();
-                    } else {
-                      setState(() => _index += 1);
+          KeyedSubtree(
+            key: _submitKey,
+            child: FilledButton.icon(
+              key: StudioDriverKeys.userInputSubmit,
+              icon: Icon(isLast ? Icons.check : Icons.chevron_right),
+              label: Text(
+                isLast
+                    ? context.l10n.interactionSubmitAnswers
+                    : context.l10n.interactionNextQuestion,
+              ),
+              onPressed: widget.enabled
+                  ? () {
+                      if (isLast) {
+                        _submitAnswers();
+                      } else {
+                        setState(() => _index += 1);
+                      }
                     }
-                  }
-                : null,
+                  : null,
+            ),
           ),
         ],
       ),
@@ -140,6 +149,8 @@ class _UserInputDockState extends ConsumerState<UserInputDock> {
           const SizedBox(height: 12),
           _QuestionStep(
             enabled: widget.enabled,
+            isFirstQuestion: index == 0,
+            firstOptionKey: _firstOptionKey,
             question: question,
             questionKey: key,
             controller: _textControllers[key]!,
@@ -154,8 +165,12 @@ class _UserInputDockState extends ConsumerState<UserInputDock> {
                 }
                 _selectedOptions[key] = values;
               });
+              _ensureSubmitVisible();
             },
-            onTextChanged: (_) => setState(() {}),
+            onTextChanged: (_) {
+              setState(() {});
+              _ensureSubmitVisible();
+            },
           ),
         ],
       ),
@@ -184,6 +199,43 @@ class _UserInputDockState extends ConsumerState<UserInputDock> {
         ),
       );
     _index = 0;
+    _ensuredQuestionKey = null;
+  }
+
+  void _ensureFirstOptionVisible(String questionKey) {
+    if (_ensuredQuestionKey == questionKey) {
+      return;
+    }
+    _ensuredQuestionKey = questionKey;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      final context = _firstOptionKey.currentContext;
+      if (context != null) {
+        Scrollable.ensureVisible(
+          context,
+          alignment: 0.8,
+          duration: Duration.zero,
+        );
+      }
+    });
+  }
+
+  void _ensureSubmitVisible() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      final context = _submitKey.currentContext;
+      if (context != null) {
+        Scrollable.ensureVisible(
+          context,
+          alignment: 0.8,
+          duration: Duration.zero,
+        );
+      }
+    });
   }
 
   bool _answered(UserQuestionView question) {
@@ -397,6 +449,8 @@ class _QuestionStep extends StatelessWidget {
   const _QuestionStep({
     required this.question,
     required this.questionKey,
+    required this.isFirstQuestion,
+    required this.firstOptionKey,
     required this.controller,
     required this.selected,
     required this.onOptionChanged,
@@ -406,6 +460,8 @@ class _QuestionStep extends StatelessWidget {
 
   final UserQuestionView question;
   final String questionKey;
+  final bool isFirstQuestion;
+  final GlobalKey firstOptionKey;
   final TextEditingController controller;
   final Set<String> selected;
   final void Function(String label, bool selected) onOptionChanged;
@@ -433,20 +489,32 @@ class _QuestionStep extends StatelessWidget {
           for (final (optionIndex, option) in question.options.indexed)
             Padding(
               padding: const EdgeInsets.only(bottom: 7),
-              child: _QuestionOptionRow(
-                key: StudioDriverKeys.userInputOption(questionKey, optionIndex),
-                option: option,
-                selected: selected.contains(option.label),
-                onChanged: enabled
-                    ? (value) => onOptionChanged(option.label, value)
+              child: KeyedSubtree(
+                key: optionIndex == 0 && isFirstQuestion
+                    ? firstOptionKey
                     : null,
+                child: _QuestionOptionRow(
+                  key: optionIndex == 0 && isFirstQuestion
+                      ? StudioDriverKeys.userInputFirstOption
+                      : StudioDriverKeys.userInputOption(
+                          questionKey,
+                          optionIndex,
+                        ),
+                  option: option,
+                  selected: selected.contains(option.label),
+                  onChanged: enabled
+                      ? (value) => onOptionChanged(option.label, value)
+                      : null,
+                ),
               ),
             ),
         ],
         if (question.isOther || question.options.isEmpty) ...[
           const SizedBox(height: 8),
           TextField(
-            key: StudioDriverKeys.userInputText(questionKey),
+            key: isFirstQuestion
+                ? StudioDriverKeys.userInputFirstText
+                : StudioDriverKeys.userInputText(questionKey),
             controller: controller,
             enabled: enabled,
             obscureText: question.isSecret,

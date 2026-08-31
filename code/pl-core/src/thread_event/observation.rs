@@ -1,9 +1,7 @@
-use std::collections::BTreeMap;
-
 use pl_protocol::{
-    InteractionRequest, RuntimeCostAmount, ThreadContextCompactionItem, ThreadItem,
-    ThreadItemState, ThreadNotification, ThreadNotificationEnvelope, ThreadRuntimeSnapshot,
-    ThreadRuntimeUsage, ThreadSnapshot,
+    InteractionRequest, ThreadContextCompactionItem, ThreadItem, ThreadItemState,
+    ThreadNotification, ThreadNotificationEnvelope, ThreadRuntimeSnapshot, ThreadRuntimeUsage,
+    ThreadSnapshot,
 };
 use pl_trace::AgentEvent;
 
@@ -215,11 +213,11 @@ fn runtime_snapshot(
             total_tokens,
             cache_hit_rate: (prompt_tokens > 0)
                 .then_some((cached_prompt_tokens as f64 / prompt_tokens as f64).clamp(0.0, 1.0)),
-            estimated_costs: merge_costs(
+            estimated_costs: merged_costs(
                 prior.map_or(&[], |usage| usage.estimated_costs.as_slice()),
                 &delta.estimated_costs,
             ),
-            estimated_cache_savings: merge_costs(
+            estimated_cache_savings: merged_costs(
                 prior.map_or(&[], |usage| usage.estimated_cache_savings.as_slice()),
                 &delta.estimated_cache_savings,
             ),
@@ -288,22 +286,16 @@ pub(crate) fn empty_runtime(thread_id: &str) -> ThreadRuntimeSnapshot {
     }
 }
 
-fn merge_costs(left: &[RuntimeCostAmount], right: &[RuntimeCostAmount]) -> Vec<RuntimeCostAmount> {
-    let mut totals = BTreeMap::<String, f64>::new();
-    for cost in left.iter().chain(right) {
-        *totals.entry(cost.currency.clone()).or_default() += cost.amount;
-    }
-    totals
-        .into_iter()
-        .map(|(currency, amount)| RuntimeCostAmount { currency, amount })
-        .collect()
+fn merged_costs(
+    left: &[pl_protocol::RuntimeCostAmount],
+    right: &[pl_protocol::RuntimeCostAmount],
+) -> Vec<pl_protocol::RuntimeCostAmount> {
+    let mut merged = left.to_vec();
+    crate::runtime_usage::merge_costs(&mut merged, right);
+    merged
 }
 
-fn unix_timestamp() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_secs() as i64)
-}
+use crate::time::unix_seconds as unix_timestamp;
 
 #[cfg(test)]
 mod tests {

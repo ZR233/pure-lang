@@ -137,6 +137,14 @@ struct WorkflowTransitionInput {
     when: String,
 }
 
+/// 验证 workflow_state 的 wire 参数形状，不执行状态变更。
+///
+/// 该入口供 artifact/replay 等外部验收边界复用与运行时工具相同的
+/// typed serde contract，避免维护第二套字段、类型和未知字段校验。
+pub fn validate_workflow_state_arguments(arguments: serde_json::Value) -> Result<(), PureError> {
+    deserialize_tool_input::<WorkflowStateInput>(TOOL_WORKFLOW_STATE, arguments).map(|_| ())
+}
+
 impl From<WorkflowTransitionInput> for WorkflowTransition {
     fn from(input: WorkflowTransitionInput) -> Self {
         Self {

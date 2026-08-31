@@ -359,8 +359,7 @@ impl StudioRuntime {
         entries.dedup_by(|left, right| left.id == right.id);
         self.agent_facility
             .product_events
-            .apply_thread_delta(entries, Vec::new())
-            .await?;
+            .warm_thread_index(entries);
         Ok(Some((root, roots, tree)))
     }
 
@@ -374,8 +373,7 @@ impl StudioRuntime {
             .collect();
         self.agent_facility
             .product_events
-            .apply_thread_delta(entries, Vec::new())
-            .await?;
+            .warm_thread_index(entries);
         Ok(threads)
     }
 

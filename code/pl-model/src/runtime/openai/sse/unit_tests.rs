@@ -192,6 +192,36 @@ fn process_responses_completed_reads_cache_write_tokens() {
 }
 
 #[test]
+fn responses_stream_usage_matches_non_stream_alias_precedence() {
+    let event: SseStreamEvent = serde_json::from_value(serde_json::json!({
+        "type": "response.completed",
+        "response": {
+            "id": "resp_usage_precedence",
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 20,
+                "total_tokens": 120,
+                "cached_prompt_tokens": 55,
+                "input_tokens_details": {
+                    "cached_tokens": 20
+                }
+            }
+        }
+    }))
+    .unwrap();
+
+    match process_sse_events(&event).as_slice() {
+        [
+            ModelStreamEvent::Usage(usage),
+            ModelStreamEvent::Completed { .. },
+        ] => {
+            assert_eq!(usage.cached_prompt_tokens, 55);
+        }
+        other => panic!("unexpected events: {other:?}"),
+    }
+}
+
+#[test]
 fn process_responses_marks_summary_and_raw_reasoning() {
     let summary: SseStreamEvent = serde_json::from_value(serde_json::json!({
         "type": "response.reasoning_summary_text.delta",

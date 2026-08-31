@@ -303,7 +303,7 @@ fn child_fork_excludes_open_and_completed_tool_protocol_messages() {
         None,
         vec![ToolCall::function(
             "call-1",
-            "task_request_delivery_review",
+            "example_tool",
             serde_json::json!({}),
             "call-1",
         )],
@@ -313,7 +313,7 @@ fn child_fork_excludes_open_and_completed_tool_protocol_messages() {
         ToolResultRecord {
             item_id: "call-1".to_string(),
             call_id: "call-1".to_string(),
-            name: "task_request_delivery_review".to_string(),
+            name: "example_tool".to_string(),
             kind: ToolCallKind::Function,
         },
         "ok".to_string(),

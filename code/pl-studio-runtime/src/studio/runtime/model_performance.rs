@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 
+use pl_core::runtime_usage::merge_costs;
 use pl_protocol::{InferenceBillingRecord, RuntimeCostAmount};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -342,20 +343,6 @@ fn performance_summaries(
 
 fn throughput(completion_tokens: u64, decode_millis: u64) -> f64 {
     completion_tokens as f64 * 1_000.0 / decode_millis as f64
-}
-
-fn merge_costs(target: &mut Vec<RuntimeCostAmount>, incoming: &[RuntimeCostAmount]) {
-    for cost in incoming {
-        if let Some(existing) = target
-            .iter_mut()
-            .find(|existing| existing.currency == cost.currency)
-        {
-            existing.amount += cost.amount;
-        } else {
-            target.push(cost.clone());
-        }
-    }
-    target.sort_by(|left, right| left.currency.cmp(&right.currency));
 }
 
 fn billing_fingerprint(billing: &InferenceBillingRecord) -> Result<String, PureError> {

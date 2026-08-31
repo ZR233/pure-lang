@@ -340,34 +340,8 @@ fn validate_workflow_call_arguments(body: &Value) -> Result<()> {
             Value::Object(_) => raw.clone(),
             _ => bail!("workflow_state call arguments are not an object"),
         };
-        let action = arguments
-            .get("action")
-            .and_then(Value::as_str)
-            .context("workflow_state call has no action")?;
-        let required = match action {
-            "compile" => &["expectedRevision", "definition"][..],
-            "status" => &[][..],
-            "transition" => &[
-                "expectedRunId",
-                "expectedRevision",
-                "expectedStageId",
-                "toStageId",
-                "reason",
-                "completion",
-            ][..],
-            "supersede" => &[
-                "expectedRunId",
-                "expectedRevision",
-                "expectedStageId",
-                "reason",
-                "definition",
-            ][..],
-            other => bail!("workflow_state call uses unknown action `{other}`"),
-        };
-        ensure!(
-            required.iter().all(|field| arguments.get(*field).is_some()),
-            "workflow_state {action} call is missing required CAS or payload fields"
-        );
+        pl_core::tool::validate_workflow_state_arguments(arguments)
+            .map_err(|error| anyhow::anyhow!("invalid workflow_state call arguments: {error}"))?;
     }
     Ok(())
 }
@@ -572,13 +546,64 @@ mod tests {
                 "arguments": serde_json::json!({
                     "action": "compile",
                     "expectedRevision": 0,
-                    "definition": {}
+                    "definition": {
+                        "title": "Task",
+                        "goal": "Complete task",
+                        "initialStageId": "working",
+                        "stages": [
+                            {"id": "working", "title": "Working", "instructions": "Do the work"},
+                            {"id": "completed", "title": "Completed", "instructions": "", "terminal": true}
+                        ],
+                        "transitions": [
+                            {"fromStageId": "working", "toStageId": "completed", "when": "Work is verified"}
+                        ]
+                    }
                 }).to_string()
             }]
         });
 
         validate_workflow_call_arguments(&body)
             .expect("a first compile has no previous workflow run id");
+    }
+
+    #[test]
+    fn workflow_call_validation_rejects_wrong_types_and_unknown_fields() {
+        for arguments in [
+            serde_json::json!({
+                "action": "compile",
+                "expectedRevision": null,
+                "definition": {}
+            }),
+            serde_json::json!({
+                "action": "compile",
+                "expectedRevision": 0,
+                "definition": {
+                    "title": "Task",
+                    "goal": "Goal",
+                    "initialStageId": "done",
+                    "stages": [{"id": "done", "title": "Done", "instructions": "", "terminal": true}],
+                    "transitions": [],
+                    "unexpected": true
+                }
+            }),
+            serde_json::json!({
+                "action": "compile",
+                "expected_revision": 0,
+                "definition": {}
+            }),
+        ] {
+            let body = serde_json::json!({
+                "input": [{
+                    "type": "function_call",
+                    "name": "workflow_state",
+                    "arguments": arguments.to_string()
+                }]
+            });
+            assert!(
+                validate_workflow_call_arguments(&body).is_err(),
+                "{arguments}"
+            );
+        }
     }
 
     #[test]

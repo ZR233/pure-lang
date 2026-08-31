@@ -68,7 +68,7 @@ pub(crate) fn bridge_update_state(state: StudioUpdateStateSnapshot) -> BridgeUpd
             BridgeUpdaterStateSnapshot::CheckFailed(BridgeCheckFailedUpdaterState {
                 revision,
                 failed_at: value.failed_at(),
-                error: bridge_error(value.error()),
+                error: value.error().into(),
             })
         }
         StudioUpdateStateSnapshot::InstallFailed(value) => {
@@ -76,17 +76,9 @@ pub(crate) fn bridge_update_state(state: StudioUpdateStateSnapshot) -> BridgeUpd
                 revision,
                 failed_at: value.failed_at(),
                 update: bridge_update(value.update()),
-                error: bridge_error(value.error()),
+                error: value.error().into(),
             })
         }
-    }
-}
-
-fn bridge_error(error: &pl_protocol::StateError) -> BridgeStateError {
-    BridgeStateError {
-        code: error.code.clone(),
-        message: error.message.clone(),
-        retryable: error.retryable,
     }
 }
 

@@ -22,6 +22,11 @@ Chat、DeepSeek 和 Zhipu/GLM 兼容接口在进入唯一 accumulator 前必须�
 started/id、文本、思考、reasoning summary、工具参数、工具 ready/done、usage 和完成/失败事件。
 核心层、Studio timeline 和外部集成方不解析 provider 原始 JSON。
 
+同一协议族的 usage alias、cache details、reasoning details 与工具 identity 只能由
+`runtime/openai` 的共享 typed normalizer 解释一次。SSE、WebSocket 与仅供 fixture 使用的非流式
+response parser 只负责提取各自 envelope，不能各自维护字段优先级或 fallback；同一 usage/tool
+fixture 经过不同 transport 入口必须得到完全相同的 canonical `TokenUsage` 与工具身份。
+
 底层 event stream、decoder 和 accumulator 只服务 `ModelRuntime` 与 `pl-core` 的 trace projector，不是宿主 API。外部宿主通过 `pl-core::TurnEngineBuilder::from_route` 或 `pl-core::ModelTurnClient::from_route` 执行模型请求，避免复刻 provider adapter。
 
 `completion` 内部 stream 状态机负责稳定工具调用 identity。工具调用一经解码即具有必填的

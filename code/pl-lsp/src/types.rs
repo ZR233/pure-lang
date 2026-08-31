@@ -33,6 +33,11 @@ pub enum LspRoutingError {
         language_id: String,
         servers: Vec<String>,
     },
+    #[error("ambiguous file extension `{extension}`: multiple LSP servers declare it: {servers:?}")]
+    AmbiguousPath {
+        extension: String,
+        servers: Vec<String>,
+    },
 }
 
 /// server 组件缺失的 typed 描述：由 driver 探测产生，repair 消费。

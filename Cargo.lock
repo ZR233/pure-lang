@@ -2851,7 +2851,6 @@ name = "pl-studio-runtime"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "axum",
  "base64 0.22.1",
  "fs4",
  "futures",
@@ -2865,7 +2864,6 @@ dependencies = [
  "pl-trace",
  "pretty_assertions",
  "reqwest",
- "rmcp",
  "rust-embed 8.12.0",
  "schemars",
  "sea-orm",
@@ -2926,6 +2924,7 @@ dependencies = [
  "clap",
  "libc",
  "minisign-verify",
+ "pl-core",
  "pl-skill-core",
  "pretty_assertions",
  "semver",

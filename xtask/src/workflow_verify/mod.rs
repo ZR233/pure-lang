@@ -47,7 +47,11 @@ pub(crate) fn run(options: VerifyWorkflowOptions) -> Result<()> {
         "verify-workflow requires --live because it uses real credentials, incurs model fees, and never falls back to a scripted provider"
     );
     let workspace_root = paths::workspace_root()?;
-    let surface = if options.headless { "headless" } else { "gui" };
+    let surface = match (options.headless, options.gui) {
+        (true, false) => "headless",
+        (false, true) => "gui",
+        _ => bail!("verify-workflow requires exactly one of --headless or --gui"),
+    };
     let artifact_dir = workspace_root
         .join("target")
         .join("workflow-live-artifacts")
@@ -74,11 +78,9 @@ pub(crate) fn run(options: VerifyWorkflowOptions) -> Result<()> {
     let wire_dir = artifact_dir.join("wire");
     fs::create_dir_all(&wire_dir)?;
     let acceptance = if options.headless {
-        run_headless(&workspace_root, &artifact_dir, &wire_dir)
-    } else if options.gui {
-        run_gui(&workspace_root, &artifact_dir, &wire_dir, &prompt, deadline)
+        run_headless(&workspace_root, &artifact_dir, &wire_dir, deadline)
     } else {
-        bail!("verify-workflow requires exactly one of --headless or --gui")
+        run_gui(&workspace_root, &artifact_dir, &wire_dir, &prompt, deadline)
     };
     if let Err(error) = &acceptance {
         fs::write(
@@ -125,7 +127,12 @@ pub(crate) fn run(options: VerifyWorkflowOptions) -> Result<()> {
     }
 }
 
-fn run_headless(workspace_root: &Path, artifact_dir: &Path, wire_dir: &Path) -> Result<()> {
+fn run_headless(
+    workspace_root: &Path,
+    artifact_dir: &Path,
+    wire_dir: &Path,
+    deadline: Instant,
+) -> Result<()> {
     let mut command = Command::new("cargo");
     command
         .args([
@@ -144,11 +151,17 @@ fn run_headless(workspace_root: &Path, artifact_dir: &Path, wire_dir: &Path) -> 
         .current_dir(workspace_root)
         .env("PURE_STUDIO_WORKFLOW_ARTIFACT_DIR", artifact_dir)
         .env("PURE_STUDIO_WIRE_CAPTURE_DIR", wire_dir);
-    resident::run_logged(
+    let timeout = deadline.saturating_duration_since(Instant::now());
+    ensure!(
+        !timeout.is_zero(),
+        "workflow headless acceptance exceeded 30 minutes before starting"
+    );
+    resident::run_logged_with_timeout(
         &mut command,
         "real-model headless workflow acceptance",
         &artifact_dir.join("headless.stdout.log"),
         &artifact_dir.join("headless.stderr.log"),
+        timeout,
     )
 }
 
@@ -508,9 +521,16 @@ fn collect_relative_files(root: &Path, current: &Path, output: &mut Vec<String>)
         if path.file_name().is_some_and(|name| name == "target") {
             continue;
         }
-        if path.is_dir() {
+        let file_type = entry.file_type()?;
+        if file_type.is_symlink() {
+            bail!(
+                "fixture traversal refuses symbolic link `{}`",
+                path.display()
+            );
+        }
+        if file_type.is_dir() {
             collect_relative_files(root, &path, output)?;
-        } else {
+        } else if file_type.is_file() {
             output.push(
                 path.strip_prefix(root)
                     .expect("walk path must be below root")
@@ -918,6 +938,23 @@ fn unix_nanos() -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn fixture_walk_rejects_directory_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = tempfile::tempdir().unwrap();
+        let external = tempfile::tempdir().unwrap();
+        fs::write(external.path().join("outside.txt"), "outside").unwrap();
+        symlink(external.path(), workspace.path().join("escape")).unwrap();
+
+        let mut files = Vec::new();
+        let error = collect_relative_files(workspace.path(), workspace.path(), &mut files)
+            .expect_err("fixture traversal must not follow directory symlinks");
+        assert!(error.to_string().contains("symbolic link"));
+        assert!(files.is_empty());
+    }
 
     #[test]
     fn live_config_copy_upgrades_only_the_immediately_previous_schema() {

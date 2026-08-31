@@ -1,9 +1,8 @@
-use std::collections::VecDeque;
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use crate::AgentRoleId;
 use crate::agent_runtime::{ThreadId, TurnId};
+use std::collections::VecDeque;
 
+use super::unix_timestamp;
 use super::{AgentIdentity, AgentSnapshot, AgentState};
 use super::{mailbox::*, snapshot::*};
 
@@ -111,11 +110,4 @@ impl AgentRegistration {
             active_input: None,
         }
     }
-}
-
-pub(crate) fn unix_timestamp() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64
 }

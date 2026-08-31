@@ -10,6 +10,7 @@ class AgentWorkspacePane extends ConsumerStatefulWidget {
 class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
   static const _todoPanelWidth = 304.0;
   static const _minimumTimelineWidth = 560.0;
+  static const _maximumFooterFraction = 0.5;
 
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   final Map<String, bool> _todoExpandedByThread = {};
@@ -39,6 +40,9 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
             final todoInDrawer =
                 constraints.maxWidth < _todoPanelWidth + _minimumTimelineWidth;
             final todoExpanded = _todoExpandedByThread[threadId] ?? false;
+            final footerMaxHeight = constraints.hasBoundedHeight
+                ? constraints.maxHeight * _maximumFooterFraction
+                : null;
             if (todo != null &&
                 todo.items.any((item) => item.status != 'completed') &&
                 _todoAutoOpened.add(threadId)) {
@@ -107,7 +111,8 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
                       ],
                     ),
                   ),
-                  _Footer(
+                  _AdaptiveFooter(
+                    maxHeight: footerMaxHeight,
                     showTodo: todo != null,
                     todoExpanded: todoExpanded,
                     onToggleTodo: todo == null
@@ -129,6 +134,37 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
           },
         );
       },
+    );
+  }
+}
+
+/// Keeps a large interaction dock scrollable when the desktop window is short.
+class _AdaptiveFooter extends StatelessWidget {
+  const _AdaptiveFooter({
+    required this.maxHeight,
+    required this.showTodo,
+    required this.todoExpanded,
+    required this.onToggleTodo,
+  });
+
+  final double? maxHeight;
+  final bool showTodo;
+  final bool todoExpanded;
+  final VoidCallback? onToggleTodo;
+
+  @override
+  Widget build(BuildContext context) {
+    final footer = _Footer(
+      showTodo: showTodo,
+      todoExpanded: todoExpanded,
+      onToggleTodo: onToggleTodo,
+    );
+    if (maxHeight == null) {
+      return footer;
+    }
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: maxHeight!),
+      child: SingleChildScrollView(primary: false, child: footer),
     );
   }
 }
