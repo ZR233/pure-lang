@@ -2088,7 +2088,7 @@ fn ensure_finding_re_review(calls: &[WireCall], outputs: &[WireOutput]) -> Resul
             .get("agentId")
             .and_then(Value::as_str)
             .context("rework worktree receipt has no agentId")?;
-        let read_index = calls
+        let (read_index, read) = calls
             .iter()
             .enumerate()
             .find(|(index, call)| {
@@ -2097,10 +2097,18 @@ fn ensure_finding_re_review(calls: &[WireCall], outputs: &[WireOutput]) -> Resul
                     && call.name == "read_agent_submissions"
                     && call.arguments.get("target").and_then(Value::as_str) == Some(agent)
             })
-            .map(|(index, _)| index)
             .with_context(|| {
                 format!("rework worktree agent {agent} has no durable delivery read")
             })?;
+        let read_id = read
+            .call_id
+            .as_ref()
+            .context("rework worktree durable delivery read has no call_id")?;
+        let page = outputs
+            .iter()
+            .find(|output| output.call_id.as_ref() == Some(read_id))
+            .context("rework worktree durable delivery read has no bound output")?;
+        let commit = worktree_submission_commit(&parse_submission_page(&page.content)?.items)?;
         let cherry_pick = calls
             .iter()
             .enumerate()
@@ -2112,7 +2120,9 @@ fn ensure_finding_re_review(calls: &[WireCall], outputs: &[WireOutput]) -> Resul
                         .arguments
                         .get("command")
                         .and_then(Value::as_str)
-                        .is_some_and(|command| command.contains("cherry-pick"))
+                        .is_some_and(|command| {
+                            command.contains("cherry-pick") && command.contains(&commit)
+                        })
             })
             .map(|(index, _)| index)
             .with_context(|| format!("rework worktree agent {agent} was not integrated"))?;
@@ -2356,6 +2366,7 @@ fn ensure_submissions(calls: &[WireCall], outputs: &[WireOutput]) -> Result<()> 
                 "{profile} agent {agent} submission was not read before review"
             );
             if profile == "worktree_executor" {
+                let commit = worktree_submission_commit(&result.items)?;
                 let cherry_pick = calls
                     .iter()
                     .enumerate()
@@ -2367,7 +2378,9 @@ fn ensure_submissions(calls: &[WireCall], outputs: &[WireOutput]) -> Result<()> 
                                 .arguments
                                 .get("command")
                                 .and_then(Value::as_str)
-                                .is_some_and(|command| command.contains("cherry-pick"))
+                                .is_some_and(|command| {
+                                    command.contains("cherry-pick") && command.contains(&commit)
+                                })
                     })
                     .map(|(index, _)| index)
                     .with_context(|| {
@@ -2485,6 +2498,37 @@ fn parse_submission_page(content: &str) -> Result<SubmissionPage> {
     Ok(page)
 }
 
+fn worktree_submission_commit(items: &[Value]) -> Result<String> {
+    let mut commits = std::collections::HashSet::new();
+    for item in items {
+        let payload = ["summary", "nextStep", "detail"]
+            .into_iter()
+            .filter_map(|field| item.get(field).and_then(Value::as_str))
+            .collect::<Vec<_>>();
+        if !payload
+            .iter()
+            .any(|text| text.contains("WORKTREE_COMMIT_READY"))
+        {
+            continue;
+        }
+        for text in payload {
+            commits.extend(
+                text.split(|character: char| !character.is_ascii_hexdigit())
+                    .filter(|token| token.len() == 40)
+                    .map(str::to_ascii_lowercase),
+            );
+        }
+    }
+    ensure!(
+        commits.len() == 1,
+        "worktree durable delivery must identify exactly one 40-character hexadecimal commit"
+    );
+    commits
+        .into_iter()
+        .next()
+        .context("validated worktree durable delivery commit is missing")
+}
+
 fn deduplicate_calls(calls: &mut Vec<WireCall>) {
     let mut seen = std::collections::HashSet::new();
     calls.retain(|call| {
@@ -2546,6 +2590,10 @@ fn run_git(directory: &Path, args: &[&str]) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const FIRST_WORKTREE_COMMIT: &str = "1111111111111111111111111111111111111111";
+    const SECOND_WORKTREE_COMMIT: &str = "2222222222222222222222222222222222222222";
+    const REWORK_WORKTREE_COMMIT: &str = "3333333333333333333333333333333333333333";
 
     #[test]
     fn fixture_is_a_git_repository_with_an_initial_head() {
@@ -3518,7 +3566,7 @@ mod tests {
                 serde_json::json!({"target":agent}),
             ));
             let detail = if profile == "worktree_executor" {
-                "CHILD_DELIVERY_READY WORKTREE_COMMIT_READY"
+                "CHILD_DELIVERY_READY WORKTREE_COMMIT_READY commit=1111111111111111111111111111111111111111"
             } else {
                 "CHILD_DELIVERY_READY"
             };
@@ -3539,7 +3587,7 @@ mod tests {
         calls.push(orchestration_call(
             "pick",
             "exec",
-            serde_json::json!({"command":"git cherry-pick abc"}),
+            serde_json::json!({"command":format!("git cherry-pick {FIRST_WORKTREE_COMMIT}")}),
         ));
         calls.push(orchestration_call(
             "cleanup",
@@ -3578,7 +3626,7 @@ mod tests {
                 serde_json::json!({"target":agent}),
             ));
             let detail = if profile == "worktree_executor" {
-                "CHILD_DELIVERY_READY WORKTREE_COMMIT_READY"
+                "CHILD_DELIVERY_READY WORKTREE_COMMIT_READY commit=2222222222222222222222222222222222222222"
             } else {
                 "CHILD_DELIVERY_READY"
             };
@@ -3590,7 +3638,7 @@ mod tests {
         calls.push(orchestration_call(
             "pick-2",
             "exec",
-            serde_json::json!({"command":"git cherry-pick def"}),
+            serde_json::json!({"command":format!("git cherry-pick {SECOND_WORKTREE_COMMIT}")}),
         ));
         calls.push(orchestration_call(
             "cleanup-2",
@@ -3631,7 +3679,7 @@ mod tests {
             orchestration_call(
                 "i1",
                 "exec",
-                serde_json::json!({"command":"git cherry-pick abc"}),
+                serde_json::json!({"command":format!("git cherry-pick {REWORK_WORKTREE_COMMIT}")}),
             ),
             orchestration_call(
                 "c1",
@@ -3788,7 +3836,7 @@ mod tests {
             orchestration_call(
                 "i1",
                 "exec",
-                serde_json::json!({"command":"git cherry-pick abc"}),
+                serde_json::json!({"command":format!("git cherry-pick {REWORK_WORKTREE_COMMIT}")}),
             ),
             orchestration_call(
                 "c1",
@@ -3813,6 +3861,14 @@ mod tests {
             reviewer_receipt("r1", "reviewer-a"),
             finding_output("rr1"),
             spawn_output("x1", "worktree_executor", "worktree-a"),
+            reviewer_read_output(
+                Some("xr1"),
+                vec![submission_item(&[(
+                    "detail",
+                    "CHILD_DELIVERY_READY WORKTREE_COMMIT_READY commit=3333333333333333333333333333333333333333",
+                )])],
+                1,
+            ),
             reviewer_receipt("r2", "reviewer-b"),
             approval_output(Some("rr2")),
         ];
@@ -3939,6 +3995,14 @@ mod tests {
             calls.retain(|call| call.call_id.as_deref() != Some(missing));
             assert!(ensure_finding_re_review(&calls, &outputs).is_err());
         }
+        let (mut calls, outputs) = valid_finding_re_review();
+        calls
+            .iter_mut()
+            .find(|call| call.call_id.as_deref() == Some("i1"))
+            .unwrap()
+            .arguments["command"] =
+            Value::String("git cherry-pick 4444444444444444444444444444444444444444".into());
+        assert!(ensure_finding_re_review(&calls, &outputs).is_err());
     }
 
     #[test]

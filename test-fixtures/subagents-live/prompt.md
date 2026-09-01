@@ -15,7 +15,7 @@ Root 在 planning 查询 `list_agent_profiles`，并行派出两个任务互异�
 
 每个 child message 必须针对自己的任务写清：目的和价值、已确认基线、文件或事实所有权、禁止范围、按顺序的探索/实现/测试步骤、完成与失败条件、需返回的证据、workspace/Git/cleanup 契约。允许自由措辞和补充上下文，不要求复制固定段落或 marker 模板。若所需工具不在实际列表中，直接把它作为限制报告；不得尝试 MCP resource discovery 或其它未授权替代工具。
 
-explorer、executor、worktree_executor 在 final reply 前调用 `report_progress` 提交含 `CHILD_DELIVERY_READY` 的实际 evidence；worktree executor 的交付另含 `WORKTREE_COMMIT_READY`、commit hash、workspace root 与测试结果。reviewer 用 `report_progress` 提交 `REVIEWER_FINDING` 或 `REVIEWER_READ_ONLY_APPROVED`。Root 必须等待 child terminal，并按 receipt 中真实 agentId 读取 canonical nonempty submission；`read_agent_session` 或 root 转述不能替代 durable delivery。
+explorer、executor、worktree_executor 在 final reply 前调用 `report_progress` 提交含 `CHILD_DELIVERY_READY` 的实际 evidence；worktree executor 的交付另以 `WORKTREE_COMMIT_READY commit=<40位commit>` 标识自己的提交，并报告 workspace root 与测试结果。reviewer 用 `report_progress` 提交 `REVIEWER_FINDING` 或 `REVIEWER_READ_ONLY_APPROVED`。Root 必须等待 child terminal，并按 receipt 中真实 agentId 读取 canonical nonempty submission；`read_agent_session` 或 root 转述不能替代 durable delivery。
 
 ## 两个只读探索任务
 
@@ -37,7 +37,7 @@ worktree executor：
 
 1. 在独立 worktree 创建 `worktree_result.txt`，内容包含 `WORKTREE_RESULT_MARKER`。
 2. 运行 `cargo test` 并提交该文件。
-3. durable delivery 报告 `WORKTREE_COMMIT_READY`、40 位 commit hash、workspace root 和测试结果。
+3. durable delivery 报告 `WORKTREE_COMMIT_READY commit=<40位commit>`、workspace root 和测试结果。
 
 Root 必须在读取两个实现 child 的 durable delivery 后才能整合。directory 产物留在主 workspace 由 root 组合；worktree 产物在整合前不得出现在主 workspace。不得自动 merge，不得由 child 修改主分支。Root 审查 commit 后使用普通 Git 显式整合，随后 cleanup，并确认 Pure-owned branch 与 worktree 路径已删除。
 
