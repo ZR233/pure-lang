@@ -2338,9 +2338,10 @@ mod tests {
             },
         ];
         ensure_spawn_calls(&calls).unwrap();
+        let allowed_path = std::env::temp_dir().join("fixture").join("allowed");
         let receipts = [
             ("e", "explorer", serde_json::json!({"mode":"unrestricted"})),
-            ("x", "executor", serde_json::json!({"mode":"directory","writablePaths":["/tmp/fixture/allowed"]})),
+            ("x", "executor", serde_json::json!({"mode":"directory","writablePaths":[allowed_path]})),
             ("w", "worktree_executor", serde_json::json!({"mode":"worktree","worktree":{"branch":"pure-agent-child","baseCommit":"0123456789abcdef0123456789abcdef01234567"}})),
             ("r", "reviewer", serde_json::json!({"mode":"unrestricted"})),
         ].into_iter().map(|(id, profile, workspace)| WireOutput { call_id: Some(id.into()), content: serde_json::json!({"profileId":profile,"agentId":id,"workspace":workspace}).to_string() }).collect::<Vec<_>>();
