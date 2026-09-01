@@ -68,11 +68,11 @@ impl ProcessRegistry {
         capture_path: PathBuf,
     ) -> Result<(), RemoteError> {
         self.reserve_starting(&request.process_id).await?;
-        if let Some(parent) = capture_path.parent() {
-            if let Err(error) = tokio::fs::create_dir_all(parent).await {
-                self.release_starting(&request.process_id).await;
-                return Err(io_error("failed to create capture directory", error));
-            }
+        if let Some(parent) = capture_path.parent()
+            && let Err(error) = tokio::fs::create_dir_all(parent).await
+        {
+            self.release_starting(&request.process_id).await;
+            return Err(io_error("failed to create capture directory", error));
         }
         let header = format!(
             "=== COMMAND ===\n{}\n\n=== CWD ===\n{}\n\n",

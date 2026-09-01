@@ -238,7 +238,7 @@ pub(super) fn spawn_schema(policy: &AgentAccessPolicy, profiles: &[AgentProfileS
         .join(", ");
     let branches = profiles
         .into_iter()
-        .map(|profile| spawn_profile_schema(profile))
+        .map(spawn_profile_schema)
         .collect::<Vec<_>>();
     if branches.is_empty() {
         return object_schema(vec![

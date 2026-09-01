@@ -609,8 +609,7 @@ printf '%s\n' "$fixture"
     ensure_ssh_success(ssh, &output, "prepare remote subagents fixture")?;
     let path = String::from_utf8(output.stdout)?
         .lines()
-        .filter(|line| !line.trim().is_empty())
-        .next_back()
+        .rfind(|line| !line.trim().is_empty())
         .context("remote fixture preparation returned no canonical path")?
         .trim()
         .to_string();
