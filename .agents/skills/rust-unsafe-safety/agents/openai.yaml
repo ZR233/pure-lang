@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rust 非安全代码健全性"
+  short_description: "证明 Rust unsafe、FFI、裸指针和手工线程安全边界的健全性"
+  default_prompt: "请使用 $rust-unsafe-safety 审查这项 unsafe 改动并逐项说明安全证明。"

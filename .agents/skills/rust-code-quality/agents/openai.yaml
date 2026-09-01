@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rust 代码质量"
+  short_description: "审查和改进 Rust 实现、错误处理、可维护性与基础验证质量"
+  default_prompt: "请使用 $rust-code-quality 编写或审查这项 Rust 改动，并给出必要的实现与验证结论。"
