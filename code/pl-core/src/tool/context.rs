@@ -11,6 +11,7 @@ use pl_trace::{
 use tokio::sync::{Mutex, OwnedMutexGuard};
 use tokio_util::sync::CancellationToken;
 
+use super::path_policy::path_is_inside_workspace;
 use crate::turn::{InteractionCallback, PermissionMode, UserInputMode};
 
 /// Agent workspace 是否允许宿主权限策略访问 root 之外的路径。
@@ -129,12 +130,12 @@ impl AgentWorkspace {
         let Some(writable_paths) = &self.project_writable_paths else {
             return Ok(());
         };
-        if !path.starts_with(&self.project_root) {
+        if !path_is_inside_workspace(path, &self.project_root) {
             return Ok(());
         }
         if writable_paths
             .iter()
-            .any(|allowed| path == allowed || path.starts_with(allowed))
+            .any(|allowed| path_is_inside_workspace(path, allowed))
         {
             return Ok(());
         }
