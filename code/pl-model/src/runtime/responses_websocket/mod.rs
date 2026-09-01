@@ -11,6 +11,7 @@ use tokio_tungstenite::tungstenite::http::header::AUTHORIZATION;
 use tokio_tungstenite::tungstenite::http::{HeaderName, HeaderValue};
 
 use crate::ModelSession;
+use crate::completion::CompletionTraceContext;
 use crate::completion::stream::OpenAiRawEventStream;
 use crate::provider::RESPONSES_WEBSOCKET_DIALECT;
 use crate::runtime::openai::sse::SseStreamEvent;
@@ -33,15 +34,30 @@ use state::{
     ClosedResponsesStream, CompletedResponsesStream, FailedResponsesStream, ResponsesStreamState,
 };
 
+pub(super) struct StreamResponsesInput<'a> {
+    pub api_base: String,
+    pub token: Option<String>,
+    pub provider_headers: Option<&'a HashMap<String, String>>,
+    pub model_headers: &'a HashMap<String, String>,
+    pub connection_key: u64,
+    pub model_session: ModelSession,
+    pub body: Map<String, Value>,
+    pub trace: Option<CompletionTraceContext>,
+}
+
 pub(super) async fn stream_responses(
-    api_base: String,
-    token: Option<String>,
-    provider_headers: Option<&HashMap<String, String>>,
-    model_headers: &HashMap<String, String>,
-    connection_key: u64,
-    model_session: ModelSession,
-    mut body: Map<String, Value>,
+    input: StreamResponsesInput<'_>,
 ) -> Result<OpenAiRawEventStream> {
+    let StreamResponsesInput {
+        api_base,
+        token,
+        provider_headers,
+        model_headers,
+        connection_key,
+        model_session,
+        mut body,
+        trace,
+    } = input;
     normalize_websocket_request_body(&mut body);
 
     let mut guard = model_session.lock_responses_websocket().await;
@@ -83,7 +99,8 @@ pub(super) async fn stream_responses(
         "full"
     };
     let request_text = response_create_text(&mut wire_body)?;
-    super::wire_capture::capture_responses_websocket(request_mode, &wire_body).await?;
+    super::wire_capture::capture_responses_websocket(request_mode, &wire_body, trace.as_ref())
+        .await?;
     tracing::debug!(
         request_mode,
         fallback_reason = fallback_reason.map_or("none", IncrementalRequestFallbackReason::as_str),

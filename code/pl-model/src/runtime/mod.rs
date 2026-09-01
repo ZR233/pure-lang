@@ -257,6 +257,7 @@ impl ModelRuntime {
                     attempt_request,
                     context.session.clone(),
                     context.prompt_cache_key.clone(),
+                    trace.clone(),
                 )
                 .await
             {
@@ -428,6 +429,7 @@ impl ModelRuntime {
         request: CompletionRequest,
         session: ModelSession,
         prompt_cache_key: Option<String>,
+        trace: Option<CompletionTraceContext>,
     ) -> impl std::future::Future<Output = Result<CompletionEventStream>> + Send {
         let http_client = self.http_client.clone();
         let api_base = self.resolve_base_url();
@@ -457,18 +459,21 @@ impl ModelRuntime {
                     ));
                 };
                 let raw_stream = responses_websocket::stream_responses(
-                    api_base,
-                    token,
-                    endpoint.http_headers.as_ref(),
-                    &model_info.request_profile.headers,
-                    connection_key,
-                    session,
-                    body,
+                    responses_websocket::StreamResponsesInput {
+                        api_base,
+                        token,
+                        provider_headers: endpoint.http_headers.as_ref(),
+                        model_headers: &model_info.request_profile.headers,
+                        connection_key,
+                        model_session: session,
+                        body,
+                        trace,
+                    },
                 )
                 .await?;
                 return Ok(decode_raw_event_stream(raw_stream, protocol));
             }
-            let capture = wire_capture::capture_http(&body).await?;
+            let capture = wire_capture::capture_http(&body, trace.as_ref()).await?;
             let config = PureOpenAiConfig::new(
                 api_base,
                 token,

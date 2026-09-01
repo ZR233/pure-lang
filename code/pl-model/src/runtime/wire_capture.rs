@@ -15,6 +15,7 @@ use serde_json::{Map, Value};
 
 use super::openai::OpenAiRequestBody;
 use super::openai::sse::SseStreamEvent;
+use crate::completion::CompletionTraceContext;
 
 const CAPTURE_DIRECTORY_ENV: &str = "PURE_STUDIO_WIRE_CAPTURE_DIR";
 static CAPTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -27,6 +28,12 @@ struct WireCapture<'a> {
     captured_at_unix_millis: u128,
     protocol: &'a str,
     request_mode: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    session_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    turn_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    inference_id: Option<&'a str>,
     wire_body: &'a Value,
 }
 
@@ -49,22 +56,27 @@ struct TransportStageReceipt<'a> {
     captured_at_unix_millis: u128,
 }
 
-pub(super) async fn capture_http(body: &OpenAiRequestBody) -> Result<Option<HttpCaptureContext>> {
+pub(super) async fn capture_http(
+    body: &OpenAiRequestBody,
+    trace: Option<&CompletionTraceContext>,
+) -> Result<Option<HttpCaptureContext>> {
     let (protocol, wire_body) = match body {
         OpenAiRequestBody::Responses(body) => ("responsesHttp", Value::Object(body.clone())),
         OpenAiRequestBody::Chat(body) => ("chatCompletions", Value::Object(body.clone())),
     };
-    capture(protocol, "full", &wire_body).await
+    capture(protocol, "full", &wire_body, trace).await
 }
 
 pub(super) async fn capture_responses_websocket(
     request_mode: &'static str,
     wire_body: &Map<String, Value>,
+    trace: Option<&CompletionTraceContext>,
 ) -> Result<()> {
     capture(
         "responsesWebSocket",
         request_mode,
         &Value::Object(wire_body.clone()),
+        trace,
     )
     .await
     .map(|_| ())
@@ -74,6 +86,7 @@ async fn capture(
     protocol: &'static str,
     request_mode: &str,
     wire_body: &Value,
+    trace: Option<&CompletionTraceContext>,
 ) -> Result<Option<HttpCaptureContext>> {
     let Some(directory) = std::env::var_os(CAPTURE_DIRECTORY_ENV).map(PathBuf::from) else {
         return Ok(None);
@@ -100,6 +113,9 @@ async fn capture(
         captured_at_unix_millis: unix_millis(),
         protocol,
         request_mode,
+        session_id: trace.map(|trace| trace.session_id.as_str()),
+        turn_id: trace.map(|trace| trace.turn_id.as_str()),
+        inference_id: trace.map(|trace| trace.inference_id.as_str()),
         wire_body,
     })
     .map_err(|error| PureError::ConfigError(format!("failed to encode wire capture: {error}")))?;
@@ -202,4 +218,45 @@ fn unix_millis() -> u128 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wire_capture_serializes_trace_identity_outside_provider_body() {
+        let body = serde_json::json!({"model":"fixture"});
+        let trace = CompletionTraceContext {
+            session_id: "session-a".into(),
+            turn_id: "turn-a".into(),
+            inference_id: "inference-a".into(),
+        };
+        let capture = WireCapture {
+            schema_version: 1,
+            capture_id: 7,
+            captured_at_unix_millis: 9,
+            protocol: "responsesHttp",
+            request_mode: "full",
+            session_id: Some(&trace.session_id),
+            turn_id: Some(&trace.turn_id),
+            inference_id: Some(&trace.inference_id),
+            wire_body: &body,
+        };
+
+        assert_eq!(
+            serde_json::to_value(capture).unwrap(),
+            serde_json::json!({
+                "schemaVersion": 1,
+                "captureId": 7,
+                "capturedAtUnixMillis": 9,
+                "protocol": "responsesHttp",
+                "requestMode": "full",
+                "sessionId": "session-a",
+                "turnId": "turn-a",
+                "inferenceId": "inference-a",
+                "wireBody": {"model":"fixture"},
+            })
+        );
+    }
 }

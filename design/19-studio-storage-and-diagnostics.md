@@ -39,5 +39,7 @@ Mode Skill 仍由 Skill Provider 提供，不复制到数据库。run 内保存�
 preview；显式 cleanup 才能删除。恢复 DTO 不携带 Task run、merge 或自动整合状态。日志错误包含 operation、Thread/Turn/Interaction identity 与
 redacted correlation id，不记录 provider token、Mode Skill 私密正文或用户 Profile credential。
 
-Live artifact 对 wire capture、配置和日志执行 credential redaction；失败 artifact 保留 workflow
-snapshot、GUI/Driver 日志、截图、文件 diff、验证输出和最后进程树。
+Live artifact 对 wire capture、配置和日志执行 credential redaction；wire capture 可携带不进入
+provider wire 的 `sessionId`、`turnId` 与 `inferenceId` trace identity，使验收能按 canonical
+session 聚合跨 inference 调用，而不依赖 Profile 提示词片段或工具调用形态猜测 actor。失败
+artifact 保留 workflow snapshot、GUI/Driver 日志、截图、文件 diff、验证输出和最后进程树。

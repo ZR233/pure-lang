@@ -1138,7 +1138,7 @@ async fn responses_websocket_does_not_commit_unconsumed_completion() {
     let session = ModelSession::default();
     let first_request = minimal_request("local-responses");
     let mut stream = provider
-        .stream_events(first_request, session.clone(), None)
+        .stream_events(first_request, session.clone(), None, None)
         .await
         .unwrap();
     stream

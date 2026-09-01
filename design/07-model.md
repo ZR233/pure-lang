@@ -200,7 +200,10 @@ timing、usage 不完整或 `decodeMs == 0` 时不生成吞吐样本。失败与
 请求已落盘、HTTP 流已建立、首个 provider 事件以及流终止或失败。回执使用同一
 capture id、单调 elapsed 和墙上时间，不记录 prompt、密钥或 provider 错误原文；它只用于
 区分请求组装、响应头等待与 SSE 等待的耗时，不改变生产超时、重试或成功 timing
-语义。仅出现请求落盘回执不能被解释为 provider 已接收或已返回响应。
+语义。wire capture 顶层可同时记录 invocation trace 的 `sessionId`、`turnId` 与
+`inferenceId`；这些字段只用于把多次 inference 可靠归属于同一会话，不进入 provider 请求体，
+也不从提示词正文或工具行为反推 Agent 身份。普通运行未提供 trace 时省略这些字段。仅出现请求
+落盘回执不能被解释为 provider 已接收或已返回响应。
 
 ## 7.6 多模态消息
 

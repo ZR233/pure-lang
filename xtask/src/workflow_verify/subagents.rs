@@ -82,6 +82,7 @@ struct WireOutput {
 #[serde(rename_all = "camelCase")]
 struct CaptureReceipt {
     path: String,
+    session_id: String,
     actor: String,
     calls: Vec<WireCall>,
 }
@@ -1074,7 +1075,7 @@ fn validate_wire(wire_dir: &Path, artifacts: &Path, ssh: bool) -> Result<()> {
         !captures.is_empty(),
         "live acceptance produced no wire captures"
     );
-    let mut capture_receipts = Vec::new();
+    let mut pending_captures = Vec::new();
     let mut calls = Vec::new();
     let mut outputs: Vec<WireOutput> = Vec::new();
     for path in &captures {
@@ -1082,19 +1083,23 @@ fn validate_wire(wire_dir: &Path, artifacts: &Path, ssh: bool) -> Result<()> {
         let body = capture
             .get("wireBody")
             .context("wire capture has no body")?;
+        let session_id = capture
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .context("wire capture has no sessionId trace identity")?;
         let mut capture_calls = Vec::new();
         collect_calls(body, &mut capture_calls);
-        let actor = classify_capture(&capture_calls)?;
         calls.extend(capture_calls.iter().cloned());
-        capture_receipts.push(CaptureReceipt {
-            path: path.display().to_string(),
-            actor,
-            calls: capture_calls,
-        });
+        pending_captures.push((
+            path.display().to_string(),
+            session_id.to_string(),
+            capture_calls,
+        ));
         collect_outputs(body, &mut outputs);
     }
     deduplicate_calls(&mut calls);
     deduplicate_outputs(&mut outputs);
+    let capture_receipts = bind_capture_actors(pending_captures, &calls, &outputs)?;
     let expected_rejection_count = ensure_no_unexpected_tool_failures(&calls, &outputs)?;
     ensure_spawn_calls(&calls)?;
     ensure_workspace_receipts(&calls, &outputs)?;
@@ -1174,31 +1179,29 @@ fn shell_token(token: &str) -> &str {
     token.trim_matches(['\'', '"'])
 }
 
+fn shell_program_index(tokens: &[&str], program: &str) -> Option<usize> {
+    let mut index = usize::from(tokens.first() == Some(&"env"));
+    while tokens.get(index).is_some_and(|token| token.contains('=')) {
+        index += 1;
+    }
+    (tokens.get(index) == Some(&program)).then_some(index)
+}
+
 fn is_git_cherry_pick_command(command: &str, expected_commit: Option<&str>) -> bool {
     shell_segments(command).any(|segment| {
         let tokens = segment
             .split_ascii_whitespace()
             .map(shell_token)
             .collect::<Vec<_>>();
-        let Some(git) = tokens.iter().position(|token| *token == "git") else {
+        let Some(git) = shell_program_index(&tokens, "git") else {
             return false;
         };
-        if tokens[..git]
-            .iter()
-            .any(|token| !token.contains('=') && *token != "env")
-        {
+        if tokens.get(git + 1) != Some(&"cherry-pick") {
             return false;
         }
-        let Some(cherry_pick) = tokens[git + 1..]
-            .iter()
-            .position(|token| *token == "cherry-pick")
-            .map(|index| index + git + 1)
-        else {
-            return false;
-        };
         match expected_commit {
-            Some(commit) => tokens[cherry_pick + 1..].contains(&commit),
-            None => tokens[cherry_pick + 1..]
+            Some(commit) => tokens[git + 2..].contains(&commit),
+            None => tokens[git + 2..]
                 .iter()
                 .any(|token| !token.starts_with('-')),
         }
@@ -1211,7 +1214,8 @@ fn is_cargo_test_command(command: &str) -> bool {
             .split_ascii_whitespace()
             .map(shell_token)
             .collect::<Vec<_>>();
-        tokens.first() == Some(&"cargo") && tokens[1..].contains(&"test")
+        shell_program_index(&tokens, "cargo")
+            .is_some_and(|cargo| tokens[cargo + 1..].contains(&"test"))
     })
 }
 
@@ -1236,50 +1240,73 @@ fn ensure_ssh_exec_contract(captures: &[CaptureReceipt]) -> Result<()> {
             let Some(call_id) = call.call_id.as_deref() else {
                 continue;
             };
-            if capture.actor != "root" && first_seen.insert(call_id.to_string()) {
+            if capture.actor == "executor" && first_seen.insert(call_id.to_string()) {
                 child_exec_first_appearances.push(capture_index);
             }
         }
     }
     ensure!(
         child_exec_first_appearances.len() >= 2,
-        "SSH child acceptance contains fewer than two distinct exec calls"
+        "SSH executor acceptance contains fewer than two distinct exec calls"
     );
     ensure!(
         child_exec_first_appearances
             .windows(2)
             .any(|pair| pair[0] != pair[1]),
-        "SSH child exec calls were not observed across separate inference captures"
+        "SSH executor exec calls were not observed across separate inference captures"
     );
     Ok(())
 }
 
-fn classify_capture(calls: &[WireCall]) -> Result<String> {
-    let is_root = calls
-        .iter()
-        .any(|call| matches!(call.name.as_str(), "list_agent_profiles" | "submit_plan"));
-    let is_reviewer = calls.iter().any(|call| {
-        call.name == "report_progress"
-            && ["summary", "nextStep", "detail"]
-                .into_iter()
-                .filter_map(|field| call.arguments.get(field).and_then(Value::as_str))
-                .any(|text| {
-                    text.contains("REVIEWER_FINDING")
-                        || text.contains("REVIEWER_READ_ONLY_APPROVED")
-                })
-    });
-    ensure!(
-        !(is_root && is_reviewer),
-        "wire capture contains both root orchestration and reviewer verdict calls"
-    );
-    Ok(if is_root {
-        "root"
-    } else if is_reviewer {
-        "reviewer"
-    } else {
-        "child"
+fn bind_capture_actors(
+    captures: Vec<(String, String, Vec<WireCall>)>,
+    calls: &[WireCall],
+    outputs: &[WireOutput],
+) -> Result<Vec<CaptureReceipt>> {
+    let mut child_profiles = std::collections::HashMap::new();
+    for (_, receipt) in bound_receipts(calls, outputs)? {
+        let agent_id = receipt
+            .get("agentId")
+            .and_then(Value::as_str)
+            .context("successful spawn receipt has no agentId")?;
+        let profile_id = receipt
+            .get("profileId")
+            .and_then(Value::as_str)
+            .context("successful spawn receipt has no profileId")?;
+        child_profiles.insert(agent_id.to_string(), profile_id.to_string());
     }
-    .to_string())
+    let root_sessions = captures
+        .iter()
+        .map(|(_, session_id, _)| session_id)
+        .filter(|session_id| !child_profiles.contains_key(*session_id))
+        .collect::<std::collections::HashSet<_>>();
+    ensure!(
+        root_sessions.len() == 1,
+        "wire captures must contain exactly one root session outside receipt-bound child sessions"
+    );
+    let root_session = root_sessions
+        .into_iter()
+        .next()
+        .cloned()
+        .context("validated root session is missing")?;
+    let mut receipts = Vec::with_capacity(captures.len());
+    for (path, session_id, calls) in captures {
+        let actor = if session_id == root_session {
+            "root".to_string()
+        } else {
+            child_profiles
+                .get(&session_id)
+                .cloned()
+                .with_context(|| format!("wire capture session `{session_id}` has no actor"))?
+        };
+        receipts.push(CaptureReceipt {
+            path,
+            session_id,
+            actor,
+            calls,
+        });
+    }
+    Ok(receipts)
 }
 
 fn ensure_profile_messages(calls: &[WireCall], outputs: &[WireOutput]) -> Result<()> {
@@ -2968,37 +2995,95 @@ mod tests {
     }
 
     #[test]
-    fn capture_classification_uses_tool_behavior_instead_of_prompt_prose() {
-        let root = vec![orchestration_call(
-            "plan",
-            "submit_plan",
-            serde_json::json!({"plan":"Inspect, implement, integrate, review."}),
-        )];
-        assert_eq!(classify_capture(&root).unwrap(), "root");
-        let reviewer = vec![orchestration_call(
-            "progress",
-            "report_progress",
-            serde_json::json!({"detail":"REVIEWER_READ_ONLY_APPROVED"}),
-        )];
-        assert_eq!(classify_capture(&reviewer).unwrap(), "reviewer");
-        let mut ambiguous = root;
-        ambiguous.extend(reviewer);
-        assert!(classify_capture(&ambiguous).is_err());
-        assert_eq!(classify_capture(&[]).unwrap(), "child");
+    fn capture_classification_binds_all_inferences_to_spawn_receipts() {
+        let calls = vec![
+            orchestration_call(
+                "spawn-explorer",
+                "spawn_agent",
+                serde_json::json!({"profileId":"explorer"}),
+            ),
+            orchestration_call(
+                "spawn-reviewer",
+                "spawn_agent",
+                serde_json::json!({"profileId":"reviewer"}),
+            ),
+        ];
+        let outputs = vec![
+            WireOutput {
+                call_id: Some("spawn-explorer".into()),
+                content: serde_json::json!({
+                    "profileId":"explorer",
+                    "agentId":"explorer-a",
+                })
+                .to_string(),
+            },
+            reviewer_receipt("spawn-reviewer", "reviewer-a"),
+        ];
+        let captures = vec![
+            (
+                "root.json".into(),
+                "root-session".into(),
+                vec![orchestration_call(
+                    "plan",
+                    "submit_plan",
+                    serde_json::json!({"plan":"plan"}),
+                )],
+            ),
+            (
+                "explorer.json".into(),
+                "explorer-a".into(),
+                vec![orchestration_call(
+                    "child-plan",
+                    "submit_plan",
+                    serde_json::json!({"plan":"must not change identity"}),
+                )],
+            ),
+            (
+                "reviewer-before-verdict.json".into(),
+                "reviewer-a".into(),
+                vec![orchestration_call(
+                    "mutation",
+                    "exec",
+                    serde_json::json!({"command":"git commit -am bad"}),
+                )],
+            ),
+        ];
+        let receipts = bind_capture_actors(captures, &calls, &outputs).unwrap();
+        assert_eq!(
+            receipts
+                .iter()
+                .map(|capture| (capture.session_id.as_str(), capture.actor.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("root-session", "root"),
+                ("explorer-a", "explorer"),
+                ("reviewer-a", "reviewer"),
+            ]
+        );
+        assert!(ensure_reviewer_history(&receipts).is_err());
     }
 
     #[test]
     fn command_checks_require_real_git_and_cargo_invocations() {
-        assert!(is_git_cherry_pick_command(
-            "cd fixture && git cherry-pick 1111111111111111111111111111111111111111",
-            Some(FIRST_WORKTREE_COMMIT)
-        ));
-        assert!(!is_git_cherry_pick_command(
-            "echo git cherry-pick 1111111111111111111111111111111111111111",
-            Some(FIRST_WORKTREE_COMMIT)
-        ));
-        assert!(is_cargo_test_command("cargo test --workspace"));
-        assert!(!is_cargo_test_command("echo cargo test --workspace"));
+        assert_eq!(
+            [
+                is_git_cherry_pick_command(
+                    "cd fixture && git cherry-pick 1111111111111111111111111111111111111111",
+                    Some(FIRST_WORKTREE_COMMIT),
+                ),
+                is_git_cherry_pick_command(
+                    "echo git cherry-pick 1111111111111111111111111111111111111111",
+                    Some(FIRST_WORKTREE_COMMIT),
+                ),
+                is_git_cherry_pick_command(
+                    "git status cherry-pick 1111111111111111111111111111111111111111",
+                    Some(FIRST_WORKTREE_COMMIT),
+                ),
+                is_cargo_test_command("env CARGO_TERM_COLOR=never cargo test --workspace"),
+                is_cargo_test_command("echo cargo test --workspace"),
+            ],
+            [true, false, false, true, false]
+        );
     }
 
     #[test]
@@ -3017,6 +3102,7 @@ mod tests {
     fn reviewer_mutation_is_rejected_but_read_is_allowed() {
         let read = CaptureReceipt {
             path: "responses.json".into(),
+            session_id: "reviewer-a".into(),
             actor: "reviewer".into(),
             calls: vec![WireCall {
                 call_id: Some("r1".into()),
@@ -3027,6 +3113,7 @@ mod tests {
         assert!(ensure_reviewer_history(&[read]).is_ok());
         let durable_verdict = CaptureReceipt {
             path: "reviewer-progress.json".into(),
+            session_id: "reviewer-a".into(),
             actor: "reviewer".into(),
             calls: vec![WireCall {
                 call_id: Some("reviewer-verdict".into()),
@@ -3044,6 +3131,7 @@ mod tests {
         );
         let mutation = CaptureReceipt {
             path: "chat.json".into(),
+            session_id: "reviewer-a".into(),
             actor: "reviewer".into(),
             calls: vec![WireCall {
                 call_id: Some("r2".into()),
@@ -3070,6 +3158,7 @@ mod tests {
         ] {
             let capture = CaptureReceipt {
                 path: "x".into(),
+                session_id: "reviewer-a".into(),
                 actor: "reviewer".into(),
                 calls: vec![WireCall {
                     call_id: Some(name.into()),
@@ -3179,6 +3268,7 @@ mod tests {
         ];
         let captures = vec![CaptureReceipt {
             path: "root.json".into(),
+            session_id: "root".into(),
             actor: "root".into(),
             calls: root_calls.clone(),
         }];
@@ -3205,6 +3295,7 @@ mod tests {
             .enumerate()
             .map(|(index, calls)| CaptureReceipt {
                 path: format!("root-{index}.json"),
+                session_id: "root".into(),
                 actor: "root".into(),
                 calls: calls.to_vec(),
             })
@@ -3230,6 +3321,7 @@ mod tests {
                 let (mut captures, calls, outputs) = valid_root_history();
                 captures.push(CaptureReceipt {
                     path: format!("{actor}.json"),
+                    session_id: format!("{actor}-agent"),
                     actor: actor.into(),
                     calls: vec![forbidden.clone()],
                 });
@@ -3271,11 +3363,13 @@ mod tests {
         );
         captures.push(CaptureReceipt {
             path: "executor.json".into(),
+            session_id: "executor-agent".into(),
             actor: "executor".into(),
             calls: vec![executor_write.clone()],
         });
         captures.push(CaptureReceipt {
             path: "worktree.json".into(),
+            session_id: "worktree-agent".into(),
             actor: "worktree_executor".into(),
             calls: vec![worktree_test.clone()],
         });
@@ -3304,6 +3398,7 @@ mod tests {
         let final_test = captures[0].calls.pop().unwrap();
         captures.push(CaptureReceipt {
             path: "executor.json".into(),
+            session_id: "executor-agent".into(),
             actor: "executor".into(),
             calls: vec![final_test],
         });
