@@ -162,6 +162,18 @@ pub trait SkillProvider: Send + Sync + fmt::Debug {
         relative_path: &'a str,
         cancellation: CancellationToken,
     ) -> Pin<Box<dyn Future<Output = Result<String>> + Send + 'a>>;
+
+    /// Records a successful model `skill_view` for Provider-owned usage state.
+    ///
+    /// The default is deliberately a no-op: remote providers and product-owned read-only
+    /// snapshots must not be forced into the default workspace's mutable project directory.
+    fn record_model_view<'a>(
+        &'a self,
+        _candidate: &'a SkillCandidate,
+        _cancellation: CancellationToken,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+        Box::pin(async { Ok(()) })
+    }
 }
 
 #[derive(Debug)]
@@ -532,6 +544,28 @@ impl FrozenSkillCatalog {
         entry
             .provider
             .read_resource(&entry.candidate, relative_path, cancellation)
+            .await
+    }
+
+    /// Delegates a successful model view to the Provider that owns the frozen candidate.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the Skill disappeared from the frozen catalog or its Provider
+    /// cannot persist the usage fact.
+    pub async fn record_model_view(
+        &self,
+        name: &str,
+        cancellation: CancellationToken,
+    ) -> Result<()> {
+        let key = name.to_ascii_lowercase();
+        let entry = self.entries.get(&key).ok_or_else(|| {
+            PureError::ConfigError(format!("skill not found in frozen catalog: {name}"))
+        })?;
+        ensure_invocation_allowed(&entry.candidate.summary, SkillLoadInvocation::Model)?;
+        entry
+            .provider
+            .record_model_view(&entry.candidate, cancellation)
             .await
     }
 

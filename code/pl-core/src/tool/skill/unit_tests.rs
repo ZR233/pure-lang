@@ -84,6 +84,51 @@ async fn read_only_catalog_tool_group_omits_project_mutation() {
     );
 }
 
+#[tokio::test]
+async fn skill_view_reads_host_registered_project_snapshot_outside_default_project_dir() {
+    let source = tempfile::tempdir().unwrap();
+    let workspace = tempfile::tempdir().unwrap();
+    write_project_skill(source.path(), "review-single-pr");
+    let registry = crate::skill::SkillRegistry::new();
+    let provider = crate::skill::FileSystemSkillProvider::from_directories(
+        "product-project-skills",
+        vec![crate::skill::SkillDirectorySource::new(
+            source.path().join("skills"),
+            crate::skill::SkillSourceKind::Project,
+        )],
+    )
+    .unwrap();
+    let _registration = registry.register(Arc::new(provider)).unwrap();
+    let catalog = registry
+        .discover(crate::skill::SkillProviderRequest {
+            workspace_root: workspace.path().to_path_buf(),
+            config: SkillsConfig::default(),
+            system_dir: None,
+            cancellation: CancellationToken::new(),
+        })
+        .await
+        .unwrap();
+    let tool = SkillViewTool::from_catalog(Arc::new(catalog), tool_workspace(workspace.path()));
+
+    let output = tool
+        .execute(
+            ToolInput {
+                arguments: json!({"name": "review-single-pr"}),
+            },
+            tool_context(workspace.path().to_path_buf()),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(activation_from_output(&output).name, "review-single-pr");
+    assert!(
+        !source
+            .path()
+            .join("skills/review-single-pr/.usage.json")
+            .exists()
+    );
+}
+
 #[cfg(unix)]
 fn create_directory_link(target: &Path, link: &Path) {
     std::os::unix::fs::symlink(target, link).unwrap();

@@ -136,6 +136,33 @@ impl SkillProvider for FileSystemSkillProvider {
             })?
         })
     }
+
+    fn record_model_view<'a>(
+        &'a self,
+        candidate: &'a SkillCandidate,
+        cancellation: CancellationToken,
+    ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
+        let records_project_usage = matches!(self.sources, FileSystemSkillSources::Configured)
+            && candidate.summary.source == SkillSourceKind::Project;
+        let candidate = candidate.clone();
+        Box::pin(async move {
+            if !records_project_usage {
+                return Ok(());
+            }
+            tokio::task::spawn_blocking(move || {
+                if cancellation.is_cancelled() {
+                    return Err(cancelled_error());
+                }
+                let skill = SkillMetadata::from(candidate.summary);
+                let trusted_skill_dir = skill.path.clone();
+                crate::skill::bump_project_view(&trusted_skill_dir, &skill)
+            })
+            .await
+            .map_err(|error| {
+                PureError::ConfigError(format!("filesystem skill usage task failed: {error}"))
+            })?
+        })
+    }
 }
 
 fn load_local_skill(

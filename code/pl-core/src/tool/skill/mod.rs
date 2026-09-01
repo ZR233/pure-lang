@@ -485,14 +485,16 @@ impl Tool for SkillViewTool {
                             &input.target.name,
                             file_path,
                             SkillLoadInvocation::Model,
-                            cancellation,
+                            cancellation.clone(),
                         )
                         .await
                         .map_err(|error| tool_error(self.name(), error))?,
                 ),
                 None => (SKILL_FILE_NAME.to_string(), definition.content),
             };
-            bump_project_view(&catalog.snapshot().project_dir, &skill)
+            catalog
+                .record_model_view(&input.target.name, cancellation)
+                .await
                 .map_err(|error| tool_error(self.name(), error))?;
             let activation = skill_activation(skill, &turn_id, &tool_id);
             json_output_with_events(

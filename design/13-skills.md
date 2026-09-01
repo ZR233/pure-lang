@@ -26,6 +26,12 @@ host-supplied catalog 能力消失，产品只能复制一套 Skill 管理器，
 调整安装阶段，但任意 `pl-core` host 仍必须能够注册产品拥有的 Skill source、在一次 Turn 前冻结
 唯一 catalog，并把同一 catalog 同时用于用户显式调用、模型索引和普通 Skill 工具；Provider 的
 locator 与读取责任不得被强制收回 Studio，也不得要求产品通过 JSON 或兼容适配层重建 PL Skill。
+同一所有权还必须覆盖加载后的 Provider 专属副作用：`Project` 是 winner 排序与产品语义，不代表
+该 Skill 一定位于默认 `<workspace_root>/<project_dir>`，也不授权 PL 向那个默认目录写入另一个
+Provider 的状态。产品提供的 Review revision、容器卷或缓存快照可以标记为 `Project`，但仍保持
+只读；成功激活后的使用统计若存在，必须由持有冻结 locator 的 Provider 在自己的信任根内处理。
+否则公共注册入口虽然“能发现”，`skill_view` 却会在正文读取成功后因错误信任根失败，产品仍被迫
+复制工具或伪装路径，等同于公共能力不完整。
 
 当前不实现远程 Provider、在线 Hub、安装市场、文件 watcher、项目级 `.agents/skills`、平铺
 `<name>.md` 或用户级自动写入。
@@ -143,6 +149,11 @@ platforms: ["windows", "linux", "macos"]
 `skill_view` 永不进入通用只读工具缓存。每次调用都重新通过 Provider 加载正文，并重新校验名称和
 模型调用策略；candidate 的身份或权限已经变化时拒绝陈旧结果并使 Provider 失效。主文档响应只
 返回资源基底和按需读取说明，不递归枚举资源；支持文件由胜出 Provider 的 `read_resource` 实现。
+成功读取后的 Provider 专属 view 记录也委托给同一个冻结 Provider。默认文件系统 Provider 只为
+自己按标准 workspace 配置发现的可写 Project Skill 更新 `.usage.json`；宿主显式注册的目录视为
+只读快照，即使来源为 `Project` 也不写统计。后续可以更改 hook 名称、事件类型或将它并入加载回执，
+但必须保留“冻结 candidate 的 Provider 拥有副作用和信任根”这一功能语义，不能重新以
+`SkillCatalog.project_dir` 处理所有来源。
 本合同不限制主文档或支持文件大小。
 
 ## 13.5 Prompt 和 Subagent
