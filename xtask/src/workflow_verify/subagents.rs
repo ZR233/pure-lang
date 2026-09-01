@@ -2058,10 +2058,10 @@ fn ensure_finding_re_review(calls: &[WireCall], outputs: &[WireOutput]) -> Resul
         "finding re-review requires a different final reviewer agentId"
     );
     let final_reviewer_spawn = final_reviewer.spawn_index;
-    let implementation_spawn = calls
+    let implementation_spawns = calls
         .iter()
         .enumerate()
-        .find(|(index, call)| {
+        .filter(|(index, call)| {
             *index > finding_index
                 && *index < final_reviewer_spawn
                 && call.name == "spawn_agent"
@@ -2070,26 +2070,67 @@ fn ensure_finding_re_review(calls: &[WireCall], outputs: &[WireOutput]) -> Resul
                     Some("executor") | Some("worktree_executor")
                 )
         })
-        .map(|(index, _)| index)
-        .context("REVIEWER_FINDING requires a new implementation spawn")?;
-    let integration = calls.iter().enumerate().any(|(index, call)| {
-        index > implementation_spawn
-            && index < final_reviewer_spawn
-            && call.name == "exec"
-            && call
-                .arguments
-                .get("command")
-                .and_then(Value::as_str)
-                .is_some_and(|command| {
-                    command.contains("cherry-pick")
-                        || command.contains("cargo test")
-                        || command.contains("git diff --check")
-                })
-    });
+        .collect::<Vec<_>>();
     ensure!(
-        integration,
-        "REVIEWER_FINDING lacks second integration evidence"
+        !implementation_spawns.is_empty(),
+        "REVIEWER_FINDING requires a new implementation spawn"
     );
+    let receipts = bound_receipts(calls, outputs)?;
+    for (spawn_index, spawn) in implementation_spawns.into_iter().filter(|(_, call)| {
+        call.arguments.get("profileId").and_then(Value::as_str) == Some("worktree_executor")
+    }) {
+        let receipt = receipts
+            .iter()
+            .find(|(candidate, _)| candidate.call_id == spawn.call_id)
+            .map(|(_, receipt)| receipt)
+            .context("rework worktree spawn has no canonical receipt")?;
+        let agent = receipt
+            .get("agentId")
+            .and_then(Value::as_str)
+            .context("rework worktree receipt has no agentId")?;
+        let read_index = calls
+            .iter()
+            .enumerate()
+            .find(|(index, call)| {
+                *index > spawn_index
+                    && *index < final_reviewer_spawn
+                    && call.name == "read_agent_submissions"
+                    && call.arguments.get("target").and_then(Value::as_str) == Some(agent)
+            })
+            .map(|(index, _)| index)
+            .with_context(|| {
+                format!("rework worktree agent {agent} has no durable delivery read")
+            })?;
+        let cherry_pick = calls
+            .iter()
+            .enumerate()
+            .find(|(index, call)| {
+                *index > read_index
+                    && *index < final_reviewer_spawn
+                    && call.name == "exec"
+                    && call
+                        .arguments
+                        .get("command")
+                        .and_then(Value::as_str)
+                        .is_some_and(|command| command.contains("cherry-pick"))
+            })
+            .map(|(index, _)| index)
+            .with_context(|| format!("rework worktree agent {agent} was not integrated"))?;
+        ensure!(
+            calls.iter().enumerate().any(|(index, call)| {
+                index > cherry_pick
+                    && index < final_reviewer_spawn
+                    && call.name == "close_agent"
+                    && call.arguments.get("target").and_then(Value::as_str) == Some(agent)
+                    && call
+                        .arguments
+                        .get("workspaceDisposition")
+                        .and_then(Value::as_str)
+                        == Some("cleanup")
+            }),
+            "rework worktree agent {agent} was not cleaned after integration"
+        );
+    }
     Ok(())
 }
 
@@ -2243,17 +2284,6 @@ fn ensure_submissions(calls: &[WireCall], outputs: &[WireOutput]) -> Result<()> 
         .map(|(_, _, i)| *i)
         .min()
         .context("no implementation spawn")?;
-    let cherry_pick = calls
-        .iter()
-        .position(|call| {
-            call.name == "exec"
-                && call
-                    .arguments
-                    .get("command")
-                    .and_then(Value::as_str)
-                    .is_some_and(|command| command.contains("cherry-pick"))
-        })
-        .context("no explicit cherry-pick")?;
     for (profile, agent, spawn_index) in required {
         let (read_index, read) = calls
             .iter()
@@ -2308,10 +2338,57 @@ fn ensure_submissions(calls: &[WireCall], outputs: &[WireOutput]) -> Result<()> 
                 "explorer submissions read occurred after implementation spawn"
             );
         } else {
+            let reviewer_spawn = calls
+                .iter()
+                .enumerate()
+                .find(|(index, call)| {
+                    *index > spawn_index
+                        && call.name == "spawn_agent"
+                        && call.arguments.get("profileId").and_then(Value::as_str)
+                            == Some("reviewer")
+                })
+                .map(|(index, _)| index)
+                .with_context(|| {
+                    format!("{profile} agent {agent} is not followed by a reviewer spawn")
+                })?;
             ensure!(
-                read_index < cherry_pick,
-                "implementation submissions read occurred after cherry-pick"
+                read_index < reviewer_spawn,
+                "{profile} agent {agent} submission was not read before review"
             );
+            if profile == "worktree_executor" {
+                let cherry_pick = calls
+                    .iter()
+                    .enumerate()
+                    .find(|(index, call)| {
+                        *index > read_index
+                            && *index < reviewer_spawn
+                            && call.name == "exec"
+                            && call
+                                .arguments
+                                .get("command")
+                                .and_then(Value::as_str)
+                                .is_some_and(|command| command.contains("cherry-pick"))
+                    })
+                    .map(|(index, _)| index)
+                    .with_context(|| {
+                        format!("worktree_executor agent {agent} was not explicitly integrated")
+                    })?;
+                ensure!(
+                    calls.iter().enumerate().any(|(index, call)| {
+                        index > cherry_pick
+                            && index < reviewer_spawn
+                            && call.name == "close_agent"
+                            && call.arguments.get("target").and_then(Value::as_str)
+                                == Some(agent.as_str())
+                            && call
+                                .arguments
+                                .get("workspaceDisposition")
+                                .and_then(Value::as_str)
+                                == Some("cleanup")
+                    }),
+                    "worktree_executor agent {agent} was not cleaned after integration"
+                );
+            }
         }
     }
     Ok(())
@@ -3464,6 +3541,71 @@ mod tests {
             "exec",
             serde_json::json!({"command":"git cherry-pick abc"}),
         ));
+        calls.push(orchestration_call(
+            "cleanup",
+            "close_agent",
+            serde_json::json!({
+                "target":"agent-3",
+                "workspaceDisposition":"cleanup"
+            }),
+        ));
+        calls.push(orchestration_call(
+            "review",
+            "spawn_agent",
+            serde_json::json!({"profileId":"reviewer"}),
+        ));
+        outputs.push(spawn_output("review", "reviewer", "reviewer-a"));
+        for (profile, suffix) in [("executor", "4"), ("worktree_executor", "5")] {
+            let spawn = format!("spawn-{suffix}");
+            let agent = format!("agent-{suffix}");
+            calls.push(orchestration_call(
+                &spawn,
+                "spawn_agent",
+                serde_json::json!({"profileId":profile}),
+            ));
+            outputs.push(spawn_output(&spawn, profile, &agent));
+            let wait = format!("wait-{suffix}");
+            calls.push(orchestration_call(
+                &wait,
+                "wait_agents",
+                serde_json::json!({"targets":[agent]}),
+            ));
+            outputs.push(terminal_wait_output(&wait, &agent));
+            let read = format!("read-{suffix}");
+            calls.push(orchestration_call(
+                &read,
+                "read_agent_submissions",
+                serde_json::json!({"target":agent}),
+            ));
+            let detail = if profile == "worktree_executor" {
+                "CHILD_DELIVERY_READY WORKTREE_COMMIT_READY"
+            } else {
+                "CHILD_DELIVERY_READY"
+            };
+            outputs.push(WireOutput {
+                call_id: Some(read),
+                content: submission_page(vec![submission_item(&[("detail", detail)])], 1),
+            });
+        }
+        calls.push(orchestration_call(
+            "pick-2",
+            "exec",
+            serde_json::json!({"command":"git cherry-pick def"}),
+        ));
+        calls.push(orchestration_call(
+            "cleanup-2",
+            "close_agent",
+            serde_json::json!({
+                "target":"agent-5",
+                "workspaceDisposition":"cleanup"
+            }),
+        ));
+        calls.push(orchestration_call(
+            "review-2",
+            "spawn_agent",
+            serde_json::json!({"profileId":"reviewer"}),
+        ));
+        outputs.push(spawn_output("review-2", "reviewer", "reviewer-b"));
         (calls, outputs)
     }
 
@@ -3621,17 +3763,6 @@ mod tests {
         )
     }
 
-    fn executor_receipt(call_id: &str, agent_id: &str) -> WireOutput {
-        WireOutput {
-            call_id: Some(call_id.into()),
-            content: serde_json::json!({
-                "profileId": "executor",
-                "agentId": agent_id,
-            })
-            .to_string(),
-        }
-    }
-
     fn valid_finding_re_review() -> (Vec<WireCall>, Vec<WireOutput>) {
         let calls = vec![
             orchestration_call(
@@ -3647,9 +3778,26 @@ mod tests {
             orchestration_call(
                 "x1",
                 "spawn_agent",
-                serde_json::json!({"profileId":"executor"}),
+                serde_json::json!({"profileId":"worktree_executor"}),
             ),
-            orchestration_call("i1", "exec", serde_json::json!({"command":"cargo test"})),
+            orchestration_call(
+                "xr1",
+                "read_agent_submissions",
+                serde_json::json!({"target":"worktree-a"}),
+            ),
+            orchestration_call(
+                "i1",
+                "exec",
+                serde_json::json!({"command":"git cherry-pick abc"}),
+            ),
+            orchestration_call(
+                "c1",
+                "close_agent",
+                serde_json::json!({
+                    "target":"worktree-a",
+                    "workspaceDisposition":"cleanup"
+                }),
+            ),
             orchestration_call(
                 "r2",
                 "spawn_agent",
@@ -3664,7 +3812,7 @@ mod tests {
         let outputs = vec![
             reviewer_receipt("r1", "reviewer-a"),
             finding_output("rr1"),
-            executor_receipt("x1", "executor-a"),
+            spawn_output("x1", "worktree_executor", "worktree-a"),
             reviewer_receipt("r2", "reviewer-b"),
             approval_output(Some("rr2")),
         ];
@@ -3785,16 +3933,22 @@ mod tests {
     }
 
     #[test]
-    fn finding_re_review_requires_integration_after_implementation() {
-        let (mut calls, outputs) = valid_finding_re_review();
-        calls.swap(2, 3);
-        assert!(ensure_finding_re_review(&calls, &outputs).is_err());
+    fn finding_re_review_requires_worktree_integration_and_cleanup() {
+        for missing in ["i1", "c1"] {
+            let (mut calls, outputs) = valid_finding_re_review();
+            calls.retain(|call| call.call_id.as_deref() != Some(missing));
+            assert!(ensure_finding_re_review(&calls, &outputs).is_err());
+        }
     }
 
     #[test]
     fn finding_re_review_requires_different_final_reviewer_agent_id() {
         let (mut calls, mut outputs) = valid_finding_re_review();
-        calls[5].arguments["target"] = Value::String("reviewer-a".into());
+        calls
+            .iter_mut()
+            .find(|call| call.call_id.as_deref() == Some("rr2"))
+            .unwrap()
+            .arguments["target"] = Value::String("reviewer-a".into());
         outputs
             .iter_mut()
             .find(|output| output.call_id.as_deref() == Some("r2"))
