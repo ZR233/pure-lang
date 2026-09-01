@@ -31,129 +31,114 @@ void main() {
     },
   };
 
-  test('user prompt sentinel while awaiting confirmation is not complete', () {
-    expect(
-      subagentsAcceptanceCompleted(
-        snapshot(
-          stage: 'awaiting_confirmation',
-          terminal: false,
-          timeline: const [
-            {'type': 'userMessage', 'text': 'run PURE_SUBAGENTS_LIVE_OK'},
-          ],
-          roles: const ['explorer'],
-        ),
-      ),
-      isFalse,
-    );
-  });
-
-  test('final answer sentinel before completed workflow is not complete', () {
-    expect(
-      subagentsAcceptanceCompleted(snapshot(stage: 'awaiting_confirmation')),
-      isFalse,
-    );
-  });
-
-  test('completed final answer missing required role is not complete', () {
-    expect(
-      subagentsAcceptanceCompleted(
-        snapshot(roles: const ['explorer', 'executor', 'reviewer']),
-      ),
-      isFalse,
-    );
-  });
-
-  test('completed workflow with busy root or interaction is not complete', () {
-    expect(subagentsAcceptanceCompleted(snapshot(busy: true)), isFalse);
-    expect(
-      subagentsAcceptanceCompleted(
-        snapshot(interaction: {'kind': 'userInput'}),
-      ),
-      isFalse,
-    );
-  });
-
   test(
-    'completed terminal workflow with all roles and final answer is complete',
+    'completion requires the terminal workflow, roles, and final answer',
     () {
-      expect(subagentsAcceptanceCompleted(snapshot()), isTrue);
+      final cases = [
+        (
+          name: 'user prompt sentinel',
+          value: snapshot(
+            stage: 'awaiting_confirmation',
+            terminal: false,
+            timeline: const [
+              {'type': 'userMessage', 'text': 'run PURE_SUBAGENTS_LIVE_OK'},
+            ],
+            roles: const ['explorer'],
+          ),
+          expected: false,
+        ),
+        (
+          name: 'final answer before completed workflow',
+          value: snapshot(stage: 'awaiting_confirmation'),
+          expected: false,
+        ),
+        (
+          name: 'missing required role',
+          value: snapshot(roles: const ['explorer', 'executor', 'reviewer']),
+          expected: false,
+        ),
+        (name: 'busy root', value: snapshot(busy: true), expected: false),
+        (
+          name: 'pending interaction',
+          value: snapshot(interaction: {'kind': 'userInput'}),
+          expected: false,
+        ),
+        (
+          name: 'commentary sentinel',
+          value: snapshot(
+            timeline: const [
+              {'type': 'commentary', 'text': 'PURE_SUBAGENTS_LIVE_OK'},
+            ],
+          ),
+          expected: false,
+        ),
+        (name: 'complete workflow', value: snapshot(), expected: true),
+      ];
+
+      for (final scenario in cases) {
+        expect(
+          subagentsAcceptanceCompleted(scenario.value),
+          scenario.expected,
+          reason: scenario.name,
+        );
+      }
     },
   );
 
-  test('commentary sentinel does not count as completion', () {
-    expect(
-      subagentsAcceptanceCompleted(
-        snapshot(
-          timeline: const [
-            {'type': 'commentary', 'text': 'PURE_SUBAGENTS_LIVE_OK'},
-          ],
+  test(
+    'canonical route requires the target and a valid revision transition',
+    () {
+      final cases = [
+        (
+          name: 'unchanged canonical target',
+          beforeModel: 'gpt-5',
+          currentProvider: 'openai',
+          currentModel: 'gpt-5',
+          currentRevision: 7,
+          expected: true,
         ),
-      ),
-      isFalse,
-    );
-  });
+        (
+          name: 'unchanged different target',
+          beforeModel: 'gpt-4',
+          currentProvider: 'openai',
+          currentModel: 'gpt-4',
+          currentRevision: 7,
+          expected: false,
+        ),
+        (
+          name: 'advanced canonical target',
+          beforeModel: 'gpt-4',
+          currentProvider: 'openai',
+          currentModel: 'gpt-5',
+          currentRevision: 8,
+          expected: true,
+        ),
+        (
+          name: 'advanced wrong target',
+          beforeModel: 'gpt-4',
+          currentProvider: 'anthropic',
+          currentModel: 'claude',
+          currentRevision: 8,
+          expected: false,
+        ),
+      ];
 
-  test('same target with unchanged revision is canonical', () {
-    expect(
-      canonicalRouteReached(
-        beforeProvider: 'openai',
-        beforeModel: 'gpt-5',
-        beforeRevision: 7,
-        currentProvider: 'openai',
-        currentModel: 'gpt-5',
-        currentRevision: 7,
-        targetProvider: 'openai',
-        targetModel: 'gpt-5',
-      ),
-      isTrue,
-    );
-  });
-
-  test('different target with unchanged revision is not canonical', () {
-    expect(
-      canonicalRouteReached(
-        beforeProvider: 'openai',
-        beforeModel: 'gpt-4',
-        beforeRevision: 7,
-        currentProvider: 'openai',
-        currentModel: 'gpt-4',
-        currentRevision: 7,
-        targetProvider: 'openai',
-        targetModel: 'gpt-5',
-      ),
-      isFalse,
-    );
-  });
-
-  test('different target with advanced revision is canonical', () {
-    expect(
-      canonicalRouteReached(
-        beforeProvider: 'openai',
-        beforeModel: 'gpt-4',
-        beforeRevision: 7,
-        currentProvider: 'openai',
-        currentModel: 'gpt-5',
-        currentRevision: 8,
-        targetProvider: 'openai',
-        targetModel: 'gpt-5',
-      ),
-      isTrue,
-    );
-  });
-
-  test('advanced revision without target route is not canonical', () {
-    expect(
-      canonicalRouteReached(
-        beforeProvider: 'openai',
-        beforeModel: 'gpt-4',
-        beforeRevision: 7,
-        currentProvider: 'anthropic',
-        currentModel: 'claude',
-        currentRevision: 8,
-        targetProvider: 'openai',
-        targetModel: 'gpt-5',
-      ),
-      isFalse,
-    );
-  });
+      for (final scenario in cases) {
+        expect(
+          canonicalRouteReached(
+            beforeProvider: 'openai',
+            beforeModel: scenario.beforeModel,
+            beforeRevision: 7,
+            currentProvider: scenario.currentProvider,
+            currentModel: scenario.currentModel,
+            currentRevision: scenario.currentRevision,
+            targetProvider: 'openai',
+            targetModel: 'gpt-5',
+          ),
+          scenario.expected,
+          reason: scenario.name,
+        );
+      }
+    },
+  );
 }

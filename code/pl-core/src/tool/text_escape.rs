@@ -26,28 +26,20 @@ mod tests {
     use super::decode_json_escaped_fragment_once;
 
     #[test]
-    fn decodes_json_escaped_fragment_once() {
-        assert_eq!(
-            decode_json_escaped_fragment_once(r#"Snippet: `\"unknown\\nusage\"`"#),
-            Some("Snippet: `\"unknown\\nusage\"`".to_string())
-        );
-    }
-
-    #[test]
-    fn decodes_newline_escape() {
-        assert_eq!(
-            decode_json_escaped_fragment_once(r#"first\nsecond"#),
-            Some("first\nsecond".to_string())
-        );
-    }
-
-    #[test]
-    fn leaves_plain_text_alone() {
-        assert_eq!(decode_json_escaped_fragment_once("plain text"), None);
-    }
-
-    #[test]
-    fn rejects_invalid_json_fragment() {
-        assert_eq!(decode_json_escaped_fragment_once(r#"C:\Users\name"#), None);
+    fn decodes_only_valid_json_escaped_fragments_once() {
+        for (input, expected) in [
+            (
+                r#"Snippet: `\"unknown\\nusage\"`"#,
+                Some("Snippet: `\"unknown\\nusage\"`"),
+            ),
+            (r#"first\nsecond"#, Some("first\nsecond")),
+            ("plain text", None),
+            (r#"C:\Users\name"#, None),
+        ] {
+            assert_eq!(
+                decode_json_escaped_fragment_once(input).as_deref(),
+                expected
+            );
+        }
     }
 }

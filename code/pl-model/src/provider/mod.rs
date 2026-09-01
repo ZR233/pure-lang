@@ -392,18 +392,11 @@ mod tests {
     }
 
     #[test]
-    fn compatible_provider_can_express_mimo() {
+    fn compatible_provider_preserves_identity_and_function_tool_defaults() {
         let info = ProviderEndpoint::compatible("MiMo", "https://mimo.example.com/v1");
 
         assert_eq!(info.name, "MiMo");
         assert_eq!(info.base_url, "https://mimo.example.com/v1");
-        assert_eq!(info.tool_wire_policy, ToolWirePolicy::FunctionFallback);
-    }
-
-    #[test]
-    fn compatible_provider_defaults_to_function_tools() {
-        let info = ProviderEndpoint::compatible("Gateway", "https://gateway.example/v1");
-
         assert_eq!(info.tool_wire_policy, ToolWirePolicy::FunctionFallback);
         assert_eq!(info.apply_patch_tool_type, None);
     }

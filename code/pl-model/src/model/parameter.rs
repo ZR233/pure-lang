@@ -257,51 +257,35 @@ mod tests {
     }
 
     #[test]
-    fn set_nested_creates_intermediate_objects() {
+    fn set_nested_handles_missing_non_object_and_empty_path_segments() {
         let mut body = Map::new();
         set_nested(&mut body, "reasoning.effort", json!("high"));
-
         assert_eq!(body_value(body), json!({"reasoning": {"effort": "high"}}));
-    }
 
-    #[test]
-    fn set_nested_overwrites_non_object_intermediate() {
         let mut body = Map::new();
         body.insert("thinking".to_string(), json!("placeholder"));
-
         set_nested(&mut body, "thinking.type", json!("enabled"));
-
         assert_eq!(body_value(body), json!({"thinking": {"type": "enabled"}}));
-    }
 
-    #[test]
-    fn set_nested_ignores_empty_segments() {
         let mut body = Map::new();
         set_nested(&mut body, ".thinking.type.", json!("enabled"));
         set_nested(&mut body, "", json!("ignored"));
-
         assert_eq!(body_value(body), json!({"thinking": {"type": "enabled"}}));
     }
 
     #[test]
-    fn remove_nested_deletes_leaf_field() {
-        let mut body: Map<String, Value> =
-            serde_json::from_str(r#"{"reasoning_effort":"high","thinking":{"type":"enabled"}}"#)
-                .unwrap();
+    fn remove_nested_deletes_leaf_and_preserves_body_for_missing_paths() {
+        let mut body: Map<String, Value> = serde_json::from_str(
+            r#"{"reasoning_effort":"high","thinking":{"type":"enabled"},"keep":true}"#,
+        )
+        .unwrap();
 
         remove_nested(&mut body, "reasoning_effort");
-        assert!(!body.contains_key("reasoning_effort"));
-
         remove_nested(&mut body, "thinking.type");
-        assert_eq!(body_value(body), json!({"thinking": {}}));
-    }
-
-    #[test]
-    fn remove_nested_silent_on_missing_path() {
-        let mut body = Map::new();
         remove_nested(&mut body, "nonexistent.path");
-        remove_nested(&mut body, "thinking.type");
-        // 不 panic 即通过
+        remove_nested(&mut body, "keep.missing");
+
+        assert_eq!(body_value(body), json!({"thinking": {}, "keep": true}));
     }
 
     #[test]

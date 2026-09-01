@@ -26,33 +26,23 @@ void main() {
     return captured;
   }
 
-  testWidgets('translates fixed roles in Chinese locale', (tester) async {
+  testWidgets('localizes known roles and preserves fallback semantics', (
+    tester,
+  ) async {
     final context = await pumpContext(tester, const Locale('zh'));
     expect(context.roleLabel('explorer'), '探索者');
     expect(context.roleLabel('planner'), '计划者');
     expect(context.roleLabel('executor'), '执行者');
     expect(context.roleLabel('reviewer'), '审查者');
-  });
-
-  testWidgets('translates fixed roles in English locale', (tester) async {
-    final context = await pumpContext(tester, const Locale('en'));
-    expect(context.roleLabel('explorer'), 'Explorer');
-    expect(context.roleLabel('planner'), 'Planner');
-    expect(context.roleLabel('executor'), 'Executor');
-    expect(context.roleLabel('reviewer'), 'Reviewer');
-  });
-
-  testWidgets('falls back to localized label for empty role', (tester) async {
-    final zhContext = await pumpContext(tester, const Locale('zh'));
-    expect(zhContext.roleLabel(''), '代理');
-
-    final enContext = await pumpContext(tester, const Locale('en'));
-    expect(enContext.roleLabel(''), 'Agent');
-  });
-
-  testWidgets('returns unknown role unchanged', (tester) async {
-    final context = await pumpContext(tester, const Locale('zh'));
+    expect(context.roleLabel(''), '代理');
     expect(context.roleLabel('custom-role'), 'custom-role');
     expect(context.roleLabel('explorer '), '探索者');
+
+    final englishContext = await pumpContext(tester, const Locale('en'));
+    expect(englishContext.roleLabel('explorer'), 'Explorer');
+    expect(englishContext.roleLabel('planner'), 'Planner');
+    expect(englishContext.roleLabel('executor'), 'Executor');
+    expect(englishContext.roleLabel('reviewer'), 'Reviewer');
+    expect(englishContext.roleLabel(''), 'Agent');
   });
 }

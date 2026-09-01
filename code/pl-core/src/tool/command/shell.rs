@@ -59,16 +59,16 @@ mod tests {
     }
 
     #[test]
-    fn posix_argv_uses_shell_c() {
-        let argv =
-            argv_for_environment(&environment(ShellDialect::Bash, "/bin/bash"), "echo hello");
-        assert_eq!(argv, vec!["/bin/bash", "-c", "echo hello"]);
-    }
-
-    #[test]
-    fn sh_argv_uses_sh_c() {
-        let argv = argv_for_environment(&environment(ShellDialect::Sh, "/bin/sh"), "echo hello");
-        assert_eq!(argv, vec!["/bin/sh", "-c", "echo hello"]);
+    fn posix_shells_use_dash_c() {
+        for (dialect, path) in [
+            (ShellDialect::Bash, "/bin/bash"),
+            (ShellDialect::Sh, "/bin/sh"),
+        ] {
+            assert_eq!(
+                argv_for_environment(&environment(dialect, path), "echo hello"),
+                vec![path, "-c", "echo hello"]
+            );
+        }
     }
 
     #[test]
