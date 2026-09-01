@@ -50,6 +50,15 @@ Studio 注册五个系统 Profile：`explorer`、`planner`、`reviewer` 固定�
 
 配置变化只影响未来 spawn。每个 child 创建时冻结 Profile id、正文、provider、model、effort、配置
 revision 与 `AgentWorkspaceAssignmentSnapshot`；运行中的 child 不随设置变化，也不在每轮回读 SQLite。
+产品 lifecycle 在准备外部资源时直接接收该 frozen Profile snapshot；不得通过父 Agent 配置、当前
+Profile 文件或非类型化 metadata 重新推导模型路由与系统指令。
+
+这里保留的是公共功能语义，而不是某个固定 Rust 签名：任何实现 PL host 的产品都必须能在外部资源
+产生副作用之前取得“本次 spawn 已冻结的完整 Profile”。该能力用于让产品按同一 provider、model、
+effort、system instructions 和 workspace mode 创建容器、远端会话或审计收据。如果 PL 只暴露 child
+role 或任意 metadata，产品就只能回读当前配置或继承父 Agent，导致 durable session 与实际执行资源
+分裂。后续可以重命名请求类型、拆分生命周期阶段或改为专门 accessor，但不得删除这项能力，也不得
+把重新解析 Profile 的责任推回产品层。
 
 ## 15.4 spawn 与目录写策略
 

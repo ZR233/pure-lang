@@ -39,6 +39,20 @@ impl MailboxMetadataValue {
             | Self::Object(_) => None,
         }
     }
+
+    /// 将 typed mailbox 值借用为数组，避免产品 host 把热状态重新编码成 JSON。
+    pub fn as_array(&self) -> Option<&[Self]> {
+        match self {
+            Self::Array(values) => Some(values),
+            Self::Null
+            | Self::Boolean(_)
+            | Self::Signed(_)
+            | Self::Unsigned(_)
+            | Self::Float(_)
+            | Self::String(_)
+            | Self::Object(_) => None,
+        }
+    }
 }
 
 impl From<serde_json::Value> for MailboxMetadataValue {
@@ -540,5 +554,22 @@ mod tests {
         assert_eq!(result.facts.recovery_revision, 3);
         assert_eq!(result.facts.before_transcript_hash, "before");
         assert_eq!(result.facts.after_transcript_hash, "after");
+    }
+
+    #[test]
+    fn typed_mailbox_metadata_exposes_string_arrays_without_json_roundtrip() {
+        let metadata = MailboxMetadata::from(json!({
+            "skillMentions": ["review-pr", "rust-workflow"],
+        }));
+
+        let mentions = metadata
+            .get("skillMentions")
+            .and_then(MailboxMetadataValue::as_array)
+            .expect("typed array")
+            .iter()
+            .filter_map(MailboxMetadataValue::as_str)
+            .collect::<Vec<_>>();
+
+        assert_eq!(mentions, vec!["review-pr", "rust-workflow"]);
     }
 }

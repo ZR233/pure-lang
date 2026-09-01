@@ -514,6 +514,7 @@ impl AgentTurnFactory for TestTurnFactory {
 #[derive(Debug, Clone, Default)]
 struct TestLifecycle {
     close_order: Arc<Mutex<Vec<ThreadId>>>,
+    spawn_profiles: Arc<Mutex<Vec<Option<pl_protocol::AgentProfileSnapshot>>>>,
     spawn_rollbacks: Arc<Mutex<Vec<ThreadId>>>,
     close_rollbacks: Arc<Mutex<Vec<ThreadId>>>,
     fail_prepare_spawn: Arc<Mutex<bool>>,
@@ -559,6 +560,10 @@ impl AgentLifecycleAdapter for TestLifecycle {
         &self,
         request: SpawnLifecycleRequest,
     ) -> std::result::Result<Self::SpawnLease, Self::Error> {
+        self.spawn_profiles
+            .lock()
+            .unwrap()
+            .push(request.agent_profile.clone());
         if std::mem::take(&mut *self.fail_prepare_spawn.lock().unwrap()) {
             Err(TestError("prepare spawn failed".to_string()))
         } else {
@@ -883,6 +888,25 @@ fn child_spawn_request(parent_id: ThreadId) -> AgentSpawnRequest {
         initial_turn_id: None,
         initial_message: None,
         metadata: serde_json::Value::Null,
+    }
+}
+
+fn test_agent_profile() -> pl_protocol::AgentProfileSnapshot {
+    pl_protocol::AgentProfileSnapshot {
+        profile_id: "worker".to_string(),
+        display_name: "Worker".to_string(),
+        description: "Executes bounded work".to_string(),
+        when_to_use: "Implementation tasks".to_string(),
+        system_instructions: "Implement and verify the task.".to_string(),
+        provider_id: "test".to_string(),
+        model: "test-model".to_string(),
+        effort: None,
+        source: "test".to_string(),
+        revision: "1".to_string(),
+        content_hash: "hash".to_string(),
+        system: true,
+        enabled: true,
+        workspace_mode: pl_protocol::AgentWorkspaceMode::Directory,
     }
 }
 
@@ -2551,6 +2575,35 @@ async fn retire_tree_releases_actors_directory_and_thread_snapshots() {
     assert_eq!(
         repository.durable_barriers.lock().unwrap().as_slice(),
         &[(child.clone(), 2), (root.clone(), 2), (child, 3), (root, 3),]
+    );
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn spawn_lifecycle_receives_the_profile_frozen_in_the_child_session() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository, FactoryMode::Fail);
+    let runtime = AgentRuntime::start(host.clone(), test_options())
+        .await
+        .unwrap();
+    let handle = runtime.handle();
+    let root = ThreadId::new("root").unwrap();
+    handle
+        .register(registration("root", "root-chat"))
+        .await
+        .unwrap();
+    let profile = test_agent_profile();
+    let mut request = child_spawn_request(root);
+    request
+        .session
+        .session
+        .replace_agent_profile(Some(profile.clone()));
+
+    handle.spawn(request).await.unwrap();
+
+    assert_eq!(
+        host.lifecycle.spawn_profiles.lock().unwrap().as_slice(),
+        &[Some(profile)]
     );
     runtime.shutdown().await.unwrap();
 }

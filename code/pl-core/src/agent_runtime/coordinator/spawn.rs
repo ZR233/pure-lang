@@ -142,6 +142,7 @@ where
             parent,
             child: state.snapshot.clone(),
             child_thread_id,
+            agent_profile: state.session.session.agent_profile().cloned(),
             metadata,
         })
         .await

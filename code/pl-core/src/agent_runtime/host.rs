@@ -435,6 +435,11 @@ pub struct SpawnLifecycleRequest {
     pub parent: AgentSnapshot,
     pub child: AgentSnapshot,
     pub child_thread_id: super::ThreadId,
+    /// 协作工具在创建 child session 前已经冻结的完整 Agent Profile。
+    ///
+    /// 产品 lifecycle 必须使用该快照准备模型、容器或其它外部资源，不能重新读取
+    /// 当前 Profile 配置，也不能从父 Agent 继承会随时间变化的模型与提示词。
+    pub agent_profile: Option<pl_protocol::AgentProfileSnapshot>,
     pub metadata: serde_json::Value,
 }
 

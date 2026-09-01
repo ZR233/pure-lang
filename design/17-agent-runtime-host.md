@@ -32,6 +32,8 @@ child 可使用普通 workspace/command/collaboration tools，但不拥有根 wo
 `unrestricted | directory | worktree` 模式决定有效 root/boundary 与项目内写策略。directory 策略只由
 Pure 内置文件 mutation 工具强制执行，固定上下文必须声明 shell、Git、MCP 可绕过；worktree child 使用
 产品层 durable lease，但不创建旧交付记录或自动整合。多个 Agent 的协调与成果采纳责任属于 root。
+产品 lifecycle 的 spawn request 同时携带 session 中已经冻结的 typed Profile snapshot，供容器、模型
+路由等外部资源准备直接消费；产品不得从父 Agent 或当前设置重建另一份 Profile。
 
 ## 17.4 Interaction 与恢复
 
@@ -39,6 +41,12 @@ Thread 可以等待 `UserInput` 或 `ToolApproval`。响应进入同一 actor co
 Task continuation 或专用计划确认状态。重启 activation 原子恢复 transcript、working state、pending
 Interaction、Profile 与 workspace assignment；非法 session snapshot 产生通用 AgentState recovery issue。
 worktree 的物理资源恢复另由 Studio durable lease 对账，身份不匹配时发布 Recovery issue 并保留现场。
+
+Mailbox metadata 在热状态中保持 typed value tree。产品 host 必须能借用读取 object、array 与 scalar，
+例如解析一组 Skill mentions 或其它产品输入提示，而无需把热状态重新序列化成 `serde_json::Value`。
+这里约束的是“typed 结构可遍历”的公共能力，不锁定 `as_array` 等具体方法名；后续即使更换 value 类型
+或 accessor，也必须保留等价的无 JSON round-trip 读取语义。否则产品会被迫复制 wire 解析、丢失类型
+边界，并重新引入 runtime 内的非类型化兼容路径。
 
 ## 17.5 生命周期
 
