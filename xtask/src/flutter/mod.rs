@@ -798,8 +798,7 @@ fn copy_release_artifacts(
         );
     }
     if matches!(clean_mode, DistCleanMode::Clean) && dist_dir.exists() {
-        fs::remove_dir_all(dist_dir)
-            .with_context(|| format!("failed to clean {}", dist_dir.display()))?;
+        clean_directory_contents(dist_dir)?;
     }
     fs::create_dir_all(dist_dir)
         .with_context(|| format!("failed to create {}", dist_dir.display()))?;
@@ -820,6 +819,26 @@ fn copy_release_artifacts(
         for file in files {
             println!("  {}", file.to_string_lossy());
         }
+    }
+    Ok(())
+}
+
+fn clean_directory_contents(directory: &Path) -> Result<()> {
+    for entry in fs::read_dir(directory)
+        .with_context(|| format!("failed to read {} for cleanup", directory.display()))?
+    {
+        let entry =
+            entry.with_context(|| format!("failed to read entry in {}", directory.display()))?;
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .with_context(|| format!("failed to inspect {}", path.display()))?;
+        let result = if file_type.is_dir() {
+            fs::remove_dir_all(&path)
+        } else {
+            fs::remove_file(&path)
+        };
+        result.with_context(|| format!("failed to remove stale artifact {}", path.display()))?;
     }
     Ok(())
 }
@@ -858,6 +877,7 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
     use std::ffi::OsStr;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn ordinary_gui_build_uses_current_generated_sources() {
@@ -869,6 +889,40 @@ mod tests {
             generated_sources_policy(true),
             GeneratedSourcesPolicy::RegenerateAndCheck
         );
+    }
+
+    #[test]
+    fn clean_release_copy_preserves_dist_root_and_removes_stale_children() -> Result<()> {
+        let fixture_root = std::env::temp_dir().join(format!(
+            "pl-xtask-release-clean-{}-{}",
+            std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
+        ));
+        let artifact_dir = fixture_root.join("artifacts");
+        let dist_dir = fixture_root.join("dist");
+        fs::create_dir_all(artifact_dir.join("data"))?;
+        fs::write(artifact_dir.join("pure_studio.exe"), "new executable")?;
+        fs::write(artifact_dir.join("data").join("asset.bin"), "new asset")?;
+        fs::create_dir_all(dist_dir.join("stale"))?;
+        fs::write(dist_dir.join("old.exe"), "stale executable")?;
+        fs::write(dist_dir.join("stale").join("old.bin"), "stale asset")?;
+
+        copy_release_artifacts(&artifact_dir, &dist_dir, DistCleanMode::Clean)?;
+
+        assert!(dist_dir.is_dir());
+        assert!(!dist_dir.join("old.exe").exists());
+        assert!(!dist_dir.join("stale").exists());
+        assert_eq!(
+            fs::read_to_string(dist_dir.join("pure_studio.exe"))?,
+            "new executable"
+        );
+        assert_eq!(
+            fs::read_to_string(dist_dir.join("data").join("asset.bin"))?,
+            "new asset"
+        );
+
+        fs::remove_dir_all(fixture_root)?;
+        Ok(())
     }
 
     #[test]
