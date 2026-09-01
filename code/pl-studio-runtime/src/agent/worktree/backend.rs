@@ -193,7 +193,7 @@ impl WorktreeBackend for LocalWorktreeBackend {
             let args = vec!["rev-parse".to_string(), "--show-toplevel".to_string()];
             let output = self.run_git(path, &args).await?;
             let root = non_empty_head(&args, &output.stdout)?;
-            std::fs::canonicalize(root).map_err(|error| WorktreeError::Io(error.to_string()))
+            dunce::canonicalize(root).map_err(|error| WorktreeError::Io(error.to_string()))
         }
         .boxed()
     }
@@ -261,7 +261,7 @@ impl WorktreeBackend for LocalWorktreeBackend {
                 "add".to_string(),
                 "-b".to_string(),
                 branch.to_string(),
-                target_path.to_string_lossy().into_owned(),
+                local_git_path_argument(target_path),
                 base_commit.to_string(),
             ];
             let output =
@@ -323,7 +323,7 @@ impl WorktreeBackend for LocalWorktreeBackend {
             if force {
                 args.push("--force".to_string());
             }
-            args.push(target_path.to_string_lossy().into_owned());
+            args.push(local_git_path_argument(target_path));
             self.run_git(repo_root, &args).await.map(|_| ())
         }
         .boxed()
@@ -346,6 +346,7 @@ impl WorktreeBackend for LocalWorktreeBackend {
 }
 
 pub(super) fn git_request(cwd: &Path, args: &[String]) -> ExecutionRequest {
+    let cwd = dunce::simplified(cwd);
     let mut full_args = vec![
         "-c".to_string(),
         "core.hooksPath=/dev/null".to_string(),
@@ -362,6 +363,10 @@ pub(super) fn git_request(cwd: &Path, args: &[String]) -> ExecutionRequest {
         env: BTreeMap::new(),
         timeout: Some(WORKTREE_GIT_TIMEOUT),
     }
+}
+
+fn local_git_path_argument(path: &Path) -> String {
+    dunce::simplified(path).to_string_lossy().into_owned()
 }
 
 pub(super) fn checked_output(

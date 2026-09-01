@@ -240,6 +240,11 @@ mod tests {
     async fn local_worktree_does_not_copy_dirty_main_workspace_and_cleans_explicitly() {
         let repository = repository("local-lifecycle");
         let root = std::fs::canonicalize(repository.path()).unwrap();
+        #[cfg(windows)]
+        assert!(
+            root.to_string_lossy().starts_with(r"\\?\"),
+            "the regression fixture must exercise a verbatim Windows path"
+        );
         let manager = WorktreeManager::new(root.clone(), Arc::new(LocalWorktreeBackend::default()));
         let base = manager.resolve_head(&root).await.unwrap();
         std::fs::write(root.join("tracked.txt"), "dirty main\n").unwrap();

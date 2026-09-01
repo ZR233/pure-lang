@@ -37,6 +37,7 @@ tempfile = { workspace = true }
 minisign-verify = { workspace = true }
 fs4 = { workspace = true }
 rust-embed = { workspace = true }
+dunce = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
