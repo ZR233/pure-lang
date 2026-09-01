@@ -158,24 +158,38 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
                 .ok_or_else(|| lifecycle_error("spawn parent Studio Thread does not exist"))?,
         };
         let project = self.project_for_thread(&parent_thread).await?;
-        let profile_id = request
-            .metadata
-            .get("profileId")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| lifecycle_error("spawn metadata has no Agent Profile id"))?;
+        let profile = request
+            .agent_profile
+            .as_ref()
+            .ok_or_else(|| lifecycle_error("spawn has no frozen Agent Profile snapshot"))?;
+        let profile_id = profile.profile_id.as_str();
         if profile_id != request.child.identity.role.as_str() {
             return Err(lifecycle_error(
                 "spawn Agent Profile does not match child runtime role",
             ));
         }
-        let mode: AgentWorkspaceMode = serde_json::from_value(
-            request
-                .metadata
-                .get("workspaceMode")
-                .cloned()
-                .ok_or_else(|| lifecycle_error("spawn metadata has no workspace mode"))?,
-        )
-        .map_err(|error| lifecycle_error(format!("invalid workspace mode: {error}")))?;
+        if request
+            .metadata
+            .get("profileId")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|metadata_id| metadata_id != profile_id)
+        {
+            return Err(lifecycle_error(
+                "spawn metadata Agent Profile does not match frozen snapshot",
+            ));
+        }
+        let mode = profile.workspace_mode;
+        if let Some(metadata_mode) = request.metadata.get("workspaceMode") {
+            let metadata_mode: AgentWorkspaceMode = serde_json::from_value(metadata_mode.clone())
+                .map_err(|error| {
+                lifecycle_error(format!("invalid workspace mode receipt: {error}"))
+            })?;
+            if metadata_mode != mode {
+                return Err(lifecycle_error(
+                    "spawn workspace mode receipt does not match frozen Agent Profile",
+                ));
+            }
+        }
         let writable_paths: Option<Vec<String>> = serde_json::from_value(
             request
                 .metadata
@@ -184,6 +198,12 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
                 .unwrap_or(serde_json::Value::Null),
         )
         .map_err(|error| lifecycle_error(format!("invalid writablePaths receipt: {error}")))?;
+        if mode != AgentWorkspaceMode::Directory && writable_paths.is_some() {
+            return Err(lifecycle_error(format!(
+                "{} Profile received an invalid writablePaths receipt",
+                mode.label()
+            )));
+        }
         let project_root = resolved_project_root(&project)?;
         let child_id = request.child.identity.id.to_string();
 
@@ -225,11 +245,6 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
                 )
             }
             AgentWorkspaceMode::Worktree => {
-                if writable_paths.is_some() {
-                    return Err(lifecycle_error(
-                        "worktree Profile received an invalid writablePaths receipt",
-                    ));
-                }
                 let backend = self.backend_for(project.ssh_server_id.as_deref(), &project_root);
                 let repository_root =
                     WorktreeManager::resolve_repository_root(backend.as_ref(), &project_root)
