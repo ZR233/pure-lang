@@ -480,21 +480,21 @@ mod tests {
 
     #[test]
     fn non_login_process_path_includes_common_user_tool_directories() {
-        let path = user_tool_path(
-            Some(OsStr::new("/home/runner")),
-            Some(OsStr::new("/usr/local/bin:/usr/bin")),
-        )
-        .unwrap()
-        .unwrap();
+        let home = PathBuf::from("/home/runner");
+        let inherited_entries = [PathBuf::from("/usr/local/bin"), PathBuf::from("/usr/bin")];
+        let inherited = std::env::join_paths(&inherited_entries).unwrap();
+        let path = user_tool_path(Some(home.as_os_str()), Some(inherited.as_os_str()))
+            .unwrap()
+            .unwrap();
         let entries = std::env::split_paths(&path).collect::<Vec<_>>();
 
         assert_eq!(
             entries,
             vec![
-                PathBuf::from("/home/runner/.cargo/bin"),
-                PathBuf::from("/home/runner/.local/bin"),
-                PathBuf::from("/usr/local/bin"),
-                PathBuf::from("/usr/bin"),
+                home.join(".cargo/bin"),
+                home.join(".local/bin"),
+                inherited_entries[0].clone(),
+                inherited_entries[1].clone(),
             ]
         );
     }
