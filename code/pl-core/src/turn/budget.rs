@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 pub const AGENT_MAX_COUNT: usize = 16;
 pub const AGENT_MAX_DEPTH: u32 = 1;
 /// 默认 wall-clock 安全上限（30 分钟），参考 Codex 的 agent_job_max_runtime_seconds。
-pub const DEFAULT_WALL_CLOCK_MS: u64 = 1_800_000;
+pub const DEFAULT_TURN_WALL_CLOCK: Duration = Duration::from_secs(30 * 60);
 
 /// 单轮 wall-clock 安全预算。
 ///
@@ -18,20 +18,29 @@ pub const DEFAULT_WALL_CLOCK_MS: u64 = 1_800_000;
 #[serde(rename_all = "camelCase")]
 pub struct TurnBudget {
     /// Wall-clock 安全上限（毫秒）。超时后 turn 将被终止。
-    pub wall_clock_ms: u64,
+    wall_clock_ms: u64,
 }
 
 impl TurnBudget {
-    pub fn new(wall_clock_ms: u64) -> Self {
-        Self { wall_clock_ms }
+    /// 创建只强制 wall-clock 的单轮预算。
+    ///
+    /// 超出协议毫秒字段可表达范围的时长会饱和为 [`u64::MAX`]，避免宿主侧的
+    /// 平台相关整数转换改变预算语义。
+    pub fn new(wall_clock_limit: Duration) -> Self {
+        Self {
+            wall_clock_ms: wall_clock_limit.as_millis().try_into().unwrap_or(u64::MAX),
+        }
+    }
+
+    /// 返回本轮强制执行的 wall-clock 上限。
+    pub const fn wall_clock_limit(self) -> Duration {
+        Duration::from_millis(self.wall_clock_ms)
     }
 }
 
 impl Default for TurnBudget {
     fn default() -> Self {
-        Self {
-            wall_clock_ms: DEFAULT_WALL_CLOCK_MS,
-        }
+        Self::new(DEFAULT_TURN_WALL_CLOCK)
     }
 }
 
@@ -55,7 +64,7 @@ pub(crate) struct BudgetTracker {
 impl BudgetTracker {
     pub fn new(budget: TurnBudget) -> Self {
         Self {
-            wall_clock_ms: budget.wall_clock_ms,
+            wall_clock_ms: budget.wall_clock_limit().as_millis() as u64,
             usage: BudgetUsage::default(),
             started_at: Instant::now(),
             excluded_wall_clock: Duration::ZERO,

@@ -57,7 +57,9 @@ async fn request_approval_allows_external_path_after_user_approval() {
         }));
     let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(16);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
-    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(
+        std::time::Duration::from_millis(60_000),
+    ));
 
     let records = execute_tool_calls(
         &[tool_call],
@@ -118,7 +120,9 @@ async fn workspace_tool_without_approval_skips_approved_trace_phase() {
     );
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
-    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(
+        std::time::Duration::from_millis(60_000),
+    ));
 
     let records = execute_tool_calls(
         &[tool_call],
@@ -163,7 +167,9 @@ async fn unknown_tool_records_one_terminal_event_and_tool_result() {
     );
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
-    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(
+        std::time::Duration::from_millis(60_000),
+    ));
 
     let records = execute_tool_calls(
         &[tool_call],
@@ -213,7 +219,9 @@ async fn execution_policy_denied_tool_records_one_terminal_event_and_tool_result
     );
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
-    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(
+        std::time::Duration::from_millis(60_000),
+    ));
     let options =
         TurnOptions::default().with_execution_policy(crate::AgentExecutionPolicy::default());
 
@@ -291,7 +299,9 @@ async fn cancelling_running_tool_records_interrupted_terminal_event() {
     let options = TurnOptions::default().with_cancellation(token.clone());
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
-    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(
+        std::time::Duration::from_millis(60_000),
+    ));
     let cancel_task = tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         token.cancel();

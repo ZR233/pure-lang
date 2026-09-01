@@ -23,8 +23,9 @@ async fn run_turn_records_user_trace_part_before_internal_parts() {
     let result = core
         .run_turn_with_trace(
             &mut session,
-            TurnRequest::new("Build the thing".to_string())
-                .with_budget(crate::turn::TurnBudget::new(60_000)),
+            TurnRequest::new("Build the thing".to_string()).with_budget(
+                crate::turn::TurnBudget::new(std::time::Duration::from_millis(60_000)),
+            ),
             &mut recorder,
             TurnOptions::default(),
         )
@@ -87,8 +88,9 @@ async fn run_turn_emits_runtime_progress_commentary() {
     let result = core
         .run_turn_with_trace(
             &mut session,
-            TurnRequest::new("Build the thing".to_string())
-                .with_budget(crate::turn::TurnBudget::new(60_000)),
+            TurnRequest::new("Build the thing".to_string()).with_budget(
+                crate::turn::TurnBudget::new(std::time::Duration::from_millis(60_000)),
+            ),
             &mut recorder,
             TurnOptions::default(),
         )
@@ -132,8 +134,9 @@ async fn run_turn_persists_only_final_text_to_session_history() {
     let result = core
         .run_turn_with_trace(
             &mut session,
-            TurnRequest::new("Build the thing".to_string())
-                .with_budget(crate::turn::TurnBudget::new(60_000)),
+            TurnRequest::new("Build the thing".to_string()).with_budget(
+                crate::turn::TurnBudget::new(std::time::Duration::from_millis(60_000)),
+            ),
             &mut recorder,
             TurnOptions::default(),
         )
@@ -193,7 +196,9 @@ async fn run_turn_exposes_context_compaction_snapshot() {
             &mut session,
             TurnRequest::new("continue".to_string())
                 .with_turn_id("turn-compaction")
-                .with_budget(crate::turn::TurnBudget::new(60_000)),
+                .with_budget(crate::turn::TurnBudget::new(
+                    std::time::Duration::from_millis(60_000),
+                )),
             &mut recorder,
             TurnOptions::default(),
         )
@@ -350,8 +355,9 @@ async fn before_model_step_adds_replaces_and_removes_tools_for_the_next_step() {
     let result = core
         .run_turn_with_trace(
             &mut session,
-            TurnRequest::new("exercise dynamic tools".to_string())
-                .with_budget(crate::turn::TurnBudget::new(60_000)),
+            TurnRequest::new("exercise dynamic tools".to_string()).with_budget(
+                crate::turn::TurnBudget::new(std::time::Duration::from_millis(60_000)),
+            ),
             &mut recorder,
             TurnOptions::default(),
         )
@@ -409,8 +415,9 @@ async fn model_transport_retry_reuses_the_same_frozen_tool_plan() {
     let result = core
         .run_turn_with_trace(
             &mut session,
-            TurnRequest::new("retry once".to_string())
-                .with_budget(crate::turn::TurnBudget::new(60_000)),
+            TurnRequest::new("retry once".to_string()).with_budget(crate::turn::TurnBudget::new(
+                std::time::Duration::from_millis(60_000),
+            )),
             &mut recorder,
             TurnOptions::default(),
         )
@@ -599,8 +606,9 @@ async fn responses_http_uses_prompt_cache_and_full_canonical_history() {
 
     core.run_turn_with_trace(
         &mut session,
-        TurnRequest::new("first prompt".to_string())
-            .with_budget(crate::turn::TurnBudget::new(60_000)),
+        TurnRequest::new("first prompt".to_string()).with_budget(crate::turn::TurnBudget::new(
+            std::time::Duration::from_millis(60_000),
+        )),
         &mut recorder,
         options.clone(),
     )
@@ -608,8 +616,9 @@ async fn responses_http_uses_prompt_cache_and_full_canonical_history() {
     .unwrap();
     core.run_turn_with_trace(
         &mut session,
-        TurnRequest::new("second prompt".to_string())
-            .with_budget(crate::turn::TurnBudget::new(60_000)),
+        TurnRequest::new("second prompt".to_string()).with_budget(crate::turn::TurnBudget::new(
+            std::time::Duration::from_millis(60_000),
+        )),
         &mut recorder,
         options,
     )
@@ -659,8 +668,9 @@ async fn run_turn_uses_runtime_profile_default_turn_options() {
 
     core.run_turn(
         &mut session,
-        TurnRequest::new("profile prompt".to_string())
-            .with_budget(crate::turn::TurnBudget::new(60_000)),
+        TurnRequest::new("profile prompt".to_string()).with_budget(crate::turn::TurnBudget::new(
+            std::time::Duration::from_millis(60_000),
+        )),
     )
     .await
     .unwrap();
@@ -700,8 +710,9 @@ async fn run_turn_http_sends_full_history_without_a_retry_path() {
     let result = core
         .run_turn_with_trace(
             &mut session,
-            TurnRequest::new("new prompt".to_string())
-                .with_budget(crate::turn::TurnBudget::new(60_000)),
+            TurnRequest::new("new prompt".to_string()).with_budget(crate::turn::TurnBudget::new(
+                std::time::Duration::from_millis(60_000),
+            )),
             &mut recorder,
             TurnOptions::default().with_prompt_cache_key("cache-session".to_string()),
         )
@@ -883,8 +894,9 @@ async fn tool_context_keeps_full_session_history_across_responses_http_requests(
     let result = core
         .run_turn_with_trace(
             &mut session,
-            TurnRequest::new("check tool history".to_string())
-                .with_budget(crate::turn::TurnBudget::new(60_000)),
+            TurnRequest::new("check tool history".to_string()).with_budget(
+                crate::turn::TurnBudget::new(std::time::Duration::from_millis(60_000)),
+            ),
             &mut recorder,
             TurnOptions::default(),
         )
@@ -949,8 +961,9 @@ async fn ending_tool_content_is_published_as_the_canonical_final_trace_item() {
     let result = core
         .run_turn_with_trace(
             &mut session,
-            TurnRequest::new("finish with a visible marker".to_string())
-                .with_budget(crate::turn::TurnBudget::new(60_000)),
+            TurnRequest::new("finish with a visible marker".to_string()).with_budget(
+                crate::turn::TurnBudget::new(std::time::Duration::from_millis(60_000)),
+            ),
             &mut recorder,
             TurnOptions::default(),
         )
@@ -1008,8 +1021,9 @@ async fn large_tool_artifact_does_not_break_tool_history_or_evidence() {
     let result = core
         .run_turn_with_trace(
             &mut session,
-            TurnRequest::new("check a large artifact".to_string())
-                .with_budget(crate::turn::TurnBudget::new(60_000)),
+            TurnRequest::new("check a large artifact".to_string()).with_budget(
+                crate::turn::TurnBudget::new(std::time::Duration::from_millis(60_000)),
+            ),
             &mut recorder,
             TurnOptions::default(),
         )
@@ -1057,8 +1071,9 @@ async fn capture_default_tools_request() -> serde_json::Value {
     let result = core
         .run_turn_with_trace(
             &mut session,
-            TurnRequest::new("check hosted tools".to_string())
-                .with_budget(crate::turn::TurnBudget::new(60_000)),
+            TurnRequest::new("check hosted tools".to_string()).with_budget(
+                crate::turn::TurnBudget::new(std::time::Duration::from_millis(60_000)),
+            ),
             &mut recorder,
             TurnOptions::default(),
         )

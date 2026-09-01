@@ -496,8 +496,7 @@ impl AgentTurnFactory for TestTurnFactory {
                     effort: None,
                 };
                 let engine = TurnEngineBuilder::from_route(&route).unwrap().build();
-                let request =
-                    TurnRequest::new(context.input.payload.message).with_budget(TurnBudget::new(0));
+                let request = TurnRequest::new(context.input.payload.message);
                 let options = TurnOptions::default()
                     .with_debug_context_compaction_timeout(self.rollover_timeout);
                 Ok(PreparedAgentTurn::new(
@@ -505,7 +504,8 @@ impl AgentTurnFactory for TestTurnFactory {
                     request,
                     options,
                     AgentExecutionPolicy::default(),
-                ))
+                )
+                .with_budget(TurnBudget::new(std::time::Duration::ZERO)))
             }
         }
     }

@@ -301,7 +301,9 @@ async fn solo_tool_rejects_the_entire_mixed_batch_without_side_effects() {
     ];
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
     let mut recorder = TraceRecorder::new("session-solo".to_string(), event_tx, 0);
-    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(
+        std::time::Duration::from_millis(60_000),
+    ));
 
     let batch = execute_tool_call_batch(
         &calls,
@@ -575,7 +577,9 @@ async fn identical_apply_patch_arguments_with_distinct_call_ids_execute_independ
     ];
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
-    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(
+        std::time::Duration::from_millis(60_000),
+    ));
 
     let records = execute_tool_calls(
         &calls,
@@ -639,7 +643,9 @@ async fn identical_spawn_agent_arguments_with_distinct_call_ids_execute_independ
     ];
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
-    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(
+        std::time::Duration::from_millis(60_000),
+    ));
 
     let records = execute_tool_calls(
         &calls,
@@ -704,7 +710,9 @@ async fn identical_exec_arguments_with_distinct_call_ids_execute_independently()
     ];
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
-    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(
+        std::time::Duration::from_millis(60_000),
+    ));
 
     let records = execute_tool_calls(
         &calls,
@@ -742,7 +750,9 @@ async fn identical_exec_arguments_with_distinct_call_ids_execute_independently()
     );
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
     let mut recorder = TraceRecorder::new("session-2".to_string(), event_tx, 0);
-    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(
+        std::time::Duration::from_millis(60_000),
+    ));
     let records = execute_tool_calls(
         &[repeated_response],
         &mut budget,
@@ -792,7 +802,9 @@ async fn identical_cacheable_calls_return_compact_receipts_per_provider_response
     ];
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
-    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(
+        std::time::Duration::from_millis(60_000),
+    ));
 
     let batch = execute_tool_call_batch(
         &calls,
@@ -859,7 +871,9 @@ async fn tool_batch_reports_parallel_candidates_and_critical_path() {
     ];
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
-    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(
+        std::time::Duration::from_millis(60_000),
+    ));
 
     let batch = execute_tool_call_batch(
         &calls,
@@ -909,7 +923,9 @@ async fn mcp_registered_tools_use_policy_approval_batch_lock_and_trace_pipeline(
     ];
     let (event_tx, _) = tokio::sync::broadcast::channel(16);
     let mut denied_recorder = TraceRecorder::new("session-mcp-denied".to_string(), event_tx, 0);
-    let mut denied_budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+    let mut denied_budget = BudgetTracker::new(crate::turn::TurnBudget::new(
+        std::time::Duration::from_millis(60_000),
+    ));
 
     let denied = execute_tool_call_batch(
         &calls[..1],
@@ -954,7 +970,9 @@ async fn mcp_registered_tools_use_policy_approval_batch_lock_and_trace_pipeline(
         }));
     let (event_tx, _) = tokio::sync::broadcast::channel(16);
     let mut recorder = TraceRecorder::new("session-mcp".to_string(), event_tx, 0);
-    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(
+        std::time::Duration::from_millis(60_000),
+    ));
     let batch = execute_tool_call_batch(
         &calls,
         &mut budget,
@@ -1040,7 +1058,9 @@ async fn tool_batch_critical_path_includes_serialized_exclusive_calls() {
     ];
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
-    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(
+        std::time::Duration::from_millis(60_000),
+    ));
 
     let batch = execute_tool_call_batch(
         &calls,
@@ -1095,7 +1115,9 @@ async fn provider_response_uses_one_cache_epoch_across_concurrent_process_effect
     ];
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
-    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(
+        std::time::Duration::from_millis(60_000),
+    ));
 
     let records = execute_tool_calls(
         &calls,
@@ -1142,7 +1164,9 @@ async fn invalid_function_arguments_are_returned_to_the_model_without_running_th
     );
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
-    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(
+        std::time::Duration::from_millis(60_000),
+    ));
 
     let records = execute_tool_calls(
         &[tool_call],
@@ -1179,7 +1203,9 @@ async fn single_wait_agents_call_pauses_active_wall_clock_budget() {
     let tool_call = ToolCall::function("wait-1", "wait_agents", serde_json::json!({}), "wait-1");
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
-    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(5));
+    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(
+        std::time::Duration::from_millis(5),
+    ));
 
     execute_tool_calls(
         &[tool_call],
@@ -1220,7 +1246,9 @@ async fn mixed_tool_batch_keeps_wait_agents_time_in_active_budget() {
     ];
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
-    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(5));
+    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(
+        std::time::Duration::from_millis(5),
+    ));
 
     execute_tool_calls(
         &calls,
@@ -1257,7 +1285,9 @@ async fn chat_tool_call_replays_item_id_as_call_id() {
     );
     let (event_tx, _) = tokio::sync::broadcast::channel(8);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
-    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(
+        std::time::Duration::from_millis(60_000),
+    ));
 
     let records = execute_tool_calls(
         &[tool_call],
@@ -1333,7 +1363,9 @@ async fn tool_execution_reuses_streamed_trace_part() {
         Some("provider-item-1".to_string()),
     );
     recorder.start_item(streamed_item);
-    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(
+        std::time::Duration::from_millis(60_000),
+    ));
 
     let records = execute_tool_calls(
         &[tool_call],
@@ -1434,7 +1466,9 @@ async fn tool_execution_reuses_streamed_trace_part_when_provider_id_arrives_late
         None,
     );
     recorder.start_item(streamed_item);
-    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(
+        std::time::Duration::from_millis(60_000),
+    ));
 
     let records = execute_tool_calls(
         &[tool_call],
@@ -1526,7 +1560,9 @@ async fn tool_runtime_deltas_use_trace_part_id() {
     );
     let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(16);
     let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
-    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(60_000));
+    let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(
+        std::time::Duration::from_millis(60_000),
+    ));
 
     let records = execute_tool_calls(
         &[tool_call],

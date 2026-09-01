@@ -114,7 +114,7 @@ pub use thread_event::{
 pub use tool::*;
 pub use trace::TraceRecorder;
 pub use turn::{
-    AGENT_MAX_COUNT, AGENT_MAX_DEPTH, DEFAULT_WALL_CLOCK_MS, InteractionCallback,
+    AGENT_MAX_COUNT, AGENT_MAX_DEPTH, DEFAULT_TURN_WALL_CLOCK, InteractionCallback,
     InteractionFuture, PermissionMode, ToolApprovalDecision, ToolApprovalRequest, ToolCompletion,
     ToolCompletionCallback, ToolCompletionFuture, ToolEffect, ToolExecutionMode, TurnBudget,
     TurnOptions, TurnRequest, TurnResult, UserInputMode,

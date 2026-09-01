@@ -24,8 +24,31 @@ fn permission_mode_accepts_only_current_labels() {
 }
 
 #[test]
+fn turn_budget_uses_typed_duration_and_preserves_wire_milliseconds() {
+    let one_hour = Duration::from_secs(60 * 60);
+    let budget = TurnBudget::new(one_hour);
+
+    assert_eq!(budget.wall_clock_limit(), one_hour);
+    assert_eq!(
+        serde_json::to_value(budget).unwrap(),
+        serde_json::json!({ "wallClockMs": 3_600_000 })
+    );
+    assert_eq!(
+        serde_json::from_value::<TurnBudget>(serde_json::json!({
+            "wallClockMs": 3_600_000
+        }))
+        .unwrap(),
+        budget
+    );
+    assert_eq!(
+        TurnBudget::default().wall_clock_limit(),
+        DEFAULT_TURN_WALL_CLOCK
+    );
+}
+
+#[test]
 fn budget_tracker_records_observability() {
-    let mut tracker = BudgetTracker::new(TurnBudget::new(60_000));
+    let mut tracker = BudgetTracker::new(TurnBudget::new(std::time::Duration::from_millis(60_000)));
 
     tracker.record_model_step();
     tracker.record_tool_call("exec");
@@ -39,7 +62,7 @@ fn budget_tracker_records_observability() {
 
 #[test]
 fn budget_tracker_only_enforces_wall_clock() {
-    let mut tracker = BudgetTracker::new(TurnBudget::new(60_000));
+    let mut tracker = BudgetTracker::new(TurnBudget::new(std::time::Duration::from_millis(60_000)));
 
     for _ in 0..200 {
         tracker.record_model_step();
@@ -55,14 +78,14 @@ fn budget_tracker_only_enforces_wall_clock() {
 
 #[test]
 fn budget_tracker_stops_when_active_wall_clock_reaches_limit() {
-    let tracker = BudgetTracker::new(TurnBudget::new(0));
+    let tracker = BudgetTracker::new(TurnBudget::new(std::time::Duration::from_millis(0)));
 
     assert!(tracker.check_wall_clock().is_err());
 }
 
 #[test]
 fn budget_refresh_resets_time_exclusions_and_tranche_counts() {
-    let mut tracker = BudgetTracker::new(TurnBudget::new(60_000));
+    let mut tracker = BudgetTracker::new(TurnBudget::new(std::time::Duration::from_millis(60_000)));
     tracker.record_model_step();
     tracker.record_tool_call("exec");
     tracker.record_tool_call("wait_agents");
@@ -83,7 +106,7 @@ fn turn_options_consumes_only_the_latest_budget_refresh_once() {
     let (refresh, receiver) = crate::agent_runtime::turn_budget_refresh_channel();
     let mut options = TurnOptions::default();
     options.budget_refresh = Some(receiver);
-    let mut tracker = BudgetTracker::new(TurnBudget::new(60_000));
+    let mut tracker = BudgetTracker::new(TurnBudget::new(std::time::Duration::from_millis(60_000)));
     tracker.record_model_step();
 
     refresh.refresh();

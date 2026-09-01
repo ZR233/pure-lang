@@ -48,6 +48,14 @@ Mailbox metadata 在热状态中保持 typed value tree。产品 host 必须能�
 或 accessor，也必须保留等价的无 JSON round-trip 读取语义。否则产品会被迫复制 wire 解析、丢失类型
 边界，并重新引入 runtime 内的非类型化兼容路径。
 
+TurnFactory 必须能在返回冻结的 `PreparedAgentTurn` 时为本轮选择 wall-clock 预算。原因是 Review、
+批处理等产品会话可能需要不同于 PL 默认值的运行窗口，而模型、工具、等待、用量和终态仍必须由同一
+TurnEngine 统一编排。公共 Rust 接口的名称可以演进，但“产品宿主为单轮提供 typed 预算，PL 负责
+执行并产生 `BudgetLimited` 与 rollover”的能力语义必须保留；不得删除该能力后迫使产品复制 Turn
+循环、通过外层 watchdog 模拟预算，或把预算塞进非类型化 metadata。预算在 TurnFactory 返回时一次性
+冻结，活动 Turn 不因配置热更新改变上限；mailbox 的 budget refresh 只开始新的预算 tranche，不改写
+已经冻结的上限。
+
 ## 17.5 生命周期
 
 公开状态为 `Idle | Queued | Running | WaitingTool | WaitingInteraction | Cancelling | Closing |

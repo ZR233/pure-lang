@@ -124,7 +124,7 @@ async fn cross_turn_trace_isolation_live() {
     // turn 1：要求模型输出简短中文 final 文本
     let request1 =
         TurnRequest::new("请只输出 <final>你好，第一轮。</final>，不要输出其它内容。".to_string())
-            .with_budget(TurnBudget::new(90_000));
+            .with_budget(TurnBudget::new(std::time::Duration::from_millis(90_000)));
     let result1 = core
         .run_turn_with_trace(&mut session, request1, &mut recorder, Default::default())
         .await
@@ -152,7 +152,7 @@ async fn cross_turn_trace_isolation_live() {
     // turn 2：第二轮，不同 turn_id（recorder/generate_session_id per-turn 唯一）
     let request2 =
         TurnRequest::new("请只输出 <final>你好，第二轮。</final>，不要输出其它内容。".to_string())
-            .with_budget(TurnBudget::new(90_000));
+            .with_budget(TurnBudget::new(std::time::Duration::from_millis(90_000)));
     let result2 = core
         .run_turn_with_trace(&mut session, request2, &mut recorder, Default::default())
         .await

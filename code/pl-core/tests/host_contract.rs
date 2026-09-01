@@ -153,7 +153,8 @@ async fn facade_supports_route_two_turns_snapshots_engine_and_web_search() {
     let turn = engine
         .run_turn(
             &mut engine_session,
-            TurnRequest::new("engine prompt".to_string()).with_budget(TurnBudget::new(60_000)),
+            TurnRequest::new("engine prompt".to_string())
+                .with_budget(TurnBudget::new(std::time::Duration::from_millis(60_000))),
         )
         .await
         .unwrap();

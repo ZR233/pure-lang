@@ -10,7 +10,7 @@ use pl_protocol::{
 use tokio::sync::{Mutex, mpsc, watch};
 use tokio_util::sync::CancellationToken;
 
-use crate::{AgentSession, TurnEngine, TurnOptions, TurnRequest};
+use crate::{AgentSession, TurnBudget, TurnEngine, TurnOptions, TurnRequest};
 
 use super::{
     AgentExecutionPolicy, AgentRuntimeHandle, AgentSnapshot, DurableMailboxEnvelope, ThreadId,
@@ -181,6 +181,15 @@ impl PreparedAgentTurn {
     /// 设置 turn 完成后的 canonical session 提交策略。
     pub fn with_session_commit(mut self, policy: AgentSessionCommitPolicy) -> Self {
         self.session_commit = policy;
+        self
+    }
+
+    /// 冻结本轮由产品宿主选择的 wall-clock 安全预算。
+    ///
+    /// 产品只负责按会话用途选择预算；计时、`BudgetLimited` 终态、用量与 rollover
+    /// 始终由 PL 统一执行和投影，宿主不得复制 Turn 循环或预算状态机。
+    pub fn with_budget(mut self, budget: TurnBudget) -> Self {
+        self.request.budget = budget;
         self
     }
 

@@ -69,7 +69,7 @@ async fn openai_responses_compacts_context_live() {
     let mut recorder =
         pl_core::TraceRecorder::new("context-compaction-live".to_string(), event_tx, 0);
     let request = TurnRequest::new("请根据当前上下文只回答 ok，不要解释。".to_string())
-        .with_budget(TurnBudget::new(180_000));
+        .with_budget(TurnBudget::new(std::time::Duration::from_millis(180_000)));
 
     let result = core
         .run_turn_with_trace(&mut session, request, &mut recorder, Default::default())

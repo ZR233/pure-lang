@@ -39,6 +39,11 @@ Turn、Item 与 Interaction 的通知 payload 都携带 canonical tagged state�
 取消原因和预算 rollover 结果位于对应终态 payload。Item terminal error、tool result、denial与
 完成时间同样只存在于适用的 state variant。
 
+单轮预算只强制活动 wall-clock 上限；model step、tool call 与 wait call 继续作为 typed usage 观测，
+不引入隐式迭代次数限制。宿主可按会话用途在 TurnFactory 边界冻结不同上限，但不得自行生成
+`BudgetLimited`、rollover 或另一套用量投影。外层产品 watchdog 只能负责资源收束，并应给 PL 的预算
+终态与持久化预留余量，不能先于同一 wall-clock 上限取消 Turn。
+
 Item delta 只携带 threadId、turnId、itemId、field、revision、delta 和可选 chunkIndex。field
 固定为 agent message text、reasoning summary/content、plan text、tool arguments/output。
 terminal Item 携带完整 authoritative payload并清除 UI overlay。
