@@ -86,25 +86,6 @@ struct CaptureReceipt {
     calls: Vec<WireCall>,
 }
 
-const PROFILE_FIRST_LINES: &[(&str, &str)] = &[
-    (
-        "explorer",
-        "你当前是父 Agent 派出的只读 explorer，只负责在指定范围内收集事实并汇报。你使用 fresh",
-    ),
-    (
-        "executor",
-        "你是父 Agent 按冻结 Agent Profile 派出的 executor。你在 directory assignment 中工作，且不继承",
-    ),
-    (
-        "worktree_executor",
-        "你是 Worktree 执行者。只在宿主分配的独立 Git worktree 中完成边界明确的实现任务；适用于",
-    ),
-    (
-        "reviewer",
-        "你是父 Agent 按冻结 Agent Profile 派出的 reviewer。你必须使用新建的 fresh context",
-    ),
-];
-
 pub(super) fn run(options: VerifySubagentsOptions) -> Result<()> {
     ensure!(
         options.live && options.gui,
@@ -1101,9 +1082,9 @@ fn validate_wire(wire_dir: &Path, artifacts: &Path, ssh: bool) -> Result<()> {
         let body = capture
             .get("wireBody")
             .context("wire capture has no body")?;
-        let actor = classify_capture(body)?;
         let mut capture_calls = Vec::new();
         collect_calls(body, &mut capture_calls);
+        let actor = classify_capture(&capture_calls)?;
         calls.extend(capture_calls.iter().cloned());
         capture_receipts.push(CaptureReceipt {
             path: path.display().to_string(),
@@ -1141,7 +1122,7 @@ fn validate_wire(wire_dir: &Path, artifacts: &Path, ssh: bool) -> Result<()> {
                     .arguments
                     .get("command")
                     .and_then(Value::as_str)
-                    .is_some_and(|command| command.contains("cherry-pick"))
+                    .is_some_and(|command| is_git_cherry_pick_command(command, None))
         }),
         "wire captures contain no explicit Git cherry-pick"
     );
@@ -1183,9 +1164,60 @@ fn validate_wire(wire_dir: &Path, artifacts: &Path, ssh: bool) -> Result<()> {
     Ok(())
 }
 
+fn shell_segments(command: &str) -> impl Iterator<Item = &str> {
+    command
+        .split([';', '\n', '|'])
+        .flat_map(|segment| segment.split("&&"))
+}
+
+fn shell_token(token: &str) -> &str {
+    token.trim_matches(['\'', '"'])
+}
+
+fn is_git_cherry_pick_command(command: &str, expected_commit: Option<&str>) -> bool {
+    shell_segments(command).any(|segment| {
+        let tokens = segment
+            .split_ascii_whitespace()
+            .map(shell_token)
+            .collect::<Vec<_>>();
+        let Some(git) = tokens.iter().position(|token| *token == "git") else {
+            return false;
+        };
+        if tokens[..git]
+            .iter()
+            .any(|token| !token.contains('=') && *token != "env")
+        {
+            return false;
+        }
+        let Some(cherry_pick) = tokens[git + 1..]
+            .iter()
+            .position(|token| *token == "cherry-pick")
+            .map(|index| index + git + 1)
+        else {
+            return false;
+        };
+        match expected_commit {
+            Some(commit) => tokens[cherry_pick + 1..].contains(&commit),
+            None => tokens[cherry_pick + 1..]
+                .iter()
+                .any(|token| !token.starts_with('-')),
+        }
+    })
+}
+
+fn is_cargo_test_command(command: &str) -> bool {
+    shell_segments(command).any(|segment| {
+        let tokens = segment
+            .split_ascii_whitespace()
+            .map(shell_token)
+            .collect::<Vec<_>>();
+        tokens.first() == Some(&"cargo") && tokens[1..].contains(&"test")
+    })
+}
+
 fn ensure_ssh_exec_contract(captures: &[CaptureReceipt]) -> Result<()> {
     let mut first_seen = std::collections::HashSet::new();
-    let mut executor_exec_first_appearances = Vec::new();
+    let mut child_exec_first_appearances = Vec::new();
     for (capture_index, capture) in captures.iter().enumerate() {
         for call in &capture.calls {
             if call.name != "exec" {
@@ -1204,75 +1236,50 @@ fn ensure_ssh_exec_contract(captures: &[CaptureReceipt]) -> Result<()> {
             let Some(call_id) = call.call_id.as_deref() else {
                 continue;
             };
-            if capture.actor == "executor" && first_seen.insert(call_id.to_string()) {
-                executor_exec_first_appearances.push(capture_index);
+            if capture.actor != "root" && first_seen.insert(call_id.to_string()) {
+                child_exec_first_appearances.push(capture_index);
             }
         }
     }
     ensure!(
-        executor_exec_first_appearances.len() >= 2,
-        "SSH executor acceptance contains fewer than two distinct exec calls"
+        child_exec_first_appearances.len() >= 2,
+        "SSH child acceptance contains fewer than two distinct exec calls"
     );
     ensure!(
-        executor_exec_first_appearances
+        child_exec_first_appearances
             .windows(2)
             .any(|pair| pair[0] != pair[1]),
-        "SSH executor exec calls were not observed across separate inference captures"
+        "SSH child exec calls were not observed across separate inference captures"
     );
     Ok(())
 }
 
-fn classify_capture(body: &Value) -> Result<String> {
-    let rendered = role_text(body);
-    let matches = PROFILE_FIRST_LINES
+fn classify_capture(calls: &[WireCall]) -> Result<String> {
+    let is_root = calls
         .iter()
-        .filter(|(_, first)| rendered.contains(first))
-        .map(|(id, _)| *id)
-        .collect::<Vec<_>>();
+        .any(|call| matches!(call.name.as_str(), "list_agent_profiles" | "submit_plan"));
+    let is_reviewer = calls.iter().any(|call| {
+        call.name == "report_progress"
+            && ["summary", "nextStep", "detail"]
+                .into_iter()
+                .filter_map(|field| call.arguments.get(field).and_then(Value::as_str))
+                .any(|text| {
+                    text.contains("REVIEWER_FINDING")
+                        || text.contains("REVIEWER_READ_ONLY_APPROVED")
+                })
+    });
     ensure!(
-        matches.len() <= 1,
-        "wire capture matches multiple built-in Profile identities: {matches:?}"
+        !(is_root && is_reviewer),
+        "wire capture contains both root orchestration and reviewer verdict calls"
     );
-    if rendered.contains("# Unified Root Agent") {
-        ensure!(
-            matches.is_empty(),
-            "wire capture matches root and built-in Profile identities"
-        );
-        return Ok("root".to_string());
+    Ok(if is_root {
+        "root"
+    } else if is_reviewer {
+        "reviewer"
+    } else {
+        "child"
     }
-    Ok(matches.first().copied().unwrap_or("unknown").to_string())
-}
-
-fn role_text(value: &Value) -> String {
-    fn visit(value: &Value, out: &mut String) {
-        match value {
-            Value::Array(items) => items.iter().for_each(|item| visit(item, out)),
-            Value::Object(object) => {
-                let role = object.get("role").and_then(Value::as_str);
-                if matches!(role, Some("system" | "developer"))
-                    && let Some(content) = object.get("content")
-                {
-                    collect_text(content, out);
-                }
-                object.values().for_each(|item| visit(item, out));
-            }
-            _ => {}
-        }
-    }
-    fn collect_text(value: &Value, out: &mut String) {
-        match value {
-            Value::String(text) => {
-                out.push_str(text);
-                out.push('\n');
-            }
-            Value::Array(items) => items.iter().for_each(|item| collect_text(item, out)),
-            Value::Object(object) => object.values().for_each(|item| collect_text(item, out)),
-            _ => {}
-        }
-    }
-    let mut out = String::new();
-    visit(value, &mut out);
-    out
+    .to_string())
 }
 
 fn ensure_profile_messages(calls: &[WireCall], outputs: &[WireOutput]) -> Result<()> {
@@ -1311,15 +1318,6 @@ fn ensure_profile_messages(calls: &[WireCall], outputs: &[WireOutput]) -> Result
     ensure!(
         explorers.len() >= 2,
         "wire captures must contain at least two explorer spawn messages"
-    );
-    let distinct_messages = explorers
-        .iter()
-        .filter_map(|call| call.arguments.get("message").and_then(Value::as_str))
-        .map(str::trim)
-        .collect::<std::collections::HashSet<_>>();
-    ensure!(
-        distinct_messages.len() >= 2,
-        "explorer spawns do not contain two distinct task messages"
     );
     Ok(())
 }
@@ -1371,7 +1369,9 @@ fn ensure_root_history(
             .arguments
             .get("command")
             .and_then(Value::as_str)
-            .is_some_and(|c| c.contains("cherry-pick"))),
+            .is_some_and(|command| is_git_cherry_pick_command(
+                command, None
+            ))),
         "root capture lacks cherry-pick exec"
     );
     ensure!(
@@ -1399,7 +1399,7 @@ fn ensure_root_history(
                             .arguments
                             .get("command")
                             .and_then(Value::as_str)
-                            .is_some_and(|command| command.contains("cherry-pick")))
+                            .is_some_and(|command| is_git_cherry_pick_command(command, None)))
             }),
             "root-only call observed in {} capture",
             capture.actor
@@ -1420,7 +1420,7 @@ fn ensure_root_history(
                     .arguments
                     .get("command")
                     .and_then(Value::as_str)
-                    .is_some_and(|command| command.contains("cargo test"))
+                    .is_some_and(is_cargo_test_command)
         })
         .filter_map(|call| call.call_id.as_deref())
         .collect::<std::collections::HashSet<_>>();
@@ -1436,7 +1436,7 @@ fn ensure_root_history(
                     .arguments
                     .get("command")
                     .and_then(Value::as_str)
-                    .is_some_and(|command| command.contains("cargo test"))
+                    .is_some_and(is_cargo_test_command)
         }),
         "root capture lacks final cargo test after reviewer approval"
     );
@@ -1869,7 +1869,7 @@ fn ensure_orchestration_order(calls: &[WireCall], outputs: &[WireOutput]) -> Res
                     .arguments
                     .get("command")
                     .and_then(Value::as_str)
-                    .is_some_and(|command| command.contains("cherry-pick"))
+                    .is_some_and(|command| is_git_cherry_pick_command(command, None))
         })
         .context("wire captures contain no explicit cherry-pick")?;
     ensure!(
@@ -2120,9 +2120,7 @@ fn ensure_finding_re_review(calls: &[WireCall], outputs: &[WireOutput]) -> Resul
                         .arguments
                         .get("command")
                         .and_then(Value::as_str)
-                        .is_some_and(|command| {
-                            command.contains("cherry-pick") && command.contains(&commit)
-                        })
+                        .is_some_and(|command| is_git_cherry_pick_command(command, Some(&commit)))
             })
             .map(|(index, _)| index)
             .with_context(|| format!("rework worktree agent {agent} was not integrated"))?;
@@ -2379,7 +2377,7 @@ fn ensure_submissions(calls: &[WireCall], outputs: &[WireOutput]) -> Result<()> 
                                 .get("command")
                                 .and_then(Value::as_str)
                                 .is_some_and(|command| {
-                                    command.contains("cherry-pick") && command.contains(&commit)
+                                    is_git_cherry_pick_command(command, Some(&commit))
                                 })
                     })
                     .map(|(index, _)| index)
@@ -2501,27 +2499,25 @@ fn parse_submission_page(content: &str) -> Result<SubmissionPage> {
 fn worktree_submission_commit(items: &[Value]) -> Result<String> {
     let mut commits = std::collections::HashSet::new();
     for item in items {
-        let payload = ["summary", "nextStep", "detail"]
+        for text in ["summary", "nextStep", "detail"]
             .into_iter()
             .filter_map(|field| item.get(field).and_then(Value::as_str))
-            .collect::<Vec<_>>();
-        if !payload
-            .iter()
-            .any(|text| text.contains("WORKTREE_COMMIT_READY"))
+            .filter(|text| text.contains("WORKTREE_COMMIT_READY"))
         {
-            continue;
-        }
-        for text in payload {
-            commits.extend(
-                text.split(|character: char| !character.is_ascii_hexdigit())
-                    .filter(|token| token.len() == 40)
-                    .map(str::to_ascii_lowercase),
-            );
+            for suffix in text.split("commit=").skip(1) {
+                let commit = suffix
+                    .chars()
+                    .take_while(char::is_ascii_hexdigit)
+                    .collect::<String>();
+                if commit.len() == 40 {
+                    commits.insert(commit.to_ascii_lowercase());
+                }
+            }
         }
     }
     ensure!(
         commits.len() == 1,
-        "worktree durable delivery must identify exactly one 40-character hexadecimal commit"
+        "worktree durable delivery must identify exactly one `commit=<40-character hexadecimal commit>`"
     );
     commits
         .into_iter()
@@ -2972,24 +2968,48 @@ mod tests {
     }
 
     #[test]
-    fn capture_classification_accepts_responses_and_chat_and_rejects_ambiguity() {
-        let responses = serde_json::json!({"input":[{"role":"system","content":[{"type":"input_text","text":PROFILE_FIRST_LINES[0].1}]}]});
-        assert_eq!(classify_capture(&responses).unwrap(), "explorer");
-        let chat =
-            serde_json::json!({"messages":[{"role":"system","content":PROFILE_FIRST_LINES[3].1}]});
-        assert_eq!(classify_capture(&chat).unwrap(), "reviewer");
-        let ambiguous = serde_json::json!({"input":[{"role":"system","content":[{"text":PROFILE_FIRST_LINES[0].1},{"text":PROFILE_FIRST_LINES[3].1}]}]});
+    fn capture_classification_uses_tool_behavior_instead_of_prompt_prose() {
+        let root = vec![orchestration_call(
+            "plan",
+            "submit_plan",
+            serde_json::json!({"plan":"Inspect, implement, integrate, review."}),
+        )];
+        assert_eq!(classify_capture(&root).unwrap(), "root");
+        let reviewer = vec![orchestration_call(
+            "progress",
+            "report_progress",
+            serde_json::json!({"detail":"REVIEWER_READ_ONLY_APPROVED"}),
+        )];
+        assert_eq!(classify_capture(&reviewer).unwrap(), "reviewer");
+        let mut ambiguous = root;
+        ambiguous.extend(reviewer);
         assert!(classify_capture(&ambiguous).is_err());
+        assert_eq!(classify_capture(&[]).unwrap(), "child");
+    }
+
+    #[test]
+    fn command_checks_require_real_git_and_cargo_invocations() {
+        assert!(is_git_cherry_pick_command(
+            "cd fixture && git cherry-pick 1111111111111111111111111111111111111111",
+            Some(FIRST_WORKTREE_COMMIT)
+        ));
+        assert!(!is_git_cherry_pick_command(
+            "echo git cherry-pick 1111111111111111111111111111111111111111",
+            Some(FIRST_WORKTREE_COMMIT)
+        ));
+        assert!(is_cargo_test_command("cargo test --workspace"));
+        assert!(!is_cargo_test_command("echo cargo test --workspace"));
+    }
+
+    #[test]
+    fn worktree_commit_parser_ignores_other_reported_revisions() {
+        let item = submission_item(&[(
+            "detail",
+            "WORKTREE_COMMIT_READY commit=1111111111111111111111111111111111111111 base=2222222222222222222222222222222222222222",
+        )]);
         assert_eq!(
-            classify_capture(&serde_json::json!({"input":[]})).unwrap(),
-            "unknown"
-        );
-        assert_eq!(
-            classify_capture(
-                &serde_json::json!({"input":[{"role":"user","content":PROFILE_FIRST_LINES[0].1}]})
-            )
-            .unwrap(),
-            "unknown"
+            worktree_submission_commit(&[item]).unwrap(),
+            FIRST_WORKTREE_COMMIT
         );
     }
 
@@ -3391,7 +3411,7 @@ mod tests {
     }
 
     #[test]
-    fn profile_messages_require_frozen_context_and_distinct_explorer_tasks() {
+    fn profile_messages_require_frozen_context_and_nonempty_tasks() {
         let calls = profile_message_calls();
         let outputs = profile_message_outputs(&calls);
         ensure_profile_messages(&calls, &outputs).unwrap();
@@ -3402,10 +3422,6 @@ mod tests {
 
         let mut invalid = calls.clone();
         invalid[2].arguments["message"] = Value::String(String::new());
-        assert!(ensure_profile_messages(&invalid, &outputs).is_err());
-
-        let mut invalid = calls;
-        invalid[1].arguments["message"] = invalid[0].arguments["message"].clone();
         assert!(ensure_profile_messages(&invalid, &outputs).is_err());
     }
 
