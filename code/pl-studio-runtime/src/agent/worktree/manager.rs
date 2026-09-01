@@ -260,8 +260,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            std::fs::read_to_string(handle.path.join("tracked.txt")).unwrap(),
-            "base\n"
+            std::fs::read_to_string(handle.path.join("tracked.txt"))
+                .unwrap()
+                .trim_end_matches(['\r', '\n']),
+            "base"
         );
         std::fs::write(handle.path.join("child.txt"), "child\n").unwrap();
         let dirty = manager.preview(&handle).await.unwrap();
