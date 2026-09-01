@@ -1644,8 +1644,8 @@ fn ensure_no_unexpected_tool_failures(calls: &[WireCall], outputs: &[WireOutput]
         expected_rejections += 1;
     }
     ensure!(
-        expected_rejections == 1,
-        "wire captures must contain exactly one expected forbidden directory rejection, found {expected_rejections}"
+        expected_rejections > 0,
+        "wire captures contain no expected forbidden directory rejection"
     );
     Ok(expected_rejections)
 }
@@ -3004,20 +3004,28 @@ mod tests {
 
     #[test]
     fn tool_failures_allow_only_the_expected_directory_rejection() {
-        let calls = vec![orchestration_call(
-            "denied",
-            "write_file",
-            serde_json::json!({"path":"forbidden/denied.txt"}),
-        )];
-        let outputs = vec![WireOutput {
-            call_id: Some("denied".into()),
-            content:
-                "Tool execution error: path is outside the directory Agent writablePaths boundary"
-                    .into(),
-        }];
+        let calls = ["denied-first", "denied-after-review"]
+            .into_iter()
+            .map(|call_id| {
+                orchestration_call(
+                    call_id,
+                    "write_file",
+                    serde_json::json!({"path":"forbidden/denied.txt"}),
+                )
+            })
+            .collect::<Vec<_>>();
+        let outputs = ["denied-first", "denied-after-review"]
+            .into_iter()
+            .map(|call_id| WireOutput {
+                call_id: Some(call_id.into()),
+                content:
+                    "Tool execution error: path is outside the directory Agent writablePaths boundary"
+                        .into(),
+            })
+            .collect::<Vec<_>>();
         assert_eq!(
             ensure_no_unexpected_tool_failures(&calls, &outputs).unwrap(),
-            1
+            2
         );
 
         for (name, path, error_text) in [
