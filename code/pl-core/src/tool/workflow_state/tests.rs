@@ -120,58 +120,6 @@ fn transition_input(
 }
 
 #[test]
-fn workflow_state_wire_contract_uses_camel_case_variant_fields() {
-    let schema = tool().input_schema();
-    let variants = schema["oneOf"]
-        .as_array()
-        .expect("workflow_state schema must expose tagged variants");
-    let compile = variants
-        .iter()
-        .find(|variant| {
-            variant
-                .pointer("/properties/action/const")
-                .and_then(serde_json::Value::as_str)
-                == Some("compile")
-        })
-        .expect("compile schema variant");
-    let properties = compile["properties"]
-        .as_object()
-        .expect("compile properties");
-    assert!(properties.contains_key("expectedRevision"));
-    assert!(properties.contains_key("expectedRunId"));
-    assert!(!properties.contains_key("expected_revision"));
-    assert!(!properties.contains_key("expected_run_id"));
-    assert_eq!(
-        compile["required"],
-        serde_json::json!(["action", "expectedRevision", "definition"])
-    );
-
-    let input = serde_json::from_value::<WorkflowStateInput>(serde_json::json!({
-        "action": "compile",
-        "expectedRevision": 0,
-        "definition": {
-            "title": "Task",
-            "goal": "Complete task",
-            "initialStageId": "working",
-            "stages": [
-                {"id":"working","title":"Working","instructions":"Do the work","completionCriteria":["Work is verified"]},
-                {"id":"completed","title":"Completed","instructions":"","completionCriteria":[],"terminal":true}
-            ],
-            "transitions": [{"fromStageId":"working","toStageId":"completed","when":"Work is verified"}]
-        }
-    }))
-    .expect("camelCase workflow_state arguments must deserialize");
-    assert!(matches!(
-        input,
-        WorkflowStateInput::Compile {
-            expected_revision: 0,
-            expected_run_id: None,
-            ..
-        }
-    ));
-}
-
-#[test]
 fn wire_validation_allows_only_a_partial_transition_without_summary() {
     let arguments = serde_json::json!({
         "action": "transition",

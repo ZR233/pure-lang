@@ -401,7 +401,7 @@ fn workflow_result_count(body: &Value) -> usize {
 }
 
 fn validate_workflow_call_arguments(body: &Value) -> Result<()> {
-    let failed_call_ids = failed_workflow_call_ids(body);
+    let unsuccessful_call_ids = unsuccessful_tool_call_ids(body);
     let response_calls = body
         .get("input")
         .and_then(Value::as_array)
@@ -423,14 +423,17 @@ fn validate_workflow_call_arguments(body: &Value) -> Result<()> {
     for call in response_calls
         .chain(chat_calls)
         .filter(|call| tool_name(call) == Some("workflow_state"))
-        .filter(|call| {
-            let call_id = call
-                .get("call_id")
-                .or_else(|| call.pointer("/function/id"))
-                .and_then(Value::as_str);
-            call_id.is_none_or(|call_id| !failed_call_ids.contains(call_id))
-        })
     {
+        let call_id = call
+            .get("call_id")
+            .or_else(|| call.get("id"))
+            .or_else(|| call.pointer("/function/id"))
+            .and_then(Value::as_str);
+        ensure!(
+            call_id.is_none_or(|call_id| !unsuccessful_call_ids.contains(call_id)),
+            "workflow_state call `{}` failed or was rejected; live prompt acceptance requires every workflow_state call to be accepted",
+            call_id.unwrap_or("unknown")
+        );
         let raw = call
             .get("arguments")
             .or_else(|| call.pointer("/function/arguments"))
@@ -447,18 +450,18 @@ fn validate_workflow_call_arguments(body: &Value) -> Result<()> {
     Ok(())
 }
 
-fn failed_workflow_call_ids(body: &Value) -> HashSet<String> {
-    let mut failed = HashSet::new();
+fn unsuccessful_tool_call_ids(body: &Value) -> HashSet<String> {
+    let mut unsuccessful = HashSet::new();
     if let Some(input) = body.get("input").and_then(Value::as_array) {
         for item in input {
             if item.get("type").and_then(Value::as_str) == Some("function_call_output")
                 && item
                     .get("output")
                     .and_then(Value::as_str)
-                    .is_some_and(|output| output.starts_with("Tool execution error"))
+                    .is_some_and(workflow_tool_result_unsuccessful)
                 && let Some(call_id) = item.get("call_id").and_then(Value::as_str)
             {
-                failed.insert(call_id.to_owned());
+                unsuccessful.insert(call_id.to_owned());
             }
         }
     }
@@ -468,14 +471,22 @@ fn failed_workflow_call_ids(body: &Value) -> HashSet<String> {
                 && message
                     .get("content")
                     .and_then(Value::as_str)
-                    .is_some_and(|content| content.starts_with("Tool execution error"))
+                    .is_some_and(workflow_tool_result_unsuccessful)
                 && let Some(call_id) = message.get("tool_call_id").and_then(Value::as_str)
             {
-                failed.insert(call_id.to_owned());
+                unsuccessful.insert(call_id.to_owned());
             }
         }
     }
-    failed
+    unsuccessful
+}
+
+fn workflow_tool_result_unsuccessful(content: &str) -> bool {
+    content.starts_with("Tool execution error")
+        || serde_json::from_str::<Value>(content)
+            .ok()
+            .and_then(|result| result.get("accepted").and_then(Value::as_bool))
+            == Some(false)
 }
 
 fn tool_name(tool: &Value) -> Option<&str> {

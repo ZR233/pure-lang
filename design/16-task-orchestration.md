@@ -126,11 +126,21 @@ wire replay 对 provider 请求历史中被重试替换的 transition 增量草�
 completion 字段尚未完整到达，验收边界仍可继续；运行时执行 `workflow_state` 与 `complete` 时使用
 严格 typed schema，并由业务校验拒绝空 summary。
 
+`workflow_state` 的 provider 工具契约必须在 object 根直接暴露必填的 `action` discriminator 和所有动作
+可用字段，并把 `definition`、`completion` 等嵌套对象直接展开，不能只依赖 `oneOf` 分支或 `$ref` 让模型
+推断形状；分支仍保留条件必填与未知字段约束，运行时继续以 tagged union 严格反序列化。工具描述必须
+使用合法 JSON 示例列出 `status`、`compile`、`transition`、`supersede` 的参数形状，并明确嵌套对象不得
+二次编码为字符串、首次 compile 省略可选 run id，不能使用字符串 `"null"`。完整定义必须在首次调用
+包含所有迁移边，每个非终态 stage 至少有一条出边。输入拒绝错误必须给出可执行的修正提示，避免模型
+原样重复空对象或错误字段。
+
 最终入口是 `cargo xtask verify-workflow --live --headless` 与 `cargo xtask verify-workflow --live --gui`。
 它们必须使用真实非本地 provider 和真实 Prompt，不得 fallback 到 scripted/demo provider。workflow
 harness 在隔离 Rust 项目中分别选择 `mode.simple` 与 `mode.task`：简洁模式直接完成且不产生 workflow
 调用，任务模式走完 planning/confirmation/document/working/integrating/review/completed 并调用
-`complete`。子代理 GUI harness 另使用带初始 commit 的隔离 Git fixture，并把临时会话配置为
+`complete`。真实 Prompt 的 wire 验收必须拒绝任何执行失败或返回 `accepted:false` 的 `workflow_state`
+调用；后续成功重试不能掩盖首次参数或定义错误。子代理 GUI harness 另使用带初始 commit 的隔离 Git
+fixture，并把临时会话配置为
 `full-access`，验证 explorer、两种 executor、
 显式整合和只读 reviewer。两种模式都运行 `cargo test` 与 verifier；GUI 额外重启任务模式验证 run id/
 revision/history 持久化。失败 artifacts 保存到 `target/workflow-live-artifacts/` 或

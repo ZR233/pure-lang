@@ -26,6 +26,27 @@ pub const TOOL_WORKFLOW_STATE: &str = "workflow_state";
 const MAX_TRANSITION_REASON_BYTES: usize = 2 * 1024;
 const MAX_COMPLETION_SUMMARY_BYTES: usize = 8 * 1024;
 const MAX_COMPLETION_EVIDENCE: usize = 16;
+const WORKFLOW_STATE_DESCRIPTION: &str = concat!(
+    "Manage the root conversation's canonical workflow when the active Mode Skill requires it. ",
+    "Arguments must be one JSON object with a required top-level `action`; never send `{}`. ",
+    "Nested `definition`, `stages`, `transitions`, and `completion` values must be JSON objects or arrays, never JSON-encoded strings. ",
+    "For the first compile, omit the optional `expectedRunId` field; never use the string \"null\". ",
+    "The first compile must contain the complete graph: include every transition, and give every non-terminal stage at least one outgoing transition. ",
+    "Valid JSON examples: status = {\"action\":\"status\",\"view\":\"current\"}; ",
+    "compile = {\"action\":\"compile\",\"expectedRevision\":0,\"definition\":{\"title\":\"Task\",\"goal\":\"Complete task\",\"initialStageId\":\"planning\",\"stages\":[{\"id\":\"planning\",\"title\":\"Planning\",\"instructions\":\"Create the plan\",\"completionCriteria\":[\"Plan is ready\"],\"terminal\":false},{\"id\":\"completed\",\"title\":\"Completed\",\"instructions\":\"\",\"completionCriteria\":[],\"terminal\":true}],\"transitions\":[{\"fromStageId\":\"planning\",\"toStageId\":\"completed\",\"when\":\"Work is verified\"}]}}; ",
+    "transition = {\"action\":\"transition\",\"expectedRunId\":\"run-id\",\"expectedRevision\":1,\"expectedStageId\":\"planning\",\"toStageId\":\"completed\",\"reason\":\"Work is verified\",\"completion\":{\"summary\":\"Planning completed\",\"evidence\":[\"Plan is ready\"]}}; ",
+    "supersede uses the same object-valued `definition` shape as compile and also requires string `expectedRunId`, integer `expectedRevision`, string `expectedStageId`, and string `reason`. ",
+    "This tool must be the only tool call in its provider response."
+);
+const WORKFLOW_STATE_INPUT_ERROR_HINT: &str = concat!(
+    "Pass one object with top-level `action`; never pass `{}`. ",
+    "Valid actions are `status`, `compile`, `transition`, and `supersede`. ",
+    "Pass `definition`, its stage entries, and `completion` as JSON objects, never strings. ",
+    "Omit `expectedRunId` for the first compile; never use the string \"null\". ",
+    "Compile the complete graph in one call and include an outgoing transition for every non-terminal stage. ",
+    "To inspect canonical state, retry with {\"action\":\"status\",\"view\":\"current\"}. ",
+    "To create the first run, use `compile` with `expectedRevision`: 0 and a complete `definition`"
+);
 
 /// 工作流工具在整个 run 生命周期内冻结当前模式内容。
 #[derive(Debug, Clone)]
@@ -90,6 +111,7 @@ struct WorkflowDefinitionInput {
     goal: String,
     initial_stage_id: String,
     stages: Vec<WorkflowStageInput>,
+    /// 完整迁移图；每个非终态 stage 至少需要一条出边。
     transitions: Vec<WorkflowTransitionInput>,
 }
 
@@ -232,11 +254,11 @@ impl Tool for WorkflowStateTool {
     }
 
     fn description(&self) -> &str {
-        "Optionally compile, inspect, transition, or supersede the root conversation's canonical workflow when the active Mode Skill requires it. This tool must be the only tool call in its provider response."
+        WORKFLOW_STATE_DESCRIPTION
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        TypedTool::<WorkflowStateInput>::new(self.name(), self.description()).input_schema()
+        workflow_state_input_schema(self.name(), self.description())
     }
 
     fn effect(&self) -> Option<ToolEffect> {
@@ -254,11 +276,124 @@ impl Tool for WorkflowStateTool {
     ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
         async move {
             let argument_hash = crate::canonical_json_hash(&input.arguments);
-            let input = deserialize_tool_input::<WorkflowStateInput>(self.name(), input.arguments)?;
+            let input = deserialize_tool_input::<WorkflowStateInput>(self.name(), input.arguments)
+                .map_err(workflow_state_input_error)?;
             let response = self.execute_action(input, &context, argument_hash)?;
             ToolResult::json(response)
         }
         .boxed()
+    }
+}
+
+fn workflow_state_input_schema(tool_name: &str, description: &str) -> serde_json::Value {
+    let mut schema = TypedTool::<WorkflowStateInput>::new(tool_name, description).input_schema();
+    let Some(root) = schema.as_object_mut() else {
+        return schema;
+    };
+    let Some(variants) = root.get("oneOf").and_then(serde_json::Value::as_array) else {
+        return schema;
+    };
+
+    let definitions = root
+        .get("$defs")
+        .and_then(serde_json::Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    let mut properties = serde_json::Map::new();
+    let mut actions = Vec::new();
+    for variant in variants {
+        let Some(variant_properties) = variant
+            .get("properties")
+            .and_then(serde_json::Value::as_object)
+        else {
+            continue;
+        };
+        for (name, property) in variant_properties {
+            if name == "action" {
+                if let Some(action) = property.get("const") {
+                    actions.push(action.clone());
+                }
+            } else {
+                let mut property = property.clone();
+                inline_workflow_schema_refs(&mut property, &definitions, 0);
+                properties.entry(name.clone()).or_insert(property);
+            }
+        }
+    }
+    if actions.is_empty() {
+        return schema;
+    }
+
+    properties.insert(
+        "action".to_string(),
+        serde_json::json!({
+            "type": "string",
+            "enum": actions,
+            "description": "Required workflow operation. Choose exactly one value and provide that operation's fields."
+        }),
+    );
+    properties.insert(
+        "expectedRunId".to_string(),
+        serde_json::json!({
+            "type": "string",
+            "description": "Existing canonical run ID for transition, supersede, or compile after a terminal run. Omit this field for the first compile; never pass the string `null`."
+        }),
+    );
+    root.insert(
+        "properties".to_string(),
+        serde_json::Value::Object(properties),
+    );
+    root.insert("required".to_string(), serde_json::json!(["action"]));
+    root.insert(
+        "additionalProperties".to_string(),
+        serde_json::Value::Bool(false),
+    );
+    schema
+}
+
+fn inline_workflow_schema_refs(
+    schema: &mut serde_json::Value,
+    definitions: &serde_json::Map<String, serde_json::Value>,
+    depth: usize,
+) {
+    if depth >= 16 {
+        return;
+    }
+    let referenced = schema
+        .get("$ref")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|reference| reference.strip_prefix("#/$defs/"))
+        .map(ToOwned::to_owned);
+    if let Some(referenced) = referenced
+        && let Some(definition) = definitions.get(&referenced)
+    {
+        *schema = definition.clone();
+        inline_workflow_schema_refs(schema, definitions, depth + 1);
+        return;
+    }
+
+    match schema {
+        serde_json::Value::Array(items) => {
+            for item in items {
+                inline_workflow_schema_refs(item, definitions, depth + 1);
+            }
+        }
+        serde_json::Value::Object(object) => {
+            for value in object.values_mut() {
+                inline_workflow_schema_refs(value, definitions, depth + 1);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn workflow_state_input_error(error: PureError) -> PureError {
+    let PureError::ToolExecutionFailed { error, .. } = error else {
+        return error;
+    };
+    PureError::ToolExecutionFailed {
+        tool: TOOL_WORKFLOW_STATE.to_string(),
+        error: format!("{error}. {WORKFLOW_STATE_INPUT_ERROR_HINT}"),
     }
 }
 
@@ -857,7 +992,7 @@ fn current_snapshot(state: &WorkflowSessionState) -> serde_json::Value {
         return serde_json::json!({
             "revision": 0,
             "currentRun": null,
-            "instruction": "Call workflow_state with action compile, expectedRevision 0, expectedRunId null, and a complete workflow definition before doing stage work."
+            "instruction": "Call workflow_state with action compile, expectedRevision 0, omit expectedRunId, and provide the complete workflow definition and transition graph before doing stage work."
         });
     };
     let allowed_transitions = run
