@@ -499,6 +499,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     async fn wait_until_idle(registry: &ProcessRegistry) {
         for _ in 0..100 {
             if registry
