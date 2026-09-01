@@ -130,13 +130,21 @@ impl AgentWorkspace {
         let Some(writable_paths) = &self.project_writable_paths else {
             return Ok(());
         };
-        if !path_is_inside_workspace(path, &self.project_root) {
+        let project_root = dunce::canonicalize(&self.project_root).map_err(|error| {
+            crate::PureError::ToolExecutionFailed {
+                tool: "workspace".to_string(),
+                error: format!("failed to resolve Agent project root: {error}"),
+            }
+        })?;
+        if !path_is_inside_workspace(path, &project_root) {
             return Ok(());
         }
-        if writable_paths
-            .iter()
-            .any(|allowed| path_is_inside_workspace(path, allowed))
-        {
+        let is_allowed = writable_paths.iter().any(|allowed| {
+            allowed
+                .strip_prefix(&self.project_root)
+                .is_ok_and(|relative| path_is_inside_workspace(path, &project_root.join(relative)))
+        });
+        if is_allowed {
             return Ok(());
         }
         Err(crate::PureError::ToolExecutionFailed {
