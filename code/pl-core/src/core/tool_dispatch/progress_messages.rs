@@ -13,6 +13,7 @@ pub(super) fn emit_tool_progress(
 pub(super) fn tool_start_progress_message(name: &str) -> String {
     match name {
         "workflow_state" => "正在更新工作流状态。".to_string(),
+        "submit_plan" => "正在提交计划等待确认。".to_string(),
         "request_user_input" => "正在等待用户输入。".to_string(),
         "update_todo_list" => "正在更新 todo list。".to_string(),
         "spawn_agent" => "正在创建子代理。".to_string(),
@@ -32,6 +33,7 @@ pub(super) fn tool_terminal_progress_message(record: &ToolExecutionRecord) -> St
     match record.outcome {
         ToolExecutionOutcome::Succeeded => match name.as_str() {
             "workflow_state" => "工作流状态已更新。".to_string(),
+            "submit_plan" => "计划确认结果已收到。".to_string(),
             "request_user_input" => "用户输入已收到。".to_string(),
             "update_todo_list" => "Todo list 已更新。".to_string(),
             "spawn_agent" => "子代理已创建。".to_string(),
@@ -47,6 +49,7 @@ pub(super) fn tool_terminal_progress_message(record: &ToolExecutionRecord) -> St
         ToolExecutionOutcome::Denied => format!("工具 `{name}` 已拒绝。"),
         ToolExecutionOutcome::Failed(_) => match name.as_str() {
             "workflow_state" => "工作流状态更新失败。".to_string(),
+            "submit_plan" => "计划提交失败。".to_string(),
             "request_user_input" => "用户输入请求失败。".to_string(),
             "update_todo_list" => "Todo list 更新失败。".to_string(),
             "spawn_agent" | "report_progress" | "list_agents" | "wait_agents"

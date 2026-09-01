@@ -67,9 +67,17 @@ role 或任意 metadata，产品就只能回读当前配置或继承父 Agent，
 越界或经过不安全 symlink 的路径，规范化和去重后冻结。其他模式传入该字段直接返回参数错误，避免
 形成虚假隔离预期。
 
+模型可见的 `spawn_agent` schema 必须从本轮启用的 Profile snapshot 动态生成对象联合，而不是在一个
+公共对象上暴露所有模式字段。每个分支以 `profileId` 常量绑定一个 Profile：`directory` 分支声明可选
+`writablePaths`，`unrestricted` 与 `worktree` 分支不声明该字段；所有分支都使用
+`additionalProperties:false`。schema 同时给出 `profileId -> workspace mode` 映射，供模型在首次调用前
+完成选择。用户 Profile 按冻结的 `workspace_mode` 进入相同分支。运行时保留独立硬拒绝，防止绕过
+schema 的非法请求；explorer/reviewer 的只读是角色行为合同，不能用 `writablePaths:[]` 模拟。
+
 spawn receipt 返回模式、实际 root、canonical 可写目录；worktree 模式额外返回 branch 与 base commit。
-所有 Pure 内置文件 mutation（apply patch、write/delete/copy/move、项目 Skill 写入）都调用同一中央
-路径策略。读取不受 `writablePaths` 限制，项目外路径仍只由 Permission Mode 决定。
+Local 与 SSH backend 的所有 Pure 内置文件 mutation（apply patch、write/delete/copy/move、项目 Skill
+写入）都调用同一中央路径策略；该策略不因会话使用 `full-access` 而关闭。读取不受 `writablePaths`
+限制，项目外路径仍只由 Permission Mode 决定。
 
 ## 15.5 Task Mode 编排合同
 
@@ -83,6 +91,14 @@ Task root 先建立依赖图、文件所有权与验证边界。跨目录检索�
 commit/测试/风险证据，以及 workspace、`writablePaths`、Git 与 cleanup 合同。root 应先按依赖边排序；
 无依赖且写集合互斥的任务并行，有真实语义依赖的任务保持顺序。
 
+每个 child 都使用 durable delivery；非 reviewer child 完成实际工作后、final reply 前调用一次
+`report_progress`，以 `readyForCompletion` 阶段提交 `CHILD_DELIVERY_READY` 及完整证据；worktree child
+还必须在 detail 中提供 `WORKTREE_COMMIT_READY`、40 位 commit 与 workspace root，reviewer 继续使用
+专用 verdict marker。
+root 从成功 spawn receipt 冻结真实 `agentId`，循环 `wait_agents` 直到该 child terminal，再按该 id 调用
+`read_agent_submissions`。progress 唤醒不等于 terminal；空 submission page 是 child 交付合同失败，
+`read_agent_session` 只用于诊断和收窄重派，不能作为正常成果 fallback。
+
 - 单个边界清晰的实现，或多个写集合完全互斥的并行实现，使用 `executor`；并行时为每个 child 传入
   最窄且互不重叠的 `writablePaths`，禁止 child 借 shell、Git 或 MCP 越界修改、stage、commit 或 reset。
 - 会触及共同接口、manifest、lockfile、生成文件、全仓格式化或高风险 Git 状态的任务使用
@@ -93,6 +109,9 @@ Task 默认在 working 后进入 integrating。directory 成果由 root 检查�
 成果由 root 审查 commit、用普通 Git 显式整合并 cleanup。root 可在解决冲突时完成保持合并语义所需的
 相邻实现和测试修复，但不得借机展开无关重构。合适 child 不可用或失败时，root 先等待容量并收窄重派
 一次；仍失败才允许最小实现兜底，并在交付中记录 `ROOT_IMPLEMENTATION_FALLBACK`、原因和直接修改文件。
+参数或合同错误不得原样重放：root 先按工具 schema 修正 camelCase 参数、模式专属字段和目标 id，再用
+新的调用重试一次；容量或 provider 暂时失败则等待后收窄重派。刻意验证 directory 边界的拒绝必须标记为
+expected rejection，禁止绕过，也不计入非预期首次调用失败。
 
 所有成果整合后必须创建 fresh-context 的只读 `reviewer`，综合检查目标、设计、完整 diff、错误路径、
 测试、冲突和 fallback。reviewer 不直接修复：代码 finding 回到 working 交给 executor，设计 finding 回到
@@ -125,6 +144,19 @@ provider/model/effort 控件，用户编辑器额外显示三模式选择。所�
 
 确定性验收覆盖 schema 迁移、模式冻结、目录允许/拒绝/外部路径/symlink、shell 可绕过的显式合同、
 本地与 SSH worktree 创建和补偿、preserve/cleanup、重启 reconcile 及 GUI revision。真实验收入口为
-`cargo xtask verify-subagents --live --gui`：使用隔离的临时 Studio home 与 Git fixture，从 GUI 配置并
-提交真实 Task prompt，证明并行 explorer、两种 executor 的 spawn receipt、详细任务合同、目录拒绝、
+`cargo xtask verify-subagents --live --gui`：使用隔离的临时 Studio home 与 Git fixture，并仅在该临时
+配置中把会话 Permission Mode 设为 `full-access`，从 GUI 配置并提交真实 Task prompt，证明并行
+explorer、两种 executor 的 spawn receipt、详细任务合同、目录拒绝、
 worktree 分支、显式整合、cleanup、整合后的只读 reviewer、最终测试、截图和 terminal receipt。
+artifact 还必须保留每次协作工具调用的 attempt/outcome 分类；成功重试不能隐藏先前的参数、容量或
+provider 失败。验收要求每个 child 都有绑定真实 `agentId` 的 canonical nonempty durable submission，
+并将预期目录拒绝与非预期 tool failure 分开统计。`full-access` 只取消会话级工具审批，不改变 directory
+内置文件写策略或 worktree confined assignment，也不得被表述为 directory 的 OS 沙箱。
+
+设置 `PURE_SUBAGENTS_SSH_SERVER`、`PURE_SUBAGENTS_SSH_USERNAME` 与一次性的
+`PURE_SUBAGENTS_SSH_PASSWORD` 后，同一入口改用 SSH 实机验收。harness 通过系统 OpenSSH 在远端用户
+home 下创建唯一临时 Git fixture；Driver 必须从 Agents 页面切到 SSH 页面，经可见控件保存、测试连接、
+浏览并打开该项目，再从 GUI 提交同一 Task prompt。password 只进入 Driver 进程环境、可见密码框和产品
+内存 secret lease，不得进入 CLI argv、GUI 进程环境、SQLite、wire 或 artifact。验收额外要求 executor
+在不同 inference 中多次以 `cwd:"."` 执行只读命令，所有 SSH `exec.cwd` 首次即为 `.` 或省略，且没有
+process id 冲突；成功或失败都按精确路径核验并清理远端 fixture。

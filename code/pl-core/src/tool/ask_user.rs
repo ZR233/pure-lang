@@ -108,82 +108,90 @@ impl Tool for AskUserTool {
                 .into_iter()
                 .map(UserQuestion::from)
                 .collect::<Vec<_>>();
-            validate_questions(&questions)?;
-            let request_id = namespaced_request_id(
-                &context.identity().turn_id,
-                &context.identity().item_id,
-            );
-            let request = UserInputRequest {
-                request_id,
-                tool_id: context.identity().item_id.clone(),
-                questions,
-            };
-            let interaction =
-                user_input_interaction(&context.identity().turn_id, &request, &context);
-            let (response, runtime_events) = match context.approval().user_input_mode() {
-                UserInputMode::AwaitResponse => {
-                    let Some(callback) = context.approval().interaction_callback() else {
-                        return Err(PureError::ToolExecutionFailed {
-                            tool: self.name().to_string(),
-                            error: "interaction runtime is not configured".to_string(),
-                        });
-                    };
-                    let resolution = match context.cancellation_token() {
-                        Some(token) => {
-                            tokio::select! {
-                                resolution = callback(interaction.clone()) => resolution,
-                                _ = token.cancelled() => InteractionResolution::UserInput(UserInputResolution {
-                                    answers: Default::default(),
-                                }),
-                            }
-                        }
-                        None => callback(interaction.clone()).await,
-                    };
-                    let response = match resolution {
-                        InteractionResolution::UserInput(value) => {
-                            UserInputResponse { answers: value.answers }
-                        }
-                        InteractionResolution::ToolApproval(_) => {
-                            UserInputResponse::default()
-                        }
-                    };
-                    (response, Vec::new())
-                }
-                UserInputMode::EmitAndEndTurn => (
-                    UserInputResponse::default(),
-                    vec![
-                        ToolDirective::InteractionRequested {
-                            interaction: Box::new(interaction),
-                        },
-                        ToolDirective::EndTurn {
-                            final_content: None,
-                        },
-                    ],
-                ),
-            };
-            let description = serde_json::to_string(&response).map_err(|error| {
-                PureError::ToolExecutionFailed {
-                    tool: self.name().to_string(),
-                    error: format!("failed to serialize response: {error}"),
-                }
-            })?;
-            Ok(ToolResult::from_runtime_text(
-                description,
-                OutputTruncation::empty(),
-                PathBuf::new(),
-                Some(0),
-                false,
-                runtime_events,
-            ))
+            execute_user_input(self.name(), questions, context, None).await
         }
         .boxed()
     }
 }
 
-fn validate_questions(questions: &[UserQuestion]) -> Result<(), PureError> {
+pub(super) async fn execute_user_input(
+    tool_name: &str,
+    questions: Vec<UserQuestion>,
+    context: ToolCallContext,
+    pending_output: Option<String>,
+) -> Result<ToolResult, PureError> {
+    validate_questions(tool_name, &questions)?;
+    let request_id =
+        namespaced_request_id(&context.identity().turn_id, &context.identity().item_id);
+    let request = UserInputRequest {
+        request_id,
+        tool_id: context.identity().item_id.clone(),
+        questions,
+    };
+    let interaction = user_input_interaction(&context.identity().turn_id, &request, &context);
+    let (response, runtime_events) = match context.approval().user_input_mode() {
+        UserInputMode::AwaitResponse => {
+            let Some(callback) = context.approval().interaction_callback() else {
+                return Err(PureError::ToolExecutionFailed {
+                    tool: tool_name.to_string(),
+                    error: "interaction runtime is not configured".to_string(),
+                });
+            };
+            let resolution = match context.cancellation_token() {
+                Some(token) => {
+                    tokio::select! {
+                        resolution = callback(interaction.clone()) => resolution,
+                        _ = token.cancelled() => InteractionResolution::UserInput(UserInputResolution {
+                            answers: Default::default(),
+                        }),
+                    }
+                }
+                None => callback(interaction.clone()).await,
+            };
+            let response = match resolution {
+                InteractionResolution::UserInput(value) => UserInputResponse {
+                    answers: value.answers,
+                },
+                InteractionResolution::ToolApproval(_) => UserInputResponse::default(),
+            };
+            (response, Vec::new())
+        }
+        UserInputMode::EmitAndEndTurn => (
+            UserInputResponse::default(),
+            vec![
+                ToolDirective::InteractionRequested {
+                    interaction: Box::new(interaction),
+                },
+                ToolDirective::EndTurn {
+                    final_content: None,
+                },
+            ],
+        ),
+    };
+    let response_description =
+        serde_json::to_string(&response).map_err(|error| PureError::ToolExecutionFailed {
+            tool: tool_name.to_string(),
+            error: format!("failed to serialize response: {error}"),
+        })?;
+    let description = if runtime_events.is_empty() {
+        response_description
+    } else {
+        pending_output.unwrap_or(response_description)
+    };
+    Ok(ToolResult::from_runtime_text(
+        description,
+        OutputTruncation::empty(),
+        PathBuf::new(),
+        Some(0),
+        false,
+        runtime_events,
+    ))
+}
+
+fn validate_questions(tool_name: &str, questions: &[UserQuestion]) -> Result<(), PureError> {
     if questions.is_empty() {
         return Err(PureError::ToolExecutionFailed {
-            tool: "request_user_input".to_string(),
+            tool: tool_name.to_string(),
             error: "questions must not be empty".to_string(),
         });
     }
@@ -192,19 +200,19 @@ fn validate_questions(questions: &[UserQuestion]) -> Result<(), PureError> {
         let id = question.id.trim();
         if id.is_empty() {
             return Err(PureError::ToolExecutionFailed {
-                tool: "request_user_input".to_string(),
+                tool: tool_name.to_string(),
                 error: "question id must not be empty".to_string(),
             });
         }
         if !ids.insert(id.to_string()) {
             return Err(PureError::ToolExecutionFailed {
-                tool: "request_user_input".to_string(),
+                tool: tool_name.to_string(),
                 error: format!("duplicate question id: {id}"),
             });
         }
         if question.question.trim().is_empty() {
             return Err(PureError::ToolExecutionFailed {
-                tool: "request_user_input".to_string(),
+                tool: tool_name.to_string(),
                 error: format!("question text must not be empty for id: {id}"),
             });
         }
@@ -439,6 +447,6 @@ mod tests {
             },
         ];
 
-        assert!(validate_questions(&questions).is_err());
+        assert!(validate_questions("request_user_input", &questions).is_err());
     }
 }

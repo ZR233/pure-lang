@@ -567,7 +567,14 @@ class _RemoteDirectoryDialogState
                       : () => _load(listing!.parent),
                   icon: const Icon(Icons.arrow_upward),
                 ),
-                Expanded(child: SelectableText(listing?.path ?? '…')),
+                Expanded(
+                  child: SelectableText(
+                    listing?.path ?? '…',
+                    key: listing == null
+                        ? null
+                        : StudioDriverKeys.sshDirectoryCurrent(listing.path),
+                  ),
+                ),
               ],
             ),
             const Divider(),
@@ -577,9 +584,11 @@ class _RemoteDirectoryDialogState
                   : listing == null
                   ? const Center(child: CircularProgressIndicator())
                   : ListView(
+                      key: StudioDriverKeys.sshDirectoryList,
                       children: [
                         for (final entry in listing.entries)
                           ListTile(
+                            key: StudioDriverKeys.sshDirectoryEntry(entry.path),
                             leading: const Icon(Icons.folder_outlined),
                             title: Text(entry.name),
                             onTap: () => _load(entry.path),

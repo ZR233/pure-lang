@@ -29,7 +29,7 @@ abstract interface class FlutterDriverClient {
     Duration? timeout,
   });
 
-  Future<void> tap(SerializableFinder finder);
+  Future<void> tap(SerializableFinder finder, {Duration? timeout});
 
   Future<void> enterText(String text);
 
@@ -87,6 +87,7 @@ class FlutterDriverSession {
     Duration(milliseconds: 500),
     Duration(seconds: 1),
   ];
+  static const tapDeadline = Duration(seconds: 30);
 
   final String _vmServiceUrl;
   final FlutterDriverConnector _connector;
@@ -195,6 +196,27 @@ class FlutterDriverSession {
       dyScroll: dyScroll,
       timeout: timeout,
     );
+    return _runSideEffectWithDeadline(
+      operation,
+      name: 'scrollUntilVisible',
+      timeout: timeout,
+    );
+  }
+
+  Future<void> tap(SerializableFinder finder, {Duration? timeout}) {
+    final effectiveTimeout = timeout ?? tapDeadline;
+    return _runSideEffectWithDeadline(
+      _client.tap(finder, timeout: effectiveTimeout),
+      name: 'tap',
+      timeout: effectiveTimeout,
+    );
+  }
+
+  Future<void> _runSideEffectWithDeadline(
+    Future<void> operation, {
+    required String name,
+    required Duration? timeout,
+  }) async {
     if (timeout == null) return operation;
     try {
       await operation.timeout(timeout);
@@ -205,16 +227,13 @@ class FlutterDriverSession {
       unawaited(_closeClientBestEffort());
       Error.throwWithStackTrace(
         TimeoutException(
-          'scrollUntilVisible timed out after '
-          '${timeout.inMilliseconds} ms',
+          '$name timed out after ${timeout.inMilliseconds} ms',
           timeout,
         ),
         stackTrace,
       );
     }
   }
-
-  Future<void> tap(SerializableFinder finder) => _client.tap(finder);
 
   Future<void> enterText(String text) => _client.enterText(text);
 
@@ -377,7 +396,8 @@ class _RealFlutterDriverClient implements FlutterDriverClient {
   }
 
   @override
-  Future<void> tap(SerializableFinder finder) => _driver.tap(finder);
+  Future<void> tap(SerializableFinder finder, {Duration? timeout}) =>
+      _driver.tap(finder, timeout: timeout);
 
   @override
   Future<void> enterText(String text) => _driver.enterText(text);

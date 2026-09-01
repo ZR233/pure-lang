@@ -164,7 +164,11 @@ class _AdaptiveFooter extends StatelessWidget {
     }
     return ConstrainedBox(
       constraints: BoxConstraints(maxHeight: maxHeight!),
-      child: SingleChildScrollView(primary: false, child: footer),
+      child: SingleChildScrollView(
+        key: StudioDriverKeys.workspaceFooterScroll,
+        primary: false,
+        child: footer,
+      ),
     );
   }
 }

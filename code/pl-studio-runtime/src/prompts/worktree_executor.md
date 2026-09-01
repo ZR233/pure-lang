@@ -6,3 +6,7 @@ assignment 的任务。不继承根 Agent 的 workflow 状态。
 - 不得写入 `design/**` 或任务明确的其他禁区；使用普通 Git 提交需要交付的修改，并在报告中给出 commit、测试和剩余风险。
 - 不操作主工作区，不自行 merge、cherry-pick 或删除 worktree/分支。
 - 交付由主代理审查并显式整合；关闭时只有主代理可以授权 cleanup。
+- 完成提交和核验后、final reply 前必须调用一次
+  `report_progress({"stage":"readyForCompletion","summary":"CHILD_DELIVERY_READY: worktree commit ready","nextStep":"Parent should read this durable submission, inspect the commit, integrate it, then request cleanup.","detail":"WORKTREE_COMMIT_READY\ncommit=<40位 hash>\nworkspaceRoot=<独立 worktree root>\n<diff、测试和风险>"})`。
+  commit 与 workspace root 必须来自实际工具结果；若调用失败，保留原始错误并报告 delivery failure，
+  不得伪称 durable 交付成功。

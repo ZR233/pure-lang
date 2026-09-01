@@ -47,6 +47,18 @@ approval/sandbox 策略。协作 `spawn_agent` 接受 `profileId` 并冻结 Prof
 扩张或收缩。该策略不是 OS 沙箱，exec、Git 和 MCP 的 schema/固定 prompt 必须明确其可绕过目录限制，
 并要求 child 不借这些工具修改白名单外项目文件。
 
+协作工具 schema 按当前启用 Profile 的冻结 `workspace_mode` 生成 `oneOf` 对象分支。每个分支固定
+`profileId` 并拒绝额外字段；只有 directory 分支声明 `writablePaths`。schema 约束用于降低模型首次
+调用错误，执行路径仍按 Profile snapshot 重做同一语义校验，不能把 schema 当作安全边界。
+
+MCP resource façade 同样属于本轮冻结工具目录。Runtime 必须读取 server 在 initialize/discovery 中
+声明的 `resources` capability，只把支持该能力的 server 写入 lease 的 resource assignment；没有任何
+此类 server 时不向模型暴露 `list_mcp_resources`、`list_mcp_resource_templates` 或
+`read_mcp_resource`。聚合查询只访问 assignment 中的 server，显式指定未声明该能力的 server 必须在
+发送请求前返回稳定参数错误，不能用一次预期的 `Method not found` 探测能力，也不能因此把正常 MCP
+transport 标记为 unavailable。模型可见 schema 与执行路径必须消费同一冻结 assignment，避免暴露必然
+首次失败的工具。
+
 ## 13.5 统一完成
 
 所有 root Mode 在完成请求后调用 `complete`，提交非空 `summary` 和可选、有界的 `evidence` 列表。

@@ -30,8 +30,9 @@ GUI 不执行本地乐观 transition。旧 recovery、WorkUnit、delivery review
 
 ## 11.4 通用 Interaction
 
-composer dock 只渲染 `UserInput` 与 `ToolApproval`。任务计划确认是普通 UserInput：显示 Agent 已输出的
-计划和问题选项，用户选择后提交 typed resolution。不存在模式专用确认 dock 或 continuation。
+composer dock 只渲染 `UserInput` 与 `ToolApproval`。任务计划由 `submit_plan` 发起，但仍显示为普通
+UserInput：展示完整计划以及批准/修订选项，用户选择后提交 typed resolution。不存在模式专用确认 dock
+或 continuation；普通澄清继续由 `request_user_input` 发起。
 
 ## 11.5 Agents 设置
 

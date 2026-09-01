@@ -156,6 +156,7 @@ impl McpRuntimeHandle {
             generation: snapshot.generation,
             tools: Arc::new(snapshot.tools),
             server_ids: Arc::new(snapshot.server_ids),
+            resource_server_ids: Arc::new(snapshot.resource_server_ids),
             guard: Arc::new(McpLeaseGuard {
                 generation: snapshot.generation,
                 handle: self.clone(),
@@ -249,6 +250,7 @@ pub struct McpTurnLease {
     generation: McpGeneration,
     tools: Arc<Vec<McpRuntimeToolDescriptor>>,
     server_ids: Arc<Vec<String>>,
+    resource_server_ids: Arc<Vec<String>>,
     guard: Arc<McpLeaseGuard>,
 }
 
@@ -287,7 +289,7 @@ impl McpTurnLease {
                     as Arc<dyn Tool>,
             );
         }
-        if !self.server_ids.is_empty() {
+        if !self.resource_server_ids.is_empty() {
             for kind in ResourceToolKind::all() {
                 tools.push(Arc::new(self.registered_resource_tool(*kind)) as Arc<dyn Tool>);
             }
@@ -402,6 +404,7 @@ pub(super) struct LeaseSnapshot {
     generation: McpGeneration,
     tools: Vec<McpRuntimeToolDescriptor>,
     server_ids: Vec<String>,
+    resource_server_ids: Vec<String>,
 }
 
 pub(super) enum RuntimeCommand {

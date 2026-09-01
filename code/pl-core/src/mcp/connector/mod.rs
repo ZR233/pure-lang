@@ -232,6 +232,13 @@ impl ConnectedMcp {
         self.peer.clone()
     }
 
+    /// Whether the server declared the MCP resources capability during discovery.
+    pub fn supports_resources(&self) -> bool {
+        self.peer
+            .peer_info()
+            .is_some_and(|info| info.capabilities.resources.is_some())
+    }
+
     pub async fn list_tools(&self) -> Result<Vec<Tool>> {
         self.peer
             .list_all_tools()

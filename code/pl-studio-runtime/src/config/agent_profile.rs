@@ -489,19 +489,30 @@ model = "gpt-5"
         assert!(explorer.contains("只读"));
         assert!(explorer.contains("不得修改"));
         assert!(explorer.contains("file:line"));
+        assert!(explorer.contains("report_progress"));
+        assert!(explorer.contains("CHILD_DELIVERY_READY"));
         let planner = prompt("planner");
         assert!(planner.contains("方案"));
         assert!(planner.contains("父 Agent"));
+        assert!(planner.contains("report_progress"));
+        assert!(planner.contains("CHILD_DELIVERY_READY"));
         let executor = prompt("executor");
         assert!(executor.contains("writablePaths"));
         assert!(executor.contains("不得") && executor.contains("Git"));
+        assert!(executor.contains("report_progress"));
+        assert!(executor.contains("CHILD_DELIVERY_READY"));
         let worktree = prompt("worktree_executor");
         assert!(worktree.contains("独立 Git worktree"));
         assert!(worktree.contains("commit"));
         assert!(worktree.contains("不得") && worktree.contains("cherry-pick"));
+        assert!(worktree.contains("report_progress"));
+        assert!(worktree.contains("CHILD_DELIVERY_READY"));
+        assert!(worktree.contains("WORKTREE_COMMIT_READY"));
         let reviewer = prompt("reviewer");
         assert!(reviewer.contains("只读"));
         assert!(reviewer.contains("不得修改"));
+        assert!(reviewer.contains("report_progress"));
+        assert!(reviewer.contains("REVIEWER_READ_ONLY_APPROVED"));
         assert!(!reviewer.contains("可以直接修改"));
     }
 
@@ -541,5 +552,7 @@ model = "gpt-5"
         }
         assert!(task.contains("fresh-context"));
         assert!(task.contains("重新") && task.contains("review"));
+        assert!(task.contains("CHILD_DELIVERY_READY"));
+        assert!(task.contains("canonical page 必须非空"));
     }
 }

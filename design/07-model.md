@@ -196,6 +196,12 @@ WebSocket full replay 与 HTTP fallback 继续属于同一次 inference，等待
 `t/s = completionTokens × 1000 / decodeMs`。completion token 已包含 reasoning token，不得重复相加；
 timing、usage 不完整或 `decodeMs == 0` 时不生成吞吐样本。失败与取消不携带成功 timing。
 
+真实验收 harness 可在显式启用 wire capture 时额外记录少量 transport 阶段回执：
+请求已落盘、HTTP 流已建立、首个 provider 事件以及流终止或失败。回执使用同一
+capture id、单调 elapsed 和墙上时间，不记录 prompt、密钥或 provider 错误原文；它只用于
+区分请求组装、响应头等待与 SSE 等待的耗时，不改变生产超时、重试或成功 timing
+语义。仅出现请求落盘回执不能被解释为 provider 已接收或已返回响应。
+
 ## 7.6 多模态消息
 
 `MessageContent` 只有一个有序 multipart 形态：`parts: Vec<ContentPart>`。持久协议仅允许

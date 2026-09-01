@@ -7,22 +7,34 @@ use super::{
 use crate::cli::VerifySubagentsOptions;
 use crate::{paths, process};
 use anyhow::{Context, Result, bail, ensure};
+use sea_orm::{ConnectionTrait, Database, DatabaseBackend, Statement};
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::ffi::OsString;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 const TOTAL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
-const STALL_TIMEOUT_SECONDS: u64 = 10 * 60;
+// One HTTP attempt has a five-minute client deadline. The acceptance needs
+// enough time to record that boundary, but must not spend the full retry
+// budget when the provider never opens a stream.
+const STALL_TIMEOUT_SECONDS: u64 = 6 * 60;
 const SENTINEL: &str = "PURE_SUBAGENTS_LIVE_OK";
 const DIRECTORY_MARKER: &str = "DIRECTORY_MARKER";
 const WORKTREE_RESULT_MARKER: &str = "WORKTREE_RESULT_MARKER";
-const EXPLORER_STEPS_FIXTURE_SOURCE_V1: &str = "LIVE_EXPLORER_STEPS_V1: fixture-source\n1. 只读读取 Cargo.toml。\n2. 只读读取 src/lib.rs。\n3. 输出要求：总结这两个文件中与 Task workflow 和 live artifact 相关的有限源码事实，并与 root 注入的已编译阶段图及 Profile/spawn facts 对照；完成后直接 final reply。";
-const EXPLORER_STEPS_WORKSPACE_GIT_V1: &str = "LIVE_EXPLORER_STEPS_V1: workspace-git\n1. 只读读取 .gitignore。\n2. 只调用 git_workspace_info。\n3. 只调用 git_status。\n4. 输出要求：总结 workspace/Git lifecycle 元数据，并在完成后直接 final reply。";
+const SSH_SERVER_ENV: &str = "PURE_SUBAGENTS_SSH_SERVER";
+const SSH_USERNAME_ENV: &str = "PURE_SUBAGENTS_SSH_USERNAME";
+const SSH_PASSWORD_ENV: &str = "PURE_SUBAGENTS_SSH_PASSWORD";
+const SSH_PORT_ENV: &str = "PURE_SUBAGENTS_SSH_PORT";
+const SSH_ACCEPTANCE_NAME: &str = "Pure SSH Acceptance";
+#[cfg(test)]
+const EXPLORER_STEPS_FIXTURE_SOURCE_V2: &str = "LIVE_EXPLORER_STEPS_V2: fixture-source\n1. 只读读取 Cargo.toml。\n2. 只读读取 src/lib.rs。\n3. 调用 `report_progress({\"stage\":\"readyForCompletion\",\"summary\":\"CHILD_DELIVERY_READY: explorer fixture-source evidence complete\",\"nextStep\":\"Root should read this durable submission by agentId.\",\"detail\":\"<这两个文件的有限源码事实、file:line、与阶段图/Profile facts 的对照和不确定项>\"})`，detail 必须写入实际证据而非占位符。\n4. report_progress 成功后，以内容一致的 final reply 结束。";
+#[cfg(test)]
+const EXPLORER_STEPS_WORKSPACE_GIT_V2: &str = "LIVE_EXPLORER_STEPS_V2: workspace-git\n1. 只读读取 .gitignore。\n2. 只调用 `exec({\"command\":\"git rev-parse HEAD\",\"cwd\":\".\"})`。\n3. 消费上一步结果后，只调用 `exec({\"command\":\"git status --short --branch\",\"cwd\":\".\"})`；不得并行调用，不得使用绝对 cwd。\n4. 调用 `report_progress({\"stage\":\"readyForCompletion\",\"summary\":\"CHILD_DELIVERY_READY: explorer workspace-git evidence complete\",\"nextStep\":\"Root should read this durable submission by agentId.\",\"detail\":\"<.gitignore 与 workspace/Git lifecycle 元数据、证据和不确定项>\"})`，detail 必须写入实际证据而非占位符。\n5. report_progress 成功后，以内容一致的 final reply 结束。";
 
 #[derive(Debug, Clone)]
 struct Route {
@@ -30,11 +42,26 @@ struct Route {
     model: String,
 }
 
+#[derive(Clone)]
+struct SshAcceptance {
+    host: String,
+    username: String,
+    password: String,
+    port: u16,
+}
+
+struct RemoteFixture {
+    path: String,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct WireReceipt {
     schema_version: u32,
     capture_count: usize,
+    attempt_count: usize,
+    expected_rejection_count: usize,
+    unexpected_failure_count: usize,
     calls: Vec<WireCall>,
     captures: Vec<CaptureReceipt>,
     output_markers: Vec<&'static str>,
@@ -106,21 +133,36 @@ pub(super) fn run(options: VerifySubagentsOptions) -> Result<()> {
         installed_config.display()
     );
     let installed_state_before = user_config_state(&installed_home)?;
+    let ssh = read_ssh_acceptance()?;
     let root = tempfile::Builder::new()
         .prefix("pure-subagents-live-gui-")
         .tempdir()
         .context("failed to create isolated subagents acceptance root")?;
     let studio_home = root.path().join("studio-home");
-    let fixture = root.path().join("workspace");
     fs::create_dir_all(&studio_home)?;
-    prepare_fixture(&fixture)?;
+    let local_fixture = root.path().join("workspace");
+    let remote_fixture = match ssh.as_ref() {
+        Some(ssh) => Some(prepare_remote_fixture(ssh)?),
+        None => {
+            prepare_fixture(&local_fixture)?;
+            None
+        }
+    };
+    let fixture = remote_fixture.as_ref().map_or_else(
+        || local_fixture.clone(),
+        |fixture| PathBuf::from(&fixture.path),
+    );
     let isolated_config = studio_home.join("config.toml");
     write_isolated_live_config(
         &installed_config,
         &isolated_config,
         &artifact_dir.join("model-routes.json"),
     )?;
-    disable_all_live_profiles(&isolated_config)?;
+    configure_live_acceptance(&isolated_config)?;
+    fs::write(
+        artifact_dir.join("permission-mode.txt"),
+        "permissionMode=full-access\nprofileWorkspacePolicies=preserved\n",
+    )?;
     let executor = read_route(&isolated_config, "executor")?;
     let worktree_executor = read_route(&isolated_config, "worktree_executor")?;
     let explorer = read_route(&isolated_config, "explorer")?;
@@ -136,10 +178,22 @@ pub(super) fn run(options: VerifySubagentsOptions) -> Result<()> {
     fs::copy(&prompt, artifact_dir.join("fixture-prompt.md"))?;
     fs::write(
         artifact_dir.join("acceptance-surface.txt"),
-        "surface=gui\nscriptedProvider=false\nlive=true\nfixture=isolatedGit\n",
+        format!(
+            "surface=gui\nscriptedProvider=false\nlive=true\nfixture={}\ntransport={}\n",
+            if remote_fixture.is_some() {
+                "isolatedRemoteGit"
+            } else {
+                "isolatedGit"
+            },
+            if remote_fixture.is_some() {
+                "ssh"
+            } else {
+                "local"
+            }
+        ),
     )?;
 
-    let acceptance = run_gui(GuiRun {
+    let mut acceptance = run_gui(GuiRun {
         workspace_root: &workspace_root,
         artifact_dir: &artifact_dir,
         wire_dir: &wire_dir,
@@ -150,10 +204,36 @@ pub(super) fn run(options: VerifySubagentsOptions) -> Result<()> {
         worktree_executor: &worktree_executor,
         explorer: &explorer,
         reviewer: &reviewer,
+        ssh: ssh.as_ref(),
+        remote_fixture: remote_fixture.as_ref(),
         deadline,
     })
-    .and_then(|_| validate_fixture(&fixture, &artifact_dir))
-    .and_then(|_| validate_wire(&wire_dir, &artifact_dir));
+    .and_then(|_| validate_wire(&wire_dir, &artifact_dir, ssh.is_some()))
+    .and_then(|_| match (&ssh, &remote_fixture) {
+        (Some(ssh), Some(fixture)) => validate_remote_fixture(ssh, fixture, &artifact_dir),
+        (None, None) => validate_fixture(&fixture, &artifact_dir),
+        _ => unreachable!("SSH acceptance and remote fixture are created together"),
+    });
+    if let (Some(ssh), Some(fixture)) = (&ssh, &remote_fixture)
+        && let Err(cleanup_error) = cleanup_remote_fixture(ssh, fixture, &artifact_dir)
+    {
+        acceptance = Err(match acceptance {
+            Ok(()) => cleanup_error,
+            Err(error) => error.context(format!(
+                "remote fixture cleanup also failed: {cleanup_error:#}"
+            )),
+        });
+    }
+    if let Some(ssh) = &ssh
+        && let Err(leak_error) = verify_ssh_credential_storage(ssh, &studio_home, &artifact_dir)
+    {
+        acceptance = Err(match acceptance {
+            Ok(()) => leak_error,
+            Err(error) => {
+                error.context(format!("secret leakage check also failed: {leak_error:#}"))
+            }
+        });
+    }
 
     let installed_state_after = user_config_state(&installed_home)?;
     fs::write(
@@ -202,6 +282,8 @@ struct GuiRun<'a> {
     worktree_executor: &'a Route,
     explorer: &'a Route,
     reviewer: &'a Route,
+    ssh: Option<&'a SshAcceptance>,
+    remote_fixture: Option<&'a RemoteFixture>,
     deadline: Instant,
 }
 
@@ -210,6 +292,10 @@ fn run_gui(run: GuiRun<'_>) -> Result<()> {
     command
         .args(["xtask", "run-gui", "--driver", "--log-level", "debug"])
         .current_dir(run.workspace_root)
+        .env_remove(SSH_SERVER_ENV)
+        .env_remove(SSH_USERNAME_ENV)
+        .env_remove(SSH_PASSWORD_ENV)
+        .env_remove(SSH_PORT_ENV)
         .env("PURE_STUDIO_HOME", run.studio_home)
         .env("PURE_STUDIO_WIRE_CAPTURE_DIR", run.wire_dir)
         .env(
@@ -233,6 +319,11 @@ fn run_gui(run: GuiRun<'_>) -> Result<()> {
         let display = process::display_command("dart", &args);
         let mut driver = process::path_command("dart", &args);
         driver.current_dir(paths::studio_app_dir(run.workspace_root));
+        if let Some(ssh) = run.ssh {
+            driver.env(SSH_PASSWORD_ENV, &ssh.password);
+        } else {
+            driver.env_remove(SSH_PASSWORD_ENV);
+        }
         let driver_stdout = run.artifact_dir.join("driver.stdout.log");
         resident::run_logged_with_timeout(
             &mut driver,
@@ -244,6 +335,7 @@ fn run_gui(run: GuiRun<'_>) -> Result<()> {
         write_driver_receipt(
             &driver_stdout,
             &run.artifact_dir.join("terminal-receipt.json"),
+            run.fixture.to_string_lossy().as_ref(),
         )
     })();
     let process_tree = gui.write_process_tree(&run.artifact_dir.join("last-process-tree.txt"));
@@ -311,10 +403,22 @@ fn driver_args(run: &GuiRun<'_>, vm_service: &str) -> Vec<OsString> {
     }
     args.push(OsString::from("--stall-timeout-seconds"));
     args.push(OsString::from(STALL_TIMEOUT_SECONDS.to_string()));
+    if let (Some(ssh), Some(fixture)) = (run.ssh, run.remote_fixture) {
+        let port = ssh.port.to_string();
+        for (name, value) in [
+            ("--ssh-host", ssh.host.as_str()),
+            ("--ssh-username", ssh.username.as_str()),
+            ("--ssh-port", port.as_str()),
+            ("--ssh-workspace", fixture.path.as_str()),
+        ] {
+            args.push(OsString::from(name));
+            args.push(OsString::from(value));
+        }
+    }
     args
 }
 
-fn write_driver_receipt(log: &Path, output: &Path) -> Result<()> {
+fn write_driver_receipt(log: &Path, output: &Path, expected_workspace: &str) -> Result<()> {
     let mut completed = None;
     let mut shutdown = None;
     for line in fs::read_to_string(log)?.lines() {
@@ -335,7 +439,7 @@ fn write_driver_receipt(log: &Path, output: &Path) -> Result<()> {
         rendered.contains(SENTINEL),
         "Flutter Driver receipt does not contain {SENTINEL}"
     );
-    validate_driver_snapshot(&completed)?;
+    validate_driver_snapshot(&completed, expected_workspace)?;
     fs::write(
         output,
         serde_json::to_vec_pretty(&serde_json::json!({
@@ -347,7 +451,15 @@ fn write_driver_receipt(log: &Path, output: &Path) -> Result<()> {
     Ok(())
 }
 
-fn validate_driver_snapshot(completed: &Value) -> Result<()> {
+fn validate_driver_snapshot(completed: &Value, expected_workspace: &str) -> Result<()> {
+    ensure!(
+        completed
+            .get("project")
+            .and_then(|project| project.get("path"))
+            .and_then(Value::as_str)
+            == Some(expected_workspace),
+        "Flutter Driver terminal project is not the expected workspace"
+    );
     let workspace = completed
         .get("workspace")
         .context("Flutter Driver receipt has no workspace")?;
@@ -413,6 +525,11 @@ fn prepare_fixture(path: &Path) -> Result<()> {
     fs::write(path.join("forbidden/.gitkeep"), "")?;
     fs::write(path.join(".gitignore"), "/target/\n/.pure/\n")?;
     run_git(path, &["init", "-b", "main"])?;
+    run_git(path, &["config", "user.name", "Pure Acceptance"])?;
+    run_git(
+        path,
+        &["config", "user.email", "pure-acceptance@example.invalid"],
+    )?;
     run_git(path, &["add", "."])?;
     run_git(
         path,
@@ -427,6 +544,411 @@ fn prepare_fixture(path: &Path) -> Result<()> {
         ],
     )?;
     Ok(())
+}
+
+fn read_ssh_acceptance() -> Result<Option<SshAcceptance>> {
+    let configured = [
+        SSH_SERVER_ENV,
+        SSH_USERNAME_ENV,
+        SSH_PASSWORD_ENV,
+        SSH_PORT_ENV,
+    ]
+    .into_iter()
+    .any(|key| std::env::var_os(key).is_some());
+    if !configured {
+        return Ok(None);
+    }
+    ensure!(
+        cfg!(unix),
+        "SSH subagents acceptance currently requires a Unix Askpass host"
+    );
+    let required = |key: &str| -> Result<String> {
+        std::env::var(key)
+            .with_context(|| format!("{key} is required when SSH subagents acceptance is enabled"))
+            .and_then(|value| {
+                ensure!(!value.is_empty(), "{key} must not be empty");
+                Ok(value)
+            })
+    };
+    let port = match std::env::var(SSH_PORT_ENV) {
+        Ok(value) => value
+            .parse::<u16>()
+            .with_context(|| format!("{SSH_PORT_ENV} must be a valid non-zero port"))?,
+        Err(std::env::VarError::NotPresent) => 22,
+        Err(error) => return Err(error).context(format!("failed to read {SSH_PORT_ENV}")),
+    };
+    ensure!(port > 0, "{SSH_PORT_ENV} must be a valid non-zero port");
+    Ok(Some(SshAcceptance {
+        host: required(SSH_SERVER_ENV)?,
+        username: required(SSH_USERNAME_ENV)?,
+        password: required(SSH_PASSWORD_ENV)?,
+        port,
+    }))
+}
+
+fn prepare_remote_fixture(ssh: &SshAcceptance) -> Result<RemoteFixture> {
+    let script = r#"set -eu
+fixture=$(mktemp -d "${HOME%/}/pure-subagents-live.XXXXXX")
+cleanup() { rm -rf -- "$fixture"; }
+trap cleanup EXIT
+mkdir -p "$fixture/src" "$fixture/design" "$fixture/allowed" "$fixture/forbidden"
+printf '%s\n' '[package]' 'name = "subagents-live-fixture"' 'version = "0.1.0"' 'edition = "2024"' > "$fixture/Cargo.toml"
+printf '%s\n' 'pub fn fixture_ready() -> bool { true }' '' '#[cfg(test)]' 'mod tests {' '    #[test]' '    fn fixture_is_ready() { assert!(super::fixture_ready()); }' '}' > "$fixture/src/lib.rs"
+: > "$fixture/allowed/.gitkeep"
+: > "$fixture/forbidden/.gitkeep"
+printf '%s\n' '/target/' '/.pure/' > "$fixture/.gitignore"
+git -C "$fixture" init -q -b main
+git -C "$fixture" config user.name 'Pure Acceptance'
+git -C "$fixture" config user.email 'pure-acceptance@example.invalid'
+git -C "$fixture" add .
+git -C "$fixture" -c user.name='Pure Acceptance' -c user.email='pure-acceptance@example.invalid' commit -q -m 'test: initialize subagents fixture'
+trap - EXIT
+printf '%s\n' "$fixture"
+"#;
+    let output = run_ssh_script(ssh, script)?;
+    ensure_ssh_success(ssh, &output, "prepare remote subagents fixture")?;
+    let path = String::from_utf8(output.stdout)?
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .next_back()
+        .context("remote fixture preparation returned no canonical path")?
+        .trim()
+        .to_string();
+    validate_remote_fixture_path(&path)?;
+    Ok(RemoteFixture { path })
+}
+
+fn validate_remote_fixture(
+    ssh: &SshAcceptance,
+    fixture: &RemoteFixture,
+    artifacts: &Path,
+) -> Result<()> {
+    validate_remote_fixture_path(&fixture.path)?;
+    let path = shell_quote(&fixture.path);
+    let script = format!(
+        r#"set -eu
+fixture={path}
+PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+export PATH
+test -d "$fixture/.git"
+grep -Fq 'ROOT_DESIGN_MARKER' "$fixture/design/subagents-orchestration.md"
+grep -Fq 'DIRECTORY_MARKER' "$fixture/allowed/directory.txt"
+test ! -e "$fixture/forbidden/denied.txt"
+grep -Fq 'WORKTREE_RESULT_MARKER' "$fixture/worktree_result.txt"
+git -C "$fixture" log --format='%s' | grep -Fxq 'feat: worktree executor marker'
+test -z "$(git -C "$fixture" branch --format='%(refname:short)' | grep '^pure-agent-' || true)"
+test "$(git -C "$fixture" worktree list --porcelain | grep -c '^worktree ')" -eq 1
+cargo test --manifest-path "$fixture/Cargo.toml"
+printf '%s\n' 'REMOTE_SUBAGENTS_FIXTURE_OK' '--- git status ---'
+git -C "$fixture" status --short
+printf '%s\n' '--- git log ---'
+git -C "$fixture" log --format='%H%x09%s'
+printf '%s\n' '--- worktrees ---'
+git -C "$fixture" worktree list --porcelain
+printf '%s\n' '--- design ---'
+cat "$fixture/design/subagents-orchestration.md"
+printf '%s\n' '--- directory ---'
+cat "$fixture/allowed/directory.txt"
+printf '%s\n' '--- worktree ---'
+cat "$fixture/worktree_result.txt"
+"#
+    );
+    let output = run_ssh_script(ssh, &script)?;
+    fs::write(
+        artifacts.join("remote-fixture-validation.stdout.log"),
+        &output.stdout,
+    )?;
+    fs::write(
+        artifacts.join("remote-fixture-validation.stderr.log"),
+        &output.stderr,
+    )?;
+    ensure_ssh_success(ssh, &output, "validate remote subagents fixture")?;
+    let rendered = String::from_utf8(output.stdout)?;
+    ensure!(
+        rendered.contains("REMOTE_SUBAGENTS_FIXTURE_OK"),
+        "remote fixture validation returned no completion marker"
+    );
+    fs::write(
+        artifacts.join("remote-final-file-diff.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schemaVersion": 1,
+            "workspace": fixture.path,
+            "receipt": rendered,
+            "rejectedPathPresent": false,
+        }))?,
+    )?;
+    Ok(())
+}
+
+fn cleanup_remote_fixture(
+    ssh: &SshAcceptance,
+    fixture: &RemoteFixture,
+    artifacts: &Path,
+) -> Result<()> {
+    validate_remote_fixture_path(&fixture.path)?;
+    let path = shell_quote(&fixture.path);
+    let script = format!(
+        r#"set -eu
+fixture={path}
+if test -e "$fixture"; then
+  test "$(git -C "$fixture" worktree list --porcelain | grep -c '^worktree ')" -eq 1
+  rm -rf -- "$fixture"
+fi
+test ! -e "$fixture"
+printf '%s\n' 'REMOTE_SUBAGENTS_FIXTURE_CLEANED'
+"#
+    );
+    let output = run_ssh_script(ssh, &script)?;
+    fs::write(
+        artifacts.join("remote-fixture-cleanup.stdout.log"),
+        &output.stdout,
+    )?;
+    fs::write(
+        artifacts.join("remote-fixture-cleanup.stderr.log"),
+        &output.stderr,
+    )?;
+    ensure_ssh_success(ssh, &output, "cleanup remote subagents fixture")?;
+    ensure!(
+        String::from_utf8(output.stdout)?.contains("REMOTE_SUBAGENTS_FIXTURE_CLEANED"),
+        "remote fixture cleanup returned no completion marker"
+    );
+    Ok(())
+}
+
+fn run_ssh_script(ssh: &SshAcceptance, script: &str) -> Result<std::process::Output> {
+    let askpass_root = tempfile::Builder::new()
+        .prefix("pure-subagents-askpass-")
+        .tempdir()
+        .context("failed to create SSH acceptance Askpass directory")?;
+    let askpass = askpass_root.path().join("askpass.sh");
+    fs::write(
+        &askpass,
+        "#!/bin/sh\nprintf '%s\\n' \"$PURE_SUBAGENTS_SSH_PASSWORD\"\n",
+    )?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&askpass, fs::Permissions::from_mode(0o700))?;
+    }
+    let target = format!("{}@{}", ssh.username, ssh.host);
+    let port = ssh.port.to_string();
+    let mut command = Command::new("ssh");
+    command
+        .args([
+            "-T",
+            "-x",
+            "-o",
+            "BatchMode=no",
+            "-o",
+            "NumberOfPasswordPrompts=1",
+            "-o",
+            "PreferredAuthentications=password,keyboard-interactive",
+            "-p",
+            &port,
+            &target,
+            "sh",
+            "-s",
+        ])
+        .env("SSH_ASKPASS", &askpass)
+        .env("SSH_ASKPASS_REQUIRE", "force")
+        .env("DISPLAY", "pure-studio")
+        .env(SSH_PASSWORD_ENV, &ssh.password)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command.spawn().context("failed to start system OpenSSH")?;
+    child
+        .stdin
+        .take()
+        .context("system OpenSSH has no stdin")?
+        .write_all(script.as_bytes())?;
+    child
+        .wait_with_output()
+        .context("failed to wait for system OpenSSH")
+}
+
+fn ensure_ssh_success(
+    ssh: &SshAcceptance,
+    output: &std::process::Output,
+    operation: &str,
+) -> Result<()> {
+    ensure!(
+        output.status.success(),
+        "{operation} failed: {}",
+        redact_secret(&String::from_utf8_lossy(&output.stderr), &ssh.password)
+    );
+    Ok(())
+}
+
+fn redact_secret(value: &str, secret: &str) -> String {
+    value.replace(secret, "[REDACTED]")
+}
+
+fn validate_remote_fixture_path(path: &str) -> Result<String> {
+    ensure!(path.starts_with('/'), "remote fixture path is not absolute");
+    ensure!(
+        path.bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"/._-".contains(&byte)),
+        "remote fixture path contains unsafe characters"
+    );
+    ensure!(
+        !path.split('/').any(|component| component == ".."),
+        "remote fixture path escapes its parent"
+    );
+    let leaf = path
+        .rsplit('/')
+        .next()
+        .filter(|leaf| leaf.starts_with("pure-subagents-live."))
+        .context("remote fixture path is not Pure-owned")?;
+    Ok(leaf.to_string())
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+fn ensure_secret_absent<'a>(
+    roots: impl IntoIterator<Item = &'a Path>,
+    secret: &[u8],
+) -> Result<()> {
+    ensure!(
+        !secret.is_empty(),
+        "SSH acceptance secret must not be empty"
+    );
+    for root in roots {
+        scan_secret(root, secret)?;
+    }
+    Ok(())
+}
+
+fn verify_ssh_credential_storage(
+    ssh: &SshAcceptance,
+    studio_home: &Path,
+    artifact_dir: &Path,
+) -> Result<()> {
+    let collision_with = [
+        ("username", ssh.username.as_str()),
+        ("host", ssh.host.as_str()),
+        ("serverName", SSH_ACCEPTANCE_NAME),
+    ]
+    .into_iter()
+    .filter_map(|(field, value)| (ssh.password == value).then_some(field))
+    .collect::<Vec<_>>();
+    let raw_byte_scan = collision_with.is_empty();
+    if raw_byte_scan {
+        ensure_secret_absent([artifact_dir, studio_home], ssh.password.as_bytes())?;
+    }
+
+    let database_path = studio_home.join("studio").join("studio.sqlite");
+    let database_url = sqlite_read_only_url(&database_path);
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("failed to create SQLite credential audit runtime")?;
+    let (columns, username, auth_json) = runtime.block_on(async {
+        let database = Database::connect(&database_url)
+            .await
+            .context("failed to open isolated Studio database for credential audit")?;
+        let columns = database
+            .query_all_raw(Statement::from_string(
+                DatabaseBackend::Sqlite,
+                "PRAGMA table_info(ssh_servers)".to_string(),
+            ))
+            .await?
+            .into_iter()
+            .map(|row| row.try_get::<String>("", "name"))
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let rows = database
+            .query_all_raw(Statement::from_string(
+                DatabaseBackend::Sqlite,
+                "SELECT username, auth_json FROM ssh_servers ORDER BY id".to_string(),
+            ))
+            .await?;
+        ensure!(
+            rows.len() == 1,
+            "expected exactly one isolated SSH server row"
+        );
+        let username = rows[0].try_get::<String>("", "username")?;
+        let auth_json = rows[0].try_get::<String>("", "auth_json")?;
+        database.close().await?;
+        Ok::<_, anyhow::Error>((columns, username, auth_json))
+    })?;
+    let expected_columns = [
+        "id",
+        "name",
+        "host",
+        "port",
+        "username",
+        "auth_json",
+        "created_at",
+        "updated_at",
+    ];
+    ensure!(
+        columns.iter().map(String::as_str).eq(expected_columns),
+        "ssh_servers contains an unexpected persistence column: {columns:?}"
+    );
+    ensure!(
+        username == ssh.username,
+        "isolated SSH server username does not match the visible GUI input"
+    );
+    let auth: Value = serde_json::from_str(&auth_json)?;
+    ensure!(
+        auth == serde_json::json!({"kind": "password"}),
+        "ssh_servers auth_json contains data beyond the password authentication kind"
+    );
+    fs::write(
+        artifact_dir.join("ssh-credential-storage.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schemaVersion": 1,
+            "passed": true,
+            "rawByteScan": raw_byte_scan,
+            "rawByteScanSkippedBecauseSecretMatches": collision_with,
+            "typedColumns": columns,
+            "persistedAuth": auth,
+        }))?,
+    )?;
+    Ok(())
+}
+
+fn sqlite_read_only_url(path: &Path) -> String {
+    let path = path.to_string_lossy();
+    let path = path
+        .strip_prefix(r"\\?\UNC\")
+        .map(|path| format!("//{path}"))
+        .or_else(|| path.strip_prefix(r"\\?\").map(ToOwned::to_owned))
+        .unwrap_or_else(|| path.into_owned())
+        .replace('\\', "/");
+    format!("sqlite://{path}?mode=ro")
+}
+
+fn scan_secret(path: &Path, secret: &[u8]) -> Result<()> {
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() {
+        return Ok(());
+    }
+    ensure!(
+        !contains_bytes(path.as_os_str().to_string_lossy().as_bytes(), secret),
+        "SSH acceptance secret leaked into path {}",
+        path.display()
+    );
+    if metadata.is_dir() {
+        for entry in fs::read_dir(path)? {
+            scan_secret(&entry?.path(), secret)?;
+        }
+    } else if metadata.is_file() {
+        ensure!(
+            !contains_bytes(&fs::read(path)?, secret),
+            "SSH acceptance secret leaked into {}",
+            path.display()
+        );
+    }
+    Ok(())
+}
+
+fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack
+        .windows(needle.len())
+        .any(|candidate| candidate == needle)
 }
 
 fn validate_fixture(fixture: &Path, artifacts: &Path) -> Result<()> {
@@ -514,7 +1036,7 @@ fn file_receipt(root: &Path, relative: &str) -> Result<Value> {
     }))
 }
 
-fn disable_all_live_profiles(path: &Path) -> Result<()> {
+fn configure_live_acceptance(path: &Path) -> Result<()> {
     let mut config = fs::read_to_string(path)?.parse::<toml::Table>()?;
     let mut disabled = config
         .get("disabled_system_agents")
@@ -529,6 +1051,15 @@ fn disable_all_live_profiles(path: &Path) -> Result<()> {
     config.insert(
         "disabled_system_agents".to_string(),
         toml::Value::Array(disabled),
+    );
+    let runtime = config
+        .entry("runtime")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+        .as_table_mut()
+        .context("isolated live config runtime must be a table")?;
+    runtime.insert(
+        "permission_mode".to_string(),
+        toml::Value::String("full-access".to_string()),
     );
     fs::write(path, toml::to_string_pretty(&config)?)?;
     Ok(())
@@ -558,7 +1089,7 @@ fn read_route(path: &Path, role: &str) -> Result<Route> {
     })
 }
 
-fn validate_wire(wire_dir: &Path, artifacts: &Path) -> Result<()> {
+fn validate_wire(wire_dir: &Path, artifacts: &Path, ssh: bool) -> Result<()> {
     let mut captures = Vec::new();
     collect_json(wire_dir, &mut captures)?;
     ensure!(
@@ -586,6 +1117,7 @@ fn validate_wire(wire_dir: &Path, artifacts: &Path) -> Result<()> {
     }
     deduplicate_calls(&mut calls);
     deduplicate_outputs(&mut outputs);
+    let expected_rejection_count = ensure_no_unexpected_tool_failures(&calls, &outputs)?;
     ensure_spawn_calls(&calls)?;
     ensure_workspace_receipts(&calls, &outputs)?;
     ensure_profile_messages(&calls, &outputs)?;
@@ -594,6 +1126,9 @@ fn validate_wire(wire_dir: &Path, artifacts: &Path) -> Result<()> {
     ensure_submissions(&calls, &outputs)?;
     ensure_finding_re_review(&calls, &outputs)?;
     ensure_orchestration_order(&calls, &outputs)?;
+    if ssh {
+        ensure_ssh_exec_contract(&capture_receipts)?;
+    }
     ensure!(
         calls.iter().any(|call| {
             call.name == "write_file"
@@ -640,22 +1175,73 @@ fn validate_wire(wire_dir: &Path, artifacts: &Path) -> Result<()> {
             "wire tool results contain no `{marker}` receipt"
         );
     }
+    let mut output_markers = vec![
+        "directoryRejection",
+        "directoryWorkspaceReceipt",
+        "worktreeWorkspaceReceipt",
+        "explicitCherryPick",
+        "explicitCleanup",
+        "childDurableDelivery",
+    ];
+    if ssh {
+        output_markers.push("sshRelativeExec");
+    }
     fs::write(
         artifacts.join("subagents-wire-receipt.json"),
         serde_json::to_vec_pretty(&WireReceipt {
-            schema_version: 1,
+            schema_version: 2,
             capture_count: captures.len(),
+            attempt_count: calls.len(),
+            expected_rejection_count,
+            unexpected_failure_count: 0,
             calls,
             captures: capture_receipts,
-            output_markers: vec![
-                "directoryRejection",
-                "directoryWorkspaceReceipt",
-                "worktreeWorkspaceReceipt",
-                "explicitCherryPick",
-                "explicitCleanup",
-            ],
+            output_markers,
         })?,
     )?;
+    Ok(())
+}
+
+fn ensure_ssh_exec_contract(captures: &[CaptureReceipt]) -> Result<()> {
+    let mut first_seen = std::collections::HashSet::new();
+    let mut executor_exec_first_appearances = Vec::new();
+    for (capture_index, capture) in captures.iter().enumerate() {
+        for call in &capture.calls {
+            if call.name != "exec" {
+                continue;
+            }
+            let cwd = call.arguments.get("cwd").and_then(Value::as_str);
+            if let Some(cwd) = cwd {
+                ensure!(
+                    !cwd.starts_with('/')
+                        && !cwd.starts_with('\\')
+                        && !cwd.split(['/', '\\']).any(|part| part == "..")
+                        && !cwd.contains(':'),
+                    "SSH exec.cwd is not workspace-relative: {cwd}"
+                );
+            }
+            let Some(call_id) = call.call_id.as_deref() else {
+                continue;
+            };
+            if capture.actor == "executor" && first_seen.insert(call_id.to_string()) {
+                ensure!(
+                    cwd == Some("."),
+                    "SSH executor acceptance exec must use cwd:\".\" on first call"
+                );
+                executor_exec_first_appearances.push(capture_index);
+            }
+        }
+    }
+    ensure!(
+        executor_exec_first_appearances.len() >= 2,
+        "SSH executor acceptance contains fewer than two distinct exec calls"
+    );
+    ensure!(
+        executor_exec_first_appearances
+            .windows(2)
+            .any(|pair| pair[0] != pair[1]),
+        "SSH executor exec calls were not observed across separate inference captures"
+    );
     Ok(())
 }
 
@@ -735,6 +1321,28 @@ fn ensure_profile_messages(calls: &[WireCall], outputs: &[WireOutput]) -> Result
                 .get("message")
                 .and_then(Value::as_str)
                 .with_context(|| format!("{profile} spawn has no message"))?;
+            ensure!(
+                message.contains("report_progress"),
+                "{profile} message does not require durable delivery"
+            );
+            if profile == "reviewer" {
+                ensure!(
+                    message.contains("REVIEWER_FINDING")
+                        && message.contains("REVIEWER_READ_ONLY_APPROVED"),
+                    "reviewer message lacks durable verdict markers"
+                );
+            } else {
+                ensure!(
+                    message.contains("CHILD_DELIVERY_READY"),
+                    "{profile} message lacks CHILD_DELIVERY_READY"
+                );
+            }
+            if profile == "worktree_executor" {
+                ensure!(
+                    message.contains("WORKTREE_COMMIT_READY"),
+                    "worktree_executor message lacks commit delivery marker"
+                );
+            }
             let markers = [
                 "purpose",
                 "baseline",
@@ -776,7 +1384,7 @@ fn ensure_profile_messages(calls: &[WireCall], outputs: &[WireOutput]) -> Result
     );
     ensure!(
         explorers[0].arguments.get("message") != explorers[1].arguments.get("message"),
-        "two explorer messages do not define distinct purpose/ownership"
+        "two explorer messages do not define distinct task contracts"
     );
     let section = |call: &WireCall, name: &str| -> Result<String> {
         let message = call
@@ -804,10 +1412,6 @@ fn ensure_profile_messages(calls: &[WireCall], outputs: &[WireOutput]) -> Result
         "explorer purposes are not distinct"
     );
     ensure!(
-        section(explorers[0], "ownership")? != section(explorers[1], "ownership")?,
-        "explorer ownership sections are not distinct"
-    );
-    ensure!(
         explorers[0].call_id.is_some()
             && explorers[1].call_id.is_some()
             && explorers[0].call_id != explorers[1].call_id,
@@ -817,33 +1421,39 @@ fn ensure_profile_messages(calls: &[WireCall], outputs: &[WireOutput]) -> Result
         .iter()
         .map(|explorer| section(explorer, "steps"))
         .collect::<Result<Vec<_>>>()?;
-    let canonical = [
-        EXPLORER_STEPS_FIXTURE_SOURCE_V1,
-        EXPLORER_STEPS_WORKSPACE_GIT_V1,
-    ];
-    for (index, (steps, expected)) in explorer_steps.iter().zip(canonical).enumerate() {
-        let normalized = normalize_explorer_steps(steps);
+    let fixture_steps = explorer_steps
+        .iter()
+        .find(|steps| steps.contains("LIVE_EXPLORER_STEPS_V2: fixture-source"))
+        .context("fixture-source explorer steps are missing")?;
+    for required in [
+        "Cargo.toml",
+        "src/lib.rs",
+        "report_progress",
+        "CHILD_DELIVERY_READY: explorer fixture-source evidence complete",
+    ] {
         ensure!(
-            normalized == expected,
-            "explorer {} steps do not exactly match canonical block",
-            index + 1
+            fixture_steps.contains(required),
+            "fixture-source explorer steps lack required functional node: {required}"
+        );
+    }
+    let workspace_steps = explorer_steps
+        .iter()
+        .find(|steps| steps.contains("LIVE_EXPLORER_STEPS_V2: workspace-git"))
+        .context("workspace-git explorer steps are missing")?;
+    for required in [
+        ".gitignore",
+        "git rev-parse HEAD",
+        "git status --short --branch",
+        "\"cwd\":\".\"",
+        "report_progress",
+        "CHILD_DELIVERY_READY: explorer workspace-git evidence complete",
+    ] {
+        ensure!(
+            workspace_steps.contains(required),
+            "workspace-git explorer steps lack required functional node: {required}"
         );
     }
     Ok(())
-}
-
-fn normalize_explorer_steps(steps: &str) -> String {
-    let normalized = steps.replace("\r\n", "\n").trim().to_owned();
-    let opening = "```text\n";
-    let closing = "\n```";
-    if normalized.len() >= opening.len() + closing.len()
-        && normalized.starts_with(opening)
-        && normalized.ends_with(closing)
-    {
-        normalized[opening.len()..normalized.len() - closing.len()].to_owned()
-    } else {
-        normalized
-    }
 }
 
 fn ensure_reviewer_history(captures: &[CaptureReceipt]) -> Result<()> {
@@ -1010,6 +1620,52 @@ fn is_mutating_shell_command(command: &str) -> bool {
         || words.windows(3).any(|w| w == ["git", "worktree", "remove"])
 }
 
+fn ensure_no_unexpected_tool_failures(calls: &[WireCall], outputs: &[WireOutput]) -> Result<usize> {
+    let mut expected_rejections = 0;
+    for output in outputs.iter().filter(|output| tool_output_failed(output)) {
+        let call_id = output
+            .call_id
+            .as_deref()
+            .context("tool failure has no call_id")?;
+        let call = calls
+            .iter()
+            .find(|call| call.call_id.as_deref() == Some(call_id))
+            .with_context(|| format!("tool failure {call_id} has no bound call"))?;
+        let is_expected_directory_rejection = call.name == "write_file"
+            && call.arguments.get("path").and_then(Value::as_str) == Some("forbidden/denied.txt")
+            && output
+                .content
+                .contains("outside the directory Agent writablePaths boundary");
+        ensure!(
+            is_expected_directory_rejection,
+            "unexpected first-call tool failure {call_id} ({}): {}",
+            call.name,
+            output.content.trim()
+        );
+        expected_rejections += 1;
+    }
+    ensure!(
+        expected_rejections == 1,
+        "wire captures must contain exactly one expected forbidden directory rejection, found {expected_rejections}"
+    );
+    Ok(expected_rejections)
+}
+
+fn tool_output_failed(output: &WireOutput) -> bool {
+    let content = output.content.trim();
+    if content.starts_with("Tool execution error:") {
+        return true;
+    }
+    let Ok(value) = serde_json::from_str::<Value>(content) else {
+        return false;
+    };
+    value.get("accepted").and_then(Value::as_bool) == Some(false)
+        || value
+            .pointer("/state/data/result/kind")
+            .and_then(Value::as_str)
+            == Some("failed")
+}
+
 fn bound_receipts(calls: &[WireCall], outputs: &[WireOutput]) -> Result<Vec<(WireCall, Value)>> {
     let mut receipts = Vec::new();
     let mut agent_ids = std::collections::HashSet::new();
@@ -1022,8 +1678,6 @@ fn bound_receipts(calls: &[WireCall], outputs: &[WireOutput]) -> Result<Vec<(Wir
             .iter()
             .find(|output| output.call_id.as_ref() == Some(id))
             .with_context(|| format!("spawn {id} has no same-call-id output"))?;
-        // A failed tool invocation is captured as plain text. Keep the call in the
-        // audit trail, but only bind a successfully parsed JSON receipt below.
         let content = output.content.trim();
         let receipt: Value = match serde_json::from_str(content) {
             Ok(receipt) => receipt,
@@ -1032,7 +1686,9 @@ fn bound_receipts(calls: &[WireCall], outputs: &[WireOutput]) -> Result<Vec<(Wir
                     "spawn {id} output looks like JSON but is malformed (bound_receipts): {error}"
                 )
             }
-            Err(_) if is_plain_text_failed_spawn(content) => continue,
+            Err(_) if content.starts_with("Tool execution error:") => {
+                bail!("spawn {id} failed before a canonical receipt: {content}")
+            }
             Err(error) => {
                 bail!(
                     "spawn {id} output is neither a canonical JSON receipt nor an explicit plain-text tool failure (bound_receipts): {error}"
@@ -1074,10 +1730,6 @@ fn looks_like_json_output(content: &str) -> bool {
         || content.starts_with("null")
         || content.starts_with("true")
         || content.starts_with("false")
-}
-
-fn is_plain_text_failed_spawn(content: &str) -> bool {
-    content.starts_with("Tool execution error:")
 }
 
 fn ensure_workspace_receipts(calls: &[WireCall], outputs: &[WireOutput]) -> Result<()> {
@@ -1221,7 +1873,7 @@ fn ensure_orchestration_order(calls: &[WireCall], outputs: &[WireOutput]) -> Res
         .context("wire captures contain no root Profile query")?;
     let confirmation = calls
         .iter()
-        .position(|call| call.name == "request_user_input")
+        .position(|call| call.name == "submit_plan")
         .context("wire captures contain no plan confirmation")?;
     let design_write = calls
         .iter()
@@ -1748,19 +2400,29 @@ fn ensure_submissions(calls: &[WireCall], outputs: &[WireOutput]) -> Result<()> 
         })
         .context("no explicit cherry-pick")?;
     for (profile, agent, spawn_index) in required {
-        let read = calls
+        let (read_index, read) = calls
             .iter()
             .enumerate()
             .find(|(i, call)| {
-                *i > if profile == "explorer" {
-                    first_spawn
-                } else {
-                    spawn_index
-                } && call.name == "read_agent_submissions"
+                *i > spawn_index
+                    && call.name == "read_agent_submissions"
                     && call.arguments.get("target").and_then(Value::as_str) == Some(agent.as_str())
             })
-            .map(|(_, c)| c)
             .with_context(|| format!("{profile} agent {agent} has no targeted submissions read"))?;
+        calls
+            .iter()
+            .enumerate()
+            .find(|(index, call)| {
+                *index > spawn_index
+                    && *index < read_index
+                    && call.name == "wait_agents"
+                    && wait_has_terminal_evidence(call, outputs, &agent).is_ok()
+            })
+            .with_context(|| {
+                format!(
+                    "{profile} agent {agent} has no receipt-bound terminal wait before submissions read"
+                )
+            })?;
         let read_id = read
             .call_id
             .as_ref()
@@ -1770,53 +2432,29 @@ fn ensure_submissions(calls: &[WireCall], outputs: &[WireOutput]) -> Result<()> 
             .find(|output| output.call_id.as_ref() == Some(read_id))
             .context("submissions read has no bound output")?;
         let result = parse_submission_page(&output.content)?;
-        if result.total == 0 {
-            let read_index = calls
-                .iter()
-                .position(|call| call.call_id == read.call_id)
-                .context("submissions read is absent from flattened calls")?;
-            let boundary = if profile == "explorer" {
-                first_impl
-            } else {
-                cherry_pick
-            };
-            let terminal_wait = calls.iter().enumerate().find(|(index, call)| {
-                *index > spawn_index
-                    && *index < read_index
-                    && call.name == "wait_agents"
-                    && wait_has_terminal_evidence(call, outputs, &agent).is_ok()
-            });
-            terminal_wait.map(|(index, _)| index).with_context(|| {
-                format!("{profile} agent {agent} has no strictly bound terminal wait")
-            })?;
+        ensure!(
+            result.total > 0 && !result.items.is_empty(),
+            "{profile} agent {agent} returned an empty durable submission page"
+        );
+        let rendered = serde_json::to_string(&result.items)?;
+        ensure!(
+            rendered.contains("CHILD_DELIVERY_READY"),
+            "{profile} agent {agent} submission lacks CHILD_DELIVERY_READY"
+        );
+        if profile == "worktree_executor" {
             ensure!(
-                calls.iter().enumerate().any(|(index, call)| {
-                    index > read_index
-                        && index < boundary
-                        && call.name == "read_agent_session"
-                        && call.arguments.get("target").and_then(Value::as_str)
-                            == Some(agent.as_str())
-                        && session_has_terminal_evidence(call, outputs, &agent).is_ok()
-                }),
-                "{profile} agent {agent} has no strictly bound terminal session fallback"
+                rendered.contains("WORKTREE_COMMIT_READY"),
+                "worktree_executor agent {agent} submission lacks WORKTREE_COMMIT_READY"
             );
         }
         if profile == "explorer" {
             ensure!(
-                calls
-                    .iter()
-                    .position(|call| call.call_id == read.call_id)
-                    .unwrap()
-                    < first_impl,
+                read_index < first_impl,
                 "explorer submissions read occurred after implementation spawn"
             );
         } else {
             ensure!(
-                calls
-                    .iter()
-                    .position(|call| call.call_id == read.call_id)
-                    .unwrap()
-                    < cherry_pick,
+                read_index < cherry_pick,
                 "implementation submissions read occurred after cherry-pick"
             );
         }
@@ -1900,25 +2538,6 @@ struct SubmissionPage {
     has_more: bool,
 }
 
-#[derive(Debug, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SessionSnapshot {
-    #[serde(default)]
-    agent_id: Option<String>,
-    #[serde(default)]
-    thread_id: Option<String>,
-    messages: Vec<SessionMessage>,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct SessionMessage {
-    role: String,
-    #[serde(default)]
-    text: Option<String>,
-    #[serde(default)]
-    content: Option<String>,
-}
-
 fn parse_submission_page(content: &str) -> Result<SubmissionPage> {
     let page: SubmissionPage =
         serde_json::from_str(content).context("submissions output is not canonical JSON")?;
@@ -1932,55 +2551,6 @@ fn parse_submission_page(content: &str) -> Result<SubmissionPage> {
     );
     let _ = (page.offset, page.limit, page.has_more);
     Ok(page)
-}
-
-fn session_has_terminal_evidence(
-    session_call: &WireCall,
-    outputs: &[WireOutput],
-    agent: &str,
-) -> Result<()> {
-    ensure!(
-        session_call.name == "read_agent_session"
-            && session_call.arguments.get("target").and_then(Value::as_str) == Some(agent),
-        "session fallback target is not bound to agent"
-    );
-    let call_id = session_call
-        .call_id
-        .as_ref()
-        .context("session fallback has no call_id")?;
-    let output = outputs
-        .iter()
-        .find(|output| output.call_id.as_ref() == Some(call_id))
-        .context("session fallback has no same-call-id output")?;
-    let session: SessionSnapshot =
-        serde_json::from_str(&output.content).context("session fallback output is not JSON")?;
-    if let Some(session_agent) = session.agent_id.as_deref() {
-        ensure!(
-            session_agent == agent,
-            "session output agentId does not match target"
-        );
-    }
-    if let Some(thread_id) = session.thread_id.as_deref() {
-        ensure!(
-            thread_id == agent,
-            "session output threadId does not match target"
-        );
-    }
-    let final_message = session
-        .messages
-        .last()
-        .filter(|message| message.role == "assistant")
-        .context("session fallback has no assistant final message")?;
-    let text = final_message
-        .text
-        .as_deref()
-        .or(final_message.content.as_deref())
-        .context("session final assistant message is not text")?;
-    ensure!(
-        !text.trim().is_empty(),
-        "session final assistant message is empty"
-    );
-    Ok(())
 }
 
 fn deduplicate_calls(calls: &mut Vec<WireCall>) {
@@ -2069,7 +2639,7 @@ mod tests {
             "live prompt must require WORKTREE_RESULT_MARKER in worktree_result.txt"
         );
         assert!(
-            prompt.contains("两个 explorer submissions 都读取后")
+            prompt.contains("两个 explorer canonical nonempty submissions 都读取后")
                 && prompt.contains("executor 与 worktree_executor 两个 spawn_agent")
                 && prompt
                     .contains("两次 implementation spawn 均完成后才能对任一实现调用 wait/read"),
@@ -2089,7 +2659,8 @@ mod tests {
             prompt.contains(
                 "planning 阶段由 root 调用 list_agent_profiles，随后并行 spawn 两个 explorer"
             ) && prompt.contains("两个 explorer 都进入 terminal")
-                && prompt.contains("再调用 request_user_input 请求确认")
+                && prompt.contains("再调用 submit_plan 请求批准或修订")
+                && prompt.contains("不得用 request_user_input 替代计划提交")
                 && prompt.contains("确认后 root 才能写入 design/subagents-orchestration.md"),
             "live prompt must explore and synthesize the plan before confirmation and design edits"
         );
@@ -2109,19 +2680,17 @@ mod tests {
             "live prompt must keep the explorers semantically distinct while bounding their tools"
         );
         assert!(
-            prompt.contains(EXPLORER_STEPS_FIXTURE_SOURCE_V1)
-                && prompt.contains(EXPLORER_STEPS_WORKSPACE_GIT_V1)
-                && prompt.contains("原样复制以下版本化 canonical block")
-                && prompt.contains("不能增删、改写或追加动作")
-                && prompt
-                    .contains("只允许在完整 canonical block 外包一层 Markdown `text` 展示围栏")
-                && prompt.contains("不得使用其它围栏语言、嵌套围栏"),
-            "live prompt must require exact versioned explorer steps"
+            prompt.contains("LIVE_EXPLORER_STEPS_V2: fixture-source")
+                && prompt.contains("LIVE_EXPLORER_STEPS_V2: workspace-git")
+                && prompt.contains("git rev-parse HEAD")
+                && prompt.contains("git status --short --branch")
+                && prompt.contains("允许为\nchild 上下文补充说明或调整措辞"),
+            "live prompt must define the explorer functional nodes without freezing prose"
         );
     }
 
     #[test]
-    fn durable_reviewer_verdict_is_prompted_end_to_end() {
+    fn durable_child_delivery_is_prompted_end_to_end() {
         let reviewer = include_str!("../../../code/pl-studio-runtime/src/prompts/reviewer.md");
         let workflow = include_str!(
             "../../../code/pl-studio-runtime/assets/skills/subagent-workflow/SKILL.md"
@@ -2178,6 +2747,55 @@ mod tests {
         assert!(
             reviewer_read < final_test,
             "live prompt must read the reviewer durable verdict before the final test"
+        );
+        let prompts = [
+            (
+                "explorer",
+                include_str!("../../../code/pl-studio-runtime/src/prompts/explorer.md"),
+            ),
+            (
+                "planner",
+                include_str!("../../../code/pl-studio-runtime/src/prompts/planner.md"),
+            ),
+            (
+                "executor",
+                include_str!("../../../code/pl-studio-runtime/src/prompts/executor.md"),
+            ),
+            (
+                "worktree_executor",
+                include_str!("../../../code/pl-studio-runtime/src/prompts/worktree_executor.md"),
+            ),
+            (
+                "subagent-workflow",
+                include_str!(
+                    "../../../code/pl-studio-runtime/assets/skills/subagent-workflow/SKILL.md"
+                ),
+            ),
+            (
+                "mode.task",
+                include_str!(
+                    "../../../code/pl-studio-runtime/assets/skills/modes/mode.task/SKILL.md"
+                ),
+            ),
+            (
+                "live acceptance",
+                include_str!("../../../test-fixtures/subagents-live/prompt.md"),
+            ),
+        ];
+        for (name, prompt) in prompts {
+            assert!(
+                prompt.contains("report_progress") && prompt.contains("CHILD_DELIVERY_READY"),
+                "{name} must require durable child delivery"
+            );
+        }
+        let worktree =
+            include_str!("../../../code/pl-studio-runtime/src/prompts/worktree_executor.md");
+        assert!(worktree.contains("WORKTREE_COMMIT_READY"));
+        let live = include_str!("../../../test-fixtures/subagents-live/prompt.md");
+        assert!(
+            live.contains("canonical nonempty submissions")
+                && live.contains("`read_agent_session` 不得替代正常交付")
+                && live.contains("任何 `Tool execution error:` 都是验收失败")
         );
     }
 
@@ -2349,7 +2967,7 @@ mod tests {
     }
 
     #[test]
-    fn bound_receipts_ignores_failed_spawn_output_and_keeps_successful_receipt() {
+    fn bound_receipts_rejects_failed_spawn_before_retry() {
         let calls = vec![
             WireCall {
                 call_id: Some("failed".into()),
@@ -2377,15 +2995,81 @@ mod tests {
             },
         ];
 
-        let receipts = bound_receipts(&calls, &outputs).unwrap();
-        assert_eq!(
-            calls.len(),
-            2,
-            "failed call remains in the audit call history"
+        let error = bound_receipts(&calls, &outputs).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("failed before a canonical receipt")
         );
-        assert_eq!(receipts.len(), 1);
-        assert_eq!(receipts[0].0.call_id.as_deref(), Some("retry"));
-        assert_eq!(receipts[0].1["agentId"], "explorer-retry");
+    }
+
+    #[test]
+    fn tool_failures_allow_only_the_expected_directory_rejection() {
+        let calls = vec![orchestration_call(
+            "denied",
+            "write_file",
+            serde_json::json!({"path":"forbidden/denied.txt"}),
+        )];
+        let outputs = vec![WireOutput {
+            call_id: Some("denied".into()),
+            content:
+                "Tool execution error: path is outside the directory Agent writablePaths boundary"
+                    .into(),
+        }];
+        assert_eq!(
+            ensure_no_unexpected_tool_failures(&calls, &outputs).unwrap(),
+            1
+        );
+
+        for (name, path, error_text) in [
+            (
+                "spawn_agent",
+                "",
+                "Tool execution error: invalid fork_turns",
+            ),
+            (
+                "write_file",
+                "allowed/result.txt",
+                "Tool execution error: permission denied",
+            ),
+        ] {
+            let calls = vec![orchestration_call(
+                "failed",
+                name,
+                serde_json::json!({"path":path}),
+            )];
+            let outputs = vec![WireOutput {
+                call_id: Some("failed".into()),
+                content: error_text.into(),
+            }];
+            let error = ensure_no_unexpected_tool_failures(&calls, &outputs).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("unexpected first-call tool failure")
+            );
+        }
+
+        for (name, output) in [
+            (
+                "workflow_state",
+                serde_json::json!({"accepted":false,"code":"invalidDefinition"}).to_string(),
+            ),
+            (
+                "exec",
+                serde_json::json!({
+                    "state": {"kind":"final","data":{"result":{"kind":"failed"}}}
+                })
+                .to_string(),
+            ),
+        ] {
+            let calls = vec![orchestration_call("failed", name, serde_json::json!({}))];
+            let outputs = vec![WireOutput {
+                call_id: Some("failed".into()),
+                content: output,
+            }];
+            assert!(ensure_no_unexpected_tool_failures(&calls, &outputs).is_err());
+        }
     }
 
     #[test]
@@ -2476,109 +3160,16 @@ mod tests {
         assert!(
             error
                 .to_string()
-                .contains("wire tool results contain no executor workspace receipt")
+                .contains("failed before a canonical receipt")
         );
     }
 
     #[test]
-    fn failed_attempts_are_ignored_but_two_explorers_are_required_consistently() {
-        let (mut calls, mut outputs) = valid_orchestration_calls();
-        let failures = ["failed-empty", "failed-malicious"];
-        for (offset, id) in failures.into_iter().enumerate() {
-            calls.insert(
-                1 + offset,
-                orchestration_call(
-                    id,
-                    "spawn_agent",
-                    serde_json::json!({"profileId":"explorer"}),
-                ),
-            );
-            outputs.push(WireOutput {
-                call_id: Some(id.into()),
-                content: if offset == 0 {
-                    "Tool execution error: capacity unavailable".into()
-                } else {
-                    "  Tool execution error: invalid writablePaths  ".into()
-                },
-            });
-        }
-        let cherry_pick = calls
-            .iter()
-            .position(|call| call.call_id.as_deref() == Some("i1"))
-            .unwrap();
-        for (id, target) in [("xr1", "executor-a"), ("xr2", "worktree-a")] {
-            calls.insert(
-                cherry_pick,
-                orchestration_call(
-                    id,
-                    "read_agent_submissions",
-                    serde_json::json!({"target":target}),
-                ),
-            );
-            outputs.push(WireOutput {
-                call_id: Some(id.into()),
-                content: submission_page(vec![serde_json::json!({"id": "submission"})], 1),
-            });
-        }
-        for id in ["er1", "er2"] {
-            outputs.push(WireOutput {
-                call_id: Some(id.into()),
-                content: submission_page(vec![serde_json::json!({"id": "submission"})], 1),
-            });
-        }
-        ensure_orchestration_order(&calls, &outputs).unwrap();
-        ensure_submissions(&calls, &outputs).unwrap();
-
-        let mut profile_calls = profile_message_calls();
-        let mut profile_outputs = profile_message_outputs(&profile_calls);
-        for id in failures {
-            let failed = WireCall {
-                call_id: Some(id.into()),
-                name: "spawn_agent".into(),
-                arguments: serde_json::json!({
-                    "profileId": "explorer",
-                    "forkTurns": "none",
-                    "message": "failed attempt"
-                }),
-            };
-            profile_calls.insert(0, failed);
-            profile_outputs.push(WireOutput {
-                call_id: Some(id.into()),
-                content: "Tool execution error: capacity unavailable".into(),
-            });
-        }
-        ensure_profile_messages(&profile_calls, &profile_outputs).unwrap();
-
-        let third = calls[3].clone();
-        calls.push(WireCall {
-            call_id: Some("explorer-success-3".into()),
-            ..third
-        });
-        outputs.push(spawn_output(
-            "explorer-success-3",
-            "explorer",
-            "explorer-success-3",
-        ));
-        assert!(ensure_orchestration_order(&calls, &outputs).is_err());
-        assert!(ensure_submissions(&calls, &outputs).is_err());
-
-        let mut third_profile = profile_calls[2].clone();
-        third_profile.call_id = Some("explorer-success-3".into());
-        profile_calls.push(third_profile);
-        profile_outputs.push(spawn_output(
-            "explorer-success-3",
-            "explorer",
-            "explorer-success-3",
-        ));
-        assert!(ensure_profile_messages(&profile_calls, &profile_outputs).is_err());
-    }
-
-    #[test]
-    fn isolated_live_config_disables_all_four_profiles() {
+    fn isolated_live_config_uses_full_access_and_disables_live_profiles() {
         let root = tempfile::tempdir().unwrap();
         let config = root.path().join("config.toml");
         fs::write(&config, "disabled_system_agents = []\n").unwrap();
-        disable_all_live_profiles(&config).unwrap();
+        configure_live_acceptance(&config).unwrap();
         let table = fs::read_to_string(config)
             .unwrap()
             .parse::<toml::Table>()
@@ -2590,6 +3181,14 @@ mod tests {
         for profile in ["explorer", "executor", "worktree_executor", "reviewer"] {
             assert!(disabled.iter().any(|value| value.as_str() == Some(profile)));
         }
+        assert_eq!(
+            table
+                .get("runtime")
+                .and_then(toml::Value::as_table)
+                .and_then(|runtime| runtime.get("permission_mode"))
+                .and_then(toml::Value::as_str),
+            Some("full-access")
+        );
     }
 
     #[test]
@@ -2924,43 +3523,7 @@ mod tests {
 
     #[test]
     fn submissions_require_implementation_reads_before_cherry_pick() {
-        let mut calls = vec![orchestration_call(
-            "profiles",
-            "list_agent_profiles",
-            serde_json::json!({}),
-        )];
-        let mut outputs = Vec::new();
-        for (index, profile) in ["explorer", "explorer", "executor", "worktree_executor"]
-            .into_iter()
-            .enumerate()
-        {
-            let spawn = format!("spawn-{index}");
-            let agent = format!("agent-{index}");
-            calls.push(orchestration_call(
-                &spawn,
-                "spawn_agent",
-                serde_json::json!({"profileId":profile}),
-            ));
-            outputs.push(WireOutput {
-                call_id: Some(spawn),
-                content: serde_json::json!({"profileId":profile,"agentId":agent}).to_string(),
-            });
-            let read = format!("read-{index}");
-            calls.push(orchestration_call(
-                &read,
-                "read_agent_submissions",
-                serde_json::json!({"target":agent}),
-            ));
-            outputs.push(WireOutput {
-                call_id: Some(read),
-                content: submission_page(vec![serde_json::json!({"id":"submission"})], 1),
-            });
-        }
-        calls.push(orchestration_call(
-            "pick",
-            "exec",
-            serde_json::json!({"command":"git cherry-pick abc"}),
-        ));
+        let (mut calls, outputs) = valid_nonreviewer_submission_flow();
         ensure_submissions(&calls, &outputs).unwrap();
         let pick = calls
             .iter()
@@ -2971,281 +3534,62 @@ mod tests {
     }
 
     #[test]
-    fn empty_non_reviewer_pages_accept_bound_terminal_session_fallback() {
-        let mut calls = vec![orchestration_call(
-            "profiles",
-            "list_agent_profiles",
-            serde_json::json!({}),
-        )];
-        let mut outputs = Vec::new();
-        for (index, profile) in ["explorer", "explorer", "executor", "worktree_executor"]
-            .into_iter()
-            .enumerate()
-        {
-            let spawn = format!("spawn-{index}");
-            let agent = format!("agent-{index}");
-            calls.push(orchestration_call(
-                &spawn,
-                "spawn_agent",
-                serde_json::json!({"profileId":profile}),
-            ));
-            outputs.push(WireOutput {
-                call_id: Some(spawn),
-                content: serde_json::json!({"profileId":profile,"agentId":agent}).to_string(),
-            });
-            let wait = format!("wait-{index}");
-            calls.push(orchestration_call(
-                &wait,
-                "wait_agents",
-                serde_json::json!({"targets":[agent]}),
-            ));
-            outputs.push(terminal_wait_output(&wait, &agent));
-            let read = format!("read-{index}");
-            calls.push(orchestration_call(
-                &read,
-                "read_agent_submissions",
-                serde_json::json!({"target":agent}),
-            ));
-            outputs.push(WireOutput {
-                call_id: Some(read),
-                content: submission_page(Vec::new(), 0),
-            });
-            let session = format!("session-{index}");
-            calls.push(orchestration_call(
-                &session,
+    fn empty_non_reviewer_pages_are_rejected_even_with_session_diagnostics() {
+        let (mut calls, mut outputs) = valid_nonreviewer_submission_flow();
+        outputs
+            .iter_mut()
+            .find(|output| output.call_id.as_deref() == Some("read-0"))
+            .unwrap()
+            .content = submission_page(Vec::new(), 0);
+        let read = calls
+            .iter()
+            .position(|call| call.call_id.as_deref() == Some("read-0"))
+            .unwrap();
+        calls.insert(
+            read + 1,
+            orchestration_call(
+                "session-0",
                 "read_agent_session",
-                serde_json::json!({"target":agent}),
-            ));
-            outputs.push(WireOutput {
-                call_id: Some(session),
-                content: serde_json::json!({
-                    "messages": [
-                        {"role":"assistant","text":"<final>terminal child result</final>"}
-                    ],
-                    "truncated": false
-                })
-                .to_string(),
-            });
-        }
-        calls.push(orchestration_call(
-            "pick",
-            "exec",
-            serde_json::json!({"command":"git cherry-pick abc"}),
-        ));
-        ensure_submissions(&calls, &outputs).unwrap();
+                serde_json::json!({"target":"agent-0"}),
+            ),
+        );
+        outputs.push(WireOutput {
+            call_id: Some("session-0".into()),
+            content: serde_json::json!({
+                "messages": [{"role":"assistant","text":"terminal child result"}]
+            })
+            .to_string(),
+        });
+        let error = ensure_submissions(&calls, &outputs).unwrap_err();
+        assert!(error.to_string().contains("empty durable submission page"));
     }
 
     #[test]
-    fn session_fallback_requires_binding_shape_and_phase_boundary() {
-        let mut calls = vec![orchestration_call(
-            "profiles",
-            "list_agent_profiles",
-            serde_json::json!({}),
-        )];
-        let mut outputs = Vec::new();
-        for (index, profile) in ["explorer", "explorer", "executor", "worktree_executor"]
-            .into_iter()
-            .enumerate()
-        {
-            let spawn = format!("spawn-{index}");
-            let agent = format!("agent-{index}");
-            calls.push(orchestration_call(
-                &spawn,
-                "spawn_agent",
-                serde_json::json!({"profileId":profile}),
-            ));
-            outputs.push(WireOutput {
-                call_id: Some(spawn),
-                content: serde_json::json!({"profileId":profile,"agentId":agent}).to_string(),
-            });
-            let wait = format!("wait-{index}");
-            calls.push(orchestration_call(
-                &wait,
-                "wait_agents",
-                serde_json::json!({"targets":[agent]}),
-            ));
-            outputs.push(terminal_wait_output(&wait, &agent));
-            let read = format!("read-{index}");
-            calls.push(orchestration_call(
-                &read,
-                "read_agent_submissions",
-                serde_json::json!({"target":agent}),
-            ));
-            outputs.push(WireOutput {
-                call_id: Some(read),
-                content: submission_page(Vec::new(), 0),
-            });
-            let session = format!("session-{index}");
-            calls.push(orchestration_call(
-                &session,
-                "read_agent_session",
-                serde_json::json!({"target":agent}),
-            ));
-            outputs.push(WireOutput {
-                call_id: Some(session),
-                content: serde_json::json!({
-                    "messages": [{"role":"assistant","text":"terminal child result"}]
-                })
-                .to_string(),
-            });
-        }
-        calls.push(orchestration_call(
-            "pick",
-            "exec",
-            serde_json::json!({"command":"git cherry-pick abc"}),
-        ));
-        let baseline_calls = calls.clone();
-        let baseline_outputs = outputs.clone();
-        for (call_id, mutate) in [
-            ("session-0", 0),
-            ("session-0", 1),
-            ("session-0", 2),
-            ("session-0", 3),
-        ] {
-            let mut invalid_calls = baseline_calls.clone();
-            let mut invalid_outputs = baseline_outputs.clone();
-            match mutate {
-                0 => {
-                    invalid_calls.retain(|call| call.call_id.as_deref() != Some(call_id));
-                    invalid_outputs.retain(|output| output.call_id.as_deref() != Some(call_id));
-                }
-                1 => {
-                    invalid_calls
-                        .iter_mut()
-                        .find(|call| call.call_id.as_deref() == Some(call_id))
-                        .unwrap()
-                        .arguments = serde_json::json!({"target":"wrong-agent"})
-                }
-                2 => {
-                    invalid_outputs
-                        .iter_mut()
-                        .find(|output| output.call_id.as_deref() == Some(call_id))
-                        .unwrap()
-                        .call_id = Some("wrong-call-id".into())
-                }
-                3 => {
-                    invalid_outputs
-                        .iter_mut()
-                        .find(|output| output.call_id.as_deref() == Some(call_id))
-                        .unwrap()
-                        .content = "{}".into()
-                }
-                _ => unreachable!(),
-            }
-            assert!(
-                ensure_submissions(&invalid_calls, &invalid_outputs).is_err(),
-                "mutation {mutate} unexpectedly accepted"
-            );
-        }
-        for mutation in ["target", "call_id", "reason", "message_agent"] {
-            let mut invalid_calls = baseline_calls.clone();
-            let mut invalid_outputs = baseline_outputs.clone();
-            if mutation == "target" {
-                invalid_calls
-                    .iter_mut()
-                    .find(|call| call.call_id.as_deref() == Some("wait-0"))
-                    .unwrap()
-                    .arguments = serde_json::json!({"targets":["wrong-agent"]});
-            } else {
-                let output = invalid_outputs
-                    .iter_mut()
-                    .find(|output| output.call_id.as_deref() == Some("wait-0"))
-                    .unwrap();
-                match mutation {
-                    "call_id" => output.call_id = Some("wrong-call-id".into()),
-                    "reason" => {
-                        output.content = serde_json::json!({
-                            "messages": [{"agentId":"agent-0"}],
-                            "reason":"progress"
-                        })
-                        .to_string()
-                    }
-                    "message_agent" => {
-                        output.content = serde_json::json!({
-                            "messages": [{"agentId":"wrong-agent"}],
-                            "reason":"terminal"
-                        })
-                        .to_string()
-                    }
-                    _ => unreachable!(),
-                }
-            }
-            assert!(
-                ensure_submissions(&invalid_calls, &invalid_outputs).is_err(),
-                "wait mutation {mutation} unexpectedly accepted"
-            );
-        }
-        let mut wait_before_spawn_calls = baseline_calls.clone();
-        let wait_index = wait_before_spawn_calls
+    fn submissions_require_receipt_bound_terminal_wait_before_read() {
+        let (calls, mut outputs) = valid_nonreviewer_submission_flow();
+        outputs
+            .iter_mut()
+            .find(|output| output.call_id.as_deref() == Some("wait-0"))
+            .unwrap()
+            .content = serde_json::json!({
+            "messages": [{"agentId":"agent-0"}],
+            "reason":"progress"
+        })
+        .to_string();
+        assert!(ensure_submissions(&calls, &outputs).is_err());
+
+        let (mut calls, outputs) = valid_nonreviewer_submission_flow();
+        let wait = calls
             .iter()
             .position(|call| call.call_id.as_deref() == Some("wait-0"))
             .unwrap();
-        let wait = wait_before_spawn_calls.remove(wait_index);
-        let spawn_index = wait_before_spawn_calls
+        let wait_call = calls.remove(wait);
+        let read = calls
             .iter()
-            .position(|call| call.call_id.as_deref() == Some("spawn-0"))
+            .position(|call| call.call_id.as_deref() == Some("read-0"))
             .unwrap();
-        wait_before_spawn_calls.insert(spawn_index, wait);
-        assert!(ensure_submissions(&wait_before_spawn_calls, &baseline_outputs).is_err());
-
-        let mut session_before_read_calls = baseline_calls.clone();
-        let session_index = session_before_read_calls
-            .iter()
-            .position(|call| call.call_id.as_deref() == Some("session-2"))
-            .unwrap();
-        let session = session_before_read_calls.remove(session_index);
-        let read_index = session_before_read_calls
-            .iter()
-            .position(|call| call.call_id.as_deref() == Some("read-2"))
-            .unwrap();
-        session_before_read_calls.insert(read_index, session);
-        assert!(ensure_submissions(&session_before_read_calls, &baseline_outputs).is_err());
-
-        let mut late_calls = baseline_calls.clone();
-        let wait_index = late_calls
-            .iter()
-            .position(|call| call.call_id.as_deref() == Some("wait-2"))
-            .unwrap();
-        let wait = late_calls.remove(wait_index);
-        let session_index = late_calls
-            .iter()
-            .position(|call| call.call_id.as_deref() == Some("session-2"))
-            .unwrap();
-        late_calls.insert(session_index + 1, wait);
-        assert!(ensure_submissions(&late_calls, &baseline_outputs).is_err());
-        let mut late_worktree_calls = baseline_calls.clone();
-        let wait_index = late_worktree_calls
-            .iter()
-            .position(|call| call.call_id.as_deref() == Some("wait-3"))
-            .unwrap();
-        let wait = late_worktree_calls.remove(wait_index);
-        let pick_index = late_worktree_calls
-            .iter()
-            .position(|call| call.call_id.as_deref() == Some("pick"))
-            .unwrap();
-        late_worktree_calls.insert(pick_index + 1, wait);
-        assert!(ensure_submissions(&late_worktree_calls, &baseline_outputs).is_err());
-        let mut late_calls = baseline_calls.clone();
-        let session_index = late_calls
-            .iter()
-            .position(|call| call.call_id.as_deref() == Some("session-0"))
-            .unwrap();
-        let late_session = late_calls.remove(session_index);
-        late_calls.push(late_session);
-        assert!(ensure_submissions(&late_calls, &baseline_outputs).is_err());
-
-        let mut late_worktree_session_calls = baseline_calls;
-        let session_index = late_worktree_session_calls
-            .iter()
-            .position(|call| call.call_id.as_deref() == Some("session-3"))
-            .unwrap();
-        let session = late_worktree_session_calls.remove(session_index);
-        let pick_index = late_worktree_session_calls
-            .iter()
-            .position(|call| call.call_id.as_deref() == Some("pick"))
-            .unwrap();
-        late_worktree_session_calls.insert(pick_index + 1, session);
-        assert!(ensure_submissions(&late_worktree_session_calls, &baseline_outputs).is_err());
+        calls.insert(read + 1, wait_call);
+        assert!(ensure_submissions(&calls, &outputs).is_err());
     }
 
     #[test]
@@ -3293,7 +3637,7 @@ mod tests {
     }
 
     #[test]
-    fn profile_messages_ignore_failed_explorer_retry_but_reject_third_success() {
+    fn profile_messages_reject_failed_explorer_before_retry() {
         let mut calls = profile_message_calls();
         let failed = WireCall {
             call_id: Some("explorer-failed".into()),
@@ -3310,9 +3654,14 @@ mod tests {
             call_id: Some("explorer-failed".into()),
             content: "Tool execution error: capacity unavailable".into(),
         });
-        ensure_profile_messages(&calls, &outputs).unwrap();
+        assert!(ensure_profile_messages(&calls, &outputs).is_err());
+    }
 
-        let third = calls[2].clone();
+    #[test]
+    fn profile_messages_reject_third_successful_explorer() {
+        let mut calls = profile_message_calls();
+        let mut outputs = profile_message_outputs(&calls);
+        let third = calls[1].clone();
         calls.push(WireCall {
             call_id: Some("explorer-success-3".into()),
             ..third
@@ -3385,7 +3734,7 @@ mod tests {
             let message = if profile == "explorer" && id == "explorer-1" {
                 message.replace(
                     "[[CHILD_CONTRACT:steps]]\ncontent",
-                    &format!("[[CHILD_CONTRACT:steps]]\n{EXPLORER_STEPS_FIXTURE_SOURCE_V1}"),
+                    &format!("[[CHILD_CONTRACT:steps]]\n{EXPLORER_STEPS_FIXTURE_SOURCE_V2}"),
                 )
             } else if profile == "explorer" && id == "explorer-2" {
                 message
@@ -3394,16 +3743,18 @@ mod tests {
                         "[[CHILD_CONTRACT:purpose]]\nsecond purpose",
                     )
                     .replace(
-                        "[[CHILD_CONTRACT:ownership]]\ncontent",
-                        "[[CHILD_CONTRACT:ownership]]\nsecond ownership",
-                    )
-                    .replace(
                         "[[CHILD_CONTRACT:steps]]\ncontent",
-                        &format!("[[CHILD_CONTRACT:steps]]\n{EXPLORER_STEPS_WORKSPACE_GIT_V1}"),
+                        &format!("[[CHILD_CONTRACT:steps]]\n{EXPLORER_STEPS_WORKSPACE_GIT_V2}"),
                     )
             } else {
                 message
             };
+            let delivery = match profile {
+                "reviewer" => "report_progress REVIEWER_FINDING REVIEWER_READ_ONLY_APPROVED",
+                "worktree_executor" => "report_progress CHILD_DELIVERY_READY WORKTREE_COMMIT_READY",
+                _ => "report_progress CHILD_DELIVERY_READY",
+            };
+            let message = format!("{message}\n{delivery}\n");
             calls.push(WireCall {
                 call_id: Some(id.into()),
                 name: "spawn_agent".into(),
@@ -3473,7 +3824,7 @@ mod tests {
                 "read_agent_submissions",
                 serde_json::json!({"target":"explorer-b"}),
             ),
-            orchestration_call("confirm", "request_user_input", serde_json::json!({})),
+            orchestration_call("confirm", "submit_plan", serde_json::json!({})),
             orchestration_call(
                 "design",
                 "write_file",
@@ -3510,8 +3861,67 @@ mod tests {
         }
     }
 
+    fn valid_nonreviewer_submission_flow() -> (Vec<WireCall>, Vec<WireOutput>) {
+        let mut calls = vec![orchestration_call(
+            "profiles",
+            "list_agent_profiles",
+            serde_json::json!({}),
+        )];
+        let mut outputs = Vec::new();
+        for (index, profile) in ["explorer", "explorer", "executor", "worktree_executor"]
+            .into_iter()
+            .enumerate()
+        {
+            let spawn = format!("spawn-{index}");
+            let agent = format!("agent-{index}");
+            calls.push(orchestration_call(
+                &spawn,
+                "spawn_agent",
+                serde_json::json!({"profileId":profile}),
+            ));
+            outputs.push(spawn_output(&spawn, profile, &agent));
+            let wait = format!("wait-{index}");
+            calls.push(orchestration_call(
+                &wait,
+                "wait_agents",
+                serde_json::json!({"targets":[agent]}),
+            ));
+            outputs.push(terminal_wait_output(&wait, &agent));
+            let read = format!("read-{index}");
+            calls.push(orchestration_call(
+                &read,
+                "read_agent_submissions",
+                serde_json::json!({"target":agent}),
+            ));
+            let detail = if profile == "worktree_executor" {
+                "CHILD_DELIVERY_READY WORKTREE_COMMIT_READY"
+            } else {
+                "CHILD_DELIVERY_READY"
+            };
+            outputs.push(WireOutput {
+                call_id: Some(read),
+                content: submission_page(
+                    vec![serde_json::json!({
+                        "stage":"readyForCompletion",
+                        "summary":"CHILD_DELIVERY_READY",
+                        "nextStep":"root reads receipt",
+                        "detail":detail,
+                        "createdAt":1
+                    })],
+                    1,
+                ),
+            });
+        }
+        calls.push(orchestration_call(
+            "pick",
+            "exec",
+            serde_json::json!({"command":"git cherry-pick abc"}),
+        ));
+        (calls, outputs)
+    }
+
     #[test]
-    fn explorer_messages_reject_third_explorer_and_any_steps_suffix() {
+    fn explorer_messages_require_two_distinct_functional_contracts() {
         let mut calls = profile_message_calls();
         let mut third = calls[0].clone();
         third.call_id = Some("explorer-3".into());
@@ -3519,27 +3929,10 @@ mod tests {
         let outputs = profile_message_outputs(&calls);
         assert!(ensure_profile_messages(&calls, &outputs).is_err());
 
-        for extra in [
-            "查看 README.md",
-            "检查 Cargo.lock",
-            "使用 unexpected_tool",
-            "禁止调用 list_agent_profiles",
-            "改写目标",
-        ] {
-            let mut calls = profile_message_calls();
-            let message = calls[0].arguments["message"].as_str().unwrap();
-            calls[0].arguments["message"] =
-                Value::String(message.replace("。", &format!("。{extra}")));
-            let outputs = profile_message_outputs(&calls);
-            assert!(
-                ensure_profile_messages(&calls, &outputs).is_err(),
-                "accepted `{extra}`"
-            );
-        }
-
         let mut calls = profile_message_calls();
-        let message = calls[1].arguments["message"].as_str().unwrap();
-        calls[1].arguments["message"] = Value::String(message.replace("。", "。读取 Cargo.lock"));
+        let message = calls[0].arguments["message"].as_str().unwrap();
+        calls[0].arguments["message"] =
+            Value::String(message.replace("src/lib.rs", "missing-source-step"));
         let outputs = profile_message_outputs(&calls);
         assert!(ensure_profile_messages(&calls, &outputs).is_err());
     }
@@ -3556,41 +3949,6 @@ mod tests {
         }
         let outputs = profile_message_outputs(&calls);
         ensure_profile_messages(&calls, &outputs).unwrap();
-    }
-
-    #[test]
-    fn explorer_steps_accept_only_one_outer_text_fence() {
-        let canonical = EXPLORER_STEPS_FIXTURE_SOURCE_V1;
-        assert_eq!(normalize_explorer_steps(canonical), canonical);
-        assert_eq!(
-            normalize_explorer_steps(&format!("```text\n{canonical}\n```")),
-            canonical
-        );
-        assert_eq!(
-            normalize_explorer_steps(&format!("  ```text\r\n{canonical}\r\n```  ")),
-            canonical
-        );
-        let mut calls = profile_message_calls();
-        let message = calls[0].arguments["message"].as_str().unwrap();
-        calls[0].arguments["message"] =
-            Value::String(message.replace(canonical, &format!("```text\n{canonical}\n```")));
-        let outputs = profile_message_outputs(&calls);
-        ensure_profile_messages(&calls, &outputs).unwrap();
-
-        for invalid in [
-            format!("```markdown\n{canonical}\n```"),
-            format!("```text\n{canonical}"),
-            format!("```text\n{canonical}\n```\nextra"),
-            format!("extra\n```text\n{canonical}\n```"),
-            format!("```text\n```text\n{canonical}\n```\n```"),
-            format!("```text\n{canonical}\n\nextra action\n```"),
-        ] {
-            assert_ne!(
-                normalize_explorer_steps(&invalid),
-                canonical,
-                "accepted {invalid:?}"
-            );
-        }
     }
 
     fn valid_orchestration_calls() -> (Vec<WireCall>, Vec<WireOutput>) {
@@ -3731,7 +4089,7 @@ mod tests {
     }
 
     #[test]
-    fn orchestration_order_ignores_failed_spawn_receipt() {
+    fn orchestration_order_rejects_failed_spawn_receipt_before_retry() {
         let (mut calls, mut outputs) = valid_orchestration_calls();
         calls.insert(
             1,
@@ -3745,7 +4103,7 @@ mod tests {
             call_id: Some("failed-explorer".into()),
             content: "Tool execution error: capacity unavailable".into(),
         });
-        ensure_orchestration_order(&calls, &outputs).unwrap();
+        assert!(ensure_orchestration_order(&calls, &outputs).is_err());
     }
 
     #[test]

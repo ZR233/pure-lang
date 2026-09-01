@@ -193,7 +193,7 @@ rg 'TODO|FIXME|HACK|XXX' code/ --glob '*.rs'  -n
 
 ## 执行器子代理分工
 
-修复阶段可使用 `spawn_agent agentType: "executor"` 按 crate 并行实施机械化修改。
+修复阶段可使用 `spawn_agent profileId: "executor"` 按 crate 并行实施机械化修改。
 
 典型分工：
 

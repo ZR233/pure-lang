@@ -103,6 +103,16 @@ fn platform_prompt_tracks_runtime_shell_and_target() {
         assert!(platform.content.contains(target));
         assert!(platform.content.contains(path));
         assert!(platform.content.contains(syntax));
+        assert!(
+            platform
+                .content
+                .contains("Absolute local paths are accepted only")
+        );
+        assert!(
+            !platform
+                .content
+                .contains("Never pass the remote canonical workspace root")
+        );
     }
     fs::remove_dir_all(dir).unwrap();
 }
@@ -135,6 +145,24 @@ fn ssh_platform_prompt_never_uses_local_platform_template() {
     let platform = &snapshot.developer[0];
     assert_eq!(platform.source.label, "platform: linux/sh");
     assert!(platform.content.contains("SSH remote helper"));
+    assert!(platform.content.contains(
+        "For `exec.cwd`, use only a workspace-relative path: `.` for the workspace root"
+    ));
+    assert!(
+        platform
+            .content
+            .contains("Never pass the remote canonical workspace root")
+    );
+    assert!(
+        !platform
+            .content
+            .contains("`exec.cwd`, and LSP filePath inputs may be relative or absolute")
+    );
+    assert!(
+        !platform
+            .content
+            .contains("Absolute local paths are accepted only")
+    );
     assert!(!platform.content.contains("Current platform: windows"));
     fs::remove_dir_all(dir).unwrap();
 }

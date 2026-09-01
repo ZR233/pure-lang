@@ -61,6 +61,17 @@ fn test_tool_with_root() -> (TestExecTool, PathBuf) {
     (tool, root)
 }
 
+#[test]
+fn exec_schema_explains_local_and_ssh_cwd_contracts() {
+    let schema = test_tool().input_schema();
+    let description = schema["properties"]["cwd"]["description"].as_str().unwrap();
+    assert!(description.contains("Use `.` for the workspace root"));
+    assert!(description.contains("workspace-relative path"));
+    assert!(description.contains("`src`"));
+    assert!(description.contains("SSH execution rejects absolute paths"));
+    assert!(description.contains("local absolute paths remain subject"));
+}
+
 #[tokio::test]
 async fn directory_workspace_explicitly_documents_that_shell_can_bypass_writable_paths() {
     let root = test_root();

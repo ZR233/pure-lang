@@ -2,6 +2,7 @@ use pretty_assertions::assert_eq;
 
 use super::snapshot::message_for_state;
 use super::*;
+use crate::tool::LocalCommandBackend;
 
 fn running_state() -> CommandProcessState {
     CommandProcessState::new(true, true)
@@ -114,4 +115,27 @@ fn terminating_message_only_suggests_polling() {
     assert!(interrupted_message.contains("termination is in progress"));
     assert!(interrupted_message.contains("empty chars"));
     assert!(!interrupted_message.contains("send input"));
+}
+
+#[tokio::test]
+async fn process_ids_are_unique_across_manager_instances_and_rebuilds() {
+    let root = tempfile::tempdir().unwrap();
+    let backend = Arc::new(LocalCommandBackend::new(root.path()));
+    let first = CommandProcessManager::new(backend.clone());
+    let second = CommandProcessManager::new(backend.clone());
+
+    let (first_id, second_id) =
+        tokio::join!(first.reserve_process_id(), second.reserve_process_id());
+    let first_id = first_id.unwrap();
+    let second_id = second_id.unwrap();
+    assert_ne!(first_id, second_id);
+
+    let rebuilt = CommandProcessManager::new(backend);
+    let rebuilt_id = rebuilt.reserve_process_id().await.unwrap();
+    assert_ne!(rebuilt_id, first_id);
+    assert_ne!(rebuilt_id, second_id);
+
+    first.release_start_reservation().await;
+    second.release_start_reservation().await;
+    rebuilt.release_start_reservation().await;
 }

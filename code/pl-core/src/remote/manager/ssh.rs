@@ -10,7 +10,7 @@ use crate::remote::RemoteClientError;
 
 pub(super) struct PreparedSshCommand {
     pub(super) command: Command,
-    pub(super) askpass: Option<tempfile::NamedTempFile>,
+    pub(super) askpass: Option<tempfile::TempPath>,
 }
 
 pub(super) fn validate_profile(profile: &SshServerProfile) -> Result<(), RemoteClientError> {
@@ -78,16 +78,17 @@ pub(super) fn ssh_command(
                 },
             )?;
         }
+        let path = file.into_temp_path();
         command
             .arg("-o")
             .arg("NumberOfPasswordPrompts=1")
             .arg("-o")
             .arg("PubkeyAuthentication=no")
-            .env("SSH_ASKPASS", file.path())
+            .env("SSH_ASKPASS", &path)
             .env("SSH_ASKPASS_REQUIRE", "force")
             .env("DISPLAY", "pure-studio")
             .env("PURE_SSH_PASSWORD", password);
-        Some(file)
+        Some(path)
     } else {
         None
     };
@@ -148,5 +149,20 @@ mod tests {
             args,
             vec!["-T", "-x", "-p", "2222", "-l", "dev", "--", "example.test"]
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn password_askpass_is_executable_after_preparation() {
+        let prepared = ssh_command(&profile(), Some("leased-secret")).expect("SSH command");
+        let askpass = prepared.askpass.expect("askpass lease");
+        let output = std::process::Command::new(&askpass)
+            .env("PURE_SSH_PASSWORD", "leased-secret")
+            .output()
+            .expect("execute askpass");
+
+        assert!(output.status.success());
+        assert_eq!(output.stdout, b"leased-secret\n");
+        assert!(output.stderr.is_empty());
     }
 }

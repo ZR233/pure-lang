@@ -53,7 +53,9 @@ where
 pub struct ExecInput {
     /// The shell command to execute.
     pub command: String,
-    /// Optional working directory relative to the agent workspace.
+    /// Optional working directory. Use `.` for the workspace root or a workspace-relative path
+    /// such as `src`. SSH execution rejects absolute paths; local absolute paths remain subject to
+    /// the active permission and workspace policy.
     #[serde(default)]
     pub cwd: Option<PathBuf>,
     /// Optional total timeout in seconds (default: 60).

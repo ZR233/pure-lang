@@ -36,6 +36,17 @@ Future<String> _handleDriverData(String? message) async {
           .loadMoreThreads();
       _publishSidebarDirectory();
       return jsonEncode({'loaded': true});
+    case final String lookup when lookup.startsWith('ssh-server-id:'):
+      final name = lookup.substring('ssh-server-id:'.length);
+      final servers = await _container.read(studioApiProvider).listSshServers();
+      final matches = servers.where((server) => server.name == name).toList();
+      if (matches.length != 1) {
+        return jsonEncode({
+          'error': 'expected exactly one SSH server named $name',
+          'count': matches.length,
+        });
+      }
+      return jsonEncode({'serverId': matches.single.id});
     case 'prepare-session-lifecycle-demo':
       final api = _container.read(studioApiProvider);
       if (api is! DriverDemoStudioApi) {

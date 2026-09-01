@@ -84,9 +84,12 @@ void main() {
   });
 
   test(
-    'scroll deadline terminates a stuck side effect without replaying it',
+    'side effect deadlines terminate stuck commands without replaying them',
     () async {
-      final client = _FakeDriverClient(neverCompletesScroll: true);
+      final client = _FakeDriverClient(
+        neverCompletesTap: true,
+        neverCompletesScroll: true,
+      );
       var connectCount = 0;
       final session = await FlutterDriverSession.connect(
         vmServiceUrl: 'http://vm.test',
@@ -97,31 +100,40 @@ void main() {
         delay: (_) async {},
       );
 
-      await expectLater(
-        session.scrollUntilVisible(
+      for (final operation in <Future<void> Function()>[
+        () => session.tap(
+          driver.find.byValueKey('side-effect'),
+          timeout: const Duration(milliseconds: 20),
+        ),
+        () => session.scrollUntilVisible(
           driver.find.byValueKey('scrollable'),
           driver.find.byValueKey('item'),
           dyScroll: -100,
           timeout: const Duration(milliseconds: 20),
         ),
-        throwsA(
-          isA<TimeoutException>()
-              .having(
-                (error) => error.message,
-                'message',
-                'scrollUntilVisible timed out after 20 ms',
-              )
-              .having(
-                (error) => error.duration,
-                'duration',
-                const Duration(milliseconds: 20),
-              ),
-        ),
-      );
+      ]) {
+        await expectLater(
+          operation(),
+          throwsA(
+            isA<TimeoutException>()
+                .having(
+                  (error) => error.message,
+                  'message',
+                  contains('timed out after 20 ms'),
+                )
+                .having(
+                  (error) => error.duration,
+                  'duration',
+                  const Duration(milliseconds: 20),
+                ),
+          ),
+        );
+      }
 
       expect(connectCount, 1);
+      expect(client.tapCount, 1);
       expect(client.scrollCount, 1);
-      expect(client.closeCount, 1);
+      expect(client.closeCount, 2);
     },
     timeout: const Timeout(Duration(seconds: 1)),
   );
@@ -174,6 +186,7 @@ class _FakeDriverClient implements FlutterDriverClient {
     this.snapshotError,
     this.tapError,
     this.failSnapshotAfterClose = false,
+    this.neverCompletesTap = false,
     this.neverCompletesScroll = false,
   });
 
@@ -181,6 +194,7 @@ class _FakeDriverClient implements FlutterDriverClient {
   final Object? snapshotError;
   final Object? tapError;
   final bool failSnapshotAfterClose;
+  final bool neverCompletesTap;
   final bool neverCompletesScroll;
   int healthCount = 0;
   int requestCount = 0;
@@ -210,9 +224,13 @@ class _FakeDriverClient implements FlutterDriverClient {
   }
 
   @override
-  Future<void> tap(driver.SerializableFinder finder) async {
+  Future<void> tap(
+    driver.SerializableFinder finder, {
+    Duration? timeout,
+  }) async {
     tapCount += 1;
     if (tapError case final error?) throw error;
+    if (neverCompletesTap) return Completer<void>().future;
   }
 
   @override

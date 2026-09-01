@@ -20,6 +20,9 @@ Future<void> main(List<String> arguments) async {
       timeout: const Duration(minutes: 2),
     );
     await _configureAgents(session, options);
+    if (options.ssh case final ssh?) {
+      await _configureSshProject(session, ssh);
+    }
     await File(options.settingsScreenshot)
         .writeAsBytes(await session.screenshot(), flush: true);
     await File('${options.settingsScreenshot}.render-tree.txt')
@@ -35,6 +38,7 @@ Future<void> main(List<String> arguments) async {
     stdout.writeln(
       jsonEncode({
         'result': 'completed',
+        'project': snapshot['project'],
         'workspace': snapshot['workspace'],
         'workflow': snapshot['workflow'],
       }),
@@ -64,6 +68,96 @@ Future<void> main(List<String> arguments) async {
   } finally {
     await session?.close();
   }
+}
+
+Future<void> _configureSshProject(
+  FlutterDriverSession session,
+  _SshOptions ssh,
+) async {
+  await session.tap(find.byValueKey('settings-tab-ssh'));
+  await session.waitFor(find.byValueKey('ssh-add-server'));
+  await session.tap(find.byValueKey('ssh-add-server'));
+  await session.waitFor(find.byValueKey('ssh-server-dialog'));
+  for (final field in [
+    ('ssh-server-name-input', _SshOptions.name),
+    ('ssh-server-host-input', ssh.host),
+    ('ssh-server-username-input', ssh.username),
+    ('ssh-server-port-input', '${ssh.port}'),
+  ]) {
+    await session.tap(find.byValueKey(field.$1));
+    await session.enterText(field.$2);
+  }
+  await session.tap(find.byValueKey('ssh-server-auth-input'));
+  await session.waitFor(find.text('Password'));
+  await session.tap(find.text('Password'));
+  await session.waitFor(find.byValueKey('ssh-server-password-input'));
+  await session.tap(find.byValueKey('ssh-server-password-input'));
+  await session.enterText(ssh.password);
+  await session.tap(find.byValueKey('ssh-server-save'));
+  await session.waitForAbsent(
+    find.byValueKey('ssh-server-dialog'),
+    timeout: const Duration(seconds: 30),
+  );
+
+  final serverId = await _waitForSshServerId(session, _SshOptions.name);
+  await session.waitFor(find.byValueKey('ssh-test-$serverId'));
+  await session.tap(find.byValueKey('ssh-test-$serverId'));
+  await session.waitFor(
+    find.byValueKey('ssh-reconnect-$serverId'),
+    timeout: const Duration(minutes: 3),
+  );
+  await session.tap(find.byValueKey('ssh-open-$serverId'));
+  await session.waitFor(
+    find.byValueKey('ssh-directory-dialog'),
+    timeout: const Duration(minutes: 2),
+  );
+  final fixtureEntry = find.byValueKey('ssh-directory-entry-${ssh.workspace}');
+  await session.scrollUntilVisible(
+    find.byValueKey('ssh-directory-list'),
+    fixtureEntry,
+    dyScroll: -240,
+    timeout: const Duration(minutes: 2),
+  );
+  await session.tap(fixtureEntry);
+  await session.waitFor(
+    find.byValueKey('ssh-directory-current-${ssh.workspace}'),
+    timeout: const Duration(minutes: 2),
+  );
+  await session.tap(find.byValueKey('ssh-open-current-directory'));
+  await session.waitForAbsent(
+    find.byValueKey('ssh-directory-dialog'),
+    timeout: const Duration(minutes: 2),
+  );
+  final deadline = DateTime.now().add(const Duration(minutes: 2));
+  Object? lastPath;
+  while (DateTime.now().isBefore(deadline)) {
+    final snapshot = await session.readSnapshot();
+    lastPath = (snapshot['project'] as Map?)?['path'];
+    if (lastPath == ssh.workspace) return;
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+  }
+  throw StateError(
+    'SSH project did not become canonical before timeout: '
+    'expected=${ssh.workspace}, last=$lastPath',
+  );
+}
+
+Future<String> _waitForSshServerId(
+  FlutterDriverSession session,
+  String name,
+) async {
+  final deadline = DateTime.now().add(const Duration(seconds: 30));
+  Object? last;
+  while (DateTime.now().isBefore(deadline)) {
+    final response = await session.requestData('ssh-server-id:$name');
+    final decoded = jsonDecode(response);
+    last = decoded;
+    if (decoded is Map && decoded['serverId'] is String) {
+      return decoded['serverId'] as String;
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+  }
+  throw StateError('SSH server did not become canonical: $last');
 }
 
 Future<void> _configureAgents(
@@ -265,19 +359,21 @@ Future<void> _openProjectAndSubmit(
   FlutterDriverSession session,
   _Options options,
 ) async {
-  await session.waitFor(find.byValueKey('sidebar-open-project'));
-  await session.tap(find.byValueKey('sidebar-open-project'));
-  await session.waitFor(find.byValueKey('project-path-dialog'));
-  await session.tap(find.byValueKey('project-path-input'));
-  await session.enterText(options.workspace);
-  await session.sendTextInputAction(
-    TextInputAction.done,
-    timeout: const Duration(seconds: 10),
-  );
-  await session.waitForAbsent(
-    find.byValueKey('project-path-dialog'),
-    timeout: const Duration(seconds: 30),
-  );
+  if (options.ssh == null) {
+    await session.waitFor(find.byValueKey('sidebar-open-project'));
+    await session.tap(find.byValueKey('sidebar-open-project'));
+    await session.waitFor(find.byValueKey('project-path-dialog'));
+    await session.tap(find.byValueKey('project-path-input'));
+    await session.enterText(options.workspace);
+    await session.sendTextInputAction(
+      TextInputAction.done,
+      timeout: const Duration(seconds: 10),
+    );
+    await session.waitForAbsent(
+      find.byValueKey('project-path-dialog'),
+      timeout: const Duration(seconds: 30),
+    );
+  }
   await session.waitFor(find.byValueKey('sidebar-new-session'));
   await session.tap(find.byValueKey('sidebar-new-session'));
   await session.tap(find.byValueKey('session-mode-selector'));
@@ -293,7 +389,31 @@ Future<void> _openProjectAndSubmit(
   await session.tap(find.byValueKey('composer-input'));
   await session.enterText(await File(options.promptFile).readAsString());
   await session.waitForNoPendingFrame(timeout: const Duration(seconds: 20));
-  await session.tap(find.byValueKey('composer-submit'));
+  final submittedAt = DateTime.now().toUtc();
+  final submitElapsed = Stopwatch()..start();
+  stdout.writeln(
+    jsonEncode({
+      'event': 'promptSubmitStarted',
+      'capturedAt': submittedAt.toIso8601String(),
+    }),
+  );
+  try {
+    await session.tap(
+      find.byValueKey('composer-submit'),
+      timeout: options.stallTimeout,
+    );
+    stdout.writeln(
+      jsonEncode({
+        'event': 'promptSubmitReturned',
+        'elapsedMs': submitElapsed.elapsedMilliseconds,
+        'capturedAt': DateTime.now().toUtc().toIso8601String(),
+      }),
+    );
+  } on TimeoutException catch (error) {
+    throw StateError(
+      'root provider produced no response during prompt submission: $error',
+    );
+  }
 }
 
 Future<Map<String, dynamic>> _waitForCompletion(
@@ -323,14 +443,26 @@ Future<Map<String, dynamic>> _waitForCompletion(
       throw StateError('subagents acceptance made no observable progress');
     }
     final interaction = workspace?['activeInteraction'];
+    final workflow = last['workflow'];
+    final run = workflow is Map ? workflow['currentRun'] : null;
+    final stage = run is Map ? run['currentStageId'] as String? : null;
     if (interaction is Map && interaction['kind'] == 'toolApproval') {
-      await session.tap(find.byValueKey('tool-approve'));
+      await _resolveInteraction(
+        session: session,
+        artifactPrefix: options.finalScreenshot,
+        kind: 'toolApproval',
+        stage: stage,
+        action: () => _tapInteractionAction(session, 'tool-approve'),
+      );
     } else if (interaction is Map && interaction['kind'] == 'userInput') {
-      final workflow = last['workflow'];
-      final run = workflow is Map ? workflow['currentRun'] : null;
-      final stage = run is Map ? run['currentStageId'] : null;
       if (stage == 'awaiting_confirmation' && !confirmationHandled) {
-        await _tapFirstUserInputOption(session);
+        await _resolveInteraction(
+          session: session,
+          artifactPrefix: options.finalScreenshot,
+          kind: 'userInput',
+          stage: stage,
+          action: () => _tapFirstUserInputOption(session),
+        );
         confirmationHandled = true;
       } else {
         throw StateError(
@@ -342,6 +474,38 @@ Future<Map<String, dynamic>> _waitForCompletion(
     await Future<void>.delayed(const Duration(milliseconds: 300));
   }
   throw StateError('subagents acceptance timed out; last=$last');
+}
+
+Future<void> _resolveInteraction({
+  required FlutterDriverSession session,
+  required String artifactPrefix,
+  required String kind,
+  required String? stage,
+  required Future<void> Function() action,
+}) async {
+  final elapsed = Stopwatch()..start();
+  stdout.writeln(
+    jsonEncode({
+      'event': 'interactionResolutionStarted',
+      'kind': kind,
+      'stage': stage,
+      'capturedAt': DateTime.now().toUtc().toIso8601String(),
+    }),
+  );
+  await File('$artifactPrefix.$kind-before.png')
+      .writeAsBytes(await session.screenshot(), flush: true);
+  await File('$artifactPrefix.$kind-before.render-tree.txt')
+      .writeAsString(await session.renderTree(), flush: true);
+  await action();
+  stdout.writeln(
+    jsonEncode({
+      'event': 'interactionResolutionReturned',
+      'kind': kind,
+      'stage': stage,
+      'elapsedMs': elapsed.elapsedMilliseconds,
+      'capturedAt': DateTime.now().toUtc().toIso8601String(),
+    }),
+  );
 }
 
 /// Returns true only when the complete subagent workflow has reached its
@@ -454,16 +618,30 @@ void _validateSnapshot(Map<String, dynamic> snapshot) {
 Future<void> _tapFirstUserInputOption(FlutterDriverSession session) async {
   if (await _isVisible(session, 'user-input-first-option')) {
     await session.tap(find.byValueKey('user-input-first-option'));
-    await session.tap(find.byValueKey('user-input-submit'));
+    await _tapInteractionAction(session, 'user-input-submit');
   } else if (await _isVisible(session, 'user-input-first-text')) {
     await session.tap(find.byValueKey('user-input-first-text'));
     await session.enterText('确认');
-    await session.tap(find.byValueKey('user-input-submit'));
+    await _tapInteractionAction(session, 'user-input-submit');
   } else {
     await session.tap(find.byValueKey('fallback-user-input'));
     await session.enterText('确认');
-    await session.tap(find.byValueKey('fallback-user-input-submit'));
+    await _tapInteractionAction(session, 'fallback-user-input-submit');
   }
+}
+
+Future<void> _tapInteractionAction(
+  FlutterDriverSession session,
+  String actionKey,
+) async {
+  final action = find.byValueKey(actionKey);
+  await session.scrollUntilVisible(
+    find.byValueKey('workspace-footer-scrollable'),
+    action,
+    dyScroll: -220,
+    timeout: const Duration(seconds: 30),
+  );
+  await session.tap(action);
 }
 
 Future<bool> _isVisible(FlutterDriverSession session, String key) async {
@@ -503,6 +681,23 @@ class _CanonicalRoute {
   String toString() => '$provider/$model';
 }
 
+class _SshOptions {
+  const _SshOptions({
+    required this.host,
+    required this.username,
+    required this.password,
+    required this.port,
+    required this.workspace,
+  });
+
+  static const name = 'Pure SSH Acceptance';
+  final String host;
+  final String username;
+  final String password;
+  final int port;
+  final String workspace;
+}
+
 class _Options {
   const _Options({
     required this.vmServiceUrl,
@@ -516,6 +711,7 @@ class _Options {
     required this.reviewer,
     required this.timeout,
     required this.stallTimeout,
+    required this.ssh,
   });
 
   final String vmServiceUrl;
@@ -529,12 +725,22 @@ class _Options {
   final _Route reviewer;
   final Duration timeout;
   final Duration stallTimeout;
+  final _SshOptions? ssh;
 
   static _Options parse(List<String> args) {
     String required(String name) {
       final index = args.indexOf(name);
       if (index < 0 || index + 1 >= args.length) {
         throw ArgumentError('$name is required');
+      }
+      return args[index + 1];
+    }
+
+    String? optional(String name) {
+      final index = args.indexOf(name);
+      if (index < 0) return null;
+      if (index + 1 >= args.length) {
+        throw ArgumentError('$name requires a value');
       }
       return args[index + 1];
     }
@@ -547,6 +753,40 @@ class _Options {
     final explorerModel = required('--explorer-model');
     final reviewerProvider = required('--reviewer-provider');
     final reviewerModel = required('--reviewer-model');
+    final sshHost = optional('--ssh-host');
+    final sshUsername = optional('--ssh-username');
+    final sshPort = optional('--ssh-port');
+    final sshWorkspace = optional('--ssh-workspace');
+    final sshConfigured = [
+      sshHost,
+      sshUsername,
+      sshPort,
+      sshWorkspace,
+    ].any((value) => value != null);
+    _SshOptions? ssh;
+    if (sshConfigured) {
+      if ([
+        sshHost,
+        sshUsername,
+        sshPort,
+        sshWorkspace,
+      ].any((value) => value == null)) {
+        throw ArgumentError('all SSH acceptance arguments are required');
+      }
+      final password = Platform.environment['PURE_SUBAGENTS_SSH_PASSWORD'];
+      if (password == null || password.isEmpty) {
+        throw ArgumentError(
+          'PURE_SUBAGENTS_SSH_PASSWORD is required in the Driver environment',
+        );
+      }
+      ssh = _SshOptions(
+        host: sshHost!,
+        username: sshUsername!,
+        password: password,
+        port: int.parse(sshPort!),
+        workspace: sshWorkspace!,
+      );
+    }
     return _Options(
       vmServiceUrl: required('--vm-service-url'),
       workspace: required('--workspace'),
@@ -565,6 +805,7 @@ class _Options {
       stallTimeout: Duration(
         seconds: int.parse(required('--stall-timeout-seconds')),
       ),
+      ssh: ssh,
     );
   }
 }

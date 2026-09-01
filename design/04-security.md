@@ -47,7 +47,9 @@ submission 作为 approval/finding 证据，不能把 root 转述、任意 sessi
 
 文件工具默认遵守工作区边界：
 
-- 工具输入可以是 workspace-relative 路径或绝对路径；相对路径按 `workspace_root` 解析，不依赖进程 cwd
+- 本地文件、patch、LSP 与 `exec.cwd` 输入可以是 workspace-relative 或绝对路径；相对路径按
+  `workspace_root` 解析，不依赖进程 cwd。SSH `exec.cwd` 是例外，只接受 workspace-relative 路径，
+  workspace 根目录使用 `.`
 - 执行前统一解析为规范化绝对路径，并复用同一解析结果做审批预判和实际执行
 - 解析后路径必须位于 `workspace_root` 内
 - `WorkspaceOnly` 拒绝 `..`、Windows drive-relative 路径、越界绝对路径、越界 UNC / verbatim 路径和符号链接越界
@@ -58,7 +60,9 @@ submission 作为 approval/finding 证据，不能把 root 转述、任意 sessi
 当用户显式选择 `full-access` 时，Pure 放宽本地文件 backend 和 `exec.cwd` 的 workspace 边界：绝对路径和 `..` 可以解析到 workspace 外。该模式仍要求目标自身或其最近存在父目录可解析，只影响 Pure 工具的本地策略，不代表系统级完全隔离或提权；容器或远程 backend 可以继续拒绝越界路径。
 
 SSH 远端 backend 始终拒绝 workspace 越界和符号链接入口，`full-access` 不放宽它。远端 helper
-依据远端文件系统事实做 canonicalize；但 `exec` 仍只约束 cwd，不分析命令正文，也不是 OS
+依据远端文件系统事实做 canonicalize；模型不得把远端 canonical root 传给 `exec.cwd`，runtime 也不
+猜测或自动截断绝对路径。绝对路径与 `..` 分别返回可操作且不同的稳定错误。但 `exec` 仍只约束 cwd，
+不分析命令正文，也不是 OS
 沙箱。远端命令拥有 SSH 用户权限，这一事实必须在连接与权限 UI 中可见。
 
 ## 4.4 凭据暴露面

@@ -36,9 +36,8 @@ use args::*;
 use summary::*;
 use support::{
     close_schema, filter_visible, fork_session, json_output, json_output_with_budget,
-    normalize_directory_writable_paths, object_schema, parse_agent_id, parse_input,
-    progress_schema, send_message_schema, spawn_schema, submissions_schema, target_schema,
-    wait_schema,
+    object_schema, parse_agent_id, parse_input, progress_schema, resolve_profile_writable_paths,
+    send_message_schema, spawn_schema, submissions_schema, target_schema, wait_schema,
 };
 
 /// 为一次 turn 构造由 `AgentRuntimeHandle` 驱动的协作工具。
@@ -321,25 +320,8 @@ impl CollaborationTool {
                 format!("agent profile `{role}` is not allowed for this turn"),
             ));
         }
-        let writable_paths = match profile.workspace_mode {
-            pl_protocol::AgentWorkspaceMode::Directory => {
-                normalize_directory_writable_paths(&self.workspace_root, args.writable_paths)?
-            }
-            pl_protocol::AgentWorkspaceMode::Unrestricted
-            | pl_protocol::AgentWorkspaceMode::Worktree => {
-                if args.writable_paths.is_some() {
-                    return Err(tool_error(
-                        TOOL_SPAWN_AGENT,
-                        format!(
-                            "writablePaths is only valid for directory Profiles; `{}` uses {} mode",
-                            profile.profile_id,
-                            profile.workspace_mode.label()
-                        ),
-                    ));
-                }
-                None
-            }
-        };
+        let writable_paths =
+            resolve_profile_writable_paths(&self.workspace_root, &profile, args.writable_paths)?;
         let thread_id = ThreadId::generate();
         let mut child_session =
             fork_session(&self.session_runtime.parent_session(), args.fork_turns)?;

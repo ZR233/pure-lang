@@ -20,7 +20,10 @@ Timeline、重试或会话持久化；不监听端口、不 daemonize，也不�
 
 `hello` 返回结构化 shell descriptor（dialect 与已验证的可执行路径）。Linux helper 启动时优先
 验证 `/bin/bash`，缺失时验证 `/bin/sh`；不会读取 `$SHELL` 或注入完整环境变量。descriptor 是
-远端 helper 的唯一命令启动事实，所有 `exec`、Git 与 LSP 进程都复用它。
+远端 helper 的唯一命令启动事实，所有 `exec`、Git 与 LSP 进程都复用它。helper 启动普通远端
+进程时继承当前环境，并在请求没有显式覆盖 `PATH` 时，把该用户的 `$HOME/.cargo/bin` 与
+`$HOME/.local/bin` 放到继承 `PATH` 前；这只补齐非 login SSH channel 常见的用户工具目录，不读取
+shell profile，也不替模型改写命令。调用方显式提供的 `PATH` 始终原样优先。
 
 控制面只提供 `hello`、GUI 专用的 `browseDirectories`、`openWorkspace`、`closeWorkspace` 和
 `shutdown`。文件面只提供远端事实所必需的 `stat`、`readBytes`、`writeAtomic`、
@@ -33,6 +36,12 @@ canonicalize、链接分类与 workspace 越界拒绝。
 helper 同时把完整输出写到 core 指定的 workspace capture path。Core 继续拥有超时、模型输出
 截断、tool record、Timeline、artifact 与最终 JSON。v2 不提供 PTY、终端面板、端口转发、调试器
 或后台任务恢复。
+
+`processId` 是 opaque token，不允许调用方解析其局部序号。core 进程内所有
+`CommandProcessManager` 共用一个原子单调分配序列，因此 manager 重建或多个 Agent 共享同一 helper
+连接时也不会复用 id；在单个 helper 连接生命周期内同一 id 最多成功 spawn 一次。helper 在任何异步
+进程准备前把 id 原子登记为 `Starting` reservation，成功后转换为 live handle，所有失败路径都释放
+reservation。并发同 id 请求不得通过检查后相互覆盖，关闭连接仍回收全部 live 进程组。
 
 ## 21.3 本地工具与 SSH 管理
 
@@ -76,12 +85,22 @@ Pure 调用 PATH 中的系统 OpenSSH，复用 ssh config、known_hosts、ProxyJ
 显式配置的 agent forwarding。Askpass prompt 由本地 core 分类并经宿主 prompt 端口显示。密码只
 存在于系统凭据库或当前进程 secret lease。凭据不得进入 SQLite、DTO、
 日志、helper 参数、helper 环境或远端协议；Askpass secret 只注入本地 OpenSSH 子进程环境。
+Askpass 脚本写入和 chmod 完成后必须关闭可写文件句柄，再以自动清理的路径 lease 覆盖整个
+OpenSSH 子进程生命周期，避免 Unix 首次执行返回 `Text file busy`。
 provider token 不得转发。远端 Git 只使用服务器原生配置与凭据。
 
 shell descriptor 不是 login shell 配置，也不携带完整环境变量；它只描述 Pure 实际启动命令所用
 的解释器与已验证路径。
 
-远端文件 backend 与 `exec.cwd` 始终 confined；`full-access` 不放宽该 backend。该约束仍是 Pure
+远端文件 backend 与 `exec.cwd` 始终 confined；`full-access` 不放宽该 backend。冻结为 directory
+Profile 的 `writablePaths` 也独立于 Permission Mode：core 在所有远端内置 mutation 路径上先按
+workspace-relative POSIX 路径执行同一策略，包括 `write_file`、创建、删除、复制目标、移动源/目标
+以及 `apply_patch` 的写入和删除；读取不受该列表限制。helper 继续负责 canonical workspace 与
+symlink 越界防护，目录策略仍只是 Pure 内置工具边界，不能宣称为 shell/Git/MCP 的 OS 沙箱。
+SSH `exec.cwd` 只接受
+workspace-relative POSIX 路径，根目录使用 `.`，不得传远端 canonical root；绝对路径返回
+`exec.cwd must be workspace-relative for SSH; use "." for the workspace root`，`..` 仍以 workspace
+escape 错误拒绝。runtime 不把绝对路径猜成 `.` 或静默截断前缀。该约束仍是 Pure
 策略而非 OS shell 沙箱，命令正文拥有 SSH 用户本身的系统权限。GUI 目录浏览是独立宿主功能，
 不注册为模型工具。
 
@@ -114,3 +133,13 @@ Linux job 构建同一提交的两种 helper，并把 CI 内部构建产物交�
 `root@192.168.100.12` 是 opt-in aarch64 实机验收主机：测试只在唯一
 `/tmp/pure-ssh-validation.XXXXXX` workspace 内写入，结束后按记录的精确路径清理并验证无残留
 进程；远端版本化 helper 目录作为正式产品状态保留。
+
+子代理实机验收复用 `cargo xtask verify-subagents --live --gui`，通过
+`PURE_SUBAGENTS_SSH_SERVER`、`PURE_SUBAGENTS_SSH_USERNAME` 和当前进程的一次性
+`PURE_SUBAGENTS_SSH_PASSWORD` 显式启用。harness 不把 password 放入 argv 或日志；创建远端 fixture
+时只把它传给本地 OpenSSH 的 Askpass 环境，启动 GUI 前从 GUI 进程环境移除，再仅向 Driver 进程传递，
+由 Driver 通过可见密码框交给产品 secret lease。远端 fixture 位于连接用户 home 下的唯一目录，必须
+包含初始 commit；验收后核对 worktree branch/path 已清理、最终 marker 与 Git 状态，再删除该精确目录。
+当 password 与任何持久化非 secret 字段都不相同时，artifact 与隔离 Studio home 在结束前扫描
+password 字节，发现泄漏立即失败；若 password 与 username 等合法字段相同，字节扫描无法区分来源，
+验收必须改用 SQLite typed schema/row 检查，确认只存在非 secret 列且 `auth_json` 只记录认证种类。

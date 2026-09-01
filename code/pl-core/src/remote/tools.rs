@@ -169,6 +169,8 @@ impl Tool for RemoteWorkspaceMutationTool {
 impl RemoteWorkspaceMutationTool {
     async fn write(&self, input: ToolInput) -> Result<String> {
         let input: WriteFileInput = deserialize_tool_input(self.name(), input.arguments)?;
+        self.workspace
+            .ensure_relative_path_writable(None, &input.path)?;
         let existing = self.backend.stat_optional(input.path.clone(), None).await?;
         let content = match input.mode {
             WriteMode::Create if existing.is_some() => {
@@ -219,6 +221,8 @@ impl RemoteWorkspaceMutationTool {
 
     async fn create_directory(&self, input: ToolInput) -> Result<String> {
         let input: PathInput = deserialize_tool_input(self.name(), input.arguments)?;
+        self.workspace
+            .ensure_relative_path_writable(None, &input.path)?;
         self.backend
             .create_directory(input.path.clone(), None)
             .await?;
@@ -227,6 +231,8 @@ impl RemoteWorkspaceMutationTool {
 
     async fn delete(&self, input: ToolInput) -> Result<String> {
         let input: DeletePathInput = deserialize_tool_input(self.name(), input.arguments)?;
+        self.workspace
+            .ensure_relative_path_writable(None, &input.path)?;
         let stat = self
             .backend
             .stat_optional(input.path.clone(), None)
@@ -258,6 +264,12 @@ impl RemoteWorkspaceMutationTool {
 
     async fn copy_or_move(&self, input: ToolInput, moving: bool) -> Result<String> {
         let input: CopyMoveInput = deserialize_tool_input(self.name(), input.arguments)?;
+        if moving {
+            self.workspace
+                .ensure_relative_path_writable(None, &input.from)?;
+        }
+        self.workspace
+            .ensure_relative_path_writable(None, &input.to)?;
         let source = self
             .backend
             .stat_optional(input.from.clone(), None)

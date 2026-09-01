@@ -499,7 +499,10 @@ stream。标题区唯一的 `n agents` 菜单只展示 owner、父子关系、�
 Todo、interaction 或 context。选择条目后再订阅对应 Thread；底部状态栏不维护第二套 agent
 活动面板。
 
-Studio 交互状态统一保存在 SQLite `interactions` 表。工具审批、`request_user_input` 和 Plan 实施确认都通过该表与 `InteractionChanged` 事件恢复；旧 `tool_approvals` 不再作为读写路径或 UI pending 状态来源。破坏性 schema 版本不迁移旧 pending 审批、询问或计划确认。
+Studio 交互状态统一保存在 SQLite `interactions` 表。工具审批、`request_user_input` 和
+`submit_plan` 发起的计划确认都通过通用 Interaction 与 `InteractionChanged` 事件恢复；旧
+`tool_approvals` 不再作为读写路径或 UI pending 状态来源。破坏性 schema 版本不迁移旧 pending
+审批、询问或计划确认。
 
 聊天界面使用双栏布局：左侧项目/大会话栏和主聊天区，不再展示右侧工具历史面板。主聊天区底部状态栏左侧展示当前 agent 身份、`Auto / Plan` 模式、当前模型和推理强度，右侧展示上下文使用量、按货币分组的费用估算与 Skill/MCP/LSP 数量；权限模式保留在 Composer。Skill/MCP/LSP 默认只显示数量，悬浮、点击或键盘聚焦时展示当前 agent 的完整列表。状态栏不得显示 agent 数量或子代理列表；大会话下的 agent 数量、状态和切换只通过标题区唯一的 `n agents` 菜单表达。由于左侧栏会占用窗口宽度，状态栏响应式按聊天 footer 自身宽度折叠低频读数，并保证详情弹层不被状态栏滚动容器或窗口边界裁剪。
 

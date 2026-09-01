@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::num::NonZeroUsize;
 use std::path::{Component, Path, PathBuf};
 
-use pl_protocol::{AgentProfileSnapshot, PureError};
+use pl_protocol::{AgentProfileSnapshot, AgentWorkspaceMode, PureError};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -114,6 +114,31 @@ pub(super) fn normalize_directory_writable_paths(
     Ok(Some(compact))
 }
 
+pub(super) fn resolve_profile_writable_paths(
+    project_root: &Path,
+    profile: &AgentProfileSnapshot,
+    requested: Option<Vec<String>>,
+) -> Result<Option<Vec<String>>, PureError> {
+    match profile.workspace_mode {
+        AgentWorkspaceMode::Directory => {
+            normalize_directory_writable_paths(project_root, requested)
+        }
+        AgentWorkspaceMode::Unrestricted | AgentWorkspaceMode::Worktree => {
+            if requested.is_some() {
+                return Err(tool_error(
+                    TOOL_SPAWN_AGENT,
+                    format!(
+                        "writablePaths is only valid for directory Profiles; `{}` uses {} mode",
+                        profile.profile_id,
+                        profile.workspace_mode.label()
+                    ),
+                ));
+            }
+            Ok(None)
+        }
+    }
+}
+
 pub(super) fn fork_session(
     parent: &AgentSession,
     mode: ForkTurns,
@@ -199,53 +224,94 @@ fn root_id(id: &ThreadId, parents: &BTreeMap<ThreadId, Option<ThreadId>>) -> Thr
 }
 
 pub(super) fn spawn_schema(policy: &AgentAccessPolicy, profiles: &[AgentProfileSnapshot]) -> Value {
-    let profile_ids = profiles
+    let profiles = profiles
         .iter()
         .filter(|profile| {
             AgentRoleId::new(profile.profile_id.clone())
                 .is_ok_and(|role| policy.spawn_roles.contains(&role))
         })
-        .map(|profile| Value::String(profile.profile_id.clone()))
         .collect::<Vec<_>>();
-    object_schema(vec![
+    let mode_mapping = profiles
+        .iter()
+        .map(|profile| format!("{}={}", profile.profile_id, profile.workspace_mode.label()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let branches = profiles
+        .into_iter()
+        .map(|profile| spawn_profile_schema(profile))
+        .collect::<Vec<_>>();
+    if branches.is_empty() {
+        return object_schema(vec![
+            ("message", json!({ "type": "string" }), true),
+            (
+                "profileId",
+                json!({
+                    "type": "string",
+                    "enum": [],
+                    "description": "No Agent Profile is enabled and allowed for this turn."
+                }),
+                true,
+            ),
+            ("forkTurns", fork_turns_schema(), false),
+            ("metadata", json!({ "type": "object" }), false),
+        ]);
+    }
+    json!({
+        "type": "object",
+        "description": format!(
+            "Spawn an enabled Agent Profile. Available profile workspace modes: {mode_mapping}. Select profileId first; writablePaths exists only in directory branches. Explorer/reviewer read-only behavior comes from their Profile instructions, not writablePaths."
+        ),
+        "oneOf": branches,
+    })
+}
+
+fn spawn_profile_schema(profile: &AgentProfileSnapshot) -> Value {
+    let mut fields = vec![
         ("message", json!({ "type": "string" }), true),
         (
             "profileId",
             json!({
                 "type": "string",
-                "enum": profile_ids,
-                "description": "Enabled Agent Profile to freeze for the new child Agent."
+                "const": profile.profile_id,
+                "description": format!(
+                    "Enabled Agent Profile `{}` using {} workspace mode.",
+                    profile.profile_id,
+                    profile.workspace_mode.label()
+                )
             }),
             true,
         ),
-        (
-            "forkTurns",
-            json!({
-                "oneOf": [
-                    { "const": "none" },
-                    { "const": "all" },
-                    {
-                        "type": "object",
-                        "properties": { "last": { "type": "integer", "minimum": 1 } },
-                        "required": ["last"],
-                        "additionalProperties": false
-                    }
-                ]
-            }),
-            false,
-        ),
-        (
+        ("forkTurns", fork_turns_schema(), false),
+        ("metadata", json!({ "type": "object" }), false),
+    ];
+    if profile.workspace_mode == AgentWorkspaceMode::Directory {
+        fields.push((
             "writablePaths",
             json!({
                 "type": "array",
                 "items": { "type": "string" },
                 "uniqueItems": true,
-                "description": "Only valid for directory Profiles. Project-relative directory prefixes enforced by Pure built-in file mutation tools. Omit for the whole project; [] makes project files read-only. This is not an OS sandbox: shell, Git, and MCP can bypass it."
+                "description": "Project-relative directory prefixes enforced by Pure built-in file mutation tools. Omit for the whole project; [] makes project files read-only. This is not an OS sandbox: shell, Git, and MCP can bypass it."
             }),
             false,
-        ),
-        ("metadata", json!({ "type": "object" }), false),
-    ])
+        ));
+    }
+    object_schema(fields)
+}
+
+fn fork_turns_schema() -> Value {
+    json!({
+        "oneOf": [
+            { "const": "none" },
+            { "const": "all" },
+            {
+                "type": "object",
+                "properties": { "last": { "type": "integer", "minimum": 1 } },
+                "required": ["last"],
+                "additionalProperties": false
+            }
+        ]
+    })
 }
 
 pub(super) fn progress_schema() -> Value {
@@ -459,6 +525,85 @@ pub(super) fn json_output_with_budget(
 mod tests {
     use super::*;
 
+    fn profile(profile_id: &str, workspace_mode: AgentWorkspaceMode) -> AgentProfileSnapshot {
+        AgentProfileSnapshot {
+            profile_id: profile_id.to_string(),
+            display_name: profile_id.to_string(),
+            description: String::new(),
+            when_to_use: String::new(),
+            system_instructions: String::new(),
+            provider_id: "provider".to_string(),
+            model: "model".to_string(),
+            effort: None,
+            source: "test".to_string(),
+            revision: "1".to_string(),
+            content_hash: "hash".to_string(),
+            system: false,
+            enabled: true,
+            workspace_mode,
+        }
+    }
+
+    #[test]
+    fn spawn_schema_branches_by_enabled_profile_workspace_mode() {
+        let profiles = vec![
+            profile("explorer", AgentWorkspaceMode::Unrestricted),
+            profile("executor", AgentWorkspaceMode::Directory),
+            profile("worktree_executor", AgentWorkspaceMode::Worktree),
+            profile("custom-directory", AgentWorkspaceMode::Directory),
+            profile("custom-unrestricted", AgentWorkspaceMode::Unrestricted),
+        ];
+        let policy = AgentAccessPolicy {
+            spawn_roles: profiles
+                .iter()
+                .map(|profile| AgentRoleId::new(profile.profile_id.clone()).unwrap())
+                .collect(),
+            ..AgentAccessPolicy::default()
+        };
+
+        let schema = spawn_schema(&policy, &profiles);
+        let branches = schema["oneOf"].as_array().unwrap();
+        assert_eq!(branches.len(), profiles.len());
+        for branch in branches {
+            assert_eq!(branch["additionalProperties"], false);
+            let profile_id = branch["properties"]["profileId"]["const"].as_str().unwrap();
+            let has_writable_paths = branch["properties"].get("writablePaths").is_some();
+            assert_eq!(
+                has_writable_paths,
+                matches!(profile_id, "executor" | "custom-directory"),
+                "unexpected writablePaths exposure for {profile_id}"
+            );
+        }
+    }
+
+    #[test]
+    fn spawn_schema_excludes_profiles_not_allowed_for_the_turn() {
+        let profiles = vec![
+            profile("explorer", AgentWorkspaceMode::Unrestricted),
+            profile("executor", AgentWorkspaceMode::Directory),
+        ];
+        let policy = AgentAccessPolicy {
+            spawn_roles: [AgentRoleId::new("executor").unwrap()]
+                .into_iter()
+                .collect(),
+            ..AgentAccessPolicy::default()
+        };
+
+        let schema = spawn_schema(&policy, &profiles);
+        let branches = schema["oneOf"].as_array().unwrap();
+        assert_eq!(branches.len(), 1);
+        assert_eq!(branches[0]["properties"]["profileId"]["const"], "executor");
+        assert!(branches[0]["properties"].get("writablePaths").is_some());
+
+        let unavailable = spawn_schema(&AgentAccessPolicy::default(), &profiles);
+        assert_eq!(unavailable["additionalProperties"], false);
+        assert_eq!(
+            unavailable["properties"]["profileId"]["enum"],
+            serde_json::json!([])
+        );
+        assert!(unavailable.get("oneOf").is_none());
+    }
+
     #[test]
     fn writable_paths_are_normalized_deduplicated_and_compacted() {
         let root = tempfile::tempdir().unwrap();
@@ -479,6 +624,36 @@ mod tests {
             normalize_directory_writable_paths(root.path(), Some(Vec::new())).unwrap(),
             Some(Vec::new())
         );
+    }
+
+    #[test]
+    fn runtime_writable_paths_contract_survives_schema_bypass() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = profile("custom-directory", AgentWorkspaceMode::Directory);
+        assert_eq!(
+            resolve_profile_writable_paths(root.path(), &directory, None).unwrap(),
+            None
+        );
+        assert_eq!(
+            resolve_profile_writable_paths(root.path(), &directory, Some(Vec::new())).unwrap(),
+            Some(Vec::new())
+        );
+        assert_eq!(
+            resolve_profile_writable_paths(root.path(), &directory, Some(vec!["src".to_string()]),)
+                .unwrap(),
+            Some(vec!["src".to_string()])
+        );
+        for mode in [
+            AgentWorkspaceMode::Unrestricted,
+            AgentWorkspaceMode::Worktree,
+        ] {
+            let profile = profile("non-directory", mode);
+            let error = resolve_profile_writable_paths(root.path(), &profile, Some(Vec::new()))
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("only valid for directory Profiles"));
+            assert!(error.contains(mode.label()));
+        }
     }
 
     #[test]

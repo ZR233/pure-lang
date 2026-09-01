@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use pl_protocol::PureError;
@@ -32,6 +33,7 @@ use stream_io::{read_stderr, read_stdout};
 
 const DEFAULT_MAX_PROCESSES: usize = 16;
 const INTERNAL_BUFFER_BYTES: usize = 64 * 1024;
+static NEXT_PROCESS_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug)]
 pub struct CommandProcessManager<B>
@@ -57,7 +59,6 @@ where
 #[derive(Debug)]
 struct CommandProcessManagerState {
     entries: HashMap<String, Arc<CommandProcessEntry>>,
-    next_id: u64,
     starting: usize,
     max_processes: usize,
 }
@@ -195,7 +196,6 @@ where
         Self {
             state: Arc::new(Mutex::new(CommandProcessManagerState {
                 entries: HashMap::new(),
-                next_id: 0,
                 starting: 0,
                 max_processes,
             })),
@@ -344,9 +344,19 @@ where
                 ),
             ));
         }
-        state.next_id = state.next_id.saturating_add(1);
+        let next_id = NEXT_PROCESS_ID
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |next| {
+                next.checked_add(1)
+            })
+            .map_err(|_| {
+                tool_error(
+                    "exec",
+                    "process id space exhausted; restart Pure before starting another command"
+                        .to_string(),
+                )
+            })?;
         state.starting = state.starting.saturating_add(1);
-        Ok(format!("proc-{}", state.next_id))
+        Ok(format!("proc-{next_id}"))
     }
 
     async fn release_start_reservation(&self) {

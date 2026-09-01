@@ -10,7 +10,9 @@ Mode Skill；自定义模式复用相同发现、预加载和 GUI projection，�
 TaskRun、WorkUnit、ReviewRound、MergeRecord、Task issue/recovery、worktree/branch/merge 管理、Git
 门禁、专用 PlanConfirmation、Task driver provider 和旧 task tool catalog。
 旧计划工具遗留的输入流投影、Plan trace part、Thread plan item、FRB/Dart plan union 与专用
-timeline 渲染同样必须删除；工作流计划通过普通 assistant 内容展示。
+timeline 渲染同样必须删除；工作流计划通过普通 assistant 内容展示。新的自由工具 `submit_plan` 复用
+旧工具的 typed Markdown 输入、完成校验、submitted receipt 与 end-turn 行为，但把确认映射为通用
+`UserInput`；它不恢复旧 Task runtime、Plan 产品类型或专用投影。
 
 ## 12.2 实施顺序
 
@@ -24,7 +26,7 @@ timeline 渲染同样必须删除；工作流计划通过普通 assistant 内容
 
 ## 12.3 完成定义
 
-- repo 搜索不再发现可执行路径中的旧 task tool、PlanConfirmation 或 Task 产品类型；
+- repo 搜索不再发现可执行路径中的旧 Task runtime tool、PlanConfirmation 或 Task 产品类型；
 - 内置 Mode 不可覆盖，活跃 run 使用冻结 snapshot，自定义模式无需代码改动即可出现；
 - workflow 编译、CAS、幂等、supersede、Solo 与 checkpoint rollback 有自动化测试；
 - `complete` 的 typed schema、Solo 执行、完成事实和 root finalization 有自动化测试；

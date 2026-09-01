@@ -428,10 +428,19 @@ impl RuntimeWorker {
             .filter(|server| server.availability == McpAvailabilityKind::Available)
             .map(|server| server.descriptor.id.clone())
             .collect();
+        let resource_server_ids = generation
+            .servers
+            .values()
+            .filter(|server| {
+                server.availability == McpAvailabilityKind::Available && server.supports_resources
+            })
+            .map(|server| server.descriptor.id.clone())
+            .collect();
         Ok(LeaseSnapshot {
             generation: generation.id,
             tools,
             server_ids,
+            resource_server_ids,
         })
     }
 

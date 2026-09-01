@@ -136,7 +136,7 @@ fn path_to_posix(path: &Path) -> Result<String> {
     let value = path.to_string_lossy().replace('\\', "/");
     if value.starts_with('/') {
         return Err(remote_exec_error(
-            "remote command paths must be workspace-relative",
+            "exec.cwd must be workspace-relative for SSH; use \".\" for the workspace root",
         ));
     }
     let mut parts = Vec::new();
@@ -167,10 +167,21 @@ mod tests {
 
     #[test]
     fn remote_cwd_is_posix_and_confined() {
+        assert_eq!(normalize_cwd(None).expect("default cwd"), ".");
+        assert_eq!(normalize_cwd(Some(Path::new("."))).expect("root cwd"), ".");
         assert_eq!(
             normalize_cwd(Some(Path::new("src/bin"))).expect("cwd"),
             "src/bin"
         );
-        assert!(normalize_cwd(Some(Path::new("../outside"))).is_err());
+        let absolute = normalize_cwd(Some(Path::new("/home/runner/project")))
+            .unwrap_err()
+            .to_string();
+        assert!(absolute.contains(
+            "exec.cwd must be workspace-relative for SSH; use \".\" for the workspace root"
+        ));
+        let parent = normalize_cwd(Some(Path::new("../outside")))
+            .unwrap_err()
+            .to_string();
+        assert!(parent.contains("remote command path escapes workspace"));
     }
 }

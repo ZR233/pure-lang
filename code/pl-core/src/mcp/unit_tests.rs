@@ -52,6 +52,7 @@ impl McpTestHarness {
 #[derive(Debug, Clone)]
 struct TestServer {
     tools: Vec<rmcp::model::Tool>,
+    supports_resources: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -135,14 +136,17 @@ impl ServerHandler for MutableToolServer {
 )]
 impl ServerHandler for TestServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(
+        let capabilities = if self.supports_resources {
             ServerCapabilities::builder()
                 .enable_tools()
                 .enable_resources()
-                .build(),
-        )
-        .with_protocol_version(ProtocolVersion::V_2026_07_28)
-        .with_server_info(Implementation::new("pl-test-mcp", "1.0.0"))
+                .build()
+        } else {
+            ServerCapabilities::builder().enable_tools().build()
+        };
+        ServerInfo::new(capabilities)
+            .with_protocol_version(ProtocolVersion::V_2026_07_28)
+            .with_server_info(Implementation::new("pl-test-mcp", "1.0.0"))
     }
 
     fn list_tools(
@@ -264,8 +268,19 @@ fn plain_tool(name: &str) -> rmcp::model::Tool {
 }
 
 async fn test_connection(tools: Vec<rmcp::model::Tool>, closed: Arc<AtomicBool>) -> ConnectedMcp {
+    test_connection_with_resources(tools, closed, true).await
+}
+
+async fn test_connection_with_resources(
+    tools: Vec<rmcp::model::Tool>,
+    closed: Arc<AtomicBool>,
+    supports_resources: bool,
+) -> ConnectedMcp {
     let (client_transport, server_transport) = tokio::io::duplex(64 * 1024);
-    let server = TestServer { tools };
+    let server = TestServer {
+        tools,
+        supports_resources,
+    };
     tokio::spawn(async move {
         let service = server
             .serve(server_transport)
@@ -538,6 +553,34 @@ async fn resource_facades_are_published_and_use_rmcp_typed_resource_api() {
 
     installed.runtime.shutdown().await;
     wait_for_closed(&installed.closed).await;
+}
+
+#[tokio::test]
+async fn resource_facades_are_hidden_when_the_server_does_not_declare_the_capability() {
+    let closed = Arc::new(AtomicBool::new(false));
+    let connector = McpConnector::testing([(
+        "tools-only".to_string(),
+        test_connection_with_resources(vec![test_tool("lookup")], closed.clone(), false).await,
+    )]);
+    let runtime = McpRuntime::new(connector).handle();
+    runtime
+        .reconcile(BTreeMap::from([(
+            "tools-only".to_string(),
+            config("tools-only", None),
+        )]))
+        .await
+        .expect("reconcile tools-only MCP runtime");
+    let lease = runtime.acquire_turn_lease().await.expect("MCP lease");
+    let names = lease
+        .agent_tools(None)
+        .into_iter()
+        .map(|tool| crate::tool::Tool::name(tool.as_ref()).to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(names, vec!["mcp__tools-only__lookup"]);
+
+    drop(lease);
+    runtime.shutdown().await;
+    wait_for_closed(&closed).await;
 }
 
 #[tokio::test]

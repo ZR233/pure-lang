@@ -200,6 +200,14 @@ fn platform_instructions(environment: &ExecutionEnvironment) -> String {
         ExecutionTransport::Local => "local process",
         ExecutionTransport::Ssh => "SSH remote helper",
     };
+    let cwd_rule = match environment.transport {
+        ExecutionTransport::Local => {
+            "For `exec.cwd`, use `.` for the workspace root or a relative path such as `src`. Absolute local paths are accepted only when the current Permission Mode and workspace policy allow them."
+        }
+        ExecutionTransport::Ssh => {
+            "For `exec.cwd`, use only a workspace-relative path: `.` for the workspace root or a path such as `src`. Never pass the remote canonical workspace root or any other absolute path."
+        }
+    };
     let os_specific = if environment.os.is_windows() {
         PLATFORM_WINDOWS_INSTRUCTIONS
     } else {
@@ -219,7 +227,7 @@ fn platform_instructions(environment: &ExecutionEnvironment) -> String {
         ShellDialect::Cmd => "Use Windows cmd.exe syntax; commands are started as `cmd /C`.",
     };
     format!(
-        "{}\n\n{}\n\n## Runtime execution environment\n- Execution target: {target}\n- Target OS: {}\n- Shell dialect: {}\n- Shell executable: `{}`\n- {shell_rules}\n- Follow this runtime shell exactly. Do not infer syntax from the controller OS, your model defaults, or `$SHELL`.",
+        "{}\n\n{}\n\n## Runtime execution environment\n- Execution target: {target}\n- Target OS: {}\n- Shell dialect: {}\n- Shell executable: `{}`\n- {shell_rules}\n- {cwd_rule}\n- Follow this runtime shell exactly. Do not infer syntax from the controller OS, your model defaults, or `$SHELL`.",
         PLATFORM_COMMON_INSTRUCTIONS.trim(),
         os_specific.trim(),
         environment.os.as_str(),

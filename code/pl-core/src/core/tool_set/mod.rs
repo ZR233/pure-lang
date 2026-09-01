@@ -9,9 +9,9 @@ use crate::tool::{
     ExecutionBackend, GitCredentialProvider, GitTool, GitToolKind, GitWorkspaceConfig,
     LocalCommandBackend, LocalExecutionBackend, LocalWorkspaceFileBackend, LocalWorkspaceFileTool,
     MovePathTool, NoGitCredentialProvider, SessionNoteTool, SessionNoteToolKind, StatPathTool,
-    TodoListTool, Tool, ToolGroupId, ToolWorkspace, WorkspaceFileBackend, WorkspaceFileTool,
-    WorkspaceFileToolKind, WriteFileTool, command_tool_pair,
-    local_command_tool_pair_with_environment, lsp_tools,
+    SubmitPlanTool, TodoListTool, Tool, ToolGroupId, ToolWorkspace, WorkspaceFileBackend,
+    WorkspaceFileTool, WorkspaceFileToolKind, WorkspacePolicyBackend, WriteFileTool,
+    command_tool_pair, local_command_tool_pair_with_environment, lsp_tools,
 };
 
 use super::TurnEngine;
@@ -183,13 +183,18 @@ where
         if self.capabilities.workspace_files
             && let Some(runtime) = &self.workspace_file_runtime
         {
+            let backend = Arc::new(WorkspacePolicyBackend::new(
+                runtime.backend.clone(),
+                tool_workspace.clone(),
+            ));
             tools.extend(WorkspaceFileToolKind::all().iter().map(|kind| {
-                Arc::new(WorkspaceFileTool::new(*kind, runtime.backend.clone())) as Arc<dyn Tool>
+                Arc::new(WorkspaceFileTool::new(*kind, backend.clone())) as Arc<dyn Tool>
             }));
         }
         tools.extend(self.additional_tools.iter().cloned());
         if self.capabilities.ask_user {
             tools.push(Arc::new(AskUserTool));
+            tools.push(Arc::new(SubmitPlanTool));
         }
         tools.push(Arc::new(TodoListTool::new(
             core.tool_session_runtime.working_set(),

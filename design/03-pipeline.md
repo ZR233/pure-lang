@@ -21,9 +21,11 @@ working state 必须由一个 Thread checkpoint 原子提交；失败时三者�
 
 ## 3.3 Interaction
 
-Interaction 只有通用 `UserInput` 与 `ToolApproval`。模式确认、澄清和选项输入统一通过
-`request_user_input`；不存在专用 PlanConfirmation continuation。pending Interaction 随 Thread
-恢复，响应必须匹配 interaction identity 并且只能决议一次。
+Interaction 只有通用 `UserInput` 与 `ToolApproval`。Task root 使用自由的 `submit_plan` 工具提交以一级
+Markdown 标题开头的完整计划并请求
+批准或修订；缺失信息、澄清和普通选项输入使用 `request_user_input`。两个工具都生成同一种通用
+`UserInput` Interaction，不存在专用 PlanConfirmation continuation。pending Interaction 随 Thread 恢复，
+响应必须匹配 interaction identity 并且只能决议一次。
 
 ## 3.4 工作流生命周期
 
@@ -53,5 +55,7 @@ editing_documents，修复和重新整合后再次 review。不存在隐式 merg
 输出和 workspace/Git 合同。语义独立且写集合互斥的任务应并行；真实前后依赖保持顺序。directory child
 适合单任务或互斥目录并行，可能触及共同接口、清单、生成边界或 Git 状态的任务使用独立 worktree。
 worktree 只隔离现场，不能消除语义依赖；root 仍负责顺序采纳 commit 和处理冲突。
-计划正文是普通 assistant 内容，确认由 `request_user_input` 承载；运行时不再维护专用
-`PlanCompleted`、Plan trace part 或 Thread plan item 投影链。
+`submit_plan` 复用重构前计划工具的 typed `{plan}`、Markdown 标题校验、结构化 submitted receipt 与
+提交后结束 Turn 的语义，但通过通用 `UserInput` 发起确认；
+`request_user_input` 不得用于替代计划提交。运行时不维护专用 `PlanCompleted`、Plan trace part 或
+Thread plan item 投影链。

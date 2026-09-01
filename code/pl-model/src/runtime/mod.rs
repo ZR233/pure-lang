@@ -468,7 +468,7 @@ impl ModelRuntime {
                 .await?;
                 return Ok(decode_raw_event_stream(raw_stream, protocol));
             }
-            wire_capture::capture_http(&body).await?;
+            let capture = wire_capture::capture_http(&body).await?;
             let config = PureOpenAiConfig::new(
                 api_base,
                 token,
@@ -476,22 +476,34 @@ impl ModelRuntime {
                 &model_info.request_profile.headers,
             )?;
             let client = Client::build(http_client, config);
-            let stream: StreamResponse<sse::SseStreamEvent> = match body {
-                OpenAiRequestBody::Responses(body) => client
-                    .responses()
-                    .create_stream_byot(body)
-                    .await
-                    .map_err(openai_error_to_pure)?,
-                OpenAiRequestBody::Chat(body) => client
-                    .chat()
-                    .create_stream_byot(body)
-                    .await
-                    .map_err(openai_error_to_pure)?,
+            let stream_result: std::result::Result<
+                StreamResponse<sse::SseStreamEvent>,
+                async_openai::error::OpenAIError,
+            > = match body {
+                OpenAiRequestBody::Responses(body) => {
+                    client.responses().create_stream_byot(body).await
+                }
+                OpenAiRequestBody::Chat(body) => client.chat().create_stream_byot(body).await,
+            };
+            let stream = match stream_result {
+                Ok(stream) => {
+                    if let Some(capture) = &capture {
+                        capture.record_stage("streamOpened").await?;
+                    }
+                    stream
+                }
+                Err(error) => {
+                    if let Some(capture) = &capture {
+                        capture.record_stage("streamOpenFailed").await?;
+                    }
+                    return Err(openai_error_to_pure(error));
+                }
             };
 
             let raw_stream = stream
                 .map(|event| event.map_err(openai_error_to_pure))
                 .boxed();
+            let raw_stream = wire_capture::observe_http_stream(raw_stream, capture);
             Ok(decode_raw_event_stream(raw_stream, protocol))
         }
     }

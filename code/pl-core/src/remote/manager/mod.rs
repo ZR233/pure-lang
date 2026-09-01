@@ -88,7 +88,7 @@ pub enum SshConnectionState {
 struct SshConnection {
     client: RemoteClient,
     process: Arc<Mutex<Child>>,
-    _askpass: Option<tempfile::NamedTempFile>,
+    _askpass: Option<tempfile::TempPath>,
     execution_environment: ExecutionEnvironment,
 }
 

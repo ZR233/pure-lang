@@ -155,6 +155,85 @@ impl AgentWorkspace {
             ),
         })
     }
+
+    fn ensure_relative_path_writable(&self, cwd: Option<&str>, path: &str) -> crate::Result<()> {
+        if self.mutability == WorkspaceMutability::ReadOnly {
+            return Err(crate::PureError::ToolExecutionFailed {
+                tool: "workspace".to_string(),
+                error: "agent workspace is read-only".to_string(),
+            });
+        }
+        let Some(writable_paths) = &self.project_writable_paths else {
+            return Ok(());
+        };
+        let relative = normalize_workspace_relative_path(cwd, path)?;
+        let project_root = comparable_policy_path(&self.project_root);
+        let target = if relative == "." {
+            project_root.clone()
+        } else if project_root == "/" {
+            format!("/{relative}")
+        } else {
+            format!("{project_root}/{relative}")
+        };
+        let allowed = writable_paths.iter().any(|path| {
+            let path = comparable_policy_path(path);
+            path == target
+                || target
+                    .strip_prefix(&path)
+                    .is_some_and(|suffix| suffix.starts_with('/'))
+        });
+        if allowed {
+            return Ok(());
+        }
+        Err(crate::PureError::ToolExecutionFailed {
+            tool: "workspace".to_string(),
+            error: format!(
+                "project path '{relative}' is outside the directory Agent writablePaths boundary"
+            ),
+        })
+    }
+}
+
+fn normalize_workspace_relative_path(cwd: Option<&str>, path: &str) -> crate::Result<String> {
+    let mut parts = Vec::new();
+    for source in cwd
+        .filter(|cwd| !cwd.trim().is_empty() && *cwd != ".")
+        .into_iter()
+        .chain(std::iter::once(path))
+    {
+        if source.starts_with('/') || source.contains('\\') {
+            return Err(crate::PureError::ToolExecutionFailed {
+                tool: "workspace".to_string(),
+                error: "workspace mutation paths must be project-relative".to_string(),
+            });
+        }
+        for component in source.split('/') {
+            match component {
+                "" | "." => {}
+                ".." => {
+                    return Err(crate::PureError::ToolExecutionFailed {
+                        tool: "workspace".to_string(),
+                        error: "workspace mutation path must not escape the project".to_string(),
+                    });
+                }
+                value => parts.push(value),
+            }
+        }
+    }
+    Ok(if parts.is_empty() {
+        ".".to_string()
+    } else {
+        parts.join("/")
+    })
+}
+
+fn comparable_policy_path(path: &std::path::Path) -> String {
+    let value = path.to_string_lossy().replace('\\', "/");
+    if value == "/" {
+        value
+    } else {
+        value.trim_end_matches('/').to_string()
+    }
 }
 
 /// Runtime coordination policy for tools within one model response.
@@ -546,6 +625,15 @@ impl ToolWorkspace {
     /// 校验一次 Pure 内置文件 mutation 的最终解析路径。
     pub fn ensure_path_writable(&self, path: &std::path::Path) -> crate::Result<()> {
         self.workspace.ensure_path_writable(path)
+    }
+
+    /// 校验 confined backend 中一次 workspace-relative 文件 mutation。
+    pub fn ensure_relative_path_writable(
+        &self,
+        cwd: Option<&str>,
+        path: &str,
+    ) -> crate::Result<()> {
+        self.workspace.ensure_relative_path_writable(cwd, path)
     }
 
     pub(crate) async fn write_lock(&self) -> WorkspaceWriteGuard {

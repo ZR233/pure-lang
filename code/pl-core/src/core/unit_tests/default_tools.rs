@@ -34,6 +34,7 @@ async fn default_tools_register_shared_tools_without_product_collaboration() {
     assert!(!has_tool(&core, "send_input"));
     assert!(!has_tool(&core, "close_agent"));
     assert!(has_tool(&core, "request_user_input"));
+    assert!(has_tool(&core, "submit_plan"));
     assert!(has_tool(&core, "update_todo_list"));
     assert!(has_tool(&core, "read_session_note"));
     assert!(has_tool(&core, "search_session_note"));
@@ -85,6 +86,7 @@ async fn default_tool_builder_exposes_only_framework_independent_names() {
         "list_files",
         "apply_patch",
         "request_user_input",
+        "submit_plan",
         "update_todo_list",
         "read_session_note",
         "search_session_note",
@@ -147,6 +149,7 @@ async fn builtin_tool_installer_can_disable_exec() {
     assert!(!has_tool(&core, "spawn_agent"));
     assert!(has_tool(&core, "read_file"));
     assert!(has_tool(&core, "request_user_input"));
+    assert!(has_tool(&core, "submit_plan"));
     assert!(!has_tool(&core, "plan_exit"));
 }
 

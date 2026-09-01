@@ -146,12 +146,14 @@ async fn connect_server(
             );
         }
     };
+    let supports_resources = session.supports_resources();
     match tokio::time::timeout(startup_timeout, session.list_tools()).await {
         Ok(Ok(tools)) => RuntimeServer::available(super::server::AvailableRuntimeServer {
             descriptor,
             fingerprint,
             session,
             definitions: filter_tool_definitions(tools, &config.config),
+            supports_resources,
             request_timeout,
             config: server_config,
             tool_effect: config.tool_effect,

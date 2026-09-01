@@ -5,6 +5,9 @@ abstract final class StudioDriverKeys {
   static const startPage = ValueKey<String>('studio-start-page');
   static const sidebar = ValueKey<String>('studio-sidebar');
   static const timeline = ValueKey<String>('timeline-scrollable');
+  static const workspaceFooterScroll = ValueKey<String>(
+    'workspace-footer-scrollable',
+  );
   static const newSession = ValueKey<String>('sidebar-new-session');
   static const openProject = ValueKey<String>('sidebar-open-project');
   static const projectPathDialog = ValueKey<String>('project-path-dialog');
@@ -45,6 +48,7 @@ abstract final class StudioDriverKeys {
   );
   static const sshServerSave = ValueKey<String>('ssh-server-save');
   static const sshDirectoryDialog = ValueKey<String>('ssh-directory-dialog');
+  static const sshDirectoryList = ValueKey<String>('ssh-directory-list');
   static const sshOpenCurrentDirectory = ValueKey<String>(
     'ssh-open-current-directory',
   );
@@ -101,6 +105,12 @@ abstract final class StudioDriverKeys {
 
   static ValueKey<String> sshOpen(String id) =>
       ValueKey<String>('ssh-open-$id');
+
+  static ValueKey<String> sshDirectoryCurrent(String path) =>
+      ValueKey<String>('ssh-directory-current-$path');
+
+  static ValueKey<String> sshDirectoryEntry(String path) =>
+      ValueKey<String>('ssh-directory-entry-$path');
 
   static ValueKey<String> projectRow(String id) =>
       ValueKey<String>('project-row-$id');

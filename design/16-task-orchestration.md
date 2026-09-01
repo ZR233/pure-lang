@@ -78,8 +78,12 @@ definition hash、Mode snapshot、active/terminal、当前 stage、时间和最�
 
 `mode.task` 默认编译 `planning -> awaiting_confirmation -> editing_documents -> working -> integrating ->
 reviewing -> completed`，并提供 stopped 终态。确认修改回到 planning；代码 finding 回到 working，设计
-finding 回到 editing_documents；两条返工路径都必须重新经过 integrating 和 reviewing。确认使用通用
-`request_user_input`，进入 `completed` 后调用 `complete`。
+finding 回到 editing_documents；两条返工路径都必须重新经过 integrating 和 reviewing。完整计划必须
+以一级 Markdown 标题开头，并用自由工具 `submit_plan { plan }` 请求批准或修订；
+`request_user_input` 只用于计划形成前的缺失信息与澄清。两者都复用
+通用 `UserInput` continuation，进入 `completed` 后调用 `complete`。
+`completed` 与 `stopped` 都是无任何 outgoing transition 的 terminal stage；停止边只从非 terminal 活动
+阶段进入 `stopped`，避免首轮 compile 先产生可预防的 definition rejection。
 
 planning 中 root 优先把相互独立的探索并行交给 fresh-context `explorer`，自己综合依赖图、文件所有权与
 验证边界。editing_documents 中 root 亲自更新设计。working 中普通实现必须交给 `executor` 或
@@ -87,10 +91,21 @@ planning 中 root 优先把相互独立的探索并行交给 fresh-context `expl
 状态时使用 worktree；真实前后依赖始终顺序执行。每个 child 消息必须详细描述目的、基线、所有权、
 禁止范围、有序步骤、完成/失败条件、证据和 workspace/Git 合同。
 
+所有 child 使用同一成果传递顺序；非 reviewer child 完成探索/实现/验证后先调用 `report_progress`，以
+`readyForCompletion` 提交含 `CHILD_DELIVERY_READY` 的 durable detail，再发送内容一致的 final reply；
+reviewer 使用既有的 durable verdict marker。
+root 保存成功 spawn receipt 中的 `agentId`，循环 `wait_agents` 直到 terminal，然后对该 id 调用
+`read_agent_submissions`；progress 事件只能触发继续等待。canonical page 必须非空，空页只允许进入
+诊断和收窄重派，`read_agent_session` 不能替代正常交付。reviewer 使用既有 finding/approval marker，
+并继续保持比通用 child delivery 更严格的最终授权语义。
+
 integrating 中 root 审查 directory 组合 diff、显式采纳 worktree commit、cleanup 并处理冲突。冲突处理中
 允许完成相邻必要实现或测试修复，但不能展开无关工作。child 持续不可用时，root 收窄重派一次后可以
 最小兜底，并显式记录 `ROOT_IMPLEMENTATION_FALLBACK`。reviewing 必须由新创建的只读 `reviewer` 检查
 整合后的主 workspace；root 自审不能替代它，阻塞 finding 修复后必须创建新的 reviewer 复审。
+工具参数错误必须先对照 schema 修正再重试，禁止原样重复失败调用；模式专属字段必须使用 camelCase，
+`writablePaths` 只传给 directory child，`workspaceDisposition:cleanup` 只在 worktree commit 已整合后使用。
+验收用的 directory 越界拒绝是明确的 expected rejection，不得重试或借 shell 绕过。
 reviewer 只读完成后以 `report_progress` 提交 durable finding/approval，root 按冻结 reviewer `agentId`
 调用 `read_agent_submissions` 获取结构化 verdict；只有该证据到达后才能执行最终门禁。该提交不改变
 workspace 或 Git，不能扩张 reviewer 的修复权限，也不能由 root 自述或自由文本 session 摘要替代。
@@ -111,7 +126,11 @@ completion 字段尚未完整到达，验收边界仍可继续；运行时执行
 它们必须使用真实非本地 provider 和真实 Prompt，不得 fallback 到 scripted/demo provider。workflow
 harness 在隔离 Rust 项目中分别选择 `mode.simple` 与 `mode.task`：简洁模式直接完成且不产生 workflow
 调用，任务模式走完 planning/confirmation/document/working/integrating/review/completed 并调用
-`complete`。子代理 GUI harness 另使用带初始 commit 的隔离 Git fixture，验证 explorer、两种 executor、
+`complete`。子代理 GUI harness 另使用带初始 commit 的隔离 Git fixture，并把临时会话配置为
+`full-access`，验证 explorer、两种 executor、
 显式整合和只读 reviewer。两种模式都运行 `cargo test` 与 verifier；GUI 额外重启任务模式验证 run id/
 revision/history 持久化。失败 artifacts 保存到 `target/workflow-live-artifacts/` 或
 `target/subagents-live-artifacts/`，同时回收 GUI、DTD 与 Driver 进程树。
+子代理 artifact 必须保留未去重的协作调用 attempt、outcome 与 error class；每个 child 都需要绑定成功
+spawn receipt 的 nonempty durable submission。非预期首次调用失败不能因后续成功 receipt 被静默忽略，
+expected directory rejection、正常 progress polling 与空页诊断分别分类。

@@ -113,6 +113,18 @@ impl RuntimeWorker {
                 })?;
         match server_id {
             Some(server_id) => {
+                let supports_resources = state
+                    .servers
+                    .get(server_id)
+                    .is_some_and(|server| server.supports_resources);
+                if !supports_resources {
+                    return Err(PureError::ToolExecutionFailed {
+                        tool: "mcp".to_string(),
+                        error: format!(
+                            "MCP server '{server_id}' does not declare the resources capability"
+                        ),
+                    });
+                }
                 let (session, request_timeout, redactor) = self.session(generation, server_id)?;
                 Ok(vec![(
                     server_id.to_string(),
@@ -125,7 +137,8 @@ impl RuntimeWorker {
                 .servers
                 .values()
                 .filter_map(|server| {
-                    (server.availability == McpAvailabilityKind::Available)
+                    (server.availability == McpAvailabilityKind::Available
+                        && server.supports_resources)
                         .then(|| server.session.clone())
                         .flatten()
                         .map(|session| {

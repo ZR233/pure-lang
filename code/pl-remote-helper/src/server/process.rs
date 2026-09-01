@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -10,7 +12,7 @@ use pl_protocol::remote::{
     RemoteSpawnRequest,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::process::{ChildStdin, Command};
+use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{Mutex, mpsc};
 
 use crate::codec::write_frame;
@@ -24,9 +26,16 @@ struct ProcessHandle {
     stdin: Option<Arc<Mutex<ChildStdin>>>,
 }
 
+#[derive(Debug)]
+enum ProcessEntry {
+    Starting,
+    Running(ProcessHandle),
+    Finished,
+}
+
 #[derive(Clone)]
 pub(super) struct ProcessRegistry {
-    processes: Arc<Mutex<HashMap<String, ProcessHandle>>>,
+    processes: Arc<Mutex<HashMap<String, ProcessEntry>>>,
     writer: SharedWriter,
     output_sequence: Arc<AtomicU64>,
     shell: RemoteShellDescriptor,
@@ -58,34 +67,29 @@ impl ProcessRegistry {
         cwd: PathBuf,
         capture_path: PathBuf,
     ) -> Result<(), RemoteError> {
-        if self
-            .processes
-            .lock()
-            .await
-            .contains_key(&request.process_id)
-        {
-            return Err(remote_error(
-                RemoteErrorCode::InvalidRequest,
-                format!("process '{}' already exists", request.process_id),
-            ));
-        }
+        self.reserve_starting(&request.process_id).await?;
         if let Some(parent) = capture_path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|error| io_error("failed to create capture directory", error))?;
+            if let Err(error) = tokio::fs::create_dir_all(parent).await {
+                self.release_starting(&request.process_id).await;
+                return Err(io_error("failed to create capture directory", error));
+            }
         }
         let header = format!(
             "=== COMMAND ===\n{}\n\n=== CWD ===\n{}\n\n",
             request.command,
             cwd.display()
         );
-        let mut capture = tokio::fs::File::create(&capture_path)
-            .await
-            .map_err(|error| io_error("failed to create capture file", error))?;
-        capture
-            .write_all(header.as_bytes())
-            .await
-            .map_err(|error| io_error("failed to write capture header", error))?;
+        let mut capture = match tokio::fs::File::create(&capture_path).await {
+            Ok(capture) => capture,
+            Err(error) => {
+                self.release_starting(&request.process_id).await;
+                return Err(io_error("failed to create capture file", error));
+            }
+        };
+        if let Err(error) = capture.write_all(header.as_bytes()).await {
+            self.release_starting(&request.process_id).await;
+            return Err(io_error("failed to write capture header", error));
+        }
 
         let mut command = Command::new(&self.shell.path);
         command
@@ -100,32 +104,86 @@ impl ProcessRegistry {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        if !request.environment.contains_key("PATH")
+            && let Some(path) = user_tool_path(
+                std::env::var_os("HOME").as_deref(),
+                std::env::var_os("PATH").as_deref(),
+            )?
+        {
+            command.env("PATH", path);
+        }
+        command.kill_on_drop(true);
         #[cfg(unix)]
         {
             command.process_group(0);
         }
-        let mut child = command
-            .spawn()
-            .map_err(|error| io_error("failed to spawn remote process", error))?;
-        let process_group = child.id().ok_or_else(|| {
-            remote_error(RemoteErrorCode::Io, "spawned process did not expose an id")
-        })? as i32;
+        let mut child = match command.spawn() {
+            Ok(child) => child,
+            Err(error) => {
+                self.release_starting(&request.process_id).await;
+                return Err(io_error("failed to spawn remote process", error));
+            }
+        };
+        let process_group = match child.id() {
+            Some(id) => id as i32,
+            None => {
+                stop_failed_child(child, None).await;
+                self.release_starting(&request.process_id).await;
+                return Err(remote_error(
+                    RemoteErrorCode::Io,
+                    "spawned process did not expose an id",
+                ));
+            }
+        };
         let stdin = child.stdin.take();
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| remote_error(RemoteErrorCode::Io, "spawned process has no stdout"))?;
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or_else(|| remote_error(RemoteErrorCode::Io, "spawned process has no stderr"))?;
-        self.processes.lock().await.insert(
-            request.process_id.clone(),
-            ProcessHandle {
-                process_group,
-                stdin: stdin.map(|stdin| Arc::new(Mutex::new(stdin))),
-            },
-        );
+        let stdout = match child.stdout.take() {
+            Some(stdout) => stdout,
+            None => {
+                stop_failed_child(child, Some(process_group)).await;
+                self.release_starting(&request.process_id).await;
+                return Err(remote_error(
+                    RemoteErrorCode::Io,
+                    "spawned process has no stdout",
+                ));
+            }
+        };
+        let stderr = match child.stderr.take() {
+            Some(stderr) => stderr,
+            None => {
+                stop_failed_child(child, Some(process_group)).await;
+                self.release_starting(&request.process_id).await;
+                return Err(remote_error(
+                    RemoteErrorCode::Io,
+                    "spawned process has no stderr",
+                ));
+            }
+        };
+        let handle = ProcessHandle {
+            process_group,
+            stdin: stdin.map(|stdin| Arc::new(Mutex::new(stdin))),
+        };
+        let activated = {
+            let mut processes = self.processes.lock().await;
+            if matches!(
+                processes.get(&request.process_id),
+                Some(ProcessEntry::Starting)
+            ) {
+                processes.insert(request.process_id.clone(), ProcessEntry::Running(handle));
+                true
+            } else {
+                false
+            }
+        };
+        if !activated {
+            stop_failed_child(child, Some(process_group)).await;
+            return Err(remote_error(
+                RemoteErrorCode::InvalidRequest,
+                format!(
+                    "process '{}' reservation was cancelled before activation",
+                    request.process_id
+                ),
+            ));
+        }
 
         let (output_sender, output_receiver) = mpsc::channel(256);
         let stdout_task =
@@ -147,7 +205,11 @@ impl ProcessRegistry {
             let result = child.wait().await;
             let _ = tokio::join!(stdout_task, stderr_task);
             let _ = output_task.await;
-            processes.lock().await.remove(&process_id);
+            let mut processes = processes.lock().await;
+            if matches!(processes.get(&process_id), Some(ProcessEntry::Running(_))) {
+                processes.insert(process_id.clone(), ProcessEntry::Finished);
+            }
+            drop(processes);
             let (exit_code, signal) = match result {
                 Ok(status) => {
                     #[cfg(unix)]
@@ -182,25 +244,21 @@ impl ProcessRegistry {
         process_id: &str,
         body: &[u8],
     ) -> Result<(), RemoteError> {
-        let stdin = self
-            .processes
-            .lock()
-            .await
-            .get(process_id)
-            .ok_or_else(|| {
-                remote_error(
+        let stdin = match self.processes.lock().await.get(process_id) {
+            Some(ProcessEntry::Running(handle)) => handle.stdin.clone(),
+            Some(ProcessEntry::Starting | ProcessEntry::Finished) | None => {
+                return Err(remote_error(
                     RemoteErrorCode::ProcessNotFound,
                     format!("unknown process id '{process_id}'"),
-                )
-            })?
-            .stdin
-            .clone()
-            .ok_or_else(|| {
-                remote_error(
-                    RemoteErrorCode::ProcessNotFound,
-                    format!("process '{process_id}' does not accept stdin"),
-                )
-            })?;
+                ));
+            }
+        }
+        .ok_or_else(|| {
+            remote_error(
+                RemoteErrorCode::ProcessNotFound,
+                format!("process '{process_id}' does not accept stdin"),
+            )
+        })?;
         let mut stdin = stdin.lock().await;
         stdin
             .write_all(body)
@@ -214,45 +272,96 @@ impl ProcessRegistry {
 
     pub(super) async fn close_stdin(&self, process_id: &str) -> Result<(), RemoteError> {
         let mut processes = self.processes.lock().await;
-        let handle = processes.get_mut(process_id).ok_or_else(|| {
-            remote_error(
+        let Some(ProcessEntry::Running(handle)) = processes.get_mut(process_id) else {
+            return Err(remote_error(
                 RemoteErrorCode::ProcessNotFound,
                 format!("unknown process id '{process_id}'"),
-            )
-        })?;
+            ));
+        };
         handle.stdin.take();
         Ok(())
     }
 
     pub(super) async fn terminate(&self, process_id: &str) -> Result<(), RemoteError> {
-        let group = self
-            .processes
-            .lock()
-            .await
-            .get(process_id)
-            .map(|handle| handle.process_group)
-            .ok_or_else(|| {
-                remote_error(
+        let group = match self.processes.lock().await.get(process_id) {
+            Some(ProcessEntry::Running(handle)) => handle.process_group,
+            Some(ProcessEntry::Starting | ProcessEntry::Finished) | None => {
+                return Err(remote_error(
                     RemoteErrorCode::ProcessNotFound,
                     format!("unknown process id '{process_id}'"),
-                )
-            })?;
+                ));
+            }
+        };
         terminate_process_group(group);
         Ok(())
     }
 
     pub(super) async fn terminate_all(&self) {
-        let groups = self
-            .processes
-            .lock()
-            .await
-            .values()
-            .map(|handle| handle.process_group)
-            .collect::<Vec<_>>();
+        let groups = {
+            let mut processes = self.processes.lock().await;
+            let groups = processes
+                .values()
+                .filter_map(|entry| match entry {
+                    ProcessEntry::Starting | ProcessEntry::Finished => None,
+                    ProcessEntry::Running(handle) => Some(handle.process_group),
+                })
+                .collect::<Vec<_>>();
+            processes.clear();
+            groups
+        };
         for group in groups {
             terminate_process_group(group);
         }
     }
+
+    async fn reserve_starting(&self, process_id: &str) -> Result<(), RemoteError> {
+        match self.processes.lock().await.entry(process_id.to_string()) {
+            Entry::Vacant(entry) => {
+                entry.insert(ProcessEntry::Starting);
+                Ok(())
+            }
+            Entry::Occupied(_) => Err(remote_error(
+                RemoteErrorCode::InvalidRequest,
+                format!("process '{process_id}' already exists"),
+            )),
+        }
+    }
+
+    async fn release_starting(&self, process_id: &str) {
+        let mut processes = self.processes.lock().await;
+        if matches!(processes.get(process_id), Some(ProcessEntry::Starting)) {
+            processes.remove(process_id);
+        }
+    }
+}
+
+fn user_tool_path(
+    home: Option<&OsStr>,
+    inherited: Option<&OsStr>,
+) -> Result<Option<OsString>, RemoteError> {
+    let Some(home) = home else {
+        return Ok(inherited.map(OsStr::to_os_string));
+    };
+    let home = PathBuf::from(home);
+    let mut paths = vec![home.join(".cargo/bin"), home.join(".local/bin")];
+    if let Some(inherited) = inherited {
+        paths.extend(std::env::split_paths(inherited));
+    }
+    std::env::join_paths(paths).map(Some).map_err(|error| {
+        remote_error(
+            RemoteErrorCode::InvalidRequest,
+            format!("failed to assemble remote process PATH: {error}"),
+        )
+    })
+}
+
+async fn stop_failed_child(mut child: Child, process_group: Option<i32>) {
+    if let Some(process_group) = process_group {
+        terminate_process_group(process_group);
+    } else {
+        let _ = child.kill().await;
+    }
+    let _ = child.wait().await;
 }
 
 fn spawn_output_reader<R>(
@@ -340,3 +449,170 @@ fn terminate_process_group(group: i32) {
 
 #[cfg(not(unix))]
 fn terminate_process_group(_: i32) {}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+
+    fn registry(shell_path: &str) -> ProcessRegistry {
+        let writer: SharedWriter = Arc::new(Mutex::new(Box::new(tokio::io::sink())));
+        ProcessRegistry::new(
+            writer,
+            RemoteShellDescriptor {
+                dialect: RemoteShellDialect::Sh,
+                path: shell_path.to_string(),
+            },
+        )
+    }
+
+    fn request(process_id: &str, command: &str) -> RemoteSpawnRequest {
+        RemoteSpawnRequest {
+            process_id: process_id.to_string(),
+            workspace_id: "workspace".to_string(),
+            command: command.to_string(),
+            cwd: ".".to_string(),
+            environment: BTreeMap::new(),
+            capture_path: format!("target/{process_id}.log"),
+        }
+    }
+
+    #[test]
+    fn non_login_process_path_includes_common_user_tool_directories() {
+        let path = user_tool_path(
+            Some(OsStr::new("/home/runner")),
+            Some(OsStr::new("/usr/local/bin:/usr/bin")),
+        )
+        .unwrap()
+        .unwrap();
+        let entries = std::env::split_paths(&path).collect::<Vec<_>>();
+
+        assert_eq!(
+            entries,
+            vec![
+                PathBuf::from("/home/runner/.cargo/bin"),
+                PathBuf::from("/home/runner/.local/bin"),
+                PathBuf::from("/usr/local/bin"),
+                PathBuf::from("/usr/bin"),
+            ]
+        );
+    }
+
+    async fn wait_until_idle(registry: &ProcessRegistry) {
+        for _ in 0..100 {
+            if registry
+                .processes
+                .lock()
+                .await
+                .values()
+                .all(|entry| matches!(entry, ProcessEntry::Finished))
+            {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("process registry did not become idle");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn concurrent_spawn_with_the_same_id_allows_only_one_process() {
+        let temp = tempfile::tempdir().unwrap();
+        let registry = registry("/bin/sh");
+        let request = request("proc-shared", "sleep 1");
+        let first_capture = temp.path().join("first.log");
+        let second_capture = temp.path().join("second.log");
+
+        let (first, second) = tokio::join!(
+            registry.spawn(request.clone(), temp.path().to_path_buf(), first_capture),
+            registry.spawn(request, temp.path().to_path_buf(), second_capture),
+        );
+
+        assert_ne!(first.is_ok(), second.is_ok());
+        let error = first.err().or_else(|| second.err()).unwrap();
+        assert_eq!(error.code, RemoteErrorCode::InvalidRequest);
+        assert!(error.message.contains("already exists"));
+        assert_eq!(
+            registry
+                .processes
+                .lock()
+                .await
+                .values()
+                .filter(|entry| matches!(entry, ProcessEntry::Running(_)))
+                .count(),
+            1
+        );
+
+        registry.terminate_all().await;
+        assert!(registry.processes.lock().await.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn different_process_ids_run_in_parallel_and_cleanup() {
+        let temp = tempfile::tempdir().unwrap();
+        let registry = registry("/bin/sh");
+
+        let (first, second) = tokio::join!(
+            registry.spawn(
+                request("proc-a", "printf a"),
+                temp.path().to_path_buf(),
+                temp.path().join("a.log"),
+            ),
+            registry.spawn(
+                request("proc-b", "printf b"),
+                temp.path().to_path_buf(),
+                temp.path().join("b.log"),
+            ),
+        );
+        first.unwrap();
+        second.unwrap();
+        wait_until_idle(&registry).await;
+        assert!(
+            tokio::fs::read_to_string(temp.path().join("a.log"))
+                .await
+                .unwrap()
+                .contains('a')
+        );
+        assert!(
+            tokio::fs::read_to_string(temp.path().join("b.log"))
+                .await
+                .unwrap()
+                .contains('b')
+        );
+
+        let reused = registry
+            .spawn(
+                request("proc-a", "true"),
+                temp.path().to_path_buf(),
+                temp.path().join("reused.log"),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(reused.code, RemoteErrorCode::InvalidRequest);
+        assert!(reused.message.contains("already exists"));
+    }
+
+    #[tokio::test]
+    async fn failed_spawn_releases_starting_reservation() {
+        let temp = tempfile::tempdir().unwrap();
+        let registry = registry("/definitely/missing/pure-shell");
+        let request = request("proc-retry", "true");
+
+        for capture in ["first.log", "second.log"] {
+            let error = registry
+                .spawn(
+                    request.clone(),
+                    temp.path().to_path_buf(),
+                    temp.path().join(capture),
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(error.code, RemoteErrorCode::PathNotFound);
+            assert!(error.message.contains("failed to spawn remote process"));
+            assert!(!error.message.contains("already exists"));
+            assert!(registry.processes.lock().await.is_empty());
+        }
+    }
+}
