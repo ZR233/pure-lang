@@ -4,6 +4,7 @@
 
 首次 `workflow_state.compile` 就提交合法阶段图：
 `planning → awaiting_confirmation → editing_documents → working → integrating → reviewing → completed`，另有终态 `stopped`。`completed` 与 `stopped` 不得有 outgoing transition。
+每个 stage 都显式传 `terminal`，仅 `completed`、`stopped` 为 `true`；每次 transition 的 `completion` 只传 `summary` 与 `evidence`，不得传 `workflowStateNote` 或其它字段。
 
 Root 在 planning 查询 `list_agent_profiles`，并行派出两个任务互异的只读 explorer。两者 terminal 后，按真实 agentId 读取 canonical nonempty durable submissions，再综合为以一级 Markdown 标题开头的完整计划并调用 `submit_plan`。`request_user_input` 只可用于真正的澄清，不能替代提交计划。用户确认前不得写设计或实现。
 

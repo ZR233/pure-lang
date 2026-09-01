@@ -39,7 +39,8 @@ definition hash、Mode snapshot、active/terminal、当前 stage、时间和最�
 
 定义包含 title、goal、initialStageId、stages 与 transitions。最多 32 个阶段、96 条边，规范化 JSON
 最大 64 KiB。stage id 只允许小写 ASCII、数字、`-`、`_`，长度 1–64。非终态必须有指令、完成标准
-与出边；终态禁止出边；允许自环、循环和返工；同一 from/to 只能出现一次。
+与出边；终态禁止出边；wire 调用中每个 stage 都显式携带 `terminal` 布尔值，避免把终态按默认
+`false` 编译。允许自环、循环和返工；同一 from/to 只能出现一次。
 
 纯编译器先做 schema/大小/唯一性检查，再校验端点与初态；从初态正向遍历拒绝不可达节点，从所有
 终态反向遍历拒绝无法终结的非终态。成功后保留声明顺序用于 UI，以 canonical JSON 计算稳定 hash；
@@ -53,7 +54,8 @@ definition hash、Mode snapshot、active/terminal、当前 stage、时间和最�
   最新 id/revision；活跃 run 拒绝。
 - `status { view = current | graph | history }`：未编译返回 revision 0 和 compile 指引。
 - `transition { expectedRunId, expectedRevision, expectedStageId, toStageId, reason, completion }`：
-  表示完成当前阶段并原子进入直接相邻阶段；进入 terminal stage 时 run 终止。
+  表示完成当前阶段并原子进入直接相邻阶段；`completion` 只含 `summary` 与 `evidence`，拒绝
+  `workflowStateNote` 等旧字段或扩展字段；进入 terminal stage 时 run 终止。
 - `supersede { expectedRunId, expectedRevision, expectedStageId, reason, definition }`：先完整编译 replacement，
   再原子归档旧 run 并在同 lineage 创建新 run；不允许原地 patch 图。
 
