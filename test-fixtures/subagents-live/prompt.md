@@ -6,7 +6,7 @@
 `planning → awaiting_confirmation → editing_documents → working → integrating → reviewing → completed`，另有终态 `stopped`。`completed` 与 `stopped` 不得有 outgoing transition。
 每个 stage 都显式传 `terminal`，仅 `completed`、`stopped` 为 `true`；每次 transition 的 `completion` 只传 `summary` 与 `evidence`，不得传 `workflowStateNote` 或其它字段。
 
-Root 在 planning 查询 `list_agent_profiles`，并行派出两个任务互异的只读 explorer。两者 terminal 后，按真实 agentId 读取 canonical nonempty durable submissions，再综合为以一级 Markdown 标题开头的完整计划并调用 `submit_plan`。`request_user_input` 只可用于真正的澄清，不能替代提交计划。用户确认前不得写设计或实现。
+Root 在 planning 查询 `list_agent_profiles`，并行派出两个任务互异的只读 explorer。两者 terminal 后，按真实 agentId 读取 canonical nonempty durable submissions，再综合完整计划；先调用 `workflow_state.transition` 从 planning 进入 awaiting_confirmation，随后才以一级 Markdown 标题调用 `submit_plan`。真实任务在 planning 有不确定项时应使用 `request_user_input` 澄清；本 fixture 已给出完整事实与选择，不存在需澄清项，因此不得额外提问。`request_user_input` 不能替代提交计划。用户确认前不得写设计或实现。
 
 确认后 root 亲自写 `design/subagents-orchestration.md`，内容包含 `ROOT_DESIGN_MARKER`。设计基线完成后，并行派出 directory executor 与 worktree executor；两者都必须在首次 wait/read 前完成 spawn。实现完成后 root 审查并显式 cherry-pick worktree commit，再以 `workspaceDisposition:"cleanup"` 关闭 worktree child。cleanup 后派全新的只读 reviewer。最终 reviewer durable verdict 为 `REVIEWER_READ_ONLY_APPROVED` 后，root 才运行最终 `cargo test` 并输出 `PURE_SUBAGENTS_LIVE_OK`。若 reviewer 报告 `REVIEWER_FINDING`，修复并重新整合后必须派新的 reviewer。
 

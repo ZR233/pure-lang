@@ -81,7 +81,9 @@ definition hash、Mode snapshot、active/terminal、当前 stage、时间和最�
 `mode.task` 默认编译 `planning -> awaiting_confirmation -> editing_documents -> working -> integrating ->
 reviewing -> completed`，并提供 stopped 终态。确认修改回到 planning；代码 finding 回到 working，设计
 finding 回到 editing_documents；两条返工路径都必须重新经过 integrating 和 reviewing。完整计划必须
-以一级 Markdown 标题开头，并用自由工具 `submit_plan { plan }` 请求批准或修订；
+在 planning 形成后先 transition 到 awaiting_confirmation，再以一级 Markdown 标题开头并用自由工具
+`submit_plan { plan }` 请求批准或修订；planning 仅在确有缺失决策时用 `request_user_input` 澄清，
+不得提前调用 `submit_plan`。
 `request_user_input` 只用于计划形成前的缺失信息与澄清。两者都复用
 通用 `UserInput` continuation，进入 `completed` 后调用 `complete`。
 `completed` 与 `stopped` 都是无任何 outgoing transition 的 terminal stage；停止边只从非 terminal 活动
