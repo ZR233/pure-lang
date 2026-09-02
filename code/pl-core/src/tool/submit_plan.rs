@@ -1,13 +1,11 @@
-use futures::FutureExt;
+use std::future::Future;
+
 use pl_protocol::{PureError, UserQuestion, UserQuestionOption};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::ask_user::execute_user_input;
-use super::{
-    BoxFuture, Tool, ToolBatchPolicy, ToolCallContext, ToolInput, ToolResult, TypedTool,
-    deserialize_tool_input,
-};
+use super::{StaticTool, ToolBatchPolicy, ToolCallContext, ToolPolicy, ToolResult};
 use crate::turn::ToolEffect;
 
 #[derive(Debug, Default)]
@@ -15,7 +13,7 @@ pub struct SubmitPlanTool;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct SubmitPlanInput {
+pub struct SubmitPlanInput {
     /// The complete final plan in Markdown.
     plan: String,
 }
@@ -27,39 +25,33 @@ struct SubmitPlanResult {
     message: String,
 }
 
-impl Tool for SubmitPlanTool {
-    fn name(&self) -> &str {
-        "submit_plan"
+impl StaticTool for SubmitPlanTool {
+    type Input = SubmitPlanInput;
+
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        crate::tool::StaticToolDefinition::new(
+            crate::tool::ToolName::builtin("submit_plan"),
+            "Submit the final Markdown plan for user confirmation. Use only after the plan is \
+             complete; this tool does not execute the plan. Use request_user_input instead when \
+             information is missing or clarification is needed.",
+        )
     }
 
-    fn description(&self) -> &str {
-        "Submit the final Markdown plan for user confirmation. Use only after the plan is \
-         complete; this tool does not execute the plan. Use request_user_input instead when \
-         information is missing or clarification is needed."
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::default()
+            .with_effect(ToolEffect::Read)
+            .with_batch_policy(ToolBatchPolicy::Solo)
     }
 
-    fn input_schema(&self) -> serde_json::Value {
-        TypedTool::<SubmitPlanInput>::new(self.name(), self.description()).input_schema()
-    }
-
-    fn effect(&self) -> Option<ToolEffect> {
-        Some(ToolEffect::Read)
-    }
-
-    fn batch_policy(&self) -> ToolBatchPolicy {
-        ToolBatchPolicy::Solo
-    }
-
-    fn execute<'a>(
-        &'a self,
-        input: ToolInput,
+    fn execute(
+        &self,
+        args: SubmitPlanInput,
         context: ToolCallContext,
-    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
+    ) -> impl Future<Output = Result<ToolResult, PureError>> + Send {
         async move {
-            let args = deserialize_tool_input::<SubmitPlanInput>(self.name(), input.arguments)?;
             if !has_markdown_level_one_heading(args.plan.trim()) {
                 return Err(PureError::ToolExecutionFailed {
-                    tool: self.name().to_string(),
+                    tool: "submit_plan".to_string(),
                     error: "plan must start with a level-one Markdown heading".to_string(),
                 });
             }
@@ -69,11 +61,11 @@ impl Tool for SubmitPlanTool {
                     .to_string(),
             })
             .map_err(|error| PureError::ToolExecutionFailed {
-                tool: self.name().to_string(),
+                tool: "submit_plan".to_string(),
                 error: format!("failed to serialize submission result: {error}"),
             })?;
             execute_user_input(
-                self.name(),
+                "submit_plan",
                 vec![UserQuestion {
                     id: "plan_confirmation".to_string(),
                     header: "Plan".to_string(),
@@ -87,8 +79,9 @@ impl Tool for SubmitPlanTool {
                         },
                         UserQuestionOption {
                             label: "Revise".to_string(),
-                            description: "Return to planning and incorporate the requested changes."
-                                .to_string(),
+                            description:
+                                "Return to planning and incorporate the requested changes."
+                                    .to_string(),
                         },
                     ]),
                 }],
@@ -97,7 +90,6 @@ impl Tool for SubmitPlanTool {
             )
             .await
         }
-        .boxed()
     }
 }
 
@@ -114,7 +106,9 @@ mod tests {
 
     use super::*;
     use crate::TurnOptions;
-    use crate::tool::{ToolApprovalContext, ToolDirective, WorkspaceAccess};
+    use crate::tool::{
+        StaticToolTestExt, ToolApprovalContext, ToolDirective, ToolInput, WorkspaceAccess,
+    };
 
     fn context() -> ToolCallContext {
         let options = TurnOptions::default().with_user_input_end_turn();
@@ -129,7 +123,7 @@ mod tests {
     async fn reuses_the_markdown_submission_contract_with_generic_interaction() {
         let plan = "  # Plan\n\n1. Inspect\n2. Implement\n3. Verify\n  ";
         let output = SubmitPlanTool
-            .execute(
+            .execute_raw(
                 ToolInput {
                     arguments: serde_json::json!({"plan": plan}),
                 },
@@ -186,7 +180,7 @@ mod tests {
         ] {
             assert!(
                 SubmitPlanTool
-                    .execute(ToolInput { arguments }, context())
+                    .execute_raw(ToolInput { arguments }, context())
                     .await
                     .is_err()
             );

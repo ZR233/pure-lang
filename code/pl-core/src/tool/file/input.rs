@@ -3,7 +3,7 @@ use serde::Deserialize;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(super) struct WriteFileInput {
+pub struct WriteFileInput {
     /// Workspace-relative or permitted absolute destination path.
     pub path: String,
     /// UTF-8 text content.
@@ -14,7 +14,7 @@ pub(super) struct WriteFileInput {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
-pub(super) enum WriteMode {
+pub enum WriteMode {
     Create,
     Overwrite,
     Append,
@@ -22,14 +22,14 @@ pub(super) enum WriteMode {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(super) struct PathInput {
+pub struct PathInput {
     /// Workspace-relative or permitted absolute path.
     pub path: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(super) struct DeletePathInput {
+pub struct DeletePathInput {
     /// Workspace-relative or permitted absolute path.
     pub path: String,
     /// Explicit file or directory deletion mode.
@@ -44,7 +44,7 @@ impl DeletePathInput {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub(super) enum DeleteMode {
+pub enum DeleteMode {
     File,
     EmptyDirectory,
     RecursiveDirectory,
@@ -52,7 +52,7 @@ pub(super) enum DeleteMode {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(super) struct CopyMoveInput {
+pub struct CopyMoveInput {
     /// Existing source path.
     pub from: String,
     /// Destination path.
@@ -69,7 +69,7 @@ impl CopyMoveInput {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-pub(super) enum PathCollision {
+pub enum PathCollision {
     FailIfExists,
     Overwrite,
 }

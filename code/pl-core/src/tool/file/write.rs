@@ -1,4 +1,5 @@
-use futures::FutureExt;
+use std::future::Future;
+
 use pl_protocol::PureError;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
@@ -6,10 +7,7 @@ use tokio::io::AsyncWriteExt;
 use super::helpers::*;
 use super::input::*;
 use crate::path_safety::remove_dir_all_no_follow_async;
-use crate::tool::{
-    BoxFuture, Tool, ToolCallContext, ToolInput, ToolResult, ToolWorkspace, TypedTool,
-    deserialize_tool_input, tool_error,
-};
+use crate::tool::{StaticTool, ToolCallContext, ToolPolicy, ToolResult, ToolWorkspace, tool_error};
 use crate::turn::ToolEffect;
 
 #[derive(Debug, Clone)]
@@ -67,32 +65,28 @@ impl MovePathTool {
     }
 }
 
-impl Tool for WriteFileTool {
-    fn name(&self) -> &str {
-        "write_file"
+impl StaticTool for WriteFileTool {
+    type Input = WriteFileInput;
+
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        crate::tool::StaticToolDefinition::new(
+            crate::tool::ToolName::builtin("write_file"),
+            "Write UTF-8 text to a workspace file using create, overwrite, or append mode.",
+        )
     }
 
-    fn description(&self) -> &str {
-        "Write UTF-8 text to a workspace file using create, overwrite, or append mode."
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::default().with_effect(ToolEffect::WorkspaceWrite)
     }
 
-    fn input_schema(&self) -> serde_json::Value {
-        TypedTool::<WriteFileInput>::new(self.name(), self.description()).input_schema()
-    }
-
-    fn effect(&self) -> Option<ToolEffect> {
-        Some(ToolEffect::WorkspaceWrite)
-    }
-
-    fn execute<'a>(
-        &'a self,
-        input: ToolInput,
+    fn execute(
+        &self,
+        input: WriteFileInput,
         context: ToolCallContext,
-    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
+    ) -> impl Future<Output = Result<ToolResult, PureError>> + Send {
         async move {
             self.workspace.ensure_workspace_writable()?;
             let _write_guard = self.workspace.write_lock().await;
-            let input: WriteFileInput = deserialize_tool_input(self.name(), input.arguments)?;
             let paths = workspace(&self.workspace, &context).await?;
             let path = paths.resolve_for_write(&input.path).await?;
             self.workspace.ensure_path_writable(&path)?;
@@ -128,36 +122,31 @@ impl Tool for WriteFileTool {
                 paths.display_relative(&path)
             )))
         }
-        .boxed()
     }
 }
 
-impl Tool for CreateDirectoryTool {
-    fn name(&self) -> &str {
-        "create_directory"
+impl StaticTool for CreateDirectoryTool {
+    type Input = PathInput;
+
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        crate::tool::StaticToolDefinition::new(
+            crate::tool::ToolName::builtin("create_directory"),
+            "Create a directory inside the workspace.",
+        )
     }
 
-    fn description(&self) -> &str {
-        "Create a directory inside the workspace."
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::default().with_effect(ToolEffect::WorkspaceWrite)
     }
 
-    fn input_schema(&self) -> serde_json::Value {
-        TypedTool::<PathInput>::new(self.name(), self.description()).input_schema()
-    }
-
-    fn effect(&self) -> Option<ToolEffect> {
-        Some(ToolEffect::WorkspaceWrite)
-    }
-
-    fn execute<'a>(
-        &'a self,
-        input: ToolInput,
+    fn execute(
+        &self,
+        input: PathInput,
         context: ToolCallContext,
-    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
+    ) -> impl Future<Output = Result<ToolResult, PureError>> + Send {
         async move {
             self.workspace.ensure_workspace_writable()?;
             let _write_guard = self.workspace.write_lock().await;
-            let input: PathInput = deserialize_tool_input(self.name(), input.arguments)?;
             let paths = workspace(&self.workspace, &context).await?;
             let path = paths.resolve_for_write(&input.path).await?;
             self.workspace.ensure_path_writable(&path)?;
@@ -167,36 +156,31 @@ impl Tool for CreateDirectoryTool {
                 paths.display_relative(&path)
             )))
         }
-        .boxed()
     }
 }
 
-impl Tool for DeletePathTool {
-    fn name(&self) -> &str {
-        "delete_path"
+impl StaticTool for DeletePathTool {
+    type Input = DeletePathInput;
+
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        crate::tool::StaticToolDefinition::new(
+            crate::tool::ToolName::builtin("delete_path"),
+            "Delete a workspace file, empty directory, or recursive directory using an explicit mode.",
+        )
     }
 
-    fn description(&self) -> &str {
-        "Delete a workspace file, empty directory, or recursive directory using an explicit mode."
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::default().with_effect(ToolEffect::WorkspaceWrite)
     }
 
-    fn input_schema(&self) -> serde_json::Value {
-        TypedTool::<DeletePathInput>::new(self.name(), self.description()).input_schema()
-    }
-
-    fn effect(&self) -> Option<ToolEffect> {
-        Some(ToolEffect::WorkspaceWrite)
-    }
-
-    fn execute<'a>(
-        &'a self,
-        input: ToolInput,
+    fn execute(
+        &self,
+        input: DeletePathInput,
         context: ToolCallContext,
-    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
+    ) -> impl Future<Output = Result<ToolResult, PureError>> + Send {
         async move {
             self.workspace.ensure_workspace_writable()?;
             let _write_guard = self.workspace.write_lock().await;
-            let input: DeletePathInput = deserialize_tool_input(self.name(), input.arguments)?;
             let paths = workspace(&self.workspace, &context).await?;
             let path = paths.resolve_existing(&input.path).await?;
             self.workspace.ensure_path_writable(&path)?;
@@ -205,13 +189,13 @@ impl Tool for DeletePathTool {
                 (false, DeleteMode::File) => tokio::fs::remove_file(&path).await?,
                 (false, DeleteMode::EmptyDirectory | DeleteMode::RecursiveDirectory) => {
                     return Err(tool_error(
-                        self.name(),
+                        "delete_path",
                         "delete mode requires a directory but path is a file",
                     ));
                 }
                 (true, DeleteMode::File) => {
                     return Err(tool_error(
-                        self.name(),
+                        "delete_path",
                         "delete mode file cannot delete a directory",
                     ));
                 }
@@ -219,7 +203,7 @@ impl Tool for DeletePathTool {
                 (true, DeleteMode::RecursiveDirectory) => {
                     remove_dir_all_no_follow_async(paths.root(), &path)
                         .await
-                        .map_err(|error| tool_error(self.name(), error))?;
+                        .map_err(|error| tool_error("delete_path", error))?;
                 }
             }
             self.workspace.notify_deleted(&path).await;
@@ -228,36 +212,31 @@ impl Tool for DeletePathTool {
                 paths.display_relative(&path)
             )))
         }
-        .boxed()
     }
 }
 
-impl Tool for CopyPathTool {
-    fn name(&self) -> &str {
-        "copy_path"
+impl StaticTool for CopyPathTool {
+    type Input = CopyMoveInput;
+
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        crate::tool::StaticToolDefinition::new(
+            crate::tool::ToolName::builtin("copy_path"),
+            "Copy a file inside the workspace.",
+        )
     }
 
-    fn description(&self) -> &str {
-        "Copy a file inside the workspace."
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::default().with_effect(ToolEffect::WorkspaceWrite)
     }
 
-    fn input_schema(&self) -> serde_json::Value {
-        TypedTool::<CopyMoveInput>::new(self.name(), self.description()).input_schema()
-    }
-
-    fn effect(&self) -> Option<ToolEffect> {
-        Some(ToolEffect::WorkspaceWrite)
-    }
-
-    fn execute<'a>(
-        &'a self,
-        input: ToolInput,
+    fn execute(
+        &self,
+        input: CopyMoveInput,
         context: ToolCallContext,
-    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
+    ) -> impl Future<Output = Result<ToolResult, PureError>> + Send {
         async move {
             self.workspace.ensure_workspace_writable()?;
             let _write_guard = self.workspace.write_lock().await;
-            let input: CopyMoveInput = deserialize_tool_input(self.name(), input.arguments)?;
             let paths = workspace(&self.workspace, &context).await?;
             let from = paths.resolve_existing(&input.from).await?;
             let to = paths.resolve_for_write(&input.to).await?;
@@ -265,7 +244,7 @@ impl Tool for CopyPathTool {
             ensure_overwrite(
                 &to,
                 input.collision() == PathCollision::Overwrite,
-                self.name(),
+                "copy_path",
             )
             .await?;
             if let Some(parent) = to.parent() {
@@ -279,36 +258,31 @@ impl Tool for CopyPathTool {
                 paths.display_relative(&to)
             )))
         }
-        .boxed()
     }
 }
 
-impl Tool for MovePathTool {
-    fn name(&self) -> &str {
-        "move_path"
+impl StaticTool for MovePathTool {
+    type Input = CopyMoveInput;
+
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        crate::tool::StaticToolDefinition::new(
+            crate::tool::ToolName::builtin("move_path"),
+            "Move or rename a file or directory inside the workspace.",
+        )
     }
 
-    fn description(&self) -> &str {
-        "Move or rename a file or directory inside the workspace."
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::default().with_effect(ToolEffect::WorkspaceWrite)
     }
 
-    fn input_schema(&self) -> serde_json::Value {
-        TypedTool::<CopyMoveInput>::new(self.name(), self.description()).input_schema()
-    }
-
-    fn effect(&self) -> Option<ToolEffect> {
-        Some(ToolEffect::WorkspaceWrite)
-    }
-
-    fn execute<'a>(
-        &'a self,
-        input: ToolInput,
+    fn execute(
+        &self,
+        input: CopyMoveInput,
         context: ToolCallContext,
-    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
+    ) -> impl Future<Output = Result<ToolResult, PureError>> + Send {
         async move {
             self.workspace.ensure_workspace_writable()?;
             let _write_guard = self.workspace.write_lock().await;
-            let input: CopyMoveInput = deserialize_tool_input(self.name(), input.arguments)?;
             let paths = workspace(&self.workspace, &context).await?;
             let from = paths.resolve_existing(&input.from).await?;
             let to = paths.resolve_for_write(&input.to).await?;
@@ -317,7 +291,7 @@ impl Tool for MovePathTool {
             ensure_overwrite(
                 &to,
                 input.collision() == PathCollision::Overwrite,
-                self.name(),
+                "move_path",
             )
             .await?;
             if let Some(parent) = to.parent() {
@@ -332,6 +306,5 @@ impl Tool for MovePathTool {
                 paths.display_relative(&to)
             )))
         }
-        .boxed()
     }
 }

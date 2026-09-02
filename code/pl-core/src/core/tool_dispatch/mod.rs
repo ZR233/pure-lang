@@ -152,7 +152,9 @@ pub(super) async fn execute_tool_call_batch(
             context
                 .tool_plan
                 .binding(&tool_call.name)
-                .is_some_and(|binding| binding.tool().batch_policy() == ToolBatchPolicy::Solo)
+                .is_some_and(|binding| {
+                    binding.tool().policy().batch_policy() == ToolBatchPolicy::Solo
+                })
         });
 
     for tool_call in tool_calls {
@@ -240,7 +242,7 @@ pub(super) async fn execute_tool_call_batch(
         }
 
         let registered_tool = context.tool_plan.binding(&tool_call.name);
-        let effect = registered_tool.and_then(|entry| entry.tool().effect());
+        let effect = registered_tool.and_then(|entry| entry.tool().policy().effect());
         let allowed = context
             .options
             .execution_policy
@@ -294,7 +296,7 @@ pub(super) async fn execute_tool_call_batch(
 
         let executor_generation = binding.generation();
         let tool = binding.tool();
-        let supports_parallel = tool.supports_parallel_tool_calls()
+        let supports_parallel = tool.policy().supports_parallel_tool_calls()
             && matches!(
                 context.options.tool_execution_mode,
                 ToolExecutionMode::ModelDefault | ToolExecutionMode::Parallel
@@ -303,7 +305,7 @@ pub(super) async fn execute_tool_call_batch(
             context.options.tool_execution_mode,
             ToolExecutionMode::ModelDefault | ToolExecutionMode::Parallel
         ) {
-            tool.runtime_lock_policy()
+            tool.policy().runtime_lock_policy()
         } else {
             ToolRuntimeLockPolicy::Exclusive
         };
@@ -414,8 +416,8 @@ pub(super) async fn execute_tool_call_batch(
                 let tool_input = ToolInput {
                     arguments: invocation.payload.arguments_for_tool(),
                 };
-                let cache_policy = tool.cache_policy(&tool_input.arguments);
-                let invalidates_cache = tool.invalidates_cache(&tool_input.arguments);
+                let cache_policy = tool.policy().cache_policy(&tool_input.arguments);
+                let invalidates_cache = tool.policy().invalidates_cache(&tool_input.arguments);
                 let lock = runtime_lock.clone();
                 let tool_name = invocation.name.clone();
                 let tool_call_for_task = tool_call.clone();
@@ -428,7 +430,7 @@ pub(super) async fn execute_tool_call_batch(
                 let tool_manager = context.core.agent_tools.manager().clone();
                 let tool_plan = context.tool_plan.clone();
                 let tool_effect = effect;
-                let budget_timing = tool.budget_timing();
+                let budget_timing = tool.policy().budget_timing();
                 let suppress_exact_arguments = cache_policy != ToolCachePolicy::Never;
                 if suppress_exact_arguments {
                     let argument_hash = crate::working_set::canonical_content_hash(

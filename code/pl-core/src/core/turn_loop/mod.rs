@@ -152,12 +152,23 @@ pub(super) async fn run_turn_with_trace(
             })
             .await?;
         }
-        let tool_plan = core
-            .acquire_tool_plan()
-            .allowed_by(options.execution_policy.as_ref());
+        let unfiltered_tool_plan = core.acquire_tool_plan_for(session.tool_discovery());
+        let normalized_discovery =
+            unfiltered_tool_plan.normalized_discovery_state(session.tool_discovery());
+        if session.replace_tool_discovery(normalized_discovery) {
+            checkpoint::persist(
+                &options,
+                session,
+                crate::TurnCheckpointReason::WorkingSetChanged,
+            )
+            .await?;
+        }
+        let tool_plan = unfiltered_tool_plan.allowed_by(options.execution_policy.as_ref());
         let iteration_tools = tool_plan.specs().to_vec();
         record_enabled_tools(recorder, &turn_id, iteration, &tool_plan);
-        let iteration_snapshot = turn_instruction_snapshot.clone();
+        let iteration_snapshot = turn_instruction_snapshot
+            .clone()
+            .with_tool_group_instructions(tool_plan.developer_instructions());
         let instruction_bundle = iteration_snapshot.to_bundle();
         let model_capabilities = runtime.effective_model_capabilities();
         let parallel_tool_calls = should_request_parallel_tool_calls(model_capabilities, &options);
@@ -542,6 +553,30 @@ pub(super) async fn run_turn_with_trace(
         };
         billing.orchestration.merge(&tool_batch.orchestration);
         let mut tool_results = tool_batch.records;
+        let mut discovery = session.tool_discovery().clone();
+        for result in &tool_results {
+            for event in &result.runtime_events {
+                if let crate::tool::ToolDirective::RevealTools {
+                    catalog_fingerprint,
+                    tool_names,
+                } = event
+                    && tool_plan.catalog_fingerprint() == Some(catalog_fingerprint.as_str())
+                {
+                    discovery.catalog_fingerprint = Some(catalog_fingerprint.clone());
+                    discovery
+                        .revealed_tool_names
+                        .extend(tool_names.iter().cloned());
+                }
+            }
+        }
+        if session.replace_tool_discovery(tool_plan.normalized_discovery_state(&discovery)) {
+            checkpoint::persist(
+                &options,
+                session,
+                crate::TurnCheckpointReason::WorkingSetChanged,
+            )
+            .await?;
+        }
         progress.tool_detail(recorder, "工具执行完成，准备回写结果。");
         let requested_interaction = tool_results.iter().any(|tool_result| {
             tool_result.runtime_events.iter().any(|event| {
@@ -569,6 +604,7 @@ pub(super) async fn run_turn_with_trace(
                     | crate::tool::ToolDirective::SkillActivated { .. }
                     | crate::tool::ToolDirective::ToolResultRevision { .. }
                     | crate::tool::ToolDirective::OutputArtifacts { .. }
+                    | crate::tool::ToolDirective::RevealTools { .. }
                     | crate::tool::ToolDirective::AuditMetadata { .. }
                     | crate::tool::ToolDirective::ExecutionFailed
                     | crate::tool::ToolDirective::CacheHit { .. }

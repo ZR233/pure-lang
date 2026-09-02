@@ -2,7 +2,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::tool::TypedTool;
+use crate::tool::typed_tool_input_schema;
 
 pub const TOOL_READ_SESSION_NOTE: &str = "read_session_note";
 pub const TOOL_SEARCH_SESSION_NOTE: &str = "search_session_note";
@@ -50,18 +50,10 @@ impl SessionNoteToolKind {
 
     pub fn input_schema(self) -> Value {
         match self {
-            Self::Read => {
-                TypedTool::<ReadInput>::new(self.name(), self.description()).input_schema()
-            }
-            Self::Search => {
-                TypedTool::<SearchInput>::new(self.name(), self.description()).input_schema()
-            }
-            Self::Write => {
-                TypedTool::<WriteInput>::new(self.name(), self.description()).input_schema()
-            }
-            Self::ApplyPatch => {
-                TypedTool::<ApplyPatchInput>::new(self.name(), self.description()).input_schema()
-            }
+            Self::Read => typed_tool_input_schema::<ReadInput>(),
+            Self::Search => typed_tool_input_schema::<SearchInput>(),
+            Self::Write => typed_tool_input_schema::<WriteInput>(),
+            Self::ApplyPatch => typed_tool_input_schema::<ApplyPatchInput>(),
         }
     }
 

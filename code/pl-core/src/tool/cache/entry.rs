@@ -34,6 +34,7 @@ pub(super) fn cache_entry(
             | ToolDirective::SkillActivated { .. }
             | ToolDirective::ToolResultRevision { .. }
             | ToolDirective::OutputArtifacts { .. }
+            | ToolDirective::RevealTools { .. }
             | ToolDirective::AuditMetadata { .. }
             | ToolDirective::ExecutionFailed
             | ToolDirective::CacheHit { .. }
@@ -84,6 +85,7 @@ pub(super) fn compact_cache_hit(entry: &ToolCacheEntry, reuse_kind: CacheReuseKi
             | ToolDirective::SkillActivated { .. }
             | ToolDirective::ToolResultRevision { .. }
             | ToolDirective::OutputArtifacts { .. }
+            | ToolDirective::RevealTools { .. }
             | ToolDirective::AuditMetadata { .. }
             | ToolDirective::ExecutionFailed
             | ToolDirective::CacheHit { .. }

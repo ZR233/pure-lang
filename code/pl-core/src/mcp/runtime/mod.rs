@@ -10,7 +10,10 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::config::EffectiveMcpServerConfig;
 use crate::tool::cache::ToolCachePolicy;
-use crate::tool::{LocalTool, Tool, ToolDisplayMetadata, ToolRuntimeLockPolicy};
+use crate::tool::{
+    DynTool, DynamicToolExecutor, StaticToolDefinition, ToolDefinition, ToolDisplayMetadata,
+    ToolExecution, ToolName, ToolPolicy, ToolRuntimeLockPolicy,
+};
 use crate::turn::ToolEffect;
 
 use super::McpImageOutputContext;
@@ -281,27 +284,24 @@ impl McpTurnLease {
     }
 
     /// 构造该 lease 的全部统一工具：MCP server 工具 + resource façade。
-    pub fn agent_tools(&self, image_output: Option<McpImageOutputContext>) -> Vec<Arc<dyn Tool>> {
+    pub fn agent_tools(&self, image_output: Option<McpImageOutputContext>) -> Result<Vec<DynTool>> {
         let mut tools = Vec::with_capacity(self.tools.len() + ResourceToolKind::all().len());
         for descriptor in self.tools.iter() {
-            tools.push(
-                Arc::new(self.registered_tool(descriptor.clone(), image_output.clone()))
-                    as Arc<dyn Tool>,
-            );
+            tools.push(self.registered_tool(descriptor.clone(), image_output.clone())?);
         }
         if !self.resource_server_ids.is_empty() {
             for kind in ResourceToolKind::all() {
-                tools.push(Arc::new(self.registered_resource_tool(*kind)) as Arc<dyn Tool>);
+                tools.push(self.registered_resource_tool(*kind)?);
             }
         }
-        tools
+        Ok(tools)
     }
 
     fn registered_tool(
         &self,
         descriptor: McpRuntimeToolDescriptor,
         image_output: Option<McpImageOutputContext>,
-    ) -> LocalTool {
+    ) -> Result<DynTool> {
         let lease = self.clone();
         let server_id = descriptor.server_id.clone();
         let raw_name = descriptor.raw_name.clone();
@@ -312,16 +312,38 @@ impl McpTurnLease {
         };
         let handler_server_id = server_id.clone();
         let handler_raw_name = raw_name.clone();
-        let mut tool = LocalTool::new(
-            descriptor.exposed_name,
+        let mut static_definition = StaticToolDefinition::new(
+            ToolName::with_wire_name(&server_id, &raw_name, &descriptor.exposed_name)?,
             descriptor.description,
-            descriptor.input_schema,
-            move |input, _context| {
+        )
+        .with_display_metadata(display_metadata);
+        if let Some(output_schema) = descriptor.output_schema {
+            static_definition = static_definition.with_output_schema(output_schema);
+        }
+        let definition = ToolDefinition::function(static_definition, descriptor.input_schema);
+        let mut policy = ToolPolicy::default()
+            .with_cache_policy(ToolCachePolicy::Never)
+            .with_runtime_lock_policy(ToolRuntimeLockPolicy::Exclusive);
+        if let Some(effect) = descriptor.effect {
+            policy = policy.with_effect(effect);
+            if effect == ToolEffect::Read {
+                policy = policy
+                    .with_programmatic_calls()
+                    .with_parallel_tool_calls()
+                    .with_runtime_lock_policy(ToolRuntimeLockPolicy::Shared);
+            }
+        }
+        Ok(DynTool::new_executor(DynamicToolExecutor::new(
+            definition,
+            policy,
+            ToolExecution::Local,
+            move |invocation| {
                 let lease = lease.clone();
                 let server_id = handler_server_id.clone();
                 let raw_name = handler_raw_name.clone();
                 let image_output = image_output.clone();
                 async move {
+                    let (input, _context) = invocation.into_parts();
                     let result = lease
                         .call_tool(server_id.clone(), raw_name.clone(), input.arguments)
                         .await?;
@@ -329,32 +351,28 @@ impl McpTurnLease {
                         .await
                 }
             },
-        )
-        .with_output_schema(descriptor.output_schema)
-        .with_display_metadata(display_metadata)
-        .with_cache_policy(ToolCachePolicy::Never)
-        .with_runtime_lock_policy(ToolRuntimeLockPolicy::Exclusive);
-        if let Some(effect) = descriptor.effect {
-            tool = tool.with_effect(effect);
-            if effect == ToolEffect::Read {
-                tool = tool
-                    .with_programmatic_calls()
-                    .with_parallel_tool_calls()
-                    .with_runtime_lock_policy(ToolRuntimeLockPolicy::Shared);
-            }
-        }
-        tool
+        )))
     }
 
-    fn registered_resource_tool(&self, kind: ResourceToolKind) -> LocalTool {
+    fn registered_resource_tool(&self, kind: ResourceToolKind) -> Result<DynTool> {
         let lease = self.clone();
-        LocalTool::new(
-            kind.name(),
-            kind.description(),
+        let definition = ToolDefinition::function(
+            StaticToolDefinition::new(ToolName::bare(kind.name())?, kind.description()),
             kind.input_schema(),
-            move |input, _context| {
+        );
+        let policy = ToolPolicy::read_only()
+            .with_programmatic_calls()
+            .with_parallel_tool_calls()
+            .with_runtime_lock_policy(ToolRuntimeLockPolicy::Shared)
+            .with_cache_policy(ToolCachePolicy::Never);
+        Ok(DynTool::new_executor(DynamicToolExecutor::new(
+            definition,
+            policy,
+            ToolExecution::Local,
+            move |invocation| {
                 let lease = lease.clone();
                 async move {
+                    let (input, _context) = invocation.into_parts();
                     let (server_id, operation) = kind.parse(input.arguments)?;
                     let value = lease
                         .guard
@@ -364,12 +382,7 @@ impl McpTurnLease {
                     crate::tool::ToolResult::json(value)
                 }
             },
-        )
-        .with_effect(ToolEffect::Read)
-        .with_programmatic_calls()
-        .with_parallel_tool_calls()
-        .with_runtime_lock_policy(ToolRuntimeLockPolicy::Shared)
-        .with_cache_policy(ToolCachePolicy::Never)
+        )))
     }
 }
 

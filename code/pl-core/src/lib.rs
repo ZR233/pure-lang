@@ -1,3 +1,8 @@
+#![allow(
+    clippy::manual_async_fn,
+    reason = "StaticTool intentionally exposes an RPITIT future with an explicit Send bound"
+)]
+
 mod agent_runtime;
 pub mod atomic_file;
 pub mod attachment;
@@ -98,8 +103,9 @@ pub use pl_protocol::{
     PipelineStage, ProviderCatalogSnapshot, ProviderConnectionModeDescriptor,
     ProviderPresetDescriptor, ProviderServiceCapabilitiesDescriptor, PureError, Result,
     RetryDisposition, RuntimeCostAmount, RuntimeUsageSnapshot, SkillActivation, TokenUsageSnapshot,
-    ToolApprovalResolution, ToolResultReceipt, TurnFailure, TurnFailureCategory, UserInputAnswer,
-    UserInputRequest, UserInputResponse, UserQuestion, UserQuestionOption,
+    ToolApprovalResolution, ToolDiscoveryState, ToolResultReceipt, TurnFailure,
+    TurnFailureCategory, UserInputAnswer, UserInputRequest, UserInputResponse, UserQuestion,
+    UserQuestionOption,
 };
 pub(crate) use prompt_cache::{
     PromptCacheInput, derive_prompt_cache_key, prepare_prompt_context, stable_tool_schemas,

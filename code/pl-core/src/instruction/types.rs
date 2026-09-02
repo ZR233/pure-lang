@@ -90,6 +90,7 @@ pub enum InstructionSourceKind {
     ConfigDeveloper,
     ProfileDeveloper,
     Skills,
+    ToolGroup,
     SubagentConstraint,
     SubagentForce,
     ConfigUser,
@@ -125,6 +126,7 @@ impl InstructionSourceKind {
             Self::ExecutionProfile
                 | Self::Platform
                 | Self::Skills
+                | Self::ToolGroup
                 | Self::SubagentConstraint
                 | Self::SubagentForce
                 | Self::SkillInvocation

@@ -50,8 +50,23 @@ pub struct AgentWorkingState {
     /// 子 Agent 创建时冻结的有效工作区；根 Agent 不设置此字段。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_assignment: Option<crate::AgentWorkspaceAssignmentSnapshot>,
+    /// 当前 AgentSession 已揭示的 deferred 工具目录状态。
+    #[serde(default)]
+    pub tool_discovery: ToolDiscoveryState,
     #[serde(default)]
     pub revision: u64,
+}
+
+/// Provider-neutral deferred tool reveal state.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolDiscoveryState {
+    /// Fingerprint of the deferred catalog that produced the reveal set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_fingerprint: Option<String>,
+    /// Provider-visible names revealed for the next model step.
+    #[serde(default)]
+    pub revealed_tool_names: Vec<String>,
 }
 
 /// 对话上下文恢复方式；两种方式都保留外部世界状态。

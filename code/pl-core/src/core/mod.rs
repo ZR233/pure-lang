@@ -21,7 +21,7 @@ use crate::session::AgentSession;
 use crate::tool::{
     AgentToolSet, BeforeModelStepHook, ExecutionBackend, GitCredentialProvider, GitTool,
     GitToolKind, GitWorkspaceConfig, SkillManageTool, SkillToolMode, SkillViewTool, SkillsListTool,
-    SubagentContext, Tool, ToolGroupId, ToolPlan, WorkspaceAccess,
+    SubagentContext, ToolGroupId, ToolInstallGroup, ToolPlan, WorkspaceAccess,
 };
 #[cfg(test)]
 use crate::tool::{LocalWorkspaceFileTool, WorkspaceFileToolKind, WriteFileTool};
@@ -125,17 +125,25 @@ impl TurnEngine {
 
     /// 测试专用：向 host 来源追加单个工具，等价于旧 `register_tool`。
     #[cfg(test)]
-    pub(crate) fn register_test_tool(&mut self, tool: impl crate::tool::Tool + 'static) {
-        let name = tool.name().to_string();
-        let _ = self.agent_tools.install(
+    pub(crate) fn register_test_tool(&mut self, tool: impl Into<crate::tool::DynTool>) {
+        let tool = tool.into();
+        let name = tool.definition().name().wire_name().to_string();
+        let _ = self.agent_tools.install(ToolInstallGroup::direct(
             ToolGroupId::new(format!("test:{name}")),
-            vec![std::sync::Arc::new(tool)],
-        );
+            vec![tool],
+        ));
     }
 
     /// 冻结一次模型 step 的不可变工具 plan。
     pub(crate) fn acquire_tool_plan(&self) -> ToolPlan {
         self.agent_tools.freeze()
+    }
+
+    pub(crate) fn acquire_tool_plan_for(
+        &self,
+        discovery: &pl_protocol::ToolDiscoveryState,
+    ) -> ToolPlan {
+        self.agent_tools.freeze_with_discovery(discovery)
     }
 
     /// 返回当前 Turn 可见的工具名（本地与共享注册表合并）。
@@ -212,10 +220,10 @@ impl TurnEngine {
                 attachment_runtime,
             )
         {
-            self.agent_tools.install(
+            self.agent_tools.install(ToolInstallGroup::direct(
                 ToolGroupId::new("view_image"),
-                vec![std::sync::Arc::new(tool)],
-            )?;
+                vec![tool.into()],
+            ))?;
         }
         Ok(())
     }
@@ -231,10 +239,10 @@ impl TurnEngine {
         B: ExecutionBackend + 'static,
         P: GitCredentialProvider + 'static,
     {
-        self.agent_tools.install(
+        self.agent_tools.install(ToolInstallGroup::direct(
             ToolGroupId::new("git"),
             git_tools(config, backend, credential_provider),
-        )
+        ))
     }
 
     pub fn install_skill_tools(
@@ -267,10 +275,10 @@ impl TurnEngine {
         });
         let tool_workspace =
             crate::tool::ToolWorkspace::new(workspace).with_lsp_runtime(self.lsp_runtime.clone());
-        self.agent_tools.install(
+        self.agent_tools.install(ToolInstallGroup::direct(
             ToolGroupId::new("skills"),
             crate::tool::skill_tools_from_catalog(catalog, tool_workspace, mode),
-        )
+        ))
     }
 
     fn register_skill_tools_for_workspace(
@@ -293,25 +301,19 @@ impl TurnEngine {
             crate::tool::ToolWorkspace::new(workspace).with_lsp_runtime(self.lsp_runtime.clone());
         let tools = if let Some(catalog) = self.skill_catalog.clone() {
             vec![
-                std::sync::Arc::new(SkillsListTool::from_catalog(
-                    catalog.clone(),
-                    tool_workspace.clone(),
-                )) as std::sync::Arc<dyn Tool>,
-                std::sync::Arc::new(SkillViewTool::from_catalog(
-                    catalog.clone(),
-                    tool_workspace.clone(),
-                )),
-                std::sync::Arc::new(SkillManageTool::from_catalog(catalog, tool_workspace)),
+                SkillsListTool::from_catalog(catalog.clone(), tool_workspace.clone()).into(),
+                SkillViewTool::from_catalog(catalog.clone(), tool_workspace.clone()).into(),
+                SkillManageTool::from_catalog(catalog, tool_workspace).into(),
             ]
         } else {
             vec![
-                std::sync::Arc::new(SkillsListTool::new(config.clone(), tool_workspace.clone()))
-                    as std::sync::Arc<dyn Tool>,
-                std::sync::Arc::new(SkillViewTool::new(config.clone(), tool_workspace.clone())),
-                std::sync::Arc::new(SkillManageTool::new(config, tool_workspace)),
+                SkillsListTool::new(config.clone(), tool_workspace.clone()).into(),
+                SkillViewTool::new(config.clone(), tool_workspace.clone()).into(),
+                SkillManageTool::new(config, tool_workspace).into(),
             ]
         };
-        self.agent_tools.install(ToolGroupId::new("skills"), tools)
+        self.agent_tools
+            .install(ToolInstallGroup::direct(ToolGroupId::new("skills"), tools))
     }
 
     async fn review_tool_call_with_ai(
@@ -563,7 +565,7 @@ fn git_tools<B, P>(
     config: GitWorkspaceConfig,
     backend: std::sync::Arc<B>,
     credential_provider: std::sync::Arc<P>,
-) -> Vec<std::sync::Arc<dyn Tool>>
+) -> Vec<crate::tool::DynTool>
 where
     B: ExecutionBackend + 'static,
     P: GitCredentialProvider + 'static,
@@ -572,12 +574,13 @@ where
         .iter()
         .copied()
         .map(|kind| {
-            std::sync::Arc::new(GitTool::new(
+            GitTool::new(
                 kind,
                 config.clone(),
                 backend.clone(),
                 credential_provider.clone(),
-            )) as std::sync::Arc<dyn Tool>
+            )
+            .into()
         })
         .collect()
 }

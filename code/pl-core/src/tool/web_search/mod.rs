@@ -1,21 +1,20 @@
 mod client;
-mod input;
+
+use std::future::Future;
 
 use futures::FutureExt;
 use pl_model::{
     HostedWebSearchDialect, SearchCommands, SearchRequest, SearchSettings, ToolSpec,
     WebSearchAction, WebSearchConfig, WebSearchFilters, WebSearchMode, WebSearchUserLocation,
 };
-use pl_protocol::{MessageRole, PureError};
+use pl_protocol::{MessageRole, PureError, Result};
 use serde_json::{Value, json};
 
-use crate::turn::ToolEffect;
-
-pub(crate) use self::client::WebSearchClient;
-use self::input::parse_commands;
+pub use self::client::WebSearchClient;
 use super::{
-    BoxFuture, OutputTruncation, Tool, ToolCallContext, ToolDirective, ToolExecution, ToolInput,
-    ToolResult, ToolSessionRuntime, TypedTool, run_tool_backend_with_cancellation,
+    BoxFuture, OutputTruncation, StaticTool, ToolCallContext, ToolDefinition, ToolDirective,
+    ToolExecution, ToolExecutor, ToolInvocation, ToolName, ToolPolicy, ToolResult,
+    ToolSessionRuntime, run_tool_backend_with_cancellation,
 };
 
 pub const TOOL_WEB_SEARCH: &str = "web_search";
@@ -33,7 +32,8 @@ pub struct WebSearchTool {
 }
 
 impl WebSearchTool {
-    pub(crate) fn new(
+    /// Builds a standalone web-search function tool from an explicit client and model route.
+    pub fn new(
         client: WebSearchClient,
         model: impl Into<String>,
         config: &WebSearchConfig,
@@ -50,34 +50,26 @@ impl WebSearchTool {
     }
 }
 
-impl Tool for WebSearchTool {
-    fn name(&self) -> &str {
-        TOOL_WEB_SEARCH
+impl StaticTool for WebSearchTool {
+    type Input = SearchCommands;
+
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        crate::tool::StaticToolDefinition::new(
+            crate::tool::ToolName::builtin(TOOL_WEB_SEARCH),
+            WEB_SEARCH_DESCRIPTION,
+        )
     }
 
-    fn description(&self) -> &str {
-        WEB_SEARCH_DESCRIPTION
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::read_only().with_parallel_tool_calls()
     }
 
-    fn input_schema(&self) -> Value {
-        TypedTool::<SearchCommands>::new(self.name(), self.description()).input_schema()
-    }
-
-    fn supports_parallel_tool_calls(&self) -> bool {
-        true
-    }
-
-    fn effect(&self) -> Option<ToolEffect> {
-        Some(ToolEffect::Read)
-    }
-
-    fn execute<'a>(
-        &'a self,
-        input: ToolInput,
+    fn execute(
+        &self,
+        commands: SearchCommands,
         context: ToolCallContext,
-    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
+    ) -> impl Future<Output = Result<ToolResult>> + Send {
         async move {
-            let commands = parse_commands(input.arguments)?;
             let action = command_action(&commands);
             let request = SearchRequest {
                 id: format!(
@@ -117,14 +109,14 @@ impl Tool for WebSearchTool {
                 }],
             ))
         }
-        .boxed()
     }
 }
 
 /// Responses 原生 hosted `web_search` 的 schema 载体。
 #[derive(Debug, Clone)]
 pub struct HostedWebSearchTool {
-    schema: ToolSpec,
+    definition: ToolDefinition,
+    policy: ToolPolicy,
 }
 
 impl HostedWebSearchTool {
@@ -135,66 +127,64 @@ impl HostedWebSearchTool {
             WebSearchMode::Live => (true, None),
             WebSearchMode::Disabled => return None,
         };
+        let schema = ToolSpec::WebSearch {
+            dialect: HostedWebSearchDialect::OpenAiResponses,
+            external_web_access,
+            indexed_web_access,
+            filters: (!config.allowed_domains.is_empty()).then(|| WebSearchFilters {
+                allowed_domains: config.allowed_domains.clone(),
+            }),
+            user_location: config
+                .location
+                .as_ref()
+                .filter(|location| !location.is_empty())
+                .map(WebSearchUserLocation::from),
+            search_context_size: config.context_size,
+            search_content_types: None,
+        };
         Some(Self {
-            schema: ToolSpec::WebSearch {
-                dialect: HostedWebSearchDialect::OpenAiResponses,
-                external_web_access,
-                indexed_web_access,
-                filters: (!config.allowed_domains.is_empty()).then(|| WebSearchFilters {
-                    allowed_domains: config.allowed_domains.clone(),
-                }),
-                user_location: config
-                    .location
-                    .as_ref()
-                    .filter(|location| !location.is_empty())
-                    .map(WebSearchUserLocation::from),
-                search_context_size: config.context_size,
-                search_content_types: None,
-            },
+            definition: ToolDefinition::from_trusted_spec(
+                ToolName::builtin(TOOL_WEB_SEARCH),
+                schema,
+            ),
+            policy: ToolPolicy::read_only(),
         })
     }
 
     pub fn deepseek() -> Self {
+        let schema = ToolSpec::WebSearch {
+            dialect: HostedWebSearchDialect::DeepSeekResponses,
+            external_web_access: true,
+            indexed_web_access: None,
+            filters: None,
+            user_location: None,
+            search_context_size: None,
+            search_content_types: None,
+        };
         Self {
-            schema: ToolSpec::WebSearch {
-                dialect: HostedWebSearchDialect::DeepSeekResponses,
-                external_web_access: true,
-                indexed_web_access: None,
-                filters: None,
-                user_location: None,
-                search_context_size: None,
-                search_content_types: None,
-            },
+            definition: ToolDefinition::from_trusted_spec(
+                ToolName::builtin(TOOL_WEB_SEARCH),
+                schema,
+            ),
+            policy: ToolPolicy::read_only(),
         }
     }
 }
 
-impl Tool for HostedWebSearchTool {
-    fn name(&self) -> &str {
-        TOOL_WEB_SEARCH
+impl ToolExecutor for HostedWebSearchTool {
+    fn definition(&self) -> &ToolDefinition {
+        &self.definition
     }
 
-    fn description(&self) -> &str {
-        "Search the web."
-    }
-
-    fn input_schema(&self) -> Value {
-        json!({ "type": "object", "properties": {} })
-    }
-
-    fn effect(&self) -> Option<ToolEffect> {
-        Some(ToolEffect::Read)
+    fn policy(&self) -> &ToolPolicy {
+        &self.policy
     }
 
     fn execution(&self) -> ToolExecution {
         ToolExecution::ProviderHosted
     }
 
-    fn execute<'a>(
-        &'a self,
-        _input: ToolInput,
-        _context: ToolCallContext,
-    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
+    fn execute(&self, _invocation: ToolInvocation) -> BoxFuture<'_, Result<ToolResult>> {
         async {
             Err(PureError::ToolExecutionFailed {
                 tool: TOOL_WEB_SEARCH.to_string(),
@@ -202,10 +192,6 @@ impl Tool for HostedWebSearchTool {
             })
         }
         .boxed()
-    }
-
-    fn spec(&self) -> ToolSpec {
-        self.schema.clone()
     }
 }
 
@@ -322,12 +308,12 @@ mod tests {
                 external_web_access,
                 indexed_web_access,
                 ..
-            } = tool.spec()
+            } = tool.definition().spec()
             else {
                 panic!("hosted schema");
             };
-            assert_eq!(external_web_access, external);
-            assert_eq!(indexed_web_access, indexed);
+            assert_eq!(*external_web_access, external);
+            assert_eq!(*indexed_web_access, indexed);
         }
         assert!(
             HostedWebSearchTool::from_config(&WebSearchConfig {

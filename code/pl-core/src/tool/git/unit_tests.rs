@@ -1,4 +1,4 @@
-//! [`GitTool`] 经 `Tool::execute` 的端到端行为测试。
+//! [`GitTool`] 经静态工具执行契约的端到端行为测试。
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -9,7 +9,7 @@ use pl_protocol::PureError;
 use pretty_assertions::assert_eq;
 
 use super::*;
-use crate::tool::{Tool, ToolCallContext, ToolInput};
+use crate::tool::{StaticToolTestExt, ToolCallContext, ToolInput};
 
 #[derive(Debug, Clone)]
 struct DisplayGitError(&'static str);
@@ -154,7 +154,7 @@ async fn git_status_returns_json_output() {
     let tool = GitTool::new(GitToolKind::Status, workspace_config(), backend, provider);
 
     let output = tool
-        .execute(
+        .execute_raw(
             ToolInput {
                 arguments: serde_json::json!({}),
             },
@@ -186,7 +186,7 @@ async fn git_fetch_uses_provider_token_and_redacts_output() {
     );
 
     let output = tool
-        .execute(
+        .execute_raw(
             ToolInput {
                 arguments: serde_json::json!({"remote": "origin", "prune": true}),
             },
@@ -231,7 +231,7 @@ async fn git_push_rejects_unsafe_branch_before_backend_runs() {
     );
 
     let error = tool
-        .execute(
+        .execute_raw(
             ToolInput {
                 arguments: serde_json::json!({"branch": "../escape"}),
             },
@@ -251,7 +251,7 @@ async fn git_tool_maps_backend_display_error_to_current_tool() {
     let tool = GitTool::new(GitToolKind::Status, workspace_config(), backend, provider);
 
     let error = tool
-        .execute(
+        .execute_raw(
             ToolInput {
                 arguments: serde_json::json!({}),
             },
@@ -274,7 +274,7 @@ async fn git_tool_maps_credential_display_error_to_current_tool() {
     let tool = GitTool::new(GitToolKind::Fetch, workspace_config(), backend, provider);
 
     let error = tool
-        .execute(
+        .execute_raw(
             ToolInput {
                 arguments: serde_json::json!({ "remote": "origin" }),
             },
@@ -313,7 +313,7 @@ async fn git_sync_default_branch_preserves_dirty_workspace_with_provider_token()
     );
 
     let output = tool
-        .execute(
+        .execute_raw(
             ToolInput {
                 arguments: serde_json::json!({ "preserveChanges": true }),
             },

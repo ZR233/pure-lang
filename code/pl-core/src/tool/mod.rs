@@ -80,8 +80,25 @@ pub(crate) fn tool_error(tool: &str, error: impl std::fmt::Display) -> pl_protoc
 }
 
 #[cfg(test)]
+pub(crate) trait StaticToolTestExt: StaticTool {
+    fn execute_raw(
+        &self,
+        input: ToolInput,
+        context: ToolCallContext,
+    ) -> futures::future::BoxFuture<'_, crate::Result<ToolResult>> {
+        let tool_name = self.definition().name().wire_name().to_string();
+        Box::pin(async move {
+            let parsed = deserialize_tool_input::<Self::Input>(&tool_name, input.arguments)?;
+            StaticTool::execute(self, parsed, context).await
+        })
+    }
+}
+
+#[cfg(test)]
+impl<T: StaticTool> StaticToolTestExt for T {}
+
+#[cfg(test)]
 mod tests {
-    use std::fmt;
     use std::sync::Arc;
 
     use super::*;
@@ -140,8 +157,7 @@ mod tests {
             pagination: PaginationInput,
         }
 
-        let definition = TypedTool::<SearchInput>::new("search_product", "Search product records.");
-        let input_schema = definition.input_schema();
+        let input_schema = typed_tool_input_schema::<SearchInput>();
 
         assert_eq!(input_schema["type"], "object");
         assert_eq!(input_schema["additionalProperties"], false);
@@ -226,31 +242,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn local_tool_honors_cancelled_context() {
+    async fn static_tool_adapter_honors_cancelled_context() {
+        #[derive(Debug, Deserialize, JsonSchema)]
+        #[serde(deny_unknown_fields)]
+        struct EmptyInput {}
+
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let tool_calls = calls.clone();
-        let tool = LocalTool::new(
-            "product_tool",
+        let tool = static_tool::<EmptyInput>(StaticToolDefinition::new(
+            ToolName::bare("product_tool").unwrap(),
             "Product tool",
-            serde_json::json!({ "type": "object" }),
-            move |_input, _context| {
-                let tool_calls = tool_calls.clone();
-                async move {
-                    tool_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    Ok(ToolResult::success("ran"))
-                }
-            },
-        );
+        ))
+        .build(move |_input, _context| {
+            let tool_calls = tool_calls.clone();
+            async move {
+                tool_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Ok(ToolResult::success("ran"))
+            }
+        });
         let token = tokio_util::sync::CancellationToken::new();
         token.cancel();
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
         let result = tool
-            .execute(
+            .execute(ToolInvocation::new(
                 ToolInput {
                     arguments: serde_json::json!({}),
                 },
                 ToolCallContext::test(event_tx).with_cancellation(Some(token)),
-            )
+            ))
             .await;
 
         assert!(matches!(
@@ -262,30 +281,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn typed_function_tool_maps_display_error() {
+    async fn typed_function_tool_preserves_handler_error() {
         #[derive(Debug, Deserialize, JsonSchema)]
         struct EmptyInput {}
 
-        #[derive(Debug)]
-        struct DisplayError(&'static str);
-
-        impl fmt::Display for DisplayError {
-            fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str(self.0)
-            }
-        }
-
-        let tool = TypedTool::<EmptyInput>::new("product_tool", "Product tool").handler(
-            |_input, _context| async move { Err::<ToolResult, DisplayError>(DisplayError("boom")) },
-        );
+        let tool = static_tool::<EmptyInput>(StaticToolDefinition::new(
+            ToolName::bare("product_tool").unwrap(),
+            "Product tool",
+        ))
+        .build(|_input, _context| async move {
+            Err(PureError::ToolExecutionFailed {
+                tool: "product_tool".to_string(),
+                error: "boom".to_string(),
+            })
+        });
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
         let result = tool
-            .execute(
+            .execute(ToolInvocation::new(
                 ToolInput {
                     arguments: serde_json::json!({}),
                 },
                 ToolCallContext::test(event_tx),
-            )
+            ))
             .await;
 
         assert!(matches!(

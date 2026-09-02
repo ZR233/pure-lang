@@ -6,19 +6,14 @@ mod ops;
 mod patch;
 mod schema;
 
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use futures::FutureExt;
-use pl_model::ToolSpec;
 use pl_protocol::Result;
 use serde_json::Value;
 
-use crate::tool::cache::ToolCachePolicy;
-use crate::tool::{
-    BoxFuture, Tool, ToolCallContext, ToolInput, ToolResult, ToolWorkspace, tool_error,
-};
-use crate::turn::ToolEffect;
+use crate::tool::{StaticTool, ToolCallContext, ToolPolicy, ToolResult, ToolWorkspace, tool_error};
 
 pub use backend::*;
 pub use container::ContainerWorkspaceFileBackend;
@@ -39,54 +34,45 @@ impl<B> WorkspaceFileTool<B> {
     }
 }
 
-impl<B> Tool for WorkspaceFileTool<B>
+impl<B> StaticTool for WorkspaceFileTool<B>
 where
     B: WorkspaceFileBackend + 'static,
 {
-    fn name(&self) -> &str {
-        self.kind.name()
-    }
+    type Input = Value;
 
-    fn description(&self) -> &str {
-        self.kind.description()
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        crate::tool::StaticToolDefinition::new(
+            crate::tool::ToolName::builtin(self.kind.name()),
+            self.kind.description(),
+        )
     }
 
     fn input_schema(&self) -> Value {
         self.kind.input_schema()
     }
 
-    fn supports_parallel_tool_calls(&self) -> bool {
-        self.kind.supports_parallel_tool_calls()
+    fn policy(&self) -> ToolPolicy {
+        let mut policy = ToolPolicy::default()
+            .with_effect(self.kind.effect())
+            .with_cache_policy(self.kind.cache_policy());
+        if self.kind.supports_parallel_tool_calls() {
+            policy = policy.with_parallel_tool_calls();
+        }
+        policy
     }
 
-    fn effect(&self) -> Option<ToolEffect> {
-        Some(self.kind.effect())
-    }
-
-    fn cache_policy(&self, _arguments: &serde_json::Value) -> ToolCachePolicy {
-        self.kind.cache_policy()
-    }
-
-    fn execute<'a>(
-        &'a self,
-        input: ToolInput,
+    fn execute(
+        &self,
+        input: Value,
         _context: ToolCallContext,
-    ) -> BoxFuture<'a, Result<ToolResult>> {
+    ) -> impl Future<Output = Result<ToolResult>> + Send {
         async move {
-            let execution = execute_workspace_file_tool(
-                self.backend.as_ref(),
-                self.kind.name(),
-                input.arguments,
-            )
-            .await?
-            .ok_or_else(|| tool_error(self.name(), "unknown workspace file tool"))?;
+            let execution =
+                execute_workspace_file_tool(self.backend.as_ref(), self.kind.name(), input)
+                    .await?
+                    .ok_or_else(|| tool_error(self.kind.name(), "unknown workspace file tool"))?;
             Ok(workspace_tool_output(execution))
         }
-        .boxed()
-    }
-
-    fn spec(&self) -> ToolSpec {
-        self.kind.to_spec()
     }
 }
 
@@ -108,36 +94,35 @@ impl LocalWorkspaceFileTool {
     }
 }
 
-impl Tool for LocalWorkspaceFileTool {
-    fn name(&self) -> &str {
-        self.kind.name()
-    }
+impl StaticTool for LocalWorkspaceFileTool {
+    type Input = Value;
 
-    fn description(&self) -> &str {
-        self.kind.description()
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        crate::tool::StaticToolDefinition::new(
+            crate::tool::ToolName::builtin(self.kind.name()),
+            self.kind.description(),
+        )
     }
 
     fn input_schema(&self) -> Value {
         self.kind.input_schema()
     }
 
-    fn supports_parallel_tool_calls(&self) -> bool {
-        self.kind.supports_parallel_tool_calls()
+    fn policy(&self) -> ToolPolicy {
+        let mut policy = ToolPolicy::default()
+            .with_effect(self.kind.effect())
+            .with_cache_policy(self.kind.cache_policy());
+        if self.kind.supports_parallel_tool_calls() {
+            policy = policy.with_parallel_tool_calls();
+        }
+        policy
     }
 
-    fn effect(&self) -> Option<ToolEffect> {
-        Some(self.kind.effect())
-    }
-
-    fn cache_policy(&self, _arguments: &serde_json::Value) -> ToolCachePolicy {
-        self.kind.cache_policy()
-    }
-
-    fn execute<'a>(
-        &'a self,
-        input: ToolInput,
+    fn execute(
+        &self,
+        input: Value,
         context: ToolCallContext,
-    ) -> BoxFuture<'a, Result<ToolResult>> {
+    ) -> impl Future<Output = Result<ToolResult>> + Send {
         async move {
             if matches!(self.kind, WorkspaceFileToolKind::ApplyPatch) {
                 self.workspace.ensure_workspace_writable()?;
@@ -148,17 +133,11 @@ impl Tool for LocalWorkspaceFileTool {
                 None
             };
             let backend = LocalWorkspaceFileBackend::for_call(&self.workspace, &context).await?;
-            let execution =
-                execute_workspace_file_tool(&backend, self.kind.name(), input.arguments)
-                    .await?
-                    .ok_or_else(|| tool_error(self.name(), "unknown workspace file tool"))?;
+            let execution = execute_workspace_file_tool(&backend, self.kind.name(), input)
+                .await?
+                .ok_or_else(|| tool_error(self.kind.name(), "unknown workspace file tool"))?;
             Ok(workspace_tool_output(execution))
         }
-        .boxed()
-    }
-
-    fn spec(&self) -> ToolSpec {
-        self.kind.to_spec()
     }
 }
 

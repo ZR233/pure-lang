@@ -1,8 +1,8 @@
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::FutureExt;
 use pl_protocol::{OutputStream, PureError};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -10,10 +10,7 @@ use serde::{Deserialize, Serialize};
 use super::command::process_manager::*;
 use super::command::{CommandBackend, LocalCommandBackend};
 use super::truncation::{OutputTruncation, TruncationStrategy};
-use super::{
-    Tool, ToolCallContext, ToolDirective, ToolInput, ToolResult, ToolWorkspace, TypedTool,
-    deserialize_tool_input,
-};
+use super::{StaticTool, ToolCallContext, ToolDirective, ToolPolicy, ToolResult, ToolWorkspace};
 use crate::execution_environment::ExecutionEnvironment;
 use crate::turn::ToolEffect;
 
@@ -74,7 +71,7 @@ pub struct ExecInput {
 /// `write_stdin` 的结构化输入。
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct WriteStdinInput {
+pub struct WriteStdinInput {
     /// Process id returned by a running exec result.
     pub process_id: String,
     /// Text to write; omit or pass an empty string to only wait or poll.
@@ -158,7 +155,8 @@ impl CommandOutputObserver for ToolResultOutputObserver {
     }
 }
 
-pub(crate) fn command_tool_pair<B>(
+/// Builds the `exec` and `write_stdin` tools over one shared process manager.
+pub fn command_tool_pair<B>(
     backend: Arc<B>,
     workspace: ToolWorkspace,
 ) -> (ExecTool<B>, WriteStdinTool<B>)
@@ -177,7 +175,8 @@ where
     )
 }
 
-pub(crate) fn local_command_tool_pair_with_environment(
+/// Builds the local command tool pair with an explicit execution environment.
+pub fn local_command_tool_pair_with_environment(
     workspace: ToolWorkspace,
     execution_environment: ExecutionEnvironment,
 ) -> (
@@ -195,38 +194,35 @@ impl<B> WriteStdinTool<B>
 where
     B: CommandBackend,
 {
-    pub(crate) fn new(process_manager: CommandProcessManager<B>) -> Self {
+    /// Builds `write_stdin` for an existing shared command process manager.
+    pub fn new(process_manager: CommandProcessManager<B>) -> Self {
         Self { process_manager }
     }
 }
 
-impl<B> Tool for ExecTool<B>
+impl<B> StaticTool for ExecTool<B>
 where
     B: CommandBackend,
 {
-    fn name(&self) -> &str {
-        TOOL_EXEC
+    type Input = ExecInput;
+
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        crate::tool::StaticToolDefinition::new(
+            crate::tool::ToolName::builtin(TOOL_EXEC),
+            "Start a shell command in the agent workspace and return a compact JSON result. Shell commands are not constrained by a directory Profile's writablePaths; obey the frozen workspace assignment and do not modify project files outside it. If the command is still running after yieldTimeMs, use write_stdin with the returned processId. Full output is saved to a workspace-relative outputFile.",
+        )
     }
 
-    fn description(&self) -> &str {
-        "Start a shell command in the agent workspace and return a compact JSON result. Shell commands are not constrained by a directory Profile's writablePaths; obey the frozen workspace assignment and do not modify project files outside it. If the command is still running after yieldTimeMs, use write_stdin with the returned processId. Full output is saved to a workspace-relative outputFile."
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::default().with_effect(ToolEffect::Process)
     }
 
-    fn input_schema(&self) -> serde_json::Value {
-        TypedTool::<ExecInput>::new(self.name(), self.description()).input_schema()
-    }
-
-    fn effect(&self) -> Option<ToolEffect> {
-        Some(ToolEffect::Process)
-    }
-
-    fn execute<'a>(
-        &'a self,
-        input: ToolInput,
+    fn execute(
+        &self,
+        exec_input: ExecInput,
         context: ToolCallContext,
-    ) -> super::BoxFuture<'a, Result<ToolResult, PureError>> {
+    ) -> impl Future<Output = Result<ToolResult, PureError>> + Send {
         async move {
-            let exec_input: ExecInput = deserialize_tool_input(self.name(), input.arguments)?;
             let timeout = exec_input
                 .timeout_seconds
                 .map(Duration::from_secs)
@@ -258,45 +254,39 @@ where
 
             if let Some(error) = context.take_output_delta_error() {
                 return Err(PureError::ToolExecutionFailed {
-                    tool: self.name().to_string(),
+                    tool: TOOL_EXEC.to_string(),
                     error: error.to_string(),
                 });
             }
 
-            tool_output_from_snapshot(snapshot, self.name(), context.identity().revision_base)
+            tool_output_from_snapshot(snapshot, TOOL_EXEC, context.identity().revision_base)
         }
-        .boxed()
     }
 }
 
-impl<B> Tool for WriteStdinTool<B>
+impl<B> StaticTool for WriteStdinTool<B>
 where
     B: CommandBackend,
 {
-    fn name(&self) -> &str {
-        TOOL_WRITE_STDIN
+    type Input = WriteStdinInput;
+
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        crate::tool::StaticToolDefinition::new(
+            crate::tool::ToolName::builtin(TOOL_WRITE_STDIN),
+            "Write stdin to, or poll, a live process previously started by exec. Pass empty chars to wait without sending input. Does not start a new command or re-request command approval.",
+        )
     }
 
-    fn description(&self) -> &str {
-        "Write stdin to, or poll, a live process previously started by exec. Pass empty chars to wait without sending input. Does not start a new command or re-request command approval."
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::default().with_effect(ToolEffect::Process)
     }
 
-    fn input_schema(&self) -> serde_json::Value {
-        TypedTool::<WriteStdinInput>::new(self.name(), self.description()).input_schema()
-    }
-
-    fn effect(&self) -> Option<ToolEffect> {
-        Some(ToolEffect::Process)
-    }
-
-    fn execute<'a>(
-        &'a self,
-        input: ToolInput,
+    fn execute(
+        &self,
+        stdin_input: WriteStdinInput,
         context: ToolCallContext,
-    ) -> super::BoxFuture<'a, Result<ToolResult, PureError>> {
+    ) -> impl Future<Output = Result<ToolResult, PureError>> + Send {
         async move {
-            let stdin_input: WriteStdinInput =
-                deserialize_tool_input(self.name(), input.arguments)?;
             let chars = stdin_input.chars.unwrap_or_default();
             let yield_time = if chars.is_empty() {
                 poll_yield_duration(stdin_input.yield_time_ms)
@@ -318,9 +308,8 @@ where
                 })
                 .await?;
 
-            tool_output_from_snapshot(snapshot, self.name(), context.identity().revision_base)
+            tool_output_from_snapshot(snapshot, TOOL_WRITE_STDIN, context.identity().revision_base)
         }
-        .boxed()
     }
 }
 

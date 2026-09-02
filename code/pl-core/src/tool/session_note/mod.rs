@@ -2,8 +2,8 @@ mod patch;
 mod schema;
 mod search;
 
-use futures::FutureExt;
-use pl_model::ToolSpec;
+use std::future::Future;
+
 use pl_protocol::Result;
 use serde_json::{Value, json};
 
@@ -11,9 +11,8 @@ use crate::tool::text_document::{
     line_end_byte_offset, line_start_byte_offset, logical_line_count,
 };
 use crate::tool::{
-    BoxFuture, Tool, ToolCallContext, ToolInput, ToolResult, deserialize_tool_input, tool_error,
+    StaticTool, ToolCallContext, ToolPolicy, ToolResult, deserialize_tool_input, tool_error,
 };
-use crate::turn::ToolEffect;
 
 pub use schema::*;
 
@@ -35,48 +34,44 @@ impl SessionNoteTool {
     }
 }
 
-impl Tool for SessionNoteTool {
-    fn name(&self) -> &str {
-        self.kind.name()
-    }
+impl StaticTool for SessionNoteTool {
+    type Input = Value;
 
-    fn description(&self) -> &str {
-        self.kind.description()
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        crate::tool::StaticToolDefinition::new(
+            crate::tool::ToolName::builtin(self.kind.name()),
+            self.kind.description(),
+        )
     }
 
     fn input_schema(&self) -> Value {
         self.kind.input_schema()
     }
 
-    fn supports_parallel_tool_calls(&self) -> bool {
-        self.kind.supports_parallel_tool_calls()
+    fn policy(&self) -> ToolPolicy {
+        let mut policy = ToolPolicy::read_only();
+        if self.kind.supports_parallel_tool_calls() {
+            policy = policy.with_parallel_tool_calls();
+        }
+        policy
     }
 
-    fn effect(&self) -> Option<ToolEffect> {
-        Some(ToolEffect::Read)
-    }
-
-    fn execute<'a>(
-        &'a self,
-        input: ToolInput,
+    fn execute(
+        &self,
+        input: Value,
         _context: ToolCallContext,
-    ) -> BoxFuture<'a, Result<ToolResult>> {
+    ) -> impl Future<Output = Result<ToolResult>> + Send {
         async move {
             let result = match self.kind {
-                SessionNoteToolKind::Read => read_note(input.arguments, &self.working_set)?,
-                SessionNoteToolKind::Search => search_note(input.arguments, &self.working_set)?,
-                SessionNoteToolKind::Write => write_note(input.arguments, &self.working_set)?,
+                SessionNoteToolKind::Read => read_note(input, &self.working_set)?,
+                SessionNoteToolKind::Search => search_note(input, &self.working_set)?,
+                SessionNoteToolKind::Write => write_note(input, &self.working_set)?,
                 SessionNoteToolKind::ApplyPatch => {
-                    apply_note_patch(input.arguments, &self.working_set).await?
+                    apply_note_patch(input, &self.working_set).await?
                 }
             };
             ToolResult::json(result)
         }
-        .boxed()
-    }
-
-    fn spec(&self) -> ToolSpec {
-        ToolSpec::function(self.name(), self.description(), self.input_schema())
     }
 }
 
@@ -224,7 +219,7 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
-    use crate::tool::Tool;
+    use crate::tool::{StaticToolTestExt, ToolInput};
 
     #[derive(Clone)]
     struct TestRuntime {
@@ -255,7 +250,7 @@ mod tests {
         runtime: &TestRuntime,
     ) -> Result<ToolResult> {
         SessionNoteTool::new(kind, runtime.working_set.clone())
-            .execute(input(arguments), runtime.context.clone())
+            .execute_raw(input(arguments), runtime.context.clone())
             .await
     }
 

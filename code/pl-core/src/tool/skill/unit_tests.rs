@@ -5,6 +5,7 @@ use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
 use super::*;
+use crate::tool::{StaticToolTestExt, ToolInput, deserialize_tool_input};
 
 fn temp_dir(name: &str) -> PathBuf {
     let stamp = SystemTime::now()
@@ -79,7 +80,10 @@ async fn read_only_catalog_tool_group_omits_project_mutation() {
     );
 
     assert_eq!(
-        tools.iter().map(|tool| tool.name()).collect::<Vec<_>>(),
+        tools
+            .iter()
+            .map(|tool| tool.definition().name().wire_name())
+            .collect::<Vec<_>>(),
         ["skills_list", "skill_view"]
     );
 }
@@ -111,7 +115,7 @@ async fn skill_view_reads_host_registered_project_snapshot_outside_default_proje
     let tool = SkillViewTool::from_catalog(Arc::new(catalog), tool_workspace(workspace.path()));
 
     let output = tool
-        .execute(
+        .execute_raw(
             ToolInput {
                 arguments: json!({"name": "review-single-pr"}),
             },
@@ -215,7 +219,7 @@ async fn skills_list_preserves_full_listing_and_supports_ranked_search() {
     let tool = SkillsListTool::new(config, tool_workspace(&workspace));
 
     let full = tool
-        .execute(
+        .execute_raw(
             ToolInput {
                 arguments: json!({"category": category}),
             },
@@ -239,7 +243,7 @@ async fn skills_list_preserves_full_listing_and_supports_ranked_search() {
     );
 
     let ranked = tool
-        .execute(
+        .execute_raw(
             ToolInput {
                 arguments: json!({
                     "category": category,
@@ -259,7 +263,7 @@ async fn skills_list_preserves_full_listing_and_supports_ranked_search() {
     assert!(ranked.skills[0].description.contains("Cargo profile"));
 
     let error = tool
-        .execute(
+        .execute_raw(
             ToolInput {
                 arguments: json!({"query": "Rust", "limit": 51}),
             },
@@ -338,7 +342,7 @@ fn skill_manage_schema_is_a_provider_object_union() {
     assert!(schema["oneOf"].is_array());
     assert!(schema.get("additionalProperties").is_none());
     let input = deserialize_tool_input::<SkillManageInput>(
-        tool.name(),
+        "skill_manage",
         json!({
             "action": "create",
             "name": "local-flow",
@@ -349,7 +353,7 @@ fn skill_manage_schema_is_a_provider_object_union() {
     assert!(matches!(input, SkillManageInput::Create(_)));
 
     let error = deserialize_tool_input::<SkillManageInput>(
-        tool.name(),
+        "skill_manage",
         json!({
             "action": "create",
             "name": "local-flow",
@@ -365,7 +369,7 @@ fn skill_manage_schema_is_a_provider_object_union() {
 fn skill_view_is_never_cached() {
     let tool = SkillViewTool::new(SkillsConfig::default(), tool_workspace(Path::new(".")));
     assert_eq!(
-        tool.cache_policy(&json!({"name": "demo"})),
+        tool.policy().cache_policy(&json!({"name": "demo"})),
         ToolCachePolicy::Never
     );
 }
@@ -459,7 +463,7 @@ async fn skill_view_success_emits_skill_activation() {
     );
 
     let output = tool
-        .execute(
+        .execute_raw(
             ToolInput {
                 arguments: json!({"name": "local-flow"}),
             },
@@ -495,7 +499,7 @@ async fn skill_view_records_project_usage_independent_of_product_mode() {
     );
 
     let output = tool
-        .execute(
+        .execute_raw(
             ToolInput {
                 arguments: json!({"name": "local-flow"}),
             },
@@ -522,7 +526,7 @@ async fn skill_view_support_file_success_activates_parent_skill() {
     );
 
     let output = tool
-        .execute(
+        .execute_raw(
             ToolInput {
                 arguments: json!({"name": "local-flow", "filePath": "references/example.md"}),
             },
@@ -550,7 +554,7 @@ async fn skill_view_main_file_alias_returns_resource_base_without_enumerating_fi
     );
 
     let output = tool
-        .execute(
+        .execute_raw(
             ToolInput {
                 arguments: json!({"name": "local-flow", "filePath": "SKILL.md"}),
             },
@@ -586,7 +590,7 @@ async fn skill_view_failure_does_not_emit_activation() {
     );
 
     let error = tool
-        .execute(
+        .execute_raw(
             ToolInput {
                 arguments: json!({"name": "missing"}),
             },
@@ -618,7 +622,7 @@ async fn skill_discovery_skips_linked_skill_directories() {
     );
 
     let error = tool
-        .execute(
+        .execute_raw(
             ToolInput {
                 arguments: json!({"name": "linked-flow"}),
             },
@@ -651,7 +655,7 @@ async fn skill_manage_rejects_linked_support_directory() {
     );
 
     let error = tool
-        .execute(
+        .execute_raw(
             ToolInput {
                 arguments: json!({
                     "action": "writeFile",
@@ -690,7 +694,7 @@ async fn skill_delete_unlinks_support_directory_without_touching_target() {
         tool_workspace(&workspace),
     );
 
-    tool.execute(
+    tool.execute_raw(
         ToolInput {
             arguments: json!({
                 "action": "delete",

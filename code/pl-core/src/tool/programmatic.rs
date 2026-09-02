@@ -2,15 +2,13 @@
 
 use futures::FutureExt;
 use pl_model::ProviderWireProtocol;
-use pl_protocol::{PureError, ToolSpec};
-
-use crate::ResolvedModelRoute;
-use crate::turn::ToolEffect;
+use pl_protocol::{PureError, Result, ToolSpec};
 
 use super::{
-    AgentToolSet, BoxFuture, Tool, ToolCallContext, ToolExecution, ToolGroupId, ToolInput,
-    ToolResult,
+    AgentToolSet, BoxFuture, DynTool, ToolDefinition, ToolExecution, ToolExecutor, ToolGroupId,
+    ToolInstallGroup, ToolInvocation, ToolName, ToolPolicy, ToolResult,
 };
+use crate::ResolvedModelRoute;
 
 pub const TOOL_PROGRAMMATIC_TOOL_CALLING: &str = "programmatic_tool_calling";
 const PROGRAMMATIC_TOOL_GROUP: &str = "programmatic_tool_calling";
@@ -19,39 +17,38 @@ const PROGRAMMATIC_TOOL_GROUP: &str = "programmatic_tool_calling";
 ///
 /// This value is registered and snapshotted like every other tool, but execution is
 /// delegated to the selected provider and therefore never enters local dispatch.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct ProgrammaticToolCallingTool;
+#[derive(Debug, Clone)]
+pub struct ProgrammaticToolCallingTool {
+    definition: ToolDefinition,
+    policy: ToolPolicy,
+}
 
-impl Tool for ProgrammaticToolCallingTool {
-    fn name(&self) -> &str {
-        TOOL_PROGRAMMATIC_TOOL_CALLING
+impl Default for ProgrammaticToolCallingTool {
+    fn default() -> Self {
+        Self {
+            definition: ToolDefinition::from_trusted_spec(
+                ToolName::builtin(TOOL_PROGRAMMATIC_TOOL_CALLING),
+                ToolSpec::ProgrammaticToolCalling,
+            ),
+            policy: ToolPolicy::read_only(),
+        }
+    }
+}
+
+impl ToolExecutor for ProgrammaticToolCallingTool {
+    fn definition(&self) -> &ToolDefinition {
+        &self.definition
     }
 
-    fn description(&self) -> &str {
-        "Coordinate eligible read-only tools in provider-hosted code."
-    }
-
-    fn input_schema(&self) -> serde_json::Value {
-        serde_json::json!({ "type": "object", "properties": {} })
-    }
-
-    fn effect(&self) -> Option<ToolEffect> {
-        Some(ToolEffect::Read)
+    fn policy(&self) -> &ToolPolicy {
+        &self.policy
     }
 
     fn execution(&self) -> ToolExecution {
         ToolExecution::ProviderHosted
     }
 
-    fn spec(&self) -> ToolSpec {
-        ToolSpec::ProgrammaticToolCalling
-    }
-
-    fn execute<'a>(
-        &'a self,
-        _input: ToolInput,
-        _context: ToolCallContext,
-    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
+    fn execute(&self, _invocation: ToolInvocation) -> BoxFuture<'_, Result<ToolResult>> {
         async {
             Err(PureError::ToolExecutionFailed {
                 tool: TOOL_PROGRAMMATIC_TOOL_CALLING.to_string(),
@@ -91,10 +88,10 @@ pub fn reconcile_programmatic_tool_calling(
             .programmatic_tool_calling;
     let group = ToolGroupId::new(PROGRAMMATIC_TOOL_GROUP);
     if supported {
-        tools.install(
+        tools.install(ToolInstallGroup::direct(
             group,
-            vec![std::sync::Arc::new(ProgrammaticToolCallingTool)],
-        )
+            vec![DynTool::new_executor(ProgrammaticToolCallingTool::default())],
+        ))
     } else {
         tools.uninstall(&group);
         Ok(())

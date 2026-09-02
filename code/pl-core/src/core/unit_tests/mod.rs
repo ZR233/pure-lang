@@ -2,10 +2,9 @@ use super::tool_dispatch::ToolExecutionOutcome;
 use super::*;
 use crate::ContextCompactionTrigger;
 use crate::tool::{
-    GlobalToolInheritance, LocalTool, Tool, ToolCallContext, ToolInput, ToolManager, ToolResult,
+    GlobalToolInheritance, StaticTool, ToolCallContext, ToolManager, ToolPolicy, ToolResult,
 };
 use crate::turn::PermissionMode;
-use futures::FutureExt;
 use pl_model::{ModelInfo, OpenAiCompactionMode, ProviderEndpoint, ToolCall};
 use pl_protocol::{
     InteractionContent, InteractionResolution, ToolApprovalResolution,
@@ -14,6 +13,13 @@ use pl_protocol::{
 use pl_trace::{TraceEventKind, TracePartKind, TracePartSource, TraceTextChannel};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
+
+fn test_static_tool_definition(
+    name: &'static str,
+    description: &'static str,
+) -> crate::tool::StaticToolDefinition {
+    crate::tool::StaticToolDefinition::new(crate::tool::ToolName::builtin(name), description)
+}
 
 fn test_route(endpoint: ProviderEndpoint, model: ModelInfo) -> crate::ResolvedModelRoute {
     crate::ResolvedModelRoute {
@@ -393,13 +399,11 @@ fn enabled_tools_event(events: &[TraceEvent]) -> &pl_trace::EnabledToolsEvent {
 #[derive(Debug)]
 struct SleepingTool;
 
-impl Tool for SleepingTool {
-    fn name(&self) -> &str {
-        "sleeping_tool"
-    }
+impl StaticTool for SleepingTool {
+    type Input = serde_json::Value;
 
-    fn description(&self) -> &str {
-        "Sleeps until the turn is cancelled"
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        test_static_tool_definition("sleeping_tool", "Sleeps until the turn is cancelled")
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -410,43 +414,30 @@ impl Tool for SleepingTool {
         })
     }
 
-    fn supports_parallel_tool_calls(&self) -> bool {
-        true
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::default().with_parallel_tool_calls()
     }
 
-    fn effect(&self) -> Option<crate::ToolEffect> {
-        None
-    }
-
-    fn execute<'a>(
-        &'a self,
-        _input: ToolInput,
+    fn execute(
+        &self,
+        _input: Self::Input,
         _context: ToolCallContext,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = std::result::Result<ToolResult, PureError>>
-                + Send
-                + 'a,
-        >,
-    > {
+    ) -> impl std::future::Future<Output = crate::Result<ToolResult>> + Send {
         async {
             tokio::time::sleep(std::time::Duration::from_secs(60)).await;
             Ok(ToolResult::success("done"))
         }
-        .boxed()
     }
 }
 
 #[derive(Debug)]
 struct DeltaEchoTool;
 
-impl Tool for DeltaEchoTool {
-    fn name(&self) -> &str {
-        "delta_echo"
-    }
+impl StaticTool for DeltaEchoTool {
+    type Input = serde_json::Value;
 
-    fn description(&self) -> &str {
-        "Echoes a trace delta before completing"
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        test_static_tool_definition("delta_echo", "Echoes a trace delta before completing")
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -457,21 +448,15 @@ impl Tool for DeltaEchoTool {
         })
     }
 
-    fn effect(&self) -> Option<crate::ToolEffect> {
-        None
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::default()
     }
 
-    fn execute<'a>(
-        &'a self,
-        _input: ToolInput,
+    fn execute(
+        &self,
+        _input: Self::Input,
         context: ToolCallContext,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = std::result::Result<ToolResult, PureError>>
-                + Send
-                + 'a,
-        >,
-    > {
+    ) -> impl std::future::Future<Output = crate::Result<ToolResult>> + Send {
         async move {
             let now = crate::time::unix_seconds();
             let event = pl_trace::TracePartDeltaEvent {
@@ -488,6 +473,5 @@ impl Tool for DeltaEchoTool {
             let _ = context.events().send(AgentEvent::TracePartDelta { event });
             Ok(ToolResult::success("delta complete"))
         }
-        .boxed()
     }
 }

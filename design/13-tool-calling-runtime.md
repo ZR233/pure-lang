@@ -6,6 +6,24 @@
 参数 schema、审批策略和 `ToolBatchPolicy` 在 inference 开始时冻结为代际快照。未知工具、参数解析、
 审批拒绝与执行失败都形成 typed tool result，不伪造成功。
 
+运行时唯一执行容器是 `DynTool(Arc<dyn ToolExecutor>)`。`ToolExecutor` 是对象安全的动态边界，同时
+提供冻结 definition、可信 policy、execution owner 与 boxed execute future；registry、`ToolBinding`
+和 `ToolPlan` 不保存来源枚举或具体工具类型。静态 Rust 工具通过 `StaticTool` 的关联 `Input` 保留
+typed 参数和 RPITIT future，再由 `From` adapter 生成 `DynTool`。`StaticTool::definition` 必须返回
+已经持有 `ToolName` 的 `StaticToolDefinition`，`From` 不承担可失败校验。Schemars 从 `Input` 的类型、
+rustdoc 和属性生成参数 schema；adapter 使用同一类型反序列化调用参数，复杂业务不变量仍由领域逻辑验证。
+
+`pl-core` 在 crate 根公开 `StaticTool`、`static_tool` builder、`DynTool`、`ToolExecutor`、
+`ToolInstallGroup` 以及可复用内置工具的实现类型和构造函数。下游按所需能力自由选择内置工具，逐个
+`.into()` 后与宿主工具放入同一安装组；`lsp_tools`、`command_tool_pair` 等工具族构造器直接返回
+`Vec<DynTool>`。默认工具安装器只是公共工具的预设组合，不拥有私有工具类型，也不是第二条注册路径。
+
+工具注册以 `ToolInstallGroup` 为原子单位，组同时拥有 exposure、可选 developer instructions、
+generation 和 `DynTool` 列表。冻结快照只向模型发送 Direct 和当前 session 已 reveal 的 Deferred
+工具；若目录仍有 Deferred 工具，同时暴露普通 `tool_search`。搜索只返回当前冻结目录中的命中，
+通过 typed `RevealTools` directive 令下一次 inference 重新冻结；当前 inference 的 executor 集合不会
+原地改变。目录 fingerprint 包含 deferred definition 与 source generation，变化时旧 reveal 失效。
+
 `Coexist` 工具可按普通 batch 执行；包含 `Solo` 工具的 response 必须恰好只有该一个调用，否则整批在
 任何工具执行前拒绝。该规则通用，不依赖工具名；`workflow_state` 与 `complete` 都使用 `Solo`。
 
@@ -58,6 +76,10 @@ MCP resource façade 同样属于本轮冻结工具目录。Runtime 必须读取
 发送请求前返回稳定参数错误，不能用一次预期的 `Method not found` 探测能力，也不能因此把正常 MCP
 transport 标记为 unavailable。模型可见 schema 与执行路径必须消费同一冻结 assignment，避免暴露必然
 首次失败的工具。
+
+MCP tool executor 必须捕获创建它的 `McpTurnLease`、server identity、raw tool name 与 generation；
+旧 `ToolPlan` 即使在新 generation 发布后仍调用旧 lease，最后一个 executor/plan 释放后才能回收旧
+连接。远端展示 metadata 不得提升 effect、并行、programmatic、cache 或权限策略。
 
 ## 13.5 统一完成
 

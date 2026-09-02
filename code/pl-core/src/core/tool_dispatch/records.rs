@@ -112,6 +112,7 @@ pub(super) fn finalize_tool_item(
                 }
                 ToolDirective::ToolResultRevision { .. } => {}
                 ToolDirective::OutputArtifacts { .. } => {}
+                ToolDirective::RevealTools { .. } => {}
                 ToolDirective::AuditMetadata { .. } => {}
                 ToolDirective::ExecutionFailed => {}
                 ToolDirective::CacheHit { .. } => {}
@@ -246,6 +247,7 @@ fn tool_execution_record_from_envelope(
             | ToolDirective::SkillActivated { .. }
             | ToolDirective::ToolResultRevision { .. }
             | ToolDirective::OutputArtifacts { .. }
+            | ToolDirective::RevealTools { .. }
             | ToolDirective::AuditMetadata { .. }
             | ToolDirective::ExecutionFailed
             | ToolDirective::CacheHit { .. }
@@ -295,6 +297,7 @@ fn output_artifacts(runtime_events: &[ToolDirective]) -> Vec<serde_json::Value> 
             ToolDirective::InteractionRequested { .. }
             | ToolDirective::SkillActivated { .. }
             | ToolDirective::ToolResultRevision { .. }
+            | ToolDirective::RevealTools { .. }
             | ToolDirective::AuditMetadata { .. }
             | ToolDirective::CacheHit { .. }
             | ToolDirective::OutputMetrics { .. }
@@ -316,6 +319,7 @@ fn audit_metadata(runtime_events: &[ToolDirective]) -> Vec<serde_json::Value> {
             | ToolDirective::SkillActivated { .. }
             | ToolDirective::ToolResultRevision { .. }
             | ToolDirective::OutputArtifacts { .. }
+            | ToolDirective::RevealTools { .. }
             | ToolDirective::ExecutionFailed
             | ToolDirective::CacheHit { .. }
             | ToolDirective::OutputMetrics { .. }
@@ -346,6 +350,7 @@ fn output_metrics(runtime_events: &[ToolDirective]) -> Option<pl_trace::TraceToo
         | ToolDirective::SkillActivated { .. }
         | ToolDirective::ToolResultRevision { .. }
         | ToolDirective::OutputArtifacts { .. }
+        | ToolDirective::RevealTools { .. }
         | ToolDirective::AuditMetadata { .. }
         | ToolDirective::ExecutionFailed
         | ToolDirective::CacheHit { .. }

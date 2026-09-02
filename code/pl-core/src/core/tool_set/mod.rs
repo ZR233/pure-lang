@@ -5,20 +5,20 @@ use std::sync::Arc;
 
 use crate::config::ToolCapabilityConfig;
 use crate::tool::{
-    AskUserTool, CommandBackend, CopyPathTool, CreateDirectoryTool, DeletePathTool,
+    AskUserTool, CommandBackend, CopyPathTool, CreateDirectoryTool, DeletePathTool, DynTool,
     ExecutionBackend, GitCredentialProvider, GitTool, GitToolKind, GitWorkspaceConfig,
     LocalCommandBackend, LocalExecutionBackend, LocalWorkspaceFileBackend, LocalWorkspaceFileTool,
     MovePathTool, NoGitCredentialProvider, SessionNoteTool, SessionNoteToolKind, StatPathTool,
-    SubmitPlanTool, TodoListTool, Tool, ToolGroupId, ToolWorkspace, WorkspaceFileBackend,
-    WorkspaceFileTool, WorkspaceFileToolKind, WorkspacePolicyBackend, WriteFileTool,
-    command_tool_pair, local_command_tool_pair_with_environment, lsp_tools,
+    SubmitPlanTool, TodoListTool, ToolGroupId, ToolInstallGroup, ToolWorkspace,
+    WorkspaceFileBackend, WorkspaceFileTool, WorkspaceFileToolKind, WorkspacePolicyBackend,
+    WriteFileTool, command_tool_pair, local_command_tool_pair_with_environment, lsp_tools,
 };
 
 use super::TurnEngine;
 
 /// Installs the built-in tool implementations selected by explicit capabilities.
 ///
-/// This type only constructs ordinary [`Tool`] implementations and publishes one
+/// This type only constructs ordinary [`crate::StaticTool`] implementations and publishes one
 /// atomic group into the engine's persistent [`crate::AgentToolSet`].
 #[derive(Debug, Clone)]
 pub struct BuiltinToolInstaller<
@@ -32,7 +32,7 @@ pub struct BuiltinToolInstaller<
     git_runtime: Option<GitToolRuntime<B, P>>,
     command_runtime: Option<CommandToolRuntime<E>>,
     workspace_file_runtime: Option<WorkspaceFileToolRuntime<W>>,
-    additional_tools: Vec<Arc<dyn Tool>>,
+    additional_tools: Vec<DynTool>,
 }
 
 impl BuiltinToolInstaller {
@@ -106,7 +106,7 @@ impl<B, P, E, W> BuiltinToolInstaller<B, P, E, W> {
         }
     }
 
-    pub fn with_additional_tools(mut self, tools: Vec<Arc<dyn Tool>>) -> Self {
+    pub fn with_additional_tools(mut self, tools: Vec<DynTool>) -> Self {
         self.additional_tools.extend(tools);
         self
     }
@@ -148,36 +148,37 @@ where
             ToolWorkspace::new(workspace.clone()).with_lsp_runtime(core.lsp_runtime.clone());
         core.workspace = Some(workspace);
         core.workspace_instructions = workspace_instructions;
-        let mut tools = Vec::<Arc<dyn Tool>>::new();
+        let mut tools = Vec::<DynTool>::new();
 
         if self.capabilities.exec && self.local_backends {
             let (exec, write_stdin) = local_command_tool_pair_with_environment(
                 tool_workspace.clone(),
                 core.execution_environment.clone(),
             );
-            tools.push(Arc::new(exec));
-            tools.push(Arc::new(write_stdin));
+            tools.push(exec.into());
+            tools.push(write_stdin.into());
         }
         if self.capabilities.exec
             && let Some(runtime) = &self.command_runtime
         {
             let (exec, write_stdin) =
                 command_tool_pair(runtime.backend.clone(), tool_workspace.clone());
-            tools.push(Arc::new(exec));
-            tools.push(Arc::new(write_stdin));
+            tools.push(exec.into());
+            tools.push(write_stdin.into());
         }
         if self.capabilities.workspace_files && self.local_backends {
-            tools.extend(WorkspaceFileToolKind::all().iter().map(|kind| {
-                Arc::new(LocalWorkspaceFileTool::new(*kind, tool_workspace.clone()))
-                    as Arc<dyn Tool>
-            }));
+            tools.extend(
+                WorkspaceFileToolKind::all()
+                    .iter()
+                    .map(|kind| LocalWorkspaceFileTool::new(*kind, tool_workspace.clone()).into()),
+            );
             tools.extend([
-                Arc::new(WriteFileTool::new(tool_workspace.clone())) as Arc<dyn Tool>,
-                Arc::new(StatPathTool::new(tool_workspace.clone())),
-                Arc::new(CreateDirectoryTool::new(tool_workspace.clone())),
-                Arc::new(DeletePathTool::new(tool_workspace.clone())),
-                Arc::new(CopyPathTool::new(tool_workspace.clone())),
-                Arc::new(MovePathTool::new(tool_workspace.clone())),
+                WriteFileTool::new(tool_workspace.clone()).into(),
+                StatPathTool::new(tool_workspace.clone()).into(),
+                CreateDirectoryTool::new(tool_workspace.clone()).into(),
+                DeletePathTool::new(tool_workspace.clone()).into(),
+                CopyPathTool::new(tool_workspace.clone()).into(),
+                MovePathTool::new(tool_workspace.clone()).into(),
             ]);
         }
         if self.capabilities.workspace_files
@@ -187,23 +188,20 @@ where
                 runtime.backend.clone(),
                 tool_workspace.clone(),
             ));
-            tools.extend(WorkspaceFileToolKind::all().iter().map(|kind| {
-                Arc::new(WorkspaceFileTool::new(*kind, backend.clone())) as Arc<dyn Tool>
-            }));
+            tools.extend(
+                WorkspaceFileToolKind::all()
+                    .iter()
+                    .map(|kind| WorkspaceFileTool::new(*kind, backend.clone()).into()),
+            );
         }
         tools.extend(self.additional_tools.iter().cloned());
         if self.capabilities.ask_user {
-            tools.push(Arc::new(AskUserTool));
-            tools.push(Arc::new(SubmitPlanTool));
+            tools.push(AskUserTool.into());
+            tools.push(SubmitPlanTool.into());
         }
-        tools.push(Arc::new(TodoListTool::new(
-            core.tool_session_runtime.working_set(),
-        )));
+        tools.push(TodoListTool::new(core.tool_session_runtime.working_set()).into());
         tools.extend(SessionNoteToolKind::all().iter().map(|kind| {
-            Arc::new(SessionNoteTool::new(
-                *kind,
-                core.tool_session_runtime.working_set(),
-            )) as Arc<dyn Tool>
+            SessionNoteTool::new(*kind, core.tool_session_runtime.working_set()).into()
         }));
         if self.capabilities.git
             && let Some(runtime) = &self.git_runtime
@@ -211,7 +209,7 @@ where
             tools.extend(git_tools(runtime));
         }
         core.agent_tools
-            .install(ToolGroupId::new("builtin"), tools)?;
+            .install(ToolInstallGroup::direct(ToolGroupId::new("builtin"), tools))?;
 
         if self.capabilities.skills {
             core.register_skill_tools_for_workspace(workspace_root.clone())?;
@@ -226,8 +224,10 @@ where
                 .await
                 .is_empty()
         {
-            core.agent_tools
-                .install(ToolGroupId::new("lsp"), lsp_tools(registry, tool_workspace))?;
+            core.agent_tools.install(ToolInstallGroup::direct(
+                ToolGroupId::new("lsp"),
+                lsp_tools(registry, tool_workspace),
+            ))?;
         } else {
             core.agent_tools.uninstall(&ToolGroupId::new("lsp"));
         }
@@ -235,7 +235,7 @@ where
     }
 }
 
-fn git_tools<B, P>(runtime: &GitToolRuntime<B, P>) -> Vec<Arc<dyn Tool>>
+fn git_tools<B, P>(runtime: &GitToolRuntime<B, P>) -> Vec<DynTool>
 where
     B: ExecutionBackend + 'static,
     P: GitCredentialProvider + 'static,
@@ -244,12 +244,13 @@ where
         .iter()
         .copied()
         .map(|kind| {
-            Arc::new(GitTool::new(
+            GitTool::new(
                 kind,
                 runtime.config.clone(),
                 runtime.backend.clone(),
                 runtime.credential_provider.clone(),
-            )) as Arc<dyn Tool>
+            )
+            .into()
         })
         .collect()
 }

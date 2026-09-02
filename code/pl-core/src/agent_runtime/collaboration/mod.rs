@@ -1,14 +1,11 @@
-use std::sync::Arc;
+use std::{future::Future, sync::Arc};
 
-use futures::FutureExt;
 use pl_protocol::PureError;
 use serde_json::{Value, json};
 
 use super::*;
-use crate::tool::{BoxFuture, ToolBudgetTiming};
-use crate::{
-    AgentRoleId, Tool, ToolCallContext, ToolEffect, ToolInput, ToolResult, ToolSessionRuntime,
-};
+use crate::tool::{DynTool, StaticTool, ToolBudgetTiming, ToolPolicy};
+use crate::{AgentRoleId, ToolCallContext, ToolEffect, ToolInput, ToolResult, ToolSessionRuntime};
 
 const TOOL_SPAWN_AGENT: &str = "spawn_agent";
 const TOOL_LIST_AGENT_PROFILES: &str = "list_agent_profiles";
@@ -81,7 +78,7 @@ impl AgentCollaborationTools {
     /// 所有 Agent Profile 共享同一套基础能力：send_message 仅允许
     /// parent→direct-child 调度，子代理向主代理的报告改由 durable 阶段提交
     /// 与 read_agent_submissions 查询承载。
-    pub fn tools(&self) -> Vec<Arc<dyn Tool>> {
+    pub fn tools(&self) -> Vec<DynTool> {
         let controller = !self.policy.spawn_roles.is_empty()
             || !matches!(self.policy.list_targets, AgentTargetSelector::None)
             || !matches!(self.policy.message_targets, AgentTargetSelector::None)
@@ -101,7 +98,7 @@ impl AgentCollaborationTools {
                 | CollaborationToolKind::Close => controller,
             })
             .map(|kind| {
-                Arc::new(CollaborationTool {
+                CollaborationTool {
                     kind,
                     runtime: self.runtime.clone(),
                     caller: self.caller.clone(),
@@ -109,7 +106,8 @@ impl AgentCollaborationTools {
                     session_runtime: self.session_runtime.clone(),
                     workspace_root: self.workspace_root.clone(),
                     profiles: self.profiles.clone(),
-                }) as Arc<dyn Tool>
+                }
+                .into()
             })
             .collect()
     }
@@ -218,13 +216,14 @@ struct CollaborationTool {
     profiles: Arc<Vec<pl_protocol::AgentProfileSnapshot>>,
 }
 
-impl Tool for CollaborationTool {
-    fn name(&self) -> &str {
-        self.kind.name()
-    }
+impl StaticTool for CollaborationTool {
+    type Input = Value;
 
-    fn description(&self) -> &str {
-        self.kind.description()
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        crate::tool::StaticToolDefinition::new(
+            crate::tool::ToolName::builtin(self.kind.name()),
+            self.kind.description(),
+        )
     }
 
     fn input_schema(&self) -> Value {
@@ -248,8 +247,11 @@ impl Tool for CollaborationTool {
         }
     }
 
-    fn supports_parallel_tool_calls(&self) -> bool {
-        matches!(
+    fn policy(&self) -> ToolPolicy {
+        let policy = ToolPolicy::default()
+            .with_effect(ToolEffect::AgentControl)
+            .with_budget_timing(self.kind.budget_timing());
+        if matches!(
             self.kind,
             CollaborationToolKind::SendMessage
                 | CollaborationToolKind::Interrupt
@@ -257,23 +259,20 @@ impl Tool for CollaborationTool {
                 | CollaborationToolKind::ListProfiles
                 | CollaborationToolKind::ReadSession
                 | CollaborationToolKind::ReadSubmissions
-        )
+        ) {
+            policy.with_parallel_tool_calls()
+        } else {
+            policy
+        }
     }
 
-    fn budget_timing(&self) -> ToolBudgetTiming {
-        self.kind.budget_timing()
-    }
-
-    fn effect(&self) -> Option<ToolEffect> {
-        Some(ToolEffect::AgentControl)
-    }
-
-    fn execute<'a>(
-        &'a self,
-        input: ToolInput,
+    fn execute(
+        &self,
+        input: Self::Input,
         context: ToolCallContext,
-    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
+    ) -> impl Future<Output = Result<ToolResult, PureError>> + Send {
         async move {
+            let input = ToolInput { arguments: input };
             match self.kind {
                 CollaborationToolKind::Spawn => self.spawn(input, context).await,
                 CollaborationToolKind::ListProfiles => self.list_profiles(input),
@@ -287,7 +286,6 @@ impl Tool for CollaborationTool {
                 CollaborationToolKind::Close => self.close(input).await,
             }
         }
-        .boxed()
     }
 }
 

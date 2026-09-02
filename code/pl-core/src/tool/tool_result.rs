@@ -263,6 +263,7 @@ impl ToolResult {
                 ToolDirective::InteractionRequested { .. }
                 | ToolDirective::SkillActivated { .. }
                 | ToolDirective::ToolResultRevision { .. }
+                | ToolDirective::RevealTools { .. }
                 | ToolDirective::AuditMetadata { .. }
                 | ToolDirective::ExecutionFailed
                 | ToolDirective::CacheHit { .. }
@@ -290,6 +291,7 @@ impl ToolResult {
             | ToolDirective::SkillActivated { .. }
             | ToolDirective::ToolResultRevision { .. }
             | ToolDirective::OutputArtifacts { .. }
+            | ToolDirective::RevealTools { .. }
             | ToolDirective::AuditMetadata { .. }
             | ToolDirective::ExecutionFailed
             | ToolDirective::CacheHit { .. }

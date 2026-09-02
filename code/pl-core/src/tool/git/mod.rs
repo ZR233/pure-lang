@@ -5,17 +5,15 @@
 //! `commands` 承载各 git 子命令语义,`runner` 承载带凭据注入与脱敏的执行管道。
 
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use futures::FutureExt;
 use pl_protocol::PureError;
 use serde_json::Value;
 
-use super::cache::ToolCachePolicy;
 use super::{
-    BoxFuture, OutputTruncation, Tool, ToolCallContext, ToolInput, ToolResult,
-    deserialize_tool_input,
+    OutputTruncation, StaticTool, ToolCallContext, ToolPolicy, ToolResult, deserialize_tool_input,
 };
 use crate::turn::ToolEffect;
 
@@ -89,60 +87,61 @@ impl<B, P> GitTool<B, P> {
             credential_provider,
         }
     }
-}
 
-impl<B, P> Tool for GitTool<B, P>
-where
-    B: ExecutionBackend,
-    P: GitCredentialProvider,
-{
     fn name(&self) -> &str {
         self.kind.name()
     }
+}
 
-    fn description(&self) -> &str {
-        self.kind.description()
+impl<B, P> StaticTool for GitTool<B, P>
+where
+    B: ExecutionBackend + 'static,
+    P: GitCredentialProvider + 'static,
+{
+    type Input = Value;
+
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        crate::tool::StaticToolDefinition::new(
+            crate::tool::ToolName::builtin(self.kind.name()),
+            self.kind.description(),
+        )
     }
 
     fn input_schema(&self) -> Value {
         self.kind.input_schema()
     }
 
-    fn effect(&self) -> Option<ToolEffect> {
-        Some(self.kind.effect())
+    fn policy(&self) -> ToolPolicy {
+        let mut policy = ToolPolicy::default()
+            .with_effect(self.kind.effect())
+            .with_cache_policy(self.kind.cache_policy());
+        if self.kind.effect() == ToolEffect::Read {
+            policy = policy.with_programmatic_calls();
+        }
+        policy
     }
 
-    fn supports_programmatic_calls(&self) -> bool {
-        self.kind.effect() == ToolEffect::Read
-    }
-
-    fn cache_policy(&self, _arguments: &serde_json::Value) -> ToolCachePolicy {
-        self.kind.cache_policy()
-    }
-
-    fn execute<'a>(
-        &'a self,
-        input: ToolInput,
+    fn execute(
+        &self,
+        input: Value,
         _context: ToolCallContext,
-    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
+    ) -> impl Future<Output = Result<ToolResult, PureError>> + Send {
         async move {
             let outcome = match self.kind {
                 GitToolKind::Status => {
-                    deserialize_tool_input::<GitEmptyInput>(self.name(), input.arguments)?;
+                    deserialize_tool_input::<GitEmptyInput>(self.name(), input)?;
                     self.run_plain(vec!["status", "--short", "--branch"]).await
                 }
-                GitToolKind::Diff => self.run_diff(input.arguments).await,
-                GitToolKind::Branch => self.run_branch(input.arguments).await,
-                GitToolKind::Fetch => self.run_fetch(input.arguments).await,
-                GitToolKind::Commit => self.run_commit(input.arguments).await,
-                GitToolKind::Push => self.run_push(input.arguments).await,
+                GitToolKind::Diff => self.run_diff(input).await,
+                GitToolKind::Branch => self.run_branch(input).await,
+                GitToolKind::Fetch => self.run_fetch(input).await,
+                GitToolKind::Commit => self.run_commit(input).await,
+                GitToolKind::Push => self.run_push(input).await,
                 GitToolKind::WorkspaceInfo => {
-                    deserialize_tool_input::<GitEmptyInput>(self.name(), input.arguments)?;
+                    deserialize_tool_input::<GitEmptyInput>(self.name(), input)?;
                     self.workspace_info()
                 }
-                GitToolKind::SyncDefaultBranch => {
-                    self.run_sync_default_branch(input.arguments).await
-                }
+                GitToolKind::SyncDefaultBranch => self.run_sync_default_branch(input).await,
             }?;
             Ok(ToolResult::from_runtime_text(
                 outcome.description,
@@ -153,6 +152,5 @@ where
                 Vec::new(),
             ))
         }
-        .boxed()
     }
 }

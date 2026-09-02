@@ -1,8 +1,8 @@
 use pl_model::ToolSpec;
 use serde_json::Value;
 
-use crate::tool::TypedTool;
 use crate::tool::cache::ToolCachePolicy;
+use crate::tool::typed_tool_input_schema;
 use crate::turn::ToolEffect;
 
 use super::ops::{ApplyPatchInput, ListFilesInput, ReadFileInput};
@@ -64,15 +64,9 @@ impl WorkspaceFileToolKind {
 
     pub fn input_schema(self) -> Value {
         match self {
-            Self::ReadFile => {
-                TypedTool::<ReadFileInput>::new(self.name(), self.description()).input_schema()
-            }
-            Self::ListFiles => {
-                TypedTool::<ListFilesInput>::new(self.name(), self.description()).input_schema()
-            }
-            Self::ApplyPatch => {
-                TypedTool::<ApplyPatchInput>::new(self.name(), self.description()).input_schema()
-            }
+            Self::ReadFile => typed_tool_input_schema::<ReadFileInput>(),
+            Self::ListFiles => typed_tool_input_schema::<ListFilesInput>(),
+            Self::ApplyPatch => typed_tool_input_schema::<ApplyPatchInput>(),
         }
     }
 

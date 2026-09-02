@@ -38,7 +38,10 @@ impl McpTestHarness {
             .expect("reconcile test MCP runtime");
         let lease = runtime.acquire_turn_lease().await.expect("MCP lease");
         core.agent_tools()
-            .install(ToolGroupId::new("mcp"), lease.agent_tools(None))
+            .install(ToolInstallGroup::direct(
+                ToolGroupId::new("mcp"),
+                lease.agent_tools(None).expect("construct MCP tools"),
+            ))
             .expect("install MCP tools");
         Self { runtime, closed }
     }
@@ -387,7 +390,10 @@ async fn installed_runtime(
     let manager = ToolManager::new();
     let tools = manager.agent_tool_set("mcp-test", GlobalToolInheritance::Isolated);
     tools
-        .install(ToolGroupId::new("mcp"), lease.agent_tools(None))
+        .install(ToolInstallGroup::direct(
+            ToolGroupId::new("mcp"),
+            lease.agent_tools(None).expect("construct MCP tools"),
+        ))
         .expect("install MCP tools");
     let plan = tools.freeze();
     InstalledMcp {
@@ -396,6 +402,47 @@ async fn installed_runtime(
         runtime,
         closed,
     }
+}
+
+#[tokio::test]
+async fn static_mcp_and_hosted_executors_share_one_tool_plan() {
+    let closed = Arc::new(AtomicBool::new(false));
+    let connector = McpConnector::testing([(
+        "docs".to_string(),
+        test_connection(vec![test_tool("lookup")], closed.clone()).await,
+    )]);
+    let runtime = McpRuntime::new(connector).handle();
+    runtime
+        .reconcile(BTreeMap::from([(
+            "docs".to_string(),
+            config("docs", Some(ToolEffect::Read)),
+        )]))
+        .await
+        .expect("reconcile test MCP runtime");
+    let lease = runtime.acquire_turn_lease().await.expect("MCP lease");
+    let manager = ToolManager::new();
+    let tools = manager.agent_tool_set("mixed-test", GlobalToolInheritance::Isolated);
+    let mut mixed = vec![CompleteTool.into()];
+    mixed.extend(lease.agent_tools(None).expect("construct MCP tools"));
+    mixed.push(DynTool::new_executor(HostedWebSearchTool::deepseek()));
+    tools
+        .install(ToolInstallGroup::direct(ToolGroupId::new("mixed"), mixed))
+        .expect("install mixed executor sources");
+
+    assert_eq!(
+        tools.freeze().names().collect::<Vec<_>>(),
+        vec![
+            "complete",
+            "list_mcp_resource_templates",
+            "list_mcp_resources",
+            "mcp__docs__lookup",
+            "read_mcp_resource",
+            "web_search",
+        ]
+    );
+
+    runtime.shutdown().await;
+    wait_for_closed(&closed).await;
 }
 
 #[tokio::test]
@@ -408,14 +455,20 @@ async fn manager_plan_exposes_mcp_tools_and_audit_pipeline() {
         .expect("published MCP tool");
     // 无显式配置时 readOnlyHint=true 推导 Read。
     let tool = binding.tool();
-    assert_eq!(tool.effect(), Some(ToolEffect::Read));
-    assert!(tool.supports_parallel_tool_calls());
-    assert_eq!(tool.runtime_lock_policy(), ToolRuntimeLockPolicy::Shared);
+    assert_eq!(tool.policy().effect(), Some(ToolEffect::Read));
+    assert!(tool.policy().supports_parallel_tool_calls());
     assert_eq!(
-        tool.cache_policy(&json!({})),
+        tool.policy().runtime_lock_policy(),
+        ToolRuntimeLockPolicy::Shared
+    );
+    assert_eq!(
+        tool.policy().cache_policy(&json!({})),
         crate::tool::cache::ToolCachePolicy::Never
     );
-    let display = tool.display_metadata().expect("MCP display metadata");
+    let display = tool
+        .definition()
+        .display_metadata()
+        .expect("MCP display metadata");
     assert_eq!(
         display
             .annotations
@@ -426,7 +479,7 @@ async fn manager_plan_exposes_mcp_tools_and_audit_pipeline() {
     assert!(display.icons.is_some());
     assert!(display.metadata.is_some());
     assert!(matches!(
-        tool.spec(),
+        tool.definition().spec(),
         pl_protocol::ToolSpec::Function {
             output_schema: Some(_),
             ..
@@ -470,9 +523,12 @@ async fn untrusted_annotations_keep_conservative_defaults() {
         .binding("mcp__docs__destructive")
         .expect("published MCP tool");
     let tool = binding.tool();
-    assert_eq!(tool.effect(), None);
-    assert!(!tool.supports_parallel_tool_calls());
-    assert_eq!(tool.runtime_lock_policy(), ToolRuntimeLockPolicy::Exclusive);
+    assert_eq!(tool.policy().effect(), None);
+    assert!(!tool.policy().supports_parallel_tool_calls());
+    assert_eq!(
+        tool.policy().runtime_lock_policy(),
+        ToolRuntimeLockPolicy::Exclusive
+    );
 
     installed.runtime.shutdown().await;
     wait_for_closed(&installed.closed).await;
@@ -487,7 +543,7 @@ async fn explicit_server_effect_overrides_remote_hints() {
         .plan
         .binding("mcp__docs__configured")
         .expect("published MCP tool");
-    assert_eq!(binding.tool().effect(), Some(ToolEffect::Read));
+    assert_eq!(binding.tool().policy().effect(), Some(ToolEffect::Read));
 
     installed.runtime.shutdown().await;
     wait_for_closed(&installed.closed).await;
@@ -573,8 +629,9 @@ async fn resource_facades_are_hidden_when_the_server_does_not_declare_the_capabi
     let lease = runtime.acquire_turn_lease().await.expect("MCP lease");
     let names = lease
         .agent_tools(None)
+        .expect("construct MCP tools")
         .into_iter()
-        .map(|tool| crate::tool::Tool::name(tool.as_ref()).to_string())
+        .map(|tool| tool.definition().name().wire_name().to_string())
         .collect::<Vec<_>>();
     assert_eq!(names, vec!["mcp__tools-only__lookup"]);
 

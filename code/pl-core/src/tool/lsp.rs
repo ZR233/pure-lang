@@ -1,27 +1,21 @@
+use std::future::Future;
 use std::path::PathBuf;
 
-use futures::FutureExt;
 use pl_lsp::{LspQuery, LspQueryOperation, LspRuntimeRegistry};
 use pl_protocol::PureError;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::{
-    BoxFuture, OutputTruncation, Tool, ToolCallContext, ToolInput, ToolPathPolicy, ToolResult,
-    ToolWorkspace, TypedTool, deserialize_tool_input,
+    DynTool, OutputTruncation, StaticTool, ToolCallContext, ToolPathPolicy, ToolPolicy, ToolResult,
+    ToolWorkspace,
 };
 
 /// 构造 lsp 来源的 seam 工具条目（`lsp_capabilities` + `lsp_query`）。
-pub fn lsp_tools(
-    registry: LspRuntimeRegistry,
-    workspace: ToolWorkspace,
-) -> Vec<std::sync::Arc<dyn Tool>> {
+pub fn lsp_tools(registry: LspRuntimeRegistry, workspace: ToolWorkspace) -> Vec<DynTool> {
     vec![
-        std::sync::Arc::new(LspCapabilitiesTool::new(
-            registry.clone(),
-            workspace.clone(),
-        )),
-        std::sync::Arc::new(LspQueryTool::new(registry, workspace)),
+        LspCapabilitiesTool::new(registry.clone(), workspace.clone()).into(),
+        LspQueryTool::new(registry, workspace).into(),
     ]
 }
 
@@ -42,47 +36,37 @@ impl LspCapabilitiesTool {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct LspCapabilitiesInput {}
+pub struct LspCapabilitiesInput {}
 
-impl Tool for LspCapabilitiesTool {
-    fn name(&self) -> &str {
-        "lsp_capabilities"
+impl StaticTool for LspCapabilitiesTool {
+    type Input = LspCapabilitiesInput;
+
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        crate::tool::StaticToolDefinition::new(
+            crate::tool::ToolName::builtin("lsp_capabilities"),
+            "List language servers available in the current workspace with their language ids, supported lsp_query operations, and readiness. Call this before lsp_query to discover valid languageId values.",
+        )
     }
 
-    fn description(&self) -> &str {
-        "List language servers available in the current workspace with their language ids, supported lsp_query operations, and readiness. Call this before lsp_query to discover valid languageId values."
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::read_only()
+            .with_parallel_tool_calls()
+            .with_programmatic_calls()
     }
 
-    fn input_schema(&self) -> serde_json::Value {
-        TypedTool::<LspCapabilitiesInput>::new(self.name(), self.description()).input_schema()
-    }
-
-    fn supports_parallel_tool_calls(&self) -> bool {
-        true
-    }
-
-    fn supports_programmatic_calls(&self) -> bool {
-        true
-    }
-
-    fn effect(&self) -> Option<crate::turn::ToolEffect> {
-        Some(crate::turn::ToolEffect::Read)
-    }
-
-    fn execute<'a>(
-        &'a self,
-        input: ToolInput,
+    fn execute(
+        &self,
+        _input: LspCapabilitiesInput,
         _context: ToolCallContext,
-    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
+    ) -> impl Future<Output = Result<ToolResult, PureError>> + Send {
         async move {
-            deserialize_tool_input::<LspCapabilitiesInput>(self.name(), input.arguments)?;
             let capabilities = self
                 .registry
                 .capabilities_for_workspace(self.workspace.root())
                 .await;
             let description = serde_json::to_string_pretty(&capabilities).map_err(|error| {
                 PureError::ToolExecutionFailed {
-                    tool: self.name().to_string(),
+                    tool: "lsp_capabilities".to_string(),
                     error: format!("failed to serialize LSP capabilities: {error}"),
                 }
             })?;
@@ -95,13 +79,12 @@ impl Tool for LspCapabilitiesTool {
                 Vec::new(),
             ))
         }
-        .boxed()
     }
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct LspQueryInput {
+pub struct LspQueryInput {
     /// 目标语言 ID；运行期按 catalog 路由到对应 server。
     language_id: String,
     operation: LspQueryOperation,
@@ -136,39 +119,28 @@ impl LspQueryTool {
     }
 }
 
-impl Tool for LspQueryTool {
-    fn name(&self) -> &str {
-        "lsp_query"
+impl StaticTool for LspQueryTool {
+    type Input = LspQueryInput;
+
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        crate::tool::StaticToolDefinition::new(
+            crate::tool::ToolName::builtin("lsp_query"),
+            "Query language servers for semantic code intelligence. Provide languageId (see lsp_capabilities) plus an operation and its parameters. Prefer this over text search when resolving definitions, references, hover/type or signature information, implementations, symbols, call hierarchy, or diagnostics.",
+        )
     }
 
-    fn description(&self) -> &str {
-        "Query language servers for semantic code intelligence. Provide languageId (see lsp_capabilities) plus an operation and its parameters. Prefer this over text search when resolving definitions, references, hover/type or signature information, implementations, symbols, call hierarchy, or diagnostics."
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::read_only()
+            .with_parallel_tool_calls()
+            .with_programmatic_calls()
     }
 
-    fn input_schema(&self) -> serde_json::Value {
-        TypedTool::<LspQueryInput>::new(self.name(), self.description()).input_schema()
-    }
-
-    fn supports_parallel_tool_calls(&self) -> bool {
-        true
-    }
-
-    fn supports_programmatic_calls(&self) -> bool {
-        true
-    }
-
-    fn effect(&self) -> Option<crate::turn::ToolEffect> {
-        Some(crate::turn::ToolEffect::Read)
-    }
-
-    fn execute<'a>(
-        &'a self,
-        input: ToolInput,
+    fn execute(
+        &self,
+        parsed: LspQueryInput,
         context: ToolCallContext,
-    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
+    ) -> impl Future<Output = Result<ToolResult, PureError>> + Send {
         async move {
-            let parsed: LspQueryInput =
-                deserialize_tool_input::<LspQueryInput>(self.name(), input.arguments)?;
             let query = LspQuery {
                 operation: parsed.operation,
                 file_path: parsed.file_path,
@@ -178,15 +150,15 @@ impl Tool for LspQueryTool {
                 max_results: parsed.max_results,
                 language_id: Some(parsed.language_id.clone()),
             };
-            let query = resolve_query_path(query, &self.workspace, &context, self.name())?;
+            let query = resolve_query_path(query, &self.workspace, &context, "lsp_query")?;
             let result = self
                 .registry
                 .query_in_workspace(self.workspace.root(), query)
                 .await
-                .map_err(|error| unknown_language_error(self.name(), &parsed.language_id, error))?;
+                .map_err(|error| unknown_language_error("lsp_query", &parsed.language_id, error))?;
             let description = serde_json::to_string_pretty(&result).map_err(|error| {
                 PureError::ToolExecutionFailed {
-                    tool: self.name().to_string(),
+                    tool: "lsp_query".to_string(),
                     error: format!("failed to serialize LSP result: {error}"),
                 }
             })?;
@@ -199,7 +171,6 @@ impl Tool for LspQueryTool {
                 Vec::new(),
             ))
         }
-        .boxed()
     }
 }
 
@@ -246,7 +217,7 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
-    use crate::tool::ToolApprovalContext;
+    use crate::tool::{StaticToolTestExt, ToolApprovalContext, ToolInput, deserialize_tool_input};
 
     fn test_context(
         _workspace_root: PathBuf,
@@ -267,10 +238,13 @@ mod tests {
     fn lsp_tools_expose_capabilities_and_query_only() {
         let tools = lsp_tools(LspRuntimeRegistry::new(), workspace(std::env::temp_dir()));
 
-        let names = tools.iter().map(|tool| tool.name()).collect::<Vec<_>>();
+        let names = tools
+            .iter()
+            .map(|tool| tool.definition().name().wire_name())
+            .collect::<Vec<_>>();
         assert_eq!(names, vec!["lsp_capabilities", "lsp_query"]);
         for tool in &tools {
-            assert_eq!(tool.effect(), Some(crate::turn::ToolEffect::Read));
+            assert_eq!(tool.policy().effect(), Some(crate::turn::ToolEffect::Read));
         }
         // catalog 中不得出现按语言命名的 lsp_query_{lang} 形态。
         assert!(!names.iter().any(|name| name.starts_with("lsp_query_")));
@@ -312,7 +286,7 @@ mod tests {
             }),
         };
 
-        let error = tool.execute(input, context).await.unwrap_err();
+        let error = tool.execute_raw(input, context).await.unwrap_err();
 
         match error {
             PureError::ToolExecutionFailed { tool, error } => {

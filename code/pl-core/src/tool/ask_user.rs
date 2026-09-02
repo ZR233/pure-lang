@@ -1,9 +1,9 @@
 use std::collections::HashSet;
+use std::future::Future;
 use std::path::PathBuf;
 
 use crate::time::unix_seconds;
 use crate::turn::ToolEffect;
-use futures::FutureExt;
 use pl_protocol::{
     InteractionRequest, InteractionResolution, InteractionScope, PureError, UserInputRequest,
     UserInputResolution, UserInputResponse, UserQuestion, UserQuestionOption,
@@ -12,10 +12,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::truncation::OutputTruncation;
-use super::{
-    BoxFuture, Tool, ToolCallContext, ToolDirective, ToolInput, ToolResult, TypedTool,
-    deserialize_tool_input,
-};
+use super::{StaticTool, ToolCallContext, ToolDirective, ToolPolicy, ToolResult};
 use crate::turn::UserInputMode;
 
 #[derive(Debug, Default)]
@@ -23,7 +20,7 @@ pub struct AskUserTool;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct AskUserInput {
+pub struct AskUserInput {
     /// Structured questions shown to the user.
     #[schemars(length(min = 1))]
     questions: Vec<UserQuestionInput>,
@@ -78,39 +75,34 @@ impl From<UserQuestionInput> for UserQuestion {
     }
 }
 
-impl Tool for AskUserTool {
-    fn name(&self) -> &str {
-        "request_user_input"
+impl StaticTool for AskUserTool {
+    type Input = AskUserInput;
+
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        crate::tool::StaticToolDefinition::new(
+            crate::tool::ToolName::builtin("request_user_input"),
+            "Ask the user for missing information while the current turn is running. \
+             Supports multiple structured questions with optional choices and free-form answers.",
+        )
     }
 
-    fn description(&self) -> &str {
-        "Ask the user for missing information while the current turn is running. \
-         Supports multiple structured questions with optional choices and free-form answers."
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::default().with_effect(ToolEffect::Read)
     }
 
-    fn input_schema(&self) -> serde_json::Value {
-        TypedTool::<AskUserInput>::new(self.name(), self.description()).input_schema()
-    }
-
-    fn effect(&self) -> Option<ToolEffect> {
-        Some(ToolEffect::Read)
-    }
-
-    fn execute<'a>(
-        &'a self,
-        input: ToolInput,
+    fn execute(
+        &self,
+        args: AskUserInput,
         context: ToolCallContext,
-    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
+    ) -> impl Future<Output = Result<ToolResult, PureError>> + Send {
         async move {
-            let args = deserialize_tool_input::<AskUserInput>(self.name(), input.arguments)?;
             let questions = args
                 .questions
                 .into_iter()
                 .map(UserQuestion::from)
                 .collect::<Vec<_>>();
-            execute_user_input(self.name(), questions, context, None).await
+            execute_user_input("request_user_input", questions, context, None).await
         }
-        .boxed()
     }
 }
 
@@ -253,13 +245,14 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 
+    use futures::FutureExt;
     use pl_protocol::{UserInputAnswer, UserQuestionOption};
     use pretty_assertions::assert_eq;
     use tokio_util::sync::CancellationToken;
 
     use super::*;
     use crate::TurnOptions;
-    use crate::tool::{ToolApprovalContext, WorkspaceAccess};
+    use crate::tool::{StaticToolTestExt, ToolApprovalContext, ToolInput, WorkspaceAccess};
 
     fn context(options: TurnOptions) -> ToolCallContext {
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
@@ -307,7 +300,7 @@ mod tests {
             .boxed()
         });
         let output = AskUserTool
-            .execute(
+            .execute_raw(
                 tool_input(),
                 context(TurnOptions::default().with_interaction_callback(callback)),
             )
@@ -376,7 +369,7 @@ mod tests {
         let token = CancellationToken::new();
         token.cancel();
         let output = AskUserTool
-            .execute(
+            .execute_raw(
                 tool_input(),
                 context(
                     TurnOptions::default()
@@ -397,7 +390,7 @@ mod tests {
     async fn request_user_input_can_end_current_turn_after_request() {
         let output = tokio::time::timeout(
             std::time::Duration::from_millis(200),
-            AskUserTool.execute(
+            AskUserTool.execute_raw(
                 tool_input(),
                 context(TurnOptions::default().with_user_input_end_turn()),
             ),

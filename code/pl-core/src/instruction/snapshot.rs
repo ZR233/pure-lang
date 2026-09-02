@@ -100,6 +100,14 @@ impl InstructionSnapshot {
         push_instruction_group(
             &mut prelude_messages,
             &mut prefix_section_hashes,
+            "toolGroups",
+            MessageRole::System,
+            "# Tool Group Instructions",
+            select_blocks(&self.developer, &[InstructionSourceKind::ToolGroup]),
+        );
+        push_instruction_group(
+            &mut prelude_messages,
+            &mut prefix_section_hashes,
             "workspace",
             MessageRole::User,
             "# Workspace Context",
@@ -151,6 +159,22 @@ impl InstructionSnapshot {
             ),
             content,
         );
+        self
+    }
+
+    pub(crate) fn with_tool_group_instructions<'a>(
+        mut self,
+        groups: impl IntoIterator<Item = (&'a crate::ToolGroupId, &'a str)>,
+    ) -> Self {
+        for (group, instructions) in groups {
+            self.push_developer(
+                InstructionSource::new(
+                    InstructionSourceKind::ToolGroup,
+                    format!("tool group {group}"),
+                ),
+                instructions,
+            );
+        }
         self
     }
 

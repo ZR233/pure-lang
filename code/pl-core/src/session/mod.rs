@@ -7,7 +7,8 @@ use pl_protocol::{
     AgentSessionSnapshot, AgentWorkingState, ConversationRecoveryState, Message, MessageContent,
     MessageRole, ModelContextItem, ModelContextSectionSnapshot, ModelContextSnapshot,
     PinnedContextSection, PromptPrefixChangedReason, ResponsesContextItem, SessionNote,
-    ThreadPromptMetadata, ToolMediaContext, ToolResultReceipt, ToolResultRecord,
+    ThreadPromptMetadata, ToolDiscoveryState, ToolMediaContext, ToolResultReceipt,
+    ToolResultRecord,
 };
 
 use crate::working_set::canonical_content_hash;
@@ -192,6 +193,24 @@ impl AgentSession {
 
     pub fn conversation_recovery(&self) -> &ConversationRecoveryState {
         &self.state.working_state.conversation_recovery
+    }
+
+    pub fn tool_discovery(&self) -> &ToolDiscoveryState {
+        &self.state.working_state.tool_discovery
+    }
+
+    /// Replaces the current session's deferred-tool reveal state.
+    pub fn replace_tool_discovery(&mut self, mut discovery: ToolDiscoveryState) -> bool {
+        discovery.revealed_tool_names.sort();
+        discovery.revealed_tool_names.dedup();
+        if self.state.working_state.tool_discovery == discovery {
+            return false;
+        }
+        let state = Arc::make_mut(&mut self.state);
+        state.working_state.tool_discovery = discovery;
+        state.working_state.revision = state.working_state.revision.saturating_add(1);
+        state.revision = state.revision.saturating_add(1);
+        true
     }
 
     /// 替换 typed conversation recovery 审计状态。

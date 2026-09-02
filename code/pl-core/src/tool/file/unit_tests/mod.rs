@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use crate::tool::{
-    AgentWorkspace, LocalWorkspaceFileTool, StatPathTool, Tool, ToolCallContext, ToolInput,
-    ToolWorkspace, WorkspaceFileToolKind,
+    AgentWorkspace, LocalWorkspaceFileTool, StatPathTool, ToolCallContext, ToolInput, ToolResult,
+    ToolWorkspace, WorkspaceFileToolKind, deserialize_tool_input,
 };
 
 use super::write::WriteFileTool;
@@ -37,6 +37,22 @@ fn directory_workspace(root: &Path, paths: Option<&[&str]>) -> ToolWorkspace {
 fn input(arguments: serde_json::Value) -> ToolInput {
     ToolInput { arguments }
 }
+
+trait StaticToolTestExt: crate::tool::StaticTool {
+    fn execute(
+        &self,
+        input: ToolInput,
+        context: ToolCallContext,
+    ) -> futures::future::BoxFuture<'_, crate::Result<ToolResult>> {
+        let tool_name = self.definition().name().wire_name().to_string();
+        Box::pin(async move {
+            let parsed = deserialize_tool_input::<Self::Input>(&tool_name, input.arguments)?;
+            crate::tool::StaticTool::execute(self, parsed, context).await
+        })
+    }
+}
+
+impl<T: crate::tool::StaticTool> StaticToolTestExt for T {}
 
 fn read_file_tool(root: &Path) -> LocalWorkspaceFileTool {
     LocalWorkspaceFileTool::new(WorkspaceFileToolKind::ReadFile, tool_workspace(root))

@@ -1,16 +1,15 @@
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use futures::FutureExt;
-use pl_model::ToolSpec;
 use pl_protocol::Result;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
 use crate::tool::{
-    BoxFuture, Tool, ToolCallContext, ToolInput, ToolResult, ToolResultContent, ToolWorkspace,
-    TypedTool, WorkspaceFileBackend, WorkspaceFileReadRequest, WorkspaceFileWriteRequest,
-    deserialize_tool_input, tool_error,
+    DynTool, StaticTool, ToolCallContext, ToolInput, ToolPolicy, ToolResult, ToolResultContent,
+    ToolWorkspace, WorkspaceFileBackend, WorkspaceFileReadRequest, WorkspaceFileWriteRequest,
+    deserialize_tool_input, tool_error, typed_tool_input_schema,
 };
 use crate::turn::ToolEffect;
 
@@ -20,16 +19,17 @@ use super::RemoteWorkspaceFileBackend;
 pub fn remote_workspace_mutation_tools(
     backend: Arc<RemoteWorkspaceFileBackend>,
     workspace: ToolWorkspace,
-) -> Vec<Arc<dyn Tool>> {
+) -> Vec<DynTool> {
     RemoteMutationKind::all()
         .iter()
         .copied()
         .map(|kind| {
-            Arc::new(RemoteWorkspaceMutationTool {
+            RemoteWorkspaceMutationTool {
                 kind,
                 backend: backend.clone(),
                 workspace: workspace.clone(),
-            }) as Arc<dyn Tool>
+            }
+            .into()
         })
         .collect()
 }
@@ -39,6 +39,12 @@ struct RemoteWorkspaceMutationTool {
     kind: RemoteMutationKind,
     backend: Arc<RemoteWorkspaceFileBackend>,
     workspace: ToolWorkspace,
+}
+
+impl RemoteWorkspaceMutationTool {
+    fn name(&self) -> &str {
+        self.kind.name()
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -93,52 +99,46 @@ impl RemoteMutationKind {
 
     fn schema(self) -> serde_json::Value {
         match self {
-            Self::Write => {
-                TypedTool::<WriteFileInput>::new(self.name(), self.description()).input_schema()
-            }
-            Self::Stat | Self::CreateDirectory => {
-                TypedTool::<PathInput>::new(self.name(), self.description()).input_schema()
-            }
-            Self::Delete => {
-                TypedTool::<DeletePathInput>::new(self.name(), self.description()).input_schema()
-            }
-            Self::Copy | Self::Move => {
-                TypedTool::<CopyMoveInput>::new(self.name(), self.description()).input_schema()
-            }
+            Self::Write => typed_tool_input_schema::<WriteFileInput>(),
+            Self::Stat | Self::CreateDirectory => typed_tool_input_schema::<PathInput>(),
+            Self::Delete => typed_tool_input_schema::<DeletePathInput>(),
+            Self::Copy | Self::Move => typed_tool_input_schema::<CopyMoveInput>(),
         }
     }
 }
 
-impl Tool for RemoteWorkspaceMutationTool {
-    fn name(&self) -> &str {
-        self.kind.name()
-    }
+impl StaticTool for RemoteWorkspaceMutationTool {
+    type Input = serde_json::Value;
 
-    fn description(&self) -> &str {
-        self.kind.description()
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        crate::tool::StaticToolDefinition::new(
+            crate::tool::ToolName::builtin(self.kind.name()),
+            self.kind.description(),
+        )
     }
 
     fn input_schema(&self) -> serde_json::Value {
         self.kind.schema()
     }
 
-    fn supports_parallel_tool_calls(&self) -> bool {
-        matches!(self.kind, RemoteMutationKind::Stat)
-    }
-
-    fn effect(&self) -> Option<ToolEffect> {
-        Some(if matches!(self.kind, RemoteMutationKind::Stat) {
+    fn policy(&self) -> ToolPolicy {
+        let effect = if matches!(self.kind, RemoteMutationKind::Stat) {
             ToolEffect::Read
         } else {
             ToolEffect::WorkspaceWrite
-        })
+        };
+        let mut policy = ToolPolicy::default().with_effect(effect);
+        if matches!(self.kind, RemoteMutationKind::Stat) {
+            policy = policy.with_parallel_tool_calls();
+        }
+        policy
     }
 
-    fn execute<'a>(
-        &'a self,
-        input: ToolInput,
+    fn execute(
+        &self,
+        input: serde_json::Value,
         _context: ToolCallContext,
-    ) -> BoxFuture<'a, Result<ToolResult>> {
+    ) -> impl Future<Output = Result<ToolResult>> + Send {
         async move {
             if !matches!(self.kind, RemoteMutationKind::Stat) {
                 self.workspace.ensure_workspace_writable()?;
@@ -148,6 +148,7 @@ impl Tool for RemoteWorkspaceMutationTool {
             } else {
                 Some(self.workspace.write_lock().await)
             };
+            let input = ToolInput { arguments: input };
             let text = match self.kind {
                 RemoteMutationKind::Write => self.write(input).await?,
                 RemoteMutationKind::Stat => self.stat(input).await?,
@@ -158,11 +159,6 @@ impl Tool for RemoteWorkspaceMutationTool {
             };
             Ok(text_result(text))
         }
-        .boxed()
-    }
-
-    fn spec(&self) -> ToolSpec {
-        ToolSpec::function(self.name(), self.description(), self.input_schema())
     }
 }
 

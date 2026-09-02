@@ -11,12 +11,12 @@ use super::schema::{
     GitBranchAction, GitBranchInput, GitCommitInput, GitDiffInput, GitFetchInput, GitPushInput,
     GitSyncDefaultBranchInput,
 };
-use crate::tool::{Tool, deserialize_tool_input, tool_error};
+use crate::tool::{deserialize_tool_input, tool_error};
 
 impl<B, P> GitTool<B, P>
 where
-    B: ExecutionBackend,
-    P: GitCredentialProvider,
+    B: ExecutionBackend + 'static,
+    P: GitCredentialProvider + 'static,
 {
     pub(super) async fn run_diff(&self, arguments: Value) -> Result<GitToolOutcome, PureError> {
         let input: GitDiffInput = deserialize_tool_input(self.name(), arguments)?;

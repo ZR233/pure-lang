@@ -12,8 +12,8 @@ use pl_core::instruction::{
 use pl_core::{
     AgentCollaborationTools, AgentIdentity, AgentTurnFactory, AgentTurnPreparationContext,
     AttachmentRuntime, BeforeModelStepHook, CoreRuntimeProfile, PreparedAgentTurn,
-    PreparedSessionRuntime, SubagentContext, ToolGroupId, TurnEngineBuilder, TurnOptions,
-    TurnRequest, load_workspace_instruction_documents, plan_web_searches,
+    PreparedSessionRuntime, SubagentContext, ToolGroupId, ToolInstallGroup, TurnEngineBuilder,
+    TurnOptions, TurnRequest, load_workspace_instruction_documents, plan_web_searches,
 };
 
 use crate::McpRuntimeHandle;
@@ -320,15 +320,17 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
                     let mut replacements = Vec::with_capacity(2);
                     if refresh_mcp {
                         let lease = mcp_runtime.acquire_turn_lease().await?;
-                        replacements
-                            .push((ToolGroupId::new("mcp"), lease.agent_tools(mcp_image_output)));
+                        replacements.push(ToolInstallGroup::deferred(
+                            ToolGroupId::new("mcp"),
+                            lease.agent_tools(mcp_image_output)?,
+                        ));
                     }
                     if refresh_lsp {
                         let available = !lsp_runtime
                             .active_server_names_for_workspace(&refresh_workspace_root)
                             .await
                             .is_empty();
-                        replacements.push((
+                        replacements.push(ToolInstallGroup::direct(
                             ToolGroupId::new("lsp"),
                             lsp_tool_group(available, lsp_runtime, refresh_workspace),
                         ));
@@ -398,7 +400,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
                 &route.model,
                 attachment_runtime,
             ) {
-                additional_tools.push(Arc::new(tool));
+                additional_tools.push(tool.into());
             }
             pl_core::BuiltinToolInstaller::host_provided(config.runtime.tool_capabilities.clone())
                 .with_git_tools(
@@ -433,23 +435,20 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             workflow_mode_snapshot(mode_snapshot.as_ref(), exclusive_web_search)
         {
             let working_set = engine.tool_session_runtime().working_set();
-            engine.agent_tools().install(
+            engine.agent_tools().install(ToolInstallGroup::direct(
                 ToolGroupId::new("workflow"),
-                vec![Arc::new(pl_core::WorkflowStateTool::new(
-                    working_set,
-                    mode_snapshot,
-                ))],
-            )?;
+                vec![pl_core::WorkflowStateTool::new(working_set, mode_snapshot).into()],
+            ))?;
         } else {
             engine
                 .agent_tools()
                 .uninstall(&ToolGroupId::new("workflow"));
         }
         if is_root {
-            engine.agent_tools().install(
+            engine.agent_tools().install(ToolInstallGroup::direct(
                 ToolGroupId::new("completion"),
-                vec![Arc::new(pl_core::CompleteTool)],
-            )?;
+                vec![pl_core::CompleteTool.into()],
+            ))?;
         } else {
             engine
                 .agent_tools()
@@ -481,9 +480,10 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
                 .agent_tools()
                 .uninstall(&ToolGroupId::new("collaboration"));
         } else {
-            engine
-                .agent_tools()
-                .install(ToolGroupId::new("collaboration"), collaboration.tools())?;
+            engine.agent_tools().install(ToolInstallGroup::direct(
+                ToolGroupId::new("collaboration"),
+                collaboration.tools(),
+            ))?;
         }
 
         let attachment_ids = context
@@ -860,7 +860,7 @@ fn lsp_tool_group(
     available: bool,
     registry: pl_lsp::LspRuntimeRegistry,
     workspace: pl_core::ToolWorkspace,
-) -> Vec<Arc<dyn pl_core::Tool>> {
+) -> Vec<pl_core::DynTool> {
     if available {
         pl_core::lsp_tools(registry, workspace)
     } else {
@@ -958,10 +958,10 @@ mod tests {
             pl_core::ToolWorkspace::new(pl_core::AgentWorkspace::local(std::env::temp_dir()));
 
         tools
-            .install(
+            .install(ToolInstallGroup::direct(
                 ToolGroupId::new("lsp"),
                 lsp_tool_group(true, registry.clone(), workspace.clone()),
-            )
+            ))
             .expect("publish available LSP tools");
         assert_eq!(
             tools.tool_names(),
@@ -969,10 +969,10 @@ mod tests {
         );
 
         tools
-            .install(
+            .install(ToolInstallGroup::direct(
                 ToolGroupId::new("lsp"),
                 lsp_tool_group(false, registry, workspace),
-            )
+            ))
             .expect("publish unavailable LSP generation");
         assert!(tools.tool_names().is_empty());
     }

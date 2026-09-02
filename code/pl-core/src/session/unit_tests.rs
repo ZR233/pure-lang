@@ -471,6 +471,32 @@ fn compaction_preserves_note_and_child_forks_do_not_inherit_it() {
 }
 
 #[test]
+fn deferred_tool_reveals_persist_in_session_but_child_forks_start_empty() {
+    let mut parent = AgentSession::from_messages(vec![text_message("before")]);
+    assert!(parent.replace_tool_discovery(ToolDiscoveryState {
+        catalog_fingerprint: Some("catalog-v1".to_string()),
+        revealed_tool_names: vec![
+            "mcp__write".to_string(),
+            "mcp__read".to_string(),
+            "mcp__read".to_string(),
+        ],
+    }));
+    assert_eq!(
+        parent.tool_discovery(),
+        &ToolDiscoveryState {
+            catalog_fingerprint: Some("catalog-v1".to_string()),
+            revealed_tool_names: vec!["mcp__read".to_string(), "mcp__write".to_string()],
+        }
+    );
+
+    let restored = AgentSession::from_snapshot(parent.snapshot());
+    let child = parent.fork(AgentSessionForkPolicy::AllMessages);
+
+    assert_eq!(restored.tool_discovery(), parent.tool_discovery());
+    assert_eq!(child.tool_discovery(), &ToolDiscoveryState::default());
+}
+
+#[test]
 fn clone_shares_state_until_first_write() {
     let mut original = AgentSession::from_messages(vec![text_message("shared")]);
     let mut cloned = original.clone();

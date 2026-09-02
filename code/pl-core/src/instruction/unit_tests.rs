@@ -501,6 +501,30 @@ fn bundle_orders_fixed_layers_from_global_to_workspace() {
 }
 
 #[test]
+fn visible_tool_group_guidance_has_its_own_system_prefix_section() {
+    let group = crate::ToolGroupId::new("mcp:business");
+    let snapshot = InstructionSnapshot {
+        base: InstructionBlock {
+            source: InstructionSource::new(InstructionSourceKind::BuiltInBase, "base"),
+            content: "base".to_string(),
+        },
+        developer: Vec::new(),
+        user: Vec::new(),
+    }
+    .with_tool_group_instructions([(&group, "Use only for approved business keys.")]);
+
+    let bundle = snapshot.to_bundle();
+
+    assert_eq!(bundle.prelude_messages.len(), 1);
+    assert_eq!(bundle.prelude_messages[0].role, MessageRole::System);
+    let content = bundle.prelude_messages[0].content.text_value();
+    assert!(content.starts_with("# Tool Group Instructions"));
+    assert!(content.contains("## tool group mcp:business"));
+    assert!(content.contains("Use only for approved business keys."));
+    assert!(bundle.prefix_section_hashes.contains_key("toolGroups"));
+}
+
+#[test]
 fn direct_skill_invocation_is_a_transient_user_instruction_group() {
     let mut snapshot = InstructionSnapshot {
         base: InstructionBlock {

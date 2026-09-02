@@ -1,5 +1,4 @@
 use super::*;
-use futures::FutureExt;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
@@ -333,10 +332,16 @@ async fn before_model_step_adds_replaces_and_removes_tools_for_the_next_step() {
         match context.step {
             0 => context
                 .agent_tools
-                .install(group, vec![step_tool("step_alpha", "alpha")])?,
+                .install(crate::tool::ToolInstallGroup::direct(
+                    group,
+                    vec![step_tool("step_alpha", "alpha")],
+                ))?,
             1 => context
                 .agent_tools
-                .install(group, vec![step_tool("step_beta", "beta")])?,
+                .install(crate::tool::ToolInstallGroup::direct(
+                    group,
+                    vec![step_tool("step_beta", "beta")],
+                ))?,
             2 => {
                 context.agent_tools.uninstall(&group);
             }
@@ -398,10 +403,12 @@ async fn model_transport_retry_reuses_the_same_frozen_tool_plan() {
         let hook_refreshes = hook_refreshes.clone();
         async move {
             hook_refreshes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            context.agent_tools.install(
-                ToolGroupId::new("retry"),
-                vec![step_tool("retry_visible", "retry")],
-            )
+            context
+                .agent_tools
+                .install(crate::tool::ToolInstallGroup::direct(
+                    ToolGroupId::new("retry"),
+                    vec![step_tool("retry_visible", "retry")],
+                ))
         }
     });
     let core = test_turn_engine_builder(endpoint, local_responses_model())
@@ -451,13 +458,13 @@ async fn randomized_registration_order_keeps_full_provider_request_bytes_identic
         let manager = ToolManager::new();
         let agent_tools = manager.agent_tool_set("root", GlobalToolInheritance::Isolated);
         agent_tools
-            .install(
+            .install(crate::tool::ToolInstallGroup::direct(
                 ToolGroupId::new("wire"),
                 permutation
                     .into_iter()
                     .map(|(name, output)| step_tool(name, output))
                     .collect(),
-            )
+            ))
             .expect("install randomized tools");
         let core = test_turn_engine_builder(endpoint, local_responses_model())
             .with_agent_tool_set(agent_tools)
@@ -499,10 +506,10 @@ async fn each_step_trace_pairs_tool_fingerprint_with_reported_provider_cache_usa
     let manager = ToolManager::new();
     let agent_tools = manager.agent_tool_set("root", GlobalToolInheritance::Isolated);
     agent_tools
-        .install(
+        .install(crate::tool::ToolInstallGroup::direct(
             ToolGroupId::new("trace"),
             vec![step_tool("trace_visible", "ok")],
-        )
+        ))
         .expect("install trace tool");
     let core = test_turn_engine_builder(endpoint, local_responses_model())
         .with_agent_tool_set(agent_tools)
@@ -1091,20 +1098,17 @@ fn local_responses_model() -> pl_model::ModelInfo {
     model
 }
 
-fn step_tool(name: &'static str, output: &'static str) -> std::sync::Arc<dyn Tool> {
-    std::sync::Arc::new(
-        LocalTool::new(
-            name,
-            name,
-            serde_json::json!({
-                "type": "object",
-                "properties": {},
-                "additionalProperties": false,
-            }),
-            move |_input, _context| async move { Ok(ToolResult::success(output)) },
-        )
-        .with_effect(crate::ToolEffect::Read),
-    )
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct StepToolInput {}
+
+fn step_tool(name: &'static str, output: &'static str) -> crate::tool::DynTool {
+    crate::tool::static_tool::<StepToolInput>(crate::tool::StaticToolDefinition::new(
+        crate::tool::ToolName::bare(name).unwrap(),
+        name,
+    ))
+    .policy(crate::tool::ToolPolicy::read_only())
+    .build(move |_input, _context| async move { Ok(ToolResult::success(output)) })
 }
 
 fn request_tool_names(body: &serde_json::Value) -> Vec<&str> {
@@ -1128,13 +1132,14 @@ struct LargeArtifactTool;
 #[derive(Debug)]
 struct EndTurnContentTool;
 
-impl Tool for HostedToolProbe {
-    fn name(&self) -> &str {
-        "git_status"
-    }
+impl StaticTool for HostedToolProbe {
+    type Input = serde_json::Value;
 
-    fn description(&self) -> &str {
-        "Provides a read-only hosted tool orchestration probe"
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        test_static_tool_definition(
+            "git_status",
+            "Provides a read-only hosted tool orchestration probe",
+        )
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -1145,32 +1150,24 @@ impl Tool for HostedToolProbe {
         })
     }
 
-    fn effect(&self) -> Option<crate::ToolEffect> {
-        Some(crate::ToolEffect::Read)
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::read_only()
     }
 
-    fn execute<'a>(
-        &'a self,
-        _input: ToolInput,
+    fn execute(
+        &self,
+        _input: Self::Input,
         _context: ToolCallContext,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = std::result::Result<ToolResult, PureError>>
-                + Send
-                + 'a,
-        >,
-    > {
-        async { Ok(ToolResult::success("clean")) }.boxed()
+    ) -> impl std::future::Future<Output = crate::Result<ToolResult>> + Send {
+        async { Ok(ToolResult::success("clean")) }
     }
 }
 
-impl Tool for LargeArtifactTool {
-    fn name(&self) -> &str {
-        "large_artifact"
-    }
+impl StaticTool for LargeArtifactTool {
+    type Input = serde_json::Value;
 
-    fn description(&self) -> &str {
-        "Returns a large artifact payload"
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        test_static_tool_definition("large_artifact", "Returns a large artifact payload")
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -1181,21 +1178,15 @@ impl Tool for LargeArtifactTool {
         })
     }
 
-    fn effect(&self) -> Option<crate::ToolEffect> {
-        None
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::default()
     }
 
-    fn execute<'a>(
-        &'a self,
-        _input: ToolInput,
+    fn execute(
+        &self,
+        _input: Self::Input,
         _context: ToolCallContext,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = std::result::Result<ToolResult, PureError>>
-                + Send
-                + 'a,
-        >,
-    > {
+    ) -> impl std::future::Future<Output = crate::Result<ToolResult>> + Send {
         async {
             let mut result = ToolResult::success("large artifact ready");
             result
@@ -1208,17 +1199,17 @@ impl Tool for LargeArtifactTool {
                 });
             Ok(result)
         }
-        .boxed()
     }
 }
 
-impl Tool for EndTurnContentTool {
-    fn name(&self) -> &str {
-        "end_turn_content"
-    }
+impl StaticTool for EndTurnContentTool {
+    type Input = serde_json::Value;
 
-    fn description(&self) -> &str {
-        "Ends the turn with canonical final assistant content"
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        test_static_tool_definition(
+            "end_turn_content",
+            "Ends the turn with canonical final assistant content",
+        )
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -1229,36 +1220,27 @@ impl Tool for EndTurnContentTool {
         })
     }
 
-    fn effect(&self) -> Option<crate::ToolEffect> {
-        None
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::default()
     }
 
-    fn execute<'a>(
-        &'a self,
-        _input: ToolInput,
+    fn execute(
+        &self,
+        _input: Self::Input,
         _context: ToolCallContext,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = std::result::Result<ToolResult, PureError>>
-                + Send
-                + 'a,
-        >,
-    > {
+    ) -> impl std::future::Future<Output = crate::Result<ToolResult>> + Send {
         async {
             Ok(crate::tool::ToolResult::success("completed")
                 .ending_turn_with_content("TASK_E2E_DONE"))
         }
-        .boxed()
     }
 }
 
-impl Tool for HistoryMarkerTool {
-    fn name(&self) -> &str {
-        "history_marker"
-    }
+impl StaticTool for HistoryMarkerTool {
+    type Input = serde_json::Value;
 
-    fn description(&self) -> &str {
-        "Records a marker in tool history"
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        test_static_tool_definition("history_marker", "Records a marker in tool history")
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -1269,22 +1251,16 @@ impl Tool for HistoryMarkerTool {
         })
     }
 
-    fn effect(&self) -> Option<crate::ToolEffect> {
-        None
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::default()
     }
 
-    fn execute<'a>(
-        &'a self,
-        _input: ToolInput,
+    fn execute(
+        &self,
+        _input: Self::Input,
         _context: ToolCallContext,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = std::result::Result<ToolResult, PureError>>
-                + Send
-                + 'a,
-        >,
-    > {
-        async { Ok(ToolResult::success("history marker")) }.boxed()
+    ) -> impl std::future::Future<Output = crate::Result<ToolResult>> + Send {
+        async { Ok(ToolResult::success("history marker")) }
     }
 }
 
@@ -1293,13 +1269,14 @@ struct ParentHistoryProbeTool {
     session_runtime: crate::tool::ToolSessionRuntime,
 }
 
-impl Tool for ParentHistoryProbeTool {
-    fn name(&self) -> &str {
-        "parent_history_probe"
-    }
+impl StaticTool for ParentHistoryProbeTool {
+    type Input = serde_json::Value;
 
-    fn description(&self) -> &str {
-        "Reports whether prior tool history is visible"
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        test_static_tool_definition(
+            "parent_history_probe",
+            "Reports whether prior tool history is visible",
+        )
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -1310,21 +1287,15 @@ impl Tool for ParentHistoryProbeTool {
         })
     }
 
-    fn effect(&self) -> Option<crate::ToolEffect> {
-        None
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::default()
     }
 
-    fn execute<'a>(
-        &'a self,
-        _input: ToolInput,
+    fn execute(
+        &self,
+        _input: Self::Input,
         _context: ToolCallContext,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = std::result::Result<ToolResult, PureError>>
-                + Send
-                + 'a,
-        >,
-    > {
+    ) -> impl std::future::Future<Output = crate::Result<ToolResult>> + Send {
         async move {
             let parent_session = self.session_runtime.parent_session();
             let marker_visible = parent_session.messages().iter().any(|message| {
@@ -1339,7 +1310,6 @@ impl Tool for ParentHistoryProbeTool {
                 "history marker missing"
             }))
         }
-        .boxed()
     }
 }
 

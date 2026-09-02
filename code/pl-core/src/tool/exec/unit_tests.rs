@@ -1,4 +1,5 @@
 use super::*;
+use crate::tool::{StaticToolTestExt, ToolInput};
 use crate::{
     CommandCaptureStream, CommandOutputSizes, CommandOutputTarget, CommandSpawnRequest,
     ManagedCommand,
@@ -87,7 +88,7 @@ async fn directory_workspace_explicitly_documents_that_shell_can_bypass_writable
     };
 
     let output = tool
-        .execute(tool_input(command, "session", "tool"), test_context())
+        .execute_raw(tool_input(command, "session", "tool"), test_context())
         .await
         .unwrap();
 
@@ -464,7 +465,7 @@ async fn injected_backend_keeps_the_exec_result_contract() {
     let tool = ExecTool::new(backend.clone(), tool_workspace(&root));
 
     let output = tool
-        .execute(
+        .execute_raw(
             tool_input("echo hosted", "hosted-session", "hosted-tool"),
             test_context(),
         )
@@ -502,7 +503,7 @@ async fn streams_tool_result_delta_for_command_output() {
     let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(16);
     let input = tool_input("echo streaming", "stream-session", "stream-tool");
     let output = tool
-        .execute(input, test_context_with_revision(event_tx, 5))
+        .execute_raw(input, test_context_with_revision(event_tx, 5))
         .await
         .unwrap();
 
@@ -523,7 +524,7 @@ async fn streams_tool_result_delta_for_stderr_output() {
     let tool = test_tool();
     let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(16);
     let output = tool
-        .execute(
+        .execute_raw(
             tool_input(
                 stderr_command(),
                 "stderr-stream-session",
@@ -551,7 +552,7 @@ async fn streams_tool_result_delta_for_stderr_output() {
 async fn windows_default_shell_executes_powershell_script() {
     let tool = test_tool();
     let output = tool
-        .execute(
+        .execute_raw(
             tool_input(
                 "if ($PSVersionTable.PSVersion.Major -ge 5) { Write-Output 'powershell-ok' }; (Get-Location).Path",
                 "ps-session",
@@ -572,7 +573,7 @@ async fn windows_default_shell_executes_powershell_script() {
 async fn windows_powershell_captures_unicode_stdout() {
     let tool = test_tool();
     let output = tool
-        .execute(
+        .execute_raw(
             tool_input("Write-Output '中文输出'", "unicode-session", "unicode-tool"),
             test_context(),
         )
@@ -587,7 +588,7 @@ async fn windows_powershell_captures_unicode_stdout() {
 async fn defaults_to_workspace_root_as_current_directory() {
     let (tool, root) = test_tool_with_root();
     let output = tool
-        .execute(
+        .execute_raw(
             tool_input("echo marker > cwd-check.txt", "cwd-session", "cwd-tool"),
             test_context(),
         )
@@ -603,7 +604,7 @@ async fn defaults_to_workspace_root_as_current_directory() {
 async fn rejects_working_directory_outside_workspace() {
     let tool = test_tool();
     let result = tool
-        .execute(
+        .execute_raw(
             ToolInput {
                 arguments: serde_json::json!({
                     "command": "echo no",
@@ -624,7 +625,7 @@ async fn relative_working_directory_resolves_from_workspace_root() {
         .await
         .unwrap();
     let output = tool
-        .execute(
+        .execute_raw(
             ToolInput {
                 arguments: serde_json::json!({
                     "command": "echo marker > cwd-check.txt",
@@ -650,7 +651,7 @@ async fn full_access_allows_working_directory_outside_workspace() {
         crate::tool::WorkspaceAccess::ExternalAllowed,
     ));
     let output = tool
-        .execute(
+        .execute_raw(
             ToolInput {
                 arguments: serde_json::json!({
                     "command": "echo yes",
@@ -685,7 +686,7 @@ async fn exec_allows_search_read_and_write_in_read_only_workspace() {
     let context = test_context();
 
     let search = tool
-        .execute(
+        .execute_raw(
             tool_input("rg --version", "read-only", "search"),
             context.clone(),
         )
@@ -699,7 +700,7 @@ async fn exec_allows_search_read_and_write_in_read_only_workspace() {
     #[cfg(not(windows))]
     let read_command = "cat read-only-source.txt";
     let read = tool
-        .execute(
+        .execute_raw(
             tool_input(read_command, "read-only", "read"),
             context.clone(),
         )
@@ -713,7 +714,7 @@ async fn exec_allows_search_read_and_write_in_read_only_workspace() {
     #[cfg(not(windows))]
     let write_command = "printf written > shell-write.txt";
     let write = tool
-        .execute(tool_input(write_command, "read-only", "write"), context)
+        .execute_raw(tool_input(write_command, "read-only", "write"), context)
         .await
         .unwrap();
     assert_eq!(write.exit_code, Some(0));
@@ -732,7 +733,7 @@ async fn exec_allows_search_read_and_write_in_read_only_workspace() {
 async fn full_output_saved_to_file() {
     let tool = test_tool();
     let output = tool
-        .execute(tool_input("echo test", "s5", "t5"), test_context())
+        .execute_raw(tool_input("echo test", "s5", "t5"), test_context())
         .await
         .unwrap();
 
@@ -761,7 +762,7 @@ async fn output_file_path_follows_convention() {
         event_tx,
     );
     let output = tool
-        .execute(tool_input("echo ok", "my-session", "my-tool"), context)
+        .execute_raw(tool_input("echo ok", "my-session", "my-tool"), context)
         .await
         .unwrap();
 
@@ -776,7 +777,7 @@ async fn output_file_path_follows_convention() {
 async fn long_command_returns_process_id_then_can_be_polled() {
     let (exec, stdin) = shared_tools();
     let running = exec
-        .execute(
+        .execute_raw(
             ToolInput {
                 arguments: serde_json::json!({
                     "command": sleep_then_echo_command(),
@@ -798,7 +799,7 @@ async fn long_command_returns_process_id_then_can_be_polled() {
     let mut result = None;
     for _ in 0..5 {
         let completed = stdin
-            .execute(
+            .execute_raw(
                 ToolInput {
                     arguments: serde_json::json!({
                         "processId": process_id,
@@ -834,7 +835,7 @@ async fn long_command_returns_process_id_then_can_be_polled() {
 async fn write_stdin_sends_input_to_running_process() {
     let (exec, stdin) = shared_tools();
     let running = exec
-        .execute(
+        .execute_raw(
             ToolInput {
                 arguments: serde_json::json!({
                     "command": stdin_echo_command(),
@@ -856,7 +857,7 @@ async fn write_stdin_sends_input_to_running_process() {
     let mut stdout = String::new();
     for attempt in 0..5 {
         let completed = stdin
-            .execute(
+            .execute_raw(
                 ToolInput {
                     arguments: serde_json::json!({
                         "processId": process_id,
@@ -893,7 +894,7 @@ async fn write_stdin_sends_input_to_running_process() {
 async fn timeout_terminates_background_process() {
     let (tool, stdin) = shared_tools();
     let output = tool
-        .execute(
+        .execute_raw(
             ToolInput {
                 arguments: serde_json::json!({
                     "command": long_sleep_then_echo_command(),
@@ -918,7 +919,7 @@ async fn timeout_terminates_background_process() {
             break;
         };
         let polled = stdin
-            .execute(
+            .execute_raw(
                 ToolInput {
                     arguments: serde_json::json!({
                         "processId": process_id,
@@ -950,7 +951,7 @@ async fn process_limit_returns_recoverable_error() {
     let exec = test_tool().with_process_manager(manager.clone());
     let stdin = WriteStdinTool::new(manager);
     let first = exec
-        .execute(
+        .execute_raw(
             ToolInput {
                 arguments: serde_json::json!({
                     "command": sleep_then_echo_command(),
@@ -964,7 +965,7 @@ async fn process_limit_returns_recoverable_error() {
     let process_id = command_json(&first).process_id.unwrap();
 
     let second = exec
-        .execute(
+        .execute_raw(
             ToolInput {
                 arguments: serde_json::json!({
                     "command": sleep_then_echo_command(),
@@ -978,7 +979,7 @@ async fn process_limit_returns_recoverable_error() {
     assert!(second.unwrap_err().to_string().contains("process limit"));
 
     let _ = stdin
-        .execute(
+        .execute_raw(
             ToolInput {
                 arguments: serde_json::json!({
                     "processId": process_id,
@@ -994,7 +995,7 @@ async fn process_limit_returns_recoverable_error() {
 async fn write_stdin_unknown_process_is_recoverable_error() {
     let (_bash, stdin) = shared_tools();
     let result = stdin
-        .execute(
+        .execute_raw(
             ToolInput {
                 arguments: serde_json::json!({ "processId": "missing" }),
             },
@@ -1014,7 +1015,7 @@ async fn write_stdin_unknown_process_is_recoverable_error() {
 async fn large_output_is_truncated_in_json_and_saved_to_file() {
     let tool = test_tool();
     let output = tool
-        .execute(
+        .execute_raw(
             ToolInput {
                 arguments: serde_json::json!({
                     "command": large_output_command(),

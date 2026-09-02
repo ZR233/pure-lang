@@ -8,10 +8,12 @@ fn has_tool(core: &TurnEngine, name: &str) -> bool {
 
 #[test]
 fn session_note_tools_declare_read_effect_for_plan_policy() {
-    use crate::tool::{SessionNoteTool, SessionNoteToolKind, Tool};
+    use crate::tool::{SessionNoteTool, SessionNoteToolKind, StaticTool};
     for kind in SessionNoteToolKind::all() {
         assert_eq!(
-            SessionNoteTool::new(*kind, crate::TurnWorkingSetHandle::default()).effect(),
+            SessionNoteTool::new(*kind, crate::TurnWorkingSetHandle::default())
+                .policy()
+                .effect(),
             Some(ToolEffect::Read),
             "{}",
             kind.name()
@@ -280,7 +282,7 @@ async fn host_provided_tool_set_requires_explicit_workspace_backends() {
 }
 
 #[tokio::test]
-async fn profiled_local_workspace_uses_unified_workspace_file_tools() {
+async fn profiled_local_workspace_installs_workspace_tools_in_the_unified_plan() {
     let runtime = CoreRuntimeProfile::local_workspace(std::env::temp_dir())
         .with_workspace_instructions("rules");
     let mut core = test_turn_engine_builder(
@@ -297,8 +299,22 @@ async fn profiled_local_workspace_uses_unified_workspace_file_tools() {
     let lease = core.acquire_tool_plan();
     let read_tool = lease.binding("read_file").expect("read_file tool");
     let patch_tool = lease.binding("apply_patch").expect("apply_patch tool");
-    assert!(format!("{:?}", read_tool.tool()).contains("LocalWorkspaceFileTool"));
-    assert!(format!("{:?}", patch_tool.tool()).contains("LocalWorkspaceFileTool"));
+    assert_eq!(
+        read_tool.tool().definition().spec(),
+        &crate::tool::WorkspaceFileToolKind::ReadFile.to_spec()
+    );
+    assert_eq!(
+        patch_tool.tool().definition().spec(),
+        &crate::tool::WorkspaceFileToolKind::ApplyPatch.to_spec()
+    );
+    assert_eq!(
+        read_tool.tool().execution(),
+        crate::tool::ToolExecution::Local
+    );
+    assert_eq!(
+        patch_tool.tool().execution(),
+        crate::tool::ToolExecution::Local
+    );
 }
 
 #[tokio::test]

@@ -3,8 +3,8 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::tool::TypedTool;
 use crate::tool::cache::ToolCachePolicy;
+use crate::tool::typed_tool_input_schema;
 use crate::turn::ToolEffect;
 
 pub const TOOL_GIT_STATUS: &str = "git_status";
@@ -109,28 +109,13 @@ impl GitToolKind {
 
     pub fn input_schema(self) -> Value {
         match self {
-            Self::Status | Self::WorkspaceInfo => {
-                TypedTool::<GitEmptyInput>::new(self.name(), self.description()).input_schema()
-            }
-            Self::Diff => {
-                TypedTool::<GitDiffInput>::new(self.name(), self.description()).input_schema()
-            }
-            Self::Branch => {
-                TypedTool::<GitBranchInput>::new(self.name(), self.description()).input_schema()
-            }
-            Self::Fetch => {
-                TypedTool::<GitFetchInput>::new(self.name(), self.description()).input_schema()
-            }
-            Self::Commit => {
-                TypedTool::<GitCommitInput>::new(self.name(), self.description()).input_schema()
-            }
-            Self::Push => {
-                TypedTool::<GitPushInput>::new(self.name(), self.description()).input_schema()
-            }
-            Self::SyncDefaultBranch => {
-                TypedTool::<GitSyncDefaultBranchInput>::new(self.name(), self.description())
-                    .input_schema()
-            }
+            Self::Status | Self::WorkspaceInfo => typed_tool_input_schema::<GitEmptyInput>(),
+            Self::Diff => typed_tool_input_schema::<GitDiffInput>(),
+            Self::Branch => typed_tool_input_schema::<GitBranchInput>(),
+            Self::Fetch => typed_tool_input_schema::<GitFetchInput>(),
+            Self::Commit => typed_tool_input_schema::<GitCommitInput>(),
+            Self::Push => typed_tool_input_schema::<GitPushInput>(),
+            Self::SyncDefaultBranch => typed_tool_input_schema::<GitSyncDefaultBranchInput>(),
         }
     }
 

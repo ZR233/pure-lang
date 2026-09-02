@@ -1,6 +1,6 @@
+use std::future::Future;
 use std::path::Path;
 
-use futures::FutureExt;
 use pl_model::{
     MediaRepresentation, ModelInfo, ModelInputCapability, ModelInputSource, ModelModality,
 };
@@ -11,16 +11,15 @@ use serde::Deserialize;
 use crate::AttachmentRuntime;
 use crate::tool::cache::ToolCachePolicy;
 use crate::tool::{
-    BoxFuture, LocalWorkspaceFileBackend, MAX_SOURCE_BYTES, Tool, ToolCallContext, ToolInput,
-    ToolResult, ToolWorkspace, TypedTool, WorkspaceFileBackend, WorkspaceFileReadBytesRequest,
-    WorkspaceFileStatRequest, deserialize_tool_input, normalize_tool_image, tool_error,
+    LocalWorkspaceFileBackend, MAX_SOURCE_BYTES, StaticTool, ToolCallContext, ToolPolicy,
+    ToolResult, ToolWorkspace, WorkspaceFileBackend, WorkspaceFileReadBytesRequest,
+    WorkspaceFileStatRequest, normalize_tool_image, tool_error,
 };
-use crate::turn::ToolEffect;
 
 pub const TOOL_VIEW_IMAGE: &str = "view_image";
 #[derive(Debug, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-struct ViewImageInput {
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ViewImageInput {
     /// Local path to an image in the current workspace.
     path: String,
 }
@@ -95,42 +94,32 @@ impl ViewImageTool {
     }
 }
 
-impl Tool for ViewImageTool {
-    fn name(&self) -> &str {
-        TOOL_VIEW_IMAGE
+impl StaticTool for ViewImageTool {
+    type Input = ViewImageInput;
+
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        crate::tool::StaticToolDefinition::new(
+            crate::tool::ToolName::builtin(TOOL_VIEW_IMAGE),
+            "Read a local workspace image and add it to the model's visual context. Supports validated PNG, JPEG, WebP, and GIF files; image bytes are never returned as text.",
+        )
     }
 
-    fn description(&self) -> &str {
-        "Read a local workspace image and add it to the model's visual context. Supports validated PNG, JPEG, WebP, and GIF files; image bytes are never returned as text."
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::read_only()
+            .with_parallel_tool_calls()
+            .with_cache_policy(ToolCachePolicy::UntilWorkspaceMutation)
     }
 
-    fn input_schema(&self) -> serde_json::Value {
-        TypedTool::<ViewImageInput>::new(self.name(), self.description()).input_schema()
-    }
-
-    fn supports_parallel_tool_calls(&self) -> bool {
-        true
-    }
-
-    fn effect(&self) -> Option<ToolEffect> {
-        Some(ToolEffect::Read)
-    }
-
-    fn cache_policy(&self, _arguments: &serde_json::Value) -> ToolCachePolicy {
-        ToolCachePolicy::UntilWorkspaceMutation
-    }
-
-    fn execute<'a>(
-        &'a self,
-        input: ToolInput,
+    fn execute(
+        &self,
+        input: ViewImageInput,
         context: ToolCallContext,
-    ) -> BoxFuture<'a, Result<ToolResult>> {
+    ) -> impl Future<Output = Result<ToolResult>> + Send {
         async move {
             self.ensure_available()?;
-            let input: ViewImageInput = deserialize_tool_input(self.name(), input.arguments)?;
             let path = input.path.trim();
             if path.is_empty() {
-                return Err(tool_error(self.name(), "path must not be empty"));
+                return Err(tool_error(TOOL_VIEW_IMAGE, "path must not be empty"));
             }
 
             let stat_request = WorkspaceFileStatRequest {
@@ -157,7 +146,7 @@ impl Tool for ViewImageTool {
             };
             if !stat.is_file {
                 return Err(tool_error(
-                    self.name(),
+                    TOOL_VIEW_IMAGE,
                     format!("'{path}' is not a regular file"),
                 ));
             }
@@ -190,7 +179,6 @@ impl Tool for ViewImageTool {
             }))?;
             Ok(result.with_model_attachment(attachment))
         }
-        .boxed()
     }
 }
 
@@ -214,8 +202,8 @@ mod tests {
 
     use super::*;
     use crate::tool::{
-        AgentWorkspace, MAX_DATA_URL_BASE64_BYTES, MAX_IMAGE_SIDE, ToolResultContent,
-        base64_encoded_len,
+        AgentWorkspace, MAX_DATA_URL_BASE64_BYTES, MAX_IMAGE_SIDE, StaticToolTestExt, ToolInput,
+        ToolResultContent, base64_encoded_len,
     };
 
     fn model(slug: &str) -> ModelInfo {
@@ -302,7 +290,7 @@ mod tests {
         .unwrap();
 
         let result = tool
-            .execute(
+            .execute_raw(
                 ToolInput {
                     arguments: serde_json::json!({"path": "misleading.txt"}),
                 },
@@ -334,7 +322,7 @@ mod tests {
         .unwrap();
 
         let error = tool
-            .execute(
+            .execute_raw(
                 ToolInput {
                     arguments: serde_json::json!({"path": "broken.png"}),
                 },
@@ -363,7 +351,7 @@ mod tests {
         .unwrap();
 
         let error = tool
-            .execute(
+            .execute_raw(
                 ToolInput {
                     arguments: serde_json::json!({"path": "oversized.png"}),
                 },
@@ -391,7 +379,7 @@ mod tests {
         .unwrap();
 
         let error = tool
-            .execute(
+            .execute_raw(
                 ToolInput {
                     arguments: serde_json::json!({"path": "."}),
                 },
@@ -427,7 +415,7 @@ mod tests {
         .unwrap();
 
         let error = tool
-            .execute(
+            .execute_raw(
                 ToolInput {
                     arguments: serde_json::json!({"path": "valid.png"}),
                 },
@@ -453,7 +441,7 @@ mod tests {
         )
         .unwrap();
 
-        tool.execute(
+        tool.execute_raw(
             ToolInput {
                 arguments: serde_json::json!({"path": "large.png"}),
             },
@@ -495,7 +483,7 @@ mod tests {
         .unwrap();
 
         let error = tool
-            .execute(
+            .execute_raw(
                 ToolInput {
                     arguments: serde_json::json!({"path": "escape.png"}),
                 },

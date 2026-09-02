@@ -10,7 +10,10 @@ use pl_protocol::{PureError, Result, WebSearchResolutionDescriptor};
 
 use crate::TurnEngine;
 use crate::model_config::{AgentModelConfig, ProviderConfig, ProviderId, ResolvedModelRoute};
-use crate::tool::{HostedWebSearchTool, TOOL_WEB_SEARCH, WebSearchClient, WebSearchTool};
+use crate::tool::{
+    DynTool, HostedWebSearchTool, TOOL_WEB_SEARCH, ToolGroupId, ToolInstallGroup, WebSearchClient,
+    WebSearchTool,
+};
 
 /// Web Search 工具对本轮其他工具的可见性约束。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,7 +101,7 @@ impl WebSearchPlan {
     ///
     /// backend 缺失或 builtin 来源发布校验失败时返回错误。
     pub fn install(&self, core: &mut TurnEngine, config: &WebSearchConfig) -> Result<()> {
-        let tool = match self.resolution.path {
+        let tool: DynTool = match self.resolution.path {
             Some(WebSearchPath::Standalone) => {
                 let backend = self.backend.as_ref().ok_or_else(|| {
                     PureError::ConfigError(
@@ -115,7 +118,7 @@ impl WebSearchPlan {
                             backend.max_output_tokens,
                             core.tool_session_runtime(),
                         );
-                        std::sync::Arc::new(tool) as std::sync::Arc<dyn crate::tool::Tool>
+                        tool.into()
                     }
                 }
             }
@@ -132,16 +135,18 @@ impl WebSearchPlan {
                         })?
                     }
                 };
-                std::sync::Arc::new(tool) as std::sync::Arc<dyn crate::tool::Tool>
+                DynTool::new_executor(tool)
             }
             None => {
                 core.agent_tools()
-                    .uninstall(&crate::tool::ToolGroupId::new("web_search"));
+                    .uninstall(&ToolGroupId::new("web_search"));
                 return Ok(());
             }
         };
-        core.agent_tools()
-            .install(crate::tool::ToolGroupId::new("web_search"), vec![tool])
+        core.agent_tools().install(ToolInstallGroup::direct(
+            ToolGroupId::new("web_search"),
+            vec![tool],
+        ))
     }
 
     /// 返回 exclusive 路径唯一允许的工具名。
@@ -175,7 +180,7 @@ impl WebSearchPlans {
             Some(plan) => plan.install(core, openai_config),
             None => {
                 core.agent_tools()
-                    .uninstall(&crate::tool::ToolGroupId::new("web_search"));
+                    .uninstall(&ToolGroupId::new("web_search"));
                 Ok(())
             }
         }

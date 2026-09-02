@@ -149,9 +149,36 @@ Responses HTTP/SSE 和 Chat Completions 始终发送完整历史。
 `CompletionRequest.messages` 中的 `MessageRole::System` 表示本轮临时前置指令或开发者上下文。Responses endpoint 序列化为 input message role `developer`，避免发送不被部分 Responses 兼容服务接受的 `system` role；Chat Completions 仍序列化为 `system` role。
 
 `CompletionRequest.tools` 使用 `pl_protocol::ToolSpec`，它是 provider-neutral 的唯一 wire 事实。
-每个 model step 携带当前 `ToolPlan` 的完整可见工具列表；客户端 Tool Search、deferred catalog、
-tool references 和 hosted `tool_search` wire 已删除。OpenAI adapter 只把 frozen specs 转为
+每个 model step 携带当前 `ToolPlan` 的完整可见工具列表；OpenAI adapter 只把 frozen specs 转为
 Responses/Chat typed body，不自行发现、过滤或注入 agent 工具。
+
+Core 的运行时工具统一为 `DynTool`，内部持有 `Arc<dyn ToolExecutor>`；definition、policy、execution
+owner 与 executor 在注册时组成一个不可拆分的执行对象。Rust 内置工具和宿主静态工具实现
+`StaticTool`，由 `From<T: StaticTool> for DynTool` 经过 typed adapter 擦除；MCP、插件和 hosted
+adapter 直接实现对象安全的 `ToolExecutor`。`ToolPlan` 只冻结 `DynTool`，不存在按 builtin、MCP、
+插件或 hosted 来源分派的第二条执行链。provider 只能看到从 `DynTool::definition()` 投影出的
+`ToolSpec`，看不到 handler、policy、group generation 或注册来源。
+
+`pl-core` 的 crate 根同时公开工具契约、typed builder、安装组，以及文件、命令、Git、Skill、LSP、
+控制和搜索等可复用内置工具的实现类型与构造入口。下游可自由选择其中任意子集注册；默认 installer
+只是这些公共工具的预设组合，不能依赖私有构造器或维护另一份 registry。
+
+工具名称在 core 内使用 `ToolName { namespace, name, wire_name }`。registry 以稳定 wire name 接收
+provider 回传调用，同时保留结构化 identity；MCP 的 wire name 继续使用既有
+`mcp__<server>__<tool>` 规则，不能从归一化后的 wire name 反解析执行目标。trace、历史和现有 UI
+协议继续记录 wire name 字符串。
+
+注册组显式声明 `ToolExposure::Direct | Deferred`。builtin、LSP、控制类和普通宿主静态工具默认
+Direct；MCP、插件和 App 动态目录默认 Deferred。若当前冻结目录存在 Deferred 工具，core 以普通
+function tool 形式加入 `tool_search`；搜索结果通过 typed runtime directive 更新当前
+`AgentSession` 的 revealed identities，匹配工具从下一 model step 开始进入完整 `ToolSpec` 列表。
+该机制是 provider-neutral 的普通工具调用，不使用 Responses 私有 hosted tool-search wire，Chat 与
+Responses 继续消费同一 `CompletionRequest.tools`。revealed 状态只在当前 AgentSession 持久化，
+子 agent 默认从空状态开始；deferred definition 或 source generation 变化会使旧 reveal 失效。
+
+每个安装组可以提供集中式 developer instructions。只有本 step 最终可见且通过执行策略过滤的组才
+注入其说明；组说明与工具 definition/executor 来自同一个冻结 `ToolPlan`。说明内容参与固定 prompt
+section hash，但 group identity、注册顺序和 executor generation 仍不参与 tool wire fingerprint。
 
 Programmatic Tool Calling 通过 hosted `programmatic_tool_calling` 与工具的 `allowed_callers` 声明。
 首期只允许稳定本地读工具、LSP 查询和 effect 被可信配置明确标为 Read 的 MCP；命令、文件写入、
@@ -412,7 +439,7 @@ provider prompt cache。
 时 replace transcript，再把当前 working context 注入新窗口一次。provider 报告 token 达到阈值时，
 下一次采样前执行同样 replacement；压缩不得丢失 tool call/output 配对或当前用户任务。
 
-每个指令层分别计算内容 hash；基础、模式角色、Skill、Workspace、wire 工具前缀、provider、
+每个指令层分别计算内容 hash；基础、模式角色、Skill、可见工具组说明、Workspace、wire 工具前缀、provider、
 model 或 compaction 变化都给出精确 `PromptPrefixChangedReason` 并提升 generation。工具与
 缓存的关系只由 `ToolPlan::wire_fingerprint` 表达：它是实际发送的完整 `ToolSpec` 列表 canonical
 哈希。工具按模型可见名称排序，JSON Schema 递归使用确定性字段顺序；registry revision、group

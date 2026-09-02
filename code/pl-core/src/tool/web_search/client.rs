@@ -10,7 +10,7 @@ const WEB_SEARCH_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// 只负责兼容 `/alpha/search` dialect 的 HTTP 客户端。
 #[derive(Debug, Clone)]
-pub(crate) struct WebSearchClient {
+pub struct WebSearchClient {
     client: reqwest::Client,
     endpoint: String,
     bearer_token: SecretString,
@@ -18,7 +18,8 @@ pub(crate) struct WebSearchClient {
 }
 
 impl WebSearchClient {
-    pub(crate) fn new(provider: &ProviderEndpoint) -> Result<Self> {
+    /// Builds the standalone `/alpha/search` client from a provider endpoint.
+    pub fn new(provider: &ProviderEndpoint) -> Result<Self> {
         Self::with_timeout(provider, WEB_SEARCH_REQUEST_TIMEOUT)
     }
 
@@ -46,7 +47,7 @@ impl WebSearchClient {
         })
     }
 
-    pub(crate) async fn search(&self, request: &SearchRequest) -> Result<SearchResponse> {
+    pub async fn search(&self, request: &SearchRequest) -> Result<SearchResponse> {
         let response = self
             .client
             .post(&self.endpoint)

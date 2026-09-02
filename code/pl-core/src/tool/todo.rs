@@ -1,15 +1,13 @@
+use std::future::Future;
 use std::path::PathBuf;
 
-use futures::FutureExt;
 use pl_protocol::{PureError, TodoItem, TodoListSnapshot, TodoStatus};
 use pl_trace::AgentEvent;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::truncation::OutputTruncation;
-use super::{
-    BoxFuture, Tool, ToolCallContext, ToolInput, ToolResult, TypedTool, deserialize_tool_input,
-};
+use super::{StaticTool, ToolCallContext, ToolPolicy, ToolResult};
 use crate::turn::ToolEffect;
 
 pub const TOOL_UPDATE_TODO_LIST: &str = "update_todo_list";
@@ -27,7 +25,7 @@ impl TodoListTool {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct TodoListInput {
+pub struct TodoListInput {
     /// Optional short title or explanation for this todo list update.
     #[serde(default)]
     explanation: Option<String>,
@@ -69,30 +67,26 @@ struct TodoListResult {
     status: String,
 }
 
-impl Tool for TodoListTool {
-    fn name(&self) -> &str {
-        TOOL_UPDATE_TODO_LIST
+impl StaticTool for TodoListTool {
+    type Input = TodoListInput;
+
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        crate::tool::StaticToolDefinition::new(
+            crate::tool::ToolName::builtin(TOOL_UPDATE_TODO_LIST),
+            "Update the current task checklist. Submit the full todo list snapshot; each update appears as a new timeline entry.",
+        )
     }
 
-    fn description(&self) -> &str {
-        "Update the current task checklist. Submit the full todo list snapshot; each update appears as a new timeline entry."
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::default().with_effect(ToolEffect::Read)
     }
 
-    fn input_schema(&self) -> serde_json::Value {
-        TypedTool::<TodoListInput>::new(self.name(), self.description()).input_schema()
-    }
-
-    fn effect(&self) -> Option<ToolEffect> {
-        Some(ToolEffect::Read)
-    }
-
-    fn execute<'a>(
-        &'a self,
-        input: ToolInput,
+    fn execute(
+        &self,
+        args: TodoListInput,
         context: ToolCallContext,
-    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
+    ) -> impl Future<Output = Result<ToolResult, PureError>> + Send {
         async move {
-            let args = deserialize_tool_input::<TodoListInput>(self.name(), input.arguments)?;
             let snapshot = todo_list_snapshot(context.identity().item_id.clone(), args, &context)?;
             self.working_set
                 .apply(crate::TurnWorkingSetChange::ReplaceTodo(snapshot.clone()))?;
@@ -111,7 +105,6 @@ impl Tool for TodoListTool {
                 Vec::new(),
             ))
         }
-        .boxed()
     }
 }
 
@@ -171,6 +164,7 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
+    use crate::tool::{StaticToolTestExt, ToolInput};
 
     fn context() -> (
         ToolCallContext,
@@ -191,7 +185,7 @@ mod tests {
         let (context, working_set, mut event_rx) = context();
 
         let output = TodoListTool::new(working_set)
-            .execute(
+            .execute_raw(
                 input(serde_json::json!({
                     "explanation": "Plan the pass",
                     "items": [
@@ -245,7 +239,7 @@ mod tests {
         );
         let tool = TodoListTool::new(crate::TurnWorkingSetHandle::default());
 
-        tool.execute(
+        tool.execute_raw(
             input(serde_json::json!({
                 "items": [{"step": "Inspect", "status": "pending"}]
             })),
@@ -283,7 +277,7 @@ mod tests {
         for (arguments, message) in cases {
             let (context, working_set, _event_rx) = context();
             let error = TodoListTool::new(working_set)
-                .execute(input(arguments), context)
+                .execute_raw(input(arguments), context)
                 .await
                 .unwrap_err();
             assert!(error.to_string().contains(message));

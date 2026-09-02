@@ -1,7 +1,7 @@
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use futures::FutureExt;
 use pl_protocol::{PureError, SkillActivation, SkillActivationCause, SkillActivationResourceBase};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -14,8 +14,8 @@ use crate::turn::ToolEffect;
 
 use super::truncation::{OutputTruncation, TruncatedOutput};
 use super::{
-    Tool, ToolCallContext, ToolDirective, ToolInput, ToolResult, ToolWorkspace, TypedTool,
-    deserialize_tool_input, tool_error,
+    DynTool, StaticTool, ToolCallContext, ToolDirective, ToolPolicy, ToolResult, ToolWorkspace,
+    tool_error,
 };
 
 mod actions;
@@ -57,21 +57,15 @@ pub fn skill_tools_from_catalog(
     catalog: Arc<FrozenSkillCatalog>,
     workspace: ToolWorkspace,
     mode: SkillToolMode,
-) -> Vec<Arc<dyn Tool>> {
+) -> Vec<DynTool> {
     let mut tools = vec![
-        Arc::new(SkillsListTool::from_catalog(
-            catalog.clone(),
-            workspace.clone(),
-        )) as Arc<dyn Tool>,
-        Arc::new(SkillViewTool::from_catalog(
-            catalog.clone(),
-            workspace.clone(),
-        )),
+        SkillsListTool::from_catalog(catalog.clone(), workspace.clone()).into(),
+        SkillViewTool::from_catalog(catalog.clone(), workspace.clone()).into(),
     ];
     match mode {
         SkillToolMode::ReadOnly => {}
         SkillToolMode::ProjectWritable => {
-            tools.push(Arc::new(SkillManageTool::from_catalog(catalog, workspace)));
+            tools.push(SkillManageTool::from_catalog(catalog, workspace).into());
         }
     }
     tools
@@ -85,7 +79,7 @@ enum SkillCatalogSource {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct SkillsListInput {
+pub struct SkillsListInput {
     /// Optional category filter.
     category: Option<String>,
     /// Optional natural-language name and description query.
@@ -96,7 +90,7 @@ struct SkillsListInput {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct SkillViewInput {
+pub struct SkillViewInput {
     /// Skill name.
     #[serde(flatten)]
     target: SkillTargetInput,
@@ -106,14 +100,14 @@ struct SkillViewInput {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct SkillTargetInput {
+pub struct SkillTargetInput {
     /// Project skill name.
     name: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", tag = "action")]
-enum SkillManageInput {
+pub enum SkillManageInput {
     Create(CreateSkillInput),
     Patch(PatchSkillInput),
     Edit(EditSkillInput),
@@ -124,7 +118,7 @@ enum SkillManageInput {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct CreateSkillInput {
+pub struct CreateSkillInput {
     #[serde(flatten)]
     target: SkillTargetInput,
     /// Full SKILL.md content.
@@ -135,7 +129,7 @@ struct CreateSkillInput {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct PatchSkillInput {
+pub struct PatchSkillInput {
     #[serde(flatten)]
     target: SkillTargetInput,
     /// Exact existing text to replace.
@@ -148,7 +142,7 @@ struct PatchSkillInput {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct EditSkillInput {
+pub struct EditSkillInput {
     #[serde(flatten)]
     target: SkillTargetInput,
     /// Complete replacement SKILL.md content.
@@ -157,7 +151,7 @@ struct EditSkillInput {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct DeleteSkillInput {
+pub struct DeleteSkillInput {
     #[serde(flatten)]
     target: SkillTargetInput,
     /// Optional note identifying where its knowledge was absorbed.
@@ -166,7 +160,7 @@ struct DeleteSkillInput {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct WriteSkillFileInput {
+pub struct WriteSkillFileInput {
     #[serde(flatten)]
     target: SkillTargetInput,
     /// Support file under references/, templates/, scripts/, or assets/.
@@ -177,7 +171,7 @@ struct WriteSkillFileInput {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct RemoveSkillFileInput {
+pub struct RemoveSkillFileInput {
     #[serde(flatten)]
     target: SkillTargetInput,
     /// Existing support file path.
@@ -186,7 +180,7 @@ struct RemoveSkillFileInput {
 
 #[derive(Debug, Clone, Copy, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-enum ReplaceMode {
+pub enum ReplaceMode {
     One,
     All,
 }
@@ -307,44 +301,31 @@ impl SkillManageTool {
     }
 }
 
-impl Tool for SkillsListTool {
-    fn name(&self) -> &str {
-        "skills_list"
+impl StaticTool for SkillsListTool {
+    type Input = SkillsListInput;
+
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        crate::tool::StaticToolDefinition::new(
+            crate::tool::ToolName::builtin("skills_list"),
+            "List or search available skills by name and description before loading one by exact name.",
+        )
     }
 
-    fn description(&self) -> &str {
-        "List or search available skills by name and description before loading one by exact name."
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::read_only()
+            .with_parallel_tool_calls()
+            .with_programmatic_calls()
+            .with_cache_policy(ToolCachePolicy::UntilWorkspaceMutation)
     }
 
-    fn input_schema(&self) -> serde_json::Value {
-        TypedTool::<SkillsListInput>::new(self.name(), self.description()).input_schema()
-    }
-
-    fn supports_parallel_tool_calls(&self) -> bool {
-        true
-    }
-
-    fn supports_programmatic_calls(&self) -> bool {
-        true
-    }
-
-    fn effect(&self) -> Option<ToolEffect> {
-        Some(ToolEffect::Read)
-    }
-
-    fn cache_policy(&self, _arguments: &serde_json::Value) -> ToolCachePolicy {
-        ToolCachePolicy::UntilWorkspaceMutation
-    }
-
-    fn execute<'a>(
-        &'a self,
-        input: ToolInput,
+    fn execute(
+        &self,
+        input: SkillsListInput,
         context: ToolCallContext,
-    ) -> super::BoxFuture<'a, Result<ToolResult, PureError>> {
+    ) -> impl Future<Output = Result<ToolResult, PureError>> + Send {
         async move {
-            let input: SkillsListInput = deserialize_tool_input(self.name(), input.arguments)?;
             let catalog =
-                catalog_for(&self.source, self.workspace.root(), &context, self.name()).await?;
+                catalog_for(&self.source, self.workspace.root(), &context, "skills_list").await?;
             let snapshot = catalog.snapshot();
             let query = input
                 .query
@@ -354,7 +335,7 @@ impl Tool for SkillsListTool {
             let (selected, truncated) = if let Some(query) = query {
                 let limit = input.limit.unwrap_or(10);
                 if !(1..=50).contains(&limit) {
-                    return Err(tool_error(self.name(), "limit must be between 1 and 50"));
+                    return Err(tool_error("skills_list", "limit must be between 1 and 50"));
                 }
                 let selection = SkillSelector.select(
                     &snapshot.skills,
@@ -404,62 +385,45 @@ impl Tool for SkillsListTool {
                 skills,
             })
         }
-        .boxed()
     }
 }
 
-impl Tool for SkillViewTool {
-    fn name(&self) -> &str {
-        "skill_view"
+impl StaticTool for SkillViewTool {
+    type Input = SkillViewInput;
+
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        crate::tool::StaticToolDefinition::new(
+            crate::tool::ToolName::builtin("skill_view"),
+            "Read a full skill or one of its support files. Call this before using a relevant skill.",
+        )
     }
 
-    fn description(&self) -> &str {
-        "Read a full skill or one of its support files. Call this before using a relevant skill."
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::read_only()
+            .with_parallel_tool_calls()
+            .with_programmatic_calls()
     }
 
-    fn input_schema(&self) -> serde_json::Value {
-        TypedTool::<SkillViewInput>::new(self.name(), self.description()).input_schema()
-    }
-
-    fn supports_parallel_tool_calls(&self) -> bool {
-        true
-    }
-
-    fn supports_programmatic_calls(&self) -> bool {
-        true
-    }
-
-    fn effect(&self) -> Option<ToolEffect> {
-        Some(ToolEffect::Read)
-    }
-
-    fn cache_policy(&self, _arguments: &serde_json::Value) -> ToolCachePolicy {
-        ToolCachePolicy::Never
-    }
-
-    fn execute<'a>(
-        &'a self,
-        input: ToolInput,
+    fn execute(
+        &self,
+        input: SkillViewInput,
         context: ToolCallContext,
-    ) -> super::BoxFuture<'a, Result<ToolResult, PureError>> {
+    ) -> impl Future<Output = Result<ToolResult, PureError>> + Send {
         async move {
             let turn_id = context.identity().turn_id.clone();
             let tool_id = context.identity().item_id.clone();
-            let input: SkillViewInput = deserialize_tool_input(self.name(), input.arguments)?;
-            let catalog = catalog_for(
-                &self.source,
-                self.workspace.root(),
-                &context,
-                self.name(),
-            )
-            .await?;
-            let skill = catalog.find(&input.target.name).ok_or_else(|| {
-                let name = &input.target.name;
-                tool_error(self.name(), format!("skill not found: {name}"))
-            })?.clone();
+            let catalog =
+                catalog_for(&self.source, self.workspace.root(), &context, "skill_view").await?;
+            let skill = catalog
+                .find(&input.target.name)
+                .ok_or_else(|| {
+                    let name = &input.target.name;
+                    tool_error("skill_view", format!("skill not found: {name}"))
+                })?
+                .clone();
             if !skill.invocation.model_invocable {
                 return Err(tool_error(
-                    self.name(),
+                    "skill_view",
                     format!("skill is not model-invocable: {}", skill.name),
                 ));
             }
@@ -471,7 +435,7 @@ impl Tool for SkillViewTool {
                     cancellation.clone(),
                 )
                 .await
-                .map_err(|error| tool_error(self.name(), error))?;
+                .map_err(|error| tool_error("skill_view", error))?;
             let requested_resource = input
                 .file_path
                 .as_deref()
@@ -488,14 +452,14 @@ impl Tool for SkillViewTool {
                             cancellation.clone(),
                         )
                         .await
-                        .map_err(|error| tool_error(self.name(), error))?,
+                        .map_err(|error| tool_error("skill_view", error))?,
                 ),
                 None => (SKILL_FILE_NAME.to_string(), definition.content),
             };
             catalog
                 .record_model_view(&input.target.name, cancellation)
                 .await
-                .map_err(|error| tool_error(self.name(), error))?;
+                .map_err(|error| tool_error("skill_view", error))?;
             let activation = skill_activation(skill, &turn_id, &tool_id);
             json_output_with_events(
                 SkillViewOutput {
@@ -509,7 +473,6 @@ impl Tool for SkillViewTool {
                 vec![ToolDirective::SkillActivated { activation }],
             )
         }
-        .boxed()
     }
 }
 
@@ -519,51 +482,52 @@ fn is_main_skill_path(path: &str) -> bool {
     normalized.is_empty() || normalized == "." || normalized.eq_ignore_ascii_case(SKILL_FILE_NAME)
 }
 
-impl Tool for SkillManageTool {
-    fn name(&self) -> &str {
-        "skill_manage"
+impl StaticTool for SkillManageTool {
+    type Input = SkillManageInput;
+
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        crate::tool::StaticToolDefinition::new(
+            crate::tool::ToolName::builtin("skill_manage"),
+            "Create, patch, edit, delete, or manage support files for project skills. Writes only to the current workspace skills directory.",
+        )
     }
 
-    fn description(&self) -> &str {
-        "Create, patch, edit, delete, or manage support files for project skills. Writes only to the current workspace skills directory."
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::default().with_effect(ToolEffect::WorkspaceWrite)
     }
 
-    fn input_schema(&self) -> serde_json::Value {
-        TypedTool::<SkillManageInput>::new(self.name(), self.description()).input_schema()
-    }
-
-    fn effect(&self) -> Option<ToolEffect> {
-        Some(ToolEffect::WorkspaceWrite)
-    }
-
-    fn execute<'a>(
-        &'a self,
-        input: ToolInput,
+    fn execute(
+        &self,
+        input: SkillManageInput,
         context: ToolCallContext,
-    ) -> super::BoxFuture<'a, Result<ToolResult, PureError>> {
+    ) -> impl Future<Output = Result<ToolResult, PureError>> + Send {
         async move {
             self.workspace.ensure_workspace_writable()?;
-            let input: SkillManageInput = deserialize_tool_input(self.name(), input.arguments)?;
-            let catalog =
-                catalog_for(&self.source, self.workspace.root(), &context, self.name()).await?;
+            let catalog = catalog_for(
+                &self.source,
+                self.workspace.root(),
+                &context,
+                "skill_manage",
+            )
+            .await?;
             let result = match input {
                 SkillManageInput::Create(input) => {
-                    create_skill(self.name(), catalog.snapshot(), &self.workspace, input)
+                    create_skill("skill_manage", catalog.snapshot(), &self.workspace, input)
                 }
                 SkillManageInput::Patch(input) => {
-                    patch_skill(self.name(), catalog.snapshot(), &self.workspace, input)
+                    patch_skill("skill_manage", catalog.snapshot(), &self.workspace, input)
                 }
                 SkillManageInput::Edit(input) => {
-                    edit_skill(self.name(), catalog.snapshot(), &self.workspace, input)
+                    edit_skill("skill_manage", catalog.snapshot(), &self.workspace, input)
                 }
                 SkillManageInput::Delete(input) => {
-                    delete_skill(self.name(), catalog.snapshot(), &self.workspace, input)
+                    delete_skill("skill_manage", catalog.snapshot(), &self.workspace, input)
                 }
                 SkillManageInput::WriteFile(input) => {
-                    write_support_file(self.name(), catalog.snapshot(), &self.workspace, input)
+                    write_support_file("skill_manage", catalog.snapshot(), &self.workspace, input)
                 }
                 SkillManageInput::RemoveFile(input) => {
-                    remove_support_file(self.name(), catalog.snapshot(), &self.workspace, input)
+                    remove_support_file("skill_manage", catalog.snapshot(), &self.workspace, input)
                 }
             };
             if result.is_ok() {
@@ -571,7 +535,6 @@ impl Tool for SkillManageTool {
             }
             result
         }
-        .boxed()
     }
 }
 

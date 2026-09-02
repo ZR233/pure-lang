@@ -1,15 +1,11 @@
+use std::future::Future;
 use std::time::UNIX_EPOCH;
 
-use futures::FutureExt;
 use pl_protocol::PureError;
 
 use super::helpers::*;
 use super::input::PathInput;
-use crate::tool::{
-    BoxFuture, Tool, ToolCallContext, ToolInput, ToolResult, ToolWorkspace, TypedTool,
-    deserialize_tool_input, tool_error,
-};
-use crate::turn::ToolEffect;
+use crate::tool::{StaticTool, ToolCallContext, ToolPolicy, ToolResult, ToolWorkspace, tool_error};
 
 #[derive(Debug, Clone)]
 pub struct StatPathTool {
@@ -22,38 +18,28 @@ impl StatPathTool {
     }
 }
 
-impl Tool for StatPathTool {
-    fn name(&self) -> &str {
-        "stat_path"
+impl StaticTool for StatPathTool {
+    type Input = PathInput;
+
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        crate::tool::StaticToolDefinition::new(
+            crate::tool::ToolName::builtin("stat_path"),
+            "Return metadata for a workspace path, or `exists: false` when the path is absent.",
+        )
     }
 
-    fn description(&self) -> &str {
-        "Return metadata for a workspace path, or `exists: false` when the path is absent."
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::read_only()
+            .with_parallel_tool_calls()
+            .with_cache_policy(crate::tool::cache::ToolCachePolicy::UntilWorkspaceMutation)
     }
 
-    fn input_schema(&self) -> serde_json::Value {
-        TypedTool::<PathInput>::new(self.name(), self.description()).input_schema()
-    }
-
-    fn supports_parallel_tool_calls(&self) -> bool {
-        true
-    }
-
-    fn effect(&self) -> Option<ToolEffect> {
-        Some(ToolEffect::Read)
-    }
-
-    fn cache_policy(&self, _arguments: &serde_json::Value) -> crate::tool::cache::ToolCachePolicy {
-        crate::tool::cache::ToolCachePolicy::UntilWorkspaceMutation
-    }
-
-    fn execute<'a>(
-        &'a self,
-        input: ToolInput,
+    fn execute(
+        &self,
+        input: PathInput,
         context: ToolCallContext,
-    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
+    ) -> impl Future<Output = Result<ToolResult, PureError>> + Send {
         async move {
-            let input: PathInput = deserialize_tool_input(self.name(), input.arguments)?;
             let paths = workspace(&self.workspace, &context).await?;
             let path = paths.resolve_existing_or_parent(&input.path).await?;
             let metadata = match tokio::fs::metadata(&path).await {
@@ -69,7 +55,7 @@ impl Tool for StatPathTool {
                 }
                 Err(error) => {
                     return Err(tool_error(
-                        self.name(),
+                        "stat_path",
                         format!("failed to inspect path '{}': {error}", input.path),
                     ));
                 }
@@ -91,6 +77,5 @@ impl Tool for StatPathTool {
                 .to_string(),
             ))
         }
-        .boxed()
     }
 }

@@ -11,14 +11,14 @@ use super::credential::{
     GitCredentialRequest, write_askpass_script,
 };
 use super::execution::{ExecutionBackend, ExecutionRequest};
-use crate::tool::{Tool, tool_error};
+use crate::tool::tool_error;
 
 const GIT_TIMEOUT: Duration = Duration::from_secs(600);
 
 impl<B, P> GitTool<B, P>
 where
-    B: ExecutionBackend,
-    P: GitCredentialProvider,
+    B: ExecutionBackend + 'static,
+    P: GitCredentialProvider + 'static,
 {
     pub(super) async fn run_plain<S>(&self, args: Vec<S>) -> Result<GitToolOutcome, PureError>
     where

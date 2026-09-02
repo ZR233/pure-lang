@@ -1,13 +1,11 @@
 //! Root turn completion tool.
 
-use futures::FutureExt;
+use std::future::Future;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{
-    BoxFuture, Tool, ToolBatchPolicy, ToolCallContext, ToolInput, ToolResult,
-    deserialize_tool_input,
-};
+use super::{StaticTool, ToolBatchPolicy, ToolCallContext, ToolPolicy, ToolResult};
 use crate::turn::ToolEffect;
 use pl_protocol::{PureError, Result};
 
@@ -23,7 +21,7 @@ pub struct CompleteTool;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct CompleteInput {
+pub struct CompleteInput {
     /// A concise summary of the result delivered by this turn.
     #[schemars(length(min = 1, max = 8192))]
     summary: String,
@@ -41,34 +39,28 @@ struct CompleteOutput {
     evidence: Vec<String>,
 }
 
-impl Tool for CompleteTool {
-    fn name(&self) -> &str {
-        TOOL_COMPLETE
+impl StaticTool for CompleteTool {
+    type Input = CompleteInput;
+
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        crate::tool::StaticToolDefinition::new(
+            crate::tool::ToolName::builtin(TOOL_COMPLETE),
+            "Complete the current root turn with a summary and optional evidence. This must be the final and only tool call in the provider response.",
+        )
     }
 
-    fn description(&self) -> &str {
-        "Complete the current root turn with a summary and optional evidence. This must be the final and only tool call in the provider response."
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::default()
+            .with_effect(ToolEffect::Read)
+            .with_batch_policy(ToolBatchPolicy::Solo)
     }
 
-    fn input_schema(&self) -> serde_json::Value {
-        super::TypedTool::<CompleteInput>::new(self.name(), self.description()).input_schema()
-    }
-
-    fn effect(&self) -> Option<ToolEffect> {
-        Some(ToolEffect::Read)
-    }
-
-    fn batch_policy(&self) -> ToolBatchPolicy {
-        ToolBatchPolicy::Solo
-    }
-
-    fn execute<'a>(
-        &'a self,
-        input: ToolInput,
+    fn execute(
+        &self,
+        input: CompleteInput,
         _context: ToolCallContext,
-    ) -> BoxFuture<'a, Result<ToolResult>> {
+    ) -> impl Future<Output = Result<ToolResult>> + Send {
         async move {
-            let input = deserialize_tool_input::<CompleteInput>(self.name(), input.arguments)?;
             let summary = input.summary.trim().to_string();
             if summary.is_empty() || summary.len() > MAX_SUMMARY_BYTES {
                 return Err(invalid_completion(format!(
@@ -100,7 +92,6 @@ impl Tool for CompleteTool {
             };
             Ok(ToolResult::json(output)?.ending_turn_with_content(summary))
         }
-        .boxed()
     }
 }
 
@@ -114,6 +105,7 @@ fn invalid_completion(message: String) -> PureError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tool::{StaticToolTestExt, ToolInput};
     use pretty_assertions::assert_eq;
 
     fn context() -> ToolCallContext {
@@ -136,7 +128,7 @@ mod tests {
     #[tokio::test]
     async fn valid_completion_returns_summary_and_ends_turn() {
         let result = CompleteTool
-            .execute(
+            .execute_raw(
                 ToolInput {
                     arguments: serde_json::json!({
                         "summary": "  Work is complete.  ",
@@ -156,7 +148,7 @@ mod tests {
     #[tokio::test]
     async fn invalid_completion_is_rejected() {
         let result = CompleteTool
-            .execute(
+            .execute_raw(
                 ToolInput {
                     arguments: serde_json::json!({"summary": "  "}),
                 },
@@ -167,7 +159,7 @@ mod tests {
         assert!(result.to_string().contains("summary must be non-empty"));
 
         let result = CompleteTool
-            .execute(
+            .execute_raw(
                 ToolInput {
                     arguments: serde_json::json!({
                         "summary": "done",
@@ -181,7 +173,7 @@ mod tests {
         assert!(result.to_string().contains("unknown field `unexpected`"));
 
         let result = CompleteTool
-            .execute(
+            .execute_raw(
                 ToolInput {
                     arguments: serde_json::json!({
                         "summary": "done",

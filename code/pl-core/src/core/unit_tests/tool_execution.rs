@@ -5,16 +5,21 @@ use futures::FutureExt;
 use pretty_assertions::assert_eq;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct EmptyTestToolInput {}
+
 #[derive(Debug)]
 struct ProviderCallIdEchoTool;
 
-impl Tool for ProviderCallIdEchoTool {
-    fn name(&self) -> &str {
-        "provider_call_id_echo"
-    }
+impl StaticTool for ProviderCallIdEchoTool {
+    type Input = serde_json::Value;
 
-    fn description(&self) -> &str {
-        "Returns the stable provider call identity from ToolCallContext"
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        test_static_tool_definition(
+            "provider_call_id_echo",
+            "Returns the stable provider call identity from ToolCallContext",
+        )
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -25,21 +30,15 @@ impl Tool for ProviderCallIdEchoTool {
         })
     }
 
-    fn effect(&self) -> Option<crate::ToolEffect> {
-        None
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::default()
     }
 
-    fn execute<'a>(
-        &'a self,
-        _input: ToolInput,
+    fn execute(
+        &self,
+        _input: Self::Input,
         context: ToolCallContext,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = std::result::Result<ToolResult, PureError>>
-                + Send
-                + 'a,
-        >,
-    > {
+    ) -> impl std::future::Future<Output = crate::Result<ToolResult>> + Send {
         async move { Ok(ToolResult::success(context.identity().call_id.clone())) }.boxed()
     }
 }
@@ -85,13 +84,11 @@ struct BatchEpochProcessTool {
     release_first: std::sync::Arc<tokio::sync::Notify>,
 }
 
-impl Tool for FailingApplyPatchTool {
-    fn name(&self) -> &str {
-        "apply_patch"
-    }
+impl StaticTool for FailingApplyPatchTool {
+    type Input = serde_json::Value;
 
-    fn description(&self) -> &str {
-        "Test-only failing patch tool"
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        test_static_tool_definition("apply_patch", "Test-only failing patch tool")
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -106,21 +103,15 @@ impl Tool for FailingApplyPatchTool {
         })
     }
 
-    fn effect(&self) -> Option<crate::ToolEffect> {
-        None
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::default()
     }
 
-    fn execute<'a>(
-        &'a self,
-        _input: ToolInput,
+    fn execute(
+        &self,
+        _input: Self::Input,
         _context: ToolCallContext,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = std::result::Result<ToolResult, PureError>>
-                + Send
-                + 'a,
-        >,
-    > {
+    ) -> impl std::future::Future<Output = crate::Result<ToolResult>> + Send {
         async move {
             self.executions.fetch_add(1, Ordering::SeqCst);
             Err(PureError::ToolExecutionFailed {
@@ -132,13 +123,11 @@ impl Tool for FailingApplyPatchTool {
     }
 }
 
-impl Tool for CountingSpawnAgentTool {
-    fn name(&self) -> &str {
-        "spawn_agent"
-    }
+impl StaticTool for CountingSpawnAgentTool {
+    type Input = serde_json::Value;
 
-    fn description(&self) -> &str {
-        "Test-only agent spawn tool"
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        test_static_tool_definition("spawn_agent", "Test-only agent spawn tool")
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -155,27 +144,21 @@ impl Tool for CountingSpawnAgentTool {
         })
     }
 
-    fn effect(&self) -> Option<crate::ToolEffect> {
-        Some(crate::ToolEffect::AgentControl)
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::default().with_effect(crate::ToolEffect::AgentControl)
     }
 
-    fn execute<'a>(
-        &'a self,
-        input: ToolInput,
+    fn execute(
+        &self,
+        input: Self::Input,
         _context: ToolCallContext,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = std::result::Result<ToolResult, PureError>>
-                + Send
-                + 'a,
-        >,
-    > {
+    ) -> impl std::future::Future<Output = crate::Result<ToolResult>> + Send {
         async move {
             let execution = self.executions.fetch_add(1, Ordering::SeqCst) + 1;
             Ok(ToolResult::success(
                 serde_json::json!({
                     "agentId": format!("agent-{execution}"),
-                    "message": input.arguments["message"],
+                    "message": input["message"],
                 })
                 .to_string(),
             ))
@@ -184,13 +167,11 @@ impl Tool for CountingSpawnAgentTool {
     }
 }
 
-impl Tool for CountingExecTool {
-    fn name(&self) -> &str {
-        "exec"
-    }
+impl StaticTool for CountingExecTool {
+    type Input = serde_json::Value;
 
-    fn description(&self) -> &str {
-        "Test-only command tool"
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        test_static_tool_definition("exec", "Test-only command tool")
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -205,27 +186,21 @@ impl Tool for CountingExecTool {
         })
     }
 
-    fn effect(&self) -> Option<crate::ToolEffect> {
-        Some(crate::ToolEffect::Process)
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::default().with_effect(crate::ToolEffect::Process)
     }
 
-    fn execute<'a>(
-        &'a self,
-        input: ToolInput,
+    fn execute(
+        &self,
+        input: Self::Input,
         _context: ToolCallContext,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = std::result::Result<ToolResult, PureError>>
-                + Send
-                + 'a,
-        >,
-    > {
+    ) -> impl std::future::Future<Output = crate::Result<ToolResult>> + Send {
         async move {
             self.executions.fetch_add(1, Ordering::SeqCst);
             Ok(ToolResult::success(
                 serde_json::json!({
                     "status": "completed",
-                    "command": input.arguments["command"],
+                    "command": input["command"],
                 })
                 .to_string(),
             ))
@@ -234,38 +209,26 @@ impl Tool for CountingExecTool {
     }
 }
 
-impl Tool for CountingSoloTool {
-    fn name(&self) -> &str {
-        "solo_state"
-    }
+impl StaticTool for CountingSoloTool {
+    type Input = serde_json::Value;
 
-    fn description(&self) -> &str {
-        "Test-only Solo state tool"
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        test_static_tool_definition("solo_state", "Test-only Solo state tool")
     }
 
     fn input_schema(&self) -> serde_json::Value {
         serde_json::json!({"type": "object", "additionalProperties": false})
     }
 
-    fn effect(&self) -> Option<crate::ToolEffect> {
-        Some(crate::ToolEffect::Read)
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::read_only().with_batch_policy(ToolBatchPolicy::Solo)
     }
 
-    fn batch_policy(&self) -> ToolBatchPolicy {
-        ToolBatchPolicy::Solo
-    }
-
-    fn execute<'a>(
-        &'a self,
-        _input: ToolInput,
+    fn execute(
+        &self,
+        _input: Self::Input,
         _context: ToolCallContext,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = std::result::Result<ToolResult, PureError>>
-                + Send
-                + 'a,
-        >,
-    > {
+    ) -> impl std::future::Future<Output = crate::Result<ToolResult>> + Send {
         async move {
             self.executions.fetch_add(1, Ordering::SeqCst);
             Ok(ToolResult::success("mutated"))
@@ -332,13 +295,11 @@ async fn solo_tool_rejects_the_entire_mixed_batch_without_side_effects() {
     }));
 }
 
-impl Tool for CountingCacheableTool {
-    fn name(&self) -> &str {
-        "cacheable_read"
-    }
+impl StaticTool for CountingCacheableTool {
+    type Input = serde_json::Value;
 
-    fn description(&self) -> &str {
-        "Test-only cacheable read tool"
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        test_static_tool_definition("cacheable_read", "Test-only cacheable read tool")
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -352,30 +313,20 @@ impl Tool for CountingCacheableTool {
         })
     }
 
-    fn cache_policy(&self, _arguments: &serde_json::Value) -> ToolCachePolicy {
-        ToolCachePolicy::UntilWorkspaceMutation
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::read_only().with_cache_policy(ToolCachePolicy::UntilWorkspaceMutation)
     }
 
-    fn effect(&self) -> Option<crate::ToolEffect> {
-        Some(crate::ToolEffect::Read)
-    }
-
-    fn execute<'a>(
-        &'a self,
-        input: ToolInput,
+    fn execute(
+        &self,
+        input: Self::Input,
         _context: ToolCallContext,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = std::result::Result<ToolResult, PureError>>
-                + Send
-                + 'a,
-        >,
-    > {
+    ) -> impl std::future::Future<Output = crate::Result<ToolResult>> + Send {
         async move {
             self.executions.fetch_add(1, Ordering::SeqCst);
             Ok(ToolResult::success(
                 serde_json::json!({
-                    "path": input.arguments["path"],
+                    "path": input["path"],
                     "content": "x".repeat(8_192),
                 })
                 .to_string(),
@@ -385,13 +336,11 @@ impl Tool for CountingCacheableTool {
     }
 }
 
-impl Tool for BatchFailingReadTool {
-    fn name(&self) -> &str {
-        "read_file"
-    }
+impl StaticTool for BatchFailingReadTool {
+    type Input = serde_json::Value;
 
-    fn description(&self) -> &str {
-        "Test-only deterministic read failure"
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        test_static_tool_definition("read_file", "Test-only deterministic read failure")
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -405,29 +354,17 @@ impl Tool for BatchFailingReadTool {
         })
     }
 
-    fn cache_policy(&self, _arguments: &serde_json::Value) -> ToolCachePolicy {
-        ToolCachePolicy::UntilWorkspaceMutation
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::read_only()
+            .with_cache_policy(ToolCachePolicy::UntilWorkspaceMutation)
+            .with_runtime_lock_policy(ToolRuntimeLockPolicy::Exclusive)
     }
 
-    fn runtime_lock_policy(&self) -> ToolRuntimeLockPolicy {
-        ToolRuntimeLockPolicy::Exclusive
-    }
-
-    fn effect(&self) -> Option<crate::ToolEffect> {
-        Some(crate::ToolEffect::Read)
-    }
-
-    fn execute<'a>(
-        &'a self,
-        _input: ToolInput,
+    fn execute(
+        &self,
+        _input: Self::Input,
         context: ToolCallContext,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = std::result::Result<ToolResult, PureError>>
-                + Send
-                + 'a,
-        >,
-    > {
+    ) -> impl std::future::Future<Output = crate::Result<ToolResult>> + Send {
         async move {
             self.executions.fetch_add(1, Ordering::SeqCst);
             if context.identity().call_id == "read-call-1" {
@@ -443,13 +380,14 @@ impl Tool for BatchFailingReadTool {
     }
 }
 
-impl Tool for BatchEpochProcessTool {
-    fn name(&self) -> &str {
-        "batch_epoch_process"
-    }
+impl StaticTool for BatchEpochProcessTool {
+    type Input = serde_json::Value;
 
-    fn description(&self) -> &str {
-        "Test-only process effect between duplicate reads"
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        test_static_tool_definition(
+            "batch_epoch_process",
+            "Test-only process effect between duplicate reads",
+        )
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -460,25 +398,17 @@ impl Tool for BatchEpochProcessTool {
         })
     }
 
-    fn effect(&self) -> Option<crate::ToolEffect> {
-        Some(crate::ToolEffect::Process)
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::default()
+            .with_effect(crate::ToolEffect::Process)
+            .with_runtime_lock_policy(ToolRuntimeLockPolicy::None)
     }
 
-    fn runtime_lock_policy(&self) -> ToolRuntimeLockPolicy {
-        ToolRuntimeLockPolicy::None
-    }
-
-    fn execute<'a>(
-        &'a self,
-        _input: ToolInput,
+    fn execute(
+        &self,
+        _input: Self::Input,
         _context: ToolCallContext,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = std::result::Result<ToolResult, PureError>>
-                + Send
-                + 'a,
-        >,
-    > {
+    ) -> impl std::future::Future<Output = crate::Result<ToolResult>> + Send {
         async move {
             self.first_started.notified().await;
             self.release_first.notify_one();
@@ -488,13 +418,11 @@ impl Tool for BatchEpochProcessTool {
     }
 }
 
-impl Tool for BudgetPausedWaitTool {
-    fn name(&self) -> &str {
-        "wait_agents"
-    }
+impl StaticTool for BudgetPausedWaitTool {
+    type Input = serde_json::Value;
 
-    fn description(&self) -> &str {
-        "Test-only blocking wait"
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        test_static_tool_definition("wait_agents", "Test-only blocking wait")
     }
 
     fn input_schema(&self) -> serde_json::Value {
@@ -505,25 +433,15 @@ impl Tool for BudgetPausedWaitTool {
         })
     }
 
-    fn budget_timing(&self) -> ToolBudgetTiming {
-        ToolBudgetTiming::PauseWhenOnlyScheduledTool
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::default().with_budget_timing(ToolBudgetTiming::PauseWhenOnlyScheduledTool)
     }
 
-    fn effect(&self) -> Option<crate::ToolEffect> {
-        None
-    }
-
-    fn execute<'a>(
-        &'a self,
-        _input: ToolInput,
+    fn execute(
+        &self,
+        _input: Self::Input,
         _context: ToolCallContext,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = std::result::Result<ToolResult, PureError>>
-                + Send
-                + 'a,
-        >,
-    > {
+    ) -> impl std::future::Future<Output = crate::Result<ToolResult>> + Send {
         async {
             tokio::time::sleep(std::time::Duration::from_millis(30)).await;
             Ok(ToolResult::success("progress"))
@@ -842,18 +760,19 @@ async fn identical_cacheable_calls_return_compact_receipts_per_provider_response
 async fn tool_batch_reports_parallel_candidates_and_critical_path() {
     let mut core = test_turn_engine();
     core.register_test_tool(
-        crate::tool::LocalTool::new(
-            "parallel_metric_read",
+        crate::tool::static_tool::<EmptyTestToolInput>(crate::tool::StaticToolDefinition::new(
+            crate::tool::ToolName::bare("parallel_metric_read").unwrap(),
             "Test-only parallel metric tool",
-            serde_json::json!({"type": "object"}),
-            |_input, _context| async move {
-                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-                Ok(ToolResult::success("ok"))
-            },
+        ))
+        .policy(
+            ToolPolicy::read_only()
+                .with_parallel_tool_calls()
+                .with_runtime_lock_policy(ToolRuntimeLockPolicy::Shared),
         )
-        .with_parallel_tool_calls()
-        .with_runtime_lock_policy(ToolRuntimeLockPolicy::Shared)
-        .with_effect(crate::ToolEffect::Read),
+        .build(|_input, _context| async move {
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            Ok(ToolResult::success("ok"))
+        }),
     );
     let calls = [
         ToolCall::function(
@@ -1033,15 +952,16 @@ async fn mcp_registered_tools_use_policy_approval_batch_lock_and_trace_pipeline(
 #[tokio::test]
 async fn tool_batch_critical_path_includes_serialized_exclusive_calls() {
     let mut core = test_turn_engine();
-    core.register_test_tool(crate::tool::LocalTool::new(
-        "exclusive_metric_read",
-        "Test-only exclusive metric tool",
-        serde_json::json!({"type": "object"}),
-        |_input, _context| async move {
+    core.register_test_tool(
+        crate::tool::static_tool::<EmptyTestToolInput>(crate::tool::StaticToolDefinition::new(
+            crate::tool::ToolName::bare("exclusive_metric_read").unwrap(),
+            "Test-only exclusive metric tool",
+        ))
+        .build(|_input, _context| async move {
             tokio::time::sleep(std::time::Duration::from_millis(25)).await;
             Ok(ToolResult::success("ok"))
-        },
-    ));
+        }),
+    );
     let calls = [
         ToolCall::function(
             "exclusive-item-1",

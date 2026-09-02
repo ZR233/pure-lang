@@ -94,6 +94,7 @@ pub(super) fn receipt(result: &ToolExecutionRecord) -> ToolResultReceipt {
             crate::tool::ToolDirective::InteractionRequested { .. }
             | crate::tool::ToolDirective::SkillActivated { .. }
             | crate::tool::ToolDirective::ToolResultRevision { .. }
+            | crate::tool::ToolDirective::RevealTools { .. }
             | crate::tool::ToolDirective::AuditMetadata { .. }
             | crate::tool::ToolDirective::ExecutionFailed
             | crate::tool::ToolDirective::CacheHit { .. }
@@ -114,6 +115,7 @@ pub(super) fn receipt(result: &ToolExecutionRecord) -> ToolResultReceipt {
         | crate::tool::ToolDirective::SkillActivated { .. }
         | crate::tool::ToolDirective::ToolResultRevision { .. }
         | crate::tool::ToolDirective::OutputArtifacts { .. }
+        | crate::tool::ToolDirective::RevealTools { .. }
         | crate::tool::ToolDirective::AuditMetadata { .. }
         | crate::tool::ToolDirective::ExecutionFailed
         | crate::tool::ToolDirective::OutputMetrics { .. }
@@ -131,6 +133,7 @@ pub(super) fn receipt(result: &ToolExecutionRecord) -> ToolResultReceipt {
         | crate::tool::ToolDirective::SkillActivated { .. }
         | crate::tool::ToolDirective::ToolResultRevision { .. }
         | crate::tool::ToolDirective::OutputArtifacts { .. }
+        | crate::tool::ToolDirective::RevealTools { .. }
         | crate::tool::ToolDirective::AuditMetadata { .. }
         | crate::tool::ToolDirective::ExecutionFailed
         | crate::tool::ToolDirective::CacheHit { .. }

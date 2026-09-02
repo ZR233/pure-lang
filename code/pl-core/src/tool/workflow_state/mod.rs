@@ -1,6 +1,7 @@
 //! Canonical 工作流状态工具。
 
-use futures::FutureExt;
+use std::future::Future;
+
 use pl_protocol::{
     ModeInstructionSnapshot, PureError, WorkflowDefinition, WorkflowOperationReceipt, WorkflowRun,
     WorkflowRunArchive, WorkflowRunLifecycle, WorkflowSessionState, WorkflowStage,
@@ -10,15 +11,14 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::time::unix_seconds;
-use crate::turn::ToolEffect;
 use crate::workflow::{
     MAX_ARCHIVED_WORKFLOW_RUNS, MAX_WORKFLOW_HISTORY, MAX_WORKFLOW_OPERATION_RECEIPTS,
     WorkflowValidationIssue, compile_definition, validate_session_state_size,
 };
 
 use super::{
-    BoxFuture, Tool, ToolBatchPolicy, ToolCallContext, ToolInput, ToolResult, TypedTool,
-    deserialize_tool_input,
+    StaticTool, ToolBatchPolicy, ToolCallContext, ToolPolicy, ToolResult, deserialize_tool_input,
+    typed_tool_input_schema,
 };
 
 pub const TOOL_WORKFLOW_STATE: &str = "workflow_state";
@@ -61,14 +61,14 @@ impl WorkflowStateTool {
     }
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(
     rename_all = "camelCase",
     rename_all_fields = "camelCase",
     tag = "action",
     deny_unknown_fields
 )]
-enum WorkflowStateInput {
+pub enum WorkflowStateInput {
     Compile {
         expected_revision: u64,
         expected_run_id: Option<String>,
@@ -95,18 +95,18 @@ enum WorkflowStateInput {
     },
 }
 
-#[derive(Debug, Clone, Copy, Default, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
-enum WorkflowStatusView {
+pub enum WorkflowStatusView {
     #[default]
     Current,
     Graph,
     History,
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct WorkflowDefinitionInput {
+pub struct WorkflowDefinitionInput {
     title: String,
     goal: String,
     initial_stage_id: String,
@@ -127,9 +127,9 @@ impl From<WorkflowDefinitionInput> for WorkflowDefinition {
     }
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct WorkflowStageInput {
+pub struct WorkflowStageInput {
     id: String,
     title: String,
     instructions: String,
@@ -151,9 +151,9 @@ impl From<WorkflowStageInput> for WorkflowStage {
     }
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct WorkflowTransitionInput {
+pub struct WorkflowTransitionInput {
     from_stage_id: String,
     to_stage_id: String,
     when: String,
@@ -228,9 +228,9 @@ impl From<WorkflowTransitionInput> for WorkflowTransition {
     }
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct WorkflowCompletionInput {
+pub struct WorkflowCompletionInput {
     summary: String,
     #[serde(default)]
     evidence: Vec<String>,
@@ -248,45 +248,46 @@ struct WorkflowStateResponse {
     recovery_actions: Vec<String>,
 }
 
-impl Tool for WorkflowStateTool {
-    fn name(&self) -> &str {
-        TOOL_WORKFLOW_STATE
-    }
+impl StaticTool for WorkflowStateTool {
+    type Input = WorkflowStateInput;
 
-    fn description(&self) -> &str {
-        WORKFLOW_STATE_DESCRIPTION
+    fn definition(&self) -> crate::tool::StaticToolDefinition {
+        crate::tool::StaticToolDefinition::new(
+            crate::tool::ToolName::builtin(TOOL_WORKFLOW_STATE),
+            WORKFLOW_STATE_DESCRIPTION,
+        )
     }
 
     fn input_schema(&self) -> serde_json::Value {
-        workflow_state_input_schema(self.name(), self.description())
+        workflow_state_input_schema(TOOL_WORKFLOW_STATE, WORKFLOW_STATE_DESCRIPTION)
     }
 
-    fn effect(&self) -> Option<ToolEffect> {
-        Some(ToolEffect::Read)
+    fn policy(&self) -> ToolPolicy {
+        ToolPolicy::read_only().with_batch_policy(ToolBatchPolicy::Solo)
     }
 
-    fn batch_policy(&self) -> ToolBatchPolicy {
-        ToolBatchPolicy::Solo
-    }
-
-    fn execute<'a>(
-        &'a self,
-        input: ToolInput,
+    fn execute(
+        &self,
+        input: WorkflowStateInput,
         context: ToolCallContext,
-    ) -> BoxFuture<'a, Result<ToolResult, PureError>> {
+    ) -> impl Future<Output = Result<ToolResult, PureError>> + Send {
         async move {
-            let argument_hash = crate::canonical_json_hash(&input.arguments);
-            let input = deserialize_tool_input::<WorkflowStateInput>(self.name(), input.arguments)
-                .map_err(workflow_state_input_error)?;
+            let arguments = serde_json::to_value(&input).map_err(|error| {
+                workflow_state_input_error(PureError::ToolExecutionFailed {
+                    tool: TOOL_WORKFLOW_STATE.to_string(),
+                    error: format!("failed to serialize typed input: {error}"),
+                })
+            })?;
+            let argument_hash = crate::canonical_json_hash(&arguments);
             let response = self.execute_action(input, &context, argument_hash)?;
             ToolResult::json(response)
         }
-        .boxed()
     }
 }
 
 fn workflow_state_input_schema(tool_name: &str, description: &str) -> serde_json::Value {
-    let mut schema = TypedTool::<WorkflowStateInput>::new(tool_name, description).input_schema();
+    let _ = (tool_name, description);
+    let mut schema = typed_tool_input_schema::<WorkflowStateInput>();
     let Some(root) = schema.as_object_mut() else {
         return schema;
     };
