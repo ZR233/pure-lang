@@ -447,7 +447,7 @@ impl ModelInfo {
             .unwrap_or_default()
     }
 
-    /// 返回 effort 的默认值（候选值首项），若模型未声明 effort 返回 None。
+    /// 返回 effort 的默认值（模型声明的候选值首项，且该首项是最弱强度），若模型未声明 effort 返回 None。
     pub fn default_effort(&self) -> Option<String> {
         self.effort_parameter()
             .and_then(|parameter| parameter.candidates.first().cloned())

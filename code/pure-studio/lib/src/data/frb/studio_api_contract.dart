@@ -35,6 +35,7 @@ abstract class StudioApi {
     StudioPromptInput input,
     StudioMode mode,
   );
+  Future<StudioThread> renameThread(String threadId, String title);
   Future<ArchiveThreadResult> archiveThread(String threadId);
   Future<void> archiveProject(String projectId);
   Future<PersistenceStateSnapshot> retryPersistence();
@@ -519,6 +520,15 @@ class FrbStudioApi implements StudioApi {
         cursor: response.receipt.revision.toInt(),
       ),
     );
+  }
+
+  @override
+  Future<StudioThread> renameThread(String threadId, String title) async {
+    await _ensureReady();
+    final response = await _bridgeCall(
+      () => frb.renameThread(threadId: threadId, title: title),
+    );
+    return _threadFromFrb(response);
   }
 
   @override

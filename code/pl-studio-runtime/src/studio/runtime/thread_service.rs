@@ -7,6 +7,7 @@ use crate::studio::records::{ProjectRecord, ThreadRecord, ThreadVisibility};
 use crate::studio::store::directory::{DirectoryDelta, ProjectDirectoryRecord, ProjectRemoval};
 use crate::{StudioMode, resolve_workspace_root};
 
+use super::thread_title::{manual_title, provisional_title};
 use super::{
     StudioArchiveThreadResult, StudioRuntime, StudioStartNewThreadRequest,
     StudioStartNewThreadResponse, StudioSubmitPromptRequest,
@@ -116,6 +117,12 @@ impl StudioRuntime {
         request: StudioStartNewThreadRequest,
     ) -> Result<StudioStartNewThreadResponse> {
         super::prompt_runner::validate_prompt_content(&request.input)?;
+        let auto_title = request.title.is_none() && !request.input.text.trim().is_empty();
+        let provisional = request
+            .title
+            .clone()
+            .unwrap_or_else(|| provisional_title(&request.input.text));
+        let title_prompt = request.input.text.clone();
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
         self.ensure_prompt_runtime_ready().await?;
         self.ensure_persistence_accepts_new_work()?;
@@ -139,7 +146,7 @@ impl StudioRuntime {
             .await?;
 
         let (delta, thread) =
-            DirectoryDelta::register_root_thread(&request.project_id, &request.title, request.mode);
+            DirectoryDelta::register_root_thread(&request.project_id, &provisional, request.mode);
         // 目录事实内存先行；SQLite 失败进入持久化降级而不是命令失败
         // （design/20 §20.4）。
         self.agent_facility
@@ -169,7 +176,81 @@ impl StudioRuntime {
                 return Err(error);
             }
         };
+        if auto_title {
+            self.title_tasks
+                .spawn(self.clone(), thread.id.clone(), provisional, title_prompt)
+                .await;
+        }
         Ok(StudioStartNewThreadResponse { thread, submission })
+    }
+
+    /// Renames a root Thread and publishes the canonical directory update.
+    pub async fn rename_thread(&self, thread_id: String, title: String) -> Result<ThreadRecord> {
+        let title = manual_title(&title)?;
+        self.ensure_persistence_accepts_new_work()?;
+        let _lifecycle_guard = self.lifecycle_lock.lock().await;
+        self.ensure_prompt_runtime_ready().await?;
+        let mut thread = self.read_protocol_thread(&thread_id).await?;
+        anyhow::ensure!(
+            thread.parent_thread_id.is_none(),
+            "only root Threads can be renamed"
+        );
+        if thread.archived {
+            bail!("archived Threads cannot be renamed");
+        }
+        // A user edit is authoritative: stop the best-effort Explorer task
+        // before publishing the canonical manual title.
+        self.title_tasks.cancel(&thread_id).await;
+        thread.title = title;
+        thread.updated_at = crate::studio::unix_seconds();
+        self.agent_facility
+            .product_events
+            .commit_directory(DirectoryDelta {
+                thread_upserts: vec![thread.clone()],
+                ..Default::default()
+            })
+            .await?;
+        Ok(ThreadRecord::from_directory_thread(thread))
+    }
+
+    pub(super) async fn apply_automatic_thread_title(
+        &self,
+        thread_id: &str,
+        expected_title: &str,
+        title: &str,
+        cancellation: &tokio_util::sync::CancellationToken,
+    ) -> Result<()> {
+        let _lifecycle_guard = tokio::select! {
+            _ = cancellation.cancelled() => return Ok(()),
+            guard = self.lifecycle_lock.lock() => guard,
+        };
+        if cancellation.is_cancelled() {
+            return Ok(());
+        }
+        let Some(mut thread) = self
+            .agent_facility
+            .product_events
+            .thread_snapshot(thread_id)
+        else {
+            return Ok(());
+        };
+        if thread.archived
+            || thread.parent_thread_id.is_some()
+            || thread.title != expected_title
+            || thread.title == title
+        {
+            return Ok(());
+        }
+        thread.title = title.to_string();
+        thread.updated_at = crate::studio::unix_seconds();
+        self.agent_facility
+            .product_events
+            .commit_directory(DirectoryDelta {
+                thread_upserts: vec![thread],
+                ..Default::default()
+            })
+            .await?;
+        Ok(())
     }
 
     pub async fn archive_thread(
@@ -223,6 +304,9 @@ impl StudioRuntime {
             .product_events
             .commit_directory(DirectoryDelta::archive_threads(removed_thread_ids.clone()))
             .await?;
+        for removed_thread_id in &removed_thread_ids {
+            self.title_tasks.cancel(removed_thread_id).await;
+        }
         self.model_performance.remove_session(&thread.id).await?;
         Ok(Some(StudioArchiveThreadResult {
             archived_root_id: thread.id,
@@ -241,6 +325,7 @@ impl StudioRuntime {
             .product_events
             .commit_directory(DirectoryDelta::archive_threads(vec![thread_id.to_string()]))
             .await?;
+        self.title_tasks.cancel(thread_id).await;
         self.model_performance.remove_session(thread_id).await?;
         if let Some(error) = actor_cleanup_error {
             return Err(error).context(format!(
@@ -319,6 +404,7 @@ impl StudioRuntime {
             })
             .await?;
         for thread_id in &thread_ids {
+            self.title_tasks.cancel(thread_id).await;
             self.model_performance.remove_session(thread_id).await?;
         }
         Ok(Some(project))
@@ -523,5 +609,161 @@ impl StudioRuntime {
             Err(pl_core::AgentRuntimeError::NotFound(_)) => Ok(false),
             Err(error) => Err(anyhow::anyhow!(error)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::StudioProductEventKind;
+    use crate::{StudioHostKind, StudioRuntimeOptions};
+    use tokio_util::sync::CancellationToken;
+
+    async fn runtime_with_thread() -> (tempfile::TempDir, tempfile::TempDir, StudioRuntime, String)
+    {
+        let home = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let runtime = StudioRuntime::with_options(StudioRuntimeOptions {
+            studio_home: Some(home.path().to_path_buf()),
+            host: StudioHostKind::Test,
+        })
+        .await
+        .unwrap();
+        runtime.start_runtime().await.unwrap();
+        let project = runtime.open_project(workspace.path()).await.unwrap();
+        let thread = runtime
+            .create_thread(&project.id, "Old title")
+            .await
+            .unwrap();
+        (home, workspace, runtime, thread.id)
+    }
+
+    #[tokio::test]
+    async fn manual_rename_publishes_and_persists_directory_title() {
+        let (home, _workspace, runtime, thread_id) = runtime_with_thread().await;
+        let mut events = runtime.subscribe_product();
+
+        let renamed = runtime
+            .rename_thread(thread_id.clone(), "  Manual title  ".to_string())
+            .await
+            .unwrap();
+        assert_eq!(renamed.title, "Manual title");
+        assert_eq!(
+            runtime
+                .read_protocol_thread(&thread_id)
+                .await
+                .unwrap()
+                .title,
+            "Manual title"
+        );
+
+        let delta = loop {
+            let event = events.recv().await.unwrap();
+            if let StudioProductEventKind::ThreadDirectoryChanged(delta) = event.kind {
+                break delta;
+            }
+        };
+        assert_eq!(delta.upserted[0].title, "Manual title");
+        runtime.shutdown_runtime().await.unwrap();
+        drop(runtime);
+
+        let reopened = StudioRuntime::with_options(StudioRuntimeOptions {
+            studio_home: Some(home.path().to_path_buf()),
+            host: StudioHostKind::Test,
+        })
+        .await
+        .unwrap();
+        reopened.start_runtime().await.unwrap();
+        assert_eq!(
+            reopened
+                .read_protocol_thread(&thread_id)
+                .await
+                .unwrap()
+                .title,
+            "Manual title"
+        );
+        reopened.shutdown_runtime().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn automatic_title_uses_cas_and_drops_stale_result() {
+        let (_home, _workspace, runtime, thread_id) = runtime_with_thread().await;
+        let cancellation = CancellationToken::new();
+        runtime
+            .apply_automatic_thread_title(&thread_id, "Old title", "Explorer title", &cancellation)
+            .await
+            .unwrap();
+        assert_eq!(
+            runtime
+                .read_protocol_thread(&thread_id)
+                .await
+                .unwrap()
+                .title,
+            "Explorer title"
+        );
+
+        runtime
+            .rename_thread(thread_id.clone(), "Manual title".to_string())
+            .await
+            .unwrap();
+        runtime
+            .apply_automatic_thread_title(
+                &thread_id,
+                "Explorer title",
+                "Stale explorer title",
+                &cancellation,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            runtime
+                .read_protocol_thread(&thread_id)
+                .await
+                .unwrap()
+                .title,
+            "Manual title"
+        );
+        runtime.shutdown_runtime().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn manual_rename_rejects_empty_title() {
+        let (_home, _workspace, runtime, thread_id) = runtime_with_thread().await;
+        let error = runtime
+            .rename_thread(thread_id, " \n ".to_string())
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("cannot be empty"));
+        runtime.shutdown_runtime().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn automatic_title_is_dropped_after_archive() {
+        let (_home, _workspace, runtime, thread_id) = runtime_with_thread().await;
+        runtime
+            .agent_facility
+            .product_events
+            .commit_directory(DirectoryDelta::archive_threads(vec![thread_id.clone()]))
+            .await
+            .unwrap();
+        runtime.title_tasks.cancel(&thread_id).await;
+
+        runtime
+            .apply_automatic_thread_title(
+                &thread_id,
+                "Old title",
+                "Explorer title",
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            runtime
+                .agent_facility
+                .product_events
+                .thread_snapshot(&thread_id)
+                .is_none()
+        );
+        runtime.shutdown_runtime().await.unwrap();
     }
 }

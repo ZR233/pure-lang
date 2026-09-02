@@ -19,7 +19,8 @@ pub struct SearchSkillsRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CreateThreadRequest {
-    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     pub input: StudioPromptInput,
     pub mode: String,
 }
@@ -35,6 +36,12 @@ pub struct StudioPromptInput {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SetThreadModeRequest {
     pub mode: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RenameThreadRequest {
+    pub title: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -119,5 +126,23 @@ mod tests {
         }))
         .unwrap_err();
         assert!(error.to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn create_thread_title_is_optional_and_accepts_legacy_string() {
+        let missing = serde_json::from_value::<CreateThreadRequest>(serde_json::json!({
+            "input": {"text": "hello", "attachmentDraftIds": []},
+            "mode": "mode.simple",
+        }))
+        .unwrap();
+        assert_eq!(missing.title, None);
+
+        let legacy = serde_json::from_value::<CreateThreadRequest>(serde_json::json!({
+            "title": "Legacy",
+            "input": {"text": "hello", "attachmentDraftIds": []},
+            "mode": "mode.simple",
+        }))
+        .unwrap();
+        assert_eq!(legacy.title.as_deref(), Some("Legacy"));
     }
 }

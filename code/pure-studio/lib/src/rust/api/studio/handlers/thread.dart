@@ -28,6 +28,15 @@ Future<StartNewThreadResponse> startNewThread({
   mode: mode,
 );
 
+/// Renames a root Thread and returns its canonical directory record.
+Future<BridgeThread> renameThread({
+  required String threadId,
+  required String title,
+}) => RustLib.instance.api.crateApiStudioHandlersThreadRenameThread(
+  threadId: threadId,
+  title: title,
+);
+
 /// Archives a root Thread and selects the next available Thread.
 ///
 /// # Errors

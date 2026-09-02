@@ -63,6 +63,30 @@ class AppLocalizationsZh extends AppLocalizations {
   String get sidebarArchiveSessionFailed => '无法归档该会话，它可能仍在运行。';
 
   @override
+  String get sidebarRenameSession => '重命名会话';
+
+  @override
+  String get sidebarRenameSessionTitle => '重命名会话';
+
+  @override
+  String get sidebarRenameSessionInput => '会话标题';
+
+  @override
+  String get sidebarRenameSessionEmpty => '请输入会话标题。';
+
+  @override
+  String get sidebarRenameSessionTooLong => '会话标题最多 80 个字符。';
+
+  @override
+  String get sidebarRenameSessionFailed => '无法重命名该会话。';
+
+  @override
+  String get commonCancel => '取消';
+
+  @override
+  String get commonSave => '保存';
+
+  @override
   String get sidebarNewSession => '新建会话';
 
   @override

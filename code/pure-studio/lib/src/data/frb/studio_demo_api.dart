@@ -900,10 +900,11 @@ class DemoStudioApi implements StudioApi {
       throw ArgumentError.value(input.text, 'text', 'empty');
     }
     final now = DateTime.now();
+    final provisionalTitle = _demoProvisionalThreadTitle(input.text);
     final thread = StudioThread(
       id: 'thread-created-${++_threadSequence}',
       projectId: projectId,
-      title: 'New Session',
+      title: provisionalTitle,
       mode: mode,
       role: 'planner',
       createdAt: now,
@@ -913,7 +914,65 @@ class DemoStudioApi implements StudioApi {
     _ensureWorkspaceFixture();
     _selectedThreadId = thread.id;
     final receipt = await _submitPrompt(thread.id, input);
+    if (input.text.trim().isNotEmpty) {
+      unawaited(_completeDemoThreadTitle(thread.id, provisionalTitle));
+    }
     return StartNewThreadResult(thread: thread, receipt: receipt);
+  }
+
+  @override
+  Future<StudioThread> renameThread(String threadId, String title) async {
+    final normalized = title.trim();
+    if (normalized.isEmpty || normalized.runes.length > 80) {
+      throw ArgumentError.value(title, 'title', 'must be 1–80 characters');
+    }
+    final index = _createdRootThreads.indexWhere(
+      (thread) => thread.id == threadId,
+    );
+    if (index < 0) throw StateError('unknown demo root Thread $threadId');
+    final renamed = _createdRootThreads[index].copyWith(
+      title: normalized,
+      updatedAt: DateTime.now(),
+    );
+    _createdRootThreads[index] = renamed;
+    if (_workspaces[threadId] case final workspace?) {
+      _workspaces[threadId] = workspace.copyWith(thread: renamed);
+    }
+    _emitThreadDirectoryUpdate(renamed);
+    return renamed;
+  }
+
+  Future<void> _completeDemoThreadTitle(
+    String threadId,
+    String provisionalTitle,
+  ) async {
+    await Future<void>.delayed(const Duration(milliseconds: 650));
+    final index = _createdRootThreads.indexWhere(
+      (thread) => thread.id == threadId,
+    );
+    if (index < 0 || _archivedThreadIds.contains(threadId)) return;
+    final current = _createdRootThreads[index];
+    if (current.title != provisionalTitle) return;
+    final renamed = current.copyWith(
+      title: 'Demo generated session',
+      updatedAt: DateTime.now(),
+    );
+    _createdRootThreads[index] = renamed;
+    if (_workspaces[threadId] case final workspace?) {
+      _workspaces[threadId] = workspace.copyWith(thread: renamed);
+    }
+    _emitThreadDirectoryUpdate(renamed);
+  }
+
+  void _emitThreadDirectoryUpdate(StudioThread thread) {
+    _productEvents.add(
+      StudioBridgeEvent(
+        payload: ThreadDirectoryChangedPayload(
+          upserted: [thread],
+          removed: const [],
+        ),
+      ),
+    );
   }
 
   @override
@@ -2185,6 +2244,12 @@ class DriverDemoStudioApi extends DemoStudioApi {
       },
     );
   }
+}
+
+String _demoProvisionalThreadTitle(String prompt) {
+  final normalized = prompt.trim().replaceAll(RegExp(r'\s+'), ' ');
+  if (normalized.isEmpty) return 'New Session';
+  return normalized.runes.take(80).map(String.fromCharCode).join();
 }
 
 ObservedResource<T> _demoReadyResource<T>(int revision, T value) {

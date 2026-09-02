@@ -322,7 +322,7 @@ Responses 与 Chat Completions 均只由下述 `ParameterWire` 写入供应商�
 pub struct ModelParameter {
     pub name: String,                          // 参数键，effort 的 name = "effort"
     pub label: Option<String>,                 // 面向用户的显示名，缺失回退 name
-    pub candidates: Vec<String>,               // 候选值域，首项为默认值
+    pub candidates: Vec<String>,               // 候选值域，固定按推理强度从弱到强排列
     pub wire: BTreeMap<String, ParameterWire>, // 每个候选值 → 写入规则
 }
 
@@ -347,14 +347,13 @@ impl ParameterWire {
 
 | 供应商 | candidates | wire.set（选中值 → 字段） | wire.remove |
 | --- | --- | --- | --- |
-| OpenAI（GPT-5.5 / GPT-5.4 / GPT-5.4-Mini） | `medium` / `low` / `high` / `xhigh` | `reasoning.effort` = 值 | — |
-| OpenAI（GPT-5.6 Sol） | `low` / `medium` / `high` / `xhigh` / `max` | `reasoning.effort` = 值 | — |
-| OpenAI（GPT-5.6 Terra / Luna） | `medium` / `low` / `high` / `xhigh` / `max` | `reasoning.effort` = 值 | — |
+| OpenAI（GPT-5.5 / GPT-5.4 / GPT-5.4-Mini） | `low` / `medium` / `high` / `xhigh` | `reasoning.effort` = 值 | — |
+| OpenAI（GPT-5.6 Sol / Terra / Luna） | `low` / `medium` / `high` / `xhigh` / `max` | `reasoning.effort` = 值 | — |
 | DeepSeek | `high` / `max` | `reasoning_effort` = 值（`thinking.type = enabled` 作为 base body） | — |
-| Zhipu 普通 | `enabled` / `none` | `thinking.type` = 值 | — |
-| GLM-5.2 | `high` / `max` / `none` | `high`/`max`：`reasoning_effort` + `thinking.type = enabled` + `thinking.clear_thinking = false`；`none`：`thinking.type = disabled` | `none` 移除 `reasoning_effort` |
-| GLM-5.3 / GLM-5.3-Flash | `high` / `low` / `max` | 三档均为 `reasoning_effort` + `thinking.type = enabled` + `thinking.clear_thinking = false` | — |
-| MiMo | `enabled` / `disabled` | `thinking.type` = 值 | — |
+| Zhipu 普通 | `none` / `enabled` | `thinking.type` = 值 | — |
+| GLM-5.2 | `none` / `high` / `max` | `high`/`max`：`reasoning_effort` + `thinking.type = enabled` + `thinking.clear_thinking = false`；`none`：`thinking.type = disabled` | `none` 移除 `reasoning_effort` |
+| GLM-5.3 / GLM-5.3-Flash | `low` / `high` / `max` | 三档均为 `reasoning_effort` + `thinking.type = enabled` + `thinking.clear_thinking = false` | — |
+| MiMo | `disabled` / `enabled` | `thinking.type` = 值 | — |
 
 GLM-5.2 的「一个选择联动多个字段」和「none 时移除字段」由 wire 的多条 `set` 与 `remove` 完整表达，无需协议层特判。GLM-5.3 系列始终启用思考，不提供禁用思考的 `none` 候选；effort 选择只改变 `reasoning_effort` 值。
 
@@ -363,6 +362,10 @@ GLM-5.2 的「一个选择联动多个字段」和「none 时移除字段」由 
 - `effort_parameter() -> Option<&ModelParameter>`
 - `supported_efforts() -> Vec<String>`
 - `default_effort() -> Option<String>`
+
+所有模型的 `candidates` 必须按思考强度从弱到强声明；因此 `candidates.first()` 是该模型
+可用的最弱强度。内部摘要类请求（例如 Thread 自动命名）沿用 Explorer 路由的模型，并选择
+该数组首项，不复制 provider/model 或重新定义强度枚举。
 
 ## 7.9 模型家族预设
 

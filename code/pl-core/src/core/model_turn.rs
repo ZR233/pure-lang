@@ -13,13 +13,27 @@ use crate::{AgentSession, ResolvedModelRoute};
 /// 不需要完整 turn loop 的单次模型请求。
 ///
 /// 模型由 [`ModelTurnClient`] 绑定，请求只描述本次 invocation 的 canonical 输入。
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ModelTurnRequest {
     instructions: Option<String>,
     tools: Vec<ToolSpec>,
+    tool_choice: String,
     parallel_tool_calls: bool,
     max_tokens: Option<u64>,
     reasoning: Option<ReasoningConfig>,
+}
+
+impl Default for ModelTurnRequest {
+    fn default() -> Self {
+        Self {
+            instructions: None,
+            tools: Vec::new(),
+            tool_choice: "auto".to_string(),
+            parallel_tool_calls: false,
+            max_tokens: None,
+            reasoning: None,
+        }
+    }
 }
 
 impl ModelTurnRequest {
@@ -50,6 +64,15 @@ impl ModelTurnRequest {
 
     pub fn with_tools(mut self, tools: Vec<ToolSpec>) -> Self {
         self.tools = tools;
+        self
+    }
+
+    /// Sets the provider-neutral tool selection mode for this invocation.
+    ///
+    /// Use `"none"` when the caller must guarantee that no tool can be selected,
+    /// even if a provider defaults an empty tool list to automatic selection.
+    pub fn with_tool_choice(mut self, tool_choice: impl Into<String>) -> Self {
+        self.tool_choice = tool_choice.into();
         self
     }
 
@@ -132,6 +155,7 @@ impl ModelTurnClient {
             .maybe_instructions(request.instructions)
             .input(session.items().to_vec())
             .tools(request.tools)
+            .tool_choice(request.tool_choice)
             .parallel_tool_calls(request.parallel_tool_calls)
             .maybe_max_tokens(request.max_tokens)
             .reasoning(request.reasoning)

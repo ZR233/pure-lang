@@ -32,7 +32,7 @@ fn openai_default_models_match_codex_metadata() {
     assert_eq!(gpt_55.max_output_tokens, None);
     assert_eq!(
         gpt_55.supported_efforts(),
-        vec!["medium", "low", "high", "xhigh"]
+        vec!["low", "medium", "high", "xhigh"]
     );
     assert_eq!(gpt_55.truncation_policy.mode, TruncationMode::Tokens);
     assert!(gpt_55.capabilities.web_search);
@@ -70,9 +70,9 @@ fn openai_default_models_match_codex_metadata() {
         assert_eq!(model.max_output_tokens, None);
         assert_eq!(
             model.supported_efforts(),
-            vec!["medium", "low", "high", "xhigh", "max"]
+            vec!["low", "medium", "high", "xhigh", "max"]
         );
-        assert_eq!(model.default_effort().as_deref(), Some("medium"));
+        assert_eq!(model.default_effort().as_deref(), Some("low"));
         assert!(model.capabilities.web_search);
         assert!(model.capabilities.tools.freeform_tools);
     }
@@ -320,9 +320,9 @@ fn default_models_include_zhipu_glm_models_from_official_overview() {
         assert!(model.max_output_tokens.is_some());
         assert_eq!(model.currency, None);
         if slug == "glm-5.2" {
-            assert_eq!(model.supported_efforts(), vec!["high", "max", "none"]);
+            assert_eq!(model.supported_efforts(), vec!["none", "high", "max"]);
         } else if slug == "glm-5.3" || slug == "glm-5.3-flash" {
-            assert_eq!(model.supported_efforts(), vec!["high", "low", "max"]);
+            assert_eq!(model.supported_efforts(), vec!["low", "high", "max"]);
         } else {
             assert!(
                 model
@@ -342,7 +342,7 @@ fn default_models_include_zhipu_glm_models_from_official_overview() {
     assert_eq!(glm_53.display_name, "GLM-5.3");
     assert_eq!(glm_53.context_window, Some(1_000_000));
     assert_eq!(glm_53.max_output_tokens, Some(128_000));
-    assert_eq!(glm_53.default_effort().as_deref(), Some("high"));
+    assert_eq!(glm_53.default_effort().as_deref(), Some("low"));
     assert!(
         glm_53
             .capabilities
@@ -494,7 +494,7 @@ fn glm53_effort_wire_always_enables_thinking() {
         let model = models.iter().find(|model| model.slug == slug).unwrap();
         let param = model.effort_parameter().unwrap();
 
-        assert_eq!(param.candidates, vec!["high", "low", "max"]);
+        assert_eq!(param.candidates, vec!["low", "high", "max"]);
         // GLM-5.3 系列不支持禁用思考：官方文档明确 disabled 会报错
         assert!(param.wire_for("none").is_none());
 

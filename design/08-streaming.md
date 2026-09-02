@@ -103,3 +103,16 @@ provider 或未知字段一律是协议错误，不做映射、默认填充或�
 Product lag 发送 `stale` 并要求重读 `/api/v1/state`。SSE 不提供 durable replay；收到
 `Last-Event-ID` 时先发送 `stale`。每 15 秒发送 comment heartbeat；heartbeat 不占用领域 sequence，
 FRB 与 HTTP 的 transport buffer 也不共享 sequence 或取消句柄。
+
+## 8.7 Thread title projection
+
+新 root Thread 的首条文本 prompt 先以规范化摘要作为临时 title，随后由配置中的 Explorer model
+异步生成一次最终 title。标题生成请求是隐藏的临时 model request；若 Explorer 模型声明 effort，
+使用其按弱到强排列的首项。只提取 provider 返回的可见 assistant 文本，忽略 reasoning/思考内容，
+不进入 Thread transcript、Turn 列表或费用投影；任务等待首条 Turn 空闲后再调用 Explorer，失败、
+超时和取消都保留临时 title。
+
+自动结果只能在 directory owner 的 CAS 检查通过后提交：当前 title 必须仍等于生成任务启动时的
+临时 title。手动 rename/归档会先取消对应任务；即使取消与 provider 返回发生竞态，手动 mutation
+仍会使陈旧自动结果失效。成功的 title mutation 继续
+通过 `ThreadDirectoryChanged` 增量事件发布，Thread stream 不新增平行 title 通知。

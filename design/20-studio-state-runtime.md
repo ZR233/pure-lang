@@ -40,3 +40,18 @@ Rust builtin 与用户 TOML；完整 Agent 配置投影属于 Settings snapshot�
 shutdown 命令阻止新 mutation，停止/等待活动 Turn，flush 所有 Thread checkpoint，关闭 Agent、MCP、
 LSP 与订阅，最后发布 Stopped。GUI 只有收到该终态才可正常销毁 engine；Driver harness 还需确认完整
 原生子进程树已退出。
+
+## 20.6 Automatic title lifecycle
+
+`CreateThreadRequest.title = None` 表示由首条已接受的文本 prompt 触发一次自动 title；显式 title
+不会触发自动任务。运行时只保存有界的 title task handle 与取消令牌，不把命名任务当作用户 Turn。
+Explorer request 使用独立临时 session，最多 30 秒，禁止 tools、MCP 和持久化；若模型声明了
+effort，则按模型定义中从弱到强数组的首项请求最弱强度。标题解析只读取 provider 返回的可见
+assistant 文本，忽略 reasoning/思考内容。任务在首条 Turn 被接受后注册，并等待该 Turn 空闲再占用
+Explorer provider，避免后台命名与用户 Turn 争抢同一远程路由；这段等待可由手动 rename、归档或
+shutdown 取消，不计入模型调用的 30 秒超时。
+
+标题生成完成后，directory owner 在同一 mutation 临界区核对期望临时 title，再提交 write-behind
+delta 与 `ThreadDirectoryChanged`。手动 rename 先提交 canonical title，因此自动任务观察到期望值变化
+时必须丢弃结果；手动 rename/归档命令还会通过每线程取消令牌终止尚未结束的任务。shutdown 先阻止新 mutation，再取消并等待所有 title task，最后 flush persistence；
+关闭前未完成的自动 title 不在重启时重试。

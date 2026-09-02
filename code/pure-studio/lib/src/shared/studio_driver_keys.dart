@@ -121,6 +121,18 @@ abstract final class StudioDriverKeys {
   static ValueKey<String> archiveThread(String id) =>
       ValueKey<String>('thread-archive-$id');
 
+  static ValueKey<String> renameThread(String id) =>
+      ValueKey<String>('thread-rename-$id');
+
+  static ValueKey<String> renameThreadDialog(String id) =>
+      ValueKey<String>('thread-rename-dialog-$id');
+
+  static ValueKey<String> renameThreadInput(String id) =>
+      ValueKey<String>('thread-rename-input-$id');
+
+  static ValueKey<String> renameThreadSave(String id) =>
+      ValueKey<String>('thread-rename-save-$id');
+
   static ValueKey<String> retryRecoveryIssue(String id) =>
       ValueKey<String>('recovery-retry-$id');
 

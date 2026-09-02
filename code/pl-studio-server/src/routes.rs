@@ -10,8 +10,8 @@ use axum::response::IntoResponse;
 use pl_protocol::studio::{
     AdmitAttachmentDraftsRequest, AdmitAttachmentDraftsResponse, CreateThreadRequest,
     ExpectedRevisionRequest, HealthResponse, LspResetRequest, McpResetRequest, OpenProjectRequest,
-    ResolveInteractionRequest, SearchSkillsRequest, SetModelRoleRequest, SetThreadModeRequest,
-    StartTurnRequest, SteerTurnRequest, StudioAttachmentAdmissionContext,
+    RenameThreadRequest, ResolveInteractionRequest, SearchSkillsRequest, SetModelRoleRequest,
+    SetThreadModeRequest, StartTurnRequest, SteerTurnRequest, StudioAttachmentAdmissionContext,
     StudioAttachmentDraftSource, StudioError, StudioSettingsSnapshot, ThreadPageQuery,
     UpdateDeepSeekWebSearchSettingsRequest, UpdateGeneralSettingsRequest,
     UpdateInstructionsSettingsRequest, UpdateMcpSettingsRequest, UpdatePermissionSettingsRequest,
@@ -121,6 +121,7 @@ pub(crate) fn api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(create_thread))
         .routes(routes!(read_thread))
         .routes(routes!(archive_thread))
+        .routes(routes!(rename_thread))
         .routes(routes!(set_thread_mode))
         .routes(routes!(list_thread_turns))
         .routes(routes!(start_turn))
@@ -272,6 +273,21 @@ async fn archive_thread(
         .map_err(ApiError::from)?
         .ok_or_else(|| ApiError(StudioError::not_found("Thread")))?;
     Ok(Json(result))
+}
+
+#[utoipa::path(put, path = "/api/v1/threads/{thread_id}/title", operation_id = "thread.rename", params(("thread_id" = String, Path)), request_body = RenameThreadRequest, responses(StudioApiErrors, (status = 200)))]
+async fn rename_thread(
+    State(state): State<AppState>,
+    Path(thread_id): Path<String>,
+    ApiJson(request): ApiJson<RenameThreadRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(
+        state
+            .runtime
+            .rename_thread(thread_id, request.title)
+            .await
+            .map_err(ApiError::from)?,
+    ))
 }
 
 #[utoipa::path(put, path = "/api/v1/threads/{thread_id}/mode", operation_id = "thread.setMode", params(("thread_id" = String, Path)), request_body = SetThreadModeRequest, responses(StudioApiErrors, (status = 204)))]

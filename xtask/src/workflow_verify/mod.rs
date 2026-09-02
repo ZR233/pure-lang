@@ -376,6 +376,7 @@ struct GuiAttempt<'a> {
 struct DriverWorkflowIdentity {
     project_id: String,
     thread_id: String,
+    title: String,
     workflow_run_id: Option<String>,
 }
 
@@ -707,6 +708,11 @@ fn write_driver_receipt(
             .pointer("/workspace/threadId")
             .and_then(serde_json::Value::as_str)
             .context("Flutter Driver receipt has no Thread id")?
+            .to_string(),
+        title: completed
+            .pointer("/workspace/title")
+            .and_then(serde_json::Value::as_str)
+            .context("Flutter Driver receipt has no Thread title")?
             .to_string(),
         workflow_run_id,
     };

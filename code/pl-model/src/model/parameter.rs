@@ -27,7 +27,7 @@ pub struct ModelParameter {
     /// 面向用户的显示名，缺失时回退到 name。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
-    /// 候选值域（GUI 渲染为下拉选项；首项为默认值）。
+    /// 候选值域（GUI 渲染为下拉选项；按强度从弱到强排列，首项为最弱默认值）。
     pub candidates: Vec<String>,
     /// 每个候选值对应的 wire 写入规则，key 必须是 candidates 中的值。
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]

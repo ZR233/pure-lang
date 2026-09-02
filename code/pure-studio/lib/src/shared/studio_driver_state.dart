@@ -9,6 +9,7 @@ abstract final class StudioDriverState {
   static final Map<String, StudioTurnView> _lastTurnsByThread = {};
   static final List<StudioShutdownProgress> _shutdownProgress = [];
   static List<String> _sidebarDirectoryIds = const [];
+  static List<StudioThread> _currentRootThreads = const [];
   static bool _sidebarDirectoryHasMore = false;
   static String? _selectedProjectId;
   static String? _selectedThreadId;
@@ -23,6 +24,7 @@ abstract final class StudioDriverState {
   static void publishState(StudioState state) {
     _selectedProjectId = state.selectedProjectId;
     _selectedThreadId = state.selectedThreadId;
+    _currentRootThreads = List.unmodifiable(state.rootThreads);
     _newThreadMode = state.newThreadMode;
     _newThreadComposer = state.newThreadComposer;
     _settingsRevision = state.settingsRevision;
@@ -86,6 +88,9 @@ abstract final class StudioDriverState {
         'count': _sidebarDirectoryIds.length,
         'hasMore': _sidebarDirectoryHasMore,
         'ids': _sidebarDirectoryIds,
+        'titles': {
+          for (final thread in _currentRootThreads) thread.id: thread.title,
+        },
       },
       'navigation': {
         'selectedProjectId': _selectedProjectId,
@@ -153,6 +158,7 @@ abstract final class StudioDriverState {
           ? null
           : {
               'threadId': workspace.thread.id,
+              'title': workspace.rootThread.title,
               'projectId': workspace.thread.projectId,
               'rootThreadId': workspace.rootThread.id,
               'threadMode': workspace.thread.mode.name,

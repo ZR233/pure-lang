@@ -59,3 +59,13 @@ Settings CAS revision，并以返回的完整 canonical snapshot 原子更新 UI
 原生 GUI 必须通过 `cargo xtask run-gui --driver` 启动，Flutter Driver 使用稳定 key 操作项目、Thread、
 模式 selector、composer、通用 Interaction、workflow panel/history 与 shutdown。workflow live harness
 在 terminal 后读取 canonical history，不以轮询瞬时阶段作为通过条件。
+
+## 11.8 Thread title
+
+新会话首条 prompt 提交后，侧栏和会话页眉立即显示 prompt 摘要；Explorer model 生成的最终 title
+通过 `ThreadDirectoryChanged` 更新，两处始终从同一个 `StudioState` projection 渲染。UI 不显示独立
+的“正在命名”状态，也不在本地维护第二份 title。
+
+Thread tile 在悬停或键盘聚焦时提供 rename action，保存对话框提交 typed rename command；空标题和
+超过 80 个字符的输入在 UI 与 runtime 两侧都拒绝。Driver 使用稳定 key 验证临时 title、自动 title、
+手动 title 以及关闭重开后的恢复。

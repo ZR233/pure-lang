@@ -4,8 +4,8 @@ use crate::api::studio::bridge_runtime::active_bridge;
 use crate::api::studio::convert::records::thread_from_record;
 use crate::api::studio::convert::thread_stream::bridge_thread;
 use crate::api::studio::types::{
-    ArchiveThreadResult, BridgeError, BridgeStudioPromptInput, StartNewThreadResponse,
-    StartTurnResponse,
+    ArchiveThreadResult, BridgeError, BridgeStudioPromptInput, BridgeThread,
+    StartNewThreadResponse, StartTurnResponse,
 };
 use pl_studio_runtime::StudioMode;
 
@@ -30,7 +30,7 @@ pub async fn start_new_thread(
         .create_thread_command(
             project_id,
             pl_protocol::studio::CreateThreadRequest {
-                title: "New Session".to_string(),
+                title: None,
                 input: input.into(),
                 mode: mode.label().to_string(),
             },
@@ -44,6 +44,13 @@ pub async fn start_new_thread(
             revision: response.submission.cursor,
         },
     })
+}
+
+/// Renames a root Thread and returns its canonical directory record.
+pub async fn rename_thread(thread_id: String, title: String) -> Result<BridgeThread, BridgeError> {
+    let bridge = active_bridge().await?;
+    let thread = bridge.studio.rename_thread(thread_id, title).await?;
+    Ok(bridge_thread(thread_from_record(thread)))
 }
 
 /// Archives a root Thread and selects the next available Thread.

@@ -31,6 +31,7 @@ mod skill_catalog;
 mod ssh;
 mod state_query;
 mod thread_service;
+mod thread_title;
 mod updater;
 
 pub(crate) use model_performance::ModelPerformanceOwner;
@@ -40,6 +41,7 @@ pub use provider_usage::{ProviderUsageStateData, ProviderUsageStateSnapshot};
 pub(crate) use shutdown_progress::ShutdownProgressBus;
 pub(crate) use skill_catalog::SkillCatalogRuntime;
 pub use skill_catalog::{SkillSearchResult, SkillsStateSnapshot};
+use thread_title::ThreadTitleTasks;
 pub(crate) use updater::StudioUpdateRuntime;
 pub use updater::*;
 
@@ -56,7 +58,7 @@ pub struct StudioSubmitPromptRequest {
 /// Creates a root Thread with the requested mode and submits its first prompt as one product command.
 pub struct StudioStartNewThreadRequest {
     pub project_id: String,
-    pub title: String,
+    pub title: Option<String>,
     pub input: StudioPromptInput,
     pub mode: StudioMode,
     pub options: StudioSubmitPromptOptions,
@@ -139,6 +141,7 @@ pub struct StudioRuntime {
     attachment_drafts: attachment_drafts::AttachmentDraftRuntime,
     ssh_manager: std::sync::Arc<pl_core::remote::SshManager>,
     lifecycle_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
+    title_tasks: ThreadTitleTasks,
     #[cfg(test)]
     initialization_entry_barrier: Option<std::sync::Arc<tokio::sync::Barrier>>,
 }

@@ -137,6 +137,7 @@ impl StudioRuntime {
             attachment_drafts,
             ssh_manager,
             lifecycle_lock: std::sync::Arc::new(tokio::sync::Mutex::new(())),
+            title_tasks: Default::default(),
             #[cfg(test)]
             initialization_entry_barrier: None,
         })

@@ -249,6 +249,74 @@ void registerShellSettingsTests() {
     expect(find.byKey(StudioDriverKeys.threadRow('session-1')), findsOneWidget);
   });
 
+  testWidgets('sidebar rename updates the canonical title in the header', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeStudioApi(_emptyState());
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(StudioDriverKeys.renameThread('session-1')));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(StudioDriverKeys.renameThreadDialog('session-1')),
+      findsOneWidget,
+    );
+    await tester.enterText(
+      find.byKey(StudioDriverKeys.renameThreadInput('session-1')),
+      'Manual title',
+    );
+    await tester.tap(
+      find.byKey(StudioDriverKeys.renameThreadSave('session-1')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(api.renamedThreadId, 'session-1');
+    expect(api.renamedThreadTitle, 'Manual title');
+    expect(find.text('Manual title'), findsAtLeastNWidgets(1));
+  });
+
+  testWidgets('thread directory title event updates the selected header', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeStudioApi(_emptyState());
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    api.emitGlobal(
+      StudioBridgeEvent(
+        payload: ThreadDirectoryChangedPayload(
+          upserted: [
+            _emptyState().threads.single.copyWith(title: 'Auto title'),
+          ],
+          removed: const [],
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Auto title'), findsAtLeastNWidgets(1));
+  });
+
   testWidgets('compact rail keeps new and archive Thread actions', (
     tester,
   ) async {

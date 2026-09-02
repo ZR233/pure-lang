@@ -64,6 +64,31 @@ class AppLocalizationsEn extends AppLocalizations {
       'Could not archive this session. It may still be running.';
 
   @override
+  String get sidebarRenameSession => 'Rename session';
+
+  @override
+  String get sidebarRenameSessionTitle => 'Rename session';
+
+  @override
+  String get sidebarRenameSessionInput => 'Session title';
+
+  @override
+  String get sidebarRenameSessionEmpty => 'Enter a session title.';
+
+  @override
+  String get sidebarRenameSessionTooLong =>
+      'Session titles can be at most 80 characters.';
+
+  @override
+  String get sidebarRenameSessionFailed => 'Could not rename this session.';
+
+  @override
+  String get commonCancel => 'Cancel';
+
+  @override
+  String get commonSave => 'Save';
+
+  @override
   String get sidebarNewSession => 'New session';
 
   @override

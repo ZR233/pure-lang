@@ -21,6 +21,7 @@ class StudioController extends _$StudioController {
   late ProductStreamCoordinator _productCoordinator;
   late ThreadStreamCoordinator _threadCoordinator;
   final Set<String> _archivingThreadIds = {};
+  final Set<String> _renamingThreadIds = {};
 
   StudioApi get _api => ref.read(studioApiProvider);
 
@@ -196,6 +197,40 @@ class StudioController extends _$StudioController {
       }
     } finally {
       _archivingThreadIds.remove(threadId);
+    }
+  }
+
+  Future<StudioThread?> renameThread(String threadId, String title) async {
+    final current = state.value;
+    final thread = current?.threads
+        .where((candidate) => candidate.id == threadId && candidate.isRoot)
+        .firstOrNull;
+    if (current == null ||
+        !_acceptsNewWork(current) ||
+        thread == null ||
+        current.recoveryIssue(
+              scope: RecoveryIssueScope.thread,
+              threadId: threadId,
+            ) !=
+            null ||
+        !_renamingThreadIds.add(threadId)) {
+      return null;
+    }
+    try {
+      final renamed = await _api.renameThread(threadId, title);
+      if (!ref.mounted) return renamed;
+      final latest = state.value;
+      if (latest == null) return renamed;
+      state = AsyncData(
+        applyThreadDirectoryDelta(
+          latest,
+          upserted: [renamed],
+          removed: const [],
+        ),
+      );
+      return renamed;
+    } finally {
+      _renamingThreadIds.remove(threadId);
     }
   }
 

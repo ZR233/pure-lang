@@ -65,8 +65,8 @@ pub fn zhipu_default_model_slugs() -> &'static [&'static str] {
 
 pub fn default_models() -> Vec<ModelInfo> {
     let openai = openai_family();
-    let openai_gpt56 = openai_gpt56_family("medium");
-    let openai_gpt56_sol = openai_gpt56_family("low");
+    let openai_gpt56 = openai_gpt56_family();
+    let openai_gpt56_sol = openai_gpt56_family();
     let deepseek_flash = deepseek_family(ModelTransportProfile::responses_http());
     let deepseek_vision = deepseek_vision_family();
     let deepseek_pro = deepseek_family(ModelTransportProfile::responses_http());
@@ -217,7 +217,7 @@ pub fn default_models() -> Vec<ModelInfo> {
             Some(32_768),
             ModelPricing::default(),
         ),
-        // Zhipu GLM-5.3（始终思考，effort 候选值 high/low/max，联动 reasoning_effort + thinking）
+        // Zhipu GLM-5.3（始终思考，effort 候选值按弱到强 low/high/max，联动 reasoning_effort + thinking）
         zhipu_glm53.instantiate(
             "glm-5.3",
             "GLM-5.3",
@@ -237,7 +237,7 @@ pub fn default_models() -> Vec<ModelInfo> {
             Some(128_000),
             ModelPricing::default(),
         ),
-        // Zhipu GLM-5.2（effort 候选值 high/max/none，联动 reasoning_effort + thinking）
+        // Zhipu GLM-5.2（effort 候选值按弱到强 none/high/max，联动 reasoning_effort + thinking）
         zhipu_glm52.instantiate(
             "glm-5.2",
             "GLM-5.2",
@@ -247,7 +247,7 @@ pub fn default_models() -> Vec<ModelInfo> {
             Some(128_000),
             ModelPricing::default(),
         ),
-        // Zhipu 文本模型（effort 候选值 enabled/none，映射 thinking 开关）
+        // Zhipu 文本模型（effort 候选值按弱到强 none/enabled，映射 thinking 开关）
         zhipu_text.instantiate(
             "glm-5",
             "GLM-5",
@@ -420,21 +420,14 @@ fn openai_family() -> ModelFamily {
         capabilities: openai_capabilities(),
         truncation_mode: TruncationMode::Tokens,
         truncation_limit: 10_000,
-        parameters: vec![openai_effort_parameter(&["medium", "low", "high", "xhigh"])],
+        parameters: vec![openai_effort_parameter(&["low", "medium", "high", "xhigh"])],
         transport: ModelTransportProfile::responses_websocket(),
         request_profile: openai_responses_request_profile(),
         base_instructions: String::new(),
     }
 }
 
-fn openai_gpt56_family(default_effort: &str) -> ModelFamily {
-    let mut candidates = vec![default_effort];
-    for effort in ["low", "medium", "high", "xhigh", "max"] {
-        if effort != default_effort {
-            candidates.push(effort);
-        }
-    }
-
+fn openai_gpt56_family() -> ModelFamily {
     let mut capabilities = openai_capabilities();
     capabilities.prompt_cache = PromptCacheModelCapabilities {
         cache_write_tokens: true,
@@ -444,7 +437,9 @@ fn openai_gpt56_family(default_effort: &str) -> ModelFamily {
         capabilities,
         truncation_mode: TruncationMode::Tokens,
         truncation_limit: 10_000,
-        parameters: vec![openai_effort_parameter(&candidates)],
+        parameters: vec![openai_effort_parameter(&[
+            "low", "medium", "high", "xhigh", "max",
+        ])],
         transport: ModelTransportProfile::responses_websocket(),
         request_profile: openai_responses_request_profile(),
         base_instructions: String::new(),
@@ -638,7 +633,7 @@ fn openai_effort_parameter(candidates: &[&str]) -> ModelParameter {
     }
 }
 
-/// DeepSeek effort：候选值 high/max，透传到 `reasoning_effort`。
+/// DeepSeek effort：候选值按弱到强 high/max，透传到 `reasoning_effort`。
 fn deepseek_effort_parameter() -> ModelParameter {
     ModelParameter {
         name: "effort".to_string(),
@@ -656,20 +651,20 @@ fn mimo_effort_parameter() -> ModelParameter {
     ModelParameter {
         name: "effort".to_string(),
         label: Some("Thinking".to_string()),
-        candidates: vec!["enabled".to_string(), "disabled".to_string()],
-        wire: ["enabled", "disabled"]
+        candidates: vec!["disabled".to_string(), "enabled".to_string()],
+        wire: ["disabled", "enabled"]
             .into_iter()
             .map(|value| (value.to_string(), wire_set_one("thinking.type", value)))
             .collect(),
     }
 }
 
-/// Zhipu 普通模型 effort：候选值 enabled/none，映射 `thinking.type` 开关。
+/// Zhipu 普通模型 effort：候选值按弱到强 none/enabled，映射 `thinking.type` 开关。
 fn zhipu_plain_effort_parameter() -> ModelParameter {
     ModelParameter {
         name: "effort".to_string(),
         label: None,
-        candidates: vec!["enabled".to_string(), "none".to_string()],
+        candidates: vec!["none".to_string(), "enabled".to_string()],
         wire: BTreeMap::from([
             (
                 "enabled".to_string(),
@@ -701,12 +696,12 @@ fn zhipu_plain_effort_parameter() -> ModelParameter {
     }
 }
 
-/// GLM-5.2 effort：候选值 high/max/none，联动 `reasoning_effort` 与 `thinking`。
+/// GLM-5.2 effort：候选值按弱到强 none/high/max，联动 `reasoning_effort` 与 `thinking`。
 fn zhipu_glm52_effort_parameter() -> ModelParameter {
     ModelParameter {
         name: "effort".to_string(),
         label: None,
-        candidates: vec!["high".to_string(), "max".to_string(), "none".to_string()],
+        candidates: vec!["none".to_string(), "high".to_string(), "max".to_string()],
         wire: BTreeMap::from([
             ("high".to_string(), glm_reasoning_effort_wire("high")),
             ("max".to_string(), glm_reasoning_effort_wire("max")),
@@ -724,12 +719,12 @@ fn zhipu_glm52_effort_parameter() -> ModelParameter {
     }
 }
 
-/// GLM-5.3 effort：候选值 high/low/max，三档共用「始终思考」wire，仅切换 reasoning_effort。
+/// GLM-5.3 effort：候选值按弱到强 low/high/max，三档共用「始终思考」wire，仅切换 reasoning_effort。
 fn zhipu_glm53_effort_parameter() -> ModelParameter {
     ModelParameter {
         name: "effort".to_string(),
         label: None,
-        candidates: vec!["high".to_string(), "low".to_string(), "max".to_string()],
+        candidates: vec!["low".to_string(), "high".to_string(), "max".to_string()],
         wire: BTreeMap::from([
             ("high".to_string(), glm_reasoning_effort_wire("high")),
             ("low".to_string(), glm_reasoning_effort_wire("low")),

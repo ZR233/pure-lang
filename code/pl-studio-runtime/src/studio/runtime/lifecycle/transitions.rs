@@ -154,6 +154,9 @@ impl StudioRuntime {
                 .emit(crate::StudioShutdownProgress::CancellingTurns(
                     Default::default(),
                 ));
+            // 标题任务使用同一 runtime 生命周期；先取消并等待，避免关机后
+            // 陈旧 Explorer 结果再次修改目录事实。
+            self.title_tasks.cancel_and_wait().await;
             self.shutdown_agent_framework().await?;
             // 阶段 3：等待 write-behind 全部 pending commit 落库；完成事件必须 pending=0。
             let pending_before = self.pending_persistence_commits().await;

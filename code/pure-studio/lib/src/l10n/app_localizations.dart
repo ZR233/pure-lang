@@ -200,6 +200,54 @@ abstract class AppLocalizations {
   /// **'Could not archive this session. It may still be running.'**
   String get sidebarArchiveSessionFailed;
 
+  /// No description provided for @sidebarRenameSession.
+  ///
+  /// In en, this message translates to:
+  /// **'Rename session'**
+  String get sidebarRenameSession;
+
+  /// No description provided for @sidebarRenameSessionTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Rename session'**
+  String get sidebarRenameSessionTitle;
+
+  /// No description provided for @sidebarRenameSessionInput.
+  ///
+  /// In en, this message translates to:
+  /// **'Session title'**
+  String get sidebarRenameSessionInput;
+
+  /// No description provided for @sidebarRenameSessionEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a session title.'**
+  String get sidebarRenameSessionEmpty;
+
+  /// No description provided for @sidebarRenameSessionTooLong.
+  ///
+  /// In en, this message translates to:
+  /// **'Session titles can be at most 80 characters.'**
+  String get sidebarRenameSessionTooLong;
+
+  /// No description provided for @sidebarRenameSessionFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not rename this session.'**
+  String get sidebarRenameSessionFailed;
+
+  /// No description provided for @commonCancel.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel'**
+  String get commonCancel;
+
+  /// No description provided for @commonSave.
+  ///
+  /// In en, this message translates to:
+  /// **'Save'**
+  String get commonSave;
+
   /// No description provided for @sidebarNewSession.
   ///
   /// In en, this message translates to:

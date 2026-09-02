@@ -373,6 +373,12 @@ class _ThreadTile extends ConsumerWidget {
                   _archiveThreadFromSidebar(context, ref, thread.id),
                 )
               : null,
+          secondaryActionKey: StudioDriverKeys.renameThread(thread.id),
+          secondaryActionTooltip: context.l10n.sidebarRenameSession,
+          secondaryActionIcon: Icons.edit_outlined,
+          onSecondaryAction: issue == null
+              ? () => unawaited(_renameThreadFromSidebar(context, ref, thread))
+              : null,
         ),
       );
     }
@@ -397,18 +403,37 @@ class _ThreadTile extends ConsumerWidget {
                 .read(studioControllerProvider.notifier)
                 .selectThread(thread.id)
           : null,
-      trailing: IconButton(
-        key: StudioDriverKeys.archiveThread(thread.id),
-        tooltip: context.l10n.sidebarArchiveSession,
-        style: IconButton.styleFrom(
-          minimumSize: const Size.square(30),
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        ),
-        icon: const Icon(Icons.archive_outlined, size: 18),
-        onPressed: issue == null && canArchive
-            ? () =>
-                  unawaited(_archiveThreadFromSidebar(context, ref, thread.id))
-            : null,
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            key: StudioDriverKeys.renameThread(thread.id),
+            tooltip: context.l10n.sidebarRenameSession,
+            style: IconButton.styleFrom(
+              minimumSize: const Size.square(30),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            icon: const Icon(Icons.edit_outlined, size: 17),
+            onPressed: issue == null
+                ? () =>
+                      unawaited(_renameThreadFromSidebar(context, ref, thread))
+                : null,
+          ),
+          IconButton(
+            key: StudioDriverKeys.archiveThread(thread.id),
+            tooltip: context.l10n.sidebarArchiveSession,
+            style: IconButton.styleFrom(
+              minimumSize: const Size.square(30),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            icon: const Icon(Icons.archive_outlined, size: 18),
+            onPressed: issue == null && canArchive
+                ? () => unawaited(
+                    _archiveThreadFromSidebar(context, ref, thread.id),
+                  )
+                : null,
+          ),
+        ],
       ),
     );
     return KeyedSubtree(
@@ -433,6 +458,94 @@ Future<void> _archiveThreadFromSidebar(
   }
 }
 
+Future<void> _renameThreadFromSidebar(
+  BuildContext context,
+  WidgetRef ref,
+  StudioThread thread,
+) async {
+  final title = await showDialog<String>(
+    context: context,
+    builder: (context) => _RenameThreadDialog(thread: thread),
+  );
+  if (title == null || !context.mounted) return;
+  try {
+    await ref
+        .read(studioControllerProvider.notifier)
+        .renameThread(thread.id, title);
+  } on Object {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(context.l10n.sidebarRenameSessionFailed)),
+    );
+  }
+}
+
+class _RenameThreadDialog extends StatefulWidget {
+  const _RenameThreadDialog({required this.thread});
+
+  final StudioThread thread;
+
+  @override
+  State<_RenameThreadDialog> createState() => _RenameThreadDialogState();
+}
+
+class _RenameThreadDialogState extends State<_RenameThreadDialog> {
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.thread.title,
+  );
+  String? _error;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final title = _controller.text.trim();
+    if (title.isEmpty) {
+      setState(() => _error = context.l10n.sidebarRenameSessionEmpty);
+      return;
+    }
+    if (title.runes.length > 80) {
+      setState(() => _error = context.l10n.sidebarRenameSessionTooLong);
+      return;
+    }
+    Navigator.of(context).pop(title);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      key: StudioDriverKeys.renameThreadDialog(widget.thread.id),
+      title: Text(context.l10n.sidebarRenameSessionTitle),
+      content: TextField(
+        key: StudioDriverKeys.renameThreadInput(widget.thread.id),
+        controller: _controller,
+        autofocus: true,
+        maxLength: 80,
+        textInputAction: TextInputAction.done,
+        onSubmitted: (_) => _submit(),
+        decoration: InputDecoration(
+          labelText: context.l10n.sidebarRenameSessionInput,
+          errorText: _error,
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(context.l10n.commonCancel),
+        ),
+        FilledButton(
+          key: StudioDriverKeys.renameThreadSave(widget.thread.id),
+          onPressed: _submit,
+          child: Text(context.l10n.commonSave),
+        ),
+      ],
+    );
+  }
+}
+
 class _CompactSidebarTile extends StatefulWidget {
   const _CompactSidebarTile({
     required this.selected,
@@ -444,6 +557,10 @@ class _CompactSidebarTile extends StatefulWidget {
     required this.onAction,
     this.iconColor,
     this.actionKey,
+    this.secondaryActionKey,
+    this.secondaryActionTooltip,
+    this.secondaryActionIcon,
+    this.onSecondaryAction,
   });
 
   final bool selected;
@@ -455,6 +572,10 @@ class _CompactSidebarTile extends StatefulWidget {
   final IconData actionIcon;
   final VoidCallback? onAction;
   final Key? actionKey;
+  final Key? secondaryActionKey;
+  final String? secondaryActionTooltip;
+  final IconData? secondaryActionIcon;
+  final VoidCallback? onSecondaryAction;
 
   @override
   State<_CompactSidebarTile> createState() => _CompactSidebarTileState();
@@ -467,6 +588,8 @@ class _CompactSidebarTileState extends State<_CompactSidebarTile> {
   Widget build(BuildContext context) {
     final actionVisible =
         widget.onAction != null && (widget.selected || _hovering);
+    final secondaryActionVisible =
+        widget.onSecondaryAction != null && (widget.selected || _hovering);
     return MouseRegion(
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
@@ -505,6 +628,31 @@ class _CompactSidebarTileState extends State<_CompactSidebarTile> {
                       ),
                       icon: Icon(widget.actionIcon, size: 12),
                       onPressed: widget.onAction,
+                    ),
+                  ),
+                ),
+              ),
+            if (widget.onSecondaryAction != null &&
+                widget.secondaryActionIcon != null)
+              Positioned(
+                right: 0,
+                top: 0,
+                child: IgnorePointer(
+                  ignoring: !secondaryActionVisible,
+                  child: AnimatedOpacity(
+                    opacity: secondaryActionVisible ? 1 : 0,
+                    duration: const Duration(milliseconds: 120),
+                    child: IconButton(
+                      key: widget.secondaryActionKey,
+                      tooltip: widget.secondaryActionTooltip,
+                      style: IconButton.styleFrom(
+                        minimumSize: const Size.square(20),
+                        maximumSize: const Size.square(20),
+                        padding: EdgeInsets.zero,
+                        backgroundColor: context.studioPaper,
+                      ),
+                      icon: Icon(widget.secondaryActionIcon, size: 12),
+                      onPressed: widget.onSecondaryAction,
                     ),
                   ),
                 ),

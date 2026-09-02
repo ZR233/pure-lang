@@ -15,6 +15,7 @@ pub enum StudioOperation {
     StartNewThread,
     ReadThread,
     ArchiveThread,
+    RenameThread,
     SetThreadMode,
     ListThreadTurns,
     StartTurn,
@@ -57,7 +58,7 @@ pub enum StudioOperation {
 }
 
 impl StudioOperation {
-    pub const ALL: [Self; 47] = [
+    pub const ALL: [Self; 48] = [
         Self::ReadState,
         Self::OpenProject,
         Self::ActivateProject,
@@ -66,6 +67,7 @@ impl StudioOperation {
         Self::StartNewThread,
         Self::ReadThread,
         Self::ArchiveThread,
+        Self::RenameThread,
         Self::SetThreadMode,
         Self::ListThreadTurns,
         Self::StartTurn,
@@ -117,6 +119,7 @@ impl StudioOperation {
             Self::StartNewThread => "thread.create",
             Self::ReadThread => "thread.read",
             Self::ArchiveThread => "thread.archive",
+            Self::RenameThread => "thread.rename",
             Self::SetThreadMode => "thread.setMode",
             Self::ListThreadTurns => "thread.listTurns",
             Self::StartTurn => "turn.start",

@@ -107,6 +107,45 @@ void registerDemoProjectTests() {
     expect(turnItems.every(_demoItemIsTerminal), isTrue);
   });
 
+  test(
+    'Demo new Thread shows provisional then generated title event',
+    () async {
+      final api = DemoStudioApi();
+      final titleEvent = api
+          .subscribeProductEvents()
+          .where((event) => event is StudioBridgeEvent)
+          .cast<StudioBridgeEvent>()
+          .where((event) {
+            final payload = event.payload;
+            return payload is ThreadDirectoryChangedPayload &&
+                payload.upserted.any(
+                  (thread) => thread.title == 'Demo generated session',
+                );
+          })
+          .first
+          .timeout(const Duration(seconds: 5));
+
+      final result = await api.startNewThread(
+        'project-local',
+        const StudioPromptInput(
+          text: 'Review the session title lifecycle',
+          attachmentDraftIds: [],
+        ),
+        StudioMode.simple,
+      );
+      expect(result.thread.title, 'Review the session title lifecycle');
+
+      await titleEvent;
+      final state = await api.readStudioState();
+      expect(
+        state.threads
+            .singleWhere((thread) => thread.id == result.thread.id)
+            .title,
+        'Demo generated session',
+      );
+    },
+  );
+
   test('Driver demo interactions live in the Thread snapshot', () async {
     final api = DriverDemoStudioApi();
     final frame = await api.subscribeThread('thread-main').first;

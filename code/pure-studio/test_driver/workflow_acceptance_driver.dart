@@ -21,9 +21,17 @@ Future<void> main(List<String> arguments) async {
     if (options.mode == 'new') {
       await _startNewWorkflow(session, options, snapshots);
     }
-    final finalSnapshot = options.studioMode == 'mode.simple'
+    var finalSnapshot = options.studioMode == 'mode.simple'
         ? await _waitForSimpleCompletion(session, options, snapshots)
         : await _waitForTerminal(session, options, snapshots, 'completed');
+    if (options.mode == 'new') {
+      finalSnapshot = await _verifyAndRenameThreadTitle(
+        session,
+        options,
+        snapshots,
+        finalSnapshot,
+      );
+    }
     final workflow = _workflow(finalSnapshot);
     if (options.studioMode == 'mode.simple') {
       if (workflow != null) {
@@ -180,6 +188,21 @@ Future<void> _startNewWorkflow(
   await session.enterText(await File(options.promptFile!).readAsString());
   await session.waitForNoPendingFrame(timeout: const Duration(seconds: 20));
   await session.tap(find.byValueKey('composer-submit'));
+  final provisional = _provisionalTitle(
+    await File(options.promptFile!).readAsString(),
+  );
+  await _waitForSnapshot(session, snapshots, 'provisional-title', (snapshot) {
+    final workspace = snapshot['workspace'];
+    final threadId = workspace is Map ? workspace['threadId'] : null;
+    final directory = snapshot['sidebarDirectory'];
+    final titles = directory is Map ? directory['titles'] : null;
+    return threadId is String &&
+        workspace is Map &&
+        workspace['title'] == provisional &&
+        provisional != 'New Session' &&
+        titles is Map &&
+        titles[threadId] == provisional;
+  }, timeout: const Duration(seconds: 30));
   if (options.studioMode == 'mode.task') {
     await _waitForSnapshot(
       session,
@@ -206,6 +229,85 @@ Future<void> _startNewWorkflow(
       timeout: const Duration(minutes: 2),
     );
   }
+}
+
+Future<Map<String, dynamic>> _verifyAndRenameThreadTitle(
+  FlutterDriverSession session,
+  _Options options,
+  File snapshots,
+  Map<String, dynamic> completed,
+) async {
+  final workspace = completed['workspace'];
+  if (workspace is! Map<String, dynamic>) {
+    throw StateError(
+      'completed snapshot has no workspace for title acceptance',
+    );
+  }
+  final threadId = workspace['threadId'];
+  final title = workspace['title'];
+  if (threadId is! String || title is! String) {
+    throw StateError(
+      'completed snapshot has no canonical Thread title: $workspace',
+    );
+  }
+  final prompt = await File(options.promptFile!).readAsString();
+  final provisional = _provisionalTitle(prompt);
+  final generated = await _waitForSnapshot(
+    session,
+    snapshots,
+    'automatic-title',
+    (snapshot) {
+      final nextWorkspace = snapshot['workspace'];
+      final nextTitle = nextWorkspace is Map ? nextWorkspace['title'] : null;
+      return nextWorkspace is Map &&
+          nextWorkspace['threadId'] == threadId &&
+          nextTitle is String &&
+          nextTitle != 'New Session' &&
+          nextTitle != provisional &&
+          nextTitle.runes.length <= 36;
+    },
+    timeout: const Duration(seconds: 45),
+  );
+  final generatedWorkspace = generated['workspace'] as Map<String, dynamic>;
+  final generatedTitle = generatedWorkspace['title'] as String;
+  final generatedDirectory = generated['sidebarDirectory'];
+  final generatedTitles = generatedDirectory is Map
+      ? generatedDirectory['titles']
+      : null;
+  if (generatedTitles is! Map || generatedTitles[threadId] != generatedTitle) {
+    throw StateError(
+      'sidebar and workspace titles diverged: '
+      '$generatedTitles vs $generatedTitle',
+    );
+  }
+  await session.tap(find.byValueKey('thread-rename-$threadId'));
+  await session.waitFor(find.byValueKey('thread-rename-dialog-$threadId'));
+  await session.tap(find.byValueKey('thread-rename-input-$threadId'));
+  await session.enterText('Driver manual title');
+  await session.tap(find.byValueKey('thread-rename-save-$threadId'));
+  final renamed = await _waitForSnapshot(session, snapshots, 'manual-title', (
+    snapshot,
+  ) {
+    final nextWorkspace = snapshot['workspace'];
+    return nextWorkspace is Map &&
+        nextWorkspace['threadId'] == threadId &&
+        nextWorkspace['title'] == 'Driver manual title';
+  }, timeout: const Duration(seconds: 30));
+  final renamedDirectory = renamed['sidebarDirectory'];
+  final renamedTitles = renamedDirectory is Map
+      ? renamedDirectory['titles']
+      : null;
+  if (renamedTitles is! Map ||
+      renamedTitles[threadId] != 'Driver manual title') {
+    throw StateError('manual title did not reach the sidebar: $renamedTitles');
+  }
+  return renamed;
+}
+
+String _provisionalTitle(String prompt) {
+  final normalized = prompt.trim().split(RegExp(r'\s+')).join(' ');
+  if (normalized.isEmpty) return 'New Session';
+  return String.fromCharCodes(normalized.runes.take(80));
 }
 
 Future<Map<String, dynamic>> _waitForSimpleCompletion(

@@ -49,6 +49,9 @@ class _FakeStudioApi implements StudioApi {
   StudioMode? createdThreadMode;
   String? newThreadPrompt;
   String? archivedThreadId;
+  String? renamedThreadId;
+  String? renamedThreadTitle;
+  Object? renameThreadError;
   int archiveThreadCallCount = 0;
   Object? archiveThreadError;
   Completer<ArchiveThreadResult>? blockedArchiveThread;
@@ -380,6 +383,30 @@ class _FakeStudioApi implements StudioApi {
         cursor: receipt.cursor,
       ),
     );
+  }
+
+  @override
+  Future<StudioThread> renameThread(String threadId, String title) async {
+    renamedThreadId = threadId;
+    renamedThreadTitle = title;
+    if (renameThreadError case final error?) throw error;
+    final current = _currentState.threads
+        .where((thread) => thread.id == threadId)
+        .firstOrNull;
+    if (current == null) throw StateError('unknown Thread $threadId');
+    final renamed = current.copyWith(
+      title: title.trim(),
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(2),
+    );
+    _currentState = _currentState.copyWith(
+      threadDirectory: _currentState.threadDirectory.copyWith(
+        threads: [
+          for (final thread in _currentState.threads)
+            thread.id == threadId ? renamed : thread,
+        ],
+      ),
+    );
+    return renamed;
   }
 
   @override
