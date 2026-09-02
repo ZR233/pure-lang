@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use pl_lsp::{
+use pl_lsp::host::{
     LspHostBackend, LspHostError, LspHostFileStat, LspHostProcess, LspHostProcessExit,
     LspHostSpawnRequest,
 };

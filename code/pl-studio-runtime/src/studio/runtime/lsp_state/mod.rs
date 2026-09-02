@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
 use anyhow::Error;
+use pl_lsp::runtime::{
+    LspActivityKind, LspAvailabilityKind, LspRuntimeRegistry, LspServerSnapshot,
+};
 use pl_protocol::{
     ObservedResource, ObservedResourceCommand, ObservedResourceKind, StateError, StateOperation,
 };
@@ -154,7 +157,7 @@ impl LspStateRuntime {
     }
 }
 
-pub(super) async fn health(registry: &pl_lsp::LspRuntimeRegistry) -> StudioLspHealth {
+pub(super) async fn health(registry: &LspRuntimeRegistry) -> StudioLspHealth {
     let snapshots = registry.snapshots().await;
     let active_lsp_servers = registry.active_server_names().await;
     let observed_at = unix_seconds();
@@ -185,29 +188,27 @@ fn latest_checked_at(health: &StudioLspHealth) -> Option<i64> {
         .max()
 }
 
-fn lsp_server_state(server: &pl_lsp::LspServerSnapshot, observed_at: i64) -> StudioLspServerState {
+fn lsp_server_state(server: &LspServerSnapshot, observed_at: i64) -> StudioLspServerState {
     match &server.availability_kind {
-        pl_lsp::LspAvailabilityKind::Checking => StudioLspServerState::Checking(LspChecking::new(
+        LspAvailabilityKind::Checking => StudioLspServerState::Checking(LspChecking::new(
             server
                 .availability_message
                 .as_deref()
                 .unwrap_or("LSP health check is running"),
         )),
-        pl_lsp::LspAvailabilityKind::Available => {
+        LspAvailabilityKind::Available => {
             let activity = match server.activity_kind {
-                pl_lsp::LspActivityKind::Idle => LspAvailableActivity::Idle(LspIdle),
-                pl_lsp::LspActivityKind::Busy => LspAvailableActivity::Busy(LspBusy::new(
+                LspActivityKind::Idle => LspAvailableActivity::Idle(LspIdle),
+                LspActivityKind::Busy => LspAvailableActivity::Busy(LspBusy::new(
                     server.activity_title.clone(),
                     server.activity_message.clone(),
                     server.activity_percentage,
                 )),
-                pl_lsp::LspActivityKind::Indexing => {
-                    LspAvailableActivity::Indexing(LspIndexing::new(
-                        server.activity_title.clone(),
-                        server.activity_message.clone(),
-                        server.activity_percentage,
-                    ))
-                }
+                LspActivityKind::Indexing => LspAvailableActivity::Indexing(LspIndexing::new(
+                    server.activity_title.clone(),
+                    server.activity_message.clone(),
+                    server.activity_percentage,
+                )),
             };
             StudioLspServerState::Available(LspAvailable::new(
                 server.last_checked_at.unwrap_or(observed_at),
@@ -215,26 +216,26 @@ fn lsp_server_state(server: &pl_lsp::LspServerSnapshot, observed_at: i64) -> Stu
                 activity,
             ))
         }
-        pl_lsp::LspAvailabilityKind::Disabled => StudioLspServerState::Disabled(LspDisabled::new(
+        LspAvailabilityKind::Disabled => StudioLspServerState::Disabled(LspDisabled::new(
             server
                 .availability_message
                 .as_deref()
                 .unwrap_or("LSP server is disabled"),
         )),
-        pl_lsp::LspAvailabilityKind::Unavailable => {
+        LspAvailabilityKind::Unavailable => {
             unavailable_lsp_state(server, observed_at, "lspServerUnavailable")
         }
-        pl_lsp::LspAvailabilityKind::MissingCommand => {
+        LspAvailabilityKind::MissingCommand => {
             unavailable_lsp_state(server, observed_at, "lspCommandMissing")
         }
-        pl_lsp::LspAvailabilityKind::MissingServerComponent(_) => {
+        LspAvailabilityKind::MissingServerComponent(_) => {
             unavailable_lsp_state(server, observed_at, "lspComponentMissing")
         }
     }
 }
 
 fn unavailable_lsp_state(
-    server: &pl_lsp::LspServerSnapshot,
+    server: &LspServerSnapshot,
     observed_at: i64,
     code: &str,
 ) -> StudioLspServerState {

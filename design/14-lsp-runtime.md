@@ -8,6 +8,25 @@ catalog：内置 catalog 收录已知 server（当前只有 rust-analyzer 一条
 自定义 server；新增语言支持只需新增 catalog 条目、driver 实现或用户配置，不需要修改
 `pl-core`，也不存在语言名字面量或按语言的分支。
 
+## 模块边界
+
+`pl-lsp` 按变化原因组织为六个主责任：
+
+- `catalog` 拥有 server 定义、用户配置合并、workspace 匹配与内置条目；
+- `driver` 拥有环境探测、repair、command 解析与 server 专项初始化；
+- `host` 拥有 workspace 文件/进程宿主边界与本地进程树托管；
+- `client` 拥有单个 server 连接，其配置、文档同步、诊断、消息分发、RPC、状态、传输和 URI 边界作为次级模块；
+- `query` 拥有查询、位置、诊断与查询结果等纯领域合同；
+- `runtime` 拥有错误、状态、capabilities 与唯一 registry owner，只编排 membership、probe/repair、query/routing、reset、snapshot 和 shutdown。
+
+依赖方向由 query/runtime 纯合同与 catalog/driver/host 边界指向 client，再由 runtime 组合；
+client 不反向依赖 registry 编排。`catalog`、`driver`、`host`、`query` 和 `runtime` 是稳定公开命名空间，
+client 及各公开边界的实现子模块保持私有。旧 crate 根类型路径不保留别名或兼容导出。
+
+测试只保护关键节点：crate 集成测试从根 API 验证 catalog 到 registry 的装配、路由拒绝、
+repair 和终止合同；单元测试只留在实际拥有不变量的模块旁，覆盖连接关闭竞态、传输边界、
+LSP 位置/URI 转换和 server 专项错误映射。不为私有 helper、薄转发、简单构造或同一规则的重复排列保留测试。
+
 ## Server catalog 与 driver
 
 `LspServerDefinition` 是纯数据（serde camelCase）：声明 server id、展示名、language ids、

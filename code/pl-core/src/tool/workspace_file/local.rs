@@ -17,7 +17,7 @@ use crate::tool::tool_error;
 #[derive(Debug, Clone)]
 pub struct LocalWorkspaceFileBackend {
     paths: WorkspacePaths,
-    lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
+    lsp_runtime: Option<pl_lsp::runtime::LspRuntimeRegistry>,
     workspace: Option<ToolWorkspace>,
 }
 

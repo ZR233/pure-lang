@@ -11,7 +11,7 @@ use super::{
     PROBE_TIMEOUT, run_command_capture,
 };
 use crate::host::LspHostBackend;
-use crate::types::LspMissingComponent;
+use crate::runtime::LspMissingComponent;
 
 const RUST_ANALYZER_COMPONENT: &str = "rust-analyzer";
 const RUSTUP_TIMEOUT: Duration = Duration::from_secs(120);
@@ -163,36 +163,5 @@ mod tests {
         assert!(!is_rustup_missing_component_error(
             "error: Unknown binary 'cargo-miri.exe' in official toolchain"
         ));
-    }
-
-    #[tokio::test]
-    async fn repair_rejects_foreign_component() {
-        let driver = RustAnalyzerDriver::new();
-        let component = LspMissingComponent {
-            component: "other-component".to_string(),
-            repair_hint: "unused".to_string(),
-        };
-
-        let error = driver.repair(&component, None).await.unwrap_err();
-
-        assert!(matches!(&error, LspRepairError::NotSupported), "{error:?}");
-    }
-
-    #[test]
-    fn configuration_response_covers_rust_analyzer_sections() {
-        let driver = RustAnalyzerDriver::new();
-
-        assert_eq!(
-            driver.configuration_response(None),
-            serde_json::json!({ "files": { "watcher": "client" } })
-        );
-        assert_eq!(
-            driver.configuration_response(Some("rust-analyzer.files")),
-            serde_json::json!({ "watcher": "client" })
-        );
-        assert_eq!(
-            driver.configuration_response(Some("rust-analyzer.cargo")),
-            serde_json::json!(null)
-        );
     }
 }

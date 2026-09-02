@@ -149,7 +149,7 @@ struct StudioExternalRuntimes {
     mcp_state: mcp_health::McpStateRuntime,
     mcp_startup_reconcile: std::sync::Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
     mcp_health_watcher: std::sync::Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
-    lsp: pl_lsp::LspRuntimeRegistry,
+    lsp: pl_lsp::runtime::LspRuntimeRegistry,
     lsp_state: lsp_state::LspStateRuntime,
     lsp_state_watcher: std::sync::Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
 }

@@ -1,7 +1,8 @@
 use std::future::Future;
 use std::path::PathBuf;
 
-use pl_lsp::{LspQuery, LspQueryOperation, LspRuntimeRegistry};
+use pl_lsp::query::{LspQuery, LspQueryOperation};
+use pl_lsp::runtime::{LspRuntimeError, LspRuntimeRegistry};
 use pl_protocol::PureError;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -175,11 +176,7 @@ impl StaticTool for LspQueryTool {
 }
 
 /// 未知 languageId 时附带当前可用语言的可恢复错误。
-fn unknown_language_error(
-    tool_name: &str,
-    language_id: &str,
-    error: pl_lsp::LspRuntimeError,
-) -> PureError {
+fn unknown_language_error(tool_name: &str, language_id: &str, error: LspRuntimeError) -> PureError {
     PureError::ToolExecutionFailed {
         tool: tool_name.to_string(),
         error: format!(
@@ -314,7 +311,7 @@ mod tests {
         assert_eq!(parsed.file_path, Some(PathBuf::from("src/lib.rs")));
         // languageId 提升为必填顶层字段并注入 LspQuery 路由。
         let query = LspQuery {
-            operation: pl_lsp::LspQueryOperation::Hover,
+            operation: LspQueryOperation::Hover,
             file_path: parsed.file_path.clone(),
             line: parsed.line,
             character: parsed.character,

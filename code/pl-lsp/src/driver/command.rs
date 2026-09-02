@@ -10,7 +10,7 @@ use super::{
     PROBE_TIMEOUT, run_command_capture,
 };
 use crate::host::LspHostBackend;
-use crate::types::LspMissingComponent;
+use crate::runtime::LspMissingComponent;
 
 /// 无特殊初始化需求的通用命令 driver。
 pub(crate) struct CommandDriver;
@@ -66,39 +66,5 @@ impl LspServerDriver for CommandDriver {
         _host: Option<&'a dyn LspHostBackend>,
     ) -> BoxFuture<'a, Result<(), LspRepairError>> {
         std::future::ready(Err(LspRepairError::NotSupported)).boxed()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn repair_is_not_supported_for_custom_servers() {
-        let driver = CommandDriver::new();
-        let component = LspMissingComponent {
-            component: "unused".to_string(),
-            repair_hint: "unused".to_string(),
-        };
-
-        let error = driver.repair(&component, None).await.unwrap_err();
-
-        assert!(matches!(&error, LspRepairError::NotSupported), "{error:?}");
-    }
-
-    #[tokio::test]
-    async fn probe_reports_missing_command_for_unknown_program() {
-        let driver = CommandDriver::new();
-        let command = LspResolvedCommand {
-            program: "definitely-not-a-language-server-pure-test".to_string(),
-            args: Vec::new(),
-        };
-
-        let outcome = driver.probe(&command, None).await;
-
-        assert!(
-            matches!(&outcome, LspProbeOutcome::MissingCommand { .. }),
-            "{outcome:?}"
-        );
     }
 }

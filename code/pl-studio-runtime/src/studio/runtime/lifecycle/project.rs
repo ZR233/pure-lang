@@ -216,7 +216,7 @@ impl StudioRuntime {
         }
     }
 
-    pub async fn reset_lsp(&self, scope: pl_lsp::LspScope) -> Result<()> {
+    pub async fn reset_lsp(&self, scope: pl_lsp::runtime::LspScope) -> Result<()> {
         let _command = self.external_runtimes.lsp_state.command().await;
         self.external_runtimes
             .lsp_state
@@ -253,16 +253,16 @@ impl StudioRuntime {
             pl_protocol::studio::LspResetRequest::Server {
                 project_id,
                 server_id,
-            } => pl_lsp::LspScope::Server {
+            } => pl_lsp::runtime::LspScope::Server {
                 workspace_root: self.project_workspace_root(&project_id).await?,
                 server_id,
             },
             pl_protocol::studio::LspResetRequest::Workspace { project_id } => {
-                pl_lsp::LspScope::Workspace {
+                pl_lsp::runtime::LspScope::Workspace {
                     workspace_root: self.project_workspace_root(&project_id).await?,
                 }
             }
-            pl_protocol::studio::LspResetRequest::All => pl_lsp::LspScope::All,
+            pl_protocol::studio::LspResetRequest::All => pl_lsp::runtime::LspScope::All,
         };
         self.reset_lsp(scope).await
     }

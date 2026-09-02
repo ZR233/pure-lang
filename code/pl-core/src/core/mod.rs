@@ -67,7 +67,7 @@ pub struct TurnEngine {
     effort: Option<ReasoningEffort>,
     skills: Option<SkillsConfig>,
     skill_catalog: Option<std::sync::Arc<crate::skill::FrozenSkillCatalog>>,
-    lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
+    lsp_runtime: Option<pl_lsp::runtime::LspRuntimeRegistry>,
     workspace: Option<crate::tool::AgentWorkspace>,
     workspace_instructions: Option<String>,
     instruction_profile: Option<crate::instruction::InstructionProfile>,
@@ -98,7 +98,7 @@ impl TurnEngine {
         self
     }
 
-    pub fn with_lsp_runtime(mut self, registry: pl_lsp::LspRuntimeRegistry) -> Self {
+    pub fn with_lsp_runtime(mut self, registry: pl_lsp::runtime::LspRuntimeRegistry) -> Self {
         self.lsp_runtime = Some(registry);
         self
     }

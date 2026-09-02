@@ -582,7 +582,7 @@ impl fmt::Debug for ToolCallContext {
 #[derive(Clone)]
 pub struct ToolWorkspace {
     workspace: AgentWorkspace,
-    lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
+    lsp_runtime: Option<pl_lsp::runtime::LspRuntimeRegistry>,
 }
 
 impl ToolWorkspace {
@@ -593,7 +593,10 @@ impl ToolWorkspace {
         }
     }
 
-    pub fn with_lsp_runtime(mut self, runtime: Option<pl_lsp::LspRuntimeRegistry>) -> Self {
+    pub fn with_lsp_runtime(
+        mut self,
+        runtime: Option<pl_lsp::runtime::LspRuntimeRegistry>,
+    ) -> Self {
         self.lsp_runtime = runtime;
         self
     }
@@ -654,7 +657,7 @@ impl ToolWorkspace {
         }
     }
 
-    pub(crate) fn lsp_runtime(&self) -> Option<pl_lsp::LspRuntimeRegistry> {
+    pub(crate) fn lsp_runtime(&self) -> Option<pl_lsp::runtime::LspRuntimeRegistry> {
         self.lsp_runtime.clone()
     }
 }

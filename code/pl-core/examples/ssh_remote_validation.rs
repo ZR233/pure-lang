@@ -13,11 +13,11 @@ use pl_core::{
     WorkspaceFileListRequest, WorkspaceFileReadBytesRequest, WorkspaceFileReadRequest,
     WorkspaceFileStatRequest, WorkspaceFileWriteRequest,
 };
-use pl_lsp::{
-    LspCatalogServer, LspCommandSpec, LspHostBackend, LspMissingComponent, LspProbeOutcome,
-    LspQuery, LspQueryOperation, LspRepairError, LspResolvedCommand, LspRuntimeRegistry,
-    LspServerCatalog, LspServerDefinition, LspServerDriver,
-};
+use pl_lsp::catalog::{LspCatalogServer, LspCommandSpec, LspServerCatalog, LspServerDefinition};
+use pl_lsp::driver::{LspProbeOutcome, LspRepairError, LspResolvedCommand, LspServerDriver};
+use pl_lsp::host::LspHostBackend;
+use pl_lsp::query::{LspQuery, LspQueryOperation};
+use pl_lsp::runtime::{LspMissingComponent, LspRuntimeRegistry};
 use tokio_util::sync::CancellationToken;
 
 #[tokio::main]

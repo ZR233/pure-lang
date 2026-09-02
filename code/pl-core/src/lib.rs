@@ -78,10 +78,6 @@ pub use model_config::{
     ProviderModelCatalogConfig, ProviderPreset, ProviderPresetId, ResolvedModelRoute,
     builtin_model_catalog, builtin_provider_catalog, provider_service_capabilities_descriptor,
 };
-pub use pl_lsp::{
-    LspActivityKind, LspAvailabilityKind, LspDiagnostic, LspPosition, LspQuery, LspQueryOperation,
-    LspQueryResult, LspRange, LspRuntimeRegistry, LspServerSnapshot,
-};
 pub use pl_model::{
     MediaMixPolicy, MediaRepresentation, ModelCapabilities, ModelInfo, ModelInputCapability,
     ModelInputLimits, ModelInputSource, ModelMediaInputProfile, ModelModality, ModelParameter,

@@ -36,7 +36,7 @@ pub(in crate::studio) struct StudioAgentTurnFactory {
     config_runtime: ConfigRuntime,
     mcp_runtime: McpRuntimeHandle,
     tool_manager: pl_core::ToolManager,
-    lsp_runtime: pl_lsp::LspRuntimeRegistry,
+    lsp_runtime: pl_lsp::runtime::LspRuntimeRegistry,
     interactions: InteractionService,
     resources: StudioAgentResources,
     skills: SkillCatalogRuntime,
@@ -51,7 +51,7 @@ impl StudioAgentTurnFactory {
         config_runtime: ConfigRuntime,
         mcp_runtime: McpRuntimeHandle,
         tool_manager: pl_core::ToolManager,
-        lsp_runtime: pl_lsp::LspRuntimeRegistry,
+        lsp_runtime: pl_lsp::runtime::LspRuntimeRegistry,
         interactions: InteractionService,
         resources: StudioAgentResources,
         skills: SkillCatalogRuntime,
@@ -858,7 +858,7 @@ fn runtime_subagent_context(identity: &AgentIdentity, task: String) -> Option<Su
 
 fn lsp_tool_group(
     available: bool,
-    registry: pl_lsp::LspRuntimeRegistry,
+    registry: pl_lsp::runtime::LspRuntimeRegistry,
     workspace: pl_core::ToolWorkspace,
 ) -> Vec<pl_core::DynTool> {
     if available {
@@ -953,7 +953,7 @@ mod tests {
     fn lsp_availability_replaces_the_agent_group_without_stale_tools() {
         let manager = pl_core::ToolManager::new();
         let tools = manager.agent_tool_set("lsp-switch", pl_core::GlobalToolInheritance::Isolated);
-        let registry = pl_lsp::LspRuntimeRegistry::new();
+        let registry = pl_lsp::runtime::LspRuntimeRegistry::new();
         let workspace =
             pl_core::ToolWorkspace::new(pl_core::AgentWorkspace::local(std::env::temp_dir()));
 

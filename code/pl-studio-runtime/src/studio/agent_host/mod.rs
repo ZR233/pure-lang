@@ -39,7 +39,7 @@ impl StudioAgentHost {
         config_runtime: ConfigRuntime,
         mcp_runtime: McpRuntimeHandle,
         tool_manager: pl_core::ToolManager,
-        lsp_runtime: pl_lsp::LspRuntimeRegistry,
+        lsp_runtime: pl_lsp::runtime::LspRuntimeRegistry,
         interactions: InteractionService,
         resources: StudioAgentResources,
         product_events: ProductEventBus,

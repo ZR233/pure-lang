@@ -110,7 +110,7 @@ impl StudioRuntime {
                 mcp_state,
                 mcp_startup_reconcile: Default::default(),
                 mcp_health_watcher: Default::default(),
-                lsp: pl_lsp::LspRuntimeRegistry::new(),
+                lsp: pl_lsp::runtime::LspRuntimeRegistry::new(),
                 lsp_state,
                 lsp_state_watcher: Default::default(),
             },

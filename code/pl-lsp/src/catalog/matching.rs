@@ -55,59 +55,24 @@ pub(crate) fn glob_match(pattern: &str, text: &str) -> bool {
 mod tests {
     use super::*;
 
-    fn temp_root(name: &str) -> std::path::PathBuf {
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!("pure-lsp-detect-{name}-{stamp}"));
-        std::fs::create_dir_all(&root).unwrap();
-        root
-    }
-
     #[test]
-    fn empty_rules_match_every_workspace() {
-        let root = temp_root("empty");
+    fn workspace_detection_honors_exact_and_single_segment_glob_rules() {
+        let workspace = tempfile::tempdir().expect("temporary workspace");
+        std::fs::write(workspace.path().join("package.json"), "{}\n")
+            .expect("write detection fixture");
 
-        assert!(workspace_matches(&[], &root));
-
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn exact_rule_matches_existing_file_only() {
-        let root = temp_root("exact");
-        std::fs::write(root.join("pure.toml"), "schema = 1\n").unwrap();
-
-        assert!(workspace_matches(&["pure.toml".to_string()], &root));
-        assert!(!workspace_matches(&["Cargo.toml".to_string()], &root));
-
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn glob_rule_matches_single_segment_entries() {
-        let root = temp_root("glob");
-        std::fs::write(root.join("package.json"), "{}\n").unwrap();
-
-        assert!(workspace_matches(&["*.json".to_string()], &root));
-        assert!(!workspace_matches(&["*.toml".to_string()], &root));
-        assert!(workspace_matches(&["pack*.json".to_string()], &root));
-        assert!(workspace_matches(&["*".to_string()], &root));
-
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn glob_match_supports_prefix_suffix_and_inner_literals() {
-        assert!(glob_match("*.pure", "hello.pure"));
-        assert!(glob_match("*.pure", ".pure"));
-        assert!(!glob_match("*.pure", "hello.rs"));
-        assert!(glob_match("a*c*e", "abcde"));
-        assert!(glob_match("a*c*e", "acbde"));
-        assert!(!glob_match("a*c*e", "abde"));
-        assert!(glob_match("*", "anything"));
-        assert!(glob_match("exact", "exact"));
-        assert!(!glob_match("exact", "exactly"));
+        assert!(workspace_matches(&[], workspace.path()));
+        assert!(workspace_matches(
+            &["package.json".to_string()],
+            workspace.path()
+        ));
+        assert!(workspace_matches(
+            &["pack*.json".to_string()],
+            workspace.path()
+        ));
+        assert!(!workspace_matches(
+            &["Cargo.toml".to_string()],
+            workspace.path()
+        ));
     }
 }

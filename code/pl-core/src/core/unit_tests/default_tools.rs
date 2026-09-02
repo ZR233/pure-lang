@@ -338,7 +338,7 @@ async fn profiled_host_tools_do_not_register_local_workspace_tools() {
 
 #[tokio::test]
 async fn default_tools_register_lsp_query_when_runtime_is_shared() {
-    let registry = pl_lsp::LspRuntimeRegistry::new();
+    let registry = pl_lsp::runtime::LspRuntimeRegistry::new();
     let mut core = test_turn_engine().with_lsp_runtime(registry.clone());
 
     core.install_default_tools(std::env::temp_dir(), Some("rules".to_string()))

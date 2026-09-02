@@ -113,7 +113,7 @@ pub struct TurnEngineBuilder {
     tool_capabilities: ToolCapabilityConfig,
     skills: Option<SkillsConfig>,
     skill_catalog: Option<std::sync::Arc<crate::skill::FrozenSkillCatalog>>,
-    lsp_runtime: Option<pl_lsp::LspRuntimeRegistry>,
+    lsp_runtime: Option<pl_lsp::runtime::LspRuntimeRegistry>,
     agent_tools: Option<crate::tool::AgentToolSet>,
     before_model_step: Option<crate::tool::BeforeModelStepHook>,
     runtime_profile: CoreRuntimeProfile,
@@ -160,7 +160,7 @@ impl TurnEngineBuilder {
         self
     }
 
-    pub fn with_lsp_runtime(mut self, registry: pl_lsp::LspRuntimeRegistry) -> Self {
+    pub fn with_lsp_runtime(mut self, registry: pl_lsp::runtime::LspRuntimeRegistry) -> Self {
         self.lsp_runtime = Some(registry);
         self
     }

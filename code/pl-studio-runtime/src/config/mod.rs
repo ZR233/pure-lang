@@ -123,7 +123,7 @@ pub struct StudioMcpConfig {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StudioLspConfig {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub servers: BTreeMap<String, pl_lsp::LspUserServerConfig>,
+    pub servers: BTreeMap<String, pl_lsp::catalog::LspUserServerConfig>,
 }
 
 impl StudioLspConfig {
@@ -309,8 +309,10 @@ pub fn normalize_builtin_mcp_server_states(config: &mut StudioConfig) {
 }
 
 /// 校验自定义 LSP server 与内置 catalog 的合并结果；冲突 fail-loud。
-fn validate_lsp_servers(servers: &BTreeMap<String, pl_lsp::LspUserServerConfig>) -> Result<()> {
-    pl_lsp::LspServerCatalog::with_user_servers(servers)
+fn validate_lsp_servers(
+    servers: &BTreeMap<String, pl_lsp::catalog::LspUserServerConfig>,
+) -> Result<()> {
+    pl_lsp::catalog::LspServerCatalog::with_user_servers(servers)
         .map(|_| ())
         .map_err(|error| {
             PureError::ConfigError(format!("invalid [lsp.servers] configuration: {error}"))
@@ -381,7 +383,7 @@ mod tests {
         let mut config = StudioConfig::default_config();
         config.lsp.servers.insert(
             "custom-rust".to_string(),
-            pl_lsp::LspUserServerConfig {
+            pl_lsp::catalog::LspUserServerConfig {
                 command: "other-rust-server".to_string(),
                 args: Vec::new(),
                 language_ids: vec!["rust".to_string()],
