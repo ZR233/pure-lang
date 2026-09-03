@@ -5,6 +5,7 @@ mod catalog;
 mod family;
 pub(crate) mod info;
 mod parameter;
+mod profile_error;
 
 pub use capabilities::{
     ModelCapabilities, ModelInputCapability, ModelInputLimits, ModelInputSource, ModelModality,

@@ -5,6 +5,7 @@ use crate::model::capabilities::{ModelInputSource, ModelModality};
 use crate::model::info::{
     MediaRepresentation, MediaWireFormat, ModelTransportProfile, TruncationMode,
 };
+use crate::model::profile_error::ModelProfileError;
 
 #[test]
 fn openai_default_models_match_codex_metadata() {
@@ -441,7 +442,10 @@ fn builtin_model_media_contracts_are_complete_and_protocol_specific() {
         .unwrap();
     invalid.request_profile.media[0].wire = MediaWireFormat::ResponsesInputImage;
     let error = invalid.validate_media_contract().unwrap_err();
-    assert!(error.contains("does not match transport"));
+    assert!(matches!(
+        error,
+        ModelProfileError::WireProtocolMismatch { .. }
+    ));
 }
 
 #[test]

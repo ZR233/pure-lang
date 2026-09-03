@@ -7,6 +7,7 @@ use serde_json::Value;
 
 use crate::model::capabilities::{ModelCapabilities, ModelModality};
 use crate::model::parameter::ModelParameter;
+use crate::model::profile_error::ModelProfileError;
 use crate::provider::{ProviderConnectionMode, ProviderWireProtocol};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -82,30 +83,6 @@ impl ModelTransportProfile {
             supported_connection_modes: vec![ProviderConnectionMode::Http],
             default_connection_mode: ProviderConnectionMode::Http,
         }
-    }
-
-    pub fn validate(&self, model: &str) -> Result<(), String> {
-        if self.supported_connection_modes.is_empty() {
-            return Err(format!("model {model} has no supported connection modes"));
-        }
-        if !self
-            .supported_connection_modes
-            .contains(&self.default_connection_mode)
-        {
-            return Err(format!(
-                "model {model} default connection mode is not supported"
-            ));
-        }
-        if self.protocol == ProviderWireProtocol::ChatCompletions
-            && self
-                .supported_connection_modes
-                .contains(&ProviderConnectionMode::WebSocket)
-        {
-            return Err(format!(
-                "model {model} chat_completions transport does not support web_socket"
-            ));
-        }
-        Ok(())
     }
 }
 
@@ -274,69 +251,68 @@ pub enum TruncationMode {
 }
 
 impl ModelInfo {
-    pub fn validate_media_contract(&self) -> Result<(), String> {
+    pub fn validate_media_contract(&self) -> Result<(), ModelProfileError> {
         let mut modalities = Vec::new();
         for capability in &self.capabilities.input {
             if modalities.contains(&capability.modality) {
-                return Err(format!(
-                    "model {} declares duplicate input modality {:?}",
-                    self.slug, capability.modality
-                ));
+                return Err(ModelProfileError::DuplicateInputModality {
+                    model: self.slug.clone(),
+                    modality: capability.modality,
+                });
             }
             modalities.push(capability.modality);
             if capability.modality == ModelModality::Text {
                 if !capability.sources.is_empty() {
-                    return Err(format!(
-                        "model {} text input must not declare media sources",
-                        self.slug
-                    ));
+                    return Err(ModelProfileError::TextInputDeclaresMediaSources {
+                        model: self.slug.clone(),
+                    });
                 }
                 continue;
             }
             let profile = self
                 .request_profile
                 .media_profile(capability.modality)
-                .ok_or_else(|| {
-                    format!(
-                        "model {} input modality {:?} has no request media profile",
-                        self.slug, capability.modality
-                    )
+                .ok_or_else(|| ModelProfileError::ModalityWithoutMediaProfile {
+                    model: self.slug.clone(),
+                    modality: capability.modality,
                 })?;
             if capability.sources.is_empty() {
-                return Err(format!(
-                    "model {} input modality {:?} has no admitted sources",
-                    self.slug, capability.modality
-                ));
+                return Err(ModelProfileError::ModalityWithoutAdmittedSources {
+                    model: self.slug.clone(),
+                    modality: capability.modality,
+                });
             }
             if profile.first_send.is_empty() || profile.replay.is_empty() {
-                return Err(format!(
-                    "model {} input modality {:?} needs first-send and replay representations",
-                    self.slug, capability.modality
-                ));
+                return Err(ModelProfileError::MissingSendOrReplayRepresentations {
+                    model: self.slug.clone(),
+                    modality: capability.modality,
+                });
             }
             if profile.wire.modality() != profile.modality {
-                return Err(format!(
-                    "model {} input modality {:?} does not match media wire {:?}",
-                    self.slug, capability.modality, profile.wire
-                ));
+                return Err(ModelProfileError::WireModalityMismatch {
+                    model: self.slug.clone(),
+                    modality: capability.modality,
+                    wire: profile.wire,
+                });
             }
             if profile.wire.protocol() != self.transport.protocol {
-                return Err(format!(
-                    "model {} media wire {:?} does not match transport {:?}",
-                    self.slug, profile.wire, self.transport.protocol
-                ));
+                return Err(ModelProfileError::WireProtocolMismatch {
+                    model: self.slug.clone(),
+                    wire: profile.wire,
+                    protocol: self.transport.protocol,
+                });
             }
             if has_duplicates(&profile.first_send) || has_duplicates(&profile.replay) {
-                return Err(format!(
-                    "model {} input modality {:?} repeats a media representation",
-                    self.slug, capability.modality
-                ));
+                return Err(ModelProfileError::RepeatedMediaRepresentation {
+                    model: self.slug.clone(),
+                    modality: capability.modality,
+                });
             }
             if profile.replay.contains(&MediaRepresentation::RemoteUrl) {
-                return Err(format!(
-                    "model {} input modality {:?} replay must not use the original remote URL",
-                    self.slug, capability.modality
-                ));
+                return Err(ModelProfileError::ReplayUsesRemoteUrl {
+                    model: self.slug.clone(),
+                    modality: capability.modality,
+                });
             }
             if capability
                 .sources
@@ -348,46 +324,46 @@ impl ModelInfo {
                     )
                 })
             {
-                return Err(format!(
-                    "model {} input modality {:?} cannot send an admitted local snapshot",
-                    self.slug, capability.modality
-                ));
+                return Err(ModelProfileError::LocalSourceWithoutDurableRepresentation {
+                    model: self.slug.clone(),
+                    modality: capability.modality,
+                });
             }
             if profile.first_send.contains(&MediaRepresentation::RemoteUrl)
                 && !capability
                     .sources
                     .contains(&crate::model::ModelInputSource::RemoteUrl)
             {
-                return Err(format!(
-                    "model {} input modality {:?} has a remote URL strategy without admitting URLs",
-                    self.slug, capability.modality
-                ));
+                return Err(ModelProfileError::RemoteUrlStrategyWithoutAdmission {
+                    model: self.slug.clone(),
+                    modality: capability.modality,
+                });
             }
             if profile
                 .replay
                 .iter()
                 .all(|representation| *representation == MediaRepresentation::RemoteUrl)
             {
-                return Err(format!(
-                    "model {} input modality {:?} cannot replay a durable snapshot",
-                    self.slug, capability.modality
-                ));
+                return Err(ModelProfileError::ReplayNotDurable {
+                    model: self.slug.clone(),
+                    modality: capability.modality,
+                });
             }
         }
         let mut profile_modalities = Vec::new();
         for profile in &self.request_profile.media {
             if profile_modalities.contains(&profile.modality) {
-                return Err(format!(
-                    "model {} declares duplicate media profile {:?}",
-                    self.slug, profile.modality
-                ));
+                return Err(ModelProfileError::DuplicateMediaProfile {
+                    model: self.slug.clone(),
+                    modality: profile.modality,
+                });
             }
             profile_modalities.push(profile.modality);
             if !self.capabilities.supports_input_modality(profile.modality) {
-                return Err(format!(
-                    "model {} has a request media profile for undeclared modality {:?}",
-                    self.slug, profile.modality
-                ));
+                return Err(ModelProfileError::MediaProfileForUndeclaredModality {
+                    model: self.slug.clone(),
+                    modality: profile.modality,
+                });
             }
         }
         Ok(())

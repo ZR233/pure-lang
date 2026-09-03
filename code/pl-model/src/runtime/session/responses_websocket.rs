@@ -1,15 +1,18 @@
 use futures::{SinkExt, StreamExt};
+use pl_protocol::PureError;
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
+
+use crate::runtime::responses_websocket::error::connection_error;
 
 type RawResponsesWebSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 enum WebSocketCommand {
     Send {
         message: Message,
-        result: oneshot::Sender<std::result::Result<(), String>>,
+        result: oneshot::Sender<std::result::Result<(), PureError>>,
     },
 }
 
@@ -19,7 +22,7 @@ enum WebSocketCommand {
 /// 回复 ping。该类型只管理物理连接，不持有 continuation 或 provider 配置。
 pub(crate) struct ResponsesWebSocketConnection {
     command_tx: mpsc::Sender<WebSocketCommand>,
-    message_rx: mpsc::UnboundedReceiver<std::result::Result<Message, String>>,
+    message_rx: mpsc::UnboundedReceiver<std::result::Result<Message, PureError>>,
     pump_task: tokio::task::JoinHandle<()>,
 }
 
@@ -39,7 +42,7 @@ impl ResponsesWebSocketConnection {
                                 let send_result = socket
                                     .send(message)
                                     .await
-                                    .map_err(|error| error.to_string());
+                                    .map_err(|error| connection_error(error.to_string()));
                                 let should_stop = send_result.is_err();
                                 let _ = result.send(send_result);
                                 if should_stop {
@@ -52,7 +55,7 @@ impl ResponsesWebSocketConnection {
                         match message {
                             Some(Ok(Message::Ping(payload))) => {
                                 if let Err(error) = socket.send(Message::Pong(payload)).await {
-                                    let _ = message_tx.send(Err(error.to_string()));
+                                    let _ = message_tx.send(Err(connection_error(error.to_string())));
                                     break;
                                 }
                             }
@@ -64,7 +67,7 @@ impl ResponsesWebSocketConnection {
                                 }
                             }
                             Some(Err(error)) => {
-                                let _ = message_tx.send(Err(error.to_string()));
+                                let _ = message_tx.send(Err(connection_error(error.to_string())));
                                 break;
                             }
                             None => break,
@@ -80,7 +83,7 @@ impl ResponsesWebSocketConnection {
         }
     }
 
-    pub(crate) async fn send(&self, message: Message) -> std::result::Result<(), String> {
+    pub(crate) async fn send(&self, message: Message) -> std::result::Result<(), PureError> {
         let (result_tx, result_rx) = oneshot::channel();
         self.command_tx
             .send(WebSocketCommand::Send {
@@ -88,13 +91,13 @@ impl ResponsesWebSocketConnection {
                 result: result_tx,
             })
             .await
-            .map_err(|_| "Responses WebSocket connection is closed".to_string())?;
+            .map_err(|_| connection_error("Responses WebSocket connection is closed"))?;
         result_rx
             .await
-            .unwrap_or_else(|_| Err("Responses WebSocket connection is closed".to_string()))
+            .unwrap_or_else(|_| Err(connection_error("Responses WebSocket connection is closed")))
     }
 
-    pub(crate) async fn next(&mut self) -> Option<std::result::Result<Message, String>> {
+    pub(crate) async fn next(&mut self) -> Option<std::result::Result<Message, PureError>> {
         self.message_rx.recv().await
     }
 }

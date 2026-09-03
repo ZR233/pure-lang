@@ -130,7 +130,9 @@ Responses 支持 `web_socket | http`，Chat Completions 只支持 `http`。协�
 `ModelTransportProfile` 是 `ModelInfo` 的必填字段，包含 `protocol`、
 `supported_connection_modes` 与 `default_connection_mode`。provider 的模型目录可按模型 slug 保存
 `connection_overrides`；解析后的模型把 override 投影为本次请求的最终连接方式。Chat + WS、空支持
-列表、默认模式不在支持列表，以及 override 指向未知或不支持模式的模型，都在配置加载/保存时拒绝。
+列表、默认模式不在支持列表，以及 override 指向未知或不支持模式的模型，都在配置加载/保存时拒绝，
+校验失败返回类型化的 `model::ModelProfileError`（携带 slug 与涉事模态/wire 上下文），消费方并入
+`PureError::ConfigError`。媒体契约校验（`ModelInfo::validate_media_contract`）同样使用该错误类型。
 Web 与 Flutter 只渲染模型目录返回的 transport 和当前 override，不按 preset ID 推断。
 
 内建矩阵固定为：全部 GPT 使用 Responses，支持 WS/HTTP且默认 WS；DeepSeek V4 Flash、V4 Pro 与

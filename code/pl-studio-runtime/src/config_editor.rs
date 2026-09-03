@@ -99,7 +99,7 @@ impl ProviderModelEdit {
         model
             .transport
             .validate(&slug)
-            .map_err(PureError::ConfigError)?;
+            .map_err(|error| PureError::ConfigError(error.to_string()))?;
         Ok(model)
     }
 }

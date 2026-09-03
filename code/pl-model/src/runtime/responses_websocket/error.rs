@@ -92,7 +92,7 @@ pub(super) fn handshake_timeout_error() -> PureError {
     PureError::transient_model_transport(HANDSHAKE_TIMEOUT_MESSAGE)
 }
 
-pub(super) fn connection_error(detail: impl AsRef<str>) -> PureError {
+pub(crate) fn connection_error(detail: impl AsRef<str>) -> PureError {
     PureError::transient_model_transport(redact_secret_like_values(&format!(
         "Responses WebSocket stream failed: {}",
         detail.as_ref()

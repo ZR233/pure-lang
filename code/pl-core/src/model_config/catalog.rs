@@ -150,7 +150,7 @@ impl ProviderCatalogRegistry {
                 model
                     .transport
                     .validate(&model.slug)
-                    .map_err(PureError::ConfigError)?;
+                    .map_err(|error| PureError::ConfigError(error.to_string()))?;
             }
             if !catalog
                 .models

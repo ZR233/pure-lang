@@ -22,7 +22,7 @@ use crate::runtime::transport_policy::{
 };
 
 mod dialer;
-mod error;
+pub(crate) mod error;
 mod state;
 
 use error::{
@@ -353,7 +353,6 @@ async fn send_request(
     .map_err(|_| {
         PureError::transient_model_transport("Responses WebSocket send timed out after 15 seconds")
     })?
-    .map_err(connection_error)
 }
 
 struct WebSocketEventState {
@@ -380,14 +379,14 @@ impl WebSocketEventState {
                 Ok(Some(Ok(message))) => message,
                 Ok(Some(Err(error))) => return Err(self.invalidate_with_connection_error(error)),
                 Ok(None) => {
-                    return Err(self.invalidate_with_connection_error(
+                    return Err(self.invalidate_with_connection_error(connection_error(
                         "connection closed before a terminal response event",
-                    ));
+                    )));
                 }
                 Err(_) => {
-                    return Err(self.invalidate_with_connection_error(
+                    return Err(self.invalidate_with_connection_error(connection_error(
                         "idle timeout waiting for a response event",
-                    ));
+                    )));
                 }
             };
             match message {
@@ -454,8 +453,7 @@ impl WebSocketEventState {
         }
     }
 
-    fn invalidate_with_connection_error(&mut self, detail: impl AsRef<str>) -> PureError {
-        let error = connection_error(detail);
+    fn invalidate_with_connection_error(&mut self, error: PureError) -> PureError {
         self.fail(error)
     }
 

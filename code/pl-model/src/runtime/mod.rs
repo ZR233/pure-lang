@@ -180,7 +180,7 @@ impl ModelRuntime {
         model
             .transport
             .validate(&model.slug)
-            .map_err(PureError::ConfigError)?;
+            .map_err(|error| PureError::ConfigError(error.to_string()))?;
         let provider_instance_id = provider_instance_id.into();
         if provider_instance_id.trim().is_empty() {
             return Err(PureError::ConfigError(
