@@ -1,6 +1,10 @@
 use pretty_assertions::assert_eq;
 
 use super::*;
+use crate::model::capabilities::{ModelInputSource, ModelModality};
+use crate::model::info::{
+    MediaRepresentation, MediaWireFormat, ModelTransportProfile, TruncationMode,
+};
 
 #[test]
 fn openai_default_models_match_codex_metadata() {
@@ -511,9 +515,12 @@ fn glm53_effort_wire_always_enables_thinking() {
 
 #[test]
 fn deepseek_request_includes_base_body_thinking() {
-    let profile = deepseek_request_profile();
+    let deepseek = default_models()
+        .into_iter()
+        .find(|model| model.slug == "deepseek-v4-flash")
+        .unwrap();
     assert_eq!(
-        profile.body["thinking"]["type"],
+        deepseek.request_profile.body["thinking"]["type"],
         serde_json::json!("enabled")
     );
 }

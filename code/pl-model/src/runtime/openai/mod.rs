@@ -5,6 +5,7 @@ use crate::completion::CompletionRequest;
 use crate::completion::CompletionResponse;
 use crate::model::info::ModelInfo;
 
+mod client_config;
 mod identity;
 mod request;
 #[cfg(test)]
@@ -12,6 +13,7 @@ mod response;
 pub(crate) mod sse;
 mod usage;
 
+pub(crate) use client_config::PureOpenAiConfig;
 pub(crate) use request::OpenAiRequestBody;
 use request::build_openai_request_body;
 #[cfg(test)]

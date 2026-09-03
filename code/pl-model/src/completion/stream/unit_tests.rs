@@ -1,5 +1,10 @@
-use super::*;
+use super::decode::{CompletionEventStream, VisibleOutputDecoder};
+use super::{StreamCollectContext, collect_completion_event_stream_with_idle_timeout};
+use crate::completion::stream::event::{ModelBlockField, ModelBlockKind, ModelStreamEvent};
+use crate::runtime::openai::VisibleOutputProtocol;
 use futures::StreamExt;
+use pl_protocol::Result;
+use pl_trace::TraceTextChannel;
 
 #[test]
 fn native_phase_decoder_does_not_parse_visible_tags() {
@@ -206,10 +211,12 @@ async fn collect_completion_event_stream_returns_idle_timeout_when_stream_stalls
 
     let error = collect_completion_event_stream_with_idle_timeout(
         stream,
-        &event_tx,
-        None,
-        None,
-        None,
+        StreamCollectContext {
+            event_tx: &event_tx,
+            trace: None,
+            trace_sink: None,
+            cancellation: None,
+        },
         std::time::Duration::from_millis(10),
     )
     .await

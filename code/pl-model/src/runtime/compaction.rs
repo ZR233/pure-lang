@@ -7,8 +7,9 @@ use futures::StreamExt;
 use pl_protocol::{ModelContextItem, PureError, Result};
 use serde_json::{Map, Value};
 
+use super::ModelRuntime;
+use super::openai::PureOpenAiConfig;
 use super::provider_error::openai_error_to_pure;
-use super::{ModelRuntime, PureOpenAiConfig};
 use crate::completion::{
     CompletionRequest, ModelCompactionRequest, ModelCompactionResponse, OpenAiCompactionMode,
 };

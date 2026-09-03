@@ -1,16 +1,12 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use async_openai::Client;
-use async_openai::config::Config;
 use async_openai::types::stream::StreamResponse;
 use futures::StreamExt;
 use pl_protocol::{InferenceTiming, PureError, Result};
 use pl_trace::{AgentEventSender, TraceEventSink};
-use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderName, HeaderValue};
-use secrecy::SecretString;
 
 mod compaction;
 pub(crate) mod openai;
@@ -24,7 +20,8 @@ pub(crate) use provider_error::provider_stream_failure;
 pub use session::ModelSession;
 
 use crate::completion::stream::{
-    CompletionEventStream, collect_completion_event_stream, decode_raw_event_stream,
+    CompletionEventStream, StreamCollectContext, collect_completion_event_stream,
+    decode_raw_event_stream,
 };
 use crate::completion::{
     CompletionRequest, CompletionResponse, CompletionTraceContext, ModelCompactionRequest,
@@ -34,7 +31,7 @@ use crate::model::capabilities::ModelCapabilities;
 use crate::model::info::ModelInfo;
 use crate::provider::{ProviderConnectionMode, ProviderEndpoint, ProviderWireProtocol};
 use crate::runtime::openai::sse;
-use crate::runtime::openai::{OpenAiProtocol, OpenAiRequestBody};
+use crate::runtime::openai::{OpenAiProtocol, OpenAiRequestBody, PureOpenAiConfig};
 use crate::runtime::transport_policy::{
     OPENAI_HTTP_MAX_RETRIES, RESPONSES_WEBSOCKET_MAX_RETRIES, model_request_retry_delay,
 };
@@ -252,49 +249,15 @@ impl ModelRuntime {
                 trace.inference_id =
                     format!("{original_inference_id}-{transport}-retry-{attempt_number}");
             }
-            let (result, retry_allowed) = match self
-                .stream_events(
+            let (result, retry_allowed) = self
+                .run_stream_attempt(
                     attempt_request,
-                    context.session.clone(),
-                    context.prompt_cache_key.clone(),
-                    trace.clone(),
+                    &context,
+                    trace,
+                    &inference_timer,
+                    trace_checkpoint,
                 )
-                .await
-            {
-                Ok(event_stream) => {
-                    let stream_started = Arc::new(AtomicBool::new(false));
-                    let tracked_stream: CompletionEventStream = event_stream
-                        .inspect({
-                            let stream_started = Arc::clone(&stream_started);
-                            let inference_timer = inference_timer.clone();
-                            move |event| {
-                                if event.is_ok() {
-                                    stream_started.store(true, Ordering::Release);
-                                }
-                                if let Ok(event) = event {
-                                    inference_timer.observe(event);
-                                }
-                            }
-                        })
-                        .boxed();
-                    let result = collect_completion_event_stream(
-                        tracked_stream,
-                        &context.event_tx,
-                        trace,
-                        context.trace_sink.clone(),
-                        context.cancellation.clone(),
-                    )
-                    .await;
-                    // design/13：仅在模型流尚未产生任何 canonical 事件时允许完整重放。
-                    // 该门控对全部 transport 一致；事件一旦出现即禁止重放，避免重复输出。
-                    let retry_allowed = context.trace_sink.as_ref().map_or_else(
-                        || !stream_started.load(Ordering::Acquire),
-                        |sink| Some(sink.next_sequence()) == trace_checkpoint,
-                    );
-                    (result, retry_allowed)
-                }
-                Err(error) => (Err(error), true),
-            };
+                .await;
             let error = match result {
                 Ok(mut response) => {
                     if response.model.is_empty() {
@@ -409,6 +372,62 @@ impl ModelRuntime {
                 "模型请求遇到瞬态 provider 错误，将在同一连接模式下重放完整请求"
             );
             tokio::time::sleep(delay).await;
+        }
+    }
+
+    /// 执行单次流式尝试并收集结果；返回结果与「尚未产出 canonical 事件、允许完整重放」。
+    async fn run_stream_attempt(
+        &self,
+        request: CompletionRequest,
+        context: &ModelInvocationContext,
+        trace: Option<CompletionTraceContext>,
+        inference_timer: &InferenceTimer,
+        trace_checkpoint: Option<u64>,
+    ) -> (Result<CompletionResponse>, bool) {
+        match self
+            .stream_events(
+                request,
+                context.session.clone(),
+                context.prompt_cache_key.clone(),
+                trace.clone(),
+            )
+            .await
+        {
+            Ok(event_stream) => {
+                let stream_started = Arc::new(AtomicBool::new(false));
+                let tracked_stream: CompletionEventStream = event_stream
+                    .inspect({
+                        let stream_started = Arc::clone(&stream_started);
+                        let inference_timer = inference_timer.clone();
+                        move |event| {
+                            if event.is_ok() {
+                                stream_started.store(true, Ordering::Release);
+                            }
+                            if let Ok(event) = event {
+                                inference_timer.observe(event);
+                            }
+                        }
+                    })
+                    .boxed();
+                let result = collect_completion_event_stream(
+                    tracked_stream,
+                    StreamCollectContext {
+                        event_tx: &context.event_tx,
+                        trace,
+                        trace_sink: context.trace_sink.clone(),
+                        cancellation: context.cancellation.clone(),
+                    },
+                )
+                .await;
+                // design/13：仅在模型流尚未产生任何 canonical 事件时允许完整重放。
+                // 该门控对全部 transport 一致；事件一旦出现即禁止重放，避免重复输出。
+                let retry_allowed = context.trace_sink.as_ref().map_or_else(
+                    || !stream_started.load(Ordering::Acquire),
+                    |sink| Some(sink.next_sequence()) == trace_checkpoint,
+                );
+                (result, retry_allowed)
+            }
+            Err(error) => (Err(error), true),
         }
     }
 
@@ -571,83 +590,6 @@ fn openai_protocol(protocol: ProviderWireProtocol) -> OpenAiProtocol {
     match protocol {
         ProviderWireProtocol::Responses => OpenAiProtocol::responses(),
         ProviderWireProtocol::ChatCompletions => OpenAiProtocol::chat(),
-    }
-}
-
-#[derive(Debug, Clone)]
-struct PureOpenAiConfig {
-    api_base: String,
-    api_key: SecretString,
-    bearer_token: Option<String>,
-    custom_headers: HeaderMap,
-}
-
-impl PureOpenAiConfig {
-    fn new(
-        api_base: String,
-        bearer_token: Option<String>,
-        http_headers: Option<&HashMap<String, String>>,
-        model_headers: &HashMap<String, String>,
-    ) -> Result<Self> {
-        let mut custom_headers = HeaderMap::new();
-        if let Some(headers) = http_headers {
-            for (key, value) in headers {
-                insert_header(&mut custom_headers, key, value)?;
-            }
-        }
-        for (key, value) in model_headers {
-            insert_header(&mut custom_headers, key, value)?;
-        }
-
-        Ok(Self {
-            api_base,
-            api_key: bearer_token.clone().unwrap_or_default().into(),
-            bearer_token,
-            custom_headers,
-        })
-    }
-}
-
-fn insert_header(headers: &mut HeaderMap, key: &str, value: &str) -> Result<()> {
-    let name = HeaderName::from_bytes(key.as_bytes())
-        .map_err(|error| PureError::HttpError(error.to_string()))?;
-    let value =
-        HeaderValue::from_str(value).map_err(|error| PureError::HttpError(error.to_string()))?;
-    headers.insert(name, value);
-    Ok(())
-}
-
-impl Config for PureOpenAiConfig {
-    fn headers(&self) -> HeaderMap {
-        let mut headers = HeaderMap::new();
-        if let Some(token) = &self.bearer_token
-            && let Ok(value) = HeaderValue::from_str(&format!("Bearer {token}"))
-        {
-            headers.insert(AUTHORIZATION, value);
-        }
-
-        for (key, value) in &self.custom_headers {
-            headers.insert(key, value.clone());
-        }
-
-        headers
-    }
-
-    fn url(&self, path: &str) -> String {
-        let base = &self.api_base;
-        format!("{base}{path}")
-    }
-
-    fn query(&self) -> Vec<(&str, &str)> {
-        Vec::new()
-    }
-
-    fn api_base(&self) -> &str {
-        &self.api_base
-    }
-
-    fn api_key(&self) -> &SecretString {
-        &self.api_key
     }
 }
 

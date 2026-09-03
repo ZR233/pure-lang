@@ -10,7 +10,6 @@ use crate::model::info::{
     ModelInfo, ModelRequestProfile, ModelTransportProfile, TruncationMode, TruncationPolicy,
 };
 use crate::model::parameter::ModelParameter;
-
 /// 同一 provider 内共享元数据的模型家族预设。
 ///
 /// 封装同 provider 模型共享的 capabilities、truncation_policy、parameters、
@@ -41,19 +40,37 @@ pub struct ModelPricing {
     pub cache_write_per_mtok: Option<f64>,
 }
 
+/// 家族内单个具体模型的差异字段，[`ModelFamily::instantiate`] 的输入。
+#[derive(Debug, Clone)]
+pub struct ModelInstanceSpec {
+    pub slug: &'static str,
+    pub display_name: &'static str,
+    pub description: &'static str,
+    pub context_window: u64,
+    pub max_context_window: u64,
+    pub max_output_tokens: Option<u64>,
+    pub pricing: ModelPricing,
+}
+
 impl ModelFamily {
     /// 用差异字段实例化一个具体 `ModelInfo`。
-    #[allow(clippy::too_many_arguments)]
-    pub fn instantiate(
-        &self,
-        slug: &str,
-        display_name: &str,
-        description: &str,
-        context_window: u64,
-        max_context_window: u64,
-        max_output_tokens: Option<u64>,
-        pricing: ModelPricing,
-    ) -> ModelInfo {
+    pub fn instantiate(&self, spec: ModelInstanceSpec) -> ModelInfo {
+        let ModelInstanceSpec {
+            slug,
+            display_name,
+            description,
+            context_window,
+            max_context_window,
+            max_output_tokens,
+            pricing:
+                ModelPricing {
+                    currency,
+                    input_per_mtok,
+                    output_per_mtok,
+                    cache_read_per_mtok,
+                    cache_write_per_mtok,
+                },
+        } = spec;
         ModelInfo {
             slug: slug.to_string(),
             display_name: display_name.to_string(),
@@ -63,11 +80,11 @@ impl ModelFamily {
             auto_compact_token_limit: None,
             default_temperature: None,
             max_output_tokens,
-            currency: pricing.currency,
-            input_price_per_mtok: pricing.input_per_mtok,
-            output_price_per_mtok: pricing.output_per_mtok,
-            cache_read_price_per_mtok: pricing.cache_read_per_mtok,
-            cache_write_price_per_mtok: pricing.cache_write_per_mtok,
+            currency,
+            input_price_per_mtok: input_per_mtok,
+            output_price_per_mtok: output_per_mtok,
+            cache_read_price_per_mtok: cache_read_per_mtok,
+            cache_write_price_per_mtok: cache_write_per_mtok,
             parameters: self.parameters.clone(),
             transport: self.transport.clone(),
             capabilities: self.capabilities.clone(),
