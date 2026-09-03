@@ -473,11 +473,9 @@ mod tests {
             .execute_raw(tool_input(command, "session", "tool"), test_context())
             .await
             .unwrap();
+        let (_output, result) = await_successful_command(&tool, output).await;
 
-        assert!(matches!(
-            command_json(&output).state,
-            CommandProcessLifecycle::Final(_)
-        ));
+        assert_eq!(result.state.exit_code(), Some(0));
         assert!(root.join("bypassed.txt").exists());
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -641,6 +639,53 @@ mod tests {
 
     fn command_json(output: &ToolResult) -> CommandJsonOutput {
         serde_json::from_str(&output.canonical_output()).unwrap()
+    }
+
+    async fn await_successful_command<B>(
+        tool: &ExecTool<B>,
+        mut output: ToolResult,
+    ) -> (ToolResult, CommandJsonOutput)
+    where
+        B: CommandBackend,
+    {
+        let stdin = WriteStdinTool::new(tool.process_manager.clone());
+        let mut result = command_json(&output);
+        let mut stdout = result.stdout.clone();
+        let mut stderr = result.stderr.clone();
+        for _ in 0..6 {
+            if result.state.final_result().is_some() {
+                break;
+            }
+            let process_id = result
+                .process_id
+                .clone()
+                .expect("non-final command must remain pollable");
+            output = stdin
+                .execute_raw(
+                    ToolInput {
+                        arguments: serde_json::json!({
+                            "processId": process_id,
+                            "yieldTimeMs": 10_000,
+                        }),
+                    },
+                    test_context(),
+                )
+                .await
+                .unwrap();
+            result = command_json(&output);
+            stdout.push_str(&result.stdout);
+            stderr.push_str(&result.stderr);
+        }
+        result.stdout = stdout;
+        result.stderr = stderr;
+        assert!(
+            matches!(
+                result.state.final_result(),
+                Some(CommandProcessFinalResult::Succeeded { .. })
+            ),
+            "{result:?}"
+        );
+        (output, result)
     }
 
     fn test_context() -> ToolCallContext {
@@ -853,7 +898,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let result = command_json(&output);
+        let (output, result) = await_successful_command(&tool, output).await;
 
         assert!(matches!(
             result.state.final_result(),
@@ -944,10 +989,11 @@ mod tests {
         )
         .await
         .unwrap();
+        let (output, result) = await_successful_command(&tool, output).await;
 
         assert_eq!(output.exit_code, Some(0));
-        assert!(output.truncated.stdout.content.contains("powershell-ok"));
-        assert!(output.truncated.stdout.content.lines().count() >= 2);
+        assert!(result.stdout.contains("powershell-ok"));
+        assert!(result.stdout.lines().count() >= 2);
     }
 
     #[cfg(windows)]
@@ -961,9 +1007,10 @@ mod tests {
             )
             .await
             .unwrap();
+        let (output, result) = await_successful_command(&tool, output).await;
 
         assert_eq!(output.exit_code, Some(0));
-        assert!(output.truncated.stdout.content.contains("中文输出"));
+        assert!(result.stdout.contains("中文输出"));
     }
 
     #[tokio::test]
@@ -976,6 +1023,7 @@ mod tests {
             )
             .await
             .unwrap();
+        let (output, _result) = await_successful_command(&tool, output).await;
 
         assert_eq!(output.exit_code, Some(0));
         assert!(root.join("cwd-check.txt").exists());
@@ -1018,6 +1066,7 @@ mod tests {
             )
             .await
             .unwrap();
+        let (output, _result) = await_successful_command(&tool, output).await;
 
         assert_eq!(output.exit_code, Some(0));
         assert!(root.join("subdir/cwd-check.txt").exists());
@@ -1044,6 +1093,7 @@ mod tests {
             )
             .await
             .unwrap();
+        let (output, _result) = await_successful_command(&tool, output).await;
 
         assert_eq!(output.exit_code, Some(0));
         let _ = tokio::fs::remove_file(&output.output_file).await;
@@ -1075,8 +1125,9 @@ mod tests {
             )
             .await
             .unwrap();
+        let (search, search_result) = await_successful_command(&tool, search).await;
         assert_eq!(search.exit_code, Some(0));
-        assert!(search.truncated.stdout.content.contains("ripgrep"));
+        assert!(search_result.stdout.contains("ripgrep"));
 
         #[cfg(windows)]
         let read_command = "Get-Content -LiteralPath 'read-only-source.txt'";
@@ -1089,8 +1140,9 @@ mod tests {
             )
             .await
             .unwrap();
+        let (read, read_result) = await_successful_command(&tool, read).await;
         assert_eq!(read.exit_code, Some(0));
-        assert!(read.truncated.stdout.content.contains("read-only fixture"));
+        assert!(read_result.stdout.contains("read-only fixture"));
 
         #[cfg(windows)]
         let write_command = "Set-Content -LiteralPath 'shell-write.txt' -Value 'written'";
@@ -1100,6 +1152,7 @@ mod tests {
             .execute_raw(tool_input(write_command, "read-only", "write"), context)
             .await
             .unwrap();
+        let (write, _write_result) = await_successful_command(&tool, write).await;
         assert_eq!(write.exit_code, Some(0));
         assert_eq!(
             tokio::fs::read_to_string(root.join("shell-write.txt"))
@@ -1119,6 +1172,7 @@ mod tests {
             .execute_raw(tool_input("echo test", "s5", "t5"), test_context())
             .await
             .unwrap();
+        let (output, _result) = await_successful_command(&tool, output).await;
 
         let content = tokio::fs::read_to_string(&output.output_file)
             .await
@@ -1148,6 +1202,7 @@ mod tests {
             .execute_raw(tool_input("echo ok", "my-session", "my-tool"), context)
             .await
             .unwrap();
+        let (output, _result) = await_successful_command(&tool, output).await;
 
         let path = output.output_file;
         assert!(path.ends_with("target/pure/my-session/my-tool/output.log"));
@@ -1409,7 +1464,7 @@ mod tests {
             )
             .await
             .unwrap();
-        let result = command_json(&output);
+        let (output, result) = await_successful_command(&tool, output).await;
         let file_content = tokio::fs::read_to_string(&output.output_file)
             .await
             .unwrap();
