@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail, ensure};
 use futures::StreamExt;
-use pl_model::{MediaMixPolicy, MediaRepresentation, ModelInfo, ModelInputSource, ModelModality};
+
 use pl_protocol::PureError;
 use pl_protocol::studio::{
     AdmitAttachmentDraftsRequest, AdmitAttachmentDraftsResponse, StudioAttachmentAdmissionContext,
@@ -21,6 +21,9 @@ use crate::config::{StudioMode, StudioRole};
 use crate::studio::store::attachment::{AttachmentDraftObject, normalize_image_attachment};
 
 use super::StudioRuntime;
+use pl_model::model::{
+    MediaMixPolicy, MediaRepresentation, ModelInfo, ModelInputSource, ModelModality,
+};
 
 const MAX_IMAGE_SOURCE_BYTES: u64 = 20 * 1024 * 1024;
 const MAX_GENERIC_SOURCE_BYTES: u64 = 50 * 1024 * 1024;
@@ -822,14 +825,14 @@ mod tests {
     use super::*;
 
     fn glm_flash() -> ModelInfo {
-        pl_model::default_models()
+        pl_model::model::default_models()
             .into_iter()
             .find(|model| model.slug == "glm-5.3-flash")
             .expect("GLM-5.3-Flash must be present in the canonical catalog")
     }
 
     fn deepseek_vision() -> ModelInfo {
-        pl_model::default_models()
+        pl_model::model::default_models()
             .into_iter()
             .find(|model| model.slug == "deepseek-v4-flash-vision-exp")
             .expect("DeepSeek vision model must be present in the canonical catalog")

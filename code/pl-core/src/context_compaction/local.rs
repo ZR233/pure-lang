@@ -1,8 +1,5 @@
 use std::collections::HashMap;
 
-use pl_model::{
-    CompletionRequest, ModelInvocationContext, ModelRuntime, ReasoningConfig, TokenUsage,
-};
 use pl_protocol::{Message, MessageContent, MessageRole, ModelContextItem, PureError, Result};
 use pl_trace::AgentEventSender;
 
@@ -10,6 +7,9 @@ use super::ContextCompactionConfig;
 use super::history::build_compacted_history;
 use crate::TraceRecorder;
 use crate::core::progress::ProgressEmitter;
+use pl_model::completion::{CompletionRequest, ReasoningConfig};
+use pl_model::runtime::{ModelInvocationContext, ModelRuntime};
+use pl_protocol::TokenUsage;
 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn compact_local(

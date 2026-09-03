@@ -1,7 +1,3 @@
-use pl_model::{
-    ModelCompactionRequest, ModelRuntime, OpenAiCompactionMode, ReasoningConfig, TokenUsage,
-    ToolSpec,
-};
 use pl_protocol::{
     ContentPart, Message, MessageContent, MessageRole, ModelContextItem, PureError, Result,
 };
@@ -9,6 +5,9 @@ use pl_protocol::{
 use super::history::{estimate_message_tokens, is_compaction_summary};
 use super::{APPROX_CHARS_PER_TOKEN, ContextCompactionConfig};
 use crate::session::AgentSession;
+use pl_model::completion::{ModelCompactionRequest, OpenAiCompactionMode, ReasoningConfig};
+use pl_model::runtime::ModelRuntime;
+use pl_protocol::{TokenUsage, ToolSpec};
 
 const RETAINED_REMOTE_V2_TOKEN_BUDGET: u64 = 64_000;
 const CONTEXT_WINDOW_TRUNCATED_OUTPUT_MESSAGE: &str =

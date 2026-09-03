@@ -5,7 +5,11 @@ use crate::tool::{
     GlobalToolInheritance, StaticTool, ToolCallContext, ToolManager, ToolPolicy, ToolResult,
 };
 use crate::turn::PermissionMode;
-use pl_model::{ModelInfo, OpenAiCompactionMode, ProviderEndpoint, ToolCall};
+use pl_model::completion::ToolCall;
+
+use pl_model::completion::OpenAiCompactionMode;
+use pl_model::model::ModelInfo;
+use pl_model::provider::ProviderEndpoint;
 use pl_protocol::{
     InteractionContent, InteractionResolution, ToolApprovalResolution,
     ToolApprovalResolutionPayload,

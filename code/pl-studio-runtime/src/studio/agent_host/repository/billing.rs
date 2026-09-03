@@ -52,10 +52,10 @@ pub(super) async fn restore_billing(
 
 pub(super) fn aggregate_billing_usage<'a>(
     billing: impl IntoIterator<Item = &'a TurnBillingRecord>,
-) -> pl_model::TokenUsage {
+) -> pl_protocol::TokenUsage {
     billing
         .into_iter()
-        .fold(pl_model::TokenUsage::default(), |mut aggregate, turn| {
+        .fold(pl_protocol::TokenUsage::default(), |mut aggregate, turn| {
             let usage = turn.aggregate_usage();
             aggregate.prompt_tokens = aggregate.prompt_tokens.saturating_add(usage.prompt_tokens);
             aggregate.cached_prompt_tokens = aggregate
@@ -154,8 +154,8 @@ pub(super) fn runtime_from_context(
 
 pub(super) fn authoritative_turn_usage(
     existing: Option<&turn::Model>,
-    projected: Option<&pl_model::TokenUsage>,
-) -> Result<pl_model::TokenUsage, PureError> {
+    projected: Option<&pl_protocol::TokenUsage>,
+) -> Result<pl_protocol::TokenUsage, PureError> {
     if let Some(model_json) = existing.and_then(|row| row.model_json.as_deref()) {
         let billing: TurnBillingRecord = serde_json::from_str(model_json)?;
         if !billing.inferences.is_empty() {
@@ -165,7 +165,7 @@ pub(super) fn authoritative_turn_usage(
     projected.cloned().map_or_else(
         || {
             existing.map_or_else(
-                || Ok(pl_model::TokenUsage::default()),
+                || Ok(pl_protocol::TokenUsage::default()),
                 |row| serde_json::from_str(&row.usage_json).map_err(Into::into),
             )
         },
@@ -273,7 +273,7 @@ mod tests {
             revision: Set(0),
             state_json: Set(serde_json::to_string(&turn_state).unwrap()),
             model_json: Set(None),
-            usage_json: Set(serde_json::to_string(&pl_model::TokenUsage::default()).unwrap()),
+            usage_json: Set(serde_json::to_string(&pl_protocol::TokenUsage::default()).unwrap()),
             metadata_json: Set(None),
             updated_at: Set(1),
             ..Default::default()
@@ -342,11 +342,11 @@ mod tests {
             .unwrap(),
             state_kind: "running".to_string(),
             model_json: Some(serde_json::to_string(&billing).unwrap()),
-            usage_json: serde_json::to_string(&pl_model::TokenUsage::default()).unwrap(),
+            usage_json: serde_json::to_string(&pl_protocol::TokenUsage::default()).unwrap(),
             metadata_json: None,
             updated_at: 1,
         };
-        let projected = pl_model::TokenUsage {
+        let projected = pl_protocol::TokenUsage {
             prompt_tokens: 999,
             completion_tokens: 999,
             total_tokens: 1_998,

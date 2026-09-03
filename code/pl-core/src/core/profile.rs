@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use pl_model::ModelRuntime;
+use pl_model::runtime::ModelRuntime;
 use pl_protocol::Result;
 
 use crate::ResolvedModelRoute;

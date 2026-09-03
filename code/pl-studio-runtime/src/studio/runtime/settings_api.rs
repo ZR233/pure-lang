@@ -12,14 +12,18 @@ use pl_protocol::studio::{
 };
 
 use crate::{
-    ConfigRuntimeSnapshot, ModelInfo, PermissionMode, PromptCacheDialect,
-    PromptCacheProviderCapabilities, ProviderCapabilitySelection, ProviderConnectionMode,
-    ProviderEdit, ProviderModelCatalogConfig, ProviderModelEdit, ProviderPresetId,
-    ProviderServiceCapabilities, ProviderSettingsEdit, ProviderWireProtocol,
-    ResponsesHostedToolCapabilities, RoleEdit, StandaloneWebSearchDialect, StudioRole,
-    WebSearchAvailability, WebSearchBackendKind, WebSearchContextSize, WebSearchMode,
-    WebSearchProviderCapabilities,
+    ConfigRuntimeSnapshot, PermissionMode, ProviderCapabilitySelection, ProviderEdit,
+    ProviderModelCatalogConfig, ProviderModelEdit, ProviderPresetId, ProviderSettingsEdit,
+    RoleEdit, StudioRole, WebSearchAvailability, WebSearchBackendKind,
 };
+use pl_model::completion::WebSearchMode;
+use pl_model::model::ModelInfo;
+use pl_model::provider::{
+    PromptCacheDialect, PromptCacheProviderCapabilities, ProviderConnectionMode,
+    ProviderServiceCapabilities, ProviderWireProtocol, ResponsesHostedToolCapabilities,
+    StandaloneWebSearchDialect, WebSearchProviderCapabilities,
+};
+use pl_protocol::WebSearchContextSize;
 
 use super::StudioRuntime;
 
@@ -430,8 +434,8 @@ fn custom_model_settings(model: &ModelInfo) -> StudioCustomModelSettings {
         reasoning_efforts: reasoning_efforts.to_vec(),
         base_instructions: model.base_instructions.clone(),
         wire_protocol: match model.transport.protocol {
-            crate::ProviderWireProtocol::Responses => "responses",
-            crate::ProviderWireProtocol::ChatCompletions => "chat_completions",
+            ProviderWireProtocol::Responses => "responses",
+            ProviderWireProtocol::ChatCompletions => "chat_completions",
         }
         .to_string(),
         supported_connection_modes: model
@@ -514,7 +518,7 @@ fn web_search_availability_label(availability: WebSearchAvailability) -> &'stati
 
 fn web_search_config(
     request: UpdateWebSearchSettingsRequest,
-) -> Result<(u64, pl_model::WebSearchConfig)> {
+) -> Result<(u64, pl_model::completion::WebSearchConfig)> {
     let mode = match request.mode.trim() {
         "disabled" => WebSearchMode::Disabled,
         "cached" => WebSearchMode::Cached,
@@ -541,7 +545,7 @@ fn web_search_config(
     };
     Ok((
         request.expected_revision,
-        pl_model::WebSearchConfig {
+        pl_model::completion::WebSearchConfig {
             mode,
             context_size,
             allowed_domains: normalized_string_list(request.allowed_domains),

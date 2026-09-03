@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::completion::tool_schema::provider_compatible_tool;
 use crate::completion::usage::ReasoningConfig;
-use crate::{ModelCapabilities, ModelModality};
+use crate::model::{ModelCapabilities, ModelModality};
 use pl_protocol::{
     AttachmentModality, ContentPart, Message, ModelContextItem, PureError, ToolSpec,
 };
@@ -329,7 +329,7 @@ mod tests {
 
     use super::*;
     use crate::completion::usage::{ReasoningConfig, ReasoningSummary};
-    use crate::{
+    use crate::model::{
         ModelCapabilities, ModelInputCapability, ModelInputSource, ModelModality, ToolCapabilities,
     };
 

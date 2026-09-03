@@ -662,7 +662,7 @@ fn root_agent_id_for(
 
 #[cfg(test)]
 mod tests {
-    use pl_model::TokenUsage;
+    use pl_protocol::TokenUsage;
 
     use super::*;
     use crate::agent_runtime::{

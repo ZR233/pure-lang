@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::super::tool_stream::ToolCallAccumulatorSnapshot;
 use super::*;
-use crate::{ToolCall, ToolCallPayload};
+use crate::completion::{ToolCall, ToolCallPayload};
 
 fn trace() -> TraceProjection {
     TraceProjection::new(CompletionTraceContext {

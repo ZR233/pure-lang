@@ -1,7 +1,7 @@
 //! Provider-hosted programmatic tool coordinator.
 
 use futures::FutureExt;
-use pl_model::ProviderWireProtocol;
+use pl_model::provider::ProviderWireProtocol;
 use pl_protocol::{PureError, Result, ToolSpec};
 
 use super::{
@@ -100,14 +100,15 @@ pub fn reconcile_programmatic_tool_calling(
 
 #[cfg(test)]
 mod tests {
-    use pl_model::{ModelInfo, ProviderEndpoint};
 
     use super::*;
     use crate::{AgentRoleId, ProviderId};
+    use pl_model::model::ModelInfo;
+    use pl_model::provider::ProviderEndpoint;
 
     fn route() -> ResolvedModelRoute {
         let mut model = ModelInfo::fallback("hosted-model");
-        model.transport = pl_model::ModelTransportProfile::responses_http();
+        model.transport = pl_model::model::ModelTransportProfile::responses_http();
         model.capabilities.tools.programmatic_tool_calling = true;
         model.request_profile.responses_programmatic_tool_calling = true;
         let mut endpoint = ProviderEndpoint::openai(None);

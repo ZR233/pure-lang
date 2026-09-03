@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
 
-use pl_model::{ModelInfo, ProviderConnectionMode, ProviderEndpoint};
 use pretty_assertions::assert_eq;
 
 use super::*;
+use pl_model::model::ModelInfo;
+use pl_model::provider::{ProviderConnectionMode, ProviderEndpoint};
 
 fn test_config() -> AgentModelConfig {
     let provider_id = ProviderId::new("deepseek").unwrap();
@@ -103,7 +104,7 @@ fn route_resolution_binds_one_model_to_the_endpoint() {
     assert_eq!(resolved.model.slug, "deepseek-v4-pro");
     assert_eq!(
         resolved.model.transport.protocol,
-        pl_model::ProviderWireProtocol::Responses
+        pl_model::provider::ProviderWireProtocol::Responses
     );
     assert_eq!(
         resolved.model.transport.default_connection_mode,
@@ -242,7 +243,7 @@ fn custom_deepseek_base_url_disables_inherited_hosted_search_only() {
     assert!(inherited.web_search.hosted_responses);
     assert_eq!(
         inherited.web_search.hosted_dialect,
-        pl_model::HostedWebSearchDialect::DeepSeekResponses
+        pl_protocol::HostedWebSearchDialect::DeepSeekResponses
     );
 
     provider.base_url = "https://deepseek-proxy.example/v1".to_string();
@@ -251,6 +252,6 @@ fn custom_deepseek_base_url_disables_inherited_hosted_search_only() {
     assert!(!overridden.web_search.hosted_responses);
     assert_eq!(
         overridden.prompt_cache.dialect,
-        pl_model::PromptCacheDialect::ImplicitPrefix
+        pl_model::provider::PromptCacheDialect::ImplicitPrefix
     );
 }

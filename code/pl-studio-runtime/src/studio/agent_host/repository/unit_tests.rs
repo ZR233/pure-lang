@@ -78,7 +78,7 @@ fn budget_limited_turn_restores_typed_rollover_state() {
         state_json: serde_json::to_string(&state).unwrap(),
         state_kind: "budgetLimited".to_string(),
         model_json: None,
-        usage_json: serde_json::to_string(&pl_model::TokenUsage::default()).unwrap(),
+        usage_json: serde_json::to_string(&pl_protocol::TokenUsage::default()).unwrap(),
         metadata_json: None,
         updated_at: 2,
     })
@@ -332,7 +332,7 @@ async fn seed_running_turn(
                 .expect("turn state JSON"),
         ),
         model_json: Set(None),
-        usage_json: Set(serde_json::to_string(&pl_model::TokenUsage::default()).unwrap()),
+        usage_json: Set(serde_json::to_string(&pl_protocol::TokenUsage::default()).unwrap()),
         metadata_json: Set(None),
         updated_at: Set(1),
         ..Default::default()
@@ -534,7 +534,7 @@ async fn seed_completed_turn_at(store: &StudioStore, thread_id: &str, turn_id: &
         revision: Set(1),
         state_json: Set(serde_json::to_string(&state).expect("turn state JSON")),
         model_json: Set(None),
-        usage_json: Set(serde_json::to_string(&pl_model::TokenUsage::default()).unwrap()),
+        usage_json: Set(serde_json::to_string(&pl_protocol::TokenUsage::default()).unwrap()),
         metadata_json: Set(None),
         updated_at: Set(2),
         ..Default::default()

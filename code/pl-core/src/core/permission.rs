@@ -12,7 +12,7 @@ use crate::turn::{ToolApprovalDecision, ToolApprovalRequest, TurnOptions};
 use crate::time::unix_seconds;
 
 pub(super) fn approval_request(
-    tool_call: &pl_model::ToolCall,
+    tool_call: &pl_model::completion::ToolCall,
     active_subagent: Option<&SubagentContext>,
 ) -> ToolApprovalRequest {
     let arguments = tool_call.arguments_for_display();
@@ -38,7 +38,7 @@ pub(super) fn get_working_directory(arguments: &serde_json::Value) -> Option<Str
 }
 
 pub(super) fn requested_workspace_access(
-    tool_call: &pl_model::ToolCall,
+    tool_call: &pl_model::completion::ToolCall,
     workspace_root: &Path,
 ) -> WorkspaceAccess {
     let arguments = tool_call.arguments_for_tool();
@@ -198,7 +198,7 @@ fn tool_approval_interaction(request: &ToolApprovalRequest, turn_id: &str) -> In
 
 #[cfg(test)]
 mod tests {
-    use pl_model::ToolCall;
+    use pl_model::completion::ToolCall;
     use pretty_assertions::assert_eq;
 
     use super::*;

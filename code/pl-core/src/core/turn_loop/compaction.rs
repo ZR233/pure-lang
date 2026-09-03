@@ -1,4 +1,3 @@
-use pl_model::{EffectivePromptCachePolicy, ModelRuntime, ReasoningConfig, ToolSpec};
 use pl_protocol::Result;
 
 use crate::context_assembler::{AssembledModelContext, ContextAssembler, TurnContextSnapshot};
@@ -22,6 +21,10 @@ use super::super::turn_result::{
     failed_turn_result, interrupted_turn_result, is_cancelled, normalize_provider_error,
 };
 use super::{checkpoint, inference, prompt_cache};
+use pl_model::completion::ReasoningConfig;
+use pl_model::provider::EffectivePromptCachePolicy;
+use pl_model::runtime::ModelRuntime;
+use pl_protocol::ToolSpec;
 
 /// 单次 turn 循环内执行上下文压缩所需的共享状态。
 ///
@@ -49,7 +52,7 @@ pub(super) struct CompactionStep<'a> {
     pub(super) last_content: &'a str,
     pub(super) last_reasoning_content: &'a Option<String>,
     pub(super) last_model: &'a str,
-    pub(super) total_usage: &'a mut pl_model::TokenUsage,
+    pub(super) total_usage: &'a mut pl_protocol::TokenUsage,
     pub(super) inference_count: &'a mut u64,
     pub(super) context_compactions: &'a mut Vec<ContextCompactionSnapshot>,
     pub(super) safe_message_count: &'a mut usize,

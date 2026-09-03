@@ -227,7 +227,7 @@ pub enum ApplyPatchToolType {
 impl ProviderEndpoint {
     pub fn effective_prompt_cache_policy(
         &self,
-        model: &crate::ModelInfo,
+        model: &crate::model::ModelInfo,
     ) -> EffectivePromptCachePolicy {
         match (
             model.transport.protocol,
@@ -408,11 +408,11 @@ mod tests {
         let compatible = ProviderEndpoint::compatible("Gateway", "https://gateway.example/v1");
         let chat_compatible =
             ProviderEndpoint::compatible("Chat Gateway", "https://chat.example/v1");
-        let deepseek_model = crate::default_models()
+        let deepseek_model = crate::model::default_models()
             .into_iter()
             .find(|model| model.slug == "deepseek-v4-flash")
             .unwrap();
-        let openai_model = crate::default_models()
+        let openai_model = crate::model::default_models()
             .into_iter()
             .find(|model| model.slug == "gpt-5.6-sol")
             .unwrap();

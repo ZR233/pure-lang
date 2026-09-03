@@ -1,4 +1,4 @@
-use pl_model::ModelInfo;
+use pl_model::model::ModelInfo;
 use pl_protocol::Result;
 
 use crate::config::InstructionsConfig;

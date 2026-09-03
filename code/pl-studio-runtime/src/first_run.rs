@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
 use crate::{PureError, Result};
-use pl_model::{ModelInfo, ModelParameter, ProviderEndpoint};
 
 use crate::config::{
     ModelRouteConfig, ProviderId, ReasoningEffort, STUDIO_CONFIG_SCHEMA_VERSION, StudioConfig,
@@ -12,6 +11,8 @@ use crate::{
     AgentModelConfig, ProviderConfig, ProviderModelCatalogConfig, ProviderPresetId,
     builtin_provider_catalog,
 };
+use pl_model::model::{ModelInfo, ModelParameter};
+use pl_model::provider::ProviderEndpoint;
 
 const DEFAULT_ROLE_EFFORT: &str = "high";
 

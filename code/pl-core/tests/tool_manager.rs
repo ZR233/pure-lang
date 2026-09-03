@@ -208,7 +208,7 @@ async fn public_builder_generates_schema_and_rejects_invalid_input_before_handle
         ))
         .unwrap();
     let plan = tools.freeze();
-    let pl_core::ToolSpec::Function { input_schema, .. } = &plan.specs()[0] else {
+    let pl_protocol::ToolSpec::Function { input_schema, .. } = &plan.specs()[0] else {
         panic!("builder must create a function tool");
     };
     assert_eq!(input_schema["required"], serde_json::json!(["key", "mode"]));

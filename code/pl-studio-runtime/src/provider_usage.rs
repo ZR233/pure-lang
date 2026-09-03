@@ -11,7 +11,7 @@ pub use state::{
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use futures::future::join_all;
-use pl_model::ProviderEndpoint;
+use pl_model::provider::ProviderEndpoint;
 use pl_protocol::{PureError, StateError};
 use reqwest::header::{ACCEPT_LANGUAGE, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde_json::Value;
@@ -548,7 +548,7 @@ type ProviderUsageQueryFuture = BoxFuture<'static, crate::Result<ProviderUsageDa
 
 async fn provider_usage_data(
     provider: ProviderConfig,
-    query: impl FnOnce(pl_model::ProviderEndpoint) -> ProviderUsageQueryFuture,
+    query: impl FnOnce(pl_model::provider::ProviderEndpoint) -> ProviderUsageQueryFuture,
 ) -> ProviderUsageState {
     if provider
         .resolved_bearer_token()
@@ -577,7 +577,7 @@ async fn provider_usage_data(
     }
 }
 
-fn query_deepseek(info: pl_model::ProviderEndpoint) -> ProviderUsageQueryFuture {
+fn query_deepseek(info: pl_model::provider::ProviderEndpoint) -> ProviderUsageQueryFuture {
     async move {
         query_deepseek_balance(&info)
             .await
@@ -586,7 +586,7 @@ fn query_deepseek(info: pl_model::ProviderEndpoint) -> ProviderUsageQueryFuture 
     .boxed()
 }
 
-fn query_zhipu(info: pl_model::ProviderEndpoint) -> ProviderUsageQueryFuture {
+fn query_zhipu(info: pl_model::provider::ProviderEndpoint) -> ProviderUsageQueryFuture {
     async move {
         query_zhipu_coding_plan_usage(&info)
             .await

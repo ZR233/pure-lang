@@ -630,7 +630,7 @@ fn studio_turn_options(options: TurnOptions) -> TurnOptions {
 
 struct StudioInstructionContext<'a> {
     config: &'a crate::config::StudioConfig,
-    model: &'a pl_model::ModelInfo,
+    model: &'a pl_model::model::ModelInfo,
     execution_label: &'a str,
     execution_instructions: &'a str,
     workspace_root: &'a Path,

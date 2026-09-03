@@ -1,9 +1,6 @@
 use std::future::Future;
 use std::path::Path;
 
-use pl_model::{
-    MediaRepresentation, ModelInfo, ModelInputCapability, ModelInputSource, ModelModality,
-};
 use pl_protocol::Result;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -14,6 +11,9 @@ use crate::tool::{
     LocalWorkspaceFileBackend, MAX_SOURCE_BYTES, StaticTool, ToolCallContext, ToolPolicy,
     ToolResult, ToolWorkspace, WorkspaceFileBackend, WorkspaceFileReadBytesRequest,
     WorkspaceFileStatRequest, normalize_tool_image, tool_error,
+};
+use pl_model::model::{
+    MediaRepresentation, ModelInfo, ModelInputCapability, ModelInputSource, ModelModality,
 };
 
 pub const TOOL_VIEW_IMAGE: &str = "view_image";
@@ -207,7 +207,7 @@ mod tests {
     };
 
     fn model(slug: &str) -> ModelInfo {
-        pl_model::default_models()
+        pl_model::model::default_models()
             .into_iter()
             .find(|model| model.slug == slug)
             .expect("bundled model")

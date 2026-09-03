@@ -1,11 +1,12 @@
 //! prompt_cache 单元测试。
 
-use pl_model::{ProviderEndpoint, ReasoningSummary, ToolWirePolicy};
 use pl_protocol::MessageRole;
 use pretty_assertions::assert_eq;
 
 use super::*;
 use crate::context_section;
+use pl_model::completion::ReasoningSummary;
+use pl_model::provider::{ProviderEndpoint, ToolWirePolicy};
 
 fn input<'a>(
     scope: &'a str,
@@ -31,7 +32,7 @@ fn input<'a>(
         service_tier: None,
         compacted,
         prompt_cache_policy: provider
-            .effective_prompt_cache_policy(&pl_model::ModelInfo::fallback(model)),
+            .effective_prompt_cache_policy(&pl_model::model::ModelInfo::fallback(model)),
         updated_at: 1,
     }
 }

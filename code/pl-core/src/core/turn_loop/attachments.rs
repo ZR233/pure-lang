@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use pl_model::{PreparedContentPart, PreparedContentSource};
+use pl_model::completion::{PreparedContentPart, PreparedContentSource};
 use pl_protocol::{AttachmentModality, ContentPart, ModelContextItem, Result, ThreadAttachment};
 
 #[derive(Debug, Clone)]

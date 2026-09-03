@@ -184,7 +184,7 @@ fn deepseek_default_models_declare_native_web_search_capability() {
             .unwrap_or_else(|| panic!("missing bundled DeepSeek model: {slug}"));
         assert_eq!(
             model.transport.protocol,
-            crate::ProviderWireProtocol::Responses,
+            crate::provider::ProviderWireProtocol::Responses,
             "DeepSeek native web search requires Responses: {slug}"
         );
         assert!(

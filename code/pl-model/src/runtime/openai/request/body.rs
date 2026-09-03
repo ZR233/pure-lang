@@ -2,8 +2,9 @@ use pl_protocol::Result;
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-use crate::completion::{ReasoningConfig, ToolFormat};
+use crate::completion::ReasoningConfig;
 use crate::model::info::ModelInfo;
+use pl_protocol::ToolFormat;
 
 use super::protocol_error;
 #[derive(Debug, Clone, Serialize)]

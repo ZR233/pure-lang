@@ -267,11 +267,11 @@ fn is_snapshot_source(source: &PreparedContentSource) -> bool {
     matches!(source, PreparedContentSource::DataUrl { .. })
 }
 
-fn model_modality(modality: AttachmentModality) -> crate::ModelModality {
+fn model_modality(modality: AttachmentModality) -> crate::model::ModelModality {
     match modality {
-        AttachmentModality::Image => crate::ModelModality::Image,
-        AttachmentModality::Video => crate::ModelModality::Video,
-        AttachmentModality::File => crate::ModelModality::File,
+        AttachmentModality::Image => crate::model::ModelModality::Image,
+        AttachmentModality::Video => crate::model::ModelModality::Video,
+        AttachmentModality::File => crate::model::ModelModality::File,
     }
 }
 

@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::completion::tool_call::ToolCall;
-use crate::completion::usage::TokenUsage;
+use pl_protocol::TokenUsage;
 use pl_protocol::{InferenceTiming, ResponsesContextItem};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

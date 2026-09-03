@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use pl_model::ModelCapabilities;
+use pl_model::model::ModelCapabilities;
 use pl_protocol::{
     BudgetLimitKind, BudgetUsage, ErrorSeverity, ProviderFailureKind, PureError, RetryDisposition,
     TurnCancellationCause, TurnFailure, TurnFailureCategory, TurnOutcome, TurnRolloverOutcome,
@@ -135,7 +135,7 @@ pub(super) fn interrupted_turn_result(
     content: String,
     reasoning_content: Option<String>,
     model: String,
-    mut usage: pl_model::TokenUsage,
+    mut usage: pl_protocol::TokenUsage,
     session_message_count: usize,
     reason: String,
 ) -> TurnResult {
@@ -167,7 +167,7 @@ pub(super) fn failed_turn_result(
     content: String,
     reasoning_content: Option<String>,
     model: String,
-    usage: pl_model::TokenUsage,
+    usage: pl_protocol::TokenUsage,
     session_message_count: usize,
     error: String,
     severity: ErrorSeverity,
@@ -194,7 +194,7 @@ pub(super) fn failed_turn_result_with_abort_reason(
     content: String,
     reasoning_content: Option<String>,
     model: String,
-    mut usage: pl_model::TokenUsage,
+    mut usage: pl_protocol::TokenUsage,
     session_message_count: usize,
     error: String,
     severity: ErrorSeverity,
@@ -232,7 +232,7 @@ pub(super) fn budget_limited_turn_result(
     content: String,
     reasoning_content: Option<String>,
     model: String,
-    mut usage: pl_model::TokenUsage,
+    mut usage: pl_protocol::TokenUsage,
     session_message_count: usize,
     limit_kind: BudgetLimitKind,
     budget_usage: BudgetUsage,

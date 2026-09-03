@@ -1,13 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use pl_model::{
-    ApplyPatchToolType, ModelInfo, ProviderConnectionMode, ProviderEndpoint,
-    ProviderServiceCapabilities, ToolWirePolicy,
-};
 use pl_protocol::{PureError, Result};
 use serde::{Deserialize, Serialize};
 
 use super::{ModelCatalogId, ProviderId, ProviderPresetId, builtin_model_catalog};
+use pl_model::model::ModelInfo;
+use pl_model::provider::{
+    ApplyPatchToolType, ProviderConnectionMode, ProviderEndpoint, ProviderServiceCapabilities,
+    ToolWirePolicy,
+};
 
 /// Provider 模型目录来源。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

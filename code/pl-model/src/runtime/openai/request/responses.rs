@@ -1,10 +1,10 @@
 use pl_protocol::{
     AttachmentModality, ContentPart, MessageContent, MessageRole, Result, ToolCallKind,
-    ToolCallRecord,
+    ToolCallRecord, ToolSpec,
 };
 use serde::Serialize;
 
-use crate::completion::{CompletionRequest, ReasoningConfig, ReasoningSummary, ToolSpec};
+use crate::completion::{CompletionRequest, ReasoningConfig, ReasoningSummary};
 use crate::model::info::MediaWireFormat;
 
 use super::body::ToolFormatBody;
@@ -36,7 +36,7 @@ pub(super) struct ResponsesRequestBody {
 impl ResponsesRequestBody {
     pub(super) fn from_request(
         request: &CompletionRequest,
-        model: &crate::ModelInfo,
+        model: &crate::model::ModelInfo,
         prompt_cache_key: Option<&str>,
     ) -> Result<Self> {
         let mut input = Vec::new();
@@ -274,7 +274,7 @@ enum ResponsesTool {
         description: String,
         parameters: serde_json::Value,
         #[serde(skip_serializing_if = "Vec::is_empty")]
-        allowed_callers: Vec<crate::ToolCallerMode>,
+        allowed_callers: Vec<pl_protocol::ToolCallerMode>,
         #[serde(skip_serializing_if = "Option::is_none")]
         output_schema: Option<serde_json::Value>,
     },
@@ -283,7 +283,7 @@ enum ResponsesTool {
         description: String,
         format: ToolFormatBody,
         #[serde(skip_serializing_if = "Vec::is_empty")]
-        allowed_callers: Vec<crate::ToolCallerMode>,
+        allowed_callers: Vec<pl_protocol::ToolCallerMode>,
         #[serde(skip_serializing_if = "Option::is_none")]
         output_schema: Option<serde_json::Value>,
     },
@@ -294,11 +294,11 @@ enum ResponsesTool {
         #[serde(skip_serializing_if = "Option::is_none")]
         indexed_web_access: Option<bool>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        filters: Option<crate::WebSearchFilters>,
+        filters: Option<pl_protocol::WebSearchFilters>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        user_location: Option<crate::WebSearchUserLocation>,
+        user_location: Option<pl_protocol::WebSearchUserLocation>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        search_context_size: Option<crate::WebSearchContextSize>,
+        search_context_size: Option<pl_protocol::WebSearchContextSize>,
         #[serde(skip_serializing_if = "Option::is_none")]
         search_content_types: Option<Vec<String>>,
     },
@@ -343,7 +343,7 @@ impl From<&ToolSpec> for ResponsesTool {
                 search_context_size,
                 search_content_types,
             } => {
-                let deepseek = *dialect == crate::HostedWebSearchDialect::DeepSeekResponses;
+                let deepseek = *dialect == pl_protocol::HostedWebSearchDialect::DeepSeekResponses;
                 Self::WebSearch {
                     external_web_access: (!deepseek).then_some(*external_web_access),
                     indexed_web_access: (!deepseek).then_some(*indexed_web_access).flatten(),

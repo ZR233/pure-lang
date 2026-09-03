@@ -1,4 +1,3 @@
-use pl_model::{EffectivePromptCachePolicy, ModelInfo, TokenUsage};
 use pl_protocol::{
     AgentRuntimeDelta, InferenceBillingRecord, InferenceTiming, InferenceTokenUsage,
     ModelPricingSnapshot, RuntimeCostAmount, RuntimeUsageSnapshot, ThreadPromptSnapshot,
@@ -6,6 +5,9 @@ use pl_protocol::{
 };
 
 use crate::tool::SubagentContext;
+use pl_model::model::ModelInfo;
+use pl_model::provider::EffectivePromptCachePolicy;
+use pl_protocol::TokenUsage;
 
 pub const ROOT_AGENT_ID: &str = "agent-root";
 pub const ROOT_AGENT_PATH: &str = "/root";
@@ -139,7 +141,7 @@ fn pricing_snapshot(
 ///
 /// `TokenUsageSnapshot` 面向 pl-core runtime cost/trace，只保留成本计算需要的字段；
 /// 宿主产品若需要展示 reasoning token 或 provider 返回的总数，应使用该类型，避免
-/// 在产品层重复解释 `pl_model::TokenUsage`。
+/// 在产品层重复解释 `pl_protocol::TokenUsage`。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelTokenUsageSnapshot {
     input_tokens: u64,

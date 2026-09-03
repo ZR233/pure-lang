@@ -477,7 +477,7 @@ impl StudioRuntime {
                     title: Some(thread_record.title),
                 },
                 session: pl_core::AgentSession::new(),
-                usage: pl_model::TokenUsage::default(),
+                usage: pl_protocol::TokenUsage::default(),
                 billing_by_turn: std::collections::BTreeMap::new(),
                 last_context_tokens: None,
                 trace_sequence: 0,

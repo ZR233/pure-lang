@@ -1,4 +1,4 @@
-use pl_model::CompletionRequest;
+use pl_model::completion::CompletionRequest;
 use pl_protocol::TurnCompletion;
 use pl_protocol::{ErrorSeverity, Result};
 use std::sync::Arc;
@@ -90,7 +90,7 @@ pub(super) async fn run_turn_with_trace(
     let mut last_model = model.clone();
     let mut last_context_tokens = None;
     let mut context_compactions = Vec::new();
-    let mut total_usage = pl_model::TokenUsage::default();
+    let mut total_usage = pl_protocol::TokenUsage::default();
     let mut safe_message_count = session.len();
     let mut session_message_count = safe_message_count;
     let mut inference_count = 0_u64;
@@ -291,13 +291,13 @@ pub(super) async fn run_turn_with_trace(
             .parallel_tool_calls(parallel_tool_calls)
             .reasoning(reasoning.clone())
             .build();
-        let invocation = pl_model::ModelInvocationContext::new(
+        let invocation = pl_model::runtime::ModelInvocationContext::new(
             session.model_session(),
             recorder.sender().clone(),
         )
         .with_prompt_cache_key(session.prompt_cache_key().map(ToString::to_string))
         .with_trace(
-            pl_model::CompletionTraceContext {
+            pl_model::completion::CompletionTraceContext {
                 session_id: recorder.session_id().to_string(),
                 turn_id: turn_id.clone(),
                 inference_id: inference_id.clone(),

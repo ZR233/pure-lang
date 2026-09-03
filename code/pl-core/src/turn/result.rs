@@ -1,4 +1,4 @@
-use pl_model::TokenUsage;
+use pl_protocol::TokenUsage;
 use pl_protocol::TurnOutcome;
 use pl_trace::TraceEvent;
 

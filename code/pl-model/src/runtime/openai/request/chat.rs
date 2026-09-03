@@ -1,7 +1,9 @@
-use pl_protocol::{ContentPart, MessageContent, MessageRole, Result, ToolCallKind, ToolCallRecord};
+use pl_protocol::{
+    ContentPart, MessageContent, MessageRole, Result, ToolCallKind, ToolCallRecord, ToolSpec,
+};
 use serde::Serialize;
 
-use crate::completion::{CompletionRequest, ToolSpec};
+use crate::completion::CompletionRequest;
 use crate::model::info::{MaxTokensField, MediaWireFormat, ModelInfo};
 
 use super::body::ToolFormatBody;

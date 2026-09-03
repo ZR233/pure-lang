@@ -1,11 +1,13 @@
 use std::collections::BTreeMap;
 
-use pl_model::{EffectivePromptCachePolicy, ProviderEndpoint, ReasoningConfig, ToolSpec};
 use pl_protocol::{
     Message, ModelContextSnapshot, PromptPrefixChangedReason, PureError, ThreadPromptSnapshot,
 };
 
 use crate::{AgentSession, canonical_json_hash};
+use pl_model::completion::ReasoningConfig;
+use pl_model::provider::{EffectivePromptCachePolicy, ProviderEndpoint};
+use pl_protocol::ToolSpec;
 
 /// 计算 prompt generation 所需的固定请求属性。
 pub(crate) struct PromptCacheInput<'a> {

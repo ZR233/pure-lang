@@ -1,6 +1,5 @@
 use std::path::Path;
 
-use pl_model::{ReasoningConfig, ReasoningSummary};
 use pl_protocol::Result;
 
 use super::super::TurnEngine;
@@ -8,11 +7,12 @@ use crate::ReasoningEffort;
 use crate::instruction::SkillSuggestionRequest;
 use crate::instruction::{InstructionAssembler, InstructionAssemblyRequest, InstructionSnapshot};
 use crate::turn::TurnRequest;
+use pl_model::completion::{ReasoningConfig, ReasoningSummary};
 
 pub(super) fn instruction_snapshot(
     core: &TurnEngine,
     request: &TurnRequest,
-    model: &pl_model::ModelInfo,
+    model: &pl_model::model::ModelInfo,
     workspace_root: &Path,
 ) -> Result<InstructionSnapshot> {
     let mut snapshot = match request.instruction_snapshot.clone() {

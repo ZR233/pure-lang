@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use pl_model::{ProviderEndpoint, SearchRequest, SearchResponse};
+use pl_model::completion::{SearchRequest, SearchResponse};
+use pl_model::provider::ProviderEndpoint;
 use pl_protocol::{PureError, Result};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use secrecy::{ExposeSecret, SecretString};
@@ -95,10 +96,11 @@ fn configured_headers(headers: Option<&HashMap<String, String>>) -> Result<Heade
 mod tests {
     use std::time::Duration;
 
-    use pl_model::{
-        ProviderEndpoint, SearchCommands, SearchQuery, SearchResponseLength, SearchSettings,
-        WebSearchConfig, WebSearchContextSize, WebSearchLocation, WebSearchMode,
+    use pl_model::completion::{
+        SearchCommands, SearchQuery, SearchRequest, SearchResponseLength, SearchSettings,
+        WebSearchConfig, WebSearchLocation, WebSearchMode,
     };
+    use pl_protocol::WebSearchContextSize;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
     use tokio::sync::oneshot;

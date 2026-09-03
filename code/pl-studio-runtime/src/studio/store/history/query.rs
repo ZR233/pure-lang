@@ -97,7 +97,7 @@ mod tests {
             revision: Set(1),
             state_json: Set(serde_json::to_string(&state).unwrap()),
             model_json: Set(None),
-            usage_json: Set(serde_json::to_string(&pl_model::TokenUsage::default()).unwrap()),
+            usage_json: Set(serde_json::to_string(&pl_protocol::TokenUsage::default()).unwrap()),
             metadata_json: Set(None),
             updated_at: Set(ordinal),
             ..Default::default()

@@ -1,4 +1,4 @@
-use pl_model::ToolSpec;
+use pl_protocol::ToolSpec;
 use serde_json::Value;
 
 use crate::tool::cache::ToolCachePolicy;

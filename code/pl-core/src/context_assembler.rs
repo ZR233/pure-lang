@@ -120,8 +120,9 @@ fn render_working_context_message(context: &ModelContextSnapshot) -> Option<Mess
 
 #[cfg(test)]
 mod tests {
-    use pl_model::{ToolCall, ToolCallKind};
-    use pl_protocol::{SessionNote, ToolResultReceipt, ToolResultRecord};
+
+    use pl_model::completion::ToolCall;
+    use pl_protocol::{SessionNote, ToolCallKind, ToolResultReceipt, ToolResultRecord};
     use pretty_assertions::assert_eq;
 
     use super::*;

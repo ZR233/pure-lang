@@ -499,7 +499,7 @@ fn thread_depth(id: &str, parents: &BTreeMap<String, Option<String>>) -> Result<
 #[cfg(test)]
 mod tests {
     use pl_core::{AgentTurnOutcome, FaultedAgentState, ThreadId, TurnId};
-    use pl_model::TokenUsage;
+    use pl_protocol::TokenUsage;
     use pl_protocol::{StateError, TurnFailure, TurnFailureCategory, TurnOutcome};
 
     use super::*;

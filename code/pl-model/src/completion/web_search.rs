@@ -1,9 +1,8 @@
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-
-pub use pl_protocol::{
+use pl_protocol::{
     WebSearchContextSize, WebSearchFilters, WebSearchUserLocation, WebSearchUserLocationType,
 };
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 /// Web 搜索访问模式。
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]

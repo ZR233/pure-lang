@@ -125,7 +125,7 @@ pub(super) fn finalize_tool_item(
 }
 
 pub(super) async fn ready_tool_execution_record(
-    tool_call: pl_model::ToolCall,
+    tool_call: pl_model::completion::ToolCall,
     error: ToolExecutionError,
     outcome: ToolExecutionOutcome,
     exit_code: Option<i32>,
@@ -151,7 +151,7 @@ pub(super) async fn ready_tool_execution_record(
 }
 
 pub(super) fn tool_execution_record(
-    tool_call: pl_model::ToolCall,
+    tool_call: pl_model::completion::ToolCall,
     tool_name: String,
     result: std::result::Result<ToolResult, PureError>,
 ) -> Result<ToolExecutionRecord, ToolExecutionError> {
@@ -220,7 +220,7 @@ pub(super) fn tool_execution_record(
 }
 
 fn tool_execution_record_from_envelope(
-    tool_call: pl_model::ToolCall,
+    tool_call: pl_model::completion::ToolCall,
     tool_name: String,
     envelope: ToolOutputEnvelope,
     outcome: ToolExecutionOutcome,
@@ -360,7 +360,7 @@ fn output_metrics(runtime_events: &[ToolDirective]) -> Option<pl_trace::TraceToo
 }
 
 pub(super) fn interrupted_tool_execution_record(
-    tool_call: pl_model::ToolCall,
+    tool_call: pl_model::completion::ToolCall,
 ) -> ToolExecutionRecord {
     tool_execution_record_from_envelope(
         tool_call.clone(),
@@ -379,7 +379,7 @@ pub(super) fn interrupted_tool_execution_record(
 }
 
 pub(super) fn respond_to_model_tool_execution_record(
-    tool_call: pl_model::ToolCall,
+    tool_call: pl_model::completion::ToolCall,
     message: String,
 ) -> ToolExecutionRecord {
     tool_execution_record_from_envelope(

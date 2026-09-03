@@ -2,10 +2,6 @@
 
 use std::collections::BTreeSet;
 
-use pl_model::{
-    HostedWebSearchDialect, ProviderEndpoint, ProviderWireProtocol, StandaloneWebSearchDialect,
-    WebSearchConfig, WebSearchMode,
-};
 use pl_protocol::{PureError, Result, WebSearchResolutionDescriptor};
 
 use crate::TurnEngine;
@@ -14,6 +10,9 @@ use crate::tool::{
     DynTool, HostedWebSearchTool, TOOL_WEB_SEARCH, ToolGroupId, ToolInstallGroup, WebSearchClient,
     WebSearchTool,
 };
+use pl_model::completion::{WebSearchConfig, WebSearchMode};
+use pl_model::provider::{ProviderEndpoint, ProviderWireProtocol, StandaloneWebSearchDialect};
+use pl_protocol::HostedWebSearchDialect;
 
 /// Web Search 工具对本轮其他工具的可见性约束。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -375,7 +374,7 @@ fn selected_model(
     current: &ResolvedModelRoute,
     provider_id: &ProviderId,
     provider: &ProviderConfig,
-) -> Result<pl_model::ModelInfo> {
+) -> Result<pl_model::model::ModelInfo> {
     if provider_id == &current.provider_id {
         return Ok(current.model.clone());
     }

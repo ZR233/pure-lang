@@ -286,8 +286,8 @@ async fn profiled_local_workspace_installs_workspace_tools_in_the_unified_plan()
     let runtime = CoreRuntimeProfile::local_workspace(std::env::temp_dir())
         .with_workspace_instructions("rules");
     let mut core = test_turn_engine_builder(
-        pl_model::ProviderEndpoint::deepseek(None),
-        pl_model::ModelInfo::fallback("deepseek-v4-flash"),
+        pl_model::provider::ProviderEndpoint::deepseek(None),
+        pl_model::model::ModelInfo::fallback("deepseek-v4-flash"),
     )
     .with_runtime_profile(runtime)
     .build();
@@ -323,8 +323,8 @@ async fn profiled_host_tools_do_not_register_local_workspace_tools() {
         .with_agent_workspace(crate::tool::AgentWorkspace::local(std::env::temp_dir()))
         .with_workspace_instructions("rules");
     let mut core = test_turn_engine_builder(
-        pl_model::ProviderEndpoint::deepseek(None),
-        pl_model::ModelInfo::fallback("deepseek-v4-flash"),
+        pl_model::provider::ProviderEndpoint::deepseek(None),
+        pl_model::model::ModelInfo::fallback("deepseek-v4-flash"),
     )
     .with_runtime_profile(runtime)
     .build();

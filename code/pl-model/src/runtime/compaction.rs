@@ -11,11 +11,11 @@ use super::provider_error::openai_error_to_pure;
 use super::{ModelRuntime, PureOpenAiConfig};
 use crate::completion::{
     CompletionRequest, ModelCompactionRequest, ModelCompactionResponse, OpenAiCompactionMode,
-    TokenUsage,
 };
 use crate::provider::ProviderWireProtocol;
 use crate::runtime::openai::sse;
 use crate::runtime::openai::{OpenAiProtocol, OpenAiRequestBody};
+use pl_protocol::TokenUsage;
 
 const REMOTE_COMPACTION_V2_FEATURE: &str = "remote_compaction_v2";
 const MAX_REMOTE_V2_RETRIES: u32 = 2;

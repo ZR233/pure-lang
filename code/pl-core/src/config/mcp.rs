@@ -575,7 +575,8 @@ mod tests {
 
     use super::*;
     use crate::{AgentModelConfig, ProviderConfig, ProviderId, builtin_provider_catalog};
-    use pl_model::{ModelInfo, ProviderEndpoint};
+    use pl_model::model::ModelInfo;
+    use pl_model::provider::ProviderEndpoint;
 
     #[test]
     fn public_http_endpoint_removes_userinfo_query_and_fragment() {

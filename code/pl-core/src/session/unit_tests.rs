@@ -1,8 +1,11 @@
 use super::tool_history::*;
-use pl_model::{CompletionResponse, TokenUsage, ToolCall};
+use pl_model::completion::ToolCall;
+
 use pl_protocol::{ThreadPromptSnapshot, ToolCallCaller, ToolCallKind, ToolResultRecord};
 
 use super::*;
+use pl_model::completion::CompletionResponse;
+use pl_protocol::TokenUsage;
 use pretty_assertions::assert_eq;
 
 fn text_message(text: &str) -> Message {
@@ -165,7 +168,7 @@ fn snapshot_round_trip_preserves_responses_items_and_typed_records() {
     session.push_assistant_tool_calls(
         None,
         vec![
-            pl_model::ToolCall::function(
+            pl_model::completion::ToolCall::function(
                 "fc-1",
                 "read_file",
                 serde_json::json!({"path": "README.md"}),

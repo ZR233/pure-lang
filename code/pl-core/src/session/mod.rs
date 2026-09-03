@@ -1,8 +1,8 @@
+use pl_model::completion::ToolCall;
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
-use pl_model::{CompletionResponse, ModelSession, ToolCall};
 use pl_protocol::{
     AgentSessionSnapshot, AgentWorkingState, ConversationRecoveryState, Message, MessageContent,
     MessageRole, ModelContextItem, ModelContextSectionSnapshot, ModelContextSnapshot,
@@ -12,6 +12,8 @@ use pl_protocol::{
 };
 
 use crate::working_set::canonical_content_hash;
+use pl_model::completion::CompletionResponse;
+use pl_model::runtime::ModelSession;
 
 mod fork;
 pub mod tool_history;

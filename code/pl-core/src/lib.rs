@@ -78,18 +78,7 @@ pub use model_config::{
     ProviderModelCatalogConfig, ProviderPreset, ProviderPresetId, ResolvedModelRoute,
     builtin_model_catalog, builtin_provider_catalog, provider_service_capabilities_descriptor,
 };
-pub use pl_model::{
-    MediaMixPolicy, MediaRepresentation, ModelCapabilities, ModelInfo, ModelInputCapability,
-    ModelInputLimits, ModelInputSource, ModelMediaInputProfile, ModelModality, ModelParameter,
-    ModelRequestProfile, OpenAiCompactionMode, PromptCacheDialect, PromptCacheProviderCapabilities,
-    ProviderConnectionMode, ProviderEndpoint, ProviderServiceCapabilities, ProviderWireProtocol,
-    ReasoningConfig, ReasoningInterleaved, ReasoningInterleavedField, ReasoningSummary,
-    ResponsesHostedToolCapabilities, StandaloneWebSearchDialect, ToolCapabilities, ToolSpec,
-    ToolWirePolicy, TruncationMode, WebSearchConfig, WebSearchContextSize, WebSearchFilters,
-    WebSearchMode, WebSearchProviderCapabilities, WebSearchUserLocation,
-    deepseek_default_model_slugs, default_models, mimo_default_model_slugs,
-    openai_default_model_slugs, zhipu_default_model_slugs,
-};
+
 pub use pl_protocol::{
     AgentRuntimeDelta, AttachmentModality, BudgetLimitKind, BudgetUsage, ContentPart,
     ContextSectionId, ErrorSeverity, InteractionChangedEvent, InteractionContent, InteractionKind,

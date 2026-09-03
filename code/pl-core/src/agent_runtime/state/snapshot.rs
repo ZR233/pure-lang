@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use pl_model::TokenUsage;
+use pl_protocol::TokenUsage;
 use pl_protocol::{
     AgentProgressReport, AgentSnapshot, AgentSubmissionRecord, AgentTurnOutcome, TurnBillingRecord,
 };

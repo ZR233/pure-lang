@@ -9,8 +9,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use pl_core::{AgentSession, ModelTurnClient, ModelTurnOptions, ModelTurnRequest, ReasoningConfig};
-use pl_model::{ProviderWireProtocol, ResponsesMaxTokensField};
+use pl_core::{AgentSession, ModelTurnClient, ModelTurnOptions, ModelTurnRequest};
+use pl_model::completion::ReasoningConfig;
+use pl_model::model::ResponsesMaxTokensField;
+use pl_model::provider::ProviderWireProtocol;
 use serde::Deserialize;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;

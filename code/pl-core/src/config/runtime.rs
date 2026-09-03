@@ -1,4 +1,4 @@
-use pl_model::OpenAiCompactionMode;
+use pl_model::completion::OpenAiCompactionMode;
 use serde::{Deserialize, Serialize};
 
 use crate::turn::PermissionMode;

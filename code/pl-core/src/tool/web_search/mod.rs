@@ -3,10 +3,7 @@ mod client;
 use std::future::Future;
 
 use futures::FutureExt;
-use pl_model::{
-    HostedWebSearchDialect, SearchCommands, SearchRequest, SearchSettings, ToolSpec,
-    WebSearchAction, WebSearchConfig, WebSearchFilters, WebSearchMode, WebSearchUserLocation,
-};
+
 use pl_protocol::{MessageRole, PureError, Result};
 use serde_json::{Value, json};
 
@@ -16,6 +13,10 @@ use super::{
     ToolExecution, ToolExecutor, ToolInvocation, ToolName, ToolPolicy, ToolResult,
     ToolSessionRuntime, run_tool_backend_with_cancellation,
 };
+use pl_model::completion::{
+    SearchCommands, SearchRequest, SearchSettings, WebSearchAction, WebSearchConfig, WebSearchMode,
+};
+use pl_protocol::{HostedWebSearchDialect, ToolSpec, WebSearchFilters, WebSearchUserLocation};
 
 pub const TOOL_WEB_SEARCH: &str = "web_search";
 const ASSISTANT_CONTEXT_CHAR_LIMIT: usize = 4_000;
@@ -268,7 +269,7 @@ fn command_action(commands: &SearchCommands) -> WebSearchAction {
         .unwrap_or(WebSearchAction::Other)
 }
 
-fn query_action(queries: &[pl_model::SearchQuery]) -> Option<WebSearchAction> {
+fn query_action(queries: &[pl_model::completion::SearchQuery]) -> Option<WebSearchAction> {
     match queries {
         [] => None,
         [query] => Some(WebSearchAction::Search {

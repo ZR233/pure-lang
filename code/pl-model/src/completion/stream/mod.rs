@@ -17,9 +17,10 @@ mod tagged_output;
 mod tool_stream;
 mod trace_projection;
 
-use crate::completion::{CompletionResponse, CompletionTraceContext, TokenUsage, ToolCall};
+use crate::completion::{CompletionResponse, CompletionTraceContext, ToolCall};
 use crate::runtime::openai::sse;
 use crate::runtime::openai::{OpenAiProtocol, VisibleOutputProtocol};
+use pl_protocol::TokenUsage;
 
 use event::{ModelBlockContent, ModelBlockField, ModelBlockKind, ModelStreamEvent};
 use lifecycle::StreamLifecycle;
@@ -573,7 +574,7 @@ impl StreamCompletionAccumulator {
     fn record_web_search_started(
         &mut self,
         item_id: &str,
-        action: crate::WebSearchAction,
+        action: crate::completion::WebSearchAction,
         event_tx: &AgentEventSender,
     ) {
         let Some(trace) = self.trace.as_mut() else {
@@ -587,7 +588,7 @@ impl StreamCompletionAccumulator {
     fn record_web_search_completed(
         &mut self,
         item_id: &str,
-        action: crate::WebSearchAction,
+        action: crate::completion::WebSearchAction,
         results: Option<Vec<serde_json::Value>>,
         event_tx: &AgentEventSender,
     ) {

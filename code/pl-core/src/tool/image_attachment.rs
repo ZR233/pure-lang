@@ -1,7 +1,7 @@
 use std::io::Cursor;
 
 use image::{DynamicImage, GenericImageView, ImageFormat, ImageReader, Limits};
-use pl_model::ModelInputCapability;
+use pl_model::model::ModelInputCapability;
 use pl_protocol::Result;
 use sha2::{Digest, Sha256};
 

@@ -1,6 +1,6 @@
+use pl_model::completion::{ToolCall, ToolCallPayload};
 use std::collections::HashSet;
 
-use pl_model::{ToolCall, ToolCallPayload};
 use pl_protocol::{
     Message, MessageContent, MessageRole, ToolCallKind, ToolCallRecord, ToolResultRecord,
 };

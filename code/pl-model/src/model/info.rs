@@ -234,7 +234,7 @@ impl MaxTokensField {
     }
 }
 
-/// Controls how a Responses request serializes [`CompletionRequest::max_tokens`](crate::CompletionRequest::max_tokens).
+/// Controls how a Responses request serializes [`CompletionRequest::max_tokens`](crate::completion::CompletionRequest::max_tokens).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResponsesMaxTokensField {
@@ -338,7 +338,9 @@ impl ModelInfo {
                     self.slug, capability.modality
                 ));
             }
-            if capability.sources.contains(&crate::ModelInputSource::Local)
+            if capability
+                .sources
+                .contains(&crate::model::ModelInputSource::Local)
                 && !profile.first_send.iter().any(|representation| {
                     matches!(
                         representation,
@@ -354,7 +356,7 @@ impl ModelInfo {
             if profile.first_send.contains(&MediaRepresentation::RemoteUrl)
                 && !capability
                     .sources
-                    .contains(&crate::ModelInputSource::RemoteUrl)
+                    .contains(&crate::model::ModelInputSource::RemoteUrl)
             {
                 return Err(format!(
                     "model {} input modality {:?} has a remote URL strategy without admitting URLs",

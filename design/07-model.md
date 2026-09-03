@@ -60,6 +60,13 @@ pl-core
 
 provider 适配实现可以依赖 `async-openai`、`reqwest`、`tokio-tungstenite` 和 `serde`。这些依赖只用于 `pl-model` 内部 transport、typed protocol request 和 typed stream event 解析，不向 `pl-core` 暴露。
 
+公开 API 按四个稳定域模块组织：`completion`（canonical 请求/响应、工具调用、用量与流语义）、
+`model`（模型元数据、能力、可调参数与内置目录）、`provider`（endpoint、wire 协议与服务能力声明）、
+`runtime`（单模型运行时与会话）。消费方通过 `pl_model::<domain>::` 前缀访问类型，crate 根不重导出
+类型，同一公开接口只有域级一条 canonical 路径。`pl-model` 不转发 `pl-protocol` 的类型
+（如 `TokenUsage`、`ToolSpec`、`ToolFormat`、`HostedWebSearchDialect`、`WebSearchFilters` 等），
+跨 crate 消费方直接依赖 `pl-protocol`。
+
 ## 7.3 模型能力
 
 `ModelInfo` 的能力声明使用结构化能力矩阵，不再使用 bitflag 或旧的 `input_modalities` 列表作为主协议。配置和运行时只接受新的 `capabilities` 对象：

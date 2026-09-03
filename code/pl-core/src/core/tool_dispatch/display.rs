@@ -1,7 +1,7 @@
 use super::ToolExecutionOutcome;
 
 pub(super) fn display_result_for_tool(
-    tool_call: &pl_model::ToolCall,
+    tool_call: &pl_model::completion::ToolCall,
     tool_name: &str,
     result: &str,
     outcome: ToolExecutionOutcome,

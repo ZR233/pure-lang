@@ -1,11 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use pl_model::{
-    ModelInfo, ModelModality, ProviderConnectionMode, ProviderEndpoint,
-    ProviderServiceCapabilities, ProviderWireProtocol, deepseek_default_model_slugs,
-    default_models, mimo_default_model_slugs, openai_default_model_slugs,
-    provider_transport_profile_revision, zhipu_default_model_slugs,
-};
 use pl_protocol::{
     CredentialDescriptorDto, ModelCapabilitiesDto, ModelCatalogDescriptor, ModelDescriptor,
     ModelInputCapabilityDto, ModelInputSourceDto, ModelModalityDto, ModelPricingDto,
@@ -16,6 +10,14 @@ use pl_protocol::{
 };
 
 use super::{ModelCatalogId, ProviderConfig, ProviderPresetId};
+use pl_model::model::{
+    ModelInfo, ModelModality, deepseek_default_model_slugs, default_models,
+    mimo_default_model_slugs, openai_default_model_slugs, zhipu_default_model_slugs,
+};
+use pl_model::provider::{
+    ProviderConnectionMode, ProviderEndpoint, ProviderServiceCapabilities, ProviderWireProtocol,
+    provider_transport_profile_revision,
+};
 
 const MIMO_API_BASE_URL: &str = "https://api.xiaomimimo.com/v1";
 const MIMO_TOKEN_PLAN_BASE_URL: &str = "https://token-plan-cn.xiaomimimo.com/v1";
@@ -415,10 +417,10 @@ fn modality_descriptor(modality: ModelModality) -> ModelModalityDto {
     }
 }
 
-fn input_source_descriptor(source: pl_model::ModelInputSource) -> ModelInputSourceDto {
+fn input_source_descriptor(source: pl_model::model::ModelInputSource) -> ModelInputSourceDto {
     match source {
-        pl_model::ModelInputSource::Local => ModelInputSourceDto::Local,
-        pl_model::ModelInputSource::RemoteUrl => ModelInputSourceDto::RemoteUrl,
+        pl_model::model::ModelInputSource::Local => ModelInputSourceDto::Local,
+        pl_model::model::ModelInputSource::RemoteUrl => ModelInputSourceDto::RemoteUrl,
     }
 }
 

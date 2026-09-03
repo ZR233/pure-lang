@@ -17,7 +17,6 @@ mod visible_text;
 mod web_search;
 
 pub use compaction::*;
-pub use pl_protocol::{ToolFormat, ToolSpec};
 pub use request::*;
 pub use response::*;
 pub use tool_call::*;
@@ -27,6 +26,5 @@ pub use web_search::{
     FindOperation, OpenOperation, ScreenshotOperation, SearchAllowedCaller, SearchCommands,
     SearchQuery, SearchRequest, SearchResponse, SearchResponseLength, SearchSettings,
     SportsFunction, SportsLeague, SportsOperation, SportsToolName, TimeOperation, WeatherOperation,
-    WebSearchAction, WebSearchConfig, WebSearchContextSize, WebSearchFilters, WebSearchLocation,
-    WebSearchMode, WebSearchUserLocation, WebSearchUserLocationType,
+    WebSearchAction, WebSearchConfig, WebSearchLocation, WebSearchMode,
 };

@@ -4,7 +4,7 @@ use crate::completion::stream::StreamCompletionAccumulator;
 use crate::completion::stream::event::{
     ModelBlockContent, ModelBlockField, ModelBlockKind, ToolInputPayloadKind,
 };
-use crate::{CompletionTraceContext, ToolCallPayload};
+use crate::completion::{CompletionTraceContext, ToolCallPayload};
 
 use super::*;
 
@@ -112,14 +112,14 @@ fn deepseek_web_search_sse_preserves_lifecycle_actions_and_native_context() {
     assert!(decoded.iter().any(|event| matches!(
         event,
         ModelStreamEvent::WebSearchStarted {
-            action: crate::WebSearchAction::Search { query: Some(query), .. },
+            action: crate::completion::WebSearchAction::Search { query: Some(query), .. },
             ..
         } if query == "DeepSeek Responses API"
     )));
     assert!(decoded.iter().any(|event| matches!(
         event,
         ModelStreamEvent::WebSearchCompleted {
-            action: crate::WebSearchAction::OpenPage { url: Some(url) },
+            action: crate::completion::WebSearchAction::OpenPage { url: Some(url) },
             results: Some(results),
             ..
         } if url == "https://api-docs.deepseek.com" && results[0]["opaque"]["rank"] == 1
@@ -127,7 +127,7 @@ fn deepseek_web_search_sse_preserves_lifecycle_actions_and_native_context() {
     assert!(decoded.iter().any(|event| matches!(
         event,
         ModelStreamEvent::WebSearchCompleted {
-            action: crate::WebSearchAction::FindInPage { pattern: Some(pattern), .. },
+            action: crate::completion::WebSearchAction::FindInPage { pattern: Some(pattern), .. },
             ..
         } if pattern == "web_search"
     )));

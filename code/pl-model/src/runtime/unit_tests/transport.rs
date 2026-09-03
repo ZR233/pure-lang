@@ -1,10 +1,11 @@
 use super::*;
 use crate::completion::{
-    ModelCompactionRequest, OpenAiCompactionMode, ReasoningConfig, ReasoningSummary, ToolSpec,
+    ModelCompactionRequest, OpenAiCompactionMode, ReasoningConfig, ReasoningSummary,
 };
-use crate::default_models;
+use crate::model::default_models;
 use futures::{SinkExt, StreamExt};
 use pl_protocol::ModelContextItem;
+use pl_protocol::ToolSpec;
 use pretty_assertions::assert_eq;
 use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::Message as WebSocketMessage;
@@ -125,13 +126,13 @@ fn openai_provider(base_url: String, connection_mode: ProviderConnectionMode) ->
 
 fn responses_websocket_model(slug: &str) -> ModelInfo {
     let mut model = ModelInfo::fallback(slug);
-    model.transport = crate::ModelTransportProfile::responses_websocket();
+    model.transport = crate::model::ModelTransportProfile::responses_websocket();
     model
 }
 
 fn responses_http_model(slug: &str) -> ModelInfo {
     let mut model = ModelInfo::fallback(slug);
-    model.transport = crate::ModelTransportProfile::responses_http();
+    model.transport = crate::model::ModelTransportProfile::responses_http();
     model
 }
 
@@ -1585,12 +1586,12 @@ async fn http_does_not_replay_media_requests_after_the_first_send() {
             }
             .into(),
         ])
-        .prepared_content(vec![crate::PreparedContentPart {
+        .prepared_content(vec![crate::completion::PreparedContentPart {
             attachment_id,
             modality: pl_protocol::AttachmentModality::Image,
             media_type: "image/png".to_string(),
             filename: Some("marker.png".to_string()),
-            sources: vec![crate::PreparedContentSource::DataUrl {
+            sources: vec![crate::completion::PreparedContentSource::DataUrl {
                 base64: "aW1hZ2U=".to_string(),
             }],
         }])

@@ -216,7 +216,7 @@ async fn upsert_thread_directory_row(
             runtime_revision: Set(None),
             event_sequence: Set(0),
             metadata_json: Set("{}".to_string()),
-            usage_json: Set(serde_json::to_string(&pl_model::TokenUsage::default())?),
+            usage_json: Set(serde_json::to_string(&pl_protocol::TokenUsage::default())?),
             last_context_tokens: Set(None),
             trace_sequence: Set(0),
             created_at: Set(thread.created_at),

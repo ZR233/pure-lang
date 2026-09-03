@@ -1,42 +1,19 @@
 //! 模型目录、provider endpoint、canonical completion 与单模型运行时。
+//!
+//! 公开 API 按四个稳定域模块组织（见 design/07-model.md 7.2 节）：
+//!
+//! - [`completion`]：canonical 请求/响应、工具调用、用量与流语义。
+//! - [`model`]：模型元数据、能力、可调参数与内置目录。
+//! - [`provider`]：endpoint、wire 协议与服务能力声明。
+//! - [`runtime`]：单模型运行时入口与会话状态。
+//!
+//! 消费方通过 `pl_model::<domain>::` 前缀访问类型；crate 根不重导出类型，
+//! 也不转发 `pl-protocol` 的类型，跨 crate 消费方直接依赖 `pl-protocol`。
 
-mod completion;
-mod model;
-mod provider;
-mod runtime;
-
-pub use completion::{
-    ClickOperation, CompletionRequest, CompletionRequestBuilder, CompletionResponse,
-    CompletionTraceContext, ExternalWebAccess, ExternalWebAccessMode, FinanceAssetType,
-    FinanceOperation, FindOperation, InvalidToolArguments, ModelCompactionRequest,
-    ModelCompactionResponse, OpenAiCompactionMode, OpenOperation, PreparedContentPart,
-    PreparedContentSource, ReasoningConfig, ReasoningSummary, ScreenshotOperation,
-    SearchAllowedCaller, SearchCommands, SearchQuery, SearchRequest, SearchResponse,
-    SearchResponseLength, SearchSettings, SportsFunction, SportsLeague, SportsOperation,
-    SportsToolName, TimeOperation, TokenUsage, ToolCall, ToolCallPayload, WeatherOperation,
-    WebSearchAction, WebSearchConfig, WebSearchContextSize, WebSearchFilters, WebSearchLocation,
-    WebSearchMode, WebSearchUserLocation, WebSearchUserLocationType,
-};
-pub use model::{
-    MaxTokensField, MediaMixPolicy, MediaRepresentation, MediaWireFormat, MissingCandidatePolicy,
-    ModelCapabilities, ModelFamily, ModelInfo, ModelInputCapability, ModelInputLimits,
-    ModelInputSource, ModelMediaInputProfile, ModelModality, ModelParameter,
-    ModelParameterCandidateError, ModelParameterCandidateRequest, ModelPricing,
-    ModelRequestProfile, ModelTransportProfile, ParameterWire, PromptCacheModelCapabilities,
-    ReasoningInterleaved, ReasoningInterleavedField, ResponsesMaxTokensField, ToolCapabilities,
-    TruncationMode, TruncationPolicy, WireAssignment, deepseek_default_model_slugs, default_models,
-    mimo_default_model_slugs, openai_default_model_slugs, wire_assignments_from_value,
-    zhipu_default_model_slugs,
-};
-pub use pl_protocol::{HostedWebSearchDialect, ToolCallKind, ToolCallerMode, ToolFormat, ToolSpec};
-pub use provider::{
-    ApplyPatchToolType, EffectivePromptCachePolicy, PromptCacheDialect,
-    PromptCacheProviderCapabilities, ProviderConnectionMode, ProviderEndpoint,
-    ProviderServiceCapabilities, ProviderWireProtocol, ResponsesHostedToolCapabilities,
-    StandaloneWebSearchDialect, ToolWirePolicy, WebSearchProviderCapabilities,
-    ZHIPU_CODING_PLAN_BASE_URL, provider_transport_profile_revision,
-};
-pub use runtime::{ModelInvocationContext, ModelRuntime, ModelSession};
+pub mod completion;
+pub mod model;
+pub mod provider;
+pub mod runtime;
 
 #[cfg(test)]
 mod tests {
@@ -91,5 +68,21 @@ mod tests {
                 "obsolete model architecture symbol reappeared: {forbidden}"
             );
         }
+    }
+
+    #[test]
+    fn crate_root_exports_only_domain_namespaces() {
+        let lib_rs =
+            std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"))
+                .unwrap();
+        let outside_tests = lib_rs.split("#[cfg(test)]").next().unwrap_or_default();
+        assert!(
+            !outside_tests.contains("pub use"),
+            "crate root must not re-export types; use pl_model::<domain>:: paths instead"
+        );
+        assert!(
+            !outside_tests.contains("pl_protocol"),
+            "crate root must not forward pl-protocol types; depend on pl-protocol directly"
+        );
     }
 }

@@ -10,10 +10,10 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::header::AUTHORIZATION;
 use tokio_tungstenite::tungstenite::http::{HeaderName, HeaderValue};
 
-use crate::ModelSession;
 use crate::completion::CompletionTraceContext;
 use crate::completion::stream::OpenAiRawEventStream;
 use crate::provider::RESPONSES_WEBSOCKET_DIALECT;
+use crate::runtime::ModelSession;
 use crate::runtime::openai::sse::SseStreamEvent;
 use crate::runtime::session::{ResponsesWebSocketConnection, ResponsesWebSocketSession};
 use crate::runtime::transport_policy::{

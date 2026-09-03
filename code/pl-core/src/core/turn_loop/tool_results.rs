@@ -71,7 +71,7 @@ pub(super) fn apply_batch_budget(
 
 pub(super) fn normalize_programmatic_results(
     tool_results: &mut [ToolExecutionRecord],
-    tool_calls: &[pl_model::ToolCall],
+    tool_calls: &[pl_model::completion::ToolCall],
 ) {
     for (tool_result, tool_call) in tool_results.iter_mut().zip(tool_calls) {
         if tool_call.caller.is_none() {
@@ -342,7 +342,7 @@ mod tests {
             tool_result("direct", "plain text".to_string()),
         ];
         let calls = vec![
-            pl_model::ToolCall::function(
+            pl_model::completion::ToolCall::function(
                 "programmatic",
                 "read_file",
                 serde_json::json!({}),
@@ -351,7 +351,7 @@ mod tests {
             .with_caller(Some(pl_protocol::ToolCallCaller::Program {
                 caller_id: "program-1".to_string(),
             })),
-            pl_model::ToolCall::function(
+            pl_model::completion::ToolCall::function(
                 "direct",
                 "read_file",
                 serde_json::json!({}),

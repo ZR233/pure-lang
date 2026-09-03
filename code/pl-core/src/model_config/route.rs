@@ -1,10 +1,11 @@
 use std::collections::BTreeMap;
 
-use pl_model::{ModelInfo, ProviderEndpoint};
 use pl_protocol::{PureError, Result};
 use serde::{Deserialize, Serialize};
 
 use super::{AgentRoleId, ProviderConfig, ProviderId};
+use pl_model::model::ModelInfo;
+use pl_model::provider::ProviderEndpoint;
 
 /// 模型推理强度的产品无关字符串值。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -1,6 +1,3 @@
-use pl_model::{
-    ModelRuntime, OpenAiCompactionMode, ProviderWireProtocol, ReasoningConfig, TokenUsage, ToolSpec,
-};
 use pl_protocol::{Message, ModelContextItem, PureError, Result};
 use pl_trace::AgentEventSender;
 
@@ -17,6 +14,10 @@ mod remote;
 use history::build_compacted_history;
 use history::{estimate_text_tokens, has_compactable_history};
 use local::compact_local;
+use pl_model::completion::{OpenAiCompactionMode, ReasoningConfig};
+use pl_model::provider::ProviderWireProtocol;
+use pl_model::runtime::ModelRuntime;
+use pl_protocol::{TokenUsage, ToolSpec};
 use std::future::Future;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;

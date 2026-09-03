@@ -1,4 +1,4 @@
-use pl_model::ToolSpec;
+use pl_protocol::ToolSpec;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;

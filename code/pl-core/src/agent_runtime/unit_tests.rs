@@ -15,9 +15,11 @@ use tokio::sync::{Notify, Semaphore};
 use super::host::ThreadContextMutation;
 use super::*;
 use crate::{
-    AgentSession, Message, ModelInfo, ProviderEndpoint, ResolvedModelRoute, TurnBudget,
-    TurnEngineBuilder, TurnOptions, TurnRequest,
+    AgentSession, Message, ResolvedModelRoute, TurnBudget, TurnEngineBuilder, TurnOptions,
+    TurnRequest,
 };
+use pl_model::model::ModelInfo;
+use pl_model::provider::ProviderEndpoint;
 
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("{0}")]
@@ -1057,7 +1059,7 @@ async fn conversation_recovery_excludes_rolled_back_provider_context_and_preserv
         crate::user_text_message("broken tail"),
         crate::assistant_text_message("failed answer"),
     ]);
-    let usage = pl_model::TokenUsage {
+    let usage = pl_protocol::TokenUsage {
         prompt_tokens: 120,
         completion_tokens: 30,
         total_tokens: 150,
@@ -1346,7 +1348,7 @@ async fn rollover_timeout_commits_budget_outcome_and_wakes_wait_agents() {
         pl_protocol::TurnRolloverOutcome::Failed { error }
             if error.contains("timed out after 2000ms")
     ));
-    assert_eq!(outcome.usage, pl_model::TokenUsage::default());
+    assert_eq!(outcome.usage, pl_protocol::TokenUsage::default());
     assert_eq!(
         repository.state(&agent_id).session.session.messages().len(),
         2

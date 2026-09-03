@@ -2,10 +2,6 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
 use crate::{PureError, Result};
-use pl_model::{
-    ModelInfo, ModelParameter, ModelTransportProfile, ProviderConnectionMode, ProviderEndpoint,
-    ProviderWireProtocol,
-};
 
 use crate::config::{
     ModelRouteConfig, ProviderId, ReasoningEffort, STUDIO_CONFIG_SCHEMA_VERSION, StudioConfig,
@@ -16,6 +12,8 @@ use crate::{
     AgentModelConfig, ProviderCapabilitySelection, ProviderConfig, ProviderModelCatalogConfig,
     ProviderPresetId, builtin_provider_catalog,
 };
+use pl_model::model::{ModelInfo, ModelParameter, ModelTransportProfile};
+use pl_model::provider::{ProviderConnectionMode, ProviderEndpoint, ProviderWireProtocol};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderModelEdit {

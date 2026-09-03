@@ -16,7 +16,7 @@ use pl_core::config::{
     BuiltinMcpServerState, InstructionsConfig, McpServerConfig, RuntimeConfig, SkillsConfig,
 };
 use pl_core::{AgentModelConfig, ProviderConfig};
-use pl_model::WebSearchConfig;
+use pl_model::completion::WebSearchConfig;
 use serde::{Deserialize, Serialize};
 
 pub use agent_profile::{
@@ -106,7 +106,8 @@ impl StudioRole {
     }
 }
 
-pub use pl_model::{WebSearchContextSize, WebSearchLocation, WebSearchMode};
+pub use pl_model::completion::{WebSearchLocation, WebSearchMode};
+pub use pl_protocol::WebSearchContextSize;
 
 /// Studio 自有的 MCP 配置段。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]

@@ -3,12 +3,12 @@ use std::collections::HashMap;
 use pl_protocol::{
     AttachmentModality, ContentPart, Message, MessageContent, MessageRole, ModelContextItem,
     PureError, ResponsesContextItem, ResponsesContextItemKind, ToolCallCaller, ToolCallKind,
-    ToolCallRecord, ToolMediaContext, ToolResultReceipt, ToolResultRecord,
+    ToolCallRecord, ToolMediaContext, ToolResultReceipt, ToolResultRecord, ToolSpec,
 };
 use pretty_assertions::assert_eq;
 
 use super::*;
-use crate::completion::{ReasoningConfig, ReasoningSummary, ToolCallPayload, ToolSpec};
+use crate::completion::{ReasoningConfig, ReasoningSummary, ToolCallPayload};
 use crate::model::info::{
     MaxTokensField, MediaRepresentation, ModelMediaInputProfile, ResponsesMaxTokensField,
 };
@@ -45,13 +45,13 @@ fn image_message() -> Message {
     }
 }
 
-fn image_prepared_content() -> Vec<crate::PreparedContentPart> {
-    vec![crate::PreparedContentPart {
+fn image_prepared_content() -> Vec<crate::completion::PreparedContentPart> {
+    vec![crate::completion::PreparedContentPart {
         attachment_id: "attachment-1".to_string(),
         modality: AttachmentModality::Image,
         media_type: "image/png".to_string(),
         filename: Some("sample.png".to_string()),
-        sources: vec![crate::PreparedContentSource::DataUrl {
+        sources: vec![crate::completion::PreparedContentSource::DataUrl {
             base64: "aGVsbG8=".to_string(),
         }],
     }]
@@ -85,19 +85,19 @@ fn prepared_image(
     attachment_id: &str,
     remote_url: Option<&str>,
     base64: Option<&str>,
-) -> crate::PreparedContentPart {
+) -> crate::completion::PreparedContentPart {
     let mut sources = Vec::new();
     if let Some(remote_url) = remote_url {
-        sources.push(crate::PreparedContentSource::RemoteUrl {
+        sources.push(crate::completion::PreparedContentSource::RemoteUrl {
             url: remote_url.to_string(),
         });
     }
     if let Some(base64) = base64 {
-        sources.push(crate::PreparedContentSource::DataUrl {
+        sources.push(crate::completion::PreparedContentSource::DataUrl {
             base64: base64.to_string(),
         });
     }
-    crate::PreparedContentPart {
+    crate::completion::PreparedContentPart {
         attachment_id: attachment_id.to_string(),
         modality: AttachmentModality::Image,
         media_type: "image/png".to_string(),
@@ -126,27 +126,27 @@ fn data_media(
     attachment_id: &str,
     modality: AttachmentModality,
     media_type: &str,
-) -> crate::PreparedContentPart {
-    crate::PreparedContentPart {
+) -> crate::completion::PreparedContentPart {
+    crate::completion::PreparedContentPart {
         attachment_id: attachment_id.to_string(),
         modality,
         media_type: media_type.to_string(),
         filename: Some(attachment_id.to_string()),
-        sources: vec![crate::PreparedContentSource::DataUrl {
+        sources: vec![crate::completion::PreparedContentSource::DataUrl {
             base64: "cGF5bG9hZA==".to_string(),
         }],
     }
 }
 
-fn profiled_media_model(modality: crate::ModelModality) -> ModelInfo {
+fn profiled_media_model(modality: crate::model::ModelModality) -> ModelInfo {
     let mut model = ModelInfo::fallback("profiled-media-model");
     model.request_profile.media = vec![ModelMediaInputProfile {
         modality,
         wire: match modality {
-            crate::ModelModality::Image => crate::MediaWireFormat::ChatImageUrl,
-            crate::ModelModality::Video => crate::MediaWireFormat::ChatVideoUrl,
-            crate::ModelModality::File => crate::MediaWireFormat::ChatFileUrl,
-            crate::ModelModality::Text | crate::ModelModality::Audio => {
+            crate::model::ModelModality::Image => crate::model::MediaWireFormat::ChatImageUrl,
+            crate::model::ModelModality::Video => crate::model::MediaWireFormat::ChatVideoUrl,
+            crate::model::ModelModality::File => crate::model::MediaWireFormat::ChatFileUrl,
+            crate::model::ModelModality::Text | crate::model::ModelModality::Audio => {
                 panic!("unsupported media test modality")
             }
         },
@@ -477,13 +477,13 @@ fn chat_serializes_exact_video_url_and_file_url_parts() {
     for (modality, model_modality, media_type, wire_field) in [
         (
             AttachmentModality::Video,
-            crate::ModelModality::Video,
+            crate::model::ModelModality::Video,
             "video/mp4",
             "video_url",
         ),
         (
             AttachmentModality::File,
-            crate::ModelModality::File,
+            crate::model::ModelModality::File,
             "application/pdf",
             "file_url",
         ),
@@ -513,12 +513,12 @@ fn responses_rejects_video_and_file_attachments() {
     for (modality, model_modality, media_type) in [
         (
             AttachmentModality::Video,
-            crate::ModelModality::Video,
+            crate::model::ModelModality::Video,
             "video/mp4",
         ),
         (
             AttachmentModality::File,
-            crate::ModelModality::File,
+            crate::model::ModelModality::File,
             "application/pdf",
         ),
     ] {
@@ -662,7 +662,7 @@ fn request_with_function_tool_history(tool_result: Option<ToolResultRecord>) -> 
 }
 
 fn bundled_model(slug: &str) -> ModelInfo {
-    crate::default_models()
+    crate::model::default_models()
         .into_iter()
         .find(|model| model.slug == slug)
         .unwrap_or_else(|| panic!("test bundled model not found: {slug}"))
@@ -818,7 +818,7 @@ fn mimo_chat_body_uses_catalog_wire_policy_without_reasoning_effort() {
     assert!(!model.capabilities.tools.parallel_tool_calls);
     assert_eq!(
         model.capabilities.interleaved.unwrap().field,
-        crate::ReasoningInterleavedField::ReasoningContent
+        crate::model::ReasoningInterleavedField::ReasoningContent
     );
 }
 
@@ -1192,20 +1192,20 @@ fn responses_parse_response_preserves_unknown_native_items_for_stateless_replay(
 fn responses_body_writes_current_hosted_web_search_shape() {
     let mut request = request_with_effort("xhigh");
     request.tools = vec![ToolSpec::WebSearch {
-        dialect: crate::HostedWebSearchDialect::OpenAiResponses,
+        dialect: pl_protocol::HostedWebSearchDialect::OpenAiResponses,
         external_web_access: true,
         indexed_web_access: Some(true),
-        filters: Some(crate::WebSearchFilters {
+        filters: Some(pl_protocol::WebSearchFilters {
             allowed_domains: vec!["example.com".to_string()],
         }),
-        user_location: Some(crate::WebSearchUserLocation {
-            kind: crate::WebSearchUserLocationType::Approximate,
+        user_location: Some(pl_protocol::WebSearchUserLocation {
+            kind: pl_protocol::WebSearchUserLocationType::Approximate,
             country: Some("US".to_string()),
             region: Some("CA".to_string()),
             city: None,
             timezone: Some("America/Los_Angeles".to_string()),
         }),
-        search_context_size: Some(crate::WebSearchContextSize::High),
+        search_context_size: Some(pl_protocol::WebSearchContextSize::High),
         search_content_types: None,
     }];
 
@@ -1227,7 +1227,7 @@ fn responses_body_writes_current_hosted_web_search_shape() {
 fn deepseek_responses_body_writes_only_native_web_search_type() {
     let mut request = request_with_effort("high");
     request.tools = vec![ToolSpec::WebSearch {
-        dialect: crate::HostedWebSearchDialect::DeepSeekResponses,
+        dialect: pl_protocol::HostedWebSearchDialect::DeepSeekResponses,
         external_web_access: true,
         indexed_web_access: None,
         filters: None,

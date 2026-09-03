@@ -1,6 +1,3 @@
-use pl_model::{
-    CompletionRequest, ModelInvocationContext, ModelRuntime, ReasoningConfig, ReasoningSummary,
-};
 #[cfg(test)]
 use pl_protocol::ErrorSeverity;
 use pl_protocol::{Message, MessageContent, MessageRole, PureError, Result};
@@ -31,6 +28,8 @@ use crate::turn::BudgetTracker;
 use crate::turn::{
     ToolApprovalDecision, ToolApprovalRequest, TurnOptions, TurnRequest, TurnResult,
 };
+use pl_model::completion::{CompletionRequest, ReasoningConfig, ReasoningSummary};
+use pl_model::runtime::{ModelInvocationContext, ModelRuntime};
 use progress::{ProgressEmitter, ProgressVerbosity};
 
 mod model_turn;
@@ -589,7 +588,7 @@ where
 #[cfg(test)]
 use permission::approval_request;
 #[cfg(test)]
-use pl_model::TokenUsage;
+use pl_protocol::TokenUsage;
 #[cfg(test)]
 use tool_dispatch::{ToolExecutionContext, execute_tool_call_batch, execute_tool_calls};
 #[cfg(test)]

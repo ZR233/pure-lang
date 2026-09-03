@@ -1,13 +1,14 @@
-use pl_model::{
-    ModelInfo, ModelTransportProfile, ProviderEndpoint, ProviderServiceCapabilities,
-    WebSearchConfig, WebSearchProviderCapabilities,
-};
 use pretty_assertions::assert_eq;
 
 use super::*;
 use crate::{
     AgentRoleId, ModelRouteConfig, ProviderCapabilitySelection, ProviderConfig,
     ProviderModelCatalogConfig, ReasoningEffort,
+};
+use pl_model::completion::WebSearchConfig;
+use pl_model::model::{ModelInfo, ModelTransportProfile};
+use pl_model::provider::{
+    ProviderEndpoint, ProviderServiceCapabilities, WebSearchProviderCapabilities,
 };
 
 fn provider_id(value: &str) -> ProviderId {
@@ -63,7 +64,7 @@ fn deepseek_provider_with_hosted_search() -> (ProviderConfig, ModelInfo) {
     provider.capabilities = ProviderCapabilitySelection::Explicit(ProviderServiceCapabilities {
         web_search: WebSearchProviderCapabilities {
             hosted_responses: true,
-            hosted_dialect: pl_model::HostedWebSearchDialect::DeepSeekResponses,
+            hosted_dialect: pl_protocol::HostedWebSearchDialect::DeepSeekResponses,
             standalone: None,
         },
         ..ProviderServiceCapabilities::default()
@@ -238,7 +239,7 @@ fn planner_distinguishes_disabled_missing_credential_and_model_support() {
     let models = models_with_current(provider.clone(), model.clone());
     let route = models.resolve(&role_id("executor")).unwrap();
     let disabled = WebSearchConfig {
-        mode: pl_model::WebSearchMode::Disabled,
+        mode: pl_model::completion::WebSearchMode::Disabled,
         ..WebSearchConfig::default()
     };
     assert_eq!(

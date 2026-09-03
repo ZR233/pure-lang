@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use crate::WebSearchAction;
+use crate::completion::WebSearchAction;
 use crate::completion::stream::event::{
     ModelStreamEvent, ToolInputDeltaPayload, ToolInputPayloadKind,
 };

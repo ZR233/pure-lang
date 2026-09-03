@@ -2,7 +2,7 @@
 
 use serde::Deserialize;
 
-use crate::completion::TokenUsage;
+use pl_protocol::TokenUsage;
 
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct ProviderTokenUsage {

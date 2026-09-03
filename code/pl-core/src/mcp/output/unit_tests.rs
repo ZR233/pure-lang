@@ -9,7 +9,7 @@ use rmcp::model::ContentBlock;
 use super::*;
 
 fn model(slug: &str) -> ModelInfo {
-    pl_model::default_models()
+    pl_model::model::default_models()
         .into_iter()
         .find(|model| model.slug == slug)
         .expect("bundled model")

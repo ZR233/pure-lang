@@ -2,8 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 
-pub use pl_protocol::TokenUsage;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReasoningConfig {
     pub effort: Option<String>,

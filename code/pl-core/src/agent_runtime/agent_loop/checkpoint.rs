@@ -416,7 +416,7 @@ fn append_inference(
         .append(inference.billing.clone())
         .map_err(AgentRuntimeError::InvalidInput)?;
     state.session.usage = state.session.billing_by_turn.values().fold(
-        pl_model::TokenUsage::default(),
+        pl_protocol::TokenUsage::default(),
         |mut aggregate, billing| {
             let usage = billing.aggregate_usage();
             aggregate.prompt_tokens = aggregate.prompt_tokens.saturating_add(usage.prompt_tokens);

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use pl_model::ModelInfo;
+use pl_model::model::ModelInfo;
 use pl_protocol::Message;
 use serde::{Deserialize, Serialize};
 

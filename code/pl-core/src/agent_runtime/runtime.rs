@@ -196,7 +196,7 @@ where
             outcome: pl_protocol::TurnOutcome::cancelled(
                 pl_protocol::TurnCancellationCause::Recovery,
             ),
-            usage: pl_model::TokenUsage::default(),
+            usage: pl_protocol::TokenUsage::default(),
             started_at: None,
             finished_at: unix_timestamp(),
         };

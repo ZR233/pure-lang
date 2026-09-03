@@ -3,10 +3,6 @@ use std::future::pending;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use pl_model::{
-    ModelInfo, ModelRuntime, ModelTransportProfile, OpenAiCompactionMode, ProviderEndpoint,
-    ProviderWireProtocol,
-};
 use pl_protocol::{Message, MessageContent, MessageRole, ModelContextItem};
 use pl_trace::{AgentEvent, AgentEventSender, TracePartSource};
 use pretty_assertions::assert_eq;
@@ -18,6 +14,10 @@ use super::history::{
 };
 use super::*;
 use crate::core::progress::{ProgressEmitter, ProgressVerbosity};
+use pl_model::completion::OpenAiCompactionMode;
+use pl_model::model::{ModelInfo, ModelTransportProfile};
+use pl_model::provider::{ProviderEndpoint, ProviderWireProtocol};
+use pl_model::runtime::ModelRuntime;
 
 fn text_message(role: MessageRole, text: &str) -> Message {
     Message {

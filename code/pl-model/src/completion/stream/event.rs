@@ -1,5 +1,5 @@
-use crate::WebSearchAction;
-use crate::completion::TokenUsage;
+use crate::completion::WebSearchAction;
+use pl_protocol::TokenUsage;
 use pl_protocol::{ResponsesContextItem, ToolCallCaller};
 use pl_trace::TraceTextChannel;
 

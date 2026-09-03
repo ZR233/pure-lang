@@ -1,7 +1,3 @@
-use pl_model::{
-    CompletionRequest, CompletionResponse, ModelInvocationContext, ModelRuntime, ReasoningConfig,
-    ReasoningSummary, ToolSpec,
-};
 use pl_protocol::Result;
 use tokio_util::sync::CancellationToken;
 
@@ -9,6 +5,11 @@ use crate::message::{
     CompletionResponseSnapshot, completion_response_message_text, completion_response_snapshot,
 };
 use crate::{AgentSession, ResolvedModelRoute};
+use pl_model::completion::{
+    CompletionRequest, CompletionResponse, ReasoningConfig, ReasoningSummary,
+};
+use pl_model::runtime::{ModelInvocationContext, ModelRuntime};
+use pl_protocol::ToolSpec;
 
 /// 不需要完整 turn loop 的单次模型请求。
 ///

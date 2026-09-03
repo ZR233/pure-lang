@@ -1061,11 +1061,11 @@ async fn capture_default_tools_request() -> serde_json::Value {
         serve_sse_sequence(vec![final_sse("hosted-tools", "ok")]).await;
     let mut endpoint = ProviderEndpoint::openai(Some(base_url));
     endpoint.bearer_token = Some("test-token".to_string());
-    let mut model = pl_model::default_models()
+    let mut model = pl_model::model::default_models()
         .into_iter()
         .find(|model| model.slug == "gpt-5.6-sol")
         .unwrap();
-    model.transport.default_connection_mode = pl_model::ProviderConnectionMode::Http;
+    model.transport.default_connection_mode = pl_model::provider::ProviderConnectionMode::Http;
     let mut core = test_turn_engine_builder(endpoint, model).build();
     core.install_default_tools(std::env::temp_dir(), Some("rules".to_string()))
         .await
@@ -1092,9 +1092,9 @@ async fn capture_default_tools_request() -> serde_json::Value {
     bodies.lock().unwrap()[0].clone()
 }
 
-fn local_responses_model() -> pl_model::ModelInfo {
-    let mut model = pl_model::ModelInfo::fallback("local-responses");
-    model.transport = pl_model::ModelTransportProfile::responses_http();
+fn local_responses_model() -> pl_model::model::ModelInfo {
+    let mut model = pl_model::model::ModelInfo::fallback("local-responses");
+    model.transport = pl_model::model::ModelTransportProfile::responses_http();
     model
 }
 

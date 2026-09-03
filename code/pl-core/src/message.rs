@@ -27,7 +27,7 @@ pub fn text_preview_chars(text: &str, max_chars: usize) -> String {
 /// 模型完成响应面向宿主产品的结构化快照。
 ///
 /// 产品层可以把该快照投影到自己的 Web/API DTO，但不应重复解释
-/// `pl_model::CompletionResponse` 的 reasoning、文本、tool call 和 usage 语义。
+/// `pl_model::completion::CompletionResponse` 的 reasoning、文本、tool call 和 usage 语义。
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompletionResponseSnapshot {
     id: Option<String>,
@@ -169,7 +169,7 @@ impl CompletionResponseOutputSnapshot {
 
 /// 从模型完成响应生成结构化宿主快照。
 pub fn completion_response_snapshot(
-    response: &pl_model::CompletionResponse,
+    response: &pl_model::completion::CompletionResponse,
 ) -> CompletionResponseSnapshot {
     let mut output = Vec::new();
     if let Some(reasoning) = response
@@ -207,7 +207,9 @@ pub fn completion_response_snapshot(
 ///
 /// reasoning 和 tool call 不属于普通助手消息文本；宿主产品需要标题、摘要等
 /// 纯文本用途时应使用该 helper，而不是重复解析 `CompletionResponse`。
-pub fn completion_response_message_text(response: &pl_model::CompletionResponse) -> String {
+pub fn completion_response_message_text(
+    response: &pl_model::completion::CompletionResponse,
+) -> String {
     completion_response_snapshot(response)
         .output()
         .iter()
@@ -398,18 +400,18 @@ mod tests {
 
     #[test]
     fn completion_response_snapshot_projects_model_response_shape() {
-        let response = pl_model::CompletionResponse {
+        let response = pl_model::completion::CompletionResponse {
             response_id: Some("resp_1".to_string()),
             content: Some("answer".to_string()),
             reasoning_content: Some("thinking".to_string()),
             tool_calls: vec![
-                pl_model::ToolCall::function(
+                pl_model::completion::ToolCall::function(
                     "call_item",
                     "read_file",
                     serde_json::json!({"path": "Cargo.toml"}),
                     "call_1",
                 ),
-                pl_model::ToolCall::custom(
+                pl_model::completion::ToolCall::custom(
                     "custom_item",
                     "apply_patch",
                     "*** Begin Patch",
@@ -419,7 +421,7 @@ mod tests {
             responses_context_items: Vec::new(),
             orchestration: Default::default(),
             timing: None,
-            usage: pl_model::TokenUsage {
+            usage: pl_protocol::TokenUsage {
                 prompt_tokens: 10,
                 cached_prompt_tokens: 4,
                 cache_write_tokens: 1,
@@ -460,11 +462,11 @@ mod tests {
 
     #[test]
     fn completion_response_message_text_uses_only_visible_message_output() {
-        let response = pl_model::CompletionResponse {
+        let response = pl_model::completion::CompletionResponse {
             response_id: Some("resp_1".to_string()),
             content: Some("Task title".to_string()),
             reasoning_content: Some("hidden chain of thought".to_string()),
-            tool_calls: vec![pl_model::ToolCall::function(
+            tool_calls: vec![pl_model::completion::ToolCall::function(
                 "call_item",
                 "read_file",
                 serde_json::json!({"path": "Cargo.toml"}),
@@ -473,7 +475,7 @@ mod tests {
             responses_context_items: Vec::new(),
             orchestration: Default::default(),
             timing: None,
-            usage: pl_model::TokenUsage::default(),
+            usage: pl_protocol::TokenUsage::default(),
             model: "test-model".to_string(),
         };
 

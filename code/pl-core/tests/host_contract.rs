@@ -4,10 +4,13 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use pl_core::{
-    AgentModelConfig, AgentRoleId, AgentSession, ModelInfo, ModelRouteConfig, ModelTurnClient,
-    ModelTurnOptions, ModelTurnRequest, ProviderConfig, ProviderEndpoint, ProviderId, TurnBudget,
-    TurnEngineBuilder, TurnRequest, WebSearchAvailability, WebSearchConfig, plan_web_search,
+    AgentModelConfig, AgentRoleId, AgentSession, ModelRouteConfig, ModelTurnClient,
+    ModelTurnOptions, ModelTurnRequest, ProviderConfig, ProviderId, TurnBudget, TurnEngineBuilder,
+    TurnRequest, WebSearchAvailability, plan_web_search,
 };
+use pl_model::completion::WebSearchConfig;
+use pl_model::model::ModelInfo;
+use pl_model::provider::ProviderEndpoint;
 use pl_protocol::MessageRole;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;

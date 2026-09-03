@@ -5,8 +5,8 @@ use pl_trace::{
     TraceToolInvocation, TraceToolOutput, TraceToolState,
 };
 
-use crate::WebSearchAction;
 use crate::completion::ToolCall;
+use crate::completion::WebSearchAction;
 
 use super::super::tool_stream::ToolCallAccumulatorSnapshot;
 use super::TraceProjection;

@@ -2,7 +2,7 @@ use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{ExecutionEnvironment, ExecutionOs, ExecutionTransport, ShellDialect};
-use pl_model::ModelInfo;
+use pl_model::model::ModelInfo;
 use pl_protocol::MessageRole;
 use pretty_assertions::assert_eq;
 

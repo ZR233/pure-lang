@@ -1,4 +1,4 @@
-use pl_model::EffectivePromptCachePolicy;
+use pl_model::provider::EffectivePromptCachePolicy;
 use pl_protocol::Result;
 
 use crate::derive_prompt_cache_key;

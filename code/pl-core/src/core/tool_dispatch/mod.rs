@@ -5,7 +5,7 @@ use std::time::Instant;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use futures::stream::{FuturesUnordered, StreamExt};
-use pl_model::ToolCallPayload;
+use pl_model::completion::ToolCallPayload;
 use pl_protocol::{InferenceOrchestrationMetrics, ToolCallKind};
 use pl_trace::{TracePartAction, TraceToolActivePhase, TraceToolFailureKind, TraceToolInvocation};
 use tokio::sync::RwLock;
@@ -74,7 +74,7 @@ impl ToolExecutionOutcome {
 }
 
 pub(super) struct ScheduledToolExecution<'a> {
-    pub(super) tool_call: pl_model::ToolCall,
+    pub(super) tool_call: pl_model::completion::ToolCall,
     pub(super) item: pl_trace::TracePart,
     pub(super) future: BoxFuture<'a, Result<ToolExecutionRecord, ToolExecutionError>>,
     pub(super) budget_timing: ToolBudgetTiming,
@@ -121,7 +121,7 @@ pub(super) struct ToolExecutionContext<'a> {
 
 #[cfg(test)]
 pub(super) async fn execute_tool_calls(
-    tool_calls: &[pl_model::ToolCall],
+    tool_calls: &[pl_model::completion::ToolCall],
     budget_tracker: &mut BudgetTracker,
     recorder: &mut crate::trace::TraceRecorder,
     context: ToolExecutionContext<'_>,
@@ -132,7 +132,7 @@ pub(super) async fn execute_tool_calls(
 }
 
 pub(super) async fn execute_tool_call_batch(
-    tool_calls: &[pl_model::ToolCall],
+    tool_calls: &[pl_model::completion::ToolCall],
     budget_tracker: &mut BudgetTracker,
     recorder: &mut crate::trace::TraceRecorder,
     context: ToolExecutionContext<'_>,
@@ -579,7 +579,7 @@ pub(super) fn namespaced_tool_trace_part_id(turn_id: &str, tool_call_id: &str) -
     format!("{turn_id}-{tool_call_id}")
 }
 
-fn tool_trace_part_id(turn_id: &str, tool_call: &pl_model::ToolCall) -> String {
+fn tool_trace_part_id(turn_id: &str, tool_call: &pl_model::completion::ToolCall) -> String {
     let tool_call_id = if tool_call.id.is_empty() {
         tool_call.call_id.as_str()
     } else {
@@ -589,7 +589,10 @@ fn tool_trace_part_id(turn_id: &str, tool_call: &pl_model::ToolCall) -> String {
 }
 
 impl ToolInvocation {
-    fn from_tool_call(tool_call: &pl_model::ToolCall, context: ToolCallContext) -> Self {
+    fn from_tool_call(
+        tool_call: &pl_model::completion::ToolCall,
+        context: ToolCallContext,
+    ) -> Self {
         Self {
             name: tool_call.name.clone(),
             payload: ToolPayload::from_tool_call_payload(&tool_call.payload),

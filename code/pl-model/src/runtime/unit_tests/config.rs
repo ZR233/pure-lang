@@ -1,6 +1,6 @@
 use super::super::provider_error::redact_secret_like_values;
 use super::*;
-use crate::ModelTransportProfile;
+use crate::model::ModelTransportProfile;
 use pretty_assertions::assert_eq;
 
 #[test]

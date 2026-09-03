@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use base64::Engine;
-use pl_model::{MediaRepresentation, ModelInfo, ModelInputCapability, ModelModality};
+
 use pl_protocol::{PureError, Result, ThreadAttachment};
 use rmcp::model::{CallToolResult, ContentBlock};
 use serde::Serialize;
@@ -12,6 +12,7 @@ use crate::tool::{
     maximum_base64_input_len, normalize_tool_image,
 };
 use crate::{AttachmentRuntime, ToolImageAttachmentInput};
+use pl_model::model::{MediaRepresentation, ModelInfo, ModelInputCapability, ModelModality};
 
 /// 当前 Turn 接收 MCP typed image result 所需的完整模型与宿主边界。
 #[derive(Debug, Clone)]
