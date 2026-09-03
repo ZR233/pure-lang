@@ -262,6 +262,3 @@ pub fn bump_project_patch(project_dir: &Path, skill_dir: &Path) -> Result<()> {
     usage.updated_at = now;
     util::save_usage(project_dir, skill_dir, &usage)
 }
-
-#[cfg(test)]
-mod unit_tests;

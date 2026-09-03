@@ -447,6 +447,3 @@ enum StreamKind {
     Stdout,
     Stderr,
 }
-
-#[cfg(test)]
-mod unit_tests;

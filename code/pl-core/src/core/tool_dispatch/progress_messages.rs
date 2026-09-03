@@ -67,3 +67,56 @@ pub(super) fn tool_terminal_progress_message(record: &ToolExecutionRecord) -> St
         ToolExecutionOutcome::Cancelled => format!("工具 `{name}` 已取消。"),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+    use pl_protocol::ToolCallKind;
+
+    fn completed_record(name: &str) -> ToolExecutionRecord {
+        ToolExecutionRecord {
+            id: "item-1".to_string(),
+            call_id: "call-1".to_string(),
+            name: name.to_string(),
+            kind: ToolCallKind::Function,
+            result: String::new(),
+            display_result: String::new(),
+            arguments: "{}".to_string(),
+            outcome: ToolExecutionOutcome::Succeeded,
+            exit_code: None,
+            timed_out: false,
+            model_attachments: Vec::new(),
+            runtime_events: Vec::new(),
+            execution_millis: 0,
+        }
+    }
+    #[test]
+    fn progress_messages_describe_workflow_and_subagent_lifecycle() {
+        assert_eq!(
+            tool_start_progress_message("workflow_transition"),
+            "正在切换工作流状态。"
+        );
+        assert_eq!(
+            tool_terminal_progress_message(&completed_record("workflow_transition")),
+            "工作流状态已切换。"
+        );
+        assert_eq!(
+            tool_start_progress_message("spawn_agent"),
+            "正在创建子代理。"
+        );
+        assert_eq!(
+            tool_terminal_progress_message(&completed_record("spawn_agent")),
+            "子代理已创建。"
+        );
+        assert_eq!(
+            tool_start_progress_message("read_file"),
+            "正在执行工具 `read_file`。"
+        );
+        assert_eq!(
+            tool_terminal_progress_message(&completed_record("read_file")),
+            "工具 `read_file` 已完成。"
+        );
+    }
+}

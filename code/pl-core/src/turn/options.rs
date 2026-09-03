@@ -271,3 +271,30 @@ impl std::fmt::Debug for TurnOptions {
             .finish()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+
+    #[test]
+    fn permission_mode_accepts_only_current_labels() {
+        assert_eq!(
+            PermissionMode::from_label("request-approval"),
+            Some(PermissionMode::RequestApproval)
+        );
+        assert_eq!(
+            PermissionMode::from_label("auto-review"),
+            Some(PermissionMode::AutoReview)
+        );
+        assert_eq!(
+            PermissionMode::from_label("full-access"),
+            Some(PermissionMode::FullAccess)
+        );
+        assert_eq!(PermissionMode::from_label("workspace-write"), None);
+        assert_eq!(PermissionMode::from_label("old-auto-allow"), None);
+        assert!(PermissionMode::FullAccess.allows_workspace_escape());
+        assert!(!PermissionMode::RequestApproval.allows_workspace_escape());
+    }
+}

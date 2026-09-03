@@ -54,3 +54,38 @@ pub(super) fn redact_user_input_display_result(
     }
     serde_json::to_string(&value).unwrap_or_else(|_| "[redacted user input]".to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+    #[test]
+    fn redacts_secret_user_input_answers_for_display() {
+        let arguments = serde_json::json!({
+            "questions": [
+                { "id": "api_key", "header": "Key", "question": "API key?", "isSecret": true },
+                { "id": "mode", "header": "Mode", "question": "Mode?", "isSecret": false }
+            ]
+        });
+        let result = serde_json::json!({
+            "answers": {
+                "api_key": { "answers": ["sk-secret"] },
+                "mode": { "answers": ["Fast"] }
+            }
+        })
+        .to_string();
+
+        let display = redact_user_input_display_result(&arguments, &result);
+
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&display).unwrap(),
+            serde_json::json!({
+                "answers": {
+                    "api_key": { "answers": ["[redacted]"] },
+                    "mode": { "answers": ["Fast"] }
+                }
+            })
+        );
+    }
+}

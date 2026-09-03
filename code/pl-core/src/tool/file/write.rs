@@ -308,3 +308,387 @@ impl StaticTool for MovePathTool {
         }
     }
 }
+
+#[cfg(test)]
+mod ops_tests {
+    use pretty_assertions::assert_eq;
+
+    use super::super::test_support::*;
+    use super::*;
+    use crate::{ToolApprovalContext, WorkspaceAccess};
+
+    #[tokio::test]
+    async fn write_file_waits_for_workspace_write_lock() {
+        let root = unique_temp_dir("write-lock-tool");
+        let context = context(&root).await;
+        let workspace = tool_workspace(&root);
+        let guard = workspace.write_lock().await;
+        let tool = WriteFileTool::new(workspace);
+        let write_context = context.clone();
+        let write_task = tokio::spawn(async move {
+            tool.execute_with_tool_input(
+                input(serde_json::json!({
+                    "path": "locked.txt",
+                    "content": "after\n",
+                    "mode": "create"
+                })),
+                write_context,
+            )
+            .await
+        });
+        tokio::task::yield_now().await;
+
+        assert!(!write_task.is_finished());
+        drop(guard);
+        write_task.await.unwrap().unwrap();
+        assert_eq!(
+            tokio::fs::read_to_string(root.join("locked.txt"))
+                .await
+                .unwrap(),
+            "after\n"
+        );
+        let _ = tokio::fs::remove_dir_all(root).await;
+    }
+
+    #[tokio::test]
+    async fn directory_workspace_allows_only_configured_project_prefixes() {
+        let root = unique_temp_dir("directory-write-prefixes");
+        tokio::fs::create_dir_all(root.join("allowed"))
+            .await
+            .unwrap();
+        let tool = WriteFileTool::new(directory_workspace(&root, Some(&["allowed"])));
+
+        tool.execute_with_tool_input(
+            input(serde_json::json!({
+                "path": "allowed/ok.txt",
+                "content": "ok",
+                "mode": "create"
+            })),
+            context(&root).await,
+        )
+        .await
+        .unwrap();
+        let error = tool
+            .execute_with_tool_input(
+                input(serde_json::json!({
+                    "path": "denied.txt",
+                    "content": "denied",
+                    "mode": "create"
+                })),
+                context(&root).await,
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("writablePaths"), "{error}");
+        assert_eq!(
+            tokio::fs::read_to_string(root.join("allowed/ok.txt"))
+                .await
+                .unwrap(),
+            "ok"
+        );
+        assert!(
+            !tokio::fs::try_exists(root.join("denied.txt"))
+                .await
+                .unwrap()
+        );
+        let _ = tokio::fs::remove_dir_all(root).await;
+    }
+
+    #[tokio::test]
+    async fn directory_workspace_empty_list_is_project_read_only_but_not_an_external_sandbox() {
+        let root = unique_temp_dir("directory-empty");
+        let outside = unique_temp_dir("directory-external");
+        tokio::fs::create_dir_all(&root).await.unwrap();
+        tokio::fs::create_dir_all(&outside).await.unwrap();
+        let tool = WriteFileTool::new(directory_workspace(&root, Some(&[])));
+
+        let project_error = tool
+            .execute_with_tool_input(
+                input(serde_json::json!({
+                    "path": "denied.txt",
+                    "content": "denied",
+                    "mode": "create"
+                })),
+                context(&root).await,
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+        let external_context = context(&root).await.with_approval(ToolApprovalContext::new(
+            crate::turn::PermissionMode::FullAccess,
+            WorkspaceAccess::ExternalAllowed,
+        ));
+        tool.execute_with_tool_input(
+            input(serde_json::json!({
+                "path": outside.join("allowed.txt").to_string_lossy(),
+                "content": "outside",
+                "mode": "create"
+            })),
+            external_context,
+        )
+        .await
+        .unwrap();
+
+        assert!(project_error.contains("writablePaths"), "{project_error}");
+        assert_eq!(
+            tokio::fs::read_to_string(outside.join("allowed.txt"))
+                .await
+                .unwrap(),
+            "outside"
+        );
+        let _ = tokio::fs::remove_dir_all(root).await;
+        let _ = tokio::fs::remove_dir_all(outside).await;
+    }
+
+    #[tokio::test]
+    async fn delete_path_modes_are_explicit() {
+        let root = unique_temp_dir("delete-mode");
+        tokio::fs::create_dir_all(root.join("empty")).await.unwrap();
+        tokio::fs::create_dir_all(root.join("tree/nested"))
+            .await
+            .unwrap();
+        tokio::fs::write(root.join("file.txt"), "file")
+            .await
+            .unwrap();
+        tokio::fs::write(root.join("tree/nested/file.txt"), "file")
+            .await
+            .unwrap();
+        let tool = DeletePathTool::new(tool_workspace(&root));
+
+        tool.execute_with_tool_input(
+            input(serde_json::json!({ "path": "file.txt", "mode": "file" })),
+            context(&root).await,
+        )
+        .await
+        .unwrap();
+        tool.execute_with_tool_input(
+            input(serde_json::json!({ "path": "empty", "mode": "emptyDirectory" })),
+            context(&root).await,
+        )
+        .await
+        .unwrap();
+        tool.execute_with_tool_input(
+            input(serde_json::json!({ "path": "tree", "mode": "recursiveDirectory" })),
+            context(&root).await,
+        )
+        .await
+        .unwrap();
+
+        assert!(!tokio::fs::try_exists(root.join("file.txt")).await.unwrap());
+        assert!(!tokio::fs::try_exists(root.join("empty")).await.unwrap());
+        assert!(!tokio::fs::try_exists(root.join("tree")).await.unwrap());
+        let _ = tokio::fs::remove_dir_all(root).await;
+    }
+
+    #[tokio::test]
+    async fn copy_and_move_collision_modes_are_explicit() {
+        let root = unique_temp_dir("collision-mode");
+        tokio::fs::create_dir_all(&root).await.unwrap();
+        tokio::fs::write(root.join("source.txt"), "new")
+            .await
+            .unwrap();
+        tokio::fs::write(root.join("target.txt"), "old")
+            .await
+            .unwrap();
+        let copy = CopyPathTool::new(tool_workspace(&root));
+        let move_tool = MovePathTool::new(tool_workspace(&root));
+
+        let fail = copy
+            .execute_with_tool_input(
+                input(serde_json::json!({
+                    "from": "source.txt",
+                    "to": "target.txt",
+                    "collision": "failIfExists"
+                })),
+                context(&root).await,
+            )
+            .await;
+        assert!(fail.is_err());
+
+        copy.execute_with_tool_input(
+            input(serde_json::json!({
+                "from": "source.txt",
+                "to": "target.txt",
+                "collision": "overwrite"
+            })),
+            context(&root).await,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            tokio::fs::read_to_string(root.join("target.txt"))
+                .await
+                .unwrap(),
+            "new"
+        );
+
+        tokio::fs::write(root.join("move-source.txt"), "moved")
+            .await
+            .unwrap();
+        tokio::fs::write(root.join("move-target.txt"), "old")
+            .await
+            .unwrap();
+        move_tool
+            .execute_with_tool_input(
+                input(serde_json::json!({
+                    "from": "move-source.txt",
+                    "to": "move-target.txt",
+                    "collision": "overwrite"
+                })),
+                context(&root).await,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            tokio::fs::read_to_string(root.join("move-target.txt"))
+                .await
+                .unwrap(),
+            "moved"
+        );
+        let _ = tokio::fs::remove_dir_all(root).await;
+    }
+
+    #[tokio::test]
+    async fn modifying_tools_reject_link_ancestors() {
+        let root = unique_temp_dir("reject-linked-writes");
+        let outside = unique_temp_dir("reject-linked-writes-target");
+        tokio::fs::create_dir_all(&root).await.unwrap();
+        tokio::fs::create_dir_all(&outside).await.unwrap();
+        tokio::fs::write(outside.join("source.txt"), "outside")
+            .await
+            .unwrap();
+        tokio::fs::write(root.join("source.txt"), "inside")
+            .await
+            .unwrap();
+        create_directory_symlink(&outside, &root.join("linked")).unwrap();
+
+        let write = WriteFileTool::new(tool_workspace(&root))
+            .execute_with_tool_input(
+                input(serde_json::json!({
+                    "path": "linked/new.txt",
+                    "content": "blocked",
+                    "mode": "create"
+                })),
+                context(&root).await,
+            )
+            .await;
+        let create = super::super::CreateDirectoryTool::new(tool_workspace(&root))
+            .execute_with_tool_input(
+                input(serde_json::json!({ "path": "linked/new-directory" })),
+                context(&root).await,
+            )
+            .await;
+        let patch = apply_patch_tool(&root)
+        .execute_with_tool_input(
+            input(serde_json::json!({
+                "input": "*** Begin Patch\n*** Add File: linked/patched.txt\n+blocked\n*** End Patch\n"
+            })),
+            context(&root).await,
+        )
+        .await;
+        let copy_source = CopyPathTool::new(tool_workspace(&root))
+            .execute_with_tool_input(
+                input(serde_json::json!({
+                    "from": "linked/source.txt",
+                    "to": "copied.txt",
+                    "collision": "failIfExists"
+                })),
+                context(&root).await,
+            )
+            .await;
+        let copy_target = CopyPathTool::new(tool_workspace(&root))
+            .execute_with_tool_input(
+                input(serde_json::json!({
+                    "from": "source.txt",
+                    "to": "linked/copied.txt",
+                    "collision": "failIfExists"
+                })),
+                context(&root).await,
+            )
+            .await;
+        let move_target = MovePathTool::new(tool_workspace(&root))
+            .execute_with_tool_input(
+                input(serde_json::json!({
+                    "from": "source.txt",
+                    "to": "linked/moved.txt",
+                    "collision": "failIfExists"
+                })),
+                context(&root).await,
+            )
+            .await;
+        let delete = DeletePathTool::new(tool_workspace(&root))
+            .execute_with_tool_input(
+                input(serde_json::json!({
+                    "path": "linked/source.txt",
+                    "mode": "file"
+                })),
+                context(&root).await,
+            )
+            .await;
+
+        for result in [
+            write,
+            create,
+            patch,
+            copy_source,
+            copy_target,
+            move_target,
+            delete,
+        ] {
+            let error = result.unwrap_err().to_string();
+            assert!(
+                error.contains("symbolic link") && error.contains("reparse point"),
+                "{error}"
+            );
+        }
+        assert!(!outside.join("new.txt").exists());
+        assert!(!outside.join("new-directory").exists());
+        assert!(!outside.join("patched.txt").exists());
+        assert!(!outside.join("copied.txt").exists());
+        assert!(!outside.join("moved.txt").exists());
+        assert_eq!(
+            tokio::fs::read_to_string(outside.join("source.txt"))
+                .await
+                .unwrap(),
+            "outside"
+        );
+        remove_directory_symlink(&root.join("linked")).unwrap();
+        let _ = tokio::fs::remove_dir_all(root).await;
+        let _ = tokio::fs::remove_dir_all(outside).await;
+    }
+
+    #[tokio::test]
+    async fn recursive_delete_unlinks_child_without_touching_target() {
+        let root = unique_temp_dir("safe-recursive-delete");
+        let outside = unique_temp_dir("safe-recursive-delete-target");
+        tokio::fs::create_dir_all(root.join("tree")).await.unwrap();
+        tokio::fs::create_dir_all(&outside).await.unwrap();
+        tokio::fs::write(outside.join("kept.txt"), "kept")
+            .await
+            .unwrap();
+        create_directory_symlink(&outside, &root.join("tree/linked")).unwrap();
+
+        DeletePathTool::new(tool_workspace(&root))
+            .execute_with_tool_input(
+                input(serde_json::json!({
+                    "path": "tree",
+                    "mode": "recursiveDirectory"
+                })),
+                context(&root).await,
+            )
+            .await
+            .unwrap();
+
+        assert!(!root.join("tree").exists());
+        assert_eq!(
+            tokio::fs::read_to_string(outside.join("kept.txt"))
+                .await
+                .unwrap(),
+            "kept"
+        );
+        let _ = tokio::fs::remove_dir_all(root).await;
+        let _ = tokio::fs::remove_dir_all(outside).await;
+    }
+}

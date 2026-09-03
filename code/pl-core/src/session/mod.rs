@@ -572,7 +572,7 @@ impl AgentSession {
 }
 
 #[cfg(test)]
-mod unit_tests_inline {
+mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
 

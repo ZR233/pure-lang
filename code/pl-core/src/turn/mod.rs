@@ -9,6 +9,3 @@ pub use execution::ToolEffect;
 pub use options::*;
 pub use request::TurnRequest;
 pub use result::*;
-
-#[cfg(test)]
-mod unit_tests;

@@ -617,3 +617,403 @@ mod tests {
         ));
     }
 }
+
+#[cfg(test)]
+mod behavior_tests {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
+
+    use pretty_assertions::assert_eq;
+    use rmcp::model::*;
+    use serde_json::{Value, json};
+
+    use crate::mcp::test_support::*;
+    use crate::mcp::{McpConnector, McpResetScope, McpRuntime};
+    use crate::tool::*;
+    use crate::turn::ToolEffect;
+
+    #[tokio::test]
+    async fn static_mcp_and_hosted_executors_share_one_tool_plan() {
+        let closed = Arc::new(AtomicBool::new(false));
+        let connector = McpConnector::testing([(
+            "docs".to_string(),
+            test_connection(vec![test_tool("lookup")], closed.clone()).await,
+        )]);
+        let runtime = McpRuntime::new(connector).handle();
+        runtime
+            .reconcile(BTreeMap::from([(
+                "docs".to_string(),
+                config("docs", Some(ToolEffect::Read)),
+            )]))
+            .await
+            .expect("reconcile test MCP runtime");
+        let lease = runtime.acquire_turn_lease().await.expect("MCP lease");
+        let manager = ToolManager::new();
+        let tools = manager.agent_tool_set("mixed-test", GlobalToolInheritance::Isolated);
+        let mut mixed = vec![CompleteTool.into()];
+        mixed.extend(lease.agent_tools(None).expect("construct MCP tools"));
+        mixed.push(DynTool::new_executor(HostedWebSearchTool::deepseek()));
+        tools
+            .install(ToolInstallGroup::direct(ToolGroupId::new("mixed"), mixed))
+            .expect("install mixed executor sources");
+
+        assert_eq!(
+            tools.freeze().names().collect::<Vec<_>>(),
+            vec![
+                "complete",
+                "list_mcp_resource_templates",
+                "list_mcp_resources",
+                "mcp__docs__lookup",
+                "read_mcp_resource",
+                "web_search",
+            ]
+        );
+
+        runtime.shutdown().await;
+        wait_for_closed(&closed).await;
+    }
+
+    #[tokio::test]
+    async fn manager_plan_exposes_mcp_tools_and_audit_pipeline() {
+        let installed = installed_runtime(vec![test_tool("lookup")], None).await;
+
+        let binding = installed
+            .plan
+            .binding("mcp__docs__lookup")
+            .expect("published MCP tool");
+        // 无显式配置时 readOnlyHint=true 推导 Read。
+        let tool = binding.tool();
+        assert_eq!(tool.policy().effect(), Some(ToolEffect::Read));
+        assert!(tool.policy().supports_parallel_tool_calls());
+        assert_eq!(
+            tool.policy().runtime_lock_policy(),
+            ToolRuntimeLockPolicy::Shared
+        );
+        assert_eq!(
+            tool.policy().cache_policy(&json!({})),
+            crate::tool::cache::ToolCachePolicy::Never
+        );
+        let display = tool
+            .definition()
+            .display_metadata()
+            .expect("MCP display metadata");
+        assert_eq!(
+            display
+                .annotations
+                .as_ref()
+                .and_then(|value| value.get("readOnlyHint")),
+            Some(&Value::Bool(true))
+        );
+        assert!(display.icons.is_some());
+        assert!(display.metadata.is_some());
+        assert!(matches!(
+            tool.definition().spec(),
+            pl_protocol::ToolSpec::Function {
+                output_schema: Some(_),
+                ..
+            }
+        ));
+
+        let output = installed
+            .manager
+            .execute(
+                &installed.plan,
+                "mcp__docs__lookup",
+                tool_input(json!({ "query": "meaning" })),
+                test_context(),
+            )
+            .await
+            .expect("execute MCP tool");
+        assert!(output.canonical_output().contains("\"answer\":42"));
+        let audit = audit_metadata(&output.runtime_events);
+        assert_eq!(audit["result"]["structuredContent"]["answer"], 42);
+        assert_eq!(audit["result"]["_meta"]["auditId"], "audit-1");
+        assert_eq!(audit["result"]["resultType"], "complete");
+
+        installed.runtime.shutdown().await;
+        wait_for_closed(&installed.closed).await;
+    }
+
+    #[tokio::test]
+    async fn untrusted_annotations_keep_conservative_defaults() {
+        // 无显式配置且只有 destructiveHint：不映射写 effect，保持 None（保守）。
+        let installed = installed_runtime(
+            vec![annotated_tool(
+                "destructive",
+                ToolAnnotations::new().destructive(true),
+            )],
+            None,
+        )
+        .await;
+
+        let binding = installed
+            .plan
+            .binding("mcp__docs__destructive")
+            .expect("published MCP tool");
+        let tool = binding.tool();
+        assert_eq!(tool.policy().effect(), None);
+        assert!(!tool.policy().supports_parallel_tool_calls());
+        assert_eq!(
+            tool.policy().runtime_lock_policy(),
+            ToolRuntimeLockPolicy::Exclusive
+        );
+
+        installed.runtime.shutdown().await;
+        wait_for_closed(&installed.closed).await;
+    }
+
+    #[tokio::test]
+    async fn explicit_server_effect_overrides_remote_hints() {
+        // 无 annotation 的工具 + 显式配置 Read：优先配置。
+        let installed =
+            installed_runtime(vec![plain_tool("configured")], Some(ToolEffect::Read)).await;
+
+        let binding = installed
+            .plan
+            .binding("mcp__docs__configured")
+            .expect("published MCP tool");
+        assert_eq!(binding.tool().policy().effect(), Some(ToolEffect::Read));
+
+        installed.runtime.shutdown().await;
+        wait_for_closed(&installed.closed).await;
+    }
+
+    #[tokio::test]
+    async fn mcp_error_result_keeps_structured_audit_and_failed_terminal_marker() {
+        let installed = installed_runtime(vec![test_tool("fail")], None).await;
+
+        let output = installed
+            .manager
+            .execute(
+                &installed.plan,
+                "mcp__docs__fail",
+                tool_input(json!({})),
+                test_context(),
+            )
+            .await
+            .expect("typed MCP error remains an auditable output");
+        assert!(
+            output
+                .canonical_output()
+                .starts_with("Tool execution error: ")
+        );
+        assert!(
+            output
+                .runtime_events
+                .contains(&ToolDirective::ExecutionFailed)
+        );
+        assert_eq!(
+            audit_metadata(&output.runtime_events)["result"]["structuredContent"]["code"],
+            "TEST_FAILURE"
+        );
+
+        installed.runtime.shutdown().await;
+        wait_for_closed(&installed.closed).await;
+    }
+
+    #[tokio::test]
+    async fn resource_facades_are_published_and_use_rmcp_typed_resource_api() {
+        let installed = installed_runtime(vec![test_tool("lookup")], None).await;
+
+        let names = installed.plan.names().collect::<Vec<_>>();
+        for facade in [
+            "list_mcp_resources",
+            "list_mcp_resource_templates",
+            "read_mcp_resource",
+        ] {
+            assert!(names.contains(&facade), "missing {facade} in {names:?}");
+        }
+        let output = installed
+            .manager
+            .execute(
+                &installed.plan,
+                "read_mcp_resource",
+                tool_input(json!({ "server": "docs", "uri": "mcp://docs/one" })),
+                test_context(),
+            )
+            .await
+            .expect("read resource");
+        let value: Value = serde_json::from_str(&output.canonical_output()).expect("resource JSON");
+        assert_eq!(value["contents"][0]["text"], "resource body");
+
+        installed.runtime.shutdown().await;
+        wait_for_closed(&installed.closed).await;
+    }
+
+    #[tokio::test]
+    async fn resource_facades_are_hidden_when_the_server_does_not_declare_the_capability() {
+        let closed = Arc::new(AtomicBool::new(false));
+        let connector = McpConnector::testing([(
+            "tools-only".to_string(),
+            test_connection_with_resources(vec![test_tool("lookup")], closed.clone(), false).await,
+        )]);
+        let runtime = McpRuntime::new(connector).handle();
+        runtime
+            .reconcile(BTreeMap::from([(
+                "tools-only".to_string(),
+                config("tools-only", None),
+            )]))
+            .await
+            .expect("reconcile tools-only MCP runtime");
+        let lease = runtime.acquire_turn_lease().await.expect("MCP lease");
+        let names = lease
+            .agent_tools(None)
+            .expect("construct MCP tools")
+            .into_iter()
+            .map(|tool| tool.definition().name().wire_name().to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec!["mcp__tools-only__lookup"]);
+
+        drop(lease);
+        runtime.shutdown().await;
+        wait_for_closed(&closed).await;
+    }
+
+    #[tokio::test]
+    async fn generation_replacement_changes_new_leases_without_mutating_old_ones() {
+        let first_closed = Arc::new(AtomicBool::new(false));
+        let second_closed = Arc::new(AtomicBool::new(false));
+        let connector = McpConnector::testing([
+            (
+                "docs".to_string(),
+                test_connection(vec![test_tool("first")], first_closed.clone()).await,
+            ),
+            (
+                "docs".to_string(),
+                test_connection(vec![test_tool("second")], second_closed.clone()).await,
+            ),
+        ]);
+        let runtime = McpRuntime::new(connector).handle();
+        let servers = BTreeMap::from([("docs".to_string(), config("docs", None))]);
+        runtime.reconcile(servers.clone()).await.expect("first");
+
+        let first = runtime.acquire_turn_lease().await.expect("first lease");
+        assert_eq!(first.tools()[0].exposed_name, "mcp__docs__first");
+
+        runtime
+            .reset(McpResetScope::All, servers)
+            .await
+            .expect("second");
+        let second = runtime.acquire_turn_lease().await.expect("second lease");
+        assert_eq!(second.tools()[0].exposed_name, "mcp__docs__second");
+        assert_eq!(first.tools()[0].exposed_name, "mcp__docs__first");
+        assert!(second.generation() > first.generation());
+
+        drop(first);
+        drop(second);
+        runtime.shutdown().await;
+        wait_for_closed(&first_closed).await;
+        wait_for_closed(&second_closed).await;
+    }
+
+    #[tokio::test]
+    async fn tool_list_changed_atomically_publishes_the_next_generation() {
+        let closed = Arc::new(AtomicBool::new(false));
+        let (connection, tool_changes, tools, _fail_list, _list_calls) =
+            mutable_test_connection(vec![test_tool("first")], closed.clone()).await;
+        let connector = McpConnector::testing([("docs".to_string(), connection)]);
+        let runtime = McpRuntime::new(connector).handle();
+        runtime
+            .reconcile(BTreeMap::from([(
+                "docs".to_string(),
+                config("docs", Some(ToolEffect::Read)),
+            )]))
+            .await
+            .expect("initial MCP generation");
+        let first = runtime.acquire_turn_lease().await.expect("first lease");
+        assert_eq!(first.tools()[0].raw_name, "first");
+
+        *tools
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = vec![test_tool("second")];
+        let mut updates = runtime.subscribe();
+        tool_changes.notify_one();
+        tokio::time::timeout(Duration::from_secs(5), updates.recv())
+            .await
+            .expect("MCP refresh update timeout")
+            .expect("MCP refresh update");
+
+        let second = runtime.acquire_turn_lease().await.expect("second lease");
+        assert!(second.generation() > first.generation());
+        assert_eq!(second.tools()[0].raw_name, "second");
+        assert_eq!(first.tools()[0].raw_name, "first");
+
+        drop(first);
+        drop(second);
+        runtime.shutdown().await;
+        wait_for_closed(&closed).await;
+    }
+
+    #[tokio::test]
+    async fn failed_tool_list_changed_refresh_preserves_the_current_generation() {
+        let closed = Arc::new(AtomicBool::new(false));
+        let (connection, tool_changes, _tools, fail_list, list_calls) =
+            mutable_test_connection(vec![test_tool("stable")], closed.clone()).await;
+        let connector = McpConnector::testing([("docs".to_string(), connection)]);
+        let runtime = McpRuntime::new(connector).handle();
+        runtime
+            .reconcile(BTreeMap::from([(
+                "docs".to_string(),
+                config("docs", Some(ToolEffect::Read)),
+            )]))
+            .await
+            .expect("initial MCP generation");
+        let first = runtime.acquire_turn_lease().await.expect("stable lease");
+        let calls_before_refresh = list_calls.load(Ordering::SeqCst);
+        fail_list.store(true, Ordering::SeqCst);
+        tool_changes.notify_one();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while list_calls.load(Ordering::SeqCst) == calls_before_refresh {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("failing MCP refresh timeout");
+
+        let current = runtime.acquire_turn_lease().await.expect("current lease");
+        assert_eq!(current.generation(), first.generation());
+        assert_eq!(current.tools()[0].raw_name, "stable");
+
+        drop(first);
+        drop(current);
+        runtime.shutdown().await;
+        wait_for_closed(&closed).await;
+    }
+
+    #[tokio::test]
+    async fn retired_generation_closes_only_after_last_lease_releases() {
+        let first_closed = Arc::new(AtomicBool::new(false));
+        let second_closed = Arc::new(AtomicBool::new(false));
+        let connector = McpConnector::testing([
+            (
+                "docs".to_string(),
+                test_connection(vec![test_tool("first")], first_closed.clone()).await,
+            ),
+            (
+                "docs".to_string(),
+                test_connection(vec![test_tool("second")], second_closed.clone()).await,
+            ),
+        ]);
+        let runtime = McpRuntime::new(connector).handle();
+        let servers = BTreeMap::from([("docs".to_string(), config("docs", None))]);
+        runtime.reconcile(servers.clone()).await.expect("first");
+        let first = runtime.acquire_turn_lease().await.expect("first lease");
+        runtime
+            .reset(McpResetScope::All, servers)
+            .await
+            .expect("second");
+        let second = runtime.acquire_turn_lease().await.expect("second lease");
+        assert_eq!(first.tools()[0].raw_name, "first");
+        assert_eq!(second.tools()[0].raw_name, "second");
+        assert!(!first_closed.load(Ordering::SeqCst));
+
+        drop(first);
+        wait_for_closed(&first_closed).await;
+        assert!(!second_closed.load(Ordering::SeqCst));
+        drop(second);
+        runtime.shutdown().await;
+        wait_for_closed(&second_closed).await;
+    }
+}
