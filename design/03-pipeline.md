@@ -59,19 +59,26 @@ Mode Prompt 可以在不裁剪工具的前提下声明合作式角色边界，�
 
 root 通过 `list_agent_profiles` 选择 Profile，再以 `spawn_agent(profileId, ...)` 创建 child。生成时冻结
 Profile 指令、模型路由与 workspace assignment。child 使用普通 Thread/Turn/Tool，但不拥有 root 的
-workflow 工具。Task root 在 planning 中优先把可独立的探索并行交给 `explorer`，在 working 中按文件
-所有权与依赖图把实现交给 `executor` 或 `worktree_executor`，并在 integrating 中审查和显式整合结果。
-整合后的主 workspace 必须由新的只读 `reviewer` 总审；阻塞 finding 回到 working 或
-editing_documents，修复和重新整合后再次 review。不存在隐式 merge 或 delivery gate。
+workflow 工具。Task root 在 planning 开始和每批 child 交付后维护成本感知的任务依赖 DAG：节点包含
+前置依赖、读写范围、Profile、交付证据与 root-only 标记；所有依赖已满足、边界清楚、可独立验收且
+预计能缩短关键路径或显著增加独立证据的节点形成 ready frontier。root 必须在首次等待前派出该前沿的
+全部 child，等待期间继续处理未委托的综合与编排工作，收齐 durable delivery 后释放下一前沿。
+planning 中按独立事实域使用 `explorer`，复杂依赖分析可使用一个不重复 root 工作的 `planner`；working
+中按文件所有权与依赖图把实现交给 `executor` 或 `worktree_executor`，integrating 中由 root 审查和
+显式整合结果。整合后的主 workspace 必须由新的只读综合 `reviewer` 总审；范围较广或风险面独立时，
+同一 review wave 可再并行派出专项 reviewer。最终 wave 的全部 reviewer 都必须提交 durable approval；
+任一阻塞 finding 都回到 working 或 editing_documents，修复和重新整合后重新 review。不存在隐式 merge
+或 delivery gate。
 这里的只读约束针对项目文件、Git、worktree 和外部持久状态；reviewer 应以 `report_progress` 写入
 协作层的 durable 审查报告，root 再按该 reviewer 的冻结 `agentId` 通过
 `read_agent_submissions` 读取 verdict。该报告只承载 finding 或 approval，不授予 reviewer 修复权，
 也不能由 root 自述或自由文本 session 摘要替代。
 
 每个 child 消息必须自包含地给出目的、设计基线、所有权、禁止范围、有序步骤、完成/失败条件、证据
-输出和 workspace/Git 合同。语义独立且写集合互斥的任务应并行；真实前后依赖保持顺序。directory child
-适合单任务或互斥目录并行，可能触及共同接口、清单、生成边界或 Git 状态的任务使用独立 worktree。
-worktree 只隔离现场，不能消除语义依赖；root 仍负责顺序采纳 commit 和处理冲突。
+输出和 workspace/Git 合同。语义独立且写集合互斥的任务应并行；只有极少操作的微任务、重复目标、
+需要共享未稳定上下文或真实前后依赖的工作不得为增加 agent 数量而拆分。directory child 适合单任务或
+互斥目录并行，可能触及共同接口、清单、生成边界或 Git 状态的任务使用独立 worktree。worktree 只隔离
+现场，不能消除语义依赖；root 仍负责顺序采纳 commit 和处理冲突。
 `spawn_agent.message` 与后续 `send_message.message` 都作为 `Visible + ParentAgent` 输入进入 child 的
 canonical transcript 和 Timeline；前者由首轮 `TurnStarted` 补齐尚未存在的稳定 Item，后者继续按目标
 当前状态启动或 steer Turn。相同稳定 mailbox Item 已经由 `TurnQueued` 投影时不得重复生成。

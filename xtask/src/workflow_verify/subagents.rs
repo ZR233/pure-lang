@@ -1182,6 +1182,7 @@ fn validate_wire(wire_dir: &Path, artifacts: &Path, ssh: bool) -> Result<()> {
     ensure_root_history(&capture_receipts, &calls, &outputs)?;
     ensure_submissions(&calls, &outputs)?;
     ensure_finding_re_review(&calls, &outputs)?;
+    ensure_parallel_review_waves(&calls, &outputs)?;
     ensure_orchestration_order(&calls, &outputs)?;
     if ssh {
         ensure_ssh_exec_contract(&capture_receipts)?;
@@ -2457,30 +2458,29 @@ fn ensure_orchestration_order(calls: &[WireCall], outputs: &[WireOutput]) -> Res
         "wire captures contain fewer than two explicit worktree cleanups"
     );
     let first_cleanup = cleanups[0];
-    let last_cleanup = *cleanups.last().expect("two cleanups were validated");
-    let reviewer = successful_spawns("reviewer")?;
+    let initial_batch_last_cleanup = cleanups[1];
+    let reviewers = successful_spawns("reviewer")?;
     ensure!(
-        !reviewer.is_empty(),
-        "wire captures contain no reviewer spawn"
+        reviewers.len() >= 2,
+        "wire captures contain fewer than two reviewer spawns"
     );
     ensure!(
         first_cleanup
             > *cherry_picks
-                .last()
+                .get(1)
                 .expect("two cherry-picks were validated"),
         "a cleanup occurred before both cherry-picks"
     );
     ensure!(
-        reviewer[0].0 > last_cleanup,
-        "reviewer was not spawned after integration and cleanup"
+        reviewers[0].0 > initial_batch_last_cleanup,
+        "a reviewer was spawned before integration and cleanup"
     );
-    ensure!(
-        calls[reviewer[0].0]
-            .arguments
-            .get("writablePaths")
-            .is_none(),
-        "reviewer spawn unexpectedly requested writablePaths"
-    );
+    for (spawn_index, _) in reviewers {
+        ensure!(
+            calls[spawn_index].arguments.get("writablePaths").is_none(),
+            "reviewer spawn unexpectedly requested writablePaths"
+        );
+    }
     Ok(())
 }
 
@@ -2594,6 +2594,94 @@ fn reviewer_submission_evidence(
             })
         })
         .collect()
+}
+
+fn ensure_parallel_review_waves(calls: &[WireCall], outputs: &[WireOutput]) -> Result<()> {
+    let evidence = reviewer_submission_evidence(calls, outputs)?;
+    for reviewer in &evidence {
+        let verdict_index = reviewer
+            .finding_index
+            .into_iter()
+            .chain(reviewer.approval_index)
+            .min()
+            .with_context(|| {
+                format!(
+                    "reviewer {} has no durable finding or approval",
+                    reviewer.agent_id
+                )
+            })?;
+        ensure!(
+            calls.iter().enumerate().any(|(index, call)| {
+                index > reviewer.spawn_index
+                    && index < verdict_index
+                    && call.name == "wait_agents"
+                    && wait_has_terminal_evidence(call, outputs, &reviewer.agent_id).is_ok()
+            }),
+            "reviewer {} has no receipt-bound terminal wait before its verdict read",
+            reviewer.agent_id
+        );
+    }
+
+    let last_implementation_spawn = calls
+        .iter()
+        .enumerate()
+        .filter(|(_, call)| {
+            call.name == "spawn_agent"
+                && matches!(
+                    call.arguments.get("profileId").and_then(Value::as_str),
+                    Some("executor") | Some("worktree_executor")
+                )
+        })
+        .map(|(index, _)| index)
+        .max()
+        .context("review verification has no implementation spawn")?;
+    let final_wave = evidence
+        .iter()
+        .filter(|reviewer| reviewer.spawn_index > last_implementation_spawn)
+        .collect::<Vec<_>>();
+    ensure!(
+        final_wave.len() >= 2,
+        "final review wave contains fewer than two reviewers"
+    );
+    let first_spawn = final_wave
+        .iter()
+        .map(|reviewer| reviewer.spawn_index)
+        .min()
+        .expect("two final reviewers were validated");
+    let first_observation = calls
+        .iter()
+        .enumerate()
+        .skip(first_spawn + 1)
+        .find(|(_, call)| {
+            matches!(
+                call.name.as_str(),
+                "wait_agents" | "read_agent_session" | "read_agent_submissions"
+            )
+        })
+        .map(|(index, _)| index)
+        .context("final review wave has no wait or read operation")?;
+    ensure!(
+        final_wave
+            .iter()
+            .all(|reviewer| reviewer.spawn_index < first_observation),
+        "final reviewers were not all spawned before the first review wait/read"
+    );
+    let agent_ids = final_wave
+        .iter()
+        .map(|reviewer| reviewer.agent_id.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    ensure!(
+        agent_ids.len() == final_wave.len(),
+        "final review wave reuses a reviewer agentId"
+    );
+    for reviewer in final_wave {
+        ensure!(
+            reviewer.finding_index.is_none() && reviewer.approval_index.is_some(),
+            "final review wave reviewer {} did not produce durable approval",
+            reviewer.agent_id
+        );
+    }
+    Ok(())
 }
 
 fn verdict_starts_with(text: &str, marker: &str) -> bool {
@@ -4710,6 +4798,11 @@ mod tests {
                 "spawn_agent",
                 serde_json::json!({"profileId":"reviewer"}),
             ),
+            orchestration_call(
+                "r2",
+                "spawn_agent",
+                serde_json::json!({"profileId":"reviewer"}),
+            ),
         ]);
         let outputs = vec![
             spawn_output("e1", "explorer", "explorer-a"),
@@ -4721,6 +4814,7 @@ mod tests {
             spawn_output("x3", "worktree_executor", "worktree-a"),
             spawn_output("x4", "worktree_executor", "worktree-b"),
             spawn_output("r1", "reviewer", "reviewer-a"),
+            spawn_output("r2", "reviewer", "reviewer-b"),
         ];
         (calls, outputs)
     }
@@ -4901,6 +4995,135 @@ mod tests {
             approval_output(Some("rr2")),
         ];
         (calls, outputs)
+    }
+
+    fn valid_parallel_review_wave() -> (Vec<WireCall>, Vec<WireOutput>) {
+        let calls = vec![
+            orchestration_call(
+                "x1",
+                "spawn_agent",
+                serde_json::json!({"profileId":"executor"}),
+            ),
+            orchestration_call(
+                "r1",
+                "spawn_agent",
+                serde_json::json!({"profileId":"reviewer"}),
+            ),
+            orchestration_call(
+                "r2",
+                "spawn_agent",
+                serde_json::json!({"profileId":"reviewer"}),
+            ),
+            orchestration_call(
+                "w1",
+                "wait_agents",
+                serde_json::json!({"targets":["reviewer-a","reviewer-b"]}),
+            ),
+            orchestration_call(
+                "w2",
+                "wait_agents",
+                serde_json::json!({"targets":["reviewer-b"]}),
+            ),
+            orchestration_call(
+                "rr1",
+                "read_agent_submissions",
+                serde_json::json!({"target":"reviewer-a"}),
+            ),
+            orchestration_call(
+                "rr2",
+                "read_agent_submissions",
+                serde_json::json!({"target":"reviewer-b"}),
+            ),
+        ];
+        let outputs = vec![
+            spawn_output("x1", "executor", "executor-a"),
+            reviewer_receipt("r1", "reviewer-a"),
+            reviewer_receipt("r2", "reviewer-b"),
+            terminal_wait_output("w1", "reviewer-a"),
+            terminal_wait_output("w2", "reviewer-b"),
+            approval_output(Some("rr1")),
+            approval_output(Some("rr2")),
+        ];
+        (calls, outputs)
+    }
+
+    #[test]
+    fn parallel_review_wave_requires_batch_spawn_terminal_evidence_and_all_approvals() {
+        let (calls, outputs) = valid_parallel_review_wave();
+        ensure_parallel_review_waves(&calls, &outputs).unwrap();
+
+        let (mut calls, outputs) = valid_parallel_review_wave();
+        swap_calls(&mut calls, "r2", "w1");
+        assert!(ensure_parallel_review_waves(&calls, &outputs).is_err());
+
+        let (calls, mut outputs) = valid_parallel_review_wave();
+        outputs.retain(|output| output.call_id.as_deref() != Some("w2"));
+        assert!(ensure_parallel_review_waves(&calls, &outputs).is_err());
+
+        let (calls, mut outputs) = valid_parallel_review_wave();
+        *outputs
+            .iter_mut()
+            .find(|output| output.call_id.as_deref() == Some("rr2"))
+            .unwrap() = finding_output("rr2");
+        assert!(ensure_parallel_review_waves(&calls, &outputs).is_err());
+    }
+
+    #[test]
+    fn parallel_review_wave_accepts_finding_rework_and_a_new_approved_wave() {
+        let (mut calls, mut outputs) = valid_parallel_review_wave();
+        *outputs
+            .iter_mut()
+            .find(|output| output.call_id.as_deref() == Some("rr1"))
+            .unwrap() = finding_output("rr1");
+        calls.extend([
+            orchestration_call(
+                "x2",
+                "spawn_agent",
+                serde_json::json!({"profileId":"executor"}),
+            ),
+            orchestration_call(
+                "r3",
+                "spawn_agent",
+                serde_json::json!({"profileId":"reviewer"}),
+            ),
+            orchestration_call(
+                "r4",
+                "spawn_agent",
+                serde_json::json!({"profileId":"reviewer"}),
+            ),
+            orchestration_call(
+                "w3",
+                "wait_agents",
+                serde_json::json!({"targets":["reviewer-c","reviewer-d"]}),
+            ),
+            orchestration_call(
+                "w4",
+                "wait_agents",
+                serde_json::json!({"targets":["reviewer-d"]}),
+            ),
+            orchestration_call(
+                "rr3",
+                "read_agent_submissions",
+                serde_json::json!({"target":"reviewer-c"}),
+            ),
+            orchestration_call(
+                "rr4",
+                "read_agent_submissions",
+                serde_json::json!({"target":"reviewer-d"}),
+            ),
+        ]);
+        outputs.extend([
+            spawn_output("x2", "executor", "executor-b"),
+            reviewer_receipt("r3", "reviewer-c"),
+            reviewer_receipt("r4", "reviewer-d"),
+            terminal_wait_output("w3", "reviewer-c"),
+            terminal_wait_output("w4", "reviewer-d"),
+            approval_output(Some("rr3")),
+            approval_output(Some("rr4")),
+        ]);
+
+        ensure_finding_re_review(&calls, &outputs).unwrap();
+        ensure_parallel_review_waves(&calls, &outputs).unwrap();
     }
 
     #[test]

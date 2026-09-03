@@ -34,16 +34,41 @@ replacement. The workflow remains in `planning` throughout clarification and con
 after `plan_current` returns `approved` may you use the solo `workflow_transition` from `planning`
 to `editing_documents`. Do not start implementation before that approval.
 
-For architecture, protocol, runtime behavior, or durable conventions, the root agent personally
-updates `design/**` before implementation. Delegate independent read-only exploration to fresh
-context `explorer` profiles. After approval, delegate implementation by dependency and file
-ownership: `executor` profiles must have mutually isolated writable paths, and `worktree_executor`
-profiles own distinct branches/worktrees. Spawn independent children before waiting so they run in parallel. Every child
-task must state its objective, design baseline, ownership, forbidden scope, steps, success/failure
-conditions, evidence, isolation, Git, and cleanup contract. A child AgentSession cannot read or
-mutate the root AgentSession Plan, so every implementation and reviewer spawn message must contain
-the approved implementation baseline needed for that owned task. The root can reread its complete
-approved Plan with `plan_current` throughout implementation.
+The root is the sole dynamic scheduler; children cannot spawn. At the start of planning and after
+each child wave, perform a cost-aware parallelization pass. Model bounded deliverables as a task DAG.
+For each candidate record prerequisites, read/write ownership, suitable Profile, checkable evidence,
+and whether it is root-only. A candidate qualifies for delegation only when its boundary is clear,
+its work is substantial enough to repay coordination cost, it can be validated independently, and
+parallel execution is expected to shorten the critical path or materially add independent evidence.
+Never create agents merely to fill capacity, split tiny work, duplicate an active objective, or run
+work in parallel across an unstable shared contract or a real semantic dependency.
+
+All qualifying nodes whose prerequisites are satisfied form the ready frontier. Spawn every node in
+that frontier before the wave's first `wait_agents`, `read_agent_session`, or
+`read_agent_submissions`; do not wait after spawning one while another qualifying ready node remains.
+While children run, the root continues only unassigned synthesis, planning, coordination, or other
+root-owned work and does not repeat delegated tasks. After every pending child has receipt-bound
+terminal evidence and its durable delivery is read, update the DAG and immediately dispatch the next
+ready frontier. There is no fixed agent count.
+
+During planning, partition independent evidence by crate or component, frontend/backend layer,
+hypothesis, external research area, or validation surface and assign it to fresh-context `explorer`
+profiles. For a genuinely complex dependency graph, one `planner` may independently challenge the
+decomposition, critical path, ownership, and risks without duplicating the root. The root owns user
+clarification, final synthesis, the canonical Plan, and every architecture or contract decision. For
+architecture, protocol, runtime behavior, or durable conventions, the root personally updates
+`design/**` before implementation.
+
+After approval, delegate qualifying implementation nodes by dependency and file ownership.
+`executor` profiles use mutually isolated writable paths behind stable contracts.
+`worktree_executor` profiles own distinct branches/worktrees for cross-directory changes, manifests,
+lockfiles, generated boundaries, or risky Git state; worktree isolation never removes a semantic
+dependency. The root alone maintains canonical Git state and integrates results in dependency order.
+Every child task must state its objective, design baseline, ownership, forbidden scope, steps,
+success/failure conditions, evidence, isolation, Git, and cleanup contract. A child AgentSession
+cannot read or mutate the root AgentSession Plan, so every implementation and reviewer spawn message
+must contain the approved implementation baseline needed for that owned task. The root can reread its
+complete approved Plan with `plan_current` throughout implementation.
 
 Every non-reviewer child must publish a durable `CHILD_DELIVERY_READY` submission before its final
 reply; a worktree delivery also includes `WORKTREE_COMMIT_READY`, a full commit ID, and workspace
@@ -54,22 +79,25 @@ integrate every accepted commit before issuing the first cleanup; only then clea
 child workspace. Never interleave one child's integration and cleanup while another accepted sibling
 commit is still pending integration.
 
-After integration, create a fresh-context read-only reviewer. Its final durable verdict must be
+After integration, always create one fresh-context read-only comprehensive reviewer. When the change
+is broad enough that API/error paths, tests, GUI behavior, or Git/integration risks form substantial
+independent review scopes, add specialized reviewers to the same review wave. Spawn the entire wave
+before waiting. Every reviewer must reach terminal state and publish a canonical durable verdict of
 `REVIEWER_FINDING` or `REVIEWER_READ_ONLY_APPROVED`; root summaries and session text are not
-substitutes. Findings return through the registered graph for repair and another integration/review
-cycle. Only after approval may the root run final gates, transition to `completed`, call `complete`,
-and deliver the final result. Ordinary file, command, Git, collaboration, and final-answer
-capabilities are not removed by workflow states."#;
+substitutes. Every reviewer in the final wave must approve. Any finding blocks completion and returns
+through the registered graph for repair, integration, and a new review wave. Only then may the root
+run final gates, transition to `completed`, call `complete`, and deliver the final result. Ordinary
+file, command, Git, collaboration, and final-answer capabilities are not removed by workflow states."#;
 
 const STATES: &[StaticWorkflowState] = &[
     StaticWorkflowState {
         id: "planning",
         title: "Planning",
-        instructions: "Inspect the task and architecture, ask only material clarification questions that block a complete plan, run independent read-only exploration in parallel, and use the fixed Plan state machine rather than request_user_input or final text to obtain implementation approval for a complete implementation and validation plan with explicit ownership and isolation.",
+        instructions: "Inspect the task and architecture, ask only material clarification questions that block a complete plan, build a cost-aware task DAG, dispatch every qualifying ready exploration before waiting, and use the fixed Plan state machine rather than request_user_input or final text to obtain implementation approval.",
         completion_criteria: &[
             "The requested outcome and non-goals are explicit.",
             "Architecture and protocol impacts are grounded in repository evidence.",
-            "The plan names dependencies, ownership, isolation, and validation boundaries.",
+            "The plan names dependency waves, ownership, isolation, root-only work, validation boundaries, and why any substantial work remains serial.",
             "plan_current reports approved for the complete current Plan.",
         ],
         kind: WorkflowStateKind::Atomic,
@@ -87,9 +115,9 @@ const STATES: &[StaticWorkflowState] = &[
     StaticWorkflowState {
         id: "working",
         title: "Working",
-        instructions: "Implement the approved plan. Use isolated directory and worktree children for independent owned changes, start parallel work before waiting, and collect canonical durable deliveries and targeted tests.",
+        instructions: "Implement the approved plan by repeatedly dispatching the cost-qualified ready frontier. Use isolated directory and worktree children for independent owned changes, start the complete wave before waiting, and collect canonical durable deliveries and targeted tests before releasing dependent work.",
         completion_criteria: &[
-            "Every implementation owner has completed or produced an explicit failure receipt.",
+            "Every qualifying ready implementation item was dispatched before its wave first wait, and every owner completed or produced an explicit failure receipt.",
             "Directory scopes are mutually isolated and worktree changes have reviewable commits.",
             "Focused tests cover the implemented behavior and regressions.",
         ],
@@ -98,7 +126,7 @@ const STATES: &[StaticWorkflowState] = &[
     StaticWorkflowState {
         id: "integrating",
         title: "Integrating",
-        instructions: "Review the combined directory diff, explicitly integrate worktree commits, resolve conflicts without losing other owners' changes, and clean temporary worktrees and branches after durable integration.",
+        instructions: "As the sole canonical Git owner, review the combined directory diff, explicitly integrate worktree commits in dependency order, resolve conflicts without losing other owners' changes, and clean temporary worktrees and branches after durable integration.",
         completion_criteria: &[
             "All accepted child deliveries are present exactly once in the canonical workspace.",
             "Worktree commits and cleanup are recorded.",
@@ -109,9 +137,9 @@ const STATES: &[StaticWorkflowState] = &[
     StaticWorkflowState {
         id: "reviewing",
         title: "Reviewing",
-        instructions: "Run a fresh-context read-only review of the integrated workspace, consume its canonical durable verdict, then run the proportional final validation matrix. Findings must route back through the graph.",
+        instructions: "Run one fresh-context comprehensive read-only reviewer plus cost-qualified specialized reviewers for independent risk surfaces, spawn the complete review wave before waiting, consume every canonical durable verdict, then run the proportional final validation matrix. Findings must route back through the graph.",
         completion_criteria: &[
-            "A fresh reviewer produced a canonical durable verdict for the integrated head.",
+            "Every reviewer in the final wave reached terminal state and produced a canonical durable approval for the integrated head.",
             "No unresolved design or code finding remains.",
             "All required deterministic and live acceptance gates have terminal evidence.",
         ],

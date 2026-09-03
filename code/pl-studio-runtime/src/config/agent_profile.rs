@@ -551,6 +551,26 @@ model = "gpt-5"
         assert!(task.contains("workflow_current") && task.contains("workflow_next"));
         assert!(task.contains("workflow_graph") && task.contains("workflow_history"));
         assert!(task.contains("Never infer CAS values"));
+        for scheduling_contract in [
+            "cost-aware parallelization pass",
+            "task DAG",
+            "ready frontier",
+            "Spawn every node",
+            "coordination cost",
+            "shorten the critical path",
+            "There is no fixed agent count",
+            "root-only",
+        ] {
+            assert!(
+                task.contains(scheduling_contract),
+                "task mode prompt omits scheduling contract {scheduling_contract}"
+            );
+        }
+        assert!(task.contains("Never create agents merely to fill capacity"));
+        assert!(task.contains("one `planner` may independently challenge"));
+        assert!(task.contains("one fresh-context read-only comprehensive reviewer"));
+        assert!(task.contains("add specialized reviewers to the same review wave"));
+        assert!(task.contains("Every reviewer in the final wave must approve"));
         assert!(
             !workflow
                 .states
@@ -580,5 +600,53 @@ model = "gpt-5"
         assert!(task.contains("CHILD_DELIVERY_READY"));
         assert!(task.contains("canonical submissions"));
         assert!(task.contains("integrate every accepted commit before issuing the first cleanup"));
+
+        let state = |id| {
+            workflow
+                .states
+                .iter()
+                .find(|candidate| candidate.id == id)
+                .unwrap_or_else(|| panic!("missing task mode state {id}"))
+        };
+        let planning = state("planning");
+        assert!(planning.instructions.contains("cost-aware task DAG"));
+        assert!(
+            planning
+                .instructions
+                .contains("ready exploration before waiting")
+        );
+        assert!(planning.completion_criteria.iter().any(|criterion| {
+            criterion.contains("dependency waves")
+                && criterion.contains("root-only work")
+                && criterion.contains("remains serial")
+        }));
+        let working = state("working");
+        assert!(
+            working
+                .instructions
+                .contains("cost-qualified ready frontier")
+        );
+        assert!(
+            working
+                .instructions
+                .contains("complete wave before waiting")
+        );
+        let integrating = state("integrating");
+        assert!(
+            integrating
+                .instructions
+                .contains("sole canonical Git owner")
+        );
+        let reviewing = state("reviewing");
+        assert!(reviewing.instructions.contains("specialized reviewers"));
+        assert!(
+            reviewing
+                .instructions
+                .contains("complete review wave before waiting")
+        );
+        assert!(reviewing.completion_criteria.iter().any(|criterion| {
+            criterion.contains("Every reviewer in the final wave")
+                && criterion.contains("canonical durable approval")
+        }));
     }
 }

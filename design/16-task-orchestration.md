@@ -84,11 +84,20 @@ finding 回到 editing_documents；两条返工路径都必须重新经过 integ
 `completed` 与 `stopped` 都是无任何 outgoing transition 的 final state；停止边只从非终态 state
 进入 `stopped`。
 
-planning 中 root 优先把相互独立的探索并行交给 fresh-context `explorer`，自己综合依赖图、文件所有权与
-验证边界。editing_documents 中 root 亲自更新设计。working 中普通实现必须交给 `executor` 或
-`worktree_executor`：单任务和互斥目录并行优先 directory，可能交叉影响共同接口、清单、生成边界或 Git
-状态时使用 worktree；真实前后依赖始终顺序执行。每个 child 消息必须详细描述目的、基线、所有权、
-禁止范围、有序步骤、完成/失败条件、证据和 workspace/Git 合同。
+planning 开始和每批 child 交付后，root 都执行一次成本感知的并行化分析。它从需求、仓库边界和验证目标
+列出可交付节点，为每项记录前置依赖、读写范围、适用 Profile、交付证据与 root-only 标记，形成任务 DAG。
+依赖已满足、边界清楚、可独立验收且预计能缩短关键路径或显著增加独立证据的节点构成 ready frontier；
+root 必须在首次 `wait_agents` 前派出该前沿的全部 child，等待期间继续处理未委托的综合和编排工作，不得
+重复 child 的任务。收齐本批 durable delivery 后，root 更新 DAG 并立即释放下一 ready frontier，直到
+没有剩余节点。调度不使用固定 agent 数量，也不得为凑数量拆出只有极少操作的微任务、重复目标、共享
+未稳定上下文的工作或具有真实前后依赖的工作。
+
+planning 按 crate、前后端层次、独立假设、外部资料或验证面把事实收集交给 fresh-context `explorer`；
+依赖图复杂时可增加一个 `planner` 独立检查拆分、关键路径与风险，但不得机械重复 root 工作。
+editing_documents 中 root 亲自更新设计。working 中普通实现必须交给 `executor` 或
+`worktree_executor`：稳定接口下的单任务和互斥目录并行优先 directory，可能交叉影响共同接口、清单、
+生成边界或 Git 状态时使用 worktree；worktree 只能隔离现场，不能消除语义依赖。每个 child 消息必须
+详细描述目的、基线、所有权、禁止范围、有序步骤、完成/失败条件、证据和 workspace/Git 合同。
 
 所有 child 使用同一成果传递顺序；非 reviewer child 完成探索/实现/验证后先调用 `report_progress`，以
 `readyForCompletion` 提交含 `CHILD_DELIVERY_READY` 的 durable detail，再发送内容一致的 final reply；
@@ -103,12 +112,16 @@ root 保存成功 spawn receipt 中的 `agentId`，循环 `wait_agents` 直到 t
 `CHILD_DELIVERY_READY` 也必须继续等待。所有 pending 目标清空前禁止调用任何一个目标的
 `read_agent_submissions`，从而让每份 durable delivery 都有先行的 receipt-bound terminal 证据。
 
-integrating 中 root 审查 directory 组合 diff、显式采纳 worktree commit、cleanup 并处理冲突。并行
+integrating 中 root 串行维护 canonical Git 状态，审查 directory 组合 diff、显式采纳 worktree commit、
+cleanup 并处理冲突。并行
 worktree 批次必须先把全部接受的 commit 整合进主 workspace，再开始逐个 cleanup；不得在同批次仍有
 未整合 commit 时提前清理其中任一 child。冲突处理中
 允许完成相邻必要实现或测试修复，但不能展开无关工作。child 持续不可用时，root 收窄重派一次后可以
-最小兜底，并显式记录 `ROOT_IMPLEMENTATION_FALLBACK`。reviewing 必须由新创建的只读 `reviewer` 检查
-整合后的主 workspace；root 自审不能替代它，阻塞 finding 修复后必须创建新的 reviewer 复审。
+最小兜底，并显式记录 `ROOT_IMPLEMENTATION_FALLBACK`。reviewing 必须包含一个新创建的只读综合
+`reviewer` 检查整合后的主 workspace；范围较广或风险面可独立验收时，同一 review wave 还应在首次等待前
+并行派出分别覆盖 API/错误路径、测试、GUI、Git/整合等专项 reviewer。root 自审不能替代 reviewer；必须
+等待该 wave 的每个 reviewer terminal 并按 agentId 读取 durable verdict，只有全部 approval 才能进入最终
+门禁，任一阻塞 finding 都必须返工、重新整合并创建新的 review wave。
 工具参数错误必须先对照 schema 修正再重试，禁止原样重复失败调用；模式专属字段必须使用 camelCase，
 `writablePaths` 只传给 directory child，`workspaceDisposition:cleanup` 只在 worktree commit 已整合后使用。
 验收用的 directory 越界拒绝是明确的 expected rejection，不得重试或借 shell 绕过。
@@ -135,8 +148,11 @@ harness 在隔离 Rust 项目中分别选择 `mode.simple` 与 `mode.task`：简
 editing_documents/working/integrating/reviewing/completed 并调用
 `complete`。真实 Prompt 的 wire 验收必须拒绝任何工具执行失败或 `accepted:false`；后续成功重试不能
 掩盖首次错误。最终临时 GUI Task 验收还必须先提出真实澄清，接收固定计划修改意见，再重新提交计划并
-获得批准；批准前不得开始实现。随后并行运行至少两个互斥 directory child 与至少两个独立 worktree
-child，验证不同 workspace/branch、整合前隔离、显式 commit 采纳、只读 reviewer 与全部 cleanup。
+获得批准；批准前不得开始实现。fixture 只描述独立交付目标与 workspace 合同，不直接告诉模型何时批量
+spawn 或何时等待；Task Prompt 必须据此在 planning 与 working 中分别识别 ready frontier。验收随后要求
+至少两个互斥 directory child 与至少两个独立 worktree child 在首次实现等待前运行，验证不同
+workspace/branch、整合前隔离、显式 commit 采纳与全部 cleanup。整合后必须在首次 review 等待前并行派出
+至少一个综合 reviewer 和一个专项 reviewer，并逐个取得 terminal receipt 与 durable approval。
 两份 worktree commit 必须都先完成显式采纳，之后才允许第一次 cleanup。
 两种模式都运行 `cargo test` 与 verifier；GUI 额外重启任务模式验证 run id/revision/history 持久化。
 聚焦计划确认的真实 GUI 回归使用 `cargo xtask verify-workflow --live --gui --plan-only`：它只启动一次

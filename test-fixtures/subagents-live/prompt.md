@@ -16,8 +16,11 @@ Host 已注册并编译完整图；你只能用 `workflow_current`、`workflow_n
 
 在 planning 的任何探索前，先用 `request_user_input` 询问一个真实选择：最终证据是否同时
 保留两份目录隔离 marker 和两份 worktree marker。提供“全部保留（推荐）”与“只保留汇总”
-两个选项，并等待回答。随后查询 `list_agent_profiles`，并行派出下面两个互异 explorer；
-两者 terminal 后按真实 agentId 读取 canonical nonempty durable submissions，再综合完整计划。
+两个选项，并等待回答。随后查询 `list_agent_profiles`。下文给出两个边界互异、可独立验收的
+planning 事实目标；由 Task Mode Prompt 决定如何形成 ready frontier、选择 Profile 和安排等待。
+fixture 为控制费用而刻意缩小了工作量，本验收把下文每个具名 planning、implementation 和 review
+目标都视为足以摊薄一次子代理协调成本的独立工作包，但不预先规定其批次或等待顺序。
+取得实际交付后按真实 agentId 读取 canonical nonempty durable submissions，再综合完整计划。
 在 workflow 保持 `planning` 时依次调用 `plan_current`、`plan_next`、`plan_history`，再用
 canonical revision 和一级 Markdown 标题调用 `plan_submit`。用户会要求补充计划；收到
 `Revise` 后从 `revisionRequested` 读取补充要求并重新提交完整计划，只有第二次明确
@@ -26,13 +29,14 @@ canonical revision 和一级 Markdown 标题调用 `plan_submit`。用户会要�
 
 确认后 root 亲自写 `design/subagents-orchestration.md`，内容包含 `ROOT_DESIGN_MARKER`，并
 明确两份目录隔离、两份 worktree、并行启动、逐提交整合与逐 worktree cleanup。设计基线
-完成后，在首次 wait/read 前连续派出 4 个实现 child：两个 directory executor 和两个
-worktree executor。四者必须互不重叠并真实并行。Root 读取四份 durable delivery 后，审查并
+完成后，下文四个实现目标在稳定设计基线上拥有互不重叠且可独立验收的所有权；由 Task Mode
+Prompt 决定 implementation ready frontier 和调度顺序。Root 取得四份 durable delivery 后，审查并
 先后显式 cherry-pick 两个 worktree commit；只有第二次 cherry-pick 成功后，才分别以
 `workspaceDisposition:"cleanup"` 关闭
-两个 worktree child。全部 cleanup 后派全新的只读 reviewer。只有 reviewer durable verdict 为
-`REVIEWER_READ_ONLY_APPROVED` 后，root 才运行最终 `cargo test`、推进到 `completed` 并输出
-`PURE_SUBAGENTS_LIVE_OK`。若 reviewer 报告 `REVIEWER_FINDING`，修复后必须派新的 reviewer。
+两个 worktree child。全部 cleanup 后完成下文两个边界独立的只读 review 目标。只有最终 review
+wave 的全部 durable verdict 都为 `REVIEWER_READ_ONLY_APPROVED`，root 才运行最终 `cargo test`、
+推进到 `completed` 并输出 `PURE_SUBAGENTS_LIVE_OK`。若任一 reviewer 报告 `REVIEWER_FINDING`，
+修复后必须创建新的 review wave。
 
 ## Spawn 与交付合同
 
@@ -62,10 +66,10 @@ explorer、executor、worktree_executor 在 final reply 前调用 `report_progre
 维护 pending agentId 集合。只有同一次 wait receipt 同时满足以下四项，才能把该 agent 从 pending
 移除：`reason:"terminal"`、message 的 `agentId` 精确匹配、`state.agent.kind` 为 `idle` 或
 `closed`、`lastTurnOutcome` 为 completed。若 receipt 是 `reason:"progress"`，即使 message 已含
-`CHILD_DELIVERY_READY`，也只能说明 durable delivery 已发布，必须继续 wait 该 agent。两个 explorer
-都分别获得 terminal receipt 前，禁止读取任一 explorer submission；四个实现 child 也遵循同一规则。
+`CHILD_DELIVERY_READY`，也只能说明 durable delivery 已发布，必须继续 wait 该 agent。每个调度 wave
+都必须先取得所有 pending agent 的 terminal receipt，才能读取该 wave 的 submissions。
 
-## 两个只读探索任务
+## Planning 事实目标
 
 - fixture-source：只读 `Cargo.toml` 与 `src/lib.rs`，报告 file:line、关键事实，以及它们与
   Thread Mode 注册图和 Profile facts 是否一致。
@@ -73,9 +77,8 @@ explorer、executor、worktree_executor 在 final reply 前调用 `report_progre
   `git status --short --branch`。SSH 的 `exec.cwd` 使用 workspace-relative 路径（根目录用
   `"."`），两次命令不得并行。
 
-两个 explorer 都不得修改状态、读取 Studio home/config、扫描 target 或 `.git` 内部、运行
-全仓检索或测试，也不得自行查询 Profile。两次 explorer spawn 都必须发生在首次 wait/read
-之前。
+承担这些目标的 explorer 不得修改状态、读取 Studio home/config、扫描 target 或 `.git` 内部、运行
+全仓检索或测试，也不得自行查询 Profile。
 
 ## 两个目录隔离实现
 
@@ -113,15 +116,18 @@ alpha → 验证 alpha 清理 → cleanup beta → 验证 beta 清理。在两�
 `close_agent` cleanup 都是验收失败；不得交错成“cherry-pick alpha → cleanup alpha → cherry-pick
 beta”。最后确认所有 `pure-agent-*` branch 与 child worktree 路径已删除。
 
-## Reviewer 与验收证据
+## Review 目标与验收证据
 
-Reviewer 严格只读，只检查目标、五个 marker 文件、两次 worktree 整合、两次目录拒绝、测试
-和剩余风险；不得执行 shell、修改文件或 Git。工具缺失只作为 limitation，不得把未暴露工具
-本身判为 finding。
+两个 review 目标都严格只读，不得执行 shell、修改文件或 Git；工具缺失只作为 limitation，不得把
+未暴露工具本身判为 finding。
+
+- comprehensive：综合检查用户目标、五个 marker 文件、两次目录拒绝、测试与剩余风险。
+- integration-specialist：专项检查两个 worktree commit 的显式整合、cleanup 顺序、残留
+  worktree/branch 与 canonical workspace 一致性。
 
 最终 artifact 必须证明：首次 provider 请求已含 Thread Mode Prompt 与 `planning` 初态、没有
-图编译指令；真实澄清、首次计划退回、修订计划批准均发生；两个 explorer 在首次等待前并行；
-两个目录 child 与两个 worktree child 在首次实现等待前并行；每个 child 有 receipt-bound terminal
-wait 与 durable submission；两个越界写入均被拒绝；两份目录产物和两份 worktree commit 正确；
-root 逐个整合并 cleanup；fresh reviewer 的 durable approval 被读取；最终测试通过、无残留
-worktree/branch、五个 marker 文件正确、GUI 截图与 terminal receipt 存在。
+图编译指令；真实澄清、首次计划退回、修订计划批准均发生；Task Mode 从上述目标自主形成并批量调度
+planning、implementation 与 review ready frontier；每个 child 有 receipt-bound terminal wait 与
+durable submission；两个越界写入均被拒绝；两份目录产物和两份 worktree commit 正确；root 逐个整合
+并 cleanup；最终 review wave 的全部 durable approval 被读取；最终测试通过、无残留 worktree/branch、
+五个 marker 文件正确、GUI 截图与 terminal receipt 存在。
