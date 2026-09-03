@@ -2,6 +2,12 @@ part of '../widget_test.dart';
 
 void registerStatusAccessibilityTests() {
   group('status detail accessibility', () {
+    test('runtime cost formatting rounds to two decimal places', () {
+      expect(formatRuntimeCostAmount('CNY', 1.236), '￥1.24');
+      expect(formatRuntimeCostAmount('USD', 0.005), r'$0.01');
+      expect(formatRuntimeCostAmount('USD', -0.004), r'$0.00');
+    });
+
     testWidgets('context readout is a keyboard-operable semantic button', (
       tester,
     ) async {
@@ -80,8 +86,8 @@ void registerStatusAccessibilityTests() {
         '75',
         '3',
         '40%',
-        r'$0.0025 + ￥0.31 · Partially unpriced',
-        r'$0.0012',
+        r'$0.00 + ￥0.31 · Partially unpriced',
+        r'$0.00',
       ]) {
         expect(find.text(value), findsOneWidget, reason: value);
       }
@@ -171,7 +177,7 @@ void registerStatusAccessibilityTests() {
       await tester.tap(find.byKey(StudioDriverKeys.contextUsage()));
       await tester.pumpAndSettle();
       expect(find.byKey(StudioDriverKeys.contextUsageDetail()), findsOneWidget);
-      expect(find.textContaining(r'$0.0025 + ￥0.31'), findsOneWidget);
+      expect(find.textContaining(r'$0.00 + ￥0.31'), findsOneWidget);
     });
 
     testWidgets('status bar keeps an unstarted Thread Mode lightweight', (
@@ -761,7 +767,7 @@ const _cacheRuntime = ThreadRuntimeView(
   contextTokens: 42,
   contextWindow: 100,
   totalTokens: 1200,
-  costLabel: r'$0.0025',
+  costLabel: r'$0.00',
   activeSkills: [],
   activeMcpServers: [],
   activeLspServers: [],

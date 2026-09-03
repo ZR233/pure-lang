@@ -989,7 +989,7 @@ void registerShellSettingsTests() {
         of: sessionCost,
         matching: find.text('Partially unpriced'),
       ),
-      findsOneWidget,
+      findsNothing,
     );
     expect(find.textContaining('Total cost'), findsNothing);
     expect(find.byKey(StudioDriverKeys.threadThroughput), findsOneWidget);
@@ -1005,9 +1005,46 @@ void registerShellSettingsTests() {
     await tester.pumpAndSettle();
 
     expect(find.text(r'￥0.14 + $0.02'), findsOneWidget);
-    expect(find.text('Partially unpriced'), findsOneWidget);
+    expect(find.text('Partially unpriced'), findsNothing);
     expect(find.text('75 t/s'), findsOneWidget);
     expect(find.text('150 t/s'), findsNothing);
+  });
+
+  testWidgets('header shows a dash when the session has no priced costs', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final state = _rootAndChildState().copyWith(
+      modelPerformance: _modelPerformanceFixture(
+        hasUnpricedUsage: true,
+        estimatedCosts: const [],
+      ),
+    );
+    final api = _FakeStudioApi(state);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final sessionCost = find.byKey(StudioDriverKeys.sessionCost);
+    expect(
+      find.descendant(of: sessionCost, matching: find.text('-')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: sessionCost,
+        matching: find.text('Partially unpriced'),
+      ),
+      findsNothing,
+    );
   });
 
   testWidgets('status bar shows a placeholder without a speed sample', (
@@ -3031,6 +3068,7 @@ Future<void> _pumpSettingsPage(WidgetTester tester, _FakeStudioApi api) async {
 
 ModelPerformanceSnapshotView _modelPerformanceFixture({
   bool hasUnpricedUsage = false,
+  List<RuntimeCostView>? estimatedCosts,
 }) {
   return ModelPerformanceSnapshotView(
     revision: 3,
@@ -3038,10 +3076,12 @@ ModelPerformanceSnapshotView _modelPerformanceFixture({
     sessionCosts: [
       SessionCostView(
         rootThreadId: 'session-1',
-        estimatedCosts: [
-          RuntimeCostView(currency: 'CNY', amount: 0.14),
-          RuntimeCostView(currency: 'USD', amount: 0.02),
-        ],
+        estimatedCosts:
+            estimatedCosts ??
+            [
+              RuntimeCostView(currency: 'CNY', amount: 0.14),
+              RuntimeCostView(currency: 'USD', amount: 0.02),
+            ],
         hasUnpricedUsage: hasUnpricedUsage,
       ),
     ],

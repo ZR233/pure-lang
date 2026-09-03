@@ -151,6 +151,43 @@ impl AgentDirectoryHandle {
     }
 }
 
+pub(crate) fn root_agent_id_for(
+    directory: &AgentDirectorySnapshot,
+    agent_id: &ThreadId,
+) -> AgentRuntimeResult<ThreadId> {
+    let parents = directory
+        .agents
+        .iter()
+        .map(|snapshot| {
+            (
+                snapshot.identity.id.clone(),
+                snapshot.identity.parent_id.clone(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    if !parents.contains_key(agent_id) {
+        return Err(AgentRuntimeError::NotFound(agent_id.clone()));
+    }
+    let mut current = agent_id.clone();
+    let mut remaining = parents.len();
+    while let Some(parent) = parents.get(&current).cloned().flatten() {
+        if remaining == 0 {
+            return Err(AgentRuntimeError::Lifecycle(
+                "agent parent graph contains a cycle".to_string(),
+            ));
+        }
+        remaining -= 1;
+        current = parent;
+        if !parents.contains_key(&current) {
+            return Err(AgentRuntimeError::Lifecycle(format!(
+                "agent parent {} is missing while resolving root for {agent_id}",
+                current.as_str()
+            )));
+        }
+    }
+    Ok(current)
+}
+
 fn directory_fact_changed(
     previous: Option<&AgentSnapshot>,
     snapshot: &AgentSnapshot,

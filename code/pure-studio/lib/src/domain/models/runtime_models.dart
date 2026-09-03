@@ -21,21 +21,18 @@ class RuntimeCostView {
 /// 已知币种显示为货币符号；未知币种回退为币种代码前缀。
 const Map<String, String> _runtimeCurrencySymbols = {'CNY': '￥', 'USD': r'$'};
 
-/// 费用金额显示：最多保留 6 位小数并去掉尾随零。
+/// 费用金额显示：四舍五入并固定保留 2 位小数。
 String formatRuntimeCostAmount(String currency, double amount) {
-  final fixed = amount.toStringAsFixed(6);
-  var compact = fixed.replaceFirst(RegExp(r'\.?0+$'), '');
-  if (compact == '-0' || compact.isEmpty) {
-    compact = '0';
-  }
+  final rounded = amount.toStringAsFixed(2);
+  final display = rounded == '-0.00' ? '0.00' : rounded;
   final symbol = _runtimeCurrencySymbols[currency.toUpperCase()];
   if (symbol != null) {
-    return '$symbol$compact';
+    return '$symbol$display';
   }
-  return '$currency $compact'.trim();
+  return '$currency $display'.trim();
 }
 
-/// 多币种实际花费合并显示，如 `￥1.2 + $2.6`；不做汇率换算。
+/// 多币种实际花费合并显示，如 `￥1.20 + $2.60`；不做汇率换算。
 String formatRuntimeCosts(Iterable<RuntimeCostView> costs) {
   return costs
       .map((cost) => formatRuntimeCostAmount(cost.currency, cost.amount))

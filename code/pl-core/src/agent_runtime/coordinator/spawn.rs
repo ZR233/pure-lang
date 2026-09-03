@@ -1,3 +1,4 @@
+use super::super::directory::root_agent_id_for;
 use super::super::host::{PersistenceClass, initial_transcript_mutation};
 use super::super::{
     AgentCommand, AgentFaultClassification, AgentIdentity, AgentSnapshotTransition,
@@ -8,6 +9,18 @@ use super::*;
 enum SpawnCompensation {
     RolledBack,
     Faulted { reason: String },
+}
+
+fn thread_snapshot_for_agent(
+    identity: &AgentIdentity,
+    root_agent_id: &ThreadId,
+    revision: u64,
+) -> pl_protocol::ThreadSnapshot {
+    let mut snapshot = pl_protocol::ThreadSnapshot::empty(identity.id.as_str());
+    snapshot.revision = revision;
+    snapshot.thread.root_thread_id = root_agent_id.to_string();
+    snapshot.thread.parent_thread_id = identity.parent_id.as_ref().map(ToString::to_string);
+    snapshot
 }
 
 pub(super) async fn register_agent<H>(
@@ -99,6 +112,7 @@ where
         role: request.role,
         depth: parent.identity.depth.saturating_add(1),
     };
+    let root_agent_id = root_agent_id_for(&runtime.directory_snapshot(), &parent.identity.id)?;
     let mut state = AgentRegistration {
         identity,
         session: request.session.clone(),
@@ -222,8 +236,11 @@ where
             };
         }
     }
-    let mut thread_snapshot = pl_protocol::ThreadSnapshot::empty(child_id.as_str());
-    thread_snapshot.revision = state.session.thread_revision;
+    let thread_snapshot = thread_snapshot_for_agent(
+        &state.snapshot.identity,
+        &root_agent_id,
+        state.session.thread_revision,
+    );
     if let Err(error) = runtime.thread_events.replace_snapshot(thread_snapshot) {
         let rollback_reason = SpawnRollbackReason {
             phase: SpawnRollbackPhase::AgentRegistration,

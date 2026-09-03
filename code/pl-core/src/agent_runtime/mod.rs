@@ -2869,6 +2869,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn child_thread_projection_retains_root_and_parent_identity() {
+        let host = TestHost::new(TestRepository::empty(), FactoryMode::Fail);
+        let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
+        let handle = runtime.handle();
+        let root = ThreadId::new("root").unwrap();
+        handle
+            .register(registration("root", "root-chat"))
+            .await
+            .unwrap();
+
+        let child = handle
+            .spawn(child_spawn_request(root.clone()))
+            .await
+            .unwrap()
+            .snapshot
+            .identity
+            .id;
+        let child_snapshot = handle.thread_snapshot(&child).unwrap();
+        assert_eq!(child_snapshot.thread.root_thread_id, root.as_str());
+        assert_eq!(
+            child_snapshot.thread.parent_thread_id.as_deref(),
+            Some(root.as_str())
+        );
+
+        let grandchild = handle
+            .spawn(AgentSpawnRequest {
+                thread_id: ThreadId::new("grandchild-chat").unwrap(),
+                parent_id: child.clone(),
+                role: crate::AgentRoleId::new("worker").unwrap(),
+                session: ThreadContextState::empty(),
+                initial_turn_id: None,
+                initial_message: None,
+                metadata: serde_json::Value::Null,
+            })
+            .await
+            .unwrap()
+            .snapshot
+            .identity
+            .id;
+        let grandchild_snapshot = handle.thread_snapshot(&grandchild).unwrap();
+        assert_eq!(grandchild_snapshot.thread.root_thread_id, root.as_str());
+        assert_eq!(
+            grandchild_snapshot.thread.parent_thread_id.as_deref(),
+            Some(child.as_str())
+        );
+
+        runtime.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn retire_tree_releases_actors_directory_and_thread_snapshots() {
         let repository = TestRepository::empty();
         let host = TestHost::new(repository.clone(), FactoryMode::Fail);

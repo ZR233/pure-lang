@@ -416,6 +416,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unpriced_root_does_not_hide_priced_child_session_cost() {
+        let (owner, _, writer, _) = memory_owner().await;
+        let mut root = billing_record("root-inference", "provider-a", "model-a", 20, 200, 1);
+        root.has_unpriced_usage = true;
+        let mut child = billing_record("child-inference", "provider-a", "model-a", 10, 100, 2);
+        child.estimated_costs = vec![cost("CNY", 0.10)];
+
+        owner
+            .record_inference("root", "root", &root)
+            .await
+            .expect("unpriced root billing");
+        owner
+            .record_inference("root", "child", &child)
+            .await
+            .expect("priced child billing");
+
+        let snapshot = owner.snapshot().await;
+        assert_eq!(snapshot.session_costs.len(), 1);
+        assert_eq!(snapshot.session_costs[0].root_thread_id, "root");
+        assert_eq!(
+            snapshot.session_costs[0].estimated_costs,
+            [cost("CNY", 0.10)]
+        );
+        assert!(snapshot.session_costs[0].has_unpriced_usage);
+
+        writer.shutdown().await.expect("writer shutdown");
+    }
+
+    #[tokio::test]
     async fn summaries_isolate_provider_instances_and_use_weighted_throughput() {
         let (owner, _, writer, _) = memory_owner().await;
         owner
