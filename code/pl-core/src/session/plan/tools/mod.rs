@@ -56,6 +56,15 @@ mod tests {
             &PlanSubmitTool::new(working_set.clone(), binding.clone()),
             TOOL_PLAN_SUBMIT,
         );
+        let submit_description = PlanSubmitTool::new(working_set.clone(), binding.clone())
+            .definition()
+            .description()
+            .to_string();
+        assert!(
+            submit_description.contains("only tool for asking the user to approve implementation")
+        );
+        assert!(submit_description.contains("do not first ask whether to implement"));
+        assert!(submit_description.contains("request_user_input or final text"));
         assert_mutation_policy(
             &PlanRestartTool::new(working_set, binding),
             TOOL_PLAN_RESTART,

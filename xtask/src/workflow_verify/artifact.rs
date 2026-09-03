@@ -10,9 +10,11 @@ use anyhow::{Context, Result, bail, ensure};
 use serde::Serialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+
+use super::WorkflowAcceptanceScope;
 
 const FORBIDDEN_TOOLS: &[&str] = &[
     "workflow_state",
@@ -58,6 +60,7 @@ const FORBIDDEN_PROMPT_MARKERS: &[&str] = &[
 struct WireManifest<'a> {
     schema_version: u32,
     surface: &'a str,
+    scope: &'a str,
     fixture_prompt_sha256: &'a str,
     simple_fixture_prompt_sha256: &'a str,
     captures: Vec<WireManifestEntry>,
@@ -73,9 +76,15 @@ struct WireManifestEntry {
     mode_id: Option<&'static str>,
     workflow_call_count: usize,
     workflow_result_count: usize,
+    workflow_transition_call_count: usize,
+    request_user_input_call_count: usize,
+    plan_current_call_count: usize,
+    plan_submit_call_count: usize,
+    plan_submit_call_ids: Vec<String>,
     complete_call_count: usize,
     prompt_sections: Vec<&'static str>,
     tool_names: Vec<String>,
+    tool_descriptions: BTreeMap<String, String>,
     tool_schema_sha256: String,
 }
 
@@ -91,6 +100,7 @@ pub(super) fn finalize(
     surface: &str,
     prompt_hash: &str,
     simple_prompt_hash: &str,
+    scope: WorkflowAcceptanceScope,
 ) -> Result<()> {
     let prompt_bytes = fs::read(artifact_dir.join("fixture-prompt.md"))?;
     let artifact_prompt_hash = format!("{:x}", Sha256::digest(&prompt_bytes));
@@ -125,13 +135,22 @@ pub(super) fn finalize(
         }
         captures.push(capture);
     }
-    assert_completion_receipts(artifact_dir, surface)?;
-    assert_workflow_contract(&captures)?;
+    match scope {
+        WorkflowAcceptanceScope::Full => {
+            assert_completion_receipts(artifact_dir, surface)?;
+            assert_workflow_contract(&captures)?;
+        }
+        WorkflowAcceptanceScope::PlanOnly => {
+            assert_gui_plan_only_receipt(artifact_dir)?;
+            assert_plan_only_contract(&captures)?;
+        }
+    }
     fs::write(
         artifact_dir.join("wire-request-manifest.json"),
         serde_json::to_vec_pretty(&WireManifest {
-            schema_version: 2,
+            schema_version: 3,
             surface,
+            scope: scope.driver_value(),
             fixture_prompt_sha256: prompt_hash,
             simple_fixture_prompt_sha256: simple_prompt_hash,
             captures,
@@ -190,6 +209,31 @@ fn assert_gui_completion_receipts(artifact_dir: &Path) -> Result<()> {
             "GUI attempt {attempt} has no successful complete tool receipt"
         );
     }
+    Ok(())
+}
+
+fn assert_gui_plan_only_receipt(artifact_dir: &Path) -> Result<()> {
+    let path = artifact_dir.join("gui-attempt-1-workflow-receipt.json");
+    let receipt: Value = serde_json::from_slice(
+        &fs::read(&path)
+            .with_context(|| format!("missing Plan-only GUI receipt `{}`", path.display()))?,
+    )
+    .with_context(|| format!("invalid Plan-only GUI receipt `{}`", path.display()))?;
+    ensure!(
+        receipt.get("scope").and_then(Value::as_str) == Some("plan-only"),
+        "Plan-only GUI receipt has the wrong scope"
+    );
+    ensure!(
+        receipt
+            .pointer("/completed/planState")
+            .and_then(Value::as_str)
+            == Some("approved"),
+        "Plan-only GUI receipt has no approved canonical Plan"
+    );
+    ensure!(
+        receipt.get("complete").is_some_and(Value::is_null),
+        "Plan-only GUI receipt unexpectedly contains complete"
+    );
     Ok(())
 }
 
@@ -309,6 +353,112 @@ fn assert_workflow_contract(captures: &[WireManifestEntry]) -> Result<()> {
     Ok(())
 }
 
+fn assert_plan_only_contract(captures: &[WireManifestEntry]) -> Result<()> {
+    ensure!(
+        captures.iter().all(|capture| {
+            capture
+                .tool_names
+                .iter()
+                .all(|name| !FORBIDDEN_TOOLS.contains(&name.as_str()))
+        }),
+        "Plan-only wire captures contain a removed Task/review/merge tool"
+    );
+    ensure!(
+        captures
+            .iter()
+            .all(|capture| capture.mode_id != Some("mode.simple")),
+        "Plan-only wire captures unexpectedly contain mode.simple"
+    );
+    let root = captures.iter().filter(|capture| {
+        capture.request_mode == "full"
+            && capture.mode_id == Some("mode.task")
+            && capture
+                .model
+                .as_deref()
+                .is_some_and(|model| !model.is_empty())
+    });
+    let first_root = root
+        .clone()
+        .next()
+        .context("Plan-only acceptance has no full mode.task provider request")?;
+    ensure!(
+        first_root.prompt_sections.contains(&"threadModePrompt")
+            && first_root.prompt_sections.contains(&"canonicalUserPrompt")
+            && first_root.prompt_sections.contains(&"workflowProjection")
+            && first_root.prompt_sections.contains(&"initialPlanningState"),
+        "the first Plan-only request does not contain Task Mode and initial planning context"
+    );
+    ensure!(
+        first_root.workflow_call_count == 0
+            && first_root.plan_current_call_count == 0
+            && first_root.plan_submit_call_count == 0
+            && first_root.request_user_input_call_count == 0
+            && first_root.complete_call_count == 0,
+        "the first Plan-only provider request already contains tool calls or results"
+    );
+    ensure!(
+        PLAN_TOOLS.iter().all(|required| {
+            first_root
+                .tool_names
+                .iter()
+                .any(|actual| actual == required)
+        }),
+        "the first Plan-only provider request does not expose every Plan tool"
+    );
+    let ask_description = first_root
+        .tool_descriptions
+        .get("request_user_input")
+        .context("the first Plan-only request has no request_user_input description")?;
+    ensure!(
+        ask_description.contains("Never use this tool to ask whether to implement")
+            && ask_description.contains("plan_submit instead"),
+        "request_user_input description does not exclude Plan approval"
+    );
+    let submit_description = first_root
+        .tool_descriptions
+        .get("plan_submit")
+        .context("the first Plan-only request has no plan_submit description")?;
+    ensure!(
+        submit_description.contains("only tool for asking the user to approve implementation")
+            && submit_description.contains("request_user_input or final text"),
+        "plan_submit description does not own implementation approval"
+    );
+    ensure!(
+        captures
+            .iter()
+            .all(|capture| capture.request_user_input_call_count == 0),
+        "Plan-only acceptance called request_user_input"
+    );
+    ensure!(
+        captures
+            .iter()
+            .any(|capture| capture.plan_current_call_count > 0),
+        "Plan-only acceptance never called plan_current"
+    );
+    ensure!(
+        captures
+            .iter()
+            .flat_map(|capture| capture.plan_submit_call_ids.iter())
+            .collect::<HashSet<_>>()
+            .len()
+            >= 2,
+        "Plan-only acceptance did not submit both the initial and revised Plan"
+    );
+    ensure!(
+        captures
+            .iter()
+            .all(|capture| capture.workflow_transition_call_count == 0),
+        "Plan-only acceptance transitioned the workflow"
+    );
+    ensure!(
+        captures
+            .iter()
+            .all(|capture| capture.complete_call_count == 0),
+        "Plan-only acceptance called complete"
+    );
+    Ok(())
+}
+
 fn capture_entry(artifact_dir: &Path, path: &Path) -> Result<WireManifestEntry> {
     let capture: Value = serde_json::from_slice(
         &fs::read(path).with_context(|| format!("failed to read `{}`", path.display()))?,
@@ -350,6 +500,16 @@ fn capture_entry(artifact_dir: &Path, path: &Path) -> Result<WireManifestEntry> 
         .collect::<Vec<_>>();
     tool_names.sort();
     tool_names.dedup();
+    let tool_descriptions = tools
+        .iter()
+        .filter_map(|tool| {
+            let name = tool_name(tool)?;
+            matches!(name, "request_user_input" | "plan_submit").then(|| {
+                tool_description(tool)
+                    .map(|description| (name.to_string(), description.to_string()))
+            })?
+        })
+        .collect::<BTreeMap<_, _>>();
     let message_texts = wire_message_texts(body);
     let prompt_text = prompt_text(body, &message_texts);
     ensure!(
@@ -365,6 +525,11 @@ fn capture_entry(artifact_dir: &Path, path: &Path) -> Result<WireManifestEntry> 
         .map(|name| function_call_count(body, name))
         .sum();
     let workflow_result_count = workflow_result_count(body);
+    let workflow_transition_call_count = function_call_count(body, "workflow_transition");
+    let request_user_input_call_count = function_call_count(body, "request_user_input");
+    let plan_current_call_count = function_call_count(body, "plan_current");
+    let plan_submit_call_count = function_call_count(body, "plan_submit");
+    let plan_submit_call_ids = function_call_ids(body, "plan_submit");
     let complete_call_count = function_call_count(body, "complete");
     let mode_id = if prompt_text.contains("<preloaded_thread_mode_prompt modeId=\"mode.simple\"") {
         Some("mode.simple")
@@ -387,9 +552,15 @@ fn capture_entry(artifact_dir: &Path, path: &Path) -> Result<WireManifestEntry> 
         mode_id,
         workflow_call_count,
         workflow_result_count,
+        workflow_transition_call_count,
+        request_user_input_call_count,
+        plan_current_call_count,
+        plan_submit_call_count,
+        plan_submit_call_ids,
         complete_call_count,
         prompt_sections,
         tool_names,
+        tool_descriptions,
         tool_schema_sha256: format!("{:x}", Sha256::digest(tools_json)),
     })
 }
@@ -418,6 +589,40 @@ fn function_call_count(body: &Value, name: &str) -> usize {
         .filter(|item| tool_name(item) == Some(name))
         .count();
     responses + chat
+}
+
+fn function_call_ids(body: &Value, name: &str) -> Vec<String> {
+    let responses = body
+        .get("input")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("function_call"));
+    let chat = body
+        .get("messages")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .flat_map(|message| {
+            message
+                .get("tool_calls")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+        });
+    let mut call_ids = responses
+        .chain(chat)
+        .filter(|item| tool_name(item) == Some(name))
+        .filter_map(|item| {
+            item.get("call_id")
+                .or_else(|| item.get("id"))
+                .and_then(Value::as_str)
+        })
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    call_ids.sort_unstable();
+    call_ids.dedup();
+    call_ids
 }
 
 fn workflow_result_count(body: &Value) -> usize {
@@ -562,6 +767,13 @@ fn tool_name(tool: &Value) -> Option<&str> {
     tool.get("name")
         .and_then(Value::as_str)
         .or_else(|| tool.pointer("/function/name").and_then(Value::as_str))
+}
+
+fn tool_description(tool: &Value) -> Option<&str> {
+    tool.get("description").and_then(Value::as_str).or_else(|| {
+        tool.pointer("/function/description")
+            .and_then(Value::as_str)
+    })
 }
 
 fn wire_message_texts(body: &Value) -> Vec<&str> {
@@ -711,6 +923,29 @@ mod tests {
     }
 
     #[test]
+    fn plan_only_contract_uses_plan_confirmation_without_general_question() {
+        let captures = valid_plan_only_captures();
+
+        assert!(assert_plan_only_contract(&captures).is_ok());
+    }
+
+    #[test]
+    fn plan_only_contract_rejects_request_user_input() {
+        let mut captures = valid_plan_only_captures();
+        captures[1].request_user_input_call_count = 1;
+
+        assert!(assert_plan_only_contract(&captures).is_err());
+    }
+
+    #[test]
+    fn plan_only_contract_requires_two_distinct_plan_submissions() {
+        let mut captures = valid_plan_only_captures();
+        captures[1].plan_submit_call_ids = vec!["plan-1".to_string()];
+
+        assert!(assert_plan_only_contract(&captures).is_err());
+    }
+
+    #[test]
     fn workflow_contract_rejects_removed_tools() {
         let mut task = initial_task_capture();
         task.tool_names.push("task_transition".to_string());
@@ -741,10 +976,29 @@ mod tests {
         ]
     }
 
+    fn valid_plan_only_captures() -> Vec<WireManifestEntry> {
+        let initial = initial_task_capture();
+        let mut progressed = valid_capture("mode.task");
+        progressed.workflow_call_count = 0;
+        progressed.workflow_result_count = 0;
+        progressed.workflow_transition_call_count = 0;
+        progressed.request_user_input_call_count = 0;
+        progressed.plan_current_call_count = 1;
+        progressed.plan_submit_call_count = 2;
+        progressed.plan_submit_call_ids = vec!["plan-1".to_string(), "plan-2".to_string()];
+        progressed.complete_call_count = 0;
+        vec![initial, progressed]
+    }
+
     fn initial_task_capture() -> WireManifestEntry {
         let mut capture = valid_capture("mode.task");
         capture.workflow_call_count = 0;
         capture.workflow_result_count = 0;
+        capture.workflow_transition_call_count = 0;
+        capture.request_user_input_call_count = 0;
+        capture.plan_current_call_count = 0;
+        capture.plan_submit_call_count = 0;
+        capture.plan_submit_call_ids.clear();
         capture.complete_call_count = 0;
         capture.prompt_sections.push("initialPlanningState");
         capture
@@ -768,6 +1022,18 @@ mod tests {
             tool_names.extend(WORKFLOW_TOOLS.iter().map(ToString::to_string));
             tool_names.extend(PLAN_TOOLS.iter().map(ToString::to_string));
         }
+        let tool_descriptions = BTreeMap::from([
+            (
+                "request_user_input".to_string(),
+                "Never use this tool to ask whether to implement; use plan_submit instead."
+                    .to_string(),
+            ),
+            (
+                "plan_submit".to_string(),
+                "The only tool for asking the user to approve implementation; do not use request_user_input or final text."
+                    .to_string(),
+            ),
+        ]);
         WireManifestEntry {
             file: format!("{mode_id}.json"),
             protocol: "responsesHttp".to_string(),
@@ -776,6 +1042,15 @@ mod tests {
             mode_id: Some(mode_id),
             workflow_call_count: if task { 1 } else { 0 },
             workflow_result_count: if task { 1 } else { 0 },
+            workflow_transition_call_count: if task { 1 } else { 0 },
+            request_user_input_call_count: 0,
+            plan_current_call_count: if task { 1 } else { 0 },
+            plan_submit_call_count: if task { 1 } else { 0 },
+            plan_submit_call_ids: if task {
+                vec!["plan-1".to_string()]
+            } else {
+                Vec::new()
+            },
             complete_call_count: 1,
             prompt_sections: if task {
                 vec![
@@ -787,6 +1062,7 @@ mod tests {
                 vec!["threadModePrompt", "canonicalUserPrompt"]
             },
             tool_names,
+            tool_descriptions,
             tool_schema_sha256: "hash".to_string(),
         }
     }
@@ -878,6 +1154,7 @@ mod tests {
             std::fs::read_to_string(artifact_dir.join("simple-fixture-prompt.sha256"))
                 .expect("simple fixture prompt hash")
                 .trim(),
+            WorkflowAcceptanceScope::Full,
         )
         .expect("wire manifest replay");
     }

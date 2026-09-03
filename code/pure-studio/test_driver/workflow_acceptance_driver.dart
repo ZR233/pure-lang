@@ -20,19 +20,37 @@ Future<void> main(List<String> arguments) async {
       vmServiceUrl: options.vmServiceUrl,
       onReconnect: (event) => _append(snapshots, event.toJson()),
     );
+    Map<String, dynamic>? scopedSnapshot;
     if (options.mode == 'new') {
-      await _startNewWorkflow(session, options, snapshots, evidence);
+      scopedSnapshot = await _startNewWorkflow(
+        session,
+        options,
+        snapshots,
+        evidence,
+      );
     }
-    var finalSnapshot = options.studioMode == 'mode.simple'
-        ? await _waitForSimpleCompletion(session, options, snapshots, evidence)
-        : await _waitForTerminal(
-            session,
-            options,
-            snapshots,
-            evidence,
-            'completed',
-          );
-    if (options.mode == 'new') {
+    var finalSnapshot = switch (options.acceptanceScope) {
+      _AcceptanceScope.planOnly =>
+        scopedSnapshot ??
+            (throw StateError('Plan-only Driver did not produce a snapshot')),
+      _AcceptanceScope.full =>
+        options.studioMode == 'mode.simple'
+            ? await _waitForSimpleCompletion(
+                session,
+                options,
+                snapshots,
+                evidence,
+              )
+            : await _waitForTerminal(
+                session,
+                options,
+                snapshots,
+                evidence,
+                'completed',
+              ),
+    };
+    if (options.mode == 'new' &&
+        options.acceptanceScope == _AcceptanceScope.full) {
       finalSnapshot = await _verifyAndRenameThreadTitle(
         session,
         options,
@@ -42,7 +60,17 @@ Future<void> main(List<String> arguments) async {
       );
     }
     final workflow = workflowFromSnapshot(finalSnapshot);
-    if (options.studioMode == 'mode.simple') {
+    if (options.acceptanceScope == _AcceptanceScope.planOnly) {
+      final run = workflow?['currentRun'];
+      if (run is! Map<String, dynamic> ||
+          run['currentStateId'] != 'planning' ||
+          run['terminal'] != false) {
+        throw StateError(
+          'Plan-only workflow left non-terminal planning: $workflow',
+        );
+      }
+      evidence.validatePlanOnlyFlow();
+    } else if (options.studioMode == 'mode.simple') {
       if (workflow != null) {
         throw StateError(
           'mode.simple unexpectedly exposed a workflow: $workflow',
@@ -59,17 +87,20 @@ Future<void> main(List<String> arguments) async {
       }
       evidence.validateTaskFlow();
     }
-    final timeline =
-        ((finalSnapshot['workspace'] as Map?)?['timeline'] as List? ?? const [])
-            .whereType<Map>()
-            .map((row) => row['text'])
-            .whereType<String>()
-            .join('\n');
-    if (!timeline.contains('PURE_WORKFLOW_GUI_VERIFY_OK') ||
-        !timeline.contains('cargo test')) {
-      throw StateError(
-        'final response does not report the verifier marker and cargo test',
-      );
+    if (options.acceptanceScope == _AcceptanceScope.full) {
+      final timeline =
+          ((finalSnapshot['workspace'] as Map?)?['timeline'] as List? ??
+                  const [])
+              .whereType<Map>()
+              .map((row) => row['text'])
+              .whereType<String>()
+              .join('\n');
+      if (!timeline.contains('PURE_WORKFLOW_GUI_VERIFY_OK') ||
+          !timeline.contains('cargo test')) {
+        throw StateError(
+          'final response does not report the verifier marker and cargo test',
+        );
+      }
     }
     await File('${options.snapshotOutput}.png')
         .writeAsBytes(await session.screenshot(), flush: true);
@@ -92,6 +123,8 @@ Future<void> main(List<String> arguments) async {
         'result': 'completed',
         'mode': options.mode,
         'attempt': options.attempt,
+        'acceptanceScope': options.acceptanceScope.wireValue,
+        'planState': evidence.canonicalPlanState,
         'workflow': workflow,
         'workspace': finalSnapshot['workspace'],
       }),
@@ -131,7 +164,7 @@ Future<void> main(List<String> arguments) async {
   }
 }
 
-Future<void> _startNewWorkflow(
+Future<Map<String, dynamic>?> _startNewWorkflow(
   FlutterDriverSession session,
   _Options options,
   File snapshots,
@@ -199,6 +232,15 @@ Future<void> _startNewWorkflow(
       timeout: const Duration(minutes: 10),
       evidence: evidence,
     );
+    if (options.acceptanceScope == _AcceptanceScope.planOnly) {
+      return _drivePlanOnlyRevisionAndApproval(
+        session,
+        snapshots,
+        options,
+        protectedFiles,
+        evidence,
+      );
+    }
     await _driveClarificationAndPlanRevision(
       session,
       snapshots,
@@ -218,6 +260,7 @@ Future<void> _startNewWorkflow(
       evidence: evidence,
     );
   }
+  return null;
 }
 
 Future<Map<String, dynamic>> _verifyAndRenameThreadTitle(
@@ -437,6 +480,82 @@ Future<void> _driveClarificationAndPlanRevision(
   );
 }
 
+Future<Map<String, dynamic>> _drivePlanOnlyRevisionAndApproval(
+  FlutterDriverSession session,
+  File snapshots,
+  _Options options,
+  Map<String, String?> protectedFiles,
+  WorkflowAcceptanceEvidence evidence,
+) async {
+  final deadline = DateTime.now().add(options.workflowTimeout);
+  final progress = _ProgressWatch();
+  var revisionRequested = false;
+  var planApproved = false;
+  Map<String, dynamic>? last;
+  while (DateTime.now().isBefore(deadline)) {
+    last = await _appendSnapshot(
+      session,
+      snapshots,
+      'plan-only',
+      evidence: evidence,
+    );
+    progress.observe(last, options.stallTimeout, 'Plan-only confirmation');
+    await _assertProtectedFilesUnchanged(options.workspace!, protectedFiles);
+    final workflow = workflowFromSnapshot(last);
+    final run = workflow?['currentRun'];
+    final current = run is Map ? run['currentStateId'] : null;
+    if (current != 'planning' || (run is Map && run['terminal'] == true)) {
+      throw StateError('Plan-only workflow left planning: $workflow');
+    }
+    final workspace = last['workspace'] as Map?;
+    final interaction = workspace?['activeInteraction'];
+    if (interaction is Map && interaction['kind'] == 'userInput') {
+      if (!revisionRequested) {
+        _assertPlanInteraction(interaction);
+        await _requestPlanOnlyRevision(session);
+        revisionRequested = true;
+        evidence.recordPlanRevisionRequest();
+        await _waitForInteractionChange(
+          session,
+          snapshots,
+          interaction['id'],
+          evidence,
+        );
+        continue;
+      }
+      if (!planApproved) {
+        _assertPlanOnlyRevisedPlanInteraction(interaction);
+        await _approvePlan(session);
+        planApproved = true;
+        evidence.recordRevisedPlanApproval();
+        await _waitForInteractionChange(
+          session,
+          snapshots,
+          interaction['id'],
+          evidence,
+        );
+        continue;
+      }
+      throw StateError(
+        'Plan-only flow requested unexpected input after approval: $interaction',
+      );
+    }
+    if (interaction is Map && interaction['kind'] == 'toolApproval') {
+      throw StateError(
+        'Plan-only flow requested an unexpected tool approval: $interaction',
+      );
+    }
+    if (planApproved &&
+        evidence.canonicalPlanState == 'approved' &&
+        workspace?['turn'] == null &&
+        interaction == null) {
+      return last;
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 250));
+  }
+  throw StateError('Plan-only confirmation timed out; last=$last');
+}
+
 Future<Map<String, dynamic>> _waitForTerminal(
   FlutterDriverSession session,
   _Options options,
@@ -538,6 +657,26 @@ void _assertRevisedPlanInteraction(Map interaction) {
   }
 }
 
+void _assertPlanOnlyRevisedPlanInteraction(Map interaction) {
+  _assertPlanInteraction(interaction);
+  final body = (interaction['body'] as String).toLowerCase();
+  const requiredConcepts = {
+    'ownership': ['ownership', 'owner', '归属'],
+    'ordering': ['ordered implementation', 'sequence', 'order', '顺序'],
+    'regression': ['regression', 'red-green', '回归'],
+    'failure handling': ['failure handling', 'failure', '失败'],
+    'evidence': ['evidence', '证据'],
+  };
+  for (final MapEntry(key: concept, value: markers)
+      in requiredConcepts.entries) {
+    if (!markers.any(body.contains)) {
+      throw StateError(
+        'Plan-only revised plan omitted requested concept `$concept`: $body',
+      );
+    }
+  }
+}
+
 Future<void> _answerClarification(FlutterDriverSession session) async {
   const answer =
       '按第一个非法 Unicode scalar 在原始 UTF-8 输入中的起始 byte index 报告。'
@@ -569,6 +708,19 @@ Future<void> _requestPlanRevision(FlutterDriverSession session) async {
   await session.waitFor(find.byValueKey('user-input-first-text'));
   await session.tap(find.byValueKey('user-input-first-text'));
   await session.enterText('请补充多目录隔离并行执行、结果整合和验证顺序的具体步骤。');
+  await session.tap(find.byValueKey('user-input-submit'));
+}
+
+Future<void> _requestPlanOnlyRevision(FlutterDriverSession session) async {
+  const revisionOption = 'user-input-option-plan_confirmation-1';
+  await session.waitFor(
+    find.byValueKey(revisionOption),
+    timeout: const Duration(seconds: 20),
+  );
+  await session.tap(find.byValueKey(revisionOption));
+  await session.waitFor(find.byValueKey('user-input-first-text'));
+  await session.tap(find.byValueKey('user-input-first-text'));
+  await session.enterText('请补充每个文件的明确归属、实施顺序、回归测试先红后绿、失败处理和最终证据。');
   await session.tap(find.byValueKey('user-input-submit'));
 }
 
@@ -648,6 +800,21 @@ Future<void> _append(File output, Object value) => output.writeAsString(
   flush: true,
 );
 
+enum _AcceptanceScope {
+  full('full'),
+  planOnly('plan-only');
+
+  const _AcceptanceScope(this.wireValue);
+
+  final String wireValue;
+
+  static _AcceptanceScope parse(String value) => switch (value) {
+    'full' => full,
+    'plan-only' => planOnly,
+    _ => throw ArgumentError('--acceptance-scope must be full or plan-only'),
+  };
+}
+
 class _Options {
   _Options({
     required this.vmServiceUrl,
@@ -657,6 +824,7 @@ class _Options {
     required this.promptFile,
     required this.snapshotOutput,
     required this.attempt,
+    required this.acceptanceScope,
     required this.shutdownAfterCompletion,
     required this.workflowTimeout,
     required this.stallTimeout,
@@ -669,6 +837,7 @@ class _Options {
   final String? promptFile;
   final String snapshotOutput;
   final int attempt;
+  final _AcceptanceScope acceptanceScope;
   final bool shutdownAfterCompletion;
   final Duration workflowTimeout;
   final Duration stallTimeout;
@@ -693,9 +862,18 @@ class _Options {
     }
     final workspace = value('--workspace');
     final prompt = value('--prompt-file');
+    final acceptanceScope = _AcceptanceScope.parse(
+      value('--acceptance-scope') ?? 'full',
+    );
     if (mode == 'new' && (workspace == null || prompt == null)) {
       throw ArgumentError(
         '--workspace and --prompt-file are required for new mode',
+      );
+    }
+    if (acceptanceScope == _AcceptanceScope.planOnly &&
+        (mode != 'new' || studioMode != 'mode.task')) {
+      throw ArgumentError(
+        'plan-only acceptance requires --mode new and --studio-mode mode.task',
       );
     }
     return _Options(
@@ -706,6 +884,7 @@ class _Options {
       promptFile: prompt,
       snapshotOutput: output,
       attempt: int.tryParse(value('--attempt') ?? '1') ?? 1,
+      acceptanceScope: acceptanceScope,
       shutdownAfterCompletion: value('--shutdown-after-completion') != 'false',
       workflowTimeout: Duration(
         seconds:

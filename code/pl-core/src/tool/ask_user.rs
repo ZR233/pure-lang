@@ -82,8 +82,10 @@ impl StaticTool for AskUserTool {
     fn definition(&self) -> crate::tool::StaticToolDefinition {
         crate::tool::StaticToolDefinition::new(
             crate::tool::ToolName::builtin("request_user_input"),
-            "Ask the user for missing information while the current turn is running. \
-             Supports multiple structured questions with optional choices and free-form answers.",
+            "Ask the user for material missing facts or preferences while the current turn is \
+             running. Supports multiple structured questions with optional choices and free-form \
+             answers. Never use this tool to ask whether to implement, proceed, or approve a \
+             complete Plan; submit a complete Plan with plan_submit instead.",
         )
     }
 
@@ -324,6 +326,15 @@ mod tests {
                 }]
             }),
         }
+    }
+
+    #[test]
+    fn request_user_input_description_excludes_plan_approval() {
+        let description = AskUserTool.definition().description().to_string();
+
+        assert!(description.contains("material missing facts or preferences"));
+        assert!(description.contains("Never use this tool to ask whether to implement"));
+        assert!(description.contains("plan_submit instead"));
     }
 
     #[tokio::test]

@@ -47,7 +47,7 @@ impl StaticTool for PlanSubmitTool {
     fn definition(&self) -> StaticToolDefinition {
         StaticToolDefinition::new(
             ToolName::builtin(TOOL_PLAN_SUBMIT),
-            "Submit a complete Markdown Plan through the fixed Plan state machine for user approval or revision. Requires plan revision CAS; use request_user_input for missing information. This must be the only tool call in the response.",
+            "Submit a complete Markdown Plan through the fixed Plan state machine for user approval or revision. This is the only tool for asking the user to approve implementation of a complete Plan; do not first ask whether to implement, proceed, or approve through request_user_input or final text. Requires plan revision CAS, and this must be the only tool call in the response.",
         )
     }
 

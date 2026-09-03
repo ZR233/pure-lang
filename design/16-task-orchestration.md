@@ -77,8 +77,9 @@ finding 回到 editing_documents；两条返工路径都必须重新经过 integ
 在 planning 中通过 `plan_current`、`plan_next` 和 `plan_submit { expectedRevision, plan }` 请求批准或修订；
 用户要求补充时 Plan 固定状态机进入 `revisionRequested`，重新提交与批准期间 workflow 仍保持 planning。
 只有 `plan_current` 返回 `approved` 后才可 transition 到 editing_documents。`request_user_input` 只用于
-计划形成前的缺失信息与澄清；Plan 确认也复用通用 `UserInput` continuation，但生命周期只属于当前
-AgentSession。批准后的完整 Plan 作为 GUI 隐藏的用户输入进入该 session；进入 `completed` 后调用
+计划形成前会实质改变计划的缺失事实或用户偏好，不得询问是否实施、继续或批准完整计划；计划已经完整
+时直接以 `plan_submit` 发起唯一的实施授权。Plan 确认也复用通用 `UserInput` continuation，但生命周期只
+属于当前 AgentSession。批准后的完整 Plan 作为 GUI 隐藏的用户输入进入该 session；进入 `completed` 后调用
 `complete`。完整合同见 [24-agent-session-plan.md](24-agent-session-plan.md)。
 `completed` 与 `stopped` 都是无任何 outgoing transition 的 final state；停止边只从非终态 state
 进入 `stopped`。
@@ -138,6 +139,10 @@ editing_documents/working/integrating/reviewing/completed 并调用
 child，验证不同 workspace/branch、整合前隔离、显式 commit 采纳、只读 reviewer 与全部 cleanup。
 两份 worktree commit 必须都先完成显式采纳，之后才允许第一次 cleanup。
 两种模式都运行 `cargo test` 与 verifier；GUI 额外重启任务模式验证 run id/revision/history 持久化。
+聚焦计划确认的真实 GUI 回归使用 `cargo xtask verify-workflow --live --gui --plan-only`：它只启动一次
+`mode.task`，在 `planning` 中验证完整计划提交、修订、批准与最终 `plan_current=approved`，禁止
+`request_user_input`、`workflow_transition`、`complete` 和项目文件修改，并在该边界停止，不运行 Simple、
+实施、整合、review、终态或重启流程。
 失败 artifacts 保存到 `target/workflow-live-artifacts/` 或
 `target/subagents-live-artifacts/`，同时回收 GUI、DTD 与 Driver 进程树。
 子代理 artifact 必须保留未去重的协作调用 attempt、outcome 与 error class；每个 child 都需要绑定成功

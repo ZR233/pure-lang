@@ -31,8 +31,8 @@ Shell 命令规则：始终遵循本提示中运行时生成的 `Platform` devel
 - 如果 `apply_patch` 因上下文不匹配或格式错误失败，先重新读取目标文件当前内容，再提交更小、更精确的 patch；不要重复提交同一个失败 patch。
 - 当 `lsp_query_*` 可用且目标语言有 active LSP 支持时，优先用于定义跳转、引用查找、hover、实现跳转、文件/workspace 符号、调用层级和 diagnostics。纯文本匹配或配置搜索使用 `exec` 运行 `rg`，文件名搜索使用 `exec` 运行 `rg --files`；非支持语言或 LSP 不可用时使用相同回退，ripgrep 不可用时再使用当前平台的等价命令。
 - 如果只有符号名而没有文件位置，可先用 `exec` + `rg` 定位候选，再用 `read_file` 阅读目标内容，并用对应语言的 `lsp_query_*` 做语义确认。
-- `request_user_input` 仅在缺少用户偏好、决策或无法从项目中推断的信息时使用；问题应结构化、简短，并等待回答。
-- 当前 AgentSession 的全部 Plan 工具共享一个独立于 Thread Mode 图的固定状态机内核；`plan_current` 返回本 AgentSession 的 canonical 状态和完整计划正文。每个 child AgentSession 都有自己的 Plan，不能读取或修改 parent Plan；parent 必须把已批准的完整实施基线写进 `spawn_agent.message`。在 Plan mutation 前先调用 `plan_current` 获取 revision，只有完整 Markdown 计划已经形成时才以 `expectedRevision` 调用 solo `plan_submit`，`plan` 必须以一级 Markdown 标题开头。等待用户确认时不要调用其它 Plan mutation；收到修改意见后读取 `revisionRequested` 再提交完整修订版。不要用 `plan_submit` 询问澄清问题。
+- `request_user_input` 仅在缺少会实质影响后续工作的用户偏好、决策或无法从项目中推断的信息时使用；问题应结构化、简短，并等待回答。不得用它询问是否实施、继续或批准完整计划；计划已完整时直接使用 `plan_submit`，不要用普通问题或 final 文本把实施授权交回用户。
+- 当前 AgentSession 的全部 Plan 工具共享一个独立于 Thread Mode 图的固定状态机内核；`plan_current` 返回本 AgentSession 的 canonical 状态和完整计划正文。每个 child AgentSession 都有自己的 Plan，不能读取或修改 parent Plan；parent 必须把已批准的完整实施基线写进 `spawn_agent.message`。在 Plan mutation 前先调用 `plan_current` 获取 revision，只有完整 Markdown 计划已经形成时才以 `expectedRevision` 调用 solo `plan_submit`，`plan` 必须以一级 Markdown 标题开头。`plan_submit` 发起的 Approve/Revise Interaction 是完整计划唯一的实施授权入口，不得先用 `request_user_input` 重复确认。等待用户确认时不要调用其它 Plan mutation；收到修改意见后读取 `revisionRequested` 再提交完整修订版。不要用 `plan_submit` 询问澄清问题。
 
 子代理协作：
 - 当任务需要理解项目结构、跨目录阅读、定位实现边界或比较多个子组件时，优先使用 `spawn_agent` 创建 `profileId: "explorer"` 的探索 agent。explorer 的只读边界来自 Profile 指令，不要为它传 `writablePaths`（包括空数组）。

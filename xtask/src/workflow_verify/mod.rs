@@ -28,6 +28,33 @@ const EXPECTED_DELIVERY_PATHS: &[&str] = &[
     "tests/validate.rs",
 ];
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum WorkflowAcceptanceScope {
+    Full,
+    PlanOnly,
+}
+
+impl WorkflowAcceptanceScope {
+    fn from_options(options: VerifyWorkflowOptions) -> Result<Self> {
+        if options.plan_only {
+            ensure!(
+                options.gui && !options.headless,
+                "verify-workflow --plan-only requires --gui and cannot run with --headless"
+            );
+            Ok(Self::PlanOnly)
+        } else {
+            Ok(Self::Full)
+        }
+    }
+
+    fn driver_value(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::PlanOnly => "plan-only",
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct WorkflowFixtureSkillUsage {
@@ -47,9 +74,11 @@ pub(crate) fn run(options: VerifyWorkflowOptions) -> Result<()> {
         options.live,
         "verify-workflow requires --live because it uses real credentials, incurs model fees, and never falls back to a scripted provider"
     );
+    let scope = WorkflowAcceptanceScope::from_options(options)?;
     let workspace_root = paths::workspace_root()?;
     let surface = match (options.headless, options.gui) {
         (true, false) => "headless",
+        (false, true) if scope == WorkflowAcceptanceScope::PlanOnly => "gui-plan",
         (false, true) => "gui",
         _ => bail!("verify-workflow requires exactly one of --headless or --gui"),
     };
@@ -58,10 +87,14 @@ pub(crate) fn run(options: VerifyWorkflowOptions) -> Result<()> {
         .join("workflow-live-artifacts")
         .join(format!("{surface}-{}-{}", std::process::id(), unix_nanos()));
     fs::create_dir_all(&artifact_dir)?;
+    let prompt_name = match scope {
+        WorkflowAcceptanceScope::Full => "prompt.md",
+        WorkflowAcceptanceScope::PlanOnly => "plan-only-prompt.md",
+    };
     let prompt = workspace_root
         .join("test-fixtures")
         .join("workflow-live")
-        .join("prompt.md");
+        .join(prompt_name);
     let prompt_bytes = fs::read(&prompt)
         .with_context(|| format!("failed to read canonical prompt `{}`", prompt.display()))?;
     let prompt_hash = format!("{:x}", Sha256::digest(&prompt_bytes));
@@ -91,7 +124,10 @@ pub(crate) fn run(options: VerifyWorkflowOptions) -> Result<()> {
     )?;
     fs::write(
         artifact_dir.join("acceptance-surface.txt"),
-        format!("surface={surface}\nscriptedProvider=false\nlive=true\n"),
+        format!(
+            "surface={surface}\nscope={}\nscriptedProvider=false\nlive=true\n",
+            scope.driver_value()
+        ),
     )?;
     println!("Workflow live artifacts: {}", artifact_dir.display());
 
@@ -100,7 +136,14 @@ pub(crate) fn run(options: VerifyWorkflowOptions) -> Result<()> {
     let acceptance = if options.headless {
         run_headless(&workspace_root, &artifact_dir, &wire_dir, deadline)
     } else {
-        run_gui(&workspace_root, &artifact_dir, &wire_dir, &prompt, deadline)
+        run_gui(
+            &workspace_root,
+            &artifact_dir,
+            &wire_dir,
+            &prompt,
+            scope,
+            deadline,
+        )
     };
     if let Err(error) = &acceptance {
         fs::write(
@@ -126,6 +169,7 @@ pub(crate) fn run(options: VerifyWorkflowOptions) -> Result<()> {
             surface,
             &prompt_hash,
             &simple_prompt_hash,
+            scope,
         ),
         Err(error) => Err(error),
     };
@@ -200,6 +244,7 @@ fn run_gui(
     artifact_dir: &Path,
     wire_dir: &Path,
     prompt: &Path,
+    scope: WorkflowAcceptanceScope,
     deadline: Instant,
 ) -> Result<()> {
     let installed_home = current_home()?.join(".pure");
@@ -221,22 +266,27 @@ fn run_gui(
         installed_config.display()
     );
     let root = tempfile::Builder::new()
-        .prefix("pure-workflow-live-gui-")
+        .prefix(match scope {
+            WorkflowAcceptanceScope::Full => "pure-workflow-live-gui-",
+            WorkflowAcceptanceScope::PlanOnly => "pure-workflow-plan-live-gui-",
+        })
         .tempdir()
         .context("failed to create isolated GUI acceptance root")?;
     let simple_studio_home = root.path().join("studio-home-simple");
     let task_studio_home = root.path().join("studio-home-task");
     let simple_fixture_workspace = root.path().join("workspace-simple");
     let task_fixture_workspace = root.path().join("workspace-task");
-    fs::create_dir_all(&simple_studio_home)?;
     fs::create_dir_all(&task_studio_home)?;
-    fs::create_dir_all(&simple_fixture_workspace)?;
     fs::create_dir_all(&task_fixture_workspace)?;
-    write_isolated_live_config(
-        &installed_config,
-        &simple_studio_home.join("config.toml"),
-        &artifact_dir.join("model-routes.json"),
-    )?;
+    if scope == WorkflowAcceptanceScope::Full {
+        fs::create_dir_all(&simple_studio_home)?;
+        fs::create_dir_all(&simple_fixture_workspace)?;
+        write_isolated_live_config(
+            &installed_config,
+            &simple_studio_home.join("config.toml"),
+            &artifact_dir.join("model-routes.json"),
+        )?;
+    }
     write_isolated_live_config(
         &installed_config,
         &task_studio_home.join("config.toml"),
@@ -244,100 +294,141 @@ fn run_gui(
     )?;
     let installed_agents = installed_home.join("agents");
     if installed_agents.is_dir() {
-        copy_directory(&installed_agents, &simple_studio_home.join("agents"))?;
+        if scope == WorkflowAcceptanceScope::Full {
+            copy_directory(&installed_agents, &simple_studio_home.join("agents"))?;
+        }
         copy_directory(&installed_agents, &task_studio_home.join("agents"))?;
     }
     let canonical_workspace = workspace_root
         .join("test-fixtures")
         .join("workflow-live")
         .join("workspace");
-    copy_directory(&canonical_workspace, &simple_fixture_workspace)?;
+    if scope == WorkflowAcceptanceScope::Full {
+        copy_directory(&canonical_workspace, &simple_fixture_workspace)?;
+    }
     copy_directory(&canonical_workspace, &task_fixture_workspace)?;
     let simple_prompt = workspace_root
         .join("test-fixtures")
         .join("workflow-live")
         .join("simple-prompt.md");
 
-    let acceptance = (|| {
-        let simple = run_gui_attempt(GuiAttempt {
-            workspace_root,
-            artifact_dir,
-            wire_dir: &wire_dir.join("simple"),
-            studio_home: &simple_studio_home,
-            fixture_workspace: &simple_fixture_workspace,
-            prompt: &simple_prompt,
-            mode: "new",
-            attempt: 1,
-            studio_mode: "mode.simple",
-            deadline,
-        })?;
-        ensure!(
-            simple.workflow_run_id.is_none(),
-            "mode.simple GUI receipt unexpectedly contains a workflow identity: {simple:?}"
-        );
-        let task = run_gui_attempt(GuiAttempt {
-            workspace_root,
-            artifact_dir,
-            wire_dir: &wire_dir.join("task-new"),
-            studio_home: &task_studio_home,
-            fixture_workspace: &task_fixture_workspace,
-            prompt,
-            mode: "new",
-            attempt: 2,
-            studio_mode: "mode.task",
-            deadline,
-        })?;
-        let reopened = run_gui_attempt(GuiAttempt {
-            workspace_root,
-            artifact_dir,
-            wire_dir: &wire_dir.join("task-resume"),
-            studio_home: &task_studio_home,
-            fixture_workspace: &task_fixture_workspace,
-            prompt,
-            mode: "resume",
-            attempt: 3,
-            studio_mode: "mode.task",
-            deadline,
-        })?;
-        ensure!(
-            task == reopened,
-            "GUI reopen selected a different durable workflow: first={task:?}, reopened={reopened:?}"
-        );
-        fs::write(
-            artifact_dir.join("gui-shutdown-reopen.json"),
-            serde_json::to_vec_pretty(&serde_json::json!({
-                "schemaVersion": 1,
-                "simple": simple,
-                "first": task,
-                "reopened": reopened,
-                "sameWorkflow": true,
-            }))?,
-        )?;
-        validate_delivered_fixture(
-            &canonical_workspace,
-            &simple_fixture_workspace,
-            &artifact_dir.join("simple"),
-        )?;
-        validate_delivered_fixture(
+    let acceptance = match scope {
+        WorkflowAcceptanceScope::Full => (|| {
+            let simple = run_gui_attempt(GuiAttempt {
+                workspace_root,
+                artifact_dir,
+                wire_dir: &wire_dir.join("simple"),
+                studio_home: &simple_studio_home,
+                fixture_workspace: &simple_fixture_workspace,
+                prompt: &simple_prompt,
+                mode: "new",
+                attempt: 1,
+                studio_mode: "mode.simple",
+                scope,
+                deadline,
+            })?;
+            ensure!(
+                simple.workflow_run_id.is_none(),
+                "mode.simple GUI receipt unexpectedly contains a workflow identity: {simple:?}"
+            );
+            let task = run_gui_attempt(GuiAttempt {
+                workspace_root,
+                artifact_dir,
+                wire_dir: &wire_dir.join("task-new"),
+                studio_home: &task_studio_home,
+                fixture_workspace: &task_fixture_workspace,
+                prompt,
+                mode: "new",
+                attempt: 2,
+                studio_mode: "mode.task",
+                scope,
+                deadline,
+            })?;
+            let reopened = run_gui_attempt(GuiAttempt {
+                workspace_root,
+                artifact_dir,
+                wire_dir: &wire_dir.join("task-resume"),
+                studio_home: &task_studio_home,
+                fixture_workspace: &task_fixture_workspace,
+                prompt,
+                mode: "resume",
+                attempt: 3,
+                studio_mode: "mode.task",
+                scope,
+                deadline,
+            })?;
+            ensure!(
+                task == reopened,
+                "GUI reopen selected a different durable workflow: first={task:?}, reopened={reopened:?}"
+            );
+            fs::write(
+                artifact_dir.join("gui-shutdown-reopen.json"),
+                serde_json::to_vec_pretty(&serde_json::json!({
+                    "schemaVersion": 1,
+                    "simple": simple,
+                    "first": task,
+                    "reopened": reopened,
+                    "sameWorkflow": true,
+                }))?,
+            )?;
+            validate_delivered_fixture(
+                &canonical_workspace,
+                &simple_fixture_workspace,
+                &artifact_dir.join("simple"),
+            )?;
+            validate_delivered_fixture(
+                &canonical_workspace,
+                &task_fixture_workspace,
+                &artifact_dir.join("task"),
+            )
+        })(),
+        WorkflowAcceptanceScope::PlanOnly => (|| {
+            let task = run_gui_attempt(GuiAttempt {
+                workspace_root,
+                artifact_dir,
+                wire_dir: &wire_dir.join("task-plan"),
+                studio_home: &task_studio_home,
+                fixture_workspace: &task_fixture_workspace,
+                prompt,
+                mode: "new",
+                attempt: 1,
+                studio_mode: "mode.task",
+                scope,
+                deadline,
+            })?;
+            ensure!(
+                task.workflow_run_id.is_some(),
+                "Plan-only GUI receipt has no workflow identity: {task:?}"
+            );
+            validate_plan_only_workspace(
+                &canonical_workspace,
+                &task_fixture_workspace,
+                &artifact_dir.join("plan-only"),
+            )
+        })(),
+    };
+    let diff_artifact = match scope {
+        WorkflowAcceptanceScope::Full => (|| {
+            write_workspace_diff(
+                &canonical_workspace,
+                &simple_fixture_workspace,
+                artifact_dir,
+                "workspace-file-diff-simple.json",
+            )?;
+            write_workspace_diff(
+                &canonical_workspace,
+                &task_fixture_workspace,
+                artifact_dir,
+                "workspace-file-diff-task.json",
+            )
+        })(),
+        WorkflowAcceptanceScope::PlanOnly => write_workspace_diff(
             &canonical_workspace,
             &task_fixture_workspace,
-            &artifact_dir.join("task"),
-        )
-    })();
-    let diff_artifact = (|| {
-        write_workspace_diff(
-            &canonical_workspace,
-            &simple_fixture_workspace,
             artifact_dir,
-            "workspace-file-diff-simple.json",
-        )?;
-        write_workspace_diff(
-            &canonical_workspace,
-            &task_fixture_workspace,
-            artifact_dir,
-            "workspace-file-diff-task.json",
-        )
-    })();
+            "workspace-file-diff-plan-only.json",
+        ),
+    };
     let installed_state_after = user_config_state(&installed_home);
     let state_check = installed_state_after.and_then(|after| {
         fs::write(
@@ -368,6 +459,7 @@ struct GuiAttempt<'a> {
     mode: &'static str,
     attempt: u32,
     studio_mode: &'static str,
+    scope: WorkflowAcceptanceScope,
     deadline: Instant,
 }
 
@@ -443,6 +535,7 @@ fn run_gui_attempt(attempt: GuiAttempt<'_>) -> Result<DriverWorkflowIdentity> {
                 .artifact_dir
                 .join(format!("{prefix}-workflow-receipt.json")),
             attempt.studio_mode,
+            attempt.scope,
         )
     })();
     let process_tree = gui.write_process_tree(
@@ -488,6 +581,8 @@ fn driver_args(
     args.push(OsString::from(STALL_TIMEOUT_SECONDS.to_string()));
     args.push(OsString::from("--attempt"));
     args.push(OsString::from(if attempt.attempt == 1 { "1" } else { "2" }));
+    args.push(OsString::from("--acceptance-scope"));
+    args.push(OsString::from(attempt.scope.driver_value()));
     args.push(OsString::from("--shutdown-after-completion"));
     args.push(OsString::from("true"));
     if attempt.mode == "new" {
@@ -559,6 +654,45 @@ fn validate_delivered_fixture(canonical: &Path, workspace: &Path, artifacts: &Pa
         "workflow fixture must not create .pure state"
     );
     fs::write(artifacts.join("workspace-git-check.txt"), "git=false\n")?;
+    Ok(())
+}
+
+fn validate_plan_only_workspace(
+    canonical: &Path,
+    workspace: &Path,
+    artifacts: &Path,
+) -> Result<()> {
+    fs::create_dir_all(artifacts)?;
+    let mut canonical_files = Vec::new();
+    let mut workspace_files = Vec::new();
+    collect_relative_files(canonical, canonical, &mut canonical_files)?;
+    collect_relative_files(workspace, workspace, &mut workspace_files)?;
+    let files = canonical_files
+        .into_iter()
+        .chain(workspace_files)
+        .filter(|path| path != WORKFLOW_FIXTURE_USAGE_PATH)
+        .collect::<BTreeSet<_>>();
+    for path in files {
+        ensure!(
+            fs::read(canonical.join(&path)).ok() == fs::read(workspace.join(&path)).ok(),
+            "Plan-only GUI acceptance modified project file `{path}`"
+        );
+    }
+    if workspace.join(WORKFLOW_FIXTURE_USAGE_PATH).is_file() {
+        validate_fixture_skill_usage(workspace)?;
+    }
+    ensure!(
+        !workspace.join(".git").exists(),
+        "Plan-only workflow fixture must not initialize Git"
+    );
+    ensure!(
+        !workspace.join(".pure").exists(),
+        "Plan-only workflow fixture must not create .pure state"
+    );
+    fs::write(
+        artifacts.join("workspace-check.txt"),
+        "projectFilesUnchanged=true\ngit=false\npureState=false\n",
+    )?;
     Ok(())
 }
 
@@ -637,6 +771,7 @@ fn write_driver_receipt(
     log: &Path,
     output: &Path,
     studio_mode: &str,
+    scope: WorkflowAcceptanceScope,
 ) -> Result<DriverWorkflowIdentity> {
     let mut completed = None;
     let mut shutdown = None;
@@ -670,23 +805,68 @@ fn write_driver_receipt(
             tool.get("name").and_then(serde_json::Value::as_str) == Some("complete")
                 && tool.get("status").and_then(serde_json::Value::as_str) == Some("succeeded")
         })
-        .cloned()
-        .context("Flutter Driver emitted no successful complete tool receipt")?;
-    if studio_mode == "mode.task" {
-        ensure!(
-            completed
-                .pointer("/workflow/currentRun/currentStateId")
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|stage| stage == "completed"),
-            "Flutter Driver completed receipt does not contain a terminal workflow"
-        );
-    } else {
-        ensure!(
-            completed
-                .get("workflow")
-                .is_some_and(serde_json::Value::is_null),
-            "Flutter Driver simple receipt unexpectedly contains a workflow"
-        );
+        .cloned();
+    match scope {
+        WorkflowAcceptanceScope::Full if studio_mode == "mode.task" => {
+            ensure!(
+                complete.is_some(),
+                "Flutter Driver emitted no successful complete tool receipt"
+            );
+            ensure!(
+                completed
+                    .pointer("/workflow/currentRun/currentStateId")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|stage| stage == "completed"),
+                "Flutter Driver completed receipt does not contain a terminal workflow"
+            );
+        }
+        WorkflowAcceptanceScope::Full => {
+            ensure!(
+                complete.is_some(),
+                "Flutter Driver emitted no successful complete tool receipt"
+            );
+            ensure!(
+                completed
+                    .get("workflow")
+                    .is_some_and(serde_json::Value::is_null),
+                "Flutter Driver simple receipt unexpectedly contains a workflow"
+            );
+        }
+        WorkflowAcceptanceScope::PlanOnly => {
+            ensure!(
+                studio_mode == "mode.task",
+                "Plan-only acceptance must use mode.task"
+            );
+            ensure!(
+                completed
+                    .get("acceptanceScope")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("plan-only"),
+                "Flutter Driver receipt does not identify the Plan-only scope"
+            );
+            ensure!(
+                completed
+                    .get("planState")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("approved"),
+                "Flutter Driver receipt does not contain an approved canonical Plan"
+            );
+            ensure!(
+                completed
+                    .pointer("/workflow/currentRun/currentStateId")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("planning")
+                    && completed
+                        .pointer("/workflow/currentRun/terminal")
+                        .and_then(serde_json::Value::as_bool)
+                        == Some(false),
+                "Plan-only receipt left planning or reached a terminal workflow"
+            );
+            ensure!(
+                complete.is_none(),
+                "Plan-only acceptance unexpectedly called complete"
+            );
+        }
     }
     let workflow_run_id = completed
         .pointer("/workflow/currentRun/runId")
@@ -721,6 +901,7 @@ fn write_driver_receipt(
         serde_json::to_vec_pretty(&serde_json::json!({
             "schemaVersion": 1,
             "identity": identity,
+            "scope": scope.driver_value(),
             "completed": completed,
             "complete": complete,
             "shutdown": shutdown,
@@ -878,14 +1059,18 @@ fn validate_live_routes(config: &toml::Table) -> Result<LiveRouteManifest> {
         let environment_selector = provider
             .get("bearer_token_env")
             .and_then(toml::Value::as_str)
-            .is_some_and(|name| !name.trim().is_empty());
+            .map(str::trim);
         ensure!(
-            !environment_selector,
-            "live GUI provider {provider_id} must resolve credentials only from the system credential store"
+            environment_selector.is_none_or(|name| !name.is_empty()),
+            "live GUI provider {provider_id} has an empty bearer_token_env"
         );
-        // SystemCredentialStore 是 Studio runtime 的产品边界；xtask 不读取或复制
-        // 系统密钥。真实 provider request 是最终的 credential resolution 门禁。
-        let credential_source = "systemCredentialStore";
+        // SystemCredentialStore 和环境变量 fallback 都是 Studio runtime 的产品边界；
+        // xtask 不读取或复制密钥。真实 provider request 是最终的 credential 门禁。
+        let credential_source = if environment_selector.is_some() {
+            "systemCredentialStoreOrEnvironmentFallback"
+        } else {
+            "systemCredentialStore"
+        };
         let credential_resolution = "deferredToStudioRuntime";
         manifest.push(LiveRouteEntry {
             role: role.to_string(),
@@ -1150,6 +1335,38 @@ mod tests {
     }
 
     #[test]
+    fn live_routes_allow_runtime_environment_credential_fallback() {
+        let config = toml::toml! {
+            [models.providers.openai]
+            base_url = "https://example.com"
+            bearer_token_env = "OPENAI_API_KEY"
+
+            [models.routes.explorer]
+            provider = "openai"
+            model = "model"
+            [models.routes.planner]
+            provider = "openai"
+            model = "model"
+            [models.routes.executor]
+            provider = "openai"
+            model = "model"
+            [models.routes.worktree_executor]
+            provider = "openai"
+            model = "model"
+            [models.routes.reviewer]
+            provider = "openai"
+            model = "model"
+        };
+
+        let manifest = validate_live_routes(&config).expect("runtime fallback is supported");
+
+        assert!(manifest.routes.iter().all(|route| {
+            route.credential_source == "systemCredentialStoreOrEnvironmentFallback"
+                && route.credential_resolution == "deferredToStudioRuntime"
+        }));
+    }
+
+    #[test]
     fn runtime_skill_usage_is_not_counted_as_a_delivery_change() {
         let mut changed = EXPECTED_DELIVERY_PATHS
             .iter()
@@ -1172,6 +1389,57 @@ mod tests {
         changed.sort_unstable();
 
         assert!(validate_delivery_changes(&changed).is_err());
+    }
+
+    #[test]
+    fn plan_only_workspace_allows_only_fixture_skill_usage_metadata() {
+        let canonical = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let artifacts = tempfile::tempdir().unwrap();
+        fs::create_dir_all(canonical.path().join("src")).unwrap();
+        fs::create_dir_all(workspace.path().join("src")).unwrap();
+        fs::write(canonical.path().join("src/lib.rs"), "pub fn value() {}\n").unwrap();
+        fs::write(workspace.path().join("src/lib.rs"), "pub fn value() {}\n").unwrap();
+        let usage = workspace.path().join(WORKFLOW_FIXTURE_USAGE_PATH);
+        fs::create_dir_all(usage.parent().unwrap()).unwrap();
+        fs::write(
+            usage,
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "createdBy": "agent",
+                "views": 1,
+                "uses": 1,
+                "patches": 0,
+                "createdAt": 10,
+                "updatedAt": 11,
+                "lastViewedAt": 11,
+                "pinned": false
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        validate_plan_only_workspace(canonical.path(), workspace.path(), artifacts.path())
+            .expect("the known Skill usage sidecar is runtime metadata");
+    }
+
+    #[test]
+    fn plan_only_workspace_rejects_project_file_changes() {
+        let canonical = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let artifacts = tempfile::tempdir().unwrap();
+        fs::create_dir_all(canonical.path().join("src")).unwrap();
+        fs::create_dir_all(workspace.path().join("src")).unwrap();
+        fs::write(canonical.path().join("src/lib.rs"), "pub fn value() {}\n").unwrap();
+        fs::write(workspace.path().join("src/lib.rs"), "pub fn changed() {}\n").unwrap();
+
+        let error =
+            validate_plan_only_workspace(canonical.path(), workspace.path(), artifacts.path())
+                .expect_err("Plan-only acceptance must reject implementation changes");
+        assert!(
+            error
+                .to_string()
+                .contains("modified project file `src/lib.rs`")
+        );
     }
 
     #[test]

@@ -57,6 +57,89 @@ void main() {
       );
     },
   );
+
+  test('accepts a revised and approved Plan-only timeline', () {
+    final evidence = WorkflowAcceptanceEvidence()
+      ..recordPlanRevisionRequest()
+      ..recordRevisedPlanApproval();
+
+    evidence.observe(_planOnlySnapshot());
+
+    expect(evidence.canonicalPlanState, 'approved');
+    expect(evidence.validatePlanOnlyFlow, returnsNormally);
+  });
+
+  test('Plan-only rejects request_user_input', () {
+    final evidence = WorkflowAcceptanceEvidence()
+      ..recordPlanRevisionRequest()
+      ..recordRevisedPlanApproval();
+    final snapshot = _planOnlySnapshot();
+    _tools(snapshot).add({
+      'callId': 'ask-1',
+      'name': 'request_user_input',
+      'status': 'succeeded',
+      'arguments': '{}',
+    });
+
+    evidence.observe(snapshot);
+
+    expect(
+      evidence.validatePlanOnlyFlow,
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('called request_user_input'),
+        ),
+      ),
+    );
+  });
+
+  test('Plan-only rejects workflow_transition', () {
+    final evidence = WorkflowAcceptanceEvidence()
+      ..recordPlanRevisionRequest()
+      ..recordRevisedPlanApproval();
+    final snapshot = _planOnlySnapshot();
+    _tools(snapshot).add({
+      'callId': 'transition-1',
+      'name': 'workflow_transition',
+      'status': 'succeeded',
+      'arguments': jsonEncode(_transition('planning', 'editing_documents')),
+    });
+
+    evidence.observe(snapshot);
+
+    expect(
+      evidence.validatePlanOnlyFlow,
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('called workflow_transition'),
+        ),
+      ),
+    );
+  });
+
+  test('Plan-only rejects a missing approved plan_current state', () {
+    final evidence = WorkflowAcceptanceEvidence()
+      ..recordPlanRevisionRequest()
+      ..recordRevisedPlanApproval();
+    final snapshot = _planOnlySnapshot(planState: 'awaitingConfirmation');
+
+    evidence.observe(snapshot);
+
+    expect(
+      evidence.validatePlanOnlyFlow,
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('plan_current.state == approved'),
+        ),
+      ),
+    );
+  });
 }
 
 Map<String, dynamic> _completedSnapshot({required bool includeRevision}) {
@@ -118,3 +201,44 @@ Map<String, String> _transition(String source, String target) => {
   'expectedStateId': source,
   'targetStateId': target,
 };
+
+Map<String, dynamic> _planOnlySnapshot({String planState = 'approved'}) => {
+  'workflow': {
+    'currentRun': {'currentStateId': 'planning', 'terminal': false},
+  },
+  'workspace': {
+    'timeline': [
+      {
+        'id': 'tools-1',
+        'tools': [
+          {
+            'callId': 'submit-1',
+            'name': 'plan_submit',
+            'status': 'succeeded',
+            'arguments': '{"expectedRevision":0,"plan":"# Initial Plan"}',
+          },
+          {
+            'callId': 'submit-2',
+            'name': 'plan_submit',
+            'status': 'succeeded',
+            'arguments': '{"expectedRevision":2,"plan":"# Revised Plan"}',
+          },
+          {
+            'callId': 'current-1',
+            'name': 'plan_current',
+            'status': 'succeeded',
+            'arguments': '{}',
+            'result': jsonEncode({'state': planState}),
+          },
+        ],
+      },
+    ],
+  },
+};
+
+List<dynamic> _tools(Map<String, dynamic> snapshot) {
+  final workspace = snapshot['workspace'] as Map<String, dynamic>;
+  final timeline = workspace['timeline'] as List<dynamic>;
+  final row = timeline.single as Map<String, dynamic>;
+  return row['tools'] as List<dynamic>;
+}

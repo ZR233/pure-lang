@@ -92,6 +92,9 @@ pub(crate) struct VerifyWorkflowOptions {
     /// Run the real native GUI and Flutter Driver workflow harness.
     #[arg(long)]
     pub(crate) gui: bool,
+    /// Stop the real GUI harness after Plan revision and approval.
+    #[arg(long, requires = "gui", conflicts_with = "headless")]
+    pub(crate) plan_only: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Args)]
@@ -385,11 +388,36 @@ mod tests {
                 live: true,
                 headless: true,
                 gui: false,
+                plan_only: false,
             }))
         );
         assert!(
             parse(
                 ["xtask", "verify-workflow", "--live", "--headless", "--gui"].map(OsString::from)
+            )
+            .is_err()
+        );
+        assert_eq!(
+            parse(
+                ["xtask", "verify-workflow", "--live", "--gui", "--plan-only",].map(OsString::from),
+            )?,
+            ParseOutcome::Run(Command::VerifyWorkflow(VerifyWorkflowOptions {
+                live: true,
+                headless: false,
+                gui: true,
+                plan_only: true,
+            }))
+        );
+        assert!(
+            parse(
+                [
+                    "xtask",
+                    "verify-workflow",
+                    "--live",
+                    "--headless",
+                    "--plan-only",
+                ]
+                .map(OsString::from)
             )
             .is_err()
         );

@@ -542,6 +542,11 @@ model = "gpt-5"
         assert!(task.contains("executor") && task.contains("worktree_executor"));
         assert!(task.contains("explorer") && task.contains("reviewer"));
         assert!(task.contains("plan_current") && task.contains("plan_submit"));
+        assert!(task.contains("Never use it to ask whether to implement, proceed, or"));
+        assert!(task.contains("approve a complete plan"));
+        assert!(task.contains("its Approve/Revise Interaction is the only"));
+        assert!(task.contains("implementation-authorization boundary"));
+        assert!(task.contains("never replace Plan confirmation with a final-text question"));
         assert!(task.contains("before every transition"));
         assert!(task.contains("workflow_current") && task.contains("workflow_next"));
         assert!(task.contains("workflow_graph") && task.contains("workflow_history"));

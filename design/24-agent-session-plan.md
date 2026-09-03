@@ -91,7 +91,8 @@ Plan 工具作为一组安装，并共享当前 AgentSession 的同一个 Arc �
 - `plan_current`：从当前 AgentSession 读取 revision、当前状态、完整计划文档、pending Interaction、最近修改意见和允许操作；同一 session 的实施期可继续读取已批准计划；
 - `plan_next`：从同一 session 快照读取当前状态的固定直接转换、触发方、条件和准确工具/用户动作；
 - `plan_history`：从同一 session 快照读取有界转换历史与归档摘要；
-- `plan_submit`：以 `expectedRevision` 和完整一级标题 Markdown 提交当前或修订计划；
+- `plan_submit`：以 `expectedRevision` 和完整一级标题 Markdown 提交当前或修订计划，并作为请求用户批准
+  实施该完整计划的唯一工具；不得先用 `request_user_input` 或普通文本重复询问是否实施、继续或批准；
 - `plan_restart`：以 `expectedRevision` 和非空 reason 从允许状态清空旧计划并回到 `drafting`。
 
 前三个查询工具为 `Read + Coexist`；两个 mutation 为 `AgentControl + Solo`。不存在 `submit_plan`、
@@ -118,7 +119,9 @@ awaiting 状态的重复 submit 必须指出等待哪个 Interaction，而 appro
 Task Mode 的 workflow planning 阶段可以发生多轮澄清、计划提交和修订；这些行为不产生 workflow
 transition。只有 `plan_current` 已返回 `approved` 后，root 才能把 Task workflow 从 `planning`
 转换到 `editing_documents`。因此 Task 预设图不包含 `awaiting_confirmation`，Mode 状态栏在整个计划
-确认期间持续显示 `planning`。
+确认期间持续显示 `planning`。`request_user_input` 只收集会实质影响计划的缺失事实或偏好；它不能承担
+完整计划批准或实施授权。完整计划形成后 root 必须直接调用 `plan_submit`，不得以普通问题或 final 文本
+把是否实施交回用户。
 
 Turn 模型上下文从当前 AgentSession Plan state 派生只读 `pl.plan` section，提供当前 state/revision、文档 hash、修改意见
 和允许动作；批准后的完整计划作为隐藏 user message 存在 canonical transcript 中，并继续存在 canonical
@@ -135,6 +138,12 @@ stale Interaction、restart、working-state 恢复，以及 pending/resolve 与 
 `revisionRequested`，模型读取当前状态并提交修订版，用户批准后 Plan 进入 `approved`，随后才允许
 workflow 进入 `editing_documents`。后续多目录隔离、多 worktree 并行子代理、整合、只读 reviewer、
 终态、重启和清理证据继续由 Thread Mode workflow 验收，不得因 Plan 重构而弱化。
+
+真实 Plan-only GUI 回归使用 `cargo xtask verify-workflow --live --gui --plan-only`。专用完整需求不留下
+需要澄清的事实；Driver 要求修订首版计划、批准完整修订版并等待 canonical `plan_current` 返回
+`approved`。该验收必须拒绝 `request_user_input`、workflow transition、`complete` 和任何项目文件修改，
+保留 provider wire、通用 UserInput、GUI snapshot、截图、render tree、workspace diff、shutdown 与进程树
+证据后停止，不继续实施或完整 workflow 验收。
 
 确定性测试还要覆盖同一 AgentSession 的五个工具共享一个 Arc 内核、跨 Turn 从 session 恢复、不同
 AgentSession 状态互相隔离、child fork 不继承 Plan、presentation 预设不能由工具覆盖，以及 Approve 后下一

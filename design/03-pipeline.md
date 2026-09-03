@@ -31,8 +31,9 @@ working state 必须由一个 Thread checkpoint 原子提交；失败时三者�
 
 Interaction 只有通用 `UserInput` 与 `ToolApproval`。Task root 使用独立固定状态机的 `plan_*` 工具管理
 计划 lifecycle；`plan_submit` 提交以一级 Markdown 标题开头的完整计划并请求批准或修订，缺失信息、
-澄清和普通选项输入使用 `request_user_input`。两者都生成同一种通用 `UserInput` Interaction，Plan 只以
-typed purpose 绑定状态机，不增加 PlanConfirmation kind。pending Interaction 随 Thread 恢复，响应必须
+澄清和普通选项输入使用 `request_user_input`。`request_user_input` 不得询问是否实施、继续或批准完整
+计划；计划已经完整时必须直接调用 `plan_submit`，其 Plan confirmation 是唯一实施授权入口。两者都生成
+同一种通用 `UserInput` Interaction，Plan 只以 typed purpose 绑定状态机，不增加 PlanConfirmation kind。pending Interaction 随 Thread 恢复，响应必须
 匹配 interaction identity 和 Plan revision，并且只能决议一次。完整合同见
 [24-agent-session-plan.md](24-agent-session-plan.md)。
 
@@ -69,7 +70,8 @@ editing_documents，修复和重新整合后再次 review。不存在隐式 merg
 适合单任务或互斥目录并行，可能触及共同接口、清单、生成边界或 Git 状态的任务使用独立 worktree。
 worktree 只隔离现场，不能消除语义依赖；root 仍负责顺序采纳 commit 和处理冲突。
 `plan_submit` 使用 typed `{expectedRevision, plan}`、Markdown 标题校验、结构化状态机 receipt 与提交后
-结束 Turn 的语义，并通过通用 `UserInput` 发起确认；`request_user_input` 不得替代计划提交。运行时只在
+结束 Turn 的语义，并通过通用 `UserInput` 发起确认；`request_user_input` 和普通文本追问都不得替代计划
+提交或重复询问实施授权。运行时只在
 `AgentWorkingState.plan` 保存当前 AgentSession 的有界状态，不维护专用 `PlanCompleted`、Plan trace part
 或 Thread plan item 投影链。批准后的完整 Plan 通过 `Hidden` mailbox continuation 作为 user message
 进入同一 session transcript，但不投影到 GUI Timeline，也不跨 AgentSession 共享。

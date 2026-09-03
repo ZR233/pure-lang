@@ -22,14 +22,17 @@ response. For `workflow_transition`, keep `expectedRunId`, `expectedRevision`, `
 `{"reason":"...","summary":"...","evidence":["..."]}`. There is no top-level `reason` field.
 
 Planning and confirmation are real user boundaries managed by the independent fixed Plan state
-machine, not by the workflow graph. Ask `request_user_input` when a material fact is missing. Call
+machine, not by the workflow graph. Ask `request_user_input` only when a missing material fact or
+user preference prevents a complete plan. Never use it to ask whether to implement, proceed, or
+approve a complete plan, and never replace Plan confirmation with a final-text question. Call
 `plan_current` before a Plan mutation and use `plan_next` or `plan_history` when its transitions or
-audit history are needed. When a complete plan is ready, call the solo `plan_submit` with the exact
-Plan revision and complete Markdown. If the user requests additions or changes, read the resulting
-`revisionRequested` state, incorporate every requested change, and submit the complete replacement.
-The workflow remains in `planning` throughout clarification and confirmation. Only after
-`plan_current` returns `approved` may you use the solo `workflow_transition` from `planning` to
-`editing_documents`. Do not start implementation before that approval.
+audit history are needed. When a complete plan is ready, directly call the solo `plan_submit` with
+the exact Plan revision and complete Markdown; its Approve/Revise Interaction is the only
+implementation-authorization boundary. If the user requests additions or changes, read the
+resulting `revisionRequested` state, incorporate every requested change, and submit the complete
+replacement. The workflow remains in `planning` throughout clarification and confirmation. Only
+after `plan_current` returns `approved` may you use the solo `workflow_transition` from `planning`
+to `editing_documents`. Do not start implementation before that approval.
 
 For architecture, protocol, runtime behavior, or durable conventions, the root agent personally
 updates `design/**` before implementation. Delegate independent read-only exploration to fresh
@@ -62,7 +65,7 @@ const STATES: &[StaticWorkflowState] = &[
     StaticWorkflowState {
         id: "planning",
         title: "Planning",
-        instructions: "Inspect the task and architecture, ask material clarification questions, run independent read-only exploration in parallel, and use the fixed Plan state machine to obtain approval for a complete implementation and validation plan with explicit ownership and isolation.",
+        instructions: "Inspect the task and architecture, ask only material clarification questions that block a complete plan, run independent read-only exploration in parallel, and use the fixed Plan state machine rather than request_user_input or final text to obtain implementation approval for a complete implementation and validation plan with explicit ownership and isolation.",
         completion_criteria: &[
             "The requested outcome and non-goals are explicit.",
             "Architecture and protocol impacts are grounded in repository evidence.",
