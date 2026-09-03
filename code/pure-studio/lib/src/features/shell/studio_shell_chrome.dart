@@ -77,15 +77,32 @@ class _SessionCostChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final value = cost;
-    final tooltip = value?.hasUnpricedUsage ?? false
+    final hasUnpricedUsage = value?.hasUnpricedUsage ?? false;
+    final costLabel = value?.label ?? '-';
+    final tooltip = hasUnpricedUsage
         ? '${context.l10n.sessionAllAgentsCostTooltip} · ${context.l10n.statusUnpricedUsageLabel}'
         : context.l10n.sessionAllAgentsCostTooltip;
+    final label = hasUnpricedUsage
+        ? Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (costLabel != '-') ...[Text(costLabel), const Text(' · ')],
+              Text(
+                context.l10n.statusUnpricedUsageLabel,
+                style: const TextStyle(
+                  color: StudioColors.ochre,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          )
+        : Text(costLabel);
     return Tooltip(
       message: tooltip,
       child: Chip(
         key: StudioDriverKeys.sessionCost,
         avatar: const Icon(Icons.receipt_long_outlined, size: 16),
-        label: Text(value?.label ?? '-'),
+        label: label,
       ),
     );
   }

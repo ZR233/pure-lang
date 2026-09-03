@@ -665,7 +665,7 @@ void registerShellSettingsTests() {
     final rootWorkspace = base.workspacesByThread['session-1']!;
     final childWorkspace = base.workspacesByThread['child-1']!;
     final state = base.copyWith(
-      modelPerformance: _modelPerformanceFixture(),
+      modelPerformance: _modelPerformanceFixture(hasUnpricedUsage: true),
       workspacesByThread: {
         'session-1': rootWorkspace.copyWith(
           runtime: rootWorkspace.runtime.copyWith(
@@ -696,6 +696,13 @@ void registerShellSettingsTests() {
       find.descendant(of: sessionCost, matching: find.text(r'￥0.14 + $0.02')),
       findsOneWidget,
     );
+    expect(
+      find.descendant(
+        of: sessionCost,
+        matching: find.text('Partially unpriced'),
+      ),
+      findsOneWidget,
+    );
     expect(find.textContaining('Total cost'), findsNothing);
     expect(find.byKey(StudioDriverKeys.threadThroughput), findsOneWidget);
     expect(find.text('150 t/s'), findsOneWidget);
@@ -710,6 +717,7 @@ void registerShellSettingsTests() {
     await tester.pumpAndSettle();
 
     expect(find.text(r'￥0.14 + $0.02'), findsOneWidget);
+    expect(find.text('Partially unpriced'), findsOneWidget);
     expect(find.text('75 t/s'), findsOneWidget);
     expect(find.text('150 t/s'), findsNothing);
   });
@@ -2684,18 +2692,20 @@ Future<void> _pumpSettingsPage(WidgetTester tester, _FakeStudioApi api) async {
   await tester.pumpAndSettle();
 }
 
-ModelPerformanceSnapshotView _modelPerformanceFixture() {
+ModelPerformanceSnapshotView _modelPerformanceFixture({
+  bool hasUnpricedUsage = false,
+}) {
   return ModelPerformanceSnapshotView(
     revision: 3,
     updatedAt: DateTime.fromMillisecondsSinceEpoch(3000),
-    sessionCosts: const [
+    sessionCosts: [
       SessionCostView(
         rootThreadId: 'session-1',
         estimatedCosts: [
           RuntimeCostView(currency: 'CNY', amount: 0.14),
           RuntimeCostView(currency: 'USD', amount: 0.02),
         ],
-        hasUnpricedUsage: false,
+        hasUnpricedUsage: hasUnpricedUsage,
       ),
     ],
     summaries: const [

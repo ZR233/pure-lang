@@ -378,15 +378,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn root_and_child_costs_share_one_multi_currency_session() {
+    async fn priced_and_unpriced_agents_share_one_multi_currency_session() {
         let (owner, _, writer, _) = memory_owner().await;
         let mut root = billing_record("root-inference", "provider-a", "model-a", 20, 200, 1);
         root.estimated_costs = vec![cost("CNY", 0.04)];
-        root.has_unpriced_usage = true;
         let mut child = billing_record("child-inference", "provider-a", "model-a", 10, 100, 2);
         child.estimated_costs = vec![cost("CNY", 0.10), cost("USD", 0.02)];
         let mut unmeasured =
             billing_record("unmeasured-inference", "provider-a", "model-a", 30, 300, 3);
+        unmeasured.has_unpriced_usage = true;
         unmeasured.timing = None;
 
         owner
