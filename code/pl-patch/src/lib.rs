@@ -10,8 +10,6 @@ mod error;
 mod matching;
 mod outcome;
 mod parse;
-#[cfg(test)]
-mod unit_tests;
 
 pub use apply::*;
 pub use backend::*;

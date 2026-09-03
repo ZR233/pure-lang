@@ -72,3 +72,59 @@ pub(super) fn deserialize_input_metadata(
         .unwrap_or(serde_json::Value::Null);
     Ok((payload.into(), key, budget_action))
 }
+
+#[cfg(test)]
+mod tests {
+    use pl_core::{DurableMailboxEnvelope, MailboxDeliveryState, MessagePresentation};
+    use pl_core::{ThreadId, TurnId};
+
+    use super::*;
+
+    #[test]
+    fn input_metadata_round_trips_queue_key_and_budget_action_together() {
+        for (queue_coalescing_key, budget_action) in [
+            (
+                Some("task-run:wakes".to_string()),
+                pl_core::MailboxBudgetAction::Preserve,
+            ),
+            (None, pl_core::MailboxBudgetAction::Refresh),
+        ] {
+            let input = DurableMailboxEnvelope {
+                mail_id: "mail:wake".to_string(),
+                turn_id: TurnId::new("turn-wake").unwrap(),
+                thread_id: ThreadId::new("thread-wake").unwrap(),
+                payload: pl_core::MailboxInputPayload {
+                    message: "wake".to_string(),
+                    attachments: Vec::new(),
+                    presentation: MessagePresentation::Hidden,
+                    metadata: serde_json::json!({"kind": "taskWake"}).into(),
+                },
+                queue_coalescing_key: queue_coalescing_key.clone(),
+                budget_action,
+                delivery_state: MailboxDeliveryState::default(),
+                queued_at: 1,
+            };
+
+            let stored = serialize_input_metadata(&input).unwrap();
+            let (metadata, key, restored_budget_action) =
+                deserialize_input_metadata(&stored).unwrap();
+
+            assert_eq!(metadata, input.payload.metadata);
+            assert_eq!(key, queue_coalescing_key);
+            assert_eq!(restored_budget_action, budget_action);
+        }
+    }
+
+    #[test]
+    fn payload_only_input_metadata_remains_unwrapped() {
+        let stored = r#"{"kind":"taskWake"}"#;
+        let (metadata, key, budget_action) = deserialize_input_metadata(stored).unwrap();
+
+        assert_eq!(
+            metadata,
+            pl_core::MailboxMetadata::from(serde_json::json!({"kind": "taskWake"}))
+        );
+        assert_eq!(key, None);
+        assert_eq!(budget_action, pl_core::MailboxBudgetAction::Preserve);
+    }
+}

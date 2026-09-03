@@ -197,3 +197,78 @@ fn turn_state_kind(state: &TurnState) -> &'static str {
         TurnState::BudgetLimited(_) => "budgetLimited",
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use pl_core::AgentTurnOutcome;
+
+    use super::*;
+
+    #[test]
+    fn thread_input_restores_typed_attachment_manifest() {
+        let attachment = pl_protocol::ThreadAttachment {
+            id: "attachment-1".to_string(),
+            modality: pl_protocol::AttachmentModality::Image,
+            media_type: "image/png".to_string(),
+            filename: Some("marker.png".to_string()),
+            width: Some(1200),
+            height: Some(800),
+            byte_size: 80_000,
+        };
+        let restored = pl_core::DurableMailboxEnvelope::try_from(thread_input::Model {
+            id: "mail-1".to_string(),
+            thread_id: "thread-1".to_string(),
+            mail_id: "mail-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            content: "inspect".to_string(),
+            attachments_json: serde_json::to_string(std::slice::from_ref(&attachment)).unwrap(),
+            metadata_json: "null".to_string(),
+            presentation: "visible".to_string(),
+            state_json: serde_json::to_string(&pl_core::MailboxDeliveryState::default()).unwrap(),
+            state_kind: "pending".to_string(),
+            queue_ordinal: 0,
+            queued_at: 7,
+        })
+        .unwrap();
+
+        assert_eq!(restored.payload.attachments, [attachment]);
+    }
+
+    #[test]
+    fn budget_limited_turn_restores_typed_rollover_state() {
+        let limit = pl_protocol::BudgetLimitSnapshot {
+            kind: pl_protocol::BudgetLimitKind::WallClock,
+            usage: pl_protocol::BudgetUsage {
+                model_steps: 4,
+                tool_calls: 8,
+                wait_calls: 2,
+                elapsed_ms: 1_800_000,
+            },
+        };
+        let state =
+            pl_protocol::TurnState::BudgetLimited(pl_protocol::BudgetLimitedTurnState::new(
+                Some(1),
+                2,
+                limit,
+                pl_protocol::TurnRolloverOutcome::Succeeded,
+            ));
+        let outcome = AgentTurnOutcome::try_from(turn::Model {
+            id: "turn-budget".to_string(),
+            thread_id: "thread-budget".to_string(),
+            ordinal: 0,
+            revision: 1,
+            state_json: serde_json::to_string(&state).unwrap(),
+            state_kind: "budgetLimited".to_string(),
+            model_json: None,
+            usage_json: serde_json::to_string(&pl_protocol::TokenUsage::default()).unwrap(),
+            metadata_json: None,
+            updated_at: 2,
+        })
+        .unwrap();
+
+        assert_eq!(
+            outcome.outcome,
+            TurnOutcome::budget_limited(limit, pl_protocol::TurnRolloverOutcome::Succeeded)
+        );
+    }
+}

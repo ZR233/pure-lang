@@ -1,4 +1,4 @@
-//! pl-patch 端到端行为测试：解析、应用与失败摘要。
+//! pl-patch 端到端行为测试：解析、应用与失败摘要，全部经公共 API 驱动。
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -6,10 +6,11 @@ use std::sync::{Arc, Mutex};
 
 use pretty_assertions::assert_eq;
 
-use crate::apply::apply_patch;
-use crate::backend::{PatchBackend, PatchPathDisplay};
-use crate::error::{PatchError, PatchResult};
-use crate::parse::parse_patch;
+use pl_patch::PatchBackend;
+use pl_patch::PatchError;
+use pl_patch::PatchPathDisplay;
+use pl_patch::PatchResult;
+use pl_patch::apply_patch;
 
 #[derive(Debug, Default, Clone)]
 struct MemoryBackend {
@@ -103,9 +104,12 @@ impl PatchBackend for MemoryBackend {
     }
 }
 
-#[test]
-fn invalid_header_reports_recovery_guidance() {
-    let error = parse_patch("*** Begin Patch\n--- a/file.txt\n*** End Patch").unwrap_err();
+#[tokio::test]
+async fn invalid_header_reports_recovery_guidance() {
+    let backend = MemoryBackend::default();
+    let error = apply_patch("*** Begin Patch\n--- a/file.txt\n*** End Patch", &backend)
+        .await
+        .unwrap_err();
 
     assert!(error.message().contains("unified diff"));
     assert!(error.message().contains("*** Update File:"));

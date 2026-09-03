@@ -383,3 +383,230 @@ fn active_turn_projection(
     };
     Ok(Some(turn_state))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::VecDeque;
+
+    use pl_core::{
+        AgentIdentity, AgentRoleId, AgentSnapshot, AgentState, DurableCommitFacts,
+        PersistenceClass, RunningAgentState, ThreadActorState, ThreadContextState, ThreadId,
+        ThreadMutation, TurnId,
+    };
+    use pl_protocol::{
+        RunningTurnState, ThreadNotification, ThreadNotificationEnvelope, Turn, TurnPhase,
+        TurnState,
+    };
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, TransactionTrait};
+
+    use crate::ThreadModeId;
+
+    use super::*;
+
+    fn running_actor_state(thread_id: &str, turn_id: &str, updated_at: i64) -> ThreadActorState {
+        let thread_id = ThreadId::new(thread_id).expect("thread id");
+        let turn_id = TurnId::new(turn_id).expect("turn id");
+        ThreadActorState {
+            snapshot: AgentSnapshot {
+                identity: AgentIdentity {
+                    id: thread_id.clone(),
+                    parent_id: None,
+                    role: AgentRoleId::new("executor").expect("role"),
+                    depth: 0,
+                },
+                state: AgentState::Running(RunningAgentState::new(turn_id)),
+                pending_inputs: 0,
+                progress: None,
+                last_turn: None,
+                revision: 1,
+                event_sequence: 1,
+                updated_at,
+            },
+            session: ThreadContextState::empty(),
+            pending_inputs: VecDeque::new(),
+            active_input: None,
+        }
+    }
+
+    fn turn_update_commit(
+        state: ThreadActorState,
+        turn_id: &str,
+        phase: TurnPhase,
+        emitted_at: i64,
+    ) -> ThreadCommit {
+        let thread_id = state.snapshot.identity.id.clone();
+        let turn_id_ref = TurnId::new(turn_id).expect("turn id");
+        ThreadCommit {
+            agent_id: thread_id.clone(),
+            persistence: PersistenceClass::Standard,
+            expected_revision: None,
+            next_state: state,
+            facts: DurableCommitFacts {
+                thread_id: thread_id.clone(),
+                turn_id: Some(turn_id_ref),
+                through_revision: 0,
+                revision: 1,
+                notifications: vec![ThreadNotificationEnvelope {
+                    thread_id: thread_id.to_string(),
+                    revision: 1,
+                    emitted_at,
+                    notification: ThreadNotification::TurnUpdated {
+                        turn: Turn {
+                            id: turn_id.to_string(),
+                            thread_id: thread_id.to_string(),
+                            revision: 1,
+                            state: TurnState::Running(RunningTurnState::new(emitted_at, phase)),
+                            updated_at: emitted_at,
+                        },
+                    },
+                }],
+                turn_transition: None,
+                context: None,
+                projection_snapshot: None,
+                runtime_events: Vec::new(),
+                trace_events: Vec::new(),
+                inference: None,
+                submission: None,
+            },
+            mutation: ThreadMutation::ReplaceThread { thread_id },
+        }
+    }
+
+    async fn seed_running_turn(
+        store: &StudioStore,
+        thread_id: &str,
+        turn_id: &str,
+        ordinal: i64,
+        phase: TurnPhase,
+    ) {
+        turn::ActiveModel {
+            id: Set(turn_id.to_string()),
+            thread_id: Set(thread_id.to_string()),
+            ordinal: Set(ordinal),
+            revision: Set(1),
+            state_json: Set(
+                serde_json::to_string(&TurnState::Running(RunningTurnState::new(1, phase)))
+                    .expect("turn state JSON"),
+            ),
+            model_json: Set(None),
+            usage_json: Set(serde_json::to_string(&pl_protocol::TokenUsage::default()).unwrap()),
+            metadata_json: Set(None),
+            updated_at: Set(1),
+            ..Default::default()
+        }
+        .insert(store.database())
+        .await
+        .expect("seed running turn");
+    }
+
+    async fn assert_phase(
+        store: &StudioStore,
+        thread_id: &str,
+        turn_id: &str,
+        expected: TurnPhase,
+    ) {
+        let row = turn::Entity::find_by_id(turn_id)
+            .one(store.database())
+            .await
+            .expect("read turn")
+            .expect("turn row exists");
+        assert_eq!(row.thread_id, thread_id, "turn {turn_id} belongs to thread");
+        let state = serde_json::from_str::<TurnState>(&row.state_json).expect("parse turn state");
+        assert_eq!(
+            state.phase(),
+            Some(expected),
+            "turn {turn_id} must keep phase {expected:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn active_turn_fallback_preserves_canonical_phase() {
+        let store = StudioStore::open_memory().await.expect("memory store");
+        let project = store
+            .upsert_project(std::env::temp_dir().join("active-turn-fallback"))
+            .await
+            .expect("project");
+        let thread = store
+            .create_thread(&project.id, "active-turn-fallback", ThreadModeId::simple())
+            .await
+            .expect("thread");
+        let thread_id = thread.id;
+
+        // 既有的 canonical Thinking phase 不能被粗粒度 AgentState fallback 覆盖。
+        seed_running_turn(&store, &thread_id, "turn-thinking", 0, TurnPhase::Thinking).await;
+        {
+            let tx = store.database().begin().await.expect("begin");
+            let state = running_actor_state(&thread_id, "turn-thinking", 9);
+            persist_state_turns(&tx, &state)
+                .await
+                .expect("write-behind");
+            tx.commit().await.expect("commit");
+        }
+        assert_phase(&store, &thread_id, "turn-thinking", TurnPhase::Thinking).await;
+
+        // 既有的 canonical RunningTool phase 同样被保留。
+        seed_running_turn(&store, &thread_id, "turn-tool", 1, TurnPhase::RunningTool).await;
+        {
+            let tx = store.database().begin().await.expect("begin");
+            let state = running_actor_state(&thread_id, "turn-tool", 10);
+            persist_state_turns(&tx, &state)
+                .await
+                .expect("write-behind");
+            tx.commit().await.expect("commit");
+        }
+        assert_phase(&store, &thread_id, "turn-tool", TurnPhase::RunningTool).await;
+
+        // 缺失 Turn 行仍建立粗粒度 fallback。
+        {
+            let tx = store.database().begin().await.expect("begin");
+            let state = running_actor_state(&thread_id, "turn-missing", 11);
+            persist_state_turns(&tx, &state)
+                .await
+                .expect("write-behind");
+            tx.commit().await.expect("commit");
+        }
+        assert_phase(&store, &thread_id, "turn-missing", TurnPhase::Responding).await;
+
+        // 后续 canonical ThreadNotification 把 fallback 覆盖为精确 phase。
+        {
+            let tx = store.database().begin().await.expect("begin");
+            let state = running_actor_state(&thread_id, "turn-missing", 12);
+            let commit = turn_update_commit(state, "turn-missing", TurnPhase::Thinking, 12);
+            persist_thread_notifications(&tx, &commit)
+                .await
+                .expect("notification");
+            tx.commit().await.expect("commit");
+        }
+        assert_phase(&store, &thread_id, "turn-missing", TurnPhase::Thinking).await;
+
+        // 同一 Turn id 已属于另一 Thread 时，持久化必须失败且不得修改该行。
+        let foreign = store
+            .create_thread(&project.id, "foreign", ThreadModeId::simple())
+            .await
+            .expect("foreign thread");
+        seed_running_turn(&store, &foreign.id, "turn-foreign", 0, TurnPhase::Thinking).await;
+        let before = turn::Entity::find_by_id("turn-foreign")
+            .one(store.database())
+            .await
+            .expect("read foreign turn")
+            .expect("foreign turn exists");
+        {
+            let tx = store.database().begin().await.expect("begin");
+            let state = running_actor_state(&thread_id, "turn-foreign", 13);
+            let error = persist_state_turns(&tx, &state)
+                .await
+                .expect_err("must reject a Turn owned by another Thread");
+            assert!(
+                error.to_string().contains("belongs to another Thread"),
+                "unexpected error: {error}"
+            );
+            tx.rollback().await.ok();
+        }
+        let after = turn::Entity::find_by_id("turn-foreign")
+            .one(store.database())
+            .await
+            .expect("read foreign turn")
+            .expect("foreign turn exists");
+        assert_eq!(after, before, "foreign Turn row must be unchanged");
+    }
+}

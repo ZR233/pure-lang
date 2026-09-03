@@ -498,6 +498,14 @@ fn thread_depth(id: &str, parents: &BTreeMap<String, Option<String>>) -> Result<
 
 #[cfg(test)]
 mod tests {
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
+
+    use crate::studio::entity::{item, thread_context_segment, turn};
+    use crate::studio::store::object::put_object;
+
+    use super::super::{StudioAgentRepository, StudioStore, ThreadWriteBehindWriter};
+    use super::active_skills_from_items;
+
     use pl_core::{AgentTurnOutcome, FaultedAgentState, ThreadId, TurnId};
     use pl_protocol::TokenUsage;
     use pl_protocol::{StateError, TurnFailure, TurnFailureCategory, TurnOutcome};
@@ -562,5 +570,300 @@ mod tests {
         let recovered = recover_validated_fault(state, None).unwrap();
 
         assert!(recovered.is_idle());
+    }
+    #[test]
+    fn restored_active_skills_are_deduped_in_item_order() {
+        let items = vec![
+            skill_item("item-1", "tool-1", "doc", 1),
+            skill_item("item-2", "tool-2", "pdf", 2),
+            skill_item("item-3", "tool-3", "doc", 3),
+        ];
+
+        assert_eq!(active_skills_from_items(&items), ["doc", "pdf"]);
+    }
+
+    #[tokio::test]
+    async fn wire_v7_skill_audit_blocks_only_legacy_root_without_rewriting_v13_rows() {
+        let store = StudioStore::open_memory().await.expect("memory store");
+        let workspace = std::env::temp_dir().join("pure-studio-strict-skill-recovery");
+        let project = store.upsert_project(&workspace).await.expect("project");
+        let legacy = store
+            .create_thread(&project.id, "legacy", crate::ThreadModeId::simple())
+            .await
+            .expect("legacy thread");
+        let healthy = store
+            .create_thread(&project.id, "healthy", crate::ThreadModeId::simple())
+            .await
+            .expect("healthy thread");
+        seed_empty_session(&store, &legacy.id).await;
+        seed_empty_session(&store, &healthy.id).await;
+        seed_completed_turn(&store, &legacy.id, "legacy-turn").await;
+        seed_completed_turn(&store, &healthy.id, "healthy-turn").await;
+
+        let legacy_state = serde_json::json!({
+            "kind": "skill",
+            "data": {
+                "activation": {
+                    "name": "pdf",
+                    "source": "system",
+                    "path": "/skills/pdf",
+                    "turnId": "legacy-turn",
+                    "toolCallId": "tool-legacy",
+                    "activatedAt": 7
+                }
+            }
+        })
+        .to_string();
+        seed_skill_row(
+            &store,
+            &legacy.id,
+            "legacy-turn",
+            "legacy-skill",
+            &legacy_state,
+        )
+        .await;
+        let healthy_state =
+            serde_json::to_string(skill_item("healthy-skill", "tool-healthy", "pdf", 8).state())
+                .expect("current Skill JSON");
+        seed_skill_row(
+            &store,
+            &healthy.id,
+            "healthy-turn",
+            "healthy-skill",
+            &healthy_state,
+        )
+        .await;
+
+        let writer = ThreadWriteBehindWriter::new(store.clone());
+        let product_events = crate::studio::ProductEventBus::new(store.clone(), writer.clone());
+        let model_performance = crate::studio::runtime::ModelPerformanceOwner::new(
+            store.clone(),
+            writer.clone(),
+            product_events,
+        );
+        let repository = StudioAgentRepository::with_writer_and_performance(
+            store.clone(),
+            writer.clone(),
+            model_performance,
+        );
+        assert!(matches!(
+            repository.audit_thread_recovery_payloads(&legacy.id).await,
+            Err(SessionSnapshotAuditError::Corrupt(_))
+        ));
+        assert!(
+            repository
+                .audit_thread_recovery_payloads(&healthy.id)
+                .await
+                .is_ok(),
+            "current v7 Skill remains recoverable"
+        );
+
+        let persisted = item::Entity::find_by_id("legacy-skill")
+            .one(store.database())
+            .await
+            .expect("read legacy row")
+            .expect("legacy row exists");
+        assert_eq!(persisted.state_json, legacy_state);
+        writer.shutdown().await.expect("shutdown writer");
+    }
+
+    #[tokio::test]
+    async fn activation_restores_recent_four_hundred_items_and_older_active_skills() {
+        let store = StudioStore::open_memory().await.expect("memory store");
+        let workspace = std::env::temp_dir().join("pure-studio-hot-timeline-window");
+        let project = store.upsert_project(&workspace).await.expect("project");
+        let thread = store
+            .create_thread(&project.id, "hot window", crate::ThreadModeId::simple())
+            .await
+            .expect("thread");
+        seed_empty_session(&store, &thread.id).await;
+        seed_completed_turn(&store, &thread.id, "old-turn").await;
+        seed_completed_turn_at(&store, &thread.id, "new-turn", 1).await;
+
+        for ordinal in 1..=5 {
+            seed_text_row(&store, &thread.id, "old-turn", ordinal, "old").await;
+        }
+        let old_skill = skill_item("old-skill", "tool-old", "pdf", 6);
+        item::ActiveModel {
+            id: Set(old_skill.id.clone()),
+            thread_id: Set(thread.id.clone()),
+            turn_id: Set("old-turn".to_string()),
+            ordinal: Set(6),
+            revision: Set(0),
+            state_json: Set(serde_json::to_string(old_skill.state()).unwrap()),
+            created_at: Set(6),
+            updated_at: Set(6),
+            ..Default::default()
+        }
+        .insert(store.database())
+        .await
+        .expect("old Skill item");
+        for ordinal in 7..=406 {
+            seed_text_row(&store, &thread.id, "new-turn", ordinal, "new").await;
+        }
+
+        let writer = ThreadWriteBehindWriter::new(store.clone());
+        let product_events = crate::studio::ProductEventBus::new(store.clone(), writer.clone());
+        let model_performance = crate::studio::runtime::ModelPerformanceOwner::new(
+            store.clone(),
+            writer.clone(),
+            product_events,
+        );
+        let repository = StudioAgentRepository::with_writer_and_performance(
+            store.clone(),
+            writer.clone(),
+            model_performance,
+        );
+        let model = crate::studio::entity::thread::Entity::find_by_id(thread.id.clone())
+            .one(store.database())
+            .await
+            .unwrap()
+            .unwrap();
+        let restored = repository
+            .restore_thread_snapshot(model, &pl_core::ThreadContextState::empty())
+            .await
+            .expect("restore hot snapshot")
+            .snapshot;
+
+        assert_eq!(restored.items.len(), 400);
+        assert!(restored.items.iter().all(|item| item.turn_id == "new-turn"));
+        assert_eq!(
+            restored
+                .runtime
+                .expect("runtime from active Skill")
+                .active_skills,
+            ["pdf"]
+        );
+        writer.shutdown().await.expect("shutdown writer");
+    }
+
+    async fn seed_empty_session(store: &StudioStore, thread_id: &str) {
+        let state = pl_protocol::AgentWorkingState::default();
+        put_object(store.database(), thread_id, &state, 1)
+            .await
+            .expect("seed working state");
+        assert!(
+            thread_context_segment::Entity::find()
+                .all(store.database())
+                .await
+                .expect("read transcript")
+                .is_empty()
+        );
+    }
+
+    async fn seed_completed_turn(store: &StudioStore, thread_id: &str, turn_id: &str) {
+        seed_completed_turn_at(store, thread_id, turn_id, 0).await;
+    }
+
+    async fn seed_completed_turn_at(
+        store: &StudioStore,
+        thread_id: &str,
+        turn_id: &str,
+        ordinal: i64,
+    ) {
+        let state = pl_protocol::TurnState::Completed(pl_protocol::CompletedTurnState::new(
+            Some(1),
+            2,
+            pl_protocol::TurnCompletion::Normal,
+        ));
+        turn::ActiveModel {
+            id: Set(turn_id.to_string()),
+            thread_id: Set(thread_id.to_string()),
+            ordinal: Set(ordinal),
+            revision: Set(1),
+            state_json: Set(serde_json::to_string(&state).expect("turn state JSON")),
+            model_json: Set(None),
+            usage_json: Set(serde_json::to_string(&pl_protocol::TokenUsage::default()).unwrap()),
+            metadata_json: Set(None),
+            updated_at: Set(2),
+            ..Default::default()
+        }
+        .insert(store.database())
+        .await
+        .expect("seed turn");
+    }
+
+    async fn seed_skill_row(
+        store: &StudioStore,
+        thread_id: &str,
+        turn_id: &str,
+        item_id: &str,
+        state_json: &str,
+    ) {
+        item::ActiveModel {
+            id: Set(item_id.to_string()),
+            thread_id: Set(thread_id.to_string()),
+            turn_id: Set(turn_id.to_string()),
+            ordinal: Set(0),
+            revision: Set(0),
+            state_json: Set(state_json.to_string()),
+            created_at: Set(1),
+            updated_at: Set(2),
+            ..Default::default()
+        }
+        .insert(store.database())
+        .await
+        .expect("seed Skill item");
+    }
+
+    async fn seed_text_row(
+        store: &StudioStore,
+        thread_id: &str,
+        turn_id: &str,
+        ordinal: i64,
+        text: &str,
+    ) {
+        let state = pl_protocol::ThreadItemState::Text(pl_protocol::ThreadTextItem::new(
+            pl_protocol::ThreadTextChannel::Final,
+            format!("{text}-{ordinal}"),
+            Vec::new(),
+            pl_protocol::ThreadContentLifecycle::completed(ordinal),
+        ));
+        item::ActiveModel {
+            id: Set(format!("item-{turn_id}-{ordinal}")),
+            thread_id: Set(thread_id.to_string()),
+            turn_id: Set(turn_id.to_string()),
+            ordinal: Set(ordinal),
+            revision: Set(0),
+            state_json: Set(serde_json::to_string(&state).unwrap()),
+            created_at: Set(ordinal),
+            updated_at: Set(ordinal),
+            ..Default::default()
+        }
+        .insert(store.database())
+        .await
+        .expect("seed text item");
+    }
+
+    fn skill_item(
+        item_id: &str,
+        tool_call_id: &str,
+        name: &str,
+        activated_at: i64,
+    ) -> pl_protocol::ThreadItem {
+        pl_protocol::ThreadItem::new(
+            item_id.to_string(),
+            "thread-1".to_string(),
+            "turn-1".to_string(),
+            activated_at as u64,
+            0,
+            activated_at,
+            activated_at,
+            pl_protocol::ThreadItemState::Skill(pl_protocol::ThreadSkillItem::new(
+                pl_protocol::SkillActivation {
+                    name: name.to_string(),
+                    source: "system".to_string(),
+                    provider_id: "local-filesystem".to_string(),
+                    resource_base: pl_protocol::SkillActivationResourceBase::Directory {
+                        path: format!("/skills/{name}"),
+                    },
+                    turn_id: "turn-1".to_string(),
+                    cause: pl_protocol::SkillActivationCause::Tool {
+                        tool_call_id: tool_call_id.to_string(),
+                    },
+                    activated_at,
+                },
+            )),
+        )
     }
 }

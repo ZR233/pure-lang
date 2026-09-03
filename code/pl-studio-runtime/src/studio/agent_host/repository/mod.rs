@@ -51,24 +51,7 @@ pub(in crate::studio) struct StudioSessionRecoveryFailure {
 mod input_metadata;
 mod projection;
 mod restore;
-#[cfg(test)]
-mod unit_tests;
-
 impl StudioAgentRepository {
-    /// write-behind writer 共享实例构造：与 Agent runtime、ProductEventBus 使用
-    /// 同一进程级 writer，恢复基线 seed 进该实例。
-    #[cfg(test)]
-    pub(in crate::studio) fn with_writer(
-        store: StudioStore,
-        writer: ThreadWriteBehindWriter,
-    ) -> Self {
-        Self {
-            writer,
-            store,
-            model_performance: None,
-        }
-    }
-
     pub(in crate::studio) fn with_writer_and_performance(
         store: StudioStore,
         writer: ThreadWriteBehindWriter,
