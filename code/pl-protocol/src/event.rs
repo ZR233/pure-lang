@@ -235,8 +235,8 @@ pub enum PipelineStage {
 
 /// Token usage snapshot shared by product projection and internal trace mapping.
 ///
-/// Lightweight copy of `pl_model::TokenUsage` to avoid coupling public protocol
-/// DTOs to `pl-model`.
+/// Independent of `pl_protocol::TokenUsage` to keep this product projection DTO
+/// decoupled from the model-layer accounting type.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TokenUsageSnapshot {
