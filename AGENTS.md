@@ -160,6 +160,7 @@
 ## 测试、检查与交付
 
 - 每个核心业务规则必须有测试；每个 bug 修复必须增加能覆盖该问题的回归测试。
+- Rust 测试按位置分层：单元测试内联在所测源码文件尾部的 `#[cfg(test)] mod tests`，禁止 `unit_tests.rs` / `unit_tests/` 分离文件与 `#[cfg(test)] mod tests;` 兄弟文件形式；集成测试位于 crate 的 `tests/` 目录且只经公共 API 驱动。跨测试文件共享的 fake/fixture 收敛到 `tests/support/` 或 crate 内单一 `#[cfg(test)]` 支持模块；迁移或删除测试后无消费者的生产 `cfg(test)` 钩子一并删除。
 - 测试名称表达场景和期望；优先比较完整对象并使用 `pretty_assertions::assert_eq!` 获得清晰 diff。
 - 测试 helper 只服务测试时放在测试模块或专用测试模块，不为测试方便扩大生产 API。
 - 避免在测试中修改进程环境变量；确需修改时必须隔离并恢复。

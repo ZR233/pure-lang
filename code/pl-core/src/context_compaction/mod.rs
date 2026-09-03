@@ -546,8 +546,8 @@ mod tests {
     use std::time::Duration;
 
     use pl_protocol::{
-    Message, MessageContent, MessagePresentation, MessageRole, ModelContextItem,
-};
+        Message, MessageContent, MessagePresentation, MessageRole, ModelContextItem,
+    };
     use pl_trace::{AgentEvent, AgentEventSender, TracePartSource};
     use pretty_assertions::assert_eq;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -600,6 +600,7 @@ mod tests {
         assert_eq!(message_text(&compacted[0]), "old request");
         assert_eq!(message_text(&compacted[1]), "latest request");
         assert!(is_compaction_summary(&compacted[2]));
+        assert_eq!(compacted[2].presentation, MessagePresentation::Hidden);
     }
 
     #[test]
@@ -663,6 +664,10 @@ mod tests {
         // Chat wire messages include the compaction instruction as a system message.
         assert_eq!(provider.recorded_wire_item_counts(), vec![5, 4]);
         assert!(session.messages().last().is_some_and(is_compaction_summary));
+        assert_eq!(
+            session.messages().last().unwrap().presentation,
+            MessagePresentation::Hidden
+        );
         assert_eq!(
             runtime_progress_texts(&mut event_rx),
             vec![

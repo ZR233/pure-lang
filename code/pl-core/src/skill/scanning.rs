@@ -410,32 +410,10 @@ fn ensure_real_skill_path(skill_dir: &Path, path: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::env;
-    use std::fs;
-    use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use pretty_assertions::assert_eq;
 
-    use super::super::{MAX_SKILL_SCAN_DEPTH, SKILL_FILE_NAME};
     use super::*;
-
-    fn temp_dir(name: &str) -> PathBuf {
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        env::temp_dir().join(format!("pure-skill-{name}-{stamp}"))
-    }
-
-    fn write_skill(dir: &Path, name: &str, description: &str) {
-        fs::create_dir_all(dir).unwrap();
-        fs::write(
-            dir.join(SKILL_FILE_NAME),
-            format!("---\nname: {name}\ndescription: {description}\n---\n# {name}\n"),
-        )
-        .unwrap();
-    }
 
     #[test]
     fn parses_valid_frontmatter() {

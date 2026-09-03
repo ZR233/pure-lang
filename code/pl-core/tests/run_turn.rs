@@ -93,6 +93,50 @@ async fn run_turn_records_user_trace_part_before_internal_parts() {
 }
 
 #[tokio::test]
+async fn hidden_turn_input_remains_in_provider_context_and_session_protocol() {
+    let sse_body = concat!(
+        "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\"}}\n\n",
+        "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"ok\"}\n\n",
+        "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}}\n\n",
+        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_string();
+    let (base_url, requests, handle) = serve_sse_sequence(vec![sse_body]).await;
+    let mut endpoint = ProviderEndpoint::openai(Some(base_url));
+    endpoint.bearer_token = Some("test-token".to_string());
+    let core = test_turn_engine_builder(endpoint, local_responses_model()).build();
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(32);
+    let mut recorder = TraceRecorder::new("session-hidden".to_string(), event_tx, 0);
+    let mut session = AgentSession::new();
+
+    core.run_turn_with_trace(
+        &mut session,
+        TurnRequest::new("# Approved Plan\n\nImplement it.")
+            .with_user_presentation(MessagePresentation::Hidden),
+        &mut recorder,
+        TurnOptions::default(),
+    )
+    .await
+    .unwrap();
+    handle.await.unwrap();
+
+    let user = session
+        .messages()
+        .iter()
+        .find(|message| message.role == MessageRole::User)
+        .expect("hidden user message remains canonical");
+    assert_eq!(user.presentation, MessagePresentation::Hidden);
+    let requests = requests.lock().unwrap();
+    assert!(
+        requests[0]
+            .to_string()
+            .contains("# Approved Plan\\n\\nImplement it."),
+        "Hidden controls GUI projection, not provider delivery"
+    );
+}
+
+#[tokio::test]
 async fn run_turn_emits_runtime_progress_commentary() {
     let sse_body = concat!(
         "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\"}}\n\n",
