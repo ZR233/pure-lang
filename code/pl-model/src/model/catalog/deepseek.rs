@@ -96,8 +96,10 @@ fn deepseek_vision_family() -> ModelFamily {
         truncation_limit: 10_000,
         parameters: vec![deepseek_effort_parameter()],
         transport: ModelTransportProfile::responses_http(),
-        request_profile: deepseek_request_profile()
-            .with_image_media(MediaWireFormat::ResponsesInputImage, true),
+        request_profile: deepseek_request_profile().with_image_media(
+            MediaWireFormat::ResponsesInputImage,
+            super::MediaSendOrder::RemoteUrlFirst,
+        ),
         base_instructions: String::new(),
     }
 }

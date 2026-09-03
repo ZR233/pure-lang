@@ -23,6 +23,7 @@ use crate::completion::stream::{
     CompletionEventStream, StreamCollectContext, collect_completion_event_stream,
     decode_raw_event_stream,
 };
+use crate::completion::tool_schema::CustomToolProjection;
 use crate::completion::{
     CompletionRequest, CompletionResponse, CompletionTraceContext, ModelCompactionRequest,
     ModelCompactionResponse,
@@ -464,10 +465,15 @@ impl ModelRuntime {
                 .capabilities
                 .clone()
                 .with_native_custom_tools(endpoint.uses_native_custom_tools());
-            let supports_custom_tools = endpoint.uses_native_custom_tools()
+            let custom_tools_native = endpoint.uses_native_custom_tools()
                 && effective_capabilities.supports_custom_tools()
                 && effective_capabilities.supports_freeform_tools();
-            let request = request.provider_compatible(supports_custom_tools);
+            let projection = if custom_tools_native {
+                CustomToolProjection::Native
+            } else {
+                CustomToolProjection::ToFunction
+            };
+            let request = request.provider_compatible(projection);
             request.validate_against(&model_info.slug, &effective_capabilities)?;
             let body =
                 protocol.build_request(&request, &model_info, prompt_cache_key.as_deref())?;

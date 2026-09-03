@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use pl_trace::TraceTextChannel;
 
 use crate::completion::stream::event::{ModelBlockKind, ModelStreamEvent};
+use crate::runtime::openai::VisibleOutputProtocol;
 
 use super::item::{
     assistant_message_identity, assistant_message_text, output_item_native_context,
@@ -20,7 +21,7 @@ use super::{DEFAULT_TEXT_ID, SseStreamEvent, process_sse_events};
 /// Responses output text deltas do not carry the assistant message phase, so
 /// the decoder remembers `response.output_item.added` metadata for the stream.
 pub(crate) struct OpenAiStreamDecoder {
-    use_native_phases: bool,
+    visible_output: VisibleOutputProtocol,
     text_channels: HashMap<String, TraceTextChannel>,
     open_text_blocks: HashMap<String, OpenTextBlock>,
     open_reasoning_blocks: HashMap<String, String>,
@@ -35,9 +36,9 @@ struct OpenTextBlock {
 }
 
 impl OpenAiStreamDecoder {
-    pub(crate) fn new(use_native_phases: bool) -> Self {
+    pub(crate) fn new(visible_output: VisibleOutputProtocol) -> Self {
         Self {
-            use_native_phases,
+            visible_output,
             text_channels: HashMap::new(),
             open_text_blocks: HashMap::new(),
             open_reasoning_blocks: HashMap::new(),
@@ -47,7 +48,7 @@ impl OpenAiStreamDecoder {
     }
 
     pub(crate) fn decode(&mut self, event: &SseStreamEvent) -> Vec<ModelStreamEvent> {
-        if !self.use_native_phases {
+        if matches!(self.visible_output, VisibleOutputProtocol::TaggedText) {
             return self.normalize_fallback_events(process_sse_events(event));
         }
 

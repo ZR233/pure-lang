@@ -117,7 +117,10 @@ fn openai_gpt56_family() -> ModelFamily {
 fn openai_responses_request_profile() -> ModelRequestProfile {
     ModelRequestProfile {
         responses_programmatic_tool_calling: true,
-        media: super::image_media_profiles(super::MediaWireFormat::ResponsesInputImage, true),
+        media: super::image_media_profiles(
+            super::MediaWireFormat::ResponsesInputImage,
+            super::MediaSendOrder::RemoteUrlFirst,
+        ),
         ..ModelRequestProfile::default()
     }
 }

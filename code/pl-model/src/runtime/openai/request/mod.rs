@@ -31,7 +31,7 @@ pub(crate) fn build_openai_request_body(
     prompt_cache_key: Option<&str>,
 ) -> Result<OpenAiRequestBody> {
     let messages = messages_after_last_compaction(&request.input);
-    validate_tool_history(&messages, false)?;
+    validate_tool_history(&messages)?;
     match endpoint {
         OpenAiEndpoint::Responses => {
             let mut body = to_object_map(&ResponsesRequestBody::from_request(

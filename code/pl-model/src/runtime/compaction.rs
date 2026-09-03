@@ -10,6 +10,7 @@ use serde_json::{Map, Value};
 use super::ModelRuntime;
 use super::openai::PureOpenAiConfig;
 use super::provider_error::openai_error_to_pure;
+use crate::completion::tool_schema::CustomToolProjection;
 use crate::completion::{
     CompletionRequest, ModelCompactionRequest, ModelCompactionResponse, OpenAiCompactionMode,
 };
@@ -146,9 +147,14 @@ fn build_compaction_body(
         .capabilities
         .clone()
         .with_native_custom_tools(provider.endpoint().uses_native_custom_tools());
-    let supports_custom_tools = provider.endpoint().uses_native_custom_tools()
+    let custom_tools_native = provider.endpoint().uses_native_custom_tools()
         && effective_capabilities.supports_custom_tools()
         && effective_capabilities.supports_freeform_tools();
+    let custom_tool_projection = if custom_tools_native {
+        CustomToolProjection::Native
+    } else {
+        CustomToolProjection::ToFunction
+    };
     let completion = CompletionRequest::builder()
         .instructions(request.instructions.clone())
         .input(request.input.clone())
@@ -156,7 +162,7 @@ fn build_compaction_body(
         .parallel_tool_calls(request.parallel_tool_calls)
         .reasoning(request.reasoning.clone())
         .build()
-        .provider_compatible(supports_custom_tools);
+        .provider_compatible(custom_tool_projection);
     completion.validate_against(&model_info.slug, &effective_capabilities)?;
     let OpenAiRequestBody::Responses(mut body) = OpenAiProtocol::responses().build_request(
         &completion,

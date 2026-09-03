@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::completion::tool_schema::provider_compatible_tool;
+use crate::completion::tool_schema::{CustomToolProjection, provider_compatible_tool};
 use crate::completion::usage::ReasoningConfig;
 use crate::model::{ModelCapabilities, ModelModality};
 use pl_protocol::{
@@ -139,11 +139,11 @@ impl CompletionRequest {
         }
     }
 
-    pub fn provider_compatible(mut self, supports_custom_tools: bool) -> Self {
+    pub(crate) fn provider_compatible(mut self, projection: CustomToolProjection) -> Self {
         self.tools = self
             .tools
             .into_iter()
-            .map(|tool| provider_compatible_tool(tool, supports_custom_tools))
+            .map(|tool| provider_compatible_tool(tool, projection))
             .collect();
         self
     }

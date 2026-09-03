@@ -270,9 +270,10 @@ fn zhipu_glm53_flash_family() -> ModelFamily {
         zhipu_vision_capabilities(),
         zhipu_glm53_effort_parameter(),
     );
-    family.request_profile = family
-        .request_profile
-        .with_image_media(MediaWireFormat::ChatImageUrl, true);
+    family.request_profile = family.request_profile.with_image_media(
+        MediaWireFormat::ChatImageUrl,
+        super::MediaSendOrder::RemoteUrlFirst,
+    );
     family
 }
 
@@ -282,9 +283,10 @@ fn zhipu_vision_family() -> ModelFamily {
         zhipu_vision_capabilities(),
         zhipu_plain_effort_parameter(),
     );
-    family.request_profile = family
-        .request_profile
-        .with_image_media(MediaWireFormat::ChatImageUrl, true);
+    family.request_profile = family.request_profile.with_image_media(
+        MediaWireFormat::ChatImageUrl,
+        super::MediaSendOrder::RemoteUrlFirst,
+    );
     family
 }
 

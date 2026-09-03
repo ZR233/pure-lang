@@ -88,7 +88,7 @@ impl OpenAiProtocol {
     }
 
     pub(crate) fn new_stream_decoder(&self) -> sse::OpenAiStreamDecoder {
-        sse::OpenAiStreamDecoder::new(matches!(self.endpoint, OpenAiEndpoint::Responses))
+        sse::OpenAiStreamDecoder::new(self.visible_output_protocol())
     }
 
     pub(crate) fn visible_output_protocol(&self) -> VisibleOutputProtocol {

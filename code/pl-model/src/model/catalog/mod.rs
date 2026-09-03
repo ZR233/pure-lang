@@ -35,23 +35,31 @@ pub fn default_models() -> Vec<ModelInfo> {
 
 impl ModelRequestProfile {
     /// 覆盖 profile 的图片媒体表示顺序。
-    fn with_image_media(mut self, wire: MediaWireFormat, remote_url_first: bool) -> Self {
-        self.media = image_media_profiles(wire, remote_url_first);
+    fn with_image_media(mut self, wire: MediaWireFormat, send_order: MediaSendOrder) -> Self {
+        self.media = image_media_profiles(wire, send_order);
         self
     }
 }
 
+/// 图片首发表示的顺序策略；重放固定使用 DataUrl。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum MediaSendOrder {
+    /// 优先发送远端 URL，失败或受限时回退 DataUrl。
+    RemoteUrlFirst,
+    /// 只发送 DataUrl（模型未声明远端来源时使用）。
+    DataUrlOnly,
+}
+
 /// 构造图片模态的媒体表示 profile。
-///
-/// `remote_url_first` 控制首次发送是否优先 RemoteUrl（重放固定使用 DataUrl）。
 fn image_media_profiles(
     wire: MediaWireFormat,
-    remote_url_first: bool,
+    send_order: MediaSendOrder,
 ) -> Vec<ModelMediaInputProfile> {
-    let first_send = if remote_url_first {
-        vec![MediaRepresentation::RemoteUrl, MediaRepresentation::DataUrl]
-    } else {
-        vec![MediaRepresentation::DataUrl]
+    let first_send = match send_order {
+        MediaSendOrder::RemoteUrlFirst => {
+            vec![MediaRepresentation::RemoteUrl, MediaRepresentation::DataUrl]
+        }
+        MediaSendOrder::DataUrlOnly => vec![MediaRepresentation::DataUrl],
     };
     vec![ModelMediaInputProfile {
         modality: ModelModality::Image,

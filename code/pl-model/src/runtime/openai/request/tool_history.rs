@@ -7,11 +7,8 @@ use super::protocol_error;
 /// 校验 assistant tool call 与 tool result 的 typed 配对。
 ///
 /// `call_id` 与 `item_id` 必填由解码与写入边界保证，这里不重复检查空值；
-/// 校验聚焦 id 配对、kind 配对和缺失 output。
-pub(super) fn validate_tool_history(
-    messages: &[Message],
-    allow_leading_tool_results: bool,
-) -> Result<()> {
+/// 校验聚焦 id 配对、kind 配对和缺失 output；开头的 tool result 一律拒绝。
+pub(super) fn validate_tool_history(messages: &[Message]) -> Result<()> {
     let mut expected_outputs = VecDeque::new();
 
     for message in messages {
@@ -32,9 +29,6 @@ pub(super) fn validate_tool_history(
                     ));
                 };
                 let Some(expected) = expected_outputs.pop_front() else {
-                    if allow_leading_tool_results {
-                        continue;
-                    }
                     return Err(protocol_error(
                         "tool result has no preceding assistant tool call",
                     ));

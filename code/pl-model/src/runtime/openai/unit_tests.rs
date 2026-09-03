@@ -8,6 +8,7 @@ use pl_protocol::{
 use pretty_assertions::assert_eq;
 
 use super::*;
+use crate::completion::tool_schema::CustomToolProjection;
 use crate::completion::{ReasoningConfig, ReasoningSummary, ToolCallPayload};
 use crate::model::info::{
     MaxTokensField, MediaRepresentation, ModelMediaInputProfile, ResponsesMaxTokensField,
@@ -1271,7 +1272,7 @@ fn provider_compatible_turns_custom_apply_patch_into_function_fallback() {
         "start: patch",
     )];
 
-    let request = request.provider_compatible(false);
+    let request = request.provider_compatible(CustomToolProjection::ToFunction);
     let body = OpenAiProtocol::chat().build_request_body(&request);
 
     assert_eq!(body["tools"][0]["type"], serde_json::json!("function"));

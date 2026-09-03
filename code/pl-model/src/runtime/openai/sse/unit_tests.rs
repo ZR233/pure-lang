@@ -5,6 +5,7 @@ use crate::completion::stream::event::{
     ModelBlockContent, ModelBlockField, ModelBlockKind, ToolInputPayloadKind,
 };
 use crate::completion::{CompletionTraceContext, ToolCallPayload};
+use crate::runtime::openai::VisibleOutputProtocol;
 
 use super::*;
 
@@ -350,7 +351,7 @@ fn process_responses_marks_summary_and_raw_reasoning() {
 
 #[test]
 fn responses_decoder_preserves_native_text_phase_and_completed_text() {
-    let mut decoder = OpenAiStreamDecoder::new(true);
+    let mut decoder = OpenAiStreamDecoder::new(VisibleOutputProtocol::NativePhases);
     let commentary_added: SseStreamEvent = serde_json::from_value(serde_json::json!({
         "type": "response.output_item.added",
         "item": {
@@ -446,7 +447,7 @@ fn responses_decoder_preserves_native_text_phase_and_completed_text() {
 
 #[test]
 fn responses_decoder_tracks_reasoning_summary_lifecycle() {
-    let mut decoder = OpenAiStreamDecoder::new(true);
+    let mut decoder = OpenAiStreamDecoder::new(VisibleOutputProtocol::NativePhases);
     let reasoning_added: SseStreamEvent = serde_json::from_value(serde_json::json!({
         "type": "response.output_item.added",
         "item": {
@@ -524,7 +525,7 @@ fn responses_decoder_tracks_reasoning_summary_lifecycle() {
 
 #[test]
 fn responses_decoder_closes_content_at_tool_boundary_once() {
-    let mut decoder = OpenAiStreamDecoder::new(true);
+    let mut decoder = OpenAiStreamDecoder::new(VisibleOutputProtocol::NativePhases);
     let reasoning_delta: SseStreamEvent = serde_json::from_value(serde_json::json!({
         "type": "response.reasoning_summary_text.delta",
         "item_id": "thinking",
@@ -595,7 +596,7 @@ fn responses_decoder_closes_content_at_tool_boundary_once() {
 
 #[test]
 fn responses_decoder_allocates_new_blocks_after_tool_boundary() {
-    let mut decoder = OpenAiStreamDecoder::new(true);
+    let mut decoder = OpenAiStreamDecoder::new(VisibleOutputProtocol::NativePhases);
     let reasoning_delta: SseStreamEvent = serde_json::from_value(serde_json::json!({
         "type": "response.reasoning_summary_text.delta",
         "item_id": "thinking",
@@ -704,7 +705,7 @@ fn responses_decoder_allocates_new_blocks_after_tool_boundary() {
 
 #[test]
 fn responses_decoder_reopens_text_block_when_phase_arrives_late() {
-    let mut decoder = OpenAiStreamDecoder::new(true);
+    let mut decoder = OpenAiStreamDecoder::new(VisibleOutputProtocol::NativePhases);
     let default_delta: SseStreamEvent = serde_json::from_value(serde_json::json!({
         "type": "response.output_text.delta",
         "item_id": "msg_1",
@@ -880,7 +881,7 @@ fn process_chat_followup_tool_delta_keeps_stream_id_without_item_id() {
 #[test]
 fn chat_completion_split_tool_chunks_finish_as_one_named_call() {
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
-    let mut decoder = OpenAiStreamDecoder::new(false);
+    let mut decoder = OpenAiStreamDecoder::new(VisibleOutputProtocol::TaggedText);
     let mut accumulator = StreamCompletionAccumulator::new(None);
     let events = [
         chat_event(serde_json::json!({
@@ -962,7 +963,7 @@ fn process_responses_output_item_added_captures_tool_name() {
 #[test]
 fn responses_id_only_added_and_done_canonicalize_function_identity() {
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
-    let mut decoder = OpenAiStreamDecoder::new(false);
+    let mut decoder = OpenAiStreamDecoder::new(VisibleOutputProtocol::TaggedText);
     let mut accumulator = StreamCompletionAccumulator::new(None);
     let events = [
         serde_json::from_value(serde_json::json!({
@@ -1006,7 +1007,7 @@ fn responses_id_only_added_and_done_canonicalize_function_identity() {
 #[test]
 fn responses_done_upgrades_fallback_call_id_without_splitting_custom_tool() {
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
-    let mut decoder = OpenAiStreamDecoder::new(false);
+    let mut decoder = OpenAiStreamDecoder::new(VisibleOutputProtocol::TaggedText);
     let mut accumulator = StreamCompletionAccumulator::new(None);
     let events = [
         serde_json::from_value(serde_json::json!({
@@ -1051,7 +1052,7 @@ fn responses_done_upgrades_fallback_call_id_without_splitting_custom_tool() {
 #[test]
 fn responses_call_id_only_delta_upgrades_fallback_identity() {
     let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
-    let mut decoder = OpenAiStreamDecoder::new(false);
+    let mut decoder = OpenAiStreamDecoder::new(VisibleOutputProtocol::TaggedText);
     let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTraceContext {
         session_id: "session-1".to_string(),
         turn_id: "turn-1".to_string(),

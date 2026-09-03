@@ -71,7 +71,10 @@ fn mimo_vision_family() -> ModelFamily {
     mimo_family(
         "mimo-vision",
         mimo_vision_capabilities(),
-        super::image_media_profiles(MediaWireFormat::ChatImageUrl, false),
+        super::image_media_profiles(
+            MediaWireFormat::ChatImageUrl,
+            super::MediaSendOrder::DataUrlOnly,
+        ),
     )
 }
 

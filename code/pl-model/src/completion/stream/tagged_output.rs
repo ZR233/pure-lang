@@ -4,6 +4,15 @@ use crate::completion::visible_text::{VisibleTextEvent, VisibleTextKind, Visible
 
 use super::event::{ModelBlockContent, ModelBlockKind, ModelStreamEvent};
 
+/// 标签式可见输出中未标记文本的处理策略。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum UntaggedTextPolicy {
+    /// 流式增量阶段：未标记文本作为 Final 可见输出回退。
+    Emit,
+    /// 结束/权威内容阶段：丢弃未标记文本，以权威内容为准。
+    Drop,
+}
+
 pub(crate) struct TaggedVisibleOutputAdapter {
     text_parser: VisibleTextParser,
     reasoning_parser: VisibleTextParser,
@@ -72,7 +81,7 @@ impl TaggedVisibleOutputAdapter {
                         &mut self.next_segment_ordinal,
                         &mut self.diagnostics,
                         &delta,
-                        true,
+                        UntaggedTextPolicy::Emit,
                     )
                 } else {
                     vec![ModelStreamEvent::BlockDelta {
@@ -96,7 +105,7 @@ impl TaggedVisibleOutputAdapter {
                         &mut self.active_text_block,
                         &mut self.next_segment_ordinal,
                         &mut self.diagnostics,
-                        true,
+                        UntaggedTextPolicy::Emit,
                     );
                     if let Some(ModelBlockContent::Text(text)) = authoritative_content {
                         events.extend(Self::authoritative_visible_events(
@@ -137,7 +146,7 @@ impl TaggedVisibleOutputAdapter {
                     &mut self.active_reasoning_block,
                     &mut self.next_segment_ordinal,
                     &mut self.diagnostics,
-                    false,
+                    UntaggedTextPolicy::Drop,
                 );
                 visible
                     .into_iter()
@@ -187,7 +196,7 @@ impl TaggedVisibleOutputAdapter {
             &mut self.active_text_block,
             &mut self.next_segment_ordinal,
             &mut self.diagnostics,
-            true,
+            UntaggedTextPolicy::Emit,
         )
     }
 
@@ -199,7 +208,7 @@ impl TaggedVisibleOutputAdapter {
                 &mut self.active_reasoning_block,
                 &mut self.next_segment_ordinal,
                 &mut self.diagnostics,
-                false,
+                UntaggedTextPolicy::Drop,
             ))
             .collect()
     }
@@ -217,7 +226,7 @@ impl TaggedVisibleOutputAdapter {
             next_segment_ordinal,
             &mut diagnostics,
             &text,
-            true,
+            UntaggedTextPolicy::Emit,
         )
         .into_iter()
         .chain(Self::finish_visible_events(
@@ -225,7 +234,7 @@ impl TaggedVisibleOutputAdapter {
             &mut active_block,
             next_segment_ordinal,
             &mut diagnostics,
-            true,
+            UntaggedTextPolicy::Emit,
         ))
         .collect()
     }
@@ -236,7 +245,7 @@ impl TaggedVisibleOutputAdapter {
         next_segment_ordinal: &mut u64,
         diagnostics: &mut TaggedOutputDiagnostics,
         delta: &str,
-        include_untagged: bool,
+        untagged_policy: UntaggedTextPolicy,
     ) -> Vec<ModelStreamEvent> {
         parser
             .push_events(delta)
@@ -247,7 +256,7 @@ impl TaggedVisibleOutputAdapter {
                     active_block,
                     next_segment_ordinal,
                     diagnostics,
-                    include_untagged,
+                    untagged_policy,
                     event,
                 )
             })
@@ -259,7 +268,7 @@ impl TaggedVisibleOutputAdapter {
         active_block: &mut Option<TaggedBlock>,
         next_segment_ordinal: &mut u64,
         diagnostics: &mut TaggedOutputDiagnostics,
-        include_untagged: bool,
+        untagged_policy: UntaggedTextPolicy,
     ) -> Vec<ModelStreamEvent> {
         let mut events: Vec<_> = parser
             .finish_events()
@@ -270,7 +279,7 @@ impl TaggedVisibleOutputAdapter {
                     active_block,
                     next_segment_ordinal,
                     diagnostics,
-                    include_untagged,
+                    untagged_policy,
                     event,
                 )
             })
@@ -289,12 +298,12 @@ impl TaggedVisibleOutputAdapter {
         active_block: &mut Option<TaggedBlock>,
         next_segment_ordinal: &mut u64,
         diagnostics: &mut TaggedOutputDiagnostics,
-        include_untagged: bool,
+        untagged_policy: UntaggedTextPolicy,
         event: VisibleTextEvent,
     ) -> Vec<ModelStreamEvent> {
         match event {
             VisibleTextEvent::Untagged(text) => {
-                if !include_untagged || text.is_empty() {
+                if untagged_policy == UntaggedTextPolicy::Drop || text.is_empty() {
                     return Vec::new();
                 }
                 diagnostics.untagged_visible_text_segments += 1;
