@@ -175,3 +175,139 @@ fn deepseek_vision_capabilities() -> ModelCapabilities {
     });
     capabilities
 }
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+    use crate::model::capabilities::{ModelInputSource, ModelModality};
+    use crate::model::info::{MediaRepresentation, MediaWireFormat};
+    use crate::provider::ProviderWireProtocol;
+
+    #[test]
+    fn default_models_include_deepseek_v4_models() {
+        let models = super::super::default_models();
+
+        for &slug in deepseek_default_model_slugs() {
+            let model = models.iter().find(|model| model.slug == *slug).unwrap();
+
+            assert_eq!(model.context_window, Some(1_000_000));
+            assert_eq!(model.max_output_tokens, Some(384_000));
+            assert_eq!(model.currency.as_deref(), Some("CNY"));
+            assert!(
+                model
+                    .supported_efforts()
+                    .iter()
+                    .any(|effort| effort == "max")
+            );
+        }
+    }
+
+    #[test]
+    fn deepseek_default_models_declare_native_web_search_capability() {
+        let models = super::super::default_models();
+
+        for &slug in deepseek_default_model_slugs() {
+            let model = models
+                .iter()
+                .find(|model| model.slug == slug)
+                .unwrap_or_else(|| panic!("missing bundled DeepSeek model: {slug}"));
+            assert_eq!(
+                model.transport.protocol,
+                ProviderWireProtocol::Responses,
+                "DeepSeek native web search requires Responses: {slug}"
+            );
+            assert!(
+                model.capabilities.web_search,
+                "DeepSeek model must declare native web search: {slug}"
+            );
+            assert!(model.capabilities.tools.function_calling);
+        }
+    }
+
+    #[test]
+    fn deepseek_default_models_use_china_pricing() {
+        let models = super::super::default_models();
+        let flash = models
+            .iter()
+            .find(|model| model.slug == "deepseek-v4-flash")
+            .unwrap();
+        let vision = models
+            .iter()
+            .find(|model| model.slug == "deepseek-v4-flash-vision-exp")
+            .unwrap();
+        let pro = models
+            .iter()
+            .find(|model| model.slug == "deepseek-v4-pro")
+            .unwrap();
+
+        assert_eq!(flash.cache_read_price_per_mtok, Some(0.02));
+        assert_eq!(flash.input_price_per_mtok, Some(1.0));
+        assert_eq!(flash.output_price_per_mtok, Some(2.0));
+        assert_eq!(vision.cache_read_price_per_mtok, Some(0.02));
+        assert_eq!(vision.input_price_per_mtok, Some(1.0));
+        assert_eq!(vision.output_price_per_mtok, Some(2.0));
+        assert_eq!(pro.cache_read_price_per_mtok, Some(0.025));
+        assert_eq!(pro.input_price_per_mtok, Some(3.0));
+        assert_eq!(pro.output_price_per_mtok, Some(6.0));
+    }
+
+    #[test]
+    fn deepseek_vision_model_has_complete_responses_image_contract() {
+        let models = super::super::default_models();
+        let model = models
+            .into_iter()
+            .find(|model| model.slug == "deepseek-v4-flash-vision-exp")
+            .unwrap();
+
+        assert_eq!(
+            model
+                .capabilities
+                .input
+                .iter()
+                .map(|capability| capability.modality)
+                .collect::<Vec<_>>(),
+            vec![ModelModality::Text, ModelModality::Image]
+        );
+        let image = model
+            .capabilities
+            .input_capability(ModelModality::Image)
+            .unwrap();
+        assert_eq!(
+            image.sources,
+            vec![ModelInputSource::Local, ModelInputSource::RemoteUrl]
+        );
+        assert_eq!(image.limits.max_count, Some(600));
+        assert_eq!(image.limits.max_bytes, Some(32 * 1024 * 1024));
+        assert_eq!(image.limits.max_total_bytes, Some(32 * 1024 * 1024));
+        assert_eq!(image.limits.max_width, Some(4096));
+        assert_eq!(image.limits.max_height, Some(4096));
+        assert_eq!(
+            image.limits.media_types,
+            ["image/jpeg", "image/png", "image/gif", "image/webp"]
+        );
+        let profile = model
+            .request_profile
+            .media_profile(ModelModality::Image)
+            .unwrap();
+        assert_eq!(profile.wire, MediaWireFormat::ResponsesInputImage);
+        assert_eq!(
+            profile.first_send,
+            vec![MediaRepresentation::RemoteUrl, MediaRepresentation::DataUrl]
+        );
+        assert_eq!(profile.replay, vec![MediaRepresentation::DataUrl]);
+        assert!(
+            model
+                .request_profile
+                .media_profile(ModelModality::Video)
+                .is_none()
+        );
+        assert!(
+            model
+                .request_profile
+                .media_profile(ModelModality::File)
+                .is_none()
+        );
+    }
+}

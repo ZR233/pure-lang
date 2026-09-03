@@ -284,3 +284,432 @@ impl ChatResponseToolCall {
 fn response_protocol_error(message: &str) -> PureError {
     PureError::LlmError(format!("provider response protocol error: {message}"))
 }
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use crate::completion::ToolCallPayload;
+    use crate::runtime::openai::OpenAiProtocol;
+    use crate::runtime::openai::test_support::request_with_effort;
+    use pl_protocol::{ModelContextItem, PureError, ResponsesContextItemKind, ToolCallCaller};
+
+    #[test]
+    fn chat_parse_response_reads_reasoning_content() {
+        let response = OpenAiProtocol::chat()
+            .parse_response(serde_json::json!({
+                "model": "deepseek-v4-flash",
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "reasoning_content": "先比较整数，再比较小数。",
+                        "content": "9.11 更大。"
+                    },
+                    "finish_reason": "stop"
+                }],
+                "usage": {
+                    "prompt_tokens": 4,
+                    "completion_tokens": 8,
+                    "total_tokens": 12
+                }
+            }))
+            .unwrap();
+
+        assert_eq!(response.content.as_deref(), Some("9.11 更大。"));
+        assert_eq!(
+            response.reasoning_content.as_deref(),
+            Some("先比较整数，再比较小数。")
+        );
+    }
+
+    #[test]
+    fn chat_parse_response_reads_deepseek_cached_token_aliases() {
+        for cached_usage in [
+            serde_json::json!({"prompt_cache_hit_tokens": 40}),
+            serde_json::json!({"cached_prompt_tokens": 40}),
+            serde_json::json!({"prompt_tokens_details": {"cached_tokens": 40}}),
+        ] {
+            let mut usage = serde_json::json!({
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120
+            });
+            usage.as_object_mut().unwrap().extend(
+                cached_usage
+                    .as_object()
+                    .unwrap()
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone())),
+            );
+            let response = OpenAiProtocol::chat()
+                .parse_response(serde_json::json!({
+                    "model": "deepseek-v4-flash",
+                    "choices": [{
+                        "message": {
+                            "role": "assistant",
+                            "content": "ok"
+                        },
+                        "finish_reason": "stop"
+                    }],
+                    "usage": usage
+                }))
+                .unwrap();
+
+            assert_eq!(response.usage.cached_prompt_tokens, 40);
+        }
+    }
+
+    #[test]
+    fn responses_parse_response_reads_cached_input_tokens() {
+        let response = OpenAiProtocol::responses()
+            .parse_response(serde_json::json!({
+                "model": "gpt-5.5",
+                "output": [{
+                    "type": "message",
+                    "content": [{ "text": "ok" }]
+                }],
+                "usage": {
+                    "input_tokens": 100,
+                    "output_tokens": 20,
+                    "total_tokens": 120,
+                    "input_tokens_details": {
+                        "cached_tokens": 55,
+                        "cache_write_tokens": 12
+                    }
+                }
+            }))
+            .unwrap();
+
+        assert_eq!(response.usage.cached_prompt_tokens, 55);
+        assert_eq!(response.usage.cache_write_tokens, 12);
+    }
+
+    #[test]
+    fn responses_parse_response_preserves_orchestration_items_and_caller() {
+        let response = OpenAiProtocol::responses()
+            .parse_response(serde_json::json!({
+                "id": "resp-1",
+                "model": "gpt-5.6-sol",
+                "output": [
+                    {"type": "program", "id": "program-1"},
+                    {
+                        "type": "function_call",
+                        "id": "fc-1",
+                        "call_id": "call-1",
+                        "name": "git_status",
+                        "arguments": "{}",
+                        "caller": {"type": "program", "caller_id": "program-1"}
+                    }
+                ],
+                "usage": {"input_tokens": 10, "output_tokens": 2, "total_tokens": 12}
+            }))
+            .unwrap();
+
+        assert_eq!(response.responses_context_items.len(), 1);
+        assert_eq!(response.orchestration.program_count, 1);
+        assert_eq!(response.orchestration.program_tool_calls, 1);
+        assert_eq!(
+            response.tool_calls[0].caller,
+            Some(ToolCallCaller::Program {
+                caller_id: "program-1".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn responses_parse_response_preserves_unknown_native_items_for_stateless_replay() {
+        let response = OpenAiProtocol::responses()
+        .parse_response(serde_json::json!({
+            "id": "resp-unknown",
+            "model": "gpt-5.6-sol",
+            "output": [
+                {"type": "future_hosted_result", "id": "future-1", "opaque": {"value": 1}},
+                {"type": "message", "id": "message-1", "content": [{"type": "output_text", "text": "done"}]}
+            ],
+            "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
+        }))
+        .unwrap();
+
+        assert_eq!(response.responses_context_items.len(), 1);
+        assert_eq!(
+            response.responses_context_items[0].kind,
+            ResponsesContextItemKind::Unknown
+        );
+        assert_eq!(
+            response.responses_context_items[0].value["type"],
+            "future_hosted_result"
+        );
+    }
+
+    #[test]
+    fn responses_parse_response_reads_custom_tool_call() {
+        let response = OpenAiProtocol::responses()
+            .parse_response(serde_json::json!({
+                "model": "gpt-5.5",
+                "output": [{
+                    "type": "custom_tool_call",
+                    "id": "ctc_1",
+                    "call_id": "call_1",
+                    "name": "apply_patch",
+                    "input": "*** Begin Patch\n*** End Patch"
+                }],
+                "usage": {
+                    "input_tokens": 1,
+                    "output_tokens": 1,
+                    "total_tokens": 2
+                }
+            }))
+            .unwrap();
+
+        assert_eq!(response.tool_calls.len(), 1);
+        assert_eq!(response.tool_calls[0].name, "apply_patch");
+        match &response.tool_calls[0].payload {
+            ToolCallPayload::Custom { input } => {
+                assert_eq!(input, "*** Begin Patch\n*** End Patch");
+            }
+            other => panic!("unexpected payload: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn responses_parse_response_canonicalizes_id_only_tool_identity() {
+        let response = OpenAiProtocol::responses()
+            .parse_response(serde_json::json!({
+                "model": "gpt-5.5",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "id": "fc_1",
+                        "name": "read_file",
+                        "arguments": "{}"
+                    },
+                    {
+                        "type": "custom_tool_call",
+                        "id": "ctc_1",
+                        "name": "apply_patch",
+                        "input": "*** Begin Patch\n*** End Patch"
+                    }
+                ]
+            }))
+            .unwrap();
+
+        assert_eq!(response.tool_calls[0].id, "fc_1");
+        assert_eq!(response.tool_calls[0].call_id, "fc_1");
+        assert_eq!(response.tool_calls[1].id, "ctc_1");
+        assert_eq!(response.tool_calls[1].call_id, "ctc_1");
+    }
+
+    #[test]
+    fn responses_parse_response_uses_call_id_as_missing_item_id() {
+        let response = OpenAiProtocol::responses()
+            .parse_response(serde_json::json!({
+                "model": "gpt-5.5",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "call_id": "call_1",
+                        "name": "read_file",
+                        "arguments": "{}"
+                    },
+                    {
+                        "type": "custom_tool_call",
+                        "call_id": "call_2",
+                        "name": "apply_patch",
+                        "input": "*** Begin Patch\n*** End Patch"
+                    }
+                ]
+            }))
+            .unwrap();
+
+        assert_eq!(response.tool_calls[0].id, "call_1");
+        assert_eq!(response.tool_calls[0].call_id, "call_1");
+        assert_eq!(response.tool_calls[1].id, "call_2");
+        assert_eq!(response.tool_calls[1].call_id, "call_2");
+    }
+
+    #[test]
+    fn responses_parse_response_rejects_empty_tool_identity() {
+        let error = OpenAiProtocol::responses()
+            .parse_response(serde_json::json!({
+                "model": "gpt-5.5",
+                "output": [{
+                    "type": "function_call",
+                    "id": "",
+                    "call_id": "",
+                    "name": "read_file",
+                    "arguments": "{}"
+                }]
+            }))
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            PureError::LlmError(message) if message.contains("missing id and call_id")
+        ));
+    }
+
+    #[test]
+    fn responses_parse_response_preserves_hosted_web_search_context_items() {
+        let response = OpenAiProtocol::responses()
+            .parse_response(serde_json::json!({
+                "id": "resp_1",
+                "model": "gpt-5.5",
+                "output": [
+                    {
+                        "type": "web_search_call",
+                        "id": "search_1",
+                        "action": {"type": "search", "queries": ["alpha", "beta"]},
+                        "results": [{"url": "https://example.com/search", "future": 1}]
+                    },
+                    {
+                        "type": "web_search_call",
+                        "id": "open_1",
+                        "action": {"type": "open_page", "url": "https://example.com/page"}
+                    },
+                    {
+                        "type": "web_search_call",
+                        "id": "find_1",
+                        "action": {
+                            "type": "find_in_page",
+                            "url": "https://example.com/page",
+                            "pattern": "needle"
+                        }
+                    },
+                    {
+                        "type": "web_search_call",
+                        "id": "future_1",
+                        "action": {"type": "future_action", "opaque": true}
+                    }
+                ]
+            }))
+            .unwrap();
+
+        assert_eq!(response.responses_context_items.len(), 4);
+        assert_eq!(
+            response.responses_context_items[0].value["action"]["queries"],
+            serde_json::json!(["alpha", "beta"])
+        );
+        assert_eq!(
+            response.responses_context_items[0].value["results"][0]["future"],
+            1
+        );
+        assert_eq!(
+            response.responses_context_items[1].value["action"]["url"],
+            "https://example.com/page"
+        );
+        assert_eq!(
+            response.responses_context_items[2].value["action"]["pattern"],
+            "needle"
+        );
+        assert_eq!(
+            response.responses_context_items[3].value["action"]["type"],
+            "future_action"
+        );
+
+        let expected = response
+            .responses_context_items
+            .iter()
+            .map(|item| item.value.clone())
+            .collect::<Vec<_>>();
+        let mut request = request_with_effort("high");
+        request.input = response
+            .responses_context_items
+            .into_iter()
+            .map(|item| ModelContextItem::Responses { item })
+            .collect();
+        let body = OpenAiProtocol::responses().build_request_body(&request);
+
+        assert_eq!(body["input"], serde_json::json!(expected));
+    }
+
+    #[test]
+    fn responses_parse_response_preserves_invalid_function_arguments() {
+        let response = OpenAiProtocol::responses()
+            .parse_response(serde_json::json!({
+                "model": "gpt-5.5",
+                "output": [{
+                    "type": "function_call",
+                    "id": "fc_1",
+                    "call_id": "call_1",
+                    "name": "read_file",
+                    "arguments": "{bad"
+                }]
+            }))
+            .unwrap();
+
+        let call = &response.tool_calls[0];
+        assert_eq!(call.payload_text(), "{bad");
+        assert_eq!(call.invalid_arguments.as_ref().unwrap().raw, "{bad");
+        assert!(
+            call.invalid_arguments_message()
+                .unwrap()
+                .contains("read_file")
+        );
+    }
+
+    #[test]
+    fn chat_parse_response_reads_custom_tool_call() {
+        let response = OpenAiProtocol::chat()
+            .parse_response(serde_json::json!({
+                "model": "gpt-5.5",
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "tool_calls": [{
+                            "id": "call_1",
+                            "type": "custom",
+                            "custom": {
+                                "name": "apply_patch",
+                                "input": "*** Begin Patch\n*** End Patch"
+                            }
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }],
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2
+                }
+            }))
+            .unwrap();
+
+        assert_eq!(response.tool_calls.len(), 1);
+        assert!(matches!(
+            response.tool_calls[0].payload,
+            ToolCallPayload::Custom { .. }
+        ));
+    }
+
+    #[test]
+    fn chat_parse_response_preserves_invalid_function_arguments() {
+        let response = OpenAiProtocol::chat()
+            .parse_response(serde_json::json!({
+                "model": "gpt-5.5",
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "tool_calls": [{
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {
+                                "name": "read_file",
+                                "arguments": "{bad"
+                            }
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }]
+            }))
+            .unwrap();
+
+        let call = &response.tool_calls[0];
+        assert_eq!(call.payload_text(), "{bad");
+        assert_eq!(call.invalid_arguments.as_ref().unwrap().raw, "{bad");
+        assert!(
+            call.invalid_arguments_message()
+                .unwrap()
+                .contains("read_file")
+        );
+    }
+}

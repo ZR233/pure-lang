@@ -458,4 +458,14 @@ mod tests {
         assert_eq!(failure.kind, ProviderFailureKind::Protocol);
         assert!(!failure.retry.is_retryable());
     }
+
+    #[test]
+    fn redacts_openai_api_keys_from_error_text() {
+        let input = "Incorrect API key provided: sk-abc123*******************************************************xyz.";
+
+        let redacted = redact_secret_like_values(input);
+
+        assert_eq!(redacted, "Incorrect API key provided: [REDACTED_API_KEY].");
+        assert!(!redacted.contains("sk-abc123"));
+    }
 }

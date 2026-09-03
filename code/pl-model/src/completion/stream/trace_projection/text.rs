@@ -255,3 +255,303 @@ pub(super) fn text_provider_key(provider_item_id: &str, channel: TraceTextChanne
 pub(super) fn thinking_provider_key_prefix(provider_item_id: &str) -> String {
     format!("reasoning:{provider_item_id}:")
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use pl_trace::{TraceEventKind, TracePart, TracePartKind, TraceTextChannel, TraceTextState};
+
+    use super::super::test_support::{
+        TracePartEvent, completed_thinking_item, delta_item_id, test_trace_context, trace,
+        trace_part_event, trace_with_sink,
+    };
+    use super::TraceProjection;
+
+    fn trace_part_text(item: &TracePart) -> String {
+        item.thinking()
+            .expect("thinking part")
+            .summary()
+            .iter()
+            .map(|chunk| chunk.content.as_str())
+            .collect::<Vec<_>>()
+            .join("")
+    }
+
+    #[test]
+    fn repeated_provider_thinking_id_after_completion_gets_new_part_id() {
+        let mut trace = trace();
+
+        let first = trace.append_thinking_delta("thinking", 0, "first".to_string());
+        let first_completed = trace.complete_thinking("thinking", None);
+        let second = trace.append_thinking_delta("thinking", 0, "second".to_string());
+        let second_completed = trace.complete_thinking("thinking", None);
+
+        let first_delta = first.iter().find_map(delta_item_id).expect("first delta");
+        let first_completed = first_completed
+            .iter()
+            .find_map(|event| match trace_part_event(event)? {
+                TracePartEvent::Completed(item) if item.kind() == TracePartKind::Thinking => {
+                    Some(item.item_id().to_string())
+                }
+                _ => None,
+            })
+            .expect("first complete");
+        let second_delta = second.iter().find_map(delta_item_id).expect("second delta");
+        let second_completed = second_completed
+            .iter()
+            .find_map(|event| match trace_part_event(event)? {
+                TracePartEvent::Completed(item) if item.kind() == TracePartKind::Thinking => {
+                    Some(item.item_id().to_string())
+                }
+                _ => None,
+            })
+            .expect("second complete");
+
+        assert_eq!(first_delta, "inference-1-reasoning-1");
+        assert_eq!(first_completed, first_delta);
+        assert_eq!(second_delta, "inference-1-reasoning-2");
+        assert_eq!(second_completed, second_delta);
+    }
+
+    #[test]
+    fn reasoning_summary_sections_get_distinct_part_ids() {
+        let mut trace = trace();
+
+        let first = trace.append_thinking_delta("thinking", 0, "first".to_string());
+        let second = trace.append_thinking_delta("thinking", 1, "second".to_string());
+        let completed = trace.complete_thinking(
+            "thinking",
+            Some(vec!["first done".to_string(), "second done".to_string()]),
+        );
+
+        let first_delta = first.iter().find_map(delta_item_id).expect("first delta");
+        let second_delta = second.iter().find_map(delta_item_id).expect("second delta");
+        let completed = completed
+            .iter()
+            .filter_map(completed_thinking_item)
+            .map(|item| (item.item_id().to_string(), trace_part_text(item)))
+            .collect::<Vec<_>>();
+
+        assert_eq!(first_delta, "inference-1-reasoning-1");
+        assert_eq!(second_delta, "inference-1-reasoning-2");
+        assert_eq!(
+            completed,
+            vec![
+                (
+                    "inference-1-reasoning-1".to_string(),
+                    "first done".to_string(),
+                ),
+                (
+                    "inference-1-reasoning-2".to_string(),
+                    "second done".to_string(),
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn raw_reasoning_starts_the_part_and_later_summary_updates_the_same_part() {
+        let mut trace = trace();
+
+        let raw = trace.append_reasoning_content_delta("thinking", 0, "raw".to_string());
+        let summary = trace.append_thinking_delta("thinking", 0, "summary".to_string());
+        let completed_events =
+            trace.complete_thinking("thinking", Some(vec!["summary done".to_string()]));
+        let completed = completed_events
+            .iter()
+            .find_map(completed_thinking_item)
+            .expect("completed reasoning part");
+
+        assert_eq!(
+            raw.iter().find_map(delta_item_id).as_deref(),
+            Some("inference-1-reasoning-1")
+        );
+        assert_eq!(
+            summary.iter().find_map(delta_item_id).as_deref(),
+            Some("inference-1-reasoning-1")
+        );
+        assert_eq!(trace_part_text(completed), "summary done");
+        assert_eq!(
+            completed
+                .thinking()
+                .expect("thinking part")
+                .content()
+                .iter()
+                .map(|chunk| chunk.content.as_str())
+                .collect::<String>(),
+            "raw"
+        );
+    }
+
+    #[test]
+    fn empty_reasoning_delta_does_not_create_a_revision_gap() {
+        let sink = Arc::new(pl_trace::InMemoryTraceEventSink::new("session-1", 0));
+        let mut trace = trace_with_sink(sink.clone());
+
+        let started = trace.append_reasoning_content_delta("thinking", 0, String::new());
+        let first = trace.append_reasoning_content_delta("thinking", 0, "first".to_string());
+        let ignored = trace.append_reasoning_content_delta("thinking", 0, String::new());
+        let second = trace.append_reasoning_content_delta("thinking", 0, " second".to_string());
+
+        assert!(matches!(
+            started.as_slice(),
+            [pl_trace::AgentEvent::TracePartStarted { .. }]
+        ));
+        assert!(ignored.is_empty());
+        assert!(first.iter().any(|event| matches!(
+            event,
+            pl_trace::AgentEvent::TracePartDelta { event } if event.revision == 1
+        )));
+        assert!(second.iter().any(|event| matches!(
+            event,
+            pl_trace::AgentEvent::TracePartDelta { event } if event.revision == 2
+        )));
+        assert!(trace.take_trace_error().is_none());
+        assert_eq!(
+            sink.events()
+                .into_iter()
+                .filter_map(|event| match event.kind {
+                    TraceEventKind::TracePartDelta { event } => Some(event.revision),
+                    TraceEventKind::TracePartStarted { .. }
+                    | TraceEventKind::TracePartCompleted { .. }
+                    | TraceEventKind::TracePartFailed { .. }
+                    | TraceEventKind::InteractionChanged { .. }
+                    | TraceEventKind::SkillActivated { .. }
+                    | TraceEventKind::EnabledToolsRecorded { .. } => None,
+                })
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+    }
+
+    #[test]
+    fn provider_reasoning_chunk_indices_are_local_to_distinct_parts() {
+        let mut trace = trace();
+
+        let first = trace.append_reasoning_content_delta("thinking", 0, "first raw".to_string());
+        let second = trace.append_reasoning_content_delta("thinking", 1, "second raw".to_string());
+        let completed_events = trace.complete_thinking(
+            "thinking",
+            Some(vec![
+                "first summary".to_string(),
+                "second summary".to_string(),
+            ]),
+        );
+        let completed = completed_events
+            .iter()
+            .filter_map(completed_thinking_item)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            first.iter().find_map(delta_item_id).as_deref(),
+            Some("inference-1-reasoning-1")
+        );
+        assert_eq!(
+            second.iter().find_map(delta_item_id).as_deref(),
+            Some("inference-1-reasoning-2")
+        );
+        assert_eq!(completed.len(), 2);
+        assert_eq!(trace_part_text(completed[0]), "first summary");
+        assert_eq!(trace_part_text(completed[1]), "second summary");
+        assert_eq!(
+            completed[0]
+                .thinking()
+                .expect("first thinking part")
+                .content()
+                .iter()
+                .map(|chunk| chunk.content.as_str())
+                .collect::<String>(),
+            "first raw"
+        );
+        assert_eq!(
+            completed[1]
+                .thinking()
+                .expect("second thinking part")
+                .content()
+                .iter()
+                .map(|chunk| chunk.content.as_str())
+                .collect::<String>(),
+            "second raw"
+        );
+    }
+
+    #[test]
+    fn raw_only_reasoning_is_preserved_in_the_authoritative_part() {
+        let mut trace = trace();
+
+        let _ = trace.append_reasoning_content_delta("thinking", 0, "raw only".to_string());
+        let completed_events = trace.complete_thinking("thinking", None);
+        let completed = completed_events
+            .iter()
+            .find_map(completed_thinking_item)
+            .expect("completed reasoning part");
+
+        assert!(
+            completed
+                .thinking()
+                .expect("thinking part")
+                .summary()
+                .is_empty()
+        );
+        assert_eq!(
+            completed
+                .thinking()
+                .expect("thinking part")
+                .content()
+                .iter()
+                .map(|chunk| chunk.content.as_str())
+                .collect::<String>(),
+            "raw only"
+        );
+    }
+
+    #[test]
+    fn generated_part_ids_are_scoped_to_inference() {
+        let mut first = trace();
+        let mut second = TraceProjection::new(test_trace_context("inference-2"));
+
+        let first_delta = first
+            .append_thinking_delta("thinking", 0, "one".to_string())
+            .iter()
+            .find_map(delta_item_id)
+            .expect("first delta");
+        let second_delta = second
+            .append_thinking_delta("thinking", 0, "two".to_string())
+            .iter()
+            .find_map(delta_item_id)
+            .expect("second delta");
+
+        assert_eq!(first_delta, "inference-1-reasoning-1");
+        assert_eq!(second_delta, "inference-2-reasoning-1");
+    }
+
+    #[test]
+    fn completed_text_uses_authoritative_text_and_revision() {
+        let mut trace = trace();
+        let _ = trace.append_text_delta("msg_1", TraceTextChannel::Final, "par".to_string());
+        let completed_events = trace.complete_text(
+            "msg_1",
+            TraceTextChannel::Final,
+            Some("final text".to_string()),
+        );
+        let completed = completed_events
+            .iter()
+            .find_map(|event| match trace_part_event(event)? {
+                TracePartEvent::Completed(item)
+                    if matches!(
+                        item.text(),
+                        Some(text) if text.channel() == TraceTextChannel::Final
+                            && matches!(text.state(), TraceTextState::Completed(_))
+                    ) =>
+                {
+                    Some(item)
+                }
+                _ => None,
+            })
+            .expect("completed text item");
+
+        assert_eq!(completed.text().expect("text part").content(), "final text");
+        assert_eq!(completed.revision(), 2);
+    }
+}

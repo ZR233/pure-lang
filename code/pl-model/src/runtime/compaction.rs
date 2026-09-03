@@ -278,6 +278,89 @@ mod tests {
         );
     }
 
+    fn compaction_request(mode: OpenAiCompactionMode) -> ModelCompactionRequest {
+        ModelCompactionRequest {
+            mode,
+            instructions: "canonical instructions".to_string(),
+            input: vec![pl_protocol::ModelContextItem::from(pl_protocol::Message {
+                presentation: Default::default(),
+                role: pl_protocol::MessageRole::User,
+                content: pl_protocol::MessageContent::text("hello".to_string()),
+                reasoning_content: None,
+                tool_calls: None,
+                tool_result: None,
+                metadata: std::collections::HashMap::new(),
+            })],
+            tools: vec![pl_protocol::ToolSpec::function(
+                "read_file",
+                "Read a file",
+                serde_json::json!({"type": "object", "properties": {}}),
+            )],
+            parallel_tool_calls: true,
+            reasoning: Some(crate::completion::ReasoningConfig {
+                effort: Some("medium".to_string()),
+                summary: Some(crate::completion::ReasoningSummary::Enabled),
+            }),
+            prompt_cache_key: Some("cache-key".to_string()),
+        }
+    }
+
+    #[tokio::test]
+    async fn v2_compaction_uses_responses_trigger_feature_and_completed_usage() {
+        use pretty_assertions::assert_eq;
+
+        use crate::provider::ProviderConnectionMode;
+        use crate::runtime::test_support::{openai_provider, serve_sse_once};
+
+        let sse_body = concat!(
+            "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"ignored\"}]}}\n\n",
+            "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"compaction\",\"encrypted_content\":\"encrypted-v2\"}}\n\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":12,\"output_tokens\":3,\"total_tokens\":15}}}\n\n",
+            "data: [DONE]\n\n"
+        )
+        .to_string();
+        let (base_url, handle) = serve_sse_once(sse_body).await;
+        let provider = openai_provider(base_url, ProviderConnectionMode::Http);
+
+        let response = provider
+            .compact_context(compaction_request(OpenAiCompactionMode::RemoteV2))
+            .await
+            .unwrap();
+        let captured = handle.await.unwrap();
+
+        assert_eq!(captured.request_line, "POST /responses HTTP/1.1");
+        assert_eq!(
+            captured.headers["x-codex-beta-features"],
+            "existing_feature,remote_compaction_v2"
+        );
+        assert_eq!(
+            captured.body["input"].as_array().unwrap().last().unwrap(),
+            &serde_json::json!({"type": "compaction_trigger"})
+        );
+        assert_eq!(response.input.len(), 1);
+        assert_eq!(response.usage.unwrap().total_tokens, 15);
+    }
+
+    #[tokio::test]
+    async fn v2_compaction_does_not_replay_after_stream_is_established() {
+        use pretty_assertions::assert_eq;
+
+        use crate::provider::ProviderConnectionMode;
+        use crate::runtime::test_support::{openai_provider, serve_sse_once};
+
+        let (base_url, handle) = serve_sse_once("data: [DONE]\n\n".to_string()).await;
+        let provider = openai_provider(base_url, ProviderConnectionMode::Http);
+
+        let error = provider
+            .compact_context(compaction_request(OpenAiCompactionMode::RemoteV2))
+            .await
+            .unwrap_err();
+        let captured = handle.await.unwrap();
+
+        assert!(matches!(error, PureError::HttpError(_)));
+        assert_eq!(captured.request_line, "POST /responses HTTP/1.1");
+    }
+
     #[test]
     fn retry_policy_uses_typed_transport_failures_only() {
         assert!(is_retryable(&PureError::transient_model_failure(

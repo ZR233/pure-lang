@@ -553,6 +553,1081 @@ impl Drop for WebSocketEventState {
         }
     }
 }
-
 #[cfg(test)]
-mod unit_tests;
+mod request_tests {
+    use pretty_assertions::assert_eq;
+    use serde_json::{Map, Value};
+
+    use super::{
+        IncrementalRequestFallbackReason, canonical_response_history_items, incremental_request,
+        normalize_websocket_request_body, responses_websocket_url,
+    };
+    use crate::runtime::session::ResponsesWebSocketSession;
+
+    #[test]
+    fn websocket_request_keeps_explicit_empty_tools_for_v2_schema() {
+        let mut body = Map::from_iter([
+            (
+                "previous_response_id".to_string(),
+                serde_json::json!("stale"),
+            ),
+            ("store".to_string(), Value::Bool(true)),
+        ]);
+
+        normalize_websocket_request_body(&mut body);
+
+        assert_eq!(body["tools"], serde_json::json!([]));
+        assert_eq!(body["store"], Value::Bool(false));
+        assert!(!body.contains_key("previous_response_id"));
+    }
+
+    #[test]
+    fn builds_responses_websocket_url_without_losing_base_path() {
+        assert_eq!(
+            responses_websocket_url("https://api.openai.com/v1/")
+                .unwrap()
+                .as_str(),
+            "wss://api.openai.com/v1/responses"
+        );
+        assert_eq!(
+            responses_websocket_url("http://127.0.0.1:8080/proxy/v1")
+                .unwrap()
+                .as_str(),
+            "ws://127.0.0.1:8080/proxy/v1/responses"
+        );
+    }
+
+    #[test]
+    fn canonical_history_ignores_reasoning_and_provider_owned_fields() {
+        let output = vec![
+            serde_json::json!({ "type": "reasoning", "id": "reasoning-1" }),
+            serde_json::json!({
+                "type": "message",
+                "id": "message-1",
+                "status": "completed",
+                "role": "assistant",
+                "content": [{
+                    "type": "output_text",
+                    "text": "ok",
+                    "annotations": [],
+                }],
+            }),
+        ];
+
+        assert_eq!(
+            canonical_response_history_items(&output),
+            vec![serde_json::json!({
+                "type": "message",
+                "role": "assistant",
+                "content": [{ "type": "output_text", "text": "ok" }],
+            })]
+        );
+    }
+
+    #[test]
+    fn incremental_request_sends_only_the_strict_suffix() {
+        let session = ResponsesWebSocketSession {
+            last_request: Some(Map::from_iter([
+                ("model".to_string(), serde_json::json!("gpt-test")),
+                (
+                    "input".to_string(),
+                    serde_json::json!([{"role":"user","content":"a"}]),
+                ),
+            ])),
+            last_response_id: Some("response-1".to_string()),
+            last_response_items: vec![serde_json::json!({"role":"assistant","content":"b"})],
+            ..ResponsesWebSocketSession::default()
+        };
+        let current = Map::from_iter([
+            ("model".to_string(), serde_json::json!("gpt-test")),
+            (
+                "input".to_string(),
+                serde_json::json!([
+                    {"role":"user","content":"a"},
+                    {"role":"assistant","content":"b"},
+                    {"role":"user","content":"c"}
+                ]),
+            ),
+        ]);
+
+        let incremental = incremental_request(&session, &current).unwrap();
+        assert_eq!(
+            incremental["input"],
+            serde_json::json!([{"role":"user","content":"c"}])
+        );
+        assert_eq!(incremental["previous_response_id"], "response-1");
+    }
+
+    #[test]
+    fn incremental_request_reports_prefix_mismatch() {
+        let session = ResponsesWebSocketSession {
+            last_request: Some(Map::from_iter([
+                ("model".to_string(), serde_json::json!("gpt-test")),
+                ("input".to_string(), serde_json::json!(["old-tail"])),
+            ])),
+            last_response_id: Some("response-1".to_string()),
+            ..ResponsesWebSocketSession::default()
+        };
+        let current = Map::from_iter([
+            ("model".to_string(), serde_json::json!("gpt-test")),
+            ("input".to_string(), serde_json::json!(["new-tail"])),
+        ]);
+
+        assert_eq!(
+            incremental_request(&session, &current).unwrap_err(),
+            IncrementalRequestFallbackReason::InputPrefixMismatch {
+                previous_prefix_items: 1,
+                first_differing_index: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn continuation_reuses_when_request_tools_unchanged_and_native_context_appended() {
+        let tools = serde_json::json!([
+            {"type": "function", "name": "exec"},
+            {"type": "programmatic_tool_calling"}
+        ]);
+        let user = serde_json::json!({
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "list the git tools"}],
+        });
+        let program = serde_json::json!({
+            "type": "program",
+            "id": "program-1",
+        });
+        let program_output = serde_json::json!({
+            "type": "program_output",
+            "id": "program-output-1",
+        });
+        let next_user = serde_json::json!({
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "run git status"}],
+        });
+        let session = ResponsesWebSocketSession {
+            last_request: Some(Map::from_iter([
+                ("model".to_string(), serde_json::json!("gpt-test")),
+                ("tools".to_string(), tools.clone()),
+                ("input".to_string(), serde_json::json!([user.clone()])),
+            ])),
+            last_response_id: Some("response-1".to_string()),
+            last_response_items: vec![program.clone(), program_output.clone()],
+            ..ResponsesWebSocketSession::default()
+        };
+        let current = Map::from_iter([
+            ("model".to_string(), serde_json::json!("gpt-test")),
+            ("tools".to_string(), tools),
+            (
+                "input".to_string(),
+                serde_json::json!([user, program, program_output, next_user,]),
+            ),
+        ]);
+
+        let incremental = incremental_request(&session, &current).unwrap();
+        assert_eq!(
+            incremental["input"],
+            serde_json::json!([next_user]),
+            "request tools 未变时，session 上下文追加的原生 item 之后 continuation 只发送严格后缀"
+        );
+        assert_eq!(incremental["previous_response_id"], "response-1");
+    }
+
+    #[test]
+    fn continuation_falls_back_when_request_tools_change() {
+        let user = serde_json::json!({
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "continue"}],
+        });
+        let session = ResponsesWebSocketSession {
+            last_request: Some(Map::from_iter([
+                ("model".to_string(), serde_json::json!("gpt-test")),
+                (
+                    "tools".to_string(),
+                    serde_json::json!([
+                        {"type": "function", "name": "exec"}
+                    ]),
+                ),
+                ("input".to_string(), serde_json::json!([user.clone()])),
+            ])),
+            last_response_id: Some("response-1".to_string()),
+            last_response_items: Vec::new(),
+            ..ResponsesWebSocketSession::default()
+        };
+        let current = Map::from_iter([
+            ("model".to_string(), serde_json::json!("gpt-test")),
+            (
+                "tools".to_string(),
+                serde_json::json!([
+                    {"type": "function", "name": "exec"},
+                    {"type": "function", "name": "read_file"}
+                ]),
+            ),
+            ("input".to_string(), serde_json::json!([user])),
+        ]);
+
+        assert_eq!(
+            incremental_request(&session, &current).unwrap_err(),
+            IncrementalRequestFallbackReason::RequestPropertiesChanged
+        );
+    }
+
+    #[test]
+    fn incremental_request_requires_working_context_to_keep_its_turn_anchor() {
+        let user = serde_json::json!({
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "implement"}],
+        });
+        let working_context = serde_json::json!({
+            "type": "message",
+            "role": "developer",
+            "content": [{"type": "input_text", "text": "# Current working context"}],
+        });
+        let tool_call = serde_json::json!({
+            "type": "function_call",
+            "name": "read_file",
+            "arguments": "{\"path\":\"src/lib.rs\"}",
+            "call_id": "call-1",
+        });
+        let tool_result = serde_json::json!({
+            "type": "function_call_output",
+            "call_id": "call-1",
+            "output": "ok",
+        });
+        let session = ResponsesWebSocketSession {
+            last_request: Some(Map::from_iter([
+                ("model".to_string(), serde_json::json!("gpt-test")),
+                (
+                    "input".to_string(),
+                    Value::Array(vec![user.clone(), working_context.clone()]),
+                ),
+            ])),
+            last_response_id: Some("response-1".to_string()),
+            last_response_items: vec![tool_call.clone()],
+            ..ResponsesWebSocketSession::default()
+        };
+        let anchored = Map::from_iter([
+            ("model".to_string(), serde_json::json!("gpt-test")),
+            (
+                "input".to_string(),
+                Value::Array(vec![
+                    user.clone(),
+                    working_context.clone(),
+                    tool_call.clone(),
+                    tool_result.clone(),
+                ]),
+            ),
+        ]);
+        let relocated = Map::from_iter([
+            ("model".to_string(), serde_json::json!("gpt-test")),
+            (
+                "input".to_string(),
+                Value::Array(vec![user, tool_call, tool_result.clone(), working_context]),
+            ),
+        ]);
+
+        let incremental = incremental_request(&session, &anchored).unwrap();
+        assert_eq!(incremental["input"], Value::Array(vec![tool_result]));
+        assert_eq!(incremental["previous_response_id"], "response-1");
+        assert_eq!(
+            incremental_request(&session, &relocated).unwrap_err(),
+            IncrementalRequestFallbackReason::InputPrefixMismatch {
+                previous_prefix_items: 3,
+                first_differing_index: 1,
+            }
+        );
+    }
+}
+
+/// WebSocket 传输编排行为：会话连接复用、重试预算、invalid continuation
+/// 回退与 HTTP fallback 隔离，经 `ModelRuntime::complete` 端到端驱动。
+#[cfg(test)]
+mod orchestration_tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use futures::{SinkExt, StreamExt};
+    use pretty_assertions::assert_eq;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::{TcpListener, TcpStream};
+    use tokio_tungstenite::WebSocketStream;
+    use tokio_tungstenite::tungstenite::Message as WebSocketMessage;
+    use tokio_tungstenite::tungstenite::handshake::server::{
+        ErrorResponse, Request as WebSocketRequest, Response as WebSocketResponse,
+    };
+    use tokio_tungstenite::tungstenite::protocol::CloseFrame;
+    use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
+    use tokio_tungstenite::{accept_async, accept_hdr_async};
+
+    use crate::completion::{CompletionRequest, CompletionTraceContext};
+    use crate::provider::ProviderEndpoint;
+    use crate::runtime::test_support::{
+        assert_complete_workflow_wire_body, capture_http_request, complete_workflow_wire_request,
+        minimal_request, responses_websocket_model, send_responses_sse,
+    };
+    use crate::runtime::transport_policy::RESPONSES_WEBSOCKET_MAX_RETRIES;
+    use crate::runtime::{ModelInvocationContext, ModelRuntime, ModelSession};
+    use pl_protocol::{Message, MessageContent, MessageRole};
+    use pl_trace::AgentEvent;
+
+    type WsStream = WebSocketStream<TcpStream>;
+    type WsSender = futures::stream::SplitSink<WsStream, WebSocketMessage>;
+    type WsReceiver = futures::stream::SplitStream<WsStream>;
+
+    // tungstenite 的 header callback 必须返回其固定 ErrorResponse；该第三方类型较大，
+    // 测试 helper 无法在不改变 callback 契约的情况下装箱。
+    #[allow(clippy::result_large_err)]
+    fn validate_openai_websocket_handshake(
+        request: &WebSocketRequest,
+        response: WebSocketResponse,
+    ) -> std::result::Result<WebSocketResponse, ErrorResponse> {
+        assert_eq!(request.uri().path(), "/v1/responses");
+        assert_eq!(
+            request.headers()["openai-beta"],
+            "responses_websockets=2026-02-06"
+        );
+        assert_eq!(request.headers()["authorization"], "Bearer test-token");
+        Ok(response)
+    }
+
+    async fn accept_websocket(listener: &TcpListener) -> (WsSender, WsReceiver) {
+        let (stream, _) = listener.accept().await.unwrap();
+        accept_async(stream).await.unwrap().split()
+    }
+
+    async fn read_json_frame(reader: &mut WsReceiver) -> serde_json::Value {
+        match reader.next().await.unwrap().unwrap() {
+            WebSocketMessage::Text(text) => serde_json::from_str(text.as_str()).unwrap(),
+            other => panic!("expected a text frame, got {other:?}"),
+        }
+    }
+
+    async fn send_json_events(writer: &mut WsSender, events: &[serde_json::Value]) {
+        for event in events {
+            writer
+                .send(WebSocketMessage::Text(event.to_string().into()))
+                .await
+                .unwrap();
+        }
+    }
+
+    fn streamed_completion(
+        response_id: &str,
+        message_id: &str,
+        text: &str,
+    ) -> Vec<serde_json::Value> {
+        vec![
+            serde_json::json!({
+                "type": "response.output_text.delta",
+                "item_id": message_id,
+                "delta": text
+            }),
+            serde_json::json!({
+                "type": "response.completed",
+                "response": {
+                    "id": response_id,
+                    "model": "local-responses",
+                    "output": [{
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{ "type": "output_text", "text": text }]
+                    }],
+                    "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
+                }
+            }),
+        ]
+    }
+
+    fn created_completion(
+        response_id: &str,
+        message_id: &str,
+        text: &str,
+    ) -> Vec<serde_json::Value> {
+        vec![serde_json::json!({
+            "type": "response.created",
+            "response": {"id": response_id, "model": "local-responses"}
+        })]
+        .into_iter()
+        .chain(streamed_completion(response_id, message_id, text))
+        .collect()
+    }
+
+    /// 只建立流的 created + delta 事件，不带终止 completed；用于注入中途失败。
+    fn started_stream_events(
+        response_id: &str,
+        message_id: &str,
+        text: &str,
+    ) -> Vec<serde_json::Value> {
+        vec![
+            serde_json::json!({
+                "type": "response.created",
+                "response": {"id": response_id, "model": "local-responses"}
+            }),
+            serde_json::json!({
+                "type": "response.output_text.delta",
+                "item_id": message_id,
+                "delta": text
+            }),
+        ]
+    }
+
+    fn local_websocket_provider(address: &str, context_window: Option<u64>) -> ModelRuntime {
+        let mut info = ProviderEndpoint::openai(Some(format!("http://{address}/v1")));
+        info.bearer_token = Some("test-token".to_string());
+        let mut model = responses_websocket_model("local-responses");
+        model.context_window = context_window;
+        ModelRuntime::new(info, model).unwrap()
+    }
+
+    fn followup_request(previous_assistant_text: &str) -> CompletionRequest {
+        let mut request = minimal_request("local-responses");
+        request.input.extend([
+            Message {
+                presentation: Default::default(),
+                role: MessageRole::Assistant,
+                content: MessageContent::text(previous_assistant_text.to_string()),
+                reasoning_content: None,
+                tool_calls: None,
+                tool_result: None,
+                metadata: HashMap::new(),
+            }
+            .into(),
+            Message {
+                presentation: Default::default(),
+                role: MessageRole::User,
+                content: MessageContent::text("again".to_string()),
+                reasoning_content: None,
+                tool_calls: None,
+                tool_result: None,
+                metadata: HashMap::new(),
+            }
+            .into(),
+        ]);
+        request
+    }
+
+    #[tokio::test]
+    async fn responses_websocket_reuses_the_agent_session_connection() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let websocket = accept_hdr_async(stream, validate_openai_websocket_handshake)
+                .await
+                .unwrap();
+            let (mut writer, mut reader) = websocket.split();
+            let mut requests = Vec::new();
+            for ordinal in 1..=2 {
+                requests.push(read_json_frame(&mut reader).await);
+                send_json_events(
+                    &mut writer,
+                    &created_completion(
+                        &format!("resp-{ordinal}"),
+                        &format!("message-{ordinal}"),
+                        &format!("ok-{ordinal}"),
+                    ),
+                )
+                .await;
+                if ordinal == 1 {
+                    writer
+                        .send(WebSocketMessage::Ping(vec![1, 2, 3].into()))
+                        .await
+                        .unwrap();
+                    let pong =
+                        tokio::time::timeout(std::time::Duration::from_secs(1), reader.next())
+                            .await
+                            .expect("client must answer ping while the model stream is idle")
+                            .expect("pong frame")
+                            .expect("valid pong frame");
+                    assert_eq!(pong, WebSocketMessage::Pong(vec![1, 2, 3].into()));
+                }
+            }
+            requests
+        });
+
+        let provider = local_websocket_provider(&address.to_string(), Some(128_000));
+        let session = ModelSession::default();
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+
+        let first = provider
+            .complete(
+                complete_workflow_wire_request(),
+                ModelInvocationContext::new(session.clone(), event_tx.clone())
+                    .with_prompt_cache_key(Some("thread-generation-key".to_string())),
+            )
+            .await
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let mut second_request = complete_workflow_wire_request();
+        second_request.input.extend([
+            Message {
+                presentation: Default::default(),
+                role: MessageRole::Assistant,
+                content: MessageContent::text("ok-1".to_string()),
+                reasoning_content: None,
+                tool_calls: None,
+                tool_result: None,
+                metadata: HashMap::new(),
+            }
+            .into(),
+            Message {
+                presentation: Default::default(),
+                role: MessageRole::User,
+                content: MessageContent::text("again".to_string()),
+                reasoning_content: None,
+                tool_calls: None,
+                tool_result: None,
+                metadata: HashMap::new(),
+            }
+            .into(),
+        ]);
+        let second = provider
+            .complete(
+                second_request,
+                ModelInvocationContext::new(session, event_tx)
+                    .with_prompt_cache_key(Some("thread-generation-key".to_string())),
+            )
+            .await
+            .unwrap();
+        let requests = server.await.unwrap();
+
+        assert_eq!(first.content.as_deref(), Some("ok-1"));
+        assert_eq!(second.content.as_deref(), Some("ok-2"));
+        assert_eq!(first.orchestration.continuation_attempts, 0);
+        assert_eq!(second.orchestration.continuation_attempts, 1);
+        assert_eq!(second.orchestration.continuation_used, 1);
+        assert_eq!(second.orchestration.continuation_invalid, 0);
+        assert_eq!(requests[0]["type"], "response.create");
+        assert!(
+            requests[0]["tools"]
+                .as_array()
+                .is_some_and(|tools| !tools.is_empty())
+        );
+        assert_eq!(requests[0]["store"], false);
+        assert_eq!(requests[1]["store"], false);
+        assert_eq!(requests[0]["prompt_cache_key"], "thread-generation-key");
+        assert_eq!(requests[1]["prompt_cache_key"], "thread-generation-key");
+        assert_eq!(requests[1]["previous_response_id"], "resp-1");
+        assert_complete_workflow_wire_body(&requests[0]);
+        assert_eq!(
+            requests[1]["input"],
+            serde_json::json!([{
+                "type": "message",
+                "role": "user",
+                "content": [{ "type": "input_text", "text": "again" }]
+            }])
+        );
+    }
+
+    #[tokio::test]
+    async fn responses_websocket_partial_failure_falls_back_only_for_the_next_turn() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut writer, mut reader) = accept_websocket(&listener).await;
+            let first = read_json_frame(&mut reader).await;
+            send_json_events(
+                &mut writer,
+                &started_stream_events("partial-response", "partial-message", "partial"),
+            )
+            .await;
+            writer
+                .send(WebSocketMessage::Text(
+                    serde_json::json!({
+                        "type": "error",
+                        "error": {
+                            "code": "server_error",
+                            "message": "upstream websocket proxy failed"
+                        }
+                    })
+                    .to_string()
+                    .into(),
+                ))
+                .await
+                .unwrap();
+            drop(writer);
+
+            assert!(
+                tokio::time::timeout(std::time::Duration::from_millis(750), listener.accept())
+                    .await
+                    .is_err(),
+                "a request that emitted stream events must not be replayed"
+            );
+            first
+        });
+
+        let provider = local_websocket_provider(&address.to_string(), Some(128_000));
+        let session = ModelSession::default();
+        let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(64);
+        let trace_sink = Arc::new(pl_trace::InMemoryTraceEventSink::new("session-1", 0));
+        let context = ModelInvocationContext::new(session.clone(), event_tx).with_trace(
+            CompletionTraceContext {
+                session_id: "session-1".to_string(),
+                turn_id: "turn-1".to_string(),
+                inference_id: "turn-1-inf-0".to_string(),
+            },
+            trace_sink,
+        );
+
+        let error = provider
+            .complete(minimal_request("local-responses"), context)
+            .await
+            .expect_err("partial stream failure must be returned without replay");
+        let initial = server.await.unwrap();
+        let events = std::iter::from_fn(|| event_rx.try_recv().ok()).collect::<Vec<_>>();
+
+        assert!(error.is_transient_model_transport());
+        assert_eq!(initial["type"], "response.create");
+        assert!(
+            session.uses_responses_http_fallback(provider.connection_fingerprint()),
+            "a partial WebSocket failure must move only the next turn to HTTP"
+        );
+        assert!(events.iter().any(|event| matches!(
+            event,
+            AgentEvent::TracePartFailed { item }
+                if item.item_id() == "turn-1-inf-0-text-final-1"
+                    && item.failure().is_some_and(|error| error.contains("upstream websocket proxy failed"))
+        )));
+    }
+
+    #[tokio::test]
+    async fn responses_websocket_does_not_retry_invalid_request_error() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut writer, mut reader) = accept_websocket(&listener).await;
+            let _ = read_json_frame(&mut reader).await;
+            writer
+                .send(WebSocketMessage::Text(
+                    serde_json::json!({
+                        "type": "error",
+                        "status": 400,
+                        "error": {
+                            "code": "invalid_request_error",
+                            "message": "model does not support image inputs"
+                        }
+                    })
+                    .to_string()
+                    .into(),
+                ))
+                .await
+                .unwrap();
+        });
+
+        let info = ProviderEndpoint::openai(Some(format!("http://{address}/v1")));
+        let provider =
+            ModelRuntime::new(info, responses_websocket_model("local-responses")).unwrap();
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+
+        let error = provider
+            .complete(
+                minimal_request("local-responses"),
+                ModelInvocationContext::new(ModelSession::default(), event_tx),
+            )
+            .await
+            .expect_err("invalid request must fail without transport retry");
+        server.await.unwrap();
+
+        assert!(!error.is_transient_model_transport());
+        assert!(error.to_string().contains("invalid_request_error"));
+        assert!(error.to_string().contains("HTTP 400"));
+    }
+
+    #[tokio::test]
+    async fn responses_websocket_does_not_retry_unauthorized_handshake() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0_u8; 4_096];
+            let read = socket.read(&mut request).await.unwrap();
+            assert!(String::from_utf8_lossy(&request[..read]).contains("GET /v1/responses"));
+            socket
+                .write_all(
+                    b"HTTP/1.1 401 Unauthorized\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                )
+                .await
+                .unwrap();
+        });
+
+        let info = ProviderEndpoint::openai(Some(format!("http://{address}/v1")));
+        let provider =
+            ModelRuntime::new(info, responses_websocket_model("local-responses")).unwrap();
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+
+        let error = provider
+            .complete(
+                minimal_request("local-responses"),
+                ModelInvocationContext::new(ModelSession::default(), event_tx),
+            )
+            .await
+            .expect_err("unauthorized handshake must fail without transport retry");
+        server.await.unwrap();
+
+        assert!(!error.is_transient_model_transport());
+        assert_eq!(
+            error.to_string(),
+            "HTTP error: Responses WebSocket handshake failed with HTTP 401"
+        );
+    }
+
+    #[tokio::test]
+    async fn responses_websocket_retries_an_immediate_close_with_full_history() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut writer, mut reader) = accept_websocket(&listener).await;
+            let initial = read_json_frame(&mut reader).await;
+            writer.send(WebSocketMessage::Close(None)).await.unwrap();
+            drop(writer);
+
+            let (mut writer, mut reader) = accept_websocket(&listener).await;
+            let retried = read_json_frame(&mut reader).await;
+            send_json_events(
+                &mut writer,
+                &streamed_completion("resp-1", "message-1", "ok"),
+            )
+            .await;
+            [initial, retried]
+        });
+
+        let provider = local_websocket_provider(&address.to_string(), Some(128_000));
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+
+        let response = provider
+            .complete(
+                minimal_request("local-responses"),
+                ModelInvocationContext::new(ModelSession::default(), event_tx)
+                    .with_prompt_cache_key(Some("thread-generation-key".to_string())),
+            )
+            .await
+            .unwrap();
+        let [initial, retried] = server.await.unwrap();
+
+        assert_eq!(response.content.as_deref(), Some("ok"));
+        assert_eq!(response.orchestration.transport_attempts, 2);
+        assert_eq!(response.orchestration.http_fallbacks, 0);
+        assert_eq!(initial, retried);
+        assert_eq!(retried["tools"], serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn responses_websocket_falls_back_to_http_after_one_full_replay() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let mut websocket_requests = Vec::new();
+            for _ in 0..=RESPONSES_WEBSOCKET_MAX_RETRIES {
+                let (mut writer, mut reader) = accept_websocket(&listener).await;
+                websocket_requests.push(read_json_frame(&mut reader).await);
+                writer
+                    .send(WebSocketMessage::Close(Some(CloseFrame {
+                        code: CloseCode::Error,
+                        reason: "upstream websocket proxy failed".into(),
+                    })))
+                    .await
+                    .unwrap();
+            }
+
+            let mut http_requests = Vec::new();
+            for (response_id, message_id, text) in [
+                ("http-response-1", "http-message-1", "http-ok-1"),
+                ("http-response-2", "http-message-2", "http-ok-2"),
+            ] {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                http_requests.push(capture_http_request(&mut socket).await);
+                send_responses_sse(&mut socket, response_id, message_id, text).await;
+            }
+
+            (websocket_requests, http_requests)
+        });
+
+        let provider = local_websocket_provider(&address.to_string(), None);
+        let session = ModelSession::default();
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+
+        let first = provider
+            .complete(
+                minimal_request("local-responses"),
+                ModelInvocationContext::new(session.clone(), event_tx.clone()),
+            )
+            .await
+            .unwrap();
+        assert!(session.uses_responses_http_fallback(provider.connection_fingerprint()));
+
+        let second = provider
+            .complete(
+                followup_request("http-ok-1"),
+                ModelInvocationContext::new(session, event_tx),
+            )
+            .await
+            .unwrap();
+        let (websocket_requests, http_requests) = server.await.unwrap();
+
+        assert_eq!(first.content.as_deref(), Some("http-ok-1"));
+        assert_eq!(second.content.as_deref(), Some("http-ok-2"));
+        assert_eq!(first.orchestration.transport_attempts, 3);
+        assert_eq!(first.orchestration.http_fallbacks, 1);
+        assert_eq!(second.orchestration.transport_attempts, 1);
+        assert_eq!(second.orchestration.http_fallbacks, 0);
+        assert_eq!(websocket_requests.len(), 2);
+        assert_eq!(websocket_requests[0], websocket_requests[1]);
+        assert_eq!(http_requests.len(), 2);
+        assert_eq!(http_requests[0].request_line, "POST /v1/responses HTTP/1.1");
+        assert_eq!(http_requests[1].request_line, "POST /v1/responses HTTP/1.1");
+        assert_eq!(http_requests[0].body["input"].as_array().unwrap().len(), 1);
+        assert_eq!(http_requests[1].body["input"].as_array().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn responses_http_fallback_isolated_by_model_transport_fingerprint() {
+        let endpoint = ProviderEndpoint::openai(Some("http://127.0.0.1:1/v1".to_string()));
+        let first_runtime =
+            ModelRuntime::new(endpoint.clone(), responses_websocket_model("responses-a")).unwrap();
+        let second_runtime =
+            ModelRuntime::new(endpoint, responses_websocket_model("responses-b")).unwrap();
+        let session = ModelSession::default();
+        let first = first_runtime.connection_fingerprint();
+        let second = second_runtime.connection_fingerprint();
+
+        assert_ne!(first, second);
+        assert!(session.activate_responses_http_fallback(first).await);
+        assert!(session.uses_responses_http_fallback(first));
+        assert!(!session.uses_responses_http_fallback(second));
+    }
+
+    #[tokio::test]
+    async fn responses_websocket_retries_an_invalid_continuation_once_with_full_history() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut writer, mut reader) = accept_websocket(&listener).await;
+            let initial = read_json_frame(&mut reader).await;
+            send_json_events(
+                &mut writer,
+                &streamed_completion("resp-1", "message-1", "ok-1"),
+            )
+            .await;
+            let incremental = read_json_frame(&mut reader).await;
+            writer
+                .send(WebSocketMessage::Text(
+                    serde_json::json!({
+                        "type": "error",
+                        "error": {
+                            "code": "invalid_previous_response_id",
+                            "message": "previous_response_id is no longer valid"
+                        }
+                    })
+                    .to_string()
+                    .into(),
+                ))
+                .await
+                .unwrap();
+            drop(writer);
+
+            let (mut writer, mut reader) = accept_websocket(&listener).await;
+            let retried = read_json_frame(&mut reader).await;
+            send_json_events(
+                &mut writer,
+                &streamed_completion("resp-2", "message-2", "ok-2"),
+            )
+            .await;
+            [initial, incremental, retried]
+        });
+
+        let provider = local_websocket_provider(&address.to_string(), Some(128_000));
+        let session = ModelSession::default();
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+
+        let first = provider
+            .complete(
+                minimal_request("local-responses"),
+                ModelInvocationContext::new(session.clone(), event_tx.clone()),
+            )
+            .await
+            .unwrap();
+        let second = provider
+            .complete(
+                followup_request("ok-1"),
+                ModelInvocationContext::new(session, event_tx),
+            )
+            .await
+            .unwrap();
+        let [initial, incremental, retried] = server.await.unwrap();
+
+        assert_eq!(first.content.as_deref(), Some("ok-1"));
+        assert_eq!(second.content.as_deref(), Some("ok-2"));
+        assert_eq!(first.orchestration.transport_attempts, 1);
+        assert_eq!(second.orchestration.transport_attempts, 2);
+        assert_eq!(second.orchestration.continuation_attempts, 1);
+        assert_eq!(second.orchestration.continuation_invalid, 1);
+        assert_eq!(second.orchestration.continuation_used, 0);
+        assert_eq!(second.orchestration.http_fallbacks, 0);
+        assert!(initial.get("previous_response_id").is_none());
+        assert_eq!(incremental["previous_response_id"], "resp-1");
+        assert_eq!(incremental["input"].as_array().unwrap().len(), 1);
+        assert!(retried.get("previous_response_id").is_none());
+        assert_eq!(retried["input"].as_array().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn invalid_continuation_full_replay_consumes_the_websocket_retry_budget() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut writer, mut reader) = accept_websocket(&listener).await;
+            let initial = read_json_frame(&mut reader).await;
+            send_json_events(
+                &mut writer,
+                &streamed_completion("resp-1", "message-1", "ok-1"),
+            )
+            .await;
+
+            let incremental = read_json_frame(&mut reader).await;
+            writer
+                .send(WebSocketMessage::Text(
+                    serde_json::json!({
+                        "type": "error",
+                        "error": {
+                            "code": "invalid_previous_response_id",
+                            "message": "previous_response_id is no longer valid"
+                        }
+                    })
+                    .to_string()
+                    .into(),
+                ))
+                .await
+                .unwrap();
+            drop(writer);
+
+            let (mut writer, mut reader) = accept_websocket(&listener).await;
+            let full_replay = read_json_frame(&mut reader).await;
+            writer
+                .send(WebSocketMessage::Close(Some(CloseFrame {
+                    code: CloseCode::Error,
+                    reason: "full replay failed".into(),
+                })))
+                .await
+                .unwrap();
+            drop(writer);
+
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let http_request = capture_http_request(&mut socket).await;
+            send_responses_sse(
+                &mut socket,
+                "http-response-2",
+                "http-message-2",
+                "http-ok-2",
+            )
+            .await;
+
+            ([initial, incremental, full_replay], http_request)
+        });
+
+        let provider = local_websocket_provider(&address.to_string(), None);
+        let session = ModelSession::default();
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+
+        let first = provider
+            .complete(
+                minimal_request("local-responses"),
+                ModelInvocationContext::new(session.clone(), event_tx.clone()),
+            )
+            .await
+            .unwrap();
+        let second = provider
+            .complete(
+                followup_request("ok-1"),
+                ModelInvocationContext::new(session.clone(), event_tx),
+            )
+            .await
+            .unwrap();
+        let ([initial, incremental, full_replay], http_request) = server.await.unwrap();
+
+        assert_eq!(first.content.as_deref(), Some("ok-1"));
+        assert_eq!(second.content.as_deref(), Some("http-ok-2"));
+        assert_eq!(second.orchestration.transport_attempts, 3);
+        assert_eq!(second.orchestration.continuation_attempts, 1);
+        assert_eq!(second.orchestration.continuation_invalid, 1);
+        assert_eq!(second.orchestration.http_fallbacks, 1);
+        assert!(session.uses_responses_http_fallback(provider.connection_fingerprint()));
+        assert!(initial.get("previous_response_id").is_none());
+        assert_eq!(incremental["previous_response_id"], "resp-1");
+        assert!(full_replay.get("previous_response_id").is_none());
+        assert_eq!(full_replay["input"].as_array().unwrap().len(), 3);
+        assert_eq!(http_request.request_line, "POST /v1/responses HTTP/1.1");
+        assert_eq!(http_request.body["input"].as_array().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn responses_websocket_does_not_commit_unconsumed_completion() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut writer, mut reader) = accept_websocket(&listener).await;
+            let first = read_json_frame(&mut reader).await;
+            writer
+                .send(WebSocketMessage::Text(
+                    serde_json::json!({
+                        "type": "response.completed",
+                        "response": {
+                            "id": "resp-unconsumed",
+                            "model": "local-responses",
+                            "output": [{
+                                "type": "message",
+                                "role": "assistant",
+                                "content": [{"type": "output_text", "text": "not-consumed"}]
+                            }],
+                            "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
+                        }
+                    })
+                    .to_string()
+                    .into(),
+                ))
+                .await
+                .unwrap();
+            drop(writer);
+
+            let (mut writer, mut reader) = accept_websocket(&listener).await;
+            let second = read_json_frame(&mut reader).await;
+            send_json_events(
+                &mut writer,
+                &streamed_completion("resp-2", "message-2", "ok"),
+            )
+            .await;
+            [first, second]
+        });
+
+        let provider = local_websocket_provider(&address.to_string(), None);
+        let session = ModelSession::default();
+        let first_request = minimal_request("local-responses");
+        let mut stream = provider
+            .stream_events(first_request, session.clone(), None, None)
+            .await
+            .unwrap();
+        stream
+            .next()
+            .await
+            .expect("first decoded completion event")
+            .unwrap();
+        drop(stream);
+
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
+        let response = provider
+            .complete(
+                followup_request("not-consumed"),
+                ModelInvocationContext::new(session, event_tx),
+            )
+            .await
+            .unwrap();
+        let [first, second] = server.await.unwrap();
+
+        assert_eq!(response.content.as_deref(), Some("ok"));
+        assert!(first.get("previous_response_id").is_none());
+        assert!(second.get("previous_response_id").is_none());
+        assert_eq!(second["input"].as_array().unwrap().len(), 3);
+    }
+}

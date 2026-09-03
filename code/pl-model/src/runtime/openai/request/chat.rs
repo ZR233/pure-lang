@@ -350,3 +350,244 @@ fn chat_content_for_user(
         Ok(ChatMessageContent::Text(message_content_text(content)))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+    use crate::completion::ReasoningConfig;
+    use crate::completion::tool_schema::CustomToolProjection;
+    use crate::runtime::openai::OpenAiProtocol;
+    use crate::runtime::openai::test_support::{
+        bundled_model, context_items, image_message, image_prepared_content, request_with_effort,
+    };
+    use pl_protocol::{Message, MessageContent};
+    use std::collections::HashMap;
+
+    #[test]
+    fn chat_parallel_tool_calls_wire_follows_request_after_profile_opt_in() {
+        for (profile_opt_in, request_flag, expected) in [
+            (false, true, None),
+            (true, true, Some(true)),
+            (true, false, Some(false)),
+        ] {
+            let mut request = request_with_effort("high");
+            request.parallel_tool_calls = request_flag;
+            let mut model = ModelInfo::fallback("chat-compatible");
+            model.request_profile.chat_parallel_tool_calls = profile_opt_in;
+
+            let body = OpenAiProtocol::chat().build_request_body_with_model(&request, &model);
+
+            match expected {
+                Some(expected) => {
+                    assert_eq!(body["parallel_tool_calls"], serde_json::json!(expected))
+                }
+                None => assert!(body.get("parallel_tool_calls").is_none()),
+            }
+        }
+    }
+
+    #[test]
+    fn chat_body_can_use_profiled_max_completion_tokens_field() {
+        let mut model = ModelInfo::fallback("mimo-chat");
+        model.request_profile.max_tokens_field = MaxTokensField::MaxCompletionTokens;
+        let mut request = request_with_effort("high");
+        request.max_tokens = Some(8192);
+
+        let body = OpenAiProtocol::chat().build_request_body_with_model(&request, &model);
+
+        assert!(body.get("max_tokens").is_none());
+        assert_eq!(body["max_completion_tokens"], serde_json::json!(8192));
+    }
+
+    #[test]
+    fn mimo_chat_body_uses_catalog_wire_policy_without_reasoning_effort() {
+        let model = bundled_model("mimo-v2.5-pro");
+        let mut request = request_with_effort("enabled");
+        request.max_tokens = Some(131_072);
+
+        let body = OpenAiProtocol::chat().build_request_body_with_model(&request, &model);
+
+        assert_eq!(body["max_completion_tokens"], serde_json::json!(131_072));
+        assert_eq!(body["thinking"]["type"], serde_json::json!("enabled"));
+        assert!(body.get("reasoning_effort").is_none());
+        assert!(model.capabilities.tools.function_calling);
+        assert!(!model.capabilities.tools.parallel_tool_calls);
+        assert_eq!(
+            model.capabilities.interleaved.unwrap().field,
+            crate::model::ReasoningInterleavedField::ReasoningContent
+        );
+    }
+
+    #[test]
+    fn chat_body_without_effort_parameter_omits_reasoning_fields() {
+        let body = OpenAiProtocol::chat().build_request_body(&request_with_effort("max"));
+
+        assert!(body.get("reasoning_effort").is_none());
+        assert!(body.get("thinking").is_none());
+    }
+
+    #[test]
+    fn deepseek_chat_body_writes_effort_and_base_body_thinking() {
+        let model = bundled_model("deepseek-v4-flash");
+        let body = OpenAiProtocol::chat()
+            .build_request_body_with_model(&request_with_effort("max"), &model);
+
+        assert_eq!(body["reasoning_effort"], serde_json::json!("max"));
+        assert_eq!(body["thinking"]["type"], serde_json::json!("enabled"));
+    }
+
+    #[test]
+    fn zhipu_plain_chat_body_maps_effort_to_thinking_type() {
+        let model = bundled_model("glm-5");
+        let body = OpenAiProtocol::chat()
+            .build_request_body_with_model(&request_with_effort("enabled"), &model);
+
+        assert!(body.get("reasoning_effort").is_none());
+        assert_eq!(body["thinking"]["type"], serde_json::json!("enabled"));
+        assert_eq!(body["thinking"]["clear_thinking"], serde_json::json!(false));
+    }
+
+    #[test]
+    fn glm52_chat_body_links_reasoning_effort_and_thinking() {
+        let model = bundled_model("glm-5.2");
+        for effort in ["high", "max"] {
+            let body = OpenAiProtocol::chat()
+                .build_request_body_with_model(&request_with_effort(effort), &model);
+
+            assert_eq!(body["reasoning_effort"], serde_json::json!(effort));
+            assert_eq!(body["thinking"]["type"], serde_json::json!("enabled"));
+            assert_eq!(body["thinking"]["clear_thinking"], serde_json::json!(false));
+        }
+    }
+
+    #[test]
+    fn glm52_chat_body_none_disables_thinking_and_removes_reasoning_effort() {
+        let model = bundled_model("glm-5.2");
+        let body = OpenAiProtocol::chat()
+            .build_request_body_with_model(&request_with_effort("none"), &model);
+
+        assert!(body.get("reasoning_effort").is_none());
+        assert_eq!(body["thinking"]["type"], serde_json::json!("disabled"));
+        assert!(body["thinking"].get("clear_thinking").is_none());
+    }
+
+    #[test]
+    fn glm53_flash_chat_body_links_thinking_and_sends_image_parts() {
+        let model = bundled_model("glm-5.3-flash");
+        let request = CompletionRequest::builder()
+            .input(context_items(vec![image_message()]))
+            .prepared_content(image_prepared_content())
+            .reasoning(Some(ReasoningConfig {
+                effort: Some("max".to_string()),
+                summary: None,
+            }))
+            .build();
+
+        let body = OpenAiProtocol::chat().build_request_body_with_model(&request, &model);
+
+        assert_eq!(body["messages"][0]["content"][0]["type"], "text");
+        assert_eq!(body["messages"][0]["content"][1]["type"], "image_url");
+        assert_eq!(
+            body["messages"][0]["content"][1]["image_url"]["url"],
+            "data:image/png;base64,aGVsbG8="
+        );
+        assert_eq!(body["reasoning_effort"], serde_json::json!("max"));
+        assert_eq!(body["thinking"]["type"], serde_json::json!("enabled"));
+        assert_eq!(body["thinking"]["clear_thinking"], serde_json::json!(false));
+    }
+
+    #[test]
+    fn chat_body_writes_assistant_reasoning_content() {
+        let mut request = request_with_effort("high");
+        request.input = vec![pl_protocol::ModelContextItem::from(Message {
+            presentation: Default::default(),
+            role: MessageRole::Assistant,
+            content: MessageContent::text("9.11 更大。".to_string()),
+            reasoning_content: Some("比较小数位。".to_string()),
+            tool_calls: None,
+            tool_result: None,
+            metadata: HashMap::new(),
+        })];
+
+        let body = OpenAiProtocol::chat().build_request_body(&request);
+
+        assert_eq!(
+            body["messages"][0]["reasoning_content"],
+            serde_json::json!("比较小数位。")
+        );
+    }
+
+    #[test]
+    fn chat_body_writes_custom_grammar_tool() {
+        let mut request = request_with_effort("xhigh");
+        request.tools = vec![ToolSpec::custom_grammar(
+            "apply_patch",
+            "edit files",
+            "lark",
+            "start: patch",
+        )];
+
+        let body = OpenAiProtocol::chat().build_request_body(&request);
+
+        assert_eq!(body["tools"][0]["type"], serde_json::json!("custom"));
+        assert_eq!(
+            body["tools"][0]["custom"]["name"],
+            serde_json::json!("apply_patch")
+        );
+    }
+
+    #[test]
+    fn provider_compatible_turns_custom_apply_patch_into_function_fallback() {
+        let mut request = request_with_effort("high");
+        request.tools = vec![ToolSpec::custom_grammar(
+            "apply_patch",
+            "edit files",
+            "lark",
+            "start: patch",
+        )];
+
+        let request = request.provider_compatible(CustomToolProjection::ToFunction);
+        let body = OpenAiProtocol::chat().build_request_body(&request);
+
+        assert_eq!(body["tools"][0]["type"], serde_json::json!("function"));
+        assert_eq!(
+            body["tools"][0]["function"]["parameters"]["required"],
+            serde_json::json!(["input"])
+        );
+        let description =
+            body["tools"][0]["function"]["parameters"]["properties"]["input"]["description"]
+                .as_str()
+                .unwrap();
+        assert!(description.contains("*** Add File:"));
+        assert!(description.contains("*** Update File:"));
+        assert!(description.contains("---/+++ unified diff"));
+        assert!(description.contains("*** File: metadata"));
+        assert!(description.contains("Insert after"));
+        assert!(description.contains("previous patch failed"));
+        assert!(description.contains("Minimal update example:"));
+        assert!(description.contains("*** Update File: notes.txt"));
+        assert!(description.contains("-old line"));
+        assert!(description.contains("+new line"));
+    }
+
+    #[test]
+    fn deepseek_chat_body_never_writes_openai_cache_fields() {
+        let request = request_with_effort("medium");
+        let body = serde_json::to_value(
+            OpenAiProtocol::chat()
+                .build_request(
+                    &request,
+                    &ModelInfo::fallback("deepseek-v4-flash"),
+                    Some("must-not-cross-chat-wire"),
+                )
+                .unwrap(),
+        )
+        .unwrap();
+
+        assert!(body.get("prompt_cache_key").is_none());
+        assert!(body.get("prompt_cache_breakpoint").is_none());
+        assert!(body.get("prompt_cache_options").is_none());
+    }
+}

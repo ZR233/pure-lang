@@ -312,3 +312,158 @@ fn push_tool_alias(aliases: &mut Vec<String>, value: &str) {
         aliases.push(value.to_string());
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use pl_trace::{TraceEventKind, TracePartKind, TraceToolState};
+
+    use crate::completion::{ToolCall, ToolCallPayload};
+
+    use super::super::test_support::{
+        TracePartEvent, started_tool_item, trace, trace_part_event, trace_with_sink,
+    };
+    use super::ToolCallAccumulatorSnapshot;
+
+    fn accumulator_snapshot(id: &str, trace_id: &str) -> ToolCallAccumulatorSnapshot {
+        ToolCallAccumulatorSnapshot {
+            id: id.to_string(),
+            trace_id: trace_id.to_string(),
+            call_id: Some("call-1".to_string()),
+            name: "exec".to_string(),
+        }
+    }
+
+    fn canonical_tool_call() -> ToolCall {
+        ToolCall {
+            id: "provider-tool-1".to_string(),
+            call_id: "call-1".to_string(),
+            name: "exec".to_string(),
+            payload: ToolCallPayload::Function {
+                arguments: serde_json::json!({"cmd": "echo hi"}),
+            },
+            invalid_arguments: None,
+            caller: None,
+        }
+    }
+
+    fn tool_delta_item_id(event: &pl_trace::AgentEvent) -> Option<String> {
+        match trace_part_event(event)? {
+            TracePartEvent::Delta {
+                item_id,
+                kind: TracePartKind::Tool,
+            } => Some(item_id.to_string()),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn update_tool_trace_keeps_streaming_tool_status_after_arguments_delta() {
+        let mut trace = trace();
+        let snapshot = accumulator_snapshot("provider-tool-1", "provider-tool-1");
+        let _ = trace.append_tool_arguments_delta(&snapshot, "{\"cmd\":\"ec".to_string());
+        let updated_events = trace.update_tool_trace(&canonical_tool_call());
+        let updated = updated_events
+            .iter()
+            .find_map(started_tool_item)
+            .expect("updated tool snapshot");
+
+        assert_eq!(updated.item_id(), "turn-1-provider-tool-1");
+        assert!(matches!(
+            updated.tool().map(|tool| tool.state()),
+            Some(TraceToolState::Streaming(_))
+        ));
+        assert_eq!(updated.revision(), 2);
+        let tool = updated.tool().expect("tool metadata");
+        assert_eq!(tool.invocation().arguments(), "{\"cmd\":\"echo hi\"}");
+    }
+
+    #[test]
+    fn late_provider_tool_id_keeps_original_trace_part_id() {
+        let mut trace = trace();
+        let early = accumulator_snapshot("call-1", "call-1");
+        let late = accumulator_snapshot("provider-tool-1", "call-1");
+
+        let first_delta = trace
+            .append_tool_arguments_delta(&early, "{\"cmd\":\"ec".to_string())
+            .iter()
+            .find_map(tool_delta_item_id)
+            .expect("first tool delta");
+        let second_delta = trace
+            .append_tool_arguments_delta(&late, "ho hi\"}".to_string())
+            .iter()
+            .find_map(tool_delta_item_id)
+            .expect("second tool delta");
+        let updated_events = trace.update_tool_trace(&canonical_tool_call());
+        let updated = updated_events
+            .iter()
+            .find_map(started_tool_item)
+            .expect("updated tool snapshot");
+
+        assert_eq!(first_delta, "turn-1-call-1");
+        assert_eq!(second_delta, "turn-1-call-1");
+        assert_eq!(updated.item_id(), "turn-1-call-1");
+        assert_eq!(updated.revision(), 3);
+        let tool = updated.tool().expect("tool metadata");
+        assert_eq!(
+            tool.invocation().provider_item_id(),
+            Some("provider-tool-1")
+        );
+        assert_eq!(tool.invocation().call_id(), Some("call-1"));
+    }
+
+    #[test]
+    fn tool_metadata_and_argument_deltas_share_one_revision_chain() {
+        let sink = Arc::new(pl_trace::InMemoryTraceEventSink::new("session-1", 0));
+        let mut trace = trace_with_sink(sink.clone());
+        let early = accumulator_snapshot("call-1", "call-1");
+        let late = accumulator_snapshot("provider-tool-1", "call-1");
+
+        let first = trace.append_tool_arguments_delta(&early, "{\"cmd\":\"ec".to_string());
+        let ignored = trace.append_tool_arguments_delta(&early, String::new());
+        let second = trace.append_tool_arguments_delta(&late, "ho hi\"}".to_string());
+        let canonical = trace.update_tool_trace(&canonical_tool_call());
+
+        assert!(ignored.is_empty());
+        assert!(first.iter().any(|event| matches!(
+            event,
+            pl_trace::AgentEvent::TracePartDelta { event } if event.revision == 1
+        )));
+        assert!(second.iter().any(|event| matches!(
+            event,
+            pl_trace::AgentEvent::TracePartStarted { item } if item.revision() == 2
+        )));
+        assert!(second.iter().any(|event| matches!(
+            event,
+            pl_trace::AgentEvent::TracePartDelta { event } if event.revision == 3
+        )));
+        assert!(canonical.iter().any(|event| matches!(
+            event,
+            pl_trace::AgentEvent::TracePartStarted { item } if item.revision() == 3
+        )));
+        assert!(trace.take_trace_error().is_none());
+        assert_eq!(
+            sink.events()
+                .into_iter()
+                .filter_map(|event| match event.kind {
+                    TraceEventKind::TracePartStarted { item } =>
+                        Some(("snapshot", item.revision())),
+                    TraceEventKind::TracePartDelta { event } => Some(("delta", event.revision)),
+                    TraceEventKind::TracePartCompleted { .. }
+                    | TraceEventKind::TracePartFailed { .. }
+                    | TraceEventKind::InteractionChanged { .. }
+                    | TraceEventKind::SkillActivated { .. }
+                    | TraceEventKind::EnabledToolsRecorded { .. } => None,
+                })
+                .collect::<Vec<_>>(),
+            vec![
+                ("snapshot", 0),
+                ("delta", 1),
+                ("snapshot", 2),
+                ("delta", 3),
+                ("snapshot", 3),
+            ]
+        );
+    }
+}

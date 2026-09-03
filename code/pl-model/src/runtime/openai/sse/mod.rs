@@ -377,4 +377,479 @@ fn provider_status_value(value: &serde_json::Value) -> Option<u16> {
 }
 
 #[cfg(test)]
-mod unit_tests;
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+    use crate::completion::stream::event::{ModelBlockField, ModelBlockKind, ToolInputPayloadKind};
+
+    fn single_event(event: &SseStreamEvent) -> Option<ModelStreamEvent> {
+        let events = process_sse_events(event);
+        assert!(events.len() <= 1, "expected at most one event: {events:?}");
+        events.into_iter().next()
+    }
+
+    fn chat_event(delta: serde_json::Value) -> SseStreamEvent {
+        serde_json::from_value(serde_json::json!({
+            "choices": [{
+                "delta": delta,
+                "finish_reason": null
+            }]
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn process_chat_reasoning_content_as_thinking_delta() {
+        let event = chat_event(serde_json::json!({
+            "reasoning_content": "先比较整数位。"
+        }));
+
+        match single_event(&event) {
+            Some(ModelStreamEvent::ReasoningRawDelta { delta, .. }) => {
+                assert_eq!(delta, "先比较整数位。");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn process_chat_content_as_output_text_delta() {
+        let event = chat_event(serde_json::json!({
+            "content": "9.11 更大。"
+        }));
+
+        match single_event(&event) {
+            Some(ModelStreamEvent::BlockDelta {
+                field: ModelBlockField::Text,
+                delta,
+                ..
+            }) => {
+                assert_eq!(delta, "9.11 更大。");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn deepseek_web_search_sse_preserves_lifecycle_actions_and_native_context() {
+        let events = [
+            serde_json::json!({
+                "type": "response.web_search_call.searching",
+                "item_id": "search_1"
+            }),
+            serde_json::json!({
+                "type": "response.output_item.added",
+                "item": {
+                    "type": "web_search_call",
+                    "id": "search_1",
+                    "action": {"type": "search", "query": "DeepSeek Responses API"}
+                }
+            }),
+            serde_json::json!({
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "web_search_call",
+                    "id": "search_1",
+                    "action": {"type": "open_page", "url": "https://api-docs.deepseek.com"},
+                    "results": [{"url": "https://api-docs.deepseek.com", "opaque": {"rank": 1}}]
+                }
+            }),
+            serde_json::json!({
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "web_search_call",
+                    "id": "find_1",
+                    "action": {
+                        "type": "find_in_page",
+                        "url": "https://api-docs.deepseek.com",
+                        "pattern": "web_search"
+                    }
+                }
+            }),
+            serde_json::json!({
+                "type": "response.web_search_call.completed",
+                "item_id": "search_1"
+            }),
+        ];
+        let decoded = events
+            .into_iter()
+            .flat_map(|event| {
+                let event: SseStreamEvent = serde_json::from_value(event).unwrap();
+                process_sse_events(&event)
+            })
+            .collect::<Vec<_>>();
+
+        assert!(matches!(
+            &decoded[0],
+            ModelStreamEvent::WebSearchStarted { item_id, .. } if item_id == "search_1"
+        ));
+        assert!(decoded.iter().any(|event| matches!(
+            event,
+            ModelStreamEvent::WebSearchStarted {
+                action: crate::completion::WebSearchAction::Search { query: Some(query), .. },
+                ..
+            } if query == "DeepSeek Responses API"
+        )));
+        assert!(decoded.iter().any(|event| matches!(
+            event,
+            ModelStreamEvent::WebSearchCompleted {
+                action: crate::completion::WebSearchAction::OpenPage { url: Some(url) },
+                results: Some(results),
+                ..
+            } if url == "https://api-docs.deepseek.com" && results[0]["opaque"]["rank"] == 1
+        )));
+        assert!(decoded.iter().any(|event| matches!(
+        event,
+        ModelStreamEvent::WebSearchCompleted {
+            action: crate::completion::WebSearchAction::FindInPage { pattern: Some(pattern), .. },
+            ..
+        } if pattern == "web_search"
+    )));
+        assert!(decoded.iter().any(|event| matches!(
+            event,
+            ModelStreamEvent::ResponsesContextItem { item }
+                if item.value["results"][0]["opaque"]["rank"] == 1
+        )));
+    }
+
+    #[test]
+    fn process_chat_reasoning_and_content_from_same_chunk() {
+        let event = chat_event(serde_json::json!({
+            "reasoning_content": "先比较整数位。",
+            "content": "<final>9.11 更大。</final>"
+        }));
+
+        match process_sse_events(&event).as_slice() {
+            [
+                ModelStreamEvent::ReasoningRawDelta {
+                    delta: reasoning, ..
+                },
+                ModelStreamEvent::BlockDelta {
+                    field: ModelBlockField::Text,
+                    delta: content,
+                    ..
+                },
+            ] => {
+                assert_eq!(reasoning, "先比较整数位。");
+                assert_eq!(content, "<final>9.11 更大。</final>");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn process_chat_completed_reads_deepseek_cached_token_aliases() {
+        for cached_usage in [
+            serde_json::json!({"prompt_cache_hit_tokens": 35}),
+            serde_json::json!({"cached_prompt_tokens": 35}),
+            serde_json::json!({"prompt_tokens_details": {"cached_tokens": 35}}),
+        ] {
+            let mut usage = serde_json::json!({
+                "prompt_tokens": 100,
+                "completion_tokens": 20,
+                "total_tokens": 120
+            });
+            usage.as_object_mut().unwrap().extend(
+                cached_usage
+                    .as_object()
+                    .unwrap()
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.clone())),
+            );
+            let event: SseStreamEvent = serde_json::from_value(serde_json::json!({
+                "choices": [{
+                    "delta": {},
+                    "finish_reason": "stop"
+                }],
+                "usage": usage
+            }))
+            .unwrap();
+
+            match process_sse_events(&event).as_slice() {
+                [
+                    ModelStreamEvent::Usage(usage),
+                    ModelStreamEvent::Completed { response_id: None },
+                ] => {
+                    assert_eq!(usage.cached_prompt_tokens, 35);
+                }
+                other => panic!("unexpected event: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn process_chat_completed_reads_responses_style_token_usage() {
+        let event: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "choices": [{
+                "delta": {},
+                "finish_reason": "stop"
+            }],
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 20,
+                "total_tokens": 120,
+                "input_tokens_details": {
+                    "cached_tokens": 35,
+                    "cache_write_tokens": 11
+                },
+                "output_tokens_details": {
+                    "reasoning_tokens": 8
+                }
+            }
+        }))
+        .unwrap();
+
+        match process_sse_events(&event).as_slice() {
+            [
+                ModelStreamEvent::Usage(usage),
+                ModelStreamEvent::Completed { response_id: None },
+            ] => {
+                assert_eq!(usage.prompt_tokens, 100);
+                assert_eq!(usage.completion_tokens, 20);
+                assert_eq!(usage.total_tokens, 120);
+                assert_eq!(usage.cached_prompt_tokens, 35);
+                assert_eq!(usage.cache_write_tokens, 11);
+                assert_eq!(usage.reasoning_tokens, 8);
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn process_responses_completed_reads_cache_write_tokens() {
+        let event: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.completed",
+            "response": {
+                "id": "resp_1",
+                "usage": {
+                    "input_tokens": 100,
+                    "output_tokens": 20,
+                    "total_tokens": 120,
+                    "input_tokens_details": {
+                        "cached_tokens": 40,
+                        "cache_write_tokens": 15
+                    }
+                }
+            }
+        }))
+        .unwrap();
+
+        match process_sse_events(&event).as_slice() {
+            [
+                ModelStreamEvent::Usage(usage),
+                ModelStreamEvent::Completed { response_id },
+            ] => {
+                assert_eq!(usage.cached_prompt_tokens, 40);
+                assert_eq!(usage.cache_write_tokens, 15);
+                assert_eq!(response_id.as_deref(), Some("resp_1"));
+            }
+            other => panic!("unexpected events: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn responses_stream_usage_matches_non_stream_alias_precedence() {
+        let event: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.completed",
+            "response": {
+                "id": "resp_usage_precedence",
+                "usage": {
+                    "input_tokens": 100,
+                    "output_tokens": 20,
+                    "total_tokens": 120,
+                    "cached_prompt_tokens": 55,
+                    "input_tokens_details": {
+                        "cached_tokens": 20
+                    }
+                }
+            }
+        }))
+        .unwrap();
+
+        match process_sse_events(&event).as_slice() {
+            [
+                ModelStreamEvent::Usage(usage),
+                ModelStreamEvent::Completed { .. },
+            ] => {
+                assert_eq!(usage.cached_prompt_tokens, 55);
+            }
+            other => panic!("unexpected events: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn process_responses_marks_summary_and_raw_reasoning() {
+        let summary: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.reasoning_summary_text.delta",
+            "item_id": "rs_1",
+            "summary_index": 1,
+            "delta": "摘要"
+        }))
+        .unwrap();
+        let raw: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.reasoning_text.delta",
+            "item_id": "rt_1",
+            "content_index": 2,
+            "delta": "内部推理"
+        }))
+        .unwrap();
+
+        match single_event(&summary) {
+            Some(ModelStreamEvent::BlockDelta {
+                id,
+                kind: ModelBlockKind::ReasoningSummary,
+                field: ModelBlockField::ReasoningSummary,
+                section_index,
+                delta,
+            }) => {
+                assert_eq!(id, "rs_1");
+                assert_eq!(section_index, Some(1));
+                assert_eq!(delta, "摘要");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+        match single_event(&raw) {
+            Some(ModelStreamEvent::ReasoningRawDelta {
+                id,
+                content_index,
+                delta,
+            }) => {
+                assert_eq!(id, "rt_1");
+                assert_eq!(content_index, 2);
+                assert_eq!(delta, "内部推理");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn process_responses_custom_tool_delta() {
+        let event: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.custom_tool_call_input.delta",
+            "item_id": "ctc_1",
+            "call_id": "call_1",
+            "delta": "*** Begin Patch\n"
+        }))
+        .unwrap();
+
+        match single_event(&event) {
+            Some(ModelStreamEvent::ToolInputDelta {
+                item_id,
+                call_id,
+                payload_delta: ToolInputDeltaPayload::CustomInput(delta),
+                ..
+            }) => {
+                assert_eq!(item_id, "ctc_1");
+                assert_eq!(call_id.as_deref(), Some("call_1"));
+                assert_eq!(delta, "*** Begin Patch\n");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn process_chat_custom_tool_delta() {
+        let event = chat_event(serde_json::json!({
+            "tool_calls": [{
+                "index": 0,
+                "id": "call_1",
+                "type": "custom",
+                "custom": {
+                    "name": "apply_patch",
+                    "input": "*** Begin Patch\n"
+                }
+            }]
+        }));
+
+        match single_event(&event) {
+            Some(ModelStreamEvent::ToolInputDelta {
+                stream_id,
+                item_id,
+                name,
+                payload_delta: ToolInputDeltaPayload::CustomInput(delta),
+                ..
+            }) => {
+                assert_eq!(stream_id.as_deref(), Some("chat_tool_call:0"));
+                assert_eq!(item_id, "call_1");
+                assert_eq!(name.as_deref(), Some("apply_patch"));
+                assert_eq!(delta, "*** Begin Patch\n");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn process_chat_followup_tool_delta_keeps_stream_id_without_item_id() {
+        let event = chat_event(serde_json::json!({
+            "tool_calls": [{
+                "index": 0,
+                "function": {
+                    "arguments": "{\"path\":\"Cargo.toml\"}"
+                }
+            }]
+        }));
+
+        match single_event(&event) {
+            Some(ModelStreamEvent::ToolInputDelta {
+                stream_id,
+                item_id,
+                name,
+                payload_delta: ToolInputDeltaPayload::FunctionArguments(delta),
+                ..
+            }) => {
+                assert_eq!(stream_id.as_deref(), Some("chat_tool_call:0"));
+                assert_eq!(item_id, "");
+                assert_eq!(name, None);
+                assert_eq!(delta, "{\"path\":\"Cargo.toml\"}");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn process_responses_output_item_added_captures_tool_name() {
+        let event: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.output_item.added",
+            "item": {
+                "type": "custom_tool_call",
+                "id": "ctc_1",
+                "call_id": "call_1",
+                "name": "apply_patch"
+            }
+        }))
+        .unwrap();
+
+        match single_event(&event) {
+            Some(ModelStreamEvent::ToolInputStarted {
+                item_id,
+                call_id,
+                name,
+                payload_kind,
+                ..
+            }) => {
+                assert_eq!(item_id, "ctc_1");
+                assert_eq!(call_id.as_deref(), Some("call_1"));
+                assert_eq!(name.as_deref(), Some("apply_patch"));
+                assert_eq!(payload_kind, ToolInputPayloadKind::CustomInput);
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn responses_id_only_delta_populates_call_id() {
+        let event: SseStreamEvent = serde_json::from_value(serde_json::json!({
+            "type": "response.function_call_arguments.delta",
+            "item_id": "fc_1",
+            "delta": "{}"
+        }))
+        .unwrap();
+
+        assert!(matches!(
+            single_event(&event),
+            Some(ModelStreamEvent::ToolInputDelta { item_id, call_id: Some(call_id), .. })
+                if item_id == "fc_1" && call_id == "fc_1"
+        ));
+    }
+}

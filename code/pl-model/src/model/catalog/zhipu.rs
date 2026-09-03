@@ -449,3 +449,186 @@ fn zhipu_capabilities(input: Vec<ModelInputCapability>) -> ModelCapabilities {
         prompt_cache: PromptCacheModelCapabilities::default(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+    use crate::model::capabilities::{ModelInputSource, ModelModality};
+    use crate::model::info::{MediaRepresentation, MediaWireFormat};
+
+    #[test]
+    fn default_models_include_zhipu_glm_models_from_official_overview() {
+        let models = super::super::default_models();
+
+        for slug in [
+            "glm-5.3",
+            "glm-5.3-flash",
+            "glm-5.2",
+            "glm-5",
+            "glm-5-turbo",
+            "glm-4.7",
+            "glm-4.7-flashx",
+            "glm-4.6",
+            "glm-4.5-air",
+            "glm-4.5-airx",
+            "glm-4-long",
+            "glm-4-flashx-250414",
+            "glm-4.7-flash",
+            "glm-4.5-flash",
+            "glm-4-flash-250414",
+            "glm-5v-turbo",
+            "glm-4.6v",
+            "glm-4.1v-thinking-flashx",
+            "glm-4.6v-flash",
+            "glm-4.1v-thinking-flash",
+            "glm-4v-flash",
+        ] {
+            let model = models.iter().find(|model| model.slug == *slug).unwrap();
+
+            assert!(model.context_window.is_some());
+            assert!(model.max_output_tokens.is_some());
+            assert_eq!(model.currency, None);
+            if slug == "glm-5.2" {
+                assert_eq!(model.supported_efforts(), vec!["none", "high", "max"]);
+            } else if slug == "glm-5.3" || slug == "glm-5.3-flash" {
+                assert_eq!(model.supported_efforts(), vec!["low", "high", "max"]);
+            } else {
+                assert!(
+                    model
+                        .supported_efforts()
+                        .iter()
+                        .any(|effort| effort == "enabled")
+                );
+            }
+        }
+
+        let glm_52 = models.iter().find(|model| model.slug == "glm-5.2").unwrap();
+        assert_eq!(glm_52.display_name, "GLM-5.2");
+        assert_eq!(glm_52.context_window, Some(1_000_000));
+        assert_eq!(glm_52.max_output_tokens, Some(128_000));
+
+        let glm_53 = models.iter().find(|model| model.slug == "glm-5.3").unwrap();
+        assert_eq!(glm_53.display_name, "GLM-5.3");
+        assert_eq!(glm_53.context_window, Some(1_000_000));
+        assert_eq!(glm_53.max_output_tokens, Some(128_000));
+        assert_eq!(glm_53.default_effort().as_deref(), Some("low"));
+        assert!(
+            glm_53
+                .capabilities
+                .input
+                .iter()
+                .all(|capability| capability.modality == ModelModality::Text)
+        );
+
+        let glm_53_flash = models
+            .iter()
+            .find(|model| model.slug == "glm-5.3-flash")
+            .unwrap();
+        assert_eq!(glm_53_flash.display_name, "GLM-5.3-Flash");
+        assert_eq!(glm_53_flash.context_window, Some(1_000_000));
+        assert_eq!(glm_53_flash.max_output_tokens, Some(128_000));
+        assert_eq!(
+            glm_53_flash
+                .capabilities
+                .input
+                .iter()
+                .map(|capability| capability.modality)
+                .collect::<Vec<_>>(),
+            vec![ModelModality::Text, ModelModality::Image]
+        );
+        assert!(
+            glm_53_flash
+                .capabilities
+                .supports_input_modality(ModelModality::Image)
+        );
+        let image_capability = glm_53_flash
+            .capabilities
+            .input_capability(ModelModality::Image)
+            .unwrap();
+        assert_eq!(
+            image_capability.sources,
+            vec![ModelInputSource::Local, ModelInputSource::RemoteUrl]
+        );
+        let image_profile = glm_53_flash
+            .request_profile
+            .media_profile(ModelModality::Image)
+            .unwrap();
+        assert_eq!(image_profile.wire, MediaWireFormat::ChatImageUrl);
+        assert_eq!(
+            image_profile.first_send,
+            vec![MediaRepresentation::RemoteUrl, MediaRepresentation::DataUrl]
+        );
+        assert_eq!(image_profile.replay, vec![MediaRepresentation::DataUrl]);
+        assert!(
+            glm_53_flash
+                .request_profile
+                .media_profile(ModelModality::Video)
+                .is_none()
+        );
+        assert!(
+            glm_53_flash
+                .request_profile
+                .media_profile(ModelModality::File)
+                .is_none()
+        );
+
+        let glm_5v = models
+            .iter()
+            .find(|model| model.slug == "glm-5v-turbo")
+            .unwrap();
+        assert_eq!(
+            glm_5v
+                .capabilities
+                .input
+                .iter()
+                .map(|capability| capability.modality)
+                .collect::<Vec<_>>(),
+            vec![ModelModality::Text, ModelModality::Image]
+        );
+        assert!(
+            glm_5v
+                .capabilities
+                .supports_input_modality(ModelModality::Image)
+        );
+    }
+
+    #[test]
+    fn zhipu_default_model_list_excludes_phasing_out_glm_45_flash() {
+        assert_eq!(
+            zhipu_default_model_slugs(),
+            [
+                "glm-5.3",
+                "glm-5.3-flash",
+                "glm-5.2",
+                "glm-5",
+                "glm-5-turbo",
+                "glm-4.7",
+                "glm-4.7-flashx",
+                "glm-4.7-flash"
+            ]
+        );
+        assert!(!zhipu_default_model_slugs().contains(&"glm-4.5-flash"));
+        assert!(!zhipu_default_model_slugs().contains(&"glm-5v-turbo"));
+        assert!(
+            super::super::default_models()
+                .iter()
+                .any(|model| model.slug == "glm-4.5-flash")
+        );
+    }
+
+    /// GLM-5.3 系列的 effort 数据形状：候选 low/high/max 且没有禁用思考的
+    /// wire；`thinking.type` 的请求体联动由 runtime/openai 协议层测试覆盖。
+    #[test]
+    fn glm53_family_efforts_cannot_disable_thinking() {
+        let models = super::super::default_models();
+        for slug in ["glm-5.3", "glm-5.3-flash"] {
+            let model = models.iter().find(|model| model.slug == slug).unwrap();
+            let param = model.effort_parameter().unwrap();
+
+            assert_eq!(param.candidates, vec!["low", "high", "max"], "{slug}");
+            assert!(param.wire_for("none").is_none(), "{slug}");
+        }
+    }
+}

@@ -439,3 +439,251 @@ fn responses_content_for_message(
     }
     Ok(response_content)
 }
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+    use crate::model::info::{ModelInfo, ResponsesMaxTokensField};
+    use crate::runtime::openai::OpenAiProtocol;
+    use crate::runtime::openai::test_support::{bundled_model, request_with_effort};
+    use pl_protocol::ToolSpec;
+
+    #[test]
+    fn responses_parallel_tool_calls_wire_is_unchanged() {
+        let request = request_with_effort("high");
+        let model = ModelInfo::fallback("responses-compatible");
+
+        let body = OpenAiProtocol::responses().build_request_body_with_model(&request, &model);
+
+        assert_eq!(body["parallel_tool_calls"], serde_json::json!(true));
+    }
+
+    #[test]
+    fn responses_body_writes_effort_via_parameter_wire() {
+        let model = bundled_model("gpt-5.5");
+        let body = OpenAiProtocol::responses()
+            .build_request_body_with_model(&request_with_effort("high"), &model);
+
+        assert_eq!(body["reasoning"]["effort"], serde_json::json!("high"));
+    }
+
+    #[test]
+    fn responses_body_writes_gpt56_max_effort_via_parameter_wire() {
+        let model = bundled_model("gpt-5.6-sol");
+        let body = OpenAiProtocol::responses()
+            .build_request_body_with_model(&request_with_effort("max"), &model);
+
+        assert_eq!(body["reasoning"]["effort"], serde_json::json!("max"));
+    }
+
+    #[test]
+    fn responses_body_maps_enabled_reasoning_summary_to_auto() {
+        let model = bundled_model("gpt-5.5");
+        let mut request = request_with_effort("medium");
+        request.reasoning.as_mut().unwrap().summary = Some(ReasoningSummary::Enabled);
+
+        let body = OpenAiProtocol::responses().build_request_body_with_model(&request, &model);
+
+        assert_eq!(body["reasoning"]["summary"], serde_json::json!("auto"));
+    }
+
+    #[test]
+    fn responses_body_omits_disabled_reasoning_summary() {
+        let model = bundled_model("gpt-5.5");
+        let mut request = request_with_effort("medium");
+        request.reasoning.as_mut().unwrap().summary = Some(ReasoningSummary::Disabled);
+
+        let body = OpenAiProtocol::responses().build_request_body_with_model(&request, &model);
+
+        assert!(body["reasoning"].get("summary").is_none());
+    }
+
+    #[test]
+    fn request_codec_only_writes_invocation_prompt_cache_key_for_responses() {
+        let request = request_with_effort("medium");
+        let model = ModelInfo::fallback("gpt-5.5");
+
+        let responses_body = serde_json::to_value(
+            OpenAiProtocol::responses()
+                .build_request(&request, &model, Some("project-cache-key"))
+                .unwrap(),
+        )
+        .unwrap();
+        let chat_body = serde_json::to_value(
+            OpenAiProtocol::chat()
+                .build_request(&request, &model, Some("project-cache-key"))
+                .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(responses_body["store"], serde_json::json!(false));
+        assert!(responses_body.get("previous_response_id").is_none());
+        assert_eq!(
+            responses_body["prompt_cache_key"],
+            serde_json::json!("project-cache-key")
+        );
+        assert!(chat_body.get("store").is_none());
+        assert!(chat_body.get("previous_response_id").is_none());
+        assert!(chat_body.get("prompt_cache_key").is_none());
+    }
+
+    #[test]
+    fn responses_body_omits_profiled_max_tokens_by_default() {
+        let mut request = request_with_effort("medium");
+        request.max_tokens = Some(8192);
+
+        let body = OpenAiProtocol::responses().build_request_body(&request);
+
+        assert!(body.get("max_output_tokens").is_none());
+        assert!(body.get("max_tokens").is_none());
+        assert!(body.get("max_completion_tokens").is_none());
+    }
+
+    #[test]
+    fn responses_body_can_use_profiled_max_output_tokens_field() {
+        let mut model = ModelInfo::fallback("responses-like");
+        model.request_profile.responses_max_tokens_field = ResponsesMaxTokensField::MaxOutputTokens;
+        let mut request = request_with_effort("medium");
+        request.max_tokens = Some(8192);
+
+        let body = OpenAiProtocol::responses().build_request_body_with_model(&request, &model);
+
+        assert_eq!(body["max_output_tokens"], serde_json::json!(8192));
+        assert!(body.get("max_tokens").is_none());
+        assert!(body.get("max_completion_tokens").is_none());
+    }
+
+    #[test]
+    fn responses_body_can_use_profiled_compatible_max_tokens_fields() {
+        let mut request = request_with_effort("medium");
+        request.max_tokens = Some(8192);
+
+        let mut max_tokens_model = ModelInfo::fallback("responses-like");
+        max_tokens_model.request_profile.responses_max_tokens_field =
+            ResponsesMaxTokensField::MaxTokens;
+        let max_tokens_body =
+            OpenAiProtocol::responses().build_request_body_with_model(&request, &max_tokens_model);
+
+        let mut max_completion_model = ModelInfo::fallback("responses-like");
+        max_completion_model
+            .request_profile
+            .responses_max_tokens_field = ResponsesMaxTokensField::MaxCompletionTokens;
+        let max_completion_body = OpenAiProtocol::responses()
+            .build_request_body_with_model(&request, &max_completion_model);
+
+        assert_eq!(max_tokens_body["max_tokens"], serde_json::json!(8192));
+        assert!(max_tokens_body.get("max_output_tokens").is_none());
+        assert_eq!(
+            max_completion_body["max_completion_tokens"],
+            serde_json::json!(8192)
+        );
+        assert!(max_completion_body.get("max_output_tokens").is_none());
+    }
+
+    #[test]
+    fn responses_body_writes_custom_grammar_tool() {
+        let mut request = request_with_effort("xhigh");
+        request.tools = vec![ToolSpec::custom_grammar(
+            "apply_patch",
+            "edit files",
+            "lark",
+            "start: patch",
+        )];
+
+        let body = OpenAiProtocol::responses().build_request_body(&request);
+
+        assert_eq!(body["tools"][0]["type"], serde_json::json!("custom"));
+        assert_eq!(body["tools"][0]["name"], serde_json::json!("apply_patch"));
+        assert_eq!(
+            body["tools"][0]["format"],
+            serde_json::json!({
+                "type": "grammar",
+                "syntax": "lark",
+                "definition": "start: patch"
+            })
+        );
+    }
+
+    #[test]
+    fn responses_body_writes_programmatic_tool_callers() {
+        let model = bundled_model("gpt-5.6-sol");
+        let mut request = request_with_effort("xhigh");
+        let read_file = ToolSpec::function(
+            "read_file",
+            "read a file",
+            serde_json::json!({"type": "object"}),
+        )
+        .allow_programmatic(serde_json::json!({
+            "type": "object",
+            "additionalProperties": true
+        }));
+        request.tools = vec![read_file, ToolSpec::ProgrammaticToolCalling];
+
+        let body = OpenAiProtocol::responses().build_request_body_with_model(&request, &model);
+
+        assert_eq!(body["tools"][0]["type"], "function");
+        assert_eq!(body["tools"][0]["name"], "read_file");
+        assert_eq!(
+            body["tools"][0]["allowed_callers"],
+            serde_json::json!(["direct", "programmatic"])
+        );
+        assert_eq!(body["tools"][0]["output_schema"]["type"], "object");
+        assert_eq!(body["tools"][1]["type"], "programmatic_tool_calling");
+    }
+
+    #[test]
+    fn responses_body_writes_current_hosted_web_search_shape() {
+        let mut request = request_with_effort("xhigh");
+        request.tools = vec![ToolSpec::WebSearch {
+            dialect: pl_protocol::HostedWebSearchDialect::OpenAiResponses,
+            external_web_access: true,
+            indexed_web_access: Some(true),
+            filters: Some(pl_protocol::WebSearchFilters {
+                allowed_domains: vec!["example.com".to_string()],
+            }),
+            user_location: Some(pl_protocol::WebSearchUserLocation {
+                kind: pl_protocol::WebSearchUserLocationType::Approximate,
+                country: Some("US".to_string()),
+                region: Some("CA".to_string()),
+                city: None,
+                timezone: Some("America/Los_Angeles".to_string()),
+            }),
+            search_context_size: Some(pl_protocol::WebSearchContextSize::High),
+            search_content_types: None,
+        }];
+
+        let body = OpenAiProtocol::responses().build_request_body(&request);
+
+        assert_eq!(body["tools"][0]["type"], "web_search");
+        assert_eq!(body["tools"][0]["external_web_access"], true);
+        assert_eq!(body["tools"][0]["indexed_web_access"], true);
+        assert_eq!(
+            body["tools"][0]["filters"]["allowed_domains"][0],
+            "example.com"
+        );
+        assert_eq!(body["tools"][0]["user_location"]["type"], "approximate");
+        assert_eq!(body["tools"][0]["search_context_size"], "high");
+        assert!(body["tools"][0].get("search_content_types").is_none());
+    }
+
+    #[test]
+    fn deepseek_responses_body_writes_only_native_web_search_type() {
+        let mut request = request_with_effort("high");
+        request.tools = vec![ToolSpec::WebSearch {
+            dialect: pl_protocol::HostedWebSearchDialect::DeepSeekResponses,
+            external_web_access: true,
+            indexed_web_access: None,
+            filters: None,
+            user_location: None,
+            search_context_size: None,
+            search_content_types: None,
+        }];
+        let model = bundled_model("deepseek-v4-flash");
+
+        let body = OpenAiProtocol::responses().build_request_body_with_model(&request, &model);
+
+        assert_eq!(body["tools"], serde_json::json!([{"type": "web_search"}]));
+    }
+}

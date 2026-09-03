@@ -172,3 +172,134 @@ fn openai_capabilities() -> ModelCapabilities {
         prompt_cache: PromptCacheModelCapabilities::default(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct ExpectedModel {
+        display_name: &'static str,
+        max_context_window: u64,
+        efforts: &'static [&'static str],
+        default_effort: Option<&'static str>,
+    }
+
+    #[test]
+    fn openai_default_models_match_codex_metadata() {
+        let models = super::super::default_models();
+
+        assert_eq!(
+            openai_default_model_slugs(),
+            [
+                "gpt-5.5",
+                "gpt-5.4",
+                "gpt-5.4-mini",
+                "gpt-5.6-sol",
+                "gpt-5.6-terra",
+                "gpt-5.6-luna",
+            ]
+        );
+
+        let expectations = [
+            (
+                "gpt-5.5",
+                ExpectedModel {
+                    display_name: "GPT-5.5",
+                    max_context_window: 272_000,
+                    efforts: &["low", "medium", "high", "xhigh"],
+                    default_effort: Some("low"),
+                },
+            ),
+            (
+                "gpt-5.4",
+                ExpectedModel {
+                    display_name: "gpt-5.4",
+                    max_context_window: 1_000_000,
+                    efforts: &["low", "medium", "high", "xhigh"],
+                    default_effort: Some("low"),
+                },
+            ),
+            (
+                "gpt-5.4-mini",
+                ExpectedModel {
+                    display_name: "GPT-5.4-Mini",
+                    max_context_window: 272_000,
+                    efforts: &["low", "medium", "high", "xhigh"],
+                    default_effort: Some("low"),
+                },
+            ),
+            (
+                "gpt-5.6-sol",
+                ExpectedModel {
+                    display_name: "GPT-5.6-Sol",
+                    max_context_window: 272_000,
+                    efforts: &["low", "medium", "high", "xhigh", "max"],
+                    default_effort: Some("low"),
+                },
+            ),
+            (
+                "gpt-5.6-terra",
+                ExpectedModel {
+                    display_name: "GPT-5.6-Terra",
+                    max_context_window: 272_000,
+                    efforts: &["low", "medium", "high", "xhigh", "max"],
+                    default_effort: Some("low"),
+                },
+            ),
+            (
+                "gpt-5.6-luna",
+                ExpectedModel {
+                    display_name: "GPT-5.6-Luna",
+                    max_context_window: 272_000,
+                    efforts: &["low", "medium", "high", "xhigh", "max"],
+                    default_effort: Some("low"),
+                },
+            ),
+        ];
+
+        for (slug, expected) in expectations {
+            let model = models.iter().find(|model| model.slug == slug).unwrap();
+            assert_eq!(model.display_name, expected.display_name, "{slug}");
+            assert_eq!(model.context_window, Some(272_000), "{slug}");
+            assert_eq!(
+                model.max_context_window,
+                Some(expected.max_context_window),
+                "{slug}"
+            );
+            assert_eq!(model.max_output_tokens, None, "{slug}");
+            assert_eq!(model.supported_efforts(), expected.efforts, "{slug}");
+            assert_eq!(
+                model.default_effort().as_deref(),
+                expected.default_effort,
+                "{slug}"
+            );
+            assert_eq!(
+                model.truncation_policy.mode,
+                TruncationMode::Tokens,
+                "{slug}"
+            );
+            assert_eq!(model.truncation_policy.limit, 10_000, "{slug}");
+            assert!(model.capabilities.web_search, "{slug}");
+            assert!(model.capabilities.tools.freeform_tools, "{slug}");
+        }
+
+        // gpt-5.6 家族的 auto compact 统一为 272k × 0.9。
+        for slug in ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
+            let model = models.iter().find(|model| model.slug == slug).unwrap();
+            assert_eq!(model.resolved_auto_compact_limit(), Some(244_800), "{slug}");
+        }
+
+        for retired in [
+            "gpt-5.4-nano",
+            "gpt-5.3-codex",
+            "gpt-5.2",
+            "gpt-5.6",
+            "gpt-5.6-pro",
+        ] {
+            assert!(
+                !models.iter().any(|model| model.slug == retired),
+                "{retired} must stay retired"
+            );
+        }
+    }
+}
