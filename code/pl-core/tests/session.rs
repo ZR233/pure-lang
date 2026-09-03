@@ -1,9 +1,14 @@
-use super::tool_history::*;
+use std::collections::HashMap;
+
+use pl_core::session::tool_history::*;
 use pl_model::completion::ToolCall;
 
-use pl_protocol::{ThreadPromptSnapshot, ToolCallCaller, ToolCallKind, ToolResultRecord};
+use pl_protocol::{
+    AgentSessionSnapshot, PromptPrefixChangedReason, ResponsesContextItem, SessionNote,
+    ThreadPromptMetadata, ThreadPromptSnapshot, ToolCallCaller, ToolCallKind, ToolResultRecord,
+};
 
-use super::*;
+use pl_core::*;
 use pl_model::completion::CompletionResponse;
 use pl_protocol::TokenUsage;
 use pretty_assertions::assert_eq;
@@ -536,27 +541,6 @@ fn replace_messages_updates_history_and_revision() {
 }
 
 #[test]
-fn truncate_messages_keeps_prefix_and_invalidates_history_revision() {
-    let mut session = AgentSession::new();
-    session.push_user_prompt("first".to_string());
-    session.push_assistant_response("second".to_string(), None);
-    let note = session_note(4, "survives truncation");
-    session.replace_session_note(note.clone());
-    let original_revision = session.revision();
-
-    session.truncate_messages(1);
-
-    assert_eq!(session.revision(), original_revision + 1);
-    assert_eq!(session.len(), 1);
-    assert_eq!(session.messages()[0].role, MessageRole::User);
-    assert_eq!(
-        session.messages()[0].content,
-        MessageContent::text("first".to_string())
-    );
-    assert_eq!(session.session_note(), Some(&note));
-}
-
-#[test]
 fn compaction_preserves_note_and_child_forks_do_not_inherit_it() {
     let mut parent = AgentSession::from_messages(vec![text_message("before")]);
     let note = session_note(7, "important checkpoint");
@@ -595,24 +579,6 @@ fn deferred_tool_reveals_persist_in_session_but_child_forks_start_empty() {
 
     assert_eq!(restored.tool_discovery(), parent.tool_discovery());
     assert_eq!(child.tool_discovery(), &ToolDiscoveryState::default());
-}
-
-#[test]
-fn clone_shares_state_until_first_write() {
-    let mut original = AgentSession::from_messages(vec![text_message("shared")]);
-    let mut cloned = original.clone();
-
-    assert!(Arc::ptr_eq(&original.state, &cloned.state));
-
-    cloned.push_user_prompt("copy-on-write".to_string());
-
-    assert!(!Arc::ptr_eq(&original.state, &cloned.state));
-    assert_eq!(original.messages(), &[text_message("shared")]);
-    assert_eq!(cloned.messages().len(), 2);
-
-    original.set_prompt_cache_key("original-cache".to_string());
-    assert_eq!(original.prompt_cache_key(), Some("original-cache"));
-    assert_eq!(cloned.prompt_cache_key(), None);
 }
 
 fn session_note(revision: u64, content: &str) -> SessionNote {

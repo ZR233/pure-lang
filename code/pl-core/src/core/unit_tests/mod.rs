@@ -1,13 +1,9 @@
 use super::tool_dispatch::ToolExecutionOutcome;
 use super::*;
-use crate::ContextCompactionTrigger;
-use crate::tool::{
-    GlobalToolInheritance, StaticTool, ToolCallContext, ToolManager, ToolPolicy, ToolResult,
-};
+use crate::tool::{StaticTool, ToolCallContext, ToolPolicy, ToolResult};
 use crate::turn::PermissionMode;
 use pl_model::completion::ToolCall;
 
-use pl_model::completion::OpenAiCompactionMode;
 use pl_model::model::ModelInfo;
 use pl_model::provider::ProviderEndpoint;
 use pl_protocol::{
@@ -15,8 +11,6 @@ use pl_protocol::{
     ToolApprovalResolutionPayload,
 };
 use pl_trace::{TraceEventKind, TracePartKind, TracePartSource, TraceTextChannel};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpListener;
 
 fn test_static_tool_definition(
     name: &'static str,
@@ -188,188 +182,7 @@ mod approval;
 mod default_tools;
 mod errors;
 mod progress_emitter;
-mod run_turn;
 mod tool_execution;
-
-async fn serve_sse_once(sse_body: String) -> (String, tokio::task::JoinHandle<()>) {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let handle = tokio::spawn(async move {
-        let (mut socket, _) = listener.accept().await.unwrap();
-        let mut buffer = Vec::new();
-        let mut temp = [0_u8; 1024];
-        let (header_end, content_length) = loop {
-            let n = socket.read(&mut temp).await.unwrap();
-            assert_ne!(n, 0);
-            buffer.extend_from_slice(&temp[..n]);
-            if let Some(header_end) = buffer.windows(4).position(|window| window == b"\r\n\r\n") {
-                let headers = String::from_utf8_lossy(&buffer[..header_end]);
-                let content_length = headers
-                    .lines()
-                    .find_map(|line| {
-                        let (name, value) = line.split_once(':')?;
-                        name.eq_ignore_ascii_case("content-length")
-                            .then(|| value.trim().parse::<usize>().ok())?
-                    })
-                    .unwrap_or(0);
-                break (header_end, content_length);
-            }
-        };
-
-        while buffer.len() < header_end + 4 + content_length {
-            let n = socket.read(&mut temp).await.unwrap();
-            assert_ne!(n, 0);
-            buffer.extend_from_slice(&temp[..n]);
-        }
-
-        let response = format!(
-            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
-            sse_body.len(),
-            sse_body
-        );
-        socket.write_all(response.as_bytes()).await.unwrap();
-        socket.shutdown().await.unwrap();
-    });
-
-    (format!("http://{addr}"), handle)
-}
-
-async fn serve_sse_sequence(
-    sse_bodies: Vec<String>,
-) -> (
-    String,
-    std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
-    tokio::task::JoinHandle<()>,
-) {
-    serve_http_sequence(sse_bodies.into_iter().map(TestHttpResponse::sse).collect()).await
-}
-
-async fn serve_sse_sequence_with_raw_requests(
-    sse_bodies: Vec<String>,
-) -> (
-    String,
-    std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>,
-    tokio::task::JoinHandle<()>,
-) {
-    let raw_requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-    let (base_url, _json_bodies, handle) = serve_http_sequence_capturing(
-        sse_bodies.into_iter().map(TestHttpResponse::sse).collect(),
-        Some(raw_requests.clone()),
-    )
-    .await;
-    (base_url, raw_requests, handle)
-}
-
-struct TestHttpResponse {
-    status: u16,
-    content_type: &'static str,
-    body: String,
-}
-
-impl TestHttpResponse {
-    fn sse(body: String) -> Self {
-        Self {
-            status: 200,
-            content_type: "text/event-stream",
-            body,
-        }
-    }
-}
-
-async fn serve_http_sequence(
-    responses: Vec<TestHttpResponse>,
-) -> (
-    String,
-    std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
-    tokio::task::JoinHandle<()>,
-) {
-    serve_http_sequence_capturing(responses, None).await
-}
-
-async fn serve_http_sequence_capturing(
-    responses: Vec<TestHttpResponse>,
-    raw_requests: Option<std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>>,
-) -> (
-    String,
-    std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
-    tokio::task::JoinHandle<()>,
-) {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let bodies = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
-    let captured = bodies.clone();
-    let handle = tokio::spawn(async move {
-        for response in responses {
-            let (mut socket, _) = listener.accept().await.unwrap();
-            let mut buffer = Vec::new();
-            let mut temp = [0_u8; 1024];
-            let (header_end, content_length) = loop {
-                let n = socket.read(&mut temp).await.unwrap();
-                assert_ne!(n, 0);
-                buffer.extend_from_slice(&temp[..n]);
-                if let Some(header_end) = buffer.windows(4).position(|window| window == b"\r\n\r\n")
-                {
-                    let headers = String::from_utf8_lossy(&buffer[..header_end]);
-                    let content_length = headers
-                        .lines()
-                        .find_map(|line| {
-                            let (name, value) = line.split_once(':')?;
-                            name.eq_ignore_ascii_case("content-length")
-                                .then(|| value.trim().parse::<usize>().ok())?
-                        })
-                        .unwrap_or(0);
-                    break (header_end, content_length);
-                }
-            };
-
-            while buffer.len() < header_end + 4 + content_length {
-                let n = socket.read(&mut temp).await.unwrap();
-                assert_ne!(n, 0);
-                buffer.extend_from_slice(&temp[..n]);
-            }
-            let body = &buffer[header_end + 4..header_end + 4 + content_length];
-            if let Some(raw_requests) = &raw_requests {
-                raw_requests.lock().unwrap().push(body.to_vec());
-            }
-            captured
-                .lock()
-                .unwrap()
-                .push(serde_json::from_slice(body).unwrap());
-
-            let response = format!(
-                "HTTP/1.1 {} {}\r\ncontent-type: {}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
-                response.status,
-                if response.status >= 400 {
-                    "Error"
-                } else {
-                    "OK"
-                },
-                response.content_type,
-                response.body.len(),
-                response.body
-            );
-            socket.write_all(response.as_bytes()).await.unwrap();
-            socket.shutdown().await.unwrap();
-        }
-    });
-
-    (format!("http://{addr}"), bodies, handle)
-}
-
-fn trace_started_kinds(events: &[TraceEvent]) -> Vec<TracePartKind> {
-    events
-        .iter()
-        .filter_map(|event| match &event.kind {
-            TraceEventKind::TracePartStarted { item } => Some(item.kind()),
-            TraceEventKind::TracePartDelta { .. }
-            | TraceEventKind::TracePartCompleted { .. }
-            | TraceEventKind::TracePartFailed { .. }
-            | TraceEventKind::InteractionChanged { .. }
-            | TraceEventKind::SkillActivated { .. }
-            | TraceEventKind::EnabledToolsRecorded { .. } => None,
-        })
-        .collect()
-}
 
 fn record_enabled_tools_for_core(
     core: &TurnEngine,

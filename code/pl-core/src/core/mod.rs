@@ -600,3 +600,49 @@ use turn_result::{
 
 #[cfg(test)]
 mod unit_tests;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn enabled_tools_snapshot_remains_internal_trace_event() {
+        let mut core = test_turn_engine();
+        core.install_default_tools(std::env::temp_dir(), Some("rules".to_string()))
+            .await
+            .expect("install default tools");
+        let tool_plan = core.acquire_tool_plan();
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+        let mut recorder = crate::trace::TraceRecorder::new("session-1".to_string(), event_tx, 0);
+
+        super::turn_loop::enabled_tools::record_enabled_tools(
+            &mut recorder,
+            "turn-1",
+            0,
+            &tool_plan,
+        );
+        let events = recorder.drain();
+        let event = events
+            .iter()
+            .find_map(|event| match &event.kind {
+                pl_trace::TraceEventKind::EnabledToolsRecorded { event } => Some(event),
+                _ => None,
+            })
+            .expect("enabled tools event");
+
+        assert_eq!(event.turn_id, "turn-1");
+        assert!(event.tools.contains(&"read_file".to_string()));
+    }
+
+    fn test_turn_engine() -> TurnEngine {
+        TurnEngineBuilder::from_route(&crate::ResolvedModelRoute {
+            role: crate::AgentRoleId::new("test").unwrap(),
+            provider_id: crate::ProviderId::new("test").unwrap(),
+            endpoint: pl_model::provider::ProviderEndpoint::deepseek(None),
+            model: pl_model::model::ModelInfo::fallback("deepseek-v4-flash"),
+            effort: None,
+        })
+        .unwrap()
+        .build()
+    }
+}

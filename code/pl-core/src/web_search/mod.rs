@@ -461,6 +461,3 @@ fn path_label(path: WebSearchPath) -> &'static str {
         WebSearchPath::Hosted => "hosted",
     }
 }
-
-#[cfg(test)]
-mod unit_tests;

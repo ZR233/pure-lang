@@ -4,7 +4,10 @@ use std::sync::{Arc, Mutex};
 use pretty_assertions::assert_eq;
 use serde_json::json;
 
-use super::*;
+use pl_core::tool::{
+    ContainerBackend, ContainerCopyFromRequest, ContainerCopyToRequest, ContainerExecOutput,
+    ContainerExecRequest,
+};
 
 #[derive(Debug, Clone)]
 struct DisplayContainerError(&'static str);
@@ -117,10 +120,10 @@ async fn workspace_file_read_has_same_json_shape_for_local_and_container_backend
     tokio::fs::write(root.join("a.txt"), "one\ntwo\n")
         .await
         .unwrap();
-    let local = crate::tool::LocalWorkspaceFileBackend::new(root.clone(), false)
+    let local = pl_core::tool::LocalWorkspaceFileBackend::new(root.clone(), false)
         .await
         .unwrap();
-    let container = crate::tool::ContainerWorkspaceFileBackend::new(Arc::new(
+    let container = pl_core::tool::ContainerWorkspaceFileBackend::new(Arc::new(
         FakeWorkspaceContainerBackend::with_file("a.txt", "one\ntwo\n"),
     ));
     let input = json!({
@@ -129,17 +132,17 @@ async fn workspace_file_read_has_same_json_shape_for_local_and_container_backend
         "maxLines": 1,
     });
 
-    let local_output = crate::tool::execute_workspace_file_tool(
+    let local_output = pl_core::tool::execute_workspace_file_tool(
         &local,
-        crate::tool::WorkspaceFileToolKind::ReadFile.name(),
+        pl_core::tool::WorkspaceFileToolKind::ReadFile.name(),
         input.clone(),
     )
     .await
     .unwrap()
     .unwrap();
-    let container_output = crate::tool::execute_workspace_file_tool(
+    let container_output = pl_core::tool::execute_workspace_file_tool(
         &container,
-        crate::tool::WorkspaceFileToolKind::ReadFile.name(),
+        pl_core::tool::WorkspaceFileToolKind::ReadFile.name(),
         input,
     )
     .await
@@ -160,10 +163,10 @@ async fn workspace_file_apply_patch_has_same_json_shape_for_local_and_container_
             .as_nanos()
     ));
     tokio::fs::create_dir_all(&root).await.unwrap();
-    let local = crate::tool::LocalWorkspaceFileBackend::new(root.clone(), false)
+    let local = pl_core::tool::LocalWorkspaceFileBackend::new(root.clone(), false)
         .await
         .unwrap();
-    let container = crate::tool::ContainerWorkspaceFileBackend::new(Arc::new(
+    let container = pl_core::tool::ContainerWorkspaceFileBackend::new(Arc::new(
         FakeWorkspaceContainerBackend::default(),
     ));
     let input = json!({
@@ -171,17 +174,17 @@ async fn workspace_file_apply_patch_has_same_json_shape_for_local_and_container_
         "input": "*** Begin Patch\n*** Add File: src/lib.rs\n+pub fn ok() {}\n*** End Patch"
     });
 
-    let local_output = crate::tool::execute_workspace_file_tool(
+    let local_output = pl_core::tool::execute_workspace_file_tool(
         &local,
-        crate::tool::WorkspaceFileToolKind::ApplyPatch.name(),
+        pl_core::tool::WorkspaceFileToolKind::ApplyPatch.name(),
         input.clone(),
     )
     .await
     .unwrap()
     .unwrap();
-    let container_output = crate::tool::execute_workspace_file_tool(
+    let container_output = pl_core::tool::execute_workspace_file_tool(
         &container,
-        crate::tool::WorkspaceFileToolKind::ApplyPatch.name(),
+        pl_core::tool::WorkspaceFileToolKind::ApplyPatch.name(),
         input,
     )
     .await

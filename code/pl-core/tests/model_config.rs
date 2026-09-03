@@ -2,7 +2,10 @@ use std::collections::BTreeMap;
 
 use pretty_assertions::assert_eq;
 
-use super::*;
+use pl_core::{
+    AgentModelConfig, AgentRoleId, ModelRouteConfig, ProviderCapabilitySelection, ProviderConfig,
+    ProviderId, ProviderModelCatalogConfig, ReasoningEffort, builtin_provider_catalog,
+};
 use pl_model::model::ModelInfo;
 use pl_model::provider::{ProviderConnectionMode, ProviderEndpoint};
 

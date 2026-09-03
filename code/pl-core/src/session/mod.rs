@@ -572,4 +572,72 @@ impl AgentSession {
 }
 
 #[cfg(test)]
-mod unit_tests;
+mod unit_tests_inline {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use pl_protocol::{Message, MessageContent, MessageRole};
+    use pretty_assertions::assert_eq;
+
+    use super::AgentSession;
+
+    fn text_message(text: &str) -> Message {
+        Message {
+            presentation: Default::default(),
+            role: MessageRole::User,
+            content: MessageContent::text(text.to_string()),
+            reasoning_content: None,
+            tool_calls: None,
+            tool_result: None,
+            metadata: HashMap::new(),
+        }
+    }
+
+    fn session_note(revision: u64, content: &str) -> pl_protocol::SessionNote {
+        pl_protocol::SessionNote {
+            revision,
+            content: content.to_string(),
+            content_hash: crate::working_set::canonical_content_hash(content.as_bytes()),
+            updated_at: 1,
+        }
+    }
+
+    #[test]
+    fn truncate_messages_keeps_prefix_and_invalidates_history_revision() {
+        let mut session = AgentSession::new();
+        session.push_user_prompt("first".to_string());
+        session.push_assistant_response("second".to_string(), None);
+        let note = session_note(4, "survives truncation");
+        session.replace_session_note(note.clone());
+        let original_revision = session.revision();
+
+        session.truncate_messages(1);
+
+        assert_eq!(session.revision(), original_revision + 1);
+        assert_eq!(session.len(), 1);
+        assert_eq!(session.messages()[0].role, MessageRole::User);
+        assert_eq!(
+            session.messages()[0].content,
+            MessageContent::text("first".to_string())
+        );
+        assert_eq!(session.session_note(), Some(&note));
+    }
+
+    #[test]
+    fn clone_shares_state_until_first_write() {
+        let mut original = AgentSession::from_messages(vec![text_message("shared")]);
+        let mut cloned = original.clone();
+
+        assert!(Arc::ptr_eq(&original.state, &cloned.state));
+
+        cloned.push_user_prompt("copy-on-write".to_string());
+
+        assert!(!Arc::ptr_eq(&original.state, &cloned.state));
+        assert_eq!(original.messages(), &[text_message("shared")]);
+        assert_eq!(cloned.messages().len(), 2);
+
+        original.set_prompt_cache_key("original-cache".to_string());
+        assert_eq!(original.prompt_cache_key(), Some("original-cache"));
+        assert_eq!(cloned.prompt_cache_key(), None);
+    }
+}

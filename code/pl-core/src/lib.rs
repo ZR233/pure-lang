@@ -96,10 +96,11 @@ pub use pl_protocol::{
     PinnedContextSection, PipelineStage, ProviderCatalogSnapshot, ProviderConnectionModeDescriptor,
     ProviderPresetDescriptor, ProviderServiceCapabilitiesDescriptor, PureError, Result,
     RetryDisposition, RuntimeCostAmount, RuntimeUsageSnapshot, SkillActivation,
-    ThreadModeCatalogSnapshot, ThreadModeDescriptor, ThreadModeId, TokenUsageSnapshot,
-    ToolApprovalResolution, ToolDiscoveryState, ToolResultReceipt, ToolSpec, TurnFailure,
-    TurnFailureCategory, UserInputAnswer, UserInputRequest, UserInputResponse, UserQuestion,
-    UserQuestionOption, WorkflowDefinition, WorkflowState, WorkflowStateKind, WorkflowTransition,
+    ThreadModeCatalogSnapshot, ThreadModeDescriptor, ThreadModeId, ThreadSnapshot,
+    TokenUsageSnapshot, ToolApprovalResolution, ToolDiscoveryState, ToolResultReceipt, ToolSpec,
+    TurnFailure, TurnFailureCategory, UserInputAnswer, UserInputRequest, UserInputResponse,
+    UserQuestion, UserQuestionOption, WorkflowDefinition, WorkflowState, WorkflowStateKind,
+    WorkflowTransition,
 };
 pub(crate) use prompt_cache::{
     PromptCacheInput, derive_prompt_cache_key, prepare_prompt_context, stable_tool_schemas,

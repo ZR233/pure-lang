@@ -1,9 +1,9 @@
 use pretty_assertions::assert_eq;
 
-use super::*;
-use crate::{
-    AgentRoleId, ModelRouteConfig, ProviderCapabilitySelection, ProviderConfig,
-    ProviderModelCatalogConfig, ReasoningEffort,
+use pl_core::{
+    AgentModelConfig, AgentRoleId, ModelRouteConfig, ProviderCapabilitySelection, ProviderConfig,
+    ProviderId, ProviderModelCatalogConfig, ReasoningEffort, ToolVisibilityConstraint,
+    WebSearchAvailability, WebSearchBackendKind, WebSearchPath, plan_web_search, plan_web_searches,
 };
 use pl_model::completion::WebSearchConfig;
 use pl_model::model::{ModelInfo, ModelTransportProfile};
@@ -38,7 +38,7 @@ fn models_with_current(provider: ProviderConfig, model: ModelInfo) -> AgentModel
 }
 
 fn openai_provider_with_secret() -> ProviderConfig {
-    let mut provider = crate::builtin_provider_catalog()
+    let mut provider = pl_core::builtin_provider_catalog()
         .presets
         .into_iter()
         .find(|preset| preset.id.as_str() == "openai")

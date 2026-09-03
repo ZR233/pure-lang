@@ -1,13 +1,13 @@
 use pl_protocol::{
     CompletedTurnState, RunningTurnState, ThreadContentLifecycle, ThreadContextDisposition,
     ThreadItem, ThreadItemDelta, ThreadItemDeltaState, ThreadItemState, ThreadNotification,
-    ThreadNotificationEnvelope, ThreadSubscriptionRequest, ThreadSubscriptionUpdate,
-    ThreadTextChannel, ThreadTextItem, ThreadTurnHistory, Turn, TurnCompletion, TurnPhase,
-    TurnState,
+    ThreadNotificationEnvelope, ThreadSnapshot, ThreadSubscriptionRequest,
+    ThreadSubscriptionUpdate, ThreadTextChannel, ThreadTextItem, ThreadTurnHistory, Turn,
+    TurnCompletion, TurnPhase, TurnState,
 };
 use tokio::time::{Duration, timeout};
 
-use super::*;
+use pl_core::*;
 
 #[tokio::test]
 async fn subscription_registers_before_returning_snapshot() {
@@ -401,70 +401,6 @@ fn active_turn(phase: TurnPhase) -> Turn {
         state: TurnState::Running(RunningTurnState::new(1, phase)),
         updated_at: 1,
     }
-}
-
-#[tokio::test]
-async fn bus_assigns_monotonic_ordinals_and_normalizes_broadcast() {
-    // 唯一排序者不变式：新 item 由总线按到达序分配 max+1；更新保留首次
-    // 分配值；广播/规范化通知携带最终 ordinal（DB 与订阅者同源）。
-    let bus = ThreadEventBus::new(ThreadEventOptions::default());
-    bus.replace_snapshot(ThreadSnapshot::empty("thread-1"))
-        .unwrap();
-    let handle = bus.handle();
-
-    let user_a = notification(
-        1,
-        ThreadNotification::ItemCompleted {
-            item: Box::new(user_message_item("turn-1:user", 0)),
-        },
-    );
-    let user_b = notification(
-        2,
-        ThreadNotification::ItemCompleted {
-            item: Box::new(user_message_item("turn-2:user", 0)),
-        },
-    );
-    let projection = handle
-        .project("thread-1", &[user_a, user_b])
-        .expect("projection");
-    let ordinals = projection
-        .notifications
-        .iter()
-        .filter_map(|envelope| match &envelope.notification {
-            ThreadNotification::ItemCompleted { item } => Some(item.ordinal),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(ordinals, vec![1, 2], "user inputs get arrival ordinals");
-
-    // 广播后快照顺序：用户消息按分配序排列。
-    handle
-        .publish_batch(projection.notifications.clone())
-        .await
-        .unwrap();
-    let snapshot = handle.snapshot("thread-1").unwrap();
-    let ids = snapshot
-        .items
-        .iter()
-        .map(|item| item.id.as_str())
-        .collect::<Vec<_>>();
-    assert_eq!(ids, vec!["turn-1:user", "turn-2:user"]);
-
-    // 更新已存在 item：载荷 revision 提升但 ordinal 保持首次分配值。
-    let updated = notification(
-        3,
-        ThreadNotification::ItemCompleted {
-            item: Box::new(user_message_item("turn-1:user", 99)),
-        },
-    );
-    handle.publish_batch(vec![updated.clone()]).await.unwrap();
-    let snapshot = handle.snapshot("thread-1").unwrap();
-    let first = snapshot.items.first().unwrap();
-    assert_eq!(first.id, "turn-1:user");
-    assert_eq!(
-        first.ordinal, 1,
-        "ordinal is immutable after first assignment"
-    );
 }
 
 #[tokio::test]

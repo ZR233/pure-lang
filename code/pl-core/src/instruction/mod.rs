@@ -11,6 +11,3 @@ pub use types::{
     ExecutionInstructionProfile, InstructionAssemblyRequest, InstructionBlock, InstructionBundle,
     InstructionSnapshot, InstructionSource, InstructionSourceKind, SkillSuggestionRequest,
 };
-
-#[cfg(test)]
-mod unit_tests;

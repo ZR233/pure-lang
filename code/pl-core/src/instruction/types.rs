@@ -163,3 +163,79 @@ fn push_non_empty(blocks: &mut Vec<InstructionBlock>, source: InstructionSource,
         content: content.to_string(),
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+    use pl_protocol::MessageRole;
+
+    #[test]
+    fn bundle_orders_fixed_layers_from_global_to_workspace() {
+        let snapshot = InstructionSnapshot {
+            base: InstructionBlock {
+                source: InstructionSource::new(InstructionSourceKind::BuiltInBase, "base"),
+                content: "base".to_string(),
+            },
+            developer: vec![
+                InstructionBlock {
+                    source: InstructionSource::new(InstructionSourceKind::Platform, "platform"),
+                    content: "platform".to_string(),
+                },
+                InstructionBlock {
+                    source: InstructionSource::new(InstructionSourceKind::ExecutionProfile, "mode"),
+                    content: "mode".to_string(),
+                },
+                InstructionBlock {
+                    source: InstructionSource::new(InstructionSourceKind::Skills, "skills"),
+                    content: "skills".to_string(),
+                },
+            ],
+            user: vec![
+                InstructionBlock {
+                    source: InstructionSource::new(InstructionSourceKind::ConfigUser, "user"),
+                    content: "global user".to_string(),
+                },
+                InstructionBlock {
+                    source: InstructionSource::new(InstructionSourceKind::ProjectDoc, "project"),
+                    content: "workspace".to_string(),
+                },
+            ],
+        };
+
+        let bundle = snapshot.to_bundle();
+
+        assert_eq!(bundle.instructions, "base");
+        assert_eq!(bundle.prelude_messages.len(), 5);
+        assert_eq!(
+            bundle
+                .prelude_messages
+                .iter()
+                .map(|message| message.role)
+                .collect::<Vec<_>>(),
+            vec![
+                MessageRole::System,
+                MessageRole::User,
+                MessageRole::System,
+                MessageRole::System,
+                MessageRole::User,
+            ]
+        );
+        assert_eq!(
+            bundle
+                .prelude_messages
+                .iter()
+                .map(|message| message.content.text_value())
+                .map(|text| text.lines().next().unwrap_or_default().to_string())
+                .collect::<Vec<_>>(),
+            vec![
+                "# Global Developer Instructions".to_string(),
+                "# Global User Context".to_string(),
+                "# Mode and Role Instructions".to_string(),
+                "# Skill Instructions".to_string(),
+                "# Workspace Context".to_string(),
+            ]
+        );
+    }
+}

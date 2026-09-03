@@ -1,6 +1,32 @@
-use super::*;
-use pl_protocol::MessagePresentation;
+#![allow(linker_messages)]
+
+mod support;
+
+use std::collections::HashMap;
+
 use pretty_assertions::assert_eq;
+
+use support::{
+    TestHttpResponse, route, serve_http_sequence, serve_sse_once, serve_sse_sequence,
+    serve_sse_sequence_with_raw_requests,
+};
+
+use pl_core::tool::{
+    AgentToolSet, BeforeModelStepHook, DynTool, GlobalToolInheritance, StaticTool,
+    StaticToolDefinition, ToolCallContext, ToolGroupId, ToolInstallGroup, ToolManager, ToolName,
+    ToolPolicy, ToolResult,
+};
+use pl_core::turn::TurnBudget;
+use pl_core::{
+    AgentSession, ContextCompactionConfig, ContextCompactionPhase, ContextCompactionTrigger,
+    CoreRuntimeProfile, ManualContextCompactionRequest, ModelTurnClient, ModelTurnOptions,
+    ModelTurnRequest, PureError, TraceRecorder, TurnEngineBuilder, TurnOptions, TurnRequest,
+};
+use pl_model::completion::OpenAiCompactionMode;
+use pl_model::model::ModelInfo;
+use pl_model::provider::ProviderEndpoint;
+use pl_protocol::{Message, MessageContent, MessagePresentation, MessageRole};
+use pl_trace::{TraceEvent, TraceEventKind, TracePartKind, TracePartSource, TraceTextChannel};
 
 #[tokio::test]
 async fn run_turn_records_user_trace_part_before_internal_parts() {
@@ -23,9 +49,8 @@ async fn run_turn_records_user_trace_part_before_internal_parts() {
     let result = core
         .run_turn_with_trace(
             &mut session,
-            TurnRequest::new("Build the thing".to_string()).with_budget(
-                crate::turn::TurnBudget::new(std::time::Duration::from_millis(60_000)),
-            ),
+            TurnRequest::new("Build the thing".to_string())
+                .with_budget(TurnBudget::new(std::time::Duration::from_millis(60_000))),
             &mut recorder,
             TurnOptions::default(),
         )
@@ -68,50 +93,6 @@ async fn run_turn_records_user_trace_part_before_internal_parts() {
 }
 
 #[tokio::test]
-async fn hidden_turn_input_remains_in_provider_context_and_session_protocol() {
-    let sse_body = concat!(
-        "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\"}}\n\n",
-        "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"ok\"}\n\n",
-        "data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\",\"content\":[{\"type\":\"output_text\",\"text\":\"ok\"}]}}\n\n",
-        "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n",
-        "data: [DONE]\n\n"
-    )
-    .to_string();
-    let (base_url, requests, handle) = serve_sse_sequence(vec![sse_body]).await;
-    let mut endpoint = ProviderEndpoint::openai(Some(base_url));
-    endpoint.bearer_token = Some("test-token".to_string());
-    let core = test_turn_engine_builder(endpoint, local_responses_model()).build();
-    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(32);
-    let mut recorder = TraceRecorder::new("session-hidden".to_string(), event_tx, 0);
-    let mut session = AgentSession::new();
-
-    core.run_turn_with_trace(
-        &mut session,
-        TurnRequest::new("# Approved Plan\n\nImplement it.")
-            .with_user_presentation(MessagePresentation::Hidden),
-        &mut recorder,
-        TurnOptions::default(),
-    )
-    .await
-    .unwrap();
-    handle.await.unwrap();
-
-    let user = session
-        .messages()
-        .iter()
-        .find(|message| message.role == MessageRole::User)
-        .expect("hidden user message remains canonical");
-    assert_eq!(user.presentation, MessagePresentation::Hidden);
-    let requests = requests.lock().unwrap();
-    assert!(
-        requests[0]
-            .to_string()
-            .contains("# Approved Plan\\n\\nImplement it."),
-        "Hidden controls GUI projection, not provider delivery"
-    );
-}
-
-#[tokio::test]
 async fn run_turn_emits_runtime_progress_commentary() {
     let sse_body = concat!(
         "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"phase\":\"final_answer\"}}\n\n",
@@ -132,9 +113,8 @@ async fn run_turn_emits_runtime_progress_commentary() {
     let result = core
         .run_turn_with_trace(
             &mut session,
-            TurnRequest::new("Build the thing".to_string()).with_budget(
-                crate::turn::TurnBudget::new(std::time::Duration::from_millis(60_000)),
-            ),
+            TurnRequest::new("Build the thing".to_string())
+                .with_budget(TurnBudget::new(std::time::Duration::from_millis(60_000))),
             &mut recorder,
             TurnOptions::default(),
         )
@@ -178,9 +158,8 @@ async fn run_turn_persists_only_final_text_to_session_history() {
     let result = core
         .run_turn_with_trace(
             &mut session,
-            TurnRequest::new("Build the thing".to_string()).with_budget(
-                crate::turn::TurnBudget::new(std::time::Duration::from_millis(60_000)),
-            ),
+            TurnRequest::new("Build the thing".to_string())
+                .with_budget(TurnBudget::new(std::time::Duration::from_millis(60_000))),
             &mut recorder,
             TurnOptions::default(),
         )
@@ -240,9 +219,7 @@ async fn run_turn_exposes_context_compaction_snapshot() {
             &mut session,
             TurnRequest::new("continue".to_string())
                 .with_turn_id("turn-compaction")
-                .with_budget(crate::turn::TurnBudget::new(
-                    std::time::Duration::from_millis(60_000),
-                )),
+                .with_budget(TurnBudget::new(std::time::Duration::from_millis(60_000))),
             &mut recorder,
             TurnOptions::default(),
         )
@@ -326,24 +303,13 @@ async fn manual_compaction_runs_standalone_for_single_message_and_resets_history
     assert_eq!(snapshot.phase, ContextCompactionPhase::Standalone);
     assert_eq!(snapshot.summary.as_deref(), Some("manual summary"));
     assert_eq!(session.revision(), original_revision + 1);
-    assert!(session.messages().last().is_some_and(|message| {
-        message
-            .metadata
-            .contains_key(crate::context_compaction::SUMMARY_METADATA_KEY)
-    }));
-}
-
-#[tokio::test]
-async fn enabled_tools_snapshot_remains_internal_trace_event() {
-    let mut core = test_turn_engine();
-    core.install_default_tools(std::env::temp_dir(), Some("rules".to_string()))
-        .await
-        .expect("install default tools");
-    let events = record_enabled_tools_for_core(&core, "session-1", "turn-1");
-    let event = enabled_tools_event(&events);
-
-    assert_eq!(event.turn_id, "turn-1");
-    assert!(event.tools.contains(&"read_file".to_string()));
+    // 持久化 wire 契约：压缩摘要消息以 context_compaction metadata 键标记。
+    assert!(
+        session
+            .messages()
+            .last()
+            .is_some_and(|message| message.metadata.contains_key("context_compaction"))
+    );
 }
 
 #[tokio::test]
@@ -378,13 +344,13 @@ async fn before_model_step_adds_replaces_and_removes_tools_for_the_next_step() {
         match context.step {
             0 => context
                 .agent_tools
-                .install(crate::tool::ToolInstallGroup::direct(
+                .install(pl_core::tool::ToolInstallGroup::direct(
                     group,
                     vec![step_tool("step_alpha", "alpha")],
                 ))?,
             1 => context
                 .agent_tools
-                .install(crate::tool::ToolInstallGroup::direct(
+                .install(pl_core::tool::ToolInstallGroup::direct(
                     group,
                     vec![step_tool("step_beta", "beta")],
                 ))?,
@@ -406,9 +372,8 @@ async fn before_model_step_adds_replaces_and_removes_tools_for_the_next_step() {
     let result = core
         .run_turn_with_trace(
             &mut session,
-            TurnRequest::new("exercise dynamic tools".to_string()).with_budget(
-                crate::turn::TurnBudget::new(std::time::Duration::from_millis(60_000)),
-            ),
+            TurnRequest::new("exercise dynamic tools".to_string())
+                .with_budget(TurnBudget::new(std::time::Duration::from_millis(60_000))),
             &mut recorder,
             TurnOptions::default(),
         )
@@ -451,7 +416,7 @@ async fn model_transport_retry_reuses_the_same_frozen_tool_plan() {
             hook_refreshes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             context
                 .agent_tools
-                .install(crate::tool::ToolInstallGroup::direct(
+                .install(pl_core::tool::ToolInstallGroup::direct(
                     ToolGroupId::new("retry"),
                     vec![step_tool("retry_visible", "retry")],
                 ))
@@ -468,9 +433,8 @@ async fn model_transport_retry_reuses_the_same_frozen_tool_plan() {
     let result = core
         .run_turn_with_trace(
             &mut session,
-            TurnRequest::new("retry once".to_string()).with_budget(crate::turn::TurnBudget::new(
-                std::time::Duration::from_millis(60_000),
-            )),
+            TurnRequest::new("retry once".to_string())
+                .with_budget(TurnBudget::new(std::time::Duration::from_millis(60_000))),
             &mut recorder,
             TurnOptions::default(),
         )
@@ -504,7 +468,7 @@ async fn randomized_registration_order_keeps_full_provider_request_bytes_identic
         let manager = ToolManager::new();
         let agent_tools = manager.agent_tool_set("root", GlobalToolInheritance::Isolated);
         agent_tools
-            .install(crate::tool::ToolInstallGroup::direct(
+            .install(pl_core::tool::ToolInstallGroup::direct(
                 ToolGroupId::new("wire"),
                 permutation
                     .into_iter()
@@ -552,7 +516,7 @@ async fn each_step_trace_pairs_tool_fingerprint_with_reported_provider_cache_usa
     let manager = ToolManager::new();
     let agent_tools = manager.agent_tool_set("root", GlobalToolInheritance::Isolated);
     agent_tools
-        .install(crate::tool::ToolInstallGroup::direct(
+        .install(pl_core::tool::ToolInstallGroup::direct(
             ToolGroupId::new("trace"),
             vec![step_tool("trace_visible", "ok")],
         ))
@@ -659,9 +623,8 @@ async fn responses_http_uses_prompt_cache_and_full_canonical_history() {
 
     core.run_turn_with_trace(
         &mut session,
-        TurnRequest::new("first prompt".to_string()).with_budget(crate::turn::TurnBudget::new(
-            std::time::Duration::from_millis(60_000),
-        )),
+        TurnRequest::new("first prompt".to_string())
+            .with_budget(TurnBudget::new(std::time::Duration::from_millis(60_000))),
         &mut recorder,
         options.clone(),
     )
@@ -669,9 +632,8 @@ async fn responses_http_uses_prompt_cache_and_full_canonical_history() {
     .unwrap();
     core.run_turn_with_trace(
         &mut session,
-        TurnRequest::new("second prompt".to_string()).with_budget(crate::turn::TurnBudget::new(
-            std::time::Duration::from_millis(60_000),
-        )),
+        TurnRequest::new("second prompt".to_string())
+            .with_budget(TurnBudget::new(std::time::Duration::from_millis(60_000))),
         &mut recorder,
         options,
     )
@@ -721,9 +683,8 @@ async fn run_turn_uses_runtime_profile_default_turn_options() {
 
     core.run_turn(
         &mut session,
-        TurnRequest::new("profile prompt".to_string()).with_budget(crate::turn::TurnBudget::new(
-            std::time::Duration::from_millis(60_000),
-        )),
+        TurnRequest::new("profile prompt".to_string())
+            .with_budget(TurnBudget::new(std::time::Duration::from_millis(60_000))),
     )
     .await
     .unwrap();
@@ -763,9 +724,8 @@ async fn run_turn_http_sends_full_history_without_a_retry_path() {
     let result = core
         .run_turn_with_trace(
             &mut session,
-            TurnRequest::new("new prompt".to_string()).with_budget(crate::turn::TurnBudget::new(
-                std::time::Duration::from_millis(60_000),
-            )),
+            TurnRequest::new("new prompt".to_string())
+                .with_budget(TurnBudget::new(std::time::Duration::from_millis(60_000))),
             &mut recorder,
             TurnOptions::default().with_prompt_cache_key("cache-session".to_string()),
         )
@@ -936,10 +896,14 @@ async fn tool_context_keeps_full_session_history_across_responses_http_requests(
     let (base_url, bodies, handle) = serve_sse_sequence(responses).await;
     let mut endpoint = ProviderEndpoint::openai(Some(base_url));
     endpoint.bearer_token = Some("test-token".to_string());
-    let mut core = test_turn_engine_builder(endpoint, local_responses_model()).build();
-    core.register_test_tool(HistoryMarkerTool);
+    let manager = ToolManager::new();
+    let agent_tools = manager.agent_tool_set("root", GlobalToolInheritance::Isolated);
+    let core = test_turn_engine_builder(endpoint, local_responses_model())
+        .with_agent_tool_set(agent_tools.clone())
+        .build();
+    install_test_tool(&agent_tools, HistoryMarkerTool);
     let session_runtime = core.tool_session_runtime();
-    core.register_test_tool(ParentHistoryProbeTool { session_runtime });
+    install_test_tool(&agent_tools, ParentHistoryProbeTool { session_runtime });
     let (event_tx, _) = tokio::sync::broadcast::channel(32);
     let mut recorder = TraceRecorder::new("session-history".to_string(), event_tx, 0);
     let mut session = AgentSession::new();
@@ -947,9 +911,8 @@ async fn tool_context_keeps_full_session_history_across_responses_http_requests(
     let result = core
         .run_turn_with_trace(
             &mut session,
-            TurnRequest::new("check tool history".to_string()).with_budget(
-                crate::turn::TurnBudget::new(std::time::Duration::from_millis(60_000)),
-            ),
+            TurnRequest::new("check tool history".to_string())
+                .with_budget(TurnBudget::new(std::time::Duration::from_millis(60_000))),
             &mut recorder,
             TurnOptions::default(),
         )
@@ -1005,8 +968,12 @@ async fn ending_tool_content_is_published_as_the_canonical_final_trace_item() {
     .await;
     let mut endpoint = ProviderEndpoint::openai(Some(base_url));
     endpoint.bearer_token = Some("test-token".to_string());
-    let mut core = test_turn_engine_builder(endpoint, local_responses_model()).build();
-    core.register_test_tool(EndTurnContentTool);
+    let manager = ToolManager::new();
+    let agent_tools = manager.agent_tool_set("root", GlobalToolInheritance::Isolated);
+    install_test_tool(&agent_tools, EndTurnContentTool);
+    let core = test_turn_engine_builder(endpoint, local_responses_model())
+        .with_agent_tool_set(agent_tools)
+        .build();
     let (event_tx, _) = tokio::sync::broadcast::channel(32);
     let mut recorder = TraceRecorder::new("session-end-turn-content".to_string(), event_tx, 0);
     let mut session = AgentSession::new();
@@ -1014,9 +981,8 @@ async fn ending_tool_content_is_published_as_the_canonical_final_trace_item() {
     let result = core
         .run_turn_with_trace(
             &mut session,
-            TurnRequest::new("finish with a visible marker".to_string()).with_budget(
-                crate::turn::TurnBudget::new(std::time::Duration::from_millis(60_000)),
-            ),
+            TurnRequest::new("finish with a visible marker".to_string())
+                .with_budget(TurnBudget::new(std::time::Duration::from_millis(60_000))),
             &mut recorder,
             TurnOptions::default(),
         )
@@ -1065,8 +1031,12 @@ async fn large_tool_artifact_does_not_break_tool_history_or_evidence() {
     let (base_url, bodies, handle) = serve_sse_sequence(responses).await;
     let mut endpoint = ProviderEndpoint::openai(Some(base_url));
     endpoint.bearer_token = Some("test-token".to_string());
-    let mut core = test_turn_engine_builder(endpoint, local_responses_model()).build();
-    core.register_test_tool(LargeArtifactTool);
+    let manager = ToolManager::new();
+    let agent_tools = manager.agent_tool_set("root", GlobalToolInheritance::Isolated);
+    install_test_tool(&agent_tools, LargeArtifactTool);
+    let core = test_turn_engine_builder(endpoint, local_responses_model())
+        .with_agent_tool_set(agent_tools)
+        .build();
     let (event_tx, _) = tokio::sync::broadcast::channel(32);
     let mut recorder = TraceRecorder::new("session-large-artifact".to_string(), event_tx, 0);
     let mut session = AgentSession::new();
@@ -1074,9 +1044,8 @@ async fn large_tool_artifact_does_not_break_tool_history_or_evidence() {
     let result = core
         .run_turn_with_trace(
             &mut session,
-            TurnRequest::new("check a large artifact".to_string()).with_budget(
-                crate::turn::TurnBudget::new(std::time::Duration::from_millis(60_000)),
-            ),
+            TurnRequest::new("check a large artifact".to_string())
+                .with_budget(TurnBudget::new(std::time::Duration::from_millis(60_000))),
             &mut recorder,
             TurnOptions::default(),
         )
@@ -1112,11 +1081,15 @@ async fn capture_default_tools_request() -> serde_json::Value {
         .find(|model| model.slug == "gpt-5.6-sol")
         .unwrap();
     model.transport.default_connection_mode = pl_model::provider::ProviderConnectionMode::Http;
-    let mut core = test_turn_engine_builder(endpoint, model).build();
+    let manager = ToolManager::new();
+    let agent_tools = manager.agent_tool_set("root", GlobalToolInheritance::Isolated);
+    install_test_tool(&agent_tools, HostedToolProbe);
+    let mut core = test_turn_engine_builder(endpoint, model)
+        .with_agent_tool_set(agent_tools)
+        .build();
     core.install_default_tools(std::env::temp_dir(), Some("rules".to_string()))
         .await
         .expect("install default tools");
-    core.register_test_tool(HostedToolProbe);
     let (event_tx, _) = tokio::sync::broadcast::channel(32);
     let mut recorder = TraceRecorder::new("session-hosted-tools".to_string(), event_tx, 0);
     let mut session = AgentSession::new();
@@ -1124,9 +1097,8 @@ async fn capture_default_tools_request() -> serde_json::Value {
     let result = core
         .run_turn_with_trace(
             &mut session,
-            TurnRequest::new("check hosted tools".to_string()).with_budget(
-                crate::turn::TurnBudget::new(std::time::Duration::from_millis(60_000)),
-            ),
+            TurnRequest::new("check hosted tools".to_string())
+                .with_budget(TurnBudget::new(std::time::Duration::from_millis(60_000))),
             &mut recorder,
             TurnOptions::default(),
         )
@@ -1148,12 +1120,12 @@ fn local_responses_model() -> pl_model::model::ModelInfo {
 #[serde(deny_unknown_fields)]
 struct StepToolInput {}
 
-fn step_tool(name: &'static str, output: &'static str) -> crate::tool::DynTool {
-    crate::tool::static_tool::<StepToolInput>(crate::tool::StaticToolDefinition::new(
-        crate::tool::ToolName::bare(name).unwrap(),
+fn step_tool(name: &'static str, output: &'static str) -> pl_core::tool::DynTool {
+    pl_core::tool::static_tool::<StepToolInput>(pl_core::tool::StaticToolDefinition::new(
+        pl_core::tool::ToolName::bare(name).unwrap(),
         name,
     ))
-    .policy(crate::tool::ToolPolicy::read_only())
+    .policy(pl_core::tool::ToolPolicy::read_only())
     .build(move |_input, _context| async move { Ok(ToolResult::success(output)) })
 }
 
@@ -1181,7 +1153,7 @@ struct EndTurnContentTool;
 impl StaticTool for HostedToolProbe {
     type Input = serde_json::Value;
 
-    fn definition(&self) -> crate::tool::StaticToolDefinition {
+    fn definition(&self) -> pl_core::tool::StaticToolDefinition {
         test_static_tool_definition(
             "git_status",
             "Provides a read-only hosted tool orchestration probe",
@@ -1200,19 +1172,19 @@ impl StaticTool for HostedToolProbe {
         ToolPolicy::read_only()
     }
 
-    fn execute(
+    async fn execute(
         &self,
         _input: Self::Input,
         _context: ToolCallContext,
-    ) -> impl std::future::Future<Output = crate::Result<ToolResult>> + Send {
-        async { Ok(ToolResult::success("clean")) }
+    ) -> pl_core::Result<ToolResult> {
+        Ok(ToolResult::success("clean"))
     }
 }
 
 impl StaticTool for LargeArtifactTool {
     type Input = serde_json::Value;
 
-    fn definition(&self) -> crate::tool::StaticToolDefinition {
+    fn definition(&self) -> pl_core::tool::StaticToolDefinition {
         test_static_tool_definition("large_artifact", "Returns a large artifact payload")
     }
 
@@ -1228,30 +1200,28 @@ impl StaticTool for LargeArtifactTool {
         ToolPolicy::default()
     }
 
-    fn execute(
+    async fn execute(
         &self,
         _input: Self::Input,
         _context: ToolCallContext,
-    ) -> impl std::future::Future<Output = crate::Result<ToolResult>> + Send {
-        async {
-            let mut result = ToolResult::success("large artifact ready");
-            result
-                .runtime_events
-                .push(crate::tool::ToolDirective::OutputArtifacts {
-                    artifacts: vec![serde_json::json!({
+    ) -> pl_core::Result<ToolResult> {
+        let mut result = ToolResult::success("large artifact ready");
+        result
+            .runtime_events
+            .push(pl_core::tool::ToolDirective::OutputArtifacts {
+                artifacts: vec![serde_json::json!({
                         "kind": "largeArtifact",
                         "payload": "x".repeat(64 * 1024),
-                    })],
-                });
-            Ok(result)
-        }
+                })],
+            });
+        Ok(result)
     }
 }
 
 impl StaticTool for EndTurnContentTool {
     type Input = serde_json::Value;
 
-    fn definition(&self) -> crate::tool::StaticToolDefinition {
+    fn definition(&self) -> pl_core::tool::StaticToolDefinition {
         test_static_tool_definition(
             "end_turn_content",
             "Ends the turn with canonical final assistant content",
@@ -1270,22 +1240,20 @@ impl StaticTool for EndTurnContentTool {
         ToolPolicy::default()
     }
 
-    fn execute(
+    async fn execute(
         &self,
         _input: Self::Input,
         _context: ToolCallContext,
-    ) -> impl std::future::Future<Output = crate::Result<ToolResult>> + Send {
-        async {
-            Ok(crate::tool::ToolResult::success("completed")
-                .ending_turn_with_content("TASK_E2E_DONE"))
-        }
+    ) -> pl_core::Result<ToolResult> {
+        Ok(pl_core::tool::ToolResult::success("completed")
+            .ending_turn_with_content("TASK_E2E_DONE"))
     }
 }
 
 impl StaticTool for HistoryMarkerTool {
     type Input = serde_json::Value;
 
-    fn definition(&self) -> crate::tool::StaticToolDefinition {
+    fn definition(&self) -> pl_core::tool::StaticToolDefinition {
         test_static_tool_definition("history_marker", "Records a marker in tool history")
     }
 
@@ -1301,24 +1269,24 @@ impl StaticTool for HistoryMarkerTool {
         ToolPolicy::default()
     }
 
-    fn execute(
+    async fn execute(
         &self,
         _input: Self::Input,
         _context: ToolCallContext,
-    ) -> impl std::future::Future<Output = crate::Result<ToolResult>> + Send {
-        async { Ok(ToolResult::success("history marker")) }
+    ) -> pl_core::Result<ToolResult> {
+        Ok(ToolResult::success("history marker"))
     }
 }
 
 #[derive(Debug)]
 struct ParentHistoryProbeTool {
-    session_runtime: crate::tool::ToolSessionRuntime,
+    session_runtime: pl_core::tool::ToolSessionRuntime,
 }
 
 impl StaticTool for ParentHistoryProbeTool {
     type Input = serde_json::Value;
 
-    fn definition(&self) -> crate::tool::StaticToolDefinition {
+    fn definition(&self) -> pl_core::tool::StaticToolDefinition {
         test_static_tool_definition(
             "parent_history_probe",
             "Reports whether prior tool history is visible",
@@ -1337,25 +1305,23 @@ impl StaticTool for ParentHistoryProbeTool {
         ToolPolicy::default()
     }
 
-    fn execute(
+    async fn execute(
         &self,
         _input: Self::Input,
         _context: ToolCallContext,
-    ) -> impl std::future::Future<Output = crate::Result<ToolResult>> + Send {
-        async move {
-            let parent_session = self.session_runtime.parent_session();
-            let marker_visible = parent_session.messages().iter().any(|message| {
-                message
-                    .tool_result
-                    .as_ref()
-                    .is_some_and(|record| record.name == "history_marker")
-            });
-            Ok(ToolResult::success(if marker_visible {
-                "history marker visible"
-            } else {
-                "history marker missing"
-            }))
-        }
+    ) -> pl_core::Result<ToolResult> {
+        let parent_session = self.session_runtime.parent_session();
+        let marker_visible = parent_session.messages().iter().any(|message| {
+            message
+                .tool_result
+                .as_ref()
+                .is_some_and(|record| record.name == "history_marker")
+        });
+        Ok(ToolResult::success(if marker_visible {
+            "history marker visible"
+        } else {
+            "history marker missing"
+        }))
     }
 }
 
@@ -1497,4 +1463,73 @@ fn final_sse(id: &str, content: &str) -> String {
     .map(|event| format!("data: {event}\n\n"))
     .chain(std::iter::once("data: [DONE]\n\n".to_string()))
     .collect()
+}
+
+fn test_route(endpoint: ProviderEndpoint, model: ModelInfo) -> pl_core::ResolvedModelRoute {
+    route("test", endpoint, model, None)
+}
+
+fn test_turn_engine_builder(endpoint: ProviderEndpoint, model: ModelInfo) -> TurnEngineBuilder {
+    TurnEngineBuilder::from_route(&test_route(endpoint, model)).unwrap()
+}
+
+fn test_static_tool_definition(
+    name: &'static str,
+    description: &'static str,
+) -> StaticToolDefinition {
+    StaticToolDefinition::new(
+        ToolName::bare(name).expect("builtin tool name"),
+        description,
+    )
+}
+
+fn install_test_tool(agent_tools: &AgentToolSet, tool: impl Into<DynTool>) {
+    let tool = tool.into();
+    let name = tool.definition().name().wire_name().to_string();
+    agent_tools
+        .install(ToolInstallGroup::direct(
+            ToolGroupId::new(format!("test:{name}")),
+            vec![tool],
+        ))
+        .expect("install test tool");
+}
+
+fn trace_started_kinds(events: &[TraceEvent]) -> Vec<TracePartKind> {
+    events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            TraceEventKind::TracePartStarted { item } => Some(item.kind()),
+            TraceEventKind::TracePartDelta { .. }
+            | TraceEventKind::TracePartCompleted { .. }
+            | TraceEventKind::TracePartFailed { .. }
+            | TraceEventKind::InteractionChanged { .. }
+            | TraceEventKind::SkillActivated { .. }
+            | TraceEventKind::EnabledToolsRecorded { .. } => None,
+        })
+        .collect()
+}
+
+fn runtime_progress_texts(
+    event_rx: &mut tokio::sync::broadcast::Receiver<pl_trace::AgentEvent>,
+) -> Vec<String> {
+    let mut progress_texts = Vec::new();
+    while let Ok(event) = event_rx.try_recv() {
+        match event {
+            pl_trace::AgentEvent::TracePartCompleted { item }
+                if item.source() == TracePartSource::Runtime
+                    && item
+                        .text()
+                        .is_some_and(|text| text.channel() == TraceTextChannel::Commentary) =>
+            {
+                progress_texts.push(
+                    item.text()
+                        .expect("runtime commentary text")
+                        .content()
+                        .to_string(),
+                );
+            }
+            _ => {}
+        }
+    }
+    progress_texts
 }
