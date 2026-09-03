@@ -62,10 +62,14 @@ provider 适配实现可以依赖 `async-openai`、`reqwest`、`tokio-tungstenit
 
 公开 API 按四个稳定域模块组织：`completion`（canonical 请求/响应、工具调用、用量与流语义）、
 `model`（模型元数据、能力、可调参数与内置目录）、`provider`（endpoint、wire 协议与服务能力声明）、
-`runtime`（单模型运行时与会话）。消费方通过 `pl_model::<domain>::` 前缀访问类型，crate 根不重导出
-类型，同一公开接口只有域级一条 canonical 路径。`pl-model` 不转发 `pl-protocol` 的类型
-（如 `TokenUsage`、`ToolSpec`、`ToolFormat`、`HostedWebSearchDialect`、`WebSearchFilters` 等），
-跨 crate 消费方直接依赖 `pl-protocol`。
+`runtime`（单模型运行时与会话）。消费方通过 `pl_model::<domain>::` 前缀访问类型，crate 根
+不重导出本 crate 自有类型，同一公开接口只有域级一条 canonical 路径（错误基础类型
+`PureError`/`Result` 在根重导出）。
+
+各域精确重导出其公共签名中出现的 `pl-protocol` 类型：公共类型字段与公共方法签名直接使用的
+依赖类型（如 `CompletionRequest.tools` 的 `ToolSpec`、`CompletionResponse.usage` 的 `TokenUsage`、
+`WebSearchProviderCapabilities.hosted_dialect` 的 `HostedWebSearchDialect`）必须能从本 crate 导入，
+消费方只依赖 `pl-model` 即可命名完整签名；禁止与公共签名无关的成套镜像转发。
 
 ## 7.3 模型能力
 

@@ -79,6 +79,14 @@ pub use model_config::{
     builtin_model_catalog, builtin_provider_catalog, provider_service_capabilities_descriptor,
 };
 
+// 公共签名（model_config 字段、ModelTurnRequest builder、ToolDefinition::spec 等）
+// 使用的 pl-model 类型在此重导出，消费方无需直接依赖 pl-model。
+pub use pl_model::completion::ReasoningConfig;
+pub use pl_model::model::ModelInfo;
+pub use pl_model::provider::{
+    ApplyPatchToolType, ProviderConnectionMode, ProviderEndpoint, ProviderServiceCapabilities,
+    ToolWirePolicy,
+};
 pub use pl_protocol::{
     AgentRuntimeDelta, AttachmentModality, BudgetLimitKind, BudgetUsage, ContentPart,
     ContextSectionId, ErrorSeverity, InteractionChangedEvent, InteractionContent, InteractionKind,
@@ -88,7 +96,7 @@ pub use pl_protocol::{
     PipelineStage, ProviderCatalogSnapshot, ProviderConnectionModeDescriptor,
     ProviderPresetDescriptor, ProviderServiceCapabilitiesDescriptor, PureError, Result,
     RetryDisposition, RuntimeCostAmount, RuntimeUsageSnapshot, SkillActivation, TokenUsageSnapshot,
-    ToolApprovalResolution, ToolDiscoveryState, ToolResultReceipt, TurnFailure,
+    ToolApprovalResolution, ToolDiscoveryState, ToolResultReceipt, ToolSpec, TurnFailure,
     TurnFailureCategory, UserInputAnswer, UserInputRequest, UserInputResponse, UserQuestion,
     UserQuestionOption,
 };
@@ -125,3 +133,23 @@ pub use workspace::{
     WorkspaceInstructionDocument, WorkspaceInstructions, load_workspace_instruction_documents,
     resolve_workspace_root,
 };
+
+#[cfg(test)]
+mod signature_reexport_tests {
+    //! 编译期契约：公共签名中出现的 pl-model / pl-protocol 类型必须能从本 crate
+    //! 导入（如 `ResolvedModelRoute` 字段、`ModelTurnRequest` builder 与
+    //! `ToolDefinition::spec`），消费方只依赖 pl-core 即可命名完整签名。
+
+    #[test]
+    fn dependency_types_in_public_signatures_stay_importable() {
+        fn assert_nameable<T>() {}
+        assert_nameable::<crate::ReasoningConfig>();
+        assert_nameable::<crate::ModelInfo>();
+        assert_nameable::<crate::ApplyPatchToolType>();
+        assert_nameable::<crate::ProviderConnectionMode>();
+        assert_nameable::<crate::ProviderEndpoint>();
+        assert_nameable::<crate::ProviderServiceCapabilities>();
+        assert_nameable::<crate::ToolWirePolicy>();
+        assert_nameable::<crate::ToolSpec>();
+    }
+}

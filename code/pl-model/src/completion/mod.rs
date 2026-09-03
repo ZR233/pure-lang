@@ -4,6 +4,9 @@
 //! `tool_call`/`tool_schema` 承载工具调用与 schema,`compaction` 承载远程压缩,
 //! `usage` 承载 token 用量与 reasoning 配置,`stream`/`tool_arguments`/
 //! `visible_text`/`web_search` 为既有子域。
+//!
+//! 本域公共类型字段与公共方法签名中出现的 `pl-protocol` 类型在下方精确重导出，
+//! 消费方只需依赖 `pl-model` 即可命名完整签名。
 
 pub(crate) mod compaction;
 pub(crate) mod request;
@@ -17,6 +20,12 @@ mod visible_text;
 mod web_search;
 
 pub use compaction::*;
+pub use pl_protocol::{
+    AttachmentModality, ContentPart, InferenceOrchestrationMetrics, InferenceTiming, Message,
+    MessageContent, MessageRole, ModelContextItem, PureError, ResponsesContextItem, Result,
+    TokenUsage, ToolCallCaller, ToolCallKind, ToolSpec, WebSearchContextSize, WebSearchFilters,
+    WebSearchUserLocation,
+};
 pub use request::*;
 pub use response::*;
 pub use tool_call::*;

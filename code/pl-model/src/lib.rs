@@ -7,13 +7,17 @@
 //! - [`provider`]：endpoint、wire 协议与服务能力声明。
 //! - [`runtime`]：单模型运行时入口与会话状态。
 //!
-//! 消费方通过 `pl_model::<domain>::` 前缀访问类型；crate 根不重导出类型，
-//! 也不转发 `pl-protocol` 的类型，跨 crate 消费方直接依赖 `pl-protocol`。
+//! 消费方通过 `pl_model::<domain>::` 前缀访问类型；crate 根不重导出本 crate 的
+//! 自有类型（同一接口只有域级一条 canonical 路径）。各域精确重导出其公共签名中
+//! 出现的 `pl-protocol` 类型，错误基础类型（`PureError`/`Result`）在根重导出，
+//! 消费方无需为命名完整签名而额外依赖 `pl-protocol`。
 
 pub mod completion;
 pub mod model;
 pub mod provider;
 pub mod runtime;
+
+pub use pl_protocol::{PureError, Result};
 
 #[cfg(test)]
 mod tests {
@@ -71,18 +75,44 @@ mod tests {
     }
 
     #[test]
-    fn crate_root_exports_only_domain_namespaces() {
+    fn crate_root_exports_only_domain_namespaces_and_error_aliases() {
         let lib_rs =
             std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs"))
                 .unwrap();
         let outside_tests = lib_rs.split("#[cfg(test)]").next().unwrap_or_default();
+        let allowed = "pub use pl_protocol::{PureError, Result};";
+        let stripped = outside_tests.replace(allowed, "");
         assert!(
-            !outside_tests.contains("pub use"),
-            "crate root must not re-export types; use pl_model::<domain>:: paths instead"
+            !stripped.contains("pub use"),
+            "crate root must not re-export own types; use pl_model::<domain>:: paths instead"
         );
-        assert!(
-            !outside_tests.contains("pl_protocol"),
-            "crate root must not forward pl-protocol types; depend on pl-protocol directly"
-        );
+    }
+
+    /// 编译期契约：公共签名中出现的 pl-protocol 类型必须能从本 crate 导入，
+    /// 消费方只依赖 pl-model 即可命名完整签名；删除任一重导出会使本测试编译失败。
+    #[test]
+    fn dependency_types_in_public_signatures_stay_importable() {
+        fn assert_nameable<T>() {}
+        assert_nameable::<crate::completion::AttachmentModality>();
+        assert_nameable::<crate::completion::ContentPart>();
+        assert_nameable::<crate::completion::InferenceOrchestrationMetrics>();
+        assert_nameable::<crate::completion::InferenceTiming>();
+        assert_nameable::<crate::completion::Message>();
+        assert_nameable::<crate::completion::MessageContent>();
+        assert_nameable::<crate::completion::MessageRole>();
+        assert_nameable::<crate::completion::ModelContextItem>();
+        assert_nameable::<crate::completion::PureError>();
+        assert_nameable::<crate::completion::ResponsesContextItem>();
+        assert_nameable::<crate::completion::Result<()>>();
+        assert_nameable::<crate::completion::TokenUsage>();
+        assert_nameable::<crate::completion::ToolCallCaller>();
+        assert_nameable::<crate::completion::ToolCallKind>();
+        assert_nameable::<crate::completion::ToolSpec>();
+        assert_nameable::<crate::completion::WebSearchContextSize>();
+        assert_nameable::<crate::completion::WebSearchFilters>();
+        assert_nameable::<crate::completion::WebSearchUserLocation>();
+        assert_nameable::<crate::provider::HostedWebSearchDialect>();
+        assert_nameable::<crate::PureError>();
+        assert_nameable::<crate::Result<()>>();
     }
 }
