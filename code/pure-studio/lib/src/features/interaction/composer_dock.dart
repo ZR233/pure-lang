@@ -15,6 +15,7 @@ import '../../shared/studio_driver_state.dart';
 import '../../shared/upward_popup_menu.dart';
 import '../status/session_selectors.dart';
 import 'interaction_payload.dart';
+import 'plan_confirmation_dock.dart';
 import 'tool_approval_dock.dart';
 import 'user_input_dock.dart';
 
@@ -712,10 +713,19 @@ class _InteractionDock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final payload = InteractionPayloadSnapshot.from(interaction);
     final trailing = workspace.isBusy
         ? _StopButton(threadId: workspace.threadId)
         : null;
+    final plan = interaction.planConfirmation;
+    if (plan != null) {
+      return PlanConfirmationDock(
+        threadId: workspace.threadId,
+        plan: plan,
+        enabled: enabled,
+        trailing: trailing,
+      );
+    }
+    final payload = InteractionPayloadSnapshot.from(interaction);
     return switch (interaction.kind) {
       InteractionKind.toolApproval => ToolApprovalDock(
         threadId: workspace.threadId,

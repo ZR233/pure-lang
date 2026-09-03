@@ -118,6 +118,216 @@ void registerInteractionTests() {
     );
   });
 
+  test('only the canonical Plan question derives Plan presentation', () {
+    final interaction = _planConfirmationInteraction();
+
+    expect(interaction.planConfirmation?.title, 'Plan review layout');
+    expect(
+      interaction.planConfirmation?.summary,
+      'Keep the timeline compact while the full plan stays readable.',
+    );
+    expect(
+      const PendingInteraction(
+        id: 'ordinary-input',
+        threadId: 'session-1',
+        turnId: 'turn-1',
+        kind: InteractionKind.userInput,
+        title: 'Question',
+        body: 'Continue?',
+        payload: UserInputInteractionPayload(
+          questions: [
+            UserQuestionView(
+              id: 'ordinary_question',
+              header: 'Question',
+              question: 'Continue?',
+              isOther: false,
+              isSecret: false,
+              options: [],
+            ),
+          ],
+        ),
+      ).planConfirmation,
+      isNull,
+    );
+  });
+
+  testWidgets(
+    'Plan confirmation renders a timeline summary, detail panel, and replacement composer',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final api = _FakeStudioApi(_stateWithPlanConfirmation());
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [studioApiProvider.overrideWithValue(api)],
+          child: _localizedApp(home: const StudioShell()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(StudioDriverKeys.planSummary), findsOneWidget);
+      expect(find.byKey(StudioDriverKeys.planDetails), findsOneWidget);
+      expect(find.byKey(StudioDriverKeys.planDetailsScroll), findsOneWidget);
+      expect(find.byKey(StudioDriverKeys.planFeedbackInput), findsOneWidget);
+      expect(find.byKey(StudioDriverKeys.planApprove), findsOneWidget);
+      expect(find.byKey(StudioDriverKeys.composerInput), findsNothing);
+      expect(find.byKey(StudioDriverKeys.userInputFirstOption), findsNothing);
+
+      final timelineScrollable = find
+          .descendant(
+            of: find.byKey(StudioDriverKeys.timeline),
+            matching: find.byType(Scrollable),
+          )
+          .first;
+      final detailsScrollable = find
+          .descendant(
+            of: find.byKey(StudioDriverKeys.planDetailsScroll),
+            matching: find.byType(Scrollable),
+          )
+          .first;
+      final timelineBefore = tester
+          .state<ScrollableState>(timelineScrollable)
+          .position
+          .pixels;
+      await tester.drag(
+        find.byKey(StudioDriverKeys.planDetailsScroll),
+        const Offset(0, -260),
+      );
+      await tester.pumpAndSettle();
+      final detailsBeforeClose = tester
+          .state<ScrollableState>(detailsScrollable)
+          .position
+          .pixels;
+      expect(detailsBeforeClose, greaterThan(0));
+      expect(
+        tester.state<ScrollableState>(timelineScrollable).position.pixels,
+        timelineBefore,
+      );
+
+      await tester.tap(find.byKey(StudioDriverKeys.planDetailsClose));
+      await tester.pumpAndSettle();
+      expect(find.byKey(StudioDriverKeys.planDetails), findsNothing);
+
+      await tester.tap(find.byKey(StudioDriverKeys.planSummary));
+      await tester.pumpAndSettle();
+      expect(find.byKey(StudioDriverKeys.planDetails), findsOneWidget);
+      final restoredDetailsScrollable = find
+          .descendant(
+            of: find.byKey(StudioDriverKeys.planDetailsScroll),
+            matching: find.byType(Scrollable),
+          )
+          .first;
+      expect(
+        tester
+            .state<ScrollableState>(restoredDetailsScrollable)
+            .position
+            .pixels,
+        closeTo(detailsBeforeClose, 0.5),
+      );
+    },
+  );
+
+  testWidgets('Plan revision submits one unambiguous typed answer', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _FakeStudioApi(_stateWithPlanConfirmation());
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(StudioDriverKeys.planFeedbackInput),
+      'Keep the panel narrower and preserve its scroll position.',
+    );
+    await tester.pump();
+    expect(
+      tester
+          .widget<OutlinedButton>(
+            find.byKey(StudioDriverKeys.planSubmitRevision),
+          )
+          .onPressed,
+      isNotNull,
+    );
+    await tester.tap(find.byKey(StudioDriverKeys.planSubmitRevision));
+    await tester.pumpAndSettle();
+
+    expect(api.resolvedInteractionId, 'plan-confirmation');
+    expect(api.resolvedInteraction, {
+      'type': 'userInput',
+      'answers': {
+        agentSessionPlanConfirmationQuestionId: {
+          'answers': [
+            agentSessionPlanReviseAnswer,
+            'Keep the panel narrower and preserve its scroll position.',
+          ],
+        },
+      },
+    });
+    expect(find.byKey(StudioDriverKeys.planFeedbackInput), findsNothing);
+    expect(find.byKey(StudioDriverKeys.composerInput), findsOneWidget);
+  });
+
+  testWidgets('Plan approval submits Approve without revision text', (
+    tester,
+  ) async {
+    final api = _FakeStudioApi(_stateWithPlanConfirmation());
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(StudioDriverKeys.planApprove));
+    await tester.pumpAndSettle();
+
+    expect(api.resolvedInteraction, {
+      'type': 'userInput',
+      'answers': {
+        agentSessionPlanConfirmationQuestionId: {
+          'answers': [agentSessionPlanApproveAnswer],
+        },
+      },
+    });
+  });
+
+  testWidgets('compact Plan details overlay only the timeline', (tester) async {
+    tester.view.physicalSize = const Size(760, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _FakeStudioApi(_stateWithPlanConfirmation());
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    final details = tester.getRect(find.byKey(StudioDriverKeys.planDetails));
+    final response = tester.getRect(
+      find.byKey(StudioDriverKeys.planFeedbackInput),
+    );
+    expect(details.bottom, lessThanOrEqualTo(response.top));
+  });
+
   test('interaction selection is scoped to the selected Thread', () {
     final state = _rootAndChildState();
 
@@ -189,4 +399,80 @@ void registerInteractionTests() {
     );
     expect(api.resolveInteractionCount, 1);
   });
+}
+
+const _planMarkdown = '''
+# Plan review layout
+
+Keep the timeline compact while the full plan stays readable.
+
+## Implementation
+
+1. Project a compact summary into the timeline.
+2. Open the full Markdown in an independently scrolling side panel.
+3. Replace the normal composer with Plan revision and approval actions.
+
+## Interaction details
+
+- Keep the Plan body read-only.
+- Preserve the timeline scroll position when the detail panel opens.
+- Preserve the Plan detail scroll position when the panel closes.
+- Keep the Plan feedback composer visible below the timeline.
+- Do not expose the normal message composer while confirmation is pending.
+
+## Responsive behavior
+
+- Use a side-by-side panel when both panes remain readable.
+- Overlay only the timeline at compact widths.
+- Keep the Plan feedback composer outside the overlay.
+
+## Verification
+
+- Cover wide and compact layouts.
+- Preserve the durable UserInput resolution contract.
+''';
+
+PendingInteraction _planConfirmationInteraction() {
+  return const PendingInteraction(
+    id: 'plan-confirmation',
+    threadId: 'session-1',
+    turnId: 'turn-plan',
+    kind: InteractionKind.userInput,
+    title: 'Plan',
+    body: _planMarkdown,
+    payload: UserInputInteractionPayload(
+      questions: [
+        UserQuestionView(
+          id: agentSessionPlanConfirmationQuestionId,
+          header: 'Plan',
+          question: _planMarkdown,
+          isOther: true,
+          isSecret: false,
+          options: [
+            UserQuestionOptionView(
+              label: agentSessionPlanApproveAnswer,
+              description: 'Approve this exact Plan.',
+            ),
+            UserQuestionOptionView(
+              label: agentSessionPlanReviseAnswer,
+              description: 'Request a revised Plan.',
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
+}
+
+StudioState _stateWithPlanConfirmation() {
+  final initial = _emptyState();
+  final threadId = initial.selectedThreadId!;
+  return initial.copyWith(
+    workspacesByThread: {
+      ...initial.workspacesByThread,
+      threadId: initial.selectedWorkspace!.copyWith(
+        interactions: [_planConfirmationInteraction()],
+      ),
+    },
+  );
 }

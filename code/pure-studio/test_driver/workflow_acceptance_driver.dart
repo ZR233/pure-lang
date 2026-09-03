@@ -699,38 +699,31 @@ Future<void> _answerClarification(FlutterDriverSession session) async {
 }
 
 Future<void> _requestPlanRevision(FlutterDriverSession session) async {
-  const revisionOption = 'user-input-option-plan_confirmation-1';
   await session.waitFor(
-    find.byValueKey(revisionOption),
+    find.byValueKey('plan-feedback-input'),
     timeout: const Duration(seconds: 20),
   );
-  await session.tap(find.byValueKey(revisionOption));
-  await session.waitFor(find.byValueKey('user-input-first-text'));
-  await session.tap(find.byValueKey('user-input-first-text'));
+  await session.tap(find.byValueKey('plan-feedback-input'));
   await session.enterText('请补充多目录隔离并行执行、结果整合和验证顺序的具体步骤。');
-  await session.tap(find.byValueKey('user-input-submit'));
+  await session.tap(find.byValueKey('plan-submit-revision'));
 }
 
 Future<void> _requestPlanOnlyRevision(FlutterDriverSession session) async {
-  const revisionOption = 'user-input-option-plan_confirmation-1';
   await session.waitFor(
-    find.byValueKey(revisionOption),
+    find.byValueKey('plan-feedback-input'),
     timeout: const Duration(seconds: 20),
   );
-  await session.tap(find.byValueKey(revisionOption));
-  await session.waitFor(find.byValueKey('user-input-first-text'));
-  await session.tap(find.byValueKey('user-input-first-text'));
+  await session.tap(find.byValueKey('plan-feedback-input'));
   await session.enterText('请补充每个文件的明确归属、实施顺序、回归测试先红后绿、失败处理和最终证据。');
-  await session.tap(find.byValueKey('user-input-submit'));
+  await session.tap(find.byValueKey('plan-submit-revision'));
 }
 
 Future<void> _approvePlan(FlutterDriverSession session) async {
   await session.waitFor(
-    find.byValueKey('user-input-first-option'),
+    find.byValueKey('plan-approve'),
     timeout: const Duration(seconds: 20),
   );
-  await session.tap(find.byValueKey('user-input-first-option'));
-  await session.tap(find.byValueKey('user-input-submit'));
+  await session.tap(find.byValueKey('plan-approve'));
 }
 
 Future<void> _waitForInteractionChange(

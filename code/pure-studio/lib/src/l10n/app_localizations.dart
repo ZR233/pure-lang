@@ -1595,6 +1595,36 @@ abstract class AppLocalizations {
   /// **'Confirm it, or describe what should change.'**
   String get interactionPlanConfirmSubtitle;
 
+  /// No description provided for @interactionPlanReadyTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Implementation plan ready'**
+  String get interactionPlanReadyTitle;
+
+  /// No description provided for @interactionPlanAwaitingConfirmation.
+  ///
+  /// In en, this message translates to:
+  /// **'Awaiting confirmation'**
+  String get interactionPlanAwaitingConfirmation;
+
+  /// No description provided for @interactionPlanViewDetails.
+  ///
+  /// In en, this message translates to:
+  /// **'View full plan'**
+  String get interactionPlanViewDetails;
+
+  /// No description provided for @interactionPlanDetailsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Implementation plan'**
+  String get interactionPlanDetailsTitle;
+
+  /// No description provided for @interactionPlanComposerPausedHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Normal messages are paused to keep plan feedback unambiguous.'**
+  String get interactionPlanComposerPausedHint;
+
   /// No description provided for @interactionPlanConfirmFooterHint.
   ///
   /// In en, this message translates to:
@@ -1610,7 +1640,7 @@ abstract class AppLocalizations {
   /// No description provided for @interactionPlanConfirmAction.
   ///
   /// In en, this message translates to:
-  /// **'Confirm plan'**
+  /// **'Confirm and execute'**
   String get interactionPlanConfirmAction;
 
   /// No description provided for @interactionPlanAdjustHint.
@@ -1622,7 +1652,7 @@ abstract class AppLocalizations {
   /// No description provided for @interactionPlanAdjustSubmit.
   ///
   /// In en, this message translates to:
-  /// **'Submit adjustment'**
+  /// **'Submit changes'**
   String get interactionPlanAdjustSubmit;
 
   /// No description provided for @settingsProvidersTitle.

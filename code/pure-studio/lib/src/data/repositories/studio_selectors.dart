@@ -10,6 +10,7 @@ typedef WorkspaceLayoutView = ({
   String threadId,
   bool isLoading,
   TimelineTodoListUpdate? todo,
+  PlanConfirmationView? planConfirmation,
 });
 
 typedef TimelinePaneView = ({
@@ -89,6 +90,7 @@ AsyncValue<WorkspaceLayoutView?> selectedWorkspaceLayout(Ref ref) {
           threadId: workspace.threadId,
           isLoading: workspace.isLoading,
           todo: workspace.todo,
+          planConfirmation: workspace.activeInteraction?.planConfirmation,
         );
       }),
     ),

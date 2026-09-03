@@ -873,6 +873,22 @@ class AppLocalizationsEn extends AppLocalizations {
       'Confirm it, or describe what should change.';
 
   @override
+  String get interactionPlanReadyTitle => 'Implementation plan ready';
+
+  @override
+  String get interactionPlanAwaitingConfirmation => 'Awaiting confirmation';
+
+  @override
+  String get interactionPlanViewDetails => 'View full plan';
+
+  @override
+  String get interactionPlanDetailsTitle => 'Implementation plan';
+
+  @override
+  String get interactionPlanComposerPausedHint =>
+      'Normal messages are paused to keep plan feedback unambiguous.';
+
+  @override
   String interactionPlanConfirmFooterHint(String mode) {
     return 'Confirming starts the document-editing checkpoint in $mode mode.';
   }
@@ -881,13 +897,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get interactionPlanAdjust => 'Tell Pure how to adjust';
 
   @override
-  String get interactionPlanConfirmAction => 'Confirm plan';
+  String get interactionPlanConfirmAction => 'Confirm and execute';
 
   @override
   String get interactionPlanAdjustHint => 'Describe what should change...';
 
   @override
-  String get interactionPlanAdjustSubmit => 'Submit adjustment';
+  String get interactionPlanAdjustSubmit => 'Submit changes';
 
   @override
   String get settingsProvidersTitle => 'Providers';

@@ -36,13 +36,15 @@ Interaction 只有通用 `UserInput` 与 `ToolApproval`。Task root 使用独立
 计划 lifecycle；`plan_submit` 提交以一级 Markdown 标题开头的完整计划并请求批准或修订，缺失信息、
 澄清和普通选项输入使用 `request_user_input`。`request_user_input` 不得询问是否实施、继续或批准完整
 计划；计划已经完整时必须直接调用 `plan_submit`，其 Plan confirmation 是唯一实施授权入口。两者都生成
-同一种通用 `UserInput` Interaction，Plan 只以 typed purpose 绑定状态机，不增加 PlanConfirmation kind。pending Interaction 随 Thread 恢复，响应必须
-匹配 interaction identity 和 Plan revision，并且只能决议一次。完整合同见
+同一种通用 `UserInput` Interaction，Plan 只以 typed purpose 绑定状态机，不增加 PlanConfirmation kind。
+Studio 可以用稳定的 `plan_confirmation` question ID 派生 pending Plan 的 Timeline 摘要、右侧详情和替换式
+反馈栏，但不能据此推演 Plan 状态、复制正文或创建第二条 resolution 路径。pending Interaction 随 Thread
+恢复，响应必须匹配 interaction identity 和 Plan revision，并且只能决议一次。完整合同见
 [24-agent-session-plan.md](24-agent-session-plan.md)。
 
 `InteractionRequest.continuation` 是通用的不可变 continuation 预设，声明 resolution 后用户消息的内容
-来源和 `MessagePresentation`，并参与 request identity 与持久化。Studio 只解释该预设，不按 purpose、
-question ID 或工具名特判可见性；没有预设的 UserInput 不得猜测 continuation。
+来源和 `MessagePresentation`，并参与 request identity 与持久化。Studio 的 Plan question ID 特判只影响
+pending UI 形态，不得用来推导 continuation 内容或可见性；没有预设的 UserInput 不得猜测 continuation。
 
 ## 3.4 工作流生命周期
 

@@ -29,9 +29,14 @@ completion gate UI 全部不存在。
 
 ## 11.4 通用 Interaction
 
-composer dock 只渲染 `UserInput` 与 `ToolApproval`。任务计划由 `plan_submit` 通过固定 Plan 状态机发起，
-但仍显示为普通 UserInput：展示完整计划以及批准/修订选项，用户选择后提交 typed resolution。不存在
-模式专用确认 dock、Plan 状态栏或第二套 continuation；普通澄清继续由 `request_user_input` 发起。
+composer dock 只响应 `UserInput` 与 `ToolApproval`。任务计划由 `plan_submit` 通过固定 Plan 状态机发起，
+协议上仍是通用 UserInput；GUI 从其中稳定 ID 为 `plan_confirmation` 的唯一问题派生 Plan 展示，不增加
+Interaction kind、持久化状态或第二套 continuation。pending 计划在 Timeline 尾部显示摘要卡，点击后在
+右侧独立滚动面板展示完整 Markdown；宽窗口并排，窄窗口覆盖，展开状态仅为 per-Thread 临时 UI 状态。
+
+Plan confirmation 期间，普通 composer 被计划反馈栏替换。用户可直接输入非空修改意见并提交 `Revise`
+resolution，或直接确认 `Approve`；右侧计划面板只读且不重复放置操作。Interaction resolved 后这些派生 UI
+同时消失并恢复普通 composer。普通澄清仍由 `request_user_input` 发起并使用既有分步问题 dock。
 
 ## 11.5 Agents 设置
 

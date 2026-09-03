@@ -839,6 +839,21 @@ class AppLocalizationsZh extends AppLocalizations {
   String get interactionPlanConfirmSubtitle => '确认计划，或直接写下调整要求';
 
   @override
+  String get interactionPlanReadyTitle => '实施计划已准备好';
+
+  @override
+  String get interactionPlanAwaitingConfirmation => '等待确认';
+
+  @override
+  String get interactionPlanViewDetails => '查看完整计划';
+
+  @override
+  String get interactionPlanDetailsTitle => '实施计划';
+
+  @override
+  String get interactionPlanComposerPausedHint => '普通消息输入已暂停，避免与计划反馈混淆。';
+
+  @override
   String interactionPlanConfirmFooterHint(String mode) {
     return '确认后将在$mode模式进入文档编辑检查点。';
   }
@@ -847,13 +862,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get interactionPlanAdjust => '告诉 Pure 如何调整';
 
   @override
-  String get interactionPlanConfirmAction => '确认计划';
+  String get interactionPlanConfirmAction => '确认并执行';
 
   @override
   String get interactionPlanAdjustHint => '输入要调整的要求...';
 
   @override
-  String get interactionPlanAdjustSubmit => '提交调整';
+  String get interactionPlanAdjustSubmit => '提交修改';
 
   @override
   String get settingsProvidersTitle => '服务';

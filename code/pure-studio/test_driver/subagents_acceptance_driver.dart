@@ -499,7 +499,7 @@ Future<Map<String, dynamic>> _waitForCompletion(
           artifactPrefix: options.finalScreenshot,
           kind: 'plan-approval',
           stage: state,
-          action: () => _tapFirstUserInputOption(session),
+          action: () => _approvePlan(session),
         );
         handledInteractionIds.add(interaction['id']);
         revisedPlanApproved = true;
@@ -685,20 +685,25 @@ void _assertRevisedPlanInteraction(Map interaction) {
 }
 
 Future<void> _requestPlanRevision(FlutterDriverSession session) async {
-  const revisionOption = 'user-input-option-plan_confirmation-1';
   await session.waitFor(
-    find.byValueKey(revisionOption),
+    find.byValueKey('plan-feedback-input'),
     timeout: const Duration(seconds: 30),
   );
-  await session.tap(find.byValueKey(revisionOption));
-  await session.waitFor(find.byValueKey('user-input-first-text'));
-  await session.tap(find.byValueKey('user-input-first-text'));
+  await session.tap(find.byValueKey('plan-feedback-input'));
   await session.enterText(
     '请在计划中逐项写明 allowed/normalize、allowed/validate、'
     'worktree_alpha、worktree_beta 的并行所有权；补充硬性顺序：两次 cherry-pick 都成功后才可开始'
     '任何 cleanup，再逐个 cleanup 并验证，禁止整合一个就清理一个。',
   );
-  await _tapInteractionAction(session, 'user-input-submit');
+  await _tapInteractionAction(session, 'plan-submit-revision');
+}
+
+Future<void> _approvePlan(FlutterDriverSession session) async {
+  await session.waitFor(
+    find.byValueKey('plan-approve'),
+    timeout: const Duration(seconds: 30),
+  );
+  await _tapInteractionAction(session, 'plan-approve');
 }
 
 class _SubagentFlowEvidence {

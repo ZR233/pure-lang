@@ -125,8 +125,18 @@ transition。只有 `plan_current` 已返回 `approved` 后，root 才能把 Tas
 
 Turn 模型上下文从当前 AgentSession Plan state 派生只读 `pl.plan` section，提供当前 state/revision、文档 hash、修改意见
 和允许动作；批准后的完整计划作为隐藏 user message 存在 canonical transcript 中，并继续存在 canonical
-tool/Interaction 状态。GUI 不新增 Plan 专用
-状态类型或卡片，仍使用通用 `UserInput` dock；Plan 状态不新增状态栏、手动切换或第二套前端 reducer。
+tool/Interaction 状态。GUI 不新增 Plan 协议状态、持久化实体或第二套 reducer，而是从 pending `UserInput`
+中稳定 ID 为 `plan_confirmation` 的唯一问题派生只读展示：Timeline 尾部显示一张紧凑摘要卡，点击后在
+右侧打开完整 Markdown Plan，详情面板与 Timeline 分别保存滚动位置。宽窗口使用并排侧栏，窄窗口使用
+覆盖式侧栏；展开状态只属于当前 Thread 的临时 UI 状态，不写入 runtime 或 store。Plan 详情打开时优先于
+Todo 侧栏，关闭后 Todo 仍按自己的 UI 状态恢复。
+
+Plan confirmation pending 期间，普通 prompt composer 必须被 Plan 专用反馈栏替换，避免同时存在“普通消息”
+和“计划修改”两个输入语义。反馈栏始终直接提供修改意见输入、提交修改与确认计划三个能力，不先进入
+Approve/Revise 二级选择；提交修改映射为同一 `plan_confirmation` answer 的 `Revise` 加非空反馈，确认映射为
+`Approve`。右侧详情面板只负责阅读，不再包含第二份输入或确认控件。Interaction resolved 后摘要、详情和
+反馈栏一起消失，普通 composer 恢复。以上均响应同一个 durable Interaction，不能复制 Plan 正文、resolution
+或生命周期状态。
 
 ## 24.6 验收
 
@@ -142,8 +152,8 @@ workflow 进入 `editing_documents`。后续多目录隔离、多 worktree 并�
 真实 Plan-only GUI 回归使用 `cargo xtask verify-workflow --live --gui --plan-only`。专用完整需求不留下
 需要澄清的事实；Driver 要求修订首版计划、批准完整修订版并等待 canonical `plan_current` 返回
 `approved`。该验收必须拒绝 `request_user_input`、workflow transition、`complete` 和任何项目文件修改，
-保留 provider wire、通用 UserInput、GUI snapshot、截图、render tree、workspace diff、shutdown 与进程树
-证据后停止，不继续实施或完整 workflow 验收。
+保留 provider wire、通用 UserInput、Timeline Plan 摘要、右侧详情、替换式反馈栏、GUI snapshot、截图、
+render tree、workspace diff、shutdown 与进程树证据后停止，不继续实施或完整 workflow 验收。
 
 确定性测试还要覆盖同一 AgentSession 的五个工具共享一个 Arc 内核、跨 Turn 从 session 恢复、不同
 AgentSession 状态互相隔离、child fork 不继承 Plan、presentation 预设不能由工具覆盖，以及 Approve 后下一
