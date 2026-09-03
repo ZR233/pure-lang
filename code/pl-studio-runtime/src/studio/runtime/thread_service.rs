@@ -3,11 +3,13 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 
 use crate::config::{ModelRouteConfig, ProviderId, ReasoningEffort, StudioRole};
+use crate::resolve_workspace_root;
 use crate::studio::records::{ProjectRecord, ThreadRecord, ThreadVisibility};
 use crate::studio::store::directory::{DirectoryDelta, ProjectDirectoryRecord, ProjectRemoval};
-use crate::{StudioMode, resolve_workspace_root};
 
-use super::thread_title::{manual_title, provisional_title};
+use super::thread_title::{
+    ThreadTitleCancellation, ThreadTitleCancellationCause, manual_title, provisional_title,
+};
 use super::{
     StudioArchiveThreadResult, StudioRuntime, StudioStartNewThreadRequest,
     StudioStartNewThreadResponse, StudioSubmitPromptRequest,
@@ -20,9 +22,9 @@ impl StudioRuntime {
         project_id: String,
         request: pl_protocol::studio::CreateThreadRequest,
     ) -> Result<StudioStartNewThreadResponse> {
-        let mode = StudioMode::from_label(request.mode.trim()).map_err(|_| {
+        let mode = pl_protocol::ThreadModeId::from_label(request.mode.trim()).map_err(|_| {
             anyhow::Error::new(pl_protocol::studio::StudioError::invalid_argument(
-                "mode must be an available mode.* Skill id",
+                "mode must be an available mode.* id",
             ))
         })?;
         self.start_new_thread(StudioStartNewThreadRequest {
@@ -103,8 +105,11 @@ impl StudioRuntime {
 
     pub async fn create_thread(&self, project_id: &str, title: &str) -> Result<ThreadRecord> {
         self.ensure_persistence_accepts_new_work()?;
-        let (delta, thread) =
-            DirectoryDelta::register_root_thread(project_id, title, StudioMode::simple());
+        let (delta, thread) = DirectoryDelta::register_root_thread(
+            project_id,
+            title,
+            pl_protocol::ThreadModeId::simple(),
+        );
         self.agent_facility
             .product_events
             .commit_directory(delta)
@@ -142,8 +147,7 @@ impl StudioRuntime {
                 .any(|project| project.id == request.project_id),
             "selected Project not found"
         );
-        self.ensure_mode_available(&request.project_id, request.mode.label())
-            .await?;
+        self.ensure_mode_available(&request.mode)?;
 
         let (delta, thread) =
             DirectoryDelta::register_root_thread(&request.project_id, &provisional, request.mode);
@@ -200,7 +204,9 @@ impl StudioRuntime {
         }
         // A user edit is authoritative: stop the best-effort Explorer task
         // before publishing the canonical manual title.
-        self.title_tasks.cancel(&thread_id).await;
+        self.title_tasks
+            .cancel(&thread_id, ThreadTitleCancellationCause::ManualRename)
+            .await;
         thread.title = title;
         thread.updated_at = crate::studio::unix_seconds();
         self.agent_facility
@@ -218,7 +224,7 @@ impl StudioRuntime {
         thread_id: &str,
         expected_title: &str,
         title: &str,
-        cancellation: &tokio_util::sync::CancellationToken,
+        cancellation: &mut ThreadTitleCancellation,
     ) -> Result<()> {
         let _lifecycle_guard = tokio::select! {
             _ = cancellation.cancelled() => return Ok(()),
@@ -305,7 +311,12 @@ impl StudioRuntime {
             .commit_directory(DirectoryDelta::archive_threads(removed_thread_ids.clone()))
             .await?;
         for removed_thread_id in &removed_thread_ids {
-            self.title_tasks.cancel(removed_thread_id).await;
+            self.title_tasks
+                .cancel(
+                    removed_thread_id,
+                    ThreadTitleCancellationCause::ThreadArchive,
+                )
+                .await;
         }
         self.model_performance.remove_session(&thread.id).await?;
         Ok(Some(StudioArchiveThreadResult {
@@ -325,7 +336,12 @@ impl StudioRuntime {
             .product_events
             .commit_directory(DirectoryDelta::archive_threads(vec![thread_id.to_string()]))
             .await?;
-        self.title_tasks.cancel(thread_id).await;
+        self.title_tasks
+            .cancel(
+                thread_id,
+                ThreadTitleCancellationCause::NewThreadCompensation,
+            )
+            .await;
         self.model_performance.remove_session(thread_id).await?;
         if let Some(error) = actor_cleanup_error {
             return Err(error).context(format!(
@@ -404,7 +420,9 @@ impl StudioRuntime {
             })
             .await?;
         for thread_id in &thread_ids {
-            self.title_tasks.cancel(thread_id).await;
+            self.title_tasks
+                .cancel(thread_id, ThreadTitleCancellationCause::ProjectArchive)
+                .await;
             self.model_performance.remove_session(thread_id).await?;
         }
         Ok(Some(project))
@@ -463,15 +481,18 @@ impl StudioRuntime {
         Ok(threads)
     }
 
-    pub async fn set_thread_mode(&self, thread_id: &str, mode: StudioMode) -> Result<()> {
+    pub async fn set_thread_mode(
+        &self,
+        thread_id: &str,
+        mode: pl_protocol::ThreadModeId,
+    ) -> Result<()> {
         self.ensure_persistence_accepts_new_work()?;
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
         let thread = self.read_owned_thread(thread_id).await?;
         if thread.parent_thread_id.is_some() {
             bail!("only a root Thread can change mode");
         }
-        self.ensure_mode_available(&thread.project_id, mode.label())
-            .await?;
+        self.ensure_mode_available(&mode)?;
         let (handle, agent_id) = self.ensure_thread_agent(thread_id).await?;
         let snapshot = handle
             .snapshot(agent_id.clone())
@@ -490,20 +511,12 @@ impl StudioRuntime {
         {
             bail!("thread mode cannot change while an interaction is pending");
         }
-        let context = handle
-            .read_thread_context(agent_id.clone())
+        handle
+            .change_idle_thread_mode(agent_id, mode.clone())
             .await
             .map_err(|error| anyhow::anyhow!(error))?;
-        if context
-            .session
-            .workflow()
-            .and_then(|workflow| workflow.current_run.as_ref())
-            .is_some_and(|run| run.lifecycle == pl_protocol::WorkflowRunLifecycle::Active)
-        {
-            bail!("thread mode cannot change while a workflow run is active");
-        }
         let mut updated = pl_protocol::Thread::from(thread);
-        updated.mode = pl_protocol::ThreadMode::from(mode);
+        updated.mode = mode;
         updated.updated_at = crate::studio::unix_seconds();
         self.agent_facility
             .product_events
@@ -515,19 +528,11 @@ impl StudioRuntime {
         Ok(())
     }
 
-    async fn ensure_mode_available(&self, project_id: &str, mode_id: &str) -> Result<()> {
-        let catalog = self.skills.read(project_id).await.catalog_for_turn();
-        if let Some(catalog) = catalog {
-            anyhow::ensure!(
-                catalog.find_mode(mode_id).is_some(),
-                "selected Mode Skill `{mode_id}` is unavailable"
-            );
-        } else {
-            anyhow::ensure!(
-                pl_core::skill::BUILTIN_MODE_IDS.contains(&mode_id),
-                "custom Mode Skill `{mode_id}` requires a discovered project Skill catalog"
-            );
-        }
+    fn ensure_mode_available(&self, mode_id: &pl_protocol::ThreadModeId) -> Result<()> {
+        anyhow::ensure!(
+            self.thread_modes.snapshot().mode(mode_id).is_some(),
+            "selected Thread Mode `{mode_id}` is unavailable"
+        );
         Ok(())
     }
 
@@ -616,8 +621,8 @@ impl StudioRuntime {
 mod tests {
     use super::*;
     use crate::StudioProductEventKind;
+    use crate::studio::runtime::thread_title::title_cancellation_channel;
     use crate::{StudioHostKind, StudioRuntimeOptions};
-    use tokio_util::sync::CancellationToken;
 
     async fn runtime_with_thread() -> (tempfile::TempDir, tempfile::TempDir, StudioRuntime, String)
     {
@@ -688,9 +693,14 @@ mod tests {
     #[tokio::test]
     async fn automatic_title_uses_cas_and_drops_stale_result() {
         let (_home, _workspace, runtime, thread_id) = runtime_with_thread().await;
-        let cancellation = CancellationToken::new();
+        let (_cancellation_owner, mut cancellation) = title_cancellation_channel();
         runtime
-            .apply_automatic_thread_title(&thread_id, "Old title", "Explorer title", &cancellation)
+            .apply_automatic_thread_title(
+                &thread_id,
+                "Old title",
+                "Explorer title",
+                &mut cancellation,
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -711,7 +721,7 @@ mod tests {
                 &thread_id,
                 "Explorer title",
                 "Stale explorer title",
-                &cancellation,
+                &mut cancellation,
             )
             .await
             .unwrap();
@@ -746,14 +756,18 @@ mod tests {
             .commit_directory(DirectoryDelta::archive_threads(vec![thread_id.clone()]))
             .await
             .unwrap();
-        runtime.title_tasks.cancel(&thread_id).await;
+        runtime
+            .title_tasks
+            .cancel(&thread_id, ThreadTitleCancellationCause::ThreadArchive)
+            .await;
 
+        let (_cancellation_owner, mut cancellation) = title_cancellation_channel();
         runtime
             .apply_automatic_thread_title(
                 &thread_id,
                 "Old title",
                 "Explorer title",
-                &CancellationToken::new(),
+                &mut cancellation,
             )
             .await
             .unwrap();

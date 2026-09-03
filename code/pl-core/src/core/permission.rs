@@ -185,6 +185,7 @@ fn tool_approval_interaction(request: &ToolApprovalRequest, turn_id: &str) -> In
             item_id: Some(request.id.clone()),
             tool_id: Some(request.id.clone()),
             agent_path: request.parent_agent_id.clone(),
+            purpose: pl_protocol::InteractionPurpose::General,
         },
         InteractionToolApprovalRequest {
             name: request.name.clone(),

@@ -154,7 +154,7 @@ impl StudioRuntime {
                 .await?;
             let thread = pl_core::ThreadId::new(thread_id.clone())?;
             let metadata = submit_metadata();
-            let presentation = options.presentation.clone();
+            let presentation = options.presentation;
             let turn_id = handle
                 .submit(
                     agent_id.clone(),
@@ -520,7 +520,7 @@ impl StudioRuntime {
             id: thread.id,
             project_id: thread.project_id,
             title: thread.title,
-            mode: thread.mode.into(),
+            mode: thread.mode,
             created_at: thread.created_at,
             updated_at: thread.updated_at,
             visibility: if thread.archived {
@@ -575,17 +575,13 @@ impl StudioRuntime {
         let resolved = if current.kind() == InteractionKind::UserInput {
             let mail_id =
                 pl_core::AgentInteractionContinuationRequest::stable_mail_id(&interaction_id);
-            let message = serde_json::to_string_pretty(&serde_json::json!({
-                "type": "studioInteractionResolution",
-                "interactionId": interaction_id.clone(),
-                "originTurnId": current.scope.turn_id.clone(),
-                "payload": current.content.clone(),
-                "resolution": resolution.clone(),
-            }))?;
+            let continuation = current
+                .continuation_input(&resolution)?
+                .context("UserInput interaction has no continuation preset")?;
             self.submit_durable_interaction_continuation(
                 &current,
                 resolution,
-                message,
+                continuation,
                 serde_json::json!({
                     "interactionResolutionId": interaction_id,
                     "mailId": mail_id,

@@ -24,14 +24,14 @@ void registerDemoProjectTests() {
   test('Demo mode update changes only the addressed root Thread', () async {
     final api = DemoStudioApi();
 
-    await api.setThreadMode(threadId: 'thread-main', mode: StudioMode.task);
+    await api.setThreadMode(threadId: 'thread-main', mode: ThreadModeId.task);
     final state = await api.readStudioState();
 
-    expect(state.threads[0].mode, StudioMode.task);
+    expect(state.threads[0].mode, ThreadModeId.task);
     expect(state.threads[0].role, 'planner');
-    expect(state.threads[1].mode, StudioMode.simple);
+    expect(state.threads[1].mode, ThreadModeId.simple);
     expect(state.threads[1].role, 'planner');
-    expect(state.threads[2].mode, StudioMode.simple);
+    expect(state.threads[2].mode, ThreadModeId.simple);
     expect(state.threads[2].role, 'reviewer');
     expect(state.workspacesByThread['thread-main']!.thread, state.threads[0]);
   });
@@ -40,7 +40,7 @@ void registerDemoProjectTests() {
     final api = DemoStudioApi();
 
     await expectLater(
-      api.setThreadMode(threadId: 'thread-reviewer', mode: StudioMode.task),
+      api.setThreadMode(threadId: 'thread-reviewer', mode: ThreadModeId.task),
       throwsA(
         isA<StateError>().having(
           (error) => error.message,
@@ -131,7 +131,7 @@ void registerDemoProjectTests() {
           text: 'Review the session title lifecycle',
           attachmentDraftIds: [],
         ),
-        StudioMode.simple,
+        ThreadModeId.simple,
       );
       expect(result.thread.title, 'Review the session title lifecycle');
 

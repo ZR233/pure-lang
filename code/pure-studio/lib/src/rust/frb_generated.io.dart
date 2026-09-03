@@ -383,6 +383,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   dco_decode_box_autoadd_bridge_thread_mcp_health_snapshot(dynamic raw);
 
   @protected
+  BridgeThreadModeCatalogSnapshot
+  dco_decode_box_autoadd_bridge_thread_mode_catalog_snapshot(dynamic raw);
+
+  @protected
   BridgeThreadRuntimeSnapshot
   dco_decode_box_autoadd_bridge_thread_runtime_snapshot(dynamic raw);
 
@@ -796,11 +800,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeMcpStateSnapshot dco_decode_bridge_mcp_state_snapshot(dynamic raw);
 
   @protected
-  BridgeModeInstructionSnapshot dco_decode_bridge_mode_instruction_snapshot(
-    dynamic raw,
-  );
-
-  @protected
   BridgeModelCapabilities dco_decode_bridge_model_capabilities(dynamic raw);
 
   @protected
@@ -1122,6 +1121,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   dco_decode_bridge_thread_mcp_server_descriptor(dynamic raw);
 
   @protected
+  BridgeThreadModeCatalogSnapshot
+  dco_decode_bridge_thread_mode_catalog_snapshot(dynamic raw);
+
+  @protected
+  BridgeThreadModeDescriptor dco_decode_bridge_thread_mode_descriptor(
+    dynamic raw,
+  );
+
+  @protected
   BridgeThreadNotification dco_decode_bridge_thread_notification(dynamic raw);
 
   @protected
@@ -1298,9 +1306,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  BridgeWorkflowDefinition dco_decode_bridge_workflow_definition(dynamic raw);
-
-  @protected
   BridgeWorkflowRun dco_decode_bridge_workflow_run(dynamic raw);
 
   @protected
@@ -1310,17 +1315,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeWorkflowRuntimeSnapshot dco_decode_bridge_workflow_runtime_snapshot(
-    dynamic raw,
-  );
-
-  @protected
-  BridgeWorkflowStage dco_decode_bridge_workflow_stage(dynamic raw);
-
-  @protected
-  BridgeWorkflowTransition dco_decode_bridge_workflow_transition(dynamic raw);
-
-  @protected
-  BridgeWorkflowTransitionRecord dco_decode_bridge_workflow_transition_record(
     dynamic raw,
   );
 
@@ -1491,6 +1485,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   dco_decode_list_bridge_thread_mcp_availability_descriptor(dynamic raw);
 
   @protected
+  List<BridgeThreadModeDescriptor>
+  dco_decode_list_bridge_thread_mode_descriptor(dynamic raw);
+
+  @protected
   List<BridgeThreadTurnHistory> dco_decode_list_bridge_thread_turn_history(
     dynamic raw,
   );
@@ -1512,27 +1510,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  List<BridgeWorkflowStage> dco_decode_list_bridge_workflow_stage(dynamic raw);
-
-  @protected
-  List<BridgeWorkflowTransition> dco_decode_list_bridge_workflow_transition(
-    dynamic raw,
-  );
-
-  @protected
-  List<BridgeWorkflowTransitionRecord>
-  dco_decode_list_bridge_workflow_transition_record(dynamic raw);
-
-  @protected
   List<DeepSeekBalanceInfoDto> dco_decode_list_deep_seek_balance_info_dto(
     dynamic raw,
   );
 
   @protected
   List<McpServerInput> dco_decode_list_mcp_server_input(dynamic raw);
-
-  @protected
-  List<ModeSummaryDto> dco_decode_list_mode_summary_dto(dynamic raw);
 
   @protected
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
@@ -1589,9 +1572,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   McpSettingsInput dco_decode_mcp_settings_input(dynamic raw);
-
-  @protected
-  ModeSummaryDto dco_decode_mode_summary_dto(dynamic raw);
 
   @protected
   String? dco_decode_opt_String(dynamic raw);
@@ -2199,6 +2179,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeThreadModeCatalogSnapshot
+  sse_decode_box_autoadd_bridge_thread_mode_catalog_snapshot(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeThreadRuntimeSnapshot
   sse_decode_box_autoadd_bridge_thread_runtime_snapshot(
     SseDeserializer deserializer,
@@ -2726,11 +2712,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  BridgeModeInstructionSnapshot sse_decode_bridge_mode_instruction_snapshot(
-    SseDeserializer deserializer,
-  );
-
-  @protected
   BridgeModelCapabilities sse_decode_bridge_model_capabilities(
     SseDeserializer deserializer,
   );
@@ -3124,6 +3105,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   sse_decode_bridge_thread_mcp_server_descriptor(SseDeserializer deserializer);
 
   @protected
+  BridgeThreadModeCatalogSnapshot
+  sse_decode_bridge_thread_mode_catalog_snapshot(SseDeserializer deserializer);
+
+  @protected
+  BridgeThreadModeDescriptor sse_decode_bridge_thread_mode_descriptor(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeThreadNotification sse_decode_bridge_thread_notification(
     SseDeserializer deserializer,
   );
@@ -3344,11 +3334,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  BridgeWorkflowDefinition sse_decode_bridge_workflow_definition(
-    SseDeserializer deserializer,
-  );
-
-  @protected
   BridgeWorkflowRun sse_decode_bridge_workflow_run(
     SseDeserializer deserializer,
   );
@@ -3360,21 +3345,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeWorkflowRuntimeSnapshot sse_decode_bridge_workflow_runtime_snapshot(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  BridgeWorkflowStage sse_decode_bridge_workflow_stage(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  BridgeWorkflowTransition sse_decode_bridge_workflow_transition(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  BridgeWorkflowTransitionRecord sse_decode_bridge_workflow_transition_record(
     SseDeserializer deserializer,
   );
 
@@ -3583,6 +3553,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<BridgeThreadModeDescriptor>
+  sse_decode_list_bridge_thread_mode_descriptor(SseDeserializer deserializer);
+
+  @protected
   List<BridgeThreadTurnHistory> sse_decode_list_bridge_thread_turn_history(
     SseDeserializer deserializer,
   );
@@ -3608,33 +3582,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  List<BridgeWorkflowStage> sse_decode_list_bridge_workflow_stage(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  List<BridgeWorkflowTransition> sse_decode_list_bridge_workflow_transition(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  List<BridgeWorkflowTransitionRecord>
-  sse_decode_list_bridge_workflow_transition_record(
-    SseDeserializer deserializer,
-  );
-
-  @protected
   List<DeepSeekBalanceInfoDto> sse_decode_list_deep_seek_balance_info_dto(
     SseDeserializer deserializer,
   );
 
   @protected
   List<McpServerInput> sse_decode_list_mcp_server_input(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  List<ModeSummaryDto> sse_decode_list_mode_summary_dto(
     SseDeserializer deserializer,
   );
 
@@ -3707,9 +3660,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   McpSettingsInput sse_decode_mcp_settings_input(SseDeserializer deserializer);
-
-  @protected
-  ModeSummaryDto sse_decode_mode_summary_dto(SseDeserializer deserializer);
 
   @protected
   String? sse_decode_opt_String(SseDeserializer deserializer);
@@ -4419,6 +4369,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_bridge_thread_mode_catalog_snapshot(
+    BridgeThreadModeCatalogSnapshot self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_bridge_thread_runtime_snapshot(
     BridgeThreadRuntimeSnapshot self,
     SseSerializer serializer,
@@ -5046,12 +5002,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  void sse_encode_bridge_mode_instruction_snapshot(
-    BridgeModeInstructionSnapshot self,
-    SseSerializer serializer,
-  );
-
-  @protected
   void sse_encode_bridge_model_capabilities(
     BridgeModelCapabilities self,
     SseSerializer serializer,
@@ -5529,6 +5479,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_thread_mode_catalog_snapshot(
+    BridgeThreadModeCatalogSnapshot self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_thread_mode_descriptor(
+    BridgeThreadModeDescriptor self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_thread_notification(
     BridgeThreadNotification self,
     SseSerializer serializer,
@@ -5802,12 +5764,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  void sse_encode_bridge_workflow_definition(
-    BridgeWorkflowDefinition self,
-    SseSerializer serializer,
-  );
-
-  @protected
   void sse_encode_bridge_workflow_run(
     BridgeWorkflowRun self,
     SseSerializer serializer,
@@ -5822,24 +5778,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_workflow_runtime_snapshot(
     BridgeWorkflowRuntimeSnapshot self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_bridge_workflow_stage(
-    BridgeWorkflowStage self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_bridge_workflow_transition(
-    BridgeWorkflowTransition self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_bridge_workflow_transition_record(
-    BridgeWorkflowTransitionRecord self,
     SseSerializer serializer,
   );
 
@@ -6084,6 +6022,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_bridge_thread_mode_descriptor(
+    List<BridgeThreadModeDescriptor> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_bridge_thread_turn_history(
     List<BridgeThreadTurnHistory> self,
     SseSerializer serializer,
@@ -6114,24 +6058,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  void sse_encode_list_bridge_workflow_stage(
-    List<BridgeWorkflowStage> self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_list_bridge_workflow_transition(
-    List<BridgeWorkflowTransition> self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_list_bridge_workflow_transition_record(
-    List<BridgeWorkflowTransitionRecord> self,
-    SseSerializer serializer,
-  );
-
-  @protected
   void sse_encode_list_deep_seek_balance_info_dto(
     List<DeepSeekBalanceInfoDto> self,
     SseSerializer serializer,
@@ -6140,12 +6066,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_mcp_server_input(
     List<McpServerInput> self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_list_mode_summary_dto(
-    List<ModeSummaryDto> self,
     SseSerializer serializer,
   );
 
@@ -6242,12 +6162,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_mcp_settings_input(
     McpSettingsInput self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_mode_summary_dto(
-    ModeSummaryDto self,
     SseSerializer serializer,
   );
 

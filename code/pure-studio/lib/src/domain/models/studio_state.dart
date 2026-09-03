@@ -42,6 +42,7 @@ class StudioState {
     required this.mcpState,
     required this.lspState,
     required this.skillsByProject,
+    this.threadModeCatalog = const ThreadModeCatalogView(),
     required this.providerUsageState,
     this.modelPerformance = const ModelPerformanceSnapshotView(),
     required this.updaterState,
@@ -59,7 +60,7 @@ class StudioState {
   final Map<String, ThreadWorkspace> workspacesByThread;
   final Map<String, WorkspaceUiState> workspaceUiByThread;
   final Map<String, ComposerThreadState> newThreadComposerByProject;
-  final Map<String, StudioMode> newThreadModeByProject;
+  final Map<String, ThreadModeId> newThreadModeByProject;
   final ProviderCatalogView providerCatalog;
   final String? selectedProjectId;
   final String? selectedThreadId;
@@ -71,6 +72,7 @@ class StudioState {
   final McpStateSnapshot mcpState;
   final LspStateSnapshot lspState;
   final Map<String, SkillsStateSnapshot> skillsByProject;
+  final ThreadModeCatalogView threadModeCatalog;
   final ProviderUsageStateSnapshot providerUsageState;
   final ModelPerformanceSnapshotView modelPerformance;
   final UpdaterStateSnapshot updaterState;
@@ -131,11 +133,11 @@ class StudioState {
               const ComposerThreadState.idle();
   }
 
-  StudioMode get newThreadMode {
+  ThreadModeId get newThreadMode {
     final projectId = selectedProjectId;
     return projectId == null
-        ? StudioMode.simple
-        : newThreadModeByProject[projectId] ?? StudioMode.simple;
+        ? ThreadModeId.simple
+        : newThreadModeByProject[projectId] ?? ThreadModeId.simple;
   }
 
   List<StudioThread> get rootThreads =>
@@ -287,7 +289,7 @@ class StudioState {
     Map<String, ThreadWorkspace>? workspacesByThread,
     Map<String, WorkspaceUiState>? workspaceUiByThread,
     Map<String, ComposerThreadState>? newThreadComposerByProject,
-    Map<String, StudioMode>? newThreadModeByProject,
+    Map<String, ThreadModeId>? newThreadModeByProject,
     ProviderCatalogView? providerCatalog,
     Object? selectedProjectId = _studioStateUnset,
     Object? selectedThreadId = _studioStateUnset,
@@ -299,6 +301,7 @@ class StudioState {
     McpStateSnapshot? mcpState,
     LspStateSnapshot? lspState,
     Map<String, SkillsStateSnapshot>? skillsByProject,
+    ThreadModeCatalogView? threadModeCatalog,
     ProviderUsageStateSnapshot? providerUsageState,
     ModelPerformanceSnapshotView? modelPerformance,
     UpdaterStateSnapshot? updaterState,
@@ -327,6 +330,7 @@ class StudioState {
       mcpState: mcpState ?? this.mcpState,
       lspState: lspState ?? this.lspState,
       skillsByProject: skillsByProject ?? this.skillsByProject,
+      threadModeCatalog: threadModeCatalog ?? this.threadModeCatalog,
       providerUsageState: providerUsageState ?? this.providerUsageState,
       modelPerformance: modelPerformance ?? this.modelPerformance,
       updaterState: updaterState ?? this.updaterState,

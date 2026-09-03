@@ -77,7 +77,10 @@ pub(super) async fn run_turn_with_trace(
     if let Some(prompt_cache_key) = options.prompt_cache_key.clone() {
         session.set_prompt_cache_key(prompt_cache_key);
     }
-    session.push_user_content(request.user_content.clone());
+    session.push_user_content_with_presentation(
+        request.user_content.clone(),
+        request.user_presentation,
+    );
     core.tool_session_runtime.begin_turn(session)?;
     let working_set = core.tool_session_runtime.working_set();
     let tool_cache = crate::tool::cache::TurnToolCacheHandle::default();
@@ -110,7 +113,7 @@ pub(super) async fn run_turn_with_trace(
     let mut completion = TurnCompletion::Normal;
     checkpoint::persist_pending_mail(&options, session).await?;
     let mut turn_context =
-        TurnContextSnapshot::capture(session.items(), session.working_context_snapshot());
+        TurnContextSnapshot::capture(session.items(), working_set.model_context_snapshot(session));
     loop {
         if checkpoint::drain_mailbox(&options, session, recorder, &turn_id).await? {
             safe_message_count = session.len();
@@ -125,6 +128,7 @@ pub(super) async fn run_turn_with_trace(
             )
             .await?;
         }
+        turn_context.refresh_working_context(working_set.model_context_snapshot(session));
         if is_cancelled(&options) {
             session.truncate_messages(safe_message_count);
             return Ok(interrupted_turn_result(
@@ -693,6 +697,7 @@ pub(super) async fn run_turn_with_trace(
             )
             .await?;
         }
+        turn_context.refresh_working_context(working_set.model_context_snapshot(session));
         if is_cancelled(&options) {
             session.truncate_messages(safe_message_count);
             return Ok(interrupted_turn_result(

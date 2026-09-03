@@ -6,7 +6,7 @@ void main() {
   Map<String, dynamic> snapshot({
     bool busy = false,
     Object? interaction,
-    String stage = 'completed',
+    String state = 'completed',
     bool terminal = true,
     List<String> roles = const [
       'explorer',
@@ -27,7 +27,7 @@ void main() {
       'timeline': timeline,
     },
     'workflow': {
-      'currentRun': {'currentStageId': stage, 'terminal': terminal},
+      'currentRun': {'currentStateId': state, 'terminal': terminal},
     },
   };
 
@@ -38,7 +38,7 @@ void main() {
         (
           name: 'user prompt sentinel',
           value: snapshot(
-            stage: 'awaiting_confirmation',
+            state: 'planning',
             terminal: false,
             timeline: const [
               {'type': 'userMessage', 'text': 'run PURE_SUBAGENTS_LIVE_OK'},
@@ -49,7 +49,7 @@ void main() {
         ),
         (
           name: 'final answer before completed workflow',
-          value: snapshot(stage: 'awaiting_confirmation'),
+          value: snapshot(state: 'planning'),
           expected: false,
         ),
         (
@@ -141,4 +141,32 @@ void main() {
       }
     },
   );
+
+  test('hidden Plan continuation cannot appear in the GUI timeline', () {
+    final value = snapshot(
+      timeline: [
+        {
+          'tools': [
+            {
+              'name': 'plan_submit',
+              'status': 'succeeded',
+              'arguments': '{"expectedRevision":0,"plan":"# Approved"}',
+            },
+          ],
+        },
+        {'type': 'userMessage', 'text': '# Approved'},
+      ],
+    );
+
+    expect(
+      () => validateSubagentSnapshotProjection(value),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('hidden Plan continuation'),
+        ),
+      ),
+    );
+  });
 }

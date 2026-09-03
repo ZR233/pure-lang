@@ -54,7 +54,7 @@ class StudioThread {
   final String id;
   final String projectId;
   final String title;
-  final StudioMode mode;
+  final ThreadModeId mode;
   final DateTime? createdAt;
   final DateTime updatedAt;
   final String? parentThreadId;
@@ -74,7 +74,7 @@ class StudioThread {
 
   StudioThread copyWith({
     String? title,
-    StudioMode? mode,
+    ThreadModeId? mode,
     DateTime? createdAt,
     DateTime? updatedAt,
     String? parentThreadId,

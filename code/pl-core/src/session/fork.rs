@@ -11,6 +11,7 @@ pub(super) fn forkable_messages(messages: &[Message]) -> Vec<Message> {
             MessageRole::Tool => false,
         })
         .map(|message| Message {
+            presentation: Default::default(),
             role: message.role,
             content: message.content.clone(),
             reasoning_content: None,

@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, RwLock};
 
 use pl_protocol::{
-    ContextSectionId, PinnedContextSection, PureError, SessionNote, TodoListSnapshot,
-    ToolResultReceipt, WorkflowSessionState,
+    AgentSessionPlanState, ContextSectionId, ModelContextSnapshot, PinnedContextSection, PureError,
+    SessionNote, TodoListSnapshot, ToolResultReceipt, WorkflowSessionState,
 };
 use sha2::{Digest, Sha256};
 
@@ -46,6 +46,7 @@ impl std::fmt::Debug for TurnWorkingSetHandle {
 pub enum TurnWorkingSetChange {
     ReplaceTodo(TodoListSnapshot),
     ReplaceWorkflow(Option<WorkflowSessionState>),
+    ReplacePlan(Option<AgentSessionPlanState>),
     UpsertSection(PinnedContextSection),
     RemoveSection(ContextSectionId),
     AppendEvidence(ToolResultReceipt),
@@ -57,6 +58,8 @@ struct TurnWorkingSet {
     evidence: EvidenceLedgerDocument,
     session_note: Option<SessionNote>,
     workflow: Option<WorkflowSessionState>,
+    plan: Option<AgentSessionPlanState>,
+    thread_mode: Option<Arc<crate::RegisteredThreadMode>>,
 }
 
 #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -94,16 +97,23 @@ impl TurnWorkingSetHandle {
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .workflow = session.workflow().cloned();
+        handle
+            .inner
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .plan = session.plan().cloned();
         Ok(handle)
     }
 
     pub(crate) fn reset_from_session(&self, session: &AgentSession) -> Result<(), PureError> {
+        let thread_mode = self.thread_mode();
         let replacement = Self::from_session(session)?;
-        let next = replacement
+        let mut next = replacement
             .inner
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
+        next.thread_mode = thread_mode;
         *self
             .inner
             .write()
@@ -134,15 +144,26 @@ impl TurnWorkingSetHandle {
             }
             TurnWorkingSetChange::ReplaceWorkflow(workflow) => {
                 if let Some(workflow) = &workflow {
-                    crate::workflow::validate_session_state_size(workflow)?;
+                    crate::thread::mode::validate_session_state_size(workflow)?;
                 }
                 next.workflow = workflow;
+            }
+            TurnWorkingSetChange::ReplacePlan(plan) => {
+                if let Some(plan) = &plan {
+                    crate::session::plan::validate_session_state_size(plan)?;
+                }
+                next.plan = plan;
             }
             TurnWorkingSetChange::UpsertSection(section) => {
                 validate_section(&section)?;
                 if section.id.as_str() == WORKFLOW_CONTEXT_SECTION_ID {
                     return Err(PureError::ConfigError(
                         "pl.workflow is a derived working-context section".to_string(),
+                    ));
+                }
+                if section.id.as_str() == crate::session::plan::PLAN_CONTEXT_SECTION_ID {
+                    return Err(PureError::ConfigError(
+                        "pl.plan is a derived working-context section".to_string(),
                     ));
                 }
                 if section.id.as_str() == CURRENT_TODO_SECTION_ID {
@@ -219,6 +240,55 @@ impl TurnWorkingSetHandle {
             .clone()
     }
 
+    /// 返回固定 Plan 状态机的完整 typed 状态。
+    pub fn plan(&self) -> Option<AgentSessionPlanState> {
+        self.inner
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .plan
+            .clone()
+    }
+
+    /// 配置本 Turn 固定使用的 Mode 快照；该值不进入 Agent session 或持久化。
+    pub fn set_thread_mode(&self, mode: Option<Arc<crate::RegisteredThreadMode>>) {
+        self.inner
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .thread_mode = mode;
+    }
+
+    /// 返回本 Turn 固定使用的 Mode 快照。
+    pub fn thread_mode(&self) -> Option<Arc<crate::RegisteredThreadMode>> {
+        self.inner
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .thread_mode
+            .clone()
+    }
+
+    /// 从 canonical session 与临时 Mode 图派生本轮最新模型工作上下文。
+    pub fn model_context_snapshot(&self, session: &AgentSession) -> ModelContextSnapshot {
+        let mut snapshot = session.working_context_snapshot();
+        if let (Some(workflow), Some(mode)) = (self.workflow(), self.thread_mode())
+            && let Some(section) =
+                crate::thread::mode::workflow_model_context_section(&workflow, &mode)
+        {
+            snapshot.sections.push(section);
+            snapshot
+                .sections
+                .sort_by(|left, right| left.id.cmp(&right.id));
+        }
+        if let Some(plan) = self.plan() {
+            snapshot
+                .sections
+                .push(crate::session::plan::plan_model_context_section(&plan));
+            snapshot
+                .sections
+                .sort_by(|left, right| left.id.cmp(&right.id));
+        }
+        snapshot
+    }
+
     /// 返回当前会话笔记；尚未创建时返回 revision 为 0 的空快照。
     pub fn session_note(&self) -> SessionNote {
         self.inner
@@ -270,6 +340,7 @@ impl TurnWorkingSetHandle {
             changed |= session.replace_session_note(note);
         }
         changed |= session.replace_workflow(self.workflow());
+        changed |= session.replace_plan(self.plan());
         Ok(changed)
     }
 }

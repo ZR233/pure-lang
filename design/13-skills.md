@@ -139,9 +139,9 @@ platforms: ["windows", "linux", "macos"]
 
 - `skills_list(category?)`：列出启用且允许模型调用的 skill 简短索引。
 - `skill_view(name, filePath?)`：通过冻结 candidate 的 Provider 读取完整 `SKILL.md` 或支持文件，
-  项目 Skill 的使用统计与 ModeId 无关。省略 `filePath`、传空字符串、`.` 或 `SKILL.md` 都表示读取
+  项目 Skill 的使用统计与 `ThreadModeId` 无关。省略 `filePath`、传空字符串、`.` 或 `SKILL.md` 都表示读取
   主文档；只有真正的支持文件路径才必须位于 `references/`、`templates/`、`scripts/` 或 `assets/`
-  下。Mode Skill 不进入此目录，也不能由该工具按需调用。
+  下。Thread Mode 不属于 Skill，也不能由该工具按需调用。
 - `skill_manage(action, ...)`：管理项目目录中的 skill。
 
 `skill_manage` 支持 `create`、`patch`、`edit`、`delete`、`writeFile`、`removeFile`。所有写入都只作用于 `<workspace_root>/<project_dir>/`。写入动作进入现有工具审批流程。`patch.oldString` 首先按 `SKILL.md` 原文字面量匹配；若完全匹配失败，运行时只允许把看起来像 JSON string fragment 的模型输出交给 `serde_json` 解码一层，再按同一匹配数量规则替换，避免因为 JSON/Markdown 二次转义噪声导致可恢复 patch 失败。运行时不维护额外的手写转义替换表。
@@ -230,7 +230,7 @@ system Skills 只在
 
 `StudioRuntime::run_prompt` 完成 root turn 并保存记录后，如果 `[skills].auto_learn = true`，后台启动
 reviewer 复盘本轮对话。reviewer 只注册 skills 工具，不注册 shell、文件或 subagent 工具。该行为不按
-ModeId 分支，也不拥有或推进 root workflow；workspace 写入和 Agent 协调仍由 root 对话负责。
+`ThreadModeId` 分支，也不拥有或推进 root workflow；workspace 写入和 Agent 协调仍由 root 对话负责。
 
 自学习默认写入项目目录。reviewer 优先修补本轮已读取的项目 skill，其次修补已有项目 umbrella skill，最后才创建新的泛化 skill。reviewer 不得修改系统、用户或外部 skill；如果系统 skill 给出了通用指导，而本轮产生了项目特定经验，应创建或更新项目 skill。reviewer 不应记录一次性任务、瞬时环境失败、负面工具断言或纯用户私密偏好。
 

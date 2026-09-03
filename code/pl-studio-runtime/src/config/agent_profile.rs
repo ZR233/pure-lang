@@ -505,6 +505,8 @@ model = "gpt-5"
         assert!(worktree.contains("独立 Git worktree"));
         assert!(worktree.contains("commit"));
         assert!(worktree.contains("不得") && worktree.contains("cherry-pick"));
+        assert!(worktree.contains("确认成功前不得"));
+        assert!(worktree.contains("git add") && worktree.contains("分别执行"));
         assert!(worktree.contains("report_progress"));
         assert!(worktree.contains("CHILD_DELIVERY_READY"));
         assert!(worktree.contains("WORKTREE_COMMIT_READY"));
@@ -517,42 +519,61 @@ model = "gpt-5"
     }
 
     #[test]
-    fn embedded_task_skill_describes_full_orchestration_contract() {
-        let task = include_str!("../../assets/skills/modes/mode.task/SKILL.md");
-        for stage in [
+    fn embedded_task_mode_describes_full_orchestration_contract() {
+        let task = crate::studio::thread::mode::task::PROMPT;
+        let registration = crate::studio::thread::mode::task::REGISTRATION;
+        let workflow = registration.workflow.expect("Task Mode has a workflow");
+        for state in [
             "planning",
-            "awaiting_confirmation",
             "editing_documents",
             "working",
             "integrating",
             "reviewing",
             "completed",
         ] {
-            assert!(task.contains(stage), "task skill omits stage {stage}");
+            assert!(
+                workflow
+                    .states
+                    .iter()
+                    .any(|candidate| candidate.id == state),
+                "task mode graph omits state {state}"
+            );
         }
         assert!(task.contains("executor") && task.contains("worktree_executor"));
         assert!(task.contains("explorer") && task.contains("reviewer"));
+        assert!(task.contains("plan_current") && task.contains("plan_submit"));
+        assert!(task.contains("before every transition"));
+        assert!(task.contains("workflow_current") && task.contains("workflow_next"));
+        assert!(task.contains("workflow_graph") && task.contains("workflow_history"));
+        assert!(task.contains("Never infer CAS values"));
+        assert!(
+            !workflow
+                .states
+                .iter()
+                .any(|candidate| candidate.id == "awaiting_confirmation")
+        );
         for contract in [
-            "目的",
-            "设计基线",
-            "所有权",
-            "禁止范围",
-            "完成/失败条件",
-            "证据",
+            "objective",
+            "design baseline",
+            "ownership",
+            "forbidden scope",
+            "success/failure",
+            "evidence",
             "workspace",
             "Git",
-            "并行",
-            "隔离",
+            "parallel",
+            "isolation",
             "review",
         ] {
             assert!(
                 task.contains(contract),
-                "task skill omits contract {contract}"
+                "task mode prompt omits contract {contract}"
             );
         }
         assert!(task.contains("fresh-context"));
-        assert!(task.contains("重新") && task.contains("review"));
+        assert!(task.contains("fresh-context") && task.contains("review"));
         assert!(task.contains("CHILD_DELIVERY_READY"));
-        assert!(task.contains("canonical page 必须非空"));
+        assert!(task.contains("canonical submissions"));
+        assert!(task.contains("integrate every accepted commit before issuing the first cleanup"));
     }
 }

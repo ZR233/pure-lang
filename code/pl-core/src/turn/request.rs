@@ -1,5 +1,4 @@
-use pl_protocol::MessageContent;
-use pl_protocol::SkillActivation;
+use pl_protocol::{MessageContent, MessagePresentation, SkillActivation};
 use pl_trace::TraceAttachment;
 
 use crate::instruction::InstructionSnapshot;
@@ -12,6 +11,7 @@ pub struct TurnRequest {
     pub turn_id: Option<String>,
     pub prompt: String,
     pub user_content: MessageContent,
+    pub user_presentation: MessagePresentation,
     pub workspace_instructions: Option<String>,
     pub instruction_snapshot: Option<InstructionSnapshot>,
     pub budget: TurnBudget,
@@ -27,6 +27,7 @@ impl TurnRequest {
         Self {
             turn_id: None,
             user_content: MessageContent::text(prompt.clone()),
+            user_presentation: MessagePresentation::Visible,
             prompt,
             workspace_instructions: None,
             instruction_snapshot: None,
@@ -40,6 +41,12 @@ impl TurnRequest {
 
     pub fn with_user_content(mut self, content: MessageContent) -> Self {
         self.user_content = content;
+        self
+    }
+
+    /// 设置本 Turn canonical 用户消息的 GUI presentation。
+    pub fn with_user_presentation(mut self, presentation: MessagePresentation) -> Self {
+        self.user_presentation = presentation;
         self
     }
 

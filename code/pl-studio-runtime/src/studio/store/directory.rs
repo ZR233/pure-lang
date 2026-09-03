@@ -5,13 +5,12 @@
 //! 只承载已经由 owner 决定的事实，不做业务校验或状态转换。
 
 use anyhow::{Result, bail};
-use pl_protocol::{Thread, ThreadMode};
+use pl_protocol::{Thread, ThreadModeId};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, EntityTrait, QueryFilter,
     QueryOrder, QuerySelect,
 };
 
-use crate::StudioMode;
 use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::mappers::thread_record;
@@ -60,7 +59,7 @@ impl DirectoryDelta {
     pub(in crate::studio) fn register_root_thread(
         project_id: &str,
         title: &str,
-        mode: StudioMode,
+        mode: ThreadModeId,
     ) -> (Self, Thread) {
         let now = unix_seconds();
         let id = new_id("thread");
@@ -70,7 +69,7 @@ impl DirectoryDelta {
             id,
             project_id: project_id.to_string(),
             title: non_empty_title(title),
-            mode: ThreadMode::from(mode.clone()),
+            mode: mode.clone(),
             parent_thread_id: None,
             role: crate::config::StudioRole::Planner.key().to_string(),
             status: pl_protocol::ThreadStatus::Idle,
@@ -136,7 +135,7 @@ pub(in crate::studio) struct RegisteredChildThread {
     pub(in crate::studio) agent_path: String,
     pub(in crate::studio) project_id: String,
     pub(in crate::studio) root_thread_id: String,
-    pub(in crate::studio) mode: ThreadMode,
+    pub(in crate::studio) mode: ThreadModeId,
     pub(in crate::studio) role: String,
     pub(in crate::studio) title: String,
 }

@@ -6,7 +6,7 @@ use crate::studio::entity as entities;
 use crate::studio::records::{
     AttachmentRecord, ProjectRecord, ThreadKind, ThreadRecord, ThreadVisibility,
 };
-use crate::{InteractionContent, InteractionRequest, InteractionScope};
+use crate::{InteractionContent, InteractionPurpose, InteractionRequest, InteractionScope};
 
 pub fn project_record(model: entities::project::Model) -> ProjectRecord {
     ProjectRecord {
@@ -19,7 +19,7 @@ pub fn project_record(model: entities::project::Model) -> ProjectRecord {
 }
 
 pub fn thread_record(model: entities::thread::Model) -> Result<ThreadRecord> {
-    let mode = crate::StudioMode::from_label(&model.mode)
+    let mode = pl_protocol::ThreadModeId::from_label(&model.mode)
         .map_err(|error| anyhow::anyhow!(error.to_string()))
         .with_context(|| format!("unsupported Thread mode in studio db: {}", model.id))?;
     let state: AgentState = serde_json::from_str(&model.state_json)
@@ -99,6 +99,14 @@ pub fn attachment_record(model: entities::attachment::Model) -> Result<Attachmen
 pub fn interaction_record(model: entities::interaction::Model) -> Result<InteractionRequest> {
     let content: InteractionContent = serde_json::from_str(&model.state_json)
         .with_context(|| format!("invalid Interaction state in studio db: {}", model.id))?;
+    let purpose: InteractionPurpose = serde_json::from_str(&model.purpose_json)
+        .with_context(|| format!("invalid Interaction purpose in studio db: {}", model.id))?;
+    let continuation = serde_json::from_str(&model.continuation_json).with_context(|| {
+        format!(
+            "invalid Interaction continuation in studio db: {}",
+            model.id
+        )
+    })?;
     let interaction = InteractionRequest {
         interaction_id: model.id,
         scope: InteractionScope {
@@ -107,9 +115,11 @@ pub fn interaction_record(model: entities::interaction::Model) -> Result<Interac
             item_id: model.item_id,
             tool_id: model.tool_id,
             agent_path: model.agent_path,
+            purpose,
         },
         revision: u64::try_from(model.revision)?,
         content,
+        continuation,
         created_at: model.created_at,
         updated_at: model.updated_at,
     };

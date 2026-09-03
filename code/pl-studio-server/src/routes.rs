@@ -7,6 +7,7 @@ use axum::extract::{FromRequest, FromRequestParts, Multipart, Path, Query, Reque
 use axum::http::request::Parts;
 use axum::http::{StatusCode, header};
 use axum::response::IntoResponse;
+use pl_protocol::ThreadModeId;
 use pl_protocol::studio::{
     AdmitAttachmentDraftsRequest, AdmitAttachmentDraftsResponse, CreateThreadRequest,
     ExpectedRevisionRequest, HealthResponse, LspResetRequest, McpResetRequest, OpenProjectRequest,
@@ -17,7 +18,6 @@ use pl_protocol::studio::{
     UpdateInstructionsSettingsRequest, UpdateMcpSettingsRequest, UpdatePermissionSettingsRequest,
     UpdateProviderSettingsRequest, UpdateSkillsSettingsRequest, UpdateWebSearchSettingsRequest,
 };
-use pl_studio_runtime::StudioMode;
 use tokio::io::AsyncWriteExt;
 use utoipa::{IntoResponses, OpenApi};
 use utoipa_axum::{router::OpenApiRouter, routes};
@@ -876,8 +876,8 @@ async fn check_update(State(state): State<AppState>) -> Result<impl IntoResponse
     ))
 }
 
-fn parse_mode(mode: &str) -> Result<StudioMode, ApiError> {
-    StudioMode::from_label(mode.trim()).map_err(|_| {
+fn parse_mode(mode: &str) -> Result<ThreadModeId, ApiError> {
+    ThreadModeId::from_label(mode.trim()).map_err(|_| {
         ApiError(StudioError::invalid_argument(format!(
             "unsupported Thread mode: {}",
             mode.trim()

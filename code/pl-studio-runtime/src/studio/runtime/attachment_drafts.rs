@@ -17,7 +17,7 @@ use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt;
 use url::Url;
 
-use crate::config::{StudioMode, StudioRole};
+use crate::config::StudioRole;
 use crate::studio::store::attachment::{AttachmentDraftObject, normalize_image_attachment};
 
 use super::StudioRuntime;
@@ -375,8 +375,8 @@ impl StudioRuntime {
                 StudioRole::from_key(&thread.role).context("Thread has an invalid model role")?
             }
             StudioAttachmentAdmissionContext::NewThread { mode } => {
-                StudioMode::from_label(mode)
-                    .map_err(|_| anyhow::anyhow!("mode must be an available mode.* Skill id"))?;
+                pl_protocol::ThreadModeId::from_label(mode)
+                    .map_err(|_| anyhow::anyhow!("mode must be an available mode.* id"))?;
                 StudioRole::Planner
             }
         };

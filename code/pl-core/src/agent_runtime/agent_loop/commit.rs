@@ -127,11 +127,12 @@ where
             facts: commit.facts,
             mutation: commit.mutation,
         };
-        self.host
-            .repository()
-            .commit(repository_commit)
-            .await
-            .map_err(|error| super::super::AgentRuntimeError::Repository(error.to_string()))?;
+        let repository_result = self.host.repository().commit(repository_commit).await;
+        if let Err(error) = repository_result {
+            return Err(super::super::AgentRuntimeError::Repository(
+                error.to_string(),
+            ));
+        }
         self.state = commit.next_state;
         let publication = commit.publication;
         if let Some(publication) = &publication {

@@ -365,116 +365,32 @@ class WorkflowRunView {
   const WorkflowRunView({
     required this.lineageId,
     required this.runId,
-    required this.title,
-    required this.goal,
-    required this.definitionHash,
     required this.modeId,
-    required this.modeDisplayName,
-    required this.currentStageId,
+    required this.graphRevision,
+    required this.graphHash,
+    required this.currentStateId,
     required this.terminal,
-    required this.stages,
-    required this.transitions,
-    required this.history,
-    required this.compiledAt,
+    required this.startedAt,
     required this.updatedAt,
-    required this.archivedTransitionCount,
   });
 
   final String lineageId;
   final String runId;
-  final String title;
-  final String goal;
-  final String definitionHash;
   final String modeId;
-  final String modeDisplayName;
-  final String currentStageId;
+  final int graphRevision;
+  final String graphHash;
+  final String currentStateId;
   final bool terminal;
-  final List<WorkflowStageView> stages;
-  final List<WorkflowTransitionView> transitions;
-  final List<WorkflowHistoryEntryView> history;
-  final DateTime compiledAt;
+  final DateTime startedAt;
   final DateTime updatedAt;
-  final int archivedTransitionCount;
-
-  WorkflowStageView? get currentStage {
-    for (final stage in stages) {
-      if (stage.id == currentStageId) return stage;
-    }
-    return null;
-  }
 
   @override
   bool operator ==(Object other) =>
       other is WorkflowRunView &&
       runId == other.runId &&
-      currentStageId == other.currentStageId &&
-      updatedAt == other.updatedAt &&
-      listEquals(history, other.history);
+      currentStateId == other.currentStateId &&
+      updatedAt == other.updatedAt;
 
   @override
-  int get hashCode =>
-      Object.hash(runId, currentStageId, updatedAt, Object.hashAll(history));
-}
-
-class WorkflowStageView {
-  const WorkflowStageView({
-    required this.id,
-    required this.title,
-    required this.instructions,
-    required this.completionCriteria,
-    required this.terminal,
-  });
-
-  final String id;
-  final String title;
-  final String instructions;
-  final List<String> completionCriteria;
-  final bool terminal;
-}
-
-class WorkflowTransitionView {
-  const WorkflowTransitionView({
-    required this.fromStageId,
-    required this.toStageId,
-    required this.when,
-  });
-
-  final String fromStageId;
-  final String toStageId;
-  final String when;
-}
-
-class WorkflowHistoryEntryView {
-  const WorkflowHistoryEntryView({
-    required this.revision,
-    required this.fromStageId,
-    required this.toStageId,
-    required this.reason,
-    required this.summary,
-    required this.evidence,
-    required this.turnId,
-    required this.callId,
-    required this.transitionedAt,
-  });
-
-  final int revision;
-  final String fromStageId;
-  final String toStageId;
-  final String reason;
-  final String summary;
-  final List<String> evidence;
-  final String turnId;
-  final String callId;
-  final DateTime transitionedAt;
-
-  @override
-  bool operator ==(Object other) =>
-      other is WorkflowHistoryEntryView &&
-      revision == other.revision &&
-      fromStageId == other.fromStageId &&
-      toStageId == other.toStageId &&
-      summary == other.summary;
-
-  @override
-  int get hashCode => Object.hash(revision, fromStageId, toStageId, summary);
+  int get hashCode => Object.hash(runId, currentStateId, updatedAt);
 }

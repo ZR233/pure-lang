@@ -347,7 +347,7 @@ class _ThreadTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final modeIcon = thread.mode == StudioMode.simple
+    final modeIcon = thread.mode == ThreadModeId.simple
         ? Icons.flash_on
         : Icons.route;
     final colors = Theme.of(context).colorScheme;
@@ -395,7 +395,7 @@ class _ThreadTile extends ConsumerWidget {
           : colors.onSurfaceVariant,
       markerColor: issue != null
           ? null
-          : thread.mode == StudioMode.simple
+          : thread.mode == ThreadModeId.simple
           ? StudioColors.clay
           : StudioColors.sage,
       onTap: issue == null

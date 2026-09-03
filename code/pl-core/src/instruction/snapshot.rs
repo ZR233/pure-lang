@@ -244,6 +244,7 @@ fn push_instruction_group(
 
 fn text_message(role: MessageRole, content: String) -> Message {
     Message {
+        presentation: Default::default(),
         role,
         content: MessageContent::text(content),
         reasoning_content: None,

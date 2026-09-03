@@ -6,12 +6,12 @@
 use anyhow::Result;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
-#[cfg(test)]
-use crate::StudioMode;
 use crate::studio::entity as entities;
 use crate::studio::mappers::thread_record;
 use crate::studio::records::ThreadRecord;
 use crate::studio::store::StudioStore;
+#[cfg(test)]
+use pl_protocol::ThreadModeId;
 
 impl StudioStore {
     /// 测试 seed 入口：直接同步创建 root Thread 行。
@@ -23,7 +23,7 @@ impl StudioStore {
         &self,
         project_id: &str,
         title: &str,
-        mode: StudioMode,
+        mode: ThreadModeId,
     ) -> Result<ThreadRecord> {
         use crate::studio::ids::{new_id, unix_seconds};
         use crate::studio::store_support::non_empty_title;

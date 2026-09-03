@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 
 use pl_core::{
     AgentIdentity, AgentRoleId, AgentSnapshot, AgentState, AgentTurnOutcome, DurableCommitFacts,
-    MailboxPresentation, PersistenceClass, RunningAgentState, ThreadActorState, ThreadContextState,
+    MessagePresentation, PersistenceClass, RunningAgentState, ThreadActorState, ThreadContextState,
     ThreadId, ThreadMutation, TurnId,
 };
 use pl_protocol::{
@@ -21,7 +21,7 @@ use super::input_metadata::{deserialize_input_metadata, serialize_input_metadata
 use super::*;
 
 use super::restore::active_skills_from_items;
-use crate::StudioMode;
+use crate::ThreadModeId;
 
 #[test]
 fn thread_input_restores_typed_attachment_manifest() {
@@ -42,7 +42,7 @@ fn thread_input_restores_typed_attachment_manifest() {
         content: "inspect".to_string(),
         attachments_json: serde_json::to_string(std::slice::from_ref(&attachment)).unwrap(),
         metadata_json: "null".to_string(),
-        presentation: "user".to_string(),
+        presentation: "visible".to_string(),
         state_json: serde_json::to_string(&pl_core::MailboxDeliveryState::default()).unwrap(),
         state_kind: "pending".to_string(),
         queue_ordinal: 0,
@@ -99,7 +99,7 @@ fn input_metadata_round_trips_queue_coalescing_key_without_changing_payload() {
         payload: pl_core::MailboxInputPayload {
             message: "wake".to_string(),
             attachments: Vec::new(),
-            presentation: MailboxPresentation::Hidden,
+            presentation: MessagePresentation::Hidden,
             metadata: serde_json::json!({"kind": "taskWake"}).into(),
         },
         queue_coalescing_key: Some("task-run:wakes".to_string()),
@@ -125,7 +125,7 @@ fn input_metadata_round_trips_budget_refresh_without_queue_key() {
         payload: pl_core::MailboxInputPayload {
             message: "continue".to_string(),
             attachments: Vec::new(),
-            presentation: MailboxPresentation::Hidden,
+            presentation: MessagePresentation::Hidden,
             metadata: serde_json::json!({"kind": "plannerMessage"}).into(),
         },
         queue_coalescing_key: None,
@@ -163,7 +163,7 @@ async fn active_turn_fallback_preserves_canonical_phase() {
         .await
         .expect("project");
     let thread = store
-        .create_thread(&project.id, "active-turn-fallback", StudioMode::simple())
+        .create_thread(&project.id, "active-turn-fallback", ThreadModeId::simple())
         .await
         .expect("thread");
     let thread_id = thread.id;
@@ -217,7 +217,7 @@ async fn active_turn_fallback_preserves_canonical_phase() {
 
     // 同一 Turn id 已属于另一 Thread 时，持久化必须失败且不得修改该行。
     let foreign = store
-        .create_thread(&project.id, "foreign", StudioMode::simple())
+        .create_thread(&project.id, "foreign", ThreadModeId::simple())
         .await
         .expect("foreign thread");
     seed_running_turn(&store, &foreign.id, "turn-foreign", 0, TurnPhase::Thinking).await;
@@ -374,11 +374,11 @@ async fn wire_v7_skill_audit_blocks_only_legacy_root_without_rewriting_v13_rows(
     let workspace = std::env::temp_dir().join("pure-studio-strict-skill-recovery");
     let project = store.upsert_project(&workspace).await.expect("project");
     let legacy = store
-        .create_thread(&project.id, "legacy", crate::StudioMode::simple())
+        .create_thread(&project.id, "legacy", crate::ThreadModeId::simple())
         .await
         .expect("legacy thread");
     let healthy = store
-        .create_thread(&project.id, "healthy", crate::StudioMode::simple())
+        .create_thread(&project.id, "healthy", crate::ThreadModeId::simple())
         .await
         .expect("healthy thread");
     seed_empty_session(&store, &legacy.id).await;
@@ -449,7 +449,7 @@ async fn activation_restores_recent_four_hundred_items_and_older_active_skills()
     let workspace = std::env::temp_dir().join("pure-studio-hot-timeline-window");
     let project = store.upsert_project(&workspace).await.expect("project");
     let thread = store
-        .create_thread(&project.id, "hot window", crate::StudioMode::simple())
+        .create_thread(&project.id, "hot window", crate::ThreadModeId::simple())
         .await
         .expect("thread");
     seed_empty_session(&store, &thread.id).await;

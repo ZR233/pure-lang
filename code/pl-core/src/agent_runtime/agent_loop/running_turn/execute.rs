@@ -39,10 +39,12 @@ where
 {
     let leading_inputs = context.leading_inputs.clone();
     for input in &leading_inputs {
-        context
-            .session
-            .push_user_prompt(input.payload.message.clone());
+        context.session.push_user_prompt_with_presentation(
+            input.payload.message.clone(),
+            input.payload.presentation,
+        );
     }
+    let input_presentation = context.input.payload.presentation;
     let turn_id = context.turn_id.clone();
     let start_revision = context.snapshot.revision;
     let framework_thread_id = context.thread_id.clone();
@@ -60,7 +62,8 @@ where
     let budget_refresh = context.budget_refresh.clone();
     let mut session = context.session.clone();
     let (result, session_commit) = match host.turn_factory().prepare_turn(context).await {
-        Ok(prepared) => {
+        Ok(mut prepared) => {
+            prepared.request.user_presentation = input_presentation;
             let prepared = prepared.with_runtime_context(
                 &turn_id,
                 cancellation.clone(),
@@ -70,6 +73,9 @@ where
             );
             for section in &prepared.pinned_context {
                 session.upsert_pinned_context(section.clone());
+            }
+            if let Some(workflow) = prepared.initial_workflow.clone() {
+                session.replace_workflow(Some(workflow));
             }
             let policy = prepared.policy.clone();
             let session_commit = prepared.session_commit;

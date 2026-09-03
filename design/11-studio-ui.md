@@ -12,27 +12,26 @@ process tree。
 
 ## 11.2 动态模式
 
-新 Thread 默认选择 `mode.simple`。composer 的模式 selector 读取 Mode Skill catalog，使用稳定
-`modeId` 作为值、`displayName` 作为文案，不写死 Simple/Task enum。模式切换命令只在 root idle、无
-pending interaction 且 workflow 不存在或已终止时可用；拒绝结果由 canonical snapshot 恢复 UI。
+新 Thread 默认选择 `mode.simple`。composer 的模式 selector 读取 `ThreadModeCatalogSnapshot`，使用
+稳定 `modeId` 作为值、`displayName` 作为文案，不写死 Simple/Task enum。模式切换命令只在 root idle、
+无 pending interaction 时可用；旧活动 run 由 runtime 归档，拒绝结果由 canonical snapshot 恢复 UI。
 
-Mode Skill 不出现在普通 Skills 设置和按需调用列表。两个内置模式不可删除或覆盖。
+Thread Mode 不出现在普通 Skills 设置和按需调用列表。两个内置模式不可删除或覆盖。
 
-## 11.3 Workflow panel
+## 11.3 Workflow status
 
-Thread runtime 只暴露通用 workflow projection。panel 显示 mode、run、revision、lifecycle、当前阶段、
-合法后继、constraint prompt 与最近 history；graph/history 使用稳定 `ValueKey` 供 Driver 读取。未编译
-时显示 compile 指引，terminal 状态仍可展开完整路径。
+Thread runtime 只向 GUI 暴露状态栏需要的通用 workflow projection：mode、run、revision、lifecycle
+与当前阶段。未开始的图模式显示“未开始”；Simple 只显示 Mode。
 
-panel 不根据阶段 ID 推演动作，不等待可能瞬间经过的中间 Widget。状态变更只来自 bridge snapshot；
-GUI 不执行本地乐观 transition。旧 recovery、WorkUnit、delivery review、merge 和 completion gate UI
-全部不存在。
+GUI 不提供完整 graph、history、展开详情或人工 transition，也不根据阶段 ID 推演动作。状态变更只来自
+bridge snapshot，不执行本地乐观 transition。旧 recovery、WorkUnit、delivery review、merge 和
+completion gate UI 全部不存在。
 
 ## 11.4 通用 Interaction
 
-composer dock 只渲染 `UserInput` 与 `ToolApproval`。任务计划由 `submit_plan` 发起，但仍显示为普通
-UserInput：展示完整计划以及批准/修订选项，用户选择后提交 typed resolution。不存在模式专用确认 dock
-或 continuation；普通澄清继续由 `request_user_input` 发起。
+composer dock 只渲染 `UserInput` 与 `ToolApproval`。任务计划由 `plan_submit` 通过固定 Plan 状态机发起，
+但仍显示为普通 UserInput：展示完整计划以及批准/修订选项，用户选择后提交 typed resolution。不存在
+模式专用确认 dock、Plan 状态栏或第二套 continuation；普通澄清继续由 `request_user_input` 发起。
 
 ## 11.5 Agents 设置
 
@@ -57,8 +56,9 @@ Settings CAS revision，并以返回的完整 canonical snapshot 原子更新 UI
 ## 11.7 驱动验收
 
 原生 GUI 必须通过 `cargo xtask run-gui --driver` 启动，Flutter Driver 使用稳定 key 操作项目、Thread、
-模式 selector、composer、通用 Interaction、workflow panel/history 与 shutdown。workflow live harness
-在 terminal 后读取 canonical history，不以轮询瞬时阶段作为通过条件。
+模式 selector、composer、通用 Interaction、workflow status、Thread title 与 shutdown。workflow live
+harness 从 provider wire、tool receipt 与 canonical runtime snapshot 验证完整历史，并在 terminal 后读取
+canonical history，不依赖 GUI 详情或轮询瞬时阶段。
 
 ## 11.8 Thread title
 

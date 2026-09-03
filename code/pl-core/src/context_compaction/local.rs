@@ -1,15 +1,17 @@
 use std::collections::HashMap;
 
-use pl_protocol::{Message, MessageContent, MessageRole, ModelContextItem, PureError, Result};
+use pl_model::completion::{CompletionRequest, ReasoningConfig};
+use pl_model::runtime::{ModelInvocationContext, ModelRuntime};
+use pl_protocol::{
+    Message, MessageContent, MessagePresentation, MessageRole, ModelContextItem, PureError, Result,
+    TokenUsage,
+};
 use pl_trace::AgentEventSender;
 
 use super::ContextCompactionConfig;
 use super::history::build_compacted_history;
 use crate::TraceRecorder;
 use crate::core::progress::ProgressEmitter;
-use pl_model::completion::{CompletionRequest, ReasoningConfig};
-use pl_model::runtime::{ModelInvocationContext, ModelRuntime};
-use pl_protocol::TokenUsage;
 
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn compact_local(
@@ -36,6 +38,7 @@ pub(super) async fn compact_local(
     }
     super::compact_old_tool_results_for_request(&mut input);
     input.push(ModelContextItem::from(Message {
+        presentation: MessagePresentation::Hidden,
         role: MessageRole::User,
         content: MessageContent::text(config.instructions.clone()),
         reasoning_content: None,

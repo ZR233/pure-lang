@@ -1,5 +1,6 @@
 mod agent;
 mod agent_profile;
+pub mod agent_session;
 mod billing;
 mod error;
 mod event;
@@ -14,7 +15,7 @@ mod permission;
 mod provider_catalog;
 pub mod remote;
 pub mod studio;
-mod thread;
+pub mod thread;
 mod thread_item;
 mod tool;
 mod turn;
@@ -25,6 +26,14 @@ pub use agent::*;
 pub use agent_profile::{
     AgentProfileSnapshot, AgentWorkspaceAssignmentSnapshot, AgentWorkspaceDisposition,
     AgentWorkspaceMode, AgentWorktreeSnapshot,
+};
+pub use agent_session::plan::{
+    AGENT_SESSION_PLAN_CONFIRMATION_QUESTION_ID, AgentSessionPlanAvailableTransition,
+    AgentSessionPlanConfirmationPurpose, AgentSessionPlanDocument,
+    AgentSessionPlanMutationResponse, AgentSessionPlanOperation, AgentSessionPlanOperationReceipt,
+    AgentSessionPlanPhase, AgentSessionPlanResultCode, AgentSessionPlanSnapshot,
+    AgentSessionPlanState, AgentSessionPlanTransitionActor, AgentSessionPlanTransitionError,
+    AgentSessionPlanTransitionRecord,
 };
 pub use billing::InferenceTokenUsage as TokenUsage;
 pub use billing::{
@@ -44,8 +53,8 @@ pub use interaction::*;
 pub use labeled::{LabeledEnum, UnknownLabelError};
 pub use mcp::{McpAvailabilityDescriptor, McpHealthSnapshot, McpServerDescriptor};
 pub use message::{
-    AttachmentModality, ContentPart, Message, MessageContent, MessageRole, ToolCallCaller,
-    ToolCallKind, ToolCallRecord, ToolResultRecord,
+    AttachmentModality, ContentPart, Message, MessageContent, MessagePresentation, MessageRole,
+    ToolCallCaller, ToolCallKind, ToolCallRecord, ToolResultRecord,
 };
 pub use model_context::{
     AgentSessionSnapshot, AgentWorkingState, ContextSectionId, ContextSectionIdError,
@@ -71,11 +80,12 @@ pub use provider_catalog::{
     ProviderServiceCapabilitiesDescriptor, WebSearchProviderCapabilitiesDescriptor,
     WebSearchResolutionDescriptor,
 };
+pub use thread::mode::{ThreadModeCatalogSnapshot, ThreadModeDescriptor, ThreadModeId};
 pub use thread::{
-    ModeId, THREAD_SCHEMA_VERSION, Thread, ThreadContextDisposition, ThreadMode,
-    ThreadNotification, ThreadNotificationEnvelope, ThreadRuntimeSnapshot, ThreadRuntimeUsage,
-    ThreadSnapshot, ThreadStatus, ThreadSubscriptionRequest, ThreadSubscriptionUpdate,
-    ThreadTurnHistory, ThreadTurnPage,
+    THREAD_SCHEMA_VERSION, Thread, ThreadContextDisposition, ThreadNotification,
+    ThreadNotificationEnvelope, ThreadRuntimeSnapshot, ThreadRuntimeUsage, ThreadSnapshot,
+    ThreadStatus, ThreadSubscriptionRequest, ThreadSubscriptionUpdate, ThreadTurnHistory,
+    ThreadTurnPage,
 };
 pub use thread_item::*;
 pub use tool::{
@@ -92,7 +102,8 @@ pub use turn_failure::{
     ProviderFailure, ProviderFailureKind, RetryDisposition, TurnFailure, TurnFailureCategory,
 };
 pub use workflow::{
-    ModeInstructionSnapshot, WorkflowDefinition, WorkflowOperationReceipt, WorkflowRun,
-    WorkflowRunArchive, WorkflowRunLifecycle, WorkflowRuntimeSnapshot, WorkflowSessionState,
-    WorkflowStage, WorkflowTransition, WorkflowTransitionRecord,
+    WorkflowDefinition, WorkflowOperationReceipt, WorkflowRun, WorkflowRunArchive,
+    WorkflowRunLifecycle, WorkflowRuntimeRunSnapshot, WorkflowRuntimeSnapshot,
+    WorkflowSessionState, WorkflowState, WorkflowStateKind, WorkflowTransition,
+    WorkflowTransitionRecord,
 };

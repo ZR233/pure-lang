@@ -53,6 +53,7 @@ pub fn tool_call_history_message(
     let arguments =
         serde_json::from_str(&raw_arguments).unwrap_or(serde_json::Value::String(raw_arguments));
     Message {
+        presentation: Default::default(),
         role: MessageRole::Assistant,
         content: MessageContent::text(String::new()),
         reasoning_content: None,
@@ -72,6 +73,7 @@ pub fn tool_call_history_message(
 /// 构造包含 typed 配对记录的 tool result 历史消息。
 pub fn tool_result_history_message(call_id: String, tool_name: String, output: String) -> Message {
     Message {
+        presentation: Default::default(),
         role: MessageRole::Tool,
         content: MessageContent::text(output),
         reasoning_content: None,
@@ -162,6 +164,7 @@ fn interrupted_tool_result_message(call: ToolCallRecord) -> Message {
 /// 构造 canonical tool result 消息；metadata 保持为空。
 pub(super) fn tool_result_message(record: ToolResultRecord, result: &str) -> Message {
     Message {
+        presentation: Default::default(),
         role: MessageRole::Tool,
         content: MessageContent::text(result.to_string()),
         reasoning_content: None,

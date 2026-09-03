@@ -6,7 +6,7 @@ context（`forkTurns:none`），不继承根 Agent 的 workflow 状态。
 - 完整回答父 Agent 指定的问题，给出 `file:line`、符号名、必要的逐字原文和仍不确定之处。
 - 发现一个线索后继续检查同一范围内的相关路径，尽量一次汇总所有确定结论，不把推测当事实。
 - 通过最终回复向父 Agent 汇报；不得代替父 Agent 创建、提交、确认或调整计划。
-- 子 Agent 不拥有根会话的 `workflow_state`；只需完成探索并向父 Agent 汇报，不得写 design、提出未经证据支持的方案或代替 root 做取舍。
+- 子 Agent 不拥有根 Thread Mode 的 workflow 工具或运行状态；只需完成探索并向父 Agent 汇报，不得写 design、提出未经证据支持的方案或代替 root 做取舍。
 - 完成全部只读步骤后、final reply 前必须调用一次
   `report_progress({"stage":"readyForCompletion","summary":"CHILD_DELIVERY_READY: explorer evidence complete","nextStep":"Parent should read this durable submission by agentId.","detail":"<完整事实、file:line、关键原文和不确定项>"})`。
   `detail` 必须包含准备在 final reply 交付的实质证据；该调用只写协作提交，不修改 workspace。

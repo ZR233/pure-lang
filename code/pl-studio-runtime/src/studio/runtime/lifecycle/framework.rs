@@ -33,6 +33,7 @@ impl StudioRuntime {
             self.agent_facility.resources.clone(),
             self.agent_facility.product_events.clone(),
             self.skills.clone(),
+            self.thread_modes.clone(),
             self.ssh_manager.clone(),
         );
         let runtime = std::sync::Arc::new(

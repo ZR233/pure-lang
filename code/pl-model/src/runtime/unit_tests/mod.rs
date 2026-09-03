@@ -236,6 +236,7 @@ fn minimal_request(_model: &str) -> CompletionRequest {
     CompletionRequest::builder()
         .input(vec![
             Message {
+                presentation: Default::default(),
                 role: MessageRole::User,
                 content: MessageContent::text("hello".to_string()),
                 reasoning_content: None,
@@ -251,11 +252,12 @@ fn minimal_request(_model: &str) -> CompletionRequest {
 fn complete_workflow_wire_request() -> CompletionRequest {
     CompletionRequest::builder()
         .instructions(
-            "WORKFLOW_WIRE_BASE_SYSTEM\nWORKFLOW_WIRE_GLOBAL_DEVELOPER\nWORKFLOW_WIRE_MODE_SKILL\n\
+            "WORKFLOW_WIRE_BASE_SYSTEM\nWORKFLOW_WIRE_GLOBAL_DEVELOPER\nWORKFLOW_WIRE_THREAD_MODE_PROMPT\n\
              WORKFLOW_WIRE_WORKSPACE_AGENTS\nWORKFLOW_WIRE_CONSTRAINTS",
         )
         .input(vec![
             Message {
+                presentation: Default::default(),
                 role: MessageRole::User,
                 content: MessageContent::text(
                     "WORKFLOW_WIRE_REAL_USER_PROMPT WORKFLOW_WIRE_HOT_HISTORY WORKFLOW_WIRE_CONTEXT"
@@ -269,8 +271,8 @@ fn complete_workflow_wire_request() -> CompletionRequest {
             .into(),
         ])
         .tools(vec![pl_protocol::ToolSpec::function(
-            "workflow_state",
-            "Read the canonical workflow state.",
+            "workflow_current",
+            "Read the canonical Thread Mode workflow state.",
             serde_json::json!({
                 "type": "object",
                 "properties": {},

@@ -1,51 +1,49 @@
-//! 可由 Mode Skill 编译的通用工作流协议。
+//! Thread Mode 使用的扁平确定性状态图协议。
 
 use serde::{Deserialize, Serialize};
 
-/// 工作流编译时冻结的模式指令。
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+use crate::ThreadModeId;
+
+/// 一个 state 在状态机中的语义种类。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ModeInstructionSnapshot {
-    pub mode_id: String,
-    pub display_name: String,
-    pub source: String,
-    pub provider_id: String,
-    pub revision: String,
-    pub content_hash: String,
-    pub content: String,
+pub enum WorkflowStateKind {
+    Atomic,
+    Final,
 }
 
-/// 一个可编译阶段。
+/// 状态图中的一个 state。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct WorkflowStage {
+pub struct WorkflowState {
     pub id: String,
     pub title: String,
     pub instructions: String,
     #[serde(default)]
     pub completion_criteria: Vec<String>,
-    #[serde(default)]
-    pub terminal: bool,
+    pub kind: WorkflowStateKind,
 }
 
-/// 一条有向阶段转换。
+/// 一条有向 state transition。
+///
+/// `guard` 是由 Agent 判断的声明性自然语言条件；Runtime 不执行表达式。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowTransition {
-    pub from_stage_id: String,
-    pub to_stage_id: String,
-    pub when: String,
+    pub source_state_id: String,
+    pub target_state_id: String,
+    pub guard: String,
 }
 
-/// Mode Skill 提交给编译器的完整定义。
+/// 注册进 Thread Mode Manager 的完整状态图定义。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowDefinition {
     pub title: String,
     pub goal: String,
-    pub initial_stage_id: String,
+    pub initial_state_id: String,
     #[serde(default)]
-    pub stages: Vec<WorkflowStage>,
+    pub states: Vec<WorkflowState>,
     #[serde(default)]
     pub transitions: Vec<WorkflowTransition>,
 }
@@ -58,13 +56,13 @@ pub enum WorkflowRunLifecycle {
     Terminal,
 }
 
-/// 一次已提交的阶段完成事实。
+/// 一次已提交的状态转换事实。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowTransitionRecord {
     pub revision: u64,
-    pub from_stage_id: String,
-    pub to_stage_id: String,
+    pub source_state_id: String,
+    pub target_state_id: String,
     pub reason: String,
     pub summary: String,
     #[serde(default)]
@@ -74,18 +72,18 @@ pub struct WorkflowTransitionRecord {
     pub transitioned_at: i64,
 }
 
-/// 当前完整 run。
+/// 与 Agent working state 一起保存的轻量 run。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowRun {
     pub lineage_id: String,
     pub run_id: String,
-    pub definition: WorkflowDefinition,
-    pub definition_hash: String,
-    pub mode: ModeInstructionSnapshot,
+    pub mode_id: ThreadModeId,
+    pub graph_revision: u64,
+    pub graph_hash: String,
     pub lifecycle: WorkflowRunLifecycle,
-    pub current_stage_id: String,
-    pub compiled_at: i64,
+    pub current_state_id: String,
+    pub started_at: i64,
     pub updated_at: i64,
     #[serde(default)]
     pub history_tail: Vec<WorkflowTransitionRecord>,
@@ -101,9 +99,10 @@ pub struct WorkflowRun {
 pub struct WorkflowRunArchive {
     pub lineage_id: String,
     pub run_id: String,
-    pub title: String,
-    pub definition_hash: String,
-    pub final_stage_id: String,
+    pub mode_id: ThreadModeId,
+    pub graph_revision: u64,
+    pub graph_hash: String,
+    pub final_state_id: String,
     pub outcome: String,
     pub summary: String,
     pub archived_at: i64,
@@ -136,20 +135,48 @@ pub struct WorkflowSessionState {
     pub operation_receipts: Vec<WorkflowOperationReceipt>,
 }
 
+/// Thread stream 向 GUI 暴露的轻量当前 run 投影。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowRuntimeRunSnapshot {
+    pub lineage_id: String,
+    pub run_id: String,
+    pub mode_id: ThreadModeId,
+    pub graph_revision: u64,
+    pub graph_hash: String,
+    pub lifecycle: WorkflowRunLifecycle,
+    pub current_state_id: String,
+    pub started_at: i64,
+    pub updated_at: i64,
+}
+
 /// Thread stream 向 GUI 暴露的当前工作流投影。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowRuntimeSnapshot {
     pub revision: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub current_run: Option<WorkflowRun>,
+    pub current_run: Option<WorkflowRuntimeRunSnapshot>,
 }
 
 impl From<&WorkflowSessionState> for WorkflowRuntimeSnapshot {
     fn from(state: &WorkflowSessionState) -> Self {
         Self {
             revision: state.revision,
-            current_run: state.current_run.clone(),
+            current_run: state
+                .current_run
+                .as_ref()
+                .map(|run| WorkflowRuntimeRunSnapshot {
+                    lineage_id: run.lineage_id.clone(),
+                    run_id: run.run_id.clone(),
+                    mode_id: run.mode_id.clone(),
+                    graph_revision: run.graph_revision,
+                    graph_hash: run.graph_hash.clone(),
+                    lifecycle: run.lifecycle,
+                    current_state_id: run.current_state_id.clone(),
+                    started_at: run.started_at,
+                    updated_at: run.updated_at,
+                }),
         }
     }
 }

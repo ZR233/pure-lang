@@ -141,6 +141,7 @@ fn compaction_request(mode: OpenAiCompactionMode) -> ModelCompactionRequest {
         mode,
         instructions: "canonical instructions".to_string(),
         input: vec![ModelContextItem::from(Message {
+            presentation: Default::default(),
             role: MessageRole::User,
             content: MessageContent::text("hello".to_string()),
             reasoning_content: None,
@@ -356,6 +357,7 @@ async fn responses_websocket_reuses_the_agent_session_connection() {
     let mut second_request = complete_workflow_wire_request();
     second_request.input.extend([
         Message {
+            presentation: Default::default(),
             role: MessageRole::Assistant,
             content: MessageContent::text("ok-1".to_string()),
             reasoning_content: None,
@@ -365,6 +367,7 @@ async fn responses_websocket_reuses_the_agent_session_connection() {
         }
         .into(),
         Message {
+            presentation: Default::default(),
             role: MessageRole::User,
             content: MessageContent::text("again".to_string()),
             reasoning_content: None,
@@ -709,6 +712,7 @@ async fn responses_websocket_falls_back_to_http_after_one_full_replay() {
     let mut second_request = minimal_request("local-responses");
     second_request.input.extend([
         Message {
+            presentation: Default::default(),
             role: MessageRole::Assistant,
             content: MessageContent::text("http-ok-1".to_string()),
             reasoning_content: None,
@@ -718,6 +722,7 @@ async fn responses_websocket_falls_back_to_http_after_one_full_replay() {
         }
         .into(),
         Message {
+            presentation: Default::default(),
             role: MessageRole::User,
             content: MessageContent::text("again".to_string()),
             reasoning_content: None,
@@ -877,6 +882,7 @@ async fn responses_websocket_retries_an_invalid_continuation_once_with_full_hist
     let mut second_request = minimal_request("local-responses");
     second_request.input.extend([
         Message {
+            presentation: Default::default(),
             role: MessageRole::Assistant,
             content: MessageContent::text("ok-1".to_string()),
             reasoning_content: None,
@@ -886,6 +892,7 @@ async fn responses_websocket_retries_an_invalid_continuation_once_with_full_hist
         }
         .into(),
         Message {
+            presentation: Default::default(),
             role: MessageRole::User,
             content: MessageContent::text("again".to_string()),
             reasoning_content: None,
@@ -1024,6 +1031,7 @@ async fn invalid_continuation_full_replay_consumes_the_websocket_retry_budget() 
     let mut second_request = minimal_request("local-responses");
     second_request.input.extend([
         Message {
+            presentation: Default::default(),
             role: MessageRole::Assistant,
             content: MessageContent::text("ok-1".to_string()),
             reasoning_content: None,
@@ -1033,6 +1041,7 @@ async fn invalid_continuation_full_replay_consumes_the_websocket_retry_budget() 
         }
         .into(),
         Message {
+            presentation: Default::default(),
             role: MessageRole::User,
             content: MessageContent::text("again".to_string()),
             reasoning_content: None,
@@ -1152,6 +1161,7 @@ async fn responses_websocket_does_not_commit_unconsumed_completion() {
     let mut second_request = minimal_request("local-responses");
     second_request.input.extend([
         Message {
+            presentation: Default::default(),
             role: MessageRole::Assistant,
             content: MessageContent::text("not-consumed".to_string()),
             reasoning_content: None,
@@ -1161,6 +1171,7 @@ async fn responses_websocket_does_not_commit_unconsumed_completion() {
         }
         .into(),
         Message {
+            presentation: Default::default(),
             role: MessageRole::User,
             content: MessageContent::text("again".to_string()),
             reasoning_content: None,
@@ -1494,13 +1505,13 @@ fn assert_complete_workflow_wire_body(body: &serde_json::Value) {
     for marker in [
         "WORKFLOW_WIRE_BASE_SYSTEM",
         "WORKFLOW_WIRE_GLOBAL_DEVELOPER",
-        "WORKFLOW_WIRE_MODE_SKILL",
+        "WORKFLOW_WIRE_THREAD_MODE_PROMPT",
         "WORKFLOW_WIRE_WORKSPACE_AGENTS",
         "WORKFLOW_WIRE_CONSTRAINTS",
         "WORKFLOW_WIRE_REAL_USER_PROMPT",
         "WORKFLOW_WIRE_HOT_HISTORY",
         "WORKFLOW_WIRE_CONTEXT",
-        "workflow_state",
+        "workflow_current",
         "additionalProperties",
     ] {
         assert!(body.contains(marker), "final wire body is missing {marker}");
@@ -1567,6 +1578,7 @@ async fn http_does_not_replay_media_requests_after_the_first_send() {
     let request = CompletionRequest::builder()
         .input(vec![
             Message {
+                presentation: Default::default(),
                 role: MessageRole::User,
                 content: MessageContent::new(vec![
                     pl_protocol::ContentPart::Text {

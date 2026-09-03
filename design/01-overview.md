@@ -16,8 +16,8 @@ Pure-Lang 是一个自然语言编译器。Pure Studio 的业务核心只有
   以及内部 context patch / context compaction。
 - `Interaction`：等待用户回答的 user input 或 tool approval；它不是普通聊天 Item。
 
-Simple、Task 与自定义模式不是独立会话类型。它们都是预加载 `mode.*` Skill 的同一 root Agent，
-差异只存在于冻结的模式指令；是否编译和推进工作流由各 Mode Skill 自主决定。
+Simple、Task 与自定义模式不是独立会话类型。它们都是同一 root Agent 的 `Thread Mode`；Mode Prompt
+与可选预设图由内存注册表提供，模型不负责定义或编译工作流。
 
 ## 1.2 运行路径
 
@@ -34,7 +34,7 @@ pl-studio-server ─ REST / typed SSE ─┘        ↓
 - 每个 `ThreadActor` 串行拥有一个 Thread 的输入队列、活动 Turn、取消句柄、live Item overlay
   与 `AgentWorkingState`。
 - `TurnEngine` 只负责模型采样、工具调用、Interaction 等待和上下文压缩。
-- root Thread 预加载动态 Mode Skill，拥有可选的 `workflow_state` 和统一 `complete` 工具；child
+- root Thread 预加载当前 Mode Prompt，拥有可选的拆分 workflow 工具和统一 `complete` 工具；child
   Thread 使用冻结的 Agent Profile 且不拥有 root workflow 工具。
 - `studio.sqlite` 是 durable Thread/Turn/Item/Interaction、working state 与 Studio 产品事实的
   唯一数据库。
@@ -45,8 +45,8 @@ pl-studio-server ─ REST / typed SSE ─┘        ↓
 | --- | --- |
 | Thread、Turn、Item、输入、Interaction、working state | `studio.sqlite` |
 | 活动 Turn、流式增量、steer、取消 identity、prompt generation | `ThreadActor` |
-| Workflow definition、run、revision、history | `AgentWorkingState.workflow` |
-| Mode Skill winner | 当前 Skill catalog；active run 使用其冻结 snapshot |
+| Workflow run、revision、history | `AgentWorkingState.workflow` |
+| Thread Mode Prompt 与预设图 | `pl-core::thread::mode::ThreadModeManager` 不可变快照 |
 | Agent Profile 文件 | `~/.pure/agents/*.toml`；系统 Profile 由 runtime 注册 |
 | Composer、滚动、展开、订阅 generation | Flutter `WorkspaceUiState` |
 

@@ -277,7 +277,7 @@ pure-lang/
 | **Skill** | 项目技能系统，定义 Codex 协作规则和可复用流程 |
 | **Studio** | Pure Studio 桌面运行时，管理项目、会话和配置 |
 | **Provider** | LLM Provider 抽象（OpenAI、DeepSeek、智谱等） |
-| **StudioMode** | root Thread 模式（Simple / Task） |
+| **ThreadModeId** | root Thread 的 Mode 身份（例如 `mode.simple` / `mode.task`） |
 
 ### 内置工具
 
@@ -380,8 +380,9 @@ cargo xtask run-gui --demo
 但 canonical 交互断言仍使用 Flutter integration test 的稳定 `ValueKey`。
 
 `verify-workflow --live` 会产生真实模型调用和费用，不进入默认 CI，也不会回退到 scripted
-provider。Headless 与 GUI 共用 canonical prompt 和无 Git 的临时 Rust 项目；GUI 路径启动真实
-native Studio、通过通用 `request_user_input` 确认计划，完成后 durable shutdown，再以同一隔离
+provider。GUI 路径启动真实 native Studio，在 `planning` 中先通过 `request_user_input` 补齐事实，再由
+固定 Plan 状态机的 `plan_submit` 完成修订与批准；批准后的完整 Plan 作为 GUI 隐藏的用户消息进入同一
+AgentSession。完成后 durable shutdown，再以同一隔离
 Studio home 恢复相同 Thread 与 workflow run。脱敏 wire、workflow snapshot、命令输出、截图、
 render tree 和 Driver 日志保存在 `target/workflow-live-artifacts/`。
 
@@ -409,7 +410,9 @@ render tree 和 Driver 日志保存在 `target/workflow-live-artifacts/`。
 | [13-tool-calling-runtime.md](./design/13-tool-calling-runtime.md) | 工具调用运行时 |
 | [14-lsp-runtime.md](./design/14-lsp-runtime.md) | LSP 运行时 |
 | [15-agent-profiles-and-collaboration.md](./design/15-agent-profiles-and-collaboration.md) | Agent Profile 与统一协作 |
-| [16-task-orchestration.md](./design/16-task-orchestration.md) | Mode Skill 与可编译工作流 |
+| [16-task-orchestration.md](./design/16-task-orchestration.md) | Thread Mode 与预注册工作流 |
+| [23-thread-mode.md](./design/23-thread-mode.md) | Thread Mode 注册、图生命周期与工具合同 |
+| [24-agent-session-plan.md](./design/24-agent-session-plan.md) | AgentSession Plan 状态机与通用隐藏 continuation |
 | [17-agent-runtime-host.md](./design/17-agent-runtime-host.md) | Agent runtime 与宿主边界 |
 | [18-studio-release-update.md](./design/18-studio-release-update.md) | Studio 发布与更新 |
 | [19-studio-storage-and-diagnostics.md](./design/19-studio-storage-and-diagnostics.md) | Studio 存储与诊断 |

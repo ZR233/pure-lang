@@ -44,6 +44,7 @@ impl StudioAgentHost {
         resources: StudioAgentResources,
         product_events: ProductEventBus,
         skills: SkillCatalogRuntime,
+        thread_modes: pl_core::ThreadModeManager,
         ssh_manager: Arc<pl_core::remote::SshManager>,
     ) -> Self {
         Self {
@@ -58,6 +59,7 @@ impl StudioAgentHost {
                 interactions.clone(),
                 resources.clone(),
                 skills,
+                thread_modes,
                 ssh_manager.clone(),
             ),
             lifecycle: StudioAgentLifecycle::new(

@@ -542,32 +542,32 @@ class _ToolGroupItemRow extends StatelessWidget {
     if (item.part.status == 'succeeded') {
       return null;
     }
-    if (item.name == 'workflow_state') {
-      return _workflowStateDetail(result);
+    if (item.name == 'workflow_transition' || item.name == 'workflow_restart') {
+      return _workflowMutationDetail(result);
     }
     return result;
+  }
+
+  String _workflowMutationDetail(String result) {
+    try {
+      final decoded = jsonDecode(result);
+      if (decoded is! Map) return result;
+      final code = decoded['code']?.toString();
+      final recoveryAction = decoded['recoveryAction']?.toString();
+      final lines = <String>[
+        if (code?.trim().isNotEmpty == true) code!,
+        if (recoveryAction?.trim().isNotEmpty == true) recoveryAction!,
+      ];
+      return lines.isEmpty ? result : lines.join('\n');
+    } catch (_) {
+      return result;
+    }
   }
 
   String? _attachmentDetail(TimelineToolPart? tool) {
     final attachments = tool?.attachments ?? const <ThreadAttachmentView>[];
     if (attachments.isEmpty) return null;
     return attachments.map(_attachmentDescription).join('\n');
-  }
-
-  String _workflowStateDetail(String result) {
-    try {
-      final decoded = jsonDecode(result);
-      if (decoded is! Map) return result;
-      final code = decoded['code']?.toString();
-      final message = decoded['message']?.toString();
-      final lines = <String>[
-        if (code?.trim().isNotEmpty == true) code!,
-        if (message?.trim().isNotEmpty == true) message!,
-      ];
-      return lines.isEmpty ? result : lines.join('\n');
-    } catch (_) {
-      return result;
-    }
   }
 }
 

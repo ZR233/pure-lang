@@ -15,11 +15,11 @@ workspace assignment 和工具集合。assignment 与 Profile 一起写入 canon
 
 ## 17.2 root 会话
 
-root TurnFactory 使用统一 `unified_root` 指令和 planner route。它解析 Thread 的动态 ModeId：无 active
-run 时读取当前 Mode Skill winner，active/terminal run 的执行上下文使用 run 内冻结 snapshot。模型
-上下文按固定 section 注入项目指令、Mode Skill 与（存在 active workflow 时）`pl.workflow`。
+root TurnFactory 使用统一 `unified_root` 指令和 planner route。它以 Thread 的 `ThreadModeId` 从
+`ThreadModeManager` 捕获不可变快照，并在 provider 前协调 run 与图 hash。模型上下文按固定 section
+注入项目指令、Mode Prompt 与（存在 workflow 时）`pl.workflow`。
 
-root 注册可选 `workflow_state`、统一 `complete` 和通用 collaboration/workspace tools。阶段只改变
+root 注册可选的拆分 workflow 工具、统一 `complete` 和通用 collaboration/workspace tools。阶段只改变
 constraint prompt，不能改变工具授权；所有 root turn 由 `complete` 形成统一完成边界。模式切换由
 runtime 命令校验 idle、pending interaction 与 workflow lifecycle。
 
@@ -28,7 +28,7 @@ runtime 命令校验 idle、pending interaction 与 workflow lifecycle。
 `spawn_agent(profileId, task, ...)` 从可用 catalog 解析 Profile，生成时冻结 system instructions、
 provider、model 与 effort，再创建普通 child Thread。系统和用户 Profile 使用同一 snapshot 类型。
 
-child 可使用普通 workspace/command/collaboration tools，但不拥有根 workflow state tool。Profile 的
+child 可使用普通 workspace/command/collaboration tools，但不拥有根 workflow 工具。Profile 的
 `unrestricted | directory | worktree` 模式决定有效 root/boundary 与项目内写策略。directory 策略只由
 Pure 内置文件 mutation 工具强制执行，固定上下文必须声明 shell、Git、MCP 可绕过；worktree child 使用
 产品层 durable lease，但不创建旧交付记录或自动整合。多个 Agent 的协调与成果采纳责任属于 root。
@@ -38,7 +38,9 @@ Pure 内置文件 mutation 工具强制执行，固定上下文必须声明 shel
 ## 17.4 Interaction 与恢复
 
 Thread 可以等待 `UserInput` 或 `ToolApproval`。响应进入同一 actor continuation，不存在 planner wake、
-Task continuation 或专用计划确认状态。重启 activation 原子恢复 transcript、working state、pending
+Task continuation 或专用 Plan Interaction kind。计划确认仍是通用 `UserInput`，但 typed purpose 将其
+绑定到独立 `session::plan` 状态机；pending、Plan state 与 resolution continuation 在 actor owner commit
+中保持原子。重启 activation 原子恢复 transcript、working state、pending
 Interaction、Profile 与 workspace assignment；非法 session snapshot 产生通用 AgentState recovery issue。
 worktree 的物理资源恢复另由 Studio durable lease 对账，身份不匹配时发布 Recovery issue 并保留现场。
 

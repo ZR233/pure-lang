@@ -156,6 +156,7 @@ pub struct PreparedAgentTurn {
     pub(crate) policy: AgentExecutionPolicy,
     pub(crate) session_commit: AgentSessionCommitPolicy,
     pub(crate) pinned_context: Vec<crate::PinnedContextSection>,
+    pub(crate) initial_workflow: Option<pl_protocol::WorkflowSessionState>,
     pub(crate) session_runtime: Option<PreparedSessionRuntime>,
 }
 
@@ -174,6 +175,7 @@ impl PreparedAgentTurn {
             policy,
             session_commit: AgentSessionCommitPolicy::Persist,
             pinned_context: Vec::new(),
+            initial_workflow: None,
             session_runtime: None,
         }
     }
@@ -196,6 +198,12 @@ impl PreparedAgentTurn {
     /// 在模型 turn 启动前写入产品提供的 canonical pinned context。
     pub fn with_pinned_context(mut self, section: crate::PinnedContextSection) -> Self {
         self.pinned_context.push(section);
+        self
+    }
+
+    /// 在第一次 provider 请求前安装宿主已与冻结 Mode 图对齐的 canonical workflow。
+    pub fn with_initial_workflow(mut self, state: pl_protocol::WorkflowSessionState) -> Self {
+        self.initial_workflow = Some(state);
         self
     }
 

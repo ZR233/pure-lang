@@ -526,7 +526,7 @@ void registerControllerStreamTests() {
       id: 'session-old',
       projectId: 'project-1',
       title: 'Older session',
-      mode: StudioMode.simple,
+      mode: ThreadModeId.simple,
       updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
     );
     api.directoryPages['opaque-dir'] = ThreadDirectoryPage(
@@ -634,7 +634,7 @@ void registerControllerStreamTests() {
       id: 'session-busy-child',
       projectId: 'project-1',
       title: 'Busy child',
-      mode: StudioMode.simple,
+      mode: ThreadModeId.simple,
       parentThreadId: 'session-1',
       rootThreadId: 'session-1',
       updatedAt: DateTime.now(),
@@ -695,7 +695,7 @@ void registerControllerStreamTests() {
                 id: 'session-other',
                 projectId: 'project-1',
                 title: 'Other',
-                mode: StudioMode.simple,
+                mode: ThreadModeId.simple,
                 updatedAt: DateTime.now(),
               ),
             ],
@@ -740,7 +740,7 @@ void registerControllerStreamTests() {
             id: 'session-late',
             projectId: 'project-1',
             title: 'Late directory entry',
-            mode: StudioMode.simple,
+            mode: ThreadModeId.simple,
             updatedAt: DateTime.now(),
           ),
         ],
@@ -784,7 +784,7 @@ void registerControllerStreamTests() {
         id: 'session-created',
         projectId: 'project-1',
         title: 'New Session',
-        mode: StudioMode.simple,
+        mode: ThreadModeId.simple,
         updatedAt: DateTime.now(),
       );
       final api = _FakeStudioApi(initial)
@@ -823,7 +823,7 @@ void registerControllerStreamTests() {
         id: 'session-outside-page',
         projectId: 'project-1',
         title: 'Outside page',
-        mode: StudioMode.simple,
+        mode: ThreadModeId.simple,
         updatedAt: DateTime.fromMillisecondsSinceEpoch(-1),
       );
       final api = _FakeStudioApi(initial)
@@ -881,7 +881,7 @@ void registerControllerStreamTests() {
       id: 'session-created',
       projectId: 'project-1',
       title: 'New Session',
-      mode: StudioMode.simple,
+      mode: ThreadModeId.simple,
       updatedAt: DateTime.now(),
     );
     final gate = Completer<SubmitPromptReceipt>();
@@ -927,7 +927,7 @@ void registerControllerStreamTests() {
         id: 'session-2',
         projectId: 'project-1',
         title: 'Second',
-        mode: StudioMode.simple,
+        mode: ThreadModeId.simple,
         updatedAt: DateTime.fromMillisecondsSinceEpoch(-1),
       );
       final state = initial.copyWith(

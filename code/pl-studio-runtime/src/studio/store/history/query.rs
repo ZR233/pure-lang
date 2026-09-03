@@ -81,7 +81,7 @@ fn turn_record(model: &turn::Model) -> Result<Turn> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::StudioMode;
+    use crate::ThreadModeId;
     use sea_orm::{ActiveModelTrait, Set};
 
     async fn seed_turn(store: &StudioStore, thread_id: &str, ordinal: i64) {
@@ -114,7 +114,7 @@ mod tests {
         std::fs::create_dir_all(&workspace).unwrap();
         let project = store.upsert_project(&workspace).await.unwrap();
         let thread = store
-            .create_thread(&project.id, "History anchor", StudioMode::simple())
+            .create_thread(&project.id, "History anchor", ThreadModeId::simple())
             .await
             .unwrap();
         for ordinal in 1..=5 {

@@ -23,6 +23,8 @@ StudioBridgeEventPayload _productPayloadFromFrb(
       LspStateChangedPayload(_lspStateFromFrb(field0)),
     frb.BridgeProductEventPayload_SkillsStateChanged(:final field0) =>
       SkillsStateChangedPayload(_skillsStateFromFrb(field0)),
+    frb.BridgeProductEventPayload_ThreadModeCatalogChanged(:final field0) =>
+      ThreadModeCatalogChangedPayload(_threadModeCatalogFromFrb(field0)),
     frb.BridgeProductEventPayload_ProviderUsageStateChanged(:final field0) =>
       ProviderUsageStateChangedPayload(_providerUsageStateFromFrb(field0)),
     frb.BridgeProductEventPayload_ModelPerformanceStateChanged(:final field0) =>
@@ -175,6 +177,7 @@ StudioState studioStateFromFrbSnapshot(frb.BridgeStudioStateSnapshot value) {
       for (final snapshot in value.skillsByProject)
         snapshot.projectId: _skillsStateFromFrb(snapshot),
     },
+    threadModeCatalog: _threadModeCatalogFromFrb(value.threadModeCatalog),
     providerUsageState: _providerUsageStateFromFrb(value.providerUsage),
     modelPerformance: _modelPerformanceFromFrb(value.modelPerformance),
     updaterState: updaterStateFromFrb(value.updater),
@@ -482,17 +485,6 @@ SkillsStateSnapshot _skillsStateFromFrb(
     configFingerprint: data.configFingerprint,
     catalogRevision: data.catalogRevision.toInt(),
     skills: data.skills.map((skill) => skill.name).toList(),
-    modes: [
-      for (final mode in data.modes)
-        ModeDescriptorView(
-          id: mode.id,
-          displayName: mode.displayName,
-          description: mode.description,
-          order: mode.order,
-          source: mode.source,
-          providerId: mode.providerId,
-        ),
-    ],
     warnings: data.warnings,
     complete: data.complete,
     summaries: data.skills.map(_skillSummaryFromFrb).toList(),
@@ -522,6 +514,22 @@ SkillsStateSnapshot _skillsStateFromFrb(
     },
   );
 }
+
+ThreadModeCatalogView _threadModeCatalogFromFrb(
+  frb.BridgeThreadModeCatalogSnapshot value,
+) => ThreadModeCatalogView(
+  revision: value.revision.toInt(),
+  modes: [
+    for (final mode in value.modes)
+      ThreadModeDescriptorView(
+        id: mode.id,
+        displayName: mode.displayName,
+        description: mode.description,
+        order: mode.order.toInt(),
+        hasWorkflow: mode.hasWorkflow,
+      ),
+  ],
+);
 
 SkillSearchResultView _skillSearchResultFromFrb(
   frb.BridgeSkillSearchResult result,

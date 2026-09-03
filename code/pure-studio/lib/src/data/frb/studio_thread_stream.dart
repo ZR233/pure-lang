@@ -179,7 +179,7 @@ StudioThread _threadFromFrb(frb.BridgeThread value) {
     id: value.id,
     projectId: value.projectId,
     title: value.title,
-    mode: StudioMode.fromId(value.mode),
+    mode: ThreadModeId.fromId(value.mode),
     createdAt: _dateFromUnix(value.createdAt),
     updatedAt: _dateFromUnix(value.updatedAt),
     parentThreadId: value.parentThreadId,
@@ -586,48 +586,13 @@ WorkflowRuntimeView _workflowRuntimeFromFrb(
         : WorkflowRunView(
             lineageId: run.lineageId,
             runId: run.runId,
-            title: run.definition.title,
-            goal: run.definition.goal,
-            definitionHash: run.definitionHash,
-            modeId: run.mode.modeId,
-            modeDisplayName: run.mode.displayName,
-            currentStageId: run.currentStageId,
+            modeId: run.modeId,
+            graphRevision: run.graphRevision.toInt(),
+            graphHash: run.graphHash,
+            currentStateId: run.currentStateId,
             terminal: run.lifecycle == frb.BridgeWorkflowRunLifecycle.terminal,
-            stages: [
-              for (final stage in run.definition.stages)
-                WorkflowStageView(
-                  id: stage.id,
-                  title: stage.title,
-                  instructions: stage.instructions,
-                  completionCriteria: stage.completionCriteria,
-                  terminal: stage.terminal,
-                ),
-            ],
-            transitions: [
-              for (final transition in run.definition.transitions)
-                WorkflowTransitionView(
-                  fromStageId: transition.fromStageId,
-                  toStageId: transition.toStageId,
-                  when: transition.when,
-                ),
-            ],
-            history: [
-              for (final entry in run.historyTail)
-                WorkflowHistoryEntryView(
-                  revision: entry.revision.toInt(),
-                  fromStageId: entry.fromStageId,
-                  toStageId: entry.toStageId,
-                  reason: entry.reason,
-                  summary: entry.summary,
-                  evidence: entry.evidence,
-                  turnId: entry.turnId,
-                  callId: entry.callId,
-                  transitionedAt: _dateFromUnix(entry.transitionedAt),
-                ),
-            ],
-            compiledAt: _dateFromUnix(run.compiledAt),
+            startedAt: _dateFromUnix(run.startedAt),
             updatedAt: _dateFromUnix(run.updatedAt),
-            archivedTransitionCount: run.archivedTransitionCount.toInt(),
           ),
   );
 }

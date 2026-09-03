@@ -82,6 +82,22 @@ where
         let thread_id = active.thread_id.clone();
         let turn_id = active.turn_id.clone();
         let persistence = observation_persistence(&observed.observation);
+        let plan_update = match &observed.observation {
+            TurnObservation::InteractionChanged(interaction)
+                if interaction.status() == pl_protocol::InteractionStatus::Pending =>
+            {
+                crate::session::plan::state_for_pending_interaction(
+                    self.state.session.session.plan(),
+                    interaction,
+                )
+                .map_err(AgentRuntimeError::InvalidInput)?
+            }
+            TurnObservation::RuntimeDelta(_)
+            | TurnObservation::TodoList(_)
+            | TurnObservation::InteractionChanged(_)
+            | TurnObservation::ContextCompacted { .. }
+            | TurnObservation::Diagnostic => None,
+        };
         let expected_revision = self.state.snapshot.revision;
         let current = self
             .runtime
@@ -106,6 +122,9 @@ where
             notifications: projected_thread.notifications.clone(),
         };
         let mut next = self.state.clone();
+        if let Some(plan) = plan_update {
+            next.session.session.replace_plan(Some(plan));
+        }
         next.snapshot.revision = expected_revision.saturating_add(1);
         next.snapshot.updated_at = unix_timestamp();
         next.session.thread_revision = projected.through_revision;

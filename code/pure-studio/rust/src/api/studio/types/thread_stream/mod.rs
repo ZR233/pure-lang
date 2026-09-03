@@ -83,7 +83,7 @@ pub struct BridgeThread {
     pub id: String,
     pub project_id: String,
     pub title: String,
-    /// 完整 Mode Skill ID，例如 `mode.simple` 或 `mode.release`。
+    /// 完整 Thread Mode ID，例如 `mode.simple` 或 `mode.release`。
     pub mode: String,
     pub root_thread_id: String,
     pub parent_thread_id: Option<String>,
@@ -235,7 +235,7 @@ pub struct BridgeThreadRuntimeSnapshot {
     pub updated_at: i64,
 }
 
-/// 通用工作流面板所需的 canonical 投影。
+/// 状态栏所需的 canonical Thread Mode workflow 投影。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeWorkflowRuntimeSnapshot {
     pub revision: u64,
@@ -246,71 +246,19 @@ pub struct BridgeWorkflowRuntimeSnapshot {
 pub struct BridgeWorkflowRun {
     pub lineage_id: String,
     pub run_id: String,
-    pub definition: BridgeWorkflowDefinition,
-    pub definition_hash: String,
-    pub mode: BridgeModeInstructionSnapshot,
-    pub lifecycle: BridgeWorkflowRunLifecycle,
-    pub current_stage_id: String,
-    pub compiled_at: i64,
-    pub updated_at: i64,
-    pub history_tail: Vec<BridgeWorkflowTransitionRecord>,
-    pub archived_transition_count: u64,
-    pub archived_transition_digest: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BridgeWorkflowDefinition {
-    pub title: String,
-    pub goal: String,
-    pub initial_stage_id: String,
-    pub stages: Vec<BridgeWorkflowStage>,
-    pub transitions: Vec<BridgeWorkflowTransition>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BridgeWorkflowStage {
-    pub id: String,
-    pub title: String,
-    pub instructions: String,
-    pub completion_criteria: Vec<String>,
-    pub terminal: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BridgeWorkflowTransition {
-    pub from_stage_id: String,
-    pub to_stage_id: String,
-    pub when: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BridgeModeInstructionSnapshot {
     pub mode_id: String,
-    pub display_name: String,
-    pub source: String,
-    pub provider_id: String,
-    pub revision: String,
-    pub content_hash: String,
-    pub content: String,
+    pub graph_revision: u64,
+    pub graph_hash: String,
+    pub lifecycle: BridgeWorkflowRunLifecycle,
+    pub current_state_id: String,
+    pub started_at: i64,
+    pub updated_at: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeWorkflowRunLifecycle {
     Active,
     Terminal,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BridgeWorkflowTransitionRecord {
-    pub revision: u64,
-    pub from_stage_id: String,
-    pub to_stage_id: String,
-    pub reason: String,
-    pub summary: String,
-    pub evidence: Vec<String>,
-    pub turn_id: String,
-    pub call_id: String,
-    pub transitioned_at: i64,
 }
 
 #[derive(Debug, Clone, PartialEq)]

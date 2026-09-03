@@ -46,7 +46,7 @@ class _FakeStudioApi implements StudioApi {
   int activateCallCount = 0;
   String? activatedProjectId;
   String? createdThreadProjectId;
-  StudioMode? createdThreadMode;
+  ThreadModeId? createdThreadMode;
   String? newThreadPrompt;
   String? archivedThreadId;
   String? renamedThreadId;
@@ -61,7 +61,7 @@ class _FakeStudioApi implements StudioApi {
   ArchiveThreadResult? archiveThreadResult;
   String? archivedProjectId;
   String? archiveSelectedProjectId;
-  ({String threadId, StudioMode mode})? modeUpdate;
+  ({String threadId, ThreadModeId mode})? modeUpdate;
   _RoleUpdate? roleUpdate;
   Completer<SettingsStateSnapshot>? blockedModelRoleSave;
   Map<String, Object?>? savedProviderSettings;
@@ -331,7 +331,7 @@ class _FakeStudioApi implements StudioApi {
   Future<StartNewThreadResult> startNewThread(
     String projectId,
     StudioPromptInput input,
-    StudioMode mode,
+    ThreadModeId mode,
   ) async {
     createdThreadProjectId = projectId;
     createdThreadMode = mode;
@@ -511,7 +511,7 @@ class _FakeStudioApi implements StudioApi {
   @override
   Future<void> setThreadMode({
     required String threadId,
-    required StudioMode mode,
+    required ThreadModeId mode,
   }) async {
     final thread = _currentState.threads
         .where((candidate) => candidate.id == threadId)

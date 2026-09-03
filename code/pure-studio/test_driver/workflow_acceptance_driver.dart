@@ -7,10 +7,12 @@ import 'dart:io';
 import 'package:flutter_driver/flutter_driver.dart';
 
 import 'flutter_driver_session.dart';
+import 'workflow_acceptance_evidence.dart';
 
 Future<void> main(List<String> arguments) async {
   final options = _Options.parse(arguments);
   final snapshots = File(options.snapshotOutput);
+  final evidence = WorkflowAcceptanceEvidence();
   await snapshots.parent.create(recursive: true);
   FlutterDriverSession? session;
   try {
@@ -19,20 +21,27 @@ Future<void> main(List<String> arguments) async {
       onReconnect: (event) => _append(snapshots, event.toJson()),
     );
     if (options.mode == 'new') {
-      await _startNewWorkflow(session, options, snapshots);
+      await _startNewWorkflow(session, options, snapshots, evidence);
     }
     var finalSnapshot = options.studioMode == 'mode.simple'
-        ? await _waitForSimpleCompletion(session, options, snapshots)
-        : await _waitForTerminal(session, options, snapshots, 'completed');
+        ? await _waitForSimpleCompletion(session, options, snapshots, evidence)
+        : await _waitForTerminal(
+            session,
+            options,
+            snapshots,
+            evidence,
+            'completed',
+          );
     if (options.mode == 'new') {
       finalSnapshot = await _verifyAndRenameThreadTitle(
         session,
         options,
         snapshots,
+        evidence,
         finalSnapshot,
       );
     }
-    final workflow = _workflow(finalSnapshot);
+    final workflow = workflowFromSnapshot(finalSnapshot);
     if (options.studioMode == 'mode.simple') {
       if (workflow != null) {
         throw StateError(
@@ -42,38 +51,13 @@ Future<void> main(List<String> arguments) async {
     } else {
       final run = workflow?['currentRun'];
       if (run is! Map<String, dynamic> ||
-          run['currentStageId'] != 'completed' ||
+          run['currentStateId'] != 'completed' ||
           run['terminal'] != true) {
         throw StateError(
           'workflow did not reach completed terminal: $workflow',
         );
       }
-      final history = (run['history'] as List<dynamic>? ?? const [])
-          .whereType<Map<String, dynamic>>()
-          .toList();
-      final visited = <String>{
-        if (run['currentStageId'] is String) run['currentStageId'] as String,
-        if (run['stages'] is List<dynamic> &&
-            (run['stages'] as List<dynamic>).isNotEmpty)
-          ((run['stages'] as List<dynamic>).first as Map)['id'] as String,
-        for (final entry in history)
-          if (entry['fromStageId'] is String) entry['fromStageId'] as String,
-        for (final entry in history)
-          if (entry['toStageId'] is String) entry['toStageId'] as String,
-      };
-      for (final stage in [
-        'planning',
-        'awaiting_confirmation',
-        'editing_documents',
-        'working',
-        'integrating',
-        'reviewing',
-        'completed',
-      ]) {
-        if (!visited.contains(stage)) {
-          throw StateError('workflow history is missing $stage: $visited');
-        }
-      }
+      evidence.validateTaskFlow();
     }
     final timeline =
         ((finalSnapshot['workspace'] as Map?)?['timeline'] as List? ?? const [])
@@ -97,6 +81,7 @@ Future<void> main(List<String> arguments) async {
       'work-unit',
       'delivery-review',
       'merge-record',
+      'workflow-history-',
     ]) {
       if (renderTree.contains(legacyKey)) {
         throw StateError('legacy Task UI is still rendered: $legacyKey');
@@ -150,6 +135,7 @@ Future<void> _startNewWorkflow(
   FlutterDriverSession session,
   _Options options,
   File snapshots,
+  WorkflowAcceptanceEvidence evidence,
 ) async {
   final protectedFiles = await _protectedFileSnapshot(options.workspace!);
   await session.waitFor(
@@ -183,6 +169,7 @@ Future<void> _startNewWorkflow(
         (snapshot['navigation'] as Map?)?['newThreadMode'] ==
             options.studioMode,
     timeout: const Duration(seconds: 30),
+    evidence: evidence,
   );
   await session.tap(find.byValueKey('composer-input'));
   await session.enterText(await File(options.promptFile!).readAsString());
@@ -208,15 +195,16 @@ Future<void> _startNewWorkflow(
       session,
       snapshots,
       'submitted',
-      (snapshot) => _workflow(snapshot) != null,
+      (snapshot) => workflowFromSnapshot(snapshot) != null,
       timeout: const Duration(minutes: 10),
+      evidence: evidence,
     );
-    await _resolveVisibleInteractionUntilStage(
+    await _driveClarificationAndPlanRevision(
       session,
       snapshots,
       options,
-      'awaiting_confirmation',
       protectedFiles,
+      evidence,
     );
   } else {
     await _waitForSnapshot(
@@ -224,9 +212,10 @@ Future<void> _startNewWorkflow(
       snapshots,
       'submitted',
       (snapshot) =>
-          _workflow(snapshot) == null &&
+          workflowFromSnapshot(snapshot) == null &&
           (snapshot['workspace'] as Map?)?['turn'] != null,
       timeout: const Duration(minutes: 2),
+      evidence: evidence,
     );
   }
 }
@@ -235,6 +224,7 @@ Future<Map<String, dynamic>> _verifyAndRenameThreadTitle(
   FlutterDriverSession session,
   _Options options,
   File snapshots,
+  WorkflowAcceptanceEvidence evidence,
   Map<String, dynamic> completed,
 ) async {
   final workspace = completed['workspace'];
@@ -259,14 +249,25 @@ Future<Map<String, dynamic>> _verifyAndRenameThreadTitle(
     (snapshot) {
       final nextWorkspace = snapshot['workspace'];
       final nextTitle = nextWorkspace is Map ? nextWorkspace['title'] : null;
+      final normalizedTitle = nextTitle is String
+          ? nextTitle.toLowerCase()
+          : '';
+      final describesFixture = const [
+        'canonical',
+        'key',
+        'normaliz',
+        'validat',
+      ].any(normalizedTitle.contains);
       return nextWorkspace is Map &&
           nextWorkspace['threadId'] == threadId &&
           nextTitle is String &&
           nextTitle != 'New Session' &&
           nextTitle != provisional &&
-          nextTitle.runes.length <= 36;
+          nextTitle.runes.length <= 36 &&
+          describesFixture;
     },
     timeout: const Duration(seconds: 45),
+    evidence: evidence,
   );
   final generatedWorkspace = generated['workspace'] as Map<String, dynamic>;
   final generatedTitle = generatedWorkspace['title'] as String;
@@ -285,14 +286,19 @@ Future<Map<String, dynamic>> _verifyAndRenameThreadTitle(
   await session.tap(find.byValueKey('thread-rename-input-$threadId'));
   await session.enterText('Driver manual title');
   await session.tap(find.byValueKey('thread-rename-save-$threadId'));
-  final renamed = await _waitForSnapshot(session, snapshots, 'manual-title', (
-    snapshot,
-  ) {
-    final nextWorkspace = snapshot['workspace'];
-    return nextWorkspace is Map &&
-        nextWorkspace['threadId'] == threadId &&
-        nextWorkspace['title'] == 'Driver manual title';
-  }, timeout: const Duration(seconds: 30));
+  final renamed = await _waitForSnapshot(
+    session,
+    snapshots,
+    'manual-title',
+    (snapshot) {
+      final nextWorkspace = snapshot['workspace'];
+      return nextWorkspace is Map &&
+          nextWorkspace['threadId'] == threadId &&
+          nextWorkspace['title'] == 'Driver manual title';
+    },
+    timeout: const Duration(seconds: 30),
+    evidence: evidence,
+  );
   final renamedDirectory = renamed['sidebarDirectory'];
   final renamedTitles = renamedDirectory is Map
       ? renamedDirectory['titles']
@@ -314,16 +320,22 @@ Future<Map<String, dynamic>> _waitForSimpleCompletion(
   FlutterDriverSession session,
   _Options options,
   File snapshots,
+  WorkflowAcceptanceEvidence evidence,
 ) async {
   final deadline = DateTime.now().add(options.workflowTimeout);
   final progress = _ProgressWatch();
   Map<String, dynamic>? last;
   while (DateTime.now().isBefore(deadline)) {
-    last = await _appendSnapshot(session, snapshots, 'simple-completed');
+    last = await _appendSnapshot(
+      session,
+      snapshots,
+      'simple-completed',
+      evidence: evidence,
+    );
     progress.observe(last, options.stallTimeout, 'simple completion');
     final workspace = last['workspace'] as Map?;
     final lastTurn = workspace?['lastTurn'] as Map?;
-    if (_workflow(last) == null &&
+    if (workflowFromSnapshot(last) == null &&
         lastTurn?['status'] == 'completed' &&
         _hasSuccessfulComplete(last)) {
       return last;
@@ -339,82 +351,110 @@ Future<Map<String, dynamic>> _waitForSimpleCompletion(
   throw StateError('simple completion timed out; last=$last');
 }
 
-Future<void> _resolveVisibleInteractionUntilStage(
+Future<void> _driveClarificationAndPlanRevision(
   FlutterDriverSession session,
   File snapshots,
   _Options options,
-  String stage,
   Map<String, String?> protectedFiles,
+  WorkflowAcceptanceEvidence evidence,
 ) async {
   final deadline = DateTime.now().add(options.workflowTimeout);
   final progress = _ProgressWatch();
+  var clarificationAnswered = false;
+  var revisionRequested = false;
   while (DateTime.now().isBefore(deadline)) {
-    final snapshot = await _appendSnapshot(session, snapshots, 'interaction');
-    progress.observe(snapshot, options.stallTimeout, 'plan confirmation');
-    final workflow = _workflow(snapshot);
-    final current = (workflow?['currentRun'] as Map?)?['currentStageId'];
+    final snapshot = await _appendSnapshot(
+      session,
+      snapshots,
+      'interaction',
+      evidence: evidence,
+    );
+    progress.observe(snapshot, options.stallTimeout, 'clarification and plan');
+    final workflow = workflowFromSnapshot(snapshot);
+    final current = (workflow?['currentRun'] as Map?)?['currentStateId'];
     final interaction = snapshot['workspace'] is Map
         ? (snapshot['workspace'] as Map)['activeInteraction']
         : null;
-    if (current == 'planning' &&
-        interaction is Map &&
-        interaction['kind'] == 'userInput') {
-      _assertPlanVisible(snapshot);
-      await _tapFirstUserInputOption(session);
-      await _waitForSnapshot(session, snapshots, 'confirmed', (next) {
-        final nextStage =
-            (_workflow(next)?['currentRun'] as Map?)?['currentStageId'];
-        return nextStage != 'planning';
-      }, timeout: const Duration(minutes: 2));
-      return;
-    }
-    if (current == stage) {
-      if (interaction is! Map || interaction['kind'] != 'userInput') {
-        await Future<void>.delayed(const Duration(milliseconds: 250));
+    if (interaction is Map && interaction['kind'] == 'userInput') {
+      await _assertProtectedFilesUnchanged(options.workspace!, protectedFiles);
+      if (current == 'planning' && !clarificationAnswered) {
+        await _answerClarification(session);
+        clarificationAnswered = true;
+        evidence.recordClarificationAnswer();
+        await _waitForInteractionChange(
+          session,
+          snapshots,
+          interaction['id'],
+          evidence,
+        );
         continue;
       }
-      await _assertProtectedFilesUnchanged(options.workspace!, protectedFiles);
-      _assertPlanVisible(snapshot);
-      await _tapFirstUserInputOption(session);
-      await _waitForSnapshot(session, snapshots, 'confirmed', (next) {
-        final nextStage =
-            (_workflow(next)?['currentRun'] as Map?)?['currentStageId'];
-        return nextStage != 'awaiting_confirmation';
-      }, timeout: const Duration(minutes: 2));
-      return;
-    }
-    if (current == 'editing_documents' || current == 'working') {
-      throw StateError('workflow skipped visible plan confirmation');
-    }
-    if (interaction is Map && interaction['kind'] == 'userInput') {
+      if (current == 'planning' && !revisionRequested) {
+        _assertPlanInteraction(interaction);
+        await _requestPlanRevision(session);
+        revisionRequested = true;
+        evidence.recordPlanRevisionRequest();
+        await _waitForInteractionChange(
+          session,
+          snapshots,
+          interaction['id'],
+          evidence,
+        );
+        continue;
+      }
+      if (current == 'planning' && revisionRequested) {
+        _assertRevisedPlanInteraction(interaction);
+        await _approvePlan(session);
+        evidence.recordRevisedPlanApproval();
+        await _waitForSnapshot(
+          session,
+          snapshots,
+          'revised-plan-approved',
+          (next) =>
+              (workflowFromSnapshot(next)?['currentRun']
+                  as Map?)?['currentStateId'] ==
+              'editing_documents',
+          timeout: const Duration(minutes: 3),
+          evidence: evidence,
+        );
+        return;
+      }
       throw StateError(
-        'workflow requested unnecessary clarification before its plan',
+        'unexpected user interaction at state $current: $interaction',
       );
-    } else if (interaction is Map && interaction['kind'] == 'toolApproval') {
+    }
+    if ((current == 'editing_documents' || current == 'working') &&
+        !evidence.hasRevisedPlanApproval) {
+      throw StateError('workflow skipped revised plan confirmation');
+    }
+    if (interaction is Map && interaction['kind'] == 'toolApproval') {
       await session.tap(find.byValueKey('tool-approve'));
     }
     await Future<void>.delayed(const Duration(milliseconds: 250));
   }
-  throw StateError('workflow never reached $stage');
+  throw StateError(
+    'workflow never completed clarification and revised-plan approval',
+  );
 }
 
 Future<Map<String, dynamic>> _waitForTerminal(
   FlutterDriverSession session,
   _Options options,
   File snapshots,
+  WorkflowAcceptanceEvidence evidence,
   String label,
 ) async {
   final deadline = DateTime.now().add(options.workflowTimeout);
   final progress = _ProgressWatch();
   Map<String, dynamic>? last;
   while (DateTime.now().isBefore(deadline)) {
-    last = await _appendSnapshot(session, snapshots, label);
+    last = await _appendSnapshot(session, snapshots, label, evidence: evidence);
     progress.observe(last, options.stallTimeout, label);
-    final workflow = _workflow(last);
+    final workflow = workflowFromSnapshot(last);
     final run = workflow?['currentRun'];
     if (run is Map<String, dynamic> &&
         run['terminal'] == true &&
-        run['currentStageId'] == 'completed' &&
+        run['currentStateId'] == 'completed' &&
         _hasSuccessfulComplete(last)) {
       return last;
     }
@@ -479,33 +519,85 @@ bool _mapEquals(Map<String, String?> left, Map<String, String?> right) {
   return left.entries.every((entry) => right[entry.key] == entry.value);
 }
 
-void _assertPlanVisible(Map<String, dynamic> snapshot) {
-  final timeline =
-      ((snapshot['workspace'] as Map?)?['timeline'] as List? ?? const [])
-          .whereType<Map>()
-          .map((row) => row['text'])
-          .whereType<String>()
-          .where((text) => text.trim().isNotEmpty)
-          .toList();
-  if (timeline.isEmpty) {
-    throw StateError('awaiting_confirmation has no visible plan text');
+void _assertPlanInteraction(Map interaction) {
+  final body = interaction['body'];
+  if (body is! String || !body.trimLeft().startsWith('# ')) {
+    throw StateError('Plan confirmation has no complete Markdown plan');
   }
 }
 
-Future<void> _tapFirstUserInputOption(FlutterDriverSession session) async {
+void _assertRevisedPlanInteraction(Map interaction) {
+  _assertPlanInteraction(interaction);
+  final body = interaction['body'] as String;
+  for (final marker in ['并行', '目录', '隔离', '验证']) {
+    if (!body.toLowerCase().contains(marker.toLowerCase())) {
+      throw StateError(
+        'revised plan omitted requested marker `$marker`: $body',
+      );
+    }
+  }
+}
+
+Future<void> _answerClarification(FlutterDriverSession session) async {
+  const answer =
+      '按第一个非法 Unicode scalar 在原始 UTF-8 输入中的起始 byte index 报告。'
+      '例如 "aα" 中 α 报 index=1、byte=0xCE；'
+      '"éα" 必须先报 é：index=0、byte=0xC3。';
   if (await _isVisible(session, 'user-input-first-option')) {
     await session.tap(find.byValueKey('user-input-first-option'));
-    await session.tap(find.byValueKey('user-input-submit'));
-  } else if (await _isVisible(session, 'user-input-first-text')) {
+  }
+  if (await _isVisible(session, 'user-input-first-text')) {
     await session.tap(find.byValueKey('user-input-first-text'));
-    await session.enterText('确认');
-    await session.tap(find.byValueKey('user-input-submit'));
-  } else {
+    await session.enterText(answer);
+  } else if (!await _isVisible(session, 'user-input-first-option')) {
     final input = find.byValueKey('fallback-user-input');
     await session.tap(input);
-    await session.enterText('确认');
+    await session.enterText(answer);
     await session.tap(find.byValueKey('fallback-user-input-submit'));
+    return;
   }
+  await session.tap(find.byValueKey('user-input-submit'));
+}
+
+Future<void> _requestPlanRevision(FlutterDriverSession session) async {
+  const revisionOption = 'user-input-option-plan_confirmation-1';
+  await session.waitFor(
+    find.byValueKey(revisionOption),
+    timeout: const Duration(seconds: 20),
+  );
+  await session.tap(find.byValueKey(revisionOption));
+  await session.waitFor(find.byValueKey('user-input-first-text'));
+  await session.tap(find.byValueKey('user-input-first-text'));
+  await session.enterText('请补充多目录隔离并行执行、结果整合和验证顺序的具体步骤。');
+  await session.tap(find.byValueKey('user-input-submit'));
+}
+
+Future<void> _approvePlan(FlutterDriverSession session) async {
+  await session.waitFor(
+    find.byValueKey('user-input-first-option'),
+    timeout: const Duration(seconds: 20),
+  );
+  await session.tap(find.byValueKey('user-input-first-option'));
+  await session.tap(find.byValueKey('user-input-submit'));
+}
+
+Future<void> _waitForInteractionChange(
+  FlutterDriverSession session,
+  File snapshots,
+  Object? interactionId,
+  WorkflowAcceptanceEvidence evidence,
+) async {
+  await _waitForSnapshot(
+    session,
+    snapshots,
+    'interaction-resolved',
+    (snapshot) {
+      final active = (snapshot['workspace'] as Map?)?['activeInteraction'];
+      return active is! Map || active['id'] != interactionId;
+    },
+    timeout: const Duration(minutes: 2),
+    evidence: evidence,
+  );
 }
 
 Future<bool> _isVisible(FlutterDriverSession session, String key) async {
@@ -526,11 +618,12 @@ Future<Map<String, dynamic>> _waitForSnapshot(
   String label,
   bool Function(Map<String, dynamic>) predicate, {
   Duration timeout = const Duration(seconds: 30),
+  WorkflowAcceptanceEvidence? evidence,
 }) async {
   final deadline = DateTime.now().add(timeout);
   Map<String, dynamic>? last;
   while (DateTime.now().isBefore(deadline)) {
-    last = await _appendSnapshot(session, output, label);
+    last = await _appendSnapshot(session, output, label, evidence: evidence);
     if (predicate(last)) return last;
     await Future<void>.delayed(const Duration(milliseconds: 250));
   }
@@ -540,9 +633,11 @@ Future<Map<String, dynamic>> _waitForSnapshot(
 Future<Map<String, dynamic>> _appendSnapshot(
   FlutterDriverSession session,
   File output,
-  String label,
-) async {
+  String label, {
+  WorkflowAcceptanceEvidence? evidence,
+}) async {
   final snapshot = await session.readSnapshot();
+  evidence?.observe(snapshot);
   await _append(output, {'stage': label, 'snapshot': snapshot});
   return snapshot;
 }
@@ -552,11 +647,6 @@ Future<void> _append(File output, Object value) => output.writeAsString(
   mode: FileMode.append,
   flush: true,
 );
-
-Map<String, dynamic>? _workflow(Map<String, dynamic> snapshot) {
-  final workflow = snapshot['workflow'];
-  return workflow is Map<String, dynamic> ? workflow : null;
-}
 
 class _Options {
   _Options({

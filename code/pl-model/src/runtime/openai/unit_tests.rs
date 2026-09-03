@@ -16,6 +16,7 @@ use crate::model::info::{
 
 fn text_message(role: MessageRole, content: &str) -> Message {
     Message {
+        presentation: Default::default(),
         role,
         content: MessageContent::text(content.to_string()),
         reasoning_content: None,
@@ -27,6 +28,7 @@ fn text_message(role: MessageRole, content: &str) -> Message {
 
 fn image_message() -> Message {
     Message {
+        presentation: Default::default(),
         role: MessageRole::User,
         content: MessageContent::new(vec![
             ContentPart::Text {
@@ -60,6 +62,7 @@ fn image_prepared_content() -> Vec<crate::completion::PreparedContentPart> {
 
 fn two_image_message() -> Message {
     Message {
+        presentation: Default::default(),
         role: MessageRole::User,
         content: MessageContent::new(vec![
             ContentPart::Attachment {
@@ -109,6 +112,7 @@ fn prepared_image(
 
 fn media_message(attachment_id: &str, modality: AttachmentModality, media_type: &str) -> Message {
     Message {
+        presentation: Default::default(),
         role: MessageRole::User,
         content: MessageContent::new(vec![ContentPart::Attachment {
             attachment_id: attachment_id.to_string(),
@@ -174,6 +178,7 @@ fn tool_batch_with_image_media() -> Vec<ModelContextItem> {
         })
         .collect::<Vec<_>>();
     let mut items = vec![ModelContextItem::from(Message {
+        presentation: Default::default(),
         role: MessageRole::Assistant,
         content: MessageContent::text(""),
         reasoning_content: None,
@@ -184,6 +189,7 @@ fn tool_batch_with_image_media() -> Vec<ModelContextItem> {
     for call in &calls {
         items.push(ModelContextItem::ToolResult {
             message: Message {
+                presentation: Default::default(),
                 role: MessageRole::Tool,
                 content: MessageContent::text(format!("read {}", call.call_id)),
                 reasoning_content: None,
@@ -616,6 +622,7 @@ fn tool_call_result_record(call: &ToolCallRecord) -> ToolResultRecord {
 
 fn assistant_tool_call_history(call: ToolCallRecord) -> Message {
     Message {
+        presentation: Default::default(),
         role: MessageRole::Assistant,
         content: MessageContent::text(String::new()),
         reasoning_content: None,
@@ -627,6 +634,7 @@ fn assistant_tool_call_history(call: ToolCallRecord) -> Message {
 
 fn tool_result_history(record: ToolResultRecord, output: &str) -> Message {
     Message {
+        presentation: Default::default(),
         role: MessageRole::Tool,
         content: MessageContent::text(output.to_string()),
         reasoning_content: None,
@@ -905,6 +913,7 @@ fn glm53_flash_chat_body_links_thinking_and_sends_image_parts() {
 fn chat_body_writes_assistant_reasoning_content() {
     let mut request = request_with_effort("high");
     request.input = vec![pl_protocol::ModelContextItem::from(Message {
+        presentation: Default::default(),
         role: MessageRole::Assistant,
         content: MessageContent::text("9.11 更大。".to_string()),
         reasoning_content: Some("比较小数位。".to_string()),
@@ -1674,6 +1683,7 @@ fn function_tool_result_ids_are_protocol_specific() {
 fn tool_result_without_typed_record_fails_request_build() {
     let mut request = request_with_function_tool_history(None);
     request.input.push(ModelContextItem::from(Message {
+        presentation: Default::default(),
         role: MessageRole::Tool,
         content: MessageContent::text("ok".to_string()),
         reasoning_content: None,

@@ -4,7 +4,8 @@ use pl_studio_runtime::{StudioProductEventEnvelope, StudioProductEventKind};
 use super::runtime::{
     bridge_agent_directory, bridge_lsp_state, bridge_mcp_state, bridge_model_performance,
     bridge_persistence_state, bridge_project_directory, bridge_provider_usage_state,
-    bridge_recovery_state, bridge_settings_state, bridge_skills_state, bridge_update_state,
+    bridge_recovery_state, bridge_settings_state, bridge_skills_state, bridge_thread_mode_catalog,
+    bridge_update_state,
 };
 use super::thread_stream::bridge_thread;
 use crate::api::studio::types::*;
@@ -51,6 +52,11 @@ pub(crate) fn bridge_product_event(
             }
             StudioProductEventKind::SkillsStateChanged(state) => {
                 BridgeProductEventPayload::SkillsStateChanged(bridge_skills_state(state))
+            }
+            StudioProductEventKind::ThreadModeCatalogChanged(state) => {
+                BridgeProductEventPayload::ThreadModeCatalogChanged(bridge_thread_mode_catalog(
+                    state,
+                ))
             }
             StudioProductEventKind::ProviderUsageStateChanged(state) => {
                 BridgeProductEventPayload::ProviderUsageStateChanged(bridge_provider_usage_state(

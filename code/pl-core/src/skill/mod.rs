@@ -14,12 +14,11 @@ use crate::config::SkillsConfig;
 pub(crate) use catalog::build_skill_suggestions_from_catalog;
 pub use catalog::{build_skills_prompt, build_skills_prompt_from_catalog};
 pub use provider::{
-    BUILTIN_MODE_IDS, BUILTIN_MODE_PROVIDER_ID, FileSystemSkillProvider, FrozenSkillCatalog,
-    SkillCandidate, SkillDefinition, SkillDirectorySource, SkillInvocationPolicy,
-    SkillLoadInvocation, SkillProvider, SkillProviderId, SkillProviderInvalidator,
-    SkillProviderObservation, SkillProviderRegistration, SkillProviderRequest, SkillRegistry,
-    SkillResourceBase, SkillSummary, SkillUserInvocationLoad, discover_local_skills,
-    local_skill_registry,
+    FileSystemSkillProvider, FrozenSkillCatalog, SkillCandidate, SkillDefinition,
+    SkillDirectorySource, SkillInvocationPolicy, SkillLoadInvocation, SkillProvider,
+    SkillProviderId, SkillProviderInvalidator, SkillProviderObservation, SkillProviderRegistration,
+    SkillProviderRequest, SkillRegistry, SkillResourceBase, SkillSummary, SkillUserInvocationLoad,
+    discover_local_skills, local_skill_registry,
 };
 pub use scanning::{
     list_support_files, project_skill_dir_for_create, read_skill_file, support_file_path,
@@ -64,16 +63,6 @@ pub struct SkillMetadata {
     pub provider_id: SkillProviderId,
     pub invocation: SkillInvocationPolicy,
     pub resource_base: SkillResourceBase,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mode: Option<ModeSkillMetadata>,
-}
-
-/// 模式选择器需要的稳定 Skill 元数据。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct ModeSkillMetadata {
-    pub display_name: String,
-    pub order: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -87,11 +76,7 @@ pub struct SkillFile {
 #[serde(rename_all = "camelCase")]
 pub struct SkillCatalog {
     pub project_dir: PathBuf,
-    /// 普通、可按需调用的 Skills；永远不包含 Mode Skill。
     pub skills: Vec<SkillMetadata>,
-    /// 预加载模式目录；完整 name 即稳定 ModeId。
-    #[serde(default)]
-    pub modes: Vec<SkillMetadata>,
     pub warnings: Vec<String>,
     #[serde(default = "default_complete")]
     pub complete: bool,
@@ -111,7 +96,6 @@ impl From<SkillMetadata> for SkillSummary {
             provider_id: metadata.provider_id,
             invocation: metadata.invocation,
             resource_base: metadata.resource_base,
-            mode: metadata.mode,
         }
     }
 }
@@ -132,7 +116,6 @@ impl From<SkillSummary> for SkillMetadata {
             provider_id: summary.provider_id,
             invocation: summary.invocation,
             resource_base: summary.resource_base,
-            mode: summary.mode,
         }
     }
 }
@@ -162,8 +145,6 @@ struct SkillFrontmatter {
     disable_model_invocation: bool,
     #[serde(default = "default_user_invocable")]
     user_invocable: bool,
-    #[serde(default)]
-    mode: Option<ModeSkillMetadata>,
 }
 
 #[derive(Debug, Clone)]

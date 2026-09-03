@@ -20,8 +20,8 @@ mod updater;
 pub use config::{
     ConfigPaths, ConfigRecoveryReport, ConfigRuntimeError, ConfigRuntimeSnapshot, ConfigStore,
     DeepSeekWebSearchConfig, ProviderId, ReasoningEffort, STUDIO_CONFIG_SCHEMA_VERSION,
-    StudioConfig, StudioMcpConfig, StudioMode, StudioModeId, StudioRole, StudioUiConfig,
-    UserAgentProfile, WebSearchContextSize, WebSearchLocation, WebSearchMode,
+    StudioConfig, StudioMcpConfig, StudioRole, StudioUiConfig, UserAgentProfile,
+    WebSearchContextSize, WebSearchLocation, WebSearchMode,
 };
 pub use config_editor::{
     ProviderEdit, ProviderModelEdit, ProviderSettingsEdit, RoleEdit, provider_template_kind,

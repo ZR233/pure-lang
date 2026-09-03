@@ -5,7 +5,6 @@ use anyhow::Result;
 use futures::FutureExt;
 
 use crate::McpRuntimeHandle;
-use crate::StudioMode;
 use crate::config::ConfigRuntime;
 use crate::studio::agent_host::{StudioAgentResources, StudioAgentRuntime, root_agent_id};
 use crate::studio::records::ThreadRecord;
@@ -60,14 +59,14 @@ pub struct StudioStartNewThreadRequest {
     pub project_id: String,
     pub title: Option<String>,
     pub input: StudioPromptInput,
-    pub mode: StudioMode,
+    pub mode: pl_protocol::ThreadModeId,
     pub options: StudioSubmitPromptOptions,
 }
 
 /// Studio UI 提交 prompt 的附加选项。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StudioSubmitPromptOptions {
-    pub presentation: pl_core::MailboxPresentation,
+    pub presentation: pl_core::MessagePresentation,
     pub turn_policy: pl_core::AgentTurnSubmitPolicy,
 }
 
@@ -134,6 +133,7 @@ pub struct StudioRuntime {
     runtime_state: StudioRuntimeState,
     recovery: crate::studio::StudioRecoveryRegistry,
     skills: SkillCatalogRuntime,
+    thread_modes: pl_core::ThreadModeManager,
     provider_usage: ProviderUsageRuntime,
     model_performance: ModelPerformanceOwner,
     updater: StudioUpdateRuntime,

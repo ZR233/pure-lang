@@ -10,7 +10,6 @@ import 'context_usage_readout.dart';
 import 'session_selectors.dart';
 import 'status_bar_item.dart';
 import 'status_detail_popover.dart';
-import 'workflow_runtime_detail.dart';
 
 class ThreadStatusBar extends ConsumerWidget {
   const ThreadStatusBar({
@@ -311,21 +310,14 @@ class _WorkflowRuntimeReadout extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final stage = run.currentStage;
-    final label = stage?.title.isNotEmpty == true
-        ? stage!.title
-        : run.currentStageId;
     return KeyedSubtree(
       key: ValueKey('workflow-runtime-${run.runId}'),
       child: _StatusReadout(
-        key: ValueKey('workflow-stage-${run.currentStageId}'),
+        key: ValueKey('workflow-state-${run.currentStateId}'),
         icon: run.terminal ? Icons.check_circle_outline : Icons.route_outlined,
-        label: label,
-        tooltip: '${run.modeDisplayName} · ${run.currentStageId}',
+        label: run.currentStateId,
+        tooltip: '${run.modeId} · ${run.currentStateId}',
         maxWidth: 140,
-        interactive: true,
-        detailWidth: 560,
-        detailBuilder: (context) => WorkflowRuntimeDetail(run: run),
       ),
     );
   }

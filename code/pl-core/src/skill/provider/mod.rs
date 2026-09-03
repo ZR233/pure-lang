@@ -19,10 +19,6 @@ mod filesystem;
 
 pub use filesystem::{FileSystemSkillProvider, SkillDirectorySource};
 
-/// Studio 内建 Mode Skill 唯一受信 Provider ID。
-pub const BUILTIN_MODE_PROVIDER_ID: &str = "studio-builtin-modes";
-pub const BUILTIN_MODE_IDS: &[&str] = &["mode.simple", "mode.task"];
-
 /// Stable identity of a process-registered Skill provider.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[serde(transparent)]
@@ -88,8 +84,6 @@ pub struct SkillSummary {
     pub provider_id: SkillProviderId,
     pub invocation: SkillInvocationPolicy,
     pub resource_base: SkillResourceBase,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub mode: Option<super::ModeSkillMetadata>,
 }
 
 /// Provider-owned discovery candidate. Its locator is never serialized.
@@ -334,17 +328,6 @@ impl SkillRegistry {
                     ));
                     continue;
                 }
-                if is_builtin_mode_id(&candidate.summary.name)
-                    && (provider.id().as_str() != BUILTIN_MODE_PROVIDER_ID
-                        || candidate.summary.source != SkillSourceKind::System)
-                {
-                    warnings.push(format!(
-                        "ignored protected Mode Skill `{}` from untrusted provider `{}`",
-                        candidate.summary.name,
-                        provider.id().as_str()
-                    ));
-                    continue;
-                }
                 let key = candidate.summary.name.to_ascii_lowercase();
                 let ordering = (candidate.rank, provider_order, candidate.local_order);
                 let replace = winners
@@ -364,26 +347,14 @@ impl SkillRegistry {
         }
         let skills = winners
             .values()
-            .filter(|entry| entry.candidate.summary.mode.is_none())
             .map(|entry| SkillMetadata::from(entry.candidate.summary.clone()))
             .collect();
-        let mut modes = winners
-            .values()
-            .filter(|entry| entry.candidate.summary.mode.is_some())
-            .map(|entry| SkillMetadata::from(entry.candidate.summary.clone()))
-            .collect::<Vec<_>>();
-        modes.sort_by(|left, right| {
-            let left_order = left.mode.as_ref().map_or_default(|mode| mode.order);
-            let right_order = right.mode.as_ref().map_or_default(|mode| mode.order);
-            (left_order, &left.name).cmp(&(right_order, &right.name))
-        });
         Ok(DiscoveryGeneration {
             generation,
             catalog: FrozenSkillCatalog {
                 snapshot: SkillCatalog {
                     project_dir,
                     skills,
-                    modes,
                     warnings,
                     complete,
                 },
@@ -460,7 +431,6 @@ impl FrozenSkillCatalog {
             snapshot: SkillCatalog {
                 project_dir,
                 skills: Vec::new(),
-                modes: Vec::new(),
                 warnings: Vec::new(),
                 complete: true,
             },
@@ -482,11 +452,6 @@ impl FrozenSkillCatalog {
     /// Finds a winning Skill by case-insensitive name.
     pub fn find(&self, name: &str) -> Option<&SkillMetadata> {
         self.snapshot.find(name)
-    }
-
-    /// Finds a preloaded Mode Skill without exposing it to ordinary skill tools.
-    pub fn find_mode(&self, mode_id: &str) -> Option<&SkillMetadata> {
-        self.snapshot.find_mode(mode_id)
     }
 
     /// Finds a winning project-owned Skill by case-insensitive name.
@@ -513,7 +478,6 @@ impl FrozenSkillCatalog {
         let loaded = entry.provider.load(&entry.candidate, cancellation).await?;
         if !loaded.summary.name.eq_ignore_ascii_case(name)
             || loaded.summary.invocation != entry.candidate.summary.invocation
-            || loaded.summary.mode != entry.candidate.summary.mode
         {
             self.invalidator.invalidate();
             return Err(PureError::ConfigError(format!(
@@ -675,7 +639,6 @@ pub struct SkillUserInvocationLoad {
 pub enum SkillLoadInvocation {
     Model,
     User,
-    Mode,
 }
 
 fn ensure_invocation_allowed(
@@ -685,7 +648,6 @@ fn ensure_invocation_allowed(
     let allowed = match invocation {
         SkillLoadInvocation::Model => summary.invocation.model_invocable,
         SkillLoadInvocation::User => summary.invocation.user_invocable,
-        SkillLoadInvocation::Mode => summary.mode.is_some(),
     };
     if allowed {
         Ok(())
@@ -709,7 +671,6 @@ fn validate_provider_candidate(
         )));
     }
     super::validate_skill_name(&candidate.summary.name)?;
-    validate_mode_summary(&candidate.summary)?;
     let description = candidate.summary.description.trim();
     if description.is_empty() || description.chars().count() > 1024 {
         return Err(PureError::ConfigError(
@@ -737,38 +698,6 @@ fn validate_provider_candidate(
         ));
     }
     Ok(())
-}
-
-fn validate_mode_summary(summary: &SkillSummary) -> Result<()> {
-    let reserved = summary.name.starts_with("mode.");
-    match (reserved, &summary.mode) {
-        (true, None) => Err(PureError::ConfigError(
-            "reserved `mode.` name requires mode metadata".to_string(),
-        )),
-        (false, Some(_)) => Err(PureError::ConfigError(
-            "mode metadata requires a reserved `mode.` name".to_string(),
-        )),
-        (true, Some(mode)) => {
-            if mode.display_name.trim().is_empty()
-                || summary.invocation.model_invocable
-                || summary.invocation.user_invocable
-            {
-                Err(PureError::ConfigError(
-                    "Mode Skill requires a display name and must disable model and user invocation"
-                        .to_string(),
-                ))
-            } else {
-                Ok(())
-            }
-        }
-        (false, None) => Ok(()),
-    }
-}
-
-fn is_builtin_mode_id(name: &str) -> bool {
-    BUILTIN_MODE_IDS
-        .iter()
-        .any(|builtin| name.eq_ignore_ascii_case(builtin))
 }
 
 fn source_label(source: SkillSourceKind) -> &'static str {

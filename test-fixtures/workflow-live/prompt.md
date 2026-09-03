@@ -1,8 +1,13 @@
 Complete the following Rust library change in this temporary dependency-free project.
 
-First inspect the complete existing contract, present a concrete implementation plan,
-and wait for my confirmation. Do not modify any project file before I confirm the plan.
-The contract is complete; do not ask additional clarifying questions.
+First inspect the existing contract. Before producing a plan, ask exactly one material user
+question with `request_user_input`: whether an invalid non-ASCII input position is reported as its
+original UTF-8 byte index or Unicode scalar index. Incorporate the answer into a concrete
+implementation plan. While the Task workflow remains in `planning`, call `plan_current`,
+`plan_next`, and `plan_history`, then use `plan_submit` with the canonical Plan revision and wait
+for confirmation. Do not modify any project file before the revised Plan reaches `approved`; if I
+request additions, read the resulting `revisionRequested` state and submit the complete updated
+Plan. Only then transition the Task workflow from `planning` to `editing_documents`.
 
 Implement two independent APIs:
 

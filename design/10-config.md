@@ -22,7 +22,7 @@ Windows 下对应：
 
 单库保存项目、Thread、Turn、Item、input、interaction、attachment 与 typed working state。Flutter
 临时 UI 状态不入库，实时流也不保存 replay journal。数据库由 `pl-studio-runtime` 通过
-SeaORM 2.0 异步访问；数据库 schema v17 的破坏性重建合同见
+SeaORM 2.0 异步访问；数据库 schema v18 的破坏性重建合同见
 `19-studio-storage-and-diagnostics.md`。
 `pl-core` 的正常依赖树不包含 SeaORM。provider/model/role 配置仍只由
 `~/.pure/config.toml` schema 17 表达。用户 Agent Profile 单独保存到 `~/.pure/agents/*.toml`，
@@ -500,7 +500,8 @@ Todo、interaction 或 context。选择条目后再订阅对应 Thread；底部�
 活动面板。
 
 Studio 交互状态统一保存在 SQLite `interactions` 表。工具审批、`request_user_input` 和
-`submit_plan` 发起的计划确认都通过通用 Interaction 与 `InteractionChanged` 事件恢复；旧
+`plan_submit` 发起的计划确认都通过通用 Interaction 与 `InteractionChanged` 事件恢复；计划确认的
+typed purpose 与 content 一起持久化并绑定 `AgentWorkingState.plan`；旧
 `tool_approvals` 不再作为读写路径或 UI pending 状态来源。破坏性 schema 版本不迁移旧 pending
 审批、询问或计划确认。
 

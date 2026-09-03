@@ -75,8 +75,8 @@ abstract class SidebarView with _$SidebarView {
       projectRecoveryIssues: projectRecoveryIssues,
       threadRecoveryIssues: threadRecoveryIssues,
       modeDisplayNames: {
-        for (final snapshot in state.skillsByProject.values)
-          for (final mode in snapshot.modes) mode.id: mode.displayName,
+        for (final mode in state.threadModeCatalog.modes)
+          mode.id: mode.displayName,
       },
       directoryHasMore: state.threadDirectory.hasMore,
       directoryIsLoading: state.threadDirectory.isLoading,

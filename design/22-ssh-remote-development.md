@@ -75,7 +75,8 @@ descriptor；下一次 Turn
 重新读取远端 Skills，并在 host identity 变化后重新探测 LSP。
 
 SSH workspace 的 Skill catalog 由一个共享 registry 组合构成：远端 provider 贡献 Project 源，
-本地 user 目录与 Studio 物化的系统技能目录（含内置 Mode Skill）以只读来源并行注册。Turn
+本地 user 目录与 Studio 物化的系统技能目录以只读来源并行注册。Thread Mode 独立从本地内存注册表
+捕获，不进入远端或本地 Skill 发现。Turn
 执行与 Settings 的显式技能发现共用同一组合，因此设置页技能目录展示远端 Project 技能与本地
 系统/用户技能，且激活 fingerprint 包含 Skills 配置指纹；配置变化后的下一次激活会重新发现。
 
@@ -107,7 +108,7 @@ escape 错误拒绝。runtime 不把绝对路径猜成 `.` 或静默截断前缀
 Studio schema v16 新增非敏感 `ssh_servers` 表与 nullable `projects.ssh_server_id`。本地项目按
 `path` 唯一，远端项目按 `(ssh_server_id, path)` 唯一；远端 path 保存 canonical POSIX path。
 Session、Turn、Item、Interaction、working state 与 tool record 的 wire 语义不因远程 host 改变。
-Studio 数据库当前 schema v17 采用破坏性重建，不再维护旧 Task/worktree 表或逐版本迁移链；其他
+Studio 数据库当前 schema v18 采用破坏性重建，不再维护旧 Task/worktree 表或逐版本迁移链；其他
 未知 schema 继续 fail closed。远端项目启动时不做本地
 canonicalize，服务器离线是连接状态，不是项目损坏。
 

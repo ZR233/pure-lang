@@ -10,6 +10,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::MessagePresentation;
 use crate::event::{UserInputAnswer, UserQuestion};
 use crate::labeled::LabeledEnum;
 
@@ -36,6 +37,15 @@ pub enum InteractionStatus {
     Expired,
 }
 
+/// Interaction 的业务用途；UI 仍按 content kind 渲染，不从用途推导领域状态。
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", content = "data", rename_all = "camelCase")]
+pub enum InteractionPurpose {
+    #[default]
+    General,
+    AgentSessionPlanConfirmation(crate::AgentSessionPlanConfirmationPurpose),
+}
+
 impl InteractionStatus {
     pub fn as_str(self) -> &'static str {
         self.label()
@@ -53,6 +63,64 @@ pub struct InteractionScope {
     pub tool_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_path: Option<String>,
+    #[serde(default)]
+    pub purpose: InteractionPurpose,
+}
+
+/// Interaction 决议后生成下一条 AgentSession 用户消息的通用预设。
+///
+/// 创建方决定消息内容来源和 GUI presentation；产品 runtime 只解释这份协议，不能按业务
+/// purpose 特判。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct InteractionContinuationPreset {
+    pub message: InteractionContinuationMessage,
+    pub presentation: MessagePresentation,
+}
+
+impl InteractionContinuationPreset {
+    pub fn resolution(presentation: MessagePresentation) -> Self {
+        Self {
+            message: InteractionContinuationMessage::Resolution,
+            presentation,
+        }
+    }
+
+    pub fn question(question_id: impl Into<String>, presentation: MessagePresentation) -> Self {
+        Self {
+            message: InteractionContinuationMessage::Question {
+                question_id: question_id.into(),
+            },
+            presentation,
+        }
+    }
+}
+
+/// continuation 用户消息的内容来源。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum InteractionContinuationMessage {
+    /// 通用 typed resolution envelope。
+    Resolution,
+    /// 复用某个 UserInput question 的完整正文。
+    Question { question_id: String },
+}
+
+/// 已根据 immutable preset 解析出的 mailbox 用户输入。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InteractionContinuationInput {
+    pub message: String,
+    pub presentation: MessagePresentation,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum InteractionContinuationError {
+    #[error("interaction continuation requires UserInput content")]
+    NotUserInput,
+    #[error("interaction continuation question `{question_id}` does not exist exactly once")]
+    InvalidQuestion { question_id: String },
+    #[error("failed to serialize interaction resolution continuation: {0}")]
+    Serialization(String),
 }
 
 /// Interaction kind 与其 payload/state 的唯一绑定。
@@ -71,6 +139,8 @@ pub struct InteractionRequest {
     pub scope: InteractionScope,
     pub revision: u64,
     pub content: InteractionContent,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continuation: Option<InteractionContinuationPreset>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -91,6 +161,7 @@ impl InteractionRequest {
             interaction_id,
             scope,
             revision: 0,
+            continuation: None,
             created_at,
             updated_at: created_at,
         }
@@ -111,6 +182,7 @@ impl InteractionRequest {
             interaction_id,
             scope,
             revision: 0,
+            continuation: None,
             created_at,
             updated_at: created_at,
         }
@@ -137,10 +209,66 @@ impl InteractionRequest {
         }
     }
 
+    pub fn with_continuation(mut self, continuation: InteractionContinuationPreset) -> Self {
+        self.continuation = Some(continuation);
+        self
+    }
+
+    /// 按创建 Interaction 时冻结的通用预设解析下一条用户输入。
+    ///
+    /// # Errors
+    ///
+    /// preset 请求了不适用的 content，或指定 question 不唯一时返回错误。
+    pub fn continuation_input(
+        &self,
+        resolution: &InteractionResolution,
+    ) -> Result<Option<InteractionContinuationInput>, InteractionContinuationError> {
+        let Some(preset) = &self.continuation else {
+            return Ok(None);
+        };
+        let message = match &preset.message {
+            InteractionContinuationMessage::Resolution => {
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "type": "interactionResolution",
+                    "interactionId": self.interaction_id,
+                    "originTurnId": self.scope.turn_id,
+                    "payload": self.content,
+                    "resolution": resolution,
+                }))
+                .map_err(|error| InteractionContinuationError::Serialization(error.to_string()))?
+            }
+            InteractionContinuationMessage::Question { question_id } => {
+                let InteractionContent::UserInput(user_input) = &self.content else {
+                    return Err(InteractionContinuationError::NotUserInput);
+                };
+                let mut questions = user_input
+                    .questions()
+                    .iter()
+                    .filter(|question| question.id == *question_id);
+                let question = questions.next().ok_or_else(|| {
+                    InteractionContinuationError::InvalidQuestion {
+                        question_id: question_id.clone(),
+                    }
+                })?;
+                if questions.next().is_some() {
+                    return Err(InteractionContinuationError::InvalidQuestion {
+                        question_id: question_id.clone(),
+                    });
+                }
+                question.question.clone()
+            }
+        };
+        Ok(Some(InteractionContinuationInput {
+            message,
+            presentation: preset.presentation,
+        }))
+    }
+
     /// 比较不受 lifecycle 变化影响的请求 identity 与 payload。
     pub fn same_request(&self, other: &Self) -> bool {
         self.interaction_id == other.interaction_id
             && self.scope == other.scope
+            && self.continuation == other.continuation
             && self.created_at == other.created_at
             && match (&self.content, &other.content) {
                 (InteractionContent::UserInput(left), InteractionContent::UserInput(right)) => {
@@ -447,6 +575,7 @@ mod tests {
             item_id: None,
             tool_id: None,
             agent_path: Some("/root".to_string()),
+            purpose: InteractionPurpose::General,
         }
     }
 
@@ -532,6 +661,42 @@ mod tests {
             ))
             .expect_err("tool resolution must not resolve user input");
         assert!(mismatch.to_string().contains("resolveToolApproval"));
+    }
+
+    #[test]
+    fn continuation_preset_generates_question_message_with_declared_presentation() {
+        let interaction = user_input().with_continuation(InteractionContinuationPreset::question(
+            "question-1",
+            MessagePresentation::Hidden,
+        ));
+        let resolution = InteractionResolution::UserInput(UserInputResolution {
+            answers: HashMap::from([(
+                "question-1".to_string(),
+                UserInputAnswer {
+                    answers: vec!["yes".to_string()],
+                },
+            )]),
+        });
+
+        assert_eq!(
+            interaction.continuation_input(&resolution).unwrap(),
+            Some(InteractionContinuationInput {
+                message: "Continue?".to_string(),
+                presentation: MessagePresentation::Hidden,
+            })
+        );
+    }
+
+    #[test]
+    fn continuation_preset_is_part_of_immutable_request_identity() {
+        let hidden = user_input().with_continuation(InteractionContinuationPreset::resolution(
+            MessagePresentation::Hidden,
+        ));
+        let visible = user_input().with_continuation(InteractionContinuationPreset::resolution(
+            MessagePresentation::Visible,
+        ));
+
+        assert!(!hidden.same_request(&visible));
     }
 
     #[test]

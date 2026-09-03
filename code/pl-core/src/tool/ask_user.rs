@@ -5,8 +5,9 @@ use std::path::PathBuf;
 use crate::time::unix_seconds;
 use crate::turn::ToolEffect;
 use pl_protocol::{
-    InteractionRequest, InteractionResolution, InteractionScope, PureError, UserInputRequest,
-    UserInputResolution, UserInputResponse, UserQuestion, UserQuestionOption,
+    InteractionContinuationPreset, InteractionPurpose, InteractionRequest, InteractionResolution,
+    InteractionScope, MessagePresentation, PureError, UserInputRequest, UserInputResolution,
+    UserInputResponse, UserQuestion, UserQuestionOption,
 };
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -112,6 +113,26 @@ pub(super) async fn execute_user_input(
     context: ToolCallContext,
     pending_output: Option<String>,
 ) -> Result<ToolResult, PureError> {
+    let interaction =
+        build_user_input_interaction(tool_name, questions, &context, InteractionPurpose::General)?;
+    Ok(
+        execute_user_input_interaction(tool_name, interaction, context, pending_output)
+            .await?
+            .result,
+    )
+}
+
+pub(crate) struct UserInputExecution {
+    pub result: ToolResult,
+    pub resolution: Option<UserInputResolution>,
+}
+
+pub(crate) fn build_user_input_interaction(
+    tool_name: &str,
+    questions: Vec<UserQuestion>,
+    context: &ToolCallContext,
+    purpose: InteractionPurpose,
+) -> Result<InteractionRequest, PureError> {
     validate_questions(tool_name, &questions)?;
     let request_id =
         namespaced_request_id(&context.identity().turn_id, &context.identity().item_id);
@@ -120,8 +141,21 @@ pub(super) async fn execute_user_input(
         tool_id: context.identity().item_id.clone(),
         questions,
     };
-    let interaction = user_input_interaction(&context.identity().turn_id, &request, &context);
-    let (response, runtime_events) = match context.approval().user_input_mode() {
+    Ok(user_input_interaction(
+        &context.identity().turn_id,
+        &request,
+        context,
+        purpose,
+    ))
+}
+
+pub(crate) async fn execute_user_input_interaction(
+    tool_name: &str,
+    interaction: InteractionRequest,
+    context: ToolCallContext,
+    pending_output: Option<String>,
+) -> Result<UserInputExecution, PureError> {
+    let (response, resolution, runtime_events) = match context.approval().user_input_mode() {
         UserInputMode::AwaitResponse => {
             let Some(callback) = context.approval().interaction_callback() else {
                 return Err(PureError::ToolExecutionFailed {
@@ -140,16 +174,20 @@ pub(super) async fn execute_user_input(
                 }
                 None => callback(interaction.clone()).await,
             };
-            let response = match resolution {
-                InteractionResolution::UserInput(value) => UserInputResponse {
-                    answers: value.answers,
-                },
-                InteractionResolution::ToolApproval(_) => UserInputResponse::default(),
+            let (response, resolution) = match resolution {
+                InteractionResolution::UserInput(value) => (
+                    UserInputResponse {
+                        answers: value.answers.clone(),
+                    },
+                    Some(value),
+                ),
+                InteractionResolution::ToolApproval(_) => (UserInputResponse::default(), None),
             };
-            (response, Vec::new())
+            (response, resolution, Vec::new())
         }
         UserInputMode::EmitAndEndTurn => (
             UserInputResponse::default(),
+            None,
             vec![
                 ToolDirective::InteractionRequested {
                     interaction: Box::new(interaction),
@@ -170,14 +208,17 @@ pub(super) async fn execute_user_input(
     } else {
         pending_output.unwrap_or(response_description)
     };
-    Ok(ToolResult::from_runtime_text(
-        description,
-        OutputTruncation::empty(),
-        PathBuf::new(),
-        Some(0),
-        false,
-        runtime_events,
-    ))
+    Ok(UserInputExecution {
+        result: ToolResult::from_runtime_text(
+            description,
+            OutputTruncation::empty(),
+            PathBuf::new(),
+            Some(0),
+            false,
+            runtime_events,
+        ),
+        resolution,
+    })
 }
 
 fn validate_questions(tool_name: &str, questions: &[UserQuestion]) -> Result<(), PureError> {
@@ -224,6 +265,7 @@ fn user_input_interaction(
     turn_id: &str,
     request: &UserInputRequest,
     context: &ToolCallContext,
+    purpose: InteractionPurpose,
 ) -> InteractionRequest {
     let now = unix_seconds();
     InteractionRequest::user_input(
@@ -234,10 +276,14 @@ fn user_input_interaction(
             item_id: Some(request.tool_id.clone()),
             tool_id: Some(request.tool_id.clone()),
             agent_path: context.identity().agent_path.clone(),
+            purpose,
         },
         request.questions.clone(),
         now,
     )
+    .with_continuation(InteractionContinuationPreset::resolution(
+        MessagePresentation::Hidden,
+    ))
 }
 
 #[cfg(test)]
@@ -333,6 +379,7 @@ mod tests {
                 item_id: Some("call-1".to_string()),
                 tool_id: Some("call-1".to_string()),
                 agent_path: Some("/root".to_string()),
+                purpose: InteractionPurpose::General,
             }
         );
         let pl_protocol::InteractionContent::UserInput(user_input) = interaction.content else {

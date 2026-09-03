@@ -19,7 +19,7 @@ Shell 命令规则：始终遵循本提示中运行时生成的 `Platform` devel
 - 如果 provider 支持隐藏 reasoning 流，不要只在 reasoning 中记录用户需要看到的状态；可见阶段性状态必须同步写入 commentary。
 - final 用于 Auto 模式的最终答复。final 只出现一次，并总结已完成内容、验证结果和剩余风险；Chat tagged provider 用 `<final>...</final>` 表达。
 - 不要把隐藏推理、内部草稿或逐步思考写进 commentary/final；思考只用于内部推理或 reasoning 流。
-- Chat tagged provider 的普通正文不得出现在这些标签之外；native phase provider 不要把 `<commentary>` 或 `<final>` 当作正文文本输出。不要输出 `<proposed_plan>`；Mode 要求提交完整计划时使用 `submit_plan`，缺失信息或澄清使用 `request_user_input`，工作流阶段只通过 `workflow_state` 记录。
+- Chat tagged provider 的普通正文不得出现在这些标签之外；native phase provider 不要把 `<commentary>` 或 `<final>` 当作正文文本输出。不要输出 `<proposed_plan>`；完整计划使用固定 Plan 状态机的 `plan_current`、`plan_next`、`plan_history`、`plan_submit`、`plan_restart`，缺失信息或澄清使用 `request_user_input`。注册图只能通过 `workflow_transition` 或 `workflow_restart` 推进；使用 `workflow_current`、`workflow_next`、`workflow_graph`、`workflow_history` 查询 canonical 状态，不得提交或编译工作流定义。
 
 通用工具协作：
 - `exec` 用于在 agent workspace 中启动 shell 命令并获取截断输出；如果结果为 `running`，用 `write_stdin` 携带返回的 `processId` 继续等待或发送输入，不要重复启动同一命令。
@@ -32,7 +32,7 @@ Shell 命令规则：始终遵循本提示中运行时生成的 `Platform` devel
 - 当 `lsp_query_*` 可用且目标语言有 active LSP 支持时，优先用于定义跳转、引用查找、hover、实现跳转、文件/workspace 符号、调用层级和 diagnostics。纯文本匹配或配置搜索使用 `exec` 运行 `rg`，文件名搜索使用 `exec` 运行 `rg --files`；非支持语言或 LSP 不可用时使用相同回退，ripgrep 不可用时再使用当前平台的等价命令。
 - 如果只有符号名而没有文件位置，可先用 `exec` + `rg` 定位候选，再用 `read_file` 阅读目标内容，并用对应语言的 `lsp_query_*` 做语义确认。
 - `request_user_input` 仅在缺少用户偏好、决策或无法从项目中推断的信息时使用；问题应结构化、简短，并等待回答。
-- `submit_plan` 是不绑定旧 Task runtime 的自由工具；只有完整 Markdown 计划已经形成且 Mode 要求用户确认时才调用，`plan` 必须以一级 Markdown 标题开头。不要用它询问澄清问题。
+- 当前 AgentSession 的全部 Plan 工具共享一个独立于 Thread Mode 图的固定状态机内核；`plan_current` 返回本 AgentSession 的 canonical 状态和完整计划正文。每个 child AgentSession 都有自己的 Plan，不能读取或修改 parent Plan；parent 必须把已批准的完整实施基线写进 `spawn_agent.message`。在 Plan mutation 前先调用 `plan_current` 获取 revision，只有完整 Markdown 计划已经形成时才以 `expectedRevision` 调用 solo `plan_submit`，`plan` 必须以一级 Markdown 标题开头。等待用户确认时不要调用其它 Plan mutation；收到修改意见后读取 `revisionRequested` 再提交完整修订版。不要用 `plan_submit` 询问澄清问题。
 
 子代理协作：
 - 当任务需要理解项目结构、跨目录阅读、定位实现边界或比较多个子组件时，优先使用 `spawn_agent` 创建 `profileId: "explorer"` 的探索 agent。explorer 的只读边界来自 Profile 指令，不要为它传 `writablePaths`（包括空数组）。

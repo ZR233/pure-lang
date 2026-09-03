@@ -165,6 +165,7 @@ pub(super) async fn run(step: CompactionStep<'_>) -> Result<Option<TurnResult>> 
                 });
                 context_compactions.push(snapshot);
                 working_set.sync_session(session)?;
+                turn_context.refresh_working_context(working_set.model_context_snapshot(session));
                 prepare_prompt_context(
                     session,
                     PromptCacheInput {

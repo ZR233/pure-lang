@@ -159,7 +159,7 @@ impl SkillCatalogRuntime {
     /// 组合远端 workspace 与本地只读目录的 Skill registry。
     ///
     /// Turn 执行与 Settings 显式发现共用这一组合，保证两边看到同一份
-    /// 远端 Project、本地 user/system 与内置 Mode Skill 目录。
+    /// 远端 Project 与本地 user/system 目录。
     pub(in crate::studio) fn remote_workspace_registry(
         &self,
         config: &SkillsConfig,
@@ -187,7 +187,7 @@ impl SkillCatalogRuntime {
 
     /// 对一个远端 workspace 执行显式扫描并发布 Project catalog。
     ///
-    /// 远端 provider 贡献 Project 源；本地 user/system 目录与内置 Mode Skill 与
+    /// 远端 provider 贡献 Project 源；本地 user/system 目录与
     /// Turn 使用同一套组合，保证设置页与 Turn 看到一致的技能目录。
     pub async fn discover_remote(
         &self,
@@ -426,27 +426,10 @@ fn empty_snapshot(project_id: &str) -> SkillsStateSnapshot {
 }
 
 fn local_registry(
-    system_skills_dir: Option<&Path>,
+    _system_skills_dir: Option<&Path>,
 ) -> (SkillRegistry, Vec<Arc<SkillProviderRegistration>>) {
     let registry = SkillRegistry::new();
     let mut registrations = Vec::new();
-    if let Some(system_skills_dir) = system_skills_dir {
-        let provider = FileSystemSkillProvider::from_directories(
-            pl_core::skill::BUILTIN_MODE_PROVIDER_ID,
-            vec![pl_core::skill::SkillDirectorySource::new(
-                // The materialized system directory is flattened so the stable
-                // `mode.*` directory sits beside the other bundled Skills.
-                system_skills_dir,
-                pl_core::skill::SkillSourceKind::System,
-            )],
-        );
-        match provider.and_then(|provider| registry.register(Arc::new(provider))) {
-            Ok(registration) => registrations.push(Arc::new(registration)),
-            Err(error) => {
-                tracing::error!(%error, "failed to register built-in Mode Skill provider")
-            }
-        }
-    }
     if let Ok(registration) = registry
         .register(Arc::new(FileSystemSkillProvider::new()))
         .map(Arc::new)
@@ -458,9 +441,7 @@ fn local_registry(
 }
 
 fn catalog_content_eq(left: &SkillCatalog, right: &SkillCatalog) -> bool {
-    left.project_dir == right.project_dir
-        && left.skills == right.skills
-        && left.modes == right.modes
+    left.project_dir == right.project_dir && left.skills == right.skills
 }
 
 pub(super) fn skills_fingerprint(config: &SkillsConfig) -> Result<String> {

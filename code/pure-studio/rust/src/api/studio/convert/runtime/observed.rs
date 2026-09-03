@@ -179,7 +179,6 @@ pub(crate) fn bridge_skills_state(state: StudioSkillsStateSnapshot) -> BridgeSki
                 config_fingerprint: data.config_fingerprint,
                 catalog_revision: data.catalog_revision,
                 skills: data.catalog.skills.into_iter().map(skill_summary).collect(),
-                modes: data.catalog.modes.into_iter().map(mode_summary).collect(),
                 warnings: data.catalog.warnings,
                 complete: data.catalog.complete,
             },
@@ -204,23 +203,22 @@ pub(crate) fn bridge_skill_search_result(
     }
 }
 
-fn mode_summary(mode: pl_core::skill::SkillMetadata) -> ModeSummaryDto {
-    let metadata = mode
-        .mode
-        .expect("catalog Mode Skill must retain validated mode metadata");
-    ModeSummaryDto {
-        id: mode.name,
-        display_name: metadata.display_name,
-        description: mode.description,
-        order: metadata.order,
-        source: match mode.source {
-            pl_core::skill::SkillSourceKind::Project => "project",
-            pl_core::skill::SkillSourceKind::User => "user",
-            pl_core::skill::SkillSourceKind::System => "system",
-            pl_core::skill::SkillSourceKind::External => "external",
-        }
-        .to_string(),
-        provider_id: mode.provider_id.as_str().to_string(),
+pub(crate) fn bridge_thread_mode_catalog(
+    catalog: pl_protocol::ThreadModeCatalogSnapshot,
+) -> BridgeThreadModeCatalogSnapshot {
+    BridgeThreadModeCatalogSnapshot {
+        revision: catalog.revision,
+        modes: catalog
+            .modes
+            .into_iter()
+            .map(|mode_| BridgeThreadModeDescriptor {
+                id: mode_.id.to_string(),
+                display_name: mode_.display_name,
+                description: mode_.description,
+                order: mode_.order,
+                has_workflow: mode_.has_workflow,
+            })
+            .collect(),
     }
 }
 

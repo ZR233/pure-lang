@@ -3,10 +3,10 @@ use pl_core::{
     ToolEffect, ToolEffectSet, TurnFinalizationPolicy,
 };
 
-/// Studio 不按 Mode 或 workflow 阶段裁剪普通工具能力。
+/// Studio 不按 Thread Mode 或 workflow state 裁剪普通工具能力。
 ///
-/// `workflow_state` 是否使用完全由 Mode Skill 决定；root 统一以 `complete` 记录
-/// 完成事实并结束 turn。文件、命令、Git 和 Agent 能力始终保持可用。
+/// 注册图只决定 root 是否获得 `workflow_*` 查询/变更工具；root 仍统一以
+/// `complete` 记录完成事实并结束 turn。文件、命令、Git 和 Agent 能力始终保持可用。
 pub(super) fn studio_execution_policy(
     snapshot: &AgentSnapshot,
     profiles: &[pl_protocol::AgentProfileSnapshot],

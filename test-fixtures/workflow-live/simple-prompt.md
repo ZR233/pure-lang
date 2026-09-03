@@ -1,10 +1,10 @@
 Directly complete the following Rust library change in this temporary dependency-free project.
 
-Use the ordinary workspace, file, process, and skill tools as needed. This is a
-simple mode request: do not compile or advance `workflow_state`, do not create a
-plan or wait for confirmation, and do not ask clarifying questions. Inspect the
-existing contract, modify the allowed files, run the checks, and finish the
-request with the `complete` tool.
+Use the ordinary workspace, file, and process tools as needed. This Thread uses
+`mode.simple`, so it has no registered workflow graph or `workflow_*` tools. Do
+not create a plan or wait for confirmation, and do not ask clarifying questions.
+Inspect the existing contract, modify the allowed files, run the checks, and
+finish the request with the `complete` tool.
 
 Implement two independent APIs:
 

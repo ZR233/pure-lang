@@ -500,6 +500,7 @@ mod tests {
         arguments: serde_json::Value,
     ) -> pl_protocol::Message {
         pl_protocol::Message {
+            presentation: Default::default(),
             role: pl_protocol::MessageRole::Assistant,
             content: pl_protocol::MessageContent::text(String::new()),
             reasoning_content: None,
@@ -524,6 +525,7 @@ mod tests {
         output: &str,
     ) -> pl_protocol::Message {
         pl_protocol::Message {
+            presentation: Default::default(),
             role: pl_protocol::MessageRole::Tool,
             content: pl_protocol::MessageContent::text(output.to_string()),
             reasoning_content: None,

@@ -39,6 +39,7 @@ pub struct CoreRuntimeProfile {
     pub context_compaction: ContextCompactionConfig,
     pub attachment_runtime: Option<crate::AttachmentRuntime>,
     pub execution_environment: Option<ExecutionEnvironment>,
+    pub agent_session_plan: crate::AgentSessionPlanOptions,
 }
 
 impl CoreRuntimeProfile {
@@ -101,6 +102,12 @@ impl CoreRuntimeProfile {
 
     pub fn with_execution_environment(mut self, environment: ExecutionEnvironment) -> Self {
         self.execution_environment = Some(environment);
+        self
+    }
+
+    /// 预设当前 AgentSession 批准后 Plan 用户消息的 GUI presentation。
+    pub fn with_agent_session_plan(mut self, options: crate::AgentSessionPlanOptions) -> Self {
+        self.agent_session_plan = options;
         self
     }
 }
@@ -192,11 +199,13 @@ impl TurnEngineBuilder {
             context_compaction,
             attachment_runtime,
             execution_environment,
+            agent_session_plan,
         } = self.runtime_profile;
         let agent_tools = self.agent_tools.unwrap_or_else(|| {
             crate::tool::ToolManager::new()
                 .agent_tool_set("standalone", crate::tool::GlobalToolInheritance::Isolated)
         });
+        let tool_session_runtime = crate::tool::ToolSessionRuntime::new(agent_session_plan);
         TurnEngine {
             runtime: self.runtime,
             effort: self.effort,
@@ -216,7 +225,7 @@ impl TurnEngineBuilder {
             execution_environment: execution_environment
                 .unwrap_or_else(ExecutionEnvironment::detect_local),
             active_subagent: None,
-            tool_session_runtime: crate::tool::ToolSessionRuntime::default(),
+            tool_session_runtime,
         }
     }
 }

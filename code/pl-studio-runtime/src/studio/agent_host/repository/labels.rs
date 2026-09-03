@@ -3,13 +3,13 @@
 //! 这里的函数是 [`pl_protocol::LabeledEnum`] 在 store 层的薄封装：标签字符串已经
 //! 在协议枚举上定义一次（`impl LabeledEnum`），本模块只处理那些无法直接走 trait 的
 //! 聚合类型（如 `&ThreadActorState → 状态字符串`、`&ThreadItemState → 类型字符串`、
-//! `MailboxPresentation` 等非协议枚举）。
+//! `MessagePresentation` 等无需 `LabeledEnum` 的协议枚举）。
 //!
 //! 标签字符串是数据库列值的稳定标识，新增枚举变体时必须同步更新对应映射，
 //! 否则 `cargo check` 会在穷尽 match 处报错。
 
-use pl_core::{AgentState, MailboxPresentation};
-use pl_protocol::{ThreadItemState, ThreadMode, ThreadStatus};
+use pl_core::{AgentState, MessagePresentation};
+use pl_protocol::{ThreadItemState, ThreadModeId, ThreadStatus};
 
 use crate::PureError;
 
@@ -59,26 +59,26 @@ pub(super) fn item_kind_label(state: &ThreadItemState) -> &'static str {
     }
 }
 
-/// 把 [`MailboxPresentation`] 映射成 thread_input 表的 `presentation` 列值。
-pub(super) fn presentation_label(value: MailboxPresentation) -> &'static str {
+/// 把 [`MessagePresentation`] 映射成 thread_input 表的 `presentation` 列值。
+pub(super) fn presentation_label(value: MessagePresentation) -> &'static str {
     match value {
-        MailboxPresentation::User => "user",
-        MailboxPresentation::Hidden => "hidden",
+        MessagePresentation::Visible => "visible",
+        MessagePresentation::Hidden => "hidden",
     }
 }
 
-/// 从 thread_input 表的 `presentation` 列值恢复 [`MailboxPresentation`]。
-pub(super) fn presentation_from_label(value: &str) -> Result<MailboxPresentation, PureError> {
+/// 从 thread_input 表的 `presentation` 列值恢复 [`MessagePresentation`]。
+pub(super) fn presentation_from_label(value: &str) -> Result<MessagePresentation, PureError> {
     match value {
-        "user" => Ok(MailboxPresentation::User),
-        "hidden" => Ok(MailboxPresentation::Hidden),
+        "visible" => Ok(MessagePresentation::Visible),
+        "hidden" => Ok(MessagePresentation::Hidden),
         other => Err(store_error(format!("unknown input presentation {other}"))),
     }
 }
 
-/// 从 thread 表的 `mode` 列值恢复 [`ThreadMode`]。
-pub(super) fn thread_mode_from_label(label: &str) -> Result<ThreadMode, PureError> {
-    ThreadMode::from_label(label).map_err(map_label_error)
+/// 从 thread 表的 `mode` 列值恢复 [`ThreadModeId`]。
+pub(super) fn thread_mode_from_label(label: &str) -> Result<ThreadModeId, PureError> {
+    ThreadModeId::from_label(label).map_err(map_label_error)
 }
 
 fn map_label_error(error: pl_protocol::UnknownLabelError) -> PureError {

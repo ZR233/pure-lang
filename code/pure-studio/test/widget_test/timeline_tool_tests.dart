@@ -19,58 +19,62 @@ void registerTimelineToolTests() {
     );
   });
 
-  testWidgets('workflow_state rejection exposes its stable code and message', (
-    tester,
-  ) async {
-    final part = _toolTimelinePart(
-      id: 'workflow-transition-1',
-      groupId: 'workflow-transition-group',
-      turnId: 'turn-workflow-transition',
-      name: 'workflow_state',
-      status: 'failed',
-      result: jsonEncode({
-        'accepted': false,
-        'code': 'staleRevision',
-        'message': 'Workflow revision changed; read status and retry',
-      }),
-    );
+  testWidgets(
+    'workflow_transition rejection exposes its stable code and message',
+    (tester) async {
+      final part = _toolTimelinePart(
+        id: 'workflow-transition-1',
+        groupId: 'workflow-transition-group',
+        turnId: 'turn-workflow-transition',
+        name: 'workflow_transition',
+        status: 'failed',
+        result: jsonEncode({
+          'accepted': false,
+          'code': 'staleRevision',
+          'recoveryAction':
+              'Call workflow_current and retry with canonical CAS',
+        }),
+      );
 
-    await tester.pumpWidget(
-      _timelineApp(
-        home: Scaffold(
-          body: TimelineView(
-            threadId: 'session-1',
-            turn: null,
-            rows: timelineRowsFromFixtureParts([part]),
+      await tester.pumpWidget(
+        _timelineApp(
+          home: Scaffold(
+            body: TimelineView(
+              threadId: 'session-1',
+              turn: null,
+              rows: timelineRowsFromFixtureParts([part]),
+            ),
           ),
         ),
-      ),
-    );
-    await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('timeline-tool-group-summary')));
-    await tester.pump();
+      );
+      await tester.pump();
+      await tester.tap(
+        find.byKey(const ValueKey('timeline-tool-group-summary')),
+      );
+      await tester.pump();
 
-    expect(
-      find.textContaining(
-        'staleRevision\nWorkflow revision changed; read status and retry',
-      ),
-      findsOneWidget,
-    );
-  });
+      expect(
+        find.textContaining(
+          'staleRevision\nCall workflow_current and retry with canonical CAS',
+        ),
+        findsOneWidget,
+      );
+    },
+  );
 
-  testWidgets('successful workflow_state hides its result payload', (
+  testWidgets('successful workflow_transition hides its result payload', (
     tester,
   ) async {
     final part = _toolTimelinePart(
       id: 'workflow-transition-2',
       groupId: 'workflow-transition-completed-group',
       turnId: 'turn-workflow-completed',
-      name: 'workflow_state',
+      name: 'workflow_transition',
       status: 'succeeded',
       result: jsonEncode({
         'accepted': true,
         'code': 'transitioned',
-        'snapshot': {'runId': 'workflow-run-hidden', 'stage': 'completed'},
+        'snapshot': {'runId': 'workflow-run-hidden', 'state': 'completed'},
       }),
     );
 

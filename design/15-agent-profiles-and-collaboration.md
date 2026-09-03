@@ -53,6 +53,10 @@ revision 与 `AgentWorkspaceAssignmentSnapshot`；运行中的 child 不随设�
 产品 lifecycle 在准备外部资源时直接接收该 frozen Profile snapshot；不得通过父 Agent 配置、当前
 Profile 文件或非类型化 metadata 重新推导模型路由与系统指令。
 
+Plan 属于各自的 AgentSession，不随 Profile、消息 fork 或 workspace assignment 复制到 child，也不存在
+lineage 共享句柄。root 必须把 child 所需的已批准基线写入 `spawn_agent.message`；child 的 `plan_*` 工具
+只操作自己的 session，不能查询 root Plan。配置冻结与 Plan session 隔离是两条独立边界。
+
 这里保留的是公共功能语义，而不是某个固定 Rust 签名：任何实现 PL host 的产品都必须能在外部资源
 产生副作用之前取得“本次 spawn 已冻结的完整 Profile”。该能力用于让产品按同一 provider、model、
 effort、system instructions 和 workspace mode 创建容器、远端会话或审计收据。如果 PL 只暴露 child
@@ -98,15 +102,26 @@ commit/测试/风险证据，以及 workspace、`writablePaths`、Git 与 cleanu
 root 从成功 spawn receipt 冻结真实 `agentId`，循环 `wait_agents` 直到该 child terminal，再按该 id 调用
 `read_agent_submissions`。progress 唤醒不等于 terminal；空 submission page 是 child 交付合同失败，
 `read_agent_session` 只用于诊断和收窄重派，不能作为正常成果 fallback。
+`wait_agents` 是“任一目标有新事件即返回”，批量等待一次不代表其余目标已完成。root 必须维护尚未
+terminal 的 agentId 集合；只有同一次 canonical wait receipt 同时满足 `reason="terminal"`、message 的
+`agentId` 精确匹配、`state.agent.kind` 为 `idle` 或 `closed`，且 `lastTurnOutcome` 为 completed，才可从
+集合移除该 child。`CHILD_DELIVERY_READY` 出现在 progress message 中只表示成果已发布，不能替代终态；
+集合非空时继续等待，所有目标分别取得 terminal receipt 后才能开始读取 submissions。
 
 - 单个边界清晰的实现，或多个写集合完全互斥的并行实现，使用 `executor`；并行时为每个 child 传入
   最窄且互不重叠的 `writablePaths`，禁止 child 借 shell、Git 或 MCP 越界修改、stage、commit 或 reset。
 - 会触及共同接口、manifest、lockfile、生成文件、全仓格式化或高风险 Git 状态的任务使用
   `worktree_executor`。每个 child 在独立 worktree 提交，root 顺序审查和采纳；worktree 不能替代真实
-  前后依赖的顺序执行。
+  前后依赖的顺序执行。对于任务要求创建的新文件，child 必须先用文件工具创建并以只读工具确认精确
+  路径和内容，之后才能执行引用该路径的 `git add` 或 `git commit`；不得用试探性暂存验证文件是否存在。
+  状态检查、文件创建、内容确认、测试、暂存、提交和提交复核是独立步骤，不得用 `&&`、`||`、`;` 或
+  pipeline 拼成一个 exec，从而保证任一步失败都保留准确的首次调用责任和可重试边界。
 
 Task 默认在 working 后进入 integrating。directory 成果由 root 检查组合 diff 并形成最终提交；worktree
-成果由 root 审查 commit、用普通 Git 显式整合并 cleanup。root 可在解决冲突时完成保持合并语义所需的
+成果由 root 审查 commit、用普通 Git 显式整合并 cleanup。同一并行批次包含多个 worktree child 时，
+root 必须先审查并整合该批次全部接受的 commit，第二次及后续整合全部成功后才能发出第一次 cleanup；
+随后再逐个 cleanup 并验证对应 branch/worktree 消失，不得按 child 交错执行“整合一个、清理一个”。
+root 可在解决冲突时完成保持合并语义所需的
 相邻实现和测试修复，但不得借机展开无关重构。合适 child 不可用或失败时，root 先等待容量并收窄重派
 一次；仍失败才允许最小实现兜底，并在交付中记录 `ROOT_IMPLEMENTATION_FALLBACK`、原因和直接修改文件。
 参数或合同错误不得原样重放：root 先按工具 schema 修正 camelCase 参数、模式专属字段和目标 id，再用
@@ -150,6 +165,7 @@ explorer、两种 executor 的 spawn receipt、详细任务合同、目录拒绝
 worktree 分支、显式整合、cleanup、整合后的只读 reviewer、最终测试、截图和 terminal receipt。
 artifact 还必须保留每次协作工具调用的 attempt/outcome 分类；成功重试不能隐藏先前的参数、容量或
 provider 失败。验收要求每个 child 都有绑定真实 `agentId` 的 canonical nonempty durable submission，
+两个 worktree commit 都必须在第一次 cleanup 前显式整合，
 并将预期目录拒绝与非预期 tool failure 分开统计。`full-access` 只取消会话级工具审批，不改变 directory
 内置文件写策略或 worktree confined assignment，也不得被表述为 directory 的 OS 沙箱。
 

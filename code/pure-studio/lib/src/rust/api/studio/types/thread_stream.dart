@@ -12,7 +12,7 @@ import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 import 'thread_stream/item.dart';
 part 'thread_stream.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 @freezed
 sealed class BridgeInteractionContent with _$BridgeInteractionContent {
@@ -118,49 +118,6 @@ class BridgeInteractionScope {
           agentPath == other.agentPath;
 }
 
-class BridgeModeInstructionSnapshot {
-  final String modeId;
-  final String displayName;
-  final String source;
-  final String providerId;
-  final String revision;
-  final String contentHash;
-  final String content;
-
-  const BridgeModeInstructionSnapshot({
-    required this.modeId,
-    required this.displayName,
-    required this.source,
-    required this.providerId,
-    required this.revision,
-    required this.contentHash,
-    required this.content,
-  });
-
-  @override
-  int get hashCode =>
-      modeId.hashCode ^
-      displayName.hashCode ^
-      source.hashCode ^
-      providerId.hashCode ^
-      revision.hashCode ^
-      contentHash.hashCode ^
-      content.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeModeInstructionSnapshot &&
-          runtimeType == other.runtimeType &&
-          modeId == other.modeId &&
-          displayName == other.displayName &&
-          source == other.source &&
-          providerId == other.providerId &&
-          revision == other.revision &&
-          contentHash == other.contentHash &&
-          content == other.content;
-}
-
 enum BridgePromptPrefixChangedReason {
   initial,
   promptScopeChanged,
@@ -202,7 +159,7 @@ class BridgeThread {
   final String projectId;
   final String title;
 
-  /// 完整 Mode Skill ID，例如 `mode.simple` 或 `mode.release`。
+  /// 完整 Thread Mode ID，例如 `mode.simple` 或 `mode.release`。
   final String mode;
   final String rootThreadId;
   final String? parentThreadId;
@@ -1083,84 +1040,40 @@ class BridgeUserQuestionOption {
           description == other.description;
 }
 
-class BridgeWorkflowDefinition {
-  final String title;
-  final String goal;
-  final String initialStageId;
-  final List<BridgeWorkflowStage> stages;
-  final List<BridgeWorkflowTransition> transitions;
-
-  const BridgeWorkflowDefinition({
-    required this.title,
-    required this.goal,
-    required this.initialStageId,
-    required this.stages,
-    required this.transitions,
-  });
-
-  @override
-  int get hashCode =>
-      title.hashCode ^
-      goal.hashCode ^
-      initialStageId.hashCode ^
-      stages.hashCode ^
-      transitions.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeWorkflowDefinition &&
-          runtimeType == other.runtimeType &&
-          title == other.title &&
-          goal == other.goal &&
-          initialStageId == other.initialStageId &&
-          stages == other.stages &&
-          transitions == other.transitions;
-}
-
 class BridgeWorkflowRun {
   final String lineageId;
   final String runId;
-  final BridgeWorkflowDefinition definition;
-  final String definitionHash;
-  final BridgeModeInstructionSnapshot mode;
+  final String modeId;
+  final BigInt graphRevision;
+  final String graphHash;
   final BridgeWorkflowRunLifecycle lifecycle;
-  final String currentStageId;
-  final PlatformInt64 compiledAt;
+  final String currentStateId;
+  final PlatformInt64 startedAt;
   final PlatformInt64 updatedAt;
-  final List<BridgeWorkflowTransitionRecord> historyTail;
-  final BigInt archivedTransitionCount;
-  final String archivedTransitionDigest;
 
   const BridgeWorkflowRun({
     required this.lineageId,
     required this.runId,
-    required this.definition,
-    required this.definitionHash,
-    required this.mode,
+    required this.modeId,
+    required this.graphRevision,
+    required this.graphHash,
     required this.lifecycle,
-    required this.currentStageId,
-    required this.compiledAt,
+    required this.currentStateId,
+    required this.startedAt,
     required this.updatedAt,
-    required this.historyTail,
-    required this.archivedTransitionCount,
-    required this.archivedTransitionDigest,
   });
 
   @override
   int get hashCode =>
       lineageId.hashCode ^
       runId.hashCode ^
-      definition.hashCode ^
-      definitionHash.hashCode ^
-      mode.hashCode ^
+      modeId.hashCode ^
+      graphRevision.hashCode ^
+      graphHash.hashCode ^
       lifecycle.hashCode ^
-      currentStageId.hashCode ^
-      compiledAt.hashCode ^
-      updatedAt.hashCode ^
-      historyTail.hashCode ^
-      archivedTransitionCount.hashCode ^
-      archivedTransitionDigest.hashCode;
+      currentStateId.hashCode ^
+      startedAt.hashCode ^
+      updatedAt.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1169,21 +1082,18 @@ class BridgeWorkflowRun {
           runtimeType == other.runtimeType &&
           lineageId == other.lineageId &&
           runId == other.runId &&
-          definition == other.definition &&
-          definitionHash == other.definitionHash &&
-          mode == other.mode &&
+          modeId == other.modeId &&
+          graphRevision == other.graphRevision &&
+          graphHash == other.graphHash &&
           lifecycle == other.lifecycle &&
-          currentStageId == other.currentStageId &&
-          compiledAt == other.compiledAt &&
-          updatedAt == other.updatedAt &&
-          historyTail == other.historyTail &&
-          archivedTransitionCount == other.archivedTransitionCount &&
-          archivedTransitionDigest == other.archivedTransitionDigest;
+          currentStateId == other.currentStateId &&
+          startedAt == other.startedAt &&
+          updatedAt == other.updatedAt;
 }
 
 enum BridgeWorkflowRunLifecycle { active, terminal }
 
-/// 通用工作流面板所需的 canonical 投影。
+/// 状态栏所需的 canonical Thread Mode workflow 投影。
 class BridgeWorkflowRuntimeSnapshot {
   final BigInt revision;
   final BridgeWorkflowRun? currentRun;
@@ -1203,114 +1113,4 @@ class BridgeWorkflowRuntimeSnapshot {
           runtimeType == other.runtimeType &&
           revision == other.revision &&
           currentRun == other.currentRun;
-}
-
-class BridgeWorkflowStage {
-  final String id;
-  final String title;
-  final String instructions;
-  final List<String> completionCriteria;
-  final bool terminal;
-
-  const BridgeWorkflowStage({
-    required this.id,
-    required this.title,
-    required this.instructions,
-    required this.completionCriteria,
-    required this.terminal,
-  });
-
-  @override
-  int get hashCode =>
-      id.hashCode ^
-      title.hashCode ^
-      instructions.hashCode ^
-      completionCriteria.hashCode ^
-      terminal.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeWorkflowStage &&
-          runtimeType == other.runtimeType &&
-          id == other.id &&
-          title == other.title &&
-          instructions == other.instructions &&
-          completionCriteria == other.completionCriteria &&
-          terminal == other.terminal;
-}
-
-class BridgeWorkflowTransition {
-  final String fromStageId;
-  final String toStageId;
-  final String when;
-
-  const BridgeWorkflowTransition({
-    required this.fromStageId,
-    required this.toStageId,
-    required this.when,
-  });
-
-  @override
-  int get hashCode => fromStageId.hashCode ^ toStageId.hashCode ^ when.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeWorkflowTransition &&
-          runtimeType == other.runtimeType &&
-          fromStageId == other.fromStageId &&
-          toStageId == other.toStageId &&
-          when == other.when;
-}
-
-class BridgeWorkflowTransitionRecord {
-  final BigInt revision;
-  final String fromStageId;
-  final String toStageId;
-  final String reason;
-  final String summary;
-  final List<String> evidence;
-  final String turnId;
-  final String callId;
-  final PlatformInt64 transitionedAt;
-
-  const BridgeWorkflowTransitionRecord({
-    required this.revision,
-    required this.fromStageId,
-    required this.toStageId,
-    required this.reason,
-    required this.summary,
-    required this.evidence,
-    required this.turnId,
-    required this.callId,
-    required this.transitionedAt,
-  });
-
-  @override
-  int get hashCode =>
-      revision.hashCode ^
-      fromStageId.hashCode ^
-      toStageId.hashCode ^
-      reason.hashCode ^
-      summary.hashCode ^
-      evidence.hashCode ^
-      turnId.hashCode ^
-      callId.hashCode ^
-      transitionedAt.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is BridgeWorkflowTransitionRecord &&
-          runtimeType == other.runtimeType &&
-          revision == other.revision &&
-          fromStageId == other.fromStageId &&
-          toStageId == other.toStageId &&
-          reason == other.reason &&
-          summary == other.summary &&
-          evidence == other.evidence &&
-          turnId == other.turnId &&
-          callId == other.callId &&
-          transitionedAt == other.transitionedAt;
 }

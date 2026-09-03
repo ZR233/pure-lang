@@ -2,8 +2,8 @@ use anyhow::Result;
 
 use crate::studio::ids::unix_seconds;
 use crate::{
-    InteractionCommand, InteractionRequest, InteractionResolution, ResolveToolApproval,
-    ResolveUserInput,
+    InteractionCommand, InteractionContinuationInput, InteractionRequest, InteractionResolution,
+    ResolveToolApproval, ResolveUserInput,
 };
 
 use super::StudioRuntime;
@@ -13,7 +13,7 @@ impl StudioRuntime {
         &self,
         current: &InteractionRequest,
         resolution: InteractionResolution,
-        message: String,
+        continuation: InteractionContinuationInput,
         metadata: serde_json::Value,
     ) -> Result<InteractionRequest> {
         let thread_id = &current.scope.thread_id;
@@ -52,8 +52,8 @@ impl StudioRuntime {
                 canonical_owner,
                 pl_core::AgentInteractionContinuationRequest::new(
                     resolved.clone(),
-                    pl_core::AgentCurrentSessionSubmitRequest::start(message)
-                        .with_presentation(pl_core::MailboxPresentation::Hidden)
+                    pl_core::AgentCurrentSessionSubmitRequest::start(continuation.message)
+                        .with_presentation(continuation.presentation)
                         .with_mail_id(mail_id)
                         .with_metadata(metadata),
                 ),

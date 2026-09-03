@@ -499,6 +499,13 @@ impl ProductEventBus {
         self.emit(StudioProductEventKind::SkillsStateChanged(state.into()))
     }
 
+    pub fn emit_thread_mode_catalog(
+        &self,
+        state: pl_protocol::ThreadModeCatalogSnapshot,
+    ) -> StudioProductEventEnvelope {
+        self.emit(StudioProductEventKind::ThreadModeCatalogChanged(state))
+    }
+
     pub fn emit_provider_usage_state(
         &self,
         state: ProviderUsageStateSnapshot,
@@ -605,7 +612,7 @@ mod tests {
                 .create_thread(
                     project_id,
                     &format!("Session {index}"),
-                    crate::StudioMode::simple(),
+                    pl_protocol::ThreadModeId::simple(),
                 )
                 .await
                 .expect("thread");

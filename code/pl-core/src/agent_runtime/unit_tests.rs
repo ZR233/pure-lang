@@ -4,8 +4,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use pl_protocol::{
-    ConversationRecoveryMode, InteractionCommand, InteractionRequest, InteractionScope,
-    ResolveUserInput, ThreadNotification, TurnBillingRecord, TurnOutcome,
+    AGENT_SESSION_PLAN_CONFIRMATION_QUESTION_ID, AgentSessionPlanConfirmationPurpose,
+    AgentSessionPlanPhase, ConversationRecoveryMode, InteractionCommand, InteractionPurpose,
+    InteractionRequest, InteractionScope, ResolveUserInput, ThreadModeId, ThreadNotification,
+    TurnBillingRecord, TurnOutcome, UserInputAnswer, UserQuestion, UserQuestionOption, WorkflowRun,
+    WorkflowRunLifecycle, WorkflowSessionState,
 };
 use pretty_assertions::assert_eq;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -734,8 +737,53 @@ fn pending_user_interaction(
             item_id: Some(format!("{interaction_id}:item")),
             tool_id: Some(format!("{interaction_id}:tool")),
             agent_path: None,
+            purpose: pl_protocol::InteractionPurpose::General,
         },
         Vec::new(),
+        1,
+    )
+}
+
+fn pending_plan_interaction(
+    interaction_id: &str,
+    thread_id: &ThreadId,
+    turn_id: &str,
+) -> InteractionRequest {
+    let plan = "# Plan\n\nImplement and verify.";
+    InteractionRequest::user_input(
+        interaction_id,
+        InteractionScope {
+            thread_id: thread_id.to_string(),
+            turn_id: turn_id.to_string(),
+            item_id: Some(format!("{interaction_id}:item")),
+            tool_id: Some(format!("{interaction_id}:tool")),
+            agent_path: None,
+            purpose: InteractionPurpose::AgentSessionPlanConfirmation(
+                AgentSessionPlanConfirmationPurpose {
+                    expected_revision: 0,
+                    operation_id: "session/turn/plan-submit".to_string(),
+                    argument_hash: "submit-arguments".to_string(),
+                    plan_hash: crate::canonical_content_hash(plan.as_bytes()),
+                },
+            ),
+        },
+        vec![UserQuestion {
+            id: AGENT_SESSION_PLAN_CONFIRMATION_QUESTION_ID.to_string(),
+            header: "Plan".to_string(),
+            question: plan.to_string(),
+            is_other: true,
+            is_secret: false,
+            options: Some(vec![
+                UserQuestionOption {
+                    label: "Approve".to_string(),
+                    description: "Proceed.".to_string(),
+                },
+                UserQuestionOption {
+                    label: "Revise".to_string(),
+                    description: "Revise the Plan.".to_string(),
+                },
+            ]),
+        }],
         1,
     )
 }
@@ -759,8 +807,34 @@ fn interaction_continuation(pending: &InteractionRequest) -> AgentInteractionCon
             "interaction resolution for {}",
             pending.interaction_id
         ))
-        .with_presentation(MailboxPresentation::Hidden)
+        .with_presentation(MessagePresentation::Hidden)
         .with_mail_id(mail_id),
+    )
+}
+
+fn plan_revision_continuation(pending: &InteractionRequest) -> AgentInteractionContinuationRequest {
+    let mut resolved = pending.clone();
+    let decision = resolved
+        .decide(InteractionCommand::ResolveUserInput(ResolveUserInput {
+            interaction_id: resolved.interaction_id.clone(),
+            expected_revision: resolved.revision,
+            operation_id: "resolve-plan-test".to_string(),
+            resolved_at: 2,
+            answers: std::collections::HashMap::from([(
+                AGENT_SESSION_PLAN_CONFIRMATION_QUESTION_ID.to_string(),
+                UserInputAnswer {
+                    answers: vec!["Revise".to_string(), "Add rollback proof.".to_string()],
+                },
+            )]),
+        }))
+        .unwrap();
+    resolved.apply(decision, 2);
+    let mail_id = AgentInteractionContinuationRequest::stable_mail_id(&pending.interaction_id);
+    AgentInteractionContinuationRequest::new(
+        resolved,
+        AgentCurrentSessionSubmitRequest::start("plan revision requested")
+            .with_presentation(MessagePresentation::Hidden)
+            .with_mail_id(mail_id),
     )
 }
 
@@ -1245,6 +1319,97 @@ async fn running_agent_rejects_role_reconfiguration() {
     assert_eq!(
         repository.state(&agent_id).snapshot.identity.role,
         crate::AgentRoleId::new("executor").unwrap()
+    );
+    handle.close(agent_id).await.unwrap();
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn idle_root_mode_change_archives_the_workflow_durably_without_starting_a_run() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository.clone(), FactoryMode::Fail);
+    let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
+    let handle = runtime.handle();
+    let agent_id = ThreadId::new("root").unwrap();
+    let mut registration = registration("root", "chat");
+    registration
+        .session
+        .session
+        .replace_workflow(Some(WorkflowSessionState {
+            revision: 1,
+            current_run: Some(WorkflowRun {
+                lineage_id: "lineage-old".to_string(),
+                run_id: "run-old".to_string(),
+                mode_id: ThreadModeId::task(),
+                graph_revision: 7,
+                graph_hash: "graph-old".to_string(),
+                lifecycle: WorkflowRunLifecycle::Active,
+                current_state_id: "working".to_string(),
+                started_at: 1,
+                updated_at: 1,
+                history_tail: Vec::new(),
+                archived_transition_count: 0,
+                archived_transition_digest: String::new(),
+            }),
+            ..WorkflowSessionState::default()
+        }));
+
+    handle.register(registration).await.unwrap();
+    let before_revision = repository.state(&agent_id).snapshot.revision;
+    let changed = handle
+        .change_idle_thread_mode(agent_id.clone(), ThreadModeId::simple())
+        .await
+        .unwrap();
+
+    let durable = repository.state(&agent_id);
+    let workflow = durable
+        .session
+        .session
+        .workflow()
+        .expect("archive remains durable");
+    assert!(workflow.current_run.is_none());
+    assert_eq!(workflow.revision, 2);
+    assert_eq!(workflow.archived_runs.len(), 1);
+    assert_eq!(workflow.archived_runs[0].run_id, "run-old");
+    assert_eq!(workflow.archived_runs[0].outcome, "modeChanged");
+    assert_eq!(changed.revision, before_revision + 1);
+    assert_eq!(durable.snapshot, changed);
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn running_root_rejects_mode_change_without_mutating_the_workflow() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository.clone(), FactoryMode::Block);
+    let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
+    let handle = runtime.handle();
+    let agent_id = ThreadId::new("root").unwrap();
+
+    handle.register(registration("root", "chat")).await.unwrap();
+    handle
+        .submit(
+            agent_id.clone(),
+            AgentSubmitRequest::start(ThreadId::new("root").unwrap(), "block"),
+        )
+        .await
+        .unwrap();
+    let error = handle
+        .change_idle_thread_mode(agent_id.clone(), ThreadModeId::task())
+        .await
+        .unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("only change while the root Thread is idle")
+    );
+    assert!(
+        repository
+            .state(&agent_id)
+            .session
+            .session
+            .workflow()
+            .is_none()
     );
     handle.close(agent_id).await.unwrap();
     runtime.shutdown().await.unwrap();
@@ -1937,7 +2102,7 @@ async fn interaction_continuation_starts_idle_fresh_turn_and_deduplicates_stable
     let active = repository.state(&agent_id);
     assert!(active.active_input.as_ref().is_some_and(|input| {
         input.mail_id == AgentInteractionContinuationRequest::stable_mail_id("ask-idle")
-            && input.payload.presentation == MailboxPresentation::Hidden
+            && input.payload.presentation == MessagePresentation::Hidden
     }));
 
     handle
@@ -1962,6 +2127,116 @@ async fn interaction_continuation_starts_idle_fresh_turn_and_deduplicates_stable
             .iter()
             .all(|interaction| interaction.interaction_id != "ask-idle")
     );
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn plan_pending_and_resolution_share_their_actor_owner_commits() {
+    let repository = TestRepository::empty();
+    let host = TestHost::new(repository.clone(), FactoryMode::Block);
+    let runtime = AgentRuntime::start(host.clone(), test_options())
+        .await
+        .unwrap();
+    let handle = runtime.handle();
+    let agent_id = ThreadId::new("root").unwrap();
+    let thread_id = ThreadId::new("root").unwrap();
+    handle.register(registration("root", "chat")).await.unwrap();
+    let pending = pending_plan_interaction("plan-confirm", &thread_id, "turn-origin");
+
+    record_pending_interaction(
+        &handle,
+        agent_id.clone(),
+        thread_id.clone(),
+        pending.clone(),
+    )
+    .await;
+    let after_pending = repository.state(&agent_id);
+    let pending_plan = after_pending
+        .session
+        .session
+        .plan()
+        .expect("pending Interaction commit includes Plan state");
+    assert_eq!(
+        pending_plan.state,
+        AgentSessionPlanPhase::AwaitingConfirmation
+    );
+    assert_eq!(
+        pending_plan.pending_interaction_id.as_deref(),
+        Some("plan-confirm")
+    );
+    let pending_commit = repository
+        .commits()
+        .into_iter()
+        .rev()
+        .find(|commit| {
+            commit.facts.notifications.iter().any(|notification| {
+                matches!(
+                    &notification.notification,
+                    ThreadNotification::InteractionChanged { interaction }
+                        if interaction.interaction_id == "plan-confirm"
+                            && interaction.status() == pl_protocol::InteractionStatus::Pending
+                )
+            })
+        })
+        .expect("pending Interaction owner commit");
+    assert_eq!(
+        pending_commit
+            .next_state
+            .session
+            .session
+            .plan()
+            .map(|plan| plan.state),
+        Some(AgentSessionPlanPhase::AwaitingConfirmation)
+    );
+
+    handle
+        .submit_interaction_continuation(agent_id.clone(), plan_revision_continuation(&pending))
+        .await
+        .unwrap();
+    wait_for_prepared_messages(&host.turn_factory, 1).await;
+    let after_resolution = repository.state(&agent_id);
+    let resolved_plan = after_resolution
+        .session
+        .session
+        .plan()
+        .expect("resolution commit includes Plan state");
+    assert_eq!(
+        resolved_plan.state,
+        AgentSessionPlanPhase::RevisionRequested
+    );
+    assert_eq!(resolved_plan.pending_interaction_id, None);
+    assert_eq!(
+        resolved_plan.last_revision_feedback.as_deref(),
+        Some("Add rollback proof.")
+    );
+    let resolved_commit = repository
+        .commits()
+        .into_iter()
+        .rev()
+        .find(|commit| {
+            commit.facts.notifications.iter().any(|notification| {
+                matches!(
+                    &notification.notification,
+                    ThreadNotification::InteractionChanged { interaction }
+                        if interaction.interaction_id == "plan-confirm"
+                            && interaction.status() == pl_protocol::InteractionStatus::Resolved
+                )
+            })
+        })
+        .expect("resolved Interaction owner commit");
+    assert_eq!(
+        resolved_commit
+            .next_state
+            .session
+            .session
+            .plan()
+            .map(|plan| plan.state),
+        Some(AgentSessionPlanPhase::RevisionRequested)
+    );
+    assert!(resolved_commit.next_state.pending_inputs.len() <= 1);
+
+    host.turn_factory.blocker.notify_one();
+    handle.wait_until_idle(agent_id).await.unwrap();
     runtime.shutdown().await.unwrap();
 }
 

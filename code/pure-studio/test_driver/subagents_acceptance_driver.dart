@@ -10,6 +10,7 @@ import 'flutter_driver_session.dart';
 
 Future<void> main(List<String> arguments) async {
   final options = _Options.parse(arguments);
+  final evidence = _SubagentFlowEvidence();
   FlutterDriverSession? session;
   try {
     session = await FlutterDriverSession.connect(
@@ -29,8 +30,8 @@ Future<void> main(List<String> arguments) async {
         .writeAsString(await session.renderTree(), flush: true);
     await session.tap(find.byValueKey('settings-back'));
     await _openProjectAndSubmit(session, options);
-    final snapshot = await _waitForCompletion(session, options);
-    _validateSnapshot(snapshot);
+    final snapshot = await _waitForCompletion(session, options, evidence);
+    _validateSnapshot(snapshot, evidence);
     await File(options.finalScreenshot)
         .writeAsBytes(await session.screenshot(), flush: true);
     await File('${options.finalScreenshot}.render-tree.txt')
@@ -419,14 +420,19 @@ Future<void> _openProjectAndSubmit(
 Future<Map<String, dynamic>> _waitForCompletion(
   FlutterDriverSession session,
   _Options options,
+  _SubagentFlowEvidence evidence,
 ) async {
   final deadline = DateTime.now().add(options.timeout);
   var changedAt = DateTime.now();
   String? fingerprint;
-  var confirmationHandled = false;
+  var clarificationHandled = false;
+  var revisionRequested = false;
+  var revisedPlanApproved = false;
+  final handledInteractionIds = <Object?>{};
   Map<String, dynamic>? last;
   while (DateTime.now().isBefore(deadline)) {
     last = await session.readSnapshot();
+    evidence.observe(last);
     final workspace = last['workspace'] as Map?;
     final current = jsonEncode({
       'turn': workspace?['turn'],
@@ -445,28 +451,63 @@ Future<Map<String, dynamic>> _waitForCompletion(
     final interaction = workspace?['activeInteraction'];
     final workflow = last['workflow'];
     final run = workflow is Map ? workflow['currentRun'] : null;
-    final stage = run is Map ? run['currentStageId'] as String? : null;
+    final state = run is Map ? run['currentStateId'] as String? : null;
+    if (interaction is Map &&
+        handledInteractionIds.contains(interaction['id'])) {
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      continue;
+    }
     if (interaction is Map && interaction['kind'] == 'toolApproval') {
       await _resolveInteraction(
         session: session,
         artifactPrefix: options.finalScreenshot,
         kind: 'toolApproval',
-        stage: stage,
+        stage: state,
         action: () => _tapInteractionAction(session, 'tool-approve'),
       );
+      handledInteractionIds.add(interaction['id']);
     } else if (interaction is Map && interaction['kind'] == 'userInput') {
-      if (stage == 'awaiting_confirmation' && !confirmationHandled) {
+      if (state == 'planning' && !clarificationHandled) {
         await _resolveInteraction(
           session: session,
           artifactPrefix: options.finalScreenshot,
-          kind: 'userInput',
-          stage: stage,
+          kind: 'clarification',
+          stage: state,
           action: () => _tapFirstUserInputOption(session),
         );
-        confirmationHandled = true;
+        handledInteractionIds.add(interaction['id']);
+        clarificationHandled = true;
+        evidence.sawClarification = true;
+      } else if (state == 'planning' && !revisionRequested) {
+        _assertPlanInteraction(interaction);
+        await _resolveInteraction(
+          session: session,
+          artifactPrefix: options.finalScreenshot,
+          kind: 'plan-revision',
+          stage: state,
+          action: () => _requestPlanRevision(session),
+        );
+        handledInteractionIds.add(interaction['id']);
+        revisionRequested = true;
+        evidence.sawPlanRevisionRequest = true;
+      } else if (state == 'planning' &&
+          revisionRequested &&
+          !revisedPlanApproved) {
+        _assertRevisedPlanInteraction(interaction);
+        await _resolveInteraction(
+          session: session,
+          artifactPrefix: options.finalScreenshot,
+          kind: 'plan-approval',
+          stage: state,
+          action: () => _tapFirstUserInputOption(session),
+        );
+        handledInteractionIds.add(interaction['id']);
+        revisedPlanApproved = true;
+        evidence.sawRevisedPlanWhilePlanning = true;
+        evidence.sawRevisedPlanApproval = true;
       } else {
         throw StateError(
-          'root requested unexpected user input at $stage: $interaction',
+          'root requested unexpected user input at $state: $interaction',
         );
       }
     }
@@ -518,7 +559,7 @@ bool subagentsAcceptanceCompleted(Map<String, dynamic> snapshot) {
   final workflow = snapshot['workflow'];
   final run = workflow is Map ? workflow['currentRun'] : null;
   if (run is! Map ||
-      run['currentStageId'] != 'completed' ||
+      run['currentStateId'] != 'completed' ||
       run['terminal'] != true) {
     return false;
   }
@@ -545,7 +586,17 @@ bool subagentsAcceptanceCompleted(Map<String, dynamic> snapshot) {
   );
 }
 
-void _validateSnapshot(Map<String, dynamic> snapshot) {
+/// Applies the live subagent snapshot projection checks without requiring a
+/// Driver connection. This keeps the acceptance-only evidence rules directly
+/// unit-testable.
+void validateSubagentSnapshotProjection(Map<String, dynamic> snapshot) {
+  _SubagentFlowEvidence().observe(snapshot);
+}
+
+void _validateSnapshot(
+  Map<String, dynamic> snapshot,
+  _SubagentFlowEvidence evidence,
+) {
   final workspace = snapshot['workspace'];
   if (workspace is! Map) throw StateError('terminal snapshot has no workspace');
   if (workspace['threadMode'] != 'mode.task') {
@@ -570,12 +621,18 @@ void _validateSnapshot(Map<String, dynamic> snapshot) {
       throw StateError('terminal snapshot lacks $role Profile: $roles');
     }
   }
+  for (final role in ['executor', 'worktree_executor']) {
+    final count = agents.where((agent) => agent['role'] == role).length;
+    if (count < 2) {
+      throw StateError('terminal snapshot has fewer than two $role Agents');
+    }
+  }
   final tools = (workspace['timeline'] as List? ?? const [])
       .whereType<Map>()
       .expand((row) => (row['tools'] as List? ?? const []).whereType<Map>())
       .toList();
   final names = tools.map((tool) => tool['name']).whereType<String>().toList();
-  if (names.where((name) => name == 'spawn_agent').length < 2 ||
+  if (names.where((name) => name == 'spawn_agent').length < 7 ||
       !names.contains('close_agent')) {
     throw StateError(
       'terminal timeline lacks canonical spawn/close receipts: $names',
@@ -590,28 +647,202 @@ void _validateSnapshot(Map<String, dynamic> snapshot) {
   for (final marker in [
     '"profileId":"executor"',
     '"profileId":"worktree_executor"',
-    '"writablePaths":["allowed"]',
+    '"writablePaths":["allowed/normalize"]',
+    '"writablePaths":["allowed/validate"]',
     '"workspaceDisposition":"cleanup"',
   ]) {
     if (!joined.replaceAll(' ', '').contains(marker)) {
       throw StateError('terminal receipt lacks $marker');
     }
   }
-  final workflow = snapshot['workflow'];
-  final run = workflow is Map ? workflow['currentRun'] : null;
-  final history = run is Map ? run['history'] : null;
-  final stages = <String>{
-    if (history is List)
-      for (final entry in history.whereType<Map>()) ...[
-        if (entry['fromStageId'] is String) entry['fromStageId'] as String,
-        if (entry['toStageId'] is String) entry['toStageId'] as String,
-      ],
-  };
-  if (!stages.contains('integrating')) {
-    throw StateError('terminal workflow history lacks integrating: $stages');
-  }
+  evidence.validate();
   if (!_timelineText(snapshot).contains('REVIEWER_READ_ONLY_APPROVED')) {
     throw StateError('terminal timeline lacks reviewer approval marker');
+  }
+}
+
+void _assertPlanInteraction(Map interaction) {
+  final body = interaction['body'];
+  if (body is! String || !body.trimLeft().startsWith('# ')) {
+    throw StateError('Plan confirmation has no complete Markdown plan');
+  }
+}
+
+void _assertRevisedPlanInteraction(Map interaction) {
+  _assertPlanInteraction(interaction);
+  final plan = (interaction['body'] as String).toLowerCase();
+  for (final marker in [
+    'allowed/normalize',
+    'allowed/validate',
+    'worktree_alpha',
+    'worktree_beta',
+    'cleanup',
+  ]) {
+    if (!plan.contains(marker)) {
+      throw StateError('revised plan omitted `$marker`: $plan');
+    }
+  }
+}
+
+Future<void> _requestPlanRevision(FlutterDriverSession session) async {
+  const revisionOption = 'user-input-option-plan_confirmation-1';
+  await session.waitFor(
+    find.byValueKey(revisionOption),
+    timeout: const Duration(seconds: 30),
+  );
+  await session.tap(find.byValueKey(revisionOption));
+  await session.waitFor(find.byValueKey('user-input-first-text'));
+  await session.tap(find.byValueKey('user-input-first-text'));
+  await session.enterText(
+    '请在计划中逐项写明 allowed/normalize、allowed/validate、'
+    'worktree_alpha、worktree_beta 的并行所有权；补充硬性顺序：两次 cherry-pick 都成功后才可开始'
+    '任何 cleanup，再逐个 cleanup 并验证，禁止整合一个就清理一个。',
+  );
+  await _tapInteractionAction(session, 'user-input-submit');
+}
+
+class _SubagentFlowEvidence {
+  final Set<String> visitedStates = {};
+  final Set<String> workflowTools = {};
+  final Set<String> planTools = {};
+  final Set<String> submittedPlans = {};
+  var successfulPlanSubmissions = 0;
+  bool sawClarification = false;
+  bool sawPlanRevisionRequest = false;
+  bool sawRevisedPlanWhilePlanning = false;
+  bool sawRevisedPlanApproval = false;
+
+  void observe(Map<String, dynamic> snapshot) {
+    final workflow = snapshot['workflow'];
+    final run = workflow is Map ? workflow['currentRun'] : null;
+    if (run is Map) {
+      final state = run['currentStateId'];
+      if (state is String) visitedStates.add(state);
+      for (final forbidden in ['stages', 'history', 'definition', 'prompt']) {
+        if (run.containsKey(forbidden)) {
+          throw StateError('GUI workflow snapshot leaked `$forbidden`: $run');
+        }
+      }
+    }
+    final timeline =
+        (((snapshot['workspace'] as Map?)?['timeline'] as List?) ?? const [])
+            .whereType<Map>()
+            .toList();
+    final tools = timeline.expand(
+      (row) => (row['tools'] as List? ?? const []).whereType<Map>(),
+    );
+    for (final tool in tools) {
+      final name = tool['name'];
+      if (name == 'workflow_state') {
+        throw StateError('legacy workflow_state appeared in the real GUI');
+      }
+      if (name == 'submit_plan') {
+        throw StateError('legacy submit_plan appeared in the real GUI');
+      }
+      if (name is String && name.startsWith('plan_')) {
+        planTools.add(name);
+        if (name == 'plan_submit' && tool['status'] == 'succeeded') {
+          successfulPlanSubmissions += 1;
+          final arguments = tool['arguments'];
+          final decoded = arguments is String
+              ? jsonDecode(arguments)
+              : arguments;
+          if (decoded is Map && decoded['plan'] is String) {
+            submittedPlans.add((decoded['plan'] as String).trim());
+          }
+        }
+        final arguments = tool['arguments'];
+        final encoded = arguments is String ? arguments : jsonEncode(arguments);
+        for (final forbidden in ['definition', 'compile', 'supersede']) {
+          if (encoded.contains('"$forbidden"')) {
+            throw StateError(
+              '$name received forbidden graph-authoring input: $encoded',
+            );
+          }
+        }
+      }
+      if (name is! String || !name.startsWith('workflow_')) continue;
+      workflowTools.add(name);
+      final arguments = tool['arguments'];
+      final encoded = arguments is String ? arguments : jsonEncode(arguments);
+      for (final forbidden in ['definition', 'compile', 'supersede']) {
+        if (encoded.contains('"$forbidden"')) {
+          throw StateError(
+            '$name received forbidden graph-authoring input: $encoded',
+          );
+        }
+      }
+      if (name == 'workflow_transition' && tool['status'] == 'succeeded') {
+        final decoded = arguments is String ? jsonDecode(arguments) : arguments;
+        if (decoded is Map && decoded['targetStateId'] is String) {
+          final source = decoded['expectedStateId'];
+          if (source is String) visitedStates.add(source);
+          visitedStates.add(decoded['targetStateId'] as String);
+        }
+      }
+    }
+    for (final row in timeline) {
+      final text = row['text'];
+      if (text is String && submittedPlans.contains(text.trim())) {
+        throw StateError(
+          'hidden Plan continuation was projected as a GUI timeline message',
+        );
+      }
+    }
+  }
+
+  void validate() {
+    if (!sawClarification ||
+        !sawPlanRevisionRequest ||
+        !sawRevisedPlanWhilePlanning ||
+        !sawRevisedPlanApproval) {
+      throw StateError(
+        'missing clarification/revision evidence: '
+        '$sawClarification/$sawPlanRevisionRequest/'
+        '$sawRevisedPlanWhilePlanning/$sawRevisedPlanApproval',
+      );
+    }
+    for (final state in [
+      'planning',
+      'editing_documents',
+      'working',
+      'integrating',
+      'reviewing',
+      'completed',
+    ]) {
+      if (!visitedStates.contains(state)) {
+        throw StateError('workflow trace is missing $state: $visitedStates');
+      }
+    }
+    for (final required in [
+      'workflow_current',
+      'workflow_next',
+      'workflow_graph',
+      'workflow_history',
+      'workflow_transition',
+    ]) {
+      if (!workflowTools.contains(required)) {
+        throw StateError(
+          'split workflow tool $required is missing: $workflowTools',
+        );
+      }
+    }
+    for (final required in [
+      'plan_current',
+      'plan_next',
+      'plan_history',
+      'plan_submit',
+    ]) {
+      if (!planTools.contains(required)) {
+        throw StateError('required Plan tool $required is missing: $planTools');
+      }
+    }
+    if (successfulPlanSubmissions < 2) {
+      throw StateError(
+        'expected two successful plan_submit calls, got '
+        '$successfulPlanSubmissions',
+      );
+    }
   }
 }
 

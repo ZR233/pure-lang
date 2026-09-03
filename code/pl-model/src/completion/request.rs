@@ -336,6 +336,7 @@ mod tests {
     fn base_request(content: MessageContent) -> CompletionRequest {
         CompletionRequest::builder()
             .input(vec![ModelContextItem::from(Message {
+                presentation: Default::default(),
                 role: MessageRole::User,
                 content,
                 reasoning_content: None,

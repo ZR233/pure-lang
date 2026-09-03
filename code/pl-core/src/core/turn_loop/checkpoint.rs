@@ -58,7 +58,10 @@ pub(super) async fn drain_mailbox(
         return Ok(false);
     }
     for input in inputs {
-        session.push_user_prompt(input.payload.message.clone());
+        session.push_user_prompt_with_presentation(
+            input.payload.message.clone(),
+            input.payload.presentation,
+        );
         recorder.user_text_item_with_id(
             turn_id,
             format!("{turn_id}-mail-{}", input.mail_id),

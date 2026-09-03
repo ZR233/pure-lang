@@ -193,7 +193,7 @@ StudioState _emptyState() {
     id: 'session-1',
     projectId: project.id,
     title: 'Session',
-    mode: StudioMode.simple,
+    mode: ThreadModeId.simple,
     updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
   );
   return _studioStateFixture(
@@ -232,7 +232,7 @@ StudioState _twoProjectState({
         id: 'session-a',
         projectId: 'project-a',
         title: 'Session A',
-        mode: StudioMode.simple,
+        mode: ThreadModeId.simple,
         updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
       ),
     if (projects.any((project) => project.id == 'project-b'))
@@ -240,7 +240,7 @@ StudioState _twoProjectState({
         id: 'session-b',
         projectId: 'project-b',
         title: 'Session B',
-        mode: StudioMode.task,
+        mode: ThreadModeId.task,
         updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
       ),
   ];

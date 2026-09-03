@@ -47,6 +47,9 @@ StudioReduceResult reduceStudioEvent(
     SkillsStateChangedPayload(:final state) => StudioReduceResult(
       applySkillsState(current, state),
     ),
+    ThreadModeCatalogChangedPayload(:final state) => StudioReduceResult(
+      applyThreadModeCatalog(current, state),
+    ),
     ProviderUsageStateChangedPayload(:final state) => StudioReduceResult(
       applyProviderUsageState(current, state),
     ),
@@ -431,6 +434,14 @@ StudioState applySkillsState(StudioState current, SkillsStateSnapshot next) {
   return current.copyWith(
     skillsByProject: {...current.skillsByProject, next.projectId: next},
   );
+}
+
+StudioState applyThreadModeCatalog(
+  StudioState current,
+  ThreadModeCatalogView next,
+) {
+  if (next.revision <= current.threadModeCatalog.revision) return current;
+  return current.copyWith(threadModeCatalog: next);
 }
 
 StudioState applyMcpState(StudioState current, McpStateSnapshot next) {

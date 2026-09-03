@@ -284,7 +284,7 @@ mod tests {
     use sea_orm::{ActiveModelTrait, IntoActiveModel, TransactionTrait};
 
     use super::*;
-    use crate::StudioMode;
+    use crate::ThreadModeId;
     use crate::studio::entity::studio_object;
 
     #[tokio::test]
@@ -394,6 +394,7 @@ mod tests {
         metadata.insert("zeta".to_string(), "2".to_string());
         metadata.insert("alpha".to_string(), "1".to_string());
         let transcript = vec![ModelContextItem::from(Message {
+            presentation: Default::default(),
             role: MessageRole::User,
             content: MessageContent::text("metadata".to_string()),
             reasoning_content: None,
@@ -542,7 +543,7 @@ mod tests {
             .await
             .unwrap();
         let thread = store
-            .create_thread(&project.id, slug, StudioMode::simple())
+            .create_thread(&project.id, slug, ThreadModeId::simple())
             .await
             .unwrap();
         (store, thread.id)
@@ -550,6 +551,7 @@ mod tests {
 
     fn text_item(content: &str) -> ModelContextItem {
         ModelContextItem::from(Message {
+            presentation: Default::default(),
             role: MessageRole::User,
             content: MessageContent::text(content.to_string()),
             reasoning_content: None,

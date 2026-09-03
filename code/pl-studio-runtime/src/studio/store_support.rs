@@ -1,6 +1,7 @@
 //! Studio 当前数据库 schema。
 //!
-//! v17 是统一工作流的破坏性边界。打开旧版本时由 `store::project` 删除整个数据库
+//! v18 是轻量 Thread Mode workflow 持久化的破坏性边界。打开旧版本时由
+//! `store::project` 删除整个数据库
 //! family 并从这里重建，因此本模块不包含旧 Task 表或迁移逻辑。
 
 use anyhow::Result;
@@ -9,7 +10,7 @@ use sea_orm::{ConnectionTrait, DatabaseConnection};
 
 use crate::studio::entity;
 
-pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 17;
+pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 18;
 
 pub(super) async fn initialize_studio_schema(db: &DatabaseConnection) -> Result<()> {
     create_thread_lifecycle_tables(db).await?;
@@ -131,6 +132,8 @@ async fn create_thread_lifecycle_tables(db: &DatabaseConnection) -> Result<()> {
             tool_id TEXT,
             agent_path TEXT,
             revision INTEGER NOT NULL CHECK (revision >= 0),
+            purpose_json TEXT NOT NULL CHECK (json_valid(purpose_json)),
+            continuation_json TEXT NOT NULL CHECK (json_valid(continuation_json)),
             state_json TEXT NOT NULL CHECK (json_valid(state_json)),
             interaction_kind TEXT GENERATED ALWAYS AS (
                 json_extract(state_json, '$.kind')

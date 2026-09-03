@@ -12,8 +12,7 @@ use pl_protocol::{
     ThreadSubscriptionUpdate, ThreadTextChannel, ThreadToolFailureKind, ThreadToolOutput,
     ThreadToolState, TodoItem, TodoListSnapshot, TodoStatus, TokenUsageSnapshot, Turn,
     TurnCancellationCause, TurnCompletion, TurnPhase, TurnRolloverOutcome, TurnState,
-    WorkflowDefinition, WorkflowRun, WorkflowRunLifecycle, WorkflowRuntimeSnapshot, WorkflowStage,
-    WorkflowTransition, WorkflowTransitionRecord,
+    WorkflowRunLifecycle, WorkflowRuntimeRunSnapshot, WorkflowRuntimeSnapshot,
 };
 
 use crate::api::studio::types::*;
@@ -562,81 +561,20 @@ fn workflow_runtime_snapshot(value: WorkflowRuntimeSnapshot) -> BridgeWorkflowRu
     }
 }
 
-fn workflow_run(value: WorkflowRun) -> BridgeWorkflowRun {
+fn workflow_run(value: WorkflowRuntimeRunSnapshot) -> BridgeWorkflowRun {
     BridgeWorkflowRun {
         lineage_id: value.lineage_id,
         run_id: value.run_id,
-        definition: workflow_definition(value.definition),
-        definition_hash: value.definition_hash,
-        mode: BridgeModeInstructionSnapshot {
-            mode_id: value.mode.mode_id,
-            display_name: value.mode.display_name,
-            source: value.mode.source,
-            provider_id: value.mode.provider_id,
-            revision: value.mode.revision,
-            content_hash: value.mode.content_hash,
-            content: value.mode.content,
-        },
+        mode_id: value.mode_id.to_string(),
+        graph_revision: value.graph_revision,
+        graph_hash: value.graph_hash,
         lifecycle: match value.lifecycle {
             WorkflowRunLifecycle::Active => BridgeWorkflowRunLifecycle::Active,
             WorkflowRunLifecycle::Terminal => BridgeWorkflowRunLifecycle::Terminal,
         },
-        current_stage_id: value.current_stage_id,
-        compiled_at: value.compiled_at,
+        current_state_id: value.current_state_id,
+        started_at: value.started_at,
         updated_at: value.updated_at,
-        history_tail: value
-            .history_tail
-            .into_iter()
-            .map(workflow_transition_record)
-            .collect(),
-        archived_transition_count: value.archived_transition_count,
-        archived_transition_digest: value.archived_transition_digest,
-    }
-}
-
-fn workflow_definition(value: WorkflowDefinition) -> BridgeWorkflowDefinition {
-    BridgeWorkflowDefinition {
-        title: value.title,
-        goal: value.goal,
-        initial_stage_id: value.initial_stage_id,
-        stages: value.stages.into_iter().map(workflow_stage).collect(),
-        transitions: value
-            .transitions
-            .into_iter()
-            .map(workflow_transition)
-            .collect(),
-    }
-}
-
-fn workflow_stage(value: WorkflowStage) -> BridgeWorkflowStage {
-    BridgeWorkflowStage {
-        id: value.id,
-        title: value.title,
-        instructions: value.instructions,
-        completion_criteria: value.completion_criteria,
-        terminal: value.terminal,
-    }
-}
-
-fn workflow_transition(value: WorkflowTransition) -> BridgeWorkflowTransition {
-    BridgeWorkflowTransition {
-        from_stage_id: value.from_stage_id,
-        to_stage_id: value.to_stage_id,
-        when: value.when,
-    }
-}
-
-fn workflow_transition_record(value: WorkflowTransitionRecord) -> BridgeWorkflowTransitionRecord {
-    BridgeWorkflowTransitionRecord {
-        revision: value.revision,
-        from_stage_id: value.from_stage_id,
-        to_stage_id: value.to_stage_id,
-        reason: value.reason,
-        summary: value.summary,
-        evidence: value.evidence,
-        turn_id: value.turn_id,
-        call_id: value.call_id,
-        transitioned_at: value.transitioned_at,
     }
 }
 

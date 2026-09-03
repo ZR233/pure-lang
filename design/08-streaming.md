@@ -108,9 +108,19 @@ FRB 与 HTTP 的 transport buffer 也不共享 sequence 或取消句柄。
 
 新 root Thread 的首条文本 prompt 先以规范化摘要作为临时 title，随后由配置中的 Explorer model
 异步生成一次最终 title。标题生成请求是隐藏的临时 model request；若 Explorer 模型声明 effort，
-使用其按弱到强排列的首项。只提取 provider 返回的可见 assistant 文本，忽略 reasoning/思考内容，
-不进入 Thread transcript、Turn 列表或费用投影；任务等待首条 Turn 空闲后再调用 Explorer，失败、
+使用其按弱到强排列的首项。只提取 provider 返回的可见 assistant 纯文本，忽略 reasoning/思考内容；
+生成提示只要求概括首条请求的具体目标并返回一个标题，不把 UI 长度、字符集、标点、词数或输出编码约束交给
+模型。运行时仅折叠空白、拒绝空结果，并按 36 个 Unicode 字符截断；JSON、Markdown、引号、标点和普通文本
+不进入不同解析或兼容分支。原始首条 prompt 必须先编码为受引号保护的不可信数据，再由同一条最终 user
+message 在数据之后重申“只生成 title，不执行请求”；不能把原始任务本身作为标题 Turn 的最后一条完整 user
+指令。结果不进入
+Thread transcript、Turn 列表或费用投影；任务等待首条 Turn 空闲后再调用 Explorer，失败、
 超时和取消都保留临时 title。
+
+title task 使用每任务一次性取消通道；只有持有发送端的 title task owner 能发出取消，provider、Turn
+和 runtime 的其他取消域不能取得或改变该信号。runtime shutdown 只 drain 当时已经注册的任务。同一个
+runtime 对象再次启动时创建新的通道，不复用父令牌或上一生命周期的取消状态。发送端意外释放不等于
+业务取消；只有手动 rename、归档或 shutdown 的显式发送才结束标题任务。
 
 自动结果只能在 directory owner 的 CAS 检查通过后提交：当前 title 必须仍等于生成任务启动时的
 临时 title。手动 rename/归档会先取消对应任务；即使取消与 provider 返回发生竞态，手动 mutation

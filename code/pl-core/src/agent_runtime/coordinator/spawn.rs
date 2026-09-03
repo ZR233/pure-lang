@@ -117,7 +117,7 @@ where
             payload: super::super::MailboxInputPayload {
                 message,
                 attachments: Vec::new(),
-                presentation: super::super::MailboxPresentation::Hidden,
+                presentation: super::super::MessagePresentation::Hidden,
                 metadata: request.metadata.into(),
             },
             queue_coalescing_key: None,

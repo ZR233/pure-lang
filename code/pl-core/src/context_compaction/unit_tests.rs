@@ -3,7 +3,11 @@ use std::future::pending;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use pl_protocol::{Message, MessageContent, MessageRole, ModelContextItem};
+use pl_model::completion::OpenAiCompactionMode;
+use pl_model::model::{ModelInfo, ModelTransportProfile};
+use pl_model::provider::{ProviderEndpoint, ProviderWireProtocol};
+use pl_model::runtime::ModelRuntime;
+use pl_protocol::{Message, MessageContent, MessagePresentation, MessageRole, ModelContextItem};
 use pl_trace::{AgentEvent, AgentEventSender, TracePartSource};
 use pretty_assertions::assert_eq;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -14,13 +18,9 @@ use super::history::{
 };
 use super::*;
 use crate::core::progress::{ProgressEmitter, ProgressVerbosity};
-use pl_model::completion::OpenAiCompactionMode;
-use pl_model::model::{ModelInfo, ModelTransportProfile};
-use pl_model::provider::{ProviderEndpoint, ProviderWireProtocol};
-use pl_model::runtime::ModelRuntime;
-
 fn text_message(role: MessageRole, text: &str) -> Message {
     Message {
+        presentation: Default::default(),
         role,
         content: MessageContent::text(text.to_string()),
         reasoning_content: None,
@@ -55,6 +55,7 @@ fn compacted_history_filters_old_summary_and_places_new_summary_last() {
     assert_eq!(message_text(&compacted[0]), "old request");
     assert_eq!(message_text(&compacted[1]), "latest request");
     assert!(is_compaction_summary(&compacted[2]));
+    assert_eq!(compacted[2].presentation, MessagePresentation::Hidden);
 }
 
 #[test]
@@ -117,6 +118,10 @@ async fn local_context_pressure_retry_emits_progress_and_preserves_summary_order
     // Chat wire messages include the compaction instruction as a system message.
     assert_eq!(provider.recorded_wire_item_counts(), vec![5, 4]);
     assert!(session.messages().last().is_some_and(is_compaction_summary));
+    assert_eq!(
+        session.messages().last().unwrap().presentation,
+        MessagePresentation::Hidden
+    );
     assert_eq!(
         runtime_progress_texts(&mut event_rx),
         vec![

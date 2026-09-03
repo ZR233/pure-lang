@@ -1,9 +1,9 @@
 //! Live workflow wire-capture validation.
 //!
 //! The acceptance harness deliberately validates the protocol boundary rather
-//! than a provider-specific transcript.  A mode is a preloaded skill and the
-//! root agent is the same agent in every mode, so captures must contain the
-//! frozen Mode Skill and the mode-specific workflow contract. The validator
+//! than a provider-specific transcript. The root agent is the same agent in
+//! every mode, so captures must contain the registered Thread Mode prompt and
+//! the mode-specific workflow contract. The validator
 //! rejects the removed Task/WorkUnit/review/merge surface everywhere.
 
 use anyhow::{Context, Result, bail, ensure};
@@ -15,6 +15,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const FORBIDDEN_TOOLS: &[&str] = &[
+    "workflow_state",
     "task_status",
     "task_transition",
     "task_spawn_executor",
@@ -22,15 +23,34 @@ const FORBIDDEN_TOOLS: &[&str] = &[
     "task_record_merge",
     "review_exit",
     "plan_exit",
+    "submit_plan",
+];
+const PLAN_TOOLS: &[&str] = &[
+    "plan_current",
+    "plan_next",
+    "plan_history",
+    "plan_submit",
+    "plan_restart",
+];
+const WORKFLOW_TOOLS: &[&str] = &[
+    "workflow_current",
+    "workflow_next",
+    "workflow_graph",
+    "workflow_history",
+    "workflow_transition",
+    "workflow_restart",
 ];
 const FORBIDDEN_PROMPT_MARKERS: &[&str] = &[
     "TaskCoordinator",
     "TaskRuntime",
     "WorkUnit",
+    "<preloaded_mode_skill",
     "<task_runtime",
     "task_status",
     "task_transition",
     "plan_exit",
+    "workflow_state.compile",
+    "workflow_state.supersede",
 ];
 
 #[derive(Debug, Serialize)]
@@ -194,11 +214,11 @@ fn assert_workflow_contract(captures: &[WireManifestEntry]) -> Result<()> {
         });
         ensure!(
             root.clone().count() > 0,
-            "no full provider request contains the frozen {mode_id} skill"
+            "no full provider request contains the registered {mode_id} prompt"
         );
         ensure!(
             root.clone().any(|capture| {
-                capture.prompt_sections.contains(&"modeSkill")
+                capture.prompt_sections.contains(&"threadModePrompt")
                     && capture.prompt_sections.contains(&"canonicalUserPrompt")
                     && capture.tool_names.iter().any(|name| name == "complete")
                     && capture.tool_names.iter().any(|name| name == "exec")
@@ -217,26 +237,60 @@ fn assert_workflow_contract(captures: &[WireManifestEntry]) -> Result<()> {
             "one root request did not preserve {mode_id}, completion, collaboration tools, and ordinary workspace tools"
         );
         if mode_id == "mode.task" {
+            let first_root = root
+                .clone()
+                .next()
+                .context("mode.task has no first full provider request")?;
+            ensure!(
+                first_root.prompt_sections.contains(&"threadModePrompt")
+                    && first_root.prompt_sections.contains(&"workflowProjection")
+                    && first_root.prompt_sections.contains(&"initialPlanningState"),
+                "the first mode.task provider request does not contain the registered Mode prompt and initial planning state"
+            );
+            ensure!(
+                first_root.workflow_call_count == 0
+                    && first_root.workflow_result_count == 0
+                    && first_root.complete_call_count == 0,
+                "the first mode.task provider request already contains tool calls or results"
+            );
+            ensure!(
+                WORKFLOW_TOOLS.iter().all(|required| {
+                    first_root
+                        .tool_names
+                        .iter()
+                        .any(|actual| actual == required)
+                }),
+                "the first mode.task provider request does not expose every registered workflow tool"
+            );
+            ensure!(
+                PLAN_TOOLS.iter().all(|required| {
+                    first_root
+                        .tool_names
+                        .iter()
+                        .any(|actual| actual == required)
+                }),
+                "the first mode.task provider request does not expose every registered Plan tool"
+            );
             ensure!(
                 captures
                     .iter()
                     .filter(|capture| capture.mode_id == Some(mode_id))
                     .any(|capture| capture.workflow_call_count > 0),
-                "mode.task wire captures contain no workflow_state call"
+                "mode.task wire captures contain no workflow tool call"
             );
             ensure!(
                 captures
                     .iter()
                     .filter(|capture| capture.mode_id == Some(mode_id))
                     .any(|capture| capture.workflow_result_count > 0),
-                "mode.task wire captures contain no workflow_state result"
+                "mode.task wire captures contain no workflow tool result"
             );
             ensure!(
                 captures
                     .iter()
                     .filter(|capture| capture.mode_id == Some(mode_id))
                     .any(|capture| { capture.prompt_sections.contains(&"workflowProjection") }),
-                "mode.task has no subsequent request containing the derived pl.workflow projection"
+                "mode.task has no request containing the derived pl.workflow projection"
             );
         } else {
             ensure!(
@@ -306,12 +360,15 @@ fn capture_entry(artifact_dir: &Path, path: &Path) -> Result<WireManifestEntry> 
     );
     validate_workflow_call_arguments(body)?;
     let prompt_sections = detected_prompt_sections(body, &prompt_text, &message_texts);
-    let workflow_call_count = function_call_count(body, "workflow_state");
+    let workflow_call_count = WORKFLOW_TOOLS
+        .iter()
+        .map(|name| function_call_count(body, name))
+        .sum();
     let workflow_result_count = workflow_result_count(body);
     let complete_call_count = function_call_count(body, "complete");
-    let mode_id = if prompt_text.contains("<preloaded_mode_skill name=\"mode.simple\"") {
+    let mode_id = if prompt_text.contains("<preloaded_thread_mode_prompt modeId=\"mode.simple\"") {
         Some("mode.simple")
-    } else if prompt_text.contains("<preloaded_mode_skill name=\"mode.task\"") {
+    } else if prompt_text.contains("<preloaded_thread_mode_prompt modeId=\"mode.task\"") {
         Some("mode.task")
     } else {
         None
@@ -376,9 +433,9 @@ fn workflow_result_count(body: &Value) -> usize {
                     .get("output")
                     .and_then(Value::as_str)
                     .is_some_and(|output| {
-                        output.contains("workflow_state")
+                        output.contains("currentStateId")
+                            || output.contains("graphRevision")
                             || output.contains("operationRevision")
-                            || output.contains("currentStageId")
                     })
         })
         .count();
@@ -393,7 +450,9 @@ fn workflow_result_count(body: &Value) -> usize {
                 .get("content")
                 .and_then(Value::as_str)
                 .is_some_and(|output| {
-                    output.contains("operationRevision") || output.contains("currentStageId")
+                    output.contains("operationRevision")
+                        || output.contains("currentStateId")
+                        || output.contains("graphRevision")
                 })
         })
         .count();
@@ -422,7 +481,7 @@ fn validate_workflow_call_arguments(body: &Value) -> Result<()> {
         });
     for call in response_calls
         .chain(chat_calls)
-        .filter(|call| tool_name(call) == Some("workflow_state"))
+        .filter(|call| tool_name(call).is_some_and(|name| WORKFLOW_TOOLS.contains(&name)))
     {
         let call_id = call
             .get("call_id")
@@ -431,21 +490,31 @@ fn validate_workflow_call_arguments(body: &Value) -> Result<()> {
             .and_then(Value::as_str);
         ensure!(
             call_id.is_none_or(|call_id| !unsuccessful_call_ids.contains(call_id)),
-            "workflow_state call `{}` failed or was rejected; live prompt acceptance requires every workflow_state call to be accepted",
+            "workflow tool call `{}` failed or was rejected; live prompt acceptance requires every workflow call to be accepted",
             call_id.unwrap_or("unknown")
         );
         let raw = call
             .get("arguments")
             .or_else(|| call.pointer("/function/arguments"))
-            .context("workflow_state call has no arguments")?;
+            .context("workflow call has no arguments")?;
         let arguments = match raw {
             Value::String(raw) => serde_json::from_str::<Value>(raw)
-                .context("workflow_state call arguments are not valid JSON")?,
+                .context("workflow call arguments are not valid JSON")?,
             Value::Object(_) => raw.clone(),
-            _ => bail!("workflow_state call arguments are not an object"),
+            _ => bail!("workflow call arguments are not an object"),
         };
-        pl_core::tool::validate_workflow_state_wire_arguments(arguments)
-            .map_err(|error| anyhow::anyhow!("invalid workflow_state call arguments: {error}"))?;
+        match tool_name(call).expect("filtered workflow tool") {
+            "workflow_transition" => pl_core::validate_workflow_transition_arguments(arguments),
+            "workflow_restart" => pl_core::validate_workflow_restart_arguments(arguments),
+            _ => {
+                ensure!(
+                    arguments.as_object().is_some_and(serde_json::Map::is_empty),
+                    "workflow query tools accept only an empty object"
+                );
+                continue;
+            }
+        }
+        .map_err(|error| anyhow::anyhow!("invalid workflow call arguments: {error}"))?;
     }
     Ok(())
 }
@@ -547,8 +616,14 @@ fn detected_prompt_sections(
 ) -> Vec<&'static str> {
     let candidates = [
         ("baseInstructions", "你是 Pure-Lang 的工程协作代理"),
-        ("modeSkill", "<preloaded_mode_skill name=\"mode.simple\""),
-        ("modeSkill", "<preloaded_mode_skill name=\"mode.task\""),
+        (
+            "threadModePrompt",
+            "<preloaded_thread_mode_prompt modeId=\"mode.simple\"",
+        ),
+        (
+            "threadModePrompt",
+            "<preloaded_thread_mode_prompt modeId=\"mode.task\"",
+        ),
         ("workspaceInstructions", "AGENTS.md"),
         ("canonicalUserPrompt", "normalize_key"),
         ("canonicalUserPrompt", "validate_key"),
@@ -570,7 +645,7 @@ fn detected_prompt_sections(
                 .get("output")
                 .and_then(Value::as_str)
                 .is_some_and(|output| {
-                    output.contains("operationRevision") || output.contains("currentStageId")
+                    output.contains("operationRevision") || output.contains("currentStateId")
                 })
     }) {
         detected.push("workflowResult");
@@ -578,9 +653,16 @@ fn detected_prompt_sections(
     if message_texts.iter().any(|text| {
         text.contains("pl.workflow")
             || text.contains("# Current workflow")
-            || (text.contains("# Current working context") && text.contains("currentStage"))
+            || (text.contains("# Current working context") && text.contains("currentState"))
     }) {
         detected.push("workflowProjection");
+    }
+    if message_texts.iter().any(|text| {
+        text.contains("pl.workflow")
+            && text.contains("\"currentState\"")
+            && text.contains("\"id\": \"planning\"")
+    }) {
+        detected.push("initialPlanningState");
     }
     detected
 }
@@ -613,33 +695,63 @@ mod tests {
     #[test]
     fn recognizes_tool_names_without_old_task_aliases() {
         assert_eq!(
-            tool_name(&serde_json::json!({"name": "workflow_state"})),
-            Some("workflow_state")
+            tool_name(&serde_json::json!({"name": "workflow_transition"})),
+            Some("workflow_transition")
         );
         assert_eq!(
-            tool_name(&serde_json::json!({"function": {"name": "workflow_state"}})),
-            Some("workflow_state")
+            tool_name(&serde_json::json!({"function": {"name": "workflow_current"}})),
+            Some("workflow_current")
         );
     }
 
     #[test]
     fn workflow_contract_requires_both_mode_contracts() {
-        let captures = vec![valid_capture("mode.task"), valid_capture("mode.simple")];
+        let captures = valid_contract_captures();
         assert!(assert_workflow_contract(&captures).is_ok());
     }
 
     #[test]
     fn workflow_contract_rejects_removed_tools() {
-        let mut task = valid_capture("mode.task");
+        let mut task = initial_task_capture();
         task.tool_names.push("task_transition".to_string());
-        let captures = vec![task, valid_capture("mode.simple")];
+        let captures = vec![
+            task,
+            progressed_task_capture(),
+            valid_capture("mode.simple"),
+        ];
         assert!(assert_workflow_contract(&captures).is_err());
     }
 
     #[test]
     fn workflow_contract_requires_simple_mode_without_workflow() {
-        let captures = vec![valid_capture("mode.simple"), valid_capture("mode.task")];
-        assert!(assert_workflow_contract(&captures).is_ok());
+        let mut captures = valid_contract_captures();
+        let simple = captures
+            .iter_mut()
+            .find(|capture| capture.mode_id == Some("mode.simple"))
+            .unwrap();
+        simple.workflow_call_count = 1;
+        assert!(assert_workflow_contract(&captures).is_err());
+    }
+
+    fn valid_contract_captures() -> Vec<WireManifestEntry> {
+        vec![
+            initial_task_capture(),
+            progressed_task_capture(),
+            valid_capture("mode.simple"),
+        ]
+    }
+
+    fn initial_task_capture() -> WireManifestEntry {
+        let mut capture = valid_capture("mode.task");
+        capture.workflow_call_count = 0;
+        capture.workflow_result_count = 0;
+        capture.complete_call_count = 0;
+        capture.prompt_sections.push("initialPlanningState");
+        capture
+    }
+
+    fn progressed_task_capture() -> WireManifestEntry {
+        valid_capture("mode.task")
     }
 
     fn valid_capture(mode_id: &'static str) -> WireManifestEntry {
@@ -653,7 +765,8 @@ mod tests {
             "spawn_agent".to_string(),
         ];
         if task {
-            tool_names.push("workflow_state".to_string());
+            tool_names.extend(WORKFLOW_TOOLS.iter().map(ToString::to_string));
+            tool_names.extend(PLAN_TOOLS.iter().map(ToString::to_string));
         }
         WireManifestEntry {
             file: format!("{mode_id}.json"),
@@ -665,9 +778,13 @@ mod tests {
             workflow_result_count: if task { 1 } else { 0 },
             complete_call_count: 1,
             prompt_sections: if task {
-                vec!["modeSkill", "canonicalUserPrompt", "workflowProjection"]
+                vec![
+                    "threadModePrompt",
+                    "canonicalUserPrompt",
+                    "workflowProjection",
+                ]
             } else {
-                vec!["modeSkill", "canonicalUserPrompt"]
+                vec!["threadModePrompt", "canonicalUserPrompt"]
             },
             tool_names,
             tool_schema_sha256: "hash".to_string(),
@@ -679,7 +796,7 @@ mod tests {
         let body = serde_json::json!({
             "instructions": "mode.task",
             "input": [],
-            "tools": [{"name": "tool", "description": "pl.workflow currentStageId"}]
+            "tools": [{"name": "tool", "description": "pl.workflow currentStateId"}]
         });
         let texts = wire_message_texts(&body);
         let sections = detected_prompt_sections(&body, &prompt_text(&body, &texts), &texts);
@@ -687,64 +804,29 @@ mod tests {
     }
 
     #[test]
-    fn compile_call_accepts_camel_case_cas_without_terminal_run_id() {
+    fn query_call_accepts_only_an_empty_object() {
         let body = serde_json::json!({
             "input": [{
                 "type": "function_call",
-                "name": "workflow_state",
-                "arguments": serde_json::json!({
-                    "action": "compile",
-                    "expectedRevision": 0,
-                    "definition": {
-                        "title": "Task",
-                        "goal": "Complete task",
-                        "initialStageId": "working",
-                        "stages": [
-                            {"id": "working", "title": "Working", "instructions": "Do the work"},
-                            {"id": "completed", "title": "Completed", "instructions": "", "terminal": true}
-                        ],
-                        "transitions": [
-                            {"fromStageId": "working", "toStageId": "completed", "when": "Work is verified"}
-                        ]
-                    }
-                }).to_string()
+                "name": "workflow_current",
+                "arguments": "{}"
             }]
         });
 
-        validate_workflow_call_arguments(&body)
-            .expect("a first compile has no previous workflow run id");
+        validate_workflow_call_arguments(&body).expect("query tools accept an empty object");
     }
 
     #[test]
     fn workflow_call_validation_rejects_wrong_types_and_unknown_fields() {
         for arguments in [
-            serde_json::json!({
-                "action": "compile",
-                "expectedRevision": null,
-                "definition": {}
-            }),
-            serde_json::json!({
-                "action": "compile",
-                "expectedRevision": 0,
-                "definition": {
-                    "title": "Task",
-                    "goal": "Goal",
-                    "initialStageId": "done",
-                    "stages": [{"id": "done", "title": "Done", "instructions": "", "terminal": true}],
-                    "transitions": [],
-                    "unexpected": true
-                }
-            }),
-            serde_json::json!({
-                "action": "compile",
-                "expected_revision": 0,
-                "definition": {}
-            }),
+            serde_json::json!({"definition": {}}),
+            serde_json::json!({"action": "compile"}),
+            serde_json::json!({"supersede": true}),
         ] {
             let body = serde_json::json!({
                 "input": [{
                     "type": "function_call",
-                    "name": "workflow_state",
+                    "name": "workflow_current",
                     "arguments": arguments.to_string()
                 }]
             });
@@ -756,19 +838,19 @@ mod tests {
     }
 
     #[test]
-    fn workflow_call_validation_accepts_a_partial_transition_from_a_retry() {
+    fn workflow_call_validation_accepts_a_transition_with_cas() {
         let body = serde_json::json!({
             "input": [{
                 "type": "function_call",
-                "name": "workflow_state",
+                "name": "workflow_transition",
                 "arguments": serde_json::json!({
-                    "action": "transition",
                     "expectedRunId": "run-1",
                     "expectedRevision": 1,
-                    "expectedStageId": "planning",
-                    "toStageId": "awaiting_confirmation",
-                    "reason": "Plan is ready",
+                    "expectedStateId": "planning",
+                    "targetStateId": "editing_documents",
                     "completion": {
+                        "reason": "Plan is ready",
+                        "summary": "Planning criteria satisfied",
                         "evidence": ["plan is complete"]
                     }
                 }).to_string()
@@ -776,7 +858,7 @@ mod tests {
         });
 
         validate_workflow_call_arguments(&body)
-            .expect("a retryable partial transition should be shape-validated");
+            .expect("a transition with full CAS should be shape-validated");
     }
 
     #[test]

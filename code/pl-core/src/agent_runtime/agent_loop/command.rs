@@ -22,6 +22,10 @@ pub(crate) enum AgentLoopCommand {
         role: crate::AgentRoleId,
         reply: oneshot::Sender<AgentRuntimeResult<AgentSnapshot>>,
     },
+    ChangeIdleThreadMode {
+        mode_id: pl_protocol::ThreadModeId,
+        reply: oneshot::Sender<AgentRuntimeResult<AgentSnapshot>>,
+    },
     PreviewConversationRecovery {
         target: ConversationRecoveryTarget,
         reply: oneshot::Sender<AgentRuntimeResult<ConversationRecoveryPreview>>,

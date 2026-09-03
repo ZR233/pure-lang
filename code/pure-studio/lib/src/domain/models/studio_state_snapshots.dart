@@ -390,7 +390,6 @@ class SkillsStateData {
     required this.catalogRevision,
     required this.skills,
     required this.warnings,
-    this.modes = const [],
     this.summaries = const [],
     this.complete = true,
   });
@@ -398,29 +397,33 @@ class SkillsStateData {
   final int catalogRevision;
   final List<String> skills;
   final List<String> warnings;
-  final List<ModeDescriptorView> modes;
   final List<SkillSummaryView> summaries;
   final bool complete;
 }
 
-class ModeDescriptorView {
-  const ModeDescriptorView({
+class ThreadModeCatalogView {
+  const ThreadModeCatalogView({this.revision = 0, this.modes = const []});
+
+  final int revision;
+  final List<ThreadModeDescriptorView> modes;
+}
+
+class ThreadModeDescriptorView {
+  const ThreadModeDescriptorView({
     required this.id,
     required this.displayName,
     required this.description,
     required this.order,
-    required this.source,
-    required this.providerId,
+    required this.hasWorkflow,
   });
 
   final String id;
   final String displayName;
   final String description;
   final int order;
-  final String source;
-  final String providerId;
+  final bool hasWorkflow;
 
-  StudioMode get mode => StudioMode.fromId(id);
+  ThreadModeId get mode => ThreadModeId.fromId(id);
 }
 
 class SkillSummaryView {
@@ -500,7 +503,6 @@ class SkillsStateSnapshot extends ObservedStateSnapshot<SkillsStateData> {
   int get catalogRevision => _data.catalogRevision;
   List<String> get skills => _data.skills;
   List<String> get warnings => _data.warnings;
-  List<ModeDescriptorView> get modes => _data.modes;
   List<SkillSummaryView> get summaries => _data.summaries;
 }
 

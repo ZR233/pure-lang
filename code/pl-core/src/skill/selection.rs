@@ -277,7 +277,6 @@ mod tests {
             resource_base: SkillResourceBase::Opaque {
                 description: "test".to_string(),
             },
-            mode: None,
         }
     }
 

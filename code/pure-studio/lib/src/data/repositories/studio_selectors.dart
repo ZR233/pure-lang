@@ -26,7 +26,7 @@ typedef StartPageView = ({
   ComposerThreadState composer,
   PermissionMode permissionMode,
   bool canSubmit,
-  StudioMode mode,
+  ThreadModeId mode,
   List<ProviderSettingsView> providers,
   List<RoleSettingsView> roles,
 });

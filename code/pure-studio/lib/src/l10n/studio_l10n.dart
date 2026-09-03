@@ -7,9 +7,9 @@ import 'app_localizations.dart';
 extension StudioLocalizationsX on BuildContext {
   AppLocalizations get l10n => AppLocalizations.of(this);
 
-  String compileModeLabel(StudioMode mode) {
-    if (mode == StudioMode.simple) return l10n.compileModeSimple;
-    if (mode == StudioMode.task) return l10n.compileModeTask;
+  String compileModeLabel(ThreadModeId mode) {
+    if (mode == ThreadModeId.simple) return l10n.compileModeSimple;
+    if (mode == ThreadModeId.task) return l10n.compileModeTask;
     return mode.id;
   }
 

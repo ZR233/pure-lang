@@ -13,7 +13,7 @@ abstract final class StudioDriverState {
   static bool _sidebarDirectoryHasMore = false;
   static String? _selectedProjectId;
   static String? _selectedThreadId;
-  static StudioMode _newThreadMode = StudioMode.simple;
+  static ThreadModeId _newThreadMode = ThreadModeId.simple;
   static ComposerThreadState _newThreadComposer =
       const ComposerThreadState.idle();
   static int _settingsRevision = 0;
@@ -268,6 +268,8 @@ abstract final class StudioDriverState {
                       'id': workspace.activeInteraction!.id,
                       'turnId': workspace.activeInteraction!.turnId,
                       'kind': workspace.activeInteraction!.kind.name,
+                      'title': workspace.activeInteraction!.title,
+                      'body': workspace.activeInteraction!.body,
                     },
               'turn': workspace.turn == null
                   ? null
@@ -301,44 +303,11 @@ abstract final class StudioDriverState {
           : {
               'lineageId': run.lineageId,
               'runId': run.runId,
-              'title': run.title,
-              'goal': run.goal,
-              'definitionHash': run.definitionHash,
               'modeId': run.modeId,
-              'modeDisplayName': run.modeDisplayName,
-              'currentStageId': run.currentStageId,
+              'graphRevision': run.graphRevision,
+              'graphHash': run.graphHash,
+              'currentStateId': run.currentStateId,
               'terminal': run.terminal,
-              'stages': [
-                for (final stage in run.stages)
-                  {
-                    'id': stage.id,
-                    'title': stage.title,
-                    'terminal': stage.terminal,
-                  },
-              ],
-              'transitions': [
-                for (final transition in run.transitions)
-                  {
-                    'fromStageId': transition.fromStageId,
-                    'toStageId': transition.toStageId,
-                    'when': transition.when,
-                  },
-              ],
-              'history': [
-                for (final entry in run.history)
-                  {
-                    'revision': entry.revision,
-                    'fromStageId': entry.fromStageId,
-                    'toStageId': entry.toStageId,
-                    'summary': entry.summary,
-                    'evidence': entry.evidence,
-                    'turnId': entry.turnId,
-                    'callId': entry.callId,
-                    'transitionedAt': entry.transitionedAt
-                        .toUtc()
-                        .toIso8601String(),
-                  },
-              ],
             },
     };
   }

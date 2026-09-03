@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
-use pl_protocol::{ContentPart, Message, MessageContent, MessageRole, ModelContextItem};
+use pl_protocol::{
+    ContentPart, Message, MessageContent, MessagePresentation, MessageRole, ModelContextItem,
+};
 
 use super::{
     APPROX_CHARS_PER_TOKEN, CompactionTrigger, ContextCompactionConfig,
@@ -67,6 +69,7 @@ fn summary_message(summary: &str, summary_prefix: &str) -> Message {
     );
     let trimmed = summary.trim();
     Message {
+        presentation: MessagePresentation::Hidden,
         role: MessageRole::User,
         content: MessageContent::text(format!("{summary_prefix}\n\n{trimmed}")),
         reasoning_content: None,
@@ -212,6 +215,7 @@ fn recent_interaction_tail(
 
 fn user_text_message(text: impl Into<String>) -> Message {
     Message {
+        presentation: MessagePresentation::Hidden,
         role: MessageRole::User,
         content: MessageContent::text(text.into()),
         reasoning_content: None,
@@ -223,6 +227,7 @@ fn user_text_message(text: impl Into<String>) -> Message {
 
 fn assistant_text_message(text: impl Into<String>) -> Message {
     Message {
+        presentation: MessagePresentation::Hidden,
         role: MessageRole::Assistant,
         content: MessageContent::text(text.into()),
         reasoning_content: None,

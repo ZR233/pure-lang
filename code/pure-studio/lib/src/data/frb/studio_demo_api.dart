@@ -19,7 +19,7 @@ class DemoStudioApi implements StudioApi {
   Timer? _lspActivityTimer;
   final Map<String, ThreadWorkspace> _workspaces = {};
   final Map<String, int> _promptGenerations = {};
-  final Map<String, StudioMode> _threadModes = {};
+  final Map<String, ThreadModeId> _threadModes = {};
   final Map<String, AttachmentDraftView> _attachmentDrafts = {};
   final Set<String> _archivedProjectIds = {};
   final Set<String> _archivedThreadIds = {};
@@ -373,9 +373,9 @@ class DemoStudioApi implements StudioApi {
       name: 'pure-lang',
       path: r'C:\Projects\pure-lang',
     );
-    final rootMode = _threadModes['thread-main'] ?? StudioMode.simple;
-    final reviewerMode = _threadModes['thread-reviewer'] ?? StudioMode.simple;
-    final alternateMode = _threadModes['thread-alt'] ?? StudioMode.simple;
+    final rootMode = _threadModes['thread-main'] ?? ThreadModeId.simple;
+    final reviewerMode = _threadModes['thread-reviewer'] ?? ThreadModeId.simple;
+    final alternateMode = _threadModes['thread-alt'] ?? ThreadModeId.simple;
     final root = StudioThread(
       id: 'thread-main',
       projectId: project.id,
@@ -469,7 +469,7 @@ class DemoStudioApi implements StudioApi {
         id: 'thread-page-$index',
         projectId: projectId,
         title: '历史会话 ${index + 1}',
-        mode: StudioMode.simple,
+        mode: ThreadModeId.simple,
         role: 'planner',
         createdAt: updated,
         updatedAt: updated,
@@ -890,7 +890,7 @@ class DemoStudioApi implements StudioApi {
   Future<StartNewThreadResult> startNewThread(
     String projectId,
     StudioPromptInput input,
-    StudioMode mode,
+    ThreadModeId mode,
   ) async {
     final current = await readStudioState();
     if (!current.projects.any((project) => project.id == projectId)) {
@@ -1049,7 +1049,7 @@ class DemoStudioApi implements StudioApi {
   @override
   Future<void> setThreadMode({
     required String threadId,
-    required StudioMode mode,
+    required ThreadModeId mode,
   }) async {
     final current = await readStudioState();
     final thread = current.threads

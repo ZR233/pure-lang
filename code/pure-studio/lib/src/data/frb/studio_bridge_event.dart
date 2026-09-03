@@ -73,6 +73,11 @@ final class SkillsStateChangedPayload extends StudioBridgeEventPayload {
   final SkillsStateSnapshot state;
 }
 
+final class ThreadModeCatalogChangedPayload extends StudioBridgeEventPayload {
+  const ThreadModeCatalogChangedPayload(this.state);
+  final ThreadModeCatalogView state;
+}
+
 final class ProviderUsageStateChangedPayload extends StudioBridgeEventPayload {
   const ProviderUsageStateChangedPayload(this.state);
   final ProviderUsageStateSnapshot state;

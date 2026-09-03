@@ -11,16 +11,15 @@ override 与模型选择，不在 runtime 依据厂商名称猜测能力。
 普通 Skill 沿用 provider precedence、`skill_list`、`skill_view` 与按需加载。Skill frontmatter 和正文
 由 `pl-skill-core` 解析；非法资源只产生自身诊断。普通 Skill 不得使用 `mode.` 前缀。
 
-## 5.3 Mode Skill
+## 5.3 Thread Mode
 
-新增模式只需增加名为 `mode.<custom-id>` 的 Skill，并提供合法 `mode.display-name`、`mode.order`，同时
-关闭普通模型/用户临时调用。无需修改 Rust enum、GUI selector 或 model loop。自定义同名模式按普通
-来源优先级选 winner；`mode.simple` 与 `mode.task` 只接受 Studio 内置 Provider，外部同名候选忽略并
-告警。
+Mode 通过 `ThreadModeRegistration` 注册，不复用 Skill frontmatter、Provider 或发现目录。内置
+`mode.simple` 与 `mode.task` 使用 Rust 常量随二进制发布；未来文件加载器只负责将外部配置转换为相同
+的拥有所有权结构，再按来源原子注册。不同来源不能注册同一 ID，内置 ID 不可覆盖。
 
-Mode Skill 可以要求 Agent 使用 `workflow_state.compile`，定义阶段、完成标准、terminal 与转换路径；
-不使用 workflow 的 Mode 可以直接执行。运行时只编译和执行通用图协议，不理解阶段业务含义。所有
-root Mode 都通过统一 `complete` 工具提交完成摘要并结束 turn。
+注册输入可携带预设 `WorkflowDefinition`。Runtime 在发布目录前完成编译，模型只能用拆分后的查询与
+转换工具读取和推进图，不能定义、compile 或 supersede 图。不使用 workflow 的 Mode 可以直接执行。
+所有 root Mode 都通过统一 `complete` 工具提交完成摘要并结束 turn。
 
 ## 5.4 Agent Profile
 

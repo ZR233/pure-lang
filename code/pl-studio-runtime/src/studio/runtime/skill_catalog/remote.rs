@@ -6,8 +6,8 @@ use anyhow::Result;
 use pl_core::config::SkillsConfig;
 use pl_core::remote::RemoteWorkspaceFileBackend;
 use pl_core::skill::{
-    BUILTIN_MODE_PROVIDER_ID, FileSystemSkillProvider, SkillDirectorySource,
-    SkillProviderRegistration, SkillRegistry, SkillSourceKind,
+    FileSystemSkillProvider, SkillDirectorySource, SkillProviderRegistration, SkillRegistry,
+    SkillSourceKind,
 };
 
 /// 远端 workspace 本地只读目录集合的稳定 Provider ID。
@@ -15,7 +15,7 @@ pub(super) const REMOTE_LOCAL_PROVIDER_ID: &str = "remote-local-skills";
 
 /// 组合远端 workspace 与本地只读目录的 Turn 与 Settings 共用 Skill registry。
 ///
-/// 远端 provider 贡献 Project 源技能；本地 user/system 目录与内置 Mode Skill 以
+/// 远端 provider 贡献 Project 源技能；本地 user/system 目录以
 /// 只读来源并行注册。返回的 guards 必须存活到 `SkillRegistry::discover` 返回之后，
 /// 否则 provider 会在发现完成前被注销。
 pub(super) fn remote_workspace_registry(
@@ -31,16 +31,6 @@ pub(super) fn remote_workspace_registry(
     if !local_sources.is_empty() {
         let provider =
             FileSystemSkillProvider::from_directories(REMOTE_LOCAL_PROVIDER_ID, local_sources)?;
-        registrations.push(Arc::new(registry.register(Arc::new(provider))?));
-    }
-    if let Some(system_skills_dir) = system_skills_dir {
-        let provider = FileSystemSkillProvider::from_directories(
-            BUILTIN_MODE_PROVIDER_ID,
-            vec![SkillDirectorySource::new(
-                system_skills_dir,
-                SkillSourceKind::System,
-            )],
-        )?;
         registrations.push(Arc::new(registry.register(Arc::new(provider))?));
     }
     Ok((registry, registrations))

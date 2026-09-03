@@ -41,6 +41,11 @@ impl TurnContextSnapshot {
     pub fn rebase(&mut self, items: &[ModelContextItem]) {
         self.history_anchor = items.len();
     }
+
+    /// 刷新 Turn 内可变的 working context，同时保持 append-only transcript 锚点。
+    pub fn refresh_working_context(&mut self, working_context: ModelContextSnapshot) {
+        self.working_context = working_context;
+    }
 }
 
 /// 每次 inference 从 canonical session 重建固定前缀、append-only transcript
@@ -109,6 +114,7 @@ fn render_working_context_message(context: &ModelContextSnapshot) -> Option<Mess
         ));
     }
     Some(Message {
+        presentation: Default::default(),
         role: MessageRole::System,
         content: MessageContent::text(rendered),
         reasoning_content: None,

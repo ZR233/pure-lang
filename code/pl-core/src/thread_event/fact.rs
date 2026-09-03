@@ -188,6 +188,7 @@ mod tests {
                 item_id: None,
                 tool_id: None,
                 agent_path: None,
+                purpose: pl_protocol::InteractionPurpose::General,
             },
             Vec::new(),
             1,

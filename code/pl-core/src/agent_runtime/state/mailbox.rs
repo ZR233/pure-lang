@@ -5,6 +5,8 @@ use pl_protocol::{
 };
 use serde::{Deserialize, Serialize};
 
+pub use pl_protocol::MessagePresentation;
+
 use crate::agent_runtime::{ThreadId, TurnId};
 
 use super::{MailboxCommand, MailboxDeliveryState, MailboxTransitionError};
@@ -106,19 +108,6 @@ impl From<serde_json::Value> for MailboxMetadata {
     }
 }
 
-/// 决定 mailbox 输入是否以及如何投影到用户可见 Timeline。
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase",
-    tag = "type"
-)]
-pub enum MailboxPresentation {
-    #[default]
-    User,
-    Hidden,
-}
-
 /// mailbox 输入对目标 Turn 预算的影响。
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -156,7 +145,7 @@ pub struct MailboxInputPayload {
     pub message: String,
     pub attachments: Vec<ThreadAttachment>,
     #[serde(default)]
-    pub presentation: MailboxPresentation,
+    pub presentation: MessagePresentation,
     #[serde(default)]
     pub metadata: MailboxMetadata,
 }
@@ -166,7 +155,7 @@ impl MailboxInputPayload {
         Self {
             message: message.into(),
             attachments: Vec::new(),
-            presentation: MailboxPresentation::User,
+            presentation: MessagePresentation::Visible,
             metadata: MailboxMetadata::default(),
         }
     }
@@ -372,7 +361,7 @@ impl AgentSubmitRequest {
     }
 
     /// 设置此输入在 Timeline 中的展示语义。
-    pub fn with_presentation(mut self, presentation: MailboxPresentation) -> Self {
+    pub fn with_presentation(mut self, presentation: MessagePresentation) -> Self {
         self.payload.presentation = presentation;
         self
     }
@@ -439,7 +428,7 @@ impl AgentCurrentSessionSubmitRequest {
     }
 
     /// 设置此输入在 Timeline 中的展示语义。
-    pub fn with_presentation(mut self, presentation: MailboxPresentation) -> Self {
+    pub fn with_presentation(mut self, presentation: MessagePresentation) -> Self {
         self.payload.presentation = presentation;
         self
     }
@@ -472,7 +461,7 @@ mod tests {
             payload: MailboxInputPayload {
                 message: "hello".to_string(),
                 attachments: Vec::new(),
-                presentation: MailboxPresentation::Hidden,
+                presentation: MessagePresentation::Hidden,
                 metadata: json!({"kind": "test"}).into(),
             },
             queue_coalescing_key: None,
@@ -483,7 +472,7 @@ mod tests {
         let envelope_json = serde_json::to_value(&envelope).unwrap();
         assert_eq!(envelope_json["message"], "hello");
         assert_eq!(envelope_json["attachments"], json!([]));
-        assert_eq!(envelope_json["presentation"], json!({"type": "hidden"}));
+        assert_eq!(envelope_json["presentation"], "hidden");
         assert_eq!(envelope_json["metadata"], json!({"kind": "test"}));
         assert_eq!(envelope_json["budgetAction"], "refresh");
         assert!(envelope_json.get("payload").is_none());
@@ -524,7 +513,7 @@ mod tests {
             "threadId": "thread-1",
             "message": "hello",
             "attachments": [],
-            "presentation": { "type": "hidden" },
+            "presentation": "hidden",
             "metadata": { "kind": "test" },
             "deliveryState": { "kind": "pending", "data": null },
             "queuedAt": 7
@@ -532,7 +521,7 @@ mod tests {
         .unwrap();
         assert_eq!(envelope.payload.message, "hello");
         assert!(envelope.payload.attachments.is_empty());
-        assert_eq!(envelope.payload.presentation, MailboxPresentation::Hidden);
+        assert_eq!(envelope.payload.presentation, MessagePresentation::Hidden);
         assert_eq!(
             envelope.payload.metadata,
             MailboxMetadata::from(json!({"kind": "test"}))

@@ -32,7 +32,6 @@ fn instruction_skill(
         provider_id: crate::skill::SkillProviderId::new("test").unwrap(),
         invocation: crate::skill::SkillInvocationPolicy::default(),
         resource_base: crate::skill::SkillResourceBase::Directory { path },
-        mode: None,
     }
 }
 
@@ -628,7 +627,6 @@ fn disabled_skills_do_not_inject_a_frozen_catalog() {
     let catalog = crate::skill::SkillCatalog {
         project_dir: dir.join("skills"),
         skills: Vec::new(),
-        modes: Vec::new(),
         warnings: Vec::new(),
         complete: true,
     };
@@ -673,7 +671,6 @@ fn skill_suggestions_are_turn_overlays_and_exclude_loaded_names() {
             ),
             instruction_skill(&dir, "rust-formatting", "Format Rust source files."),
         ],
-        modes: Vec::new(),
         warnings: Vec::new(),
         complete: true,
     };
@@ -776,7 +773,6 @@ fn unmatched_skill_query_does_not_add_a_turn_overlay() {
     let catalog = crate::skill::SkillCatalog {
         project_dir: dir.join("skills"),
         skills: vec![instruction_skill(&dir, "rust-formatting", "Format Rust")],
-        modes: Vec::new(),
         warnings: Vec::new(),
         complete: true,
     };

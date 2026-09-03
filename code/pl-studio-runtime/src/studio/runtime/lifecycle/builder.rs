@@ -99,6 +99,8 @@ impl StudioRuntime {
         let lsp_state = LspStateRuntime::new(product_events.clone());
         let attachment_drafts =
             AttachmentDraftRuntime::new(store.attachments_dir().join("drafts"))?;
+        let thread_modes = pl_core::ThreadModeManager::default();
+        crate::studio::thread::mode::register_builtins(&thread_modes)?;
         Ok(Self {
             instance_lock: RuntimeLockOwner::new(instance_lock),
             store,
@@ -130,6 +132,7 @@ impl StudioRuntime {
                 }
                 None => SkillCatalogRuntime::default(),
             },
+            thread_modes,
             provider_usage,
             model_performance,
             updater,

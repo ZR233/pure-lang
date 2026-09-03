@@ -324,7 +324,7 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
                 root_thread_id: parent_thread.root_thread_id,
                 agent_path: request.child.identity.id.to_string(),
                 project_id: parent_thread.project_id,
-                mode: parent_thread.mode.into(),
+                mode: parent_thread.mode,
                 role: profile_id.to_string(),
                 title: profile_id.to_string(),
             })

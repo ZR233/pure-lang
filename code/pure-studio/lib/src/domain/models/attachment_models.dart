@@ -9,7 +9,7 @@ sealed class AttachmentAdmissionContext {
 
   const factory AttachmentAdmissionContext.existingThread(String threadId) =
       ExistingThreadAttachmentAdmissionContext;
-  const factory AttachmentAdmissionContext.newThread(StudioMode mode) =
+  const factory AttachmentAdmissionContext.newThread(ThreadModeId mode) =
       NewThreadAttachmentAdmissionContext;
 }
 
@@ -22,7 +22,7 @@ final class ExistingThreadAttachmentAdmissionContext
 final class NewThreadAttachmentAdmissionContext
     extends AttachmentAdmissionContext {
   const NewThreadAttachmentAdmissionContext(this.mode);
-  final StudioMode mode;
+  final ThreadModeId mode;
 }
 
 sealed class AttachmentDraftSource {

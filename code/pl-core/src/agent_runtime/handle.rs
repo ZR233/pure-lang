@@ -161,6 +161,24 @@ impl AgentRuntimeHandle {
         receive(receiver).await?
     }
 
+    /// Archives an incompatible workflow run before an idle root Thread changes Mode.
+    ///
+    /// The command is serialized by the Thread actor and never starts the replacement run; the
+    /// next root Turn performs that bootstrap before its first provider request.
+    pub async fn change_idle_thread_mode(
+        &self,
+        agent_id: ThreadId,
+        mode_id: pl_protocol::ThreadModeId,
+    ) -> AgentRuntimeResult<AgentSnapshot> {
+        let (reply, receiver) = oneshot::channel();
+        self.send_to_actor(
+            &agent_id,
+            AgentLoopCommand::ChangeIdleThreadMode { mode_id, reply },
+        )
+        .await?;
+        receive(receiver).await?
+    }
+
     /// 只读预览同一 Thread 的对话尾部回退或局部重建。
     pub async fn preview_conversation_recovery(
         &self,

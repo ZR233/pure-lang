@@ -10,6 +10,7 @@ use pretty_assertions::assert_eq;
 
 fn text_message(text: &str) -> Message {
     Message {
+        presentation: Default::default(),
         role: MessageRole::User,
         content: MessageContent::text(text.to_string()),
         reasoning_content: None,
@@ -65,6 +66,7 @@ fn push_assistant_completion_response_adds_text_message() {
     assert_eq!(
         session.messages(),
         &[Message {
+            presentation: Default::default(),
             role: MessageRole::Assistant,
             content: MessageContent::text("reply".to_string()),
             reasoning_content: Some("thinking".to_string()),
@@ -275,6 +277,7 @@ fn tool_result_history_message_stores_result_metadata() {
 fn from_messages_preserves_order() {
     let msgs = vec![
         Message {
+            presentation: Default::default(),
             role: MessageRole::User,
             content: MessageContent::text("q".to_string()),
             reasoning_content: None,
@@ -283,6 +286,7 @@ fn from_messages_preserves_order() {
             metadata: HashMap::new(),
         },
         Message {
+            presentation: Default::default(),
             role: MessageRole::Assistant,
             content: MessageContent::text("a".to_string()),
             reasoning_content: None,
@@ -338,6 +342,99 @@ fn child_fork_excludes_open_and_completed_tool_protocol_messages() {
             .messages()
             .iter()
             .all(|message| message.metadata.is_empty())
+    );
+}
+
+#[test]
+fn child_fork_does_not_inherit_parent_plan_state() {
+    let mut parent = AgentSession::new();
+    parent.push_user_prompt("approved baseline is passed in the spawn task".to_string());
+    parent.replace_plan(Some(pl_protocol::AgentSessionPlanState::default()));
+
+    let child = parent.fork(AgentSessionForkPolicy::AllMessages);
+
+    assert!(parent.plan().is_some());
+    assert_eq!(child.plan(), None);
+}
+
+#[test]
+fn batched_plan_replacement_converges_with_actor_stepwise_revisions() {
+    use crate::session::plan::{
+        AgentSessionPlanConfirmationDecision, AgentSessionPlanMachine,
+        AgentSessionPlanResolveCommand, AgentSessionPlanSubmitCommand,
+    };
+
+    let mut machine = AgentSessionPlanMachine::default();
+    assert!(
+        machine
+            .submit(AgentSessionPlanSubmitCommand {
+                expected_revision: 0,
+                plan: "# Plan\n\nInitial plan.".to_string(),
+                interaction_id: "plan-initial".to_string(),
+                operation_id: "submit-initial".to_string(),
+                argument_hash: "submit-initial-hash".to_string(),
+                submitted_at: 1,
+            })
+            .accepted
+    );
+    assert!(
+        machine
+            .resolve(AgentSessionPlanResolveCommand {
+                expected_revision: 1,
+                interaction_id: "plan-initial".to_string(),
+                operation_id: "revise-initial".to_string(),
+                argument_hash: "revise-initial-hash".to_string(),
+                decision: AgentSessionPlanConfirmationDecision::RequestRevision {
+                    feedback: "Add integration coverage.".to_string(),
+                },
+                resolved_at: 2,
+            })
+            .accepted
+    );
+
+    let mut base = AgentSession::new();
+    assert!(base.replace_plan(Some(machine.state().clone())));
+    let baseline_revision = base.snapshot().working_state.revision;
+    let mut actor = base.clone();
+    let mut checkpoint = base;
+
+    assert!(
+        machine
+            .submit(AgentSessionPlanSubmitCommand {
+                expected_revision: 2,
+                plan: "# Plan\n\nRevised plan with integration coverage.".to_string(),
+                interaction_id: "plan-revised".to_string(),
+                operation_id: "submit-revised".to_string(),
+                argument_hash: "submit-revised-hash".to_string(),
+                submitted_at: 3,
+            })
+            .accepted
+    );
+    assert!(actor.replace_plan(Some(machine.state().clone())));
+    assert!(
+        machine
+            .resolve(AgentSessionPlanResolveCommand {
+                expected_revision: 3,
+                interaction_id: "plan-revised".to_string(),
+                operation_id: "approve-revised".to_string(),
+                argument_hash: "approve-revised-hash".to_string(),
+                decision: AgentSessionPlanConfirmationDecision::Approve,
+                resolved_at: 4,
+            })
+            .accepted
+    );
+    let approved = machine.into_state();
+    assert!(actor.replace_plan(Some(approved.clone())));
+    assert!(checkpoint.replace_plan(Some(approved)));
+
+    assert_eq!(
+        actor.snapshot().working_state.revision,
+        baseline_revision + 2
+    );
+    assert_eq!(
+        checkpoint.snapshot().working_state.revision,
+        actor.snapshot().working_state.revision,
+        "a checkpoint that batches the same Plan transitions must not regress the actor-owned working-state revision"
     );
 }
 
@@ -422,6 +519,7 @@ fn replace_messages_updates_history_and_revision() {
     session.replace_session_note(note.clone());
     let original_revision = session.revision();
     let messages = vec![Message {
+        presentation: Default::default(),
         role: MessageRole::User,
         content: MessageContent::text("summary".to_string()),
         reasoning_content: None,

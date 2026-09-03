@@ -140,6 +140,10 @@ where
                             let result = self.reconfigure_idle_role(role).await;
                             let _ = reply.send(result);
                         }
+                        AgentLoopCommand::ChangeIdleThreadMode { mode_id, reply } => {
+                            let result = self.change_idle_thread_mode(mode_id).await;
+                            let _ = reply.send(result);
+                        }
                         AgentLoopCommand::PreviewConversationRecovery { target, reply } => {
                             let _ = reply.send(self.preview_conversation_recovery(target));
                         }

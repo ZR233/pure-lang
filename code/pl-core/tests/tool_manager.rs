@@ -5,9 +5,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use pl_core::{
     AgentToolSet, AgentWorkspace, AskUserTool, CompleteTool, DynTool, DynamicToolExecutor,
     GlobalToolInheritance, HostedWebSearchTool, StatPathTool, StaticTool, StaticToolDefinition,
-    SubmitPlanTool, ToolCallContext, ToolCallIdentity, ToolDefinition, ToolDirective,
-    ToolExecution, ToolGroupId, ToolInput, ToolInstallGroup, ToolManager, ToolName, ToolPolicy,
-    ToolResult, ToolWorkspace, WriteFileTool,
+    ToolCallContext, ToolCallIdentity, ToolDefinition, ToolDirective, ToolExecution, ToolGroupId,
+    ToolInput, ToolInstallGroup, ToolManager, ToolName, ToolPolicy, ToolResult, ToolWorkspace,
+    WriteFileTool,
 };
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -65,7 +65,6 @@ fn downstream_can_select_and_register_public_builtin_tools() {
             vec![
                 AskUserTool.into(),
                 CompleteTool.into(),
-                SubmitPlanTool.into(),
                 StatPathTool::new(workspace.clone()).into(),
                 WriteFileTool::new(workspace).into(),
             ],
@@ -74,13 +73,7 @@ fn downstream_can_select_and_register_public_builtin_tools() {
 
     assert_eq!(
         tools.freeze().names().collect::<Vec<_>>(),
-        vec![
-            "complete",
-            "request_user_input",
-            "stat_path",
-            "submit_plan",
-            "write_file",
-        ]
+        vec!["complete", "request_user_input", "stat_path", "write_file",]
     );
 }
 

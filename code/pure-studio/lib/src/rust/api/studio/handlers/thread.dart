@@ -11,7 +11,7 @@ import '../types/thread_stream.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `studio_mode`
+// These functions are ignored because they are not marked as `pub`: `thread_mode`
 
 /// Creates a root Thread with the requested mode and accepts its first Turn.
 ///
@@ -47,11 +47,11 @@ Future<ArchiveThreadResult> archiveThread({required String threadId}) => RustLib
     .api
     .crateApiStudioHandlersThreadArchiveThread(threadId: threadId);
 
-/// Changes the selected root Thread to a discovered Mode Skill ID.
+/// Changes the selected root Thread to a registered Thread Mode ID.
 ///
 /// # Errors
 ///
-/// Returns an error when the Thread does not exist, is a child Thread, or has an active workflow.
+/// Returns an error when the Thread does not exist, is a child Thread, or is busy.
 Future<void> setThreadMode({required String threadId, required String mode}) =>
     RustLib.instance.api.crateApiStudioHandlersThreadSetThreadMode(
       threadId: threadId,

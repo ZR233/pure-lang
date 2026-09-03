@@ -41,9 +41,12 @@ pub struct AgentWorkingState {
     pub prompt: ThreadPromptMetadata,
     #[serde(default)]
     pub conversation_recovery: ConversationRecoveryState,
-    /// Mode Skill 编译的通用工作流；完整状态不直接进入模型上下文。
+    /// Thread Mode 注册图对应的轻量运行状态；完整图不持久化到会话。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflow: Option<crate::WorkflowSessionState>,
+    /// 当前 AgentSession 固定 Plan 状态机的有界持久化状态。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<crate::AgentSessionPlanState>,
     /// 子 Agent 创建时冻结的 Profile；根 Agent 不设置此字段。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_profile: Option<crate::AgentProfileSnapshot>,

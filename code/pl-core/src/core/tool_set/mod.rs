@@ -4,14 +4,17 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::config::ToolCapabilityConfig;
+use crate::session::plan::tools::{
+    PlanCurrentTool, PlanHistoryTool, PlanNextTool, PlanRestartTool, PlanSubmitTool,
+};
 use crate::tool::{
     AskUserTool, CommandBackend, CopyPathTool, CreateDirectoryTool, DeletePathTool, DynTool,
     ExecutionBackend, GitCredentialProvider, GitTool, GitToolKind, GitWorkspaceConfig,
     LocalCommandBackend, LocalExecutionBackend, LocalWorkspaceFileBackend, LocalWorkspaceFileTool,
     MovePathTool, NoGitCredentialProvider, SessionNoteTool, SessionNoteToolKind, StatPathTool,
-    SubmitPlanTool, TodoListTool, ToolGroupId, ToolInstallGroup, ToolWorkspace,
-    WorkspaceFileBackend, WorkspaceFileTool, WorkspaceFileToolKind, WorkspacePolicyBackend,
-    WriteFileTool, command_tool_pair, local_command_tool_pair_with_environment, lsp_tools,
+    TodoListTool, ToolGroupId, ToolInstallGroup, ToolWorkspace, WorkspaceFileBackend,
+    WorkspaceFileTool, WorkspaceFileToolKind, WorkspacePolicyBackend, WriteFileTool,
+    command_tool_pair, local_command_tool_pair_with_environment, lsp_tools,
 };
 
 use super::TurnEngine;
@@ -197,7 +200,6 @@ where
         tools.extend(self.additional_tools.iter().cloned());
         if self.capabilities.ask_user {
             tools.push(AskUserTool.into());
-            tools.push(SubmitPlanTool.into());
         }
         tools.push(TodoListTool::new(core.tool_session_runtime.working_set()).into());
         tools.extend(SessionNoteToolKind::all().iter().map(|kind| {
@@ -210,6 +212,24 @@ where
         }
         core.agent_tools
             .install(ToolInstallGroup::direct(ToolGroupId::new("builtin"), tools))?;
+
+        if self.capabilities.ask_user {
+            let working_set = core.tool_session_runtime.working_set();
+            let binding = core.tool_session_runtime.plan_tools();
+            let plan_tools = vec![
+                PlanCurrentTool::new(working_set.clone(), binding.clone()).into(),
+                PlanNextTool::new(working_set.clone(), binding.clone()).into(),
+                PlanHistoryTool::new(working_set.clone(), binding.clone()).into(),
+                PlanSubmitTool::new(working_set.clone(), binding.clone()).into(),
+                PlanRestartTool::new(working_set, binding).into(),
+            ];
+            core.agent_tools.install(ToolInstallGroup::direct(
+                ToolGroupId::new("plan"),
+                plan_tools,
+            ))?;
+        } else {
+            core.agent_tools.uninstall(&ToolGroupId::new("plan"));
+        }
 
         if self.capabilities.skills {
             core.register_skill_tools_for_workspace(workspace_root.clone())?;

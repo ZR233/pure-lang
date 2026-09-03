@@ -20,14 +20,15 @@ pl-studio-server ───────────────┘          │  
 
 - `pl-protocol`：Thread、Turn、Item、Interaction、workflow、Agent Profile snapshot、通知与错误。
 - `pl-model`：provider 请求、stream 归一化、模型目录与连接协议。
-- `pl-core`：会话编排、模型循环、工具运行时、Skill catalog、working state 与 workflow 编译器。
-- `pl-studio-runtime`：项目/Thread owner、配置、内置 Mode Skill、Agent Profile catalog、SQLite repository。
+- `pl-core`：会话编排、模型循环、工具运行时、Skill catalog、working state 与 `thread::mode` 注册表。
+- `pl-studio-runtime`：项目/Thread owner、配置、内置 Thread Mode、Agent Profile catalog、SQLite repository。
 - `pl-studio-bridge`：Rust 与 Dart 的机械映射。
 - `pl-studio-server`：同一 runtime 的 HTTP/SSE 适配。
 - `pure-studio`：Flutter projection、交互与设置 UI。
 
-Mode 不是运行时类型分支。`mode.simple`、`mode.task` 与自定义 `mode.<id>` 都是预加载 Skill；
-`StudioModeId` 只是稳定字符串。工作流完整状态存入 `AgentWorkingState`，不新增产品业务表。
+Mode 不是运行时类型分支，也不是 Skill。`mode.simple`、`mode.task` 与未来自定义 `mode.<id>` 都通过
+`ThreadModeRegistration` 进入同一内存注册表；稳定身份是 `ThreadModeId`。工作流 run 状态存入
+`AgentWorkingState`，Prompt 与完整图不持久化，也不新增产品业务表。
 
 ## 2.3 事实归属
 

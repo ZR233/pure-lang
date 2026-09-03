@@ -12,11 +12,30 @@ pub enum MessageRole {
     Tool,
 }
 
+/// 一条模型消息是否应投影到产品 GUI。
+///
+/// `Hidden` 只影响产品展示；消息仍属于 canonical AgentSession，必须照常持久化并发送给 provider。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MessagePresentation {
+    #[default]
+    Visible,
+    Hidden,
+}
+
+impl MessagePresentation {
+    pub const fn is_visible(&self) -> bool {
+        matches!(self, Self::Visible)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Message {
     pub role: MessageRole,
     pub content: MessageContent,
+    #[serde(default, skip_serializing_if = "MessagePresentation::is_visible")]
+    pub presentation: MessagePresentation,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_content: Option<String>,
     /// assistant 消息携带的工具调用集合；provider wire 映射忽略该字段。
@@ -130,4 +149,37 @@ pub struct ToolResultRecord {
     pub call_id: String,
     pub name: String,
     pub kind: ToolCallKind,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn message(presentation: MessagePresentation) -> Message {
+        Message {
+            role: MessageRole::User,
+            content: MessageContent::text("internal input"),
+            presentation,
+            reasoning_content: None,
+            tool_calls: None,
+            tool_result: None,
+            metadata: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn visible_is_the_omitted_wire_default() {
+        let value = serde_json::to_value(message(MessagePresentation::Visible)).unwrap();
+        assert!(value.get("presentation").is_none());
+        let restored: Message = serde_json::from_value(value).unwrap();
+        assert_eq!(restored.presentation, MessagePresentation::Visible);
+    }
+
+    #[test]
+    fn hidden_round_trips_as_generic_message_protocol() {
+        let value = serde_json::to_value(message(MessagePresentation::Hidden)).unwrap();
+        assert_eq!(value["presentation"], "hidden");
+        let restored: Message = serde_json::from_value(value).unwrap();
+        assert_eq!(restored.presentation, MessagePresentation::Hidden);
+    }
 }

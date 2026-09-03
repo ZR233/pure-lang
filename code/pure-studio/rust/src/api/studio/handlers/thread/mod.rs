@@ -7,10 +7,10 @@ use crate::api::studio::types::{
     ArchiveThreadResult, BridgeError, BridgeStudioPromptInput, BridgeThread,
     StartNewThreadResponse, StartTurnResponse,
 };
-use pl_studio_runtime::StudioMode;
+use pl_studio_runtime::ThreadModeId;
 
-fn studio_mode(mode: String) -> Result<StudioMode, BridgeError> {
-    StudioMode::new(mode).map_err(|error| anyhow::anyhow!(error).into())
+fn thread_mode(mode: String) -> Result<ThreadModeId, BridgeError> {
+    ThreadModeId::new(mode).map_err(|error| anyhow::anyhow!(error).into())
 }
 
 /// Creates a root Thread with the requested mode and accepts its first Turn.
@@ -23,7 +23,7 @@ pub async fn start_new_thread(
     input: BridgeStudioPromptInput,
     mode: String,
 ) -> Result<StartNewThreadResponse, BridgeError> {
-    let mode = studio_mode(mode)?;
+    let mode = thread_mode(mode)?;
     let bridge = active_bridge().await?;
     let response = bridge
         .studio
@@ -75,16 +75,16 @@ pub async fn archive_thread(thread_id: String) -> Result<ArchiveThreadResult, Br
     })
 }
 
-/// Changes the selected root Thread to a discovered Mode Skill ID.
+/// Changes the selected root Thread to a registered Thread Mode ID.
 ///
 /// # Errors
 ///
-/// Returns an error when the Thread does not exist, is a child Thread, or has an active workflow.
+/// Returns an error when the Thread does not exist, is a child Thread, or is busy.
 pub async fn set_thread_mode(thread_id: String, mode: String) -> Result<(), BridgeError> {
     let bridge = active_bridge().await?;
     bridge
         .studio
-        .set_thread_mode(&thread_id, studio_mode(mode)?)
+        .set_thread_mode(&thread_id, thread_mode(mode)?)
         .await?;
     Ok(())
 }

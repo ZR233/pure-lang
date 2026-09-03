@@ -104,6 +104,8 @@ pub mod interaction {
         pub tool_id: Option<String>,
         pub agent_path: Option<String>,
         pub revision: i64,
+        pub purpose_json: String,
+        pub continuation_json: String,
         pub state_json: String,
         pub interaction_kind: String,
         pub state_kind: String,

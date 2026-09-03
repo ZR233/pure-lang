@@ -16,6 +16,7 @@ use pl_model::completion::CompletionResponse;
 use pl_model::runtime::ModelSession;
 
 mod fork;
+pub mod plan;
 pub mod tool_history;
 
 /// 核心编译会话。
@@ -265,6 +266,28 @@ impl AgentSession {
         true
     }
 
+    /// 返回当前 canonical AgentSession Plan 状态。
+    pub fn plan(&self) -> Option<&pl_protocol::AgentSessionPlanState> {
+        self.state.working_state.plan.as_ref()
+    }
+
+    /// 原子替换完整 Plan 状态；返回 canonical session 是否发生变化。
+    pub fn replace_plan(&mut self, plan: Option<pl_protocol::AgentSessionPlanState>) -> bool {
+        if self.state.working_state.plan == plan {
+            return false;
+        }
+        let revision_delta = match (&self.state.working_state.plan, &plan) {
+            (Some(current), Some(next)) => next.revision.saturating_sub(current.revision).max(1),
+            (None, Some(next)) => next.revision.max(1),
+            (Some(_), None) | (None, None) => 1,
+        };
+        let state = Arc::make_mut(&mut self.state);
+        state.working_state.plan = plan;
+        state.working_state.revision = state.working_state.revision.saturating_add(revision_delta);
+        state.revision = state.revision.saturating_add(revision_delta);
+        true
+    }
+
     /// 返回子 Agent 创建时冻结的 Profile 快照。
     pub fn agent_profile(&self) -> Option<&pl_protocol::AgentProfileSnapshot> {
         self.state.working_state.agent_profile.as_ref()
@@ -334,11 +357,6 @@ impl AgentSession {
                 content_hash: section.content_hash.clone(),
             })
             .collect::<Vec<_>>();
-        if let Some(workflow) = &self.state.working_state.workflow
-            && let Some(section) = crate::workflow::model_context_section(workflow)
-        {
-            sections.push(section);
-        }
         sections.sort_by(|left, right| left.id.cmp(&right.id));
         ModelContextSnapshot {
             sections,
@@ -369,10 +387,30 @@ impl AgentSession {
         self.push_user_content(MessageContent::text(prompt));
     }
 
+    pub fn push_user_prompt_with_presentation(
+        &mut self,
+        prompt: String,
+        presentation: pl_protocol::MessagePresentation,
+    ) {
+        self.push_user_content_with_presentation(MessageContent::text(prompt), presentation);
+    }
+
     pub fn push_user_content(&mut self, content: MessageContent) {
+        self.push_user_content_with_presentation(
+            content,
+            pl_protocol::MessagePresentation::Visible,
+        );
+    }
+
+    pub fn push_user_content_with_presentation(
+        &mut self,
+        content: MessageContent,
+        presentation: pl_protocol::MessagePresentation,
+    ) {
         self.push_message(Message {
             role: MessageRole::User,
             content,
+            presentation,
             reasoning_content: None,
             tool_calls: None,
             tool_result: None,
@@ -382,6 +420,7 @@ impl AgentSession {
 
     pub fn push_assistant_response(&mut self, content: String, reasoning_content: Option<String>) {
         self.push_message(Message {
+            presentation: Default::default(),
             role: MessageRole::Assistant,
             content: MessageContent::text(content),
             reasoning_content,
@@ -406,6 +445,7 @@ impl AgentSession {
             .map(tool_history::tool_call_record)
             .collect::<Vec<_>>();
         self.push_message(Message {
+            presentation: Default::default(),
             role: MessageRole::Assistant,
             content: MessageContent::text(content.unwrap_or_default()),
             reasoning_content,

@@ -679,20 +679,26 @@ impl fmt::Debug for ToolWorkspace {
 pub struct ToolSessionRuntime {
     parent_session: Arc<std::sync::RwLock<Arc<crate::session::AgentSession>>>,
     working_set: crate::TurnWorkingSetHandle,
+    plan_tools: crate::session::plan::tools::AgentSessionPlanToolBinding,
 }
 
 impl Default for ToolSessionRuntime {
     fn default() -> Self {
+        Self::new(crate::AgentSessionPlanOptions::default())
+    }
+}
+
+impl ToolSessionRuntime {
+    pub(crate) fn new(options: crate::AgentSessionPlanOptions) -> Self {
         Self {
             parent_session: Arc::new(std::sync::RwLock::new(Arc::new(
                 crate::session::AgentSession::new(),
             ))),
             working_set: crate::TurnWorkingSetHandle::default(),
+            plan_tools: crate::session::plan::tools::AgentSessionPlanToolBinding::new(options),
         }
     }
-}
 
-impl ToolSessionRuntime {
     pub fn parent_session(&self) -> Arc<crate::session::AgentSession> {
         self.parent_session
             .read()
@@ -704,8 +710,14 @@ impl ToolSessionRuntime {
         self.working_set.clone()
     }
 
+    pub(crate) fn plan_tools(&self) -> crate::session::plan::tools::AgentSessionPlanToolBinding {
+        self.plan_tools.clone()
+    }
+
     pub(crate) fn begin_turn(&self, session: &crate::session::AgentSession) -> crate::Result<()> {
         self.working_set.reset_from_session(session)?;
+        self.plan_tools
+            .replace(session.plan().cloned().unwrap_or_default())?;
         self.update_parent_session(Arc::new(session.clone()));
         Ok(())
     }

@@ -72,7 +72,7 @@ void registerAgentWorkspaceTests() {
   test('thread snapshot cannot overwrite product-owned directory metadata', () {
     final base = _emptyState();
     final canonical = base.selectedThread!.copyWith(
-      mode: StudioMode.task,
+      mode: ThreadModeId.task,
       role: 'planner',
       updatedAt: DateTime.fromMillisecondsSinceEpoch(2000),
     );
@@ -85,9 +85,9 @@ void registerAgentWorkspaceTests() {
       base.selectedWorkspace!.copyWith(revision: 1),
     );
 
-    expect(next.selectedThread!.mode, StudioMode.task);
+    expect(next.selectedThread!.mode, ThreadModeId.task);
     expect(next.selectedThread!.role, 'planner');
-    expect(next.selectedWorkspace!.thread.mode, StudioMode.task);
+    expect(next.selectedWorkspace!.thread.mode, ThreadModeId.task);
     expect(next.selectedWorkspace!.thread.role, 'planner');
   });
 
@@ -192,7 +192,7 @@ StudioState _rootAndChildState() {
     id: 'child-1',
     projectId: root.projectId,
     title: 'Reviewer',
-    mode: StudioMode.task,
+    mode: ThreadModeId.task,
     createdAt: _fixtureDate(2),
     updatedAt: _fixtureDate(2),
     parentThreadId: root.id,

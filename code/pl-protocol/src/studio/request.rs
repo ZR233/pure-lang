@@ -129,7 +129,7 @@ mod tests {
     }
 
     #[test]
-    fn create_thread_title_is_optional_and_accepts_legacy_string() {
+    fn create_thread_title_is_optional_and_accepts_explicit_title() {
         let missing = serde_json::from_value::<CreateThreadRequest>(serde_json::json!({
             "input": {"text": "hello", "attachmentDraftIds": []},
             "mode": "mode.simple",
@@ -137,12 +137,12 @@ mod tests {
         .unwrap();
         assert_eq!(missing.title, None);
 
-        let legacy = serde_json::from_value::<CreateThreadRequest>(serde_json::json!({
-            "title": "Legacy",
+        let explicit = serde_json::from_value::<CreateThreadRequest>(serde_json::json!({
+            "title": "Explicit title",
             "input": {"text": "hello", "attachmentDraftIds": []},
             "mode": "mode.simple",
         }))
         .unwrap();
-        assert_eq!(legacy.title.as_deref(), Some("Legacy"));
+        assert_eq!(explicit.title.as_deref(), Some("Explicit title"));
     }
 }

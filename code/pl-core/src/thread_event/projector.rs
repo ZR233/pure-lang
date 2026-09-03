@@ -19,7 +19,6 @@ use pl_trace::{
 
 use crate::agent_runtime::{
     AgentRuntimeEvent, AgentRuntimeEventKind, DurableMailboxEnvelope, MailboxDeliveryState,
-    MailboxPresentation,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -317,7 +316,7 @@ fn project_user_input(
     turn_id: &str,
     emitted_at: i64,
 ) {
-    if input.payload.presentation != MailboxPresentation::User {
+    if !input.payload.presentation.is_visible() {
         return;
     }
     let item_id = if input.mail_id.is_empty() {
@@ -735,7 +734,7 @@ mod tests {
             payload: crate::MailboxInputPayload {
                 message: "continue".to_string(),
                 attachments: Vec::new(),
-                presentation: MailboxPresentation::User,
+                presentation: Default::default(),
                 metadata: crate::MailboxMetadata::default(),
             },
             queue_coalescing_key: None,
@@ -786,7 +785,7 @@ mod tests {
             payload: crate::MailboxInputPayload {
                 message: "inspect".to_string(),
                 attachments: vec![attachment.clone()],
-                presentation: MailboxPresentation::User,
+                presentation: Default::default(),
                 metadata: crate::MailboxMetadata::default(),
             },
             queue_coalescing_key: None,
@@ -803,6 +802,30 @@ mod tests {
             ThreadNotification::ItemCompleted { item }
                 if item.text().is_some_and(|text| text.attachments() == [attachment])
         ));
+    }
+
+    #[test]
+    fn hidden_message_is_not_emitted_to_thread_gui_projection() {
+        let current = snapshot();
+        let mut projector = Projector::new("thread-1", &current);
+        let input = DurableMailboxEnvelope {
+            mail_id: "mail-hidden".to_string(),
+            turn_id: crate::TurnId::new("turn-hidden").unwrap(),
+            thread_id: crate::ThreadId::new("thread-1").unwrap(),
+            payload: crate::MailboxInputPayload {
+                message: "# Approved Plan\n\nInternal continuation.".to_string(),
+                attachments: Vec::new(),
+                presentation: pl_protocol::MessagePresentation::Hidden,
+                metadata: crate::MailboxMetadata::default(),
+            },
+            queue_coalescing_key: None,
+            budget_action: crate::MailboxBudgetAction::Preserve,
+            delivery_state: MailboxDeliveryState::default(),
+            queued_at: 7,
+        };
+
+        project_user_input(&mut projector, &input, "turn-hidden", 7);
+        assert!(projector.finish().notifications.is_empty());
     }
 
     #[test]
@@ -1092,6 +1115,7 @@ mod tests {
                 item_id: None,
                 tool_id: None,
                 agent_path: None,
+                purpose: pl_protocol::InteractionPurpose::General,
             },
             Vec::new(),
             1,

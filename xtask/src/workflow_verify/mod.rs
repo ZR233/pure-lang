@@ -675,7 +675,7 @@ fn write_driver_receipt(
     if studio_mode == "mode.task" {
         ensure!(
             completed
-                .pointer("/workflow/currentRun/currentStageId")
+                .pointer("/workflow/currentRun/currentStateId")
                 .and_then(serde_json::Value::as_str)
                 .is_some_and(|stage| stage == "completed"),
             "Flutter Driver completed receipt does not contain a terminal workflow"

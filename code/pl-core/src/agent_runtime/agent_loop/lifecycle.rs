@@ -1,11 +1,16 @@
-use super::super::host::{AgentLifecycleAdapter, ThreadRepository};
-use super::super::state::AgentRuntimeError;
+use super::super::host::{
+    AgentLifecycleAdapter, DurableCommitFacts, PersistenceClass, ThreadProjectionCommit,
+    ThreadRepository,
+};
+use super::super::state::{AgentRuntimeError, unix_timestamp};
 use super::super::{
     AgentCommand, AgentRuntimeEventKind, AgentRuntimeHost, AgentRuntimeResult, AgentSnapshot,
-    AgentSnapshotTransition, AgentState, CloseLifecycleRequest,
+    AgentSnapshotTransition, AgentState, CloseLifecycleRequest, ThreadMutation,
 };
 use super::AgentLoop;
+use super::commit::{CommitPublication, PendingCommit};
 use crate::AgentRoleId;
+use crate::thread_event::project_thread_facts;
 
 enum CloseCompensation {
     Restored,
@@ -81,6 +86,102 @@ where
             |snapshot| AgentRuntimeEventKind::StateChanged {
                 snapshot: Box::new(snapshot),
             },
+        )
+        .await?;
+        Ok(self.state.snapshot.clone())
+    }
+
+    pub(super) async fn change_idle_thread_mode(
+        &mut self,
+        mode_id: pl_protocol::ThreadModeId,
+    ) -> AgentRuntimeResult<AgentSnapshot> {
+        if self.state.snapshot.identity.parent_id.is_some() {
+            return Err(AgentRuntimeError::InvalidInput(
+                "only a root Thread can change Thread Mode".to_string(),
+            ));
+        }
+        if !self.state.snapshot.state.is_operational() {
+            return Err(AgentRuntimeError::NotActive(
+                self.state.snapshot.identity.id.clone(),
+                self.state.snapshot.state.clone(),
+            ));
+        }
+        if self.active.is_some()
+            || !self.state.snapshot.state.is_idle()
+            || self.state.active_input.is_some()
+            || !self.state.pending_inputs.is_empty()
+        {
+            return Err(AgentRuntimeError::InvalidInput(
+                "Thread Mode can only change while the root Thread is idle with no pending input"
+                    .to_string(),
+            ));
+        }
+
+        let now = unix_timestamp();
+        let workflow = crate::archive_workflow_for_mode_change(
+            self.state.session.session.workflow().cloned(),
+            &mode_id,
+            now,
+        )
+        .map_err(|error| AgentRuntimeError::InvalidInput(error.to_string()))?;
+        let mut next = self.state.clone();
+        if !next.session.session.replace_workflow(workflow.clone()) {
+            return Ok(self.state.snapshot.clone());
+        }
+
+        let thread_id = next.snapshot.identity.id.clone();
+        let expected_revision = self.state.snapshot.revision;
+        next.snapshot.revision = expected_revision.saturating_add(1);
+        next.snapshot.updated_at = now;
+        let current = self
+            .runtime
+            .thread_events
+            .snapshot(thread_id.as_str())
+            .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
+        let mut runtime = current
+            .runtime
+            .clone()
+            .unwrap_or_else(|| crate::thread_event::empty_runtime(thread_id.as_str()));
+        runtime.workflow = workflow
+            .as_ref()
+            .map(pl_protocol::WorkflowRuntimeSnapshot::from);
+        runtime.updated_at = now;
+        let projected = project_thread_facts(
+            thread_id.as_str(),
+            &current,
+            vec![crate::ThreadNotificationFact::durable(
+                now,
+                pl_protocol::ThreadNotification::ThreadRuntimeUpdated {
+                    runtime: Box::new(runtime),
+                },
+            )],
+        );
+        let projected_thread = self
+            .runtime
+            .thread_events
+            .project(thread_id.as_str(), &projected.notifications)
+            .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
+        next.session.thread_revision = projected.through_revision;
+        let notifications = projected_thread.notifications.clone();
+        let projection = ThreadProjectionCommit {
+            snapshot: projected_thread.snapshot,
+            notifications: notifications.clone(),
+        };
+        let facts =
+            DurableCommitFacts::from_state(&next, Vec::new(), Vec::new(), Some(projection), None);
+        self.commit_and_publish(
+            PendingCommit::new(
+                next,
+                facts,
+                ThreadMutation::ReplaceThread {
+                    thread_id: thread_id.clone(),
+                },
+            )
+            .persistence(PersistenceClass::Settlement)
+            .publish(
+                CommitPublication::new(Some(thread_id), None)
+                    .with_thread_notifications(notifications),
+            ),
         )
         .await?;
         Ok(self.state.snapshot.clone())

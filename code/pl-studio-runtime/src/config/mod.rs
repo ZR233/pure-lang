@@ -5,7 +5,6 @@
 
 mod agent_profile;
 mod credential;
-mod mode;
 mod runtime;
 mod store;
 
@@ -23,7 +22,6 @@ pub use agent_profile::{
     AgentProfileCatalog, AgentProfileDiagnostic, UserAgentProfile, is_system_profile_id,
     save_user_agent_profile, system_profile_ids,
 };
-pub use mode::{StudioMode, StudioModeId};
 pub use pl_core::config::{
     BuiltinMcpServerState as StudioBuiltinMcpServerState, EffectiveMcpServerConfig,
     McpServerConfig as StudioMcpServerEntry, McpServerMutationPolicy, McpServerSourceKind,

@@ -255,6 +255,22 @@ where
                 actual: thread_id,
             });
         }
+        let mut plan_state = self.state.session.session.plan().cloned();
+        let mut plan_changed = false;
+        for fact in &facts {
+            if let pl_protocol::ThreadNotification::InteractionChanged { interaction } =
+                &fact.notification
+                && interaction.status() == pl_protocol::InteractionStatus::Pending
+                && let Some(next_plan) = crate::session::plan::state_for_pending_interaction(
+                    plan_state.as_ref(),
+                    interaction,
+                )
+                .map_err(AgentRuntimeError::InvalidInput)?
+            {
+                plan_state = Some(next_plan);
+                plan_changed = true;
+            }
+        }
         let recovered_wait = (self.active.is_none()
             && self.state.snapshot.state.is_idle()
             && self.state.pending_inputs.is_empty())
@@ -301,6 +317,9 @@ where
             notifications: projected_thread.notifications.clone(),
         };
         let mut next = self.state.clone();
+        if plan_changed {
+            next.session.session.replace_plan(plan_state);
+        }
         if let Some((turn_id, interaction_id)) = recovered_wait {
             next.snapshot
                 .transition(AgentCommand::RecoverWaitingInteraction {

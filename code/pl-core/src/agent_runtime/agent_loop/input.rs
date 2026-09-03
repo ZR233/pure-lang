@@ -269,6 +269,14 @@ where
             queued_at: unix_timestamp(),
         };
         let mut next = self.state.clone();
+        if let Some(plan) = crate::session::plan::state_for_resolved_interaction(
+            next.session.session.plan(),
+            &request.interaction,
+        )
+        .map_err(AgentRuntimeError::InvalidInput)?
+        {
+            next.session.session.replace_plan(Some(plan));
+        }
         next.pending_inputs.push_back(input.clone());
         next.refresh_mailbox_snapshot();
         let waiting_interaction_id = match &next.snapshot.state {

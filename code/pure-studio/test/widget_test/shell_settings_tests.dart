@@ -75,7 +75,7 @@ void registerShellSettingsTests() {
 
     expect(api.createdThreadProjectId, 'project-1');
     expect(api.newThreadPrompt, 'create the first turn');
-    expect(api.createdThreadMode, StudioMode.simple);
+    expect(api.createdThreadMode, ThreadModeId.simple);
     expect(
       find.byKey(StudioDriverKeys.threadRow('session-created')),
       findsOneWidget,
@@ -116,7 +116,7 @@ void registerShellSettingsTests() {
     await tester.tap(find.byKey(StudioDriverKeys.sessionMode));
     await tester.pumpAndSettle();
     await tester.tap(
-      find.byKey(StudioDriverKeys.sessionModeOption(StudioMode.task.name)),
+      find.byKey(StudioDriverKeys.sessionModeOption(ThreadModeId.task.name)),
     );
     await tester.pumpAndSettle();
     expect(find.text('Task'), findsOneWidget);
@@ -132,7 +132,7 @@ void registerShellSettingsTests() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
 
-    expect(api.createdThreadMode, StudioMode.task);
+    expect(api.createdThreadMode, ThreadModeId.task);
     expect(find.byKey(StudioDriverKeys.startPageSelectors), findsNothing);
   });
 
@@ -162,7 +162,7 @@ void registerShellSettingsTests() {
     await tester.tap(find.byKey(StudioDriverKeys.sessionMode));
     await tester.pumpAndSettle();
     await tester.tap(
-      find.byKey(StudioDriverKeys.sessionModeOption(StudioMode.task.name)),
+      find.byKey(StudioDriverKeys.sessionModeOption(ThreadModeId.task.name)),
     );
     await tester.pumpAndSettle();
     expect(find.text('Task'), findsOneWidget);
@@ -192,7 +192,7 @@ void registerShellSettingsTests() {
       id: 'session-2',
       projectId: first.projectId,
       title: 'Session 2',
-      mode: StudioMode.simple,
+      mode: ThreadModeId.simple,
       updatedAt: DateTime.fromMillisecondsSinceEpoch(1),
     );
     final state = initial.copyWith(
@@ -607,11 +607,11 @@ void registerShellSettingsTests() {
     await tester.tap(find.byKey(StudioDriverKeys.sessionMode));
     await tester.pumpAndSettle();
     await tester.tap(
-      find.byKey(StudioDriverKeys.sessionModeOption(StudioMode.task.name)),
+      find.byKey(StudioDriverKeys.sessionModeOption(ThreadModeId.task.name)),
     );
     await tester.pumpAndSettle();
     expect(api.modeUpdate?.threadId, 'session-1');
-    expect(api.modeUpdate?.mode, StudioMode.task);
+    expect(api.modeUpdate?.mode, ThreadModeId.task);
     expect(
       api.threadSubscriptions.where((threadId) => threadId == 'session-1'),
       hasLength(2),
@@ -635,7 +635,7 @@ void registerShellSettingsTests() {
             id: 'session-1',
             projectId: 'project-1',
             title: 'Session',
-            mode: StudioMode.task,
+            mode: ThreadModeId.task,
             updatedAt: DateTime.fromMillisecondsSinceEpoch(2000),
           ),
         ],
@@ -860,10 +860,42 @@ void registerShellSettingsTests() {
     await tester.tap(find.byKey(StudioDriverKeys.sessionMode));
     await tester.pumpAndSettle();
     expect(
-      find.byKey(StudioDriverKeys.sessionModeOption(StudioMode.task.name)),
+      find.byKey(StudioDriverKeys.sessionModeOption(ThreadModeId.task.name)),
       findsNothing,
     );
     expect(api.modeUpdate, isNull);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('shell renders the workflow state only in the status bar', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final base = _stateWithPlannerModels();
+    final state = _withSelectedRuntime(
+      base,
+      base.runtime.copyWith(
+        workflow: _workflowRuntime(stateId: 'planning', terminal: false),
+      ),
+    );
+    final api = _FakeStudioApi(state);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('workflow-state-planning')),
+      findsOneWidget,
+    );
+    expect(find.text('planning'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -876,7 +908,7 @@ void registerShellSettingsTests() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     final state = _stateWithPlannerModels();
-    final taskThread = state.selectedThread!.copyWith(mode: StudioMode.task);
+    final taskThread = state.selectedThread!.copyWith(mode: ThreadModeId.task);
     final api = _FakeStudioApi(
       _withSettingsFixture(
         state.copyWith(

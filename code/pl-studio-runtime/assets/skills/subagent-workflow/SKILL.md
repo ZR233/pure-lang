@@ -32,8 +32,9 @@ The built-in profiles are `explorer`, `planner`, `executor`, `worktree_executor`
 may be disabled. User profiles are loaded from one TOML file per profile. Select by capability,
 not by assuming that a workflow stage requires a particular profile.
 
-Children never receive the root Thread's `workflow_state` tool. Workflow compilation and stage
-transitions remain the root Agent's responsibility.
+Children never receive the root Thread Mode's workflow tools or runtime state. The root Agent may
+only query and advance the graph already registered by the host; neither root nor children compile
+workflow definitions.
 
 ## When to spawn
 
@@ -68,6 +69,14 @@ child is terminal (a progress wake is not terminal), and only then calls
 durable marker. An empty page may trigger `read_agent_session` for diagnosis, but session text is not
 normal delivery and requires a narrowed re-dispatch. Do not poll submissions before terminal.
 
+`wait_agents` wakes when any requested target produces an event; one batch response does not prove
+that the other targets are terminal. Maintain a pending set of the exact spawned agentIds. Remove an
+agent only when the same canonical wait receipt has `reason:"terminal"`, a message whose `agentId`
+matches it, `state.agent.kind` equal to `idle` or `closed`, and a completed `lastTurnOutcome`.
+`CHILD_DELIVERY_READY` inside a `reason:"progress"` response only proves that a delivery was
+published; it is never terminal evidence. Continue waiting on every pending id, and do not call any
+`read_agent_submissions` until each target has its own receipt-bound terminal evidence.
+
 The root Agent owns coordination, reconciles conflicting findings, integrates changes, performs
 final verification, and advances the workflow state. For a single bounded implementation or mutually
 exclusive directories use `executor` with the narrowest non-overlapping `writablePaths`; directory
@@ -83,9 +92,11 @@ wait for capacity and narrow/re-dispatch once; only a second failure permits min
 `ROOT_IMPLEMENTATION_FALLBACK`, recording reason and directly modified files. After integration always
 spawn a new fresh-context read-only `reviewer`; it never fixes. Route code findings to `working` and
 design findings to `editing_documents`; every repair must be re-integrated and receive a new reviewer.
-For a worktree child, the safe order is inspect branch/base/commit, integrate with ordinary Git, then
-`close_agent({"target":"<agentId>","workspaceDisposition":"cleanup"})`, and finally verify that the
-Pure-owned worktree and branch are gone. Never request cleanup before integration.
+For one parallel worktree batch, inspect every branch/base/commit and integrate every accepted commit
+with ordinary Git before the first cleanup. Only after the final accepted sibling commit is integrated,
+call `close_agent({"target":"<agentId>","workspaceDisposition":"cleanup"})` for each child and verify
+that each Pure-owned worktree and branch is gone. Never interleave one child's integration and cleanup
+while another accepted sibling commit is still pending integration.
 
 The reviewer remains read-only for workspace, Git, shell, and external state. After finishing its
 review and before its final reply it must call `report_progress` to append the final durable

@@ -14,6 +14,7 @@ mod runtime_lock;
 mod runtime_state;
 mod store;
 mod store_support;
+pub(crate) mod thread;
 
 pub(crate) use ids::unix_seconds;
 pub use interaction_service::*;

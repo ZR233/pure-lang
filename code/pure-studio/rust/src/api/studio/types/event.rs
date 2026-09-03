@@ -4,7 +4,8 @@ use super::{
     BridgeAgentDirectoryState, BridgeLspStateSnapshot, BridgeMcpStateSnapshot,
     BridgeModelPerformanceSnapshot, BridgePersistenceStateSnapshot, BridgeProjectDirectoryState,
     BridgeProviderUsageStateSnapshot, BridgeRecoveryStateSnapshot, BridgeSettingsStateSnapshot,
-    BridgeSkillsStateSnapshot, BridgeThread, BridgeUpdaterStateSnapshot,
+    BridgeSkillsStateSnapshot, BridgeThread, BridgeThreadModeCatalogSnapshot,
+    BridgeUpdaterStateSnapshot,
 };
 
 /// Flutter Bridge 的 Studio 产品事件信封。
@@ -31,6 +32,7 @@ pub enum BridgeProductEventPayload {
     McpStateChanged(BridgeMcpStateSnapshot),
     LspStateChanged(BridgeLspStateSnapshot),
     SkillsStateChanged(BridgeSkillsStateSnapshot),
+    ThreadModeCatalogChanged(BridgeThreadModeCatalogSnapshot),
     ProviderUsageStateChanged(BridgeProviderUsageStateSnapshot),
     ModelPerformanceStateChanged(BridgeModelPerformanceSnapshot),
     UpdaterStateChanged(BridgeUpdaterStateSnapshot),

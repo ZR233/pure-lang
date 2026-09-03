@@ -117,7 +117,6 @@ pub fn validate_skill_document(
     if let Some(category) = &frontmatter.category {
         let _ = category_path(category)?;
     }
-    validate_mode_metadata(&frontmatter)?;
     Ok(SkillMetadata {
         name: frontmatter.name,
         description: description.to_string(),
@@ -136,7 +135,6 @@ pub fn validate_skill_document(
         resource_base: SkillResourceBase::Directory {
             path: PathBuf::new(),
         },
-        mode: frontmatter.mode,
     })
 }
 
@@ -193,43 +191,8 @@ pub(super) fn parse_frontmatter(content: &str) -> Result<SkillFrontmatter> {
             platforms: frontmatter.platforms,
             disable_model_invocation: frontmatter.disable_model_invocation,
             user_invocable: frontmatter.user_invocable,
-            mode: frontmatter.mode.map(|mode| super::ModeSkillMetadata {
-                display_name: mode.display_name,
-                order: mode.order,
-            }),
         })
         .map_err(skill_core_error)
-}
-
-fn validate_mode_metadata(frontmatter: &SkillFrontmatter) -> Result<()> {
-    let reserved = frontmatter.name.starts_with("mode.");
-    match (reserved, &frontmatter.mode) {
-        (true, None) => Err(PureError::ConfigError(format!(
-            "reserved Mode Skill `{}` must declare mode metadata",
-            frontmatter.name
-        ))),
-        (false, Some(_)) => Err(PureError::ConfigError(format!(
-            "skill `{}` declares mode metadata without the reserved `mode.` prefix",
-            frontmatter.name
-        ))),
-        (true, Some(mode)) => {
-            let display_name = mode.display_name.trim();
-            if display_name.is_empty() || display_name.chars().count() > 128 {
-                return Err(PureError::ConfigError(
-                    "mode display-name must contain 1 to 128 characters".to_string(),
-                ));
-            }
-            if frontmatter.disable_model_invocation && !frontmatter.user_invocable {
-                Ok(())
-            } else {
-                Err(PureError::ConfigError(format!(
-                    "Mode Skill `{}` must set disable-model-invocation: true and user-invocable: false",
-                    frontmatter.name
-                )))
-            }
-        }
-        (false, None) => Ok(()),
-    }
 }
 
 pub(super) struct SkillFileScan {

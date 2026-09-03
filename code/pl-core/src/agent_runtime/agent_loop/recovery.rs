@@ -456,6 +456,7 @@ mod tests {
 
     fn message(role: MessageRole, text: &str) -> ModelContextItem {
         Message {
+            presentation: Default::default(),
             role,
             content: MessageContent::text(text.to_string()),
             reasoning_content: None,
@@ -468,6 +469,7 @@ mod tests {
 
     fn assistant_tool_call(id: &str) -> ModelContextItem {
         Message {
+            presentation: Default::default(),
             role: MessageRole::Assistant,
             content: MessageContent::text(String::new()),
             reasoning_content: None,
@@ -487,6 +489,7 @@ mod tests {
 
     fn tool_result(id: &str) -> ModelContextItem {
         Message {
+            presentation: Default::default(),
             role: MessageRole::Tool,
             content: MessageContent::text("done".to_string()),
             reasoning_content: None,

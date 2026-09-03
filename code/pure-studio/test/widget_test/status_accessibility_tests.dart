@@ -174,6 +174,101 @@ void registerStatusAccessibilityTests() {
       expect(find.textContaining(r'$0.0025 + ￥0.31'), findsOneWidget);
     });
 
+    testWidgets('status bar keeps an unstarted Thread Mode lightweight', (
+      tester,
+    ) async {
+      final state = _emptyState();
+      await _pumpThreadStatusBar(tester, state);
+
+      expect(find.byKey(StudioDriverKeys.sessionMode), findsOneWidget);
+      expect(_workflowRuntimeFinder(), findsNothing);
+      _expectNoWorkflowInspectorOrMutationUi();
+    });
+
+    testWidgets('status bar shows the canonical active workflow state', (
+      tester,
+    ) async {
+      final base = _emptyState();
+      final state = _withSelectedRuntime(
+        base,
+        base.runtime.copyWith(
+          workflow: _workflowRuntime(stateId: 'planning', terminal: false),
+        ),
+      );
+      await _pumpThreadStatusBar(tester, state);
+
+      expect(
+        find.byKey(const ValueKey('workflow-runtime-run-1')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('workflow-state-planning')),
+        findsOneWidget,
+      );
+      expect(find.text('planning'), findsOneWidget);
+      expect(
+        find.byTooltip(
+          'Session mode cannot change while the session is running or a workflow is active',
+        ),
+        findsOneWidget,
+      );
+      _expectNoWorkflowInspectorOrMutationUi();
+    });
+
+    testWidgets('status bar shows the canonical terminal workflow state', (
+      tester,
+    ) async {
+      final base = _emptyState();
+      final state = _withSelectedRuntime(
+        base,
+        base.runtime.copyWith(
+          workflow: _workflowRuntime(stateId: 'completed', terminal: true),
+        ),
+      );
+      await _pumpThreadStatusBar(tester, state);
+
+      expect(
+        find.byKey(const ValueKey('workflow-runtime-run-1')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('workflow-state-completed')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('workflow-state-planning')),
+        findsNothing,
+      );
+      expect(find.byTooltip('Session mode'), findsOneWidget);
+      _expectNoWorkflowInspectorOrMutationUi();
+    });
+
+    testWidgets('mode selector renders the reloaded canonical mode', (
+      tester,
+    ) async {
+      final state = _emptyState();
+      final api = await _pumpThreadStatusBar(tester, state);
+
+      await tester.tap(find.byKey(StudioDriverKeys.sessionMode));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(StudioDriverKeys.sessionModeOption(ThreadModeId.task.name)),
+      );
+      await tester.pumpAndSettle();
+
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(ThreadStatusBar)),
+      );
+      expect(api.modeUpdate, (threadId: 'session-1', mode: ThreadModeId.task));
+      expect(
+        container.read(studioControllerProvider).value!.selectedThread!.mode,
+        ThreadModeId.task,
+      );
+      expect(find.text('Task'), findsOneWidget);
+      expect(_workflowRuntimeFinder(), findsNothing);
+      _expectNoWorkflowInspectorOrMutationUi();
+    });
+
     testWidgets(
       'capability detail exposes every active Skill without truncation',
       (tester) async {
@@ -570,6 +665,71 @@ Future<Finder> _pumpContextWithNextFocus(WidgetTester tester) async {
 }
 
 const _contextFocusTargetKey = ValueKey('context-focus-target');
+
+Future<_FakeStudioApi> _pumpThreadStatusBar(
+  WidgetTester tester,
+  StudioState state,
+) async {
+  tester.view.physicalSize = const Size(1280, 800);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  final api = _FakeStudioApi(state);
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+      child: _localizedApp(
+        home: Scaffold(
+          body: Consumer(
+            builder: (context, ref, child) {
+              final current = ref.watch(studioControllerProvider).value;
+              if (current == null) return const SizedBox.shrink();
+              return ThreadStatusBar(
+                workspace: current.selectedAgentWorkspace!,
+              );
+            },
+          ),
+        ),
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
+  return api;
+}
+
+WorkflowRuntimeView _workflowRuntime({
+  required String stateId,
+  required bool terminal,
+}) => WorkflowRuntimeView(
+  revision: terminal ? 8 : 2,
+  currentRun: WorkflowRunView(
+    lineageId: 'lineage-1',
+    runId: 'run-1',
+    modeId: ThreadModeId.task.id,
+    graphRevision: 1,
+    graphHash: 'graph-hash',
+    currentStateId: stateId,
+    terminal: terminal,
+    startedAt: DateTime.fromMillisecondsSinceEpoch(1000),
+    updatedAt: DateTime.fromMillisecondsSinceEpoch(2000),
+  ),
+);
+
+Finder _workflowRuntimeFinder() => find.byWidgetPredicate(
+  (widget) =>
+      widget.key is ValueKey<String> &&
+      (widget.key! as ValueKey<String>).value.startsWith('workflow-runtime-'),
+);
+
+void _expectNoWorkflowInspectorOrMutationUi() {
+  for (final key in [
+    'workflow-graph',
+    'workflow-history',
+    'workflow-transition-control',
+  ]) {
+    expect(find.byKey(ValueKey(key)), findsNothing);
+  }
+}
 
 const _contextRuntime = ThreadRuntimeView(
   model: 'planner/local',

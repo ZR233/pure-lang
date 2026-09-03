@@ -60,6 +60,7 @@ impl StudioRuntime {
             mcp,
             lsp,
             skills_by_project,
+            thread_mode_catalog: self.read_thread_mode_catalog(),
             provider_usage: self.read_provider_usage_state().await,
             model_performance: self.model_performance.snapshot().await,
             updater: self.read_update_state().await,
@@ -87,6 +88,11 @@ impl StudioRuntime {
     /// Reads a Project Skills owner snapshot without scanning the filesystem.
     pub async fn read_skills_state(&self, project_id: &str) -> StudioSkillsStateSnapshot {
         self.skills.read(project_id).await.into()
+    }
+
+    /// Reads the current process-wide Thread Mode catalog.
+    pub fn read_thread_mode_catalog(&self) -> pl_protocol::ThreadModeCatalogSnapshot {
+        self.thread_modes.snapshot().catalog().clone()
     }
 
     /// Subscribes to canonical low-frequency product events.

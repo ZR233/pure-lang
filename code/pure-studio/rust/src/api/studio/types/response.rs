@@ -36,6 +36,7 @@ pub struct BridgeStudioStateSnapshot {
     pub mcp: BridgeMcpStateSnapshot,
     pub lsp: BridgeLspStateSnapshot,
     pub skills_by_project: Vec<BridgeSkillsStateSnapshot>,
+    pub thread_mode_catalog: BridgeThreadModeCatalogSnapshot,
     pub provider_usage: BridgeProviderUsageStateSnapshot,
     pub model_performance: BridgeModelPerformanceSnapshot,
     pub updater: BridgeUpdaterStateSnapshot,
@@ -394,20 +395,25 @@ pub struct BridgeSkillsStateData {
     pub config_fingerprint: String,
     pub catalog_revision: u64,
     pub skills: Vec<SkillSummaryDto>,
-    pub modes: Vec<ModeSummaryDto>,
     pub warnings: Vec<String>,
     pub complete: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct ModeSummaryDto {
+pub struct BridgeThreadModeCatalogSnapshot {
+    pub revision: u64,
+    pub modes: Vec<BridgeThreadModeDescriptor>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeThreadModeDescriptor {
     pub id: String,
     pub display_name: String,
     pub description: String,
-    pub order: i32,
-    pub source: String,
-    pub provider_id: String,
+    pub order: u32,
+    pub has_workflow: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

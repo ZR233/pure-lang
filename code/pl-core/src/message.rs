@@ -232,6 +232,7 @@ pub fn assistant_text_message(text: impl Into<String>) -> Message {
 /// 构造一条仅包含 reasoning 内容的助手消息。
 pub fn assistant_reasoning_message(content: impl Into<String>) -> Message {
     Message {
+        presentation: Default::default(),
         role: MessageRole::Assistant,
         content: MessageContent::text(String::new()),
         reasoning_content: Some(content.into()),
@@ -273,6 +274,7 @@ fn message_content_text_with_separator(content: &MessageContent, separator: &str
 
 fn text_message(role: MessageRole, content: String) -> Message {
     Message {
+        presentation: Default::default(),
         role,
         content: MessageContent::text(content),
         reasoning_content: None,
@@ -308,6 +310,7 @@ mod tests {
     #[test]
     fn append_message_fragment_text_appends_text_parts_and_ignores_images() {
         let fragment = Message {
+            presentation: Default::default(),
             role: MessageRole::User,
             content: MessageContent::new(vec![
                 ContentPart::Text {
@@ -334,6 +337,7 @@ mod tests {
             "hello\n\nskill one\nskill two"
         );
         let empty_fragment = Message {
+            presentation: Default::default(),
             role: MessageRole::User,
             content: MessageContent::text("   ".to_string()),
             reasoning_content: None,
@@ -358,6 +362,7 @@ mod tests {
         let assistant = super::assistant_text_message("done");
         let reasoning = super::assistant_reasoning_message("thinking");
         let multipart_user = Message {
+            presentation: Default::default(),
             role: MessageRole::User,
             content: MessageContent::new(vec![
                 ContentPart::Attachment {

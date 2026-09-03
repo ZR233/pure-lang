@@ -58,12 +58,12 @@ fn redacts_secret_user_input_answers_for_display() {
 #[test]
 fn progress_messages_describe_workflow_and_subagent_lifecycle() {
     assert_eq!(
-        tool_start_progress_message("workflow_state"),
-        "正在更新工作流状态。"
+        tool_start_progress_message("workflow_transition"),
+        "正在切换工作流状态。"
     );
     assert_eq!(
-        tool_terminal_progress_message(&completed_record("workflow_state")),
-        "工作流状态已更新。"
+        tool_terminal_progress_message(&completed_record("workflow_transition")),
+        "工作流状态已切换。"
     );
     assert_eq!(
         tool_start_progress_message("spawn_agent"),

@@ -24,13 +24,13 @@ pub mod remote;
 pub mod runtime_usage;
 pub mod session;
 pub mod skill;
+pub mod thread;
 mod thread_event;
 mod time;
 pub mod tool;
 mod trace;
 pub mod turn;
 mod web_search;
-pub mod workflow;
 mod working_set;
 mod workspace;
 
@@ -92,20 +92,42 @@ pub use pl_protocol::{
     ContextSectionId, ErrorSeverity, InteractionChangedEvent, InteractionContent, InteractionKind,
     InteractionRequest, InteractionResolution, InteractionScope, InteractionStatus,
     McpAvailabilityDescriptor, McpHealthSnapshot, McpServerDescriptor, Message, MessageContent,
-    MessageRole, ModelContextItem, OutputStream, PermissionLevel, PinnedContextSection,
-    PipelineStage, ProviderCatalogSnapshot, ProviderConnectionModeDescriptor,
+    MessagePresentation, MessageRole, ModelContextItem, OutputStream, PermissionLevel,
+    PinnedContextSection, PipelineStage, ProviderCatalogSnapshot, ProviderConnectionModeDescriptor,
     ProviderPresetDescriptor, ProviderServiceCapabilitiesDescriptor, PureError, Result,
-    RetryDisposition, RuntimeCostAmount, RuntimeUsageSnapshot, SkillActivation, TokenUsageSnapshot,
+    RetryDisposition, RuntimeCostAmount, RuntimeUsageSnapshot, SkillActivation,
+    ThreadModeCatalogSnapshot, ThreadModeDescriptor, ThreadModeId, TokenUsageSnapshot,
     ToolApprovalResolution, ToolDiscoveryState, ToolResultReceipt, ToolSpec, TurnFailure,
     TurnFailureCategory, UserInputAnswer, UserInputRequest, UserInputResponse, UserQuestion,
-    UserQuestionOption,
+    UserQuestionOption, WorkflowDefinition, WorkflowState, WorkflowStateKind, WorkflowTransition,
 };
 pub(crate) use prompt_cache::{
     PromptCacheInput, derive_prompt_cache_key, prepare_prompt_context, stable_tool_schemas,
 };
 pub use runtime_usage::ModelTokenUsageSnapshot;
+pub use session::plan::tools::{
+    PlanCurrentTool, PlanHistoryTool, PlanNextTool, PlanRestartTool, PlanSubmitTool,
+    TOOL_PLAN_CURRENT, TOOL_PLAN_HISTORY, TOOL_PLAN_NEXT, TOOL_PLAN_RESTART, TOOL_PLAN_SUBMIT,
+};
+pub use session::plan::{
+    AgentSessionPlanConfirmationDecision, AgentSessionPlanError, AgentSessionPlanMachine,
+    AgentSessionPlanOptions, AgentSessionPlanResolveCommand, AgentSessionPlanRestartCommand,
+    AgentSessionPlanSubmitCommand, MAX_PLAN_SESSION_STATE_BYTES, PLAN_CONTEXT_SECTION_ID,
+    available_transitions, plan_model_context_section, validate_plan, validate_session_state_size,
+};
 pub use session::{AgentSession, AgentSessionForkPolicy};
 pub use skill::{SkillCatalog, SkillMetadata, SkillSourceKind};
+pub use thread::mode::{
+    CompiledWorkflowDefinition, RegisteredThreadMode, StaticThreadModeRegistration,
+    StaticWorkflowDefinition, StaticWorkflowState, StaticWorkflowTransition, TOOL_WORKFLOW_CURRENT,
+    TOOL_WORKFLOW_GRAPH, TOOL_WORKFLOW_HISTORY, TOOL_WORKFLOW_NEXT, TOOL_WORKFLOW_RESTART,
+    TOOL_WORKFLOW_TRANSITION, ThreadModeManager, ThreadModeManagerError, ThreadModeRegistration,
+    ThreadModeRegistrySnapshot, ThreadModeSource, ThreadModeSourceId, ThreadModeSourceKind,
+    WorkflowCompilerError, WorkflowCurrentTool, WorkflowGraphTool, WorkflowHistoryTool,
+    WorkflowNextTool, WorkflowRestartTool, WorkflowTransitionTool, WorkflowValidationIssue,
+    archive_workflow_for_mode_change, compile_workflow_definition, reconcile_workflow_for_turn,
+    validate_workflow_restart_arguments, validate_workflow_transition_arguments,
+};
 pub use thread_event::{
     ThreadEventBus, ThreadEventBusHandle, ThreadEventError, ThreadEventOptions,
     ThreadEventSubscription, ThreadHotHistory, ThreadNotificationFact,

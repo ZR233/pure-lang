@@ -175,6 +175,7 @@ fn trim_tool_outputs_to_context_window(
             continue;
         }
         let replacement_message = Message {
+            presentation: Default::default(),
             role: MessageRole::Tool,
             content: MessageContent::text(CONTEXT_WINDOW_TRUNCATED_OUTPUT_MESSAGE.to_string()),
             reasoning_content: None,
@@ -229,6 +230,7 @@ mod tests {
 
     fn user(text: &str) -> Message {
         Message {
+            presentation: Default::default(),
             role: MessageRole::User,
             content: MessageContent::text(text.to_string()),
             reasoning_content: None,
@@ -260,6 +262,7 @@ mod tests {
     fn tool_output_trimming_keeps_metadata_and_success_shape() {
         let metadata = HashMap::from([("tool_call_id".to_string(), "call-1".to_string())]);
         let mut input = vec![ModelContextItem::from(Message {
+            presentation: Default::default(),
             role: MessageRole::Tool,
             content: MessageContent::text("x".repeat(100)),
             reasoning_content: None,

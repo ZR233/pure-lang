@@ -300,14 +300,14 @@ mod tests {
     use tokio::sync::Mutex;
 
     use super::*;
-    use crate::StudioMode;
+    use crate::ThreadModeId;
     use crate::studio::StudioStore;
 
     async fn store_with_session() -> (StudioStore, String) {
         let store = StudioStore::open_memory().await.unwrap();
         let project = store.upsert_project("C:/work/interactions").await.unwrap();
         let session = store
-            .create_thread(&project.id, "Interaction test", StudioMode::simple())
+            .create_thread(&project.id, "Interaction test", ThreadModeId::simple())
             .await
             .unwrap();
         (store, session.id)
@@ -365,6 +365,7 @@ mod tests {
                 item_id: Some("tool-1".to_string()),
                 tool_id: Some("tool-1".to_string()),
                 agent_path: Some("/root/child".to_string()),
+                purpose: pl_protocol::InteractionPurpose::General,
             },
             Vec::new(),
             1,
@@ -380,6 +381,7 @@ mod tests {
                 item_id: Some(id.to_string()),
                 tool_id: Some(id.to_string()),
                 agent_path: None,
+                purpose: pl_protocol::InteractionPurpose::General,
             },
             pl_protocol::ToolApprovalRequest {
                 name: "exec".to_string(),

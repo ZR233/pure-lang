@@ -15,7 +15,7 @@ import 'updater.dart';
 part 'response.freezed.dart';
 
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `ProviderUsagesResponse`, `SkillsResponse`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 class ArchiveThreadResult {
   final String archivedRootId;
@@ -756,7 +756,6 @@ class BridgeSkillsStateData {
   final String configFingerprint;
   final BigInt catalogRevision;
   final List<SkillSummaryDto> skills;
-  final List<ModeSummaryDto> modes;
   final List<String> warnings;
   final bool complete;
 
@@ -764,7 +763,6 @@ class BridgeSkillsStateData {
     required this.configFingerprint,
     required this.catalogRevision,
     required this.skills,
-    required this.modes,
     required this.warnings,
     required this.complete,
   });
@@ -774,7 +772,6 @@ class BridgeSkillsStateData {
       configFingerprint.hashCode ^
       catalogRevision.hashCode ^
       skills.hashCode ^
-      modes.hashCode ^
       warnings.hashCode ^
       complete.hashCode;
 
@@ -786,7 +783,6 @@ class BridgeSkillsStateData {
           configFingerprint == other.configFingerprint &&
           catalogRevision == other.catalogRevision &&
           skills == other.skills &&
-          modes == other.modes &&
           warnings == other.warnings &&
           complete == other.complete;
 }
@@ -842,6 +838,7 @@ class BridgeStudioStateSnapshot {
   final BridgeMcpStateSnapshot mcp;
   final BridgeLspStateSnapshot lsp;
   final List<BridgeSkillsStateSnapshot> skillsByProject;
+  final BridgeThreadModeCatalogSnapshot threadModeCatalog;
   final BridgeProviderUsageStateSnapshot providerUsage;
   final BridgeModelPerformanceSnapshot modelPerformance;
   final BridgeUpdaterStateSnapshot updater;
@@ -857,6 +854,7 @@ class BridgeStudioStateSnapshot {
     required this.mcp,
     required this.lsp,
     required this.skillsByProject,
+    required this.threadModeCatalog,
     required this.providerUsage,
     required this.modelPerformance,
     required this.updater,
@@ -874,6 +872,7 @@ class BridgeStudioStateSnapshot {
       mcp.hashCode ^
       lsp.hashCode ^
       skillsByProject.hashCode ^
+      threadModeCatalog.hashCode ^
       providerUsage.hashCode ^
       modelPerformance.hashCode ^
       updater.hashCode ^
@@ -893,6 +892,7 @@ class BridgeStudioStateSnapshot {
           mcp == other.mcp &&
           lsp == other.lsp &&
           skillsByProject == other.skillsByProject &&
+          threadModeCatalog == other.threadModeCatalog &&
           providerUsage == other.providerUsage &&
           modelPerformance == other.modelPerformance &&
           updater == other.updater &&
@@ -951,6 +951,62 @@ class BridgeThreadDirectoryPageData {
           runtimeType == other.runtimeType &&
           threads == other.threads &&
           nextCursor == other.nextCursor;
+}
+
+class BridgeThreadModeCatalogSnapshot {
+  final BigInt revision;
+  final List<BridgeThreadModeDescriptor> modes;
+
+  const BridgeThreadModeCatalogSnapshot({
+    required this.revision,
+    required this.modes,
+  });
+
+  @override
+  int get hashCode => revision.hashCode ^ modes.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeThreadModeCatalogSnapshot &&
+          runtimeType == other.runtimeType &&
+          revision == other.revision &&
+          modes == other.modes;
+}
+
+class BridgeThreadModeDescriptor {
+  final String id;
+  final String displayName;
+  final String description;
+  final int order;
+  final bool hasWorkflow;
+
+  const BridgeThreadModeDescriptor({
+    required this.id,
+    required this.displayName,
+    required this.description,
+    required this.order,
+    required this.hasWorkflow,
+  });
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      displayName.hashCode ^
+      description.hashCode ^
+      order.hashCode ^
+      hasWorkflow.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeThreadModeDescriptor &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          displayName == other.displayName &&
+          description == other.description &&
+          order == other.order &&
+          hasWorkflow == other.hasWorkflow;
 }
 
 class DeepSeekBalanceDto {
@@ -1025,45 +1081,6 @@ class InterruptTurnResponse {
           threadId == other.threadId &&
           turnId == other.turnId &&
           interrupted == other.interrupted;
-}
-
-class ModeSummaryDto {
-  final String id;
-  final String displayName;
-  final String description;
-  final int order;
-  final String source;
-  final String providerId;
-
-  const ModeSummaryDto({
-    required this.id,
-    required this.displayName,
-    required this.description,
-    required this.order,
-    required this.source,
-    required this.providerId,
-  });
-
-  @override
-  int get hashCode =>
-      id.hashCode ^
-      displayName.hashCode ^
-      description.hashCode ^
-      order.hashCode ^
-      source.hashCode ^
-      providerId.hashCode;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is ModeSummaryDto &&
-          runtimeType == other.runtimeType &&
-          id == other.id &&
-          displayName == other.displayName &&
-          description == other.description &&
-          order == other.order &&
-          source == other.source &&
-          providerId == other.providerId;
 }
 
 class ProjectDto {

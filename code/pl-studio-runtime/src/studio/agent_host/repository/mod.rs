@@ -537,7 +537,7 @@ async fn upsert_input(
         content: Set(input.payload.message.clone()),
         attachments_json: Set(serde_json::to_string(&input.payload.attachments)?),
         metadata_json: Set(serialize_input_metadata(input)?),
-        presentation: Set(presentation_label(input.payload.presentation.clone()).to_string()),
+        presentation: Set(presentation_label(input.payload.presentation).to_string()),
         state_json: Set(serde_json::to_string(&input.delivery_state)?),
         queue_ordinal: Set(ordinal),
         queued_at: Set(existing

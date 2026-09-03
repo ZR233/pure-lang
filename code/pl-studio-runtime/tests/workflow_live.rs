@@ -1,10 +1,10 @@
 //! 统一 workflow 的真实 provider 验收。
 //!
 //! 该测试只在显式 `--features live-tests -- --ignored` 时运行。它使用隔离的
-//! Studio home 和没有 `.git` 的临时项目，验证模式 Skill、通用交互、工作流终态
+//! Studio home 和没有 `.git` 的临时项目，验证内置 Thread Mode Prompt、通用交互、工作流终态
 //! 以及关机后重新打开 Thread 的持久化事实。
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -16,8 +16,8 @@ use pl_protocol::{
 };
 use pl_studio_runtime::{
     ConfigPaths, ConfigStore, STUDIO_CONFIG_SCHEMA_VERSION, StudioConfig, StudioHostKind,
-    StudioMode, StudioRuntime, StudioRuntimeOptions, StudioSubmitPromptOptions,
-    StudioSubmitPromptRequest, TurnState,
+    StudioRuntime, StudioRuntimeOptions, StudioSubmitPromptOptions, StudioSubmitPromptRequest,
+    ThreadModeId, TurnState,
 };
 
 const LIVE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
@@ -125,7 +125,7 @@ async fn run_live_mode(
     let title = format!("{label} workflow live acceptance");
     let thread = runtime.create_thread(&project.id, &title).await?;
     runtime
-        .set_thread_mode(&thread.id, StudioMode::new(mode_id)?)
+        .set_thread_mode(&thread.id, ThreadModeId::new(mode_id)?)
         .await?;
     let submitted = runtime
         .submit_prompt(StudioSubmitPromptRequest {
@@ -152,30 +152,11 @@ async fn run_live_mode(
             .as_ref()
             .context("workflow run is missing")?;
         ensure!(
-            run.current_stage_id == "completed",
+            run.current_state_id == "completed",
             "workflow ended at `{}`",
-            run.current_stage_id
+            run.current_state_id
         );
-        let stages = run
-            .history_tail
-            .iter()
-            .map(|transition| transition.from_stage_id.as_str())
-            .chain(std::iter::once(run.current_stage_id.as_str()))
-            .collect::<Vec<_>>();
-        for expected in [
-            "planning",
-            "awaiting_confirmation",
-            "editing_documents",
-            "working",
-            "integrating",
-            "reviewing",
-            "completed",
-        ] {
-            ensure!(
-                stages.contains(&expected),
-                "workflow history is missing stage `{expected}`: {stages:?}"
-            );
-        }
+        validate_workflow_tool_trace(&runtime, &thread.id).await?;
         validate_fixture(&workspace).await?;
 
         runtime.shutdown_runtime().await?;
@@ -335,7 +316,7 @@ async fn wait_for_terminal_workflow(runtime: &StudioRuntime, thread_id: &str) ->
             .and_then(|workflow| workflow.current_run.as_ref())
             .is_some_and(|run| {
                 run.lifecycle == pl_protocol::WorkflowRunLifecycle::Terminal
-                    && run.current_stage_id == "completed"
+                    && run.current_state_id == "completed"
             })
         {
             return Ok(());
@@ -343,6 +324,92 @@ async fn wait_for_terminal_workflow(runtime: &StudioRuntime, thread_id: &str) ->
         tokio::time::sleep(POLL_INTERVAL).await;
     }
     bail!("workflow live acceptance exceeded 30 minutes")
+}
+
+async fn validate_workflow_tool_trace(runtime: &StudioRuntime, thread_id: &str) -> Result<()> {
+    let page = runtime.list_thread_turns(thread_id, None, 100).await?;
+    let mut tool_names = BTreeSet::new();
+    let mut plan_tool_names = BTreeSet::new();
+    let mut visited_states = BTreeSet::from(["planning".to_string()]);
+    for history in &page.turns {
+        for tool in history
+            .items
+            .iter()
+            .filter_map(pl_protocol::ThreadItem::tool)
+        {
+            let name = tool.invocation().name();
+            ensure!(
+                name != "workflow_state",
+                "legacy workflow_state tool was called"
+            );
+            ensure!(name != "submit_plan", "legacy submit_plan tool was called");
+            if name.starts_with("plan_") {
+                plan_tool_names.insert(name.to_string());
+                let arguments = tool.invocation().arguments();
+                ensure!(
+                    !arguments.contains("definition")
+                        && !arguments.contains("compile")
+                        && !arguments.contains("supersede"),
+                    "Plan tool accepted a forbidden graph-authoring argument: {arguments}"
+                );
+            }
+            if !name.starts_with("workflow_") {
+                continue;
+            }
+            tool_names.insert(name.to_string());
+            let arguments = tool.invocation().arguments();
+            ensure!(
+                !arguments.contains("definition")
+                    && !arguments.contains("compile")
+                    && !arguments.contains("supersede"),
+                "workflow tool accepted a forbidden graph-authoring argument: {arguments}"
+            );
+            if name == "workflow_transition"
+                && matches!(tool.state(), pl_protocol::ThreadToolState::Succeeded(_))
+            {
+                let arguments = serde_json::from_str::<serde_json::Value>(arguments)
+                    .context("workflow_transition arguments are not valid JSON")?;
+                let target = arguments
+                    .get("targetStateId")
+                    .and_then(serde_json::Value::as_str)
+                    .context("workflow_transition omitted targetStateId")?;
+                visited_states.insert(target.to_string());
+            }
+        }
+    }
+    ensure!(
+        tool_names.contains("workflow_transition"),
+        "live provider never called workflow_transition: {tool_names:?}"
+    );
+    ensure!(
+        tool_names.iter().any(|name| {
+            matches!(
+                name.as_str(),
+                "workflow_current" | "workflow_next" | "workflow_graph" | "workflow_history"
+            )
+        }),
+        "live provider never called a split workflow query tool: {tool_names:?}"
+    );
+    for expected in [
+        "planning",
+        "editing_documents",
+        "working",
+        "integrating",
+        "reviewing",
+        "completed",
+    ] {
+        ensure!(
+            visited_states.contains(expected),
+            "workflow transition trace is missing state `{expected}`: {visited_states:?}"
+        );
+    }
+    for required in ["plan_current", "plan_next", "plan_history", "plan_submit"] {
+        ensure!(
+            plan_tool_names.contains(required),
+            "live provider never called required Plan tool `{required}`: {plan_tool_names:?}"
+        );
+    }
+    Ok(())
 }
 
 async fn resolve_interaction(

@@ -339,6 +339,7 @@ impl TurnEngine {
             "riskSummary": permission::permission_risk_summary(&request.name),
         });
         let message = Message {
+            presentation: Default::default(),
             role: MessageRole::User,
             content: MessageContent::text(
                 serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string()),

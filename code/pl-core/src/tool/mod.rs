@@ -19,7 +19,6 @@ mod programmatic;
 mod session_note;
 mod shell;
 mod skill;
-mod submit_plan;
 mod text_document;
 mod text_escape;
 mod todo;
@@ -27,7 +26,6 @@ mod tool_result;
 mod truncation;
 mod view_image;
 mod web_search;
-mod workflow_state;
 mod workspace_file;
 
 pub use ask_user::*;
@@ -51,13 +49,11 @@ pub use programmatic::*;
 pub use session_note::*;
 pub use shell::*;
 pub use skill::*;
-pub use submit_plan::*;
 pub use todo::*;
 pub use tool_result::*;
 pub use truncation::*;
 pub use view_image::*;
 pub use web_search::*;
-pub use workflow_state::*;
 pub use workspace_file::*;
 
 pub(crate) fn estimate_tool_schema_tokens(schemas: &[pl_protocol::ToolSpec]) -> u64 {

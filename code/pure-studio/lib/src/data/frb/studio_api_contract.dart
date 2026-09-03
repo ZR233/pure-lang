@@ -33,7 +33,7 @@ abstract class StudioApi {
   Future<StartNewThreadResult> startNewThread(
     String projectId,
     StudioPromptInput input,
-    StudioMode mode,
+    ThreadModeId mode,
   );
   Future<StudioThread> renameThread(String threadId, String title);
   Future<ArchiveThreadResult> archiveThread(String threadId);
@@ -48,7 +48,7 @@ abstract class StudioApi {
   });
   Future<void> setThreadMode({
     required String threadId,
-    required StudioMode mode,
+    required ThreadModeId mode,
   });
   Stream<Object> subscribeProductEvents();
   Stream<ThreadStreamFrame> subscribeThread(String threadId);
@@ -502,7 +502,7 @@ class FrbStudioApi implements StudioApi {
   Future<StartNewThreadResult> startNewThread(
     String projectId,
     StudioPromptInput input,
-    StudioMode mode,
+    ThreadModeId mode,
   ) async {
     await _ensureReady();
     final response = await _bridgeCall(
@@ -583,7 +583,7 @@ class FrbStudioApi implements StudioApi {
   @override
   Future<void> setThreadMode({
     required String threadId,
-    required StudioMode mode,
+    required ThreadModeId mode,
   }) async {
     await _ensureReady();
     await _bridgeCall(

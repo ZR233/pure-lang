@@ -243,10 +243,7 @@ fn list_local_skills(
     let mut observation = SkillProviderObservation::empty();
     let mut local_order = 0;
     for (root, source_kind, rank) in sources {
-        if source_kind == SkillSourceKind::System
-            && !request.config.system.enabled
-            && provider_id.as_str() != super::BUILTIN_MODE_PROVIDER_ID
-        {
+        if source_kind == SkillSourceKind::System && !request.config.system.enabled {
             continue;
         }
         if request.cancellation.is_cancelled() {
@@ -262,8 +259,6 @@ fn list_local_skills(
             match metadata_from_file(&skill_file, &root, source_kind) {
                 Ok(mut metadata) => {
                     if disabled.contains(&metadata.name.to_ascii_lowercase())
-                        && !(provider_id.as_str() == super::BUILTIN_MODE_PROVIDER_ID
-                            && super::is_builtin_mode_id(&metadata.name))
                         || !platform_matches(&metadata.platforms)
                     {
                         continue;

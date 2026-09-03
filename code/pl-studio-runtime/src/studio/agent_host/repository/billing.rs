@@ -248,7 +248,7 @@ mod tests {
     use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel, TransactionTrait};
 
     use super::*;
-    use crate::StudioMode;
+    use crate::ThreadModeId;
 
     #[tokio::test]
     async fn inference_billing_is_idempotent_and_conflicts_roll_back_the_transaction() {
@@ -258,7 +258,7 @@ mod tests {
             .await
             .unwrap();
         let thread = store
-            .create_thread(&project.id, "billing", StudioMode::simple())
+            .create_thread(&project.id, "billing", ThreadModeId::simple())
             .await
             .unwrap();
         let turn_id = "turn-billing";

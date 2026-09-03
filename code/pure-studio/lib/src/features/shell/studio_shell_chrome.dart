@@ -10,7 +10,6 @@ class _Header extends StatelessWidget {
     final thread = state.selectedRootThread;
     final project = state.selectedProject;
     final projectLabel = project?.name.trim() ?? '';
-    final workflowStage = state.runtime.workflow?.currentRun?.currentStageId;
     return SizedBox(
       height: 78,
       child: Padding(
@@ -47,25 +46,6 @@ class _Header extends StatelessWidget {
                             style: Theme.of(context).textTheme.bodySmall
                                 ?.copyWith(color: context.studioInkSoft),
                           ),
-                        ),
-                      ),
-                    if (projectLabel.isNotEmpty && workflowStage != null)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 7),
-                        child: Text(
-                          '·',
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(color: context.studioInkSoft),
-                        ),
-                      ),
-                    if (workflowStage != null)
-                      Text(
-                        workflowStage,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: StudioColors.clayDeep,
-                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     const Spacer(),

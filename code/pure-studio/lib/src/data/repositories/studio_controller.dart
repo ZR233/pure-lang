@@ -142,7 +142,7 @@ class StudioController extends _$StudioController {
     await _subscribeThread(null);
   }
 
-  void setNewThreadMode(StudioMode mode) {
+  void setNewThreadMode(ThreadModeId mode) {
     final current = state.value;
     final projectId = current?.selectedProjectId;
     if (current == null ||
@@ -834,7 +834,7 @@ class StudioController extends _$StudioController {
     );
   }
 
-  Future<void> setThreadMode(StudioMode mode) async {
+  Future<void> setThreadMode(ThreadModeId mode) async {
     final current = state.value;
     final thread = current?.selectedThread;
     if (current == null ||
@@ -1334,6 +1334,7 @@ StudioState _mergeProductSnapshots(StudioState current, StudioState incoming) {
   next = applyRecoveryState(next, incoming.recoveryState);
   next = applyMcpState(next, incoming.mcpState);
   next = applyLspState(next, incoming.lspState);
+  next = applyThreadModeCatalog(next, incoming.threadModeCatalog);
   next = applyProviderUsageState(next, incoming.providerUsageState);
   next = applyUpdaterState(next, incoming.updaterState);
   for (final snapshot in incoming.skillsByProject.values) {

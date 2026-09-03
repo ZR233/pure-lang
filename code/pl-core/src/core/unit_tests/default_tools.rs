@@ -36,7 +36,16 @@ async fn default_tools_register_shared_tools_without_product_collaboration() {
     assert!(!has_tool(&core, "send_input"));
     assert!(!has_tool(&core, "close_agent"));
     assert!(has_tool(&core, "request_user_input"));
-    assert!(has_tool(&core, "submit_plan"));
+    for name in [
+        "plan_current",
+        "plan_next",
+        "plan_history",
+        "plan_submit",
+        "plan_restart",
+    ] {
+        assert!(has_tool(&core, name), "missing Plan tool {name}");
+    }
+    assert!(!has_tool(&core, "submit_plan"));
     assert!(has_tool(&core, "update_todo_list"));
     assert!(has_tool(&core, "read_session_note"));
     assert!(has_tool(&core, "search_session_note"));
@@ -88,7 +97,11 @@ async fn default_tool_builder_exposes_only_framework_independent_names() {
         "list_files",
         "apply_patch",
         "request_user_input",
-        "submit_plan",
+        "plan_current",
+        "plan_next",
+        "plan_history",
+        "plan_submit",
+        "plan_restart",
         "update_todo_list",
         "read_session_note",
         "search_session_note",
@@ -151,7 +164,10 @@ async fn builtin_tool_installer_can_disable_exec() {
     assert!(!has_tool(&core, "spawn_agent"));
     assert!(has_tool(&core, "read_file"));
     assert!(has_tool(&core, "request_user_input"));
-    assert!(has_tool(&core, "submit_plan"));
+    assert!(has_tool(&core, "plan_current"));
+    assert!(has_tool(&core, "plan_submit"));
+    assert!(has_tool(&core, "plan_restart"));
+    assert!(!has_tool(&core, "submit_plan"));
     assert!(!has_tool(&core, "plan_exit"));
 }
 
@@ -366,6 +382,9 @@ async fn enabled_tools_snapshot_records_registered_tools() {
     assert_eq!(event.turn_id, "turn-1");
     assert!(event.tools.contains(&"exec".to_string()));
     assert!(event.tools.contains(&"read_file".to_string()));
+    assert!(event.tools.contains(&"plan_current".to_string()));
+    assert!(event.tools.contains(&"plan_submit".to_string()));
+    assert!(!event.tools.contains(&"submit_plan".to_string()));
     assert!(!event.tools.contains(&"plan_exit".to_string()));
     assert!(event.tools.contains(&"write_file".to_string()));
     assert!(event.tools.contains(&"apply_patch".to_string()));

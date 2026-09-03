@@ -99,7 +99,6 @@ fn candidate(provider_id: SkillProviderId, description: &str, rank: u16) -> Skil
             resource_base: SkillResourceBase::Opaque {
                 description: "test".to_string(),
             },
-            mode: None,
         },
         locator: "opaque".to_string(),
         revision: "1".to_string(),
@@ -125,12 +124,6 @@ fn write_skill(root: &Path, name: &str, policy: &str, body: &str) {
         format!("---\nname: {name}\ndescription: {name}\n{policy}---\n{body}\n"),
     )
     .unwrap();
-}
-
-fn mode_policy(display_name: &str, order: i32) -> String {
-    format!(
-        "disable-model-invocation: true\nuser-invocable: false\nmode:\n  display-name: {display_name}\n  order: {order}\n"
-    )
 }
 
 #[test]
@@ -164,114 +157,6 @@ async fn provider_registration_order_breaks_equal_rank_ties() {
     let catalog = registry.discover(request(root.path())).await.unwrap();
 
     assert_eq!(catalog.snapshot().skills[0].description, "winner");
-}
-
-#[tokio::test]
-async fn protected_modes_only_accept_the_builtin_provider_and_modes_are_not_ordinary_skills() {
-    let trusted = tempfile::tempdir().unwrap();
-    let untrusted = tempfile::tempdir().unwrap();
-    let workspace = tempfile::tempdir().unwrap();
-    write_skill(
-        trusted.path(),
-        "mode.task",
-        &mode_policy("Task", 20),
-        "trusted task mode",
-    );
-    write_skill(
-        untrusted.path(),
-        "mode.task",
-        &mode_policy("Fake", 1),
-        "untrusted task mode",
-    );
-    let registry = SkillRegistry::new();
-    let _untrusted = registry
-        .register(Arc::new(
-            FileSystemSkillProvider::from_directories(
-                "custom",
-                vec![SkillDirectorySource::new(
-                    untrusted.path().join("skills"),
-                    SkillSourceKind::User,
-                )],
-            )
-            .unwrap(),
-        ))
-        .unwrap();
-    let _trusted = registry
-        .register(Arc::new(
-            FileSystemSkillProvider::from_directories(
-                BUILTIN_MODE_PROVIDER_ID,
-                vec![SkillDirectorySource::new(
-                    trusted.path().join("skills"),
-                    SkillSourceKind::System,
-                )],
-            )
-            .unwrap(),
-        ))
-        .unwrap();
-
-    let catalog = registry.discover(request(workspace.path())).await.unwrap();
-
-    assert!(catalog.snapshot().skills.is_empty());
-    assert_eq!(catalog.snapshot().modes.len(), 1);
-    assert_eq!(catalog.snapshot().modes[0].name, "mode.task");
-    assert_eq!(
-        catalog.snapshot().modes[0]
-            .mode
-            .as_ref()
-            .unwrap()
-            .display_name,
-        "Task"
-    );
-    assert!(catalog.find("mode.task").is_none());
-    assert!(catalog.find_mode("mode.task").is_some());
-    assert!(
-        catalog
-            .snapshot()
-            .warnings
-            .iter()
-            .any(|warning| { warning.contains("ignored protected Mode Skill `mode.task`") })
-    );
-}
-
-#[tokio::test]
-async fn custom_mode_uses_normal_source_precedence() {
-    let first = tempfile::tempdir().unwrap();
-    let second = tempfile::tempdir().unwrap();
-    let workspace = tempfile::tempdir().unwrap();
-    write_skill(
-        first.path(),
-        "mode.release",
-        &mode_policy("Release", 30),
-        "first",
-    );
-    write_skill(
-        second.path(),
-        "mode.release",
-        &mode_policy("Other", 40),
-        "second",
-    );
-    let provider = FileSystemSkillProvider::from_directories(
-        "custom-modes",
-        vec![
-            SkillDirectorySource::new(first.path().join("skills"), SkillSourceKind::Project),
-            SkillDirectorySource::new(second.path().join("skills"), SkillSourceKind::User),
-        ],
-    )
-    .unwrap();
-    let registry = SkillRegistry::new();
-    let _guard = registry.register(Arc::new(provider)).unwrap();
-
-    let catalog = registry.discover(request(workspace.path())).await.unwrap();
-
-    assert_eq!(catalog.snapshot().modes.len(), 1);
-    assert_eq!(
-        catalog.snapshot().modes[0]
-            .mode
-            .as_ref()
-            .unwrap()
-            .display_name,
-        "Release"
-    );
 }
 
 #[tokio::test]

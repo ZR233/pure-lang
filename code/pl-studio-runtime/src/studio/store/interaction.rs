@@ -24,6 +24,8 @@ impl StudioStore {
     pub async fn upsert_interaction(&self, interaction: &InteractionRequest) -> Result<()> {
         use entities::interaction;
         let state_json = serde_json::to_string(&interaction.content)?;
+        let purpose_json = serde_json::to_string(&interaction.scope.purpose)?;
+        let continuation_json = serde_json::to_string(&interaction.continuation)?;
         if let Some(existing) = interaction::Entity::find_by_id(interaction.interaction_id.clone())
             .one(&self.db)
             .await?
@@ -35,6 +37,8 @@ impl StudioStore {
             active.tool_id = Set(interaction.scope.tool_id.clone());
             active.agent_path = Set(interaction.scope.agent_path.clone());
             active.revision = Set(i64::try_from(interaction.revision)?);
+            active.purpose_json = Set(purpose_json);
+            active.continuation_json = Set(continuation_json);
             active.state_json = Set(state_json);
             active.updated_at = Set(interaction.updated_at);
             active.update(&self.db).await?;
@@ -47,6 +51,8 @@ impl StudioStore {
                 tool_id: Set(interaction.scope.tool_id.clone()),
                 agent_path: Set(interaction.scope.agent_path.clone()),
                 revision: Set(i64::try_from(interaction.revision)?),
+                purpose_json: Set(purpose_json),
+                continuation_json: Set(continuation_json),
                 state_json: Set(state_json),
                 created_at: Set(interaction.created_at),
                 updated_at: Set(interaction.updated_at),
@@ -239,7 +245,7 @@ impl StudioStore {
 
 #[cfg(test)]
 mod tests {
-    use crate::{CancelInteraction, InteractionCommand, InteractionScope, StudioMode};
+    use crate::{CancelInteraction, InteractionCommand, InteractionScope, ThreadModeId};
 
     use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
 
@@ -249,7 +255,7 @@ mod tests {
         let store = StudioStore::open_memory().await.unwrap();
         let project = store.upsert_project(path).await.unwrap();
         let session = store
-            .create_thread(&project.id, "Restart interaction", StudioMode::task())
+            .create_thread(&project.id, "Restart interaction", ThreadModeId::task())
             .await
             .unwrap();
         (store, session.id)
@@ -269,6 +275,7 @@ mod tests {
                 item_id: Some(interaction_id.to_string()),
                 tool_id: Some(interaction_id.to_string()),
                 agent_path: None,
+                purpose: pl_protocol::InteractionPurpose::General,
             },
             Vec::new(),
             updated_at,
@@ -344,6 +351,69 @@ mod tests {
                 .await
                 .unwrap()
                 .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn interaction_store_preserves_typed_plan_purpose() {
+        let (store, session_id) = store_with_session("C:/work/plan-purpose").await;
+        insert_cancelled_turn(&store, &session_id, "turn-plan", None).await;
+        let interaction = InteractionRequest::user_input(
+            "plan-purpose",
+            InteractionScope {
+                thread_id: session_id,
+                turn_id: "turn-plan".to_string(),
+                item_id: Some("item-plan".to_string()),
+                tool_id: Some("tool-plan".to_string()),
+                agent_path: Some("/root".to_string()),
+                purpose: pl_protocol::InteractionPurpose::AgentSessionPlanConfirmation(
+                    pl_protocol::AgentSessionPlanConfirmationPurpose {
+                        expected_revision: 3,
+                        operation_id: "session/turn/call".to_string(),
+                        argument_hash: "argument-hash".to_string(),
+                        plan_hash: "plan-hash".to_string(),
+                    },
+                ),
+            },
+            Vec::new(),
+            10,
+        );
+
+        store.upsert_interaction(&interaction).await.unwrap();
+        assert_eq!(
+            store.read_interaction("plan-purpose").await.unwrap(),
+            Some(interaction)
+        );
+    }
+
+    #[tokio::test]
+    async fn interaction_store_preserves_generic_continuation_presentation() {
+        let (store, session_id) = store_with_session("C:/work/continuation").await;
+        insert_cancelled_turn(&store, &session_id, "turn-continuation", None).await;
+        let interaction = InteractionRequest::user_input(
+            "generic-continuation",
+            InteractionScope {
+                thread_id: session_id,
+                turn_id: "turn-continuation".to_string(),
+                item_id: None,
+                tool_id: Some("request_user_input".to_string()),
+                agent_path: Some("/root".to_string()),
+                purpose: pl_protocol::InteractionPurpose::General,
+            },
+            Vec::new(),
+            10,
+        )
+        .with_continuation(pl_protocol::InteractionContinuationPreset::resolution(
+            pl_protocol::MessagePresentation::Hidden,
+        ));
+
+        store.upsert_interaction(&interaction).await.unwrap();
+        assert_eq!(
+            store
+                .read_interaction("generic-continuation")
+                .await
+                .unwrap(),
+            Some(interaction)
         );
     }
 }

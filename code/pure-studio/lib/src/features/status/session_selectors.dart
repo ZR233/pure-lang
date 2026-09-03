@@ -17,27 +17,24 @@ class SessionModeSelector extends ConsumerWidget {
     super.key,
   });
 
-  final StudioMode mode;
-  final ValueChanged<StudioMode> onSelected;
+  final ThreadModeId mode;
+  final ValueChanged<ThreadModeId> onSelected;
   final bool enabled;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(studioControllerProvider).value;
-    final projectId = state?.selectedProjectId;
-    final discovered = projectId == null
-        ? const <ModeDescriptorView>[]
-        : state?.skillsByProject[projectId]?.modes ??
-              const <ModeDescriptorView>[];
+    final discovered =
+        state?.threadModeCatalog.modes ?? const <ThreadModeDescriptorView>[];
     final options = discovered.isEmpty
-        ? StudioMode.values
+        ? ThreadModeId.values
         : discovered.map((descriptor) => descriptor.mode).toList();
     if (!options.contains(mode)) options.add(mode);
     final selectedLabel = discovered
         .where((descriptor) => descriptor.id == mode.id)
         .firstOrNull
         ?.displayName;
-    return UpwardPopupMenu<StudioMode>(
+    return UpwardPopupMenu<ThreadModeId>(
       key: StudioDriverKeys.sessionMode,
       tooltip: enabled
           ? context.l10n.statusSessionMode
@@ -47,7 +44,7 @@ class SessionModeSelector extends ConsumerWidget {
       onSelected: onSelected,
       itemBuilder: (context) => [
         for (final option in options)
-          PopupMenuItem<StudioMode>(
+          PopupMenuItem<ThreadModeId>(
             key: StudioDriverKeys.sessionModeOption(option.name),
             value: option,
             child: Row(
@@ -76,7 +73,7 @@ class SessionModeSelector extends ConsumerWidget {
   }
 }
 
-/// 所有根模式统一使用 planner 路由；模式差异由预加载 Skill 提供。
+/// 所有根模式统一使用 planner 路由；模式差异由已注册的 Thread Mode prompt 提供。
 class ModelRoleSelector extends ConsumerWidget {
   const ModelRoleSelector({
     required this.providers,
@@ -87,7 +84,7 @@ class ModelRoleSelector extends ConsumerWidget {
 
   final List<ProviderSettingsView> providers;
   final List<RoleSettingsView> roles;
-  final StudioMode mode;
+  final ThreadModeId mode;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -173,7 +170,7 @@ class ReasoningEffortSelector extends ConsumerWidget {
 
   final List<ProviderSettingsView> providers;
   final List<RoleSettingsView> roles;
-  final StudioMode mode;
+  final ThreadModeId mode;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -235,11 +232,11 @@ class _ControlItem extends StatelessWidget {
   }
 }
 
-IconData sessionModeIcon(StudioMode mode) {
-  return mode == StudioMode.simple ? Icons.flash_on : Icons.route_outlined;
+IconData sessionModeIcon(ThreadModeId mode) {
+  return mode == ThreadModeId.simple ? Icons.flash_on : Icons.route_outlined;
 }
 
-String roleKeyForMode(StudioMode mode) => 'planner';
+String roleKeyForMode(ThreadModeId mode) => 'planner';
 
 RoleSettingsView? roleByKey(List<RoleSettingsView> roles, String key) {
   return roles.where((role) => role.key == key).firstOrNull;
@@ -269,7 +266,7 @@ class ModelOption {
 ModelOption? modelFor(
   List<ProviderSettingsView> providers,
   List<RoleSettingsView> roles,
-  StudioMode mode,
+  ThreadModeId mode,
 ) {
   final role = roleByKey(roles, roleKeyForMode(mode));
   if (role == null) {
@@ -289,7 +286,7 @@ ModelOption? modelFor(
 List<String> effortsFor(
   List<ProviderSettingsView> providers,
   List<RoleSettingsView> roles,
-  StudioMode mode,
+  ThreadModeId mode,
 ) {
   return modelFor(providers, roles, mode)?.reasoningEfforts ?? const [];
 }

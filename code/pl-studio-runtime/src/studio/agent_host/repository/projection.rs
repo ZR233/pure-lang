@@ -188,6 +188,8 @@ async fn persist_interaction(
         tool_id: Set(value.scope.tool_id.clone()),
         agent_path: Set(value.scope.agent_path.clone()),
         revision: Set(i64_from_u64(value.revision)?),
+        purpose_json: Set(serde_json::to_string(&value.scope.purpose)?),
+        continuation_json: Set(serde_json::to_string(&value.continuation)?),
         state_json: Set(serde_json::to_string(&value.content)?),
         created_at: Set(existing
             .as_ref()

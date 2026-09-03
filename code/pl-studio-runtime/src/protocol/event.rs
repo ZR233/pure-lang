@@ -1,4 +1,4 @@
-use pl_protocol::{ObservedResource, Thread};
+use pl_protocol::{ObservedResource, Thread, ThreadModeCatalogSnapshot};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -32,6 +32,7 @@ pub enum StudioProductEventKind {
     McpStateChanged(StudioMcpStateSnapshot),
     LspStateChanged(StudioLspStateSnapshot),
     SkillsStateChanged(StudioSkillsStateSnapshot),
+    ThreadModeCatalogChanged(ThreadModeCatalogSnapshot),
     ProviderUsageStateChanged(ProviderUsageStateSnapshot),
     ModelPerformanceStateChanged(StudioModelPerformanceSnapshot),
     UpdaterStateChanged(StudioUpdateStateSnapshot),
@@ -225,6 +226,7 @@ pub struct StudioStateSnapshot {
     pub mcp: StudioMcpStateSnapshot,
     pub lsp: StudioLspStateSnapshot,
     pub skills_by_project: Vec<StudioSkillsStateSnapshot>,
+    pub thread_mode_catalog: ThreadModeCatalogSnapshot,
     pub provider_usage: ProviderUsageStateSnapshot,
     pub model_performance: StudioModelPerformanceSnapshot,
     pub updater: StudioUpdateStateSnapshot,
