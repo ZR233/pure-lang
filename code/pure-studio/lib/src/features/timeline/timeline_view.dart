@@ -22,6 +22,7 @@ import 'markdown_repair.dart';
 part 'timeline_blocks.dart';
 part 'timeline_image_blocks.dart';
 part 'timeline_markdown_blocks.dart';
+part 'timeline_plan_blocks.dart';
 part 'timeline_agent_blocks.dart';
 part 'timeline_remote_image_blocks.dart';
 part 'timeline_tool_blocks.dart';
@@ -37,6 +38,9 @@ class TimelineView extends StatefulWidget {
     required this.threadId,
     required this.rows,
     required this.turn,
+    this.planConfirmation,
+    this.planExpanded = false,
+    this.onPlanToggle,
     this.onLoadOlder,
     this.isLoadingOlder = false,
     super.key,
@@ -45,6 +49,9 @@ class TimelineView extends StatefulWidget {
   final String? threadId;
   final List<TimelineRow> rows;
   final StudioTurnView? turn;
+  final PlanConfirmationView? planConfirmation;
+  final bool planExpanded;
+  final VoidCallback? onPlanToggle;
   final VoidCallback? onLoadOlder;
   final bool isLoadingOlder;
 
@@ -114,7 +121,11 @@ class _TimelineViewState extends State<TimelineView> {
   @override
   void initState() {
     super.initState();
-    _contentVersion = _timelineContentVersion(widget.rows, widget.turn);
+    _contentVersion = _timelineContentVersion(
+      widget.rows,
+      widget.turn,
+      widget.planConfirmation,
+    );
     _restoreThreadState();
     _controller.addListener(_handleScrollPositionChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -134,7 +145,11 @@ class _TimelineViewState extends State<TimelineView> {
       _lastSelectedText = null;
       _imageLoader.clear();
       _restoreThreadState();
-      _contentVersion = _timelineContentVersion(widget.rows, widget.turn);
+      _contentVersion = _timelineContentVersion(
+        widget.rows,
+        widget.turn,
+        widget.planConfirmation,
+      );
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           _restorePendingPosition();
@@ -149,6 +164,7 @@ class _TimelineViewState extends State<TimelineView> {
     final nextContentVersion = _timelineContentVersion(
       widget.rows,
       widget.turn,
+      widget.planConfirmation,
     );
     if (nextContentVersion == _contentVersion) {
       return;
@@ -249,7 +265,9 @@ class _TimelineViewState extends State<TimelineView> {
   Widget build(BuildContext context) {
     final activeTurn = widget.turn?.state.isBusy == true ? widget.turn : null;
     final currentActivityRow = _currentActivityRow(widget.rows, activeTurn);
-    if (widget.rows.isEmpty && activeTurn == null) {
+    if (widget.rows.isEmpty &&
+        activeTurn == null &&
+        widget.planConfirmation == null) {
       return const _EmptyTimeline();
     }
     final blocks = _timelineDisplayBlocks(
@@ -272,6 +290,13 @@ class _TimelineViewState extends State<TimelineView> {
                 _toggleReasoning(group.id);
               }
             },
+          );
+    final planSummary = widget.planConfirmation == null
+        ? null
+        : TimelinePlanSummaryCard(
+            plan: widget.planConfirmation!,
+            expanded: widget.planExpanded,
+            onPressed: widget.onPlanToggle ?? () {},
           );
     return _ThreadImageCacheScope(
       loader: _imageLoader,
@@ -328,7 +353,10 @@ class _TimelineViewState extends State<TimelineView> {
                         padding: const EdgeInsets.symmetric(horizontal: 24),
                         sliver: SliverFillRemaining(
                           hasScrollBody: false,
-                          child: _TimelineTail(activity: activity),
+                          child: _TimelineTail(
+                            activity: activity,
+                            planSummary: planSummary,
+                          ),
                         ),
                       ),
                     ],
@@ -377,7 +405,7 @@ class _TimelineViewState extends State<TimelineView> {
   }
 
   bool get _showJumpToLatest {
-    return widget.rows.isNotEmpty &&
+    return (widget.rows.isNotEmpty || widget.planConfirmation != null) &&
         (_detachedByUser || _pendingNewEvents > 0 || !_isNearBottom());
   }
 
@@ -600,9 +628,15 @@ class _TimelineScrollSnapshot {
   final int pendingNewEvents;
 }
 
-int _timelineContentVersion(List<TimelineRow> rows, StudioTurnView? turn) {
+int _timelineContentVersion(
+  List<TimelineRow> rows,
+  StudioTurnView? turn,
+  PlanConfirmationView? plan,
+) {
   return Object.hashAll([
     turn,
+    plan?.interactionId,
+    plan?.markdown,
     rows.length,
     for (final row in rows) ...[row.id, row.type, row.renderVersion],
   ]);
@@ -666,6 +700,11 @@ TimelineRow? _currentActivityRow(List<TimelineRow> rows, StudioTurnView? turn) {
 }
 
 bool _hasNewTimelineEvent(TimelineView oldWidget, TimelineView newWidget) {
+  if (newWidget.planConfirmation?.interactionId != null &&
+      newWidget.planConfirmation?.interactionId !=
+          oldWidget.planConfirmation?.interactionId) {
+    return true;
+  }
   final oldIds = oldWidget.rows.map((row) => row.id).toSet();
   if (newWidget.rows.any((row) => !oldIds.contains(row.id))) {
     return true;

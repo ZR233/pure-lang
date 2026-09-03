@@ -543,6 +543,11 @@
   "interactionReasonLabel": "Reason",
   "interactionPlanConfirmTitle": "Confirm this plan?",
   "interactionPlanConfirmSubtitle": "Confirm it, or describe what should change.",
+  "interactionPlanReadyTitle": "Implementation plan ready",
+  "interactionPlanAwaitingConfirmation": "Awaiting confirmation",
+  "interactionPlanViewDetails": "View full plan",
+  "interactionPlanDetailsTitle": "Implementation plan",
+  "interactionPlanComposerPausedHint": "Normal messages are paused to keep plan feedback unambiguous.",
   "interactionPlanConfirmFooterHint": "Confirming starts the document-editing checkpoint in {mode} mode.",
   "@interactionPlanConfirmFooterHint": {
     "placeholders": {
@@ -552,9 +557,9 @@
     }
   },
   "interactionPlanAdjust": "Tell Pure how to adjust",
-  "interactionPlanConfirmAction": "Confirm plan",
+  "interactionPlanConfirmAction": "Confirm and execute",
   "interactionPlanAdjustHint": "Describe what should change...",
-  "interactionPlanAdjustSubmit": "Submit adjustment",
+  "interactionPlanAdjustSubmit": "Submit changes",
   "settingsProvidersTitle": "Providers",
   "settingsProvidersSubtitle": "Model providers, credentials, models, and usage",
   "settingsRefreshUsage": "Refresh usage",

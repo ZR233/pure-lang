@@ -17,9 +17,10 @@ class _EmptyTimeline extends StatelessWidget {
 
 /// Timeline 的收束区域：短内容时把活动块压到视口底部，长内容时自然接在末项后。
 class _TimelineTail extends StatelessWidget {
-  const _TimelineTail({this.activity});
+  const _TimelineTail({this.activity, this.planSummary});
 
   final Widget? activity;
+  final Widget? planSummary;
 
   @override
   Widget build(BuildContext context) {
@@ -33,11 +34,24 @@ class _TimelineTail extends StatelessWidget {
               child: currentActivity,
             ),
           );
+    final currentPlan = planSummary;
+    final alignedPlan = currentPlan == null
+        ? null
+        : Align(
+            alignment: Alignment.centerLeft,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 700),
+              child: currentPlan,
+            ),
+          );
     return Column(
       key: const ValueKey('timeline-tail'),
       mainAxisAlignment: MainAxisAlignment.end,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        ?alignedPlan,
+        if (alignedPlan != null && alignedActivity != null)
+          const SizedBox(height: 12),
         ?alignedActivity,
         const SizedBox(key: ValueKey('timeline-tail-bottom-gap'), height: 14),
       ],
