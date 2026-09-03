@@ -272,9 +272,7 @@ class _ProjectTile extends ConsumerWidget {
         key: StudioDriverKeys.projectRow(project.id),
         child: _CompactSidebarTile(
           selected: selected,
-          tooltip:
-              issue?.detail ??
-              (project.path.isEmpty ? project.name : project.path),
+          tooltip: issue?.detail ?? project.name,
           icon: issue != null
               ? Icons.error_outline
               : selected
@@ -300,6 +298,7 @@ class _ProjectTile extends ConsumerWidget {
           ? Icons.folder
           : Icons.folder_open,
       title: project.name,
+      showTitleTooltip: issue == null,
       subtitle: project.path,
       dense: true,
       iconColor: issue != null
@@ -386,6 +385,7 @@ class _ThreadTile extends ConsumerWidget {
       selected: selected,
       icon: issue == null ? modeIcon : Icons.error_outline,
       title: thread.title,
+      showTitleTooltip: issue == null,
       subtitle: _threadSubtitle(context, thread, modeDisplayName),
       dense: true,
       iconColor: issue != null
@@ -670,6 +670,7 @@ class _SidebarTile extends StatefulWidget {
     required this.icon,
     required this.iconColor,
     required this.title,
+    this.showTitleTooltip = true,
     required this.subtitle,
     required this.dense,
     required this.onTap,
@@ -681,6 +682,11 @@ class _SidebarTile extends StatefulWidget {
   final IconData icon;
   final Color iconColor;
   final String title;
+
+  /// 是否在标题文本上提供完整名称 Tooltip；存在 recovery issue 时由
+  /// 整行诊断 Tooltip 接管，避免名称提示覆盖诊断。
+  final bool showTitleTooltip;
+
   final String subtitle;
   final bool dense;
   final VoidCallback? onTap;
@@ -700,6 +706,15 @@ class _SidebarTileState extends State<_SidebarTile> {
         ? StudioColors.clayDeep
         : context.studioInk;
     final trailingVisible = widget.selected || _hovering;
+    final titleText = Text(
+      widget.title,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: context.text.labelLarge?.copyWith(
+        color: foreground,
+        fontWeight: widget.selected ? FontWeight.w600 : FontWeight.w500,
+      ),
+    );
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: MouseRegion(
@@ -748,17 +763,9 @@ class _SidebarTileState extends State<_SidebarTile> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          widget.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: context.text.labelLarge?.copyWith(
-                            color: foreground,
-                            fontWeight: widget.selected
-                                ? FontWeight.w600
-                                : FontWeight.w500,
-                          ),
-                        ),
+                        widget.showTitleTooltip
+                            ? Tooltip(message: widget.title, child: titleText)
+                            : titleText,
                         if (widget.subtitle.isNotEmpty) ...[
                           const SizedBox(height: 1),
                           Text(

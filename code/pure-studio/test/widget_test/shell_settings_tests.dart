@@ -345,6 +345,294 @@ void registerShellSettingsTests() {
     expect(find.byKey(StudioDriverKeys.startPage), findsOneWidget);
   });
 
+  testWidgets('expanded sidebar titles tooltip full canonical names', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeStudioApi(_sidebarTooltipNameState());
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final projectRow = find.byKey(StudioDriverKeys.projectRow('project-1'));
+    final threadRow = find.byKey(StudioDriverKeys.threadRow('session-1'));
+    final projectTitleTooltip = find.descendant(
+      of: projectRow,
+      matching: find.byTooltip(_sidebarTooltipProjectName),
+    );
+    final threadTitleTooltip = find.descendant(
+      of: threadRow,
+      matching: find.byTooltip(_sidebarTooltipThreadTitle),
+    );
+    expect(projectTitleTooltip, findsOneWidget);
+    expect(threadTitleTooltip, findsOneWidget);
+    // 项目提示是完整 canonical name 而不是路径；路径仍只是展开布局 subtitle。
+    expect(
+      find.descendant(
+        of: projectRow,
+        matching: find.byTooltip(_sidebarTooltipProjectPath),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.descendant(
+        of: projectRow,
+        matching: find.text(_sidebarTooltipProjectPath),
+      ),
+      findsOneWidget,
+    );
+    // Tooltip 只包裹标题文本，不吞掉尾随 close/rename 按钮的区域。
+    expect(
+      find.descendant(
+        of: projectTitleTooltip,
+        matching: find.byKey(const ValueKey('project-close-project-1')),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.descendant(
+        of: threadTitleTooltip,
+        matching: find.byKey(StudioDriverKeys.renameThread('session-1')),
+      ),
+      findsNothing,
+    );
+
+    // 悬停行为验证：以悬停前同名 Text 数量为基线做增量断言，overlay 出现
+    // 意味着 +1，避免侧栏/页眉既有同名 Text 的脆弱计数。
+    final nameCountBefore = find
+        .text(_sidebarTooltipProjectName)
+        .evaluate()
+        .length;
+    final titleCountBefore = find
+        .text(_sidebarTooltipThreadTitle)
+        .evaluate()
+        .length;
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await gesture.addPointer();
+
+    await gesture.moveTo(
+      tester.getCenter(
+        find.descendant(
+          of: projectRow,
+          matching: find.text(_sidebarTooltipProjectName),
+        ),
+      ),
+    );
+    await _pumpTooltipHover(
+      tester,
+      _tooltipHoverWait(tester, projectTitleTooltip),
+    );
+    expect(
+      find.text(_sidebarTooltipProjectName).evaluate().length,
+      nameCountBefore + 1,
+      reason: '悬停项目标题后 overlay 应显示完整 canonical name',
+    );
+
+    await gesture.moveTo(const Offset(1, 1));
+    await tester.pumpAndSettle();
+    expect(
+      find.text(_sidebarTooltipProjectName).evaluate().length,
+      nameCountBefore,
+      reason: '鼠标移开后项目名称 overlay 应消失',
+    );
+
+    await gesture.moveTo(
+      tester.getCenter(
+        find.descendant(
+          of: threadRow,
+          matching: find.text(_sidebarTooltipThreadTitle),
+        ),
+      ),
+    );
+    await _pumpTooltipHover(
+      tester,
+      _tooltipHoverWait(tester, threadTitleTooltip),
+    );
+    expect(
+      find.text(_sidebarTooltipThreadTitle).evaluate().length,
+      titleCountBefore + 1,
+      reason: '悬停会话标题后 overlay 应显示完整 thread title',
+    );
+
+    await gesture.moveTo(const Offset(1, 1));
+    await tester.pumpAndSettle();
+    expect(
+      find.text(_sidebarTooltipThreadTitle).evaluate().length,
+      titleCountBefore,
+      reason: '鼠标移开后会话标题 overlay 应消失',
+    );
+    // 尾随按钮 Tooltip 与标题 Tooltip 互不竞争：悬停 close 按钮显示按钮
+    // 自身的操作提示，而不是项目名称。
+    final closeCountBefore = find.text('Close project').evaluate().length;
+    await gesture.moveTo(
+      tester.getCenter(find.byKey(const ValueKey('project-close-project-1'))),
+    );
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(
+      find.text('Close project').evaluate().length,
+      closeCountBefore + 1,
+      reason: '悬停尾随 close 按钮应显示按钮自身的操作提示',
+    );
+    await gesture.moveTo(const Offset(1, 1));
+    await tester.pumpAndSettle();
+    await gesture.removePointer();
+  });
+
+  testWidgets('compact rail tooltips identify rows by full names', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeStudioApi(_sidebarTooltipNameState());
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final projectRow = find.byKey(StudioDriverKeys.projectRow('project-1'));
+    final threadRow = find.byKey(StudioDriverKeys.threadRow('session-1'));
+    expect(
+      find.descendant(
+        of: projectRow,
+        matching: find.byTooltip(_sidebarTooltipProjectName),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: threadRow,
+        matching: find.byTooltip(_sidebarTooltipThreadTitle),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: projectRow,
+        matching: find.byTooltip(_sidebarTooltipProjectPath),
+      ),
+      findsNothing,
+    );
+
+    // 说明：紧凑 ListView 内 tile 的 hover overlay 在当前 Flutter master
+    // (3.48.0-1.0.pre) 下无法用 WidgetTester mouse gesture 稳定触发：同一
+    // 手势可稳定驱动展开标题/尾随按钮 Tooltip，紧凑 tile 的 tooltip 区域
+    // 可命中且 ensureTooltipVisible 可显示，但悬停始终不出现 overlay。因此
+    // 这里验证 Tooltip 配置（完整 name/title、无 path），悬停显示行为以
+    // 展开布局的 overlay 测试为准。
+  });
+
+  testWidgets('project recovery issue detail overrides the name tooltip', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final state = _sidebarTooltipNameState().copyWith(
+      recoveryState: RecoveryStateSnapshot(
+        revision: 5,
+        values: const [
+          StudioRecoveryIssue(
+            id: 'sidebar-tooltip-recovery-1',
+            scope: RecoveryIssueScope.project,
+            category: RecoveryIssueCategory.repository,
+            availableActions: [RecoveryIssueAction.removeProject],
+            detail: _sidebarTooltipIssueDetail,
+            projectId: 'project-1',
+          ),
+        ],
+      ),
+    );
+    final api = _FakeStudioApi(state);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final projectRow = find.byKey(StudioDriverKeys.projectRow('project-1'));
+    final threadRow = find.byKey(StudioDriverKeys.threadRow('session-1'));
+    expect(
+      find.descendant(
+        of: projectRow,
+        matching: find.byTooltip(_sidebarTooltipIssueDetail),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: projectRow,
+        matching: find.byTooltip(_sidebarTooltipProjectName),
+      ),
+      findsNothing,
+    );
+    // 无 issue 的会话仍保留完整标题提示。
+    expect(
+      find.descendant(
+        of: threadRow,
+        matching: find.byTooltip(_sidebarTooltipThreadTitle),
+      ),
+      findsOneWidget,
+    );
+
+    // 悬停行为验证：issue 行悬停标题区域显示诊断 overlay，而不是名称。
+    final issueDetailCountBefore = find
+        .text(_sidebarTooltipIssueDetail)
+        .evaluate()
+        .length;
+    final nameCountBefore = find
+        .text(_sidebarTooltipProjectName)
+        .evaluate()
+        .length;
+    final issueTooltip = find.descendant(
+      of: projectRow,
+      matching: find.byTooltip(_sidebarTooltipIssueDetail),
+    );
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await gesture.addPointer();
+    await gesture.moveTo(
+      tester.getCenter(
+        find.descendant(
+          of: projectRow,
+          matching: find.text(_sidebarTooltipProjectName),
+        ),
+      ),
+    );
+    await _pumpTooltipHover(tester, _tooltipHoverWait(tester, issueTooltip));
+    expect(
+      find.text(_sidebarTooltipIssueDetail).evaluate().length,
+      issueDetailCountBefore + 1,
+      reason: 'issue 行悬停后 overlay 应显示 issue.detail',
+    );
+    expect(
+      find.text(_sidebarTooltipProjectName).evaluate().length,
+      nameCountBefore,
+      reason: 'issue 行悬停不应出现名称 overlay',
+    );
+
+    await gesture.moveTo(const Offset(1, 1));
+    await tester.pumpAndSettle();
+    await gesture.removePointer();
+  });
+
   testWidgets('selected busy root Thread cannot be archived', (tester) async {
     tester.view.physicalSize = const Size(1280, 800);
     tester.view.devicePixelRatio = 1;
@@ -2673,6 +2961,55 @@ void registerShellSettingsTests() {
       ));
     },
   );
+}
+
+const _sidebarTooltipProjectName =
+    'Very Long Canonical Project Name Used For Sidebar Tooltip Coverage';
+const _sidebarTooltipProjectPath =
+    '/home/dev/opensource/pure-lang-pure/deeper/workspace';
+const _sidebarTooltipThreadTitle =
+    'A Very Long Session Title Used For Sidebar Tooltip Coverage';
+const _sidebarTooltipIssueDetail =
+    'Project recovery diagnostic detail for sidebar tooltip coverage';
+
+StudioState _sidebarTooltipNameState() {
+  return _emptyState().copyWith(
+    projectDirectory: ProjectDirectoryState(
+      values: const [
+        StudioProject(
+          id: 'project-1',
+          name: _sidebarTooltipProjectName,
+          path: _sidebarTooltipProjectPath,
+        ),
+      ],
+    ),
+    threadDirectory: ThreadDirectoryWindow(
+      threads: [
+        StudioThread(
+          id: 'session-1',
+          projectId: 'project-1',
+          title: _sidebarTooltipThreadTitle,
+          mode: ThreadModeId.simple,
+          updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+        ),
+      ],
+    ),
+  );
+}
+
+/// 读取 Tooltip 生效的 hover wait：`RawTooltip.hoverDelay` 已按
+/// widget.waitDuration → TooltipTheme → Duration.zero 完成解析。
+Duration _tooltipHoverWait(WidgetTester tester, Finder tooltip) {
+  return tester.widget<RawTooltip>(tooltip).hoverDelay;
+}
+
+/// 悬停事件后按 wait duration 推进时钟，让 overlay 完成显示调度。
+Future<void> _pumpTooltipHover(WidgetTester tester, Duration wait) async {
+  await tester.pump();
+  if (wait > Duration.zero) {
+    await tester.pump(wait);
+  }
+  await tester.pumpAndSettle();
 }
 
 void _configureSettingsTestView(WidgetTester tester) {

@@ -69,3 +69,7 @@ canonical history，不依赖 GUI 详情或轮询瞬时阶段。
 Thread tile 在悬停或键盘聚焦时提供 rename action，保存对话框提交 typed rename command；空标题和
 超过 80 个字符的输入在 UI 与 runtime 两侧都拒绝。Driver 使用稳定 key 验证临时 title、自动 title、
 手动 title 以及关闭重开后的恢复。
+
+展开侧栏中的项目与 Thread 标题在鼠标悬停时显示 canonical name/title 的完整文本，紧凑侧栏也以
+对应的完整 name/title 标识图标；截断只影响行内渲染，不改变提示内容。项目路径仍只作为展开布局的
+辅助信息；项目或 Thread 存在 recovery issue 时，诊断详情优先于名称提示。
