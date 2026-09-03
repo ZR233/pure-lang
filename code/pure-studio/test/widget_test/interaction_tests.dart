@@ -52,7 +52,7 @@ void registerInteractionTests() {
       find.byKey(StudioDriverKeys.attachmentModality('draft-image-1')),
       findsOneWidget,
     );
-    expect(find.textContaining('视觉'), findsWidgets);
+    expect(find.textContaining('Vision'), findsWidgets);
     expect(api.attachmentAdmissionRequests, hasLength(1));
     expect(
       api.attachmentAdmissionRequests.single.context,

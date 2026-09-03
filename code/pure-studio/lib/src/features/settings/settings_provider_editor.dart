@@ -314,20 +314,22 @@ class ProviderEditor extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         SettingsSectionPanel(
-          title: 'Service capabilities',
+          title: context.l10n.settingsServiceCapabilitiesTitle,
           children: [
             DropdownButtonFormField<String>(
               initialValue: provider.capabilitySource,
-              decoration: const InputDecoration(labelText: 'Capability source'),
+              decoration: InputDecoration(
+                labelText: context.l10n.settingsCapabilitySourceField,
+              ),
               items: [
                 if (preset != null)
-                  const DropdownMenuItem(
+                  DropdownMenuItem(
                     value: 'preset_defaults',
-                    child: Text('Follow preset defaults'),
+                    child: Text(context.l10n.settingsCapabilitySourcePreset),
                   ),
-                const DropdownMenuItem(
+                DropdownMenuItem(
                   value: 'explicit',
-                  child: Text('Explicit override'),
+                  child: Text(context.l10n.settingsCapabilitySourceExplicit),
                 ),
               ],
               onChanged: saving
@@ -362,12 +364,18 @@ class ProviderEditor extends StatelessWidget {
                 children: [
                   DropdownButtonFormField<bool>(
                     initialValue: provider.hostedWebSearch,
-                    decoration: const InputDecoration(
-                      labelText: 'Hosted Web Search',
+                    decoration: InputDecoration(
+                      labelText: context.l10n.settingsHostedWebSearchField,
                     ),
-                    items: const [
-                      DropdownMenuItem(value: false, child: Text('Disabled')),
-                      DropdownMenuItem(value: true, child: Text('Enabled')),
+                    items: [
+                      DropdownMenuItem(
+                        value: false,
+                        child: Text(context.l10n.settingsCapabilityDisabled),
+                      ),
+                      DropdownMenuItem(
+                        value: true,
+                        child: Text(context.l10n.settingsCapabilityEnabled),
+                      ),
                     ],
                     onChanged: saving
                         ? null
@@ -381,8 +389,9 @@ class ProviderEditor extends StatelessWidget {
                   ),
                   DropdownButtonFormField<String>(
                     initialValue: provider.hostedWebSearchDialect,
-                    decoration: const InputDecoration(
-                      labelText: 'Hosted Web Search dialect',
+                    decoration: InputDecoration(
+                      labelText:
+                          context.l10n.settingsHostedWebSearchDialectField,
                     ),
                     items: const [
                       DropdownMenuItem(
@@ -408,13 +417,13 @@ class ProviderEditor extends StatelessWidget {
                   ),
                   DropdownButtonFormField<String>(
                     initialValue: provider.standaloneWebSearch,
-                    decoration: const InputDecoration(
-                      labelText: 'Standalone Web Search',
+                    decoration: InputDecoration(
+                      labelText: context.l10n.settingsStandaloneWebSearchField,
                     ),
                     items: [
-                      const DropdownMenuItem(
+                      DropdownMenuItem(
                         value: '',
-                        child: Text('Disabled'),
+                        child: Text(context.l10n.settingsCapabilityDisabled),
                       ),
                       for (final dialect in standaloneDialects)
                         DropdownMenuItem(value: dialect, child: Text(dialect)),
@@ -428,12 +437,19 @@ class ProviderEditor extends StatelessWidget {
                   ),
                   DropdownButtonFormField<bool>(
                     initialValue: provider.responsesProgrammaticToolCalling,
-                    decoration: const InputDecoration(
-                      labelText: 'Programmatic Tool Calling',
+                    decoration: InputDecoration(
+                      labelText:
+                          context.l10n.settingsProgrammaticToolCallingField,
                     ),
-                    items: const [
-                      DropdownMenuItem(value: false, child: Text('Disabled')),
-                      DropdownMenuItem(value: true, child: Text('Enabled')),
+                    items: [
+                      DropdownMenuItem(
+                        value: false,
+                        child: Text(context.l10n.settingsCapabilityDisabled),
+                      ),
+                      DropdownMenuItem(
+                        value: true,
+                        child: Text(context.l10n.settingsCapabilityEnabled),
+                      ),
                     ],
                     onChanged: saving
                         ? null
@@ -451,19 +467,21 @@ class ProviderEditor extends StatelessWidget {
               )
             else ...[
               SettingsReadonlyField(
-                label: 'Hosted Web Search',
-                value: provider.hostedWebSearch ? 'Enabled' : 'Disabled',
+                label: context.l10n.settingsHostedWebSearchField,
+                value: provider.hostedWebSearch
+                    ? context.l10n.settingsCapabilityEnabled
+                    : context.l10n.settingsCapabilityDisabled,
               ),
               SettingsReadonlyField(
-                label: 'Programmatic Tool Calling',
+                label: context.l10n.settingsProgrammaticToolCallingField,
                 value: provider.responsesProgrammaticToolCalling
-                    ? 'Enabled'
-                    : 'Disabled',
+                    ? context.l10n.settingsCapabilityEnabled
+                    : context.l10n.settingsCapabilityDisabled,
               ),
               SettingsReadonlyField(
-                label: 'Standalone Web Search',
+                label: context.l10n.settingsStandaloneWebSearchField,
                 value: provider.standaloneWebSearch.isEmpty
-                    ? 'Disabled'
+                    ? context.l10n.settingsCapabilityDisabled
                     : provider.standaloneWebSearch,
               ),
             ],
@@ -638,8 +656,8 @@ class _CustomModelEditor extends StatelessWidget {
                   ),
                   DropdownButtonFormField<String>(
                     initialValue: model.defaultConnectionMode,
-                    decoration: const InputDecoration(
-                      labelText: 'Default connection',
+                    decoration: InputDecoration(
+                      labelText: context.l10n.settingsDefaultConnectionField,
                     ),
                     items: [
                       for (final mode in model.supportedConnectionModes)
@@ -664,7 +682,7 @@ class _CustomModelEditor extends StatelessWidget {
               Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  'Supported connections',
+                  context.l10n.settingsSupportedConnectionsLabel,
                   style: Theme.of(context).textTheme.labelLarge,
                 ),
               ),
@@ -712,8 +730,8 @@ class _CustomModelEditor extends StatelessWidget {
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
                   initialValue: model.connectionMode,
-                  decoration: const InputDecoration(
-                    labelText: 'Current connection',
+                  decoration: InputDecoration(
+                    labelText: context.l10n.settingsCurrentConnectionField,
                   ),
                   items: [
                     for (final mode in model.supportedConnectionModes)
@@ -757,10 +775,10 @@ class _ModelReadout extends StatelessWidget {
     final price = providerModelPriceLabel(model);
     final traits = model.capabilities;
     final inputCapabilities = model.inputCapabilities
-        .map((capability) => _modelModalityLabel(capability.modality))
+        .map((capability) => context.modalityLabel(capability.modality))
         .toList();
     final outputCapabilities = model.outputModalities
-        .map(_modelModalityLabel)
+        .map(context.modalityLabel)
         .toList();
     final row = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -813,7 +831,9 @@ class _ModelReadout extends StatelessWidget {
                   ),
                 if (outputCapabilities.isNotEmpty)
                   Text(
-                    '输出：${outputCapabilities.join(' · ')}',
+                    context.l10n.settingsModelOutputCapabilities(
+                      outputCapabilities.join(' · '),
+                    ),
                     style: context.text.labelSmall?.copyWith(
                       color: context.studioInkSoft,
                     ),
@@ -894,14 +914,6 @@ class _ModelReadout extends StatelessWidget {
     );
   }
 }
-
-String _modelModalityLabel(ModelModalityView modality) => switch (modality) {
-  ModelModalityView.text => '文本',
-  ModelModalityView.image => '视觉',
-  ModelModalityView.audio => '音频',
-  ModelModalityView.video => '视频',
-  ModelModalityView.file => '文件',
-};
 
 String _protocolLabel(String protocol) => switch (protocol) {
   'responses' => 'Responses',

@@ -451,7 +451,7 @@ class _PromptComposerPanelState extends State<_PromptComposerPanel> {
       context: context,
       builder: (context) => AlertDialog(
         key: StudioDriverKeys.attachmentUrlDialog,
-        title: const Text('添加 URL'),
+        title: Text(context.l10n.composerAddUrlTitle),
         content: TextField(
           key: StudioDriverKeys.attachmentUrlInput,
           autofocus: true,
@@ -461,12 +461,12 @@ class _PromptComposerPanelState extends State<_PromptComposerPanel> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
+            child: Text(context.l10n.commonCancel),
           ),
           FilledButton(
             key: StudioDriverKeys.attachmentUrlSubmit,
             onPressed: () => Navigator.pop(context, draft.trim()),
-            child: const Text('添加'),
+            child: Text(context.l10n.composerAddUrlConfirm),
           ),
         ],
       ),
@@ -496,7 +496,9 @@ class _AttachmentMenu extends StatelessWidget {
         localCapabilities.isNotEmpty || remoteCapabilities.isNotEmpty;
     return PopupMenuButton<String>(
       key: StudioDriverKeys.attachmentEntry,
-      tooltip: hasAny ? '添加附件' : '当前模型不支持附件',
+      tooltip: hasAny
+          ? context.l10n.composerAttachmentAddTooltip
+          : context.l10n.composerAttachmentUnsupportedTooltip,
       enabled: enabled && hasAny,
       icon: const Icon(Icons.attach_file),
       onSelected: (value) {
@@ -505,19 +507,22 @@ class _AttachmentMenu extends StatelessWidget {
       },
       itemBuilder: (context) => [
         if (localCapabilities.isNotEmpty)
-          const PopupMenuItem(
+          PopupMenuItem(
             key: StudioDriverKeys.attachmentLocal,
             value: 'local',
             child: ListTile(
-              leading: Icon(Icons.folder_open_outlined),
-              title: Text('选择本地文件'),
+              leading: const Icon(Icons.folder_open_outlined),
+              title: Text(context.l10n.composerAttachmentPickLocal),
             ),
           ),
         if (remoteCapabilities.isNotEmpty)
-          const PopupMenuItem(
+          PopupMenuItem(
             key: StudioDriverKeys.attachmentUrl,
             value: 'url',
-            child: ListTile(leading: Icon(Icons.link), title: Text('添加 URL')),
+            child: ListTile(
+              leading: const Icon(Icons.link),
+              title: Text(context.l10n.composerAddUrlTitle),
+            ),
           ),
       ],
     );
@@ -582,7 +587,7 @@ class _AttachmentDraftRail extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                       ),
                       Text(
-                        '${_attachmentModalityLabel(attachment.modality)} · ${_formatBytes(attachment.byteSize)}',
+                        '${context.attachmentModalityLabel(attachment.modality)} · ${_formatBytes(attachment.byteSize)}',
                         key: StudioDriverKeys.attachmentModality(attachment.id),
                         style: Theme.of(context).textTheme.labelSmall,
                       ),
@@ -592,7 +597,7 @@ class _AttachmentDraftRail extends StatelessWidget {
                 IconButton(
                   key: StudioDriverKeys.attachmentRemove(attachment.id),
                   visualDensity: VisualDensity.compact,
-                  tooltip: '移除',
+                  tooltip: context.l10n.composerAttachmentRemoveTooltip,
                   onPressed: enabled ? () => onRemove(attachment.id) : null,
                   icon: const Icon(Icons.close, size: 18),
                 ),
@@ -610,13 +615,6 @@ IconData _attachmentIcon(AttachmentModalityView modality) => switch (modality) {
   AttachmentModalityView.video => Icons.movie_outlined,
   AttachmentModalityView.file => Icons.insert_drive_file_outlined,
 };
-
-String _attachmentModalityLabel(AttachmentModalityView modality) =>
-    switch (modality) {
-      AttachmentModalityView.image => '视觉',
-      AttachmentModalityView.video => '视频',
-      AttachmentModalityView.file => '文件',
-    };
 
 String _formatBytes(int bytes) {
   if (bytes < 1024) return '$bytes B';

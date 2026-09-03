@@ -114,7 +114,7 @@ class _ThreadAttachmentCardState extends ConsumerState<_ThreadAttachmentCard> {
                     overflow: TextOverflow.ellipsis,
                   ),
                   Text(
-                    '${_attachmentModalityLabel(attachment.modality)} · ${_formatBytes(attachment.byteSize)}',
+                    '${context.attachmentModalityLabel(attachment.modality)} · ${_formatBytes(attachment.byteSize)}',
                     style: Theme.of(context).textTheme.labelSmall,
                   ),
                 ],

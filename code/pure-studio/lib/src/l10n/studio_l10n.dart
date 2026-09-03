@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../domain/models/attachment_models.dart';
+import '../domain/models/provider_models.dart';
 import '../domain/models/studio_enums.dart';
 import '../domain/models/turn_models.dart';
 import 'app_localizations.dart';
@@ -29,6 +31,26 @@ extension StudioLocalizationsX on BuildContext {
     return switch (kind) {
       InteractionKind.toolApproval => l10n.statusInteractionToolApproval,
       InteractionKind.userInput => l10n.statusInteractionUserInput,
+    };
+  }
+
+  /// Maps a model modality to its localized display name.
+  String modalityLabel(ModelModalityView modality) {
+    return switch (modality) {
+      ModelModalityView.text => l10n.modalityText,
+      ModelModalityView.image => l10n.modalityImage,
+      ModelModalityView.audio => l10n.modalityAudio,
+      ModelModalityView.video => l10n.modalityVideo,
+      ModelModalityView.file => l10n.modalityFile,
+    };
+  }
+
+  /// Maps an attachment modality to its localized display name.
+  String attachmentModalityLabel(AttachmentModalityView modality) {
+    return switch (modality) {
+      AttachmentModalityView.image => l10n.modalityImage,
+      AttachmentModalityView.video => l10n.modalityVideo,
+      AttachmentModalityView.file => l10n.modalityFile,
     };
   }
 

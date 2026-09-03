@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/theme/studio_tokens.dart';
 import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
+import '../../l10n/studio_l10n.dart';
 import 'settings_common.dart';
 import 'settings_system_tabs.dart';
 
@@ -77,13 +78,13 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
         final profiles = snapshot.data ?? const <AgentProfileView>[];
         return SettingsPane(
           children: [
-            const SettingsHeader(
-              title: 'Agent Profiles',
-              subtitle: '系统 Profile 的用途与工作区模式固定；可统一配置启用状态和模型。Directory 只约束 Pure 内置文件写工具，shell、Git、MCP 可绕过。',
+            SettingsHeader(
+              title: context.l10n.settingsAgentsTitle,
+              subtitle: context.l10n.settingsAgentsSubtitle,
             ),
             if (worktreeIssues.isNotEmpty) ...[
               Text(
-                'Recovery',
+                context.l10n.settingsAgentsRecoveryTitle,
                 style: context.text.titleMedium?.copyWith(
                   color: context.studioInk,
                   fontWeight: FontWeight.w700,
@@ -100,7 +101,7 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
                 key: const ValueKey('agent-profile-add'),
                 onPressed: _editProfile,
                 icon: const Icon(Icons.add),
-                label: const Text('添加用户 Profile'),
+                label: Text(context.l10n.settingsAgentsAddUserProfile),
               ),
             ),
             const SizedBox(height: 16),
@@ -151,7 +152,8 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
                                   key: ValueKey(
                                     'agent-profile-edit-${profile.id}',
                                   ),
-                                  tooltip: '编辑',
+                                  tooltip:
+                                      context.l10n.settingsAgentsEditTooltip,
                                   onPressed: () => _editProfile(profile),
                                   icon: const Icon(Icons.edit_outlined),
                                 ),
@@ -221,12 +223,16 @@ class _WorktreeRecoveryCardState extends ConsumerState<_WorktreeRecoveryCard> {
             const SizedBox(height: 8),
             SelectableText(
               'base ${worktree.baseCommit}\n'
-              'head ${worktree.headCommit ?? 'unavailable'}\n'
+              'head ${worktree.headCommit ?? context.l10n.settingsWorktreeHeadUnavailable}\n'
               '${worktree.path}',
             ),
             if (worktree.changedFiles.isNotEmpty) ...[
               const SizedBox(height: 8),
-              Text('Changed files: ${worktree.changedFiles.join(', ')}'),
+              Text(
+                context.l10n.settingsWorktreeChangedFiles(
+                  worktree.changedFiles.join(', '),
+                ),
+              ),
             ],
             const SizedBox(height: 12),
             FilledButton.tonalIcon(
@@ -238,7 +244,7 @@ class _WorktreeRecoveryCardState extends ConsumerState<_WorktreeRecoveryCard> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.delete_sweep_outlined),
-              label: const Text('显式清理 worktree 与分支'),
+              label: Text(context.l10n.settingsWorktreeCleanup),
             ),
           ],
         ),
@@ -322,9 +328,12 @@ class _AgentProfileDialogState extends State<_AgentProfileDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = context.l10n;
     return AlertDialog(
       title: Text(
-        widget.profile == null ? '添加用户 Agent Profile' : '编辑用户 Agent Profile',
+        widget.profile == null
+            ? l10n.settingsAgentProfileAddTitle
+            : l10n.settingsAgentProfileEditTitle,
       ),
       content: SizedBox(
         width: 560,
@@ -334,15 +343,25 @@ class _AgentProfileDialogState extends State<_AgentProfileDialog> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _field(_id, 'Agent ID', enabled: widget.profile == null),
-                _field(_displayName, '显示名称'),
-                _field(_description, '介绍'),
-                _field(_whenToUse, '适用任务'),
-                _field(_instructions, '系统指令', maxLines: 6),
+                _field(
+                  _id,
+                  l10n.settingsAgentProfileIdField,
+                  enabled: widget.profile == null,
+                ),
+                _field(_displayName, l10n.settingsAgentProfileDisplayNameField),
+                _field(_description, l10n.settingsAgentProfileDescriptionField),
+                _field(_whenToUse, l10n.settingsAgentProfileWhenToUseField),
+                _field(
+                  _instructions,
+                  l10n.settingsAgentProfileInstructionsField,
+                  maxLines: 6,
+                ),
                 DropdownButtonFormField<String>(
                   key: const ValueKey('agent-profile-provider'),
                   initialValue: _providerId.isEmpty ? null : _providerId,
-                  decoration: const InputDecoration(labelText: 'Provider'),
+                  decoration: InputDecoration(
+                    labelText: l10n.settingsAgentProfileProviderField,
+                  ),
                   items: widget.providers
                       .map(
                         (provider) => DropdownMenuItem(
@@ -359,13 +378,16 @@ class _AgentProfileDialogState extends State<_AgentProfileDialog> {
                       _effort = _canonicalEffort(null);
                     });
                   },
-                  validator: (value) => value == null ? '必填' : null,
+                  validator: (value) =>
+                      value == null ? l10n.settingsAgentProfileRequired : null,
                 ),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String>(
                   key: ValueKey('agent-profile-model-$_providerId'),
                   initialValue: _model.isEmpty ? null : _model,
-                  decoration: const InputDecoration(labelText: 'Model'),
+                  decoration: InputDecoration(
+                    labelText: l10n.settingsModelField,
+                  ),
                   items: _modelsFor(_providerId)
                       .map(
                         (model) => DropdownMenuItem(
@@ -385,17 +407,20 @@ class _AgentProfileDialogState extends State<_AgentProfileDialog> {
                       _effort = _canonicalEffort(null);
                     });
                   },
-                  validator: (value) => value == null ? '必填' : null,
+                  validator: (value) =>
+                      value == null ? l10n.settingsAgentProfileRequired : null,
                 ),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<String?>(
                   key: ValueKey('agent-profile-effort-$_providerId-$_model'),
                   initialValue: _effort,
-                  decoration: const InputDecoration(labelText: '思考等级'),
+                  decoration: InputDecoration(
+                    labelText: l10n.statusReasoningEffort,
+                  ),
                   items: [
-                    const DropdownMenuItem<String?>(
+                    DropdownMenuItem<String?>(
                       value: null,
-                      child: Text('使用模型默认值'),
+                      child: Text(l10n.settingsAgentProfileEffortDefault),
                     ),
                     for (final effort in _efforts)
                       DropdownMenuItem<String?>(
@@ -408,7 +433,9 @@ class _AgentProfileDialogState extends State<_AgentProfileDialog> {
                 DropdownButtonFormField<AgentWorkspaceMode>(
                   key: const ValueKey('agent-profile-workspace-mode'),
                   initialValue: _workspaceMode,
-                  decoration: const InputDecoration(labelText: '工作区模式'),
+                  decoration: InputDecoration(
+                    labelText: l10n.settingsAgentProfileWorkspaceModeField,
+                  ),
                   items: AgentWorkspaceMode.values
                       .map(
                         (mode) => DropdownMenuItem(
@@ -422,17 +449,17 @@ class _AgentProfileDialogState extends State<_AgentProfileDialog> {
                   ),
                 ),
                 if (_workspaceMode == AgentWorkspaceMode.directory)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 8, bottom: 10),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8, bottom: 10),
                     child: Text(
-                      'Directory 是合作式文件工具边界，不是 OS 沙箱；shell、Git 和 MCP 可能绕过。',
+                      l10n.settingsAgentProfileWorkspaceDirectoryHint,
                     ),
                   ),
                 SwitchListTile(
                   key: const ValueKey('agent-profile-enabled'),
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('启用'),
-                  subtitle: const Text('禁用后仍保留 TOML，但不会出现在 Agent 工具目录。'),
+                  title: Text(l10n.settingsAgentProfileEnabledTitle),
+                  subtitle: Text(l10n.settingsAgentProfileEnabledSubtitle),
                   value: _enabled,
                   onChanged: (value) => setState(() => _enabled = value),
                 ),
@@ -444,12 +471,12 @@ class _AgentProfileDialogState extends State<_AgentProfileDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('取消'),
+          child: Text(l10n.commonCancel),
         ),
         FilledButton(
           key: const ValueKey('agent-profile-save'),
           onPressed: _save,
-          child: const Text('原子保存 TOML'),
+          child: Text(l10n.settingsAgentProfileSave),
         ),
       ],
     );
@@ -470,7 +497,9 @@ class _AgentProfileDialogState extends State<_AgentProfileDialog> {
         maxLines: maxLines,
         decoration: InputDecoration(labelText: label),
         validator: required
-            ? (value) => value == null || value.trim().isEmpty ? '必填' : null
+            ? (value) => value == null || value.trim().isEmpty
+                  ? context.l10n.settingsAgentProfileRequired
+                  : null
             : null,
       ),
     );

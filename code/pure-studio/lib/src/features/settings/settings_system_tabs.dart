@@ -31,12 +31,12 @@ class AgentRoutesSection extends ConsumerWidget {
       'worktree_executor',
       'reviewer',
     ];
-    final options = _roleModelOptions(providers);
+    final options = _roleModelOptions(context, providers);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          '系统 Agent 模型路由',
+          context.l10n.settingsAgentRoutesTitle,
           style: context.text.titleMedium?.copyWith(
             color: context.studioInk,
             fontWeight: FontWeight.w700,
@@ -122,6 +122,7 @@ class AgentRoutesSection extends ConsumerWidget {
   }
 
   List<_RoleModelOption> _roleModelOptions(
+    BuildContext context,
     List<ProviderSettingsView> providers,
   ) {
     final options = <_RoleModelOption>[];
@@ -140,7 +141,7 @@ class AgentRoutesSection extends ConsumerWidget {
           continue;
         }
         final modalities = model.inputCapabilities
-            .map((capability) => _roleModalityLabel(capability.modality))
+            .map((capability) => context.modalityLabel(capability.modality))
             .join('/');
         options.add(
           _RoleModelOption(
@@ -180,7 +181,7 @@ class AgentRouteControls extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final section = AgentRoutesSection(providers: providers, roles: roles);
-    final options = section._roleModelOptions(providers);
+    final options = section._roleModelOptions(context, providers);
     return section._buildRoleRow(ref, role, options);
   }
 }
@@ -195,14 +196,6 @@ String _roleConnectionLabel(String mode) => switch (mode) {
   'web_socket' => 'WS',
   'http' => 'HTTP',
   _ => mode,
-};
-
-String _roleModalityLabel(ModelModalityView modality) => switch (modality) {
-  ModelModalityView.text => '文本',
-  ModelModalityView.image => '视觉',
-  ModelModalityView.audio => '音频',
-  ModelModalityView.video => '视频',
-  ModelModalityView.file => '文件',
 };
 
 class _RoleSettingsRow extends StatelessWidget {
@@ -656,7 +649,7 @@ class _McpSettingsRow extends StatelessWidget {
               ),
               SettingsInfoPill(
                 icon: Icons.circle_outlined,
-                label: _mcpAvailabilityLabel(server.state),
+                label: _mcpAvailabilityLabel(context, server.state),
               ),
             ],
           ),
@@ -858,7 +851,7 @@ class _LspSettingsRow extends StatelessWidget {
             children: [
               SettingsInfoPill(
                 icon: Icons.circle_outlined,
-                label: _lspAvailabilityLabel(server.state),
+                label: _lspAvailabilityLabel(context, server.state),
               ),
               if (server.state case LspAvailableState(:final diagnosticCount))
                 SettingsInfoPill(
@@ -897,20 +890,23 @@ class _LspSettingsRow extends StatelessWidget {
   }
 }
 
-String _mcpAvailabilityLabel(McpServerState state) => switch (state) {
-  McpDisabledState() => 'disabled',
-  McpMissingCredentialState() => 'missingCredential',
-  McpCheckingState() => 'checking',
-  McpAvailableState() => 'available',
-  McpUnavailableState() => 'unavailable',
-};
+String _mcpAvailabilityLabel(BuildContext context, McpServerState state) =>
+    switch (state) {
+      McpDisabledState() => context.l10n.settingsStateDisabled,
+      McpMissingCredentialState() =>
+        context.l10n.settingsMcpStateMissingCredential,
+      McpCheckingState() => context.l10n.settingsStateChecking,
+      McpAvailableState() => context.l10n.settingsStateAvailable,
+      McpUnavailableState() => context.l10n.settingsStateUnavailable,
+    };
 
-String _lspAvailabilityLabel(LspServerState state) => switch (state) {
-  LspCheckingState() => 'checking',
-  LspAvailableState() => 'available',
-  LspUnavailableState() => 'unavailable',
-  LspDisabledState() => 'disabled',
-};
+String _lspAvailabilityLabel(BuildContext context, LspServerState state) =>
+    switch (state) {
+      LspCheckingState() => context.l10n.settingsStateChecking,
+      LspAvailableState() => context.l10n.settingsStateAvailable,
+      LspUnavailableState() => context.l10n.settingsStateUnavailable,
+      LspDisabledState() => context.l10n.settingsStateDisabled,
+    };
 
 String? _lspInformationalMessage(LspServerState state) => switch (state) {
   LspCheckingState(:final message) ||
@@ -934,7 +930,7 @@ String _lspActivityPillLabel(BuildContext context, LspActivity activity) {
   final label = switch (activity) {
     LspIndexingActivity() => context.l10n.settingsLspActivityIndexing,
     LspBusyActivity() => context.l10n.settingsLspActivityBusy,
-    LspIdleActivity() => 'idle',
+    LspIdleActivity() => context.l10n.settingsLspActivityIdle,
   };
   final percentage = switch (activity) {
     LspBusyActivity(:final percentage) ||

@@ -468,13 +468,6 @@ IconData _attachmentIcon(AttachmentModalityView modality) => switch (modality) {
   AttachmentModalityView.file => Icons.insert_drive_file_outlined,
 };
 
-String _attachmentModalityLabel(AttachmentModalityView modality) =>
-    switch (modality) {
-      AttachmentModalityView.image => '视觉',
-      AttachmentModalityView.video => '视频',
-      AttachmentModalityView.file => '文件',
-    };
-
 String _formatBytes(int bytes) {
   if (bytes < 1024) return '$bytes B';
   if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';

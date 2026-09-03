@@ -1562,6 +1562,180 @@ class AppLocalizationsEn extends AppLocalizations {
   String get timelineLspCapabilitiesTitle => 'LSP capabilities';
 
   @override
+  String get modalityText => 'Text';
+
+  @override
+  String get modalityImage => 'Vision';
+
+  @override
+  String get modalityAudio => 'Audio';
+
+  @override
+  String get modalityVideo => 'Video';
+
+  @override
+  String get modalityFile => 'File';
+
+  @override
+  String get composerAddUrlTitle => 'Add URL';
+
+  @override
+  String get composerAddUrlConfirm => 'Add';
+
+  @override
+  String get composerAttachmentAddTooltip => 'Add attachment';
+
+  @override
+  String get composerAttachmentUnsupportedTooltip =>
+      'The current model does not support attachments';
+
+  @override
+  String get composerAttachmentPickLocal => 'Choose local files';
+
+  @override
+  String get composerAttachmentRemoveTooltip => 'Remove';
+
+  @override
+  String settingsModelOutputCapabilities(String capabilities) {
+    return 'Outputs: $capabilities';
+  }
+
+  @override
+  String get settingsAgentsTitle => 'Agent Profiles';
+
+  @override
+  String get settingsAgentsSubtitle =>
+      'System profiles have a fixed purpose and workspace mode; enablement and model routing stay configurable. Directory only constrains Pure\'s built-in file-write tools — shell, Git, and MCP can bypass it.';
+
+  @override
+  String get settingsAgentsAddUserProfile => 'Add user profile';
+
+  @override
+  String get settingsAgentsEditTooltip => 'Edit';
+
+  @override
+  String get settingsAgentsRecoveryTitle => 'Recovery';
+
+  @override
+  String get settingsWorktreeHeadUnavailable => 'unavailable';
+
+  @override
+  String settingsWorktreeChangedFiles(String files) {
+    return 'Changed files: $files';
+  }
+
+  @override
+  String get settingsWorktreeCleanup => 'Clean up worktree and branch';
+
+  @override
+  String get settingsAgentProfileAddTitle => 'Add user agent profile';
+
+  @override
+  String get settingsAgentProfileEditTitle => 'Edit user agent profile';
+
+  @override
+  String get settingsAgentProfileIdField => 'Agent ID';
+
+  @override
+  String get settingsAgentProfileDisplayNameField => 'Display name';
+
+  @override
+  String get settingsAgentProfileDescriptionField => 'Description';
+
+  @override
+  String get settingsAgentProfileWhenToUseField => 'Best for';
+
+  @override
+  String get settingsAgentProfileInstructionsField => 'System instructions';
+
+  @override
+  String get settingsAgentProfileProviderField => 'Provider';
+
+  @override
+  String get settingsAgentProfileEffortDefault => 'Use model default';
+
+  @override
+  String get settingsAgentProfileWorkspaceModeField => 'Workspace mode';
+
+  @override
+  String get settingsAgentProfileWorkspaceDirectoryHint =>
+      'Directory is a cooperative file-tool boundary, not an OS sandbox; shell, Git, and MCP can bypass it.';
+
+  @override
+  String get settingsAgentProfileEnabledTitle => 'Enabled';
+
+  @override
+  String get settingsAgentProfileEnabledSubtitle =>
+      'Disabled profiles keep their TOML file but no longer appear in the agent tool catalog.';
+
+  @override
+  String get settingsAgentProfileSave => 'Save TOML atomically';
+
+  @override
+  String get settingsAgentProfileRequired => 'Required';
+
+  @override
+  String get settingsServiceCapabilitiesTitle => 'Service capabilities';
+
+  @override
+  String get settingsCapabilitySourceField => 'Capability source';
+
+  @override
+  String get settingsCapabilitySourcePreset => 'Follow preset defaults';
+
+  @override
+  String get settingsCapabilitySourceExplicit => 'Explicit override';
+
+  @override
+  String get settingsHostedWebSearchField => 'Hosted Web Search';
+
+  @override
+  String get settingsHostedWebSearchDialectField => 'Hosted Web Search dialect';
+
+  @override
+  String get settingsStandaloneWebSearchField => 'Standalone Web Search';
+
+  @override
+  String get settingsProgrammaticToolCallingField =>
+      'Programmatic Tool Calling';
+
+  @override
+  String get settingsCapabilityEnabled => 'Enabled';
+
+  @override
+  String get settingsCapabilityDisabled => 'Disabled';
+
+  @override
+  String get settingsDefaultConnectionField => 'Default connection';
+
+  @override
+  String get settingsCurrentConnectionField => 'Current connection';
+
+  @override
+  String get settingsSupportedConnectionsLabel => 'Supported connections';
+
+  @override
+  String get settingsAgentRoutesTitle => 'System agent model routing';
+
+  @override
+  String get settingsStateChecking => 'Checking';
+
+  @override
+  String get settingsStateAvailable => 'Available';
+
+  @override
+  String get settingsStateUnavailable => 'Unavailable';
+
+  @override
+  String get settingsStateDisabled => 'Disabled';
+
+  @override
+  String get settingsMcpStateMissingCredential => 'Missing credential';
+
+  @override
+  String get settingsLspActivityIdle => 'Idle';
+
+  @override
   String get roleExplorer => 'Explorer';
 
   @override

@@ -1495,11 +1495,11 @@ void registerShellSettingsTests() {
     );
     final availableRow = find.byKey(StudioDriverKeys.mcpServerRow('dart'));
     expect(
-      find.descendant(of: unavailableRow, matching: find.text('unavailable')),
+      find.descendant(of: unavailableRow, matching: find.text('Unavailable')),
       findsOneWidget,
     );
     expect(
-      find.descendant(of: availableRow, matching: find.text('available')),
+      find.descendant(of: availableRow, matching: find.text('Available')),
       findsOneWidget,
     );
     expect(
@@ -2594,7 +2594,7 @@ void registerShellSettingsTests() {
         find.descendant(
           of: flashOption,
           matching: find.text(
-            'DeepSeek / DeepSeek V4 Flash · 文本 · Responses · HTTP',
+            'DeepSeek / DeepSeek V4 Flash · Text · Responses · HTTP',
           ),
         ),
         findsOneWidget,
@@ -2610,7 +2610,7 @@ void registerShellSettingsTests() {
         find.descendant(
           of: reasonerOption,
           matching: find.text(
-            'DeepSeek / DeepSeek Reasoner · 文本 · Chat Completions · HTTP',
+            'DeepSeek / DeepSeek Reasoner · Text · Chat Completions · HTTP',
           ),
         ),
         findsOneWidget,
@@ -2851,7 +2851,7 @@ void registerShellSettingsTests() {
         find.byKey(const ValueKey('agent-profile-workspace-mode')),
         findsOneWidget,
       );
-      await tester.tap(find.text('取消'));
+      await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
 
       for (final role in const [

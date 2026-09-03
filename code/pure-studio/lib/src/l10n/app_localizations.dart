@@ -2825,6 +2825,336 @@ abstract class AppLocalizations {
   /// **'LSP capabilities'**
   String get timelineLspCapabilitiesTitle;
 
+  /// No description provided for @modalityText.
+  ///
+  /// In en, this message translates to:
+  /// **'Text'**
+  String get modalityText;
+
+  /// No description provided for @modalityImage.
+  ///
+  /// In en, this message translates to:
+  /// **'Vision'**
+  String get modalityImage;
+
+  /// No description provided for @modalityAudio.
+  ///
+  /// In en, this message translates to:
+  /// **'Audio'**
+  String get modalityAudio;
+
+  /// No description provided for @modalityVideo.
+  ///
+  /// In en, this message translates to:
+  /// **'Video'**
+  String get modalityVideo;
+
+  /// No description provided for @modalityFile.
+  ///
+  /// In en, this message translates to:
+  /// **'File'**
+  String get modalityFile;
+
+  /// No description provided for @composerAddUrlTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Add URL'**
+  String get composerAddUrlTitle;
+
+  /// No description provided for @composerAddUrlConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Add'**
+  String get composerAddUrlConfirm;
+
+  /// No description provided for @composerAttachmentAddTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Add attachment'**
+  String get composerAttachmentAddTooltip;
+
+  /// No description provided for @composerAttachmentUnsupportedTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'The current model does not support attachments'**
+  String get composerAttachmentUnsupportedTooltip;
+
+  /// No description provided for @composerAttachmentPickLocal.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose local files'**
+  String get composerAttachmentPickLocal;
+
+  /// No description provided for @composerAttachmentRemoveTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove'**
+  String get composerAttachmentRemoveTooltip;
+
+  /// No description provided for @settingsModelOutputCapabilities.
+  ///
+  /// In en, this message translates to:
+  /// **'Outputs: {capabilities}'**
+  String settingsModelOutputCapabilities(String capabilities);
+
+  /// No description provided for @settingsAgentsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Agent Profiles'**
+  String get settingsAgentsTitle;
+
+  /// No description provided for @settingsAgentsSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'System profiles have a fixed purpose and workspace mode; enablement and model routing stay configurable. Directory only constrains Pure\'s built-in file-write tools — shell, Git, and MCP can bypass it.'**
+  String get settingsAgentsSubtitle;
+
+  /// No description provided for @settingsAgentsAddUserProfile.
+  ///
+  /// In en, this message translates to:
+  /// **'Add user profile'**
+  String get settingsAgentsAddUserProfile;
+
+  /// No description provided for @settingsAgentsEditTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit'**
+  String get settingsAgentsEditTooltip;
+
+  /// No description provided for @settingsAgentsRecoveryTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Recovery'**
+  String get settingsAgentsRecoveryTitle;
+
+  /// No description provided for @settingsWorktreeHeadUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'unavailable'**
+  String get settingsWorktreeHeadUnavailable;
+
+  /// No description provided for @settingsWorktreeChangedFiles.
+  ///
+  /// In en, this message translates to:
+  /// **'Changed files: {files}'**
+  String settingsWorktreeChangedFiles(String files);
+
+  /// No description provided for @settingsWorktreeCleanup.
+  ///
+  /// In en, this message translates to:
+  /// **'Clean up worktree and branch'**
+  String get settingsWorktreeCleanup;
+
+  /// No description provided for @settingsAgentProfileAddTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Add user agent profile'**
+  String get settingsAgentProfileAddTitle;
+
+  /// No description provided for @settingsAgentProfileEditTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit user agent profile'**
+  String get settingsAgentProfileEditTitle;
+
+  /// No description provided for @settingsAgentProfileIdField.
+  ///
+  /// In en, this message translates to:
+  /// **'Agent ID'**
+  String get settingsAgentProfileIdField;
+
+  /// No description provided for @settingsAgentProfileDisplayNameField.
+  ///
+  /// In en, this message translates to:
+  /// **'Display name'**
+  String get settingsAgentProfileDisplayNameField;
+
+  /// No description provided for @settingsAgentProfileDescriptionField.
+  ///
+  /// In en, this message translates to:
+  /// **'Description'**
+  String get settingsAgentProfileDescriptionField;
+
+  /// No description provided for @settingsAgentProfileWhenToUseField.
+  ///
+  /// In en, this message translates to:
+  /// **'Best for'**
+  String get settingsAgentProfileWhenToUseField;
+
+  /// No description provided for @settingsAgentProfileInstructionsField.
+  ///
+  /// In en, this message translates to:
+  /// **'System instructions'**
+  String get settingsAgentProfileInstructionsField;
+
+  /// No description provided for @settingsAgentProfileProviderField.
+  ///
+  /// In en, this message translates to:
+  /// **'Provider'**
+  String get settingsAgentProfileProviderField;
+
+  /// No description provided for @settingsAgentProfileEffortDefault.
+  ///
+  /// In en, this message translates to:
+  /// **'Use model default'**
+  String get settingsAgentProfileEffortDefault;
+
+  /// No description provided for @settingsAgentProfileWorkspaceModeField.
+  ///
+  /// In en, this message translates to:
+  /// **'Workspace mode'**
+  String get settingsAgentProfileWorkspaceModeField;
+
+  /// No description provided for @settingsAgentProfileWorkspaceDirectoryHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Directory is a cooperative file-tool boundary, not an OS sandbox; shell, Git, and MCP can bypass it.'**
+  String get settingsAgentProfileWorkspaceDirectoryHint;
+
+  /// No description provided for @settingsAgentProfileEnabledTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Enabled'**
+  String get settingsAgentProfileEnabledTitle;
+
+  /// No description provided for @settingsAgentProfileEnabledSubtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Disabled profiles keep their TOML file but no longer appear in the agent tool catalog.'**
+  String get settingsAgentProfileEnabledSubtitle;
+
+  /// No description provided for @settingsAgentProfileSave.
+  ///
+  /// In en, this message translates to:
+  /// **'Save TOML atomically'**
+  String get settingsAgentProfileSave;
+
+  /// No description provided for @settingsAgentProfileRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Required'**
+  String get settingsAgentProfileRequired;
+
+  /// No description provided for @settingsServiceCapabilitiesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Service capabilities'**
+  String get settingsServiceCapabilitiesTitle;
+
+  /// No description provided for @settingsCapabilitySourceField.
+  ///
+  /// In en, this message translates to:
+  /// **'Capability source'**
+  String get settingsCapabilitySourceField;
+
+  /// No description provided for @settingsCapabilitySourcePreset.
+  ///
+  /// In en, this message translates to:
+  /// **'Follow preset defaults'**
+  String get settingsCapabilitySourcePreset;
+
+  /// No description provided for @settingsCapabilitySourceExplicit.
+  ///
+  /// In en, this message translates to:
+  /// **'Explicit override'**
+  String get settingsCapabilitySourceExplicit;
+
+  /// No description provided for @settingsHostedWebSearchField.
+  ///
+  /// In en, this message translates to:
+  /// **'Hosted Web Search'**
+  String get settingsHostedWebSearchField;
+
+  /// No description provided for @settingsHostedWebSearchDialectField.
+  ///
+  /// In en, this message translates to:
+  /// **'Hosted Web Search dialect'**
+  String get settingsHostedWebSearchDialectField;
+
+  /// No description provided for @settingsStandaloneWebSearchField.
+  ///
+  /// In en, this message translates to:
+  /// **'Standalone Web Search'**
+  String get settingsStandaloneWebSearchField;
+
+  /// No description provided for @settingsProgrammaticToolCallingField.
+  ///
+  /// In en, this message translates to:
+  /// **'Programmatic Tool Calling'**
+  String get settingsProgrammaticToolCallingField;
+
+  /// No description provided for @settingsCapabilityEnabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Enabled'**
+  String get settingsCapabilityEnabled;
+
+  /// No description provided for @settingsCapabilityDisabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Disabled'**
+  String get settingsCapabilityDisabled;
+
+  /// No description provided for @settingsDefaultConnectionField.
+  ///
+  /// In en, this message translates to:
+  /// **'Default connection'**
+  String get settingsDefaultConnectionField;
+
+  /// No description provided for @settingsCurrentConnectionField.
+  ///
+  /// In en, this message translates to:
+  /// **'Current connection'**
+  String get settingsCurrentConnectionField;
+
+  /// No description provided for @settingsSupportedConnectionsLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Supported connections'**
+  String get settingsSupportedConnectionsLabel;
+
+  /// No description provided for @settingsAgentRoutesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'System agent model routing'**
+  String get settingsAgentRoutesTitle;
+
+  /// No description provided for @settingsStateChecking.
+  ///
+  /// In en, this message translates to:
+  /// **'Checking'**
+  String get settingsStateChecking;
+
+  /// No description provided for @settingsStateAvailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Available'**
+  String get settingsStateAvailable;
+
+  /// No description provided for @settingsStateUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Unavailable'**
+  String get settingsStateUnavailable;
+
+  /// No description provided for @settingsStateDisabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Disabled'**
+  String get settingsStateDisabled;
+
+  /// No description provided for @settingsMcpStateMissingCredential.
+  ///
+  /// In en, this message translates to:
+  /// **'Missing credential'**
+  String get settingsMcpStateMissingCredential;
+
+  /// No description provided for @settingsLspActivityIdle.
+  ///
+  /// In en, this message translates to:
+  /// **'Idle'**
+  String get settingsLspActivityIdle;
+
   /// No description provided for @roleExplorer.
   ///
   /// In en, this message translates to:

@@ -1504,6 +1504,179 @@ class AppLocalizationsZh extends AppLocalizations {
   String get timelineLspCapabilitiesTitle => 'LSP 能力';
 
   @override
+  String get modalityText => '文本';
+
+  @override
+  String get modalityImage => '视觉';
+
+  @override
+  String get modalityAudio => '音频';
+
+  @override
+  String get modalityVideo => '视频';
+
+  @override
+  String get modalityFile => '文件';
+
+  @override
+  String get composerAddUrlTitle => '添加 URL';
+
+  @override
+  String get composerAddUrlConfirm => '添加';
+
+  @override
+  String get composerAttachmentAddTooltip => '添加附件';
+
+  @override
+  String get composerAttachmentUnsupportedTooltip => '当前模型不支持附件';
+
+  @override
+  String get composerAttachmentPickLocal => '选择本地文件';
+
+  @override
+  String get composerAttachmentRemoveTooltip => '移除';
+
+  @override
+  String settingsModelOutputCapabilities(String capabilities) {
+    return '输出：$capabilities';
+  }
+
+  @override
+  String get settingsAgentsTitle => 'Agent Profiles';
+
+  @override
+  String get settingsAgentsSubtitle =>
+      '系统 Profile 的用途与工作区模式固定；可统一配置启用状态和模型。Directory 只约束 Pure 内置文件写工具，shell、Git、MCP 可绕过。';
+
+  @override
+  String get settingsAgentsAddUserProfile => '添加用户 Profile';
+
+  @override
+  String get settingsAgentsEditTooltip => '编辑';
+
+  @override
+  String get settingsAgentsRecoveryTitle => '恢复';
+
+  @override
+  String get settingsWorktreeHeadUnavailable => '不可用';
+
+  @override
+  String settingsWorktreeChangedFiles(String files) {
+    return '变更文件：$files';
+  }
+
+  @override
+  String get settingsWorktreeCleanup => '显式清理 worktree 与分支';
+
+  @override
+  String get settingsAgentProfileAddTitle => '添加用户 Agent Profile';
+
+  @override
+  String get settingsAgentProfileEditTitle => '编辑用户 Agent Profile';
+
+  @override
+  String get settingsAgentProfileIdField => 'Agent ID';
+
+  @override
+  String get settingsAgentProfileDisplayNameField => '显示名称';
+
+  @override
+  String get settingsAgentProfileDescriptionField => '介绍';
+
+  @override
+  String get settingsAgentProfileWhenToUseField => '适用任务';
+
+  @override
+  String get settingsAgentProfileInstructionsField => '系统指令';
+
+  @override
+  String get settingsAgentProfileProviderField => 'Provider';
+
+  @override
+  String get settingsAgentProfileEffortDefault => '使用模型默认值';
+
+  @override
+  String get settingsAgentProfileWorkspaceModeField => '工作区模式';
+
+  @override
+  String get settingsAgentProfileWorkspaceDirectoryHint =>
+      'Directory 是合作式文件工具边界，不是 OS 沙箱；shell、Git 和 MCP 可能绕过。';
+
+  @override
+  String get settingsAgentProfileEnabledTitle => '启用';
+
+  @override
+  String get settingsAgentProfileEnabledSubtitle =>
+      '禁用后仍保留 TOML，但不会出现在 Agent 工具目录。';
+
+  @override
+  String get settingsAgentProfileSave => '原子保存 TOML';
+
+  @override
+  String get settingsAgentProfileRequired => '必填';
+
+  @override
+  String get settingsServiceCapabilitiesTitle => '服务能力';
+
+  @override
+  String get settingsCapabilitySourceField => '能力来源';
+
+  @override
+  String get settingsCapabilitySourcePreset => '跟随预设默认';
+
+  @override
+  String get settingsCapabilitySourceExplicit => '显式覆盖';
+
+  @override
+  String get settingsHostedWebSearchField => 'Hosted Web Search';
+
+  @override
+  String get settingsHostedWebSearchDialectField => 'Hosted Web Search 方言';
+
+  @override
+  String get settingsStandaloneWebSearchField => 'Standalone Web Search';
+
+  @override
+  String get settingsProgrammaticToolCallingField =>
+      'Programmatic Tool Calling';
+
+  @override
+  String get settingsCapabilityEnabled => '已启用';
+
+  @override
+  String get settingsCapabilityDisabled => '已禁用';
+
+  @override
+  String get settingsDefaultConnectionField => '默认连接';
+
+  @override
+  String get settingsCurrentConnectionField => '当前连接';
+
+  @override
+  String get settingsSupportedConnectionsLabel => '支持的连接';
+
+  @override
+  String get settingsAgentRoutesTitle => '系统 Agent 模型路由';
+
+  @override
+  String get settingsStateChecking => '检查中';
+
+  @override
+  String get settingsStateAvailable => '可用';
+
+  @override
+  String get settingsStateUnavailable => '不可用';
+
+  @override
+  String get settingsStateDisabled => '已禁用';
+
+  @override
+  String get settingsMcpStateMissingCredential => '缺少凭据';
+
+  @override
+  String get settingsLspActivityIdle => '空闲';
+
+  @override
   String get roleExplorer => '探索者';
 
   @override

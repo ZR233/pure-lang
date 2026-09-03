@@ -132,7 +132,7 @@ class ModelRoleSelector extends ConsumerWidget {
                         if (option.inputModalities.isNotEmpty)
                           Text(
                             option.inputModalities
-                                .map(modelInputCapabilityLabel)
+                                .map(context.modalityLabel)
                                 .join(' · '),
                             key: StudioDriverKeys.modelCapabilityTags(
                               option.providerId,
@@ -151,7 +151,7 @@ class ModelRoleSelector extends ConsumerWidget {
       child: _ControlItem(
         label: [
           current.model,
-          ...current.inputModalities.map(modelInputCapabilityLabel),
+          ...current.inputModalities.map(context.modalityLabel),
         ].join(' · '),
         enabled: true,
       ),
@@ -321,12 +321,3 @@ List<ModelOption> modelOptions(List<ProviderSettingsView> providers) {
   }
   return options;
 }
-
-String modelInputCapabilityLabel(ModelModalityView modality) =>
-    switch (modality) {
-      ModelModalityView.text => '文本',
-      ModelModalityView.image => '视觉',
-      ModelModalityView.audio => '音频',
-      ModelModalityView.video => '视频',
-      ModelModalityView.file => '文件',
-    };
