@@ -324,7 +324,7 @@ sealed class BridgeThreadItemState with _$BridgeThreadItemState {
   }) = BridgeThreadItemState_ContextCompaction;
 }
 
-enum BridgeThreadTextChannel { user, commentary, final_ }
+enum BridgeThreadTextChannel { user, commentary, final_, parentAgent }
 
 class BridgeThreadToolFailure {
   final BridgeThreadToolFailureKind kind;

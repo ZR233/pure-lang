@@ -5,10 +5,11 @@ import '../../shared/typed_json.dart';
 part 'timeline_agent_events.dart';
 part 'timeline_row_projection.dart';
 
-enum TimelineTextChannel { user, commentary, finalAnswer }
+enum TimelineTextChannel { user, parentAgent, commentary, finalAnswer }
 
 enum TimelineRowType {
   userMessage,
+  parentAgentMessage,
   commentary,
   toolGroup,
   reasoningSummary,

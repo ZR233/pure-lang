@@ -451,8 +451,7 @@ impl CollaborationTool {
             .runtime
             .submit_current_session(
                 target.clone(),
-                super::AgentCurrentSessionSubmitRequest::start(args.message)
-                    .with_presentation(super::MessagePresentation::Hidden)
+                super::AgentCurrentSessionSubmitRequest::parent_agent(args.message)
                     .with_budget_action(super::MailboxBudgetAction::Refresh),
             )
             .await

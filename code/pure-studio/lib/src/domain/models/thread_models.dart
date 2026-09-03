@@ -10,6 +10,7 @@ import 'turn_models.dart';
 
 enum ThreadItemKind {
   userMessage,
+  parentAgentMessage,
   agentMessage,
   reasoning,
   toolCall,
@@ -23,7 +24,7 @@ enum ThreadItemKind {
 
 enum AgentMessageChannel { commentary, finalAnswer }
 
-enum ThreadTextChannel { user, commentary, finalAnswer }
+enum ThreadTextChannel { user, parentAgent, commentary, finalAnswer }
 
 class ThreadAttachmentView {
   const ThreadAttachmentView({
@@ -486,6 +487,8 @@ class ThreadItemView {
     ThreadTextItemStateView(:final channel) =>
       channel == ThreadTextChannel.user
           ? ThreadItemKind.userMessage
+          : channel == ThreadTextChannel.parentAgent
+          ? ThreadItemKind.parentAgentMessage
           : ThreadItemKind.agentMessage,
     ThreadThinkingItemStateView() => ThreadItemKind.reasoning,
     ThreadToolItemStateView() => ThreadItemKind.toolCall,

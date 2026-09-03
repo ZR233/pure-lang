@@ -9,12 +9,14 @@ use super::store_error;
 pub(super) const RUNTIME_INPUT_METADATA_KEY: &str = "$plAgentRuntime";
 const INPUT_METADATA_PAYLOAD_KEY: &str = "payload";
 const INPUT_METADATA_BUDGET_ACTION_KEY: &str = "budgetAction";
+const INPUT_METADATA_SOURCE_KEY: &str = "inputSource";
 
 pub(super) fn serialize_input_metadata(
     input: &DurableMailboxEnvelope,
 ) -> Result<String, PureError> {
     if input.queue_coalescing_key.is_none()
         && input.budget_action == pl_core::MailboxBudgetAction::Preserve
+        && input.payload.source == pl_core::MailboxInputSource::User
     {
         return Ok(serde_json::to_string(&input.payload.metadata)?);
     }
@@ -31,6 +33,12 @@ pub(super) fn serialize_input_metadata(
             serde_json::Value::String(input.budget_action.as_str().to_string()),
         );
     }
+    if input.payload.source != pl_core::MailboxInputSource::User {
+        runtime.insert(
+            INPUT_METADATA_SOURCE_KEY.to_string(),
+            serde_json::Value::String(input.payload.source.as_str().to_string()),
+        );
+    }
     let value = serde_json::json!({
         RUNTIME_INPUT_METADATA_KEY: runtime,
         INPUT_METADATA_PAYLOAD_KEY: input.payload.metadata,
@@ -45,15 +53,26 @@ pub(super) fn deserialize_input_metadata(
         MailboxMetadata,
         Option<String>,
         pl_core::MailboxBudgetAction,
+        pl_core::MailboxInputSource,
     ),
     PureError,
 > {
     let mut value: serde_json::Value = serde_json::from_str(input)?;
     let Some(object) = value.as_object_mut() else {
-        return Ok((value.into(), None, pl_core::MailboxBudgetAction::Preserve));
+        return Ok((
+            value.into(),
+            None,
+            pl_core::MailboxBudgetAction::Preserve,
+            pl_core::MailboxInputSource::User,
+        ));
     };
     let Some(runtime) = object.get(RUNTIME_INPUT_METADATA_KEY) else {
-        return Ok((value.into(), None, pl_core::MailboxBudgetAction::Preserve));
+        return Ok((
+            value.into(),
+            None,
+            pl_core::MailboxBudgetAction::Preserve,
+            pl_core::MailboxInputSource::User,
+        ));
     };
     let key = runtime
         .get("queueCoalescingKey")
@@ -67,10 +86,18 @@ pub(super) fn deserialize_input_metadata(
             .ok_or_else(|| store_error(format!("unknown mailbox budget action {value}")))?,
         None => pl_core::MailboxBudgetAction::Preserve,
     };
+    let source = match runtime
+        .get(INPUT_METADATA_SOURCE_KEY)
+        .and_then(serde_json::Value::as_str)
+    {
+        Some(value) => pl_core::MailboxInputSource::from_persisted_str(value)
+            .ok_or_else(|| store_error(format!("unknown mailbox input source {value}")))?,
+        None => pl_core::MailboxInputSource::User,
+    };
     let payload = object
         .remove(INPUT_METADATA_PAYLOAD_KEY)
         .unwrap_or(serde_json::Value::Null);
-    Ok((payload.into(), key, budget_action))
+    Ok((payload.into(), key, budget_action, source))
 }
 
 #[cfg(test)]
@@ -81,7 +108,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn input_metadata_round_trips_queue_key_and_budget_action_together() {
+    fn input_metadata_round_trips_runtime_fields_and_parent_agent_source() {
         for (queue_coalescing_key, budget_action) in [
             (
                 Some("task-run:wakes".to_string()),
@@ -96,6 +123,7 @@ mod tests {
                 payload: pl_core::MailboxInputPayload {
                     message: "wake".to_string(),
                     attachments: Vec::new(),
+                    source: pl_core::MailboxInputSource::ParentAgent,
                     presentation: MessagePresentation::Hidden,
                     metadata: serde_json::json!({"kind": "taskWake"}).into(),
                 },
@@ -106,19 +134,21 @@ mod tests {
             };
 
             let stored = serialize_input_metadata(&input).unwrap();
-            let (metadata, key, restored_budget_action) =
+            assert!(stored.contains(r#""inputSource":"parentAgent""#));
+            let (metadata, key, restored_budget_action, restored_source) =
                 deserialize_input_metadata(&stored).unwrap();
 
             assert_eq!(metadata, input.payload.metadata);
             assert_eq!(key, queue_coalescing_key);
             assert_eq!(restored_budget_action, budget_action);
+            assert_eq!(restored_source, input.payload.source);
         }
     }
 
     #[test]
     fn payload_only_input_metadata_remains_unwrapped() {
         let stored = r#"{"kind":"taskWake"}"#;
-        let (metadata, key, budget_action) = deserialize_input_metadata(stored).unwrap();
+        let (metadata, key, budget_action, source) = deserialize_input_metadata(stored).unwrap();
 
         assert_eq!(
             metadata,
@@ -126,5 +156,6 @@ mod tests {
         );
         assert_eq!(key, None);
         assert_eq!(budget_action, pl_core::MailboxBudgetAction::Preserve);
+        assert_eq!(source, pl_core::MailboxInputSource::User);
     }
 }

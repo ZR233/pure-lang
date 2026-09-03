@@ -47,6 +47,8 @@ Turn、Item 与 Interaction 的通知 payload 都携带 canonical tagged state�
 Item delta 只携带 threadId、turnId、itemId、field、revision、delta 和可选 chunkIndex。field
 固定为 agent message text、reasoning summary/content、plan text、tool arguments/output。
 terminal Item 携带完整 authoritative payload并清除 UI overlay。
+文本 Item 的 channel 穷尽区分 `user`、`parentAgent`、`commentary` 与 `final`；`parentAgent` 只由
+runtime 冻结的 mailbox 来源产生，所有 transport 和 Flutter reducer 都机械透传，不在客户端推导。
 
 ## 8.3 背压
 
@@ -96,7 +98,7 @@ query，均返回完整 `ThreadSnapshot`，不得让 HTTP route 退化为只返�
 Skill 激活使用普通的终态 Skill Item 和 `threadRuntimeUpdated` 通知；激活来源是 typed
 `Tool { toolCallId } | UserGesture { invocationId }`，资源位置是 typed resource base，不允许 transport
 或前端从工具 JSON 推断。Timeline 文案按来源区分代理激活与用户激活。首次订阅及重连 snapshot
-必须包含相同的 Skill Item 与 `runtime.activeSkills`。Thread wire schema 为 v7；Skill Item 只接受
+必须包含相同的 Skill Item 与 `runtime.activeSkills`。Thread wire schema 为 v10；Skill Item 只接受
 typed resource base、provider identity 与 `Tool | UserGesture` 来源。旧 `path + toolCallId`、缺失
 provider 或未知字段一律是协议错误，不做映射、默认填充或读时升级。
 

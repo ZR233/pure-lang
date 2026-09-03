@@ -19,6 +19,7 @@ use pl_trace::{
 
 use crate::agent_runtime::{
     AgentRuntimeEvent, AgentRuntimeEventKind, DurableMailboxEnvelope, MailboxDeliveryState,
+    MailboxInputSource,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -164,6 +165,7 @@ pub(crate) fn project_runtime_event(
         }
         AgentRuntimeEventKind::TurnStarted {
             turn_id,
+            input,
             claimed_inputs,
             ..
         } => {
@@ -194,6 +196,9 @@ pub(crate) fn project_runtime_event(
                     runtime: Box::new(runtime),
                 },
             );
+            if !has_projected_input(current, input, turn_id.as_str()) {
+                project_user_input(&mut projector, input, turn_id.as_str(), event.created_at);
+            }
             for input in claimed_inputs {
                 if input.turn_id.as_str() != turn_id.as_str() {
                     projector.push(
@@ -319,24 +324,48 @@ fn project_user_input(
     if !input.payload.presentation.is_visible() {
         return;
     }
-    let item_id = if input.mail_id.is_empty() {
-        format!("{turn_id}:user")
-    } else {
-        format!("{turn_id}:mail:{}", input.mail_id)
+    let item_id = input_item_id(input, turn_id);
+    let item = match input.payload.source {
+        MailboxInputSource::User => ThreadItem::completed_user_message(
+            item_id,
+            projector.thread_id.to_string(),
+            turn_id.to_string(),
+            input.payload.message.clone(),
+            input.payload.attachments.clone(),
+            input.queued_at,
+        ),
+        MailboxInputSource::ParentAgent => ThreadItem::completed_parent_agent_message(
+            item_id,
+            projector.thread_id.to_string(),
+            turn_id.to_string(),
+            input.payload.message.clone(),
+            input.payload.attachments.clone(),
+            input.queued_at,
+        ),
     };
     projector.push(
         emitted_at,
         ThreadNotification::ItemCompleted {
-            item: Box::new(ThreadItem::completed_user_message(
-                item_id,
-                projector.thread_id.to_string(),
-                turn_id.to_string(),
-                input.payload.message.clone(),
-                input.payload.attachments.clone(),
-                input.queued_at,
-            )),
+            item: Box::new(item),
         },
     );
+}
+
+fn has_projected_input(
+    current: &ThreadSnapshot,
+    input: &DurableMailboxEnvelope,
+    turn_id: &str,
+) -> bool {
+    let item_id = input_item_id(input, turn_id);
+    current.items.iter().any(|item| item.id == item_id)
+}
+
+fn input_item_id(input: &DurableMailboxEnvelope, turn_id: &str) -> String {
+    if input.mail_id.is_empty() {
+        format!("{turn_id}:user")
+    } else {
+        format!("{turn_id}:mail:{}", input.mail_id)
+    }
 }
 
 fn projected_turn(id: &str, thread_id: &str, state: TurnState, updated_at: i64) -> Turn {
@@ -734,6 +763,7 @@ mod tests {
             payload: crate::MailboxInputPayload {
                 message: "continue".to_string(),
                 attachments: Vec::new(),
+                source: Default::default(),
                 presentation: Default::default(),
                 metadata: crate::MailboxMetadata::default(),
             },
@@ -785,6 +815,7 @@ mod tests {
             payload: crate::MailboxInputPayload {
                 message: "inspect".to_string(),
                 attachments: vec![attachment.clone()],
+                source: Default::default(),
                 presentation: Default::default(),
                 metadata: crate::MailboxMetadata::default(),
             },
@@ -815,6 +846,7 @@ mod tests {
             payload: crate::MailboxInputPayload {
                 message: "# Approved Plan\n\nInternal continuation.".to_string(),
                 attachments: Vec::new(),
+                source: Default::default(),
                 presentation: pl_protocol::MessagePresentation::Hidden,
                 metadata: crate::MailboxMetadata::default(),
             },
@@ -826,6 +858,91 @@ mod tests {
 
         project_user_input(&mut projector, &input, "turn-hidden", 7);
         assert!(projector.finish().notifications.is_empty());
+    }
+
+    #[test]
+    fn parent_agent_input_projects_a_distinct_text_channel() {
+        let current = snapshot();
+        let mut projector = Projector::new("thread-1", &current);
+        let input = DurableMailboxEnvelope {
+            mail_id: "mail-parent".to_string(),
+            turn_id: crate::TurnId::new("turn-parent").unwrap(),
+            thread_id: crate::ThreadId::new("thread-1").unwrap(),
+            payload: crate::MailboxInputPayload::parent_agent("check the latest result"),
+            queue_coalescing_key: None,
+            budget_action: crate::MailboxBudgetAction::Refresh,
+            delivery_state: MailboxDeliveryState::default(),
+            queued_at: 7,
+        };
+
+        project_user_input(&mut projector, &input, "turn-parent", 7);
+        let batch = projector.finish();
+
+        assert!(matches!(
+            &batch.notifications[0].notification,
+            ThreadNotification::ItemCompleted { item }
+                if item.text().is_some_and(|text|
+                    text.channel() == ThreadTextChannel::ParentAgent
+                        && text.text() == "check the latest result")
+        ));
+    }
+
+    #[test]
+    fn turn_started_projects_an_unseen_primary_input_without_duplicating_an_existing_item() {
+        let input = DurableMailboxEnvelope {
+            mail_id: "mail-initial".to_string(),
+            turn_id: crate::TurnId::new("turn-initial").unwrap(),
+            thread_id: crate::ThreadId::new("thread-1").unwrap(),
+            payload: crate::MailboxInputPayload::parent_agent("initial assignment"),
+            queue_coalescing_key: None,
+            budget_action: crate::MailboxBudgetAction::Preserve,
+            delivery_state: MailboxDeliveryState::default(),
+            queued_at: 7,
+        };
+        let agent_snapshot = crate::AgentRegistration {
+            identity: crate::AgentIdentity {
+                id: crate::ThreadId::new("thread-1").unwrap(),
+                parent_id: Some(crate::ThreadId::new("root").unwrap()),
+                role: crate::AgentRoleId::new("executor").unwrap(),
+                depth: 1,
+            },
+            session: crate::ThreadContextState::empty(),
+            runtime_revision: 1,
+            event_sequence: 1,
+        }
+        .into_durable_state()
+        .snapshot;
+        let event = AgentRuntimeEvent {
+            agent_id: crate::ThreadId::new("thread-1").unwrap(),
+            sequence: 2,
+            created_at: 8,
+            kind: AgentRuntimeEventKind::TurnStarted {
+                turn_id: crate::TurnId::new("turn-initial").unwrap(),
+                thread_id: crate::ThreadId::new("thread-1").unwrap(),
+                input,
+                claimed_inputs: Vec::new(),
+                snapshot: Box::new(agent_snapshot),
+            },
+        };
+
+        let first = project_runtime_event(&event, &snapshot());
+        let projected_item = first
+            .notifications
+            .iter()
+            .find_map(|notification| match &notification.notification {
+                ThreadNotification::ItemCompleted { item } => Some(item.as_ref().clone()),
+                _ => None,
+            })
+            .expect("unseen primary input must be projected");
+        assert_eq!(projected_item.id, "turn-initial:mail:mail-initial");
+
+        let mut current = snapshot();
+        current.items.push(projected_item);
+        let repeated = project_runtime_event(&event, &current);
+        assert!(!repeated.notifications.iter().any(|notification| matches!(
+            &notification.notification,
+            ThreadNotification::ItemCompleted { .. }
+        )));
     }
 
     #[test]

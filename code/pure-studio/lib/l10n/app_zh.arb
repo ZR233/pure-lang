@@ -220,6 +220,7 @@
   "timelineToolGroupSummaryRunningWithIssues": "{count} 个工具，{runningCount} 个运行中，{issueCount} 个需要注意",
   "timelineSkillActivated": "已激活 Skill · {name}",
   "timelineSkillAgentActivated": "代理激活 Skill · {name}",
+  "timelineParentAgent": "主代理",
   "timelineSkillUserActivated": "用户激活 Skill · {name}",
   "timelineAgentFallback": "Agent",
   "timelineViewImageRead": "已阅读图片",

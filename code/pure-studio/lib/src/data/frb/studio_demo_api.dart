@@ -2019,6 +2019,12 @@ ThreadItemView _messageItem({
         attachments: attachments,
         lifecycle: CompletedThreadContentView(createdAt),
       ),
+      ThreadItemKind.parentAgentMessage => ThreadTextItemStateView(
+        channel: ThreadTextChannel.parentAgent,
+        text: text,
+        attachments: attachments,
+        lifecycle: CompletedThreadContentView(createdAt),
+      ),
       ThreadItemKind.agentMessage => ThreadTextItemStateView(
         channel: channel == AgentMessageChannel.commentary
             ? ThreadTextChannel.commentary

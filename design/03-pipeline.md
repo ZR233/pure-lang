@@ -12,6 +12,9 @@ Item。
 完整发送给 provider，但 Thread 产品 projector 不为它产生 GUI Item/notification。输入进入 Turn 时把同一
 presentation 从 durable mailbox 复制到 `TurnRequest` 和 `Message`，不得在宿主或 GUI 重新推导。上下文
 压缩生成的摘要、压缩指令和 synthetic user input 使用 `Hidden`，未来其他内部输入也在创建点选择该值。
+`MailboxInputSource::{User, ParentAgent}` 独立记录可见输入的来源，旧记录缺失时按 `User` 恢复；来源在
+runtime 创建输入时冻结并随 mailbox 持久化，Thread projector 将 `ParentAgent` 投影为独立文本通道，
+Studio 不根据 Thread 层级、消息正文或工具名猜测来源。
 
 TurnFactory 从同一 Thread 事实构造：统一 root 指令、项目 `AGENTS.md`、当前 Thread Mode 快照、
 可选的 `pl.workflow` projection、普通 Skill、工具快照与 provider route。Simple/Task 不选择
@@ -69,6 +72,9 @@ editing_documents，修复和重新整合后再次 review。不存在隐式 merg
 输出和 workspace/Git 合同。语义独立且写集合互斥的任务应并行；真实前后依赖保持顺序。directory child
 适合单任务或互斥目录并行，可能触及共同接口、清单、生成边界或 Git 状态的任务使用独立 worktree。
 worktree 只隔离现场，不能消除语义依赖；root 仍负责顺序采纳 commit 和处理冲突。
+`spawn_agent.message` 与后续 `send_message.message` 都作为 `Visible + ParentAgent` 输入进入 child 的
+canonical transcript 和 Timeline；前者由首轮 `TurnStarted` 补齐尚未存在的稳定 Item，后者继续按目标
+当前状态启动或 steer Turn。相同稳定 mailbox Item 已经由 `TurnQueued` 投影时不得重复生成。
 `plan_submit` 使用 typed `{expectedRevision, plan}`、Markdown 标题校验、结构化状态机 receipt 与提交后
 结束 Turn 的语义，并通过通用 `UserInput` 发起确认；`request_user_input` 和普通文本追问都不得替代计划
 提交或重复询问实施授权。运行时只在

@@ -138,12 +138,50 @@ impl MailboxBudgetAction {
     }
 }
 
+/// Mailbox 输入在产品 Timeline 中的稳定来源。
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum MailboxInputSource {
+    #[default]
+    /// 终端用户直接提交的输入。
+    User,
+    /// 目标 session 的直接父代理提交的输入。
+    ParentAgent,
+}
+
+impl MailboxInputSource {
+    /// 返回 Studio repository 使用的稳定持久化标签。
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::ParentAgent => "parentAgent",
+        }
+    }
+
+    /// 从 Studio repository 的稳定标签恢复来源。
+    pub fn from_persisted_str(value: &str) -> Option<Self> {
+        match value {
+            "user" => Some(Self::User),
+            "parentAgent" => Some(Self::ParentAgent),
+            _ => None,
+        }
+    }
+
+    /// 返回该来源是否为默认的终端用户输入。
+    pub const fn is_user(&self) -> bool {
+        matches!(self, Self::User)
+    }
+}
+
 /// mailbox 请求与持久化 envelope 共享的输入内容。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct MailboxInputPayload {
     pub message: String,
     pub attachments: Vec<ThreadAttachment>,
+    /// 输入进入 mailbox 时冻结的产品展示来源。
+    #[serde(default, skip_serializing_if = "MailboxInputSource::is_user")]
+    pub source: MailboxInputSource,
     #[serde(default)]
     pub presentation: MessagePresentation,
     #[serde(default)]
@@ -155,6 +193,18 @@ impl MailboxInputPayload {
         Self {
             message: message.into(),
             attachments: Vec::new(),
+            source: MailboxInputSource::User,
+            presentation: MessagePresentation::Visible,
+            metadata: MailboxMetadata::default(),
+        }
+    }
+
+    /// 创建来自目标 session 直接父代理的可见输入。
+    pub fn parent_agent(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            attachments: Vec::new(),
+            source: MailboxInputSource::ParentAgent,
             presentation: MessagePresentation::Visible,
             metadata: MailboxMetadata::default(),
         }
@@ -421,6 +471,15 @@ impl AgentCurrentSessionSubmitRequest {
         }
     }
 
+    /// 创建来自目标 session 直接父代理的可见输入。
+    pub fn parent_agent(message: impl Into<String>) -> Self {
+        Self {
+            payload: MailboxInputPayload::parent_agent(message),
+            mail_id: None,
+            budget_action: MailboxBudgetAction::Preserve,
+        }
+    }
+
     /// 设置产品自定义、可持久化的输入元数据。
     pub fn with_metadata(mut self, metadata: serde_json::Value) -> Self {
         self.payload.metadata = metadata.into();
@@ -461,6 +520,7 @@ mod tests {
             payload: MailboxInputPayload {
                 message: "hello".to_string(),
                 attachments: Vec::new(),
+                source: MailboxInputSource::ParentAgent,
                 presentation: MessagePresentation::Hidden,
                 metadata: json!({"kind": "test"}).into(),
             },
@@ -472,6 +532,7 @@ mod tests {
         let envelope_json = serde_json::to_value(&envelope).unwrap();
         assert_eq!(envelope_json["message"], "hello");
         assert_eq!(envelope_json["attachments"], json!([]));
+        assert_eq!(envelope_json["source"], "parentAgent");
         assert_eq!(envelope_json["presentation"], "hidden");
         assert_eq!(envelope_json["metadata"], json!({"kind": "test"}));
         assert_eq!(envelope_json["budgetAction"], "refresh");
@@ -521,6 +582,7 @@ mod tests {
         .unwrap();
         assert_eq!(envelope.payload.message, "hello");
         assert!(envelope.payload.attachments.is_empty());
+        assert_eq!(envelope.payload.source, MailboxInputSource::User);
         assert_eq!(envelope.payload.presentation, MessagePresentation::Hidden);
         assert_eq!(
             envelope.payload.metadata,

@@ -7,7 +7,7 @@ use crate::{
     ThreadModeId, TodoListSnapshot, Turn,
 };
 
-pub const THREAD_SCHEMA_VERSION: u32 = 9;
+pub const THREAD_SCHEMA_VERSION: u32 = 10;
 
 /// 一个 agent 独占的对话和执行队列。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

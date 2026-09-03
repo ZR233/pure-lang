@@ -54,6 +54,8 @@ impl ThreadTextItem {
 #[serde(rename_all = "camelCase")]
 pub enum ThreadTextChannel {
     User,
+    /// 由当前 Thread 的直接父代理提交的输入。
+    ParentAgent,
     Commentary,
     Final,
 }
@@ -302,4 +304,17 @@ fn append_chunk(
     }
     chunks[index].push_str(delta);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parent_agent_channel_uses_the_v10_wire_label() {
+        assert_eq!(
+            serde_json::to_value(ThreadTextChannel::ParentAgent).unwrap(),
+            serde_json::json!("parentAgent")
+        );
+    }
 }

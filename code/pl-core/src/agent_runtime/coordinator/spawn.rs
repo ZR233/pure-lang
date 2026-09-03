@@ -115,10 +115,8 @@ where
             turn_id: turn_id.clone(),
             thread_id: child_thread_id.clone(),
             payload: super::super::MailboxInputPayload {
-                message,
-                attachments: Vec::new(),
-                presentation: super::super::MessagePresentation::Hidden,
                 metadata: request.metadata.into(),
+                ..super::super::MailboxInputPayload::parent_agent(message)
             },
             queue_coalescing_key: None,
             budget_action: super::super::MailboxBudgetAction::Preserve,

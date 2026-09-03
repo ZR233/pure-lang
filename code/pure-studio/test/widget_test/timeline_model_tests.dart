@@ -499,7 +499,7 @@ void registerTimelineModelTests() {
     expect(rows.map((row) => row.part!.text), ['earlier', 'later']);
   });
 
-  test('user, commentary and final channels remain distinct', () {
+  test('user, parent agent, commentary and final channels remain distinct', () {
     final rows = timelineRowsFromThreadItems([
       _threadItemFixture(
         id: 'user',
@@ -511,10 +511,19 @@ void registerTimelineModelTests() {
         text: 'prompt',
       ),
       _threadItemFixture(
-        id: 'commentary',
+        id: 'parent-agent',
         threadId: 'thread-1',
         turnId: 'turn-1',
         ordinal: 1,
+        kind: ThreadItemKind.parentAgentMessage,
+        channel: null,
+        text: 'follow-up guidance',
+      ),
+      _threadItemFixture(
+        id: 'commentary',
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        ordinal: 2,
         channel: AgentMessageChannel.commentary,
         text: 'working',
       ),
@@ -522,7 +531,7 @@ void registerTimelineModelTests() {
         id: 'final',
         threadId: 'thread-1',
         turnId: 'turn-1',
-        ordinal: 2,
+        ordinal: 3,
         channel: AgentMessageChannel.finalAnswer,
         text: 'done',
       ),
@@ -530,9 +539,34 @@ void registerTimelineModelTests() {
 
     expect(rows.map((row) => row.type), [
       TimelineRowType.userMessage,
+      TimelineRowType.parentAgentMessage,
       TimelineRowType.commentary,
       TimelineRowType.finalAnswer,
     ]);
+  });
+
+  testWidgets('parent agent message has its own label and hierarchy icon', (
+    tester,
+  ) async {
+    final item = _threadItemFixture(
+      id: 'parent-agent-message',
+      threadId: 'child-thread',
+      turnId: 'child-turn',
+      ordinal: 1,
+      kind: ThreadItemKind.parentAgentMessage,
+      channel: null,
+      text: 'Check the latest result.',
+    );
+
+    await tester.pumpWidget(
+      _timelineHarness(threadId: 'child-thread', items: [item]),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Main agent'), findsOneWidget);
+    expect(find.text('Check the latest result.'), findsOneWidget);
+    expect(find.byIcon(Icons.account_tree_outlined), findsOneWidget);
+    expect(find.byIcon(Icons.person_outline), findsNothing);
   });
 
   test('adjacent tool Items are grouped only in the visual projection', () {

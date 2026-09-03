@@ -592,6 +592,12 @@ ThreadItemView _threadItemFixture({
         attachments: attachments,
         lifecycle: _contentLifecycleFixture(status, terminalAt, error: error),
       ),
+      ThreadItemKind.parentAgentMessage => ThreadTextItemStateView(
+        channel: ThreadTextChannel.parentAgent,
+        text: text,
+        attachments: attachments,
+        lifecycle: _contentLifecycleFixture(status, terminalAt, error: error),
+      ),
       ThreadItemKind.agentMessage => ThreadTextItemStateView(
         channel: channel == AgentMessageChannel.commentary
             ? ThreadTextChannel.commentary

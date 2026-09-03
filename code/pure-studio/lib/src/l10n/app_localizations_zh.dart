@@ -664,6 +664,9 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String get timelineParentAgent => '主代理';
+
+  @override
   String timelineSkillUserActivated(String name) {
     return '用户激活 Skill · $name';
   }

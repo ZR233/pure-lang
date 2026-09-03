@@ -81,6 +81,7 @@ pub enum BridgeThreadTextChannel {
     User,
     Commentary,
     Final,
+    ParentAgent,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

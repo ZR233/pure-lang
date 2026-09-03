@@ -172,6 +172,8 @@ class _TimelineRowBlock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isUser = row.type == TimelineRowType.userMessage;
+    final isParentAgent = row.type == TimelineRowType.parentAgentMessage;
+    final isPrompt = isUser || isParentAgent;
     final isCompactActivity =
         row.type == TimelineRowType.reasoningSummary ||
         row.type == TimelineRowType.toolGroup ||
@@ -180,18 +182,28 @@ class _TimelineRowBlock extends StatelessWidget {
       padding: EdgeInsets.only(bottom: isCompactActivity ? 12 : 24),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: isUser
+        mainAxisAlignment: isPrompt
             ? MainAxisAlignment.end
             : MainAxisAlignment.start,
         children: [
           Flexible(
             child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: isUser ? 560 : 700),
+              constraints: BoxConstraints(maxWidth: isPrompt ? 560 : 700),
               child: Column(
-                crossAxisAlignment: isUser
+                crossAxisAlignment: isPrompt
                     ? CrossAxisAlignment.end
                     : CrossAxisAlignment.start,
                 children: [
+                  if (isParentAgent)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Text(
+                        context.l10n.timelineParentAgent,
+                        key: const ValueKey('timeline-parent-agent-label'),
+                        style: Theme.of(context).textTheme.labelSmall
+                            ?.copyWith(color: context.studioInkSoft),
+                      ),
+                    ),
                   Opacity(
                     opacity: row.isRolledBack ? 0.52 : 1,
                     child: _RowCard(
@@ -229,7 +241,12 @@ class _TimelineRowBlock extends StatelessWidget {
               ),
             ),
           ),
-          if (isUser) const _Avatar(icon: Icons.person_outline),
+          if (isPrompt)
+            _Avatar(
+              icon: isParentAgent
+                  ? Icons.account_tree_outlined
+                  : Icons.person_outline,
+            ),
         ],
       ),
     );
@@ -278,7 +295,8 @@ class _RowCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return switch (row.type) {
-      TimelineRowType.userMessage => _MarkdownBubble(
+      TimelineRowType.userMessage ||
+      TimelineRowType.parentAgentMessage => _MarkdownBubble(
         key: ValueKey(row.part!.id),
         part: row.part!,
         isUser: true,

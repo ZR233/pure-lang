@@ -306,6 +306,7 @@ fn item_state(value: &ThreadItemState) -> Result<BridgeThreadItemState> {
         ThreadItemState::Text(value) => BridgeThreadItemState::Text {
             channel: match value.channel() {
                 ThreadTextChannel::User => BridgeThreadTextChannel::User,
+                ThreadTextChannel::ParentAgent => BridgeThreadTextChannel::ParentAgent,
                 ThreadTextChannel::Commentary => BridgeThreadTextChannel::Commentary,
                 ThreadTextChannel::Final => BridgeThreadTextChannel::Final,
             },
@@ -817,6 +818,27 @@ mod tests {
         ];
         let bridged = bridge_thread_snapshot(snapshot).unwrap();
         assert_eq!(bridged.items.len(), 1);
+    }
+
+    #[test]
+    fn parent_agent_text_channel_crosses_the_bridge_without_inference() {
+        let bridged = bridge_thread_item(item(ThreadItemState::Text(ThreadTextItem::new(
+            ThreadTextChannel::ParentAgent,
+            "follow-up guidance".to_string(),
+            Vec::new(),
+            ThreadContentLifecycle::completed(1),
+        ))))
+        .unwrap()
+        .unwrap();
+
+        assert!(matches!(
+            bridged.state,
+            BridgeThreadItemState::Text {
+                channel: BridgeThreadTextChannel::ParentAgent,
+                text,
+                ..
+            } if text == "follow-up guidance"
+        ));
     }
 
     #[test]

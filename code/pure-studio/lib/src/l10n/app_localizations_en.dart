@@ -695,6 +695,9 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get timelineParentAgent => 'Main agent';
+
+  @override
   String timelineSkillUserActivated(String name) {
     return 'User activated skill · $name';
   }

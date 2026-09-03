@@ -28,7 +28,7 @@ impl TryFrom<thread_input::Model> for DurableMailboxEnvelope {
                 model.state_kind
             )));
         }
-        let (metadata, queue_coalescing_key, budget_action) =
+        let (metadata, queue_coalescing_key, budget_action, source) =
             deserialize_input_metadata(&model.metadata_json)?;
         Ok(Self {
             mail_id: model.mail_id,
@@ -37,6 +37,7 @@ impl TryFrom<thread_input::Model> for DurableMailboxEnvelope {
             payload: MailboxInputPayload {
                 message: model.content,
                 attachments: serde_json::from_str(&model.attachments_json)?,
+                source,
                 presentation: presentation_from_label(&model.presentation)?,
                 metadata,
             },

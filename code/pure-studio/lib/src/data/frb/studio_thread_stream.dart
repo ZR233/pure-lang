@@ -226,6 +226,8 @@ ThreadItemStateView _threadItemStateFromFrb(
     text: (channel, text, attachments, lifecycle) => ThreadTextItemStateView(
       channel: switch (channel) {
         frb_item.BridgeThreadTextChannel.user => ThreadTextChannel.user,
+        frb_item.BridgeThreadTextChannel.parentAgent =>
+          ThreadTextChannel.parentAgent,
         frb_item.BridgeThreadTextChannel.commentary =>
           ThreadTextChannel.commentary,
         frb_item.BridgeThreadTextChannel.final_ =>

@@ -7173,6 +7173,9 @@ impl SseDecode for crate::api::studio::types::thread_stream::item::BridgeThreadT
                 crate::api::studio::types::thread_stream::item::BridgeThreadTextChannel::Commentary
             }
             2 => crate::api::studio::types::thread_stream::item::BridgeThreadTextChannel::Final,
+            3 => {
+                crate::api::studio::types::thread_stream::item::BridgeThreadTextChannel::ParentAgent
+            }
             _ => unreachable!("Invalid variant for BridgeThreadTextChannel: {}", inner),
         };
     }
@@ -14631,6 +14634,7 @@ impl flutter_rust_bridge::IntoDart
             Self::User => 0.into_dart(),
             Self::Commentary => 1.into_dart(),
             Self::Final => 2.into_dart(),
+            Self::ParentAgent => 3.into_dart(),
             _ => unreachable!(),
         }
     }
@@ -19966,6 +19970,7 @@ impl SseEncode for crate::api::studio::types::thread_stream::item::BridgeThreadT
         <i32>::sse_encode(match self {crate::api::studio::types::thread_stream::item::BridgeThreadTextChannel::User => { 0 }
 crate::api::studio::types::thread_stream::item::BridgeThreadTextChannel::Commentary => { 1 }
 crate::api::studio::types::thread_stream::item::BridgeThreadTextChannel::Final => { 2 }
+crate::api::studio::types::thread_stream::item::BridgeThreadTextChannel::ParentAgent => { 3 }
  _ => { unimplemented!(""); }}, serializer);
     }
 }

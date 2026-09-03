@@ -1295,6 +1295,12 @@ abstract class AppLocalizations {
   /// **'Agent activated skill · {name}'**
   String timelineSkillAgentActivated(String name);
 
+  /// No description provided for @timelineParentAgent.
+  ///
+  /// In en, this message translates to:
+  /// **'Main agent'**
+  String get timelineParentAgent;
+
   /// No description provided for @timelineSkillUserActivated.
   ///
   /// In en, this message translates to:

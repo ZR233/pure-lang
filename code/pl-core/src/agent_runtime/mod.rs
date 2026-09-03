@@ -48,8 +48,8 @@ mod tests {
         AGENT_SESSION_PLAN_CONFIRMATION_QUESTION_ID, AgentSessionPlanConfirmationPurpose,
         AgentSessionPlanPhase, ConversationRecoveryMode, InteractionCommand, InteractionPurpose,
         InteractionRequest, InteractionScope, ResolveUserInput, ThreadModeId, ThreadNotification,
-        TurnBillingRecord, TurnOutcome, UserInputAnswer, UserQuestion, UserQuestionOption,
-        WorkflowRun, WorkflowRunLifecycle, WorkflowSessionState,
+        ThreadTextChannel, TurnBillingRecord, TurnOutcome, UserInputAnswer, UserQuestion,
+        UserQuestionOption, WorkflowRun, WorkflowRunLifecycle, WorkflowSessionState,
     };
     use pretty_assertions::assert_eq;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -2941,6 +2941,106 @@ mod tests {
             host.lifecycle.spawn_profiles.lock().unwrap().as_slice(),
             &[Some(profile)]
         );
+        runtime.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn parent_agent_spawn_and_steer_messages_appear_once_in_the_child_timeline() {
+        let repository = TestRepository::empty();
+        let host = TestHost::new(repository, FactoryMode::Block);
+        let runtime = AgentRuntime::start(host.clone(), test_options())
+            .await
+            .unwrap();
+        let handle = runtime.handle();
+        let root = ThreadId::new("root").unwrap();
+        handle
+            .register(registration("root", "root-chat"))
+            .await
+            .unwrap();
+        let mut request = child_spawn_request(root.clone());
+        let child = request.thread_id.clone();
+        request.initial_message = Some("initial assignment".to_string());
+
+        let spawned = handle.spawn(request).await.unwrap();
+        let initial_turn_id = spawned
+            .initial_turn_id
+            .expect("initial parent message must create a turn");
+        wait_for_prepared_messages(&host.turn_factory, 1).await;
+
+        let collaboration = AgentCollaborationTools::new(
+            handle.clone(),
+            root.clone(),
+            AgentCollaborationToolConfig {
+                policy: AgentAccessPolicy {
+                    message_targets: AgentTargetSelector::Tree,
+                    ..AgentAccessPolicy::default()
+                },
+                session_runtime: crate::ToolSessionRuntime::default(),
+                workspace_root: std::path::PathBuf::from("."),
+                profiles: Vec::new(),
+            },
+        );
+        let send_message = collaboration
+            .tools()
+            .into_iter()
+            .find(|tool| tool.definition().name().wire_name() == "send_message")
+            .expect("controller tool set must contain send_message");
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
+        send_message
+            .execute(crate::ToolInvocation::new(
+                crate::ToolInput {
+                    arguments: serde_json::json!({
+                        "target": child.as_str(),
+                        "message": "follow-up guidance",
+                    }),
+                },
+                crate::ToolCallContext::new(
+                    crate::ToolCallIdentity {
+                        call_id: "send-message-call".to_string(),
+                        item_id: "send-message-item".to_string(),
+                        agent_id: root.to_string(),
+                        session_id: root.to_string(),
+                        turn_id: "root-turn".to_string(),
+                        ..crate::ToolCallIdentity::default()
+                    },
+                    event_tx,
+                ),
+            ))
+            .await
+            .unwrap();
+
+        let snapshot = handle.thread_snapshot(&child).unwrap();
+        assert_eq!(snapshot.items.len(), 2);
+        let messages = snapshot
+            .items
+            .iter()
+            .filter_map(|item| {
+                let text = item.text()?;
+                (text.channel() == ThreadTextChannel::ParentAgent).then(|| {
+                    (
+                        item.turn_id.clone(),
+                        text.text().to_string(),
+                        text.attachments().to_vec(),
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            messages,
+            vec![
+                (
+                    initial_turn_id.to_string(),
+                    "initial assignment".to_string(),
+                    Vec::new(),
+                ),
+                (
+                    initial_turn_id.to_string(),
+                    "follow-up guidance".to_string(),
+                    Vec::new(),
+                ),
+            ]
+        );
+
         runtime.shutdown().await.unwrap();
     }
 

@@ -177,6 +177,8 @@ List<TimelineRow> timelineRowsFromThreadItems(List<ThreadItemView> source) {
         part: part,
         type: switch (item.kind) {
           ThreadItemKind.userMessage => TimelineRowType.userMessage,
+          ThreadItemKind.parentAgentMessage =>
+            TimelineRowType.parentAgentMessage,
           ThreadItemKind.agentMessage =>
             item.channel == AgentMessageChannel.commentary
                 ? TimelineRowType.commentary
@@ -215,6 +217,7 @@ TimelineEntry _timelineEntryFromThreadItem(ThreadItemView item) {
     turnId: item.turnId,
     type: switch (item.kind) {
       ThreadItemKind.userMessage ||
+      ThreadItemKind.parentAgentMessage ||
       ThreadItemKind.agentMessage => TimelineEntryType.text,
       ThreadItemKind.reasoning => TimelineEntryType.reasoning,
       ThreadItemKind.skill => TimelineEntryType.skill,
@@ -238,6 +241,7 @@ TimelineEntry _timelineEntryFromThreadItem(ThreadItemView item) {
     status: item.status,
     textChannel: switch (item.kind) {
       ThreadItemKind.userMessage => TimelineTextChannel.user,
+      ThreadItemKind.parentAgentMessage => TimelineTextChannel.parentAgent,
       ThreadItemKind.agentMessage =>
         item.channel == AgentMessageChannel.commentary
             ? TimelineTextChannel.commentary

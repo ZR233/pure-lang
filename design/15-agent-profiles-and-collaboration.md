@@ -56,6 +56,9 @@ Profile 文件或非类型化 metadata 重新推导模型路由与系统指令�
 Plan 属于各自的 AgentSession，不随 Profile、消息 fork 或 workspace assignment 复制到 child，也不存在
 lineage 共享句柄。root 必须把 child 所需的已批准基线写入 `spawn_agent.message`；child 的 `plan_*` 工具
 只操作自己的 session，不能查询 root Plan。配置冻结与 Plan session 隔离是两条独立边界。
+`spawn_agent.message` 和 root 后续通过 `send_message` 发送的补充输入都在 child Timeline 中显示为
+`parentAgent` 文本消息，并由 Studio 标记为“主代理 / Main agent”；它们对 provider 仍是普通 user role，
+不得改变 fork、Plan 隔离、预算刷新或 parent→direct-child 授权语义。
 
 这里保留的是公共功能语义，而不是某个固定 Rust 签名：任何实现 PL host 的产品都必须能在外部资源
 产生副作用之前取得“本次 spawn 已冻结的完整 Profile”。该能力用于让产品按同一 provider、model、

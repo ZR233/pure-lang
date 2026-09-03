@@ -98,6 +98,8 @@ List<TimelineRow> timelineRowsFromFixtureParts(
           TimelineEntryType.text =>
             part.textChannel == TimelineTextChannel.user
                 ? ThreadItemKind.userMessage
+                : part.textChannel == TimelineTextChannel.parentAgent
+                ? ThreadItemKind.parentAgentMessage
                 : ThreadItemKind.agentMessage,
           TimelineEntryType.reasoning => ThreadItemKind.reasoning,
           TimelineEntryType.tool => ThreadItemKind.toolCall,
