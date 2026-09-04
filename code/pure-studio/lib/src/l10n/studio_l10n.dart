@@ -64,9 +64,27 @@ extension StudioLocalizationsX on BuildContext {
       'explorer' => l10n.roleExplorer,
       'planner' => l10n.rolePlanner,
       'executor' => l10n.roleExecutor,
+      'worktree_executor' => l10n.roleWorktreeExecutor,
       'reviewer' => l10n.roleReviewer,
       '' => l10n.roleEmpty,
       _ => role,
+    };
+  }
+
+  /// Maps a fixed agent role key to its localized responsibility summary.
+  ///
+  /// System Agent cards and route rows share this single mapping so the same
+  /// role always renders the same description in the active locale; unknown
+  /// roles fall back to the generic summary instead of leaking runtime
+  /// metadata, while user profiles never reach this mapping.
+  String roleDescription(String role) {
+    return switch (role.trim()) {
+      'explorer' => l10n.settingsRoleExplorerDescription,
+      'planner' => l10n.settingsRolePlannerDescription,
+      'executor' => l10n.settingsRoleExecutorDescription,
+      'worktree_executor' => l10n.settingsRoleWorktreeExecutorDescription,
+      'reviewer' => l10n.settingsRoleReviewerDescription,
+      _ => l10n.settingsRoleFallbackDescription,
     };
   }
 }

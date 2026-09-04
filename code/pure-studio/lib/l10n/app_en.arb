@@ -111,7 +111,7 @@
   "settingsProvidersTab": "Providers",
   "settingsInstructionsTab": "Instructions",
   "settingsSkillsTab": "Skills",
-  "settingsRolesTab": "Roles",
+  "settingsAgentsTab": "Agents",
   "settingsMcpTab": "MCP",
   "settingsLspTab": "LSP",
   "settingsStatisticsTab": "Statistics",
@@ -727,11 +727,10 @@
   "settingsClearSearchOrDiscoverAgain": "Clear the search or run discovery again.",
   "settingsNoSkillsTitle": "No skills found",
   "settingsNoSkillsMessage": "Try another filter or discover skills for this project.",
-  "settingsRolesTitle": "Roles",
-  "settingsRolesSubtitle": "Choose provider/model defaults for each fixed agent role.",
   "settingsRoleExplorerDescription": "Explore code and collect context.",
   "settingsRolePlannerDescription": "Draft plans and structure intent.",
   "settingsRoleExecutorDescription": "Apply edits and run tools.",
+  "settingsRoleWorktreeExecutorDescription": "Apply edits and run tools in an isolated Git worktree.",
   "settingsRoleReviewerDescription": "Review results and verify risk.",
   "settingsRoleFallbackDescription": "Studio role",
   "settingsModelField": "Model",
@@ -937,7 +936,23 @@
   "settingsAgentsAddUserProfile": "Add user profile",
   "settingsAgentsEditTooltip": "Edit",
   "settingsAgentsRecoveryTitle": "Recovery",
-  "settingsWorktreeHeadUnavailable": "unavailable",
+  "settingsWorktreeBase": "base {commit}",
+  "@settingsWorktreeBase": {
+    "placeholders": {
+      "commit": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsWorktreeHead": "head {commit}",
+  "@settingsWorktreeHead": {
+    "placeholders": {
+      "commit": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsWorktreeHeadUnavailable": "head unavailable",
   "settingsWorktreeChangedFiles": "Changed files: {files}",
   "@settingsWorktreeChangedFiles": {
     "placeholders": {
@@ -957,6 +972,9 @@
   "settingsAgentProfileProviderField": "Provider",
   "settingsAgentProfileEffortDefault": "Use model default",
   "settingsAgentProfileWorkspaceModeField": "Workspace mode",
+  "settingsAgentWorkspaceModeUnrestricted": "Unrestricted",
+  "settingsAgentWorkspaceModeDirectory": "Directory",
+  "settingsAgentWorkspaceModeWorktree": "Worktree",
   "settingsAgentProfileWorkspaceDirectoryHint": "Directory is a cooperative file-tool boundary, not an OS sandbox; shell, Git, and MCP can bypass it.",
   "settingsAgentProfileEnabledTitle": "Enabled",
   "settingsAgentProfileEnabledSubtitle": "Disabled profiles keep their TOML file but no longer appear in the agent tool catalog.",
@@ -985,6 +1003,7 @@
   "roleExplorer": "Explorer",
   "rolePlanner": "Planner",
   "roleExecutor": "Executor",
+  "roleWorktreeExecutor": "Worktree executor",
   "roleReviewer": "Reviewer",
   "roleEmpty": "Agent"
 }

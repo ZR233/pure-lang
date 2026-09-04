@@ -47,6 +47,11 @@ preserved worktree 显示 revision、branch、base/head、dirty/changed-files pr
 Agent 目录与 Profile 设置目录明确分区；所有 mutation 使用 settings revision CAS 并以 canonical
 snapshot 原子刷新。
 
+Agents 导航、配置页、preserved worktree recovery 和用户 Profile 详情中的固定界面文案必须跟随
+Studio locale，并由统一 l10n catalog 提供。Profile ID、provider/model、effort、workspace mode 的
+持久化值，以及分支、路径、commit、worktree 状态和诊断数据保持 canonical 原值；本地化只影响
+展示标签、说明、操作和校验反馈，不得改写配置或运行时数据。
+
 ## 11.6 联网搜索设置
 
 General 页把 OpenAI Web Search 与 DeepSeek 原生联网搜索显示为两张独立卡片。OpenAI 卡片保留

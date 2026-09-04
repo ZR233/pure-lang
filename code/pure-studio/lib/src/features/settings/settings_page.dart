@@ -63,7 +63,7 @@ class _SettingsTabInfo {
       _SettingsTab.providers => context.l10n.settingsProvidersTab,
       _SettingsTab.instructions => context.l10n.settingsInstructionsTab,
       _SettingsTab.skills => context.l10n.settingsSkillsTab,
-      _SettingsTab.agents => 'Agents',
+      _SettingsTab.agents => context.l10n.settingsAgentsTab,
       _SettingsTab.mcp => context.l10n.settingsMcpTab,
       _SettingsTab.lsp => context.l10n.settingsLspTab,
       _SettingsTab.ssh => context.l10n.settingsSshTab,

@@ -2599,7 +2599,7 @@ void registerShellSettingsTests() {
         await tester.scrollUntilVisible(
           find.byKey(StudioDriverKeys.settingsRoleModel(role)),
           300,
-          scrollable: find.byType(Scrollable).first,
+          scrollable: _settingsPaneScrollable(),
         );
         expect(
           find.byKey(StudioDriverKeys.settingsRoleModel(role)),
@@ -2614,7 +2614,10 @@ void registerShellSettingsTests() {
       await tester.scrollUntilVisible(
         find.byKey(StudioDriverKeys.settingsRoleModel('explorer')),
         -300,
-        scrollable: find.byType(Scrollable).first,
+        scrollable: _settingsPaneScrollable(),
+      );
+      await tester.ensureVisible(
+        find.byKey(StudioDriverKeys.settingsRoleModel('explorer')),
       );
       await tester.tap(
         find.byKey(StudioDriverKeys.settingsRoleModel('explorer')),
@@ -2888,6 +2891,38 @@ void registerShellSettingsTests() {
         find.byKey(const ValueKey('agent-profile-workspace-mode')),
         findsOneWidget,
       );
+      expect(find.text('Agent Profiles'), findsOneWidget);
+      expect(find.text('Add user profile'), findsOneWidget);
+      expect(_dialogText('Add user agent profile'), findsOneWidget);
+      expect(_dialogText('Agent ID'), findsOneWidget);
+      expect(_dialogText('Display name'), findsOneWidget);
+      expect(_dialogText('Description'), findsOneWidget);
+      expect(_dialogText('Best for'), findsOneWidget);
+      expect(_dialogText('System instructions'), findsOneWidget);
+      expect(_dialogText('Provider'), findsOneWidget);
+      expect(_dialogText('Model'), findsOneWidget);
+      expect(_dialogText('Reasoning effort'), findsOneWidget);
+      expect(_dialogText('Workspace mode'), findsOneWidget);
+      expect(_dialogText('Enabled'), findsOneWidget);
+      expect(
+        _dialogText(
+          'Directory is a cooperative file-tool boundary, not an OS '
+          'sandbox; shell, Git, and MCP can bypass it.',
+        ),
+        findsOneWidget,
+      );
+      expect(_dialogText('Cancel'), findsOneWidget);
+      expect(_dialogText('Save TOML atomically'), findsOneWidget);
+      final effortField = find.byKey(
+        const ValueKey('agent-profile-effort-deepseek-deepseek-v4-flash'),
+      );
+      await tester.ensureVisible(effortField);
+      await tester.pumpAndSettle();
+      await tester.tap(effortField);
+      await tester.pumpAndSettle();
+      expect(find.text('Use model default'), findsOneWidget);
+      await tester.tapAt(const Offset(10, 10));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
 
@@ -2948,46 +2983,228 @@ void registerShellSettingsTests() {
   );
 
   testWidgets(
+    'en locale projects system profile cards without leaking runtime Chinese',
+    (tester) async {
+      _configureSettingsTestView(tester);
+      final api = _FakeStudioApi(_stateWithPlannerModels())
+        ..userAgentProfiles = [_userAgentProfile];
+      await _pumpSettingsPage(tester, api);
+
+      await tester.tap(find.text('Agents'));
+      await tester.pumpAndSettle();
+
+      const enCardCopy = <(String, String, String)>[
+        ('explorer', 'Explorer', 'Explore code and collect context.'),
+        ('planner', 'Planner', 'Draft plans and structure intent.'),
+        ('executor', 'Executor', 'Apply edits and run tools.'),
+        (
+          'worktree_executor',
+          'Worktree executor',
+          'Apply edits and run tools in an isolated Git worktree.',
+        ),
+        ('reviewer', 'Reviewer', 'Review results and verify risk.'),
+      ];
+      const runtimeChineseMetadata = [
+        '探索者',
+        '计划者',
+        '执行者',
+        'Worktree 执行者',
+        '审查者',
+        '只读探索代码',
+        '分析目标并形成',
+        '实施明确',
+        '在独立 Git worktree',
+        '检查实现',
+      ];
+      for (final (role, name, description) in enCardCopy) {
+        final card = find.byKey(ValueKey('agent-profile-card-$role'));
+        await _dragUntilBuilt(tester, card);
+        expect(
+          find.descendant(of: card, matching: find.text(name)),
+          findsWidgets,
+          reason: 'card title and route row share the localized role name',
+        );
+        expect(
+          find.descendant(of: card, matching: find.textContaining(description)),
+          findsWidgets,
+        );
+        for (final leak in runtimeChineseMetadata) {
+          expect(find.textContaining(leak), findsNothing);
+        }
+      }
+
+      final userCard = find.byKey(
+        const ValueKey('agent-profile-card-user-helper'),
+      );
+      await _dragUntilBuilt(tester, userCard);
+      expect(
+        find.descendant(of: userCard, matching: find.text('User helper')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: userCard,
+          matching: find.textContaining('User owned helper profile'),
+        ),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'zh Hans locale projects system profile cards and keeps user metadata verbatim',
+    (tester) async {
+      _configureSettingsTestView(tester);
+      final api = _FakeStudioApi(_stateWithPlannerModels())
+        ..userAgentProfiles = [_userAgentProfile];
+      await _pumpSettingsPage(
+        tester,
+        api,
+        locale: const Locale.fromSubtags(
+          languageCode: 'zh',
+          scriptCode: 'Hans',
+        ),
+      );
+
+      await tester.tap(find.text('代理'));
+      await tester.pumpAndSettle();
+
+      const zhCardCopy = <(String, String, String)>[
+        ('explorer', '探索者', '探索代码并收集上下文'),
+        ('planner', '计划者', '起草计划并组织意图'),
+        ('executor', '执行者', '应用编辑并运行工具'),
+        ('worktree_executor', 'Worktree 执行者', '在隔离的 Git worktree 中应用编辑并运行工具'),
+        ('reviewer', '审查者', '审查结果并验证风险'),
+      ];
+      const runtimeChineseDescriptions = [
+        '只读探索代码',
+        '分析目标并形成',
+        '实施明确',
+        '在独立 Git worktree',
+        '检查实现',
+      ];
+      for (final (role, name, description) in zhCardCopy) {
+        final card = find.byKey(ValueKey('agent-profile-card-$role'));
+        await _dragUntilBuilt(tester, card);
+        expect(
+          find.descendant(of: card, matching: find.text(name)),
+          findsWidgets,
+          reason: 'card title and route row share the localized role name',
+        );
+        expect(
+          find.descendant(of: card, matching: find.textContaining(description)),
+          findsWidgets,
+        );
+        for (final leak in runtimeChineseDescriptions) {
+          expect(find.textContaining(leak), findsNothing);
+        }
+      }
+
+      final userCard = find.byKey(
+        const ValueKey('agent-profile-card-user-helper'),
+      );
+      await _dragUntilBuilt(tester, userCard);
+      expect(
+        find.descendant(of: userCard, matching: find.text('User helper')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: userCard,
+          matching: find.textContaining('User owned helper profile'),
+        ),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'en unknown system profile falls back safely while user metadata stays verbatim',
+    (tester) async {
+      _configureSettingsTestView(tester);
+      const unknownSystemProfile = AgentProfileView(
+        id: 'custom-router',
+        displayName: '自定义路由',
+        description: '运行时自定义说明',
+        whenToUse: 'Use for custom routing',
+        systemInstructions: 'Route with care.',
+        providerId: 'deepseek',
+        model: 'deepseek-v4-flash',
+        effort: null,
+        source: 'studio-builtin',
+        revision: 'system-v2',
+        contentHash: 'system-custom-router',
+        system: true,
+        enabled: true,
+        workspaceMode: AgentWorkspaceMode.unrestricted,
+      );
+      final api = _FakeStudioApi(_stateWithPlannerModels())
+        ..extraSystemProfiles = [unknownSystemProfile]
+        ..userAgentProfiles = [_userAgentProfile];
+      await _pumpSettingsPage(tester, api);
+
+      await tester.tap(find.text('Agents'));
+      await tester.pumpAndSettle();
+
+      final unknownCard = find.byKey(
+        const ValueKey('agent-profile-card-custom-router'),
+      );
+      await _dragUntilBuilt(tester, unknownCard);
+      expect(
+        find.descendant(of: unknownCard, matching: find.text('custom-router')),
+        findsWidgets,
+      );
+      expect(
+        find.descendant(
+          of: unknownCard,
+          matching: find.textContaining('Studio role'),
+        ),
+        findsWidgets,
+      );
+      expect(find.textContaining('自定义路由'), findsNothing);
+      expect(find.textContaining('运行时自定义说明'), findsNothing);
+
+      final userCard = find.byKey(
+        const ValueKey('agent-profile-card-user-helper'),
+      );
+      await _dragUntilBuilt(tester, userCard);
+      expect(
+        find.descendant(of: userCard, matching: find.text('User helper')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: userCard,
+          matching: find.textContaining('User owned helper profile'),
+        ),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'Agents Recovery previews preserved worktree and cleans by revision',
     (tester) async {
       _configureSettingsTestView(tester);
       final state = _stateWithPlannerModels().copyWith(
-        recoveryState: RecoveryStateSnapshot(
-          revision: 7,
-          values: const [
-            StudioRecoveryIssue(
-              id: 'worktree-lease-child-1',
-              scope: RecoveryIssueScope.thread,
-              category: RecoveryIssueCategory.repository,
-              availableActions: [RecoveryIssueAction.cleanupWorktree],
-              detail: 'Preserved for review',
-              projectId: 'project-1',
-              threadId: 'thread-1',
-              worktree: WorktreeRecoveryPreview(
-                childId: 'child-1',
-                leaseRevision: 9,
-                state: 'preserved',
-                repositoryRoot: '/repo',
-                path: '/repo/.pure/worktrees/thread-1/child-1',
-                branch: 'pure-agent-child-1',
-                baseCommit: 'base-commit',
-                headCommit: 'head-commit',
-                dirty: true,
-                changedFiles: ['src/agent.rs'],
-              ),
-            ),
-          ],
-        ),
+        recoveryState: _worktreeRecoverySnapshot(),
       );
       final api = _FakeStudioApi(state);
       await _pumpSettingsPage(tester, api);
 
       await tester.tap(find.text('Agents'));
       await tester.pumpAndSettle();
+      expect(find.text('Recovery'), findsOneWidget);
       expect(find.text('pure-agent-child-1'), findsOneWidget);
       expect(find.textContaining('base base-commit'), findsOneWidget);
+      expect(find.textContaining('head head-commit'), findsOneWidget);
       expect(find.textContaining('src/agent.rs'), findsOneWidget);
+      expect(find.text('Changed files: src/agent.rs'), findsOneWidget);
       final cleanup = find.byKey(const ValueKey('worktree-cleanup-child-1'));
+      expect(find.text('Clean up worktree and branch'), findsOneWidget);
       await tester.ensureVisible(cleanup);
       await tester.tap(cleanup);
       await tester.pump();
@@ -2996,6 +3213,323 @@ void registerShellSettingsTests() {
         childId: 'child-1',
         expectedLeaseRevision: 9,
       ));
+    },
+  );
+
+  testWidgets('zh Hans agents tab localizes fixed copy in profile dialog', (
+    tester,
+  ) async {
+    _configureSettingsTestView(tester);
+    final api = _FakeStudioApi(_stateWithPlannerModels());
+    await _pumpSettingsPage(
+      tester,
+      api,
+      locale: const Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
+    );
+
+    await tester.tap(find.text('代理'));
+    await tester.pumpAndSettle();
+    expect(find.text('Agent Profiles'), findsOneWidget);
+    expect(find.text('添加用户 Profile'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('agent-profile-add')));
+    await tester.pumpAndSettle();
+    expect(_dialogText('添加用户 Agent Profile'), findsOneWidget);
+    expect(_dialogText('Agent ID'), findsOneWidget);
+    expect(_dialogText('显示名称'), findsOneWidget);
+    expect(_dialogText('介绍'), findsOneWidget);
+    expect(_dialogText('适用任务'), findsOneWidget);
+    expect(_dialogText('系统指令'), findsOneWidget);
+    expect(_dialogText('Provider'), findsOneWidget);
+    expect(_dialogText('Model'), findsOneWidget);
+    expect(_dialogText('思考等级'), findsOneWidget);
+    expect(_dialogText('工作区模式'), findsOneWidget);
+    expect(
+      _dialogText('Directory 是合作式文件工具边界，不是 OS 沙箱；shell、Git 和 MCP 可能绕过。'),
+      findsOneWidget,
+    );
+    expect(_dialogText('启用'), findsOneWidget);
+    expect(_dialogText('禁用后仍保留 TOML，但不会出现在 Agent 工具目录。'), findsOneWidget);
+    expect(_dialogText('取消'), findsOneWidget);
+    expect(_dialogText('原子保存 TOML'), findsOneWidget);
+
+    final effortField = find.byKey(
+      const ValueKey('agent-profile-effort-deepseek-deepseek-v4-flash'),
+    );
+    await tester.ensureVisible(effortField);
+    await tester.pumpAndSettle();
+    await tester.tap(effortField);
+    await tester.pumpAndSettle();
+    expect(find.text('使用模型默认值'), findsOneWidget);
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pumpAndSettle();
+
+    await tester.tap(_dialogText('取消'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('agent-profile-save')), findsNothing);
+  });
+
+  testWidgets('zh Hans recovery card keeps canonical worktree data', (
+    tester,
+  ) async {
+    _configureSettingsTestView(tester);
+    final api = _FakeStudioApi(
+      _stateWithPlannerModels().copyWith(
+        recoveryState: _worktreeRecoverySnapshot(),
+      ),
+    );
+    await _pumpSettingsPage(
+      tester,
+      api,
+      locale: const Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
+    );
+
+    await tester.tap(find.text('代理'));
+    await tester.pumpAndSettle();
+    expect(find.text('恢复'), findsOneWidget);
+    expect(find.text('pure-agent-child-1'), findsOneWidget);
+    expect(find.text('preserved'), findsOneWidget);
+    expect(find.text('dirty'), findsOneWidget);
+    expect(find.textContaining('base base-commit'), findsOneWidget);
+    expect(
+      find.textContaining('/repo/.pure/worktrees/thread-1/child-1'),
+      findsOneWidget,
+    );
+    expect(find.text('变更文件：src/agent.rs'), findsOneWidget);
+    expect(find.text('显式清理 worktree 与分支'), findsOneWidget);
+  });
+
+  testWidgets('en agents model selector localizes modality labels', (
+    tester,
+  ) async {
+    _configureSettingsTestView(tester);
+    final api = _FakeStudioApi(_stateWithPlannerModels());
+    await _pumpSettingsPage(tester, api);
+
+    await tester.tap(find.text('Agents'));
+    await tester.pumpAndSettle();
+
+    final selector = StudioDriverKeys.settingsRoleModel('executor');
+    await tester.scrollUntilVisible(
+      find.byKey(selector),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(selector),
+        matching: find.text(
+          'DeepSeek / DeepSeek V4 Flash · Text · Responses · HTTP',
+        ),
+      ),
+      findsOneWidget,
+    );
+
+    await tester.ensureVisible(find.byKey(selector));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(selector));
+    await tester.pumpAndSettle();
+    final visionOption = find.byKey(
+      StudioDriverKeys.settingsRoleModelOption(
+        'executor',
+        'deepseek',
+        'deepseek-v4-flash-vision-exp',
+      ),
+    );
+    expect(
+      find.descendant(
+        of: visionOption,
+        matching: find.text(
+          'DeepSeek / DeepSeek V4 Flash Vision Exp · Text/Vision · Responses · HTTP',
+        ),
+      ),
+      findsOneWidget,
+    );
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('zh Hans agents model selector localizes modality labels', (
+    tester,
+  ) async {
+    _configureSettingsTestView(tester);
+    final api = _FakeStudioApi(_stateWithPlannerModels());
+    await _pumpSettingsPage(
+      tester,
+      api,
+      locale: const Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
+    );
+
+    await tester.tap(find.text('代理'));
+    await tester.pumpAndSettle();
+
+    final selector = StudioDriverKeys.settingsRoleModel('executor');
+    await tester.scrollUntilVisible(
+      find.byKey(selector),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(selector),
+        matching: find.text(
+          'DeepSeek / DeepSeek V4 Flash · 文本 · Responses · HTTP',
+        ),
+      ),
+      findsOneWidget,
+    );
+
+    await tester.ensureVisible(find.byKey(selector));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(selector));
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byKey(
+          StudioDriverKeys.settingsRoleModelOption(
+            'executor',
+            'deepseek',
+            'deepseek-v4-flash-vision-exp',
+          ),
+        ),
+        matching: find.text(
+          'DeepSeek / DeepSeek V4 Flash Vision Exp · 文本/视觉 · Responses · HTTP',
+        ),
+      ),
+      findsOneWidget,
+    );
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'en agents user profile dialog covers edit title and required validation',
+    (tester) async {
+      _configureSettingsTestView(tester);
+      final api = _FakeStudioApi(_stateWithPlannerModels())
+        ..userAgentProfiles = [_userAgentProfile];
+      await _pumpSettingsPage(tester, api);
+
+      await tester.tap(find.text('Agents'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('agent-profile-add')));
+      await tester.pumpAndSettle();
+      expect(_dialogText('Add user agent profile'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('agent-profile-save')));
+      await tester.pumpAndSettle();
+      expect(_dialogText('Required'), findsNWidgets(5));
+      await tester.tap(_dialogText('Cancel'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('agent-profile-save')), findsNothing);
+
+      final editButton = find.byKey(
+        const ValueKey('agent-profile-edit-user-helper'),
+      );
+      expect(
+        (await api.readAgentProfiles()).map((profile) => profile.id),
+        contains('user-helper'),
+      );
+      await _dragUntilBuilt(tester, editButton);
+      await tester.tap(editButton);
+      await tester.pumpAndSettle();
+      expect(_dialogText('Edit user agent profile'), findsOneWidget);
+      await tester.tap(_dialogText('Cancel'));
+      await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets(
+    'zh Hans agents user profile dialog covers edit title and required validation',
+    (tester) async {
+      _configureSettingsTestView(tester);
+      final api = _FakeStudioApi(_stateWithPlannerModels())
+        ..userAgentProfiles = [_userAgentProfile];
+      await _pumpSettingsPage(
+        tester,
+        api,
+        locale: const Locale.fromSubtags(
+          languageCode: 'zh',
+          scriptCode: 'Hans',
+        ),
+      );
+
+      await tester.tap(find.text('代理'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('agent-profile-add')));
+      await tester.pumpAndSettle();
+      expect(_dialogText('添加用户 Agent Profile'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('agent-profile-save')));
+      await tester.pumpAndSettle();
+      expect(_dialogText('必填'), findsNWidgets(5));
+      await tester.tap(_dialogText('取消'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('agent-profile-save')), findsNothing);
+
+      final editButton = find.byKey(
+        const ValueKey('agent-profile-edit-user-helper'),
+      );
+      await _dragUntilBuilt(tester, editButton);
+      await tester.tap(editButton);
+      await tester.pumpAndSettle();
+      expect(_dialogText('编辑用户 Agent Profile'), findsOneWidget);
+      await tester.tap(_dialogText('取消'));
+      await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets('en recovery card renders full head line when head is null', (
+    tester,
+  ) async {
+    _configureSettingsTestView(tester);
+    final api = _FakeStudioApi(
+      _stateWithPlannerModels().copyWith(
+        recoveryState: _worktreeRecoverySnapshotWithoutHead(),
+      ),
+    );
+    await _pumpSettingsPage(tester, api);
+
+    await tester.tap(find.text('Agents'));
+    await tester.pumpAndSettle();
+    expect(find.text('Recovery'), findsOneWidget);
+    expect(find.text('pure-agent-child-2'), findsOneWidget);
+    expect(find.textContaining('base base-commit'), findsOneWidget);
+    expect(find.textContaining('head unavailable'), findsOneWidget);
+    expect(
+      find.textContaining('/repo/.pure/worktrees/thread-2/child-2'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Changed files'), findsNothing);
+  });
+
+  testWidgets(
+    'zh Hans recovery card renders full head line when head is null',
+    (tester) async {
+      _configureSettingsTestView(tester);
+      final api = _FakeStudioApi(
+        _stateWithPlannerModels().copyWith(
+          recoveryState: _worktreeRecoverySnapshotWithoutHead(),
+        ),
+      );
+      await _pumpSettingsPage(
+        tester,
+        api,
+        locale: const Locale.fromSubtags(
+          languageCode: 'zh',
+          scriptCode: 'Hans',
+        ),
+      );
+
+      await tester.tap(find.text('代理'));
+      await tester.pumpAndSettle();
+      expect(find.text('恢复'), findsOneWidget);
+      expect(find.text('pure-agent-child-2'), findsOneWidget);
+      expect(find.textContaining('base base-commit'), findsOneWidget);
+      expect(find.textContaining('head 暂不可用'), findsOneWidget);
+      expect(find.textContaining('变更文件'), findsNothing);
     },
   );
 }
@@ -3056,15 +3590,127 @@ void _configureSettingsTestView(WidgetTester tester) {
   addTearDown(tester.view.resetDevicePixelRatio);
 }
 
-Future<void> _pumpSettingsPage(WidgetTester tester, _FakeStudioApi api) async {
+/// Agents 列表按需构建：沿设置内容 pane 固定向下拖动，直到目标进入
+/// 元素树并落在当前视口内。
+Finder _settingsPaneScrollable() => find
+    .descendant(
+      of: find.byKey(const ValueKey('settings-pane-scroll')),
+      matching: find.byType(Scrollable),
+    )
+    .first;
+
+Future<void> _dragUntilBuilt(WidgetTester tester, Finder finder) async {
+  final paneScrollable = _settingsPaneScrollable();
+  final viewportHeight =
+      tester.view.physicalSize.height / tester.view.devicePixelRatio;
+  bool targetIsVisible() {
+    if (finder.evaluate().isEmpty) return false;
+    final rect = tester.getRect(finder);
+    return rect.top >= 0 && rect.bottom <= viewportHeight;
+  }
+
+  for (var drag = 0; drag < 20 && !targetIsVisible(); drag++) {
+    await tester.drag(paneScrollable, const Offset(0, -300));
+    await tester.pump();
+  }
+  expect(finder, findsOneWidget, reason: 'target should be built after drags');
+}
+
+Future<void> _pumpSettingsPage(
+  WidgetTester tester,
+  _FakeStudioApi api, {
+  Locale locale = const Locale('en'),
+}) async {
   await tester.pumpWidget(
     ProviderScope(
       overrides: [studioApiProvider.overrideWithValue(api)],
-      child: _localizedApp(home: const SettingsPage()),
+      child: _localizedApp(home: const SettingsPage(), locale: locale),
     ),
   );
   await tester.pumpAndSettle();
 }
+
+/// Agents tab 内固定文案统一收敛到 AlertDialog 作用域断言，
+/// 避免与底层 system profile 卡片的同文案标签混淆。
+Finder _dialogText(String text) =>
+    find.descendant(of: find.byType(AlertDialog), matching: find.text(text));
+
+RecoveryStateSnapshot _worktreeRecoverySnapshot() {
+  return RecoveryStateSnapshot(
+    revision: 7,
+    values: const [
+      StudioRecoveryIssue(
+        id: 'worktree-lease-child-1',
+        scope: RecoveryIssueScope.thread,
+        category: RecoveryIssueCategory.repository,
+        availableActions: [RecoveryIssueAction.cleanupWorktree],
+        detail: 'Preserved for review',
+        projectId: 'project-1',
+        threadId: 'thread-1',
+        worktree: WorktreeRecoveryPreview(
+          childId: 'child-1',
+          leaseRevision: 9,
+          state: 'preserved',
+          repositoryRoot: '/repo',
+          path: '/repo/.pure/worktrees/thread-1/child-1',
+          branch: 'pure-agent-child-1',
+          baseCommit: 'base-commit',
+          headCommit: 'head-commit',
+          dirty: true,
+          changedFiles: ['src/agent.rs'],
+        ),
+      ),
+    ],
+  );
+}
+
+/// head 不可用且无变更文件的 worktree 预览，覆盖 null head 行为。
+RecoveryStateSnapshot _worktreeRecoverySnapshotWithoutHead() {
+  return RecoveryStateSnapshot(
+    revision: 8,
+    values: const [
+      StudioRecoveryIssue(
+        id: 'worktree-lease-child-2',
+        scope: RecoveryIssueScope.thread,
+        category: RecoveryIssueCategory.repository,
+        availableActions: [RecoveryIssueAction.cleanupWorktree],
+        detail: 'Preserved for review',
+        projectId: 'project-1',
+        threadId: 'thread-1',
+        worktree: WorktreeRecoveryPreview(
+          childId: 'child-2',
+          leaseRevision: 11,
+          state: 'preserved',
+          repositoryRoot: '/repo',
+          path: '/repo/.pure/worktrees/thread-2/child-2',
+          branch: 'pure-agent-child-2',
+          baseCommit: 'base-commit',
+          headCommit: null,
+          dirty: false,
+          changedFiles: [],
+        ),
+      ),
+    ],
+  );
+}
+
+/// 用户 Profile fixture：驱动 `agent-profile-edit-<id>` 编辑对话框断言。
+const _userAgentProfile = AgentProfileView(
+  id: 'user-helper',
+  displayName: 'User helper',
+  description: 'User owned helper profile',
+  whenToUse: 'Use when a helper is needed',
+  systemInstructions: 'Follow the user instructions.',
+  providerId: 'deepseek',
+  model: 'deepseek-v4-flash',
+  effort: 'high',
+  source: 'user-toml',
+  revision: 'user-v1',
+  contentHash: 'user-helper-hash',
+  system: false,
+  enabled: true,
+  workspaceMode: AgentWorkspaceMode.directory,
+);
 
 ModelPerformanceSnapshotView _modelPerformanceFixture({
   bool hasUnpricedUsage = false,

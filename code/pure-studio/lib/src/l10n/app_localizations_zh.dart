@@ -185,7 +185,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsSkillsTab => '技能';
 
   @override
-  String get settingsRolesTab => '角色';
+  String get settingsAgentsTab => '代理';
 
   @override
   String get settingsMcpTab => 'MCP';
@@ -1184,12 +1184,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsNoSkillsMessage => '换个过滤条件，或发现当前项目的 skills。';
 
   @override
-  String get settingsRolesTitle => '角色';
-
-  @override
-  String get settingsRolesSubtitle => '为每个固定 agent role 选择 provider/model 默认值。';
-
-  @override
   String get settingsRoleExplorerDescription => '探索代码并收集上下文。';
 
   @override
@@ -1197,6 +1191,10 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get settingsRoleExecutorDescription => '应用编辑并运行工具。';
+
+  @override
+  String get settingsRoleWorktreeExecutorDescription =>
+      '在隔离的 Git worktree 中应用编辑并运行工具。';
 
   @override
   String get settingsRoleReviewerDescription => '审查结果并验证风险。';
@@ -1576,7 +1574,17 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsAgentsRecoveryTitle => '恢复';
 
   @override
-  String get settingsWorktreeHeadUnavailable => '不可用';
+  String settingsWorktreeBase(String commit) {
+    return 'base $commit';
+  }
+
+  @override
+  String settingsWorktreeHead(String commit) {
+    return 'head $commit';
+  }
+
+  @override
+  String get settingsWorktreeHeadUnavailable => 'head 暂不可用';
 
   @override
   String settingsWorktreeChangedFiles(String files) {
@@ -1615,6 +1623,15 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get settingsAgentProfileWorkspaceModeField => '工作区模式';
+
+  @override
+  String get settingsAgentWorkspaceModeUnrestricted => '不受限';
+
+  @override
+  String get settingsAgentWorkspaceModeDirectory => '目录';
+
+  @override
+  String get settingsAgentWorkspaceModeWorktree => 'Worktree';
 
   @override
   String get settingsAgentProfileWorkspaceDirectoryHint =>
@@ -1702,6 +1719,9 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get roleExecutor => '执行者';
+
+  @override
+  String get roleWorktreeExecutor => 'Worktree 执行者';
 
   @override
   String get roleReviewer => '审查者';

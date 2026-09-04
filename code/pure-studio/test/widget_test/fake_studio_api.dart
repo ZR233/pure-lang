@@ -64,6 +64,14 @@ class _FakeStudioApi implements StudioApi {
   ({String threadId, ThreadModeId mode})? modeUpdate;
   _RoleUpdate? roleUpdate;
   Completer<SettingsStateSnapshot>? blockedModelRoleSave;
+
+  /// 测试注入：追加在五个系统 Profile 之后返回的用户 Profile；
+  /// 默认保持为空以维持系统 Profile 默认行为。
+  List<AgentProfileView> userAgentProfiles = const [];
+
+  /// 测试注入：追加在用户 Profile 之后的额外 system Profile；
+  /// 用于覆盖未知 system id 的安全回退投影。
+  List<AgentProfileView> extraSystemProfiles = const [];
   Map<String, Object?>? savedProviderSettings;
   Map<String, Object?>? savedInstructionsSettings;
   Map<String, Object?>? savedSkillsSettings;
@@ -162,8 +170,24 @@ class _FakeStudioApi implements StudioApi {
     ])
       AgentProfileView(
         id: role,
-        displayName: role,
-        description: 'System $role profile',
+        // 镜像 pl-studio-runtime 的固定中文 metadata，验证 locale 投影
+        // 不会把 runtime 原文泄漏到 Agents 卡片。
+        displayName: switch (role) {
+          'explorer' => '探索者',
+          'planner' => '计划者',
+          'executor' => '执行者',
+          'worktree_executor' => 'Worktree 执行者',
+          'reviewer' => '审查者',
+          _ => role,
+        },
+        description: switch (role) {
+          'explorer' => '只读探索代码、文档和现场事实。',
+          'planner' => '分析目标并形成可执行方案。',
+          'executor' => '实施明确、边界清楚的工程任务。',
+          'worktree_executor' => '在独立 Git worktree 中实施明确任务。',
+          'reviewer' => '检查实现、测试、错误路径和需求一致性。',
+          _ => 'System $role profile',
+        },
         whenToUse: 'Use for $role work',
         systemInstructions: 'Follow the frozen assignment.',
         providerId: _currentState.role(role)?.providerId ?? 'deepseek',
@@ -180,6 +204,8 @@ class _FakeStudioApi implements StudioApi {
           _ => AgentWorkspaceMode.unrestricted,
         },
       ),
+    ...userAgentProfiles,
+    ...extraSystemProfiles,
   ];
 
   @override

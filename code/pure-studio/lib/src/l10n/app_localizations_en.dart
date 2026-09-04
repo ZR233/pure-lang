@@ -190,7 +190,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsSkillsTab => 'Skills';
 
   @override
-  String get settingsRolesTab => 'Roles';
+  String get settingsAgentsTab => 'Agents';
 
   @override
   String get settingsMcpTab => 'MCP';
@@ -1228,13 +1228,6 @@ class AppLocalizationsEn extends AppLocalizations {
       'Try another filter or discover skills for this project.';
 
   @override
-  String get settingsRolesTitle => 'Roles';
-
-  @override
-  String get settingsRolesSubtitle =>
-      'Choose provider/model defaults for each fixed agent role.';
-
-  @override
   String get settingsRoleExplorerDescription =>
       'Explore code and collect context.';
 
@@ -1244,6 +1237,10 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsRoleExecutorDescription => 'Apply edits and run tools.';
+
+  @override
+  String get settingsRoleWorktreeExecutorDescription =>
+      'Apply edits and run tools in an isolated Git worktree.';
 
   @override
   String get settingsRoleReviewerDescription =>
@@ -1636,7 +1633,17 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsAgentsRecoveryTitle => 'Recovery';
 
   @override
-  String get settingsWorktreeHeadUnavailable => 'unavailable';
+  String settingsWorktreeBase(String commit) {
+    return 'base $commit';
+  }
+
+  @override
+  String settingsWorktreeHead(String commit) {
+    return 'head $commit';
+  }
+
+  @override
+  String get settingsWorktreeHeadUnavailable => 'head unavailable';
 
   @override
   String settingsWorktreeChangedFiles(String files) {
@@ -1675,6 +1682,15 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsAgentProfileWorkspaceModeField => 'Workspace mode';
+
+  @override
+  String get settingsAgentWorkspaceModeUnrestricted => 'Unrestricted';
+
+  @override
+  String get settingsAgentWorkspaceModeDirectory => 'Directory';
+
+  @override
+  String get settingsAgentWorkspaceModeWorktree => 'Worktree';
 
   @override
   String get settingsAgentProfileWorkspaceDirectoryHint =>
@@ -1762,6 +1778,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get roleExecutor => 'Executor';
+
+  @override
+  String get roleWorktreeExecutor => 'Worktree executor';
 
   @override
   String get roleReviewer => 'Reviewer';

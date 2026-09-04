@@ -33,26 +33,62 @@ Widget agentWorkspaceLoadingPreview() {
 }
 
 Widget _agentWorkspacePreview(StudioState state) {
-  return ProviderScope(
+  return _AgentWorkspacePreviewScope(
     key: ValueKey(
       'agent-workspace-preview-${state.selectedThreadId}-'
       '${state.selectedAgentWorkspace?.syncState.name}',
     ),
-    overrides: [
-      studioControllerProvider.overrideWith(
-        () => _AgentWorkspacePreviewController(state),
-      ),
-    ],
-    child: MaterialApp(
-      debugShowCheckedModeBanner: false,
-      theme: pureStudioTheme(Brightness.light),
-      darkTheme: pureStudioTheme(Brightness.dark),
-      themeMode: ThemeMode.dark,
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
-      supportedLocales: AppLocalizations.supportedLocales,
-      home: const Scaffold(body: AgentWorkspacePane()),
-    ),
+    previewState: state,
   );
+}
+
+class _AgentWorkspacePreviewScope extends StatefulWidget {
+  const _AgentWorkspacePreviewScope({super.key, required this.previewState});
+
+  final StudioState previewState;
+
+  @override
+  State<_AgentWorkspacePreviewScope> createState() =>
+      _AgentWorkspacePreviewScopeState();
+}
+
+class _AgentWorkspacePreviewScopeState
+    extends State<_AgentWorkspacePreviewScope> {
+  late final ProviderContainer _container;
+
+  @override
+  void initState() {
+    super.initState();
+    _container = ProviderContainer(
+      overrides: [
+        studioControllerProvider.overrideWith(
+          () => _AgentWorkspacePreviewController(widget.previewState),
+        ),
+      ],
+    );
+  }
+
+  @override
+  void dispose() {
+    _container.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return UncontrolledProviderScope(
+      container: _container,
+      child: MaterialApp(
+        debugShowCheckedModeBanner: false,
+        theme: pureStudioTheme(Brightness.light),
+        darkTheme: pureStudioTheme(Brightness.dark),
+        themeMode: ThemeMode.dark,
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: const Scaffold(body: AgentWorkspacePane()),
+      ),
+    );
+  }
 }
 
 class _AgentWorkspacePreviewController extends StudioController {

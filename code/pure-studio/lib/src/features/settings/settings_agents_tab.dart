@@ -107,6 +107,7 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
             const SizedBox(height: 16),
             for (final profile in profiles) ...[
               Card(
+                key: ValueKey('agent-profile-card-${profile.id}'),
                 color: context.studioPaper2,
                 child: Column(
                   children: [
@@ -116,9 +117,15 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
                             ? Icons.lock_outline
                             : Icons.person_outline,
                       ),
-                      title: Text(profile.displayName),
+                      title: Text(
+                        profile.system
+                            ? context.roleLabel(profile.id)
+                            : profile.displayName,
+                      ),
                       subtitle: Text(
-                        '${profile.id} · ${profile.description}\n${_workspaceModeLabel(profile.workspaceMode)}',
+                        '${profile.id} · '
+                        '${profile.system ? context.roleDescription(profile.id) : profile.description}\n'
+                        '${_workspaceModeLabel(context, profile.workspaceMode)}',
                       ),
                       isThreeLine: true,
                       trailing: profile.system
@@ -130,7 +137,10 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
                                     'system-agent-workspace-${profile.id}',
                                   ),
                                   label: Text(
-                                    _workspaceModeLabel(profile.workspaceMode),
+                                    _workspaceModeLabel(
+                                      context,
+                                      profile.workspaceMode,
+                                    ),
                                   ),
                                 ),
                                 const SizedBox(width: 8),
@@ -197,6 +207,8 @@ class _WorktreeRecoveryCardState extends ConsumerState<_WorktreeRecoveryCard> {
   @override
   Widget build(BuildContext context) {
     final worktree = widget.issue.worktree!;
+    final l10n = context.l10n;
+    final head = worktree.headCommit;
     return Card(
       key: ValueKey('worktree-recovery-${worktree.childId}'),
       color: context.studioPaper2,
@@ -222,9 +234,13 @@ class _WorktreeRecoveryCardState extends ConsumerState<_WorktreeRecoveryCard> {
             ),
             const SizedBox(height: 8),
             SelectableText(
-              'base ${worktree.baseCommit}\n'
-              'head ${worktree.headCommit ?? context.l10n.settingsWorktreeHeadUnavailable}\n'
-              '${worktree.path}',
+              [
+                l10n.settingsWorktreeBase(worktree.baseCommit),
+                head == null
+                    ? l10n.settingsWorktreeHeadUnavailable
+                    : l10n.settingsWorktreeHead(head),
+                worktree.path,
+              ].join('\n'),
             ),
             if (worktree.changedFiles.isNotEmpty) ...[
               const SizedBox(height: 8),
@@ -440,7 +456,7 @@ class _AgentProfileDialogState extends State<_AgentProfileDialog> {
                       .map(
                         (mode) => DropdownMenuItem(
                           value: mode,
-                          child: Text(_workspaceModeLabel(mode)),
+                          child: Text(_workspaceModeLabel(context, mode)),
                         ),
                       )
                       .toList(growable: false),
@@ -554,8 +570,12 @@ class _AgentProfileDialogState extends State<_AgentProfileDialog> {
   }
 }
 
-String _workspaceModeLabel(AgentWorkspaceMode mode) => switch (mode) {
-  AgentWorkspaceMode.unrestricted => 'Unrestricted',
-  AgentWorkspaceMode.directory => 'Directory',
-  AgentWorkspaceMode.worktree => 'Worktree',
-};
+String _workspaceModeLabel(BuildContext context, AgentWorkspaceMode mode) =>
+    switch (mode) {
+      AgentWorkspaceMode.unrestricted =>
+        context.l10n.settingsAgentWorkspaceModeUnrestricted,
+      AgentWorkspaceMode.directory =>
+        context.l10n.settingsAgentWorkspaceModeDirectory,
+      AgentWorkspaceMode.worktree =>
+        context.l10n.settingsAgentWorkspaceModeWorktree,
+    };

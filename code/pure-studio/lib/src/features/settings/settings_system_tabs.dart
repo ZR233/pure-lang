@@ -231,7 +231,7 @@ class _RoleSettingsRow extends StatelessWidget {
         ),
         const SizedBox(height: 2),
         Text(
-          _roleDescription(context, role),
+          context.roleDescription(role),
           style: context.text.bodySmall?.copyWith(color: context.studioInkSoft),
         ),
       ],
@@ -371,16 +371,6 @@ class _RoleSelectOption {
   final Key key;
   final String value;
   final String label;
-}
-
-String _roleDescription(BuildContext context, String role) {
-  return switch (role) {
-    'explorer' => context.l10n.settingsRoleExplorerDescription,
-    'planner' => context.l10n.settingsRolePlannerDescription,
-    'executor' => context.l10n.settingsRoleExecutorDescription,
-    'reviewer' => context.l10n.settingsRoleReviewerDescription,
-    _ => context.l10n.settingsRoleFallbackDescription,
-  };
 }
 
 class _RoleModelOption {

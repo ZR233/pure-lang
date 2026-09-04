@@ -416,11 +416,11 @@ abstract class AppLocalizations {
   /// **'Skills'**
   String get settingsSkillsTab;
 
-  /// No description provided for @settingsRolesTab.
+  /// No description provided for @settingsAgentsTab.
   ///
   /// In en, this message translates to:
-  /// **'Roles'**
-  String get settingsRolesTab;
+  /// **'Agents'**
+  String get settingsAgentsTab;
 
   /// No description provided for @settingsMcpTab.
   ///
@@ -2243,18 +2243,6 @@ abstract class AppLocalizations {
   /// **'Try another filter or discover skills for this project.'**
   String get settingsNoSkillsMessage;
 
-  /// No description provided for @settingsRolesTitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Roles'**
-  String get settingsRolesTitle;
-
-  /// No description provided for @settingsRolesSubtitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Choose provider/model defaults for each fixed agent role.'**
-  String get settingsRolesSubtitle;
-
   /// No description provided for @settingsRoleExplorerDescription.
   ///
   /// In en, this message translates to:
@@ -2272,6 +2260,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Apply edits and run tools.'**
   String get settingsRoleExecutorDescription;
+
+  /// No description provided for @settingsRoleWorktreeExecutorDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Apply edits and run tools in an isolated Git worktree.'**
+  String get settingsRoleWorktreeExecutorDescription;
 
   /// No description provided for @settingsRoleReviewerDescription.
   ///
@@ -2963,10 +2957,22 @@ abstract class AppLocalizations {
   /// **'Recovery'**
   String get settingsAgentsRecoveryTitle;
 
+  /// No description provided for @settingsWorktreeBase.
+  ///
+  /// In en, this message translates to:
+  /// **'base {commit}'**
+  String settingsWorktreeBase(String commit);
+
+  /// No description provided for @settingsWorktreeHead.
+  ///
+  /// In en, this message translates to:
+  /// **'head {commit}'**
+  String settingsWorktreeHead(String commit);
+
   /// No description provided for @settingsWorktreeHeadUnavailable.
   ///
   /// In en, this message translates to:
-  /// **'unavailable'**
+  /// **'head unavailable'**
   String get settingsWorktreeHeadUnavailable;
 
   /// No description provided for @settingsWorktreeChangedFiles.
@@ -3040,6 +3046,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Workspace mode'**
   String get settingsAgentProfileWorkspaceModeField;
+
+  /// No description provided for @settingsAgentWorkspaceModeUnrestricted.
+  ///
+  /// In en, this message translates to:
+  /// **'Unrestricted'**
+  String get settingsAgentWorkspaceModeUnrestricted;
+
+  /// No description provided for @settingsAgentWorkspaceModeDirectory.
+  ///
+  /// In en, this message translates to:
+  /// **'Directory'**
+  String get settingsAgentWorkspaceModeDirectory;
+
+  /// No description provided for @settingsAgentWorkspaceModeWorktree.
+  ///
+  /// In en, this message translates to:
+  /// **'Worktree'**
+  String get settingsAgentWorkspaceModeWorktree;
 
   /// No description provided for @settingsAgentProfileWorkspaceDirectoryHint.
   ///
@@ -3208,6 +3232,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Executor'**
   String get roleExecutor;
+
+  /// No description provided for @roleWorktreeExecutor.
+  ///
+  /// In en, this message translates to:
+  /// **'Worktree executor'**
+  String get roleWorktreeExecutor;
 
   /// No description provided for @roleReviewer.
   ///
