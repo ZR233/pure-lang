@@ -14,7 +14,7 @@ pub use cancelling::CancellingAgentState;
 pub use closed::ClosedAgentState;
 pub use closing::ClosingAgentState;
 pub use faulted::{AgentFaultClassification, FaultedAgentState};
-pub use idle::IdleAgentState;
+pub use idle::{AgentBudgetPause, IdleAgentState};
 pub use queued::QueuedAgentState;
 pub use running::RunningAgentState;
 pub use waiting_interaction::WaitingInteractionAgentState;
@@ -43,6 +43,11 @@ impl AgentState {
     /// 创建 idle Agent 状态。
     pub fn idle() -> Self {
         Self::Idle(IdleAgentState::new())
+    }
+
+    /// 创建因 child Turn 预算耗尽而暂停的 idle 状态。
+    pub fn budget_paused(pause: AgentBudgetPause) -> Self {
+        Self::Idle(IdleAgentState::budget_paused(pause))
     }
 
     /// 返回当前 active、queued 或诊断 Turn。
@@ -86,6 +91,26 @@ impl AgentState {
     /// 返回 Agent 是否 idle。
     pub fn is_idle(&self) -> bool {
         matches!(self, Self::Idle(_))
+    }
+
+    /// 返回 Agent 是否正等待父 Agent 检查预算终态并显式续跑。
+    pub fn is_budget_paused(&self) -> bool {
+        matches!(self, Self::Idle(state) if state.budget_pause().is_some())
+    }
+
+    /// 返回 child 预算暂停快照。
+    pub fn budget_pause(&self) -> Option<&AgentBudgetPause> {
+        match self {
+            Self::Idle(state) => state.budget_pause(),
+            Self::Queued(_)
+            | Self::Running(_)
+            | Self::WaitingTool(_)
+            | Self::WaitingInteraction(_)
+            | Self::Cancelling(_)
+            | Self::Closing(_)
+            | Self::Closed(_)
+            | Self::Faulted(_) => None,
+        }
     }
 
     /// 返回 Agent 是否已排队。
@@ -161,5 +186,50 @@ mod tests {
         });
 
         assert!(serde_json::from_value::<AgentState>(legacy).is_err());
+    }
+
+    #[test]
+    fn legacy_idle_and_budget_pause_have_distinct_compatible_payloads() {
+        let legacy: AgentState = serde_json::from_value(json!({
+            "kind": "idle",
+            "data": {}
+        }))
+        .expect("legacy idle");
+        assert_eq!(legacy, AgentState::idle());
+
+        let pause = AgentBudgetPause::new(
+            turn("turn-budget"),
+            crate::BudgetLimitSnapshot {
+                kind: crate::BudgetLimitKind::WallClock,
+                usage: crate::BudgetUsage {
+                    elapsed_ms: 30_000,
+                    ..crate::BudgetUsage::default()
+                },
+            },
+            42,
+        );
+        let paused = AgentState::budget_paused(pause.clone());
+        assert_eq!(paused.budget_pause(), Some(&pause));
+        assert_eq!(
+            serde_json::to_value(paused).expect("serialize budget pause"),
+            json!({
+                "kind": "idle",
+                "data": {
+                    "budgetPause": {
+                        "turnId": "turn-budget",
+                        "limit": {
+                            "kind": "wallClock",
+                            "usage": {
+                                "modelSteps": 0,
+                                "toolCalls": 0,
+                                "waitCalls": 0,
+                                "elapsedMs": 30_000
+                            }
+                        },
+                        "pausedAt": 42
+                    }
+                }
+            })
+        );
     }
 }

@@ -90,9 +90,12 @@ where
         next.pending_inputs.push_back(input.clone());
         next.refresh_mailbox_snapshot();
         if live_turn.is_none() && next.snapshot.state.is_idle() {
+            let queued_turn_id = next
+                .triggering_turn_id()
+                .expect("the newly appended input must make the mailbox triggerable");
             next.snapshot
                 .transition(AgentCommand::Queue {
-                    turn_id: turn_id.clone(),
+                    turn_id: queued_turn_id,
                 })
                 .map_err(|error| AgentRuntimeError::InvalidInput(error.to_string()))?;
         }

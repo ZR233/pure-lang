@@ -14,10 +14,11 @@ use super::{
     AgentActivityUpdate, AgentCurrentSessionSubmitRequest, AgentDirectoryWaitMessage,
     AgentDirectoryWaitReason, AgentDirectoryWaitResult, AgentInteractionContinuationRequest,
     AgentProgressCheckpoint, AgentProgressStage, AgentRegistration, AgentRuntimeResult,
-    AgentSessionDigest, AgentSnapshot, AgentSpawnRequest, AgentSpawnResult, AgentSubmissionPage,
-    AgentSubmitRequest, AgentTurnCheckpoint, AgentWaitResult, ConversationRecoveryPreview,
-    ConversationRecoveryRequest, ConversationRecoveryResult, ConversationRecoveryTarget,
-    RestoredAgentRuntime, ThreadContextState, ThreadId, TurnId,
+    AgentSessionTimelineQuery, AgentSessionTimelineRepositoryPage, AgentSnapshot,
+    AgentSpawnRequest, AgentSpawnResult, AgentSubmissionPage, AgentSubmitRequest,
+    AgentTurnCheckpoint, AgentWaitResult, ConversationRecoveryPreview, ConversationRecoveryRequest,
+    ConversationRecoveryResult, ConversationRecoveryTarget, RestoredAgentRuntime,
+    ThreadContextState, ThreadId, TurnId,
 };
 use crate::agent_runtime::state::AgentRuntimeError;
 use crate::{AgentRoleId, ThreadEventBusHandle, ThreadEventSubscription};
@@ -315,13 +316,13 @@ impl AgentRuntimeHandle {
         receive(receiver).await?
     }
 
-    /// 读取目标 agent 唯一 canonical session 的有界、过滤摘要。
+    /// 从 repository 读取目标 agent 的完整 durable Timeline 页。
     pub async fn read_agent_session(
         &self,
-        agent_id: ThreadId,
-    ) -> AgentRuntimeResult<AgentSessionDigest> {
+        query: AgentSessionTimelineQuery,
+    ) -> AgentRuntimeResult<AgentSessionTimelineRepositoryPage> {
         let (reply, receiver) = oneshot::channel();
-        self.send_to_actor(&agent_id, AgentLoopCommand::ReadSession { reply })
+        self.send(CoordinatorCommand::ReadAgentSession { query, reply })
             .await?;
         receive(receiver).await?
     }
@@ -558,6 +559,17 @@ fn current_wait_result<'a>(
     snapshots: impl Iterator<Item = &'a AgentSnapshot>,
 ) -> Option<AgentDirectoryWaitResult> {
     let snapshots = snapshots.cloned().collect::<Vec<_>>();
+    let budget_limited = snapshots
+        .iter()
+        .filter(|snapshot| snapshot.state.is_budget_paused())
+        .cloned()
+        .collect::<Vec<_>>();
+    if !budget_limited.is_empty() {
+        return Some(AgentDirectoryWaitResult {
+            reason: AgentDirectoryWaitReason::BudgetLimited,
+            messages: budget_limited.into_iter().map(wait_message).collect(),
+        });
+    }
     let terminal = snapshots
         .iter()
         .filter(|snapshot| is_settled(snapshot) && snapshot.last_turn.is_some())
@@ -587,7 +599,11 @@ fn changed_wait_result(
         .iter()
         .filter_map(|(id, snapshot)| {
             let previous = baseline.get(id)?;
-            let reason = if (!snapshot.state.is_operational() && snapshot.state != previous.state)
+            let reason = if snapshot.state.is_budget_paused()
+                && (!previous.state.is_budget_paused() || snapshot.last_turn != previous.last_turn)
+            {
+                AgentDirectoryWaitReason::BudgetLimited
+            } else if (!snapshot.state.is_operational() && snapshot.state != previous.state)
                 || snapshot.last_turn != previous.last_turn
             {
                 AgentDirectoryWaitReason::Terminal
@@ -607,9 +623,10 @@ fn changed_wait_result(
         .iter()
         .map(|(reason, _)| *reason)
         .min_by_key(|reason| match reason {
-            AgentDirectoryWaitReason::Terminal => 0,
-            AgentDirectoryWaitReason::Interaction => 1,
-            AgentDirectoryWaitReason::Progress => 2,
+            AgentDirectoryWaitReason::BudgetLimited => 0,
+            AgentDirectoryWaitReason::Terminal => 1,
+            AgentDirectoryWaitReason::Interaction => 2,
+            AgentDirectoryWaitReason::Progress => 3,
         })?;
     Some(AgentDirectoryWaitResult {
         reason,
@@ -636,7 +653,9 @@ fn wait_message(snapshot: AgentSnapshot) -> AgentDirectoryWaitMessage {
 }
 
 fn is_settled(snapshot: &AgentSnapshot) -> bool {
-    !snapshot.state.is_operational() || (snapshot.state.is_idle() && snapshot.pending_inputs == 0)
+    snapshot.state.is_budget_paused()
+        || !snapshot.state.is_operational()
+        || (snapshot.state.is_idle() && snapshot.pending_inputs == 0)
 }
 
 async fn receive<T>(receiver: oneshot::Receiver<T>) -> AgentRuntimeResult<T> {
@@ -695,5 +714,59 @@ mod tests {
         let result = current_wait_result(std::iter::once(&snapshot)).unwrap();
         assert_eq!(result.reason, AgentDirectoryWaitReason::Terminal);
         assert_eq!(result.messages[0].last_turn_outcome, snapshot.last_turn);
+    }
+
+    #[test]
+    fn newly_budget_paused_child_wins_wait_priority_and_keeps_outcome() {
+        let child_id = ThreadId::new("child").unwrap();
+        let turn_id = TurnId::new("turn-budget").unwrap();
+        let mut previous = AgentRegistration::new(AgentIdentity {
+            id: child_id.clone(),
+            parent_id: Some(ThreadId::new("root").unwrap()),
+            role: AgentRoleId::new("executor").unwrap(),
+            depth: 1,
+        })
+        .into_durable_state()
+        .snapshot;
+        previous
+            .transition(AgentCommand::Queue {
+                turn_id: turn_id.clone(),
+            })
+            .unwrap();
+        previous
+            .transition(AgentCommand::Start {
+                turn_id: turn_id.clone(),
+            })
+            .unwrap();
+        let limit = pl_protocol::BudgetLimitSnapshot {
+            kind: pl_protocol::BudgetLimitKind::WallClock,
+            usage: pl_protocol::BudgetUsage::default(),
+        };
+        let mut current = previous.clone();
+        current
+            .transition(AgentCommand::PauseForBudget {
+                pause: super::super::AgentBudgetPause::new(turn_id.clone(), limit, 2),
+            })
+            .unwrap();
+        current.pending_inputs = 1;
+        current.last_turn = Some(AgentTurnOutcome {
+            turn_id,
+            thread_id: child_id.clone(),
+            outcome: pl_protocol::TurnOutcome::budget_limited(
+                limit,
+                pl_protocol::TurnRolloverOutcome::NotAttempted,
+            ),
+            usage: TokenUsage::default(),
+            started_at: Some(1),
+            finished_at: 2,
+        });
+        let baseline = BTreeMap::from([(child_id.clone(), previous)]);
+        let changed = BTreeMap::from([(child_id, current.clone())]);
+
+        let result = changed_wait_result(&baseline, &changed).unwrap();
+
+        assert_eq!(result.reason, AgentDirectoryWaitReason::BudgetLimited);
+        assert_eq!(result.messages[0].last_turn_outcome, current.last_turn);
+        assert!(is_settled(&current));
     }
 }

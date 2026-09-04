@@ -3,9 +3,9 @@
 use std::fmt;
 
 use pl_protocol::{
-    AgentFaultClassification, AgentSnapshot, AgentState, CancellingAgentState, ClosedAgentState,
-    ClosingAgentState, FaultedAgentState, QueuedAgentState, RunningAgentState, StateError, TurnId,
-    WaitingInteractionAgentState, WaitingToolAgentState,
+    AgentBudgetPause, AgentFaultClassification, AgentSnapshot, AgentState, CancellingAgentState,
+    ClosedAgentState, ClosingAgentState, FaultedAgentState, QueuedAgentState, RunningAgentState,
+    StateError, TurnId, WaitingInteractionAgentState, WaitingToolAgentState,
 };
 
 /// 可以改变 Agent 生命周期的领域命令。
@@ -41,6 +41,9 @@ pub enum AgentCommand {
     Settle {
         next_turn_id: Option<TurnId>,
     },
+    PauseForBudget {
+        pause: AgentBudgetPause,
+    },
     BeginClose,
     Close,
     Restore {
@@ -71,6 +74,7 @@ impl AgentCommand {
             Self::ContinueInteraction { .. } => "continueInteraction",
             Self::Cancel { .. } => "cancel",
             Self::Settle { .. } => "settle",
+            Self::PauseForBudget { .. } => "pauseForBudget",
             Self::BeginClose => "beginClose",
             Self::Close => "close",
             Self::Restore { .. } => "restore",
@@ -279,6 +283,13 @@ impl AgentStateTransition for AgentState {
                 None => Self::idle(),
             })),
             (
+                Self::Running(_)
+                | Self::WaitingTool(_)
+                | Self::WaitingInteraction(_)
+                | Self::Cancelling(_),
+                AgentCommand::PauseForBudget { pause },
+            ) => Ok(AgentTransitionDecision::changed(Self::budget_paused(pause))),
+            (
                 Self::WaitingInteraction(state),
                 AgentCommand::ContinueInteraction {
                     interaction_id,
@@ -430,6 +441,41 @@ mod tests {
                 .decide(AgentCommand::RecoverFaulted {
                     target: AgentRecoveryTarget::Idle,
                 })
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn budget_pause_requires_an_active_turn_and_explicit_input_clears_it() {
+        let turn_id = turn("turn-budget");
+        let running = AgentState::Running(RunningAgentState::new(turn_id.clone()));
+        let pause = AgentBudgetPause::new(
+            turn_id,
+            pl_protocol::BudgetLimitSnapshot {
+                kind: pl_protocol::BudgetLimitKind::WallClock,
+                usage: pl_protocol::BudgetUsage::default(),
+            },
+            10,
+        );
+        let paused = running
+            .decide(AgentCommand::PauseForBudget {
+                pause: pause.clone(),
+            })
+            .expect("pause active child")
+            .next_state;
+        assert_eq!(paused.budget_pause(), Some(&pause));
+
+        let queued = paused
+            .decide(AgentCommand::Queue {
+                turn_id: turn("turn-resume"),
+            })
+            .expect("explicit input resumes paused child")
+            .next_state;
+        assert!(queued.is_queued());
+        assert!(!queued.is_budget_paused());
+        assert!(
+            AgentState::idle()
+                .decide(AgentCommand::PauseForBudget { pause })
                 .is_err()
         );
     }

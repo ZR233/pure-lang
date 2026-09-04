@@ -1,8 +1,12 @@
 use std::error::Error;
 use std::future::Future;
 
-use pl_protocol::{ThreadNotification, ThreadNotificationEnvelope, ThreadSnapshot, Turn};
+use pl_protocol::{
+    AgentSessionReadDetail, AgentSessionReadOrder, ThreadItem, ThreadNotification,
+    ThreadNotificationEnvelope, ThreadSnapshot, Turn,
+};
 use pl_trace::TraceEvent;
+use serde::{Deserialize, Serialize};
 
 use crate::ModelContextItem;
 
@@ -333,6 +337,38 @@ pub struct ThreadProjectionCommit {
     pub notifications: Vec<ThreadNotificationEnvelope>,
 }
 
+/// durable Timeline 中一个稳定的 Item key。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgentSessionTimelineKey {
+    pub ordinal: u64,
+    pub item_id: String,
+}
+
+/// repository 执行 `read_agent_session` keyset 查询时使用的 typed 请求。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentSessionTimelineQuery {
+    pub target: ThreadId,
+    pub order: AgentSessionReadOrder,
+    pub detail: AgentSessionReadDetail,
+    pub limit: usize,
+    pub through_sequence: Option<u64>,
+    pub watermark: Option<AgentSessionTimelineKey>,
+    pub anchor: Option<AgentSessionTimelineKey>,
+}
+
+/// repository 返回的 Timeline 页及目标 lineage。
+#[derive(Debug, Clone, PartialEq)]
+pub struct AgentSessionTimelineRepositoryPage {
+    pub identity: super::AgentIdentity,
+    pub path: Vec<ThreadId>,
+    pub through_sequence: u64,
+    pub watermark: Option<AgentSessionTimelineKey>,
+    pub items: Vec<ThreadItem>,
+    pub has_more: bool,
+    pub next_anchor: Option<AgentSessionTimelineKey>,
+}
+
 /// repository 可据此只更新真正变化的 durable aggregate 部分。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ThreadMutation {
@@ -415,6 +451,15 @@ pub trait ThreadRepository: Clone + Send + Sync + 'static {
         offset: usize,
         limit: usize,
     ) -> impl Future<Output = std::result::Result<super::AgentSubmissionPage, Self::Error>> + Send;
+
+    /// 读取一个 Agent 的完整 durable Timeline 页，不激活其 actor。
+    ///
+    /// `watermark` 与 `anchor` 由 runtime 的 opaque cursor 解码；实现必须在首次页冻结
+    /// 最大 Item key，并在后续页严格限制到同一水位。
+    fn list_agent_session(
+        &self,
+        query: AgentSessionTimelineQuery,
+    ) -> impl Future<Output = std::result::Result<AgentSessionTimelineRepositoryPage, Self::Error>> + Send;
 }
 
 /// 宿主为一次 turn 构造模型、instructions、工具和产品策略的端口。

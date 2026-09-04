@@ -25,7 +25,6 @@ mod lifecycle;
 mod persist;
 mod recovery;
 mod running_turn;
-mod session_digest;
 mod submissions;
 
 struct LoopChannels {
@@ -206,9 +205,6 @@ where
                             let result =
                                 self.report_progress(stage, summary, next_step, detail).boxed().await;
                             let _ = reply.send(result);
-                        }
-                        AgentLoopCommand::ReadSession { reply } => {
-                            let _ = reply.send(self.read_session());
                         }
                         AgentLoopCommand::ReadThreadContext { reply } => {
                             let _ = reply.send(Ok(self.state.session.clone()));

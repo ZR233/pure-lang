@@ -17,7 +17,9 @@ const TOOL_WAIT_AGENTS: &str = "wait_agents";
 const TOOL_READ_AGENT_SESSION: &str = "read_agent_session";
 const TOOL_READ_AGENT_SUBMISSIONS: &str = "read_agent_submissions";
 const TOOL_CLOSE_AGENT: &str = "close_agent";
-const SESSION_READ_MIN_AGE_SECONDS: i64 = 300;
+const DEFAULT_SESSION_LIMIT: usize = 20;
+const MAX_SESSION_LIMIT: usize = 50;
+const MAX_SESSION_OUTPUT_BYTES: usize = 256 * 1024;
 const DEFAULT_SUBMISSION_OFFSET: usize = 0;
 const DEFAULT_SUBMISSION_LIMIT: usize = 20;
 const MAX_SUBMISSION_LIMIT: usize = 50;
@@ -25,6 +27,7 @@ const MAX_SUBMISSION_LIMIT: usize = 50;
 const MAX_SUBMISSION_OUTPUT_BYTES: usize = 64 * 1024;
 
 mod args;
+mod session;
 mod summary;
 mod support;
 
@@ -34,7 +37,8 @@ use summary::*;
 use support::{
     close_schema, filter_visible, fork_session, json_output, json_output_with_budget,
     object_schema, parse_agent_id, parse_input, progress_schema, resolve_profile_writable_paths,
-    send_message_schema, spawn_schema, submissions_schema, target_schema, wait_schema,
+    send_message_schema, session_schema, session_target_visible, spawn_schema, submissions_schema,
+    target_schema, wait_schema,
 };
 
 /// 为一次 turn 构造由 `AgentRuntimeHandle` 驱动的协作工具。
@@ -175,10 +179,10 @@ impl CollaborationToolKind {
                 "List full compact canonical snapshots for visible agents when discovering targets, reconciling after restart, or diagnosing stalled work."
             }
             Self::Wait => {
-                "Wait until a target reports progress, requests interaction, or finishes a turn, then return only the latest changed agent messages. Consume this delta directly instead of calling list_agents to refresh."
+                "Wait until a target reports progress, requests interaction, reaches its budget, or finishes a turn, then return only the latest changed agent messages. A budgetLimited result requires session inspection and explicit continuation. Consume this delta directly instead of calling list_agents to refresh."
             }
             Self::ReadSession => {
-                "Read a bounded filtered digest for a terminal or potentially stuck agent."
+                "Read a complete durable agent Timeline with stable keyset pagination. Defaults to the newest 20 text items; use order and detail to inspect the full execution history. This diagnostic does not replace durable submissions."
             }
             Self::ReadSubmissions => {
                 "Read the durable stage submission history for an agent (full content, paginated, not truncated; works after the target has closed)."
@@ -238,10 +242,7 @@ impl StaticTool for CollaborationTool {
             ),
             CollaborationToolKind::List => object_schema(Vec::new()),
             CollaborationToolKind::Wait => wait_schema(&self.policy.list_targets),
-            CollaborationToolKind::ReadSession => target_schema(
-                &self.policy.list_targets,
-                "Agent id whose bounded session digest should be read.",
-            ),
+            CollaborationToolKind::ReadSession => session_schema(&self.policy.list_targets),
             CollaborationToolKind::ReadSubmissions => submissions_schema(&self.policy.list_targets),
             CollaborationToolKind::Close => close_schema(&self.policy.close_targets),
         }
@@ -574,33 +575,53 @@ impl CollaborationTool {
             .iter()
             .map(|message| compact_wait_message(message, &snapshots))
             .collect::<Vec<_>>();
-        json_output(json!({ "reason": result.reason, "messages": messages }))
+        let guidance = wait_guidance(result.reason);
+        json_output(json!({
+            "reason": result.reason,
+            "messages": messages,
+            "guidance": guidance,
+        }))
     }
 
     async fn read_session(&self, input: ToolInput) -> Result<ToolResult, PureError> {
-        let args: TargetArgs = parse_input(TOOL_READ_AGENT_SESSION, input.arguments)?;
+        let args: SessionArgs = parse_input(TOOL_READ_AGENT_SESSION, input.arguments)?;
         let target = parse_agent_id(TOOL_READ_AGENT_SESSION, args.target)?;
-        self.authorize(&self.policy.list_targets, &target).await?;
-        let snapshot = self
-            .runtime
-            .snapshot(target.clone())
-            .await
-            .map_err(|error| tool_error(TOOL_READ_AGENT_SESSION, error.to_string()))?;
-        let age = summary_age_seconds(&snapshot);
-        if session_read_requires_age_gate(&snapshot.state) && age < SESSION_READ_MIN_AGE_SECONDS {
+        let limit = args.limit.unwrap_or(DEFAULT_SESSION_LIMIT);
+        if !(1..=MAX_SESSION_LIMIT).contains(&limit) {
             return Err(tool_error(
                 TOOL_READ_AGENT_SESSION,
-                format!(
-                    "agent `{target}` has active work and its latest summary is {age}s old; reading is available at {SESSION_READ_MIN_AGE_SECONDS}s"
-                ),
+                format!("limit must be between 1 and {MAX_SESSION_LIMIT}"),
             ));
         }
-        let digest = self
+        let query = session::query(
+            target.clone(),
+            args.order,
+            args.detail,
+            limit,
+            args.cursor.as_deref(),
+        )?;
+        let repository = self
             .runtime
-            .read_agent_session(target)
+            .read_agent_session(query.clone())
             .await
             .map_err(|error| tool_error(TOOL_READ_AGENT_SESSION, error.to_string()))?;
-        json_output(json!(digest))
+        let caller_root =
+            super::directory::root_agent_id_for(&self.runtime.directory_snapshot(), &self.caller)
+                .map_err(|error| tool_error(TOOL_READ_AGENT_SESSION, error.to_string()))?;
+        let allowed = session_target_visible(
+            &self.policy.list_targets,
+            &caller_root,
+            &target,
+            &repository.path,
+        );
+        if !allowed {
+            return Err(tool_error(
+                TOOL_READ_AGENT_SESSION,
+                format!("agent `{target}` is not accessible for this turn"),
+            ));
+        }
+        let page = session::page_with_budget(&query, repository, MAX_SESSION_OUTPUT_BYTES)?;
+        json_output_with_budget(json!(page), MAX_SESSION_OUTPUT_BYTES)
     }
 
     async fn read_submissions(&self, input: ToolInput) -> Result<ToolResult, PureError> {
@@ -701,6 +722,19 @@ mod tests {
             CollaborationToolKind::List
                 .description()
                 .contains("discovering targets")
+        );
+    }
+
+    #[test]
+    fn read_session_schema_defaults_to_latest_text_page() {
+        let schema = session_schema(&AgentTargetSelector::Tree);
+        assert_eq!(schema["properties"]["limit"]["default"], 20);
+        assert_eq!(schema["properties"]["order"]["default"], "descending");
+        assert_eq!(schema["properties"]["detail"]["default"], "text");
+        assert!(
+            CollaborationToolKind::ReadSession
+                .description()
+                .contains("complete durable agent Timeline")
         );
     }
 }

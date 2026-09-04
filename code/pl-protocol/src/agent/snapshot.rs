@@ -88,36 +88,11 @@ pub struct AgentSubmissionPage {
     pub has_more: bool,
 }
 
-/// `read_agent_session` 可返回的公开消息角色。
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum AgentSessionDigestRole {
-    User,
-    Assistant,
-}
-
-/// `read_agent_session` 的单条有界文本。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct AgentSessionDigestMessage {
-    pub role: AgentSessionDigestRole,
-    pub text: String,
-}
-
-/// `read_agent_session` 的过滤结果。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct AgentSessionDigest {
-    pub through_sequence: u64,
-    pub truncated: bool,
-    pub messages: Vec<AgentSessionDigestMessage>,
-    pub tool_names: Vec<String>,
-}
-
 /// `wait_agents` 返回的真实 directory 变化原因。
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum AgentDirectoryWaitReason {
+    BudgetLimited,
     Progress,
     Interaction,
     Terminal,

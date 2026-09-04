@@ -43,6 +43,11 @@ mutation 批次，不限制任何阶段之后可使用的文件、命令、Git�
 transcript；崩溃恢复时遗留 running Turn 收束为 interrupted/cancelled。Timeline 采用独立热窗口，
 冷页先转为领域对象再合并热状态。
 
+协作工具对 child 的完整会话诊断使用 durable Timeline keyset 分页，不读取或伪装 provider transcript。
+驻留目标先在不持 actor 锁的情况下等待当前 runtime revision 落库，再从 repository 读取；冷目标直接
+读取持久层，因此关闭、淘汰和重启不会截断可查范围。cursor 绑定目标、排序、详细级别和首次查询水位，
+后续追加不能改变既有分页窗口；该只读查询不得激活目标或向 ThreadEventBus 合并冷页。
+
 ## 21.4 驻留
 
 当前选中 Thread、存在活动 Turn 或 pending Interaction 的 Thread，以及仍有运行中子 Agent 的根

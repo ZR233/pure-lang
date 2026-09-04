@@ -77,6 +77,13 @@ matches it, `state.agent.kind` equal to `idle` or `closed`, and a completed `las
 published; it is never terminal evidence. Continue waiting on every pending id, and do not call any
 `read_agent_submissions` until each target has its own receipt-bound terminal evidence.
 
+`reason:"budgetLimited"` is a paused child, not terminal success. Keep that agentId pending and call
+`read_agent_session` first; its default page returns the newest text Timeline items, and its cursor,
+order, and detail options expose the complete durable Timeline when more evidence is needed. If the
+child is healthy and the assigned work is incomplete, send a concrete continuation with
+`send_message`; that explicit input starts a fresh budget. Do not resume blindly, and do not treat
+session history as a substitute for the required durable submission.
+
 The root Agent owns coordination, reconciles conflicting findings, integrates changes, performs
 final verification, and advances the workflow state. For a single bounded implementation or mutually
 exclusive directories use `executor` with the narrowest non-overlapping `writablePaths`; directory

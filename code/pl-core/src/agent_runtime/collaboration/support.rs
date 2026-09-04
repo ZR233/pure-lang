@@ -181,6 +181,20 @@ pub(super) fn filter_visible(
     }
 }
 
+pub(super) fn session_target_visible(
+    selector: &AgentTargetSelector,
+    caller_root: &ThreadId,
+    target: &ThreadId,
+    target_path: &[ThreadId],
+) -> bool {
+    match selector {
+        AgentTargetSelector::None => false,
+        AgentTargetSelector::All => true,
+        AgentTargetSelector::Explicit(targets) => targets.contains(target),
+        AgentTargetSelector::Tree => target_path.first() == Some(caller_root),
+    }
+}
+
 pub(super) fn agent_path(id: &ThreadId, snapshots: &[AgentSnapshot]) -> Vec<ThreadId> {
     let parents = parent_map(snapshots);
     let mut path = vec![id.clone()];
@@ -395,6 +409,58 @@ pub(super) fn submissions_schema(selector: &AgentTargetSelector) -> Value {
                 "maximum": 50,
                 "default": 20,
                 "description": "Maximum number of submissions to return in this page."
+            }),
+            false,
+        ),
+    ])
+}
+
+pub(super) fn session_schema(selector: &AgentTargetSelector) -> Value {
+    object_schema(vec![
+        (
+            "target",
+            target_property_schema(
+                selector,
+                Some("Agent id whose complete durable Timeline should be read."),
+            ),
+            true,
+        ),
+        (
+            "cursor",
+            json!({
+                "type": "string",
+                "description": "Opaque continuation from the previous read_agent_session page. Keep target, order, and detail unchanged."
+            }),
+            false,
+        ),
+        (
+            "limit",
+            json!({
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 50,
+                "default": 20,
+                "description": "Maximum number of complete Timeline items to return."
+            }),
+            false,
+        ),
+        (
+            "order",
+            json!({
+                "type": "string",
+                "enum": ["ascending", "descending"],
+                "default": "descending",
+                "description": "Return oldest items first or newest items first."
+            }),
+            false,
+        ),
+        (
+            "detail",
+            json!({
+                "type": "string",
+                "enum": ["text", "full"],
+                "default": "text",
+                "description": "text returns user, parentAgent, commentary, and final items; full returns every typed Timeline item."
             }),
             false,
         ),
@@ -681,5 +747,35 @@ mod tests {
                 .to_string();
 
         assert!(error.contains("symbolic link"), "{error}");
+    }
+
+    #[test]
+    fn durable_session_visibility_uses_frozen_tree_or_explicit_targets() {
+        let root = ThreadId::new("root").unwrap();
+        let child = ThreadId::new("child").unwrap();
+        assert!(session_target_visible(
+            &AgentTargetSelector::Tree,
+            &root,
+            &child,
+            &[root.clone(), child.clone()],
+        ));
+        assert!(!session_target_visible(
+            &AgentTargetSelector::Tree,
+            &root,
+            &child,
+            &[ThreadId::new("other-root").unwrap(), child.clone()],
+        ));
+        assert!(session_target_visible(
+            &AgentTargetSelector::Explicit(std::collections::BTreeSet::from([child.clone()])),
+            &root,
+            &child,
+            &[],
+        ));
+        assert!(!session_target_visible(
+            &AgentTargetSelector::None,
+            &root,
+            &child,
+            &[root.clone(), child.clone()],
+        ));
     }
 }

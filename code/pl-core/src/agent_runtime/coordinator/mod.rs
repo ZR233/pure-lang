@@ -10,8 +10,9 @@ use super::runtime::{AgentRuntimeOptions, RestoredInputPolicy};
 use super::state::{AgentRuntimeError, unix_timestamp};
 use super::{
     AgentCommittedEvent, AgentRegistration, AgentRuntimeEvent, AgentRuntimeEventKind,
-    AgentRuntimeHandle, AgentRuntimeHost, AgentRuntimeResult, AgentSnapshot, AgentSpawnRequest,
-    AgentSpawnResult, AgentState, DurableCommitFacts, DurableMailboxEnvelope, RestoredAgentRuntime,
+    AgentRuntimeHandle, AgentRuntimeHost, AgentRuntimeResult, AgentSessionTimelineQuery,
+    AgentSessionTimelineRepositoryPage, AgentSnapshot, AgentSpawnRequest, AgentSpawnResult,
+    AgentState, DurableCommitFacts, DurableMailboxEnvelope, RestoredAgentRuntime,
     SpawnLifecycleRequest, SpawnRollbackPhase, SpawnRollbackReason, ThreadCommit, ThreadId, TurnId,
 };
 use crate::ThreadEventBus;
@@ -52,6 +53,10 @@ pub(crate) enum CoordinatorCommand {
     },
     List {
         reply: oneshot::Sender<AgentRuntimeResult<Vec<AgentSnapshot>>>,
+    },
+    ReadAgentSession {
+        query: AgentSessionTimelineQuery,
+        reply: oneshot::Sender<AgentRuntimeResult<AgentSessionTimelineRepositoryPage>>,
     },
     StartRestoredInputs {
         reply: oneshot::Sender<AgentRuntimeResult<()>>,
@@ -144,6 +149,10 @@ async fn run_coordinator<H>(
             }
             CoordinatorCommand::List { reply } => {
                 let _ = reply.send(list_snapshots(&actors).await);
+            }
+            CoordinatorCommand::ReadAgentSession { query, reply } => {
+                let result = read_agent_session(&host, &actors, query).await;
+                let _ = reply.send(result);
             }
             CoordinatorCommand::StartRestoredInputs { reply } => {
                 let _ = reply.send(start_pending_inputs(&actors).await);
@@ -439,7 +448,8 @@ where
             | AgentState::WaitingTool(_)
             | AgentState::WaitingInteraction(_)
             | AgentState::Cancelling(_)
-    ) || snapshot.pending_inputs > 0
+    ) || snapshot.state.is_budget_paused()
+        || snapshot.pending_inputs > 0
     {
         return Err(AgentRuntimeError::InvalidInput(format!(
             "agent {agent_id} is busy and cannot be evicted"
@@ -475,6 +485,23 @@ where
 {
     host.repository()
         .await_durable(&snapshot.identity.id, snapshot.revision)
+        .await
+        .map_err(|error| AgentRuntimeError::Repository(error.to_string()))
+}
+
+async fn read_agent_session<H>(
+    host: &H,
+    actors: &AgentRegistry,
+    query: AgentSessionTimelineQuery,
+) -> AgentRuntimeResult<AgentSessionTimelineRepositoryPage>
+where
+    H: AgentRuntimeHost,
+{
+    if let Ok(snapshot) = snapshot_for(actors, &query.target).await {
+        await_snapshot_durable(host, &snapshot).await?;
+    }
+    host.repository()
+        .list_agent_session(query)
         .await
         .map_err(|error| AgentRuntimeError::Repository(error.to_string()))
 }

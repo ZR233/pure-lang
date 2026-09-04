@@ -16,6 +16,7 @@ pub use directory::{AgentDirectorySnapshot, AgentDirectorySubscription};
 pub use handle::AgentRuntimeHandle;
 pub use host::{
     AgentCommitObserver, AgentCommittedEvent, AgentLifecycleAdapter, AgentRuntimeHost,
+    AgentSessionTimelineKey, AgentSessionTimelineQuery, AgentSessionTimelineRepositoryPage,
     AgentTurnFactory, CloseLifecycleRequest, DurableCommitFacts, PersistenceClass,
     RestoredAgentRuntime, RestoredThreadSnapshot, SpawnLifecycleRequest, SpawnRollbackPhase,
     SpawnRollbackReason, ThreadCommit, ThreadContextMutation, ThreadMutation,
@@ -362,6 +363,100 @@ mod tests {
                 total,
                 has_more: offset + returned < total,
             })
+        }
+
+        async fn list_agent_session(
+            &self,
+            query: AgentSessionTimelineQuery,
+        ) -> std::result::Result<AgentSessionTimelineRepositoryPage, Self::Error> {
+            let states = self.states.lock().unwrap();
+            let state = states
+                .get(&query.target)
+                .cloned()
+                .ok_or_else(|| TestError(format!("agent {} not found", query.target)))?;
+            let mut path = vec![state.snapshot.identity.id.clone()];
+            let mut parent = state.snapshot.identity.parent_id.clone();
+            let mut remaining = states.len();
+            while let Some(parent_id) = parent {
+                if remaining == 0 {
+                    return Err(TestError("agent parent graph contains a cycle".to_string()));
+                }
+                remaining -= 1;
+                path.push(parent_id.clone());
+                parent = states
+                    .get(&parent_id)
+                    .and_then(|parent| parent.snapshot.identity.parent_id.clone());
+            }
+            path.reverse();
+            drop(states);
+
+            let mut items = self
+                .commits
+                .lock()
+                .unwrap()
+                .iter()
+                .rev()
+                .find_map(|commit| {
+                    (commit.agent_id == query.target)
+                        .then_some(commit.facts.projection_snapshot.as_ref())
+                        .flatten()
+                        .map(|snapshot| snapshot.items.clone())
+                })
+                .unwrap_or_default();
+            if query.detail == pl_protocol::AgentSessionReadDetail::Text {
+                items.retain(|item| item.text().is_some());
+            }
+            items.sort_by(|left, right| {
+                left.ordinal
+                    .cmp(&right.ordinal)
+                    .then_with(|| left.id.cmp(&right.id))
+            });
+            let watermark = query.watermark.clone().or_else(|| {
+                items.last().map(|item| AgentSessionTimelineKey {
+                    ordinal: item.ordinal,
+                    item_id: item.id.clone(),
+                })
+            });
+            if let Some(watermark) = &watermark {
+                items.retain(|item| timeline_item_key(item) <= *watermark);
+            }
+            if let Some(anchor) = &query.anchor {
+                items.retain(|item| match query.order {
+                    pl_protocol::AgentSessionReadOrder::Ascending => {
+                        timeline_item_key(item) > *anchor
+                    }
+                    pl_protocol::AgentSessionReadOrder::Descending => {
+                        timeline_item_key(item) < *anchor
+                    }
+                });
+            }
+            if query.order == pl_protocol::AgentSessionReadOrder::Descending {
+                items.reverse();
+            }
+            let has_more = items.len() > query.limit;
+            items.truncate(query.limit);
+            let next_anchor = has_more.then(|| {
+                let item = items.last().expect("a non-zero page limit was requested");
+                timeline_item_key(item)
+            });
+            Ok(AgentSessionTimelineRepositoryPage {
+                identity: state.snapshot.identity,
+                path,
+                through_sequence: query
+                    .through_sequence
+                    .unwrap_or(state.session.thread_revision),
+                watermark,
+                items,
+                has_more,
+                next_anchor,
+            })
+        }
+    }
+
+    fn timeline_item_key(item: &pl_protocol::ThreadItem) -> AgentSessionTimelineKey {
+        AgentSessionTimelineKey {
+            ordinal: item.ordinal,
+            item_id: item.id.clone(),
         }
     }
 
@@ -1506,6 +1601,139 @@ mod tests {
         assert!(matches!(outcome.outcome, TurnOutcome::Failed(_)));
         assert_eq!(outcome.thread_id, ThreadId::new("root").unwrap());
         assert!(outcome.outcome.failure().is_some());
+        runtime.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn child_budget_limit_pauses_without_rollover_and_wakes_parent() {
+        let server = TestCompactionServer::start(TestCompactionResponse::Summary).await;
+        let repository = TestRepository::empty();
+        let host = TestHost::budget_limited(
+            repository.clone(),
+            server.base_url.clone(),
+            Duration::from_secs(2),
+        );
+        let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
+        let handle = runtime.handle();
+        let root_id = ThreadId::new("root").unwrap();
+        handle.register(registration("root", "chat")).await.unwrap();
+        let mut spawn = child_spawn_request(root_id);
+        spawn
+            .session
+            .session
+            .push_user_prompt("existing child context".to_string());
+        let child_id = handle.spawn(spawn).await.unwrap().snapshot.identity.id;
+
+        handle
+            .submit(
+                child_id.clone(),
+                AgentSubmitRequest::start(child_id.clone(), "budgeted child input"),
+            )
+            .await
+            .unwrap();
+        let waited =
+            wait_for_idle_with_timeout(&handle, child_id.clone(), Duration::from_secs(2)).await;
+
+        let pause = waited
+            .snapshot
+            .state
+            .budget_pause()
+            .expect("child must retain a typed budget pause");
+        assert_eq!(pause.turn_id(), &waited.last_turn.as_ref().unwrap().turn_id);
+        let TurnOutcome::BudgetLimited(budget) = &waited.last_turn.as_ref().unwrap().outcome else {
+            panic!("child must finish with a budget outcome");
+        };
+        assert_eq!(pause.limit(), budget.limit());
+        assert_eq!(
+            budget.rollover(),
+            &pl_protocol::TurnRolloverOutcome::NotAttempted
+        );
+        assert_eq!(server.accepted.available_permits(), 0);
+
+        let notification = handle.wait_agents(vec![child_id.clone()]).await.unwrap();
+        assert_eq!(notification.reason, AgentDirectoryWaitReason::BudgetLimited);
+        assert_eq!(notification.messages[0].identity.id, child_id);
+        assert!(notification.messages[0].state.is_budget_paused());
+        assert_eq!(notification.messages[0].last_turn_outcome, waited.last_turn);
+        runtime.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn restored_budget_pause_holds_fifo_until_explicit_input_resumes_child() {
+        let repository = TestRepository::empty();
+        let root_id = ThreadId::new("root").unwrap();
+        let child_id = ThreadId::new("child-paused").unwrap();
+        let budget_turn_id = TurnId::new("turn-budget").unwrap();
+        let queued_turn_id = TurnId::new("turn-queued").unwrap();
+        let limit = pl_protocol::BudgetLimitSnapshot {
+            kind: pl_protocol::BudgetLimitKind::WallClock,
+            usage: pl_protocol::BudgetUsage {
+                elapsed_ms: 30_000,
+                ..pl_protocol::BudgetUsage::default()
+            },
+        };
+        let mut child = AgentRegistration::new(AgentIdentity {
+            id: child_id.clone(),
+            parent_id: Some(root_id.clone()),
+            role: crate::AgentRoleId::new("worker").unwrap(),
+            depth: 1,
+        })
+        .into_durable_state();
+        child.snapshot.state =
+            AgentState::budget_paused(AgentBudgetPause::new(budget_turn_id.clone(), limit, 20));
+        child.snapshot.last_turn = Some(AgentTurnOutcome {
+            turn_id: budget_turn_id,
+            thread_id: child_id.clone(),
+            outcome: TurnOutcome::budget_limited(
+                limit,
+                pl_protocol::TurnRolloverOutcome::NotAttempted,
+            ),
+            usage: pl_protocol::TokenUsage::default(),
+            started_at: Some(1),
+            finished_at: 20,
+        });
+        child.pending_inputs.push_back(DurableMailboxEnvelope {
+            mail_id: "mail-before-pause".to_string(),
+            turn_id: queued_turn_id,
+            thread_id: child_id.clone(),
+            payload: MailboxInputPayload::parent_agent("queued before pause"),
+            queue_coalescing_key: None,
+            budget_action: MailboxBudgetAction::Refresh,
+            delivery_state: MailboxDeliveryState::default(),
+            queued_at: 19,
+        });
+        child.refresh_mailbox_snapshot();
+        repository.states.lock().unwrap().insert(
+            root_id.clone(),
+            registration("root", "chat").into_durable_state(),
+        );
+        repository
+            .states
+            .lock()
+            .unwrap()
+            .insert(child_id.clone(), child);
+        let host = TestHost::new(repository, FactoryMode::Fail);
+        let factory = host.turn_factory.clone();
+        let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
+        let handle = runtime.handle();
+
+        assert!(factory.prepared_messages.lock().unwrap().is_empty());
+        assert!(handle.evict_agent(child_id.clone()).await.is_err());
+
+        handle
+            .submit(
+                child_id.clone(),
+                AgentSubmitRequest::start(child_id.clone(), "explicit continuation"),
+            )
+            .await
+            .unwrap();
+        wait_for_prepared_messages(&factory, 2).await;
+        assert_eq!(
+            factory.prepared_messages.lock().unwrap().as_slice(),
+            ["queued before pause", "explicit continuation"]
+        );
+        let settled = wait_for_idle(&handle, child_id).await;
+        assert!(!settled.snapshot.state.is_budget_paused());
         runtime.shutdown().await.unwrap();
     }
 
@@ -2961,6 +3189,54 @@ mod tests {
         assert_eq!(
             repository.durable_barriers.lock().unwrap().as_slice(),
             &[(child.clone(), 2), (root.clone(), 2), (child, 3), (root, 3),]
+        );
+        runtime.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn durable_session_query_waits_for_resident_revision_and_reads_after_eviction() {
+        let repository = TestRepository::empty();
+        let host = TestHost::new(repository.clone(), FactoryMode::Fail);
+        let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
+        let handle = runtime.handle();
+        let root = ThreadId::new("root").unwrap();
+        let child = ThreadId::new("child-chat").unwrap();
+        handle
+            .register(registration("root", "root-chat"))
+            .await
+            .unwrap();
+        handle
+            .spawn(child_spawn_request(root.clone()))
+            .await
+            .unwrap();
+        handle.close(child.clone()).await.unwrap();
+        let query = || AgentSessionTimelineQuery {
+            target: child.clone(),
+            order: pl_protocol::AgentSessionReadOrder::Descending,
+            detail: pl_protocol::AgentSessionReadDetail::Text,
+            limit: 20,
+            through_sequence: None,
+            watermark: None,
+            anchor: None,
+        };
+
+        let resident = handle.read_agent_session(query()).await.unwrap();
+        assert_eq!(resident.identity.id, child);
+        assert_eq!(resident.path, [root.clone(), child.clone()]);
+        assert_eq!(
+            repository.durable_barriers.lock().unwrap().last(),
+            Some(&(child.clone(), 3))
+        );
+
+        handle.evict_agent(child.clone()).await.unwrap();
+        let barrier_count = repository.durable_barriers.lock().unwrap().len();
+        let cold = handle.read_agent_session(query()).await.unwrap();
+        assert_eq!(cold.identity.id, child);
+        assert_eq!(cold.path, [root, cold.identity.id.clone()]);
+        assert_eq!(
+            repository.durable_barriers.lock().unwrap().len(),
+            barrier_count,
+            "cold Timeline reads must not activate the Agent or add a live barrier"
         );
         runtime.shutdown().await.unwrap();
     }

@@ -119,11 +119,26 @@ where
                 super::super::AgentState::WaitingInteraction(state)
                     if state.turn_id() == &active.turn_id
             );
-        if !waiting_for_interaction
-            && let Err(error) = next
-                .snapshot
-                .transition(super::super::AgentCommand::Settle { next_turn_id })
-        {
+        let budget_pause = match &outcome.outcome {
+            pl_protocol::TurnOutcome::BudgetLimited(budget)
+                if next.snapshot.identity.parent_id.is_some() =>
+            {
+                Some(super::super::AgentBudgetPause::new(
+                    active.turn_id.clone(),
+                    *budget.limit(),
+                    outcome.finished_at,
+                ))
+            }
+            pl_protocol::TurnOutcome::Completed(_)
+            | pl_protocol::TurnOutcome::Cancelled(_)
+            | pl_protocol::TurnOutcome::Failed(_)
+            | pl_protocol::TurnOutcome::BudgetLimited(_) => None,
+        };
+        let transition = budget_pause.map_or_else(
+            || super::super::AgentCommand::Settle { next_turn_id },
+            |pause| super::super::AgentCommand::PauseForBudget { pause },
+        );
+        if !waiting_for_interaction && let Err(error) = next.snapshot.transition(transition) {
             self.fault(error.to_string()).await;
             return;
         }
@@ -142,7 +157,11 @@ where
             self.fault(error.to_string()).await;
             return;
         }
-        if !waiting_for_interaction && self.dispatch_enabled && self.state.has_triggering_input() {
+        if !waiting_for_interaction
+            && !self.state.snapshot.state.is_budget_paused()
+            && self.dispatch_enabled
+            && self.state.has_triggering_input()
+        {
             self.begin_next_turn().await;
         }
     }

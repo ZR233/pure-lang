@@ -51,6 +51,7 @@ pub(in crate::studio) struct StudioSessionRecoveryFailure {
 mod input_metadata;
 mod projection;
 mod restore;
+mod session_timeline;
 impl StudioAgentRepository {
     pub(in crate::studio) fn with_writer_and_performance(
         store: StudioStore,
@@ -186,6 +187,13 @@ impl ThreadRepository for StudioAgentRepository {
         limit: usize,
     ) -> Result<AgentSubmissionPage, Self::Error> {
         list_thread_submissions(&self.store, thread_id, offset, limit).await
+    }
+
+    async fn list_agent_session(
+        &self,
+        query: pl_core::AgentSessionTimelineQuery,
+    ) -> Result<pl_core::AgentSessionTimelineRepositoryPage, Self::Error> {
+        session_timeline::list_agent_session(&self.store, query).await
     }
 }
 

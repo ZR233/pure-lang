@@ -3,8 +3,9 @@
 use serde_json::{Value, json};
 
 use super::super::state::unix_timestamp;
-use super::super::{AgentDirectoryWaitMessage, AgentSnapshot, AgentState};
+use super::super::{AgentDirectoryWaitMessage, AgentDirectoryWaitReason, AgentSnapshot};
 use super::support::agent_path;
+use super::{TOOL_READ_AGENT_SESSION, TOOL_SEND_MESSAGE};
 
 pub(super) fn compact_agent(snapshot: &AgentSnapshot, all: &[AgentSnapshot]) -> Value {
     json!({
@@ -53,16 +54,22 @@ pub(super) fn summary_age_seconds(snapshot: &AgentSnapshot) -> i64 {
         .max(0)
 }
 
-pub(super) fn session_read_requires_age_gate(state: &AgentState) -> bool {
-    state.is_operational() && !state.is_idle()
+pub(super) fn wait_guidance(reason: AgentDirectoryWaitReason) -> Option<Value> {
+    matches!(reason, AgentDirectoryWaitReason::BudgetLimited).then(|| {
+        json!({
+            "summary": "A child agent reached its turn budget and is paused without post-budget compaction or automatic continuation.",
+            "inspectWith": TOOL_READ_AGENT_SESSION,
+            "continueWith": TOOL_SEND_MESSAGE,
+            "nextStep": "Inspect the paused agent's durable Timeline. If its progress is healthy and work remains, send a concrete continuation message; otherwise close or re-dispatch it."
+        })
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use crate::agent_runtime::{
-        AgentCommand, AgentDirectoryWaitMessage, AgentIdentity, AgentProgressCheckpoint,
-        AgentProgressReport, AgentProgressStage, AgentState, AgentStateTransition, ThreadId,
-        TurnId,
+        AgentDirectoryWaitMessage, AgentIdentity, AgentProgressCheckpoint, AgentProgressReport,
+        AgentProgressStage, AgentState, ThreadId,
     };
     use crate::model_config::AgentRoleId;
 
@@ -115,19 +122,10 @@ mod tests {
     }
 
     #[test]
-    fn read_session_age_gate_only_applies_while_agent_has_active_work() {
-        let turn_id = TurnId::new("turn-running").unwrap();
-        let queued = AgentState::idle()
-            .decide(AgentCommand::Queue {
-                turn_id: turn_id.clone(),
-            })
-            .unwrap()
-            .next_state;
-        let running = queued
-            .decide(AgentCommand::Start { turn_id })
-            .unwrap()
-            .next_state;
-        assert!(session_read_requires_age_gate(&running));
-        assert!(!session_read_requires_age_gate(&AgentState::idle()));
+    fn budget_wait_guidance_names_inspection_and_explicit_continuation_tools() {
+        let guidance = wait_guidance(AgentDirectoryWaitReason::BudgetLimited).unwrap();
+        assert_eq!(guidance["inspectWith"], "read_agent_session");
+        assert_eq!(guidance["continueWith"], "send_message");
+        assert!(wait_guidance(AgentDirectoryWaitReason::Terminal).is_none());
     }
 }

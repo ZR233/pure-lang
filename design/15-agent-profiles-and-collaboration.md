@@ -104,12 +104,21 @@ commit/测试/风险证据，以及 workspace、`writablePaths`、Git 与 cleanu
 专用 verdict marker。
 root 从成功 spawn receipt 冻结真实 `agentId`，循环 `wait_agents` 直到该 child terminal，再按该 id 调用
 `read_agent_submissions`。progress 唤醒不等于 terminal；空 submission page 是 child 交付合同失败，
-`read_agent_session` 只用于诊断和收窄重派，不能作为正常成果 fallback。
+`read_agent_session` 只用于诊断和收窄重派，不能作为正常成果 fallback。child 命中预算时
+`wait_agents` 以独立的 `budgetLimited` reason 返回，root 不得把它当作 terminal success 或从 pending
+集合移除：先分页读取该 child 的 durable Timeline 判断进展，确认状态正常、任务未完成后再以
+`send_message` 显式续跑；异常时应收窄指令、关闭或重新派发，而不是无条件续轮。
 `wait_agents` 是“任一目标有新事件即返回”，批量等待一次不代表其余目标已完成。root 必须维护尚未
 terminal 的 agentId 集合；只有同一次 canonical wait receipt 同时满足 `reason="terminal"`、message 的
 `agentId` 精确匹配、`state.agent.kind` 为 `idle` 或 `closed`，且 `lastTurnOutcome` 为 completed，才可从
 集合移除该 child。`CHILD_DELIVERY_READY` 出现在 progress message 中只表示成果已发布，不能替代终态；
 集合非空时继续等待，所有目标分别取得 terminal receipt 后才能开始读取 submissions。
+
+`read_agent_session` 读取持久化可见 Timeline，而不是 provider 当前 transcript。默认按倒序返回最新
+20 条 `user | parentAgent | commentary | final` 文本 Item；调用方可用 opaque cursor 翻页、切换正序，
+或请求包含 thinking、tool、agent、turn、inference、skill、file 与 context compaction 的完整 typed
+Item。查询在驻留 child 上先等待目标 revision 耐久化，也能读取已经关闭、淘汰或重启后未驻留的 child；
+它不激活目标、不修改 ThreadEventBus，且仍不能替代 durable submission。
 
 - 单个边界清晰的实现，或多个写集合完全互斥的并行实现，使用 `executor`；并行时为每个 child 传入
   最窄且互不重叠的 `writablePaths`，禁止 child 借 shell、Git 或 MCP 越界修改、stage、commit 或 reset。

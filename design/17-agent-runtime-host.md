@@ -58,6 +58,11 @@ TurnEngine 统一编排。公共 Rust 接口的名称可以演进，但“产品
 冻结，活动 Turn 不因配置热更新改变上限；mailbox 的 budget refresh 只开始新的预算 tranche，不改写
 已经冻结的上限。
 
+root 的 `BudgetLimited` 继续由 PL 尝试 rollover。child 的预算终态不执行 rollover：actor 在同一个
+settlement commit 中保存 `TurnRolloverOutcome::NotAttempted`、进入带预算快照的 idle pause，并阻止
+pending mailbox 自动启动。父 Agent 的下一条显式输入同时清除 pause、按 FIFO 选择 Turn 输入并取得
+新预算；pause 经过恢复仍保持，且不能被 LRU 当作普通可淘汰 idle。
+
 ## 17.5 生命周期
 
 公开状态为 `Idle | Queued | Running | WaitingTool | WaitingInteraction | Cancelling | Closing |

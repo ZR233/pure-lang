@@ -78,6 +78,20 @@ pub(super) struct WaitArgs {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(super) struct SessionArgs {
+    pub(super) target: String,
+    #[serde(default)]
+    pub(super) cursor: Option<String>,
+    #[serde(default)]
+    pub(super) limit: Option<usize>,
+    #[serde(default)]
+    pub(super) order: pl_protocol::AgentSessionReadOrder,
+    #[serde(default)]
+    pub(super) detail: pl_protocol::AgentSessionReadDetail,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct SubmissionsArgs {
     pub(super) target: String,
     #[serde(default)]

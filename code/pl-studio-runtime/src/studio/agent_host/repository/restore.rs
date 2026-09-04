@@ -57,6 +57,18 @@ impl StudioAgentRepository {
                 .into_iter()
                 .map(|row| row.thread_id),
         );
+        let idle_agents = thread::Entity::find()
+            .filter(thread::Column::RuntimeRevision.is_not_null())
+            .filter(thread::Column::StateKind.eq("idle"))
+            .all(database)
+            .await
+            .map_err(store_error)?;
+        for model in idle_agents {
+            let state: AgentState = serde_json::from_str(&model.state_json)?;
+            if state.is_budget_paused() {
+                ids.insert(model.id);
+            }
+        }
         Ok(ids)
     }
 
@@ -498,7 +510,7 @@ fn thread_depth(id: &str, parents: &BTreeMap<String, Option<String>>) -> Result<
 
 #[cfg(test)]
 mod tests {
-    use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, IntoActiveModel};
 
     use crate::studio::entity::{item, thread_context_segment, turn};
     use crate::studio::store::object::put_object;
@@ -733,6 +745,55 @@ mod tests {
                 .expect("runtime from active Skill")
                 .active_skills,
             ["pdf"]
+        );
+        writer.shutdown().await.expect("shutdown writer");
+    }
+
+    #[tokio::test]
+    async fn startup_pins_budget_paused_agent_without_pending_input() {
+        let store = StudioStore::open_memory().await.expect("memory store");
+        let workspace = std::env::temp_dir().join("pure-studio-budget-paused-pin");
+        let project = store.upsert_project(&workspace).await.expect("project");
+        let thread = store
+            .create_thread(&project.id, "paused", crate::ThreadModeId::simple())
+            .await
+            .expect("thread");
+        let mut active = crate::studio::entity::thread::Entity::find_by_id(thread.id.clone())
+            .one(store.database())
+            .await
+            .unwrap()
+            .unwrap()
+            .into_active_model();
+        active.state_json = Set(serde_json::to_string(&AgentState::budget_paused(
+            pl_core::AgentBudgetPause::new(
+                TurnId::new("turn-budget").unwrap(),
+                pl_protocol::BudgetLimitSnapshot {
+                    kind: pl_protocol::BudgetLimitKind::WallClock,
+                    usage: pl_protocol::BudgetUsage::default(),
+                },
+                10,
+            ),
+        ))
+        .unwrap());
+        active.runtime_revision = Set(Some(1));
+        active.update(store.database()).await.unwrap();
+
+        let writer = ThreadWriteBehindWriter::new(store.clone());
+        let product_events = crate::studio::ProductEventBus::new(store.clone(), writer.clone());
+        let model_performance = crate::studio::runtime::ModelPerformanceOwner::new(
+            store.clone(),
+            writer.clone(),
+            product_events,
+        );
+        let repository = StudioAgentRepository::with_writer_and_performance(
+            store,
+            writer.clone(),
+            model_performance,
+        );
+
+        assert_eq!(
+            repository.pinned_thread_ids().await.unwrap(),
+            BTreeSet::from([thread.id])
         );
         writer.shutdown().await.expect("shutdown writer");
     }

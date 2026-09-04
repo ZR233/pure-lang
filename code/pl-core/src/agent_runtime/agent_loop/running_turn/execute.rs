@@ -60,6 +60,7 @@ where
     );
     let mailbox = context.mailbox.clone();
     let budget_refresh = context.budget_refresh.clone();
+    let is_child = context.snapshot.identity.parent_id.is_some();
     let mut session = context.session.clone();
     let (result, session_commit) = match host.turn_factory().prepare_turn(context).await {
         Ok(mut prepared) => {
@@ -163,6 +164,7 @@ where
                     .await
                     .map_err(|error| error.to_string());
                 if let Ok(turn_result) = &mut result
+                    && !is_child
                     && matches!(
                         &turn_result.outcome,
                         TurnOutcome::BudgetLimited(outcome)

@@ -43,6 +43,9 @@ Turn、Item 与 Interaction 的通知 payload 都携带 canonical tagged state�
 不引入隐式迭代次数限制。宿主可按会话用途在 TurnFactory 边界冻结不同上限，但不得自行生成
 `BudgetLimited`、rollover 或另一套用量投影。外层产品 watchdog 只能负责资源收束，并应给 PL 的预算
 终态与持久化预留余量，不能先于同一 wall-clock 上限取消 Turn。
+child Turn 命中预算后必须直接进入带 `budgetPause` 的 idle 状态，不再执行 rollover 压缩或启动 pending
+输入；只有父 Agent 后续提交显式输入才能原子清除暂停并开始新 Turn。root Turn 继续保留现有 rollover
+行为，预算检查前由上下文压力触发的正常压缩也不受影响。
 
 Item delta 只携带 threadId、turnId、itemId、field、revision、delta 和可选 chunkIndex。field
 固定为 agent message text、reasoning summary/content、plan text、tool arguments/output。

@@ -65,9 +65,6 @@ pub(crate) enum AgentLoopCommand {
         detail: Option<String>,
         reply: oneshot::Sender<AgentRuntimeResult<AgentProgressCheckpoint>>,
     },
-    ReadSession {
-        reply: oneshot::Sender<AgentRuntimeResult<AgentSessionDigest>>,
-    },
     ReadThreadContext {
         reply: oneshot::Sender<AgentRuntimeResult<ThreadContextState>>,
     },
