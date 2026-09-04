@@ -34,7 +34,29 @@ mod web_search;
 mod working_set;
 mod workspace;
 
-pub use agent_runtime::*;
+pub use agent_runtime::{
+    AgentAccessPolicy, AgentCollaborationToolConfig, AgentCollaborationTools, AgentCommand,
+    AgentCommitObserver, AgentCommittedEvent, AgentCurrentSessionSubmitRequest,
+    AgentDirectorySnapshot, AgentDirectorySubscription, AgentExecutionPolicy,
+    AgentFaultClassification, AgentIdentity, AgentInferenceCommit,
+    AgentInteractionContinuationRequest, AgentLifecycleAdapter, AgentProgressReport,
+    AgentProgressStage, AgentRecoveryTarget, AgentRegistration, AgentRuntime, AgentRuntimeError,
+    AgentRuntimeEvent, AgentRuntimeEventKind, AgentRuntimeHandle, AgentRuntimeHost,
+    AgentRuntimeOptions, AgentSessionCommitPolicy, AgentSessionTimelineKey,
+    AgentSessionTimelineQuery, AgentSessionTimelineRepositoryPage, AgentSnapshot, AgentState,
+    AgentStateTransition, AgentSubmissionPage, AgentSubmissionRecord, AgentSubmitRequest,
+    AgentTargetSelector, AgentTurnCheckpointHandle, AgentTurnFactory, AgentTurnOutcome,
+    AgentTurnPreparationContext, AgentTurnSubmitPolicy, CancellingAgentState,
+    CloseLifecycleRequest, ClosedAgentState, ClosingAgentState, DurableCommitFacts,
+    DurableMailboxEnvelope, FaultedAgentState, IdleAgentState, MailboxBudgetAction, MailboxCommand,
+    MailboxDeliveryState, MailboxInputPayload, MailboxInputSource, MailboxMetadata,
+    MailboxMetadataValue, PersistenceClass, PreparedAgentTurn, PreparedSessionRuntime,
+    QueuedAgentState, RestoredAgentRuntime, RestoredInputPolicy, RestoredThreadSnapshot,
+    RunningAgentState, SpawnLifecycleRequest, SpawnRollbackReason, ThreadActorState, ThreadCommit,
+    ThreadContextMetadata, ThreadContextMutation, ThreadContextState, ThreadMutation,
+    ThreadRepository, ToolEffectSet, TurnCheckpointReason, TurnFinalizationPolicy,
+    WaitingInteractionAgentState, WaitingToolAgentState,
+};
 pub use attachment::{AttachmentRuntime, MaterializedAttachment, ToolImageAttachmentInput};
 pub use config::{
     BuiltinMcpServerState, DEFAULT_PROJECT_DOC_MAX_BYTES, EffectiveMcpServerConfig,
@@ -88,18 +110,18 @@ pub use pl_model::provider::{
     ToolWirePolicy,
 };
 pub use pl_protocol::{
-    AgentRuntimeDelta, AgentSessionPage, AgentSessionReadDetail, AgentSessionReadOrder,
-    AttachmentModality, BudgetLimitKind, BudgetUsage, ContentPart, ContextSectionId, ErrorSeverity,
-    InteractionChangedEvent, InteractionContent, InteractionKind, InteractionRequest,
-    InteractionResolution, InteractionScope, InteractionStatus, McpAvailabilityDescriptor,
-    McpHealthSnapshot, McpServerDescriptor, Message, MessageContent, MessagePresentation,
-    MessageRole, ModelContextItem, OutputStream, PermissionLevel, PinnedContextSection,
-    PipelineStage, ProviderCatalogSnapshot, ProviderConnectionModeDescriptor,
+    AgentBudgetPause, AgentRuntimeDelta, AgentSessionPage, AgentSessionReadDetail,
+    AgentSessionReadOrder, AttachmentModality, BudgetLimitKind, BudgetUsage, ContentPart,
+    ContextSectionId, ErrorSeverity, InteractionChangedEvent, InteractionContent, InteractionKind,
+    InteractionRequest, InteractionResolution, InteractionScope, InteractionStatus,
+    McpAvailabilityDescriptor, McpHealthSnapshot, McpServerDescriptor, Message, MessageContent,
+    MessagePresentation, MessageRole, ModelContextItem, OutputStream, PermissionLevel,
+    PinnedContextSection, PipelineStage, ProviderCatalogSnapshot, ProviderConnectionModeDescriptor,
     ProviderPresetDescriptor, ProviderServiceCapabilitiesDescriptor, PureError, Result,
-    RetryDisposition, RuntimeCostAmount, RuntimeUsageSnapshot, SkillActivation, ThreadItem,
-    ThreadModeCatalogSnapshot, ThreadModeDescriptor, ThreadModeId, ThreadSnapshot,
+    RetryDisposition, RuntimeCostAmount, RuntimeUsageSnapshot, SkillActivation, ThreadId,
+    ThreadItem, ThreadModeCatalogSnapshot, ThreadModeDescriptor, ThreadModeId, ThreadSnapshot,
     TokenUsageSnapshot, ToolApprovalResolution, ToolDiscoveryState, ToolResultReceipt, ToolSpec,
-    TurnFailure, TurnFailureCategory, UserInputAnswer, UserInputRequest, UserInputResponse,
+    TurnFailure, TurnFailureCategory, TurnId, UserInputAnswer, UserInputRequest, UserInputResponse,
     UserQuestion, UserQuestionOption, WorkflowDefinition, WorkflowState, WorkflowStateKind,
     WorkflowTransition,
 };
@@ -119,7 +141,7 @@ pub use session::plan::{
 };
 pub use session::{AgentSession, AgentSessionForkPolicy};
 pub use skill::{SkillCatalog, SkillMetadata, SkillSourceKind};
-pub use thread::mode::{
+pub use thread::{
     CompiledWorkflowDefinition, RegisteredThreadMode, StaticThreadModeRegistration,
     StaticWorkflowDefinition, StaticWorkflowState, StaticWorkflowTransition, TOOL_WORKFLOW_CURRENT,
     TOOL_WORKFLOW_GRAPH, TOOL_WORKFLOW_HISTORY, TOOL_WORKFLOW_NEXT, TOOL_WORKFLOW_RESTART,
@@ -134,7 +156,22 @@ pub use thread_event::{
     ThreadEventBus, ThreadEventBusHandle, ThreadEventError, ThreadEventOptions,
     ThreadEventSubscription, ThreadHotHistory, ThreadNotificationFact,
 };
-pub use tool::*;
+pub use tool::{
+    AgentToolSet, AgentWorkspace, AskUserTool, BeforeModelStepHook, CommandCaptureStream,
+    CommandOutputSizes, CommandOutputTarget, CommandProcessFinalResult, CommandProcessLifecycle,
+    CommandProcessManager, CommandSpawnRequest, CommandStartRequest, CommandWriteRequest,
+    CompleteTool, DynTool, DynamicToolExecutor, ExecutionBackend, ExecutionOutput,
+    ExecutionRequest, GitWorkspaceConfig, GlobalToolInheritance, HostedWebSearchTool,
+    ManagedCommand, NoGitCredentialProvider, StatPathTool, StaticTool, StaticToolDefinition,
+    SubagentContext, TOOL_COMPLETE, ToolApprovalContext, ToolBatchPolicy, ToolCallContext,
+    ToolCallIdentity, ToolDefinition, ToolDirective, ToolExecution, ToolGroupId, ToolInput,
+    ToolInstallGroup, ToolInvocation, ToolManager, ToolName, ToolPolicy, ToolResult,
+    ToolSessionRuntime, ToolWorkspace, ViewImageTool, WorkspaceAccess, WorkspaceFileBackend,
+    WorkspaceFileListRequest, WorkspaceFileReadBytesRequest, WorkspaceFileReadRequest,
+    WorkspaceFileStatRequest, WorkspaceFileWriteRequest, WriteFileTool, deserialize_tool_input,
+    lsp_tools, reconcile_programmatic_tool_calling, static_tool,
+};
+pub(crate) use tool::{build_user_input_interaction, execute_user_input_interaction};
 pub use trace::TraceRecorder;
 pub use turn::{
     AGENT_MAX_COUNT, AGENT_MAX_DEPTH, DEFAULT_TURN_WALL_CLOCK, InteractionCallback,

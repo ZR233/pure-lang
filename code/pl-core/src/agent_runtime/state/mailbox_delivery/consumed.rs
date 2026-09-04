@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::agent_runtime::TurnId;
+use crate::TurnId;
 
 /// 已随指定 checkpoint 原子提交的 mailbox 输入。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

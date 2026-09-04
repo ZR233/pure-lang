@@ -144,7 +144,7 @@ impl TurnWorkingSetHandle {
             }
             TurnWorkingSetChange::ReplaceWorkflow(workflow) => {
                 if let Some(workflow) = &workflow {
-                    crate::thread::mode::validate_session_state_size(workflow)?;
+                    crate::thread::validate_session_state_size(workflow)?;
                 }
                 next.workflow = workflow;
             }
@@ -270,8 +270,7 @@ impl TurnWorkingSetHandle {
     pub fn model_context_snapshot(&self, session: &AgentSession) -> ModelContextSnapshot {
         let mut snapshot = session.working_context_snapshot();
         if let (Some(workflow), Some(mode)) = (self.workflow(), self.thread_mode())
-            && let Some(section) =
-                crate::thread::mode::workflow_model_context_section(&workflow, &mode)
+            && let Some(section) = crate::thread::workflow_model_context_section(&workflow, &mode)
         {
             snapshot.sections.push(section);
             snapshot

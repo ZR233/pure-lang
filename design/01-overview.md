@@ -46,7 +46,7 @@ pl-studio-server ─ REST / typed SSE ─┘        ↓
 | Thread、Turn、Item、输入、Interaction、working state | `studio.sqlite` |
 | 活动 Turn、流式增量、steer、取消 identity、prompt generation | `ThreadActor` |
 | Workflow run、revision、history | `AgentWorkingState.workflow` |
-| Thread Mode Prompt 与预设图 | `pl-core::thread::mode::ThreadModeManager` 不可变快照 |
+| Thread Mode Prompt 与预设图 | `pl-core::thread::ThreadModeManager` 不可变快照 |
 | Agent Profile 文件 | `~/.pure/agents/*.toml`；系统 Profile 由 runtime 注册 |
 | Composer、滚动、展开、订阅 generation | Flutter `WorkspaceUiState` |
 

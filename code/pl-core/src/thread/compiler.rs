@@ -511,3 +511,21 @@ fn issue(
         message: message.into(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+    use crate::thread::test_support::graph;
+
+    #[test]
+    fn normalized_graph_order_has_a_stable_hash() {
+        let first = compile_workflow_definition(graph("")).expect("valid graph");
+        let mut reordered = graph("");
+        reordered.states.reverse();
+        let second = compile_workflow_definition(reordered).expect("valid reordered graph");
+
+        assert_eq!(first.graph_hash(), second.graph_hash());
+    }
+}

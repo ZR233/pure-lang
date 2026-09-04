@@ -30,7 +30,7 @@ workflow projection 与 session 同时恢复，不存在独立 TaskRuntime 恢�
 
 ## 20.4 配置目录
 
-Mode catalog 直接投影 `pl-core::thread::mode::ThreadModeManager` 的内存 snapshot；内置 Mode 由
+Mode catalog 直接投影 `pl-core::thread::ThreadModeManager` 的内存 snapshot；内置 Mode 由
 Studio 启动时以静态描述注册，既不扫描 Skill，也不读取或复制用户目录资源。未来外部 loader 只能
 先把文件解析为同一拥有所有权的 registration，再调用公开注册接口。Agent Profile catalog 合并
 Rust builtin 与用户 TOML；完整 Agent 配置投影属于 Settings snapshot。系统启停、系统 route 更新和

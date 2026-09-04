@@ -412,3 +412,191 @@ fn publish(state: &mut ThreadModeManagerState) {
         },
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+    use crate::thread::test_support::{graph, registered, registration, source};
+    use crate::thread::{
+        StaticThreadModeRegistration, StaticWorkflowDefinition, StaticWorkflowState,
+        StaticWorkflowTransition,
+    };
+    use pl_protocol::{ThreadModeId, WorkflowStateKind};
+
+    const STATIC_STATES: &[StaticWorkflowState] = &[
+        StaticWorkflowState {
+            id: "ready",
+            title: "Ready",
+            instructions: "Prepare the delivery.",
+            completion_criteria: &["Delivery is prepared."],
+            kind: WorkflowStateKind::Atomic,
+        },
+        StaticWorkflowState {
+            id: "done",
+            title: "Done",
+            instructions: "",
+            completion_criteria: &[],
+            kind: WorkflowStateKind::Final,
+        },
+    ];
+    const STATIC_TRANSITIONS: &[StaticWorkflowTransition] = &[StaticWorkflowTransition {
+        source_state_id: "ready",
+        target_state_id: "done",
+        guard: "Delivery is verified.",
+    }];
+    const STATIC_REGISTRATION: StaticThreadModeRegistration = StaticThreadModeRegistration {
+        id: "mode.static-test",
+        display_name: "Static test",
+        description: "A built-in static descriptor",
+        order: 30,
+        prompt: "Follow the registered graph.",
+        workflow: Some(StaticWorkflowDefinition {
+            title: "Delivery",
+            goal: "Ship a verified delivery",
+            initial_state_id: "ready",
+            states: STATIC_STATES,
+            transitions: STATIC_TRANSITIONS,
+        }),
+    };
+
+    #[test]
+    fn static_registration_converts_to_the_public_owned_input() {
+        let converted = STATIC_REGISTRATION
+            .to_registration()
+            .expect("static registration is valid");
+
+        assert_eq!(converted.id.as_str(), "mode.static-test");
+        assert_eq!(converted.prompt, "Follow the registered graph.");
+        assert_eq!(converted.workflow, Some(graph("")));
+    }
+
+    #[test]
+    fn synthetic_upstream_registration_uses_only_the_public_memory_api() {
+        let manager = ThreadModeManager::default();
+        let mode = registered(&manager, "upstream.test", "External prompt", graph(""));
+
+        assert_eq!(mode.prompt(), "External prompt");
+        assert_eq!(mode.descriptor().id.as_str(), "mode.synthetic");
+        assert!(mode.workflow().is_some());
+        assert_eq!(manager.snapshot().catalog().modes.len(), 1);
+    }
+
+    #[test]
+    fn source_replacement_is_atomic_when_one_registration_is_invalid() {
+        let manager = ThreadModeManager::default();
+        let initial = registered(&manager, "upstream.atomic", "Initial", graph(""));
+        let before = manager.snapshot();
+        let mut invalid = graph("");
+        invalid.initial_state_id = "missing".to_string();
+
+        let result = manager.replace_source(
+            source("upstream.atomic", ThreadModeSourceKind::External),
+            [
+                registration("mode.synthetic", "Replacement", Some(graph(""))),
+                registration("mode.invalid", "Invalid", Some(invalid)),
+            ],
+        );
+
+        assert!(matches!(
+            result,
+            Err(ThreadModeManagerError::InvalidWorkflow { .. })
+        ));
+        let after = manager.snapshot();
+        assert_eq!(after.revision(), before.revision());
+        assert_eq!(
+            after
+                .mode(&initial.descriptor().id)
+                .expect("old mode remains")
+                .prompt(),
+            "Initial"
+        );
+    }
+
+    #[test]
+    fn prompt_only_replacement_preserves_graph_identity() {
+        let manager = ThreadModeManager::default();
+        let first = registered(&manager, "upstream.prompt", "Prompt one", graph(""));
+        let first_revision = first.graph_revision();
+        let first_hash = first.graph_hash().expect("graph hash").to_string();
+        let second = registered(&manager, "upstream.prompt", "Prompt two", graph(""));
+
+        assert_eq!(second.prompt(), "Prompt two");
+        assert_eq!(second.graph_revision(), first_revision);
+        assert_eq!(second.graph_hash(), Some(first_hash.as_str()));
+    }
+
+    #[test]
+    fn graph_replacement_allocates_a_new_revision_and_hash() {
+        let manager = ThreadModeManager::default();
+        let first = registered(&manager, "upstream.graph", "Prompt", graph(""));
+        let second = registered(&manager, "upstream.graph", "Prompt", graph(" again"));
+
+        assert!(second.graph_revision() > first.graph_revision());
+        assert_ne!(second.graph_hash(), first.graph_hash());
+    }
+
+    #[test]
+    fn another_source_cannot_override_a_builtin_mode() {
+        let manager = ThreadModeManager::default();
+        manager
+            .replace_source(
+                source("studio.builtin", ThreadModeSourceKind::Builtin),
+                [registration("mode.synthetic", "Builtin", Some(graph("")))],
+            )
+            .expect("builtin registration");
+
+        let result = manager.replace_source(
+            source("upstream.override", ThreadModeSourceKind::External),
+            [registration("mode.synthetic", "Override", Some(graph("")))],
+        );
+
+        assert!(matches!(
+            result,
+            Err(ThreadModeManagerError::SourceConflict { .. })
+        ));
+    }
+
+    #[test]
+    fn source_identity_cannot_change_from_builtin_to_external() {
+        let manager = ThreadModeManager::default();
+        manager
+            .replace_source(
+                source("studio.builtin", ThreadModeSourceKind::Builtin),
+                [registration("mode.synthetic", "Builtin", Some(graph("")))],
+            )
+            .expect("builtin registration");
+
+        let result = manager.replace_source(
+            source("studio.builtin", ThreadModeSourceKind::External),
+            [registration("mode.synthetic", "Override", Some(graph("")))],
+        );
+
+        assert!(matches!(
+            result,
+            Err(ThreadModeManagerError::SourceKindConflict { .. })
+        ));
+        assert_eq!(
+            manager
+                .snapshot()
+                .mode(&ThreadModeId::new("mode.synthetic").expect("valid mode id"))
+                .expect("builtin remains")
+                .prompt(),
+            "Builtin"
+        );
+    }
+
+    #[test]
+    fn removal_publishes_a_new_catalog_without_the_source() {
+        let manager = ThreadModeManager::default();
+        registered(&manager, "upstream.removed", "Prompt", graph(""));
+        let before = manager.snapshot().revision();
+
+        let snapshot = manager
+            .remove_source(&ThreadModeSourceId::new("upstream.removed").expect("valid source id"));
+
+        assert!(snapshot.revision() > before);
+        assert!(snapshot.catalog().modes.is_empty());
+    }
+}

@@ -12,7 +12,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::agent_runtime::TurnId;
+use crate::TurnId;
 
 /// mailbox envelope 的唯一持久投递状态。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

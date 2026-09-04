@@ -20,7 +20,7 @@ pl-studio-server ───────────────┘          │  
 
 - `pl-protocol`：Thread、Turn、Item、Interaction、workflow、Agent Profile snapshot、通知与错误。
 - `pl-model`：provider 请求、stream 归一化、模型目录与连接协议。
-- `pl-core`：会话编排、模型循环、工具运行时、Skill catalog、working state 与 `thread::mode` 注册表。
+- `pl-core`：会话编排、模型循环、工具运行时、Skill catalog、working state 与 `thread` 注册表。
 - `pl-studio-runtime`：项目/Thread owner、配置、内置 Thread Mode、Agent Profile catalog、SQLite repository。
 - `pl-studio-bridge`：Rust 与 Dart 的机械映射。
 - `pl-studio-server`：同一 runtime 的 HTTP/SSE 适配。

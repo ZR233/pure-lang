@@ -22,7 +22,7 @@ pub use host::{
     SpawnRollbackReason, ThreadCommit, ThreadContextMutation, ThreadMutation,
     ThreadProjectionCommit, ThreadRepository,
 };
-pub use pl_protocol::{ThreadId, TurnId};
+use pl_protocol::{ThreadId, TurnId};
 pub use policy::{
     AgentAccessPolicy, AgentExecutionPolicy, AgentTargetSelector, ToolEffectSet,
     TurnFinalizationPolicy,
@@ -38,53 +38,36 @@ pub(crate) use turn::{
     turn_budget_refresh_channel,
 };
 
+/// agent_runtime 行为测试共享的宿主/仓库/生命周期 fixture。
 #[cfg(test)]
-mod tests {
-    use std::collections::{BTreeMap, BTreeSet};
-    use std::future::pending;
+pub(crate) mod test_support {
+    use std::collections::BTreeMap;
+
     use std::sync::{Arc, Mutex};
-    use std::time::Duration;
 
-    use pl_protocol::{
-        AGENT_SESSION_PLAN_CONFIRMATION_QUESTION_ID, AgentSessionPlanConfirmationPurpose,
-        AgentSessionPlanPhase, ConversationRecoveryMode, InteractionCommand, InteractionPurpose,
-        InteractionRequest, InteractionScope, ResolveUserInput, ThreadModeId, ThreadNotification,
-        ThreadTextChannel, TurnBillingRecord, TurnOutcome, UserInputAnswer, UserQuestion,
-        UserQuestionOption, WorkflowRun, WorkflowRunLifecycle, WorkflowSessionState,
-    };
-    use pretty_assertions::assert_eq;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::TcpListener;
-    use tokio::sync::{Notify, Semaphore};
+    use pl_protocol::ThreadId;
 
-    use super::host::ThreadContextMutation;
     use super::*;
-    use crate::{
-        AgentSession, Message, ResolvedModelRoute, TurnBudget, TurnEngineBuilder, TurnOptions,
-        TurnRequest,
-    };
-    use pl_model::model::ModelInfo;
-    use pl_model::provider::ProviderEndpoint;
 
     #[derive(Debug, Clone, thiserror::Error)]
     #[error("{0}")]
-    struct TestError(String);
+    pub(crate) struct TestError(pub(crate) String);
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    enum FactoryMode {
+    pub(crate) enum FactoryMode {
         Fail,
         Block,
         BudgetLimited,
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    enum FailingAgentState {
+    pub(crate) enum FailingAgentState {
         Closing,
         Closed,
     }
 
     impl FailingAgentState {
-        fn matches(self, state: &AgentState) -> bool {
+        pub(crate) fn matches(self, state: &AgentState) -> bool {
             matches!(
                 (self, state),
                 (Self::Closing, AgentState::Closing(_)) | (Self::Closed, AgentState::Closed(_))
@@ -93,26 +76,26 @@ mod tests {
     }
 
     #[derive(Clone)]
-    struct TestRepository {
-        states: Arc<Mutex<BTreeMap<ThreadId, ThreadActorState>>>,
-        mutations: Arc<Mutex<Vec<ThreadMutation>>>,
-        contexts: Arc<Mutex<Vec<Option<ThreadContextMutation>>>>,
-        commits: Arc<Mutex<Vec<ThreadCommit>>>,
-        submissions: Arc<Mutex<BTreeMap<ThreadId, Vec<AgentSubmissionRecord>>>>,
-        fail_trace: Arc<Mutex<bool>>,
-        fail_terminal: Arc<Mutex<bool>>,
-        fail_registration: Arc<Mutex<bool>>,
-        fail_lifecycle: Arc<Mutex<Option<FailingAgentState>>>,
-        fail_fault: Arc<Mutex<bool>>,
-        fail_turn_queue: Arc<Mutex<bool>>,
-        fail_turn_started: Arc<Mutex<bool>>,
-        fail_recovery: Arc<Mutex<bool>>,
-        fail_durability: Arc<Mutex<bool>>,
-        durable_barriers: Arc<Mutex<Vec<(ThreadId, u64)>>>,
+    pub(crate) struct TestRepository {
+        pub(crate) states: Arc<Mutex<BTreeMap<ThreadId, ThreadActorState>>>,
+        pub(crate) mutations: Arc<Mutex<Vec<ThreadMutation>>>,
+        pub(crate) contexts: Arc<Mutex<Vec<Option<ThreadContextMutation>>>>,
+        pub(crate) commits: Arc<Mutex<Vec<ThreadCommit>>>,
+        pub(crate) submissions: Arc<Mutex<BTreeMap<ThreadId, Vec<AgentSubmissionRecord>>>>,
+        pub(crate) fail_trace: Arc<Mutex<bool>>,
+        pub(crate) fail_terminal: Arc<Mutex<bool>>,
+        pub(crate) fail_registration: Arc<Mutex<bool>>,
+        pub(crate) fail_lifecycle: Arc<Mutex<Option<FailingAgentState>>>,
+        pub(crate) fail_fault: Arc<Mutex<bool>>,
+        pub(crate) fail_turn_queue: Arc<Mutex<bool>>,
+        pub(crate) fail_turn_started: Arc<Mutex<bool>>,
+        pub(crate) fail_recovery: Arc<Mutex<bool>>,
+        pub(crate) fail_durability: Arc<Mutex<bool>>,
+        pub(crate) durable_barriers: Arc<Mutex<Vec<(ThreadId, u64)>>>,
     }
 
     impl TestRepository {
-        fn empty() -> Self {
+        pub(crate) fn empty() -> Self {
             Self {
                 states: Arc::new(Mutex::new(BTreeMap::new())),
                 mutations: Arc::new(Mutex::new(Vec::new())),
@@ -132,7 +115,7 @@ mod tests {
             }
         }
 
-        fn with_state(state: ThreadActorState) -> Self {
+        pub(crate) fn with_state(state: ThreadActorState) -> Self {
             let repository = Self::empty();
             repository
                 .states
@@ -142,51 +125,51 @@ mod tests {
             repository
         }
 
-        fn fail_terminal_commits(&self) {
+        pub(crate) fn fail_terminal_commits(&self) {
             *self.fail_terminal.lock().unwrap() = true;
         }
 
-        fn fail_next_registration(&self) {
+        pub(crate) fn fail_next_registration(&self) {
             *self.fail_registration.lock().unwrap() = true;
         }
 
-        fn fail_next_trace_commit(&self) {
+        pub(crate) fn fail_next_trace_commit(&self) {
             *self.fail_trace.lock().unwrap() = true;
         }
 
-        fn fail_next_lifecycle_commit(&self, state: FailingAgentState) {
+        pub(crate) fn fail_next_lifecycle_commit(&self, state: FailingAgentState) {
             *self.fail_lifecycle.lock().unwrap() = Some(state);
         }
 
-        fn fail_next_turn_started_commit(&self) {
+        pub(crate) fn fail_next_turn_started_commit(&self) {
             *self.fail_turn_started.lock().unwrap() = true;
         }
 
-        fn fail_next_recovery_commit(&self) {
+        pub(crate) fn fail_next_recovery_commit(&self) {
             *self.fail_recovery.lock().unwrap() = true;
         }
 
-        fn fail_next_fault_commit(&self) {
+        pub(crate) fn fail_next_fault_commit(&self) {
             *self.fail_fault.lock().unwrap() = true;
         }
 
-        fn fail_next_turn_queue_commit(&self) {
+        pub(crate) fn fail_next_turn_queue_commit(&self) {
             *self.fail_turn_queue.lock().unwrap() = true;
         }
 
-        fn fail_next_durability_barrier(&self) {
+        pub(crate) fn fail_next_durability_barrier(&self) {
             *self.fail_durability.lock().unwrap() = true;
         }
 
-        fn state(&self, id: &ThreadId) -> ThreadActorState {
+        pub(crate) fn state(&self, id: &ThreadId) -> ThreadActorState {
             self.states.lock().unwrap()[id].clone()
         }
 
-        fn last_context(&self) -> Option<ThreadContextMutation> {
+        pub(crate) fn last_context(&self) -> Option<ThreadContextMutation> {
             self.contexts.lock().unwrap().last().cloned().flatten()
         }
 
-        fn commits(&self) -> Vec<ThreadCommit> {
+        pub(crate) fn commits(&self) -> Vec<ThreadCommit> {
             self.commits.lock().unwrap().clone()
         }
     }
@@ -459,6 +442,36 @@ mod tests {
             item_id: item.id.clone(),
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+    use std::future::pending;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    use pl_protocol::{
+        AGENT_SESSION_PLAN_CONFIRMATION_QUESTION_ID, AgentSessionPlanConfirmationPurpose,
+        AgentSessionPlanPhase, ConversationRecoveryMode, InteractionCommand, InteractionPurpose,
+        InteractionRequest, InteractionScope, ResolveUserInput, ThreadModeId, ThreadNotification,
+        ThreadTextChannel, TurnBillingRecord, TurnOutcome, UserInputAnswer, UserQuestion,
+        UserQuestionOption, WorkflowRun, WorkflowRunLifecycle, WorkflowSessionState,
+    };
+    use pretty_assertions::assert_eq;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+    use tokio::sync::{Notify, Semaphore};
+
+    use super::host::ThreadContextMutation;
+    use super::test_support::*;
+    use super::*;
+    use crate::{
+        AgentSession, Message, ResolvedModelRoute, TurnBudget, TurnEngineBuilder, TurnOptions,
+        TurnRequest,
+    };
+    use pl_model::model::ModelInfo;
+    use pl_model::provider::ProviderEndpoint;
 
     #[tokio::test]
     async fn registration_persists_non_empty_initial_transcript_as_baseline() {

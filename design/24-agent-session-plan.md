@@ -3,7 +3,7 @@
 ## 24.1 领域边界
 
 Plan 是 AgentSession 内独立于 Mode workflow 的计划确认聚合，源码统一归属
-`pl-protocol::agent_session::plan` 与 `pl-core::session::plan`。`thread::mode` 描述一项任务的阶段图；
+`pl-protocol::agent_session::plan` 与 `pl-core::session::plan`。`thread` 的 Mode 状态图描述一项任务的阶段；
 `session::plan` 只描述当前 AgentSession 的一份计划从起草、请求确认、要求修订到批准的生命周期。Mode 图不能定义、编译、
 覆盖或直接推进 Plan 状态，Plan 工具也不能提交外部图。
 

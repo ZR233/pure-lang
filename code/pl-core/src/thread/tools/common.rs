@@ -4,7 +4,7 @@ use pl_protocol::{PureError, WorkflowSessionState, WorkflowTransitionRecord};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::thread::mode::runtime::{
+use crate::thread::runtime::{
     archive_run, commit_operation_receipt, lifecycle_for_state, new_run, operation_receipt,
     trim_history,
 };
@@ -171,7 +171,7 @@ impl WorkflowToolRuntime {
         });
         trim_history(run)?;
         commit_operation_receipt(&mut state, operation_id, argument_hash, next_revision);
-        crate::thread::mode::validate_session_state_size(&state)?;
+        crate::thread::validate_session_state_size(&state)?;
         self.working_set
             .apply(TurnWorkingSetChange::ReplaceWorkflow(Some(state.clone())))?;
         Ok(self.accepted("transitioned", &state))
@@ -208,7 +208,7 @@ impl WorkflowToolRuntime {
         let seed = format!("{operation_id}:{argument_hash}:{next_revision}");
         state.current_run = Some(new_run(&self.mode, self.graph(), None, &seed, now));
         commit_operation_receipt(&mut state, operation_id, argument_hash, next_revision);
-        crate::thread::mode::validate_session_state_size(&state)?;
+        crate::thread::validate_session_state_size(&state)?;
         self.working_set
             .apply(TurnWorkingSetChange::ReplaceWorkflow(Some(state.clone())))?;
         Ok(self.accepted("restarted", &state))

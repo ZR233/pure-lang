@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::agent_runtime::TurnId;
+use crate::TurnId;
 
 /// 已由指定 Turn claim、尚未被 checkpoint 消费的 mailbox 输入。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

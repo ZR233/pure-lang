@@ -2,12 +2,12 @@
 
 ## 23.1 领域边界
 
-Mode 是 root `Thread` 的执行配置，源码统一归属 `thread::mode`。Mode 不是 Skill、Agent Profile、
+Mode 是 root `Thread` 的执行配置，源码统一归属 `thread` 命名空间。Mode 不是 Skill、Agent Profile、
 provider wire mode 或另一种会话类型；Simple、Task 与后续自定义 Mode 继续使用同一套
 Thread、Turn、模型循环和工具运行时。
 
 跨 crate 的稳定 ID 是 `ThreadModeId`，wire 仍使用 `mode.<id>` 字符串。`pl-protocol::thread::mode`
-拥有 ID 与目录 DTO；`pl-core::thread::mode` 拥有内存注册表、不可变快照、预设图编译和状态工具；
+拥有 ID 与目录 DTO；`pl-core::thread` 拥有内存注册表、不可变快照、预设图编译和状态工具；
 `pl-studio-runtime::studio::thread::mode` 拥有随二进制发布的内置 Mode。
 
 普通 Skill 系统不解析、发现、保护、投影或加载 Mode。Mode 不使用 `SKILL.md`、frontmatter、
