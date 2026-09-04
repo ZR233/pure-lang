@@ -30,7 +30,7 @@ platforms: ["windows", "linux", "macos"]
 Pure self-learning and `skill_manage` write only to the current project skills directory:
 
 ```text
-<workspace_root>/skills/
+<workspace_root>/.agents/skills/
 ```
 
 System, user, and external skills are read-only. To customize one, create a project skill with the same name or create a project-specific companion skill.

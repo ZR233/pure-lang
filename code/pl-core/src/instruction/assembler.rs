@@ -294,7 +294,7 @@ mod tests {
         name: &str,
         description: &str,
     ) -> crate::skill::SkillMetadata {
-        let path = root.join("skills").join(name);
+        let path = root.join(".agents/skills").join(name);
         crate::skill::SkillMetadata {
             name: name.to_string(),
             description: description.to_string(),
@@ -841,7 +841,7 @@ mod tests {
             ..crate::config::SkillsConfig::default()
         };
         let catalog = crate::skill::SkillCatalog {
-            project_dir: dir.join("skills"),
+            project_dir: dir.join(".agents/skills"),
             skills: Vec::new(),
             warnings: Vec::new(),
             complete: true,
@@ -878,7 +878,7 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         let skills = crate::config::SkillsConfig::default();
         let catalog = crate::skill::SkillCatalog {
-            project_dir: dir.join("skills"),
+            project_dir: dir.join(".agents/skills"),
             skills: vec![
                 instruction_skill(
                     &dir,
@@ -987,7 +987,7 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         let skills = crate::config::SkillsConfig::default();
         let catalog = crate::skill::SkillCatalog {
-            project_dir: dir.join("skills"),
+            project_dir: dir.join(".agents/skills"),
             skills: vec![instruction_skill(&dir, "rust-formatting", "Format Rust")],
             warnings: Vec::new(),
             complete: true,

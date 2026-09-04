@@ -15,8 +15,10 @@ rustdoc 和属性生成参数 schema；adapter 使用同一类型反序列化调
 
 `pl-core` 在 crate 根公开 `StaticTool`、`static_tool` builder、`DynTool`、`ToolExecutor`、
 `ToolInstallGroup` 以及可复用内置工具的实现类型和构造函数。下游按所需能力自由选择内置工具，逐个
-`.into()` 后与宿主工具放入同一安装组；`lsp_tools`、`command_tool_pair` 等工具族构造器直接返回
-`Vec<DynTool>`。默认工具安装器只是公共工具的预设组合，不拥有私有工具类型，也不是第二条注册路径。
+`.into()` 后与宿主工具放入同一安装组；`lsp_tools` 等目录构造器直接返回 `Vec<DynTool>`，
+`command_tool_pair` 与 `local_command_tool_pair_with_environment` 返回具体命令工具元组，调用方解构后
+分别转换为 `DynTool`。默认工具安装器只是公共工具的预设组合，不拥有私有工具类型，也不是第二条
+注册路径。
 
 工具注册以 `ToolInstallGroup` 为原子单位，组同时拥有 exposure、可选 developer instructions、
 generation 和 `DynTool` 列表。冻结快照只向模型发送 Direct 和当前 session 已 reveal 的 Deferred

@@ -165,7 +165,7 @@ fn default_true() -> bool {
 }
 
 fn default_project_skills_dir() -> String {
-    "skills".to_string()
+    ".agents/skills".to_string()
 }
 
 fn default_user_skills_dir() -> String {
@@ -174,4 +174,23 @@ fn default_user_skills_dir() -> String {
 
 fn default_auto_learn_min_tool_calls() -> u32 {
     5
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+
+    #[test]
+    fn skills_config_uses_standard_project_directory_without_overriding_explicit_values() {
+        assert_eq!(SkillsConfig::default().project_dir, ".agents/skills");
+
+        let missing_project_dir: SkillsConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(missing_project_dir.project_dir, ".agents/skills");
+
+        let explicit_legacy_dir: SkillsConfig =
+            serde_json::from_str(r#"{"project_dir":"skills"}"#).unwrap();
+        assert_eq!(explicit_legacy_dir.project_dir, "skills");
+    }
 }

@@ -382,7 +382,7 @@ fn write_skill_fixtures(workspace: &Path) -> Result<()> {
 }
 
 fn write_skill(workspace: &Path, name: &str, description: &str, marker: &str) -> Result<()> {
-    let directory = workspace.join("skills").join(name);
+    let directory = workspace.join(".agents/skills").join(name);
     fs::create_dir_all(&directory)?;
     fs::write(
         directory.join("SKILL.md"),

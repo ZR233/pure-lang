@@ -13,9 +13,11 @@ use pl_studio_runtime::{StudioHostKind, StudioRuntime, StudioRuntimeOptions};
 
 fn remote_workspace() -> PathBuf {
     let dir = std::env::temp_dir().join("pure-ssh-skills-acceptance");
-    fs::create_dir_all(dir.join("skills").join("accept-remote-skill")).unwrap();
+    fs::create_dir_all(dir.join(".agents/skills").join("accept-remote-skill")).unwrap();
     fs::write(
-        dir.join("skills").join("accept-remote-skill").join("SKILL.md"),
+        dir.join(".agents/skills")
+            .join("accept-remote-skill")
+            .join("SKILL.md"),
         "---\nname: accept-remote-skill\ndescription: Remote project skill for SSH acceptance\n---\nBody\n",
     )
     .unwrap();

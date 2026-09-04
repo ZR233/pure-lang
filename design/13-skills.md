@@ -7,7 +7,7 @@ Provider、注册表、发现观测和 Turn 级冻结 catalog；Studio 只拥有
 catalog 投影与系统资源目录。系统默认只把自学习产物写入当前项目，避免把项目经验污染到用户
 全局配置。
 
-当前只实现本地文件系统 Provider 闭环：
+当前实现默认本地文件系统 Provider 闭环，以及 SSH workspace 的远端 Project Provider：
 
 - 发现本地 skills。
 - 向模型注入简短索引。
@@ -33,14 +33,13 @@ Provider 的状态。产品提供的 Review revision、容器卷或缓存快照�
 否则公共注册入口虽然“能发现”，`skill_view` 却会在正文读取成功后因错误信任根失败，产品仍被迫
 复制工具或伪装路径，等同于公共能力不完整。
 
-当前不实现远程 Provider、在线 Hub、安装市场、文件 watcher、项目级 `.agents/skills`、平铺
-`<name>.md` 或用户级自动写入。
+当前不实现在线 Hub、安装市场、文件 watcher、平铺 `<name>.md` 或用户级自动写入。
 
 ## 13.2 目录和优先级
 
 运行时按以下优先级发现 skills：
 
-1. 项目目录：`<workspace_root>/skills/`
+1. 项目目录：`<workspace_root>/.agents/skills/`
 2. 配置用户目录：`[skills].user_dir`，默认 `~/.pure/skills/`
 3. Agents 兼容用户目录：Linux `$HOME/.agents/skills/`、Windows `%USERPROFILE%\.agents\skills\`
 4. Studio 系统目录：`<studio_home>/studio/skills/.system/`
@@ -53,7 +52,8 @@ winner 依次按来源 rank、Provider 注册顺序和 Provider 本地顺序确�
 和外部目录仅参与只读发现。若模型尝试修改来自用户目录、系统目录或外部目录的 skill，工具必须
 拒绝原地修改，并提示在项目目录创建同名项目覆盖或新建项目 skill。
 
-`[skills].project_dir` 是相对工作区根目录的路径，默认 `skills`。解析后必须位于 `workspace_root` 内。
+`[skills].project_dir` 是相对工作区根目录的路径，默认 `.agents/skills`。解析后必须位于
+`workspace_root` 内。显式配置的其他相对目录继续按配置使用；运行时不自动搬迁旧目录。
 
 项目 skills 路径按主机文件边界处理：项目目录、skill 目录、`SKILL.md`、支持文件和使用统计的已有祖先都不能是 symbolic link 或 Windows reparse point。发现和支持文件索引跳过链接入口；`skill_view` 与 `skill_manage` 直接访问链接时拒绝。删除 skill 时，skill 子树内的链接只删除入口，不能递归进入或修改其目标。用户、系统和显式 external source 仍是只读来源，但其内部发现同样不跟随链接。
 

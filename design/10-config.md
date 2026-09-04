@@ -140,7 +140,7 @@ headers = {}
 [skills]
 enabled = true
 auto_learn = true
-project_dir = "skills"
+project_dir = ".agents/skills"
 user_dir = "~/.pure/skills"
 external_dirs = []
 disabled = []
@@ -381,7 +381,7 @@ live generation，shutdown 是不可恢复终止态。完整合同见 `20-studio
 - `enabled`：是否启用 skills 目录、prompt 注入、工具注册和用户 `/name` 手势，默认 `true`；关闭时
   Studio 仍可保留已发布 catalog 供设置页只读展示。
 - `auto_learn`：是否在 Studio 主 turn 结束后启动后台 reviewer 自动沉淀项目 skill，默认 `true`。
-- `project_dir`：项目级 skills 目录，相对 `workspace_root` 解析，默认 `skills`。
+- `project_dir`：项目级 skills 目录，相对 `workspace_root` 解析，默认 `.agents/skills`。
 - `user_dir`：用户级只读 skills 目录，默认 `~/.pure/skills`。
 - `system.enabled`：是否启用内置系统 skills，默认 `true`。
 - `external_dirs`：额外只读 skills 目录列表，默认空。
@@ -400,7 +400,7 @@ Skill frontmatter 的 `disable-model-invocation` 默认 `false`，`user-invocabl
 Studio 系统 skills 来自编译进 `pl-studio-runtime` 的预置资源，并在每次 Studio Runtime 启动时
 全量重建到 `<studio_home>/studio/skills/.system/`。系统目录固定属于 Studio 数据，不从
 `skills.user_dir` 推导；`system.enabled` 只控制该来源是否参与发现，不控制启动刷新。该目录由
-Pure 管理，用户需要覆盖系统 skill 时应在项目 `skills/` 目录创建同名 skill。
+Pure 管理，用户需要覆盖系统 skill 时应在项目 `.agents/skills/` 目录创建同名 skill。
 
 系统内置 `studio-config` skill 是面向 agent 的 Pure Studio 配置指南，覆盖配置文件位置、当前
 schema、常用配置段、凭据处理和安全编辑行为。其 canonical 源文件固定为

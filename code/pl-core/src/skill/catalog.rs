@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use pl_protocol::Result;
+use pl_protocol::{PureError, Result};
 
 use super::scanning::{find_skill_files, metadata_from_file};
 use super::util::platform_matches;
@@ -27,31 +27,40 @@ impl SkillCatalog {
         config: &SkillsConfig,
         system_dir: Option<&Path>,
     ) -> Result<Self> {
-        let agents_user_dir = super::util::agents_user_skills_dir().ok();
-        Self::discover_with_agents_user_dir(
-            workspace_root,
-            config,
-            system_dir,
-            agents_user_dir.as_deref(),
-        )
+        let sources = skill_sources(workspace_root, config, system_dir)?;
+        Self::discover_from_sources(workspace_root, config, sources)
     }
 
+    #[cfg(test)]
     pub(super) fn discover_with_agents_user_dir(
         workspace_root: &Path,
         config: &SkillsConfig,
         system_dir: Option<&Path>,
         agents_user_dir: Option<&Path>,
     ) -> Result<Self> {
+        let readonly_sources = resolve_local_readonly_skill_sources_with_agents_user_dir(
+            config,
+            system_dir,
+            agents_user_dir,
+        )?;
+        let sources = skill_sources_from_readonly(workspace_root, config, readonly_sources)?;
+        Self::discover_from_sources(workspace_root, config, sources)
+    }
+
+    fn discover_from_sources(
+        workspace_root: &Path,
+        config: &SkillsConfig,
+        sources: Vec<SkillSource>,
+    ) -> Result<Self> {
         let project_dir = super::project_skills_dir(workspace_root, config)?;
         let mut warnings = Vec::new();
-        let mut by_name: BTreeMap<String, (SkillMetadata, u8)> = BTreeMap::new();
+        let mut by_name: BTreeMap<String, (SkillMetadata, u16)> = BTreeMap::new();
         let disabled = config
             .disabled
             .iter()
             .map(|name| name.to_ascii_lowercase())
             .collect::<BTreeSet<_>>();
 
-        let sources = skill_sources(workspace_root, config, system_dir, agents_user_dir)?;
         for source in sources {
             if !source.root.exists() {
                 continue;
@@ -101,6 +110,29 @@ impl SkillCatalog {
     }
 }
 
+/// Resolves the ordered local read-only Skill sources shared by local and remote workspaces.
+///
+/// Sources are returned in winner priority order: the configured user directory, the platform
+/// user's `.agents/skills` compatibility directory when distinct, the enabled Studio system
+/// directory, and configured external directories. A missing platform user home only omits the
+/// optional compatibility source.
+///
+/// # Errors
+///
+/// Returns an error when the configured user directory or an external directory cannot be
+/// resolved.
+pub fn resolve_local_readonly_skill_sources(
+    config: &SkillsConfig,
+    system_dir: Option<&Path>,
+) -> Result<Vec<super::SkillDirectorySource>> {
+    let agents_user_dir = super::util::agents_user_skills_dir().ok();
+    resolve_local_readonly_skill_sources_with_agents_user_dir(
+        config,
+        system_dir,
+        agents_user_dir.as_deref(),
+    )
+}
+
 /// Builds the Skills prompt using an optional, explicitly supplied system source.
 ///
 /// # Errors
@@ -131,7 +163,7 @@ pub fn build_skills_prompt_from_catalog(catalog: &SkillCatalog) -> String {
             .then_with(|| left.name.cmp(&right.name))
     });
     if model_skills.is_empty() {
-        return "# Skills\n当前项目未发现可用 skills。完成可复用流程后，可用 `skill_manage` 写入项目 `skills/` 目录。".to_string();
+        return "# Skills\n当前项目未发现可用 skills。完成可复用流程后，可用 `skill_manage` 写入项目 `.agents/skills/` 目录。".to_string();
     }
 
     let mut prompt = String::from(
@@ -205,44 +237,66 @@ pub(super) fn skill_sources(
     workspace_root: &Path,
     config: &SkillsConfig,
     system_dir: Option<&Path>,
-    agents_user_dir: Option<&Path>,
 ) -> Result<Vec<SkillSource>> {
-    let mut sources = Vec::new();
-    sources.push(SkillSource {
+    let readonly_sources = resolve_local_readonly_skill_sources(config, system_dir)?;
+    skill_sources_from_readonly(workspace_root, config, readonly_sources)
+}
+
+fn skill_sources_from_readonly(
+    workspace_root: &Path,
+    config: &SkillsConfig,
+    readonly_sources: Vec<super::SkillDirectorySource>,
+) -> Result<Vec<SkillSource>> {
+    let mut sources = vec![SkillSource {
         root: super::project_skills_dir(workspace_root, config)?,
         kind: SkillSourceKind::Project,
         priority: 0,
-    });
+    }];
+    for (index, source) in readonly_sources.into_iter().enumerate() {
+        let priority = u16::try_from(index + 1).map_err(|_| {
+            PureError::ConfigError("too many local read-only Skill sources to rank".to_string())
+        })?;
+        sources.push(SkillSource {
+            root: source.root,
+            kind: source.source,
+            priority,
+        });
+    }
+    Ok(sources)
+}
+
+fn resolve_local_readonly_skill_sources_with_agents_user_dir(
+    config: &SkillsConfig,
+    system_dir: Option<&Path>,
+    agents_user_dir: Option<&Path>,
+) -> Result<Vec<super::SkillDirectorySource>> {
+    let mut sources = Vec::new();
     let configured_user_dir = super::resolve_user_skills_dir(config)?;
-    sources.push(SkillSource {
-        root: configured_user_dir.clone(),
-        kind: SkillSourceKind::User,
-        priority: 1,
-    });
+    sources.push(super::SkillDirectorySource::new(
+        configured_user_dir.clone(),
+        SkillSourceKind::User,
+    ));
     if let Some(root) = agents_user_dir
         && root != configured_user_dir
     {
-        sources.push(SkillSource {
-            root: root.to_path_buf(),
-            kind: SkillSourceKind::User,
-            priority: 2,
-        });
+        sources.push(super::SkillDirectorySource::new(
+            root,
+            SkillSourceKind::User,
+        ));
     }
     if config.system.enabled
         && let Some(root) = system_dir
     {
-        sources.push(SkillSource {
-            root: root.to_path_buf(),
-            kind: SkillSourceKind::System,
-            priority: 3,
-        });
+        sources.push(super::SkillDirectorySource::new(
+            root,
+            SkillSourceKind::System,
+        ));
     }
     for external_dir in &config.external_dirs {
-        sources.push(SkillSource {
-            root: super::provider::external_source_root(external_dir)?,
-            kind: SkillSourceKind::External,
-            priority: 4,
-        });
+        sources.push(super::SkillDirectorySource::new(
+            super::provider::external_source_root(external_dir)?,
+            SkillSourceKind::External,
+        ));
     }
     Ok(sources)
 }
@@ -276,6 +330,12 @@ mod tests {
         .unwrap();
     }
 
+    fn default_project_skill_dir(workspace: &Path, name: &str) -> PathBuf {
+        workspace
+            .join(&SkillsConfig::default().project_dir)
+            .join(name)
+    }
+
     fn discover_without_agents_home(
         workspace: &Path,
         config: &SkillsConfig,
@@ -305,7 +365,7 @@ mod tests {
         let user = temp_dir("shadow-user");
         let external = temp_dir("shadow-external");
         write_skill(
-            &workspace.join("skills").join("shared"),
+            &default_project_skill_dir(&workspace, "shared"),
             "shared",
             "project",
         );
@@ -333,7 +393,11 @@ mod tests {
     #[test]
     fn disabled_skills_are_filtered() {
         let workspace = temp_dir("disabled");
-        write_skill(&workspace.join("skills").join("hidden"), "hidden", "hidden");
+        write_skill(
+            &default_project_skill_dir(&workspace, "hidden"),
+            "hidden",
+            "hidden",
+        );
         let mut config = SkillsConfig {
             disabled: vec!["hidden".to_string()],
             ..SkillsConfig::default()
@@ -444,6 +508,90 @@ mod tests {
     }
 
     #[test]
+    fn readonly_sources_follow_configured_agents_system_and_external_priority() {
+        let configured_user = temp_dir("sources-configured-user");
+        let agents_user = temp_dir("sources-agents-user");
+        let system = temp_dir("sources-system");
+        let external = temp_dir("sources-external");
+        let config = SkillsConfig {
+            user_dir: configured_user.to_string_lossy().into_owned(),
+            external_dirs: vec![external.to_string_lossy().into_owned()],
+            ..SkillsConfig::default()
+        };
+
+        let sources = resolve_local_readonly_skill_sources_with_agents_user_dir(
+            &config,
+            Some(&system),
+            Some(&agents_user),
+        )
+        .unwrap();
+
+        assert_eq!(
+            sources,
+            vec![
+                super::super::SkillDirectorySource::new(configured_user, SkillSourceKind::User,),
+                super::super::SkillDirectorySource::new(agents_user, SkillSourceKind::User),
+                super::super::SkillDirectorySource::new(system, SkillSourceKind::System),
+                super::super::SkillDirectorySource::new(external, SkillSourceKind::External),
+            ]
+        );
+    }
+
+    #[test]
+    fn readonly_sources_omit_agents_when_home_is_unavailable_but_keep_later_sources() {
+        let configured_user = temp_dir("sources-required-user");
+        let system = temp_dir("sources-required-system");
+        let external = temp_dir("sources-required-external");
+        let config = SkillsConfig {
+            user_dir: configured_user.to_string_lossy().into_owned(),
+            external_dirs: vec![external.to_string_lossy().into_owned()],
+            ..SkillsConfig::default()
+        };
+
+        let sources =
+            resolve_local_readonly_skill_sources_with_agents_user_dir(&config, Some(&system), None)
+                .unwrap();
+
+        assert_eq!(
+            sources,
+            vec![
+                super::super::SkillDirectorySource::new(configured_user, SkillSourceKind::User,),
+                super::super::SkillDirectorySource::new(system, SkillSourceKind::System),
+                super::super::SkillDirectorySource::new(external, SkillSourceKind::External),
+            ]
+        );
+    }
+
+    #[test]
+    fn readonly_sources_omit_disabled_system_without_affecting_other_sources() {
+        let configured_user = temp_dir("sources-disabled-system-user");
+        let agents_user = temp_dir("sources-disabled-system-agents");
+        let external = temp_dir("sources-disabled-system-external");
+        let mut config = SkillsConfig {
+            user_dir: configured_user.to_string_lossy().into_owned(),
+            external_dirs: vec![external.to_string_lossy().into_owned()],
+            ..SkillsConfig::default()
+        };
+        config.system.enabled = false;
+
+        let sources = resolve_local_readonly_skill_sources_with_agents_user_dir(
+            &config,
+            Some(Path::new("unused-system")),
+            Some(&agents_user),
+        )
+        .unwrap();
+
+        assert_eq!(
+            sources,
+            vec![
+                super::super::SkillDirectorySource::new(configured_user, SkillSourceKind::User,),
+                super::super::SkillDirectorySource::new(agents_user, SkillSourceKind::User),
+                super::super::SkillDirectorySource::new(external, SkillSourceKind::External),
+            ]
+        );
+    }
+
+    #[test]
     fn configured_and_agents_user_same_directory_is_scanned_once() {
         let workspace = temp_dir("agents-dedup-workspace");
         let agents_user = temp_dir("agents-dedup-user");
@@ -502,7 +650,7 @@ mod tests {
         let user = temp_dir("system-shadow-user");
         let system = temp_dir("system-shadow-system");
         write_skill(
-            &workspace.join("skills").join("skill-creator"),
+            &default_project_skill_dir(&workspace, "skill-creator"),
             "skill-creator",
             "project override",
         );

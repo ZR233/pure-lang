@@ -220,18 +220,23 @@ fn list_local_skills(
         sources
             .into_iter()
             .enumerate()
-            .map(|(rank, source)| (source.root, source.source, rank as u16))
-            .collect::<Vec<_>>()
+            .map(|(rank, source)| {
+                let rank = u16::try_from(rank).map_err(|_| {
+                    PureError::ConfigError(
+                        "too many explicit Skill directory sources to rank".to_string(),
+                    )
+                })?;
+                Ok((source.root, source.source, rank))
+            })
+            .collect::<Result<Vec<_>>>()?
     } else {
-        let agents_user_dir = crate::skill::util::agents_user_skills_dir().ok();
         crate::skill::catalog::skill_sources(
             &request.workspace_root,
             &request.config,
             request.system_dir.as_deref(),
-            agents_user_dir.as_deref(),
         )?
         .into_iter()
-        .map(|source| (source.root, source.kind, source.priority.into()))
+        .map(|source| (source.root, source.kind, source.priority))
         .collect::<Vec<_>>()
     };
     let disabled = request

@@ -12,7 +12,9 @@ use serde::{Deserialize, Serialize};
 use crate::config::SkillsConfig;
 
 pub(crate) use catalog::build_skill_suggestions_from_catalog;
-pub use catalog::{build_skills_prompt, build_skills_prompt_from_catalog};
+pub use catalog::{
+    build_skills_prompt, build_skills_prompt_from_catalog, resolve_local_readonly_skill_sources,
+};
 pub use provider::{
     FileSystemSkillProvider, FrozenSkillCatalog, SkillCandidate, SkillDefinition,
     SkillDirectorySource, SkillInvocationPolicy, SkillLoadInvocation, SkillProvider,
@@ -151,7 +153,7 @@ struct SkillFrontmatter {
 pub(super) struct SkillSource {
     pub(super) root: PathBuf,
     pub(super) kind: SkillSourceKind,
-    pub(super) priority: u8,
+    pub(super) priority: u16,
 }
 
 const fn default_user_invocable() -> bool {

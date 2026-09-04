@@ -23,20 +23,20 @@ factory dispatch 或兼容 wrapper。
 
 ## 修改清单
 
-### 1. `pl-model/src/model/catalog/` — canonical 模型目录
+### 1. `code/pl-model/src/model/catalog/` — canonical 模型目录
 
 - 优先复用 `ModelFamily`，单模型只声明 slug、显示信息、窗口、价格等差异字段。
 - 用 `ModelTransportProfile` 声明 protocol、支持的连接模式与默认连接模式。
 - 用 `ModelRequestProfile`、`ModelParameter` 和 `ParameterWire` 表达 body/header/effort 差异。
 - 更新参数化 catalog 测试，覆盖能力、transport、价格和 request profile。
 
-### 2. `pl-model/src/provider/mod.rs` — endpoint 数据
+### 2. `code/pl-model/src/provider/mod.rs` — endpoint 数据
 
 - 只有出现新的 canonical endpoint 默认值或服务能力时才增加构造函数。
 - `ProviderEndpoint` 不保存默认模型、完整模型目录、protocol 或 connection mode。
 - 不按 provider ID、preset ID、slug 或 URL 在 runtime 中推断能力。
 
-### 3. `pl-core/src/model_config/catalog.rs` — preset/catalog 注册
+### 3. `code/pl-core/src/model_config/catalog.rs` — preset/catalog 注册
 
 - 注册 `ProviderPreset` 和其绑定的 `ModelCatalogId`。
 - 多个套餐可共享同一个模型 catalog，不增加执行分支。
@@ -46,7 +46,8 @@ factory dispatch 或兼容 wrapper。
 
 - 使用 `ProviderConfig::effective_models()` 作为唯一目录解析入口。
 - 使用 `AgentModelConfig::resolve()` 生成 `ResolvedModelRoute`。
-- Web Search 只扩展 `plan_web_search()` 的数据输入或能力矩阵，不在 Studio 复制 resolver。
+- Web Search 从 `plan_web_searches()` 的统一编排入口扩展数据输入或能力矩阵；OpenAI 与
+  DeepSeek 的具体规划分别保留在对应函数中，不在 Studio 复制 resolver。
 
 ### 5. `pl-studio-runtime` 与 Flutter
 
@@ -56,7 +57,7 @@ factory dispatch 或兼容 wrapper。
 
 ### 6. 新 wire API（仅确有需要时）
 
-- 在 `pl-model/src/runtime/` 增加私有 typed codec，并先归一化为同一 raw event/error。
+- 在 `code/pl-model/src/runtime/` 增加私有 typed codec，并先归一化为同一 raw event/error。
 - 继续复用 canonical request/history/tool 转换、stream lifecycle、tool identity、accumulator、
   error classification、retry budget 和凭证脱敏。
 - 协议差异通过穷尽的 `ProviderWireProtocol` / `ProviderConnectionMode` 分派；不要建立厂商 runtime。

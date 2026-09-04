@@ -75,10 +75,12 @@ descriptor；下一次 Turn
 重新读取远端 Skills，并在 host identity 变化后重新探测 LSP。
 
 SSH workspace 的 Skill catalog 由一个共享 registry 组合构成：远端 provider 贡献 Project 源，
-本地 user 目录与 Studio 物化的系统技能目录以只读来源并行注册。Thread Mode 独立从本地内存注册表
-捕获，不进入远端或本地 Skill 发现。Turn
+默认项目目录为远端 workspace 下的 `.agents/skills`；本地配置用户目录、用户主目录
+`.agents/skills`、Studio 物化的系统技能目录和显式 external 目录以只读来源并行注册，顺序与本地
+workspace 一致。Thread Mode 独立从本地内存注册表捕获，不进入远端或本地 Skill 发现。Turn
 执行与 Settings 的显式技能发现共用同一组合，因此设置页技能目录展示远端 Project 技能与本地
-系统/用户技能，且激活 fingerprint 包含 Skills 配置指纹；配置变化后的下一次激活会重新发现。
+系统/用户/external 技能，且激活 fingerprint 包含 Skills 配置指纹；配置变化后的下一次激活会重新
+发现。
 
 ## 21.4 凭据、路径与持久化
 

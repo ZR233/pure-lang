@@ -882,7 +882,7 @@ mod tests {
     }
 
     fn write_skill(root: &Path, name: &str, policy: &str, body: &str) {
-        let directory = root.join("skills").join(name);
+        let directory = root.join(".agents/skills").join(name);
         std::fs::create_dir_all(&directory).unwrap();
         std::fs::write(
             directory.join(super::super::SKILL_FILE_NAME),
@@ -932,7 +932,7 @@ mod tests {
         let provider = FileSystemSkillProvider::from_directories(
             "mai-project",
             vec![SkillDirectorySource::new(
-                source.path().join("skills"),
+                source.path().join(".agents/skills"),
                 SkillSourceKind::Project,
             )],
         )
@@ -966,7 +966,7 @@ mod tests {
         let provider = FileSystemSkillProvider::from_directories(
             "mai-system",
             vec![SkillDirectorySource::new(
-                source.path().join("skills"),
+                source.path().join(".agents/skills"),
                 SkillSourceKind::System,
             )],
         )

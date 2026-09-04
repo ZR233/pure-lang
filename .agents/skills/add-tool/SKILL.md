@@ -22,7 +22,7 @@ MCP / plugin / hosted ToolExecutor ┘
 ## 先确定契约
 
 1. 工具名使用 `ToolName::bare` 或 `ToolName::namespaced` 构造，在定义边界完成校验。
-2. Rust 静态工具输入使用 `DeserializeOwned + JsonSchema`；字段 rustdoc 是模型看到的参数说明，
+2. Rust 静态工具输入使用 `DeserializeOwned + JsonSchema + Send + 'static`；字段 rustdoc 是模型看到的参数说明，
    `#[schemars(...)]` 表达长度、范围等结构约束，`#[serde(deny_unknown_fields)]` 拒绝未知字段。
 3. `StaticToolDefinition` 显式提供工具总体用途；Schemars 不推断业务语义，也不替代 handler
    中依赖运行时状态的业务校验。
@@ -143,12 +143,13 @@ Registry 和 `ToolPlan` 只看到 `DynTool`，不按来源再次分派。不要�
 
 ## 选择并注册 `pl-core` 内置工具
 
-内置工具实现与构造器由 `pl-core` crate 根公开。下游按能力自由组合，例如：
+内置工具实现与大多数构造器由 `pl-core` crate 根公开；远程 workspace 构造器保留在
+`pl_core::remote` 命名空间。下游按能力自由组合，例如：
 
 ```rust
 let mut tools: Vec<pl_core::DynTool> = vec![
     pl_core::AskUserTool.into(),
-    pl_core::SubmitPlanTool.into(),
+    pl_core::PlanSubmitTool.into(),
     pl_core::StatPathTool::new(tool_workspace.clone()).into(),
     pl_core::WriteFileTool::new(tool_workspace.clone()).into(),
 ];
@@ -166,20 +167,22 @@ agent_tools.install(
 
 - 文件与 workspace：`StatPathTool`、`WriteFileTool`、`CreateDirectoryTool`、
   `DeletePathTool`、`CopyPathTool`、`MovePathTool`、`WorkspaceFileTool`、
-  `LocalWorkspaceFileTool`、`remote_workspace_mutation_tools`；
+  `LocalWorkspaceFileTool`、`pl_core::remote::remote_workspace_mutation_tools`；
 - 命令：`ExecTool`、`WriteStdinTool`、`command_tool_pair`、
   `local_command_tool_pair_with_environment`；
 - LSP 与图片：`LspCapabilitiesTool`、`LspQueryTool`、`lsp_tools`、`ViewImageTool`；
 - Git、Skill 与会话状态：`GitTool`、`SkillsListTool`、`SkillViewTool`、
   `SkillManageTool`、`skill_tools_from_catalog`、`SessionNoteTool`、`TodoListTool`、
-  `WorkflowStateTool`；
-- 控制与交互：`AskUserTool`、`SubmitPlanTool`、`CompleteTool`、
+  `WorkflowCurrentTool`、`WorkflowNextTool`、`WorkflowGraphTool`、`WorkflowHistoryTool`、
+  `WorkflowTransitionTool`、`WorkflowRestartTool`；
+- 控制与交互：`AskUserTool`、`PlanSubmitTool`、`CompleteTool`、
   `AgentCollaborationTools::tools`；
 - 搜索：`WebSearchClient` + `WebSearchTool`，以及 provider-hosted
   `HostedWebSearchTool`。
 
 构造器返回 `StaticTool` 实现时使用 `.into()`；已经返回 `Vec<DynTool>` 或本身实现
-`ToolExecutor` 的入口不要重复包装。
+`ToolExecutor` 的入口不要重复包装。`command_tool_pair` 与
+`local_command_tool_pair_with_environment` 返回具体工具元组，必须先解构，再分别调用 `.into()`。
 
 ## Direct、Deferred 与组提示
 

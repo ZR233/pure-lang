@@ -194,7 +194,7 @@ async fn main() -> anyhow::Result<()> {
 
     for path in [
         "nested",
-        "skills",
+        ".agents/skills",
         ".git",
         ".pure",
         "pixel.png",
@@ -265,22 +265,22 @@ async fn validate_skills(
     files: Arc<pl_core::remote::RemoteWorkspaceFileBackend>,
 ) -> anyhow::Result<()> {
     files
-        .create_directory("skills/remote".to_string(), None)
+        .create_directory(".agents/skills/remote".to_string(), None)
         .await?;
     files
         .write_text(WorkspaceFileWriteRequest {
-            path: "skills/remote/SKILL.md".to_string(),
+            path: ".agents/skills/remote/SKILL.md".to_string(),
             cwd: None,
             content: "---\nname: remote-validation\ndescription: Validate remote Skills.\n---\n\n# Remote validation\n"
                 .to_string(),
         })
         .await?;
     files
-        .create_directory("skills/remote/references".to_string(), None)
+        .create_directory(".agents/skills/remote/references".to_string(), None)
         .await?;
     files
         .write_text(WorkspaceFileWriteRequest {
-            path: "skills/remote/references/info.md".to_string(),
+            path: ".agents/skills/remote/references/info.md".to_string(),
             cwd: None,
             content: "remote reference".to_string(),
         })

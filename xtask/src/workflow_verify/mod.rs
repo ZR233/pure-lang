@@ -19,7 +19,7 @@ const VERIFY_MARKER: &str = "PURE_WORKFLOW_GUI_VERIFY_OK";
 const LIVE_CONFIG_SCHEMA_VERSION: i64 = 17;
 const TOTAL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const STALL_TIMEOUT_SECONDS: u64 = 10 * 60;
-const WORKFLOW_FIXTURE_USAGE_PATH: &str = "skills/workflow-fixture-rust/.usage.json";
+const WORKFLOW_FIXTURE_USAGE_PATH: &str = ".agents/skills/workflow-fixture-rust/.usage.json";
 const EXPECTED_DELIVERY_PATHS: &[&str] = &[
     "design/task-workflows.md",
     "src/normalize.rs",
@@ -605,7 +605,7 @@ fn validate_delivered_fixture(canonical: &Path, workspace: &Path, artifacts: &Pa
         "AGENTS.md",
         ".gitignore",
         "docs/product-contract.md",
-        "skills/workflow-fixture-rust/SKILL.md",
+        ".agents/skills/workflow-fixture-rust/SKILL.md",
     ] {
         ensure!(
             fs::read(canonical.join(path))? == fs::read(workspace.join(path))?,
@@ -1385,7 +1385,7 @@ mod tests {
             .iter()
             .map(|path| (*path).to_string())
             .collect::<Vec<_>>();
-        changed.push("skills/another-skill/.usage.json".to_string());
+        changed.push(".agents/skills/another-skill/.usage.json".to_string());
         changed.sort_unstable();
 
         assert!(validate_delivery_changes(&changed).is_err());

@@ -109,7 +109,7 @@ class SkillsSettingsView {
     this.enabled = true,
     this.autoLearn = true,
     this.systemEnabled = true,
-    this.projectDir = 'skills',
+    this.projectDir = '.agents/skills',
     this.userDir = '~/.pure/skills',
     this.externalDirs = const [],
     this.disabled = const [],

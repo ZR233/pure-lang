@@ -651,7 +651,7 @@ mod tests {
     }
 
     fn write_project_skill(workspace: &Path, name: &str) {
-        let skill_dir = workspace.join("skills").join(name);
+        let skill_dir = workspace.join(".agents/skills").join(name);
         fs::create_dir_all(skill_dir.join("references")).unwrap();
         fs::write(
             skill_dir.join("SKILL.md"),
@@ -667,7 +667,7 @@ mod tests {
         description: &str,
         category: &str,
     ) {
-        let skill_dir = workspace.join("skills").join(name);
+        let skill_dir = workspace.join(".agents/skills").join(name);
         fs::create_dir_all(&skill_dir).unwrap();
         fs::write(
         skill_dir.join("SKILL.md"),
@@ -717,7 +717,7 @@ mod tests {
         let provider = crate::skill::FileSystemSkillProvider::from_directories(
             "product-project-skills",
             vec![crate::skill::SkillDirectorySource::new(
-                source.path().join("skills"),
+                source.path().join(".agents/skills"),
                 crate::skill::SkillSourceKind::Project,
             )],
         )
@@ -748,7 +748,7 @@ mod tests {
         assert!(
             !source
                 .path()
-                .join("skills/review-single-pr/.usage.json")
+                .join(".agents/skills/review-single-pr/.usage.json")
                 .exists()
         );
     }
@@ -829,7 +829,7 @@ mod tests {
             category,
         );
         let mut config = SkillsConfig {
-            project_dir: "skills".to_string(),
+            project_dir: ".agents/skills".to_string(),
             user_dir: workspace
                 .join("missing-user")
                 .to_string_lossy()
@@ -901,7 +901,7 @@ mod tests {
     fn create_writes_project_skill() {
         let workspace = temp_dir("create");
         let catalog = SkillCatalog {
-            project_dir: workspace.join("skills"),
+            project_dir: workspace.join(".agents/skills"),
             skills: Vec::new(),
             warnings: Vec::new(),
             complete: true,
@@ -916,7 +916,11 @@ mod tests {
 
         create_skill("skill_manage", &catalog, &tool_workspace(&workspace), input).unwrap();
 
-        assert!(workspace.join("skills/local-flow/SKILL.md").exists());
+        assert!(
+            workspace
+                .join(".agents/skills/local-flow/SKILL.md")
+                .exists()
+        );
         fs::remove_dir_all(workspace).unwrap();
     }
 
@@ -940,7 +944,7 @@ mod tests {
                 action: "create",
                 name: "local-flow",
             },
-            path: Path::new("skills/local-flow"),
+            path: Path::new(".agents/skills/local-flow"),
         })
         .unwrap();
         assert_eq!(
@@ -949,7 +953,7 @@ mod tests {
                 "success": true,
                 "action": "create",
                 "name": "local-flow",
-                "path": "skills/local-flow",
+                "path": ".agents/skills/local-flow",
             })
         );
     }
@@ -998,7 +1002,7 @@ mod tests {
     #[test]
     fn patch_accepts_json_escaped_markdown_old_string() {
         let workspace = temp_dir("patch-escaped-old-string");
-        let skill_dir = workspace.join("skills/local-flow");
+        let skill_dir = workspace.join(".agents/skills/local-flow");
         fs::create_dir_all(&skill_dir).unwrap();
         fs::write(
         skill_dir.join("SKILL.md"),
@@ -1006,7 +1010,7 @@ mod tests {
     )
     .unwrap();
         let catalog = SkillCatalog {
-            project_dir: workspace.join("skills"),
+            project_dir: workspace.join(".agents/skills"),
             skills: vec![SkillMetadata {
                 name: "local-flow".to_string(),
                 description: "Local flow".to_string(),
@@ -1073,7 +1077,7 @@ mod tests {
         write_project_skill(&workspace, "local-flow");
         let tool = SkillViewTool::new(
             SkillsConfig {
-                project_dir: "skills".to_string(),
+                project_dir: ".agents/skills".to_string(),
                 ..SkillsConfig::default()
             },
             tool_workspace(&workspace),
@@ -1106,10 +1110,10 @@ mod tests {
     async fn skill_view_records_project_usage_independent_of_product_mode() {
         let workspace = temp_dir("view-task-readonly");
         write_project_skill(&workspace, "local-flow");
-        let usage_path = workspace.join("skills/local-flow/.usage.json");
+        let usage_path = workspace.join(".agents/skills/local-flow/.usage.json");
         let tool = SkillViewTool::new(
             SkillsConfig {
-                project_dir: "skills".to_string(),
+                project_dir: ".agents/skills".to_string(),
                 ..SkillsConfig::default()
             },
             tool_workspace(&workspace),
@@ -1136,7 +1140,7 @@ mod tests {
         write_project_skill(&workspace, "local-flow");
         let tool = SkillViewTool::new(
             SkillsConfig {
-                project_dir: "skills".to_string(),
+                project_dir: ".agents/skills".to_string(),
                 ..SkillsConfig::default()
             },
             tool_workspace(&workspace),
@@ -1164,7 +1168,7 @@ mod tests {
         write_project_skill(&workspace, "local-flow");
         let tool = SkillViewTool::new(
             SkillsConfig {
-                project_dir: "skills".to_string(),
+                project_dir: ".agents/skills".to_string(),
                 ..SkillsConfig::default()
             },
             tool_workspace(&workspace),
@@ -1200,7 +1204,7 @@ mod tests {
         let workspace = temp_dir("view-failure");
         let tool = SkillViewTool::new(
             SkillsConfig {
-                project_dir: "skills".to_string(),
+                project_dir: ".agents/skills".to_string(),
                 ..SkillsConfig::default()
             },
             tool_workspace(&workspace),
@@ -1224,15 +1228,15 @@ mod tests {
     async fn skill_discovery_skips_linked_skill_directories() {
         let workspace = temp_dir("linked-discovery");
         let outside = temp_dir("linked-discovery-target");
-        fs::create_dir_all(workspace.join("skills")).unwrap();
+        fs::create_dir_all(workspace.join(".agents/skills")).unwrap();
         write_project_skill(&outside, "linked-flow");
         create_directory_link(
-            &outside.join("skills/linked-flow"),
-            &workspace.join("skills/linked-flow"),
+            &outside.join(".agents/skills/linked-flow"),
+            &workspace.join(".agents/skills/linked-flow"),
         );
         let tool = SkillViewTool::new(
             SkillsConfig {
-                project_dir: "skills".to_string(),
+                project_dir: ".agents/skills".to_string(),
                 ..SkillsConfig::default()
             },
             tool_workspace(&workspace),
@@ -1250,7 +1254,7 @@ mod tests {
             .to_string();
 
         assert!(error.contains("skill not found"), "{error}");
-        remove_directory_link(&workspace.join("skills/linked-flow"));
+        remove_directory_link(&workspace.join(".agents/skills/linked-flow"));
         fs::remove_dir_all(workspace).unwrap();
         fs::remove_dir_all(outside).unwrap();
     }
@@ -1260,12 +1264,15 @@ mod tests {
         let workspace = temp_dir("linked-support-write");
         let outside = temp_dir("linked-support-write-target");
         write_project_skill(&workspace, "local-flow");
-        fs::remove_dir_all(workspace.join("skills/local-flow/references")).unwrap();
+        fs::remove_dir_all(workspace.join(".agents/skills/local-flow/references")).unwrap();
         fs::create_dir_all(&outside).unwrap();
-        create_directory_link(&outside, &workspace.join("skills/local-flow/references"));
+        create_directory_link(
+            &outside,
+            &workspace.join(".agents/skills/local-flow/references"),
+        );
         let tool = SkillManageTool::new(
             SkillsConfig {
-                project_dir: "skills".to_string(),
+                project_dir: ".agents/skills".to_string(),
                 ..SkillsConfig::default()
             },
             tool_workspace(&workspace),
@@ -1289,7 +1296,7 @@ mod tests {
 
         assert!(error.contains("reparse point"), "{error}");
         assert!(!outside.join("new.md").exists());
-        remove_directory_link(&workspace.join("skills/local-flow/references"));
+        remove_directory_link(&workspace.join(".agents/skills/local-flow/references"));
         fs::remove_dir_all(workspace).unwrap();
         fs::remove_dir_all(outside).unwrap();
     }
@@ -1299,13 +1306,16 @@ mod tests {
         let workspace = temp_dir("linked-support-delete");
         let outside = temp_dir("linked-support-delete-target");
         write_project_skill(&workspace, "local-flow");
-        fs::remove_dir_all(workspace.join("skills/local-flow/references")).unwrap();
+        fs::remove_dir_all(workspace.join(".agents/skills/local-flow/references")).unwrap();
         fs::create_dir_all(&outside).unwrap();
         fs::write(outside.join("kept.md"), "kept").unwrap();
-        create_directory_link(&outside, &workspace.join("skills/local-flow/references"));
+        create_directory_link(
+            &outside,
+            &workspace.join(".agents/skills/local-flow/references"),
+        );
         let tool = SkillManageTool::new(
             SkillsConfig {
-                project_dir: "skills".to_string(),
+                project_dir: ".agents/skills".to_string(),
                 ..SkillsConfig::default()
             },
             tool_workspace(&workspace),
@@ -1323,7 +1333,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(!workspace.join("skills/local-flow").exists());
+        assert!(!workspace.join(".agents/skills/local-flow").exists());
         assert_eq!(fs::read_to_string(outside.join("kept.md")).unwrap(), "kept");
         fs::remove_dir_all(workspace).unwrap();
         fs::remove_dir_all(outside).unwrap();

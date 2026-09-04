@@ -487,7 +487,7 @@ mod tests {
     #[tokio::test]
     async fn every_discovery_rescans_but_unchanged_content_keeps_catalog_revision() {
         let root = tempfile::tempdir().unwrap();
-        let skill_dir = root.path().join("skills/demo");
+        let skill_dir = root.path().join(".agents/skills/demo");
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(
             skill_dir.join("SKILL.md"),
@@ -540,7 +540,7 @@ mod tests {
     #[tokio::test]
     async fn globally_disabled_skills_are_still_discovered_for_settings() {
         let root = tempfile::tempdir().unwrap();
-        let skill_dir = root.path().join("skills/demo");
+        let skill_dir = root.path().join(".agents/skills/demo");
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(
             skill_dir.join("SKILL.md"),
@@ -572,8 +572,8 @@ mod tests {
     #[tokio::test]
     async fn search_uses_cached_full_catalog_without_discovery_or_revision_change() {
         let root = tempfile::tempdir().unwrap();
-        let release_dir = root.path().join("skills/release-build-triage");
-        let slide_dir = root.path().join("skills/slide-deck-authoring");
+        let release_dir = root.path().join(".agents/skills/release-build-triage");
+        let slide_dir = root.path().join(".agents/skills/slide-deck-authoring");
         std::fs::create_dir_all(&release_dir).unwrap();
         std::fs::create_dir_all(&slide_dir).unwrap();
         std::fs::write(
