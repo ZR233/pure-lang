@@ -211,6 +211,24 @@ mod tests {
 
     #[test]
     fn rejects_unknown_schema_prerelease_and_url_escape() {
+        let url = "https://github.com/ZR233/pure-lang/releases/download/v1.2.0/Pure-Studio-1.2.0-windows-x86_64-setup.exe";
+        let future_schema = serde_json::to_vec(&serde_json::json!({
+            "schemaVersion": 2,
+            "version": "1.2.0",
+            "publishedAt": 100,
+            "notesUrl": "https://github.com/ZR233/pure-lang/releases/tag/v1.2.0",
+            "platforms": {
+                "windows-x86_64": {
+                    "url": url,
+                    "size": 42,
+                    "sha256": "ab".repeat(32),
+                    "signature": format!("{url}.minisig"),
+                }
+            }
+        }))
+        .unwrap();
+        assert!(evaluate_manifest(&future_schema, "1.0.0").is_err());
+
         let url = "https://example.com/releases/download/v1.2.0/Pure-Studio-1.2.0-windows-x86_64-setup.exe";
         let bytes = manifest("1.2.0", url, &format!("{url}.minisig"), 42);
         assert!(evaluate_manifest(&bytes, "1.0.0").is_err());

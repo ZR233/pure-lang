@@ -302,23 +302,6 @@ impl StudioRuntimeState {
         }
     }
 
-    pub fn ready() -> Self {
-        let state = Self::new();
-        state
-            .apply(StudioRuntimeCommand::BeginInitialize {
-                expected_revision: 0,
-                at: unix_seconds(),
-            })
-            .expect("new runtime must accept initialization");
-        state
-            .apply(StudioRuntimeCommand::FinishInitialize {
-                expected_revision: 1,
-                at: unix_seconds(),
-            })
-            .expect("initializing runtime must become ready");
-        state
-    }
-
     pub fn snapshot(&self) -> StudioRuntimeSnapshot {
         self.inner
             .lock()

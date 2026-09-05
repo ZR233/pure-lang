@@ -64,6 +64,8 @@ impl InteractionService {
         })
     }
 
+    /// 测试 seed 入口：直接落库并广播一条已构造完成的交互。
+    #[cfg(test)]
     pub async fn create(
         &self,
         interaction: InteractionRequest,

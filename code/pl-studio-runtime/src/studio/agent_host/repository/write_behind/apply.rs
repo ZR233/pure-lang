@@ -1,0 +1,145 @@
+//! 把一个 write-behind 批次应用进单个 SQLite 事务，并对持久化错误分类。
+
+use sea_orm::TransactionTrait;
+
+use crate::PureError;
+use crate::studio::StudioStore;
+use crate::studio::runtime::MODEL_PERFORMANCE_OWNER_ID;
+use crate::studio::store::directory::apply_directory_delta;
+use crate::studio::store::object::put_object;
+
+use super::super::{ApplyCommitOutcome, apply_state_commit, store_error};
+use super::queue::{
+    PendingBatch, QueueEntry, QueuedMutation, StudioDirectoryMutation, StudioMutation,
+};
+use super::worker::{BatchError, PersistenceDisposition};
+
+pub(super) async fn apply_batch(
+    store: &StudioStore,
+    batch: &PendingBatch,
+) -> Result<(), BatchError> {
+    let tx = store.database().begin().await.map_err(classify_db_error)?;
+    for entry in &batch.entries {
+        match entry {
+            QueueEntry::Mutation(QueuedMutation {
+                mutation: StudioMutation::Thread(commit),
+                ..
+            }) => match apply_state_commit(&tx, commit).await {
+                Ok(ApplyCommitOutcome::Applied | ApplyCommitOutcome::AlreadyApplied) => {}
+                Ok(ApplyCommitOutcome::RevisionConflict { actual_revision }) => {
+                    let _ = tx.rollback().await;
+                    return Err(BatchError::Conflict { actual_revision });
+                }
+                Err(error) => {
+                    let _ = tx.rollback().await;
+                    return Err(classify_store_error(error));
+                }
+            },
+            QueueEntry::Mutation(QueuedMutation {
+                mutation: StudioMutation::Directory(directory),
+                ..
+            }) => match directory.as_ref() {
+                StudioDirectoryMutation::Delta(delta) => {
+                    if let Err(error) = apply_directory_delta(&tx, delta).await {
+                        let _ = tx.rollback().await;
+                        return Err(classify_store_error(store_error(error)));
+                    }
+                }
+                StudioDirectoryMutation::ModelPerformance(commit) => {
+                    if let Err(error) = put_object(
+                        &tx,
+                        MODEL_PERFORMANCE_OWNER_ID,
+                        &commit.value,
+                        commit.value.updated_at(),
+                    )
+                    .await
+                    {
+                        let _ = tx.rollback().await;
+                        return Err(classify_store_error(store_error(error)));
+                    }
+                }
+            },
+            QueueEntry::Barrier(_) => {}
+        }
+    }
+    tx.commit().await.map_err(classify_db_error)?;
+    Ok(())
+}
+
+fn classify_db_error(error: sea_orm::DbErr) -> BatchError {
+    let disposition = db_error_disposition(&error);
+    classified_store_error(disposition, store_error(error))
+}
+
+fn classify_store_error(error: PureError) -> BatchError {
+    let message = error.to_string().to_ascii_lowercase();
+    let disposition = if contains_retryable_sqlite_error(&message) {
+        PersistenceDisposition::Retryable
+    } else {
+        PersistenceDisposition::Blocked
+    };
+    classified_store_error(disposition, error)
+}
+
+fn classified_store_error(disposition: PersistenceDisposition, error: PureError) -> BatchError {
+    match disposition {
+        PersistenceDisposition::Retryable => BatchError::RetryableStore(error),
+        PersistenceDisposition::Blocked => BatchError::BlockedStore(error),
+    }
+}
+
+fn db_error_disposition(error: &sea_orm::DbErr) -> PersistenceDisposition {
+    use sea_orm::{ConnAcquireErr, DbErr, RuntimeErr, SqlxError};
+
+    match error {
+        DbErr::ConnectionAcquire(ConnAcquireErr::Timeout) => PersistenceDisposition::Retryable,
+        DbErr::Conn(RuntimeErr::SqlxError(error))
+        | DbErr::Exec(RuntimeErr::SqlxError(error))
+        | DbErr::Query(RuntimeErr::SqlxError(error)) => match error.as_ref() {
+            SqlxError::Database(error) => error
+                .code()
+                .as_deref()
+                .and_then(|code| code.parse::<i32>().ok())
+                .map_or(PersistenceDisposition::Blocked, sqlite_code_disposition),
+            SqlxError::Io(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::Interrupted
+                        | std::io::ErrorKind::WouldBlock
+                        | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                PersistenceDisposition::Retryable
+            }
+            SqlxError::PoolTimedOut => PersistenceDisposition::Retryable,
+            _ => PersistenceDisposition::Blocked,
+        },
+        DbErr::Conn(RuntimeErr::Internal(message))
+        | DbErr::Exec(RuntimeErr::Internal(message))
+        | DbErr::Query(RuntimeErr::Internal(message))
+            if contains_retryable_sqlite_error(&message.to_ascii_lowercase()) =>
+        {
+            PersistenceDisposition::Retryable
+        }
+        _ => PersistenceDisposition::Blocked,
+    }
+}
+
+fn sqlite_code_disposition(extended_code: i32) -> PersistenceDisposition {
+    match extended_code & 0xff {
+        // SQLITE_BUSY、SQLITE_LOCKED 与 SQLITE_IOERR 允许自动重试。
+        5 | 6 | 10 => PersistenceDisposition::Retryable,
+        // 损坏、只读、容量耗尽、结构/约束错误等均需要人工处置。
+        _ => PersistenceDisposition::Blocked,
+    }
+}
+
+fn contains_retryable_sqlite_error(message: &str) -> bool {
+    message.contains("database is locked")
+        || message.contains("database table is locked")
+        || message.contains("database is busy")
+        || message.contains("disk i/o error")
+        || message.contains("sqlite_busy")
+        || message.contains("sqlite_locked")
+        || message.contains("sqlite_ioerr")
+}

@@ -100,7 +100,7 @@ impl StudioRuntime {
         let attachment_drafts =
             AttachmentDraftRuntime::new(store.attachments_dir().join("drafts"))?;
         let thread_modes = pl_core::ThreadModeManager::default();
-        crate::studio::thread::mode::register_builtins(&thread_modes)?;
+        crate::studio::thread::register_builtins(&thread_modes)?;
         Ok(Self {
             instance_lock: RuntimeLockOwner::new(instance_lock),
             store,
@@ -141,8 +141,6 @@ impl StudioRuntime {
             ssh_manager,
             lifecycle_lock: std::sync::Arc::new(tokio::sync::Mutex::new(())),
             title_tasks: Default::default(),
-            #[cfg(test)]
-            initialization_entry_barrier: None,
         })
     }
 }

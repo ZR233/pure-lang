@@ -41,27 +41,10 @@ impl StudioRecoveryRegistry {
             .clone()
     }
 
-    /// 按 id 查找单个恢复问题。
-    pub fn get(&self, issue_id: &str) -> Option<StudioRecoveryIssue> {
-        self.inner
-            .lock()
-            .expect("recovery registry mutex poisoned")
-            .iter()
-            .find(|issue| issue.id == issue_id)
-            .cloned()
-    }
-
     /// 删除指定 id 的恢复问题，返回剩余问题的快照。
     pub fn remove(&self, issue_id: &str) -> Vec<StudioRecoveryIssue> {
         let mut inner = self.inner.lock().expect("recovery registry mutex poisoned");
         inner.retain(|issue| issue.id != issue_id);
-        inner.clone()
-    }
-
-    /// 删除某项目下所有恢复问题，返回剩余问题的快照。
-    pub fn remove_for_project(&self, project_id: &str) -> Vec<StudioRecoveryIssue> {
-        let mut inner = self.inner.lock().expect("recovery registry mutex poisoned");
-        inner.retain(|issue| issue.project_id.as_deref() != Some(project_id));
         inner.clone()
     }
 }

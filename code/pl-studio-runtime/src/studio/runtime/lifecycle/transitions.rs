@@ -7,10 +7,6 @@ use super::super::StudioRuntime;
 
 impl StudioRuntime {
     pub async fn initialize_runtime(&self) -> Result<StudioRuntimeSnapshot> {
-        #[cfg(test)]
-        if let Some(barrier) = &self.initialization_entry_barrier {
-            barrier.wait().await;
-        }
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
         let current = self.runtime_snapshot().await?;
         if current.state.is_ready() {

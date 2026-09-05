@@ -414,16 +414,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn shutdown_does_not_poison_title_tasks_in_the_next_runtime_cycle() {
-        let tasks = ThreadTitleTasks::default();
-
-        tasks.cancel_and_wait().await;
-
-        let (_sender, mut cancellation) = title_cancellation_channel();
-        assert!(!cancellation.is_cancelled());
-    }
-
-    #[tokio::test]
     async fn dropping_a_title_owner_is_not_an_implicit_cancellation() {
         let (sender, mut cancellation) = title_cancellation_channel();
         drop(sender);

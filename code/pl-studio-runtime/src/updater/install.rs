@@ -503,16 +503,36 @@ mod tests {
     const TEST_PUBLIC_KEY: &str = "untrusted comment: minisign public key 2\nRWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3";
     const TEST_SIGNATURE: &str = "untrusted comment: signature from minisign secret key\nRUQf6LRCGA9i559r3g7V1qNyJDApGip8MfqcadIgT9CuhV3EMhHoN1mGTkUidF/z7SrlQgXdy8ofjb7bNJJylDOocrCo8KLzZwo=\ntrusted comment: timestamp:1556193335\tfile:test\ny/rUw2y8/hOUYjZU71eHp/Wo1KZ40fGy2VJEDl34XMJM+TX48Ss/17u3IvIfbVR1FkZZSNCisQbuQY+bHwhEBg==";
 
-    #[test]
-    fn minisign_accepts_valid_content_and_rejects_tampering() {
-        let public_key = PublicKey::decode(TEST_PUBLIC_KEY).unwrap();
-        let signature = Signature::decode(TEST_SIGNATURE).unwrap();
-        public_key.verify(b"test", &signature, true).unwrap();
-        assert!(public_key.verify(b"tampered", &signature, true).is_err());
+    fn write_temp(name: &str, content: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("pure-studio-verify-file-{name}"));
+        std::fs::write(&path, content).unwrap();
+        path
+    }
 
-        let wrong_signature = Signature::decode(&TEST_SIGNATURE.replacen("559r3", "558r3", 1))
-            .expect("modified signature should remain structurally valid");
-        assert!(public_key.verify(b"test", &wrong_signature, true).is_err());
+    #[tokio::test]
+    async fn verify_file_accepts_valid_content_and_rejects_tampering() {
+        let message = write_temp("message", "test");
+        let signature = write_temp("signature", TEST_SIGNATURE);
+        verify_file(TEST_PUBLIC_KEY, &signature, &message)
+            .await
+            .expect("valid content verifies");
+
+        let tampered = write_temp("tampered", "tampered");
+        assert!(
+            verify_file(TEST_PUBLIC_KEY, &signature, &tampered)
+                .await
+                .is_err()
+        );
+
+        let wrong = write_temp(
+            "wrong-signature",
+            &TEST_SIGNATURE.replacen("559r3", "558r3", 1),
+        );
+        assert!(
+            verify_file(TEST_PUBLIC_KEY, &wrong, &message)
+                .await
+                .is_err()
+        );
     }
 
     #[test]

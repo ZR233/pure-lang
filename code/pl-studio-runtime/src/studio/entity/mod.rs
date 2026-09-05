@@ -3,10 +3,9 @@
 mod metadata;
 mod object;
 mod product;
-#[path = "thread/mod.rs"]
-mod thread_entities;
+mod threads;
 
 pub use metadata::*;
 pub use object::*;
 pub use product::*;
-pub use thread_entities::*;
+pub use threads::*;

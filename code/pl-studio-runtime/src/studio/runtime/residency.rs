@@ -133,15 +133,6 @@ mod tests {
         assert_eq!(residency.snapshot().await, ["b", "c", "e", "a"]);
     }
     #[tokio::test]
-    async fn pinned_threads_are_reported_but_skipped_by_caller() {
-        let residency = ThreadResidency::new();
-        residency.pin("subscribed");
-        assert!(residency.is_pinned("subscribed"));
-        residency.unpin("subscribed");
-        assert!(!residency.is_pinned("subscribed"));
-    }
-
-    #[tokio::test]
     async fn subscription_pins_do_not_consume_inactive_capacity() {
         let residency = ThreadResidency::new();
         residency.pin("selected");

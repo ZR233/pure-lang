@@ -142,8 +142,6 @@ pub struct StudioRuntime {
     ssh_manager: std::sync::Arc<pl_core::remote::SshManager>,
     lifecycle_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
     title_tasks: ThreadTitleTasks,
-    #[cfg(test)]
-    initialization_entry_barrier: Option<std::sync::Arc<tokio::sync::Barrier>>,
 }
 
 #[derive(Clone)]

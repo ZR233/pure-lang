@@ -58,7 +58,8 @@ Codex patch 的 Update hunk 每行首字符是控制前缀：空格表示上下�
 单一职责模块使用 `foo.rs`；模块拥有多个真实、内聚的子职责时才使用
 `foo/mod.rs` + `foo/child.rs`。禁止只有 `mod.rs` 的目录，也禁止 `mod.rs` 只转发唯一子文件。
 
-`pl-core` 可以在自身领域边界重导出常用 `pl-protocol` 类型，方便核心层用户使用；不代理重导出其他
+`pl-core` 可以在自身领域边界重导出常用 `pl-protocol` 类型，方便核心层用户使用；`pl-studio-runtime`
+在 crate 根按公共签名实际使用的类型精确重导出 `pl-protocol` 项；两者都不代理重导出其他
 专项 crate 的整套 API。raw `pl-trace` 类型只作为内部运行事件边界，不应作为 Studio wire 或前端事实源。
 
 ### 9.5.1 生命周期状态机
