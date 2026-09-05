@@ -3250,6 +3250,66 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Agent'**
   String get roleEmpty;
+
+  /// No description provided for @settingsPricingEnabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Estimate token cost'**
+  String get settingsPricingEnabled;
+
+  /// No description provided for @settingsPricingHelp.
+  ///
+  /// In en, this message translates to:
+  /// **'Controls in-app cost estimates; token and cache statistics remain available. Plans default to off.'**
+  String get settingsPricingHelp;
+
+  /// No description provided for @settingsModelAdvanced.
+  ///
+  /// In en, this message translates to:
+  /// **'Optional model settings'**
+  String get settingsModelAdvanced;
+
+  /// No description provided for @settingsContextBudget.
+  ///
+  /// In en, this message translates to:
+  /// **'Context budget (tokens)'**
+  String get settingsContextBudget;
+
+  /// No description provided for @settingsOutputBudget.
+  ///
+  /// In en, this message translates to:
+  /// **'Maximum output (tokens)'**
+  String get settingsOutputBudget;
+
+  /// No description provided for @settingsPriceInput.
+  ///
+  /// In en, this message translates to:
+  /// **'Input'**
+  String get settingsPriceInput;
+
+  /// No description provided for @settingsPriceOutput.
+  ///
+  /// In en, this message translates to:
+  /// **'Output'**
+  String get settingsPriceOutput;
+
+  /// No description provided for @settingsPriceCacheRead.
+  ///
+  /// In en, this message translates to:
+  /// **'Cache read'**
+  String get settingsPriceCacheRead;
+
+  /// No description provided for @settingsPriceCacheWrite.
+  ///
+  /// In en, this message translates to:
+  /// **'Cache write'**
+  String get settingsPriceCacheWrite;
+
+  /// No description provided for @statusReportedUsageOnly.
+  ///
+  /// In en, this message translates to:
+  /// **'reported'**
+  String get statusReportedUsageOnly;
 }
 
 class _AppLocalizationsDelegate

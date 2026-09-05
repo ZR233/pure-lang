@@ -1,24 +1,21 @@
 use pl_core::{
     AgentSession, ContextCompactionImplementation, CoreRuntimeProfile, ModelInfo, ProviderEndpoint,
-    TurnBudget, TurnEngineBuilder, TurnRequest, TurnResultStatus, default_models,
-    openai_default_model_slugs,
+    TurnBudget, TurnEngineBuilder, TurnRequest,
 };
+use pl_model::model::{default_models, openai_default_model_slugs};
 use pl_protocol::{MessageRole, ModelContextItem};
 
-const OPENAI_LIVE_ENV_KEY: &str = "API_KEY_OPENAI";
-const OPENAI_LIVE_BASE_URL_ENV_KEY: &str = "API_BASE_OPENAI";
-const OPENAI_LIVE_MODEL_ENV_KEY: &str = "API_MODEL_OPENAI";
+const OPENAI_LIVE_ENV_KEY: &str = "OPENAI_API_KEY";
+const OPENAI_LIVE_BASE_URL_ENV_KEY: &str = "OPENAI_BASE_URL";
+const OPENAI_LIVE_MODEL_ENV_KEY: &str = "OPENAI_MODEL";
 
 mod support;
 
-fn live_api_key() -> Option<String> {
-    match std::env::var(OPENAI_LIVE_ENV_KEY) {
-        Ok(value) if !value.trim().is_empty() => Some(value),
-        _ => {
-            eprintln!("{OPENAI_LIVE_ENV_KEY} is not set; skipping live context compaction test");
-            None
-        }
-    }
+fn live_api_key() -> String {
+    std::env::var(OPENAI_LIVE_ENV_KEY)
+        .ok()
+        .filter(|key| !key.trim().is_empty())
+        .expect("explicit live acceptance requires configured provider credentials")
 }
 
 fn live_base_url() -> Option<String> {
@@ -38,7 +35,7 @@ fn compacting_model(model: &str) -> ModelInfo {
     let mut model_info = default_models()
         .into_iter()
         .find(|info| info.slug == model)
-        .unwrap_or_else(|| ModelInfo::fallback(model));
+        .unwrap_or_else(|| ModelInfo::compatible(model));
     model_info.context_window = Some(256);
     model_info.max_context_window = Some(256);
     model_info.auto_compact_token_limit = Some(1);
@@ -48,12 +45,11 @@ fn compacting_model(model: &str) -> ModelInfo {
 
 #[tokio::test]
 async fn openai_responses_compacts_context_live() {
-    let Some(api_key) = live_api_key() else {
-        return;
-    };
+    let api_key = live_api_key();
 
     let mut info = ProviderEndpoint::openai(live_base_url());
     info.bearer_token = Some(api_key);
+    info.service_capabilities.remote_compaction = true;
     let model = live_model(openai_default_model_slugs()[0]);
     let route = support::route("openai", info, compacting_model(&model), Some("medium"));
     let core = TurnEngineBuilder::from_route(&route)
@@ -76,11 +72,10 @@ async fn openai_responses_compacts_context_live() {
         .await
         .unwrap();
 
-    assert_eq!(
-        result.status,
-        TurnResultStatus::Completed,
+    assert!(
+        result.is_completed(),
         "live OpenAI compaction turn failed: {:?}",
-        result.error
+        result.outcome
     );
     assert_eq!(
         result.context_compactions.len(),

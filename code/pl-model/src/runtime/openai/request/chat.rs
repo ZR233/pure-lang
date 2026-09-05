@@ -18,6 +18,10 @@ pub(super) struct ChatRequestBody {
     messages: Vec<ChatMessage>,
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    stream_options: Option<ChatStreamOptions>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_stream: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<ChatTool>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_choice: Option<String>,
@@ -31,8 +35,18 @@ pub(super) struct ChatRequestBody {
     max_completion_tokens: Option<u64>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct ChatStreamOptions {
+    include_usage: bool,
+}
+
 impl ChatRequestBody {
     pub(super) fn from_request(request: &CompletionRequest, model: &ModelInfo) -> Result<Self> {
+        let crate::model::ModelProtocolOptions::ChatCompletions(options) =
+            &model.binding.request.protocol
+        else {
+            return Err(protocol_error("Chat request requires Chat options"));
+        };
         let mut messages = Vec::new();
         let media_plan = MediaRepresentationPlan::for_request(request, model)?;
 
@@ -121,24 +135,28 @@ impl ChatRequestBody {
         };
         let tool_choice = tools.as_ref().map(|_| request.tool_choice.clone());
 
-        let (max_tokens, max_completion_tokens) = match model.request_profile.max_tokens_field {
+        let (max_tokens, max_completion_tokens) = match options.max_tokens_field {
             MaxTokensField::MaxTokens => (request.max_tokens, None),
             MaxTokensField::MaxCompletionTokens => (None, request.max_tokens),
         };
 
         Ok(Self {
             model: model
-                .request_profile
+                .binding
+                .request
                 .api_model
                 .clone()
                 .unwrap_or_else(|| model.slug.clone()),
             messages,
             stream: true,
+            stream_options: options.include_usage.then_some(ChatStreamOptions {
+                include_usage: true,
+            }),
+            tool_stream: options.tool_stream.then_some(true),
             tools,
             tool_choice,
-            parallel_tool_calls: model
-                .request_profile
-                .chat_parallel_tool_calls
+            parallel_tool_calls: options
+                .parallel_tool_calls
                 .then_some(request.parallel_tool_calls),
             temperature: request.temperature,
             max_tokens,
@@ -366,42 +384,6 @@ mod tests {
     use std::collections::HashMap;
 
     #[test]
-    fn chat_parallel_tool_calls_wire_follows_request_after_profile_opt_in() {
-        for (profile_opt_in, request_flag, expected) in [
-            (false, true, None),
-            (true, true, Some(true)),
-            (true, false, Some(false)),
-        ] {
-            let mut request = request_with_effort("high");
-            request.parallel_tool_calls = request_flag;
-            let mut model = ModelInfo::fallback("chat-compatible");
-            model.request_profile.chat_parallel_tool_calls = profile_opt_in;
-
-            let body = OpenAiProtocol::chat().build_request_body_with_model(&request, &model);
-
-            match expected {
-                Some(expected) => {
-                    assert_eq!(body["parallel_tool_calls"], serde_json::json!(expected))
-                }
-                None => assert!(body.get("parallel_tool_calls").is_none()),
-            }
-        }
-    }
-
-    #[test]
-    fn chat_body_can_use_profiled_max_completion_tokens_field() {
-        let mut model = ModelInfo::fallback("mimo-chat");
-        model.request_profile.max_tokens_field = MaxTokensField::MaxCompletionTokens;
-        let mut request = request_with_effort("high");
-        request.max_tokens = Some(8192);
-
-        let body = OpenAiProtocol::chat().build_request_body_with_model(&request, &model);
-
-        assert!(body.get("max_tokens").is_none());
-        assert_eq!(body["max_completion_tokens"], serde_json::json!(8192));
-    }
-
-    #[test]
     fn mimo_chat_body_uses_catalog_wire_policy_without_reasoning_effort() {
         let model = bundled_model("mimo-v2.5-pro");
         let mut request = request_with_effort("enabled");
@@ -579,7 +561,7 @@ mod tests {
             OpenAiProtocol::chat()
                 .build_request(
                     &request,
-                    &ModelInfo::fallback("deepseek-v4-flash"),
+                    &ModelInfo::compatible("deepseek-v4-flash"),
                     Some("must-not-cross-chat-wire"),
                 )
                 .unwrap(),

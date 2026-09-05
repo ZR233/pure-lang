@@ -104,7 +104,7 @@ mod tests {
         assert_nameable::<crate::completion::PureError>();
         assert_nameable::<crate::completion::ResponsesContextItem>();
         assert_nameable::<crate::completion::Result<()>>();
-        assert_nameable::<crate::completion::TokenUsage>();
+        assert_nameable::<crate::completion::InferenceTokenUsage>();
         assert_nameable::<crate::completion::ToolCallCaller>();
         assert_nameable::<crate::completion::ToolCallKind>();
         assert_nameable::<crate::completion::ToolSpec>();

@@ -359,7 +359,7 @@ mod tests {
             service_tier: None,
             compacted,
             prompt_cache_policy: provider
-                .effective_prompt_cache_policy(&pl_model::model::ModelInfo::fallback(model)),
+                .effective_prompt_cache_policy(&pl_model::model::ModelInfo::compatible(model)),
             updated_at: 1,
         }
     }

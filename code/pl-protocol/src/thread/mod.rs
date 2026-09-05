@@ -7,7 +7,7 @@ use crate::{
     ThreadModeId, TodoListSnapshot, Turn,
 };
 
-pub const THREAD_SCHEMA_VERSION: u32 = 10;
+pub const THREAD_SCHEMA_VERSION: u32 = 11;
 
 /// 一个 agent 独占的对话和执行队列。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -131,6 +131,8 @@ pub struct ThreadRuntimeSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadRuntimeUsage {
+    #[serde(default)]
+    pub has_incomplete_usage: bool,
     pub model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window: Option<u64>,

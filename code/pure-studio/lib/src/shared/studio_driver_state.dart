@@ -18,6 +18,7 @@ abstract final class StudioDriverState {
       const ComposerThreadState.idle();
   static int _settingsRevision = 0;
   static List<RoleSettingsView> _roles = const [];
+  static List<ProviderSettingsView> _providers = const [];
   static PersistenceStateSnapshot _persistenceState =
       const PersistenceStateSnapshot.ready();
 
@@ -28,6 +29,7 @@ abstract final class StudioDriverState {
     _newThreadMode = state.newThreadMode;
     _newThreadComposer = state.newThreadComposer;
     _settingsRevision = state.settingsRevision;
+    _providers = List.unmodifiable(state.providers);
     _roles = List.unmodifiable([
       for (final role in state.roles)
         RoleSettingsView(
@@ -127,6 +129,18 @@ abstract final class StudioDriverState {
       ],
       'settings': {
         'revision': _settingsRevision,
+        'providers': [
+          for (final provider in _providers)
+            {
+              'id': provider.id,
+              'preset': provider.templateKind,
+              'defaultModel': provider.defaultModel,
+              'pricingEnabled': provider.pricingEnabled,
+              'hasBearerToken': provider.hasBearerToken,
+              'status': provider.status,
+              'models': [for (final model in provider.allModels) model.slug],
+            },
+        ],
         'roles': [
           for (final role in _roles)
             {
@@ -165,6 +179,12 @@ abstract final class StudioDriverState {
               'threadStatus': workspace.thread.status.name,
               'isBusy': workspace.isBusy,
               'model': workspace.runtime.model,
+              'usage': {
+                'inputTokens': workspace.runtime.promptTokens,
+                'outputTokens': workspace.runtime.completionTokens,
+                'cacheReadTokens': workspace.runtime.cachedPromptTokens,
+                'hasIncompleteUsage': workspace.runtime.hasIncompleteUsage,
+              },
               'modelCapabilities': _modelCapabilities(workspace),
               'modelProvider': _modelProvider(workspace),
               'composer': {

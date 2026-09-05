@@ -22,31 +22,56 @@ pub struct ModelInfo {
 
     pub default_temperature: Option<f32>,
     pub max_output_tokens: Option<u64>,
-    pub currency: Option<String>,
-    pub input_price_per_mtok: Option<f64>,
-    pub output_price_per_mtok: Option<f64>,
-    pub cache_read_price_per_mtok: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cache_write_price_per_mtok: Option<f64>,
+    pub pricing: super::pricing::ModelPricing,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub parameters: Vec<ModelParameter>,
 
     /// 模型使用的 API 协议、可用连接方式及默认连接方式。
-    pub transport: ModelTransportProfile,
+    pub binding: ModelBinding,
 
     #[serde(default)]
     pub capabilities: ModelCapabilities,
-    #[serde(default)]
-    pub request_profile: ModelRequestProfile,
 
     #[serde(default)]
     pub truncation_policy: TruncationPolicy,
 
     #[serde(default)]
     pub base_instructions: String,
+}
 
-    #[serde(skip)]
-    pub used_fallback: bool,
+/// Adapter binding kept separate from provider-neutral model metadata.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelBinding {
+    pub transport: ModelTransportProfile,
+    pub request: ModelRequestProfile,
+}
+
+impl ModelBinding {
+    /// Changes wire API and its protocol-specific defaults together, preserving same-API options.
+    pub fn set_transport(&mut self, transport: ModelTransportProfile) {
+        let matches = matches!(
+            (&self.request.protocol, transport.protocol),
+            (
+                ModelProtocolOptions::Responses(_),
+                ProviderWireProtocol::Responses
+            ) | (
+                ModelProtocolOptions::ChatCompletions(_),
+                ProviderWireProtocol::ChatCompletions
+            )
+        );
+        if !matches {
+            self.request.protocol = match transport.protocol {
+                ProviderWireProtocol::Responses => {
+                    ModelProtocolOptions::Responses(Default::default())
+                }
+                ProviderWireProtocol::ChatCompletions => {
+                    ModelProtocolOptions::ChatCompletions(Default::default())
+                }
+            };
+        }
+        self.transport = transport;
+    }
 }
 
 /// 模型拥有的 API wire 与连接策略。
@@ -100,14 +125,7 @@ pub struct ModelRequestProfile {
     pub headers: HashMap<String, String>,
     #[serde(default, skip_serializing_if = "Map::is_empty")]
     pub body: Map<String, Value>,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub chat_parallel_tool_calls: bool,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub responses_programmatic_tool_calling: bool,
-    #[serde(default, skip_serializing_if = "MaxTokensField::is_default")]
-    pub max_tokens_field: MaxTokensField,
-    #[serde(default, skip_serializing_if = "ResponsesMaxTokensField::is_default")]
-    pub responses_max_tokens_field: ResponsesMaxTokensField,
+    pub protocol: ModelProtocolOptions,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub media: Vec<ModelMediaInputProfile>,
     #[serde(default, skip_serializing_if = "MediaMixPolicy::is_default")]
@@ -120,10 +138,7 @@ impl ModelRequestProfile {
         self.api_model.is_none()
             && self.headers.is_empty()
             && self.body.is_empty()
-            && !self.chat_parallel_tool_calls
-            && !self.responses_programmatic_tool_calling
-            && self.max_tokens_field.is_default()
-            && self.responses_max_tokens_field.is_default()
+            && self.protocol == ModelProtocolOptions::default()
             && self.media.is_empty()
             && self.media_mix_policy.is_default()
     }
@@ -132,6 +147,46 @@ impl ModelRequestProfile {
         self.media
             .iter()
             .find(|profile| profile.modality == modality)
+    }
+}
+
+/// Only options belonging to the selected wire API are representable.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "api", rename_all = "camelCase")]
+pub enum ModelProtocolOptions {
+    Responses(ResponsesRequestOptions),
+    ChatCompletions(ChatRequestOptions),
+}
+impl Default for ModelProtocolOptions {
+    fn default() -> Self {
+        Self::ChatCompletions(ChatRequestOptions::default())
+    }
+}
+/// Responses-only request controls.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResponsesRequestOptions {
+    pub programmatic_tool_calling: bool,
+    pub max_tokens_field: ResponsesMaxTokensField,
+}
+/// Chat-only request controls. Usage requests are independent of tool streaming.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatRequestOptions {
+    pub parallel_tool_calls: bool,
+    pub max_tokens_field: MaxTokensField,
+    pub include_usage: bool,
+    pub tool_stream: bool,
+}
+impl ModelRequestProfile {
+    pub fn responses() -> Self {
+        Self {
+            protocol: ModelProtocolOptions::Responses(ResponsesRequestOptions::default()),
+            ..Self::default()
+        }
+    }
+    pub fn supports_programmatic_tool_calling(&self) -> bool {
+        matches!(&self.protocol, ModelProtocolOptions::Responses(options) if options.programmatic_tool_calling)
     }
 }
 
@@ -191,10 +246,6 @@ impl MediaMixPolicy {
     fn is_default(&self) -> bool {
         *self == Self::Any
     }
-}
-
-fn is_false(value: &bool) -> bool {
-    !*value
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -270,7 +321,8 @@ impl ModelInfo {
                 continue;
             }
             let profile = self
-                .request_profile
+                .binding
+                .request
                 .media_profile(capability.modality)
                 .ok_or_else(|| ModelProfileError::ModalityWithoutMediaProfile {
                     model: self.slug.clone(),
@@ -295,11 +347,11 @@ impl ModelInfo {
                     wire: profile.wire,
                 });
             }
-            if profile.wire.protocol() != self.transport.protocol {
+            if profile.wire.protocol() != self.binding.transport.protocol {
                 return Err(ModelProfileError::WireProtocolMismatch {
                     model: self.slug.clone(),
                     wire: profile.wire,
-                    protocol: self.transport.protocol,
+                    protocol: self.binding.transport.protocol,
                 });
             }
             if has_duplicates(&profile.first_send) || has_duplicates(&profile.replay) {
@@ -351,7 +403,7 @@ impl ModelInfo {
             }
         }
         let mut profile_modalities = Vec::new();
-        for profile in &self.request_profile.media {
+        for profile in &self.binding.request.media {
             if profile_modalities.contains(&profile.modality) {
                 return Err(ModelProfileError::DuplicateMediaProfile {
                     model: self.slug.clone(),
@@ -369,6 +421,38 @@ impl ModelInfo {
         Ok(())
     }
 
+    /// Validates a complete model binding and its price table before use.
+    /// # Errors
+    /// Returns the inconsistent transport, media or tariff contract.
+    pub fn validate(&self) -> Result<(), ModelProfileError> {
+        self.binding.transport.validate(&self.slug)?;
+        if !matches!(
+            (
+                &self.binding.request.protocol,
+                self.binding.transport.protocol
+            ),
+            (
+                ModelProtocolOptions::Responses(_),
+                ProviderWireProtocol::Responses
+            ) | (
+                ModelProtocolOptions::ChatCompletions(_),
+                ProviderWireProtocol::ChatCompletions
+            )
+        ) {
+            return Err(ModelProfileError::ProtocolOptionsMismatch {
+                model: self.slug.clone(),
+                protocol: self.binding.transport.protocol,
+            });
+        }
+        self.pricing
+            .validate()
+            .map_err(|source| ModelProfileError::InvalidPricing {
+                model: self.slug.clone(),
+                source,
+            })?;
+        self.validate_media_contract()
+    }
+
     pub fn resolved_context_window(&self) -> Option<u64> {
         self.context_window.or(self.max_context_window)
     }
@@ -382,31 +466,35 @@ impl ModelInfo {
         )
     }
 
-    pub fn fallback(slug: &str) -> Self {
+    /// Basic compatible model with configurable local 32K/4K budgets.
+    pub fn compatible(slug: &str) -> Self {
         Self {
             slug: slug.to_string(),
             display_name: slug.to_string(),
             description: None,
-            context_window: Some(128_000),
-            max_context_window: Some(128_000),
+            context_window: Some(32_000),
+            max_context_window: Some(32_000),
             auto_compact_token_limit: None,
-            default_temperature: Some(0.3),
+            default_temperature: None,
             max_output_tokens: Some(4096),
-            currency: None,
-            input_price_per_mtok: None,
-            output_price_per_mtok: None,
-            cache_read_price_per_mtok: None,
-            cache_write_price_per_mtok: None,
+            pricing: super::pricing::ModelPricing::Unknown,
             parameters: Vec::new(),
-            transport: ModelTransportProfile::default(),
+            binding: ModelBinding {
+                transport: ModelTransportProfile::default(),
+                request: ModelRequestProfile {
+                    protocol: ModelProtocolOptions::ChatCompletions(ChatRequestOptions {
+                        include_usage: true,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            },
             capabilities: ModelCapabilities::text_only(),
-            request_profile: ModelRequestProfile::default(),
             truncation_policy: TruncationPolicy {
                 mode: TruncationMode::Bytes,
                 limit: 10_000,
             },
             base_instructions: String::new(),
-            used_fallback: true,
         }
     }
 

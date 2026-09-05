@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use pl_protocol::TokenUsage;
+use pl_protocol::InferenceTokenUsage;
 use pl_protocol::{
     AgentProgressReport, AgentSnapshot, AgentSubmissionRecord, AgentTurnOutcome, TurnBillingRecord,
 };
@@ -44,7 +44,7 @@ pub struct ThreadContextState {
     /// 产品可持久化的类型化 session 展示元数据。
     pub metadata: ThreadContextMetadata,
     pub session: AgentSession,
-    pub usage: TokenUsage,
+    pub usage: InferenceTokenUsage,
     /// 按 Turn 保存的 inference 计费快照；durable truth 位于 `turns.model_json`。
     pub billing_by_turn: BTreeMap<String, TurnBillingRecord>,
     pub last_context_tokens: Option<u64>,
@@ -60,7 +60,7 @@ impl ThreadContextState {
         Self {
             metadata: ThreadContextMetadata::default(),
             session: AgentSession::new(),
-            usage: TokenUsage::default(),
+            usage: InferenceTokenUsage::default(),
             billing_by_turn: BTreeMap::new(),
             last_context_tokens: None,
             trace_sequence: 0,

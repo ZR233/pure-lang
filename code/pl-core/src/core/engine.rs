@@ -74,6 +74,11 @@ pub struct TurnEngine {
 }
 
 impl TurnEngine {
+    /// Accesses the bound runtime for explicit native operations and invocation metadata.
+    pub fn model_runtime(&self) -> &ModelRuntime {
+        &self.runtime
+    }
+
     pub fn execution_environment(&self) -> &ExecutionEnvironment {
         &self.execution_environment
     }
@@ -346,7 +351,7 @@ impl TurnEngine {
             .reasoning(reasoning)
             .build();
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(1);
-        let invocation = ModelInvocationContext::new(Default::default(), event_tx);
+        let invocation = ModelInvocationContext::new(Default::default()).with_events(event_tx);
         match provider.complete(completion_request, invocation).await {
             Ok(response) => {
                 let content = response.content.unwrap_or_default().trim().to_string();
@@ -410,7 +415,10 @@ impl TurnEngine {
         &self,
         session: &mut AgentSession,
         request: ManualContextCompactionRequest,
-    ) -> Result<Option<ContextCompactionSnapshot>> {
+    ) -> std::result::Result<
+        Option<ContextCompactionSnapshot>,
+        pl_model::completion::CompletionFailure,
+    > {
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
         let mut recorder = TraceRecorder::disabled(event_tx);
         self.compact_session_with_trace(session, request, &mut recorder)
@@ -427,7 +435,10 @@ impl TurnEngine {
         session: &mut AgentSession,
         request: ManualContextCompactionRequest,
         recorder: &mut TraceRecorder,
-    ) -> Result<Option<ContextCompactionSnapshot>> {
+    ) -> std::result::Result<
+        Option<ContextCompactionSnapshot>,
+        pl_model::completion::CompletionFailure,
+    > {
         self.compact_session_with_trace_control(
             session,
             request,
@@ -443,7 +454,10 @@ impl TurnEngine {
         request: ManualContextCompactionRequest,
         recorder: &mut TraceRecorder,
         control: ContextCompactionControl,
-    ) -> Result<Option<ContextCompactionSnapshot>> {
+    ) -> std::result::Result<
+        Option<ContextCompactionSnapshot>,
+        pl_model::completion::CompletionFailure,
+    > {
         let requested_trigger = request.trigger;
         let model_info = self.runtime.model().clone();
         let workspace_root = self
@@ -499,7 +513,8 @@ impl TurnEngine {
                 return Err(PureError::ConfigError(
                     "standalone compaction only accepts manual or wall-clock rollover triggers"
                         .to_string(),
-                ));
+                )
+                .into());
             }
         };
         let turn_id = request.turn_id.unwrap_or_else(generate_turn_id);
@@ -544,7 +559,7 @@ impl TurnEngine {
         .await?;
         Ok(match outcome {
             CompactionOutcome::Skipped => None,
-            CompactionOutcome::Compacted { snapshot, .. } => Some(snapshot),
+            CompactionOutcome::Compacted { snapshot } => Some(*snapshot),
         })
     }
 }

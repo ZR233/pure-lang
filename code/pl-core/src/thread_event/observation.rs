@@ -163,15 +163,15 @@ fn runtime_snapshot(
         .saturating_add(delta.usage.prompt_tokens);
     let cached_prompt_tokens = prior
         .map_or(0, |usage| usage.cached_prompt_tokens)
-        .saturating_add(delta.usage.cached_prompt_tokens)
-        .min(prompt_tokens);
+        .saturating_add(delta.usage.cached_prompt_tokens);
     let completion_tokens = prior
         .map_or(0, |usage| usage.completion_tokens)
         .saturating_add(delta.usage.completion_tokens);
     let cache_write_tokens = prior
         .map_or(0, |usage| usage.cache_write_tokens)
-        .saturating_add(delta.usage.cache_write_tokens)
-        .min(prompt_tokens.saturating_sub(cached_prompt_tokens));
+        .saturating_add(delta.usage.cache_write_tokens);
+    let has_incomplete_usage =
+        delta.has_incomplete_usage || prior.is_some_and(|usage| usage.has_incomplete_usage);
     let cache_miss_tokens = prompt_tokens.saturating_sub(cached_prompt_tokens);
     let reasoning_tokens = prior
         .map_or(0, |usage| usage.reasoning_tokens)
@@ -200,9 +200,13 @@ fn runtime_snapshot(
     ThreadRuntimeSnapshot {
         thread_id: thread_id.to_string(),
         usage: ThreadRuntimeUsage {
+            has_incomplete_usage,
             model: delta.model,
             context_window: delta.context_window,
-            latest_context_tokens: delta.usage.total_tokens,
+            latest_context_tokens: delta
+                .context_tokens
+                .or_else(|| prior.map(|usage| usage.latest_context_tokens))
+                .unwrap_or(0),
             prompt_tokens,
             completion_tokens,
             cached_prompt_tokens,
@@ -211,8 +215,8 @@ fn runtime_snapshot(
             reasoning_tokens,
             inference_count,
             total_tokens,
-            cache_hit_rate: (prompt_tokens > 0)
-                .then_some((cached_prompt_tokens as f64 / prompt_tokens as f64).clamp(0.0, 1.0)),
+            cache_hit_rate: (prompt_tokens > 0 && !has_incomplete_usage)
+                .then_some(cached_prompt_tokens as f64 / prompt_tokens as f64),
             estimated_costs: merged_costs(
                 prior.map_or(&[], |usage| usage.estimated_costs.as_slice()),
                 &delta.estimated_costs,
@@ -253,6 +257,7 @@ pub(crate) fn empty_runtime(thread_id: &str) -> ThreadRuntimeSnapshot {
     ThreadRuntimeSnapshot {
         thread_id: thread_id.to_string(),
         usage: ThreadRuntimeUsage {
+            has_incomplete_usage: false,
             model: String::new(),
             context_window: None,
             latest_context_tokens: 0,
@@ -325,6 +330,8 @@ mod tests {
             0,
             &current,
             TurnObservation::RuntimeDelta(Box::new(AgentRuntimeDelta {
+                has_incomplete_usage: false,
+                context_tokens: Some(0),
                 inference_id: "inference-1".to_string(),
                 agent_id: "thread-1".to_string(),
                 path: "thread-1".to_string(),
@@ -389,6 +396,8 @@ mod tests {
         decode_millis: Option<u64>,
     ) -> AgentRuntimeDelta {
         AgentRuntimeDelta {
+            has_incomplete_usage: false,
+            context_tokens: Some(completion_tokens),
             inference_id: inference_id.to_string(),
             agent_id: "thread-1".to_string(),
             path: "thread-1".to_string(),

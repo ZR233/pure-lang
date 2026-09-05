@@ -1,3 +1,4 @@
+mod accounting;
 mod agent;
 mod agent_profile;
 pub mod agent_session;
@@ -22,6 +23,9 @@ mod turn;
 mod turn_failure;
 mod workflow;
 
+pub use accounting::{
+    InferenceAccounting, PricingMode, PricingOutcome, UnpricedReason, UsageReport, UsageStatus,
+};
 pub use agent::*;
 pub use agent_profile::{
     AgentProfileSnapshot, AgentWorkspaceAssignmentSnapshot, AgentWorkspaceDisposition,
@@ -35,7 +39,6 @@ pub use agent_session::plan::{
     AgentSessionPlanState, AgentSessionPlanTransitionActor, AgentSessionPlanTransitionError,
     AgentSessionPlanTransitionRecord,
 };
-pub use billing::InferenceTokenUsage as TokenUsage;
 pub use billing::{
     InferenceBillingAppend, InferenceBillingRecord, InferenceOrchestrationMetrics, InferenceTiming,
     InferenceTokenUsage, ModelPricingSnapshot, TurnBillingRecord,
@@ -74,11 +77,11 @@ pub use observed_state::{
 pub use permission::PermissionLevel;
 pub use provider_catalog::{
     CredentialDescriptorDto, ModelCapabilitiesDto, ModelCatalogDescriptor, ModelDescriptor,
-    ModelInputCapabilityDto, ModelInputSourceDto, ModelModalityDto, ModelPricingDto,
-    ModelReasoningDescriptor, ModelTransportDescriptor, PROVIDER_CATALOG_SCHEMA_VERSION,
-    ProviderCatalogSnapshot, ProviderConnectionModeDescriptor, ProviderPresetDescriptor,
-    ProviderServiceCapabilitiesDescriptor, WebSearchProviderCapabilitiesDescriptor,
-    WebSearchResolutionDescriptor,
+    ModelInputCapabilityDto, ModelInputSourceDto, ModelModalityDto, ModelPriceTierDto,
+    ModelPricingDto, ModelReasoningDescriptor, ModelTransportDescriptor,
+    PROVIDER_CATALOG_SCHEMA_VERSION, ProviderCatalogSnapshot, ProviderConnectionModeDescriptor,
+    ProviderPresetDescriptor, ProviderServiceCapabilitiesDescriptor,
+    WebSearchProviderCapabilitiesDescriptor, WebSearchResolutionDescriptor,
 };
 pub use thread::mode::{ThreadModeCatalogSnapshot, ThreadModeDescriptor, ThreadModeId};
 pub use thread::{
@@ -89,8 +92,8 @@ pub use thread::{
 };
 pub use thread_item::*;
 pub use tool::{
-    HostedWebSearchDialect, ToolCallerMode, ToolFormat, ToolSpec, WebSearchContextSize,
-    WebSearchFilters, WebSearchUserLocation, WebSearchUserLocationType,
+    HostedWebSearchDialect, HostedWebSearchOptions, ToolCallerMode, ToolFormat, ToolSpec,
+    WebSearchContextSize, WebSearchFilters, WebSearchUserLocation, WebSearchUserLocationType,
 };
 pub use turn::{
     BudgetLimitedTurnOutcome, BudgetLimitedTurnState, CancelledTurnOutcome, CancelledTurnState,

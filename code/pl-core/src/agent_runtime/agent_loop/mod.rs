@@ -28,6 +28,7 @@ mod running_turn;
 mod submissions;
 
 struct LoopChannels {
+    deferred_commands: std::collections::VecDeque<AgentLoopCommand>,
     command_sender: mpsc::Sender<AgentLoopCommand>,
     command_receiver: mpsc::Receiver<AgentLoopCommand>,
     trace_sender: mpsc::UnboundedSender<TraceEvent>,
@@ -74,6 +75,7 @@ where
             state,
             runtime,
             channels: LoopChannels {
+                deferred_commands: std::collections::VecDeque::new(),
                 command_sender: sender,
                 command_receiver: receiver,
                 trace_sender,
@@ -104,7 +106,12 @@ where
         }
         loop {
             tokio::select! {
-                command = self.channels.command_receiver.recv() => {
+                command = async {
+                    match self.channels.deferred_commands.pop_front() {
+                        Some(command) => Some(command),
+                        None => self.channels.command_receiver.recv().await,
+                    }
+                } => {
                     let Some(command) = command else {
                         break;
                     };

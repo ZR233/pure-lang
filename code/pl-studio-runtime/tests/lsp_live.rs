@@ -1,13 +1,14 @@
+use pl_core::{BuiltinMcpServerState, McpServerStatusKind, builtin_mcp_server_ids};
+use pl_protocol::TurnState;
+use pl_protocol::{ThreadItem, ThreadTextChannel, ThreadToolState};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail, ensure};
 use pl_studio_runtime::{
-    AgentMessageChannel, BuiltinMcpServerState, ConfigPaths, ConfigStore, McpServerStatusKind,
-    STUDIO_CONFIG_SCHEMA_VERSION, StudioConfig, StudioHostKind, StudioRole, StudioRuntime,
-    StudioRuntimeOptions, StudioSubmitPromptOptions, StudioSubmitPromptRequest, ThreadItem,
-    ThreadItemContent, ThreadItemStatus, TurnState, WebSearchMode, builtin_mcp_server_ids,
+    ConfigPaths, ConfigStore, STUDIO_CONFIG_SCHEMA_VERSION, StudioConfig, StudioHostKind,
+    StudioRole, StudioRuntime, StudioRuntimeOptions, WebSearchMode,
 };
 
 const LIVE_CONFIG_ENV: &str = "PURE_STUDIO_LIVE_INSTALLED_CONFIG";
@@ -20,10 +21,10 @@ const RUST_ANALYZER_ID: &str = "rust-analyzer";
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "uses the installed Studio executor configuration and incurs real model usage"]
 async fn installed_config_prompt_uses_rust_analyzer_on_temporary_cargo_demo() -> Result<()> {
-    if std::env::var(LIVE_CONFIG_ENV).as_deref() != Ok("1") {
-        eprintln!("set {LIVE_CONFIG_ENV}=1 to run the installed-config live test");
-        return Ok(());
-    }
+    ensure!(
+        std::env::var(LIVE_CONFIG_ENV).as_deref() == Ok("1"),
+        "{LIVE_CONFIG_ENV}=1 is required for installed-config live acceptance"
+    );
 
     let installed = InstalledConfigGuard::load()?;
     let root = tempfile::Builder::new()
@@ -128,14 +129,15 @@ async fn run_live_flow(installed: &InstalledConfigGuard, root: &Path) -> Result<
 
 async fn run_prompt_and_assert(runtime: &StudioRuntime, thread_id: &str) -> Result<()> {
     let submitted = runtime
-        .submit_prompt(StudioSubmitPromptRequest {
-            thread_id: thread_id.to_string(),
-            input: pl_protocol::studio::StudioPromptInput {
-                text: live_prompt().to_string(),
-                attachment_draft_ids: Vec::new(),
+        .start_turn(
+            thread_id.to_string(),
+            pl_protocol::studio::StartTurnRequest {
+                input: pl_protocol::studio::StudioPromptInput {
+                    text: live_prompt().to_string(),
+                    attachment_draft_ids: Vec::new(),
+                },
             },
-            options: StudioSubmitPromptOptions::default(),
-        })
+        )
         .await?;
     wait_for_completed_turn(runtime, thread_id, &submitted.turn_id).await?;
     let snapshot = runtime.thread_snapshot(thread_id).await?;
@@ -247,11 +249,14 @@ async fn wait_for_completed_turn(
         let page = runtime.list_thread_turns(thread_id, None, 100).await?;
         if let Some(history) = page.turns.iter().find(|history| history.turn.id == turn_id) {
             match &history.turn.state {
-                TurnState::Completed => return Ok(()),
-                TurnState::Failed { reason } | TurnState::Interrupted { reason } => {
-                    bail!("live Turn ended before completion: {reason}")
+                TurnState::Completed(_) => return Ok(()),
+                TurnState::Failed(_) | TurnState::Cancelled(_) | TurnState::BudgetLimited(_) => {
+                    bail!(
+                        "live Turn ended before completion: {:?}",
+                        history.turn.state
+                    )
                 }
-                TurnState::Queued | TurnState::InProgress { .. } => {}
+                TurnState::Queued(_) | TurnState::Running(_) => {}
             }
         }
         if Instant::now() >= deadline {
@@ -265,23 +270,23 @@ fn assert_lsp_tool_results(items: &[ThreadItem]) -> Result<()> {
     let mut results = BTreeMap::new();
     let mut tool_call_count = 0;
     for item in items {
-        let ThreadItemContent::ToolCall { tool } = &item.content else {
+        let Some(tool) = item.tool() else {
             continue;
         };
         tool_call_count += 1;
         ensure!(
-            tool.name == LSP_TOOL_NAME,
+            tool.invocation().name() == LSP_TOOL_NAME,
             "live model called unexpected tool `{}`",
-            tool.name
+            tool.invocation().name()
         );
         ensure!(
-            item.status == ThreadItemStatus::Completed,
+            matches!(tool.state(), ThreadToolState::Succeeded(_)),
             "LSP tool item `{}` did not complete: {:?}",
             item.id,
-            item.status
+            tool.state()
         );
-        let arguments: serde_json::Value =
-            serde_json::from_str(&tool.arguments).context("LSP tool arguments are not JSON")?;
+        let arguments: serde_json::Value = serde_json::from_str(tool.invocation().arguments())
+            .context("LSP tool arguments are not JSON")?;
         ensure!(
             arguments["languageId"].as_str() == Some(RUST_LANGUAGE_ID),
             "live model called {LSP_TOOL_NAME} without languageId `{RUST_LANGUAGE_ID}`: {arguments}"
@@ -290,8 +295,8 @@ fn assert_lsp_tool_results(items: &[ThreadItem]) -> Result<()> {
             .as_str()
             .context("LSP tool arguments omit operation")?;
         let output: serde_json::Value = serde_json::from_str(
-            tool.result
-                .as_deref()
+            tool.terminal_output()
+                .map(|output| output.result())
                 .context("completed LSP tool result is missing")?,
         )
         .context("LSP tool result is not JSON")?;
@@ -369,13 +374,10 @@ fn normalized_result(output: &serde_json::Value) -> Result<String> {
 
 fn assert_final_marker(items: &[ThreadItem]) -> Result<()> {
     ensure!(
-        items.iter().any(|item| matches!(
-            &item.content,
-            ThreadItemContent::AgentMessage {
-                channel: AgentMessageChannel::Final,
-                text,
-            } if text.contains(LIVE_VERIFY_MARKER)
-        )),
+        items.iter().any(|item| item
+            .text()
+            .is_some_and(|text| text.channel() == ThreadTextChannel::Final
+                && text.text().contains(LIVE_VERIFY_MARKER))),
         "live model final response did not contain `{LIVE_VERIFY_MARKER}`"
     );
     Ok(())

@@ -19,8 +19,20 @@ const demoProviderCatalogFixture = ProviderCatalogView(
       promptCacheDialect: 'implicit_prefix',
       responsesProgrammaticToolCalling: false,
     ),
+    ProviderPresetView(
+      id: 'openai-compatible',
+      displayName: 'OpenAI API 兼容',
+      description: 'Custom compatible API',
+      baseUrl: 'http://localhost:11434/v1',
+      credentialLabel: 'API Key (optional)',
+      credentialEnv: '',
+      modelCatalogId: 'openai-compatible',
+      suggestedModel: '',
+      pricingEnabled: false,
+    ),
   ],
   modelCatalogs: {
+    'openai-compatible': [],
     'future-catalog': [
       ProviderModelView(
         slug: 'future-model',
@@ -67,12 +79,14 @@ List<ProviderSettingsView> _providersFromSettingsCommand(
           (model) => ProviderModelView(
             slug: model.slug,
             displayName: model.displayName,
-            reasoningEfforts: model.reasoningEfforts,
-            baseInstructions: model.baseInstructions ?? '',
+            reasoningEfforts: const [],
+            contextWindow: model.contextWindow,
+            maxOutputTokens: model.maxOutputTokens,
+
             wireProtocol: model.wireProtocol,
-            supportedConnectionModes: model.supportedConnectionModes,
-            defaultConnectionMode: model.defaultConnectionMode,
-            connectionMode: model.defaultConnectionMode,
+            supportedConnectionModes: const ['http'],
+            defaultConnectionMode: 'http',
+            connectionMode: 'http',
           ),
         )
         .where((model) => model.slug.isNotEmpty)
@@ -113,29 +127,36 @@ List<ProviderSettingsView> _providersFromSettingsCommand(
       baseUrl: provider.baseUrl.isEmpty ? template.baseUrl : provider.baseUrl,
       bearerToken: '',
       hasBearerToken: hasToken,
+      credentialRequired: template.credentialEnv.isNotEmpty,
       defaultModel: provider.defaultModel.isEmpty
           ? template.suggestedModel
           : provider.defaultModel,
       models: models,
       defaultModels: defaultModels,
       customModels: customModels.map(withCurrentConnection).toList(),
-      status: hasToken ? 'ready' : 'missingCredential',
+      status: hasToken || template.credentialEnv.isEmpty
+          ? 'ready'
+          : 'missingCredential',
       usageLabel: '${models.length} models',
       modelCount: '${models.length}',
       updatedAt: 'Preview',
       catalogId: template.modelCatalogId,
       credentialLabel: template.credentialLabel,
       credentialEnv: template.credentialEnv,
-      capabilitySource: provider.capabilitySource.isEmpty
-          ? 'preset_defaults'
-          : provider.capabilitySource,
-      hostedWebSearch: provider.hostedWebSearch,
-      hostedWebSearchDialect: provider.hostedWebSearchDialect,
+      pricingEnabled: provider.pricingEnabled,
+      capabilitySource: 'preset_defaults',
+      hostedWebSearch:
+          previousProvider?.hostedWebSearch ?? template.hostedWebSearch,
+      hostedWebSearchDialect:
+          previousProvider?.hostedWebSearchDialect ??
+          template.hostedWebSearchDialect,
       standaloneWebSearch:
-          provider.standaloneWebSearch ?? template.standaloneWebSearch,
-      promptCacheDialect: provider.promptCacheDialect,
+          previousProvider?.standaloneWebSearch ?? template.standaloneWebSearch,
+      promptCacheDialect:
+          previousProvider?.promptCacheDialect ?? template.promptCacheDialect,
       responsesProgrammaticToolCalling:
-          provider.responsesProgrammaticToolCalling,
+          previousProvider?.responsesProgrammaticToolCalling ??
+          template.responsesProgrammaticToolCalling,
       iconKey: template.iconKey,
     );
   }).toList();

@@ -1,5 +1,5 @@
 use crate::completion::WebSearchAction;
-use pl_protocol::TokenUsage;
+use pl_protocol::UsageReport;
 use pl_protocol::{ResponsesContextItem, ToolCallCaller};
 use pl_trace::TraceTextChannel;
 
@@ -79,7 +79,7 @@ pub enum ModelStreamEvent {
         action: WebSearchAction,
         results: Option<Vec<serde_json::Value>>,
     },
-    Usage(TokenUsage),
+    Usage(UsageReport),
     Completed {
         response_id: Option<String>,
     },

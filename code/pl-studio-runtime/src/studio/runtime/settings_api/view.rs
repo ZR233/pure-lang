@@ -50,6 +50,7 @@ fn settings_view(
                 ProviderModelCatalogConfig::Explicit { .. } => None,
             };
             Ok(StudioProviderSettings {
+                pricing_enabled: provider.pricing_mode == pl_protocol::PricingMode::Catalog,
                 id: id.to_string(),
                 template_kind: provider
                     .preset_id()
@@ -58,6 +59,8 @@ fn settings_view(
                 name: provider.name.clone(),
                 base_url: provider.base_url.clone(),
                 has_bearer_token: provider.resolved_bearer_token().is_some(),
+                credential_required: provider.adapter
+                    != pl_model::provider::ProviderAdapterKind::OpenAiCompatible,
                 capability_source: match &provider.capabilities {
                     ProviderCapabilitySelection::PresetDefaults => "preset_defaults",
                     ProviderCapabilitySelection::Explicit(_) => "explicit",
@@ -189,16 +192,19 @@ fn custom_model_settings(model: &ModelInfo) -> StudioCustomModelSettings {
         .map(|parameter| parameter.candidates.as_slice())
         .unwrap_or_default();
     StudioCustomModelSettings {
+        context_window: model.context_window.unwrap_or(32_000),
+        max_output_tokens: model.max_output_tokens.unwrap_or(4_096),
         slug: model.slug.clone(),
         display_name: model.display_name.clone(),
         reasoning_efforts: reasoning_efforts.to_vec(),
         base_instructions: model.base_instructions.clone(),
-        wire_protocol: match model.transport.protocol {
+        wire_protocol: match model.binding.transport.protocol {
             ProviderWireProtocol::Responses => "responses",
             ProviderWireProtocol::ChatCompletions => "chat_completions",
         }
         .to_string(),
         supported_connection_modes: model
+            .binding
             .transport
             .supported_connection_modes
             .iter()
@@ -206,8 +212,10 @@ fn custom_model_settings(model: &ModelInfo) -> StudioCustomModelSettings {
             .map(connection_mode_label)
             .map(str::to_string)
             .collect(),
-        default_connection_mode: connection_mode_label(model.transport.default_connection_mode)
-            .to_string(),
+        default_connection_mode: connection_mode_label(
+            model.binding.transport.default_connection_mode,
+        )
+        .to_string(),
     }
 }
 

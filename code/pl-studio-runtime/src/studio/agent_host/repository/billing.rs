@@ -52,10 +52,10 @@ pub(super) async fn restore_billing(
 
 pub(super) fn aggregate_billing_usage<'a>(
     billing: impl IntoIterator<Item = &'a TurnBillingRecord>,
-) -> pl_protocol::TokenUsage {
-    billing
-        .into_iter()
-        .fold(pl_protocol::TokenUsage::default(), |mut aggregate, turn| {
+) -> pl_protocol::InferenceTokenUsage {
+    billing.into_iter().fold(
+        pl_protocol::InferenceTokenUsage::default(),
+        |mut aggregate, turn| {
             let usage = turn.aggregate_usage();
             aggregate.prompt_tokens = aggregate.prompt_tokens.saturating_add(usage.prompt_tokens);
             aggregate.cached_prompt_tokens = aggregate
@@ -72,7 +72,8 @@ pub(super) fn aggregate_billing_usage<'a>(
                 .saturating_add(usage.reasoning_tokens);
             aggregate.total_tokens = aggregate.total_tokens.saturating_add(usage.total_tokens);
             aggregate
-        })
+        },
+    )
 }
 
 pub(super) fn runtime_from_context(
@@ -92,32 +93,39 @@ pub(super) fn runtime_from_context(
     let mut costs = BTreeMap::<String, f64>::new();
     let mut cache_savings = BTreeMap::<String, f64>::new();
     for inference in &inferences {
-        for cost in &inference.estimated_costs {
+        for cost in &inference.accounting.estimated_costs() {
             *costs.entry(cost.currency.clone()).or_default() += cost.amount;
         }
-        for saving in &inference.estimated_cache_savings {
+        for saving in &inference.accounting.estimated_cache_savings() {
             *cache_savings.entry(saving.currency.clone()).or_default() += saving.amount;
         }
     }
     let prompt_tokens = context.usage.prompt_tokens;
-    let cached_prompt_tokens = context.usage.cached_prompt_tokens.min(prompt_tokens);
-    let cache_hit_rate = (prompt_tokens > 0)
-        .then_some((cached_prompt_tokens as f64 / prompt_tokens as f64).clamp(0.0, 1.0));
+    let cached_prompt_tokens = context.usage.cached_prompt_tokens;
+    let has_incomplete_usage = inferences
+        .iter()
+        .any(|inference| inference.accounting.has_incomplete_usage());
+    let cache_hit_rate = (prompt_tokens > 0 && !has_incomplete_usage)
+        .then_some(cached_prompt_tokens as f64 / prompt_tokens as f64);
     Some(ThreadRuntimeSnapshot {
         thread_id: thread_id.to_string(),
         usage: ThreadRuntimeUsage {
+            has_incomplete_usage,
             model: latest.model.clone(),
             context_window: latest.context_window,
             latest_context_tokens: context
                 .last_context_tokens
-                .unwrap_or(latest.normalized_usage.total_tokens),
+                .or_else(|| {
+                    inferences
+                        .iter()
+                        .rev()
+                        .find_map(|inference| inference.accounting.usage.known_total_tokens())
+                })
+                .unwrap_or(0),
             prompt_tokens,
             completion_tokens: context.usage.completion_tokens,
             cached_prompt_tokens,
-            cache_write_tokens: context
-                .usage
-                .cache_write_tokens
-                .min(prompt_tokens.saturating_sub(cached_prompt_tokens)),
+            cache_write_tokens: context.usage.cache_write_tokens,
             cache_miss_tokens: prompt_tokens.saturating_sub(cached_prompt_tokens),
             reasoning_tokens: context.usage.reasoning_tokens,
             inference_count: inferences.len() as u64,
@@ -133,7 +141,7 @@ pub(super) fn runtime_from_context(
                 .collect(),
             has_unpriced_usage: inferences
                 .iter()
-                .any(|inference| inference.has_unpriced_usage),
+                .any(|inference| inference.accounting.has_unpriced_usage()),
             prompt_generation: latest.prompt_generation,
             prompt_cache_policy: latest.prompt_cache_policy.clone(),
             prefix_changed_reason: latest.prefix_changed_reason,
@@ -154,8 +162,8 @@ pub(super) fn runtime_from_context(
 
 pub(super) fn authoritative_turn_usage(
     existing: Option<&turn::Model>,
-    projected: Option<&pl_protocol::TokenUsage>,
-) -> Result<pl_protocol::TokenUsage, PureError> {
+    projected: Option<&pl_protocol::InferenceTokenUsage>,
+) -> Result<pl_protocol::InferenceTokenUsage, PureError> {
     if let Some(model_json) = existing.and_then(|row| row.model_json.as_deref()) {
         let billing: TurnBillingRecord = serde_json::from_str(model_json)?;
         if !billing.inferences.is_empty() {
@@ -165,7 +173,7 @@ pub(super) fn authoritative_turn_usage(
     projected.cloned().map_or_else(
         || {
             existing.map_or_else(
-                || Ok(pl_protocol::TokenUsage::default()),
+                || Ok(pl_protocol::InferenceTokenUsage::default()),
                 |row| serde_json::from_str(&row.usage_json).map_err(Into::into),
             )
         },
@@ -226,7 +234,14 @@ fn validate_inference_commit(inference: &AgentInferenceCommit) -> Result<(), Pur
     if inference.billing.inference_id != inference.runtime_delta.inference_id {
         return Err(store_error("billing and runtime inference ids differ"));
     }
-    if inference.billing.normalized_usage.public_snapshot() != inference.runtime_delta.usage {
+    if inference
+        .billing
+        .accounting
+        .usage
+        .totals()
+        .public_snapshot()
+        != inference.runtime_delta.usage
+    {
         return Err(store_error("billing and runtime usage differ"));
     }
     Ok(())
@@ -242,8 +257,7 @@ mod tests {
         ThreadMutation, TurnId,
     };
     use pl_protocol::{
-        AgentRuntimeDelta, InferenceBillingRecord, InferenceTokenUsage, ModelPricingSnapshot,
-        RuntimeCostAmount,
+        AgentRuntimeDelta, InferenceBillingRecord, ModelPricingSnapshot, RuntimeCostAmount,
     };
     use sea_orm::{ActiveModelTrait, EntityTrait, IntoActiveModel, TransactionTrait};
 
@@ -251,7 +265,7 @@ mod tests {
     use crate::ThreadModeId;
 
     #[tokio::test]
-    async fn inference_billing_is_idempotent_and_conflicts_roll_back_the_transaction() {
+    async fn compatible_provider_settings_execute_and_persist_immutable_billing() {
         let store = StudioStore::open_memory().await.unwrap();
         let project = store
             .upsert_project(std::env::temp_dir().join("billing-transaction-fixture"))
@@ -273,7 +287,9 @@ mod tests {
             revision: Set(0),
             state_json: Set(serde_json::to_string(&turn_state).unwrap()),
             model_json: Set(None),
-            usage_json: Set(serde_json::to_string(&pl_protocol::TokenUsage::default()).unwrap()),
+            usage_json: Set(
+                serde_json::to_string(&pl_protocol::InferenceTokenUsage::default()).unwrap(),
+            ),
             metadata_json: Set(None),
             updated_at: Set(1),
             ..Default::default()
@@ -282,7 +298,78 @@ mod tests {
         .await
         .unwrap();
 
-        let billing = billing_record("inference-1", 10, 4, 3);
+        let (base_url, server) = compatible_model_server().await;
+        let edit = crate::ProviderSettingsEdit {
+            default_provider: Some("local".into()),
+            providers: vec![crate::ProviderEdit {
+                key: "local".into(),
+                original_key: None,
+                preset: Some(crate::ProviderPresetId::new("openai-compatible").unwrap()),
+                name: "Local model".into(),
+                base_url: Some(base_url),
+                bearer_token: None,
+                pricing_mode: pl_protocol::PricingMode::Catalog,
+                default_model: "local-coder".into(),
+                custom_models: vec![crate::ProviderModelEdit {
+                    slug: "local-coder".into(),
+                    display_name: String::new(),
+                    protocol: pl_model::provider::ProviderWireProtocol::ChatCompletions,
+                    context_window: 32_000,
+                    max_output_tokens: 4096,
+                }],
+                model_connection_modes: Default::default(),
+            }],
+            roles: Vec::new(),
+        };
+        let mut config = edit.to_config(&crate::StudioConfig::default()).unwrap();
+        let provider = config.models.providers.values_mut().next().unwrap();
+        let crate::ProviderModelCatalogConfig::Explicit { models, .. } = &mut provider.catalog
+        else {
+            panic!("custom catalog");
+        };
+        models[0].pricing = pl_model::model::ModelPricing::published(
+            "CNY",
+            vec![pl_model::model::TokenPriceTier::flat(
+                1.5,
+                4.5,
+                Some(0.05),
+                None,
+            )],
+            "https://fixture.example/pricing",
+        );
+        config.validate().unwrap();
+        let route = config.resolve_role(crate::StudioRole::Executor).unwrap();
+        let client = pl_core::ModelTurnClient::from_route(&route).unwrap();
+        let mut session = pl_core::AgentSession::new();
+        session.push_user_prompt("Complete the configured model task".to_string());
+        let response = client
+            .complete(
+                &session,
+                pl_core::ModelTurnRequest::new(),
+                pl_core::ModelTurnOptions::default(),
+            )
+            .await
+            .unwrap();
+        server.await.unwrap();
+        assert_eq!(
+            response
+                .output()
+                .iter()
+                .filter_map(|item| item.as_message())
+                .collect::<String>(),
+            "ready"
+        );
+        let mut billing = billing_record("inference-1", 10, 4, 3);
+        billing.provider_instance_id = route.provider_id.to_string();
+        billing.provider = route.endpoint.name;
+        billing.model = response.model().to_owned();
+        billing.accounting = response.accounting().clone();
+        let pl_protocol::PricingOutcome::Estimated { cost, .. } = &billing.accounting.pricing
+        else {
+            panic!("reported inference must be priced");
+        };
+        assert!((cost.amount - 0.000_022_7).abs() < 1e-12);
+
         commit_billing(&store, billing_commit(&thread.id, turn_id, billing.clone()))
             .await
             .unwrap();
@@ -306,7 +393,9 @@ mod tests {
         let mut partial = identical.clone().into_active_model();
         partial.metadata_json = Set(Some("must roll back".to_string()));
         partial.update(&tx).await.unwrap();
-        let conflict = billing_record("inference-1", 10, 4, 4);
+        let mut conflict = billing.clone();
+        conflict.accounting.usage.output_tokens = Some(4);
+        conflict.accounting.usage.total_tokens = Some(14);
         let error = persist_inference_billing(&tx, &billing_commit(&thread.id, turn_id, conflict))
             .await
             .unwrap_err();
@@ -342,11 +431,12 @@ mod tests {
             .unwrap(),
             state_kind: "running".to_string(),
             model_json: Some(serde_json::to_string(&billing).unwrap()),
-            usage_json: serde_json::to_string(&pl_protocol::TokenUsage::default()).unwrap(),
+            usage_json: serde_json::to_string(&pl_protocol::InferenceTokenUsage::default())
+                .unwrap(),
             metadata_json: None,
             updated_at: 1,
         };
-        let projected = pl_protocol::TokenUsage {
+        let projected = pl_protocol::InferenceTokenUsage {
             prompt_tokens: 999,
             completion_tokens: 999,
             total_tokens: 1_998,
@@ -365,24 +455,29 @@ mod tests {
     #[test]
     fn restart_projection_keeps_costs_separate_by_currency() {
         let mut cny = billing_record("cny", 10, 4, 3);
-        cny.estimated_costs = vec![RuntimeCostAmount {
-            currency: "CNY".to_string(),
-            amount: 0.5,
-        }];
-        cny.estimated_cache_savings = vec![RuntimeCostAmount {
-            currency: "CNY".to_string(),
-            amount: 0.2,
-        }];
+        cny.accounting.pricing = pl_protocol::PricingOutcome::Estimated {
+            cost: RuntimeCostAmount {
+                currency: "CNY".into(),
+                amount: 0.5,
+            },
+            cache_savings: Some(RuntimeCostAmount {
+                currency: "CNY".into(),
+                amount: 0.2,
+            }),
+        };
         let mut usd = billing_record("usd", 20, 5, 4);
-        usd.estimated_costs = vec![RuntimeCostAmount {
-            currency: "USD".to_string(),
-            amount: 0.25,
-        }];
-        usd.estimated_cache_savings = vec![RuntimeCostAmount {
-            currency: "USD".to_string(),
-            amount: -0.05,
-        }];
-        usd.has_unpriced_usage = true;
+        usd.accounting.pricing = pl_protocol::PricingOutcome::Estimated {
+            cost: RuntimeCostAmount {
+                currency: "USD".into(),
+                amount: 0.25,
+            },
+            cache_savings: Some(RuntimeCostAmount {
+                currency: "USD".into(),
+                amount: -0.05,
+            }),
+        };
+        let mut unknown = billing_record("unknown", 0, 0, 0);
+        unknown.accounting = Default::default();
         usd.recorded_at = 2;
         let billing = BTreeMap::from([
             (
@@ -396,7 +491,7 @@ mod tests {
                 "turn-usd".to_string(),
                 TurnBillingRecord {
                     version: TurnBillingRecord::VERSION,
-                    inferences: vec![usd],
+                    inferences: vec![usd, unknown],
                 },
             ),
         ]);
@@ -441,12 +536,8 @@ mod tests {
             ]
         );
         assert_eq!(runtime.usage.latest_context_tokens, 11);
-        assert!(
-            runtime
-                .usage
-                .cache_hit_rate
-                .is_some_and(|rate| (0.0..=1.0).contains(&rate))
-        );
+        assert!(runtime.usage.has_incomplete_usage);
+        assert_eq!(runtime.usage.cache_hit_rate, None);
     }
 
     async fn commit_billing(store: &StudioStore, commit: ThreadCommit) -> Result<(), PureError> {
@@ -484,6 +575,8 @@ mod tests {
             active_input: None,
         };
         let runtime_delta = AgentRuntimeDelta {
+            has_incomplete_usage: billing.accounting.has_incomplete_usage(),
+            context_tokens: billing.accounting.usage.known_total_tokens(),
             inference_id: billing.inference_id.clone(),
             agent_id: thread_id.to_string(),
             path: thread_id.to_string(),
@@ -491,10 +584,10 @@ mod tests {
             role: "executor".to_string(),
             model: billing.model.clone(),
             context_window: billing.context_window,
-            usage: billing.normalized_usage.public_snapshot(),
-            estimated_costs: billing.estimated_costs.clone(),
-            estimated_cache_savings: billing.estimated_cache_savings.clone(),
-            has_unpriced_usage: billing.has_unpriced_usage,
+            usage: billing.accounting.usage.totals().public_snapshot(),
+            estimated_costs: billing.accounting.estimated_costs().clone(),
+            estimated_cache_savings: billing.accounting.estimated_cache_savings().clone(),
+            has_unpriced_usage: billing.accounting.has_unpriced_usage(),
             prompt_generation: billing.prompt_generation,
             prompt_cache_policy: billing.prompt_cache_policy.clone(),
             prefix_changed_reason: billing.prefix_changed_reason,
@@ -533,36 +626,37 @@ mod tests {
         cached_prompt_tokens: u64,
         completion_tokens: u64,
     ) -> InferenceBillingRecord {
-        let reported_usage = InferenceTokenUsage {
-            prompt_tokens,
-            cached_prompt_tokens,
-            cache_write_tokens: 0,
-            completion_tokens,
-            reasoning_tokens: 0,
-            total_tokens: prompt_tokens + completion_tokens,
-        };
-        let normalized_usage = reported_usage.normalized();
         InferenceBillingRecord {
             inference_id: inference_id.to_string(),
             provider_instance_id: "deepseek-primary".to_string(),
             provider: "DeepSeek".to_string(),
             model: "deepseek-v4-flash".to_string(),
             context_window: Some(1_000_000),
-            reported_usage,
-            normalized_usage,
-            pricing: ModelPricingSnapshot {
-                currency: Some("CNY".to_string()),
-                input_per_mtok: Some(1.0),
-                output_per_mtok: Some(2.0),
-                cache_read_per_mtok: Some(0.02),
-                cache_write_per_mtok: None,
+            accounting: pl_protocol::InferenceAccounting {
+                usage: pl_protocol::UsageReport {
+                    input_tokens: Some(prompt_tokens),
+                    output_tokens: Some(completion_tokens),
+                    cache_read_tokens: Some(cached_prompt_tokens),
+                    cache_write_tokens: None,
+                    reasoning_tokens: Some(0),
+                    total_tokens: Some(prompt_tokens + completion_tokens),
+                },
+                pricing: pl_protocol::PricingOutcome::Estimated {
+                    cost: RuntimeCostAmount {
+                        currency: "CNY".into(),
+                        amount: 0.000_1,
+                    },
+                    cache_savings: None,
+                },
+                price_snapshot: Some(ModelPricingSnapshot {
+                    currency: Some("CNY".into()),
+                    input_per_mtok: Some(1.5),
+                    output_per_mtok: Some(4.5),
+                    cache_read_per_mtok: Some(0.05),
+                    cache_write_per_mtok: None,
+                }),
+                request_started_at: Some(1),
             },
-            estimated_costs: vec![RuntimeCostAmount {
-                currency: "CNY".to_string(),
-                amount: 0.000_1,
-            }],
-            estimated_cache_savings: Vec::new(),
-            has_unpriced_usage: false,
             prompt_generation: None,
             prompt_cache_policy: None,
             prefix_changed_reason: None,
@@ -570,5 +664,52 @@ mod tests {
             timing: None,
             recorded_at: 1,
         }
+    }
+    async fn compatible_model_server() -> (String, tokio::task::JoinHandle<()>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut bytes = Vec::new();
+            let mut chunk = [0; 4096];
+            loop {
+                let count = socket.read(&mut chunk).await.unwrap();
+                if count == 0 {
+                    panic!("incomplete request");
+                }
+                bytes.extend_from_slice(&chunk[..count]);
+                if let Some(end) = bytes.windows(4).position(|part| part == b"\r\n\r\n") {
+                    let header = String::from_utf8_lossy(&bytes[..end]);
+                    let length = header
+                        .lines()
+                        .find_map(|line| {
+                            let (key, value) = line.split_once(':')?;
+                            key.eq_ignore_ascii_case("content-length")
+                                .then(|| value.trim().parse::<usize>().unwrap())
+                        })
+                        .unwrap_or(0);
+                    if bytes.len() >= end + 4 + length {
+                        break;
+                    }
+                }
+            }
+            let events = [
+                serde_json::json!({"choices":[{"delta":{"content":"ready"},"finish_reason":"stop"}]}),
+                serde_json::json!({"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":3,"total_tokens":13,"prompt_tokens_details":{"cached_tokens":4}}}),
+            ];
+            let body = events
+                .into_iter()
+                .map(|event| format!("data: {event}\n\n"))
+                .collect::<String>()
+                + "data: [DONE]\n\n";
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+            socket.shutdown().await.unwrap();
+        });
+        (format!("http://{address}/v1"), server)
     }
 }

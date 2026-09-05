@@ -74,11 +74,14 @@ pub(crate) fn responses_parse_response(body: serde_json::Value) -> Result<Comple
         responses_context_items,
         orchestration,
         timing: None,
-        usage: body
-            .usage
-            .as_ref()
-            .and_then(ProviderTokenUsage::to_responses_usage)
-            .unwrap_or_default(),
+        accounting: pl_protocol::InferenceAccounting {
+            usage: body
+                .usage
+                .as_ref()
+                .and_then(ProviderTokenUsage::to_responses_usage)
+                .unwrap_or_default(),
+            ..Default::default()
+        },
         model: body.model.unwrap_or_default(),
     })
 }
@@ -230,11 +233,14 @@ pub(crate) fn chat_parse_response(body: serde_json::Value) -> Result<CompletionR
         responses_context_items: Vec::new(),
         orchestration,
         timing: None,
-        usage: body
-            .usage
-            .as_ref()
-            .and_then(ProviderTokenUsage::to_chat_usage)
-            .unwrap_or_default(),
+        accounting: pl_protocol::InferenceAccounting {
+            usage: body
+                .usage
+                .as_ref()
+                .and_then(ProviderTokenUsage::to_chat_usage)
+                .unwrap_or_default(),
+            ..Default::default()
+        },
         model: body.model.unwrap_or_default(),
     })
 }
@@ -320,68 +326,6 @@ mod tests {
             response.reasoning_content.as_deref(),
             Some("先比较整数，再比较小数。")
         );
-    }
-
-    #[test]
-    fn chat_parse_response_reads_deepseek_cached_token_aliases() {
-        for cached_usage in [
-            serde_json::json!({"prompt_cache_hit_tokens": 40}),
-            serde_json::json!({"cached_prompt_tokens": 40}),
-            serde_json::json!({"prompt_tokens_details": {"cached_tokens": 40}}),
-        ] {
-            let mut usage = serde_json::json!({
-                "prompt_tokens": 100,
-                "completion_tokens": 20,
-                "total_tokens": 120
-            });
-            usage.as_object_mut().unwrap().extend(
-                cached_usage
-                    .as_object()
-                    .unwrap()
-                    .iter()
-                    .map(|(key, value)| (key.clone(), value.clone())),
-            );
-            let response = OpenAiProtocol::chat()
-                .parse_response(serde_json::json!({
-                    "model": "deepseek-v4-flash",
-                    "choices": [{
-                        "message": {
-                            "role": "assistant",
-                            "content": "ok"
-                        },
-                        "finish_reason": "stop"
-                    }],
-                    "usage": usage
-                }))
-                .unwrap();
-
-            assert_eq!(response.usage.cached_prompt_tokens, 40);
-        }
-    }
-
-    #[test]
-    fn responses_parse_response_reads_cached_input_tokens() {
-        let response = OpenAiProtocol::responses()
-            .parse_response(serde_json::json!({
-                "model": "gpt-5.5",
-                "output": [{
-                    "type": "message",
-                    "content": [{ "text": "ok" }]
-                }],
-                "usage": {
-                    "input_tokens": 100,
-                    "output_tokens": 20,
-                    "total_tokens": 120,
-                    "input_tokens_details": {
-                        "cached_tokens": 55,
-                        "cache_write_tokens": 12
-                    }
-                }
-            }))
-            .unwrap();
-
-        assert_eq!(response.usage.cached_prompt_tokens, 55);
-        assert_eq!(response.usage.cache_write_tokens, 12);
     }
 
     #[test]

@@ -17,7 +17,7 @@ use local::compact_local;
 use pl_model::completion::{OpenAiCompactionMode, ReasoningConfig};
 use pl_model::provider::ProviderWireProtocol;
 use pl_model::runtime::ModelRuntime;
-use pl_protocol::{TokenUsage, ToolSpec};
+use pl_protocol::{InferenceAccounting, ToolSpec};
 use std::future::Future;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
@@ -195,8 +195,9 @@ pub enum ContextCompactionPhase {
 }
 
 /// 单次上下文压缩的可观测快照。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ContextCompactionSnapshot {
+    pub accounting: InferenceAccounting,
     pub trigger: ContextCompactionTrigger,
     pub tokens_before: u64,
     pub estimated_request_tokens: u64,
@@ -248,8 +249,7 @@ pub(crate) enum CompactionTrigger {
 pub(crate) enum CompactionOutcome {
     Skipped,
     Compacted {
-        usage: Option<TokenUsage>,
-        snapshot: ContextCompactionSnapshot,
+        snapshot: Box<ContextCompactionSnapshot>,
     },
 }
 
@@ -311,7 +311,7 @@ impl Default for ContextCompactionControl {
 pub(crate) async fn maybe_compact_session(
     session: &mut AgentSession,
     request: ContextCompactionRequest<'_>,
-) -> Result<CompactionOutcome> {
+) -> std::result::Result<CompactionOutcome, pl_model::completion::CompletionFailure> {
     let ContextCompactionRequest {
         runtime,
         config,
@@ -333,7 +333,7 @@ pub(crate) async fn maybe_compact_session(
         return Ok(CompactionOutcome::Skipped);
     }
     let model_info = runtime.model();
-    ensure_provider_can_consume_session(model_info.transport.protocol, session)?;
+    ensure_provider_can_consume_session(model_info.binding.transport.protocol, session)?;
     let limit = match (trigger, model_info.resolved_auto_compact_limit()) {
         (CompactionTrigger::Manual | CompactionTrigger::WallClockRollover, limit) => {
             limit.unwrap_or_default()
@@ -362,14 +362,24 @@ pub(crate) async fn maybe_compact_session(
     if let Some(progress) = progress.as_mut() {
         progress.milestone(recorder, "上下文接近上限，正在压缩历史。");
     }
-    let use_remote = model_info.transport.protocol == ProviderWireProtocol::Responses
-        && config.openai_mode != OpenAiCompactionMode::Local;
+    let use_remote =
+        runtime.compaction().is_some() && config.openai_mode != OpenAiCompactionMode::Local;
+    let token = control.cancellation_token.clone().unwrap_or_default();
+    let invocation = pl_model::runtime::ModelInvocationContext::new(Default::default())
+        .with_events(event_tx)
+        .with_prompt_cache_key(prompt_cache_key.clone())
+        .with_cancellation(Some(token.clone()));
+    let control = ContextCompactionControl {
+        cancellation_token: Some(token),
+        ..control
+    };
     let operation = async {
         if use_remote {
             let (replacement, usage) = remote::compact_remote(
                 session,
                 remote::RemoteCompactionRequest {
                     runtime,
+                    invocation,
                     config,
                     request_instructions,
                     request_messages,
@@ -394,8 +404,7 @@ pub(crate) async fn maybe_compact_session(
                 request_messages,
                 session.items(),
                 working_context_tail.as_ref(),
-                event_tx,
-                prompt_cache_key,
+                invocation,
                 recorder,
                 &mut progress,
                 model_info.max_output_tokens,
@@ -410,7 +419,7 @@ pub(crate) async fn maybe_compact_session(
             ));
             Ok((
                 replacement,
-                Some(usage),
+                usage,
                 Some(summary),
                 ContextCompactionImplementation::Local,
                 replacement_tokens,
@@ -420,6 +429,7 @@ pub(crate) async fn maybe_compact_session(
     let (replacement, usage, summary, implementation, replacement_tokens) =
         run_compaction_operation(control, operation).await?;
     let snapshot = ContextCompactionSnapshot {
+        accounting: usage,
         trigger: public_trigger(trigger),
         tokens_before: provider_prompt_tokens(trigger).unwrap_or(estimated_tokens),
         estimated_request_tokens: estimated_tokens,
@@ -434,33 +444,42 @@ pub(crate) async fn maybe_compact_session(
     if let Some(progress) = progress {
         progress.milestone(recorder, "上下文已压缩，继续准备模型调用。");
     }
-    Ok(CompactionOutcome::Compacted { usage, snapshot })
+    Ok(CompactionOutcome::Compacted {
+        snapshot: Box::new(snapshot),
+    })
 }
 
 async fn run_compaction_operation<T>(
     control: ContextCompactionControl,
-    operation: impl Future<Output = Result<T>>,
-) -> Result<T> {
-    let timed = tokio::time::timeout(control.timeout, operation);
-    let outcome = match control.cancellation_token {
-        Some(cancellation_token) => {
-            tokio::select! {
-                _ = cancellation_token.cancelled() => {
-                    return Err(PureError::MemoryError(
-                        "context compaction cancelled with the current turn".to_string(),
-                    ));
+    operation: impl Future<Output = std::result::Result<T, pl_model::completion::CompletionFailure>>,
+) -> std::result::Result<T, pl_model::completion::CompletionFailure> {
+    tokio::pin!(operation);
+    match control.cancellation_token {
+        Some(token) => tokio::select! {
+            _ = token.cancelled() => operation.await.map_err(|mut failure| {
+                failure.source = PureError::MemoryError("context compaction cancelled with the current turn".into());
+                failure
+            }),
+            result = tokio::time::timeout(control.timeout, &mut operation) => match result {
+                Ok(result) => result.map_err(|mut failure| {
+                    if token.is_cancelled() {
+                        failure.source = PureError::MemoryError("context compaction cancelled with the current turn".into());
+                    }
+                    failure
+                }),
+                Err(_) => {
+                    token.cancel();
+                    operation.await.map_err(|mut failure| {
+                        failure.source = PureError::transient_model_transport(format!("context compaction timed out after {}ms", control.timeout.as_millis()));
+                        failure
+                    })
                 }
-                outcome = timed => outcome,
-            }
-        }
-        None => timed.await,
-    };
-    outcome.map_err(|_| {
-        PureError::transient_model_transport(format!(
-            "context compaction timed out after {}ms",
-            control.timeout.as_millis()
-        ))
-    })?
+            },
+        },
+        None => tokio::time::timeout(control.timeout, operation)
+            .await
+            .map_err(|_| PureError::transient_model_transport("context compaction timed out"))?,
+    }
 }
 
 fn public_trigger(trigger: CompactionTrigger) -> ContextCompactionTrigger {
@@ -812,7 +831,7 @@ mod tests {
     }
 
     fn test_model() -> ModelInfo {
-        let mut model = ModelInfo::fallback("compact-test");
+        let mut model = ModelInfo::compatible("compact-test");
         model.context_window = Some(100);
         model.max_context_window = Some(100);
         model.auto_compact_token_limit = Some(1);
@@ -822,7 +841,9 @@ mod tests {
 
     fn responses_test_model() -> ModelInfo {
         let mut model = test_model();
-        model.transport = ModelTransportProfile::responses_http();
+        model
+            .binding
+            .set_transport(ModelTransportProfile::responses_http());
         model
     }
 
@@ -990,7 +1011,7 @@ mod tests {
             let address = listener.local_addr().unwrap();
             let requests = Arc::new(Mutex::new(Vec::new()));
             let captured = Arc::clone(&requests);
-            let protocol = model.transport.protocol;
+            let protocol = model.binding.transport.protocol;
             tokio::spawn(async move {
                 let response_count = match failure {
                     FakeCompactionFailure::Success
@@ -1032,7 +1053,8 @@ mod tests {
                     socket.shutdown().await.unwrap();
                 }
             });
-            let endpoint = ProviderEndpoint::openai(Some(format!("http://{address}/v1")));
+            let mut endpoint = ProviderEndpoint::openai(Some(format!("http://{address}/v1")));
+            endpoint.service_capabilities.remote_compaction = true;
             Self {
                 runtime: ModelRuntime::new(endpoint, model).unwrap(),
                 requests,

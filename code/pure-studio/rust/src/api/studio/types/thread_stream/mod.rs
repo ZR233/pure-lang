@@ -263,6 +263,7 @@ pub enum BridgeWorkflowRunLifecycle {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct BridgeThreadRuntimeUsage {
+    pub has_incomplete_usage: bool,
     pub model: String,
     pub context_window: Option<u64>,
     pub latest_context_tokens: u64,

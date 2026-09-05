@@ -24,6 +24,23 @@ pub(crate) enum OpenAiRequestBody {
     Chat(Map<String, Value>),
 }
 
+impl OpenAiRequestBody {
+    pub(crate) fn prepare_compaction(&mut self) {
+        match self {
+            Self::Responses(body) | Self::Chat(body) => {
+                for key in ["store", "tool_choice", "previous_response_id"] {
+                    body.remove(key);
+                }
+            }
+        }
+    }
+    pub(crate) fn apply_native_options(&mut self, options: &Map<String, Value>) {
+        match self {
+            Self::Responses(body) | Self::Chat(body) => body::merge_base_body(body, options),
+        }
+    }
+}
+
 pub(crate) fn build_openai_request_body(
     endpoint: OpenAiEndpoint,
     request: &CompletionRequest,
@@ -34,6 +51,13 @@ pub(crate) fn build_openai_request_body(
     validate_tool_history(&messages)?;
     match endpoint {
         OpenAiEndpoint::Responses => {
+            let crate::model::ModelProtocolOptions::Responses(options) =
+                &model.binding.request.protocol
+            else {
+                return Err(protocol_error(
+                    "Responses request requires Responses options",
+                ));
+            };
             let mut body = to_object_map(&ResponsesRequestBody::from_request(
                 request,
                 model,
@@ -42,7 +66,7 @@ pub(crate) fn build_openai_request_body(
             apply_responses_max_tokens_field(
                 &mut body,
                 request.max_tokens,
-                model.request_profile.responses_max_tokens_field,
+                options.max_tokens_field,
             );
             finalize_body(&mut body, model, &request.reasoning);
             Ok(OpenAiRequestBody::Responses(body))

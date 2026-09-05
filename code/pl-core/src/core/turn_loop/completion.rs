@@ -9,7 +9,7 @@ pub(super) struct CompletedTurn {
     pub(super) content: String,
     pub(super) reasoning_content: Option<String>,
     pub(super) model: String,
-    pub(super) usage: pl_protocol::TokenUsage,
+    pub(super) usage: pl_protocol::InferenceTokenUsage,
     pub(super) last_context_tokens: Option<u64>,
     pub(super) context_compactions: Vec<ContextCompactionSnapshot>,
     pub(super) session_message_count: usize,
@@ -66,6 +66,7 @@ pub(super) fn finish(
     recorder.broadcast(AgentEvent::Done);
 
     TurnResult {
+        billing: pl_protocol::TurnBillingRecord::new(),
         content: completed.content,
         reasoning_content: completed.reasoning_content,
         model: completed.model,
@@ -105,7 +106,7 @@ mod tests {
                 content: String::new(),
                 reasoning_content: None,
                 model: "test".to_string(),
-                usage: pl_protocol::TokenUsage::default(),
+                usage: pl_protocol::InferenceTokenUsage::default(),
                 last_context_tokens: None,
                 context_compactions: Vec::new(),
                 session_message_count: 0,
@@ -146,7 +147,7 @@ mod tests {
                 content: String::new(),
                 reasoning_content: None,
                 model: "test".to_string(),
-                usage: pl_protocol::TokenUsage::default(),
+                usage: pl_protocol::InferenceTokenUsage::default(),
                 last_context_tokens: None,
                 context_compactions: Vec::new(),
                 session_message_count: 0,

@@ -1,14 +1,17 @@
 use std::collections::HashMap;
 
-use pl_model::{
-    CompletionRequest, CompletionResponse, CompletionTraceContext, ModelInvocationContext,
-    ModelRuntime, ModelSession, ProviderEndpoint, ReasoningConfig, ReasoningSummary,
-    default_models, zhipu_default_model_slugs,
+use pl_model::completion::{
+    CompletionRequest, CompletionResponse, CompletionTraceContext, ReasoningConfig,
+    ReasoningSummary,
 };
+use pl_model::model::{default_models, zhipu_default_model_slugs};
+use pl_model::provider::ProviderEndpoint;
+use pl_model::runtime::{ModelInvocationContext, ModelRuntime, ModelSession};
+
 use pl_protocol::{Message, MessageContent, MessageRole};
 use pl_trace::{AgentEvent, TraceDelta};
 
-const ZHIPU_LIVE_ENV_KEY: &str = "API_KEY_ZHIPU";
+const ZHIPU_LIVE_ENV_KEY: &str = "ZAI_API_KEY";
 
 #[derive(Debug, Default)]
 struct TraceDeltaCounts {
@@ -27,14 +30,11 @@ fn user_message(content: &str) -> Message {
     }
 }
 
-fn live_api_key() -> Option<String> {
-    match std::env::var(ZHIPU_LIVE_ENV_KEY) {
-        Ok(value) if !value.trim().is_empty() => Some(value),
-        _ => {
-            eprintln!("{ZHIPU_LIVE_ENV_KEY} is not set; skipping live Zhipu API test");
-            None
-        }
-    }
+fn live_api_key() -> String {
+    std::env::var(ZHIPU_LIVE_ENV_KEY)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .expect("explicit live acceptance requires ZAI_API_KEY")
 }
 
 fn zhipu_disabled_request() -> CompletionRequest {
@@ -43,7 +43,7 @@ fn zhipu_disabled_request() -> CompletionRequest {
         .messages(vec![user_message("请回答：2 + 2 等于几？")])
         .max_tokens(128)
         .reasoning(Some(ReasoningConfig {
-            effort: Some("none".to_string()),
+            effort: Some("low".to_string()),
             summary: Some(ReasoningSummary::Disabled),
         }))
         .build()
@@ -57,7 +57,7 @@ fn zhipu_thinking_request() -> CompletionRequest {
         .messages(vec![user_message("比较 9.11 和 9.8 哪个更大？")])
         .max_tokens(1024)
         .reasoning(Some(ReasoningConfig {
-            effort: Some("enabled".to_string()),
+            effort: Some("high".to_string()),
             summary: Some(ReasoningSummary::Enabled),
         }))
         .build()
@@ -104,22 +104,19 @@ async fn run_zhipu(
         "zhipu-live-session",
         0,
     ));
-    let context = ModelInvocationContext::new(ModelSession::default(), event_tx).with_trace(
-        CompletionTraceContext {
-            session_id: "zhipu-live-session".to_string(),
-            turn_id: "zhipu-live-turn".to_string(),
-            inference_id: "zhipu-live-inference".to_string(),
-        },
-        trace_sink,
-    );
+    let context = ModelInvocationContext::new(ModelSession::default())
+        .with_events(event_tx)
+        .with_trace(
+            CompletionTraceContext {
+                session_id: "zhipu-live-session".to_string(),
+                turn_id: "zhipu-live-turn".to_string(),
+                inference_id: "zhipu-live-inference".to_string(),
+            },
+            trace_sink,
+        );
 
     let response = match runtime.complete(request, context).await {
         Ok(response) => response,
-        Err(error) if is_live_quota_error(&error.to_string()) => {
-            eprintln!("skipping live Zhipu API test: {error}");
-            let _ = counter.await;
-            return None;
-        }
         Err(error) => panic!("live Zhipu API request failed: {error}"),
     };
     let counts = counter.await.unwrap();
@@ -127,15 +124,9 @@ async fn run_zhipu(
     Some((response, counts))
 }
 
-fn is_live_quota_error(error: &str) -> bool {
-    error.contains("429") || error.contains("余额不足") || error.contains("无可用资源包")
-}
-
 #[tokio::test]
 async fn zhipu_chat_completion_smoke() {
-    let Some(api_key) = live_api_key() else {
-        return;
-    };
+    let api_key = live_api_key();
 
     let Some((response, _counts)) = run_zhipu(api_key, zhipu_disabled_request()).await else {
         return;
@@ -146,9 +137,7 @@ async fn zhipu_chat_completion_smoke() {
 
 #[tokio::test]
 async fn zhipu_streams_thinking_mode() {
-    let Some(api_key) = live_api_key() else {
-        return;
-    };
+    let api_key = live_api_key();
 
     let Some((response, counts)) = run_zhipu(api_key, zhipu_thinking_request()).await else {
         return;

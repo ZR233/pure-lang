@@ -10,10 +10,12 @@ import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'settings.freezed.dart';
 
 // These functions are ignored because they are not marked as `pub`: `bridge_input_source`, `bridge_modality`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`
 
 /// Provider 配置中由用户定义的模型，不复制内置 catalog 元数据。
 class BridgeCustomModelSettingsDto {
+  final BigInt contextWindow;
+  final BigInt maxOutputTokens;
   final String slug;
   final String displayName;
   final List<String> reasoningEfforts;
@@ -23,6 +25,8 @@ class BridgeCustomModelSettingsDto {
   final String defaultConnectionMode;
 
   const BridgeCustomModelSettingsDto({
+    required this.contextWindow,
+    required this.maxOutputTokens,
     required this.slug,
     required this.displayName,
     required this.reasoningEfforts,
@@ -34,6 +38,8 @@ class BridgeCustomModelSettingsDto {
 
   @override
   int get hashCode =>
+      contextWindow.hashCode ^
+      maxOutputTokens.hashCode ^
       slug.hashCode ^
       displayName.hashCode ^
       reasoningEfforts.hashCode ^
@@ -47,6 +53,8 @@ class BridgeCustomModelSettingsDto {
       identical(this, other) ||
       other is BridgeCustomModelSettingsDto &&
           runtimeType == other.runtimeType &&
+          contextWindow == other.contextWindow &&
+          maxOutputTokens == other.maxOutputTokens &&
           slug == other.slug &&
           displayName == other.displayName &&
           reasoningEfforts == other.reasoningEfforts &&
@@ -406,24 +414,24 @@ enum BridgeModelInputSource { local, remoteUrl }
 
 enum BridgeModelModality { text, image, audio, video, file }
 
-class BridgeModelPricing {
-  final String currency;
-  final double? inputPerMtok;
-  final double? outputPerMtok;
+class BridgeModelPriceTier {
+  final String label;
+  final double inputPerMtok;
+  final double outputPerMtok;
   final double? cacheReadPerMtok;
   final double? cacheWritePerMtok;
 
-  const BridgeModelPricing({
-    required this.currency,
-    this.inputPerMtok,
-    this.outputPerMtok,
+  const BridgeModelPriceTier({
+    required this.label,
+    required this.inputPerMtok,
+    required this.outputPerMtok,
     this.cacheReadPerMtok,
     this.cacheWritePerMtok,
   });
 
   @override
   int get hashCode =>
-      currency.hashCode ^
+      label.hashCode ^
       inputPerMtok.hashCode ^
       outputPerMtok.hashCode ^
       cacheReadPerMtok.hashCode ^
@@ -432,13 +440,44 @@ class BridgeModelPricing {
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is BridgeModelPricing &&
+      other is BridgeModelPriceTier &&
           runtimeType == other.runtimeType &&
-          currency == other.currency &&
+          label == other.label &&
           inputPerMtok == other.inputPerMtok &&
           outputPerMtok == other.outputPerMtok &&
           cacheReadPerMtok == other.cacheReadPerMtok &&
           cacheWritePerMtok == other.cacheWritePerMtok;
+}
+
+class BridgeModelPricing {
+  final String currency;
+  final List<BridgeModelPriceTier> tiers;
+  final String source;
+  final PlatformInt64 verifiedAt;
+
+  const BridgeModelPricing({
+    required this.currency,
+    required this.tiers,
+    required this.source,
+    required this.verifiedAt,
+  });
+
+  @override
+  int get hashCode =>
+      currency.hashCode ^
+      tiers.hashCode ^
+      source.hashCode ^
+      verifiedAt.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeModelPricing &&
+          runtimeType == other.runtimeType &&
+          currency == other.currency &&
+          tiers == other.tiers &&
+          source == other.source &&
+          verifiedAt == other.verifiedAt;
 }
 
 class BridgeModelReasoningDescriptor {
@@ -552,6 +591,7 @@ class BridgeProviderConnectionModeDescriptor {
 }
 
 class BridgeProviderPresetDescriptor {
+  final bool pricingEnabled;
   final String id;
   final String displayName;
   final String? description;
@@ -564,6 +604,7 @@ class BridgeProviderPresetDescriptor {
   final BridgeProviderServiceCapabilitiesDescriptor serviceCapabilities;
 
   const BridgeProviderPresetDescriptor({
+    required this.pricingEnabled,
     required this.id,
     required this.displayName,
     this.description,
@@ -578,6 +619,7 @@ class BridgeProviderPresetDescriptor {
 
   @override
   int get hashCode =>
+      pricingEnabled.hashCode ^
       id.hashCode ^
       displayName.hashCode ^
       description.hashCode ^
@@ -594,6 +636,7 @@ class BridgeProviderPresetDescriptor {
       identical(this, other) ||
       other is BridgeProviderPresetDescriptor &&
           runtimeType == other.runtimeType &&
+          pricingEnabled == other.pricingEnabled &&
           id == other.id &&
           displayName == other.displayName &&
           description == other.description &&
@@ -636,11 +679,13 @@ class BridgeProviderServiceCapabilitiesDescriptor {
 
 /// 不含 secret 的 Provider canonical 设置视图。
 class BridgeProviderSettingsDto {
+  final bool pricingEnabled;
   final String id;
   final String templateKind;
   final String name;
   final String baseUrl;
   final bool hasBearerToken;
+  final bool credentialRequired;
   final String capabilitySource;
   final bool hostedWebSearch;
   final String hostedWebSearchDialect;
@@ -653,11 +698,13 @@ class BridgeProviderSettingsDto {
   final String? catalogId;
 
   const BridgeProviderSettingsDto({
+    required this.pricingEnabled,
     required this.id,
     required this.templateKind,
     required this.name,
     required this.baseUrl,
     required this.hasBearerToken,
+    required this.credentialRequired,
     required this.capabilitySource,
     required this.hostedWebSearch,
     required this.hostedWebSearchDialect,
@@ -672,11 +719,13 @@ class BridgeProviderSettingsDto {
 
   @override
   int get hashCode =>
+      pricingEnabled.hashCode ^
       id.hashCode ^
       templateKind.hashCode ^
       name.hashCode ^
       baseUrl.hashCode ^
       hasBearerToken.hashCode ^
+      credentialRequired.hashCode ^
       capabilitySource.hashCode ^
       hostedWebSearch.hashCode ^
       hostedWebSearchDialect.hashCode ^
@@ -693,11 +742,13 @@ class BridgeProviderSettingsDto {
       identical(this, other) ||
       other is BridgeProviderSettingsDto &&
           runtimeType == other.runtimeType &&
+          pricingEnabled == other.pricingEnabled &&
           id == other.id &&
           templateKind == other.templateKind &&
           name == other.name &&
           baseUrl == other.baseUrl &&
           hasBearerToken == other.hasBearerToken &&
+          credentialRequired == other.credentialRequired &&
           capabilitySource == other.capabilitySource &&
           hostedWebSearch == other.hostedWebSearch &&
           hostedWebSearchDialect == other.hostedWebSearchDialect &&
@@ -1085,12 +1136,7 @@ class ProviderInput {
   final String name;
   final String baseUrl;
   final ProviderSecretInput secret;
-  final String capabilitySource;
-  final bool hostedWebSearch;
-  final String hostedWebSearchDialect;
-  final String? standaloneWebSearch;
-  final String promptCacheDialect;
-  final bool responsesProgrammaticToolCalling;
+  final bool pricingEnabled;
   final String defaultModel;
   final List<ProviderModelInput> customModels;
   final List<ProviderModelConnectionInput> modelConnectionModes;
@@ -1102,12 +1148,7 @@ class ProviderInput {
     required this.name,
     required this.baseUrl,
     required this.secret,
-    required this.capabilitySource,
-    required this.hostedWebSearch,
-    required this.hostedWebSearchDialect,
-    this.standaloneWebSearch,
-    required this.promptCacheDialect,
-    required this.responsesProgrammaticToolCalling,
+    required this.pricingEnabled,
     required this.defaultModel,
     required this.customModels,
     required this.modelConnectionModes,
@@ -1121,12 +1162,7 @@ class ProviderInput {
       name.hashCode ^
       baseUrl.hashCode ^
       secret.hashCode ^
-      capabilitySource.hashCode ^
-      hostedWebSearch.hashCode ^
-      hostedWebSearchDialect.hashCode ^
-      standaloneWebSearch.hashCode ^
-      promptCacheDialect.hashCode ^
-      responsesProgrammaticToolCalling.hashCode ^
+      pricingEnabled.hashCode ^
       defaultModel.hashCode ^
       customModels.hashCode ^
       modelConnectionModes.hashCode;
@@ -1142,13 +1178,7 @@ class ProviderInput {
           name == other.name &&
           baseUrl == other.baseUrl &&
           secret == other.secret &&
-          capabilitySource == other.capabilitySource &&
-          hostedWebSearch == other.hostedWebSearch &&
-          hostedWebSearchDialect == other.hostedWebSearchDialect &&
-          standaloneWebSearch == other.standaloneWebSearch &&
-          promptCacheDialect == other.promptCacheDialect &&
-          responsesProgrammaticToolCalling ==
-              other.responsesProgrammaticToolCalling &&
+          pricingEnabled == other.pricingEnabled &&
           defaultModel == other.defaultModel &&
           customModels == other.customModels &&
           modelConnectionModes == other.modelConnectionModes;
@@ -1178,31 +1208,25 @@ class ProviderModelConnectionInput {
 class ProviderModelInput {
   final String slug;
   final String displayName;
-  final List<String> reasoningEfforts;
-  final String? baseInstructions;
   final String wireProtocol;
-  final List<String> supportedConnectionModes;
-  final String defaultConnectionMode;
+  final BigInt contextWindow;
+  final BigInt maxOutputTokens;
 
   const ProviderModelInput({
     required this.slug,
     required this.displayName,
-    required this.reasoningEfforts,
-    this.baseInstructions,
     required this.wireProtocol,
-    required this.supportedConnectionModes,
-    required this.defaultConnectionMode,
+    required this.contextWindow,
+    required this.maxOutputTokens,
   });
 
   @override
   int get hashCode =>
       slug.hashCode ^
       displayName.hashCode ^
-      reasoningEfforts.hashCode ^
-      baseInstructions.hashCode ^
       wireProtocol.hashCode ^
-      supportedConnectionModes.hashCode ^
-      defaultConnectionMode.hashCode;
+      contextWindow.hashCode ^
+      maxOutputTokens.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1211,11 +1235,9 @@ class ProviderModelInput {
           runtimeType == other.runtimeType &&
           slug == other.slug &&
           displayName == other.displayName &&
-          reasoningEfforts == other.reasoningEfforts &&
-          baseInstructions == other.baseInstructions &&
           wireProtocol == other.wireProtocol &&
-          supportedConnectionModes == other.supportedConnectionModes &&
-          defaultConnectionMode == other.defaultConnectionMode;
+          contextWindow == other.contextWindow &&
+          maxOutputTokens == other.maxOutputTokens;
 }
 
 @freezed

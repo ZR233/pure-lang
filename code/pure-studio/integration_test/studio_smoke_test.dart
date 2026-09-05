@@ -53,6 +53,99 @@ void main() {
     expect(find.text('integration smoke'), findsWidgets);
   });
 
+  testWidgets(
+    'compatible provider can be configured, selected and used without extra settings',
+    (tester) async {
+      final api = DemoStudioApi();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            studioApiProvider.overrideWithValue(api),
+            studioUpdateEnabledProvider.overrideWithValue(false),
+          ],
+          child: const PureStudioApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(StudioDriverKeys.settingsOpen));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(StudioDriverKeys.settingsTab('providers')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(StudioDriverKeys.providerAdd));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(StudioDriverKeys.providerPreset));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('OpenAI API 兼容').last);
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<SwitchListTile>(
+              find.byKey(StudioDriverKeys.providerPricing),
+            )
+            .value,
+        isFalse,
+      );
+      await tester.ensureVisible(find.byKey(StudioDriverKeys.providerModelAdd));
+      await tester.tap(find.byKey(StudioDriverKeys.providerModelAdd));
+      await tester.pumpAndSettle();
+      final id = find.descendant(
+        of: find.byKey(StudioDriverKeys.customModelId(0)),
+        matching: find.byType(TextFormField),
+      );
+      await tester.ensureVisible(id);
+      await tester.enterText(id, 'local-coder');
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.byKey(StudioDriverKeys.providerSave),
+        -400,
+        scrollable: find
+            .descendant(
+              of: find.byKey(StudioDriverKeys.providerEditorScroll),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
+      await tester.tap(find.byKey(StudioDriverKeys.providerSave));
+      await tester.pumpAndSettle();
+      final state = await api.readStudioState();
+      final provider = state.providers.singleWhere(
+        (provider) => provider.templateKind == 'openai-compatible',
+      );
+      expect(provider.defaultModel, 'local-coder');
+      expect(provider.pricingEnabled, isFalse);
+      expect(provider.hasBearerToken, isFalse);
+      await tester.tap(find.byKey(StudioDriverKeys.settingsBack));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(StudioDriverKeys.model));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(StudioDriverKeys.modelOption(provider.id, 'local-coder')),
+      );
+      await tester.pumpAndSettle();
+      final selected = (await api.readStudioState()).roles.firstWhere(
+        (role) => role.key == 'planner',
+      );
+      expect(selected.providerId, provider.id);
+      expect(selected.model, 'local-coder');
+      expect(selected.effort, isEmpty);
+      await tester.enterText(
+        find.byKey(StudioDriverKeys.composerInput),
+        'Complete the compatible-provider acceptance task.',
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(StudioDriverKeys.composerSubmit));
+      await _pumpUntilFound(tester, find.byKey(StudioDriverKeys.composerStop));
+      await _pumpUntilFound(
+        tester,
+        find.byKey(StudioDriverKeys.composerSubmit),
+      );
+      expect(
+        find.text('Complete the compatible-provider acceptance task.'),
+        findsWidgets,
+      );
+    },
+  );
+
   testWidgets('provider settings and typed interactions expose stable keys', (
     tester,
   ) async {

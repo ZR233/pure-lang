@@ -10,7 +10,6 @@ use pl_protocol::{
 
 use pl_core::*;
 use pl_model::completion::CompletionResponse;
-use pl_protocol::TokenUsage;
 use pretty_assertions::assert_eq;
 
 fn text_message(text: &str) -> Message {
@@ -61,7 +60,7 @@ fn push_assistant_completion_response_adds_text_message() {
         responses_context_items: Vec::new(),
         orchestration: Default::default(),
         timing: None,
-        usage: TokenUsage::default(),
+        accounting: pl_protocol::InferenceAccounting::default(),
         model: "test-model".to_string(),
         response_id: Some("resp-1".to_string()),
     };
@@ -98,7 +97,7 @@ fn push_assistant_completion_response_preserves_tool_call_history() {
         responses_context_items: Vec::new(),
         orchestration: Default::default(),
         timing: None,
-        usage: TokenUsage::default(),
+        accounting: pl_protocol::InferenceAccounting::default(),
         model: "test-model".to_string(),
         response_id: Some("resp-1".to_string()),
     };

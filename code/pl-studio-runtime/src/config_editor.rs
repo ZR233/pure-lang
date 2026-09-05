@@ -9,21 +9,19 @@ use crate::config::{
 };
 use crate::first_run::ProviderTemplateKind;
 use crate::{
-    AgentModelConfig, ProviderCapabilitySelection, ProviderConfig, ProviderModelCatalogConfig,
-    ProviderPresetId, builtin_provider_catalog,
+    AgentModelConfig, ProviderConfig, ProviderModelCatalogConfig, ProviderPresetId,
+    builtin_provider_catalog,
 };
-use pl_model::model::{ModelInfo, ModelParameter, ModelTransportProfile};
+use pl_model::model::{ModelInfo, ModelTransportProfile};
 use pl_model::provider::{ProviderConnectionMode, ProviderEndpoint, ProviderWireProtocol};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderModelEdit {
     pub slug: String,
     pub display_name: String,
-    pub efforts: Vec<String>,
-    pub base_instructions: String,
     pub protocol: ProviderWireProtocol,
-    pub supported_connection_modes: Vec<ProviderConnectionMode>,
-    pub default_connection_mode: ProviderConnectionMode,
+    pub context_window: u64,
+    pub max_output_tokens: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,7 +32,7 @@ pub struct ProviderEdit {
     pub name: String,
     pub base_url: Option<String>,
     pub bearer_token: Option<String>,
-    pub capabilities: ProviderCapabilitySelection,
+    pub pricing_mode: pl_protocol::PricingMode,
     pub default_model: String,
     pub custom_models: Vec<ProviderModelEdit>,
     pub model_connection_modes: BTreeMap<String, ProviderConnectionMode>,
@@ -67,36 +65,40 @@ impl ProviderModelEdit {
         let mut model = current
             .filter(|model| model.slug == slug)
             .cloned()
-            .unwrap_or_else(|| ModelInfo::fallback(&slug));
-        model.display_name = non_empty_trimmed(&self.display_name, "model display_name")?;
-        let efforts = normalized_efforts(&self.efforts);
-        let existing_effort = model
-            .parameters
-            .iter()
-            .find(|parameter| parameter.name == "effort");
-        let effort_wire = existing_effort
-            .filter(|parameter| parameter.candidates == efforts)
-            .map(|parameter| parameter.wire.clone())
-            .unwrap_or_default();
-        let effort_label = existing_effort.and_then(|parameter| parameter.label.clone());
-        model
-            .parameters
-            .retain(|parameter| parameter.name != "effort");
-        if !efforts.is_empty() {
-            model.parameters.push(ModelParameter {
-                name: "effort".to_string(),
-                label: effort_label,
-                candidates: efforts,
-                wire: effort_wire,
-            });
+            .unwrap_or_else(|| ModelInfo::compatible(&slug));
+        model.display_name =
+            trim_optional(Some(&self.display_name)).unwrap_or_else(|| slug.clone());
+        if self.context_window == 0
+            || self.max_output_tokens == 0
+            || self.max_output_tokens > self.context_window
+        {
+            return Err(PureError::ConfigError(
+                "custom model budgets must be positive and output must fit its context".into(),
+            ));
         }
-        model.base_instructions = self.base_instructions.trim().to_string();
-        model.transport = ModelTransportProfile {
+        model.context_window = Some(self.context_window);
+        model.max_context_window = Some(self.context_window);
+        model.max_output_tokens = Some(self.max_output_tokens);
+        model.binding.request.protocol = match self.protocol {
+            ProviderWireProtocol::Responses => {
+                pl_model::model::ModelProtocolOptions::Responses(Default::default())
+            }
+            ProviderWireProtocol::ChatCompletions => {
+                pl_model::model::ModelProtocolOptions::ChatCompletions(
+                    pl_model::model::ChatRequestOptions {
+                        include_usage: true,
+                        ..Default::default()
+                    },
+                )
+            }
+        };
+        model.binding.transport = ModelTransportProfile {
             protocol: self.protocol,
-            supported_connection_modes: self.supported_connection_modes.clone(),
-            default_connection_mode: self.default_connection_mode,
+            supported_connection_modes: vec![ProviderConnectionMode::Http],
+            default_connection_mode: ProviderConnectionMode::Http,
         };
         model
+            .binding
             .transport
             .validate(&slug)
             .map_err(|error| PureError::ConfigError(error.to_string()))?;
@@ -151,28 +153,18 @@ impl ProviderEdit {
                     config.apply_patch_tool_type = current.apply_patch_tool_type;
                     config.capabilities = current.capabilities.clone();
                 }
-                let ProviderModelCatalogConfig::Bundled {
-                    additional_models, ..
-                } = &mut config.catalog
-                else {
-                    return Err(PureError::ConfigError(format!(
-                        "provider preset {preset_id} must use a bundled catalog"
-                    )));
-                };
-                *additional_models = custom_models;
+                match &mut config.catalog {
+                    ProviderModelCatalogConfig::Bundled {
+                        additional_models, ..
+                    } => *additional_models = custom_models,
+                    ProviderModelCatalogConfig::Explicit { models, .. } => *models = custom_models,
+                }
                 config
             }
             None => {
-                if matches!(
-                    self.capabilities,
-                    ProviderCapabilitySelection::PresetDefaults
-                ) {
-                    return Err(PureError::ConfigError(format!(
-                        "custom provider {provider_key} must use explicit service capabilities"
-                    )));
-                }
                 let current_custom = current.filter(|provider| provider.preset_id().is_none());
                 let info = ProviderEndpoint {
+                    adapter: pl_model::provider::ProviderAdapterKind::OpenAiCompatible,
                     name: name.clone(),
                     base_url: base_url.clone(),
                     bearer_token: bearer_token.clone(),
@@ -195,7 +187,7 @@ impl ProviderEdit {
         for (model, mode) in &self.model_connection_modes {
             config.set_model_connection_mode(model, *mode)?;
         }
-        config.capabilities = self.capabilities.clone();
+        config.pricing_mode = self.pricing_mode;
         config.name = name;
         config.base_url = base_url;
         config.bearer_token = bearer_token;
@@ -359,16 +351,13 @@ fn role_edit_to_route(
         })?;
     let effort = edit.effort.trim();
     let effort = if effort.is_empty() {
-        model.default_effort().ok_or_else(|| {
-            let role_key = role.key();
-            PureError::ConfigError(format!("role {role_key} model must define effort"))
-        })?
+        model.default_effort()
     } else if model
         .supported_efforts()
         .iter()
         .any(|candidate| candidate == effort)
     {
-        effort.to_string()
+        Some(effort.to_string())
     } else {
         return Err(PureError::ConfigError(format!(
             "role {} uses unsupported effort '{}' for model {provider_key}.{model_slug}",
@@ -380,7 +369,7 @@ fn role_edit_to_route(
     Ok(ModelRouteConfig {
         provider: provider_id,
         model: model_slug,
-        effort: Some(ReasoningEffort::new(effort)),
+        effort: effort.map(ReasoningEffort::new),
     })
 }
 
@@ -395,21 +384,19 @@ fn reconciled_route(
         && let Ok(models) = provider.effective_models()
         && let Some(model) = models.iter().find(|model| model.slug == route.model)
     {
-        if route.effort.as_ref().is_none_or(|configured| {
-            model
-                .supported_efforts()
-                .iter()
-                .any(|effort| effort == configured.as_str())
-        }) {
+        let efforts = model.supported_efforts();
+        if (route.effort.is_none() && efforts.is_empty())
+            || route.effort.as_ref().is_some_and(|configured| {
+                efforts.iter().any(|effort| effort == configured.as_str())
+            })
+        {
             return Ok(route.clone());
         }
-        if let Some(effort) = model.default_effort() {
-            return Ok(ModelRouteConfig {
-                provider: route.provider.clone(),
-                model: route.model.clone(),
-                effort: Some(ReasoningEffort::new(effort)),
-            });
-        }
+        return Ok(ModelRouteConfig {
+            provider: route.provider.clone(),
+            model: route.model.clone(),
+            effort: model.default_effort().map(ReasoningEffort::new),
+        });
     }
 
     route_for_provider_default(providers, default_models, fallback_provider)
@@ -440,17 +427,12 @@ fn route_for_provider_default(
                 default_model
             ))
         })?;
-    let effort = model.default_effort().ok_or_else(|| {
-        PureError::ConfigError(format!(
-            "default model {} must define effort parameter",
-            default_model
-        ))
-    })?;
+    let effort = model.default_effort();
 
     Ok(ModelRouteConfig {
         provider: provider_key.clone(),
         model: default_model.clone(),
-        effort: Some(ReasoningEffort::new(effort)),
+        effort: effort.map(ReasoningEffort::new),
     })
 }
 
@@ -498,7 +480,7 @@ fn validate_models(provider_key: &str, default_model: &str, models: &[ModelInfo]
         }
     }
 
-    let model = models
+    let _model = models
         .iter()
         .find(|model| model.slug == default_model)
         .ok_or_else(|| {
@@ -506,26 +488,7 @@ fn validate_models(provider_key: &str, default_model: &str, models: &[ModelInfo]
                 "provider {provider_key} default_model is not in models: {default_model}"
             ))
         })?;
-    if model.default_effort().is_none() {
-        return Err(PureError::ConfigError(format!(
-            "provider {provider_key} default model {default_model} must define effort parameter"
-        )));
-    }
     Ok(())
-}
-
-fn normalized_efforts(values: &[String]) -> Vec<String> {
-    let efforts = values
-        .iter()
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
-        .map(ToOwned::to_owned)
-        .collect::<Vec<_>>();
-    if efforts.is_empty() {
-        vec!["high".to_string()]
-    } else {
-        efforts
-    }
 }
 
 #[cfg(test)]
@@ -542,7 +505,7 @@ mod tests {
             name: "OpenAI".to_string(),
             base_url: Some("https://api.openai.com/v1".to_string()),
             bearer_token: None,
-            capabilities: ProviderCapabilitySelection::PresetDefaults,
+            pricing_mode: pl_protocol::PricingMode::Catalog,
             default_model: "gpt-5.6-sol".to_string(),
             custom_models: Vec::new(),
             model_connection_modes: BTreeMap::new(),

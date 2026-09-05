@@ -402,7 +402,9 @@ mod tests {
             runtime_revision: Set(Some(1)),
             event_sequence: Set(1),
             metadata_json: Set("{}".to_string()),
-            usage_json: Set(serde_json::to_string(&pl_protocol::TokenUsage::default()).unwrap()),
+            usage_json: Set(
+                serde_json::to_string(&pl_protocol::InferenceTokenUsage::default()).unwrap(),
+            ),
             last_context_tokens: Set(None),
             trace_sequence: Set(0),
             created_at: Set(1),
@@ -426,7 +428,9 @@ mod tests {
             state_json: Set(serde_json::to_string(&state).unwrap()),
             state_kind: sea_orm::ActiveValue::NotSet,
             model_json: Set(None),
-            usage_json: Set(serde_json::to_string(&pl_protocol::TokenUsage::default()).unwrap()),
+            usage_json: Set(
+                serde_json::to_string(&pl_protocol::InferenceTokenUsage::default()).unwrap(),
+            ),
             metadata_json: Set(None),
             updated_at: Set(2),
         }

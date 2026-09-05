@@ -1,8 +1,8 @@
 //! Provider 远程上下文压缩请求与响应。
 
 use crate::completion::usage::ReasoningConfig;
+use pl_protocol::InferenceAccounting;
 use pl_protocol::ModelContextItem;
-use pl_protocol::TokenUsage;
 use pl_protocol::ToolSpec;
 use serde::{Deserialize, Serialize};
 
@@ -37,5 +37,5 @@ pub struct ModelCompactionRequest {
 #[derive(Debug, Clone)]
 pub struct ModelCompactionResponse {
     pub input: Vec<ModelContextItem>,
-    pub usage: Option<TokenUsage>,
+    pub accounting: InferenceAccounting,
 }

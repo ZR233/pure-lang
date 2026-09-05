@@ -4,12 +4,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use pl_core::{
     AgentSession, ToolCapabilityConfig, TurnBudget, TurnEngine, TurnEngineBuilder, TurnRequest,
-    TurnResultStatus,
 };
 use pl_trace::{TraceEvent, TraceEventKind};
 use pretty_assertions::{assert_eq, assert_ne};
 
-const DEEPSEEK_LIVE_ENV_KEY: &str = "API_KEY_DEEPSEEK";
+const DEEPSEEK_LIVE_ENV_KEY: &str = "DEEPSEEK_API_KEY";
 
 mod support;
 
@@ -39,14 +38,11 @@ impl Drop for TempWorkspace {
     }
 }
 
-fn live_api_key() -> Option<String> {
-    match std::env::var(DEEPSEEK_LIVE_ENV_KEY) {
-        Ok(value) if !value.trim().is_empty() => Some(value),
-        _ => {
-            eprintln!("{DEEPSEEK_LIVE_ENV_KEY} is not set; skipping live trace test");
-            None
-        }
-    }
+fn live_api_key() -> String {
+    std::env::var(DEEPSEEK_LIVE_ENV_KEY)
+        .ok()
+        .filter(|key| !key.trim().is_empty())
+        .expect("explicit live acceptance requires configured provider credentials")
 }
 
 async fn configured_core(api_key: String, workspace: &Path) -> TurnEngine {
@@ -59,7 +55,7 @@ async fn configured_core(api_key: String, workspace: &Path) -> TurnEngine {
         .unwrap()
         .with_tool_capabilities(capabilities)
         .build();
-    core.register_default_tools(workspace, None).await;
+    core.install_default_tools(workspace, None).await.unwrap();
     core
 }
 
@@ -70,7 +66,7 @@ fn turn_ids(events: &[TraceEvent]) -> HashSet<String> {
         .filter_map(|event| match &event.kind {
             TraceEventKind::TracePartStarted { item }
             | TraceEventKind::TracePartCompleted { item }
-            | TraceEventKind::TracePartFailed { item, .. } => Some(item.turn_id.clone()),
+            | TraceEventKind::TracePartFailed { item, .. } => Some(item.turn_id().to_string()),
             TraceEventKind::TracePartDelta { event } => Some(event.turn_id.clone()),
             _ => None,
         })
@@ -84,7 +80,7 @@ fn item_ids(events: &[TraceEvent]) -> HashSet<String> {
         .filter_map(|event| match &event.kind {
             TraceEventKind::TracePartStarted { item }
             | TraceEventKind::TracePartCompleted { item }
-            | TraceEventKind::TracePartFailed { item, .. } => Some(item.item_id.clone()),
+            | TraceEventKind::TracePartFailed { item, .. } => Some(item.item_id().to_string()),
             TraceEventKind::TracePartDelta { event } => Some(event.item_id.clone()),
             _ => None,
         })
@@ -96,9 +92,9 @@ fn final_text_items(events: &[TraceEvent]) -> Vec<String> {
         .iter()
         .filter_map(|event| match &event.kind {
             TraceEventKind::TracePartStarted { item }
-                if item.kind == pl_trace::TracePartKind::Text =>
+                if item.kind() == pl_trace::TracePartKind::Text =>
             {
-                Some(item.item_id.clone())
+                Some(item.item_id().to_string())
             }
             _ => None,
         })
@@ -110,9 +106,7 @@ fn final_text_items(events: &[TraceEvent]) -> Vec<String> {
 
 #[tokio::test]
 async fn cross_turn_trace_isolation_live() {
-    let Some(api_key) = live_api_key() else {
-        return;
-    };
+    let api_key = live_api_key();
 
     let workspace = TempWorkspace::new("trace-live");
     tokio::fs::create_dir_all(workspace.path()).await.unwrap();
@@ -129,11 +123,10 @@ async fn cross_turn_trace_isolation_live() {
         .run_turn_with_trace(&mut session, request1, &mut recorder, Default::default())
         .await
         .unwrap();
-    assert_eq!(
-        result1.status,
-        TurnResultStatus::Completed,
+    assert!(
+        result1.is_completed(),
         "turn 1 failed: {:?}",
-        result1.error
+        result1.outcome
     );
     let turn1_turn_ids = turn_ids(&result1.trace_events);
     let turn1_item_ids = item_ids(&result1.trace_events);
@@ -157,11 +150,10 @@ async fn cross_turn_trace_isolation_live() {
         .run_turn_with_trace(&mut session, request2, &mut recorder, Default::default())
         .await
         .unwrap();
-    assert_eq!(
-        result2.status,
-        TurnResultStatus::Completed,
+    assert!(
+        result2.is_completed(),
         "turn 2 failed: {:?}",
-        result2.error
+        result2.outcome
     );
     let turn2_turn_ids = turn_ids(&result2.trace_events);
     let turn2_item_ids = item_ids(&result2.trace_events);

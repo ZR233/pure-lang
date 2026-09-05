@@ -12,6 +12,7 @@ ProviderSettingsView _providerSettingsFromFrb(
   };
 
   return ProviderSettingsView(
+    pricingEnabled: value.pricingEnabled,
     id: value.id,
     templateKind: value.templateKind,
     name: value.name,
@@ -19,11 +20,14 @@ ProviderSettingsView _providerSettingsFromFrb(
     baseUrl: value.baseUrl,
     bearerToken: '',
     hasBearerToken: value.hasBearerToken,
+    credentialRequired: value.credentialRequired,
     defaultModel: value.defaultModel,
     models: const [],
     customModels: customModels,
     modelConnectionModes: connectionModes,
-    status: value.hasBearerToken ? 'ready' : 'missingCredential',
+    status: value.hasBearerToken || !value.credentialRequired
+        ? 'ready'
+        : 'missingCredential',
     usageLabel: value.defaultModel,
     modelCount: '${customModels.length}',
     updatedAt: 'Loaded',
@@ -41,6 +45,8 @@ ProviderModelView _customModelSettingsFromFrb(
   frb.BridgeCustomModelSettingsDto value,
 ) {
   return ProviderModelView(
+    contextWindow: value.contextWindow.toInt(),
+    maxOutputTokens: value.maxOutputTokens.toInt(),
     slug: value.slug,
     displayName: value.displayName,
     baseInstructions: value.baseInstructions,

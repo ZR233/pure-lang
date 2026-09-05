@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use pl_protocol::{
     InferenceOrchestrationMetrics, PureError, ResponsesContextItem, ResponsesContextItemKind,
-    Result, TokenUsage, ToolCallCaller,
+    Result, ToolCallCaller, UsageReport,
 };
 use pl_trace::{AgentEvent, AgentEventSender, TraceEventSink, TraceTextChannel};
 
@@ -31,7 +31,7 @@ pub(crate) struct StreamCompletionAccumulator {
     responses_context_items: Vec<ResponsesContextItem>,
     tool_stream: ToolStream,
     lifecycle: StreamLifecycle,
-    final_usage: Option<TokenUsage>,
+    final_usage: Option<UsageReport>,
     response_id: Option<String>,
     state: StreamAccumulatorState,
     trace: Option<TraceProjection>,
@@ -390,7 +390,10 @@ impl StreamCompletionAccumulator {
             responses_context_items: self.responses_context_items,
             orchestration,
             timing: None,
-            usage: self.final_usage.unwrap_or_default(),
+            accounting: pl_protocol::InferenceAccounting {
+                usage: self.final_usage.unwrap_or_default(),
+                ..Default::default()
+            },
             model: String::new(),
         })
     }
@@ -400,6 +403,13 @@ impl StreamCompletionAccumulator {
             .tool_call_callers
             .remove(&call.id)
             .or_else(|| self.tool_call_callers.remove(&call.call_id));
+    }
+
+    pub(super) fn accounting(&self) -> pl_protocol::InferenceAccounting {
+        pl_protocol::InferenceAccounting {
+            usage: self.final_usage.clone().unwrap_or_default(),
+            ..Default::default()
+        }
     }
 
     pub(super) fn fail_attempt(&mut self, error: &PureError, event_tx: &AgentEventSender) {

@@ -226,7 +226,7 @@ mod tests {
         std::fs::create_dir_all(store.paths().config_dir()).unwrap();
         let legacy = toml::to_string_pretty(&StudioConfig::default_config())
             .unwrap()
-            .replace("schema_version = 17", "schema_version = 14");
+            .replace("schema_version = 18", "schema_version = 14");
         std::fs::write(store.paths().config_file(), legacy).unwrap();
 
         let runtime = ConfigRuntime::initialize(store).unwrap();

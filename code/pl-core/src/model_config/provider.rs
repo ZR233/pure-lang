@@ -46,6 +46,10 @@ pub enum ProviderCapabilitySelection {
 /// 具体默认模型不属于 Provider；调用方必须通过角色路由选择模型。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProviderConfig {
+    #[serde(default)]
+    pub adapter: pl_model::provider::ProviderAdapterKind,
+    #[serde(default)]
+    pub pricing_mode: pl_protocol::PricingMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preset: Option<ProviderPresetId>,
     pub name: String,
@@ -107,7 +111,9 @@ impl ProviderConfig {
     fn from_parts(info: ProviderEndpoint, catalog: ProviderModelCatalogConfig) -> Self {
         let service_capabilities = info.service_capabilities.clone();
         Self {
+            adapter: info.adapter,
             preset: None,
+            pricing_mode: pl_protocol::PricingMode::Catalog,
             name: info.name,
             base_url: info.base_url,
             bearer_token: info.bearer_token,
@@ -122,6 +128,12 @@ impl ProviderConfig {
 
     /// 记录创建该实例所使用的内置 preset。
     pub fn with_preset(mut self, preset: ProviderPresetId) -> Self {
+        self.pricing_mode = match preset.as_str() {
+            "zhipu-coding-plan" | "mimo-token-plan" | "openai-compatible" => {
+                pl_protocol::PricingMode::Disabled
+            }
+            _ => pl_protocol::PricingMode::Catalog,
+        };
         self.preset = Some(preset);
         self.capabilities = ProviderCapabilitySelection::PresetDefaults;
         self
@@ -141,6 +153,7 @@ impl ProviderConfig {
                         if self.base_url.trim_end_matches('/')
                             != preset.provider.base_url.trim_end_matches('/')
                         {
+                            capabilities.remote_compaction = false;
                             capabilities.responses_tools = Default::default();
                             capabilities.web_search.hosted_responses = false;
                         }
@@ -229,6 +242,7 @@ impl ProviderConfig {
             .find(|candidate| candidate.slug == model)
             .ok_or_else(|| PureError::ConfigError(format!("unknown model: {model}")))?;
         if !selected
+            .binding
             .transport
             .supported_connection_modes
             .contains(&mode)
@@ -237,7 +251,7 @@ impl ProviderConfig {
                 "model {model} does not support connection mode {mode:?}"
             )));
         }
-        if selected.transport.default_connection_mode == mode {
+        if selected.binding.transport.default_connection_mode == mode {
             self.connection_overrides_mut().remove(model);
         } else {
             self.connection_overrides_mut()
@@ -262,6 +276,7 @@ impl ProviderConfig {
     /// 解析不包含模型与 transport 事实的 runtime endpoint。
     pub fn to_endpoint(&self) -> Result<ProviderEndpoint> {
         Ok(ProviderEndpoint {
+            adapter: self.adapter,
             name: self.name.clone(),
             base_url: self.base_url.clone(),
             bearer_token: self.resolved_bearer_token(),
@@ -317,8 +332,7 @@ impl ProviderConfig {
         let mut slugs = BTreeSet::new();
         for model in &models {
             model
-                .transport
-                .validate(&model.slug)
+                .validate()
                 .map_err(|error| PureError::ConfigError(error.to_string()))?;
             model
                 .validate_media_contract()
@@ -362,9 +376,18 @@ impl ProviderConfig {
                     "provider {provider_id} catalog {catalog} does not match preset {preset_id}"
                 )))
             }
-            ProviderModelCatalogConfig::Explicit { .. } => Err(PureError::ConfigError(format!(
-                "provider {provider_id} cannot combine preset {preset_id} with an explicit catalog"
-            ))),
+            ProviderModelCatalogConfig::Explicit { .. } => {
+                if matches!(
+                    preset.provider.catalog,
+                    ProviderModelCatalogConfig::Explicit { .. }
+                ) {
+                    Ok(())
+                } else {
+                    Err(PureError::ConfigError(format!(
+                        "provider {provider_id} cannot combine preset {preset_id} with an explicit catalog"
+                    )))
+                }
+            }
         }
     }
 }
@@ -382,12 +405,17 @@ fn apply_connection_overrides(
                     "connection override references unknown model: {slug}"
                 ))
             })?;
-        if !model.transport.supported_connection_modes.contains(mode) {
+        if !model
+            .binding
+            .transport
+            .supported_connection_modes
+            .contains(mode)
+        {
             return Err(PureError::ConfigError(format!(
                 "model {slug} does not support connection mode {mode:?}"
             )));
         }
-        model.transport.default_connection_mode = *mode;
+        model.binding.transport.default_connection_mode = *mode;
     }
     Ok(models)
 }

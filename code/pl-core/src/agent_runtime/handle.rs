@@ -664,7 +664,7 @@ async fn receive<T>(receiver: oneshot::Receiver<T>) -> AgentRuntimeResult<T> {
 
 #[cfg(test)]
 mod tests {
-    use pl_protocol::TokenUsage;
+    use pl_protocol::InferenceTokenUsage;
 
     use super::*;
     use crate::agent_runtime::{
@@ -691,7 +691,7 @@ mod tests {
                 pl_protocol::TurnFailureCategory::Internal,
                 "previous failure",
             )),
-            usage: TokenUsage::default(),
+            usage: InferenceTokenUsage::default(),
             started_at: None,
             finished_at: 1,
         });
@@ -756,7 +756,7 @@ mod tests {
                 limit,
                 pl_protocol::TurnRolloverOutcome::NotAttempted,
             ),
-            usage: TokenUsage::default(),
+            usage: InferenceTokenUsage::default(),
             started_at: Some(1),
             finished_at: 2,
         });

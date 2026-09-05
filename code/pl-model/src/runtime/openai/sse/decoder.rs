@@ -22,6 +22,9 @@ use super::{DEFAULT_TEXT_ID, SseStreamEvent, process_sse_events};
 /// the decoder remembers `response.output_item.added` metadata for the stream.
 pub(crate) struct OpenAiStreamDecoder {
     visible_output: VisibleOutputProtocol,
+    chat_finished: bool,
+    chat_response_id: Option<String>,
+    terminal_received: bool,
     text_channels: HashMap<String, TraceTextChannel>,
     open_text_blocks: HashMap<String, OpenTextBlock>,
     open_reasoning_blocks: HashMap<String, String>,
@@ -39,6 +42,9 @@ impl OpenAiStreamDecoder {
     pub(crate) fn new(visible_output: VisibleOutputProtocol) -> Self {
         Self {
             visible_output,
+            chat_finished: false,
+            chat_response_id: None,
+            terminal_received: false,
             text_channels: HashMap::new(),
             open_text_blocks: HashMap::new(),
             open_reasoning_blocks: HashMap::new(),
@@ -48,6 +54,22 @@ impl OpenAiStreamDecoder {
     }
 
     pub(crate) fn decode(&mut self, event: &SseStreamEvent) -> Vec<ModelStreamEvent> {
+        if matches!(
+            event.kind.as_str(),
+            "response.completed" | "response.failed" | "response.incomplete"
+        ) {
+            if self.terminal_received {
+                return Vec::new();
+            }
+            self.terminal_received = true;
+        }
+        if let Some(choices) = &event.choices {
+            if event.id.is_some() {
+                self.chat_response_id.clone_from(&event.id);
+            }
+            self.chat_finished |= choices.iter().any(|choice| choice.finish_reason.is_some());
+        }
+
         if matches!(self.visible_output, VisibleOutputProtocol::TaggedText) {
             return self.normalize_fallback_events(process_sse_events(event));
         }
@@ -152,6 +174,17 @@ impl OpenAiStreamDecoder {
         }
 
         self.normalize_fallback_events(process_sse_events(event))
+    }
+
+    /// Chat finish_reason closes content, while trailing chunks can still carry final usage.
+    pub(crate) fn finish(&mut self) -> Vec<ModelStreamEvent> {
+        if self.chat_finished && !self.terminal_received {
+            self.terminal_received = true;
+            let response_id = self.chat_response_id.take();
+            self.normalize_fallback_events(vec![ModelStreamEvent::Completed { response_id }])
+        } else {
+            Vec::new()
+        }
     }
 
     fn normalize_fallback_events(
@@ -418,6 +451,9 @@ mod tests {
             for stream_event in decoder.decode(event) {
                 accumulator.apply(stream_event, &event_tx).unwrap();
             }
+        }
+        for event in decoder.finish() {
+            accumulator.apply(event, &event_tx).unwrap();
         }
         accumulator.finish(&event_tx).unwrap()
     }

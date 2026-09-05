@@ -15,7 +15,7 @@ use super::enabled_tools::record_enabled_tools;
 
 use crate::context_assembler::{ContextAssembler, TurnContextSnapshot};
 use crate::context_compaction::ensure_provider_can_consume_session;
-use crate::runtime_usage::{InferenceBillingInput, inference_billing_record, token_usage_snapshot};
+use crate::runtime_usage::{InferenceBillingInput, inference_billing_record};
 use crate::session::AgentSession;
 use crate::tool::ModelStepToolContext;
 use crate::trace::TraceRecorder;
@@ -43,10 +43,24 @@ pub(in crate::core) async fn run_turn_with_trace(
     recorder: &mut TraceRecorder,
     options: TurnOptions,
 ) -> Result<TurnResult> {
+    let mut billing = pl_protocol::TurnBillingRecord::new();
+    let mut result = run_steps(core, session, request, recorder, options, &mut billing).await?;
+    result.billing = billing;
+    Ok(result)
+}
+
+async fn run_steps(
+    core: &TurnEngine,
+    session: &mut AgentSession,
+    request: TurnRequest,
+    recorder: &mut TraceRecorder,
+    options: TurnOptions,
+    turn_billing: &mut pl_protocol::TurnBillingRecord,
+) -> Result<TurnResult> {
     let runtime = core.runtime.clone();
     let model_info = runtime.model().clone();
     let model = model_info.slug.clone();
-    ensure_provider_can_consume_session(model_info.transport.protocol, session)?;
+    ensure_provider_can_consume_session(model_info.binding.transport.protocol, session)?;
     let effort = core.effort.clone();
     let workspace = core.workspace.clone().unwrap_or_else(|| {
         crate::tool::AgentWorkspace::local(super::super::turn_result::default_workspace_root())
@@ -91,7 +105,7 @@ pub(in crate::core) async fn run_turn_with_trace(
     let mut last_model = model.clone();
     let mut last_context_tokens = None;
     let mut context_compactions = Vec::new();
-    let mut total_usage = pl_protocol::TokenUsage::default();
+    let mut total_usage = pl_protocol::InferenceTokenUsage::default();
     let mut safe_message_count = session.len();
     let mut session_message_count = safe_message_count;
     let mut inference_count = 0_u64;
@@ -215,6 +229,7 @@ pub(in crate::core) async fn run_turn_with_trace(
         )?;
 
         let compaction_step = CompactionStep {
+            turn_billing,
             session,
             runtime: &runtime,
             config: &core.context_compaction,
@@ -246,11 +261,6 @@ pub(in crate::core) async fn run_turn_with_trace(
         };
         if let Some(result) = super::compaction::run(compaction_step).await? {
             return Ok(result);
-        }
-        options.apply_budget_refresh(&mut budget_tracker);
-        if let Err(limit) = budget_tracker.check_wall_clock() {
-            budget_limit = Some(limit);
-            break;
         }
         budget_tracker.record_model_step();
         super::checkpoint::persist(
@@ -293,26 +303,47 @@ pub(in crate::core) async fn run_turn_with_trace(
             .parallel_tool_calls(parallel_tool_calls)
             .reasoning(reasoning.clone())
             .build();
-        let invocation = pl_model::runtime::ModelInvocationContext::new(
-            session.model_session(),
-            recorder.sender().clone(),
-        )
-        .with_prompt_cache_key(session.prompt_cache_key().map(ToString::to_string))
-        .with_trace(
-            pl_model::completion::CompletionTraceContext {
-                session_id: recorder.session_id().to_string(),
-                turn_id: turn_id.clone(),
-                inference_id: inference_id.clone(),
-            },
-            recorder
-                .trace_sink()
-                .expect("enabled turn tracing must provide a canonical sink"),
-        )
-        .with_cancellation(cancellation_token.clone());
+        let invocation = pl_model::runtime::ModelInvocationContext::new(session.model_session())
+            .with_events(recorder.sender().clone())
+            .with_prompt_cache_key(session.prompt_cache_key().map(ToString::to_string))
+            .with_trace(
+                pl_model::completion::CompletionTraceContext {
+                    session_id: recorder.session_id().to_string(),
+                    turn_id: turn_id.clone(),
+                    inference_id: inference_id.clone(),
+                },
+                recorder
+                    .trace_sink()
+                    .expect("enabled turn tracing must provide a canonical sink"),
+            )
+            .with_cancellation(cancellation_token.clone());
         progress.heartbeat(recorder, "正在等待模型响应。");
         progress.debug(recorder, format!("模型 `{model}` 流式请求已发起。"));
 
         let response_result = runtime.complete(completion_request, invocation).await;
+        if let Err(failure) = &response_result {
+            total_usage.merge(&failure.accounting.usage.totals());
+            let billing = inference_billing_record(InferenceBillingInput {
+                inference_id: inference_id.clone(),
+                provider_instance_id: runtime.provider_instance_id(),
+                provider: &runtime.endpoint().name,
+                model: &model,
+                accounting: &failure.accounting,
+                model_info: runtime.model(),
+                prompt: super::prompt_cache::current(session, &options.prompt_scope),
+                orchestration: Default::default(),
+                timing: None,
+                recorded_at: unix_seconds(),
+            });
+            super::inference::record(
+                turn_billing,
+                &options,
+                session,
+                recorder,
+                super::inference::from_billing(active_subagent.as_ref(), billing),
+            )
+            .await?;
+        }
         let mut response = match response_result {
             Ok(response) => response,
             Err(_) if is_cancelled(&options) => {
@@ -330,7 +361,7 @@ pub(in crate::core) async fn run_turn_with_trace(
             }
             Err(error) => {
                 let (error, severity, failure) =
-                    normalize_provider_error(active_subagent.as_ref(), error);
+                    normalize_provider_error(active_subagent.as_ref(), error.into());
                 return Ok(failed_turn_result(
                     recorder,
                     &turn_id,
@@ -345,13 +376,8 @@ pub(in crate::core) async fn run_turn_with_trace(
                 ));
             }
         };
+        let response_usage = response.accounting.usage.totals();
         response.orchestration.tool_schema_estimated_tokens = tool_schema_estimated_tokens;
-        options.apply_budget_refresh(&mut budget_tracker);
-        if let Err(limit) = budget_tracker.check_wall_clock() {
-            budget_limit = Some(limit);
-            break;
-        }
-
         let actual_model = if response.model.is_empty() {
             model.clone()
         } else {
@@ -365,7 +391,7 @@ pub(in crate::core) async fn run_turn_with_trace(
         )) {
             tracing::error!(%error, "failed to update inference model trace");
         }
-        let usage_snapshot = token_usage_snapshot(&response.usage);
+        let usage_snapshot = response_usage.public_snapshot();
         recorder.complete_inference_item(inference_item, usage_snapshot.clone());
         let model_info = runtime.model().clone();
         let recorded_at = unix_seconds();
@@ -374,40 +400,43 @@ pub(in crate::core) async fn run_turn_with_trace(
             provider_instance_id: runtime.provider_instance_id(),
             provider: &runtime.endpoint().name,
             model: &actual_model,
-            usage: &response.usage,
+            accounting: &response.accounting,
             model_info: &model_info,
-            prompt_cache_policy,
             prompt: super::prompt_cache::current(session, &options.prompt_scope),
             orchestration: response.orchestration.clone(),
             timing: response.timing,
             recorded_at,
         });
-        let response_prompt_tokens = response.usage.prompt_tokens;
-        let response_total_tokens = response
-            .usage
-            .total_tokens
-            .max(response.usage.prompt_tokens + response.usage.completion_tokens);
-        last_context_tokens = Some(response_total_tokens);
+        total_usage.merge(&response_usage);
+        inference_count = inference_count.saturating_add(1);
+        options.apply_budget_refresh(&mut budget_tracker);
+        if let Err(limit) = budget_tracker.check_wall_clock() {
+            super::inference::record(
+                turn_billing,
+                &options,
+                session,
+                recorder,
+                super::inference::from_billing(active_subagent.as_ref(), billing),
+            )
+            .await?;
+            budget_limit = Some(limit);
+            break;
+        }
+        let response_prompt_tokens = response_usage.prompt_tokens;
+        let response_total_tokens = response.accounting.usage.known_total_tokens();
+        if response_total_tokens.is_some() {
+            last_context_tokens = response_total_tokens;
+        }
         let response_reached_auto_compact_limit = model_info
             .resolved_auto_compact_limit()
-            .is_some_and(|limit| response_prompt_tokens >= limit || response_total_tokens >= limit);
+            .is_some_and(|limit| {
+                response_prompt_tokens >= limit
+                    || response_total_tokens.is_some_and(|tokens| tokens >= limit)
+            });
         let content = response.content.unwrap_or_default();
         let reasoning_content = response.reasoning_content.clone();
         let tool_calls = response.tool_calls;
         session.push_responses_context_items(response.responses_context_items);
-
-        total_usage.prompt_tokens += response.usage.prompt_tokens;
-        total_usage.completion_tokens += response.usage.completion_tokens;
-        total_usage.cached_prompt_tokens += response.usage.cached_prompt_tokens;
-        total_usage.cache_write_tokens += response.usage.cache_write_tokens;
-        total_usage.reasoning_tokens += response.usage.reasoning_tokens;
-        total_usage.total_tokens += response.usage.total_tokens.max(
-            response
-                .usage
-                .prompt_tokens
-                .saturating_add(response.usage.completion_tokens),
-        );
-        inference_count = inference_count.saturating_add(1);
 
         last_model = actual_model;
 
@@ -415,6 +444,7 @@ pub(in crate::core) async fn run_turn_with_trace(
             progress.milestone(recorder, "模型已完成正文生成。");
             if looks_like_unexecuted_tool_call_text(&content) {
                 super::inference::record(
+                    turn_billing,
                     &options,
                     session,
                     recorder,
@@ -443,6 +473,7 @@ pub(in crate::core) async fn run_turn_with_trace(
             session_message_count = session.len();
             safe_message_count = session_message_count;
             super::inference::record(
+                turn_billing,
                 &options,
                 session,
                 recorder,
@@ -477,7 +508,7 @@ pub(in crate::core) async fn run_turn_with_trace(
             last_reasoning_content = reasoning_content;
         }
         if response_reached_auto_compact_limit {
-            provider_prompt_tokens_for_compaction = Some(response_total_tokens);
+            provider_prompt_tokens_for_compaction = response_total_tokens;
         }
         let count = tool_calls.len();
         progress.tool_detail(recorder, format!("模型请求调用 {count} 个工具。"));
@@ -532,6 +563,7 @@ pub(in crate::core) async fn run_turn_with_trace(
             Err(ToolExecutionError::RespondToModel(error)) => {
                 session.truncate_messages(safe_message_count);
                 super::inference::record(
+                    turn_billing,
                     &options,
                     session,
                     recorder,
@@ -622,7 +654,8 @@ pub(in crate::core) async fn run_turn_with_trace(
         let remaining_context_tokens = model_info
             .resolved_auto_compact_limit()
             .or_else(|| model_info.resolved_context_window())
-            .map(|limit| limit.saturating_sub(response_total_tokens));
+            .zip(response_total_tokens)
+            .map(|(limit, tokens)| limit.saturating_sub(tokens));
         super::tool_results::apply_batch_budget(&mut tool_results, remaining_context_tokens);
         super::tool_results::normalize_programmatic_results(&mut tool_results, &tool_calls);
         billing.orchestration.tool_result_estimated_tokens =
@@ -680,6 +713,7 @@ pub(in crate::core) async fn run_turn_with_trace(
             last_content = content;
         }
         super::inference::record(
+            turn_billing,
             &options,
             session,
             recorder,

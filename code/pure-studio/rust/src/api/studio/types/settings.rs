@@ -19,12 +19,7 @@ pub struct ProviderInput {
     pub name: String,
     pub base_url: String,
     pub secret: ProviderSecretInput,
-    pub capability_source: String,
-    pub hosted_web_search: bool,
-    pub hosted_web_search_dialect: String,
-    pub standalone_web_search: Option<String>,
-    pub prompt_cache_dialect: String,
-    pub responses_programmatic_tool_calling: bool,
+    pub pricing_enabled: bool,
     pub default_model: String,
     pub custom_models: Vec<ProviderModelInput>,
     pub model_connection_modes: Vec<ProviderModelConnectionInput>,
@@ -35,11 +30,9 @@ pub struct ProviderInput {
 pub struct ProviderModelInput {
     pub slug: String,
     pub display_name: String,
-    pub reasoning_efforts: Vec<String>,
-    pub base_instructions: Option<String>,
     pub wire_protocol: String,
-    pub supported_connection_modes: Vec<String>,
-    pub default_connection_mode: String,
+    pub context_window: u64,
+    pub max_output_tokens: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -203,11 +196,13 @@ pub struct BridgeStudioSettingsDto {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct BridgeProviderSettingsDto {
+    pub pricing_enabled: bool,
     pub id: String,
     pub template_kind: String,
     pub name: String,
     pub base_url: String,
     pub has_bearer_token: bool,
+    pub credential_required: bool,
     pub capability_source: String,
     pub hosted_web_search: bool,
     pub hosted_web_search_dialect: String,
@@ -224,6 +219,8 @@ pub struct BridgeProviderSettingsDto {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct BridgeCustomModelSettingsDto {
+    pub context_window: u64,
+    pub max_output_tokens: u64,
     pub slug: String,
     pub display_name: String,
     pub reasoning_efforts: Vec<String>,
@@ -327,6 +324,7 @@ pub struct BridgeProviderCatalogSnapshot {
 
 #[derive(Debug, Clone)]
 pub struct BridgeProviderPresetDescriptor {
+    pub pricing_enabled: bool,
     pub id: String,
     pub display_name: String,
     pub description: Option<String>,
@@ -438,8 +436,16 @@ pub struct BridgeModelReasoningDescriptor {
 #[derive(Debug, Clone)]
 pub struct BridgeModelPricing {
     pub currency: String,
-    pub input_per_mtok: Option<f64>,
-    pub output_per_mtok: Option<f64>,
+    pub tiers: Vec<BridgeModelPriceTier>,
+    pub source: String,
+    pub verified_at: i64,
+}
+
+#[derive(Debug, Clone)]
+pub struct BridgeModelPriceTier {
+    pub label: String,
+    pub input_per_mtok: f64,
+    pub output_per_mtok: f64,
     pub cache_read_per_mtok: Option<f64>,
     pub cache_write_per_mtok: Option<f64>,
 }
@@ -453,6 +459,7 @@ impl From<pl_protocol::ProviderCatalogSnapshot> for BridgeProviderCatalogSnapsho
                 .presets
                 .into_iter()
                 .map(|preset| BridgeProviderPresetDescriptor {
+                    pricing_enabled: preset.pricing_enabled,
                     id: preset.id,
                     display_name: preset.display_name,
                     description: preset.description,
@@ -561,10 +568,19 @@ impl From<pl_protocol::ModelDescriptor> for BridgeModelDescriptor {
                 }),
             pricing: model.pricing.map(|pricing| BridgeModelPricing {
                 currency: pricing.currency,
-                input_per_mtok: pricing.input_per_mtok,
-                output_per_mtok: pricing.output_per_mtok,
-                cache_read_per_mtok: pricing.cache_read_per_mtok,
-                cache_write_per_mtok: pricing.cache_write_per_mtok,
+                source: pricing.source,
+                verified_at: pricing.verified_at,
+                tiers: pricing
+                    .tiers
+                    .into_iter()
+                    .map(|tier| BridgeModelPriceTier {
+                        label: tier.label,
+                        input_per_mtok: tier.input_per_mtok,
+                        output_per_mtok: tier.output_per_mtok,
+                        cache_read_per_mtok: tier.cache_read_per_mtok,
+                        cache_write_per_mtok: tier.cache_write_per_mtok,
+                    })
+                    .collect(),
             }),
         }
     }

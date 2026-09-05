@@ -5,15 +5,15 @@ use crate::model::capabilities::{
     PromptCacheModelCapabilities, ReasoningInterleaved, ReasoningInterleavedField,
     ToolCapabilities,
 };
-use crate::model::family::{ModelFamily, ModelInstanceSpec, ModelPricing};
+use crate::model::family::{ModelFamily, ModelInstanceSpec};
 use crate::model::info::{
     MaxTokensField, MediaWireFormat, ModelInfo, ModelRequestProfile, ModelTransportProfile,
     TruncationMode,
 };
 use crate::model::parameter::ModelParameter;
+use crate::model::pricing::{ModelPricing, TokenPriceTier};
 
-const MIMO_DEFAULT_MODEL_SLUGS: &[&str] =
-    &["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-pro", "mimo-v2-omni"];
+const MIMO_DEFAULT_MODEL_SLUGS: &[&str] = &["mimo-v2.5-pro", "mimo-v2.5"];
 
 pub fn mimo_default_model_slugs() -> &'static [&'static str] {
     MIMO_DEFAULT_MODEL_SLUGS
@@ -30,7 +30,7 @@ pub(super) fn models() -> Vec<ModelInfo> {
             context_window: 1_000_000,
             max_context_window: 1_000_000,
             max_output_tokens: Some(131_072),
-            pricing: ModelPricing::default(),
+            pricing: ModelPricing::published("CNY", vec![TokenPriceTier::flat(3.0, 6.0, Some(0.025), None)], "https://mimo.mi.com/docs/en-US/price/pay-as-you-go"),
         }),
         mimo_vision.instantiate(ModelInstanceSpec {
             slug: "mimo-v2.5",
@@ -40,25 +40,7 @@ pub(super) fn models() -> Vec<ModelInfo> {
             context_window: 1_000_000,
             max_context_window: 1_000_000,
             max_output_tokens: Some(32_768),
-            pricing: ModelPricing::default(),
-        }),
-        mimo_text.instantiate(ModelInstanceSpec {
-            slug: "mimo-v2-pro",
-            display_name: "MiMo V2 Pro",
-            description: "Xiaomi MiMo long-context reasoning model for complex agent tasks.",
-            context_window: 1_000_000,
-            max_context_window: 1_000_000,
-            max_output_tokens: Some(131_072),
-            pricing: ModelPricing::default(),
-        }),
-        mimo_vision.instantiate(ModelInstanceSpec {
-            slug: "mimo-v2-omni",
-            display_name: "MiMo V2 Omni",
-            description: "Xiaomi MiMo multimodal model for text and visual agent tasks.",
-            context_window: 256_000,
-            max_context_window: 256_000,
-            max_output_tokens: Some(32_768),
-            pricing: ModelPricing::default(),
+            pricing: ModelPricing::published("CNY", vec![TokenPriceTier::flat(1.0, 2.0, Some(0.02), None)], "https://mimo.mi.com/docs/en-US/price/pay-as-you-go"),
         }),
     ]
 }
@@ -92,7 +74,12 @@ fn mimo_family(
         parameters: vec![mimo_effort_parameter()],
         transport: ModelTransportProfile::chat_completions_http(),
         request_profile: ModelRequestProfile {
-            max_tokens_field: MaxTokensField::MaxCompletionTokens,
+            protocol: crate::model::ModelProtocolOptions::ChatCompletions(
+                crate::model::ChatRequestOptions {
+                    max_tokens_field: MaxTokensField::MaxCompletionTokens,
+                    ..Default::default()
+                },
+            ),
             media,
             ..ModelRequestProfile::default()
         },

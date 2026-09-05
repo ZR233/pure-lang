@@ -3,10 +3,9 @@ use std::collections::HashMap;
 use pl_model::completion::{CompletionRequest, ReasoningConfig};
 use pl_model::runtime::{ModelInvocationContext, ModelRuntime};
 use pl_protocol::{
-    Message, MessageContent, MessagePresentation, MessageRole, ModelContextItem, PureError, Result,
-    TokenUsage,
+    InferenceAccounting, Message, MessageContent, MessagePresentation, MessageRole,
+    ModelContextItem, PureError,
 };
-use pl_trace::AgentEventSender;
 
 use super::ContextCompactionConfig;
 use super::history::build_compacted_history;
@@ -21,12 +20,14 @@ pub(super) async fn compact_local(
     request_messages: &[Message],
     session_items: &[ModelContextItem],
     working_context_tail: Option<&Message>,
-    event_tx: AgentEventSender,
-    prompt_cache_key: Option<String>,
+    invocation: ModelInvocationContext,
     recorder: &mut TraceRecorder,
     progress: &mut Option<&mut ProgressEmitter>,
     max_output_tokens: Option<u64>,
-) -> Result<(Vec<ModelContextItem>, TokenUsage, String)> {
+) -> std::result::Result<
+    (Vec<ModelContextItem>, InferenceAccounting, String),
+    pl_model::completion::CompletionFailure,
+> {
     let mut input = request_messages
         .iter()
         .cloned()
@@ -55,9 +56,10 @@ pub(super) async fn compact_local(
             .maybe_max_tokens(max_tokens)
             .reasoning(None::<ReasoningConfig>)
             .build();
-        let invocation = ModelInvocationContext::new(Default::default(), event_tx.clone())
-            .with_prompt_cache_key(prompt_cache_key.clone());
-        let response = match runtime.complete(completion_request, invocation).await {
+        let response = match runtime
+            .complete(completion_request, invocation.clone())
+            .await
+        {
             Ok(response) => response,
             Err(error) if max_tokens.is_some() && is_unsupported_max_output_tokens(&error) => {
                 max_tokens = None;
@@ -81,7 +83,10 @@ pub(super) async fn compact_local(
             .content
             .filter(|content| !content.trim().is_empty())
         else {
-            return Err(PureError::LlmError(config.empty_summary_error.clone()));
+            return Err(pl_model::completion::CompletionFailure {
+                source: PureError::LlmError(config.empty_summary_error.clone()),
+                accounting: Box::new(response.accounting),
+            });
         };
         let original_messages = session_items
             .iter()
@@ -92,7 +97,7 @@ pub(super) async fn compact_local(
             .into_iter()
             .map(ModelContextItem::from)
             .collect();
-        return Ok((replacement, response.usage, summary));
+        return Ok((replacement, response.accounting, summary));
     }
 }
 

@@ -642,5 +642,15 @@
   "roleExecutor": "执行者",
   "roleWorktreeExecutor": "Worktree 执行者",
   "roleReviewer": "审查者",
-  "roleEmpty": "代理"
+  "roleEmpty": "代理",
+  "settingsPricingEnabled": "计价",
+  "settingsPricingHelp": "仅控制应用内费用估算，Token 与缓存统计照常。套餐默认关闭。",
+  "settingsModelAdvanced": "模型可选设置",
+  "settingsContextBudget": "上下文预算（Token）",
+  "settingsOutputBudget": "最大输出（Token）",
+  "settingsPriceInput": "输入",
+  "settingsPriceOutput": "输出",
+  "settingsPriceCacheRead": "缓存读取",
+  "settingsPriceCacheWrite": "缓存写入",
+  "statusReportedUsageOnly": "已报告"
 }

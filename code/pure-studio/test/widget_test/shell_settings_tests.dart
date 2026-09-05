@@ -1703,17 +1703,14 @@ void registerShellSettingsTests() {
         .toList();
     expect(
       textInputValues,
-      containsAll(['openai', 'OpenAI', 'https://api.openai.com/v1']),
+      containsAll(['OpenAI', 'https://api.openai.com/v1']),
     );
     expect(textInputValues, isNot(contains('https://api.deepseek.com')));
     final dropdownValues = tester
         .widgetList<DropdownButton<String>>(find.byType(DropdownButton<String>))
         .map((dropdown) => dropdown.value)
         .toList();
-    expect(
-      dropdownValues,
-      containsAll(['openai', 'gpt-5.6-sol', 'preset_defaults']),
-    );
+    expect(dropdownValues, containsAll(['openai', 'gpt-5.6-sol']));
     expect(find.text('OPENAI_API_KEY'), findsOneWidget);
     expect(find.text('GPT-5.6-Sol'), findsOneWidget);
     expect(find.text('gpt-5.6-sol'), findsOneWidget);
@@ -1756,11 +1753,11 @@ void registerShellSettingsTests() {
     expect(openai['name'], 'OpenAI');
     expect(openai['baseUrl'], 'https://api.openai.com/v1');
     expect(openai['defaultModel'], 'gpt-5.6-sol');
-    expect(openai['capabilitySource'], 'preset_defaults');
-    expect(openai['hostedWebSearch'], isTrue);
-    expect(openai['standaloneWebSearch'], 'open_ai_search_api');
-    expect(openai['promptCacheDialect'], 'open_ai_prompt_cache_key');
-    expect(openai['responsesProgrammaticToolCalling'], isTrue);
+    final savedOpenAi = (await api.readStudioState()).providers.singleWhere(
+      (provider) => provider.id == 'openai',
+    );
+    expect(savedOpenAi.pricingEnabled, isTrue);
+    expect(savedOpenAi.hostedWebSearch, isTrue);
     final modes = openai['modelConnectionModes'] as List<Object?>;
     expect(
       modes.cast<Map<String, Object?>>().singleWhere(
@@ -1802,15 +1799,6 @@ void registerShellSettingsTests() {
     final editor = find.byType(ListView).last;
     await tester.fling(editor, const Offset(0, -1000), 2000);
     await tester.pumpAndSettle();
-    expect(
-      find.byWidgetPredicate(
-        (widget) =>
-            widget is TextFormField &&
-            widget.initialValue == 'future_search_dialect',
-      ),
-      findsOneWidget,
-    );
-
     await tester.fling(editor, const Offset(0, 1000), 2000);
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Save'));
@@ -1820,122 +1808,87 @@ void registerShellSettingsTests() {
     final future = providers.last! as Map<String, Object?>;
     expect(future['templateKind'], 'future-provider');
     expect(future['defaultModel'], 'future-model');
-    expect(future['capabilitySource'], 'preset_defaults');
-    expect(future['standaloneWebSearch'], 'future_search_dialect');
-    expect(future['promptCacheDialect'], 'implicit_prefix');
+    final savedFuture = (await api.readStudioState()).providers.singleWhere(
+      (provider) => provider.templateKind == 'future-provider',
+    );
+    expect(savedFuture.standaloneWebSearch, 'future_search_dialect');
+    expect(savedFuture.promptCacheDialect, 'implicit_prefix');
   });
 
-  testWidgets('custom Responses provider defaults to HTTP without a preset', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(1280, 900);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-
-    final api = _FakeStudioApi(_stateWithPlannerModels());
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [studioApiProvider.overrideWithValue(api)],
-        child: _localizedApp(home: const SettingsPage()),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.widgetWithText(FilledButton, 'Add provider'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byType(DropdownButtonFormField<String>).first);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Custom provider').last);
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(OutlinedButton, 'Add model'));
-    await tester.pumpAndSettle();
-    final protocolDropdown = find
-        .widgetWithText(DropdownButtonFormField<String>, 'Chat Completions')
-        .last;
-    await tester.ensureVisible(protocolDropdown);
-    await tester.pumpAndSettle();
-    await tester.tap(protocolDropdown);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Responses').last);
-    await tester.pumpAndSettle();
-
-    expect(find.text('WS'), findsWidgets);
-    expect(find.text('HTTP'), findsWidgets);
-    await tester.fling(find.byType(ListView).last, const Offset(0, 1000), 2000);
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
-    await tester.pumpAndSettle();
-
-    final providers = api.savedProviderSettings!['providers'] as List<Object?>;
-    final custom = providers.last! as Map<String, Object?>;
-    expect(custom['templateKind'], '');
-    final customModels = custom['customModels'] as List<Object?>;
-    final customModel = customModels.single! as Map<String, Object?>;
-    expect(customModel['wireProtocol'], 'responses');
-    expect(customModel['defaultConnectionMode'], 'http');
-    expect(customModel['supportedConnectionModes'], ['web_socket', 'http']);
-    expect(custom['capabilitySource'], 'explicit');
-    expect(custom['promptCacheDialect'], 'none');
-  });
-
-  testWidgets('custom Chat model exposes only HTTP and persists transport', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(1280, 900);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-
-    final api = _FakeStudioApi(_stateWithPlannerModels());
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [studioApiProvider.overrideWithValue(api)],
-        child: _localizedApp(home: const SettingsPage()),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.widgetWithText(FilledButton, 'Add provider'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byType(DropdownButtonFormField<String>).first);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Custom provider').last);
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(OutlinedButton, 'Add model'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Chat Completions'), findsWidgets);
-    final supportedConnections = find.byType(SegmentedButton<String>).last;
-    expect(
-      tester.widget<SegmentedButton<String>>(supportedConnections).selected,
-      {'http'},
-    );
-    final wsOption = find.descendant(
-      of: supportedConnections,
-      matching: find.text('WS'),
-    );
-    await tester.ensureVisible(wsOption);
-    await tester.pumpAndSettle();
-    await tester.tap(wsOption);
-    await tester.pumpAndSettle();
-    expect(
-      tester.widget<SegmentedButton<String>>(supportedConnections).selected,
-      {'http'},
-    );
-    await tester.fling(find.byType(ListView).last, const Offset(0, 1000), 2000);
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Save'));
-    await tester.pumpAndSettle();
-
-    final providers = api.savedProviderSettings!['providers'] as List<Object?>;
-    final custom = providers.last! as Map<String, Object?>;
-    final customModels = custom['customModels'] as List<Object?>;
-    final customModel = customModels.single! as Map<String, Object?>;
-    expect(customModel['wireProtocol'], 'chat_completions');
-    expect(customModel['defaultConnectionMode'], 'http');
-    expect(customModel['supportedConnectionModes'], ['http']);
-  });
+  testWidgets(
+    'compatible models save both supported APIs with explicit pricing choices',
+    (tester) async {
+      _configureSettingsTestView(tester);
+      for (final protocol in ['chat_completions', 'responses']) {
+        final api = _FakeStudioApi(_stateWithPlannerModels());
+        await tester.pumpWidget(
+          ProviderScope(
+            key: ValueKey(protocol),
+            overrides: [studioApiProvider.overrideWithValue(api)],
+            child: _localizedApp(home: const SettingsPage()),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(StudioDriverKeys.providerAdd));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(StudioDriverKeys.providerPreset));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('OpenAI API 兼容').last);
+        await tester.pumpAndSettle();
+        final pricing = find.byKey(StudioDriverKeys.providerPricing);
+        await tester.ensureVisible(pricing);
+        expect(tester.widget<SwitchListTile>(pricing).value, isFalse);
+        await tester.tap(pricing);
+        await tester.ensureVisible(
+          find.byKey(StudioDriverKeys.providerModelAdd),
+        );
+        await tester.tap(find.byKey(StudioDriverKeys.providerModelAdd));
+        await tester.pumpAndSettle();
+        final modelId = find.descendant(
+          of: find.byKey(StudioDriverKeys.customModelId(0)),
+          matching: find.byType(TextFormField),
+        );
+        await tester.ensureVisible(modelId);
+        await tester.enterText(modelId, 'local-coder');
+        await tester.pumpAndSettle();
+        if (protocol == 'responses') {
+          await tester.ensureVisible(find.text('Optional model settings'));
+          await tester.tap(find.text('Optional model settings'));
+          await tester.pumpAndSettle();
+          final dropdown = find
+              .widgetWithText(
+                DropdownButtonFormField<String>,
+                'Chat Completions (HTTP)',
+              )
+              .last;
+          await tester.ensureVisible(dropdown);
+          await tester.tap(dropdown);
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Responses (HTTP)').last);
+          await tester.pumpAndSettle();
+        }
+        await tester.scrollUntilVisible(
+          find.byKey(StudioDriverKeys.providerSave),
+          -400,
+          scrollable: find
+              .descendant(
+                of: find.byKey(StudioDriverKeys.providerEditorScroll),
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        );
+        await tester.tap(find.byKey(StudioDriverKeys.providerSave));
+        await tester.pumpAndSettle();
+        final saved = (await api.readStudioState()).providers.singleWhere(
+          (provider) => provider.templateKind == 'openai-compatible',
+        );
+        expect(saved.defaultModel, 'local-coder');
+        expect(saved.pricingEnabled, isTrue);
+        expect(saved.customModels.single.wireProtocol, protocol);
+        expect(saved.customModels.single.reasoningEfforts, isEmpty);
+      }
+    },
+  );
 
   test('provider settings save updates default provider in store', () async {
     final api = _FakeStudioApi(_stateWithPlannerModels());
@@ -1957,11 +1910,7 @@ void registerShellSettingsTests() {
                 name: 'DeepSeek',
                 baseUrl: 'https://api.deepseek.com',
                 secret: ProviderSecretCommand.preserve(),
-                capabilitySource: 'preset_defaults',
-                hostedWebSearch: false,
-                hostedWebSearchDialect: 'deepseek_responses',
-                promptCacheDialect: 'implicit_prefix',
-                responsesProgrammaticToolCalling: false,
+                pricingEnabled: false,
                 defaultModel: 'deepseek-v4-flash',
                 customModels: [],
                 modelConnectionModes: [],
@@ -2121,8 +2070,8 @@ void registerShellSettingsTests() {
     await tester.tap(find.text('Edit provider').last);
     await tester.pumpAndSettle();
     await tester.enterText(
-      find.widgetWithText(TextFormField, 'Provider key'),
-      'openai-team',
+      find.widgetWithText(TextFormField, 'Display name'),
+      'OpenAI Team',
     );
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(FilledButton, 'Save'));
@@ -2131,8 +2080,9 @@ void registerShellSettingsTests() {
     expect(api.savedProviderSettings?['defaultProviderId'], 'deepseek');
     final providers = api.savedProviderSettings!['providers'] as List<Object?>;
     final openAi = providers.last! as Map<String, Object?>;
-    expect(openAi['id'], 'openai-team');
-    expect(openAi['originalId'], 'openai');
+    expect(openAi['id'], 'openai');
+    expect(openAi['name'], 'OpenAI Team');
+    expect(openAi['originalId'], isNull);
     final modelConnectionModes =
         openAi['modelConnectionModes'] as List<Object?>;
     final customModelConnection = modelConnectionModes

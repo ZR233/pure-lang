@@ -98,12 +98,7 @@ pub struct ProviderSettingsUpdate {
     pub name: String,
     pub base_url: String,
     pub secret: ProviderSecretUpdate,
-    pub capability_source: String,
-    pub hosted_web_search: bool,
-    pub hosted_web_search_dialect: String,
-    pub standalone_web_search: Option<String>,
-    pub prompt_cache_dialect: String,
-    pub responses_programmatic_tool_calling: bool,
+    pub pricing_enabled: bool,
     pub default_model: String,
     pub custom_models: Vec<ProviderModelUpdate>,
     pub model_connection_modes: Vec<ProviderModelConnectionUpdate>,
@@ -114,11 +109,9 @@ pub struct ProviderSettingsUpdate {
 pub struct ProviderModelUpdate {
     pub slug: String,
     pub display_name: String,
-    pub reasoning_efforts: Vec<String>,
-    pub base_instructions: Option<String>,
     pub wire_protocol: String,
-    pub supported_connection_modes: Vec<String>,
-    pub default_connection_mode: String,
+    pub context_window: u64,
+    pub max_output_tokens: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]

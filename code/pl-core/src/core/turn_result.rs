@@ -135,11 +135,10 @@ pub(super) fn interrupted_turn_result(
     content: String,
     reasoning_content: Option<String>,
     model: String,
-    mut usage: pl_protocol::TokenUsage,
+    usage: pl_protocol::InferenceTokenUsage,
     session_message_count: usize,
     reason: String,
 ) -> TurnResult {
-    usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
     recorder.cancel_open_items(turn_id, &reason);
     let outcome = TurnOutcome::cancelled(TurnCancellationCause::UserRequested);
     let item = recorder.terminal_turn_item(turn_id, &outcome);
@@ -148,6 +147,7 @@ pub(super) fn interrupted_turn_result(
     recorder.broadcast(AgentEvent::Done);
 
     TurnResult {
+        billing: pl_protocol::TurnBillingRecord::new(),
         content,
         reasoning_content,
         model,
@@ -167,7 +167,7 @@ pub(super) fn failed_turn_result(
     content: String,
     reasoning_content: Option<String>,
     model: String,
-    usage: pl_protocol::TokenUsage,
+    usage: pl_protocol::InferenceTokenUsage,
     session_message_count: usize,
     error: String,
     severity: ErrorSeverity,
@@ -194,13 +194,12 @@ pub(super) fn failed_turn_result_with_abort_reason(
     content: String,
     reasoning_content: Option<String>,
     model: String,
-    mut usage: pl_protocol::TokenUsage,
+    usage: pl_protocol::InferenceTokenUsage,
     session_message_count: usize,
     error: String,
     severity: ErrorSeverity,
     mut failure: TurnFailure,
 ) -> TurnResult {
-    usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
     failure.message = error.clone();
     recorder.fail_open_items(turn_id, &error);
     let outcome = TurnOutcome::failed(failure);
@@ -213,6 +212,7 @@ pub(super) fn failed_turn_result_with_abort_reason(
     recorder.broadcast(AgentEvent::Done);
 
     TurnResult {
+        billing: pl_protocol::TurnBillingRecord::new(),
         content,
         reasoning_content,
         model,
@@ -232,13 +232,12 @@ pub(super) fn budget_limited_turn_result(
     content: String,
     reasoning_content: Option<String>,
     model: String,
-    mut usage: pl_protocol::TokenUsage,
+    usage: pl_protocol::InferenceTokenUsage,
     session_message_count: usize,
     limit_kind: BudgetLimitKind,
     budget_usage: BudgetUsage,
     reason: String,
 ) -> TurnResult {
-    usage.total_tokens = usage.prompt_tokens + usage.completion_tokens;
     recorder.cancel_open_items(turn_id, &reason);
     let outcome = TurnOutcome::budget_limited(
         pl_protocol::BudgetLimitSnapshot {
@@ -257,6 +256,7 @@ pub(super) fn budget_limited_turn_result(
     recorder.broadcast(AgentEvent::Done);
 
     TurnResult {
+        billing: pl_protocol::TurnBillingRecord::new(),
         content,
         reasoning_content,
         model,
@@ -330,7 +330,7 @@ mod tests {
 
     use super::*;
     use crate::SubagentContext;
-    use pl_protocol::TokenUsage;
+    use pl_protocol::InferenceTokenUsage;
 
     #[test]
     fn root_provider_429_is_transient_and_subagent_429_is_provider_capacity() {
@@ -460,7 +460,7 @@ mod tests {
             "partial summary".to_string(),
             None,
             "model-a".to_string(),
-            TokenUsage::default(),
+            InferenceTokenUsage::default(),
             3,
             "provider rejected request".to_string(),
             ErrorSeverity::Transient,

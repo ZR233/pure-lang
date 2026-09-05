@@ -236,7 +236,7 @@ pub fn plan_web_search(
     let hosted_declared = hosted_capabilities.hosted_responses
         && hosted_capabilities.hosted_dialect == HostedWebSearchDialect::OpenAiResponses;
     let hosted_supported = hosted_declared
-        && current.model.transport.protocol == ProviderWireProtocol::Responses
+        && current.model.binding.transport.protocol == ProviderWireProtocol::Responses
         && current.model.capabilities.supports_web_search()
         && current_has_credential;
 
@@ -303,7 +303,7 @@ fn plan_deepseek_web_search(current: &ResolvedModelRoute, enabled: bool) -> WebS
     if current.endpoint.bearer_token.is_none() {
         return unavailable_plan(configured_mode, WebSearchAvailability::MissingCredential);
     }
-    if current.model.transport.protocol != ProviderWireProtocol::Responses
+    if current.model.binding.transport.protocol != ProviderWireProtocol::Responses
         || !current.model.capabilities.supports_web_search()
     {
         return unavailable_plan(configured_mode, WebSearchAvailability::ModelUnsupported);

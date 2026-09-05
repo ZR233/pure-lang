@@ -252,7 +252,9 @@ class ProvidersTabState extends ConsumerState<ProvidersTab> {
       }
       final model = ProviderModelView(
         slug: slug,
-        displayName: 'Custom model',
+        displayName: slug,
+        contextWindow: 32000,
+        maxOutputTokens: 4096,
         reasoningEfforts: const [],
         wireProtocol: 'chat_completions',
         supportedConnectionModes: const ['http'],
@@ -272,9 +274,13 @@ class ProvidersTabState extends ConsumerState<ProvidersTab> {
   void _updateCustomModel(int index, ProviderModelView model) {
     _updateDraft((provider) {
       final custom = [...provider.customModels];
+      final previousSlug = custom[index].slug;
       custom[index] = model;
       return provider.copyWith(
         customModels: custom,
+        defaultModel: provider.defaultModel == previousSlug
+            ? model.slug
+            : provider.defaultModel,
         models: [...provider.defaultModels, ...custom],
       );
     });

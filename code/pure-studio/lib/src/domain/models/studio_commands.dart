@@ -23,20 +23,15 @@ class ProviderModelCommand {
   const ProviderModelCommand({
     required this.slug,
     required this.displayName,
-    required this.reasoningEfforts,
     required this.wireProtocol,
-    required this.supportedConnectionModes,
-    required this.defaultConnectionMode,
-    this.baseInstructions,
+    required this.contextWindow,
+    required this.maxOutputTokens,
   });
-
   final String slug;
   final String displayName;
-  final List<String> reasoningEfforts;
   final String wireProtocol;
-  final List<String> supportedConnectionModes;
-  final String defaultConnectionMode;
-  final String? baseInstructions;
+  final int contextWindow;
+  final int maxOutputTokens;
 }
 
 class ProviderModelConnectionCommand {
@@ -57,12 +52,7 @@ class ProviderCommand {
     required this.name,
     required this.baseUrl,
     required this.secret,
-    required this.capabilitySource,
-    required this.hostedWebSearch,
-    required this.hostedWebSearchDialect,
-    this.standaloneWebSearch,
-    required this.promptCacheDialect,
-    required this.responsesProgrammaticToolCalling,
+    required this.pricingEnabled,
     required this.defaultModel,
     required this.customModels,
     required this.modelConnectionModes,
@@ -74,12 +64,7 @@ class ProviderCommand {
   final String name;
   final String baseUrl;
   final ProviderSecretCommand secret;
-  final String capabilitySource;
-  final bool hostedWebSearch;
-  final String hostedWebSearchDialect;
-  final String? standaloneWebSearch;
-  final String promptCacheDialect;
-  final bool responsesProgrammaticToolCalling;
+  final bool pricingEnabled;
   final String defaultModel;
   final List<ProviderModelCommand> customModels;
   final List<ProviderModelConnectionCommand> modelConnectionModes;
@@ -177,28 +162,16 @@ abstract final class ProviderSettingsCommandBuilder {
                 : provider.hasBearerToken
                 ? const ProviderSecretCommand.preserve()
                 : const ProviderSecretCommand.clear(),
-            capabilitySource: provider.capabilitySource,
-            hostedWebSearch: provider.hostedWebSearch,
-            hostedWebSearchDialect: provider.hostedWebSearchDialect,
-            standaloneWebSearch: provider.standaloneWebSearch.trim().isEmpty
-                ? null
-                : provider.standaloneWebSearch.trim(),
-            promptCacheDialect: provider.promptCacheDialect,
-            responsesProgrammaticToolCalling:
-                provider.responsesProgrammaticToolCalling,
+            pricingEnabled: provider.pricingEnabled,
             defaultModel: provider.defaultModel,
             customModels: [
               for (final model in provider.customModels)
                 ProviderModelCommand(
                   slug: model.slug.trim(),
                   displayName: model.displayName.trim(),
-                  reasoningEfforts: model.reasoningEfforts,
                   wireProtocol: model.wireProtocol,
-                  supportedConnectionModes: model.supportedConnectionModes,
-                  defaultConnectionMode: model.defaultConnectionMode,
-                  baseInstructions: model.baseInstructions.trim().isEmpty
-                      ? null
-                      : model.baseInstructions,
+                  contextWindow: model.contextWindow ?? 32000,
+                  maxOutputTokens: model.maxOutputTokens ?? 4096,
                 ),
             ],
             modelConnectionModes: [

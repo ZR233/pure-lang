@@ -33,6 +33,7 @@ const _testProviderCatalog = ProviderCatalogView(
     ),
     ProviderPresetView(
       id: 'zhipu-coding-plan',
+      pricingEnabled: false,
       displayName: 'Zhipu Coding Plan',
       description: 'Zhipu Coding Plan API',
       baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4',
@@ -54,8 +55,20 @@ const _testProviderCatalog = ProviderCatalogView(
       standaloneWebSearch: 'future_search_dialect',
       promptCacheDialect: 'implicit_prefix',
     ),
+    ProviderPresetView(
+      id: 'openai-compatible',
+      displayName: 'OpenAI API 兼容',
+      description: 'Custom compatible API',
+      baseUrl: 'http://localhost:11434/v1',
+      credentialLabel: 'API Key (optional)',
+      credentialEnv: '',
+      modelCatalogId: 'openai-compatible',
+      suggestedModel: '',
+      pricingEnabled: false,
+    ),
   ],
   modelCatalogs: {
+    'openai-compatible': [],
     'deepseek': [
       ProviderModelView(
         slug: 'deepseek-v4-flash',

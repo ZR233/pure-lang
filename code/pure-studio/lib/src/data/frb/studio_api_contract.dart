@@ -944,25 +944,16 @@ class FrbStudioApi implements StudioApi {
                     ProviderSecretAction.clear =>
                       const frb.ProviderSecretInput.clear(),
                   },
-                  capabilitySource: provider.capabilitySource,
-                  hostedWebSearch: provider.hostedWebSearch,
-                  hostedWebSearchDialect: provider.hostedWebSearchDialect,
-                  standaloneWebSearch: provider.standaloneWebSearch,
-                  promptCacheDialect: provider.promptCacheDialect,
-                  responsesProgrammaticToolCalling:
-                      provider.responsesProgrammaticToolCalling,
+                  pricingEnabled: provider.pricingEnabled,
                   defaultModel: provider.defaultModel,
                   customModels: [
                     for (final model in provider.customModels)
                       frb.ProviderModelInput(
                         slug: model.slug,
                         displayName: model.displayName,
-                        reasoningEfforts: model.reasoningEfforts,
-                        baseInstructions: model.baseInstructions,
                         wireProtocol: model.wireProtocol,
-                        supportedConnectionModes:
-                            model.supportedConnectionModes,
-                        defaultConnectionMode: model.defaultConnectionMode,
+                        contextWindow: BigInt.from(model.contextWindow),
+                        maxOutputTokens: BigInt.from(model.maxOutputTokens),
                       ),
                   ],
                   modelConnectionModes: [

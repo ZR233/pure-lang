@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{AgentRoleId, ThreadId, TokenUsage, TurnId, TurnOutcome};
+use crate::{AgentRoleId, InferenceTokenUsage, ThreadId, TurnId, TurnOutcome};
 
 use super::AgentState;
 
@@ -21,7 +21,7 @@ pub struct AgentTurnOutcome {
     pub turn_id: TurnId,
     pub thread_id: ThreadId,
     pub outcome: TurnOutcome,
-    pub usage: TokenUsage,
+    pub usage: InferenceTokenUsage,
     pub started_at: Option<i64>,
     pub finished_at: i64,
 }

@@ -172,16 +172,8 @@ class ProviderEditor extends StatelessWidget {
   Widget build(BuildContext context) {
     final provider = draft.provider;
     final models = provider.allModels;
-    final preset = presets
-        .where((item) => item.id == provider.templateKind)
-        .firstOrNull;
-    final standaloneDialects = <String>{
-      for (final candidate in presets)
-        if (candidate.standaloneWebSearch.isNotEmpty)
-          candidate.standaloneWebSearch,
-      if (provider.standaloneWebSearch.isNotEmpty) provider.standaloneWebSearch,
-    }.toList();
     return ListView(
+      key: StudioDriverKeys.providerEditorScroll,
       children: [
         SettingsHeader(
           title: draft.mode == ProviderDraftMode.create
@@ -216,14 +208,8 @@ class ProviderEditor extends StatelessWidget {
           children: [
             SettingsResponsiveFieldGrid(
               children: [
-                SettingsTextEdit(
-                  label: context.l10n.settingsProviderKey,
-                  value: provider.id,
-                  enabled: !saving,
-                  onChanged: (value) =>
-                      onUpdate((item) => item.copyWith(id: value)),
-                ),
                 DropdownButtonFormField<String>(
+                  key: StudioDriverKeys.providerPreset,
                   initialValue: provider.templateKind,
                   decoration: InputDecoration(
                     labelText: context.l10n.settingsTemplate,
@@ -234,10 +220,6 @@ class ProviderEditor extends StatelessWidget {
                         value: template.id,
                         child: Text(template.displayName),
                       ),
-                    DropdownMenuItem(
-                      value: '',
-                      child: Text(context.l10n.settingsCustomProvider),
-                    ),
                   ],
                   onChanged: saving
                       ? null
@@ -257,6 +239,7 @@ class ProviderEditor extends StatelessWidget {
               ],
             ),
             SettingsTextEdit(
+              key: StudioDriverKeys.providerBaseUrl,
               label: context.l10n.settingsBaseUrl,
               value: provider.baseUrl,
               enabled: !saving,
@@ -265,6 +248,7 @@ class ProviderEditor extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             SettingsTextEdit(
+              key: StudioDriverKeys.providerApiKey,
               label: provider.hasBearerToken
                   ? context.l10n.settingsApiKeyKeepCurrent
                   : provider.credentialLabel,
@@ -313,179 +297,15 @@ class ProviderEditor extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 12),
-        SettingsSectionPanel(
-          title: context.l10n.settingsServiceCapabilitiesTitle,
-          children: [
-            DropdownButtonFormField<String>(
-              initialValue: provider.capabilitySource,
-              decoration: InputDecoration(
-                labelText: context.l10n.settingsCapabilitySourceField,
-              ),
-              items: [
-                if (preset != null)
-                  DropdownMenuItem(
-                    value: 'preset_defaults',
-                    child: Text(context.l10n.settingsCapabilitySourcePreset),
-                  ),
-                DropdownMenuItem(
-                  value: 'explicit',
-                  child: Text(context.l10n.settingsCapabilitySourceExplicit),
-                ),
-              ],
-              onChanged: saving
-                  ? null
-                  : (source) {
-                      if (source == null) return;
-                      onUpdate(
-                        (item) => item.copyWith(
-                          capabilitySource: source,
-                          hostedWebSearch: source == 'preset_defaults'
-                              ? preset?.hostedWebSearch ?? false
-                              : item.hostedWebSearch,
-                          hostedWebSearchDialect: source == 'preset_defaults'
-                              ? preset?.hostedWebSearchDialect ??
-                                    'open_ai_responses'
-                              : item.hostedWebSearchDialect,
-                          standaloneWebSearch: source == 'preset_defaults'
-                              ? preset?.standaloneWebSearch ?? ''
-                              : item.standaloneWebSearch,
-                          responsesProgrammaticToolCalling:
-                              source == 'preset_defaults'
-                              ? preset?.responsesProgrammaticToolCalling ??
-                                    false
-                              : item.responsesProgrammaticToolCalling,
-                        ),
-                      );
-                    },
-            ),
-            const SizedBox(height: 10),
-            if (provider.capabilitySource == 'explicit')
-              SettingsResponsiveFieldGrid(
-                children: [
-                  DropdownButtonFormField<bool>(
-                    initialValue: provider.hostedWebSearch,
-                    decoration: InputDecoration(
-                      labelText: context.l10n.settingsHostedWebSearchField,
-                    ),
-                    items: [
-                      DropdownMenuItem(
-                        value: false,
-                        child: Text(context.l10n.settingsCapabilityDisabled),
-                      ),
-                      DropdownMenuItem(
-                        value: true,
-                        child: Text(context.l10n.settingsCapabilityEnabled),
-                      ),
-                    ],
-                    onChanged: saving
-                        ? null
-                        : (value) {
-                            if (value != null) {
-                              onUpdate(
-                                (item) => item.copyWith(hostedWebSearch: value),
-                              );
-                            }
-                          },
-                  ),
-                  DropdownButtonFormField<String>(
-                    initialValue: provider.hostedWebSearchDialect,
-                    decoration: InputDecoration(
-                      labelText:
-                          context.l10n.settingsHostedWebSearchDialectField,
-                    ),
-                    items: const [
-                      DropdownMenuItem(
-                        value: 'open_ai_responses',
-                        child: Text('OpenAI Responses'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'deepseek_responses',
-                        child: Text('DeepSeek Responses'),
-                      ),
-                    ],
-                    onChanged: saving
-                        ? null
-                        : (value) {
-                            if (value != null) {
-                              onUpdate(
-                                (item) => item.copyWith(
-                                  hostedWebSearchDialect: value,
-                                ),
-                              );
-                            }
-                          },
-                  ),
-                  DropdownButtonFormField<String>(
-                    initialValue: provider.standaloneWebSearch,
-                    decoration: InputDecoration(
-                      labelText: context.l10n.settingsStandaloneWebSearchField,
-                    ),
-                    items: [
-                      DropdownMenuItem(
-                        value: '',
-                        child: Text(context.l10n.settingsCapabilityDisabled),
-                      ),
-                      for (final dialect in standaloneDialects)
-                        DropdownMenuItem(value: dialect, child: Text(dialect)),
-                    ],
-                    onChanged: saving
-                        ? null
-                        : (value) => onUpdate(
-                            (item) =>
-                                item.copyWith(standaloneWebSearch: value ?? ''),
-                          ),
-                  ),
-                  DropdownButtonFormField<bool>(
-                    initialValue: provider.responsesProgrammaticToolCalling,
-                    decoration: InputDecoration(
-                      labelText:
-                          context.l10n.settingsProgrammaticToolCallingField,
-                    ),
-                    items: [
-                      DropdownMenuItem(
-                        value: false,
-                        child: Text(context.l10n.settingsCapabilityDisabled),
-                      ),
-                      DropdownMenuItem(
-                        value: true,
-                        child: Text(context.l10n.settingsCapabilityEnabled),
-                      ),
-                    ],
-                    onChanged: saving
-                        ? null
-                        : (value) {
-                            if (value != null) {
-                              onUpdate(
-                                (item) => item.copyWith(
-                                  responsesProgrammaticToolCalling: value,
-                                ),
-                              );
-                            }
-                          },
-                  ),
-                ],
-              )
-            else ...[
-              SettingsReadonlyField(
-                label: context.l10n.settingsHostedWebSearchField,
-                value: provider.hostedWebSearch
-                    ? context.l10n.settingsCapabilityEnabled
-                    : context.l10n.settingsCapabilityDisabled,
-              ),
-              SettingsReadonlyField(
-                label: context.l10n.settingsProgrammaticToolCallingField,
-                value: provider.responsesProgrammaticToolCalling
-                    ? context.l10n.settingsCapabilityEnabled
-                    : context.l10n.settingsCapabilityDisabled,
-              ),
-              SettingsReadonlyField(
-                label: context.l10n.settingsStandaloneWebSearchField,
-                value: provider.standaloneWebSearch.isEmpty
-                    ? context.l10n.settingsCapabilityDisabled
-                    : provider.standaloneWebSearch,
-              ),
-            ],
-          ],
+        SwitchListTile(
+          key: StudioDriverKeys.providerPricing,
+          title: Text(context.l10n.settingsPricingEnabled),
+          subtitle: Text(context.l10n.settingsPricingHelp),
+          value: provider.pricingEnabled,
+          onChanged: saving
+              ? null
+              : (enabled) =>
+                    onUpdate((item) => item.copyWith(pricingEnabled: enabled)),
         ),
         const SizedBox(height: 12),
         SettingsSectionPanel(
@@ -511,6 +331,7 @@ class ProviderEditor extends StatelessWidget {
         SettingsSectionPanel(
           title: context.l10n.settingsProviderCustomModelsTitle,
           trailing: OutlinedButton.icon(
+            key: StudioDriverKeys.providerModelAdd,
             icon: const Icon(Icons.add),
             label: Text(context.l10n.settingsAddModel),
             onPressed: saving ? null : onAddCustomModel,
@@ -524,6 +345,7 @@ class ProviderEditor extends StatelessWidget {
             else
               for (var index = 0; index < provider.customModels.length; index++)
                 _CustomModelEditor(
+                  index: index,
                   model: provider.customModels[index],
                   enabled: !saving,
                   onChanged: (model) => onUpdateCustomModel(index, model),
@@ -538,12 +360,13 @@ class ProviderEditor extends StatelessWidget {
 
 class _CustomModelEditor extends StatelessWidget {
   const _CustomModelEditor({
+    required this.index,
     required this.model,
     required this.enabled,
     required this.onChanged,
     required this.onRemove,
   });
-
+  final int index;
   final ProviderModelView model;
   final bool enabled;
   final ValueChanged<ProviderModelView> onChanged;
@@ -552,206 +375,101 @@ class _CustomModelEditor extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          border: Border.all(
-            color: Theme.of(context).colorScheme.outlineVariant,
-          ),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        children: [
+          Row(
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: SettingsTextEdit(
-                      label: context.l10n.settingsModelSlug,
-                      value: model.slug,
-                      enabled: enabled,
-                      onChanged: (value) =>
-                          onChanged(model.copyWith(slug: value)),
+              Expanded(
+                child: SettingsTextEdit(
+                  key: StudioDriverKeys.customModelId(index),
+                  label: context.l10n.settingsModelSlug,
+                  value: model.slug,
+                  enabled: enabled,
+                  onChanged: (value) => onChanged(
+                    model.copyWith(
+                      slug: value,
+                      displayName:
+                          model.displayName == model.slug ||
+                              model.displayName == 'Custom model'
+                          ? value
+                          : model.displayName,
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: SettingsTextEdit(
-                      label: context.l10n.settingsDisplayName,
-                      value: model.displayName,
-                      enabled: enabled,
-                      onChanged: (value) =>
-                          onChanged(model.copyWith(displayName: value)),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  IconButton(
-                    tooltip: context.l10n.settingsRemoveModel,
-                    icon: const Icon(Icons.delete_outline),
-                    onPressed: enabled ? onRemove : null,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              SettingsTextEdit(
-                label: context.l10n.settingsReasoningEfforts,
-                value: model.reasoningEfforts.join(', '),
-                enabled: enabled,
-                onChanged: (value) => onChanged(
-                  model.copyWith(
-                    reasoningEfforts: value
-                        .split(',')
-                        .map((part) => part.trim())
-                        .where((part) => part.isNotEmpty)
-                        .toList(),
                   ),
                 ),
               ),
-              const SizedBox(height: 10),
-              SettingsResponsiveFieldGrid(
-                children: [
-                  DropdownButtonFormField<String>(
-                    initialValue: model.wireProtocol,
-                    decoration: InputDecoration(
-                      labelText: context.l10n.settingsProtocolType,
-                    ),
-                    items: const [
-                      DropdownMenuItem(
-                        value: 'responses',
-                        child: Text('Responses'),
-                      ),
-                      DropdownMenuItem(
-                        value: 'chat_completions',
-                        child: Text('Chat Completions'),
-                      ),
-                    ],
-                    onChanged: enabled
-                        ? (protocol) {
-                            if (protocol == null) return;
-                            if (protocol == 'chat_completions') {
-                              onChanged(
-                                model.copyWith(
-                                  wireProtocol: protocol,
-                                  supportedConnectionModes: const ['http'],
-                                  defaultConnectionMode: 'http',
-                                  connectionMode: 'http',
-                                ),
-                              );
-                            } else {
-                              onChanged(
-                                model.copyWith(
-                                  wireProtocol: protocol,
-                                  supportedConnectionModes: const [
-                                    'web_socket',
-                                    'http',
-                                  ],
-                                  defaultConnectionMode: 'http',
-                                  connectionMode: 'http',
-                                ),
-                              );
-                            }
-                          }
-                        : null,
-                  ),
-                  DropdownButtonFormField<String>(
-                    initialValue: model.defaultConnectionMode,
-                    decoration: InputDecoration(
-                      labelText: context.l10n.settingsDefaultConnectionField,
-                    ),
-                    items: [
-                      for (final mode in model.supportedConnectionModes)
-                        DropdownMenuItem(
-                          value: mode,
-                          child: Text(_connectionLabel(mode)),
-                        ),
-                    ],
-                    onChanged: enabled
-                        ? (mode) {
-                            if (mode != null) {
-                              onChanged(
-                                model.copyWith(defaultConnectionMode: mode),
-                              );
-                            }
-                          }
-                        : null,
-                  ),
-                ],
+              IconButton(
+                tooltip: context.l10n.settingsRemoveModel,
+                icon: const Icon(Icons.delete_outline),
+                onPressed: enabled ? onRemove : null,
               ),
-              const SizedBox(height: 10),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  context.l10n.settingsSupportedConnectionsLabel,
-                  style: Theme.of(context).textTheme.labelLarge,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: SegmentedButton<String>(
-                  segments: const [
-                    ButtonSegment(value: 'web_socket', label: Text('WS')),
-                    ButtonSegment(value: 'http', label: Text('HTTP')),
-                  ],
-                  selected: model.supportedConnectionModes.toSet(),
-                  multiSelectionEnabled: true,
-                  emptySelectionAllowed: false,
-                  onSelectionChanged: !enabled
-                      ? null
-                      : (selection) {
-                          if (model.wireProtocol == 'chat_completions' &&
-                              selection.contains('web_socket')) {
-                            return;
-                          }
-                          final supported = [
-                            for (final mode in const ['web_socket', 'http'])
-                              if (selection.contains(mode)) mode,
-                          ];
-                          final defaultMode =
-                              supported.contains(model.defaultConnectionMode)
-                              ? model.defaultConnectionMode
-                              : supported.first;
-                          final currentMode =
-                              supported.contains(model.connectionMode)
-                              ? model.connectionMode
-                              : defaultMode;
-                          onChanged(
-                            model.copyWith(
-                              supportedConnectionModes: supported,
-                              defaultConnectionMode: defaultMode,
-                              connectionMode: currentMode,
-                            ),
-                          );
-                        },
-                ),
-              ),
-              if (model.supportedConnectionModes.length > 1) ...[
-                const SizedBox(height: 10),
-                DropdownButtonFormField<String>(
-                  initialValue: model.connectionMode,
-                  decoration: InputDecoration(
-                    labelText: context.l10n.settingsCurrentConnectionField,
-                  ),
-                  items: [
-                    for (final mode in model.supportedConnectionModes)
-                      DropdownMenuItem(
-                        value: mode,
-                        child: Text(_connectionLabel(mode)),
-                      ),
-                  ],
-                  onChanged: enabled
-                      ? (mode) {
-                          if (mode != null) {
-                            onChanged(model.copyWith(connectionMode: mode));
-                          }
-                        }
-                      : null,
-                ),
-              ],
             ],
           ),
-        ),
+          ExpansionTile(
+            title: Text(context.l10n.settingsModelAdvanced),
+            children: [
+              SettingsTextEdit(
+                label: context.l10n.settingsDisplayName,
+                value: model.displayName,
+                enabled: enabled,
+                onChanged: (value) =>
+                    onChanged(model.copyWith(displayName: value)),
+              ),
+              DropdownButtonFormField<String>(
+                initialValue: model.wireProtocol,
+                decoration: InputDecoration(
+                  labelText: context.l10n.settingsProtocolType,
+                ),
+                items: const [
+                  DropdownMenuItem(
+                    value: 'chat_completions',
+                    child: Text('Chat Completions (HTTP)'),
+                  ),
+                  DropdownMenuItem(
+                    value: 'responses',
+                    child: Text('Responses (HTTP)'),
+                  ),
+                ],
+                onChanged: enabled
+                    ? (value) {
+                        if (value != null) {
+                          onChanged(
+                            model.copyWith(
+                              wireProtocol: value,
+                              supportedConnectionModes: const ['http'],
+                              defaultConnectionMode: 'http',
+                              connectionMode: 'http',
+                            ),
+                          );
+                        }
+                      }
+                    : null,
+              ),
+              SettingsTextEdit(
+                label: context.l10n.settingsContextBudget,
+                value: '${model.contextWindow ?? 32000}',
+                enabled: enabled,
+                onChanged: (value) {
+                  final count = int.tryParse(value);
+                  if (count != null) {
+                    onChanged(model.copyWith(contextWindow: count));
+                  }
+                },
+              ),
+              SettingsTextEdit(
+                label: context.l10n.settingsOutputBudget,
+                value: '${model.maxOutputTokens ?? 4096}',
+                enabled: enabled,
+                onChanged: (value) {
+                  final count = int.tryParse(value);
+                  if (count != null) {
+                    onChanged(model.copyWith(maxOutputTokens: count));
+                  }
+                },
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -852,10 +570,18 @@ class _ModelReadout extends StatelessWidget {
           ),
           if (price.isNotEmpty) ...[
             const SizedBox(width: 10),
-            Text(
-              price,
-              style: context.text.labelSmall?.copyWith(
-                color: context.studioInkSoft,
+            Tooltip(
+              message: model.priceTiers
+                  .map(
+                    (tier) =>
+                        '${tier.label}\n${model.currency}/1M · ${context.l10n.settingsPriceInput}: ${tier.input} · ${context.l10n.settingsPriceOutput}: ${tier.output} · ${context.l10n.settingsPriceCacheRead}: ${tier.cacheRead ?? "—"} · ${context.l10n.settingsPriceCacheWrite}: ${tier.cacheWrite ?? "—"}',
+                  )
+                  .join('\n\n'),
+              child: Text(
+                price,
+                style: context.text.labelSmall?.copyWith(
+                  color: context.studioInkSoft,
+                ),
               ),
             ),
           ],

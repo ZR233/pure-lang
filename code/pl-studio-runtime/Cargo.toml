@@ -52,3 +52,7 @@ required-features = ["live-tests"]
 name = "lsp_live"
 path = "tests/lsp_live.rs"
 required-features = ["live-tests"]
+
+[[example]]
+name = "model_accounting_live"
+required-features = ["live-tests"]

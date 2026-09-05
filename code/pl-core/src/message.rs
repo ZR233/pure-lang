@@ -1,7 +1,5 @@
 use pl_protocol::{ContentPart, Message, MessageContent, MessageRole};
 
-use crate::runtime_usage::ModelTokenUsageSnapshot;
-
 /// 提取消息内容中模型可见的文本片段。
 ///
 /// 多模态消息中的图片不转换为占位文本；调用方只拿到真实文本 part，
@@ -33,7 +31,7 @@ pub struct CompletionResponseSnapshot {
     id: Option<String>,
     model: String,
     output: Vec<CompletionResponseOutputSnapshot>,
-    usage: ModelTokenUsageSnapshot,
+    accounting: pl_protocol::InferenceAccounting,
 }
 
 impl CompletionResponseSnapshot {
@@ -49,8 +47,9 @@ impl CompletionResponseSnapshot {
         &self.model
     }
 
-    pub fn usage(&self) -> &ModelTokenUsageSnapshot {
-        &self.usage
+    /// Final accounting, including missing usage and disabled pricing states.
+    pub fn accounting(&self) -> &pl_protocol::InferenceAccounting {
+        &self.accounting
     }
 }
 
@@ -199,7 +198,7 @@ pub fn completion_response_snapshot(
         id: response.response_id.clone(),
         model: response.model.clone(),
         output,
-        usage: ModelTokenUsageSnapshot::from(&response.usage),
+        accounting: response.accounting.clone(),
     }
 }
 
@@ -426,13 +425,16 @@ mod tests {
             responses_context_items: Vec::new(),
             orchestration: Default::default(),
             timing: None,
-            usage: pl_protocol::TokenUsage {
-                prompt_tokens: 10,
-                cached_prompt_tokens: 4,
-                cache_write_tokens: 1,
-                completion_tokens: 3,
-                reasoning_tokens: 2,
-                total_tokens: 13,
+            accounting: pl_protocol::InferenceAccounting {
+                usage: pl_protocol::UsageReport {
+                    input_tokens: Some(10),
+                    cache_read_tokens: Some(4),
+                    cache_write_tokens: Some(1),
+                    output_tokens: Some(3),
+                    reasoning_tokens: Some(2),
+                    total_tokens: Some(13),
+                },
+                ..Default::default()
             },
             model: "test-model".to_string(),
         };
@@ -458,11 +460,11 @@ mod tests {
                 ),
             ]
         );
-        assert_eq!(snapshot.usage().input_tokens(), 10);
-        assert_eq!(snapshot.usage().cached_input_tokens(), 4);
-        assert_eq!(snapshot.usage().output_tokens(), 3);
-        assert_eq!(snapshot.usage().reasoning_output_tokens(), 2);
-        assert_eq!(snapshot.usage().total_tokens(), 13);
+        assert_eq!(snapshot.accounting().usage.totals().prompt_tokens, 10);
+        assert_eq!(snapshot.accounting().usage.totals().cached_prompt_tokens, 4);
+        assert_eq!(snapshot.accounting().usage.totals().completion_tokens, 3);
+        assert_eq!(snapshot.accounting().usage.totals().reasoning_tokens, 2);
+        assert_eq!(snapshot.accounting().usage.totals().total_tokens, 13);
     }
 
     #[test]
@@ -480,7 +482,7 @@ mod tests {
             responses_context_items: Vec::new(),
             orchestration: Default::default(),
             timing: None,
-            usage: pl_protocol::TokenUsage::default(),
+            accounting: pl_protocol::InferenceAccounting::default(),
             model: "test-model".to_string(),
         };
 

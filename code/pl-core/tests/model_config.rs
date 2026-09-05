@@ -106,11 +106,11 @@ fn route_resolution_binds_one_model_to_the_endpoint() {
     assert_eq!(resolved.endpoint.name, "DeepSeek");
     assert_eq!(resolved.model.slug, "deepseek-v4-pro");
     assert_eq!(
-        resolved.model.transport.protocol,
+        resolved.model.binding.transport.protocol,
         pl_model::provider::ProviderWireProtocol::Responses
     );
     assert_eq!(
-        resolved.model.transport.default_connection_mode,
+        resolved.model.binding.transport.default_connection_mode,
         ProviderConnectionMode::Http
     );
 }
@@ -124,7 +124,7 @@ fn bundled_catalog_rejects_additional_model_slug_conflicts() {
     else {
         panic!("builtin preset must use a bundled catalog");
     };
-    additional_models.push(ModelInfo::fallback("deepseek-v4-flash"));
+    additional_models.push(ModelInfo::compatible("deepseek-v4-flash"));
 
     assert!(
         provider
@@ -193,11 +193,11 @@ fn same_preset_can_back_multiple_independent_provider_instances() {
         .resolve(&AgentRoleId::new("reviewer").unwrap())
         .unwrap();
     assert_eq!(
-        executor.model.transport.default_connection_mode,
+        executor.model.binding.transport.default_connection_mode,
         ProviderConnectionMode::WebSocket
     );
     assert_eq!(
-        reviewer.model.transport.default_connection_mode,
+        reviewer.model.binding.transport.default_connection_mode,
         ProviderConnectionMode::Http
     );
     assert_eq!(

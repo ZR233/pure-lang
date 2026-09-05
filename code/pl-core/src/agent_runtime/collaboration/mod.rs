@@ -328,7 +328,7 @@ impl CollaborationTool {
         let session = ThreadContextState {
             metadata: crate::ThreadContextMetadata::default(),
             session: child_session,
-            usage: pl_protocol::TokenUsage::default(),
+            usage: pl_protocol::InferenceTokenUsage::default(),
             billing_by_turn: std::collections::BTreeMap::new(),
             last_context_tokens: None,
             trace_sequence: 0,

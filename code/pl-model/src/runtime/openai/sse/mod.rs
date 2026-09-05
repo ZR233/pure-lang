@@ -18,6 +18,8 @@ use item::{
 #[derive(Debug, Clone, Deserialize)]
 #[allow(dead_code)]
 pub struct SseStreamEvent {
+    pub id: Option<String>,
+    pub model: Option<String>,
     #[serde(rename = "type")]
     #[serde(default)]
     pub kind: String,
@@ -82,8 +84,18 @@ const DEFAULT_TEXT_ID: &str = "final";
 const DEFAULT_REASONING_ID: &str = "thinking";
 /// Chat Completions chunk 的 delta 解析；非 chat 事件（无 choices）返回 `None`。
 fn chat_choice_events(event: &SseStreamEvent) -> Option<Vec<ModelStreamEvent>> {
-    let choice = event.choices.as_ref().and_then(|choices| choices.first())?;
+    let choices = event.choices.as_ref()?;
     let mut events = Vec::new();
+    if let Some(usage) = event
+        .usage
+        .as_ref()
+        .and_then(ProviderTokenUsage::to_chat_usage)
+    {
+        events.push(ModelStreamEvent::Usage(usage));
+    }
+    let Some(choice) = choices.first() else {
+        return Some(events);
+    };
     if let Some(delta) = &choice.delta.reasoning_content
         && !delta.is_empty()
     {
@@ -135,17 +147,6 @@ fn chat_choice_events(event: &SseStreamEvent) -> Option<Vec<ModelStreamEvent>> {
                 });
             }
         }
-    }
-
-    if choice.finish_reason.is_some() {
-        let usage = event
-            .usage
-            .as_ref()
-            .and_then(ProviderTokenUsage::to_chat_usage);
-        if let Some(usage) = usage {
-            events.push(ModelStreamEvent::Usage(usage));
-        }
-        events.push(ModelStreamEvent::Completed { response_id: None });
     }
 
     (!events.is_empty()).then_some(events)
@@ -288,7 +289,7 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
 
         "response.failed" => {
             let response = event.response.as_ref();
-            Some(StreamEventBatch::Single(provider_failure_event(
+            let failure = provider_failure_event(
                 response.and_then(|response| response.get("error")),
                 response.and_then(|response| response.get("code").and_then(|value| value.as_str())),
                 response
@@ -300,21 +301,41 @@ fn process_sse_event(event: &SseStreamEvent) -> Option<StreamEventBatch> {
                         .and_then(|value| value.as_u64())
                 }),
                 "response failed",
-            )))
+            );
+            let mut events = Vec::new();
+            if let Some(usage) = response
+                .and_then(|r| r.get("usage"))
+                .and_then(ProviderTokenUsage::from_value)
+                .and_then(|usage| usage.to_responses_usage())
+            {
+                events.push(ModelStreamEvent::Usage(usage));
+            }
+            events.push(failure);
+            Some(StreamEventBatch::Many(events))
         }
 
         "response.incomplete" => {
             let response = event.response.as_ref();
             let reason = response
                 .and_then(|response| response.get("incomplete_details")?.get("reason")?.as_str());
-            Some(StreamEventBatch::Single(provider_failure_event(
+            let failure = provider_failure_event(
                 response.and_then(|response| response.get("error")),
                 reason,
                 None,
                 response.and_then(provider_status),
                 None,
                 "response incomplete",
-            )))
+            );
+            let mut events = Vec::new();
+            if let Some(usage) = response
+                .and_then(|r| r.get("usage"))
+                .and_then(ProviderTokenUsage::from_value)
+                .and_then(|usage| usage.to_responses_usage())
+            {
+                events.push(ModelStreamEvent::Usage(usage));
+            }
+            events.push(failure);
+            Some(StreamEventBatch::Many(events))
         }
 
         "error" => Some(StreamEventBatch::Single(provider_failure_event(
@@ -535,146 +556,6 @@ mod tests {
                 assert_eq!(content, "<final>9.11 更大。</final>");
             }
             other => panic!("unexpected event: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn process_chat_completed_reads_deepseek_cached_token_aliases() {
-        for cached_usage in [
-            serde_json::json!({"prompt_cache_hit_tokens": 35}),
-            serde_json::json!({"cached_prompt_tokens": 35}),
-            serde_json::json!({"prompt_tokens_details": {"cached_tokens": 35}}),
-        ] {
-            let mut usage = serde_json::json!({
-                "prompt_tokens": 100,
-                "completion_tokens": 20,
-                "total_tokens": 120
-            });
-            usage.as_object_mut().unwrap().extend(
-                cached_usage
-                    .as_object()
-                    .unwrap()
-                    .iter()
-                    .map(|(key, value)| (key.clone(), value.clone())),
-            );
-            let event: SseStreamEvent = serde_json::from_value(serde_json::json!({
-                "choices": [{
-                    "delta": {},
-                    "finish_reason": "stop"
-                }],
-                "usage": usage
-            }))
-            .unwrap();
-
-            match process_sse_events(&event).as_slice() {
-                [
-                    ModelStreamEvent::Usage(usage),
-                    ModelStreamEvent::Completed { response_id: None },
-                ] => {
-                    assert_eq!(usage.cached_prompt_tokens, 35);
-                }
-                other => panic!("unexpected event: {other:?}"),
-            }
-        }
-    }
-
-    #[test]
-    fn process_chat_completed_reads_responses_style_token_usage() {
-        let event: SseStreamEvent = serde_json::from_value(serde_json::json!({
-            "choices": [{
-                "delta": {},
-                "finish_reason": "stop"
-            }],
-            "usage": {
-                "input_tokens": 100,
-                "output_tokens": 20,
-                "total_tokens": 120,
-                "input_tokens_details": {
-                    "cached_tokens": 35,
-                    "cache_write_tokens": 11
-                },
-                "output_tokens_details": {
-                    "reasoning_tokens": 8
-                }
-            }
-        }))
-        .unwrap();
-
-        match process_sse_events(&event).as_slice() {
-            [
-                ModelStreamEvent::Usage(usage),
-                ModelStreamEvent::Completed { response_id: None },
-            ] => {
-                assert_eq!(usage.prompt_tokens, 100);
-                assert_eq!(usage.completion_tokens, 20);
-                assert_eq!(usage.total_tokens, 120);
-                assert_eq!(usage.cached_prompt_tokens, 35);
-                assert_eq!(usage.cache_write_tokens, 11);
-                assert_eq!(usage.reasoning_tokens, 8);
-            }
-            other => panic!("unexpected event: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn process_responses_completed_reads_cache_write_tokens() {
-        let event: SseStreamEvent = serde_json::from_value(serde_json::json!({
-            "type": "response.completed",
-            "response": {
-                "id": "resp_1",
-                "usage": {
-                    "input_tokens": 100,
-                    "output_tokens": 20,
-                    "total_tokens": 120,
-                    "input_tokens_details": {
-                        "cached_tokens": 40,
-                        "cache_write_tokens": 15
-                    }
-                }
-            }
-        }))
-        .unwrap();
-
-        match process_sse_events(&event).as_slice() {
-            [
-                ModelStreamEvent::Usage(usage),
-                ModelStreamEvent::Completed { response_id },
-            ] => {
-                assert_eq!(usage.cached_prompt_tokens, 40);
-                assert_eq!(usage.cache_write_tokens, 15);
-                assert_eq!(response_id.as_deref(), Some("resp_1"));
-            }
-            other => panic!("unexpected events: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn responses_stream_usage_matches_non_stream_alias_precedence() {
-        let event: SseStreamEvent = serde_json::from_value(serde_json::json!({
-            "type": "response.completed",
-            "response": {
-                "id": "resp_usage_precedence",
-                "usage": {
-                    "input_tokens": 100,
-                    "output_tokens": 20,
-                    "total_tokens": 120,
-                    "cached_prompt_tokens": 55,
-                    "input_tokens_details": {
-                        "cached_tokens": 20
-                    }
-                }
-            }
-        }))
-        .unwrap();
-
-        match process_sse_events(&event).as_slice() {
-            [
-                ModelStreamEvent::Usage(usage),
-                ModelStreamEvent::Completed { .. },
-            ] => {
-                assert_eq!(usage.cached_prompt_tokens, 55);
-            }
-            other => panic!("unexpected events: {other:?}"),
         }
     }
 

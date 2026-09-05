@@ -9,7 +9,7 @@ pub fn catalog_model(slug: &str) -> ModelInfo {
     default_models()
         .into_iter()
         .find(|model| model.slug == slug)
-        .unwrap_or_else(|| ModelInfo::fallback(slug))
+        .unwrap_or_else(|| ModelInfo::compatible(slug))
 }
 
 pub fn route(
@@ -19,6 +19,7 @@ pub fn route(
     effort: Option<&str>,
 ) -> ResolvedModelRoute {
     ResolvedModelRoute {
+        pricing_mode: pl_protocol::PricingMode::Catalog,
         role: AgentRoleId::new("live-test").expect("static role id is valid"),
         provider_id: ProviderId::new(provider_id).expect("static provider id is valid"),
         endpoint,
@@ -114,6 +115,7 @@ pub async fn serve_sse_sequence_with_raw_requests(
     let (base_url, _json_bodies, handle) = serve_http_sequence_capturing(
         sse_bodies.into_iter().map(TestHttpResponse::sse).collect(),
         Some(raw_requests.clone()),
+        None,
     )
     .await;
     (base_url, raw_requests, handle)
@@ -126,12 +128,28 @@ pub async fn serve_http_sequence(
     std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
     tokio::task::JoinHandle<()>,
 ) {
-    serve_http_sequence_capturing(responses, None).await
+    serve_http_sequence_capturing(responses, None, None).await
 }
+
+pub async fn serve_checked_sse_sequence(
+    responses: Vec<String>,
+    accepts: impl Fn(usize, &serde_json::Value) -> bool + Send + 'static,
+) -> (String, tokio::task::JoinHandle<()>) {
+    let (url, _, server) = serve_http_sequence_capturing(
+        responses.into_iter().map(TestHttpResponse::sse).collect(),
+        None,
+        Some(Box::new(accepts)),
+    )
+    .await;
+    (url, server)
+}
+
+type RequestAcceptance = Box<dyn Fn(usize, &serde_json::Value) -> bool + Send>;
 
 async fn serve_http_sequence_capturing(
     responses: Vec<TestHttpResponse>,
     raw_requests: Option<std::sync::Arc<std::sync::Mutex<Vec<Vec<u8>>>>>,
+    accepts: Option<RequestAcceptance>,
 ) -> (
     String,
     std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
@@ -144,7 +162,7 @@ async fn serve_http_sequence_capturing(
     let bodies = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let captured = bodies.clone();
     let handle = tokio::spawn(async move {
-        for response in responses {
+        for (index, mut response) in responses.into_iter().enumerate() {
             let (mut socket, _) = listener.accept().await.unwrap();
             let mut buffer = Vec::new();
             let mut temp = [0_u8; 1024];
@@ -176,10 +194,16 @@ async fn serve_http_sequence_capturing(
             if let Some(raw_requests) = &raw_requests {
                 raw_requests.lock().unwrap().push(body.to_vec());
             }
-            captured
-                .lock()
-                .unwrap()
-                .push(serde_json::from_slice(body).unwrap());
+            let body: serde_json::Value = serde_json::from_slice(body).unwrap();
+            if accepts
+                .as_ref()
+                .is_some_and(|accepts| !accepts(index, &body))
+            {
+                response.status = 400;
+                response.content_type = "application/json";
+                response.body = serde_json::json!({"error":{"message":"tool task history or native options were not accepted"}}).to_string();
+            }
+            captured.lock().unwrap().push(body);
 
             let response = format!(
                 "HTTP/1.1 {} {}\r\ncontent-type: {}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",

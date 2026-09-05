@@ -72,15 +72,16 @@ pub fn reconcile_programmatic_tool_calling(
     tools: &AgentToolSet,
     route: &ResolvedModelRoute,
 ) -> crate::Result<()> {
-    let supported = route.model.transport.protocol == ProviderWireProtocol::Responses
+    let supported = route.model.binding.transport.protocol == ProviderWireProtocol::Responses
         && route
             .model
             .capabilities
             .supports_programmatic_tool_calling()
         && route
             .model
-            .request_profile
-            .responses_programmatic_tool_calling
+            .binding
+            .request
+            .supports_programmatic_tool_calling()
         && route
             .endpoint
             .service_capabilities
@@ -107,16 +108,24 @@ mod tests {
     use pl_model::provider::ProviderEndpoint;
 
     fn route() -> ResolvedModelRoute {
-        let mut model = ModelInfo::fallback("hosted-model");
-        model.transport = pl_model::model::ModelTransportProfile::responses_http();
+        let mut model = ModelInfo::compatible("hosted-model");
+        model
+            .binding
+            .set_transport(pl_model::model::ModelTransportProfile::responses_http());
         model.capabilities.tools.programmatic_tool_calling = true;
-        model.request_profile.responses_programmatic_tool_calling = true;
+        model.binding.request.protocol = pl_model::model::ModelProtocolOptions::Responses(
+            pl_model::model::ResponsesRequestOptions {
+                programmatic_tool_calling: true,
+                ..Default::default()
+            },
+        );
         let mut endpoint = ProviderEndpoint::openai(None);
         endpoint
             .service_capabilities
             .responses_tools
             .programmatic_tool_calling = true;
         ResolvedModelRoute {
+            pricing_mode: pl_protocol::PricingMode::Catalog,
             role: AgentRoleId::new("test").expect("role"),
             provider_id: ProviderId::new("test").expect("provider"),
             endpoint,

@@ -45,7 +45,9 @@ impl StudioStore {
             runtime_revision: Set(None),
             event_sequence: Set(0),
             metadata_json: Set("{}".to_string()),
-            usage_json: Set(serde_json::to_string(&pl_protocol::TokenUsage::default())?),
+            usage_json: Set(serde_json::to_string(
+                &pl_protocol::InferenceTokenUsage::default(),
+            )?),
             last_context_tokens: Set(None),
             trace_sequence: Set(0),
             created_at: Set(now),

@@ -61,7 +61,7 @@ impl MediaRepresentationPlan {
             }
         }
 
-        if model.request_profile.media_mix_policy == MediaMixPolicy::SingleModality
+        if model.binding.request.media_mix_policy == MediaMixPolicy::SingleModality
             && attachment_ids.len() > 1
         {
             return Err(protocol_error(format!(
@@ -78,7 +78,8 @@ impl MediaRepresentationPlan {
                 .map(|attachment_id| prepared_content(request, attachment_id, modality, model))
                 .collect::<Result<Vec<_>>>()?;
             let profile = model
-                .request_profile
+                .binding
+                .request
                 .media_profile(model_modality(modality))
                 .ok_or_else(|| {
                     protocol_error(format!(
@@ -395,8 +396,11 @@ mod tests {
     }
 
     fn profiled_media_model(modality: crate::model::ModelModality) -> ModelInfo {
-        let mut model = ModelInfo::fallback("profiled-media-model");
-        model.request_profile.media = vec![ModelMediaInputProfile {
+        let mut model = ModelInfo::compatible("profiled-media-model");
+        model
+            .binding
+            .set_transport(crate::model::ModelTransportProfile::responses_http());
+        model.binding.request.media = vec![ModelMediaInputProfile {
             modality,
             wire: match modality {
                 crate::model::ModelModality::Image => crate::model::MediaWireFormat::ChatImageUrl,
@@ -488,7 +492,7 @@ mod tests {
             .prepared_content(image_prepared_content())
             .build();
 
-        let model = bundled_model("gpt-5.4");
+        let model = bundled_model("gpt-6-astra");
         let body = OpenAiProtocol::responses().build_request_body_with_model(&request, &model);
 
         assert_eq!(body["input"][0]["content"][0]["type"], "input_text");
@@ -664,7 +668,7 @@ mod tests {
             .build();
 
         let error = OpenAiProtocol::chat()
-            .build_request(&request, &bundled_model("glm-5.3-flash"), None)
+            .build_request_for_fixture(&request, &bundled_model("glm-5.3-flash"), None)
             .expect_err("a batch without a common representation must fail");
         let message = error.to_string();
 
@@ -735,7 +739,7 @@ mod tests {
                 .build();
 
             let error = OpenAiProtocol::responses()
-                .build_request(&request, &profiled_media_model(model_modality), None)
+                .build_request_for_fixture(&request, &profiled_media_model(model_modality), None)
                 .expect_err("Responses must fail closed for video and file attachments");
 
             assert!(error.to_string().contains("Responses does not support"));

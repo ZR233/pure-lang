@@ -25,16 +25,14 @@ Windows 下对应：
 SeaORM 2.0 异步访问；数据库 schema v18 的破坏性重建合同见
 `19-studio-storage-and-diagnostics.md`。
 `pl-core` 的正常依赖树不包含 SeaORM。provider/model/role 配置仍只由
-`~/.pure/config.toml` schema 17 表达。用户 Agent Profile 单独保存到 `~/.pure/agents/*.toml`，
+`~/.pure/config.toml` schema 18 表达。用户 Agent Profile 单独保存到 `~/.pure/agents/*.toml`，
 一个文件对应一个稳定 Profile ID。
 
 `ConfigRuntime` 在 `startStudioRuntime` 时读取配置；此后普通对话和设置查询只读内存 canonical
 snapshot。当配置文件不存在时设置页展示内存中的默认配置。外部文件变化只有显式
 `reloadSettingsFromDisk` 才能应用。普通设置项在用户修改后即时写入配置；独立新增/编辑页面保留
 本地草稿，必须点击页面内保存按钮才写入配置，取消则丢弃草稿。当前且唯一支持的格式为 schema
-17。Studio 启动时，schema 15 与 16 使用 typed 一次性迁移：先备份原文件，再原子写入 schema 17，
-并从旧 `executor` route 复制出 `worktree_executor` route。迁移或写回失败时保留原配置并 fail closed；
-成功后不保留旧 schema 双读或 fallback。其他旧 schema、未知版本、无法解析、含内联 provider 凭据或无法校验的配置均视为
+18。Studio 启动时，所有旧 schema、未知版本、无法解析、含内联 provider 凭据或无法校验的配置均视为
 内容不兼容：不迁移、不导入旧字段或旧 provider 凭据，先把原始字节备份到同目录唯一的
 `config.toml.rejected.<timestamp>.bak`，再原子替换为当前默认配置并继续启动；仅按默认 provider id
 注入已有系统凭据。备份路径冲突时递增后缀且不得覆盖已有备份。启动成功后桌面宿主返回一次性恢复
@@ -61,7 +59,7 @@ fail closed 并保留原文件；默认配置替换失败时已经完整写入�
 
 `pl-studio-runtime` 负责：
 
-- `StudioConfig` 与唯一支持的 schema version 17，以及启动期 schema 15/16 typed 一次性迁移。
+- `StudioConfig` 与唯一支持的 schema version 18，以及启动期不兼容格式的备份后重建。
 - `~/.pure/config.toml` 路径、serde TOML 解析、原子保存和默认值。
 - Studio instructions、skills、MCP、runtime、`disabled_system_agents` 和 UI 配置。
 - `~/.pure/agents/*.toml` 的逐文件解析、诊断与原子创建/保存。
@@ -107,7 +105,7 @@ route 决定。旧版本、缺失必需路由或无效引用会触发 Studio 配
 本地 TOML 使用 `snake_case`，不同于 API wire 格式。
 
 ```toml
-schema_version = 17
+schema_version = 18
 
 disabled_system_agents = []
 
@@ -210,7 +208,7 @@ catalog = "openai"
 ## 10.5 Provider 和 Model
 
 `models.providers` 可保存多个 provider，相同 preset 可重复使用；唯一性只约束 map key
-`ProviderId`。当前 StudioConfig schema 为 17，provider catalog snapshot schema 为 9。
+`ProviderId`。当前 StudioConfig schema 为 18，provider catalog snapshot schema 为 10。
 
 每个 provider 实例持久化：
 
@@ -232,11 +230,11 @@ hosted 或 standalone Web Search；hosted search 还携带 `OpenAiResponses` 或
 dialect，`ModelCapabilities` 仍表示当前模型能否使用 native search 或
 function tools。核心编排必须同时检查 endpoint 服务能力、模型能力与模型 request profile。官方
 OpenAI endpoint 默认开启 Responses hosted tools；覆盖自定义 `base_url` 后默认关闭，只有显式配置
-才能重新开启。产品 UI 从 catalog schema 9 的无密钥 descriptor 动态渲染能力选项，
+才能重新开启。产品 UI 从 catalog schema 10 的无密钥 descriptor 渲染预设和模型选项，
 不得识别 OpenAI、muxai 或其他具体 id。
 
 OpenAI、MiMo API、MiMo Token Plan、DeepSeek、Zhipu 与 Zhipu Coding Plan 都只是 catalog
-preset；厂商身份不进入模型执行分支。两个 MiMo preset 共享 `mimo` catalog。
+preset；显式 adapter 身份装配具体供应商客户端。两个 MiMo preset 共享 `mimo` catalog。
 
 当前不保留 Anthropic 占位；只有实现第二种协议族的 typed codec、能力模型与测试后，才可写入
 配置或 catalog。
@@ -251,34 +249,26 @@ preset；厂商身份不进入模型执行分支。两个 MiMo preset 共享 `mi
 - `auto_compact_token_limit`
 - `default_temperature`
 - `max_output_tokens`
-- `currency`
-- `input_price_per_mtok`
-- `output_price_per_mtok`
-- `cache_read_price_per_mtok`
+- `pricing`（币种、输入/输出长度档位、可选每周时段倍率及官方来源）
 - `parameters`
-- `transport`（协议、支持模式、默认模式）
+- `binding`（transport 与协议适用 request 配置）
 - `capabilities`
-- `request_profile`
 - `truncation_policy`
 - `base_instructions`
 
-`used_fallback` 是运行时状态，不写入 TOML。
-
 `capabilities` 是结构化能力矩阵。每个 input capability 显式声明 modality、允许来源和限制；
-`request_profile.media` 同时声明当前 provider codec 可使用的有序表示与混合规则。两者不完整或
+`binding.request.media` 同时声明当前 provider codec 可使用的有序表示与混合规则。两者不完整或
 无法把持久快照重新编码时，该 modality 校验失败。未知模型默认 text-only；非视觉模型即使
 provider wire API 接受图片字段，也会在任何附件 IO 和凭据读取前被拒绝。PDF 使用 file modality，
 不保留旧的 pdf modality 别名。
 
-价格字段为可选字段，用于本地 UI 估算费用。`currency` 只作为展示单位，系统不做汇率转换；三个 `*_price_per_mtok` 字段均表示每百万 token 单价。缺失任一参与计算的价格或缺失 `currency` 时，本次 token 仍进入上下文和用量统计，但费用标记为未计价。
+`ModelPricing` 明确区分未知价格与包含费率的定义。货币不做汇率转换；输入、缓存读、缓存写与输出按互斥类别计费，reasoning 已包含在输出内。用量或参与计算的费率缺失时标记未计价；关闭计价与实际零费用分别表示。每次请求冻结价格定义、计价开关和发送时间，最终账单按最终用量选择长度档位；跨时段请求不拆分 token，这是本地估算口径。历史累计读取冻结账单，不按当前目录重算。
 
-会话总费用按货币分组展示，例如 `CNY 0.04 + USD 0.01`。系统不会把不同货币相加，也不会根据当前模型重新估算历史调用；每次 inference 都按当次实际使用模型的价格配置生成费用 delta。页眉费用图标在存在已计价 inference 时只显示已知费用小计；没有任何已计价费用时显示 `-`。未计价事实仍保存在 typed runtime snapshot 中，供状态详情与诊断使用，但不追加到页眉费用图标的金额文案中。
+内置价格来源、核对日期及完整档位保存在后端目录，设置页直接展示后端提供的行。DeepSeek 工作日北京时间 09:00–12:00、14:00–18:00 为两倍高峰价，其余时段及周末使用低峰价。Flash/Vision Exp 低峰输入/缓存读/输出为 1.5/0.05/4.5 CNY，Pro 为 4.5/0.15/13.5 CNY，单位均为每百万 token。
 
-Bundled DeepSeek 模型按中国官网人民币 API 价格配置：`deepseek-v4-flash` 为缓存命中输入 0.02 元、缓存未命中输入 1 元、输出 2 元；`deepseek-v4-pro` 为缓存命中输入 0.025 元、缓存未命中输入 3 元、输出 6 元。`input_price_per_mtok` 表示缓存未命中输入价，`cache_read_price_per_mtok` 表示缓存命中输入价。
+OpenAI 模板包含 GPT‑6 Astra、GPT‑5.5、GPT‑5.6 Sol/Terra/Luna，推荐默认仍为 Sol。GPT‑6 上下文 1,050,000、最大输出 128,000，effort 为 low/medium/high/xhigh/max；标准输入/缓存读/缓存写/输出价格为 10/1/12.5/50 USD，输入超过 272K 时为 20/2/25/75。其余模型依据各自官方资料配置，不从相邻模型推断缺失费率。
 
-Bundled OpenAI/GPT 模型参数以本地 Codex 仓库 `codex-rs/models-manager/models.json` 的修改为准，不按公开 API 文档臆造价格、最大输出或上下文窗口。当前 OpenAI 模板顺序为 `gpt-5.5`、`gpt-5.4`、`gpt-5.4-mini`、`gpt-5.6-sol`、`gpt-5.6-terra`、`gpt-5.6-luna`。GPT-5.6 三个模型的上下文窗口和最大上下文窗口均为 `272000`，最大输出 token 未声明，且继承 OpenAI 的 Responses、视觉输入、工具调用、并行工具和 web search 能力。Pure 当前 `ModelInfo` 不持久化 Codex 的 `default_reasoning_level` 字段，因此 OpenAI 模型 effort 参数候选值的首项表示 Codex 默认 reasoning level，后续项表示其他支持档位；选中值通过 wire 写入 Responses 的 `reasoning.effort`。GPT-5.6 Sol 的默认 effort 为 `low`，Terra/Luna 的默认 effort 为 `medium`。Codex 的 `ultra` 是带自动任务委派语义的内部档位，Pure 没有对应语义，因此不加入候选值。
-
-`request_profile.responses_max_tokens_field` 控制 Responses endpoint 如何序列化 `CompletionRequest::max_tokens`，可选值为 `omit`、`max_output_tokens`、`max_tokens` 和 `max_completion_tokens`。默认值为 `omit`，与 Codex 常规 Responses 请求保持一致；只有兼容代理明确要求输出 token 限制字段时才应在模型 profile 中显式设置。
+`binding.request.protocol` 用封闭 enum 区分 Responses 与 Chat 配置。Responses 的 `max_tokens_field` 默认省略，兼容 Responses 使用 `max_output_tokens`；Chat 包含适用的最大输出字段、usage、parallel tools 与 tool stream 声明。普通设置页不暴露这些供应商内部参数。
 
 Bundled Zhipu 模型 effort 候选值默认为 `enabled` / `none`，直接映射到 Chat 的 `thinking.type`；`glm-5.2` 例外，候选值为 `high` / `max` / `none`，wire 层 `high` / `max` 同时写入 `reasoning_effort` 并设置 `thinking.type = enabled`，`none` 设置 `thinking.type = disabled` 并移除 `reasoning_effort`。`glm-5.3` 候选值为 `high` / `low` / `max`，三档均写入 `reasoning_effort` 并设置 `thinking.type = enabled` 与 `clear_thinking = false`；GLM-5.3 始终思考，不提供 `none` 候选。`glm-5.3-flash` 复用 `glm-5.3` 的候选值与 wire，输入能力固定为 text/image；remote URL 图片首发优选 URL，local 与 durable snapshot 使用 Data URL。video/file 在缺少该模型精确契约时不得声明。
 
@@ -539,7 +529,7 @@ OpenAI 路径。两张卡片的保存命令都携带 Settings CAS revision，成
 
 ## 10.14 LSP 自定义 server 配置
 
-自定义语言服务器声明在 `[lsp.servers.<server_id>]` 表，schema 17 下为可选段。每个条目必须配置
+自定义语言服务器声明在 `[lsp.servers.<server_id>]` 表，schema 18 下为可选段。每个条目必须配置
 `command` 与非空
 `language_ids`，可选 `args`、`detection`（workspace 检测文件名/glob，缺省总是匹配）、
 `extensions`（文件扩展名，缺省为空）、`display_name`（缺省使用 server id）和 `operations`
@@ -559,3 +549,17 @@ extensions = [".purelang"]
 配置替换。自定义 server 使用通用命令 driver（`<command> --version` 探测，无 repair 语义），
 运行行为与路由合同见 `14-lsp-runtime.md`。Studio 项目激活时把该段应用进 LSP registry
 catalog，并纳入激活 fingerprint。
+
+
+## 供应商预设与计价配置（2026-09）
+
+供应商实例持久化计价选择，普通 API 默认开启，智谱 Coding Plan、MiMo Token Plan 与
+OpenAI API 兼容预设默认关闭；修改只影响后续调用。界面主要配置名称、Base URL、API Key、
+默认模型与计价开关，实例 ID 自动生成。供应商私有优化由后端预设与类型化配置拥有。
+
+OpenAI API 兼容预设支持一个或多个模型 ID，显示名默认同 ID，本地无鉴权服务允许省略 Key。
+默认 Chat Completions HTTP，折叠设置可选 Responses HTTP、上下文预算和最大输出。
+默认 32K/4K 是可覆盖的本地运行预算，不宣称是供应商真实限制。价格默认未知，可由结构化配置
+补充。保存与展示以 canonical snapshot 为准，不在 Dart 重建供应商能力或计算价格。
+
+新格式直接替换旧接口与配置，按既有配置备份和不兼容存储重建机制恢复，不保留旧字段别名。

@@ -894,8 +894,15 @@ class _FakeStudioApi implements StudioApi {
       revision: expectedSettingsRevision + 1,
       defaultProviderId: settings['defaultProviderId'] as String?,
       providers: [
-        for (final value in settings['providers'] as List<Object?>)
-          _providerFromSettings(value),
+        for (final provider in command.providers)
+          _providerFromCommand(
+            provider,
+            _currentState.providers
+                .where(
+                  (item) => item.id == (provider.originalId ?? provider.id),
+                )
+                .firstOrNull,
+          ),
       ],
       roles: [
         for (final role in command.roles)
@@ -1280,24 +1287,16 @@ Map<String, Object?> _providerSettingsCommandJson(
           'name': provider.name,
           'baseUrl': provider.baseUrl,
           'bearerToken': provider.secret.value ?? '',
-          'capabilitySource': provider.capabilitySource,
-          'hostedWebSearch': provider.hostedWebSearch,
-          'hostedWebSearchDialect': provider.hostedWebSearchDialect,
-          'standaloneWebSearch': provider.standaloneWebSearch,
-          'promptCacheDialect': provider.promptCacheDialect,
-          'responsesProgrammaticToolCalling':
-              provider.responsesProgrammaticToolCalling,
+          'pricingEnabled': provider.pricingEnabled,
           'defaultModel': provider.defaultModel,
           'customModels': [
             for (final model in provider.customModels)
               {
                 'slug': model.slug,
                 'displayName': model.displayName,
-                'reasoningEfforts': model.reasoningEfforts,
-                'baseInstructions': model.baseInstructions,
                 'wireProtocol': model.wireProtocol,
-                'supportedConnectionModes': model.supportedConnectionModes,
-                'defaultConnectionMode': model.defaultConnectionMode,
+                'contextWindow': model.contextWindow,
+                'maxOutputTokens': model.maxOutputTokens,
               },
           ],
           'modelConnectionModes': [

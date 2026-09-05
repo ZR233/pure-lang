@@ -17,7 +17,7 @@ use crate::{
 use super::super::agent_host::ThreadWriteBehindWriter;
 
 pub(in crate::studio) const MODEL_PERFORMANCE_OWNER_ID: &str = "global";
-const CACHE_VERSION: u32 = 1;
+const CACHE_VERSION: u32 = 2;
 const HISTORY_LIMIT: usize = 1_000;
 
 #[derive(Clone)]
@@ -96,6 +96,8 @@ struct SessionCostState {
     has_unpriced_usage: bool,
     #[serde(default)]
     inference_fingerprints: BTreeMap<String, String>,
+    #[serde(default)]
+    internal_billing: pl_protocol::TurnBillingRecord,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,6 +113,12 @@ struct PerformanceSample {
     ttft_millis: u64,
     decode_millis: u64,
     total_response_millis: u64,
+}
+
+#[derive(Clone, Copy)]
+enum BillingRetention {
+    Turn,
+    Internal,
 }
 
 impl ModelPerformanceOwner {
@@ -159,6 +167,31 @@ impl ModelPerformanceOwner {
         thread_id: &str,
         billing: &InferenceBillingRecord,
     ) -> Result<(), PureError> {
+        self.record(root_thread_id, thread_id, billing, BillingRetention::Turn)
+            .await
+    }
+
+    pub(crate) async fn record_internal_inference(
+        &self,
+        root_thread_id: &str,
+        billing: &InferenceBillingRecord,
+    ) -> Result<(), PureError> {
+        self.record(
+            root_thread_id,
+            root_thread_id,
+            billing,
+            BillingRetention::Internal,
+        )
+        .await
+    }
+
+    async fn record(
+        &self,
+        root_thread_id: &str,
+        thread_id: &str,
+        billing: &InferenceBillingRecord,
+        retention: BillingRetention,
+    ) -> Result<(), PureError> {
         if root_thread_id.trim().is_empty() || thread_id.trim().is_empty() {
             return Err(PureError::MemoryError(
                 "model performance inference is missing Thread identity".to_string(),
@@ -181,9 +214,21 @@ impl ModelPerformanceOwner {
                 self.writer.block(&reason);
                 return Err(PureError::MemoryError(reason));
             }
+            match retention {
+                BillingRetention::Turn => {}
+                BillingRetention::Internal => {
+                    session
+                        .internal_billing
+                        .append(billing.clone())
+                        .map_err(PureError::MemoryError)?;
+                }
+            }
             session.inference_fingerprints.insert(identity, fingerprint);
-            merge_costs(&mut session.estimated_costs, &billing.estimated_costs);
-            session.has_unpriced_usage |= billing.has_unpriced_usage;
+            merge_costs(
+                &mut session.estimated_costs,
+                &billing.accounting.estimated_costs(),
+            );
+            session.has_unpriced_usage |= billing.accounting.has_unpriced_usage();
 
             if let Some(sample) = performance_sample(thread_id, billing) {
                 next.history.push_back(sample);
@@ -241,7 +286,7 @@ fn performance_sample(
         provider_instance_id: billing.provider_instance_id.clone(),
         provider_display_name: billing.provider.clone(),
         model: billing.model.clone(),
-        completion_tokens: billing.normalized_usage.completion_tokens,
+        completion_tokens: billing.accounting.usage.totals().completion_tokens,
         ttft_millis: timing.ttft_millis,
         decode_millis: timing.decode_millis,
         total_response_millis: timing.total_millis,
@@ -352,9 +397,7 @@ fn billing_fingerprint(billing: &InferenceBillingRecord) -> Result<String, PureE
 
 #[cfg(test)]
 mod tests {
-    use pl_protocol::{
-        InferenceOrchestrationMetrics, InferenceTiming, InferenceTokenUsage, ModelPricingSnapshot,
-    };
+    use pl_protocol::{InferenceOrchestrationMetrics, InferenceTiming};
 
     use super::*;
     use crate::StudioProductEventKind;
@@ -381,12 +424,30 @@ mod tests {
     async fn priced_and_unpriced_agents_share_one_multi_currency_session() {
         let (owner, _, writer, _) = memory_owner().await;
         let mut root = billing_record("root-inference", "provider-a", "model-a", 20, 200, 1);
-        root.estimated_costs = vec![cost("CNY", 0.04)];
+        root.accounting.pricing = pl_protocol::PricingOutcome::Estimated {
+            cost: cost("CNY", 0.04),
+            cache_savings: None,
+        };
         let mut child = billing_record("child-inference", "provider-a", "model-a", 10, 100, 2);
-        child.estimated_costs = vec![cost("CNY", 0.10), cost("USD", 0.02)];
+        child.accounting.pricing = pl_protocol::PricingOutcome::Estimated {
+            cost: cost("CNY", 0.10),
+            cache_savings: None,
+        };
+        let mut usd_child =
+            billing_record("usd-inference", "provider-usd", "model-usd", 10, 100, 2);
+        usd_child.accounting.pricing = pl_protocol::PricingOutcome::Estimated {
+            cost: cost("USD", 0.02),
+            cache_savings: None,
+        };
+        owner
+            .record_inference("root", "child-usd", &usd_child)
+            .await
+            .unwrap();
         let mut unmeasured =
             billing_record("unmeasured-inference", "provider-a", "model-a", 30, 300, 3);
-        unmeasured.has_unpriced_usage = true;
+        unmeasured.accounting.pricing = pl_protocol::PricingOutcome::Unpriced {
+            reason: pl_protocol::UnpricedReason::MissingPrice,
+        };
         unmeasured.timing = None;
 
         owner
@@ -410,7 +471,7 @@ mod tests {
             [cost("CNY", 0.14), cost("USD", 0.02)]
         );
         assert!(snapshot.session_costs[0].has_unpriced_usage);
-        assert_eq!(snapshot.history.len(), 2);
+        assert_eq!(snapshot.history.len(), 3);
 
         writer.shutdown().await.expect("writer shutdown");
     }
@@ -419,9 +480,14 @@ mod tests {
     async fn unpriced_root_does_not_hide_priced_child_session_cost() {
         let (owner, _, writer, _) = memory_owner().await;
         let mut root = billing_record("root-inference", "provider-a", "model-a", 20, 200, 1);
-        root.has_unpriced_usage = true;
+        root.accounting.pricing = pl_protocol::PricingOutcome::Unpriced {
+            reason: pl_protocol::UnpricedReason::MissingPrice,
+        };
         let mut child = billing_record("child-inference", "provider-a", "model-a", 10, 100, 2);
-        child.estimated_costs = vec![cost("CNY", 0.10)];
+        child.accounting.pricing = pl_protocol::PricingOutcome::Estimated {
+            cost: cost("CNY", 0.10),
+            cache_savings: None,
+        };
 
         owner
             .record_inference("root", "root", &root)
@@ -534,6 +600,73 @@ mod tests {
                 if snapshot.revision == 1
         ));
 
+        // An internal title request has no Turn transcript, so its full receipt is retained here.
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut reader = tokio::io::BufReader::new(&mut socket);
+            let mut content_length = 0;
+            loop {
+                let mut header = String::new();
+                assert!(reader.read_line(&mut header).await.unwrap() > 0);
+                if header == "\r\n" {
+                    break;
+                }
+                if let Some((name, value)) = header.split_once(':')
+                    && name.eq_ignore_ascii_case("content-length")
+                {
+                    content_length = value.trim().parse::<usize>().unwrap();
+                }
+            }
+            reader
+                .read_exact(&mut vec![0; content_length])
+                .await
+                .unwrap();
+            drop(reader);
+            let body = concat!(
+                "data: {\"choices\":[{\"delta\":{\"content\":\"Session title\"},\"finish_reason\":\"stop\"}]}\n\n",
+                "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":10,\"total_tokens\":110,\"prompt_tokens_details\":{\"cached_tokens\":20}}}\n\n",
+                "data: [DONE]\n\n"
+            );
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+        });
+        let model = pl_model::runtime::ModelRuntime::new(
+            pl_model::provider::ProviderEndpoint::compatible(
+                "title",
+                format!("http://{address}/v1"),
+            ),
+            pl_model::model::ModelInfo::compatible("title-model"),
+        )
+        .unwrap()
+        .with_pricing_mode(pl_protocol::PricingMode::Disabled);
+        let title = model
+            .complete(
+                pl_model::completion::CompletionRequest::builder()
+                    .instructions("Name this session")
+                    .build(),
+                Default::default(),
+            )
+            .await
+            .unwrap();
+        server.await.unwrap();
+        assert_eq!(title.content.as_deref(), Some("Session title"));
+        let mut internal = billing_record("title", "provider-a", "title-model", 10, 100, 8);
+        internal.accounting = title.accounting;
+        owner
+            .record_internal_inference("root", &internal)
+            .await
+            .unwrap();
+        owner
+            .record_internal_inference("root", &internal)
+            .await
+            .unwrap();
+
         writer.flush().await.expect("flush observed state");
         assert!(
             load_object::<ModelPerformanceState>(store.database(), MODEL_PERFORMANCE_OWNER_ID,)
@@ -546,6 +679,10 @@ mod tests {
         let restored = ModelPerformanceOwner::new(store.clone(), writer.clone(), product_events);
         restored.load_cache().await.expect("restore cache");
         assert_eq!(restored.snapshot().await, owner.snapshot().await);
+        let restored_receipts = restored.state.lock().await.sessions["root"]
+            .internal_billing
+            .clone();
+        assert_eq!(restored_receipts.inferences, vec![internal]);
 
         let empty_store = StudioStore::open_memory().await.expect("empty store");
         let empty_writer = ThreadWriteBehindWriter::new(empty_store.clone());
@@ -579,7 +716,8 @@ mod tests {
         assert_eq!(owner.snapshot().await.revision, 1);
 
         let mut conflict = billing;
-        conflict.normalized_usage.completion_tokens = 11;
+        conflict.accounting.usage.output_tokens = Some(11);
+        conflict.accounting.usage.total_tokens = Some(31);
         assert!(
             owner
                 .record_inference("root", "child", &conflict)
@@ -599,26 +737,25 @@ mod tests {
         decode_millis: u64,
         recorded_at: i64,
     ) -> InferenceBillingRecord {
-        let usage = InferenceTokenUsage {
-            prompt_tokens: 20,
-            cached_prompt_tokens: 0,
-            cache_write_tokens: 0,
-            completion_tokens,
-            reasoning_tokens: completion_tokens / 2,
-            total_tokens: 20 + completion_tokens,
-        };
         InferenceBillingRecord {
             inference_id: inference_id.to_string(),
             provider_instance_id: provider_instance_id.to_string(),
             provider: format!("{provider_instance_id} display"),
             model: model.to_string(),
             context_window: Some(128_000),
-            reported_usage: usage.clone(),
-            normalized_usage: usage,
-            pricing: ModelPricingSnapshot::default(),
-            estimated_costs: Vec::new(),
-            estimated_cache_savings: Vec::new(),
-            has_unpriced_usage: false,
+            accounting: pl_protocol::InferenceAccounting {
+                usage: pl_protocol::UsageReport {
+                    input_tokens: Some(20),
+                    cache_read_tokens: Some(0),
+                    cache_write_tokens: Some(0),
+                    output_tokens: Some(completion_tokens),
+                    reasoning_tokens: Some(completion_tokens / 2),
+                    total_tokens: Some(20 + completion_tokens),
+                },
+                pricing: pl_protocol::PricingOutcome::Disabled,
+                price_snapshot: None,
+                request_started_at: Some(recorded_at),
+            },
             prompt_generation: None,
             prompt_cache_policy: None,
             prefix_changed_reason: None,

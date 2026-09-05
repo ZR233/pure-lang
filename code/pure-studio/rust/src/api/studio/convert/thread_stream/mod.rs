@@ -581,6 +581,7 @@ fn workflow_run(value: WorkflowRuntimeRunSnapshot) -> BridgeWorkflowRun {
 
 fn runtime_usage(value: ThreadRuntimeUsage) -> BridgeThreadRuntimeUsage {
     BridgeThreadRuntimeUsage {
+        has_incomplete_usage: value.has_incomplete_usage,
         model: value.model,
         context_window: value.context_window,
         latest_context_tokens: value.latest_context_tokens,

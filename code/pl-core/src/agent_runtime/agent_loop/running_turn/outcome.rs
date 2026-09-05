@@ -1,4 +1,4 @@
-use pl_protocol::TokenUsage;
+use pl_protocol::InferenceTokenUsage;
 use pl_trace::TraceEventKind;
 
 use crate::TurnResult;
@@ -96,7 +96,7 @@ pub(crate) fn turn_outcome(
         ),
         TurnExecutionTerminal::CancelledBeforeReturn { cause } => (
             pl_protocol::TurnOutcome::cancelled(cause),
-            TokenUsage::default(),
+            InferenceTokenUsage::default(),
             RetainedTurnResult::Absent,
         ),
         TurnExecutionTerminal::WorkerFailed { error } => (
@@ -104,7 +104,7 @@ pub(crate) fn turn_outcome(
                 pl_protocol::TurnFailureCategory::Internal,
                 error,
             )),
-            TokenUsage::default(),
+            InferenceTokenUsage::default(),
             RetainedTurnResult::Absent,
         ),
         TurnExecutionTerminal::ProtocolFailed { error } => (
@@ -116,7 +116,7 @@ pub(crate) fn turn_outcome(
                 message: error,
                 retry: pl_protocol::RetryDisposition::Permanent,
             }),
-            TokenUsage::default(),
+            InferenceTokenUsage::default(),
             RetainedTurnResult::Absent,
         ),
     };
@@ -133,18 +133,8 @@ pub(crate) fn turn_outcome(
     }
 }
 
-pub(crate) fn add_usage(total: &mut TokenUsage, delta: &TokenUsage) {
-    total.prompt_tokens = total.prompt_tokens.saturating_add(delta.prompt_tokens);
-    total.completion_tokens = total
-        .completion_tokens
-        .saturating_add(delta.completion_tokens);
-    total.total_tokens = total.total_tokens.saturating_add(delta.total_tokens);
-    total.cached_prompt_tokens = total
-        .cached_prompt_tokens
-        .saturating_add(delta.cached_prompt_tokens);
-    total.reasoning_tokens = total
-        .reasoning_tokens
-        .saturating_add(delta.reasoning_tokens);
+pub(crate) fn add_usage(total: &mut InferenceTokenUsage, delta: &InferenceTokenUsage) {
+    total.merge(delta);
 }
 
 pub(super) fn enforce_finalization(
@@ -405,10 +395,11 @@ mod tests {
 
     fn completed_result(trace_events: Vec<TraceEvent>) -> TurnResult {
         TurnResult {
+            billing: pl_protocol::TurnBillingRecord::new(),
             content: String::new(),
             reasoning_content: None,
             model: "test".to_string(),
-            usage: TokenUsage::default(),
+            usage: InferenceTokenUsage::default(),
             last_context_tokens: None,
             context_compactions: Vec::new(),
             session_message_count: 0,

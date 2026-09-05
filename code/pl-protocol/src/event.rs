@@ -157,6 +157,8 @@ pub struct RuntimeCostAmount {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeUsageSnapshot {
+    #[serde(default)]
+    pub has_incomplete_usage: bool,
     pub model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window: Option<u64>,
@@ -189,6 +191,10 @@ pub struct RuntimeUsageSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRuntimeDelta {
+    #[serde(default)]
+    pub has_incomplete_usage: bool,
+    #[serde(default)]
+    pub context_tokens: Option<u64>,
     pub inference_id: String,
     pub agent_id: String,
     pub path: String,
@@ -235,7 +241,7 @@ pub enum PipelineStage {
 
 /// Token usage snapshot shared by product projection and internal trace mapping.
 ///
-/// Independent of `pl_protocol::TokenUsage` to keep this product projection DTO
+/// Independent of `pl_protocol::InferenceTokenUsage` to keep this product projection DTO
 /// decoupled from the model-layer accounting type.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]

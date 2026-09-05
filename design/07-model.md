@@ -88,18 +88,24 @@ provider 适配实现可以依赖 `async-openai`、`reqwest`、`tokio-tungstenit
 声明、wire protocol 与模型声明合成为穷尽的 `EffectivePromptCachePolicy`。未声明能力的自定义
 Responses/Chat endpoint 默认不发送任何缓存专属字段。
 
-模型级 provider override 使用 `ModelRequestProfile` 表达，包括 `api_model`、`headers`、`body`、`chat_parallel_tool_calls`、`responses_programmatic_tool_calling`、`max_tokens_field` 和 `responses_max_tokens_field`。`body` 作为唯一的动态 base body 注入请求体（如 DeepSeek 固定的 `thinking.type = enabled`）；不再保留未被 wire 消费的通用 `options` 袋。其余可变字段（如 effort 透传的 `reasoning_effort`、GLM `thinking.clear_thinking`）由 `ModelInfo.parameters` 声明驱动（见 7.8）。这些字段只由 `pl-model` 的 provider adapter 消费；核心编排层不得读取或拼接这些私有字段。Chat Completions 只有在模型 profile 显式声明 `chat_parallel_tool_calls = true` 时才发送 `parallel_tool_calls`，并把核心层本轮计算出的 `true` 或 `false` 原样写入；未声明的 OpenAI-compatible endpoint 默认省略该字段。Programmatic Tool Calling 同时要求模型能力、Responses profile 和 endpoint 服务能力；不满足时不向该 agent 注册 hosted tool。Chat Completions 的最大输出 token 字段默认写入 `max_tokens`；OpenAI-compatible provider 若要求新字段（如 MiMo 的 `max_completion_tokens`）可在模型 profile 中声明。Responses endpoint 默认不发送最大输出 token 字段，以匹配 Codex 常规 Responses 请求；Responses-like 代理若要求限制字段，可在模型 profile 中把 `responses_max_tokens_field` 设置为 `max_output_tokens`、`max_tokens` 或 `max_completion_tokens`。
+模型协议配置由 `ModelBinding` 持有：transport 声明连接方式，request 的 `ModelProtocolOptions` 区分 Responses 与 Chat。Responses 只携带最大输出字段和 programmatic tool calling 配置；Chat 只携带最大输出字段、parallel tools、include usage 与 tool stream 配置。厂商原生选项在具体客户端公开，通用调用和原生调用共同经过同一执行器。参数映射与开放原生扩展仅在适配边界解释，Core 不拼接供应商字段。MiMo 使用 `max_completion_tokens`；智谱按明确模型能力启用 `tool_stream`、保留 thinking；兼容客户端只发送所选协议的通用字段。
 
 ## 7.4 Provider 与 runtime
 
-当前所有支持的供应商共用一种 OpenAI-compatible 协议族，因此不建立 `ModelProvider` trait、厂商 runtime 子类或共享 provider wrapper。`ResolvedModelRoute` 解析出唯一的 `ProviderEndpoint + ModelInfo`，`ModelRuntime` 在构造时绑定该模型；后续请求不再携带 model，provider 也不保存 default model 或完整模型目录。
+模型执行采用窄接口与具体供应商客户端组合。统一入口只负责推理；OpenAI、DeepSeek、智谱、
+MiMo 与 OpenAI-compatible 拥有各自的具体客户端和类型化原生选项，动态路由使用持有这些
+客户端的封闭 enum。`ModelRuntime` 与 `ModelTurnClient` 显式开放类型化供应商访问入口，
+不使用 `Any`、向下转型或包含所有可选操作的大 trait。
 
-`ProviderConfig` 是持久化配置和 catalog binding 的唯一来源；`ProviderEndpoint` 只包含运行时 endpoint、解析后的凭证、headers、tool wire policy 与服务能力。protocol 和 connection mode 只来自绑定模型的 `ModelTransportProfile`，避免 provider 与 model 两份事实漂移。
-所有自定义 OpenAI-compatible endpoint 使用同一个通用构造入口；不能按 Responses/Chat 名义复制
-只改名的构造器。模型能力只由 `ModelInfo.capabilities` 表达，endpoint 仅叠加真实的服务约束，
-runtime 不再维护一份始终为全能力的 provider bitflag 或异步空操作 credential façade。
-运行路径不匹配 OpenAI、DeepSeek、Zhipu、MiMo 等 ID，也不为这些厂商建立穷尽枚举分发。
-未来只有在实际支持第二种协议族时才引入新的 typed codec；当前不保留 Anthropic 占位或预先抽象。
+通用与原生调用共享 transport、重试、取消、stream 生命周期与计量路径。余额、配额和
+远程压缩是独立能力，只由实际支持的对象提供；Responses 协议本身不意味着支持远程压缩。
+通用模型目录与协议绑定配置分离，Responses、Chat 及厂商选项只保存本身适用的字段。
+已知私有协议由 typed DTO 表达，开放扩展与 opaque context 保真留在供应商边界。
+
+Core 冻结 `ToolPlan` 并拥有工具权限、执行、并发与结果提交；供应商边界落实原生 function/custom
+工具、programmatic caller、hosted search、thinking 与工具流优化。原生优化不得丢失其他已注册
+工具；reasoning、caller、opaque context 与工具结果配对在多轮、重试和恢复中保持完整。
+具体模型和 endpoint 的显式能力决定优化，不按 slug 或 URL 猜测。
 
 每个 provider 实例保存 preset 身份、endpoint override、凭证、headers、tool wire policy、
 服务能力和 catalog binding；具体模型由角色 route 选择，不保存第二份 provider default model。
@@ -308,12 +314,11 @@ WebP。官方接口还提供 Files API，但 Pure 在 provider file 上传、瞬
 
 Bundled catalog 只读，配置只能通过 `additional_models` 追加不冲突 slug；完全自定义 provider
 使用 `Explicit { models }`。附加与显式模型都必须声明 transport；模型目录的
-`connection_overrides` 只保存当前模式选择，不修改模型声明的支持矩阵。`used_fallback` 仍是运行时
-状态，不从配置读取。
+`connection_overrides` 只保存当前模式选择，不修改模型声明的支持矩阵。
 
 模型信息中的 `base_instructions` 是模型级基础提示词来源，进入 `pl-core` 的 instruction assembler；配置中的 `[instructions].base_override` 可以完整替换它。模型信息中的 `context_window`、`max_context_window` 和 `auto_compact_token_limit` 只描述模型能力与默认阈值。上下文压缩的触发判断、历史保留、原子替换和持久化都在 `pl-core` 完成，`pl-model` 不维护压缩状态。
 
-`CompletionRequest.input` 使用 provider 无关的有序 `ModelContextItem`，包括普通 `Message` 和专用 `Compaction { encryptedContent }`；`.messages(...)` 只是不含 checkpoint 的便捷构造器。Responses request 可以把 compaction item 映射为原生输入，Chat Completions 必须明确拒绝。绑定单模型的 `ModelRuntime::compact_context` 接收 instructions、有序上下文、工具、parallel tool calls、reasoning 和 prompt cache key，并返回经过 provider 解析的上下文项与可选 usage。远程协议能力由绑定模型的 `ProviderWireProtocol::Responses` 决定，不依赖 preset ID；远程 compaction 固定走独立 HTTP 请求。
+`CompletionRequest.input` 使用 provider 无关的有序 `ModelContextItem`，包括普通 `Message` 和专用 `Compaction { encryptedContent }`；`.messages(...)` 只是不含 checkpoint 的便捷构造器。Responses request 可以把 compaction item 映射为原生输入，Chat Completions 必须明确拒绝。`ModelRuntime::compaction()` 返回实际支持远程压缩的能力对象，接收有序上下文并返回保真上下文与最终 accounting。能力由 endpoint 显式声明，不能从 Responses 协议推断；网络执行复用共享执行器并固定使用 HTTP。
 
 ## 7.8 模型可调参数
 
@@ -360,8 +365,8 @@ impl ParameterWire {
 
 | 供应商 | candidates | wire.set（选中值 → 字段） | wire.remove |
 | --- | --- | --- | --- |
-| OpenAI（GPT-5.5 / GPT-5.4 / GPT-5.4-Mini） | `low` / `medium` / `high` / `xhigh` | `reasoning.effort` = 值 | — |
-| OpenAI（GPT-5.6 Sol / Terra / Luna） | `low` / `medium` / `high` / `xhigh` / `max` | `reasoning.effort` = 值 | — |
+| OpenAI（GPT-5.5） | `low` / `medium` / `high` / `xhigh` | `reasoning.effort` = 值 | — |
+| OpenAI（GPT-6 Astra / GPT-5.6 Sol / Terra / Luna） | `low` / `medium` / `high` / `xhigh` / `max` | `reasoning.effort` = 值 | — |
 | DeepSeek | `high` / `max` | `reasoning_effort` = 值（`thinking.type = enabled` 作为 base body） | — |
 | Zhipu 普通 | `none` / `enabled` | `thinking.type` = 值 | — |
 | GLM-5.2 | `none` / `high` / `max` | `high`/`max`：`reasoning_effort` + `thinking.type = enabled` + `thinking.clear_thinking = false`；`none`：`thinking.type = disabled` | `none` 移除 `reasoning_effort` |
@@ -384,39 +389,7 @@ GLM-5.2 的「一个选择联动多个字段」和「none 时移除字段」由 
 
 同供应商的模型共享大量元数据（capabilities、truncation_policy、effort 参数声明、base body）。`default_models` 不再为每个模型独立构造完整 `ModelInfo`，而是用 `ModelFamily` 预设封装共享部分，具体模型仅以差异字段实例化。
 
-类型签名：
-
-```rust
-pub struct ModelFamily {
-    pub id: &'static str,
-    pub capabilities: ModelCapabilities,
-    pub truncation_mode: TruncationMode,
-    pub truncation_limit: u64,
-    pub parameters: Vec<ModelParameter>,
-    pub request_profile: ModelRequestProfile,
-    pub base_instructions: String,
-}
-
-impl ModelFamily {
-    pub fn instantiate(
-        &self,
-        slug: &str,
-        display_name: &str,
-        description: &str,
-        context_window: u64,
-        max_context_window: u64,
-        max_output_tokens: Option<u64>,
-        pricing: ModelPricing,
-    ) -> ModelInfo;
-}
-
-pub struct ModelPricing {
-    pub currency: Option<String>,
-    pub input_per_mtok: Option<f64>,
-    pub output_per_mtok: Option<f64>,
-    pub cache_read_per_mtok: Option<f64>,
-}
-```
+`ModelFamily::instantiate(ModelInstanceSpec)` 用模型差异创建目录项，共享声明通过组合复用。family 不承担请求生命周期或费用计算；`ModelPricing` 独立表达未知价格或包含长度分档、时段倍率及来源的费率定义，具体结构以公开 Rust 类型为准。
 
 `pl-model` 的内建 family 预设按供应商与模型线划分：`openai_family`、`openai_gpt56_family`、
 `deepseek_family`、`deepseek_vision_family`、`mimo_family`、`zhipu_text_family`、
@@ -467,11 +440,10 @@ DeepSeek 使用隐式共同前缀，不发送 `prompt_cache_key`、breakpoint �
 透传，但不得由 tool revision 或 wire fingerprint 派生。cache key 只是路由提示，不能代替请求
 前缀相等。
 
-provider usage 必须分别报告缓存读取和缓存写入。OpenAI GPT-5.6 及以后模型的
-`cache_write_tokens` 按当次价格快照计费；目录未给出显式写入价时，只有有效策略为
-`openAiPromptCacheKey` 且模型声明写入 token 能力，才按普通输入价的 `1.25 ×` 冻结写入价，
-不得仅凭模型名推断。旧模型或未声明写入能力的 provider 不得制造写入 token。DeepSeek
-继续按命中/未命中输入分类计费。
+缓存请求控制、服务端用量和价格是三个独立契约。只有服务端报告的缓存读取、写入和
+reasoning 才能作为计量事实；缺失不是零，不截断异常计数，不按缓存请求策略推导写入费用。
+OpenAI 的普通输入、缓存读和缓存写按官方语义互斥计费，DeepSeek 按输入命中/未命中计费。
+具体单价来自模型目录，不在 Core 中保留 `1.25 ×` 等供应商规则。
 
 缓存诊断只记录 generation、固定前缀/wire 工具前缀/working context 的 hash、ToolPlan wire
 fingerprint、
@@ -499,9 +471,44 @@ tool choice 保持 `auto`。DeepSeek hosted search 是 additive 工具，必须�
 Provider 服务能力同时包含 `hosted_responses` 与 `hosted_dialect`。内置 DeepSeek preset 使用
 `DeepSeekResponses`，OpenAI preset 与旧显式配置默认使用 `OpenAiResponses`。preset 实例覆盖
 非 canonical `base_url` 时不得继承 hosted search 或其他 Responses hosted 能力；显式 capability
-仍可由用户重新声明。Provider catalog schema 9 暴露 dialect，产品层不得从 provider id 或 URL 猜测。
+仍可由用户重新声明。Provider catalog schema 10 暴露 dialect，产品层不得从 provider id 或 URL 猜测。
 
 DeepSeek `/responses` 返回的 `web_search_call` 与 OpenAI Responses 共用 canonical SSE decoder、
 timeline 和历史回放：`searching` / `completed` 生命周期、search/open/find action 都投影为统一事件；
 完整 native item（包括未知字段和 opaque results）作为 Responses context 持久化，并在下一轮按原始
 JSON 顺序回放。provider adapter 不自行注入未进入本轮冻结 `ToolPlan` 的 hosted tool。
+
+## 7.12 最终计量与价格
+
+`InferenceAccounting` 是单次模型调用的 canonical 计量结果，包含用量报告、完整性、计价状态和
+价格快照。成功、失败、截断和取消均保留已收到的服务端报告；未报告保持未知。Chat 必须消费
+末尾独立 usage 包后才终结，Responses、Chat、WS 和压缩采用一致语义。重复终态不重复记账。
+
+`ModelPricing` 声明币种、输入/输出长度分档与可选的每周时段倍率。调用开始冻结价表与计价
+开关，按产生最终结果的请求发送时间选择时段，按最终用量选择长度档位；跨时段不拆分 token。
+这是本地模型 token 费用估算，不是供应商账单，不包含独立工具费、订阅费或汇率换算。
+关闭计价、价格/用量不足、已估算与零费用分别表示。历史只读取冻结账单，不按现价重算。
+Core、Studio、Flutter 仅归属、累计和展示，不再次解释供应商 usage 或价格。
+
+截至 2026-09-05，DeepSeek 以 CNY/百万 token 计价：Flash（含 Vision Exp）低峰未命中/命中/
+输出为 1.5/0.05/4.5；Pro 为 4.5/0.15/13.5。北京时间工作日 09:00–12:00、14:00–18:00
+使用两倍费率，其他时段与周末为低峰。GPT-6 Astra 新增为 Responses WS/HTTP 模型；删除
+已下线模型。官方价格无法确认时保持未知，免费明确为零。
+
+普通 API 预设默认计价；Coding Plan、Token Plan 和自定义兼容预设默认不计价，用户选择只影响
+之后的调用。账户余额和套餐配额保持独立查询。
+
+实现依据为 Fowler Role Interface / Gateway 与 Evans Anticorruption Layer：隔离外部协议、
+按真实交互拆分接口，并保留可显式使用的具体供应商能力；不引入通用规则引擎或空实现。
+
+验收按完整公开功能链路组织：多轮工具任务、原生优化、计量持久化与恢复、失败取消、设置到调用、
+压缩和内部调用。确定性环境只替换供应商网络与时钟，不为中间 JSON、私有 helper 或数量限制
+新增独立测试。真实 API 验收记录实际 endpoint、模型与最终用量；无凭据或权限不能算通过。
+
+原生搜索参数使用 `HostedWebSearchOptions` 的封闭变体：DeepSeek 无附加参数，OpenAI 拥有
+其实际支持的访问模式、过滤、位置与上下文设置。构造 DeepSeek 搜索不需要填写 OpenAI 空字段，
+adapter 也不再通过逐字段丢弃这些设置来模拟协议兼容。
+
+独立 Core 工具任务通过 `TurnResult.billing` 返回本轮每次推理与压缩的冻结账单；actor 使用同一账单提交持久状态。取消仅提交已取得的计量事实，不推进已取消上下文；预算到期前已收到的响应必须先记账。缺失或无效用量不能覆盖此前已知的上下文用量。
+
+自动标题等没有会话上下文的内部推理，将完整冻结账单保存在所属 root Thread 的内部账单中，并与费用累计一次性提交。内部调用不覆盖主会话上下文用量；重载只读取原账单和原累计。

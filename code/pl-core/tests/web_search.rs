@@ -111,7 +111,7 @@ fn custom_capability_uses_same_standalone_planner() {
     let mut info = ProviderEndpoint::compatible("Future provider", "https://future.example/v1");
     info.bearer_token = Some("secret".to_string());
     info.service_capabilities = ProviderServiceCapabilities::openai_web_search();
-    let mut model = ModelInfo::fallback("future-model");
+    let mut model = ModelInfo::compatible("future-model");
     model.capabilities.tools.function_calling = true;
     let provider = ProviderConfig::from_explicit_models(info, vec![model.clone()]);
     assert!(provider.preset.is_none());
@@ -129,8 +129,10 @@ fn custom_capability_uses_same_standalone_planner() {
 
 #[test]
 fn hosted_path_is_exclusive_when_function_tools_are_unavailable() {
-    let mut model = ModelInfo::fallback("hosted-only-model");
-    model.transport = ModelTransportProfile::responses_http();
+    let mut model = ModelInfo::compatible("hosted-only-model");
+    model
+        .binding
+        .set_transport(ModelTransportProfile::responses_http());
     model.capabilities.web_search = true;
     model.capabilities.tools.function_calling = false;
     let provider = custom_responses_provider(model.clone(), Some("secret"));
@@ -145,7 +147,7 @@ fn hosted_path_is_exclusive_when_function_tools_are_unavailable() {
 
 #[test]
 fn standalone_backend_can_be_selected_from_another_routed_provider() {
-    let mut current_model = ModelInfo::fallback("current-model");
+    let mut current_model = ModelInfo::compatible("current-model");
     current_model.capabilities.tools.function_calling = true;
     let current = ProviderConfig::from_explicit_models(
         ProviderEndpoint::compatible("Current", "https://current.example/v1"),

@@ -1,25 +1,20 @@
 use pl_core::{AgentSession, ModelTurnClient, ModelTurnOptions, ModelTurnRequest};
 
-const DEEPSEEK_LIVE_ENV_KEY: &str = "API_KEY_DEEPSEEK";
+const DEEPSEEK_LIVE_ENV_KEY: &str = "DEEPSEEK_API_KEY";
 
 mod support;
 
-fn live_api_key() -> Option<String> {
-    match std::env::var(DEEPSEEK_LIVE_ENV_KEY) {
-        Ok(value) if !value.trim().is_empty() => Some(value),
-        _ => {
-            eprintln!("{DEEPSEEK_LIVE_ENV_KEY} is not set; skipping live prompt-cache test");
-            None
-        }
-    }
+fn live_api_key() -> String {
+    std::env::var(DEEPSEEK_LIVE_ENV_KEY)
+        .ok()
+        .filter(|key| !key.trim().is_empty())
+        .expect("DEEPSEEK_API_KEY is required for explicitly requested live acceptance")
 }
 
 #[tokio::test]
 #[ignore = "requires a real DeepSeek credential and incurs provider usage"]
 async fn identical_deepseek_request_reports_provider_cache_read_tokens() {
-    let Some(api_key) = live_api_key() else {
-        return;
-    };
+    let api_key = live_api_key();
     let route = support::deepseek_route(api_key);
     let client = ModelTurnClient::from_route(&route).expect("construct DeepSeek client");
     let mut session = AgentSession::new();
@@ -42,9 +37,9 @@ async fn identical_deepseek_request_reports_provider_cache_read_tokens() {
         .await
         .expect("second identical real DeepSeek request");
 
-    assert!(first.usage().input_tokens() > 0);
+    assert!(first.accounting().usage.totals().prompt_tokens > 0);
     assert!(
-        second.usage().cached_input_tokens() > 0,
+        second.accounting().usage.totals().cached_prompt_tokens > 0,
         "provider usage must report a real cache read; local fingerprints are not evidence"
     );
 }

@@ -127,13 +127,23 @@ pub struct TurnEngineBuilder {
 }
 
 impl TurnEngineBuilder {
+    /// Injects request wall time while preserving monotonic performance measurements.
+    pub fn with_clock(
+        mut self,
+        clock: std::sync::Arc<dyn pl_model::runtime::InferenceClock>,
+    ) -> Self {
+        self.runtime = self.runtime.with_clock(clock);
+        self
+    }
+
     /// 从已校验的角色路由构造绑定单一模型的 Turn runtime。
     pub fn from_route(route: &ResolvedModelRoute) -> Result<Self> {
         let runtime = ModelRuntime::new_with_provider_id(
             route.provider_id.as_str(),
             route.endpoint.clone(),
             route.model.clone(),
-        )?;
+        )?
+        .with_pricing_mode(route.pricing_mode);
         Ok(Self {
             runtime,
             effort: route.effort.clone(),

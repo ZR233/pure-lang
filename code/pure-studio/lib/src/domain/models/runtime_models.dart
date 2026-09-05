@@ -167,6 +167,7 @@ class ThreadRuntimeView {
     this.estimatedCosts = const [],
     this.estimatedCacheSavings = const [],
     this.hasUnpricedUsage = false,
+    this.hasIncompleteUsage = false,
     this.promptGeneration,
     this.promptCachePolicy,
     this.prefixChangedReason,
@@ -195,6 +196,7 @@ class ThreadRuntimeView {
   final List<RuntimeCostView> estimatedCosts;
   final List<RuntimeCostView> estimatedCacheSavings;
   final bool hasUnpricedUsage;
+  final bool hasIncompleteUsage;
   final int? promptGeneration;
   final String? promptCachePolicy;
   final String? prefixChangedReason;
@@ -210,13 +212,8 @@ class ThreadRuntimeView {
       : null;
   String get turnThroughputLabel => formatTokenThroughput(turnTokensPerSecond);
 
-  double? get effectiveCacheHitRate {
-    if (!hasUsage) return null;
-    final reported = cacheHitRate;
-    if (reported != null) return reported.clamp(0.0, 1.0);
-    if (promptTokens <= 0) return null;
-    return (cachedPromptTokens / promptTokens).clamp(0.0, 1.0);
-  }
+  double? get effectiveCacheHitRate =>
+      hasUsage && !hasIncompleteUsage ? cacheHitRate : null;
 
   @override
   bool operator ==(Object other) {
@@ -242,6 +239,7 @@ class ThreadRuntimeView {
             listEquals(estimatedCosts, other.estimatedCosts) &&
             listEquals(estimatedCacheSavings, other.estimatedCacheSavings) &&
             hasUnpricedUsage == other.hasUnpricedUsage &&
+            hasIncompleteUsage == other.hasIncompleteUsage &&
             promptGeneration == other.promptGeneration &&
             promptCachePolicy == other.promptCachePolicy &&
             prefixChangedReason == other.prefixChangedReason &&
@@ -272,6 +270,7 @@ class ThreadRuntimeView {
     Object.hashAll(estimatedCosts),
     Object.hashAll(estimatedCacheSavings),
     hasUnpricedUsage,
+    hasIncompleteUsage,
     promptGeneration,
     promptCachePolicy,
     prefixChangedReason,
@@ -301,6 +300,7 @@ class ThreadRuntimeView {
     List<RuntimeCostView>? estimatedCosts,
     List<RuntimeCostView>? estimatedCacheSavings,
     bool? hasUnpricedUsage,
+    bool? hasIncompleteUsage,
     int? promptGeneration,
     String? promptCachePolicy,
     String? prefixChangedReason,
@@ -330,6 +330,7 @@ class ThreadRuntimeView {
       estimatedCacheSavings:
           estimatedCacheSavings ?? this.estimatedCacheSavings,
       hasUnpricedUsage: hasUnpricedUsage ?? this.hasUnpricedUsage,
+      hasIncompleteUsage: hasIncompleteUsage ?? this.hasIncompleteUsage,
       promptGeneration: promptGeneration ?? this.promptGeneration,
       promptCachePolicy: promptCachePolicy ?? this.promptCachePolicy,
       prefixChangedReason: prefixChangedReason ?? this.prefixChangedReason,

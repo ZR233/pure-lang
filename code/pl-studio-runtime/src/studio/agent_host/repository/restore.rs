@@ -414,6 +414,7 @@ fn empty_restored_runtime(thread_id: &str, updated_at: i64) -> ThreadRuntimeSnap
     ThreadRuntimeSnapshot {
         thread_id: thread_id.to_string(),
         usage: ThreadRuntimeUsage {
+            has_incomplete_usage: false,
             model: String::new(),
             context_window: None,
             latest_context_tokens: 0,
@@ -519,7 +520,7 @@ mod tests {
     use super::active_skills_from_items;
 
     use pl_core::{AgentTurnOutcome, FaultedAgentState, ThreadId, TurnId};
-    use pl_protocol::TokenUsage;
+    use pl_protocol::InferenceTokenUsage;
     use pl_protocol::{StateError, TurnFailure, TurnFailureCategory, TurnOutcome};
 
     use super::*;
@@ -533,7 +534,7 @@ mod tests {
                 TurnFailureCategory::Internal,
                 format!("projection failed: {LEGACY_REASONING_CHUNK_FAULT}"),
             )),
-            usage: TokenUsage::default(),
+            usage: InferenceTokenUsage::default(),
             started_at: Some(1),
             finished_at: 2,
         };
@@ -834,7 +835,9 @@ mod tests {
             revision: Set(1),
             state_json: Set(serde_json::to_string(&state).expect("turn state JSON")),
             model_json: Set(None),
-            usage_json: Set(serde_json::to_string(&pl_protocol::TokenUsage::default()).unwrap()),
+            usage_json: Set(
+                serde_json::to_string(&pl_protocol::InferenceTokenUsage::default()).unwrap(),
+            ),
             metadata_json: Set(None),
             updated_at: Set(2),
             ..Default::default()

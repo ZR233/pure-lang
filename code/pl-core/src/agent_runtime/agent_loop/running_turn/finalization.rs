@@ -286,17 +286,34 @@ where
         )
         .await?;
 
-        let active = self
-            .active
-            .as_mut()
-            .expect("running turn must remain while cancelling");
         let grace = self.cancel_grace.min(Duration::from_secs(1));
-        if tokio::time::timeout(grace, &mut active.settled)
-            .await
-            .is_err()
-        {
-            active.abort_handle.abort();
-            let _ = (&mut active.settled).await;
+        let deadline = tokio::time::sleep(grace);
+        tokio::pin!(deadline);
+        loop {
+            let active = self
+                .active
+                .as_mut()
+                .expect("running turn remains while cancelling");
+            tokio::select! {
+                _ = &mut active.settled => break,
+                _ = &mut deadline => {
+                    active.abort_handle.abort();
+                    let _ = (&mut active.settled).await;
+                    break;
+                }
+                command = self.channels.command_receiver.recv() => match command {
+                    Some(AgentLoopCommand::Checkpoint { checkpoint, reply }) => {
+                        // The cancelled worker awaits durable accounting before it can settle.
+                        let result = self.checkpoint(*checkpoint).await;
+                        let _ = reply.send(result);
+                    }
+                    Some(AgentLoopCommand::SetActivity { reply, .. }) => {
+                        let _ = reply.send(Ok(()));
+                    }
+                    Some(command) => self.channels.deferred_commands.push_back(command),
+                    None => break,
+                }
+            }
         }
         self.flush_pending_traces().await?;
         self.flush_pending_observations().await?;
@@ -304,13 +321,21 @@ where
             .active
             .take()
             .expect("running turn must remain until cancellation is committed");
-        let outcome = turn_outcome(
+        let mut outcome = turn_outcome(
             active.turn_id.clone(),
             active.thread_id,
             TurnExecutionTerminal::CancelledBeforeReturn { cause },
             Some(active.started_at),
         )
         .outcome;
+        if let Some(billing) = self
+            .state
+            .session
+            .billing_by_turn
+            .get(outcome.turn_id.as_str())
+        {
+            outcome.usage = billing.aggregate_usage();
+        }
         let mut next = self.state.clone();
         for input in &mut next.pending_inputs {
             if matches!(

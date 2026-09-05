@@ -1,3 +1,12 @@
+//! Endpoint configuration, concrete native clients and independently supported services.
+mod clients;
+pub mod compatible;
+pub mod deepseek;
+pub mod mimo;
+pub mod openai;
+pub mod zhipu;
+pub use clients::ProviderClient;
+
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
 
@@ -57,6 +66,8 @@ pub struct WebSearchProviderCapabilities {
 /// 与具体产品无关的 Provider 外部服务能力。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderServiceCapabilities {
+    #[serde(default)]
+    pub remote_compaction: bool,
     #[serde(default)]
     pub web_search: WebSearchProviderCapabilities,
     #[serde(default)]
@@ -119,9 +130,7 @@ pub enum EffectivePromptCachePolicy {
     #[default]
     None,
     ImplicitPrefix,
-    OpenAiPromptCacheKey {
-        cache_write_tokens: bool,
-    },
+    OpenAiPromptCacheKey,
 }
 
 impl EffectivePromptCachePolicy {
@@ -129,12 +138,12 @@ impl EffectivePromptCachePolicy {
         match self {
             Self::None => "none",
             Self::ImplicitPrefix => "implicitPrefix",
-            Self::OpenAiPromptCacheKey { .. } => "openAiPromptCacheKey",
+            Self::OpenAiPromptCacheKey => "openAiPromptCacheKey",
         }
     }
 
     pub const fn uses_prompt_cache_key(self) -> bool {
-        matches!(self, Self::OpenAiPromptCacheKey { .. })
+        matches!(self, Self::OpenAiPromptCacheKey)
     }
 }
 
@@ -142,6 +151,7 @@ impl ProviderServiceCapabilities {
     /// 返回同时支持 Responses hosted 与 OpenAI Search API 的能力集合。
     pub fn openai_web_search() -> Self {
         Self {
+            remote_compaction: true,
             web_search: WebSearchProviderCapabilities {
                 hosted_responses: true,
                 hosted_dialect: HostedWebSearchDialect::OpenAiResponses,
@@ -157,8 +167,22 @@ impl ProviderServiceCapabilities {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// Explicit adapter selection. Custom endpoints never acquire a vendor identity from their URL.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ProviderAdapterKind {
+    OpenAi,
+    DeepSeek,
+    Zhipu,
+    MiMo,
+    #[default]
+    OpenAiCompatible,
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProviderEndpoint {
+    #[serde(default)]
+    pub adapter: ProviderAdapterKind,
     pub name: String,
     pub base_url: String,
     pub bearer_token: Option<String>,
@@ -227,20 +251,35 @@ pub enum ApplyPatchToolType {
     Freeform,
 }
 
+impl std::fmt::Debug for ProviderEndpoint {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ProviderEndpoint")
+            .field("name", &self.name)
+            .field("adapter", &self.adapter)
+            .field("has_credential", &self.bearer_token.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
 impl ProviderEndpoint {
+    /// Selects a concrete adapter explicitly, without changing endpoint credentials.
+    pub fn with_adapter(mut self, adapter: ProviderAdapterKind) -> Self {
+        self.adapter = adapter;
+        self
+    }
+
     pub fn effective_prompt_cache_policy(
         &self,
         model: &crate::model::ModelInfo,
     ) -> EffectivePromptCachePolicy {
         match (
-            model.transport.protocol,
+            model.binding.transport.protocol,
             self.service_capabilities.prompt_cache.dialect,
         ) {
             (_, PromptCacheDialect::ImplicitPrefix) => EffectivePromptCachePolicy::ImplicitPrefix,
             (ProviderWireProtocol::Responses, PromptCacheDialect::OpenAiPromptCacheKey) => {
-                EffectivePromptCachePolicy::OpenAiPromptCacheKey {
-                    cache_write_tokens: model.capabilities.prompt_cache.cache_write_tokens,
-                }
+                EffectivePromptCachePolicy::OpenAiPromptCacheKey
             }
             _ => EffectivePromptCachePolicy::None,
         }
@@ -250,9 +289,11 @@ impl ProviderEndpoint {
         let custom_endpoint = base_url.is_some();
         let mut service_capabilities = ProviderServiceCapabilities::openai_web_search();
         if custom_endpoint {
+            service_capabilities.remote_compaction = false;
             service_capabilities.responses_tools = ResponsesHostedToolCapabilities::default();
         }
         Self {
+            adapter: ProviderAdapterKind::OpenAi,
             name: "OpenAI".into(),
             base_url: base_url.unwrap_or_else(|| "https://api.openai.com/v1".into()),
             bearer_token: None,
@@ -265,6 +306,7 @@ impl ProviderEndpoint {
 
     pub fn deepseek(base_url: Option<String>) -> Self {
         Self {
+            adapter: ProviderAdapterKind::DeepSeek,
             name: "DeepSeek".into(),
             base_url: base_url.unwrap_or_else(|| "https://api.deepseek.com".into()),
             bearer_token: None,
@@ -290,6 +332,7 @@ impl ProviderEndpoint {
             "Zhipu",
             base_url.unwrap_or_else(|| "https://open.bigmodel.cn/api/paas/v4".into()),
         )
+        .with_adapter(ProviderAdapterKind::Zhipu)
     }
 
     pub fn zhipu_coding_plan(base_url: Option<String>) -> Self {
@@ -297,6 +340,7 @@ impl ProviderEndpoint {
             "Zhipu Coding Plan",
             base_url.unwrap_or_else(|| ZHIPU_CODING_PLAN_BASE_URL.into()),
         )
+        .with_adapter(ProviderAdapterKind::Zhipu)
     }
 
     /// 构造通用 OpenAI-compatible provider。
@@ -305,6 +349,7 @@ impl ProviderEndpoint {
     /// 的 function tool wire，不因兼容服务名称继承官方 OpenAI 能力。
     pub fn compatible(name: impl Into<String>, base_url: impl Into<String>) -> Self {
         Self {
+            adapter: ProviderAdapterKind::OpenAiCompatible,
             name: name.into(),
             base_url: base_url.into(),
             bearer_token: None,
@@ -381,6 +426,7 @@ mod tests {
         assert_eq!(
             info,
             ProviderEndpoint::compatible("Zhipu", "https://open.bigmodel.cn/api/paas/v4")
+                .with_adapter(ProviderAdapterKind::Zhipu)
         );
     }
 
@@ -391,6 +437,7 @@ mod tests {
         assert_eq!(
             info,
             ProviderEndpoint::compatible("Zhipu Coding Plan", ZHIPU_CODING_PLAN_BASE_URL)
+                .with_adapter(ProviderAdapterKind::Zhipu)
         );
     }
 
@@ -426,9 +473,7 @@ mod tests {
         );
         assert_eq!(
             openai.effective_prompt_cache_policy(&openai_model),
-            EffectivePromptCachePolicy::OpenAiPromptCacheKey {
-                cache_write_tokens: true,
-            }
+            EffectivePromptCachePolicy::OpenAiPromptCacheKey
         );
         assert_eq!(
             compatible.effective_prompt_cache_policy(&openai_model),

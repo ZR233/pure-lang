@@ -30,11 +30,13 @@ pub struct StudioSettings {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StudioProviderSettings {
+    pub pricing_enabled: bool,
     pub id: String,
     pub template_kind: String,
     pub name: String,
     pub base_url: String,
     pub has_bearer_token: bool,
+    pub credential_required: bool,
     pub capability_source: String,
     pub hosted_web_search: bool,
     pub hosted_web_search_dialect: String,
@@ -50,6 +52,8 @@ pub struct StudioProviderSettings {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StudioCustomModelSettings {
+    pub context_window: u64,
+    pub max_output_tokens: u64,
     pub slug: String,
     pub display_name: String,
     pub reasoning_efforts: Vec<String>,

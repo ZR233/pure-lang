@@ -1,145 +1,103 @@
-use std::collections::HashMap;
-use std::time::Duration;
-
-use async_openai::Client;
-use async_openai::types::stream::StreamResponse;
-use futures::StreamExt;
-use pl_protocol::{ModelContextItem, PureError, Result};
-use serde_json::{Map, Value};
-
-use super::ModelRuntime;
-use super::openai::PureOpenAiConfig;
-use super::provider_error::openai_error_to_pure;
+//! Native remote compaction reuses the complete inference lifecycle and accounting.
+use super::{InvocationRunner, ModelInvocationContext};
 use crate::completion::tool_schema::CustomToolProjection;
 use crate::completion::{
-    CompletionRequest, ModelCompactionRequest, ModelCompactionResponse, OpenAiCompactionMode,
+    CompletionFailure, CompletionRequest, ModelCompactionRequest, ModelCompactionResponse,
+    OpenAiCompactionMode,
 };
 use crate::provider::ProviderWireProtocol;
-use crate::runtime::openai::sse;
 use crate::runtime::openai::{OpenAiProtocol, OpenAiRequestBody};
-use pl_protocol::TokenUsage;
+use pl_protocol::{ModelContextItem, PureError, Result};
+use serde_json::{Map, Value};
+use std::collections::HashMap;
 
 const REMOTE_COMPACTION_V2_FEATURE: &str = "remote_compaction_v2";
-const MAX_REMOTE_V2_RETRIES: u32 = 2;
 
 pub(super) async fn compact_context(
-    provider: &ModelRuntime,
+    provider: &InvocationRunner,
     request: ModelCompactionRequest,
-) -> Result<ModelCompactionResponse> {
-    if provider.model().transport.protocol != ProviderWireProtocol::Responses {
+    context: ModelInvocationContext,
+) -> std::result::Result<ModelCompactionResponse, CompletionFailure> {
+    if !provider.endpoint().service_capabilities.remote_compaction
+        || provider.model().binding.transport.protocol != ProviderWireProtocol::Responses
+    {
         return Err(PureError::ConfigError(
-            "remote context compaction requires the Responses protocol".to_string(),
-        ));
+            "endpoint does not support native remote compaction".into(),
+        )
+        .into());
     }
     match request.mode {
-        OpenAiCompactionMode::RemoteV2 => compact_v2(provider, request).await,
-        OpenAiCompactionMode::Local => Err(PureError::ConfigError(
-            "local context compaction must be orchestrated by pl-core".to_string(),
-        )),
+        OpenAiCompactionMode::Local => {
+            return Err(PureError::ConfigError(
+                "local compaction belongs to core orchestration".into(),
+            )
+            .into());
+        }
+        OpenAiCompactionMode::RemoteV2 => {}
     }
-}
-
-async fn compact_v2(
-    provider: &ModelRuntime,
-    request: ModelCompactionRequest,
-) -> Result<ModelCompactionResponse> {
-    let (mut body, mut model_headers) = build_compaction_body(provider, &request)?;
+    let (mut body, mut headers) = build_compaction_body(provider, &request)?;
     let input = body
         .get_mut("input")
         .and_then(Value::as_array_mut)
-        .ok_or_else(|| PureError::ConfigError("OpenAI Responses input must be an array".into()))?;
-    input.push(serde_json::json!({ "type": "compaction_trigger" }));
-    body.insert("stream".to_string(), Value::Bool(true));
+        .ok_or_else(|| {
+            PureError::ConfigError("Responses compaction input must be an array".into())
+        })?;
+    #[derive(serde::Serialize)]
+    struct CompactionTrigger {
+        r#type: &'static str,
+    }
+    input.push(
+        serde_json::to_value(CompactionTrigger {
+            r#type: "compaction_trigger",
+        })
+        .map_err(PureError::from)?,
+    );
     append_beta_feature(
-        &mut model_headers,
+        &mut headers,
         provider.endpoint().http_headers.as_ref(),
         REMOTE_COMPACTION_V2_FEATURE,
     );
-
-    let mut retry = 0;
-    loop {
-        let result = compact_v2_attempt(provider, body.clone(), &model_headers).await;
-        match result {
-            Ok(response) => return Ok(response),
-            Err(error) if retry < MAX_REMOTE_V2_RETRIES && is_retryable(&error) => {
-                retry += 1;
-                tokio::time::sleep(Duration::from_millis(100 * u64::from(retry))).await;
-            }
-            Err(error) => return Err(error),
+    let completion = CompletionRequest::builder()
+        .instructions(request.instructions)
+        .input(request.input)
+        .tools(request.tools)
+        .parallel_tool_calls(request.parallel_tool_calls)
+        .reasoning(request.reasoning)
+        .build();
+    let response = provider
+        .for_compaction(headers, body)
+        .complete(completion, context)
+        .await?;
+    let accounting = response.accounting;
+    let mut checkpoints = response
+        .responses_context_items
+        .into_iter()
+        .filter(|item| item.value.get("type").and_then(Value::as_str) == Some("compaction"));
+    let replacement = (|| -> Result<_> {
+        let checkpoint = checkpoints.next().ok_or_else(|| {
+            PureError::Protocol("remote compaction returned no checkpoint".into())
+        })?;
+        if checkpoints.next().is_some() {
+            return Err(PureError::Protocol(
+                "remote compaction returned conflicting checkpoints".into(),
+            ));
         }
-    }
-}
-
-async fn compact_v2_attempt(
-    provider: &ModelRuntime,
-    body: Map<String, Value>,
-    model_headers: &HashMap<String, String>,
-) -> Result<ModelCompactionResponse> {
-    let config = PureOpenAiConfig::new(
-        provider.resolve_base_url(),
-        provider.endpoint().bearer_token.clone(),
-        provider.endpoint().http_headers.as_ref(),
-        model_headers,
-    )?;
-    let client = Client::build(provider.http_client.clone(), config);
-    let mut stream: StreamResponse<sse::SseStreamEvent> = client
-        .responses()
-        .create_stream_byot(body)
-        .await
-        .map_err(openai_error_to_pure)?;
-    let mut compaction = None;
-    let mut compaction_count = 0;
-    let mut usage = None;
-    let mut completed = false;
-    while let Some(event) = stream.next().await {
-        let event = event.map_err(openai_error_to_pure)?;
-        match event.kind.as_str() {
-            "response.output_item.done" => {
-                if let Some(item) = event.item
-                    && item.get("type").and_then(Value::as_str) == Some("compaction")
-                {
-                    compaction_count += 1;
-                    if compaction.is_none() {
-                        compaction = parse_output_item(item)?;
-                    }
-                }
-            }
-            "response.completed" => {
-                completed = true;
-                usage = event
-                    .response
-                    .as_ref()
-                    .and_then(|response| response.get("usage"))
-                    .map(token_usage)
-                    .transpose()?;
-                break;
-            }
-            _ => {}
-        }
-    }
-    if !completed {
-        return Err(PureError::HttpError(
-            "OpenAI remote compaction v2 stream closed before response.completed".to_string(),
-        ));
-    }
-    if compaction_count != 1 {
-        return Err(PureError::ConfigError(format!(
-            "OpenAI remote compaction v2 expected exactly one compaction item, got {compaction_count}"
-        )));
-    }
-    let Some(compaction) = compaction else {
-        return Err(PureError::ConfigError(
-            "OpenAI remote compaction v2 returned an invalid compaction item".to_string(),
-        ));
-    };
+        parse_output_item(checkpoint.value)?.ok_or_else(|| {
+            PureError::Protocol("remote compaction returned an invalid checkpoint".into())
+        })
+    })()
+    .map_err(|source| CompletionFailure {
+        source,
+        accounting: Box::new(accounting.clone()),
+    })?;
     Ok(ModelCompactionResponse {
-        input: vec![compaction],
-        usage,
+        input: vec![replacement],
+        accounting,
     })
 }
 
 fn build_compaction_body(
-    provider: &ModelRuntime,
+    provider: &InvocationRunner,
     request: &ModelCompactionRequest,
 ) -> Result<(Map<String, Value>, HashMap<String, String>)> {
     let model_info = provider.model().clone();
@@ -177,7 +135,7 @@ fn build_compaction_body(
     for key in ["tool_choice", "store", "previous_response_id"] {
         body.remove(key);
     }
-    Ok((body, model_info.request_profile.headers.clone()))
+    Ok((body, model_info.binding.request.headers.clone()))
 }
 
 fn append_beta_feature(
@@ -221,41 +179,6 @@ fn parse_output_item(item: Value) -> Result<Option<ModelContextItem>> {
         }
         _ => Ok(None),
     }
-}
-
-fn token_usage(value: &Value) -> Result<TokenUsage> {
-    let input = value
-        .get("input_tokens")
-        .and_then(Value::as_u64)
-        .unwrap_or_default();
-    let output = value
-        .get("output_tokens")
-        .and_then(Value::as_u64)
-        .unwrap_or_default();
-    let cached = value
-        .get("input_tokens_details")
-        .and_then(|details| details.get("cached_tokens"))
-        .and_then(Value::as_u64)
-        .unwrap_or_default();
-    Ok(TokenUsage {
-        prompt_tokens: input,
-        completion_tokens: output,
-        total_tokens: value
-            .get("total_tokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(input + output),
-        cached_prompt_tokens: cached,
-        cache_write_tokens: value
-            .get("input_tokens_details")
-            .and_then(|details| details.get("cache_write_tokens"))
-            .and_then(Value::as_u64)
-            .unwrap_or_default(),
-        reasoning_tokens: 0,
-    })
-}
-
-fn is_retryable(error: &PureError) -> bool {
-    error.is_transient_model_transport()
 }
 
 #[cfg(test)]
@@ -320,10 +243,18 @@ mod tests {
         )
         .to_string();
         let (base_url, handle) = serve_sse_once(sse_body).await;
-        let provider = openai_provider(base_url, ProviderConnectionMode::Http);
+        let fixture = openai_provider(base_url, ProviderConnectionMode::Http);
+        let mut endpoint = fixture.endpoint().clone();
+        endpoint.service_capabilities.remote_compaction = true;
+        let provider =
+            crate::runtime::ModelRuntime::new(endpoint, fixture.model().clone()).unwrap();
+        let (tx, _) = tokio::sync::broadcast::channel(16);
+        let context = ModelInvocationContext::new(Default::default()).with_events(tx);
 
         let response = provider
-            .compact_context(compaction_request(OpenAiCompactionMode::RemoteV2))
+            .compaction()
+            .expect("declared native compaction")
+            .complete(compaction_request(OpenAiCompactionMode::RemoteV2), context)
             .await
             .unwrap();
         let captured = handle.await.unwrap();
@@ -338,7 +269,7 @@ mod tests {
             &serde_json::json!({"type": "compaction_trigger"})
         );
         assert_eq!(response.input.len(), 1);
-        assert_eq!(response.usage.unwrap().total_tokens, 15);
+        assert_eq!(response.accounting.usage.totals().total_tokens, 15);
     }
 
     #[tokio::test]
@@ -349,31 +280,23 @@ mod tests {
         use crate::runtime::test_support::{openai_provider, serve_sse_once};
 
         let (base_url, handle) = serve_sse_once("data: [DONE]\n\n".to_string()).await;
-        let provider = openai_provider(base_url, ProviderConnectionMode::Http);
+        let fixture = openai_provider(base_url, ProviderConnectionMode::Http);
+        let mut endpoint = fixture.endpoint().clone();
+        endpoint.service_capabilities.remote_compaction = true;
+        let provider =
+            crate::runtime::ModelRuntime::new(endpoint, fixture.model().clone()).unwrap();
+        let (tx, _) = tokio::sync::broadcast::channel(16);
+        let context = ModelInvocationContext::new(Default::default()).with_events(tx);
 
         let error = provider
-            .compact_context(compaction_request(OpenAiCompactionMode::RemoteV2))
+            .compaction()
+            .expect("declared native compaction")
+            .complete(compaction_request(OpenAiCompactionMode::RemoteV2), context)
             .await
             .unwrap_err();
         let captured = handle.await.unwrap();
 
-        assert!(matches!(error, PureError::HttpError(_)));
+        assert!(error.is_transient_model_transport());
         assert_eq!(captured.request_line, "POST /responses HTTP/1.1");
-    }
-
-    #[test]
-    fn retry_policy_uses_typed_transport_failures_only() {
-        assert!(is_retryable(&PureError::transient_model_failure(
-            "temporarily unavailable",
-            None,
-            Some("server_is_overloaded".to_string()),
-            Some(503),
-        )));
-        assert!(!is_retryable(&PureError::LlmError(
-            "timeout 429 503 is display text only".to_string(),
-        )));
-        assert!(!is_retryable(&PureError::HttpError(
-            "unclassified HTTP error".to_string(),
-        )));
     }
 }

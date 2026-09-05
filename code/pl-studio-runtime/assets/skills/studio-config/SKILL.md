@@ -27,9 +27,9 @@ Product state (projects, threads, tasks) lives in `<home>/studio/studio.sqlite`;
 
 ## Format Rules
 
-- TOML with snake_case keys; only `schema_version = 17` is accepted after startup migration.
+- TOML with snake_case keys; only `schema_version = 18` is accepted; incompatible configurations are backed up and reset during startup.
 - A missing file means in-memory defaults shown in Settings; nothing is written until you save.
-- At startup, schemas 15 and 16 are typed-migrated to 17 after a byte-for-byte `config.toml.migrated.<timestamp>.bak` backup. Other unparsable, invalid, inline-credential, or unknown-schema files use the rejected-backup recovery path. A failed backup or replacement keeps startup closed and preserves the original file.
+- At startup, incompatible old, unparsable, invalid, inline-credential, or unknown-schema files are backed up byte-for-byte to `config.toml.rejected.<timestamp>.bak` and reset to current defaults. A failed backup or replacement keeps startup closed and preserves the original file.
 - Explicit reload while Studio is running remains strict: it reports the invalid file instead of replacing it.
 - Saving from Settings writes atomically. External file edits are not picked up automatically; restart Studio after editing config.toml by hand.
 
@@ -59,7 +59,7 @@ Tokens never live in `config.toml`. Saving from Settings clears any inline token
 Every provider needs `name`, `base_url`, and a `catalog` section; every role needs a route. `effort` is optional and must match the model's supported effort candidates.
 
 ```toml
-schema_version = 17
+schema_version = 18
 
 [deepseek_web_search]
 enabled = true

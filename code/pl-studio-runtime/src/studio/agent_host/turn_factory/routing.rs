@@ -56,7 +56,7 @@ mod tests {
         let simple = snapshot
             .mode(&pl_protocol::ThreadModeId::simple())
             .expect("simple mode");
-        let mut model = pl_core::ModelInfo::fallback("hosted-only-model");
+        let mut model = pl_core::ModelInfo::compatible("hosted-only-model");
         model.capabilities.tools.function_calling = false;
 
         let error = validate_thread_mode_model(Some(&task), &model).unwrap_err();

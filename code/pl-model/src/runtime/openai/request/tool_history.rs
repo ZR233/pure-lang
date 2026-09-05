@@ -250,7 +250,7 @@ mod tests {
         assert_eq!(body["input"][3]["type"], "program_output");
 
         let error = OpenAiProtocol::chat()
-            .build_request(&request, &ModelInfo::fallback("gpt-5.5"), None)
+            .build_request_for_fixture(&request, &ModelInfo::compatible("gpt-5.5"), None)
             .unwrap_err();
         assert!(error.to_string().contains("Responses native items"));
     }
@@ -285,7 +285,7 @@ mod tests {
 
         let body = serde_json::to_value(
             OpenAiProtocol::responses()
-                .build_request(&request, &ModelInfo::fallback("gpt-5.5"), None)
+                .build_request_for_fixture(&request, &ModelInfo::compatible("gpt-5.5"), None)
                 .unwrap(),
         )
         .unwrap();
@@ -371,7 +371,7 @@ mod tests {
         }));
 
         let error = OpenAiProtocol::responses()
-            .build_request(&request, &ModelInfo::fallback("gpt-5.5"), None)
+            .build_request_for_fixture(&request, &ModelInfo::compatible("gpt-5.5"), None)
             .unwrap_err();
 
         match error {
@@ -387,7 +387,7 @@ mod tests {
         let request = request_with_function_tool_history(None);
 
         let error = OpenAiProtocol::responses()
-            .build_request(&request, &ModelInfo::fallback("gpt-5.5"), None)
+            .build_request_for_fixture(&request, &ModelInfo::compatible("gpt-5.5"), None)
             .unwrap_err();
 
         match error {
@@ -418,7 +418,7 @@ mod tests {
             .build();
 
         let responses_body = OpenAiProtocol::responses()
-            .build_request_body_with_model(&request, &ModelInfo::fallback("gpt-5.5"));
+            .build_request_body_with_model(&request, &ModelInfo::compatible("gpt-5.5"));
         let chat_body = OpenAiProtocol::chat().build_request_body(&request);
 
         assert_eq!(
@@ -480,7 +480,7 @@ mod tests {
 
         let body = serde_json::to_value(
             OpenAiProtocol::responses()
-                .build_request(&request, &ModelInfo::fallback("gpt-5.5"), None)
+                .build_request_for_fixture(&request, &ModelInfo::compatible("gpt-5.5"), None)
                 .expect("Responses replay must not hit a missing call_id path"),
         )
         .unwrap();
@@ -533,7 +533,7 @@ mod tests {
         let chat_body = OpenAiProtocol::chat().build_request_body(&request);
         let responses_body = serde_json::to_value(
             OpenAiProtocol::responses()
-                .build_request(&request, &ModelInfo::fallback("glm-5"), None)
+                .build_request_for_fixture(&request, &ModelInfo::compatible("glm-5"), None)
                 .expect("Responses replay must keep the provider call_id"),
         )
         .unwrap();

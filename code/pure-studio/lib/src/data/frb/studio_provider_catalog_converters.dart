@@ -9,6 +9,7 @@ ProviderCatalogView providerCatalogFromFrb(
     presets: [
       for (final preset in snapshot.presets)
         ProviderPresetView(
+          pricingEnabled: preset.pricingEnabled,
           id: preset.id,
           displayName: preset.displayName,
           description: preset.description ?? '',
@@ -86,10 +87,16 @@ ProviderModelView _providerModelFromCatalog(frb.BridgeModelDescriptor model) {
     reasoningLabel: reasoning?.label ?? '',
     defaultReasoningEffort: reasoning?.defaultCandidate ?? '',
     currency: pricing?.currency ?? '',
-    inputPricePerMTok: pricing?.inputPerMtok,
-    outputPricePerMTok: pricing?.outputPerMtok,
-    cacheReadPricePerMTok: pricing?.cacheReadPerMtok,
-    cacheWritePricePerMTok: pricing?.cacheWritePerMtok,
+    priceTiers: [
+      for (final tier in pricing?.tiers ?? <frb.BridgeModelPriceTier>[])
+        ProviderPriceTierView(
+          label: tier.label,
+          input: tier.inputPerMtok,
+          output: tier.outputPerMtok,
+          cacheRead: tier.cacheReadPerMtok,
+          cacheWrite: tier.cacheWritePerMtok,
+        ),
+    ],
     wireProtocol: model.transport.protocol,
     supportedConnectionModes: [
       for (final mode in model.transport.connectionModes) mode.id,

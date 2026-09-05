@@ -10,7 +10,7 @@ use sea_orm::{ConnectionTrait, DatabaseConnection};
 
 use crate::studio::entity;
 
-pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 18;
+pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 19;
 
 pub(super) async fn initialize_studio_schema(db: &DatabaseConnection) -> Result<()> {
     create_thread_lifecycle_tables(db).await?;

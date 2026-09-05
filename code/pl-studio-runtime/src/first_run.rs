@@ -11,10 +11,8 @@ use crate::{
     AgentModelConfig, ProviderConfig, ProviderModelCatalogConfig, ProviderPresetId,
     builtin_provider_catalog,
 };
-use pl_model::model::{ModelInfo, ModelParameter};
+use pl_model::model::ModelInfo;
 use pl_model::provider::ProviderEndpoint;
-
-const DEFAULT_ROLE_EFFORT: &str = "high";
 
 /// Studio 使用的动态 provider preset 标识。
 ///
@@ -96,21 +94,10 @@ impl FirstRunModelDraft {
         Self { config }
     }
 
-    pub fn fallback(slug: impl Into<String>) -> Self {
-        let slug = slug.into();
-        let mut model = ModelInfo::fallback(&slug);
-        model.parameters = vec![fallback_effort_parameter()];
-        Self { config: model }
-    }
-}
-
-/// 占位模型的 effort 参数声明：单一候选值，无 wire（不真正发请求）。
-fn fallback_effort_parameter() -> ModelParameter {
-    ModelParameter {
-        name: "effort".to_string(),
-        label: None,
-        candidates: vec![DEFAULT_ROLE_EFFORT.to_string()],
-        wire: BTreeMap::new(),
+    pub fn custom(slug: impl Into<String>) -> Self {
+        Self {
+            config: ModelInfo::compatible(&slug.into()),
+        }
     }
 }
 
@@ -149,7 +136,7 @@ impl FirstRunProviderDraft {
     fn to_provider_config(&self) -> Result<ProviderConfig> {
         validate_provider_key(&self.key)?;
         let bearer_token = self.bearer_token.trim();
-        if bearer_token.is_empty() {
+        if bearer_token.is_empty() && self.kind.key() != "openai-compatible" {
             return Err(PureError::ConfigError(format!(
                 "provider {} api key must not be empty",
                 self.key
@@ -163,7 +150,7 @@ impl FirstRunProviderDraft {
             PureError::ConfigError(format!("provider {key} base_url must not be empty"))
         })?;
         let default_model = non_empty_trimmed(&self.default_model, "provider default_model")?;
-        provider.bearer_token = Some(bearer_token.to_string());
+        provider.bearer_token = (!bearer_token.is_empty()).then(|| bearer_token.to_string());
         match &mut provider.catalog {
             ProviderModelCatalogConfig::Bundled {
                 additional_models, ..
@@ -279,7 +266,7 @@ impl FirstRunConfigDraft {
         let route = ModelRouteConfig {
             provider: default_provider_id,
             model: default_model,
-            effort: Some(ReasoningEffort::new(default_effort)),
+            effort: default_effort.map(ReasoningEffort::new),
         };
 
         let config = StudioConfig {
@@ -355,7 +342,7 @@ fn validate_models(provider_key: &str, default_model: &str, models: &[ModelInfo]
         }
     }
 
-    let model = models
+    let _model = models
         .iter()
         .find(|model| model.slug == default_model)
         .ok_or_else(|| {
@@ -363,15 +350,10 @@ fn validate_models(provider_key: &str, default_model: &str, models: &[ModelInfo]
                 "provider {provider_key} default_model is not in models: {default_model}"
             ))
         })?;
-    if model.default_effort().is_none() {
-        return Err(PureError::ConfigError(format!(
-            "provider {provider_key} default model {default_model} must define effort parameter"
-        )));
-    }
     Ok(())
 }
 
-fn role_effort(provider: &ProviderConfig, model_slug: &str) -> Result<String> {
+fn role_effort(provider: &ProviderConfig, model_slug: &str) -> Result<Option<String>> {
     let models = provider.effective_models()?;
     let model = models
         .iter()
@@ -381,11 +363,7 @@ fn role_effort(provider: &ProviderConfig, model_slug: &str) -> Result<String> {
                 "default model is missing from provider: {model_slug}"
             ))
         })?;
-    model.default_effort().ok_or_else(|| {
-        PureError::ConfigError(format!(
-            "default model {model_slug} must define effort parameter"
-        ))
-    })
+    Ok(model.default_effort())
 }
 
 #[cfg(test)]

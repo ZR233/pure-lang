@@ -28,11 +28,13 @@ pub(crate) fn bridge_settings(
             .providers
             .into_iter()
             .map(|provider| BridgeProviderSettingsDto {
+                pricing_enabled: provider.pricing_enabled,
                 id: provider.id,
                 template_kind: provider.template_kind,
                 name: provider.name,
                 base_url: provider.base_url,
                 has_bearer_token: provider.has_bearer_token,
+                credential_required: provider.credential_required,
                 capability_source: provider.capability_source,
                 hosted_web_search: provider.hosted_web_search,
                 hosted_web_search_dialect: provider.hosted_web_search_dialect,
@@ -152,6 +154,8 @@ fn bridge_custom_model_settings(
     model: pl_protocol::studio::StudioCustomModelSettings,
 ) -> BridgeCustomModelSettingsDto {
     BridgeCustomModelSettingsDto {
+        context_window: model.context_window,
+        max_output_tokens: model.max_output_tokens,
         slug: model.slug,
         display_name: model.display_name,
         reasoning_efforts: model.reasoning_efforts,
@@ -187,12 +191,7 @@ pub(crate) fn provider_settings_request(
                     }
                     ProviderSecretInput::Clear => pl_protocol::studio::ProviderSecretUpdate::Clear,
                 },
-                capability_source: provider.capability_source,
-                hosted_web_search: provider.hosted_web_search,
-                hosted_web_search_dialect: provider.hosted_web_search_dialect,
-                standalone_web_search: provider.standalone_web_search,
-                prompt_cache_dialect: provider.prompt_cache_dialect,
-                responses_programmatic_tool_calling: provider.responses_programmatic_tool_calling,
+                pricing_enabled: provider.pricing_enabled,
                 default_model: provider.default_model,
                 custom_models: provider
                     .custom_models
@@ -200,11 +199,9 @@ pub(crate) fn provider_settings_request(
                     .map(|model| pl_protocol::studio::ProviderModelUpdate {
                         slug: model.slug,
                         display_name: model.display_name,
-                        reasoning_efforts: model.reasoning_efforts,
-                        base_instructions: model.base_instructions,
                         wire_protocol: model.wire_protocol,
-                        supported_connection_modes: model.supported_connection_modes,
-                        default_connection_mode: model.default_connection_mode,
+                        context_window: model.context_window,
+                        max_output_tokens: model.max_output_tokens,
                     })
                     .collect(),
                 model_connection_modes: provider

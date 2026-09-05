@@ -153,6 +153,8 @@ where
                         Vec::new(),
                     );
                 }
+                let rollover_checkpoint = prepared.options.checkpoint.clone();
+                let mut rollover_commit_error = None;
                 let mut result = prepared
                     .engine
                     .run_turn_with_trace(
@@ -171,6 +173,7 @@ where
                             if outcome.limit().kind == pl_protocol::BudgetLimitKind::WallClock
                     )
                 {
+                    let before_rollover = session.clone();
                     let rollover = prepared
                         .engine
                         .compact_session_with_trace_control(
@@ -185,6 +188,11 @@ where
                             context_compaction_control,
                         )
                         .await;
+                    let accounting = match &rollover {
+                        Ok(Some(snapshot)) => Some(snapshot.accounting.clone()),
+                        Ok(None) => None,
+                        Err(failure) => Some((*failure.accounting).clone()),
+                    };
                     match rollover {
                         Ok(snapshot) => {
                             if let TurnOutcome::BudgetLimited(outcome) = &mut turn_result.outcome {
@@ -200,7 +208,53 @@ where
                             }
                         }
                     }
+                    if let Some(accounting) = accounting {
+                        turn_result.usage.merge(&accounting.usage.totals());
+                        let runtime = prepared.engine.model_runtime();
+                        let billing = pl_protocol::InferenceBillingRecord {
+                            inference_id: format!("{turn_id}-rollover"),
+                            provider_instance_id: runtime.provider_instance_id().to_owned(),
+                            provider: runtime.endpoint().name.clone(),
+                            model: runtime.model().slug.clone(),
+                            context_window: runtime.model().resolved_context_window(),
+                            accounting,
+                            prompt_generation: None,
+                            prompt_cache_policy: None,
+                            prefix_changed_reason: None,
+                            orchestration: Default::default(),
+                            timing: None,
+                            recorded_at: unix_timestamp(),
+                        };
+                        if let Err(error) = turn_result.billing.append(billing.clone()) {
+                            rollover_commit_error = Some(error);
+                        }
+                        let runtime_delta = crate::runtime_usage::agent_runtime_delta(
+                            crate::runtime_usage::identity_for_subagent(None),
+                            &billing,
+                        );
+                        if let Some(checkpoint) = &rollover_checkpoint {
+                            if let Err(error) = checkpoint
+                                .commit_inference(
+                                    before_rollover,
+                                    AgentInferenceCommit {
+                                        billing,
+                                        runtime_delta,
+                                    },
+                                )
+                                .await
+                            {
+                                rollover_commit_error = Some(error.to_string());
+                            }
+                        } else {
+                            recorder.broadcast(AgentEvent::AgentRuntimeUpdated {
+                                delta: runtime_delta,
+                            });
+                        }
+                    }
                     turn_result.trace_events.extend(recorder.drain());
+                }
+                if let Some(error) = rollover_commit_error {
+                    result = Err(error);
                 }
                 drop(recorder);
                 let _ = event_task.await;

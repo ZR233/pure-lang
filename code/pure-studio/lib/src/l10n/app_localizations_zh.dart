@@ -1728,4 +1728,34 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get roleEmpty => '代理';
+
+  @override
+  String get settingsPricingEnabled => '计价';
+
+  @override
+  String get settingsPricingHelp => '仅控制应用内费用估算，Token 与缓存统计照常。套餐默认关闭。';
+
+  @override
+  String get settingsModelAdvanced => '模型可选设置';
+
+  @override
+  String get settingsContextBudget => '上下文预算（Token）';
+
+  @override
+  String get settingsOutputBudget => '最大输出（Token）';
+
+  @override
+  String get settingsPriceInput => '输入';
+
+  @override
+  String get settingsPriceOutput => '输出';
+
+  @override
+  String get settingsPriceCacheRead => '缓存读取';
+
+  @override
+  String get settingsPriceCacheWrite => '缓存写入';
+
+  @override
+  String get statusReportedUsageOnly => '已报告';
 }

@@ -261,7 +261,8 @@ mod tests {
             state_json: serde_json::to_string(&state).unwrap(),
             state_kind: "budgetLimited".to_string(),
             model_json: None,
-            usage_json: serde_json::to_string(&pl_protocol::TokenUsage::default()).unwrap(),
+            usage_json: serde_json::to_string(&pl_protocol::InferenceTokenUsage::default())
+                .unwrap(),
             metadata_json: None,
             updated_at: 2,
         })

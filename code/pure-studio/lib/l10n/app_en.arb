@@ -1005,5 +1005,15 @@
   "roleExecutor": "Executor",
   "roleWorktreeExecutor": "Worktree executor",
   "roleReviewer": "Reviewer",
-  "roleEmpty": "Agent"
+  "roleEmpty": "Agent",
+  "settingsPricingEnabled": "Estimate token cost",
+  "settingsPricingHelp": "Controls in-app cost estimates; token and cache statistics remain available. Plans default to off.",
+  "settingsModelAdvanced": "Optional model settings",
+  "settingsContextBudget": "Context budget (tokens)",
+  "settingsOutputBudget": "Maximum output (tokens)",
+  "settingsPriceInput": "Input",
+  "settingsPriceOutput": "Output",
+  "settingsPriceCacheRead": "Cache read",
+  "settingsPriceCacheWrite": "Cache write",
+  "statusReportedUsageOnly": "reported"
 }

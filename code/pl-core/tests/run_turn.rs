@@ -819,7 +819,7 @@ async fn model_turn_helper_http_sends_full_history_once() {
     handle.await.unwrap();
 
     assert_eq!(response.output()[0].as_message(), Some("retry ok"));
-    assert_eq!(response.usage().total_tokens(), 6);
+    assert_eq!(response.accounting().usage.totals().total_tokens, 6);
     let bodies = bodies.lock().unwrap();
     assert_eq!(bodies.len(), 1);
     assert!(bodies[0].get("previous_response_id").is_none());
@@ -1124,7 +1124,8 @@ async fn capture_default_tools_request() -> serde_json::Value {
         .into_iter()
         .find(|model| model.slug == "gpt-5.6-sol")
         .unwrap();
-    model.transport.default_connection_mode = pl_model::provider::ProviderConnectionMode::Http;
+    model.binding.transport.default_connection_mode =
+        pl_model::provider::ProviderConnectionMode::Http;
     let manager = ToolManager::new();
     let agent_tools = manager.agent_tool_set("root", GlobalToolInheritance::Isolated);
     install_test_tool(&agent_tools, HostedToolProbe);
@@ -1155,8 +1156,10 @@ async fn capture_default_tools_request() -> serde_json::Value {
 }
 
 fn local_responses_model() -> pl_model::model::ModelInfo {
-    let mut model = pl_model::model::ModelInfo::fallback("local-responses");
-    model.transport = pl_model::model::ModelTransportProfile::responses_http();
+    let mut model = pl_model::model::ModelInfo::compatible("local-responses");
+    model
+        .binding
+        .set_transport(pl_model::model::ModelTransportProfile::responses_http());
     model
 }
 
@@ -1576,4 +1579,180 @@ fn runtime_progress_texts(
         }
     }
     progress_texts
+}
+
+#[derive(Debug)]
+struct TariffClock;
+impl pl_model::runtime::InferenceClock for TariffClock {
+    fn unix_seconds(&self) -> pl_protocol::Result<i64> {
+        Ok(1_788_483_600)
+    }
+}
+
+#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+struct DoubleInput {
+    value: i64,
+}
+
+#[tokio::test]
+async fn provider_tool_tasks_preserve_native_optimizations_and_account_for_the_complete_turn() {
+    use pl_model::provider::{ProviderAdapterKind, ProviderConnectionMode, ProviderWireProtocol};
+    let cases = [
+        (
+            "gpt-6-astra",
+            ProviderAdapterKind::OpenAi,
+            Some("low"),
+            Some(0.0328),
+        ),
+        (
+            "deepseek-v4-flash",
+            ProviderAdapterKind::DeepSeek,
+            Some("high"),
+            Some(0.00728),
+        ),
+        (
+            "glm-5.3",
+            ProviderAdapterKind::Zhipu,
+            Some("low"),
+            Some(0.0224),
+        ),
+        (
+            "mimo-v2.5-pro",
+            ProviderAdapterKind::MiMo,
+            Some("enabled"),
+            Some(0.00602),
+        ),
+        (
+            "custom-model",
+            ProviderAdapterKind::OpenAiCompatible,
+            None,
+            None,
+        ),
+    ];
+    for (slug, adapter, effort, expected_cost) in cases {
+        let mut model = pl_model::model::default_models()
+            .into_iter()
+            .find(|model| model.slug == slug)
+            .unwrap_or_else(|| ModelInfo::compatible(slug));
+        model.binding.transport.default_connection_mode = ProviderConnectionMode::Http;
+        let protocol = model.binding.transport.protocol;
+        let responses = [false, true].into_iter().map(|final_answer| {
+            let usage = match protocol {
+                ProviderWireProtocol::Responses => serde_json::json!({"input_tokens":1000,"output_tokens":200,"total_tokens":1200,"input_tokens_details":{"cached_tokens":400,"cache_write_tokens":0}}),
+                ProviderWireProtocol::ChatCompletions => serde_json::json!({"prompt_tokens":1000,"completion_tokens":200,"total_tokens":1200,"prompt_tokens_details":{"cached_tokens":400}}),
+            };
+            let mut events = match (protocol, final_answer) {
+                (ProviderWireProtocol::Responses, false) => vec![
+                    serde_json::json!({"type":"response.output_item.added","item":{"id":"tool-item","type":"function_call","call_id":"native-call","name":"double"}}),
+                    serde_json::json!({"type":"response.function_call_arguments.delta","item_id":"tool-item","delta":"{\"value\":2}"}),
+                    serde_json::json!({"type":"response.output_item.done","item":{"id":"tool-item","type":"function_call","call_id":"native-call","name":"double","arguments":"{\"value\":2}"}}),
+                ],
+                (ProviderWireProtocol::Responses, true) => vec![serde_json::json!({"type":"response.output_text.delta","item_id":"answer","delta":"4"})],
+                (ProviderWireProtocol::ChatCompletions, false) => vec![
+                    serde_json::json!({"choices":[{"delta":{"reasoning_content":"calculate double","tool_calls":[{"index":0,"id":"native-call","type":"function","function":{"name":"double","arguments":"{\"value\":2}"}}]},"finish_reason":null}]}),
+                    serde_json::json!({"choices":[{"delta":{},"finish_reason":"tool_calls"}]}),
+                ],
+                (ProviderWireProtocol::ChatCompletions, true) => vec![serde_json::json!({"choices":[{"delta":{"content":"4"},"finish_reason":"stop"}]})],
+            };
+            events.push(match protocol {
+                ProviderWireProtocol::Responses => serde_json::json!({"type":"response.completed","response":{"id":if final_answer {"final"} else {"tool"},"usage":usage}}),
+                ProviderWireProtocol::ChatCompletions => serde_json::json!({"choices":[],"usage":usage}),
+            });
+            events.into_iter().map(|event| format!("data: {event}\n\n")).collect::<String>() + "data: [DONE]\n\n"
+        }).collect();
+        let (url, server) = support::serve_checked_sse_sequence(responses, move |step, body| {
+            if adapter == ProviderAdapterKind::Zhipu
+                && (body["tool_stream"] != true || body["thinking"]["clear_thinking"] != false)
+            {
+                return false;
+            }
+            if adapter == ProviderAdapterKind::MiMo && body["thinking"]["type"] != "enabled" {
+                return false;
+            }
+            if step == 0 {
+                return body["tools"].as_array().is_some_and(|tools| {
+                    tools.iter().any(|tool| {
+                        tool["name"] == "double" || tool["function"]["name"] == "double"
+                    })
+                });
+            }
+            match protocol {
+                ProviderWireProtocol::Responses => body["input"].as_array().is_some_and(|items| {
+                    items.iter().any(|item| {
+                        item["type"] == "function_call_output"
+                            && item["call_id"] == "native-call"
+                            && item["output"] == "4"
+                    })
+                }),
+                ProviderWireProtocol::ChatCompletions => {
+                    body["messages"].as_array().is_some_and(|messages| {
+                        messages.iter().any(|message| {
+                            message["role"] == "tool"
+                                && message["tool_call_id"] == "native-call"
+                                && message["content"] == "4"
+                        }) && messages.iter().any(|message| {
+                            message["role"] == "assistant"
+                                && message["reasoning_content"] == "calculate double"
+                        })
+                    })
+                }
+            }
+        })
+        .await;
+        let endpoint = ProviderEndpoint::compatible("task fixture", url).with_adapter(adapter);
+        let mut route = support::route("fixture", endpoint, model, effort);
+        if expected_cost.is_none() {
+            route.pricing_mode = pl_protocol::PricingMode::Disabled;
+        }
+        let manager = ToolManager::new();
+        let tools = manager.agent_tool_set("accounted-task", GlobalToolInheritance::Isolated);
+        let tool = pl_core::tool::static_tool::<DoubleInput>(StaticToolDefinition::new(
+            ToolName::bare("double").unwrap(),
+            "Double an integer",
+        ))
+        .policy(ToolPolicy::read_only())
+        .build(|input, _| async move { Ok(ToolResult::success((input.value * 2).to_string())) });
+        install_test_tool(&tools, tool);
+        let engine = TurnEngineBuilder::from_route(&route)
+            .unwrap()
+            .with_clock(std::sync::Arc::new(TariffClock))
+            .with_agent_tool_set(tools)
+            .build();
+        let (tx, mut events) = tokio::sync::broadcast::channel(512);
+        let mut recorder = TraceRecorder::new(format!("task-{slug}"), tx, 0);
+        let mut session = AgentSession::new();
+        let result = engine
+            .run_turn_with_trace(
+                &mut session,
+                TurnRequest::new("Double 2 with the tool"),
+                &mut recorder,
+                TurnOptions::default(),
+            )
+            .await
+            .expect(slug);
+        server.await.expect("strict fixture server");
+        assert!(result.is_completed(), "{slug}: {:?}", result.outcome);
+        assert_eq!(result.content, "4", "{slug}");
+        assert_eq!(
+            result.usage.total_tokens, 2400,
+            "final usage includes the complete tool roundtrip"
+        );
+        let mut costs = Vec::new();
+        while let Ok(event) = events.try_recv() {
+            if let pl_trace::AgentEvent::AgentRuntimeUpdated { delta } = event {
+                assert!(!delta.has_unpriced_usage, "{slug}");
+                pl_core::runtime_usage::merge_costs(&mut costs, &delta.estimated_costs);
+            }
+        }
+        match expected_cost {
+            Some(expected) => assert!(
+                (costs.first().expect("final cost").amount - expected).abs() < 1e-12,
+                "{slug}: {costs:?}"
+            ),
+            None => assert!(
+                costs.is_empty(),
+                "disabled monetary accounting still completed the tool task"
+            ),
+        }
+    }
 }

@@ -43,12 +43,12 @@ pub(super) fn finalize_body(
     model: &ModelInfo,
     reasoning: &Option<ReasoningConfig>,
 ) {
-    merge_base_body(body, &model.request_profile.body);
+    merge_base_body(body, &model.binding.request.body);
     apply_parameters(body, model, reasoning);
 }
 
 /// 深合并 base body 到请求体：对象字段递归合并，其余字段覆盖。
-fn merge_base_body(target: &mut Map<String, Value>, source: &Map<String, Value>) {
+pub(super) fn merge_base_body(target: &mut Map<String, Value>, source: &Map<String, Value>) {
     for (key, value) in source {
         match (target.get_mut(key), value) {
             (Some(Value::Object(target_inner)), Value::Object(source_inner)) => {

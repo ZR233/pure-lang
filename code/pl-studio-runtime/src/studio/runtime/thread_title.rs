@@ -13,7 +13,6 @@ use anyhow::{Context, Result, bail};
 use pl_core::{AgentSession, ModelTurnClient, ModelTurnOptions, ModelTurnRequest};
 use pl_model::completion::ReasoningConfig;
 use pl_model::model::ResponsesMaxTokensField;
-use pl_model::provider::ProviderWireProtocol;
 use tokio::sync::{Mutex, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
@@ -120,7 +119,7 @@ impl ThreadTitleTasks {
         let task = tokio::spawn(async move {
             let result = async {
                 wait_for_initial_turn(&runtime, &task_thread_id, &mut task_cancellation).await?;
-                generate_title(&runtime, &prompt, &mut task_cancellation).await
+                generate_title(&runtime, &task_thread_id, &prompt, &mut task_cancellation).await
             }
             .await;
             match result {
@@ -259,14 +258,16 @@ fn truncate_generated_title(raw: &str) -> Result<String> {
 
 async fn generate_title(
     runtime: &StudioRuntime,
+    thread_id: &str,
     prompt: &str,
     cancellation: &mut ThreadTitleCancellation,
 ) -> Result<String> {
     let config = runtime.config_runtime.read()?;
     let mut route = config.config.resolve_role(StudioRole::Explorer)?;
-    if route.model.transport.protocol == ProviderWireProtocol::Responses {
-        route.model.request_profile.responses_max_tokens_field =
-            ResponsesMaxTokensField::MaxOutputTokens;
+    if let pl_model::model::ModelProtocolOptions::Responses(options) =
+        &mut route.model.binding.request.protocol
+    {
+        options.max_tokens_field = ResponsesMaxTokensField::MaxOutputTokens;
     }
     let reasoning = route
         .model
@@ -288,17 +289,49 @@ async fn generate_title(
         .with_parallel_tool_calls(false)
         .with_max_tokens(Some(TITLE_MAX_OUTPUT_TOKENS))
         .with_reasoning(reasoning);
-    // The title owner keeps sole cancellation authority. Dropping the model
-    // future closes its hidden request without sharing a mutable cancellation
-    // domain across runtime layers.
-    let response = tokio::select! {
-        _ = cancellation.cancelled() => bail!("Explorer title generation was cancelled"),
-        response = timeout(
-            TITLE_TIMEOUT,
-            client.complete_text(&session, request, ModelTurnOptions::default()),
-        ) => response.context("Explorer title generation timed out")??,
+    let token = tokio_util::sync::CancellationToken::new();
+    let request = client.complete(
+        &session,
+        request,
+        ModelTurnOptions::default().with_cancellation(token.clone()),
+    );
+    tokio::pin!(request);
+    let result = tokio::select! {
+        _ = cancellation.cancelled() => { token.cancel(); request.await },
+        result = timeout(TITLE_TIMEOUT, &mut request) => match result {
+            Ok(result) => result,
+            Err(_) => { token.cancel(); request.await }
+        },
     };
-    truncate_generated_title(&response)
+    let accounting = match &result {
+        Ok(response) => response.accounting().clone(),
+        Err(failure) => (*failure.accounting).clone(),
+    };
+    let billing = pl_protocol::InferenceBillingRecord {
+        inference_id: crate::studio::ids::new_id("title"),
+        provider_instance_id: route.provider_id.as_str().to_owned(),
+        provider: route.endpoint.name.clone(),
+        model: route.model.slug.clone(),
+        context_window: route.model.resolved_context_window(),
+        accounting,
+        prompt_generation: None,
+        prompt_cache_policy: None,
+        prefix_changed_reason: None,
+        orchestration: Default::default(),
+        timing: None,
+        recorded_at: crate::studio::unix_seconds(),
+    };
+    runtime
+        .model_performance
+        .record_internal_inference(thread_id, &billing)
+        .await?;
+    let response = result?;
+    let text = response
+        .output()
+        .iter()
+        .filter_map(|item| item.as_message())
+        .collect::<String>();
+    truncate_generated_title(&text)
 }
 
 #[cfg(test)]

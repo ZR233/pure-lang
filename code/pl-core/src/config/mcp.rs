@@ -610,13 +610,13 @@ mod tests {
             .provider;
         preset.bearer_token = Some("preset-token".to_string());
         preset.bearer_token_env = None;
-        let compatible_model = ModelInfo::fallback("compatible-model");
+        let compatible_model = ModelInfo::compatible("compatible-model");
         let mut compatible_info =
             ProviderEndpoint::compatible("Compatible", "https://open.bigmodel.cn/custom/v1");
         compatible_info.bearer_token = Some("compatible-token".to_string());
         let compatible =
             ProviderConfig::from_explicit_models(compatible_info, vec![compatible_model]);
-        let unrelated_model = ModelInfo::fallback("unrelated-model");
+        let unrelated_model = ModelInfo::compatible("unrelated-model");
         let mut unrelated_info =
             ProviderEndpoint::compatible("Unrelated", "https://example.com/v1");
         unrelated_info.bearer_token = Some("unrelated-token".to_string());
@@ -646,7 +646,7 @@ mod tests {
 
     #[test]
     fn builtin_zhipu_directory_declares_read_effect_and_injects_vision_secret() {
-        let model = ModelInfo::fallback("compatible-model");
+        let model = ModelInfo::compatible("compatible-model");
         let mut info = ProviderEndpoint::compatible("Compatible", "https://open.bigmodel.cn/v1");
         info.bearer_token = Some("secret".to_string());
         let models = AgentModelConfig {

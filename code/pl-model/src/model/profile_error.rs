@@ -14,6 +14,16 @@ use crate::provider::ProviderWireProtocol;
 /// 模型 profile 校验失败的具体规则。
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum ModelProfileError {
+    #[error("model {model} pricing: {source}")]
+    InvalidPricing {
+        model: String,
+        source: super::pricing::PricingError,
+    },
+    #[error("model {model} request options do not match {protocol:?}")]
+    ProtocolOptionsMismatch {
+        model: String,
+        protocol: ProviderWireProtocol,
+    },
     /// `supported_connection_modes` 为空。
     #[error("model {model} has no supported connection modes")]
     NoSupportedConnectionModes { model: String },

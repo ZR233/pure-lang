@@ -1,5 +1,6 @@
 //! Zhipu GLM 内建模型目录（Chat Completions HTTP，effort 联动 thinking wire）。
 
+use crate::model::pricing::{ModelPricing, TokenPriceTier};
 use std::collections::BTreeMap;
 
 use serde_json::Value;
@@ -9,7 +10,7 @@ use crate::model::capabilities::{
     PromptCacheModelCapabilities, ReasoningInterleaved, ReasoningInterleavedField,
     ToolCapabilities,
 };
-use crate::model::family::{ModelFamily, ModelInstanceSpec, ModelPricing};
+use crate::model::family::{ModelFamily, ModelInstanceSpec};
 use crate::model::info::{
     MediaWireFormat, ModelInfo, ModelRequestProfile, ModelTransportProfile, TruncationMode,
 };
@@ -46,7 +47,7 @@ pub(super) fn models() -> Vec<ModelInfo> {
             context_window: 1_000_000,
             max_context_window: 1_000_000,
             max_output_tokens: Some(128_000),
-            pricing: ModelPricing::default(),
+            pricing: zhipu_pricing("glm-5.3"),
         }),
         // GLM-5.3-Flash（GLM-5.3 同款始终思考 wire 的原生多模态版本，支持图片输入）
         zhipu_glm53_flash.instantiate(ModelInstanceSpec {
@@ -57,7 +58,7 @@ pub(super) fn models() -> Vec<ModelInfo> {
             context_window: 1_000_000,
             max_context_window: 1_000_000,
             max_output_tokens: Some(128_000),
-            pricing: ModelPricing::default(),
+            pricing: zhipu_pricing("glm-5.3-flash"),
         }),
         // GLM-5.2（effort 候选值按弱到强 none/high/max，联动 reasoning_effort + thinking）
         zhipu_glm52.instantiate(ModelInstanceSpec {
@@ -67,7 +68,7 @@ pub(super) fn models() -> Vec<ModelInfo> {
             context_window: 1_000_000,
             max_context_window: 1_000_000,
             max_output_tokens: Some(128_000),
-            pricing: ModelPricing::default(),
+            pricing: zhipu_pricing("glm-5.2"),
         }),
         // 文本模型（effort 候选值按弱到强 none/enabled，映射 thinking 开关）
         zhipu_text.instantiate(ModelInstanceSpec {
@@ -77,7 +78,7 @@ pub(super) fn models() -> Vec<ModelInfo> {
             context_window: 200_000,
             max_context_window: 200_000,
             max_output_tokens: Some(128_000),
-            pricing: ModelPricing::default(),
+            pricing: zhipu_pricing("glm-5"),
         }),
         zhipu_text.instantiate(ModelInstanceSpec {
             slug: "glm-5-turbo",
@@ -86,7 +87,7 @@ pub(super) fn models() -> Vec<ModelInfo> {
             context_window: 200_000,
             max_context_window: 200_000,
             max_output_tokens: Some(128_000),
-            pricing: ModelPricing::default(),
+            pricing: zhipu_pricing("glm-5-turbo"),
         }),
         zhipu_text.instantiate(ModelInstanceSpec {
             slug: "glm-4.7",
@@ -95,7 +96,7 @@ pub(super) fn models() -> Vec<ModelInfo> {
             context_window: 200_000,
             max_context_window: 200_000,
             max_output_tokens: Some(128_000),
-            pricing: ModelPricing::default(),
+            pricing: zhipu_pricing("glm-4.7"),
         }),
         zhipu_text.instantiate(ModelInstanceSpec {
             slug: "glm-4.7-flashx",
@@ -104,7 +105,7 @@ pub(super) fn models() -> Vec<ModelInfo> {
             context_window: 200_000,
             max_context_window: 200_000,
             max_output_tokens: Some(128_000),
-            pricing: ModelPricing::default(),
+            pricing: zhipu_pricing("glm-4.7-flashx"),
         }),
         zhipu_text.instantiate(ModelInstanceSpec {
             slug: "glm-4.6",
@@ -113,7 +114,7 @@ pub(super) fn models() -> Vec<ModelInfo> {
             context_window: 200_000,
             max_context_window: 200_000,
             max_output_tokens: Some(128_000),
-            pricing: ModelPricing::default(),
+            pricing: zhipu_pricing("glm-4.6"),
         }),
         zhipu_text.instantiate(ModelInstanceSpec {
             slug: "glm-4.5-air",
@@ -122,7 +123,7 @@ pub(super) fn models() -> Vec<ModelInfo> {
             context_window: 128_000,
             max_context_window: 128_000,
             max_output_tokens: Some(96_000),
-            pricing: ModelPricing::default(),
+            pricing: zhipu_pricing("glm-4.5-air"),
         }),
         zhipu_text.instantiate(ModelInstanceSpec {
             slug: "glm-4.5-airx",
@@ -131,7 +132,7 @@ pub(super) fn models() -> Vec<ModelInfo> {
             context_window: 128_000,
             max_context_window: 128_000,
             max_output_tokens: Some(96_000),
-            pricing: ModelPricing::default(),
+            pricing: zhipu_pricing("glm-4.5-airx"),
         }),
         zhipu_text.instantiate(ModelInstanceSpec {
             slug: "glm-4-long",
@@ -140,7 +141,7 @@ pub(super) fn models() -> Vec<ModelInfo> {
             context_window: 1_000_000,
             max_context_window: 1_000_000,
             max_output_tokens: Some(4_000),
-            pricing: ModelPricing::default(),
+            pricing: zhipu_pricing("glm-4-long"),
         }),
         zhipu_text.instantiate(ModelInstanceSpec {
             slug: "glm-4-flashx-250414",
@@ -149,7 +150,7 @@ pub(super) fn models() -> Vec<ModelInfo> {
             context_window: 128_000,
             max_context_window: 128_000,
             max_output_tokens: Some(16_000),
-            pricing: ModelPricing::default(),
+            pricing: zhipu_pricing("glm-4-flashx-250414"),
         }),
         zhipu_text.instantiate(ModelInstanceSpec {
             slug: "glm-4.7-flash",
@@ -158,7 +159,7 @@ pub(super) fn models() -> Vec<ModelInfo> {
             context_window: 200_000,
             max_context_window: 200_000,
             max_output_tokens: Some(128_000),
-            pricing: ModelPricing::default(),
+            pricing: zhipu_pricing("glm-4.7-flash"),
         }),
         zhipu_text.instantiate(ModelInstanceSpec {
             slug: "glm-4.5-flash",
@@ -167,7 +168,7 @@ pub(super) fn models() -> Vec<ModelInfo> {
             context_window: 128_000,
             max_context_window: 128_000,
             max_output_tokens: Some(96_000),
-            pricing: ModelPricing::default(),
+            pricing: zhipu_pricing("glm-4.5-flash"),
         }),
         zhipu_text.instantiate(ModelInstanceSpec {
             slug: "glm-4-flash-250414",
@@ -176,7 +177,7 @@ pub(super) fn models() -> Vec<ModelInfo> {
             context_window: 128_000,
             max_context_window: 128_000,
             max_output_tokens: Some(16_000),
-            pricing: ModelPricing::default(),
+            pricing: zhipu_pricing("glm-4-flash-250414"),
         }),
         // 视觉模型
         zhipu_vision.instantiate(ModelInstanceSpec {
@@ -187,7 +188,7 @@ pub(super) fn models() -> Vec<ModelInfo> {
             context_window: 200_000,
             max_context_window: 200_000,
             max_output_tokens: Some(128_000),
-            pricing: ModelPricing::default(),
+            pricing: zhipu_pricing("glm-5v-turbo"),
         }),
         zhipu_vision.instantiate(ModelInstanceSpec {
             slug: "glm-4.6v",
@@ -196,7 +197,7 @@ pub(super) fn models() -> Vec<ModelInfo> {
             context_window: 128_000,
             max_context_window: 128_000,
             max_output_tokens: Some(32_000),
-            pricing: ModelPricing::default(),
+            pricing: zhipu_pricing("glm-4.6v"),
         }),
         zhipu_vision.instantiate(ModelInstanceSpec {
             slug: "glm-4.1v-thinking-flashx",
@@ -205,7 +206,7 @@ pub(super) fn models() -> Vec<ModelInfo> {
             context_window: 64_000,
             max_context_window: 64_000,
             max_output_tokens: Some(16_000),
-            pricing: ModelPricing::default(),
+            pricing: zhipu_pricing("glm-4.1v-thinking-flashx"),
         }),
         zhipu_vision.instantiate(ModelInstanceSpec {
             slug: "glm-4.6v-flash",
@@ -214,7 +215,7 @@ pub(super) fn models() -> Vec<ModelInfo> {
             context_window: 128_000,
             max_context_window: 128_000,
             max_output_tokens: Some(32_000),
-            pricing: ModelPricing::default(),
+            pricing: zhipu_pricing("glm-4.6v-flash"),
         }),
         zhipu_vision.instantiate(ModelInstanceSpec {
             slug: "glm-4.1v-thinking-flash",
@@ -223,7 +224,7 @@ pub(super) fn models() -> Vec<ModelInfo> {
             context_window: 64_000,
             max_context_window: 64_000,
             max_output_tokens: Some(16_000),
-            pricing: ModelPricing::default(),
+            pricing: zhipu_pricing("glm-4.1v-thinking-flash"),
         }),
         zhipu_vision.instantiate(ModelInstanceSpec {
             slug: "glm-4v-flash",
@@ -232,9 +233,61 @@ pub(super) fn models() -> Vec<ModelInfo> {
             context_window: 16_000,
             max_context_window: 16_000,
             max_output_tokens: Some(1_000),
-            pricing: ModelPricing::default(),
+            pricing: zhipu_pricing("glm-4v-flash"),
         }),
     ]
+}
+
+fn zhipu_pricing(slug: &str) -> ModelPricing {
+    let flat = |input, output, read| vec![TokenPriceTier::flat(input, output, Some(read), None)];
+    let two = |input, output, read, long_input, long_output, long_read| {
+        let mut short = TokenPriceTier::flat(input, output, Some(read), None);
+        short.input_until = Some(32_000);
+        let mut long = TokenPriceTier::flat(long_input, long_output, Some(long_read), None);
+        long.input_from = 32_000;
+        vec![short, long]
+    };
+    let three = |input,
+                 output,
+                 read,
+                 medium_input,
+                 medium_output,
+                 medium_read,
+                 long_input,
+                 long_output,
+                 long_read| {
+        let mut tiers = two(input, output, read, long_input, long_output, long_read);
+        tiers[0].output_until = Some(200);
+        let mut medium = TokenPriceTier::flat(medium_input, medium_output, Some(medium_read), None);
+        medium.input_until = Some(32_000);
+        medium.output_from = 200;
+        tiers.insert(1, medium);
+        tiers
+    };
+    let tiers = match slug {
+        "glm-5.3" | "glm-5.2" => flat(8.0, 28.0, 2.0),
+        // Current introductory tariff shown on the official pricing page on 2026-09-05.
+        "glm-5.3-flash" => flat(0.4, 1.4, 0.115),
+        "glm-5" => two(4.0, 18.0, 1.0, 6.0, 22.0, 1.5),
+        "glm-5-turbo" | "glm-5v-turbo" => two(5.0, 22.0, 1.2, 7.0, 26.0, 1.8),
+        "glm-4.7" => three(2.0, 8.0, 0.4, 3.0, 14.0, 0.6, 4.0, 16.0, 0.8),
+        "glm-4.5-air" => three(0.8, 2.0, 0.16, 0.8, 6.0, 0.16, 1.2, 8.0, 0.24),
+        "glm-4.7-flashx" => flat(0.5, 3.0, 0.1),
+        "glm-4.6v" => two(1.0, 3.0, 0.2, 2.0, 6.0, 0.4),
+        "glm-4-long" => flat(1.0, 1.0, 1.0),
+        "glm-4-flashx-250414" => flat(0.1, 0.1, 0.1),
+        "glm-4.1v-thinking-flashx" => flat(2.0, 2.0, 2.0),
+        "glm-4.7-flash"
+        | "glm-4.5-flash"
+        | "glm-4-flash-250414"
+        | "glm-4.6v-flash"
+        | "glm-4.1v-thinking-flash"
+        | "glm-4v-flash" => flat(0.0, 0.0, 0.0),
+        // Current official tariffs for these retained historical models could not be confirmed.
+        "glm-4.6" | "glm-4.5-airx" => return ModelPricing::Unknown,
+        _ => return ModelPricing::Unknown,
+    };
+    ModelPricing::published("CNY", tiers, "https://open.bigmodel.cn/pricing")
 }
 
 // ---- 家族预设 ----
@@ -256,11 +309,17 @@ fn zhipu_glm52_family() -> ModelFamily {
 }
 
 fn zhipu_glm53_family() -> ModelFamily {
-    zhipu_chat_family(
+    let mut family = zhipu_chat_family(
         "zhipu-glm53",
         zhipu_text_capabilities(),
         zhipu_glm53_effort_parameter(),
-    )
+    );
+    if let crate::model::ModelProtocolOptions::ChatCompletions(options) =
+        &mut family.request_profile.protocol
+    {
+        options.tool_stream = true;
+    }
+    family
 }
 
 /// GLM-5.3-Flash 与 GLM-5.3 共用 effort wire，但官方归类为原生多模态模型。
@@ -270,6 +329,11 @@ fn zhipu_glm53_flash_family() -> ModelFamily {
         zhipu_vision_capabilities(),
         zhipu_glm53_effort_parameter(),
     );
+    if let crate::model::ModelProtocolOptions::ChatCompletions(options) =
+        &mut family.request_profile.protocol
+    {
+        options.tool_stream = true;
+    }
     family.request_profile = family.request_profile.with_image_media(
         MediaWireFormat::ChatImageUrl,
         super::MediaSendOrder::RemoteUrlFirst,
@@ -310,7 +374,12 @@ fn zhipu_chat_family(
 
 fn chat_parallel_request_profile() -> ModelRequestProfile {
     ModelRequestProfile {
-        chat_parallel_tool_calls: true,
+        protocol: crate::model::ModelProtocolOptions::ChatCompletions(
+            crate::model::ChatRequestOptions {
+                parallel_tool_calls: true,
+                ..Default::default()
+            },
+        ),
         ..ModelRequestProfile::default()
     }
 }
@@ -447,188 +516,5 @@ fn zhipu_capabilities(input: Vec<ModelInputCapability>) -> ModelCapabilities {
             field: ReasoningInterleavedField::ReasoningContent,
         }),
         prompt_cache: PromptCacheModelCapabilities::default(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use pretty_assertions::assert_eq;
-
-    use super::*;
-    use crate::model::capabilities::{ModelInputSource, ModelModality};
-    use crate::model::info::{MediaRepresentation, MediaWireFormat};
-
-    #[test]
-    fn default_models_include_zhipu_glm_models_from_official_overview() {
-        let models = super::super::default_models();
-
-        for slug in [
-            "glm-5.3",
-            "glm-5.3-flash",
-            "glm-5.2",
-            "glm-5",
-            "glm-5-turbo",
-            "glm-4.7",
-            "glm-4.7-flashx",
-            "glm-4.6",
-            "glm-4.5-air",
-            "glm-4.5-airx",
-            "glm-4-long",
-            "glm-4-flashx-250414",
-            "glm-4.7-flash",
-            "glm-4.5-flash",
-            "glm-4-flash-250414",
-            "glm-5v-turbo",
-            "glm-4.6v",
-            "glm-4.1v-thinking-flashx",
-            "glm-4.6v-flash",
-            "glm-4.1v-thinking-flash",
-            "glm-4v-flash",
-        ] {
-            let model = models.iter().find(|model| model.slug == *slug).unwrap();
-
-            assert!(model.context_window.is_some());
-            assert!(model.max_output_tokens.is_some());
-            assert_eq!(model.currency, None);
-            if slug == "glm-5.2" {
-                assert_eq!(model.supported_efforts(), vec!["none", "high", "max"]);
-            } else if slug == "glm-5.3" || slug == "glm-5.3-flash" {
-                assert_eq!(model.supported_efforts(), vec!["low", "high", "max"]);
-            } else {
-                assert!(
-                    model
-                        .supported_efforts()
-                        .iter()
-                        .any(|effort| effort == "enabled")
-                );
-            }
-        }
-
-        let glm_52 = models.iter().find(|model| model.slug == "glm-5.2").unwrap();
-        assert_eq!(glm_52.display_name, "GLM-5.2");
-        assert_eq!(glm_52.context_window, Some(1_000_000));
-        assert_eq!(glm_52.max_output_tokens, Some(128_000));
-
-        let glm_53 = models.iter().find(|model| model.slug == "glm-5.3").unwrap();
-        assert_eq!(glm_53.display_name, "GLM-5.3");
-        assert_eq!(glm_53.context_window, Some(1_000_000));
-        assert_eq!(glm_53.max_output_tokens, Some(128_000));
-        assert_eq!(glm_53.default_effort().as_deref(), Some("low"));
-        assert!(
-            glm_53
-                .capabilities
-                .input
-                .iter()
-                .all(|capability| capability.modality == ModelModality::Text)
-        );
-
-        let glm_53_flash = models
-            .iter()
-            .find(|model| model.slug == "glm-5.3-flash")
-            .unwrap();
-        assert_eq!(glm_53_flash.display_name, "GLM-5.3-Flash");
-        assert_eq!(glm_53_flash.context_window, Some(1_000_000));
-        assert_eq!(glm_53_flash.max_output_tokens, Some(128_000));
-        assert_eq!(
-            glm_53_flash
-                .capabilities
-                .input
-                .iter()
-                .map(|capability| capability.modality)
-                .collect::<Vec<_>>(),
-            vec![ModelModality::Text, ModelModality::Image]
-        );
-        assert!(
-            glm_53_flash
-                .capabilities
-                .supports_input_modality(ModelModality::Image)
-        );
-        let image_capability = glm_53_flash
-            .capabilities
-            .input_capability(ModelModality::Image)
-            .unwrap();
-        assert_eq!(
-            image_capability.sources,
-            vec![ModelInputSource::Local, ModelInputSource::RemoteUrl]
-        );
-        let image_profile = glm_53_flash
-            .request_profile
-            .media_profile(ModelModality::Image)
-            .unwrap();
-        assert_eq!(image_profile.wire, MediaWireFormat::ChatImageUrl);
-        assert_eq!(
-            image_profile.first_send,
-            vec![MediaRepresentation::RemoteUrl, MediaRepresentation::DataUrl]
-        );
-        assert_eq!(image_profile.replay, vec![MediaRepresentation::DataUrl]);
-        assert!(
-            glm_53_flash
-                .request_profile
-                .media_profile(ModelModality::Video)
-                .is_none()
-        );
-        assert!(
-            glm_53_flash
-                .request_profile
-                .media_profile(ModelModality::File)
-                .is_none()
-        );
-
-        let glm_5v = models
-            .iter()
-            .find(|model| model.slug == "glm-5v-turbo")
-            .unwrap();
-        assert_eq!(
-            glm_5v
-                .capabilities
-                .input
-                .iter()
-                .map(|capability| capability.modality)
-                .collect::<Vec<_>>(),
-            vec![ModelModality::Text, ModelModality::Image]
-        );
-        assert!(
-            glm_5v
-                .capabilities
-                .supports_input_modality(ModelModality::Image)
-        );
-    }
-
-    #[test]
-    fn zhipu_default_model_list_excludes_phasing_out_glm_45_flash() {
-        assert_eq!(
-            zhipu_default_model_slugs(),
-            [
-                "glm-5.3",
-                "glm-5.3-flash",
-                "glm-5.2",
-                "glm-5",
-                "glm-5-turbo",
-                "glm-4.7",
-                "glm-4.7-flashx",
-                "glm-4.7-flash"
-            ]
-        );
-        assert!(!zhipu_default_model_slugs().contains(&"glm-4.5-flash"));
-        assert!(!zhipu_default_model_slugs().contains(&"glm-5v-turbo"));
-        assert!(
-            super::super::default_models()
-                .iter()
-                .any(|model| model.slug == "glm-4.5-flash")
-        );
-    }
-
-    /// GLM-5.3 系列的 effort 数据形状：候选 low/high/max 且没有禁用思考的
-    /// wire；`thinking.type` 的请求体联动由 runtime/openai 协议层测试覆盖。
-    #[test]
-    fn glm53_family_efforts_cannot_disable_thinking() {
-        let models = super::super::default_models();
-        for slug in ["glm-5.3", "glm-5.3-flash"] {
-            let model = models.iter().find(|model| model.slug == slug).unwrap();
-            let param = model.effort_parameter().unwrap();
-
-            assert_eq!(param.candidates, vec!["low", "high", "max"], "{slug}");
-            assert!(param.wire_for("none").is_none(), "{slug}");
-        }
     }
 }

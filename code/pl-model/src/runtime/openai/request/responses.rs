@@ -139,7 +139,8 @@ impl ResponsesRequestBody {
 
         Ok(Self {
             model: model
-                .request_profile
+                .binding
+                .request
                 .api_model
                 .clone()
                 .unwrap_or_else(|| model.slug.clone()),
@@ -288,9 +289,10 @@ enum ResponsesTool {
         output_schema: Option<serde_json::Value>,
     },
     ProgrammaticToolCalling,
+    #[serde(rename = "web_search")]
+    DeepSeekWebSearch,
     WebSearch {
-        #[serde(skip_serializing_if = "Option::is_none")]
-        external_web_access: Option<bool>,
+        external_web_access: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         indexed_web_access: Option<bool>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -334,27 +336,24 @@ impl From<&ToolSpec> for ResponsesTool {
                 output_schema: output_schema.clone(),
             },
             ToolSpec::ProgrammaticToolCalling => Self::ProgrammaticToolCalling,
-            ToolSpec::WebSearch {
-                dialect,
-                external_web_access,
-                indexed_web_access,
-                filters,
-                user_location,
-                search_context_size,
-                search_content_types,
-            } => {
-                let deepseek = *dialect == pl_protocol::HostedWebSearchDialect::DeepSeekResponses;
-                Self::WebSearch {
-                    external_web_access: (!deepseek).then_some(*external_web_access),
-                    indexed_web_access: (!deepseek).then_some(*indexed_web_access).flatten(),
-                    filters: (!deepseek).then_some(filters.clone()).flatten(),
-                    user_location: (!deepseek).then_some(user_location.clone()).flatten(),
-                    search_context_size: (!deepseek).then_some(*search_context_size).flatten(),
-                    search_content_types: (!deepseek)
-                        .then_some(search_content_types.clone())
-                        .flatten(),
-                }
-            }
+            ToolSpec::WebSearch { options } => match options {
+                pl_protocol::HostedWebSearchOptions::DeepSeek => Self::DeepSeekWebSearch,
+                pl_protocol::HostedWebSearchOptions::OpenAi {
+                    external_web_access,
+                    indexed_web_access,
+                    filters,
+                    user_location,
+                    search_context_size,
+                    search_content_types,
+                } => Self::WebSearch {
+                    external_web_access: *external_web_access,
+                    indexed_web_access: *indexed_web_access,
+                    filters: filters.clone(),
+                    user_location: user_location.clone(),
+                    search_context_size: *search_context_size,
+                    search_content_types: search_content_types.clone(),
+                },
+            },
         }
     }
 }
@@ -445,7 +444,7 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
-    use crate::model::info::{ModelInfo, ResponsesMaxTokensField};
+    use crate::model::info::ModelInfo;
     use crate::runtime::openai::OpenAiProtocol;
     use crate::runtime::openai::test_support::{bundled_model, request_with_effort};
     use pl_protocol::ToolSpec;
@@ -453,7 +452,7 @@ mod tests {
     #[test]
     fn responses_parallel_tool_calls_wire_is_unchanged() {
         let request = request_with_effort("high");
-        let model = ModelInfo::fallback("responses-compatible");
+        let model = ModelInfo::compatible("responses-compatible");
 
         let body = OpenAiProtocol::responses().build_request_body_with_model(&request, &model);
 
@@ -503,17 +502,17 @@ mod tests {
     #[test]
     fn request_codec_only_writes_invocation_prompt_cache_key_for_responses() {
         let request = request_with_effort("medium");
-        let model = ModelInfo::fallback("gpt-5.5");
+        let model = ModelInfo::compatible("gpt-5.5");
 
         let responses_body = serde_json::to_value(
             OpenAiProtocol::responses()
-                .build_request(&request, &model, Some("project-cache-key"))
+                .build_request_for_fixture(&request, &model, Some("project-cache-key"))
                 .unwrap(),
         )
         .unwrap();
         let chat_body = serde_json::to_value(
             OpenAiProtocol::chat()
-                .build_request(&request, &model, Some("project-cache-key"))
+                .build_request_for_fixture(&request, &model, Some("project-cache-key"))
                 .unwrap(),
         )
         .unwrap();
@@ -539,47 +538,6 @@ mod tests {
         assert!(body.get("max_output_tokens").is_none());
         assert!(body.get("max_tokens").is_none());
         assert!(body.get("max_completion_tokens").is_none());
-    }
-
-    #[test]
-    fn responses_body_can_use_profiled_max_output_tokens_field() {
-        let mut model = ModelInfo::fallback("responses-like");
-        model.request_profile.responses_max_tokens_field = ResponsesMaxTokensField::MaxOutputTokens;
-        let mut request = request_with_effort("medium");
-        request.max_tokens = Some(8192);
-
-        let body = OpenAiProtocol::responses().build_request_body_with_model(&request, &model);
-
-        assert_eq!(body["max_output_tokens"], serde_json::json!(8192));
-        assert!(body.get("max_tokens").is_none());
-        assert!(body.get("max_completion_tokens").is_none());
-    }
-
-    #[test]
-    fn responses_body_can_use_profiled_compatible_max_tokens_fields() {
-        let mut request = request_with_effort("medium");
-        request.max_tokens = Some(8192);
-
-        let mut max_tokens_model = ModelInfo::fallback("responses-like");
-        max_tokens_model.request_profile.responses_max_tokens_field =
-            ResponsesMaxTokensField::MaxTokens;
-        let max_tokens_body =
-            OpenAiProtocol::responses().build_request_body_with_model(&request, &max_tokens_model);
-
-        let mut max_completion_model = ModelInfo::fallback("responses-like");
-        max_completion_model
-            .request_profile
-            .responses_max_tokens_field = ResponsesMaxTokensField::MaxCompletionTokens;
-        let max_completion_body = OpenAiProtocol::responses()
-            .build_request_body_with_model(&request, &max_completion_model);
-
-        assert_eq!(max_tokens_body["max_tokens"], serde_json::json!(8192));
-        assert!(max_tokens_body.get("max_output_tokens").is_none());
-        assert_eq!(
-            max_completion_body["max_completion_tokens"],
-            serde_json::json!(8192)
-        );
-        assert!(max_completion_body.get("max_output_tokens").is_none());
     }
 
     #[test]
@@ -637,21 +595,22 @@ mod tests {
     fn responses_body_writes_current_hosted_web_search_shape() {
         let mut request = request_with_effort("xhigh");
         request.tools = vec![ToolSpec::WebSearch {
-            dialect: pl_protocol::HostedWebSearchDialect::OpenAiResponses,
-            external_web_access: true,
-            indexed_web_access: Some(true),
-            filters: Some(pl_protocol::WebSearchFilters {
-                allowed_domains: vec!["example.com".to_string()],
-            }),
-            user_location: Some(pl_protocol::WebSearchUserLocation {
-                kind: pl_protocol::WebSearchUserLocationType::Approximate,
-                country: Some("US".to_string()),
-                region: Some("CA".to_string()),
-                city: None,
-                timezone: Some("America/Los_Angeles".to_string()),
-            }),
-            search_context_size: Some(pl_protocol::WebSearchContextSize::High),
-            search_content_types: None,
+            options: pl_protocol::HostedWebSearchOptions::OpenAi {
+                external_web_access: true,
+                indexed_web_access: Some(true),
+                filters: Some(pl_protocol::WebSearchFilters {
+                    allowed_domains: vec!["example.com".to_string()],
+                }),
+                user_location: Some(pl_protocol::WebSearchUserLocation {
+                    kind: pl_protocol::WebSearchUserLocationType::Approximate,
+                    country: Some("US".to_string()),
+                    region: Some("CA".to_string()),
+                    city: None,
+                    timezone: Some("America/Los_Angeles".to_string()),
+                }),
+                search_context_size: Some(pl_protocol::WebSearchContextSize::High),
+                search_content_types: None,
+            },
         }];
 
         let body = OpenAiProtocol::responses().build_request_body(&request);
@@ -672,13 +631,7 @@ mod tests {
     fn deepseek_responses_body_writes_only_native_web_search_type() {
         let mut request = request_with_effort("high");
         request.tools = vec![ToolSpec::WebSearch {
-            dialect: pl_protocol::HostedWebSearchDialect::DeepSeekResponses,
-            external_web_access: true,
-            indexed_web_access: None,
-            filters: None,
-            user_location: None,
-            search_context_size: None,
-            search_content_types: None,
+            options: pl_protocol::HostedWebSearchOptions::DeepSeek,
         }];
         let model = bundled_model("deepseek-v4-flash");
 

@@ -6,13 +6,16 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use futures::FutureExt;
 use pl_core::{
     AgentSession, ToolCapabilityConfig, TurnBudget, TurnEngine, TurnEngineBuilder, TurnOptions,
-    TurnRequest, TurnResultStatus,
+    TurnRequest,
 };
-use pl_protocol::{InteractionPayload, InteractionResolution, ToolApprovalResolution};
-use pl_trace::{TraceEvent, TraceEventKind, TracePartStatus};
+use pl_protocol::{
+    InteractionContent, InteractionResolution, ToolApprovalResolution,
+    ToolApprovalResolutionPayload,
+};
+use pl_trace::{TraceEvent, TraceEventKind};
 use pretty_assertions::assert_eq;
 
-const DEEPSEEK_LIVE_ENV_KEY: &str = "API_KEY_DEEPSEEK";
+const DEEPSEEK_LIVE_ENV_KEY: &str = "DEEPSEEK_API_KEY";
 const ORIGINAL_NOTES: &str = "title: apply patch live\nstatus: pending\nkeep: unchanged\n";
 const EXPECTED_NOTES: &str =
     "title: apply patch live\nstatus: verified-by-live-apply-patch-test\nkeep: unchanged\n";
@@ -45,14 +48,11 @@ impl Drop for TempWorkspace {
     }
 }
 
-fn live_api_key() -> Option<String> {
-    match std::env::var(DEEPSEEK_LIVE_ENV_KEY) {
-        Ok(value) if !value.trim().is_empty() => Some(value),
-        _ => {
-            eprintln!("{DEEPSEEK_LIVE_ENV_KEY} is not set; skipping live apply_patch test");
-            None
-        }
-    }
+fn live_api_key() -> String {
+    std::env::var(DEEPSEEK_LIVE_ENV_KEY)
+        .ok()
+        .filter(|key| !key.trim().is_empty())
+        .expect("explicit live acceptance requires configured provider credentials")
 }
 
 fn allowed_tool(name: &str) -> bool {
@@ -66,12 +66,13 @@ fn approval_options(requested_tools: Arc<Mutex<Vec<String>>>) -> TurnOptions {
     TurnOptions::default().with_interaction_callback(Arc::new(move |interaction| {
         let requested_tools = requested_tools.clone();
         async move {
-            let InteractionPayload::ToolApproval { name, .. } = interaction.payload else {
-                return InteractionResolution::ToolApproval {
+            let InteractionContent::ToolApproval(approval) = interaction.content else {
+                return InteractionResolution::ToolApproval(ToolApprovalResolutionPayload {
                     decision: ToolApprovalResolution::Denied,
                     reason: Some("unexpected interaction payload".to_string()),
-                };
+                });
             };
+            let name = approval.request().name.clone();
             {
                 requested_tools
                     .lock()
@@ -79,15 +80,15 @@ fn approval_options(requested_tools: Arc<Mutex<Vec<String>>>) -> TurnOptions {
                     .push(name.clone());
             }
             if allowed_tool(&name) {
-                InteractionResolution::ToolApproval {
+                InteractionResolution::ToolApproval(ToolApprovalResolutionPayload {
                     decision: ToolApprovalResolution::Approved,
                     reason: None,
-                }
+                })
             } else {
-                InteractionResolution::ToolApproval {
+                InteractionResolution::ToolApproval(ToolApprovalResolutionPayload {
                     decision: ToolApprovalResolution::Denied,
                     reason: Some(format!("forbidden tool in live apply_patch test: {name}")),
-                }
+                })
             }
         }
         .boxed()
@@ -104,7 +105,7 @@ async fn configured_core(api_key: String, workspace: &Path) -> TurnEngine {
         .unwrap()
         .with_tool_capabilities(capabilities)
         .build();
-    core.register_default_tools(workspace, None).await;
+    core.install_default_tools(workspace, None).await.unwrap();
     core
 }
 
@@ -138,34 +139,33 @@ fn tool_diagnostics(events: &[TraceEvent]) -> String {
         match &event.kind {
             TraceEventKind::TracePartStarted { item }
             | TraceEventKind::TracePartCompleted { item } => {
-                if let Some(tool) = &item.tool {
+                if let Some(tool) = item.tool() {
                     let _ = writeln!(
                         output,
                         "#{} {:?} {} args={} result={}",
                         event.sequence,
-                        item.status,
-                        tool.name,
-                        tool.arguments,
-                        tool.result.as_deref().unwrap_or("")
+                        item.state(),
+                        tool.invocation().name(),
+                        tool.invocation().arguments(),
+                        tool.terminal_output().map_or("", |output| output.result())
                     );
                 }
             }
-            TraceEventKind::TracePartFailed { item, error } => {
-                if let Some(tool) = &item.tool {
+            TraceEventKind::TracePartFailed { item } => {
+                if let Some(tool) = item.tool() {
                     let _ = writeln!(
                         output,
                         "#{} {:?} {} args={} result={} error={}",
                         event.sequence,
-                        item.status,
-                        tool.name,
-                        tool.arguments,
-                        tool.result.as_deref().unwrap_or(""),
-                        error
+                        item.state(),
+                        tool.invocation().name(),
+                        tool.invocation().arguments(),
+                        tool.terminal_output().map_or("", |output| output.result()),
+                        item.failure().unwrap_or("")
                     );
                 }
             }
             TraceEventKind::TracePartDelta { .. }
-            | TraceEventKind::PlanLifecycleChanged { .. }
             | TraceEventKind::InteractionChanged { .. }
             | TraceEventKind::SkillActivated { .. }
             | TraceEventKind::EnabledToolsRecorded { .. } => {}
@@ -183,11 +183,9 @@ fn saw_apply_patch(events: &[TraceEvent]) -> bool {
         TraceEventKind::TracePartStarted { item }
         | TraceEventKind::TracePartCompleted { item }
         | TraceEventKind::TracePartFailed { item, .. } => item
-            .tool
-            .as_ref()
-            .is_some_and(|tool| tool.name == "apply_patch"),
+            .tool()
+            .is_some_and(|tool| tool.invocation().name() == "apply_patch"),
         TraceEventKind::TracePartDelta { .. }
-        | TraceEventKind::PlanLifecycleChanged { .. }
         | TraceEventKind::InteractionChanged { .. }
         | TraceEventKind::SkillActivated { .. }
         | TraceEventKind::EnabledToolsRecorded { .. } => false,
@@ -199,16 +197,14 @@ fn failed_apply_patch(events: &[TraceEvent]) -> bool {
         matches!(
             &event.kind,
             TraceEventKind::TracePartFailed { item, .. }
-                if item.tool.as_ref().is_some_and(|tool| tool.name == "apply_patch")
+                if item.tool().is_some_and(|tool| tool.invocation().name() == "apply_patch")
         )
     })
 }
 
 #[tokio::test]
 async fn live_deepseek_applies_patch_with_prompt() {
-    let Some(api_key) = live_api_key() else {
-        return;
-    };
+    let api_key = live_api_key();
 
     let workspace = TempWorkspace::new("deepseek-apply-patch-live");
     tokio::fs::create_dir_all(workspace.path()).await.unwrap();
@@ -234,11 +230,10 @@ async fn live_deepseek_applies_patch_with_prompt() {
         .unwrap();
 
     let diagnostics = tool_diagnostics(&result.trace_events);
-    assert_eq!(
-        result.status,
-        TurnResultStatus::Completed,
+    assert!(
+        result.is_completed(),
         "live turn failed: {:?}\n{}",
-        result.error,
+        result.outcome,
         diagnostics
     );
 
@@ -271,8 +266,7 @@ async fn live_deepseek_applies_patch_with_prompt() {
         result.trace_events.iter().any(|event| matches!(
             &event.kind,
             TraceEventKind::TracePartCompleted { item }
-                if item.status == TracePartStatus::Completed
-                    && item.tool.as_ref().is_some_and(|tool| tool.name == "apply_patch")
+                if item.tool().is_some_and(|tool| tool.invocation().name() == "apply_patch")
         )),
         "apply_patch did not complete successfully\n{}",
         diagnostics

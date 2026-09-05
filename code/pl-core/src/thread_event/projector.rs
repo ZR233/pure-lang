@@ -1152,7 +1152,7 @@ mod tests {
                         pl_protocol::TurnFailureCategory::Provider,
                         "turn task join failed",
                     )),
-                    usage: pl_protocol::TokenUsage::default(),
+                    usage: pl_protocol::InferenceTokenUsage::default(),
                     started_at: Some(6),
                     finished_at: 7,
                 },

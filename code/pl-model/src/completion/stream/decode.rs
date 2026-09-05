@@ -28,6 +28,7 @@ pub(crate) fn decode_raw_event_stream(
         decoder: protocol.new_stream_decoder(),
         visible_output: VisibleOutputDecoder::new(protocol.visible_output_protocol()),
         pending: VecDeque::new(),
+        stream_finished: false,
     };
 
     futures::stream::unfold(state, |mut state| async move {
@@ -36,15 +37,25 @@ pub(crate) fn decode_raw_event_stream(
                 return Some((Ok(event), state));
             }
 
+            if state.stream_finished {
+                return None;
+            }
             let sse_event = match state.stream.next().await {
                 Some(Ok(event)) => event,
                 Some(Err(error)) => return Some((Err(error), state)),
                 None => {
+                    state.stream_finished = true;
+                    for event in state.decoder.finish() {
+                        state.pending.extend(state.visible_output.decode(event));
+                    }
                     state.visible_output.record_diagnostics();
-                    return None;
+                    continue;
                 }
             };
 
+            if let Err(error) = crate::runtime::wire_capture::capture_usage(&sse_event).await {
+                return Some((Err(error), state));
+            }
             for stream_event in state.decoder.decode(&sse_event) {
                 state
                     .pending
@@ -60,6 +71,7 @@ struct ProviderStreamDecodeState {
     decoder: sse::OpenAiStreamDecoder,
     visible_output: VisibleOutputDecoder,
     pending: VecDeque<ModelStreamEvent>,
+    stream_finished: bool,
 }
 
 pub(crate) enum VisibleOutputDecoder {

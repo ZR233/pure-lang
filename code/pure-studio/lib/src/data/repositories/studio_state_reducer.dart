@@ -477,22 +477,6 @@ StudioState _applyObservedSnapshot<T extends ObservedStateSnapshot<dynamic>>(
   return replace(next);
 }
 
-String defaultEffortForModel(
-  StudioState current,
-  String providerId,
-  String model,
-) {
-  for (final provider in current.providers) {
-    if (provider.id != providerId) continue;
-    for (final candidate in provider.models) {
-      if (candidate.slug == model && candidate.reasoningEfforts.isNotEmpty) {
-        return candidate.reasoningEfforts.first;
-      }
-    }
-  }
-  return current.role('planner')?.effort ?? 'high';
-}
-
 String planFollowUpPrompt(
   PendingInteraction interaction,
   InteractionResolutionCommand resolution,

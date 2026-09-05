@@ -32,9 +32,20 @@ pub enum ToolSpec {
     },
     /// Provider-hosted programmatic tool coordinator.
     ProgrammaticToolCalling,
-    /// Provider-hosted web search tool.
-    WebSearch {
-        dialect: HostedWebSearchDialect,
+    /// Provider-hosted search with only the options its dialect actually supports.
+    WebSearch { options: HostedWebSearchOptions },
+}
+
+/// Native search capabilities do not force other suppliers to carry unused settings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "dialect",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum HostedWebSearchOptions {
+    DeepSeek,
+    OpenAi {
         external_web_access: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         indexed_web_access: Option<bool>,

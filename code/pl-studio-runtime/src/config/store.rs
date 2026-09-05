@@ -9,7 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::{PureError, Result};
 
 use super::credential::{CredentialStore, MemoryCredentialStore, SystemCredentialStore};
-use super::{STUDIO_CONFIG_DIR_NAME, STUDIO_CONFIG_FILE_NAME, StudioConfig, StudioRole};
+use super::{STUDIO_CONFIG_DIR_NAME, STUDIO_CONFIG_FILE_NAME, StudioConfig};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigPaths {
@@ -63,12 +63,6 @@ impl ConfigIncompatibilityKind {
 struct IncompatibleConfig {
     kind: ConfigIncompatibilityKind,
     error: PureError,
-}
-
-#[derive(Debug)]
-enum StartupParsedConfig {
-    Current(StudioConfig),
-    Migrated(StudioConfig),
 }
 
 impl IncompatibleConfig {
@@ -180,15 +174,12 @@ impl ConfigStore {
         }
         let content = fs::read(self.paths.config_file())?;
         match parse_startup_config(&content) {
-            Ok(StartupParsedConfig::Current(mut config)) => {
+            Ok(mut config) => {
                 self.hydrate_credentials(&mut config)?;
                 Ok(StartupConfigLoad {
                     config,
                     recovery: None,
                 })
-            }
-            Ok(StartupParsedConfig::Migrated(config)) => {
-                self.persist_migrated_for_startup(&content, config)
             }
             Err(incompatible) => self.replace_incompatible_for_startup(&content, incompatible),
         }
@@ -249,38 +240,6 @@ impl ConfigStore {
                     .map_err(Into::into)
             },
         )
-    }
-
-    fn persist_migrated_for_startup(
-        &self,
-        original: &[u8],
-        config: StudioConfig,
-    ) -> Result<StartupConfigLoad> {
-        self.persist_migrated_for_startup_with(original, config, |config_path, persisted| {
-            pl_core::atomic_file::write_file_atomically(config_path, persisted).map_err(Into::into)
-        })
-    }
-
-    fn persist_migrated_for_startup_with(
-        &self,
-        original: &[u8],
-        mut config: StudioConfig,
-        replace: impl FnOnce(&Path, &[u8]) -> Result<()>,
-    ) -> Result<StartupConfigLoad> {
-        config.validate()?;
-        let persisted = serialize_persisted_config(&config)?;
-        self.hydrate_credentials(&mut config)?;
-        let backup_path = write_config_backup(self.paths.config_file(), original, "migrated")?;
-        replace(self.paths.config_file(), persisted.as_bytes())?;
-        tracing::info!(
-            config_path = %self.paths.config_file().display(),
-            backup_path = %backup_path.display(),
-            "migrated Studio config to schema 17"
-        );
-        Ok(StartupConfigLoad {
-            config,
-            recovery: Some(ConfigRecoveryReport { backup_path }),
-        })
     }
 
     fn replace_incompatible_for_startup_with(
@@ -383,56 +342,14 @@ fn parse_current_config(content: &str) -> Result<StudioConfig> {
     parse_config(content).map_err(IncompatibleConfig::into_error)
 }
 
-fn parse_startup_config(
-    content: &[u8],
-) -> std::result::Result<StartupParsedConfig, IncompatibleConfig> {
+fn parse_startup_config(content: &[u8]) -> std::result::Result<StudioConfig, IncompatibleConfig> {
     let content = std::str::from_utf8(content).map_err(|error| {
         IncompatibleConfig::new(
             ConfigIncompatibilityKind::Parse,
             PureError::ConfigError(format!("failed to parse Studio config as UTF-8: {error}")),
         )
     })?;
-    let mut config = parse_typed_config(content)?;
-    reject_inline_credentials(&config)?;
-    match config.schema_version {
-        super::STUDIO_CONFIG_SCHEMA_VERSION => {
-            config.validate().map_err(|error| {
-                IncompatibleConfig::new(ConfigIncompatibilityKind::Validation, error)
-            })?;
-            Ok(StartupParsedConfig::Current(config))
-        }
-        15 | 16 => {
-            let executor = config
-                .models
-                .routes
-                .get(&StudioRole::Executor.id())
-                .cloned()
-                .ok_or_else(|| {
-                    IncompatibleConfig::new(
-                        ConfigIncompatibilityKind::Validation,
-                        PureError::ConfigError(
-                            "legacy Studio config is missing executor route".to_string(),
-                        ),
-                    )
-                })?;
-            config
-                .models
-                .routes
-                .insert(StudioRole::WorktreeExecutor.id(), executor);
-            config.schema_version = super::STUDIO_CONFIG_SCHEMA_VERSION;
-            config.validate().map_err(|error| {
-                IncompatibleConfig::new(ConfigIncompatibilityKind::Validation, error)
-            })?;
-            Ok(StartupParsedConfig::Migrated(config))
-        }
-        _ => Err(IncompatibleConfig::new(
-            ConfigIncompatibilityKind::Validation,
-            PureError::ConfigError(format!(
-                "unsupported Studio config schema version: {}",
-                config.schema_version
-            )),
-        )),
-    }
+    parse_config(content)
 }
 
 fn parse_config(content: &str) -> std::result::Result<StudioConfig, IncompatibleConfig> {
@@ -463,7 +380,7 @@ fn reject_inline_credentials(config: &StudioConfig) -> std::result::Result<(), I
         return Err(IncompatibleConfig::new(
             ConfigIncompatibilityKind::InlineCredential,
             PureError::ConfigError(
-                "schema 17 forbids inline provider bearer_token; use the Studio credential store"
+                "schema 18 forbids inline provider bearer_token; use the Studio credential store"
                     .to_string(),
             ),
         ));
@@ -627,7 +544,7 @@ mod tests {
         config
             .models
             .routes
-            .remove(&StudioRole::WorktreeExecutor.id());
+            .remove(&super::super::StudioRole::WorktreeExecutor.id());
         toml::to_string_pretty(&config).unwrap()
     }
 
@@ -652,76 +569,18 @@ mod tests {
     }
 
     #[test]
-    fn schemas_15_and_16_are_backed_up_and_migrated_during_startup() {
-        for schema_version in [15, 16] {
+    fn old_schemas_are_backed_up_and_replaced_before_current_settings_reload() {
+        for schema_version in [15, 16, 17] {
             let store = test_store(&format!("schema-{schema_version}"));
             fs::create_dir_all(store.paths().config_dir()).unwrap();
             let legacy = legacy_config(schema_version);
             fs::write(store.paths().config_file(), &legacy).unwrap();
-
             let startup = store.load_for_startup().unwrap();
-
-            assert_eq!(startup.config.schema_version, 17);
-            assert_eq!(
-                startup
-                    .config
-                    .models
-                    .routes
-                    .get(&StudioRole::WorktreeExecutor.id()),
-                startup.config.models.routes.get(&StudioRole::Executor.id())
-            );
+            assert_eq!(startup.config, StudioConfig::default_config());
             let backup = startup.recovery.unwrap().backup_path;
-            assert!(
-                backup
-                    .file_name()
-                    .unwrap()
-                    .to_string_lossy()
-                    .starts_with("config.toml.migrated.")
-            );
             assert_eq!(fs::read(backup).unwrap(), legacy.as_bytes());
             assert_eq!(store.load().unwrap(), startup.config);
         }
-    }
-
-    #[test]
-    fn schema_migration_write_failure_preserves_original_after_backup() {
-        let store = test_store("migration-write-failure");
-        fs::create_dir_all(store.paths().config_dir()).unwrap();
-        let legacy = legacy_config(16);
-        fs::write(store.paths().config_file(), &legacy).unwrap();
-        let migrated = match parse_startup_config(legacy.as_bytes()).unwrap() {
-            StartupParsedConfig::Migrated(config) => config,
-            StartupParsedConfig::Current(_) => panic!("schema 16 must migrate"),
-        };
-
-        let error = store
-            .persist_migrated_for_startup_with(
-                legacy.as_bytes(),
-                migrated,
-                |_config_path, _persisted| {
-                    Err(PureError::ConfigError(
-                        "injected migration replacement failure".to_string(),
-                    ))
-                },
-            )
-            .unwrap_err();
-
-        assert!(error.to_string().contains("injected migration"));
-        assert_eq!(
-            fs::read_to_string(store.paths().config_file()).unwrap(),
-            legacy
-        );
-        let backups = fs::read_dir(store.paths().config_dir())
-            .unwrap()
-            .filter_map(std::result::Result::ok)
-            .map(|entry| entry.path())
-            .filter(|path| {
-                path.file_name()
-                    .is_some_and(|name| name.to_string_lossy().starts_with("config.toml.migrated."))
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(backups.len(), 1);
-        assert_eq!(fs::read(&backups[0]).unwrap(), legacy.as_bytes());
     }
 
     #[test]
@@ -730,7 +589,7 @@ mod tests {
         fs::create_dir_all(store.paths().config_dir()).unwrap();
         let future = toml::to_string_pretty(&StudioConfig::default_config())
             .unwrap()
-            .replace("schema_version = 17", "schema_version = 4294967295");
+            .replace("schema_version = 18", "schema_version = 4294967295");
         fs::write(store.paths().config_file(), &future).unwrap();
 
         let startup = store.load_for_startup().unwrap();

@@ -152,29 +152,31 @@ class _ContextDetail extends StatelessWidget {
               ),
               StatusDetailRow(
                 label: context.l10n.statusTotalTokensLabel,
-                value: _formatCount(runtime.totalTokens),
+                value: runtime.hasIncompleteUsage
+                    ? '${_formatCount(runtime.totalTokens)} · ${context.l10n.statusReportedUsageOnly}'
+                    : _formatCount(runtime.totalTokens),
               ),
               if (cacheRate != null)
                 StatusDetailRow(
                   label: context.l10n.statusCacheLabel,
                   value: '${(cacheRate * 100).round()}%',
                 ),
-              if (runtime.hasUsage)
+              if (runtime.hasUsage && !runtime.hasIncompleteUsage)
                 StatusDetailRow(
                   label: context.l10n.statusCacheHitTokensLabel,
                   value: _formatCount(runtime.cachedPromptTokens),
                 ),
-              if (runtime.hasUsage)
+              if (runtime.hasUsage && !runtime.hasIncompleteUsage)
                 StatusDetailRow(
                   label: context.l10n.statusCacheMissTokensLabel,
                   value: _formatCount(runtime.cacheMissTokens),
                 ),
-              if (runtime.hasUsage)
+              if (runtime.cacheWriteTokens > 0)
                 StatusDetailRow(
                   label: context.l10n.statusCacheWriteTokensLabel,
                   value: _formatCount(runtime.cacheWriteTokens),
                 ),
-              if (runtime.hasUsage)
+              if (runtime.reasoningTokens > 0)
                 StatusDetailRow(
                   label: context.l10n.statusReasoningTokensLabel,
                   value: _formatCount(runtime.reasoningTokens),

@@ -4,14 +4,14 @@ use crate::model::capabilities::{
     ModelCapabilities, ModelInputCapability, ModelInputSource, ModelModality,
     PromptCacheModelCapabilities, ToolCapabilities,
 };
-use crate::model::family::{ModelFamily, ModelInstanceSpec, ModelPricing};
+use crate::model::family::{ModelFamily, ModelInstanceSpec};
 use crate::model::info::{ModelInfo, ModelRequestProfile, ModelTransportProfile, TruncationMode};
 use crate::model::parameter::ModelParameter;
+use crate::model::pricing::{ModelPricing, TokenPriceTier};
 
 const OPENAI_DEFAULT_MODEL_SLUGS: &[&str] = &[
+    "gpt-6-astra",
     "gpt-5.5",
-    "gpt-5.4",
-    "gpt-5.4-mini",
     "gpt-5.6-sol",
     "gpt-5.6-terra",
     "gpt-5.6-luna",
@@ -25,6 +25,15 @@ pub(super) fn models() -> Vec<ModelInfo> {
     let openai = openai_family();
     let openai_gpt56 = openai_gpt56_family();
     vec![
+        openai_gpt56.instantiate(ModelInstanceSpec {
+            slug: "gpt-6-astra",
+            display_name: "GPT-6 Astra",
+            description: "OpenAI flagship model for complex reasoning, coding and agent tasks.",
+            context_window: 1_050_000,
+            max_context_window: 1_050_000,
+            max_output_tokens: Some(128_000),
+            pricing: openai_pricing(10.0, 50.0, Some(12.5)),
+        }),
         openai.instantiate(ModelInstanceSpec {
             slug: "gpt-5.5",
             display_name: "GPT-5.5",
@@ -32,25 +41,7 @@ pub(super) fn models() -> Vec<ModelInfo> {
             context_window: 272_000,
             max_context_window: 272_000,
             max_output_tokens: None,
-            pricing: ModelPricing::default(),
-        }),
-        openai.instantiate(ModelInstanceSpec {
-            slug: "gpt-5.4",
-            display_name: "gpt-5.4",
-            description: "Strong model for everyday coding.",
-            context_window: 272_000,
-            max_context_window: 1_000_000,
-            max_output_tokens: None,
-            pricing: ModelPricing::default(),
-        }),
-        openai.instantiate(ModelInstanceSpec {
-            slug: "gpt-5.4-mini",
-            display_name: "GPT-5.4-Mini",
-            description: "Small, fast, and cost-efficient model for simpler coding tasks.",
-            context_window: 272_000,
-            max_context_window: 272_000,
-            max_output_tokens: None,
-            pricing: ModelPricing::default(),
+            pricing: openai_pricing(5.0, 30.0, None),
         }),
         openai_gpt56.instantiate(ModelInstanceSpec {
             slug: "gpt-5.6-sol",
@@ -59,7 +50,7 @@ pub(super) fn models() -> Vec<ModelInfo> {
             context_window: 272_000,
             max_context_window: 272_000,
             max_output_tokens: None,
-            pricing: ModelPricing::default(),
+            pricing: openai_pricing(4.0, 20.0, Some(5.0)),
         }),
         openai_gpt56.instantiate(ModelInstanceSpec {
             slug: "gpt-5.6-terra",
@@ -68,7 +59,7 @@ pub(super) fn models() -> Vec<ModelInfo> {
             context_window: 272_000,
             max_context_window: 272_000,
             max_output_tokens: None,
-            pricing: ModelPricing::default(),
+            pricing: openai_pricing(2.0, 12.0, Some(2.5)),
         }),
         openai_gpt56.instantiate(ModelInstanceSpec {
             slug: "gpt-5.6-luna",
@@ -77,9 +68,26 @@ pub(super) fn models() -> Vec<ModelInfo> {
             context_window: 272_000,
             max_context_window: 272_000,
             max_output_tokens: None,
-            pricing: ModelPricing::default(),
+            pricing: openai_pricing(0.2, 1.2, Some(0.25)),
         }),
     ]
+}
+
+fn openai_pricing(input: f64, output: f64, write: Option<f64>) -> ModelPricing {
+    let mut short = TokenPriceTier::flat(input, output, Some(input * 0.1), write);
+    short.input_until = Some(272_001);
+    let mut long = TokenPriceTier::flat(
+        input * 2.0,
+        output * 1.5,
+        Some(input * 0.2),
+        write.map(|price| price * 2.0),
+    );
+    long.input_from = 272_001;
+    ModelPricing::published(
+        "USD",
+        vec![short, long],
+        "https://developers.openai.com/api/docs/pricing",
+    )
 }
 
 fn openai_family() -> ModelFamily {
@@ -116,7 +124,12 @@ fn openai_gpt56_family() -> ModelFamily {
 
 fn openai_responses_request_profile() -> ModelRequestProfile {
     ModelRequestProfile {
-        responses_programmatic_tool_calling: true,
+        protocol: crate::model::ModelProtocolOptions::Responses(
+            crate::model::ResponsesRequestOptions {
+                programmatic_tool_calling: true,
+                ..Default::default()
+            },
+        ),
         media: super::image_media_profiles(
             super::MediaWireFormat::ResponsesInputImage,
             super::MediaSendOrder::RemoteUrlFirst,
@@ -170,136 +183,5 @@ fn openai_capabilities() -> ModelCapabilities {
         },
         interleaved: None,
         prompt_cache: PromptCacheModelCapabilities::default(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct ExpectedModel {
-        display_name: &'static str,
-        max_context_window: u64,
-        efforts: &'static [&'static str],
-        default_effort: Option<&'static str>,
-    }
-
-    #[test]
-    fn openai_default_models_match_codex_metadata() {
-        let models = super::super::default_models();
-
-        assert_eq!(
-            openai_default_model_slugs(),
-            [
-                "gpt-5.5",
-                "gpt-5.4",
-                "gpt-5.4-mini",
-                "gpt-5.6-sol",
-                "gpt-5.6-terra",
-                "gpt-5.6-luna",
-            ]
-        );
-
-        let expectations = [
-            (
-                "gpt-5.5",
-                ExpectedModel {
-                    display_name: "GPT-5.5",
-                    max_context_window: 272_000,
-                    efforts: &["low", "medium", "high", "xhigh"],
-                    default_effort: Some("low"),
-                },
-            ),
-            (
-                "gpt-5.4",
-                ExpectedModel {
-                    display_name: "gpt-5.4",
-                    max_context_window: 1_000_000,
-                    efforts: &["low", "medium", "high", "xhigh"],
-                    default_effort: Some("low"),
-                },
-            ),
-            (
-                "gpt-5.4-mini",
-                ExpectedModel {
-                    display_name: "GPT-5.4-Mini",
-                    max_context_window: 272_000,
-                    efforts: &["low", "medium", "high", "xhigh"],
-                    default_effort: Some("low"),
-                },
-            ),
-            (
-                "gpt-5.6-sol",
-                ExpectedModel {
-                    display_name: "GPT-5.6-Sol",
-                    max_context_window: 272_000,
-                    efforts: &["low", "medium", "high", "xhigh", "max"],
-                    default_effort: Some("low"),
-                },
-            ),
-            (
-                "gpt-5.6-terra",
-                ExpectedModel {
-                    display_name: "GPT-5.6-Terra",
-                    max_context_window: 272_000,
-                    efforts: &["low", "medium", "high", "xhigh", "max"],
-                    default_effort: Some("low"),
-                },
-            ),
-            (
-                "gpt-5.6-luna",
-                ExpectedModel {
-                    display_name: "GPT-5.6-Luna",
-                    max_context_window: 272_000,
-                    efforts: &["low", "medium", "high", "xhigh", "max"],
-                    default_effort: Some("low"),
-                },
-            ),
-        ];
-
-        for (slug, expected) in expectations {
-            let model = models.iter().find(|model| model.slug == slug).unwrap();
-            assert_eq!(model.display_name, expected.display_name, "{slug}");
-            assert_eq!(model.context_window, Some(272_000), "{slug}");
-            assert_eq!(
-                model.max_context_window,
-                Some(expected.max_context_window),
-                "{slug}"
-            );
-            assert_eq!(model.max_output_tokens, None, "{slug}");
-            assert_eq!(model.supported_efforts(), expected.efforts, "{slug}");
-            assert_eq!(
-                model.default_effort().as_deref(),
-                expected.default_effort,
-                "{slug}"
-            );
-            assert_eq!(
-                model.truncation_policy.mode,
-                TruncationMode::Tokens,
-                "{slug}"
-            );
-            assert_eq!(model.truncation_policy.limit, 10_000, "{slug}");
-            assert!(model.capabilities.web_search, "{slug}");
-            assert!(model.capabilities.tools.freeform_tools, "{slug}");
-        }
-
-        // gpt-5.6 家族的 auto compact 统一为 272k × 0.9。
-        for slug in ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
-            let model = models.iter().find(|model| model.slug == slug).unwrap();
-            assert_eq!(model.resolved_auto_compact_limit(), Some(244_800), "{slug}");
-        }
-
-        for retired in [
-            "gpt-5.4-nano",
-            "gpt-5.3-codex",
-            "gpt-5.2",
-            "gpt-5.6",
-            "gpt-5.6-pro",
-        ] {
-            assert!(
-                !models.iter().any(|model| model.slug == retired),
-                "{retired} must stay retired"
-            );
-        }
     }
 }

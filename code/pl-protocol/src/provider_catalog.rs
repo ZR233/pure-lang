@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// Provider/模型目录跨产品传输协议版本。
-pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 9;
+pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 10;
 
 /// 无敏感信息、可供 Web 与桌面端直接渲染的 Provider 目录快照。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -17,6 +17,7 @@ pub struct ProviderCatalogSnapshot {
 /// 一个可创建 Provider 实例的内置预设。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProviderPresetDescriptor {
+    pub pricing_enabled: bool,
     pub id: String,
     pub display_name: String,
     pub description: Option<String>,
@@ -155,12 +156,23 @@ pub struct ModelReasoningDescriptor {
     pub candidates: Vec<String>,
 }
 
-/// 可选的模型价格投影，单位为每百万 token。
+/// Display projection of all applicable catalog price bands, per million tokens.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct ModelPricingDto {
     pub currency: String,
-    pub input_per_mtok: Option<f64>,
-    pub output_per_mtok: Option<f64>,
+    pub tiers: Vec<ModelPriceTierDto>,
+    pub source: String,
+    pub verified_at: i64,
+}
+
+/// A complete display row; clients format these rates without calculating multipliers.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelPriceTierDto {
+    pub label: String,
+    pub input_per_mtok: f64,
+    pub output_per_mtok: f64,
     pub cache_read_per_mtok: Option<f64>,
     pub cache_write_per_mtok: Option<f64>,
 }

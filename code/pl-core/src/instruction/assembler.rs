@@ -323,7 +323,7 @@ mod tests {
     fn platform_prompt_tracks_runtime_shell_and_target() {
         let dir = temp_dir("platform-matrix");
         fs::create_dir_all(&dir).unwrap();
-        let model = ModelInfo::fallback("test-model");
+        let model = ModelInfo::compatible("test-model");
         let cases = [
             (
                 ExecutionOs::Linux,
@@ -415,7 +415,7 @@ mod tests {
             skills: None,
             skill_catalog: None,
             execution_profile: None,
-            model: &ModelInfo::fallback("test-model"),
+            model: &ModelInfo::compatible("test-model"),
             workspace_root: &dir,
             current_dir: &dir,
             workspace_documents: None,
@@ -491,7 +491,7 @@ mod tests {
                 label: "test",
                 instructions: "mode instructions",
             }),
-            model: &ModelInfo::fallback("test-model"),
+            model: &ModelInfo::compatible("test-model"),
             workspace_root: &dir,
             current_dir: &dir,
             workspace_documents: None,
@@ -546,7 +546,7 @@ mod tests {
             skills: None,
             skill_catalog: None,
             execution_profile: None,
-            model: &ModelInfo::fallback("test-model"),
+            model: &ModelInfo::compatible("test-model"),
             workspace_root: &workspace_root,
             current_dir: &workspace_root,
             workspace_documents: Some(&documents),
@@ -582,7 +582,7 @@ mod tests {
                 label: "test",
                 instructions: "mode instructions",
             }),
-            model: &ModelInfo::fallback("test-model"),
+            model: &ModelInfo::compatible("test-model"),
             workspace_root: &dir,
             current_dir: &dir,
             workspace_documents: None,
@@ -631,7 +631,7 @@ mod tests {
     fn filters_empty_blocks_and_uses_model_base() {
         let dir = temp_dir("empty");
         fs::create_dir_all(&dir).unwrap();
-        let mut model = ModelInfo::fallback("test-model");
+        let mut model = ModelInfo::compatible("test-model");
         model.base_instructions = "model base".to_string();
 
         let snapshot = InstructionAssembler::assemble(InstructionAssemblyRequest {
@@ -670,7 +670,7 @@ mod tests {
                 skills: None,
                 skill_catalog: None,
                 execution_profile: None,
-                model: &ModelInfo::fallback("test-model"),
+                model: &ModelInfo::compatible("test-model"),
                 workspace_root: &dir,
                 current_dir: &dir,
                 workspace_documents: None,
@@ -769,7 +769,7 @@ mod tests {
             base_override: "config base".to_string(),
             ..crate::config::InstructionsConfig::default()
         };
-        let mut model = ModelInfo::fallback("test-model");
+        let mut model = ModelInfo::compatible("test-model");
         model.base_instructions = "model base".to_string();
 
         let snapshot = InstructionAssembler::assemble(InstructionAssemblyRequest {
@@ -809,7 +809,7 @@ mod tests {
             skills: None,
             skill_catalog: None,
             execution_profile: None,
-            model: &ModelInfo::fallback("test-model"),
+            model: &ModelInfo::compatible("test-model"),
             workspace_root: &dir,
             current_dir: &dir,
             workspace_documents: None,
@@ -852,7 +852,7 @@ mod tests {
             skills: Some(&skills),
             skill_catalog: Some(&catalog),
             execution_profile: None,
-            model: &ModelInfo::fallback("test-model"),
+            model: &ModelInfo::compatible("test-model"),
             workspace_root: &dir,
             current_dir: &dir,
             workspace_documents: None,
@@ -890,7 +890,7 @@ mod tests {
             warnings: Vec::new(),
             complete: true,
         };
-        let model = ModelInfo::fallback("test-model");
+        let model = ModelInfo::compatible("test-model");
         let first = InstructionAssembler::assemble(InstructionAssemblyRequest {
             instructions: None,
             skills: Some(&skills),
@@ -992,7 +992,7 @@ mod tests {
             warnings: Vec::new(),
             complete: true,
         };
-        let model = ModelInfo::fallback("test-model");
+        let model = ModelInfo::compatible("test-model");
 
         let snapshot = InstructionAssembler::assemble(InstructionAssemblyRequest {
             instructions: None,

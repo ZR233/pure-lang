@@ -439,6 +439,7 @@ class BridgeThreadRuntimeSnapshot {
 }
 
 class BridgeThreadRuntimeUsage {
+  final bool hasIncompleteUsage;
   final String model;
   final BigInt? contextWindow;
   final BigInt latestContextTokens;
@@ -460,6 +461,7 @@ class BridgeThreadRuntimeUsage {
   final PlatformInt64 updatedAt;
 
   const BridgeThreadRuntimeUsage({
+    required this.hasIncompleteUsage,
     required this.model,
     this.contextWindow,
     required this.latestContextTokens,
@@ -483,6 +485,7 @@ class BridgeThreadRuntimeUsage {
 
   @override
   int get hashCode =>
+      hasIncompleteUsage.hashCode ^
       model.hashCode ^
       contextWindow.hashCode ^
       latestContextTokens.hashCode ^
@@ -508,6 +511,7 @@ class BridgeThreadRuntimeUsage {
       identical(this, other) ||
       other is BridgeThreadRuntimeUsage &&
           runtimeType == other.runtimeType &&
+          hasIncompleteUsage == other.hasIncompleteUsage &&
           model == other.model &&
           contextWindow == other.contextWindow &&
           latestContextTokens == other.latestContextTokens &&

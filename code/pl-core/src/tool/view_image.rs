@@ -40,7 +40,7 @@ impl ViewImageTool {
         attachment_runtime: AttachmentRuntime,
     ) -> Option<Self> {
         let capability = model.capabilities.input_capability(ModelModality::Image)?;
-        let profile = model.request_profile.media_profile(ModelModality::Image)?;
+        let profile = model.binding.request.media_profile(ModelModality::Image)?;
         if !capability.supports_source(ModelInputSource::Local)
             || capability.limits.max_count == Some(0)
             || profile.first_send.is_empty()
@@ -65,7 +65,7 @@ impl ViewImageTool {
         attachment_runtime: AttachmentRuntime,
     ) -> Option<Self> {
         let capability = model.capabilities.input_capability(ModelModality::Image)?;
-        let profile = model.request_profile.media_profile(ModelModality::Image)?;
+        let profile = model.binding.request.media_profile(ModelModality::Image)?;
         if !capability.supports_source(ModelInputSource::Local)
             || capability.limits.max_count == Some(0)
             || profile.first_send.is_empty()

@@ -16,7 +16,7 @@ use super::{
 use pl_model::completion::{
     SearchCommands, SearchRequest, SearchSettings, WebSearchAction, WebSearchConfig, WebSearchMode,
 };
-use pl_protocol::{HostedWebSearchDialect, ToolSpec, WebSearchFilters, WebSearchUserLocation};
+use pl_protocol::{ToolSpec, WebSearchFilters, WebSearchUserLocation};
 
 pub const TOOL_WEB_SEARCH: &str = "web_search";
 const ASSISTANT_CONTEXT_CHAR_LIMIT: usize = 4_000;
@@ -129,19 +129,20 @@ impl HostedWebSearchTool {
             WebSearchMode::Disabled => return None,
         };
         let schema = ToolSpec::WebSearch {
-            dialect: HostedWebSearchDialect::OpenAiResponses,
-            external_web_access,
-            indexed_web_access,
-            filters: (!config.allowed_domains.is_empty()).then(|| WebSearchFilters {
-                allowed_domains: config.allowed_domains.clone(),
-            }),
-            user_location: config
-                .location
-                .as_ref()
-                .filter(|location| !location.is_empty())
-                .map(WebSearchUserLocation::from),
-            search_context_size: config.context_size,
-            search_content_types: None,
+            options: pl_protocol::HostedWebSearchOptions::OpenAi {
+                external_web_access,
+                indexed_web_access,
+                filters: (!config.allowed_domains.is_empty()).then(|| WebSearchFilters {
+                    allowed_domains: config.allowed_domains.clone(),
+                }),
+                user_location: config
+                    .location
+                    .as_ref()
+                    .filter(|location| !location.is_empty())
+                    .map(WebSearchUserLocation::from),
+                search_context_size: config.context_size,
+                search_content_types: None,
+            },
         };
         Some(Self {
             definition: ToolDefinition::from_trusted_spec(
@@ -154,13 +155,7 @@ impl HostedWebSearchTool {
 
     pub fn deepseek() -> Self {
         let schema = ToolSpec::WebSearch {
-            dialect: HostedWebSearchDialect::DeepSeekResponses,
-            external_web_access: true,
-            indexed_web_access: None,
-            filters: None,
-            user_location: None,
-            search_context_size: None,
-            search_content_types: None,
+            options: pl_protocol::HostedWebSearchOptions::DeepSeek,
         };
         Self {
             definition: ToolDefinition::from_trusted_spec(
@@ -306,9 +301,12 @@ mod tests {
             })
             .expect("enabled mode");
             let ToolSpec::WebSearch {
-                external_web_access,
-                indexed_web_access,
-                ..
+                options:
+                    pl_protocol::HostedWebSearchOptions::OpenAi {
+                        external_web_access,
+                        indexed_web_access,
+                        ..
+                    },
             } = tool.definition().spec()
             else {
                 panic!("hosted schema");

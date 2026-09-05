@@ -3617,6 +3617,8 @@ impl SseDecode for crate::api::studio::types::response::BridgeConfigRecoveryRepo
 impl SseDecode for crate::api::studio::types::settings::BridgeCustomModelSettingsDto {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_contextWindow = <u64>::sse_decode(deserializer);
+        let mut var_maxOutputTokens = <u64>::sse_decode(deserializer);
         let mut var_slug = <String>::sse_decode(deserializer);
         let mut var_displayName = <String>::sse_decode(deserializer);
         let mut var_reasoningEfforts = <Vec<String>>::sse_decode(deserializer);
@@ -3625,6 +3627,8 @@ impl SseDecode for crate::api::studio::types::settings::BridgeCustomModelSetting
         let mut var_supportedConnectionModes = <Vec<String>>::sse_decode(deserializer);
         let mut var_defaultConnectionMode = <String>::sse_decode(deserializer);
         return crate::api::studio::types::settings::BridgeCustomModelSettingsDto {
+            context_window: var_contextWindow,
+            max_output_tokens: var_maxOutputTokens,
             slug: var_slug,
             display_name: var_displayName,
             reasoning_efforts: var_reasoningEfforts,
@@ -4714,20 +4718,39 @@ impl SseDecode for crate::api::studio::types::response::BridgeModelPerformanceSu
     }
 }
 
-impl SseDecode for crate::api::studio::types::settings::BridgeModelPricing {
+impl SseDecode for crate::api::studio::types::settings::BridgeModelPriceTier {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_currency = <String>::sse_decode(deserializer);
-        let mut var_inputPerMtok = <Option<f64>>::sse_decode(deserializer);
-        let mut var_outputPerMtok = <Option<f64>>::sse_decode(deserializer);
+        let mut var_label = <String>::sse_decode(deserializer);
+        let mut var_inputPerMtok = <f64>::sse_decode(deserializer);
+        let mut var_outputPerMtok = <f64>::sse_decode(deserializer);
         let mut var_cacheReadPerMtok = <Option<f64>>::sse_decode(deserializer);
         let mut var_cacheWritePerMtok = <Option<f64>>::sse_decode(deserializer);
-        return crate::api::studio::types::settings::BridgeModelPricing {
-            currency: var_currency,
+        return crate::api::studio::types::settings::BridgeModelPriceTier {
+            label: var_label,
             input_per_mtok: var_inputPerMtok,
             output_per_mtok: var_outputPerMtok,
             cache_read_per_mtok: var_cacheReadPerMtok,
             cache_write_per_mtok: var_cacheWritePerMtok,
+        };
+    }
+}
+
+impl SseDecode for crate::api::studio::types::settings::BridgeModelPricing {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_currency = <String>::sse_decode(deserializer);
+        let mut var_tiers =
+            <Vec<crate::api::studio::types::settings::BridgeModelPriceTier>>::sse_decode(
+                deserializer,
+            );
+        let mut var_source = <String>::sse_decode(deserializer);
+        let mut var_verifiedAt = <i64>::sse_decode(deserializer);
+        return crate::api::studio::types::settings::BridgeModelPricing {
+            currency: var_currency,
+            tiers: var_tiers,
+            source: var_source,
+            verified_at: var_verifiedAt,
         };
     }
 }
@@ -5153,6 +5176,7 @@ impl SseDecode for crate::api::studio::types::settings::BridgeProviderConnection
 impl SseDecode for crate::api::studio::types::settings::BridgeProviderPresetDescriptor {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_pricingEnabled = <bool>::sse_decode(deserializer);
         let mut var_id = <String>::sse_decode(deserializer);
         let mut var_displayName = <String>::sse_decode(deserializer);
         let mut var_description = <Option<String>>::sse_decode(deserializer);
@@ -5164,6 +5188,7 @@ impl SseDecode for crate::api::studio::types::settings::BridgeProviderPresetDesc
         let mut var_iconKey = <Option<String>>::sse_decode(deserializer);
         let mut var_serviceCapabilities = <crate::api::studio::types::settings::BridgeProviderServiceCapabilitiesDescriptor>::sse_decode(deserializer);
         return crate::api::studio::types::settings::BridgeProviderPresetDescriptor {
+            pricing_enabled: var_pricingEnabled,
             id: var_id,
             display_name: var_displayName,
             description: var_description,
@@ -5197,11 +5222,13 @@ impl SseDecode
 impl SseDecode for crate::api::studio::types::settings::BridgeProviderSettingsDto {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_pricingEnabled = <bool>::sse_decode(deserializer);
         let mut var_id = <String>::sse_decode(deserializer);
         let mut var_templateKind = <String>::sse_decode(deserializer);
         let mut var_name = <String>::sse_decode(deserializer);
         let mut var_baseUrl = <String>::sse_decode(deserializer);
         let mut var_hasBearerToken = <bool>::sse_decode(deserializer);
+        let mut var_credentialRequired = <bool>::sse_decode(deserializer);
         let mut var_capabilitySource = <String>::sse_decode(deserializer);
         let mut var_hostedWebSearch = <bool>::sse_decode(deserializer);
         let mut var_hostedWebSearchDialect = <String>::sse_decode(deserializer);
@@ -5217,11 +5244,13 @@ impl SseDecode for crate::api::studio::types::settings::BridgeProviderSettingsDt
         >>::sse_decode(deserializer);
         let mut var_catalogId = <Option<String>>::sse_decode(deserializer);
         return crate::api::studio::types::settings::BridgeProviderSettingsDto {
+            pricing_enabled: var_pricingEnabled,
             id: var_id,
             template_kind: var_templateKind,
             name: var_name,
             base_url: var_baseUrl,
             has_bearer_token: var_hasBearerToken,
+            credential_required: var_credentialRequired,
             capability_source: var_capabilitySource,
             hosted_web_search: var_hostedWebSearch,
             hosted_web_search_dialect: var_hostedWebSearchDialect,
@@ -7001,6 +7030,7 @@ impl SseDecode for crate::api::studio::types::thread_stream::BridgeThreadRuntime
 impl SseDecode for crate::api::studio::types::thread_stream::BridgeThreadRuntimeUsage {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_hasIncompleteUsage = <bool>::sse_decode(deserializer);
         let mut var_model = <String>::sse_decode(deserializer);
         let mut var_contextWindow = <Option<u64>>::sse_decode(deserializer);
         let mut var_latestContextTokens = <u64>::sse_decode(deserializer);
@@ -7027,6 +7057,7 @@ impl SseDecode for crate::api::studio::types::thread_stream::BridgeThreadRuntime
         >>::sse_decode(deserializer);
         let mut var_updatedAt = <i64>::sse_decode(deserializer);
         return crate::api::studio::types::thread_stream::BridgeThreadRuntimeUsage {
+            has_incomplete_usage: var_hasIncompleteUsage,
             model: var_model,
             context_window: var_contextWindow,
             latest_context_tokens: var_latestContextTokens,
@@ -8482,6 +8513,22 @@ impl SseDecode for Vec<crate::api::studio::types::response::BridgeModelPerforman
     }
 }
 
+impl SseDecode for Vec<crate::api::studio::types::settings::BridgeModelPriceTier> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(
+                <crate::api::studio::types::settings::BridgeModelPriceTier>::sse_decode(
+                    deserializer,
+                ),
+            );
+        }
+        return ans_;
+    }
+}
+
 impl SseDecode
     for Vec<crate::api::studio::types::settings::BridgeProviderConnectionModeDescriptor>
 {
@@ -9384,12 +9431,7 @@ impl SseDecode for crate::api::studio::types::settings::ProviderInput {
         let mut var_baseUrl = <String>::sse_decode(deserializer);
         let mut var_secret =
             <crate::api::studio::types::settings::ProviderSecretInput>::sse_decode(deserializer);
-        let mut var_capabilitySource = <String>::sse_decode(deserializer);
-        let mut var_hostedWebSearch = <bool>::sse_decode(deserializer);
-        let mut var_hostedWebSearchDialect = <String>::sse_decode(deserializer);
-        let mut var_standaloneWebSearch = <Option<String>>::sse_decode(deserializer);
-        let mut var_promptCacheDialect = <String>::sse_decode(deserializer);
-        let mut var_responsesProgrammaticToolCalling = <bool>::sse_decode(deserializer);
+        let mut var_pricingEnabled = <bool>::sse_decode(deserializer);
         let mut var_defaultModel = <String>::sse_decode(deserializer);
         let mut var_customModels =
             <Vec<crate::api::studio::types::settings::ProviderModelInput>>::sse_decode(
@@ -9405,12 +9447,7 @@ impl SseDecode for crate::api::studio::types::settings::ProviderInput {
             name: var_name,
             base_url: var_baseUrl,
             secret: var_secret,
-            capability_source: var_capabilitySource,
-            hosted_web_search: var_hostedWebSearch,
-            hosted_web_search_dialect: var_hostedWebSearchDialect,
-            standalone_web_search: var_standaloneWebSearch,
-            prompt_cache_dialect: var_promptCacheDialect,
-            responses_programmatic_tool_calling: var_responsesProgrammaticToolCalling,
+            pricing_enabled: var_pricingEnabled,
             default_model: var_defaultModel,
             custom_models: var_customModels,
             model_connection_modes: var_modelConnectionModes,
@@ -9435,19 +9472,15 @@ impl SseDecode for crate::api::studio::types::settings::ProviderModelInput {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_slug = <String>::sse_decode(deserializer);
         let mut var_displayName = <String>::sse_decode(deserializer);
-        let mut var_reasoningEfforts = <Vec<String>>::sse_decode(deserializer);
-        let mut var_baseInstructions = <Option<String>>::sse_decode(deserializer);
         let mut var_wireProtocol = <String>::sse_decode(deserializer);
-        let mut var_supportedConnectionModes = <Vec<String>>::sse_decode(deserializer);
-        let mut var_defaultConnectionMode = <String>::sse_decode(deserializer);
+        let mut var_contextWindow = <u64>::sse_decode(deserializer);
+        let mut var_maxOutputTokens = <u64>::sse_decode(deserializer);
         return crate::api::studio::types::settings::ProviderModelInput {
             slug: var_slug,
             display_name: var_displayName,
-            reasoning_efforts: var_reasoningEfforts,
-            base_instructions: var_baseInstructions,
             wire_protocol: var_wireProtocol,
-            supported_connection_modes: var_supportedConnectionModes,
-            default_connection_mode: var_defaultConnectionMode,
+            context_window: var_contextWindow,
+            max_output_tokens: var_maxOutputTokens,
         };
     }
 }
@@ -10636,6 +10669,8 @@ impl flutter_rust_bridge::IntoDart
 {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
+            self.context_window.into_into_dart().into_dart(),
+            self.max_output_tokens.into_into_dart().into_dart(),
             self.slug.into_into_dart().into_dart(),
             self.display_name.into_into_dart().into_dart(),
             self.reasoning_efforts.into_into_dart().into_dart(),
@@ -11972,14 +12007,37 @@ impl
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
-impl flutter_rust_bridge::IntoDart for crate::api::studio::types::settings::BridgeModelPricing {
+impl flutter_rust_bridge::IntoDart for crate::api::studio::types::settings::BridgeModelPriceTier {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
-            self.currency.into_into_dart().into_dart(),
+            self.label.into_into_dart().into_dart(),
             self.input_per_mtok.into_into_dart().into_dart(),
             self.output_per_mtok.into_into_dart().into_dart(),
             self.cache_read_per_mtok.into_into_dart().into_dart(),
             self.cache_write_per_mtok.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::settings::BridgeModelPriceTier
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::settings::BridgeModelPriceTier>
+    for crate::api::studio::types::settings::BridgeModelPriceTier
+{
+    fn into_into_dart(self) -> crate::api::studio::types::settings::BridgeModelPriceTier {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::studio::types::settings::BridgeModelPricing {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.currency.into_into_dart().into_dart(),
+            self.tiers.into_into_dart().into_dart(),
+            self.source.into_into_dart().into_dart(),
+            self.verified_at.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -12440,6 +12498,7 @@ impl flutter_rust_bridge::IntoDart
 {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
+            self.pricing_enabled.into_into_dart().into_dart(),
             self.id.into_into_dart().into_dart(),
             self.display_name.into_into_dart().into_dart(),
             self.description.into_into_dart().into_dart(),
@@ -12503,11 +12562,13 @@ impl flutter_rust_bridge::IntoDart
 {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
+            self.pricing_enabled.into_into_dart().into_dart(),
             self.id.into_into_dart().into_dart(),
             self.template_kind.into_into_dart().into_dart(),
             self.name.into_into_dart().into_dart(),
             self.base_url.into_into_dart().into_dart(),
             self.has_bearer_token.into_into_dart().into_dart(),
+            self.credential_required.into_into_dart().into_dart(),
             self.capability_source.into_into_dart().into_dart(),
             self.hosted_web_search.into_into_dart().into_dart(),
             self.hosted_web_search_dialect.into_into_dart().into_dart(),
@@ -14468,6 +14529,7 @@ impl flutter_rust_bridge::IntoDart
 {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
+            self.has_incomplete_usage.into_into_dart().into_dart(),
             self.model.into_into_dart().into_dart(),
             self.context_window.into_into_dart().into_dart(),
             self.latest_context_tokens.into_into_dart().into_dart(),
@@ -16135,14 +16197,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::studio::types::settings::Prov
             self.name.into_into_dart().into_dart(),
             self.base_url.into_into_dart().into_dart(),
             self.secret.into_into_dart().into_dart(),
-            self.capability_source.into_into_dart().into_dart(),
-            self.hosted_web_search.into_into_dart().into_dart(),
-            self.hosted_web_search_dialect.into_into_dart().into_dart(),
-            self.standalone_web_search.into_into_dart().into_dart(),
-            self.prompt_cache_dialect.into_into_dart().into_dart(),
-            self.responses_programmatic_tool_calling
-                .into_into_dart()
-                .into_dart(),
+            self.pricing_enabled.into_into_dart().into_dart(),
             self.default_model.into_into_dart().into_dart(),
             self.custom_models.into_into_dart().into_dart(),
             self.model_connection_modes.into_into_dart().into_dart(),
@@ -16192,11 +16247,9 @@ impl flutter_rust_bridge::IntoDart for crate::api::studio::types::settings::Prov
         [
             self.slug.into_into_dart().into_dart(),
             self.display_name.into_into_dart().into_dart(),
-            self.reasoning_efforts.into_into_dart().into_dart(),
-            self.base_instructions.into_into_dart().into_dart(),
             self.wire_protocol.into_into_dart().into_dart(),
-            self.supported_connection_modes.into_into_dart().into_dart(),
-            self.default_connection_mode.into_into_dart().into_dart(),
+            self.context_window.into_into_dart().into_dart(),
+            self.max_output_tokens.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -17331,6 +17384,8 @@ impl SseEncode for crate::api::studio::types::response::BridgeConfigRecoveryRepo
 impl SseEncode for crate::api::studio::types::settings::BridgeCustomModelSettingsDto {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <u64>::sse_encode(self.context_window, serializer);
+        <u64>::sse_encode(self.max_output_tokens, serializer);
         <String>::sse_encode(self.slug, serializer);
         <String>::sse_encode(self.display_name, serializer);
         <Vec<String>>::sse_encode(self.reasoning_efforts, serializer);
@@ -18169,14 +18224,26 @@ impl SseEncode for crate::api::studio::types::response::BridgeModelPerformanceSu
     }
 }
 
+impl SseEncode for crate::api::studio::types::settings::BridgeModelPriceTier {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.label, serializer);
+        <f64>::sse_encode(self.input_per_mtok, serializer);
+        <f64>::sse_encode(self.output_per_mtok, serializer);
+        <Option<f64>>::sse_encode(self.cache_read_per_mtok, serializer);
+        <Option<f64>>::sse_encode(self.cache_write_per_mtok, serializer);
+    }
+}
+
 impl SseEncode for crate::api::studio::types::settings::BridgeModelPricing {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.currency, serializer);
-        <Option<f64>>::sse_encode(self.input_per_mtok, serializer);
-        <Option<f64>>::sse_encode(self.output_per_mtok, serializer);
-        <Option<f64>>::sse_encode(self.cache_read_per_mtok, serializer);
-        <Option<f64>>::sse_encode(self.cache_write_per_mtok, serializer);
+        <Vec<crate::api::studio::types::settings::BridgeModelPriceTier>>::sse_encode(
+            self.tiers, serializer,
+        );
+        <String>::sse_encode(self.source, serializer);
+        <i64>::sse_encode(self.verified_at, serializer);
     }
 }
 
@@ -18488,6 +18555,7 @@ impl SseEncode for crate::api::studio::types::settings::BridgeProviderConnection
 impl SseEncode for crate::api::studio::types::settings::BridgeProviderPresetDescriptor {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.pricing_enabled, serializer);
         <String>::sse_encode(self.id, serializer);
         <String>::sse_encode(self.display_name, serializer);
         <Option<String>>::sse_encode(self.description, serializer);
@@ -18515,11 +18583,13 @@ impl SseEncode
 impl SseEncode for crate::api::studio::types::settings::BridgeProviderSettingsDto {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.pricing_enabled, serializer);
         <String>::sse_encode(self.id, serializer);
         <String>::sse_encode(self.template_kind, serializer);
         <String>::sse_encode(self.name, serializer);
         <String>::sse_encode(self.base_url, serializer);
         <bool>::sse_encode(self.has_bearer_token, serializer);
+        <bool>::sse_encode(self.credential_required, serializer);
         <String>::sse_encode(self.capability_source, serializer);
         <bool>::sse_encode(self.hosted_web_search, serializer);
         <String>::sse_encode(self.hosted_web_search_dialect, serializer);
@@ -19855,6 +19925,7 @@ impl SseEncode for crate::api::studio::types::thread_stream::BridgeThreadRuntime
 impl SseEncode for crate::api::studio::types::thread_stream::BridgeThreadRuntimeUsage {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.has_incomplete_usage, serializer);
         <String>::sse_encode(self.model, serializer);
         <Option<u64>>::sse_encode(self.context_window, serializer);
         <u64>::sse_encode(self.latest_context_tokens, serializer);
@@ -20921,6 +20992,18 @@ impl SseEncode for Vec<crate::api::studio::types::response::BridgeModelPerforman
     }
 }
 
+impl SseEncode for Vec<crate::api::studio::types::settings::BridgeModelPriceTier> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::studio::types::settings::BridgeModelPriceTier>::sse_encode(
+                item, serializer,
+            );
+        }
+    }
+}
+
 impl SseEncode
     for Vec<crate::api::studio::types::settings::BridgeProviderConnectionModeDescriptor>
 {
@@ -21647,12 +21730,7 @@ impl SseEncode for crate::api::studio::types::settings::ProviderInput {
             self.secret,
             serializer,
         );
-        <String>::sse_encode(self.capability_source, serializer);
-        <bool>::sse_encode(self.hosted_web_search, serializer);
-        <String>::sse_encode(self.hosted_web_search_dialect, serializer);
-        <Option<String>>::sse_encode(self.standalone_web_search, serializer);
-        <String>::sse_encode(self.prompt_cache_dialect, serializer);
-        <bool>::sse_encode(self.responses_programmatic_tool_calling, serializer);
+        <bool>::sse_encode(self.pricing_enabled, serializer);
         <String>::sse_encode(self.default_model, serializer);
         <Vec<crate::api::studio::types::settings::ProviderModelInput>>::sse_encode(
             self.custom_models,
@@ -21678,11 +21756,9 @@ impl SseEncode for crate::api::studio::types::settings::ProviderModelInput {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.slug, serializer);
         <String>::sse_encode(self.display_name, serializer);
-        <Vec<String>>::sse_encode(self.reasoning_efforts, serializer);
-        <Option<String>>::sse_encode(self.base_instructions, serializer);
         <String>::sse_encode(self.wire_protocol, serializer);
-        <Vec<String>>::sse_encode(self.supported_connection_modes, serializer);
-        <String>::sse_encode(self.default_connection_mode, serializer);
+        <u64>::sse_encode(self.context_window, serializer);
+        <u64>::sse_encode(self.max_output_tokens, serializer);
     }
 }
 

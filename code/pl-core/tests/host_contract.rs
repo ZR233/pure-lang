@@ -81,7 +81,7 @@ fn host_config(base_url: String) -> (AgentModelConfig, AgentRoleId) {
     let role = AgentRoleId::new("executor").unwrap();
     let mut endpoint = ProviderEndpoint::compatible("Fixture", base_url);
     endpoint.bearer_token = Some("fixture-token".to_string());
-    let model = ModelInfo::fallback("fixture-model");
+    let model = ModelInfo::compatible("fixture-model");
     let provider = ProviderConfig::from_explicit_models(endpoint, vec![model]);
     let config = AgentModelConfig {
         providers: BTreeMap::from([(provider_id.clone(), provider)]),
@@ -126,12 +126,12 @@ async fn facade_supports_route_two_turns_snapshots_engine_and_web_search() {
         .iter()
         .find_map(|output| output.as_message())
         .unwrap();
-    assert_eq!(first.id(), None);
+    assert_eq!(first.id(), Some("response-1"));
     assert_eq!(first.model(), "fixture-model");
     assert_eq!(first_text, "first answer");
-    assert_eq!(first.usage().input_tokens(), 1);
-    assert_eq!(first.usage().output_tokens(), 2);
-    assert_eq!(first.usage().total_tokens(), 3);
+    assert_eq!(first.accounting().usage.totals().prompt_tokens, 1);
+    assert_eq!(first.accounting().usage.totals().completion_tokens, 2);
+    assert_eq!(first.accounting().usage.totals().total_tokens, 3);
 
     session.push_assistant_response(first_text.to_string(), None);
     session.push_user_prompt("second prompt".to_string());
@@ -143,7 +143,7 @@ async fn facade_supports_route_two_turns_snapshots_engine_and_web_search() {
         )
         .await
         .unwrap();
-    assert_eq!(second.id(), None);
+    assert_eq!(second.id(), Some("response-2"));
     assert_eq!(
         second
             .output()

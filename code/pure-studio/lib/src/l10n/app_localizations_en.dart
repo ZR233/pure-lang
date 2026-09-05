@@ -1787,4 +1787,35 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get roleEmpty => 'Agent';
+
+  @override
+  String get settingsPricingEnabled => 'Estimate token cost';
+
+  @override
+  String get settingsPricingHelp =>
+      'Controls in-app cost estimates; token and cache statistics remain available. Plans default to off.';
+
+  @override
+  String get settingsModelAdvanced => 'Optional model settings';
+
+  @override
+  String get settingsContextBudget => 'Context budget (tokens)';
+
+  @override
+  String get settingsOutputBudget => 'Maximum output (tokens)';
+
+  @override
+  String get settingsPriceInput => 'Input';
+
+  @override
+  String get settingsPriceOutput => 'Output';
+
+  @override
+  String get settingsPriceCacheRead => 'Cache read';
+
+  @override
+  String get settingsPriceCacheWrite => 'Cache write';
+
+  @override
+  String get statusReportedUsageOnly => 'reported';
 }

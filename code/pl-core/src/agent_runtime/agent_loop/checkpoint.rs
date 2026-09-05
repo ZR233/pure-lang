@@ -75,18 +75,23 @@ where
 
     pub(super) async fn checkpoint(
         &mut self,
-        checkpoint: AgentTurnCheckpoint,
+        mut checkpoint: AgentTurnCheckpoint,
     ) -> AgentRuntimeResult<()> {
         self.flush_pending_traces().await?;
         let Some(active) = &self.active else {
             return Ok(());
         };
-        if active.turn_id != checkpoint.turn_id
-            || active.thread_id != checkpoint.thread_id
-            || active.is_cancelling()
-            || active.cancellation.is_cancelled()
-        {
+        if active.turn_id != checkpoint.turn_id || active.thread_id != checkpoint.thread_id {
             return Ok(());
+        }
+        let accounting_only = active.is_cancelling() || active.cancellation.is_cancelled();
+        if accounting_only {
+            if checkpoint.inference.is_none() {
+                return Ok(());
+            }
+            // Cancellation stops context progress, but cannot revoke provider usage already received.
+            checkpoint.session = self.state.session.session.clone();
+            checkpoint.consumed_mail_ids.clear();
         }
         if let Some(inference) = checkpoint.inference.as_ref()
             && let Some(existing) = find_inference(&self.state, &inference.billing.inference_id)
@@ -108,6 +113,7 @@ where
         next.snapshot.revision = expected_revision.saturating_add(1);
         next.snapshot.updated_at = unix_timestamp();
         if let Some(active_input) = next.active_input.as_mut()
+            && !accounting_only
             && active_input.turn_id == checkpoint.turn_id
             && active_input.delivery_state.is_claimed()
         {
@@ -435,24 +441,16 @@ fn append_inference(
         .append(inference.billing.clone())
         .map_err(AgentRuntimeError::InvalidInput)?;
     state.session.usage = state.session.billing_by_turn.values().fold(
-        pl_protocol::TokenUsage::default(),
+        pl_protocol::InferenceTokenUsage::default(),
         |mut aggregate, billing| {
             let usage = billing.aggregate_usage();
-            aggregate.prompt_tokens = aggregate.prompt_tokens.saturating_add(usage.prompt_tokens);
-            aggregate.cached_prompt_tokens = aggregate
-                .cached_prompt_tokens
-                .saturating_add(usage.cached_prompt_tokens);
-            aggregate.completion_tokens = aggregate
-                .completion_tokens
-                .saturating_add(usage.completion_tokens);
-            aggregate.reasoning_tokens = aggregate
-                .reasoning_tokens
-                .saturating_add(usage.reasoning_tokens);
-            aggregate.total_tokens = aggregate.total_tokens.saturating_add(usage.total_tokens);
+            aggregate.merge(&usage);
             aggregate
         },
     );
-    state.session.last_context_tokens = Some(inference.billing.normalized_usage.total_tokens);
+    if let Some(tokens) = inference.billing.accounting.usage.known_total_tokens() {
+        state.session.last_context_tokens = Some(tokens);
+    }
     Ok(())
 }
 

@@ -561,6 +561,7 @@ ThreadRuntimeView _threadRuntimeFromFrb(frb.BridgeThreadRuntimeSnapshot value) {
         )
         .toList(growable: false),
     hasUnpricedUsage: usage.hasUnpricedUsage,
+    hasIncompleteUsage: usage.hasIncompleteUsage,
     promptGeneration: usage.promptGeneration?.toInt(),
     promptCachePolicy: usage.promptCachePolicy,
     prefixChangedReason: usage.prefixChangedReason?.name,

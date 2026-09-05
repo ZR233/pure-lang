@@ -48,6 +48,7 @@ pub struct AgentModelConfig {
 /// 完成引用校验后可直接创建模型 provider 的角色路由。
 #[derive(Debug, Clone)]
 pub struct ResolvedModelRoute {
+    pub pricing_mode: pl_protocol::PricingMode,
     pub role: AgentRoleId,
     pub provider_id: ProviderId,
     pub endpoint: ProviderEndpoint,
@@ -128,6 +129,7 @@ impl AgentModelConfig {
             _ => {}
         }
         Ok(ResolvedModelRoute {
+            pricing_mode: provider.pricing_mode,
             role: role.clone(),
             provider_id: route.provider.clone(),
             endpoint: provider.to_endpoint()?,

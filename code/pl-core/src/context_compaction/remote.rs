@@ -7,7 +7,7 @@ use super::{APPROX_CHARS_PER_TOKEN, ContextCompactionConfig};
 use crate::session::AgentSession;
 use pl_model::completion::{ModelCompactionRequest, OpenAiCompactionMode, ReasoningConfig};
 use pl_model::runtime::ModelRuntime;
-use pl_protocol::{TokenUsage, ToolSpec};
+use pl_protocol::{InferenceAccounting, ToolSpec};
 
 const RETAINED_REMOTE_V2_TOKEN_BUDGET: u64 = 64_000;
 const CONTEXT_WINDOW_TRUNCATED_OUTPUT_MESSAGE: &str =
@@ -15,6 +15,7 @@ const CONTEXT_WINDOW_TRUNCATED_OUTPUT_MESSAGE: &str =
 
 pub(super) struct RemoteCompactionRequest<'a> {
     pub runtime: &'a ModelRuntime,
+    pub invocation: pl_model::runtime::ModelInvocationContext,
     pub config: &'a ContextCompactionConfig,
     pub request_instructions: &'a str,
     pub request_messages: &'a [Message],
@@ -28,9 +29,13 @@ pub(super) struct RemoteCompactionRequest<'a> {
 pub(super) async fn compact_remote(
     session: &AgentSession,
     request: RemoteCompactionRequest<'_>,
-) -> Result<(Vec<ModelContextItem>, Option<TokenUsage>)> {
+) -> std::result::Result<
+    (Vec<ModelContextItem>, InferenceAccounting),
+    pl_model::completion::CompletionFailure,
+> {
     let RemoteCompactionRequest {
         runtime,
+        invocation,
         config,
         request_instructions,
         request_messages,
@@ -56,25 +61,33 @@ pub(super) async fn compact_remote(
         runtime.model().resolved_context_window(),
     );
     let response = runtime
-        .compact_context(ModelCompactionRequest {
-            mode: config.openai_mode,
-            instructions: request_instructions.to_string(),
-            input,
-            tools: tools.to_vec(),
-            parallel_tool_calls,
-            reasoning,
-            prompt_cache_key,
-        })
+        .compaction()
+        .ok_or_else(|| {
+            PureError::ConfigError("remote compaction is not supported by this endpoint".into())
+        })?
+        .complete(
+            ModelCompactionRequest {
+                mode: config.openai_mode,
+                instructions: request_instructions.to_string(),
+                input,
+                tools: tools.to_vec(),
+                parallel_tool_calls,
+                reasoning,
+                prompt_cache_key,
+            },
+            invocation,
+        )
         .await?;
     let replacement = match config.openai_mode {
         OpenAiCompactionMode::RemoteV2 => build_v2_replacement(session.messages(), response.input)?,
         OpenAiCompactionMode::Local => {
             return Err(PureError::ConfigError(
                 "remote compaction received local mode".to_string(),
-            ));
+            )
+            .into());
         }
     };
-    Ok((replacement, response.usage))
+    Ok((replacement, response.accounting))
 }
 
 fn build_v2_replacement(

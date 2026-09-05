@@ -58,6 +58,7 @@ pub(crate) mod test_support {
         Fail,
         Block,
         BudgetLimited,
+        Inference,
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -638,8 +639,9 @@ mod tests {
                     self.blocker.notified().await;
                     Err(TestError("blocker released".to_string()))
                 }
-                FactoryMode::BudgetLimited => {
+                FactoryMode::BudgetLimited | FactoryMode::Inference => {
                     let route = ResolvedModelRoute {
+                        pricing_mode: pl_protocol::PricingMode::Catalog,
                         role: crate::AgentRoleId::new("test").unwrap(),
                         provider_id: crate::ProviderId::new("test").unwrap(),
                         endpoint: ProviderEndpoint::compatible(
@@ -648,20 +650,24 @@ mod tests {
                                 .clone()
                                 .expect("budget rollover test requires an endpoint"),
                         ),
-                        model: ModelInfo::fallback("rollover-test"),
+                        model: ModelInfo::compatible("rollover-test"),
                         effort: None,
                     };
                     let engine = TurnEngineBuilder::from_route(&route).unwrap().build();
                     let request = TurnRequest::new(context.input.payload.message);
                     let options = TurnOptions::default()
                         .with_debug_context_compaction_timeout(self.rollover_timeout);
-                    Ok(PreparedAgentTurn::new(
+                    let prepared = PreparedAgentTurn::new(
                         engine,
                         request,
                         options,
                         AgentExecutionPolicy::default(),
-                    )
-                    .with_budget(TurnBudget::new(std::time::Duration::ZERO)))
+                    );
+                    Ok(if self.mode == FactoryMode::BudgetLimited {
+                        prepared.with_budget(TurnBudget::new(std::time::Duration::ZERO))
+                    } else {
+                        prepared
+                    })
                 }
             }
         }
@@ -1173,6 +1179,154 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cancelled_inference_is_billed_once_and_followup_without_usage_preserves_known_context()
+    {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let mut interrupted_socket = None;
+            for attempt in 0..3 {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                read_test_http_request(&mut socket).await;
+                let body = match attempt {
+                    0 => concat!(
+                        "data: {\"choices\":[{\"delta\":{\"content\":\"first answer\"},\"finish_reason\":\"stop\"}]}\n\n",
+                        "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":5,\"total_tokens\":105,\"prompt_tokens_details\":{\"cached_tokens\":10,\"cache_write_tokens\":20}}}\n\n",
+                        "data: [DONE]\n\n"
+                    ),
+                    1 => concat!(
+                        "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":200,\"completion_tokens\":7,\"total_tokens\":207,\"prompt_tokens_details\":{\"cached_tokens\":40,\"cache_write_tokens\":30}}}\n\n",
+                        "data: {\"choices\":[{\"delta\":{\"content\":\"cancel after reported usage\"},\"finish_reason\":null}]}\n\n"
+                    ),
+                    2 => {
+                        "data: {\"choices\":[{\"delta\":{\"content\":\"recovered answer\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+                    }
+                    _ => unreachable!(),
+                };
+                let length = if attempt == 1 {
+                    body.len() + 10_000
+                } else {
+                    body.len()
+                };
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {length}\r\nconnection: close\r\n\r\n{body}"
+                );
+                socket.write_all(response.as_bytes()).await.unwrap();
+                if attempt == 1 {
+                    interrupted_socket = Some(socket);
+                } else {
+                    socket.shutdown().await.unwrap();
+                }
+            }
+            drop(interrupted_socket);
+        });
+        let repository = TestRepository::empty();
+        let mut host = TestHost::budget_limited(
+            repository.clone(),
+            format!("http://{address}/v1"),
+            Duration::from_secs(5),
+        );
+        host.turn_factory.mode = FactoryMode::Inference;
+        let runtime = AgentRuntime::start(host.clone(), test_options())
+            .await
+            .unwrap();
+        let handle = runtime.handle();
+        let agent_id = ThreadId::new("root").unwrap();
+        handle.register(registration("root", "chat")).await.unwrap();
+        let first = handle
+            .submit(
+                agent_id.clone(),
+                AgentSubmitRequest::start(agent_id.clone(), "first task"),
+            )
+            .await
+            .unwrap();
+        let completed =
+            wait_for_idle_with_timeout(&handle, agent_id.clone(), Duration::from_secs(5)).await;
+        assert!(completed.last_turn.unwrap().outcome.is_completed());
+        let mut known_session = repository
+            .state(&agent_id)
+            .session
+            .session
+            .messages()
+            .to_vec();
+        known_session.push(crate::user_text_message("interrupted task"));
+        let cancelled = handle
+            .submit(
+                agent_id.clone(),
+                AgentSubmitRequest::start(agent_id.clone(), "interrupted task"),
+            )
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let reported = host.events.traces.lock().unwrap().iter().any(|trace| {
+                    matches!(&trace.kind, pl_trace::TraceEventKind::TracePartDelta { event }
+                        if matches!(&event.delta, pl_trace::TraceDelta::Text { delta, .. } if delta.contains("cancel after reported usage")))
+                });
+                if reported { break; }
+                tokio::task::yield_now().await;
+            }
+        }).await.expect("provider usage must precede the observed assistant delta");
+        handle
+            .cancel_turn(agent_id.clone(), cancelled.clone())
+            .await
+            .unwrap();
+        let stopped =
+            wait_for_idle_with_timeout(&handle, agent_id.clone(), Duration::from_secs(5)).await;
+        assert!(matches!(
+            stopped.last_turn.unwrap().outcome,
+            TurnOutcome::Cancelled(_)
+        ));
+        let durable = repository.state(&agent_id);
+        assert_eq!(durable.session.session.messages(), known_session);
+        assert_eq!(durable.session.last_context_tokens, Some(207));
+        assert_eq!(
+            durable.session.billing_by_turn[first.as_str()]
+                .aggregate_usage()
+                .cache_write_tokens,
+            20
+        );
+        assert_eq!(
+            durable.session.billing_by_turn[cancelled.as_str()]
+                .aggregate_usage()
+                .cache_write_tokens,
+            30
+        );
+        let expected = pl_protocol::InferenceTokenUsage {
+            prompt_tokens: 300,
+            completion_tokens: 12,
+            total_tokens: 312,
+            cached_prompt_tokens: 50,
+            cache_write_tokens: 50,
+            reasoning_tokens: 0,
+        };
+        assert_eq!(durable.session.usage, expected);
+        handle
+            .submit(
+                agent_id.clone(),
+                AgentSubmitRequest::start(agent_id.clone(), "recover task"),
+            )
+            .await
+            .unwrap();
+        let recovered =
+            wait_for_idle_with_timeout(&handle, agent_id.clone(), Duration::from_secs(5)).await;
+        assert!(recovered.last_turn.unwrap().outcome.is_completed());
+        let restored = repository.state(&agent_id);
+        assert_eq!(restored.session.usage, expected);
+        assert_eq!(restored.session.last_context_tokens, Some(207));
+        assert!(
+            restored
+                .session
+                .session
+                .messages()
+                .iter()
+                .any(|message| crate::message_content_text(&message.content) == "recovered answer")
+        );
+        runtime.shutdown().await.unwrap();
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
     async fn failed_turn_returns_agent_to_active_idle_and_commits_snapshot() {
         let repository = TestRepository::empty();
         let host = TestHost::new(repository.clone(), FactoryMode::Fail);
@@ -1292,7 +1446,7 @@ mod tests {
             crate::user_text_message("broken tail"),
             crate::assistant_text_message("failed answer"),
         ]);
-        let usage = pl_protocol::TokenUsage {
+        let usage = pl_protocol::InferenceTokenUsage {
             prompt_tokens: 120,
             completion_tokens: 30,
             total_tokens: 150,
@@ -1701,7 +1855,7 @@ mod tests {
                 limit,
                 pl_protocol::TurnRolloverOutcome::NotAttempted,
             ),
-            usage: pl_protocol::TokenUsage::default(),
+            usage: pl_protocol::InferenceTokenUsage::default(),
             started_at: Some(1),
             finished_at: 20,
         });
@@ -1808,7 +1962,7 @@ mod tests {
             pl_protocol::TurnRolloverOutcome::Failed { error }
                 if error.contains("timed out after 2000ms")
         ));
-        assert_eq!(outcome.usage, pl_protocol::TokenUsage::default());
+        assert_eq!(outcome.usage, pl_protocol::InferenceTokenUsage::default());
         assert_eq!(
             repository.state(&agent_id).session.session.messages().len(),
             2

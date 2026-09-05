@@ -20,7 +20,7 @@ struct TurnProjection<'a> {
     id: &'a str,
     thread_id: &'a str,
     state: TurnState,
-    usage: Option<&'a pl_protocol::TokenUsage>,
+    usage: Option<&'a pl_protocol::InferenceTokenUsage>,
     metadata: Option<&'a pl_core::MailboxMetadata>,
     updated_at: i64,
     revision: u64,
@@ -489,7 +489,9 @@ mod tests {
                     .expect("turn state JSON"),
             ),
             model_json: Set(None),
-            usage_json: Set(serde_json::to_string(&pl_protocol::TokenUsage::default()).unwrap()),
+            usage_json: Set(
+                serde_json::to_string(&pl_protocol::InferenceTokenUsage::default()).unwrap(),
+            ),
             metadata_json: Set(None),
             updated_at: Set(1),
             ..Default::default()

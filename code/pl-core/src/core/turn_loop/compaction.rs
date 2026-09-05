@@ -20,7 +20,7 @@ use super::super::progress::ProgressEmitter;
 use super::super::turn_result::{
     failed_turn_result, interrupted_turn_result, is_cancelled, normalize_provider_error,
 };
-use super::{checkpoint, inference, prompt_cache};
+use super::{inference, prompt_cache};
 use pl_model::completion::ReasoningConfig;
 use pl_model::provider::EffectivePromptCachePolicy;
 use pl_model::runtime::ModelRuntime;
@@ -31,6 +31,7 @@ use pl_protocol::ToolSpec;
 /// 由 `run_turn_with_trace` 在每次迭代以原变量名填充；字段即循环局部变量，
 /// 保持压缩步骤与编排循环之间的依赖显式可见。
 pub(super) struct CompactionStep<'a> {
+    pub(super) turn_billing: &'a mut pl_protocol::TurnBillingRecord,
     pub(super) session: &'a mut AgentSession,
     pub(super) runtime: &'a ModelRuntime,
     pub(super) config: &'a ContextCompactionConfig,
@@ -52,7 +53,7 @@ pub(super) struct CompactionStep<'a> {
     pub(super) last_content: &'a str,
     pub(super) last_reasoning_content: &'a Option<String>,
     pub(super) last_model: &'a str,
-    pub(super) total_usage: &'a mut pl_protocol::TokenUsage,
+    pub(super) total_usage: &'a mut pl_protocol::InferenceTokenUsage,
     pub(super) inference_count: &'a mut u64,
     pub(super) context_compactions: &'a mut Vec<ContextCompactionSnapshot>,
     pub(super) safe_message_count: &'a mut usize,
@@ -67,6 +68,7 @@ pub(super) struct CompactionStep<'a> {
 /// 返回 `None` 表示继续后续 inference 步骤。
 pub(super) async fn run(step: CompactionStep<'_>) -> Result<Option<TurnResult>> {
     let CompactionStep {
+        turn_billing,
         session,
         runtime,
         config,
@@ -131,39 +133,26 @@ pub(super) async fn run(step: CompactionStep<'_>) -> Result<Option<TurnResult>> 
         .await;
         match compaction_result {
             Ok(CompactionOutcome::Skipped) => {}
-            Ok(CompactionOutcome::Compacted { usage, snapshot }) => {
+            Ok(CompactionOutcome::Compacted { snapshot }) => {
                 *last_compacted_state = Some((session.revision(), session.len()));
                 *safe_message_count = session.len();
                 *session_message_count = *safe_message_count;
-                let compaction_inference = usage.map(|usage| {
-                    total_usage.prompt_tokens += usage.prompt_tokens;
-                    total_usage.completion_tokens += usage.completion_tokens;
-                    total_usage.cached_prompt_tokens += usage.cached_prompt_tokens;
-                    total_usage.cache_write_tokens += usage.cache_write_tokens;
-                    total_usage.reasoning_tokens += usage.reasoning_tokens;
-                    total_usage.total_tokens += usage
-                        .total_tokens
-                        .max(usage.prompt_tokens.saturating_add(usage.completion_tokens));
-                    *inference_count = (*inference_count).saturating_add(1);
-                    let model_info = runtime.model().clone();
-                    let inference_id = format!("{turn_id}-compact-{iteration}");
-                    let recorded_at = unix_seconds();
-                    let billing = inference_billing_record(InferenceBillingInput {
-                        inference_id,
-                        provider_instance_id: runtime.provider_instance_id(),
-                        provider: &runtime.endpoint().name,
-                        model,
-                        usage: &usage,
-                        model_info: &model_info,
-                        prompt_cache_policy,
-                        prompt: prompt_cache::current(session, &options.prompt_scope),
-                        orchestration: Default::default(),
-                        timing: None,
-                        recorded_at,
-                    });
-                    inference::from_billing(active_subagent, billing)
+                total_usage.merge(&snapshot.accounting.usage.totals());
+                *inference_count = (*inference_count).saturating_add(1);
+                let billing = inference_billing_record(InferenceBillingInput {
+                    inference_id: format!("{turn_id}-compact-{iteration}"),
+                    provider_instance_id: runtime.provider_instance_id(),
+                    provider: &runtime.endpoint().name,
+                    model,
+                    accounting: &snapshot.accounting,
+                    model_info: runtime.model(),
+                    prompt: prompt_cache::current(session, &options.prompt_scope),
+                    orchestration: Default::default(),
+                    timing: None,
+                    recorded_at: unix_seconds(),
                 });
-                context_compactions.push(snapshot);
+                let compaction_inference = inference::from_billing(active_subagent, billing);
+                context_compactions.push(*snapshot);
                 working_set.sync_session(session)?;
                 turn_context.refresh_working_context(working_set.model_context_snapshot(session));
                 prepare_prompt_context(
@@ -197,18 +186,37 @@ pub(super) async fn run(step: CompactionStep<'_>) -> Result<Option<TurnResult>> 
                     session.items(),
                     turn_context,
                 )?;
-                if let Some(inference) = compaction_inference {
-                    inference::record(options, session, recorder, inference).await?;
-                } else {
-                    checkpoint::persist(
-                        options,
-                        session,
-                        crate::TurnCheckpointReason::ContextCompacted,
-                    )
-                    .await?;
-                }
+                inference::record(
+                    turn_billing,
+                    options,
+                    session,
+                    recorder,
+                    compaction_inference,
+                )
+                .await?;
             }
             Err(error) => {
+                total_usage.merge(&error.accounting.usage.totals());
+                let billing = inference_billing_record(InferenceBillingInput {
+                    inference_id: format!("{turn_id}-compact-{iteration}"),
+                    provider_instance_id: runtime.provider_instance_id(),
+                    provider: &runtime.endpoint().name,
+                    model,
+                    accounting: &error.accounting,
+                    model_info: runtime.model(),
+                    prompt: prompt_cache::current(session, &options.prompt_scope),
+                    orchestration: Default::default(),
+                    timing: None,
+                    recorded_at: unix_seconds(),
+                });
+                inference::record(
+                    turn_billing,
+                    options,
+                    session,
+                    recorder,
+                    inference::from_billing(active_subagent, billing),
+                )
+                .await?;
                 if is_cancelled(options) {
                     session.truncate_messages(*safe_message_count);
                     return Ok(Some(interrupted_turn_result(
@@ -222,7 +230,8 @@ pub(super) async fn run(step: CompactionStep<'_>) -> Result<Option<TurnResult>> 
                         cancellation_reason(),
                     )));
                 }
-                let (error, severity, failure) = normalize_provider_error(active_subagent, error);
+                let (error, severity, failure) =
+                    normalize_provider_error(active_subagent, error.into());
                 return Ok(Some(failed_turn_result(
                     recorder,
                     turn_id,

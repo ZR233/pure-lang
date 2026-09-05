@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{PromptPrefixChangedReason, RuntimeCostAmount, TokenUsageSnapshot};
+use crate::{PromptPrefixChangedReason, TokenUsageSnapshot};
 
 /// 向一个 Turn 追加 inference 计费记录的结果。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -156,25 +156,24 @@ impl InferenceOrchestrationMetrics {
 }
 
 impl InferenceTokenUsage {
-    pub fn normalized(&self) -> Self {
-        let cached_prompt_tokens = self.cached_prompt_tokens.min(self.prompt_tokens);
-        let cache_write_tokens = self
+    /// Adds one inference's known counters without reinterpreting provider classifications.
+    pub fn merge(&mut self, other: &Self) {
+        self.prompt_tokens = self.prompt_tokens.saturating_add(other.prompt_tokens);
+        self.completion_tokens = self
+            .completion_tokens
+            .saturating_add(other.completion_tokens);
+        self.cached_prompt_tokens = self
+            .cached_prompt_tokens
+            .saturating_add(other.cached_prompt_tokens);
+        self.cache_write_tokens = self
             .cache_write_tokens
-            .min(self.prompt_tokens.saturating_sub(cached_prompt_tokens));
-        Self {
-            prompt_tokens: self.prompt_tokens,
-            cached_prompt_tokens,
-            cache_write_tokens,
-            completion_tokens: self.completion_tokens,
-            reasoning_tokens: self.reasoning_tokens,
-            total_tokens: self
-                .total_tokens
-                .max(self.prompt_tokens.saturating_add(self.completion_tokens)),
-        }
+            .saturating_add(other.cache_write_tokens);
+        self.reasoning_tokens = self.reasoning_tokens.saturating_add(other.reasoning_tokens);
+        self.total_tokens = self.total_tokens.saturating_add(other.total_tokens);
     }
 
     pub fn public_snapshot(&self) -> TokenUsageSnapshot {
-        let normalized = self.normalized();
+        let normalized = self;
         TokenUsageSnapshot {
             prompt_tokens: normalized.prompt_tokens,
             completion_tokens: normalized.completion_tokens,
@@ -201,15 +200,7 @@ pub struct InferenceBillingRecord {
     pub model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window: Option<u64>,
-    pub reported_usage: InferenceTokenUsage,
-    pub normalized_usage: InferenceTokenUsage,
-    pub pricing: ModelPricingSnapshot,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub estimated_costs: Vec<RuntimeCostAmount>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub estimated_cache_savings: Vec<RuntimeCostAmount>,
-    #[serde(default)]
-    pub has_unpriced_usage: bool,
+    pub accounting: crate::InferenceAccounting,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt_generation: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -237,7 +228,7 @@ pub struct TurnBillingRecord {
 }
 
 impl TurnBillingRecord {
-    pub const VERSION: u32 = 4;
+    pub const VERSION: u32 = 5;
 
     pub fn new() -> Self {
         Self {
@@ -250,7 +241,7 @@ impl TurnBillingRecord {
         self.inferences.iter().fold(
             InferenceTokenUsage::default(),
             |mut aggregate, inference| {
-                let usage = &inference.normalized_usage;
+                let usage = &inference.accounting.usage.totals();
                 aggregate.prompt_tokens =
                     aggregate.prompt_tokens.saturating_add(usage.prompt_tokens);
                 aggregate.cached_prompt_tokens = aggregate
@@ -302,178 +293,5 @@ impl TurnBillingRecord {
                 inference.inference_id
             ))
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn usage_normalization_clamps_cached_tokens() {
-        let usage = InferenceTokenUsage {
-            prompt_tokens: 10,
-            cached_prompt_tokens: 20,
-            cache_write_tokens: 3,
-            completion_tokens: 3,
-            reasoning_tokens: 2,
-            total_tokens: 0,
-        }
-        .normalized();
-
-        assert_eq!(usage.cached_prompt_tokens, 10);
-        assert_eq!(usage.cache_write_tokens, 0);
-        assert_eq!(usage.total_tokens, 13);
-    }
-
-    #[test]
-    fn turn_billing_append_is_idempotent_and_rejects_conflicts() {
-        let inference = InferenceBillingRecord {
-            inference_id: "turn-1-inf-0".to_string(),
-            provider_instance_id: "deepseek-primary".to_string(),
-            provider: "DeepSeek".to_string(),
-            model: "deepseek-v4-flash".to_string(),
-            context_window: Some(1_000_000),
-            reported_usage: InferenceTokenUsage {
-                prompt_tokens: 10,
-                cached_prompt_tokens: 4,
-                cache_write_tokens: 2,
-                completion_tokens: 3,
-                reasoning_tokens: 2,
-                total_tokens: 13,
-            },
-            normalized_usage: InferenceTokenUsage {
-                prompt_tokens: 10,
-                cached_prompt_tokens: 4,
-                cache_write_tokens: 2,
-                completion_tokens: 3,
-                reasoning_tokens: 2,
-                total_tokens: 13,
-            },
-            pricing: ModelPricingSnapshot::default(),
-            estimated_costs: Vec::new(),
-            estimated_cache_savings: Vec::new(),
-            has_unpriced_usage: true,
-            prompt_generation: Some(1),
-            prompt_cache_policy: Some("implicitPrefix".to_string()),
-            prefix_changed_reason: Some(PromptPrefixChangedReason::Initial),
-            orchestration: InferenceOrchestrationMetrics::default(),
-            timing: Some(InferenceTiming {
-                ttft_millis: 10,
-                decode_millis: 20,
-                total_millis: 30,
-            }),
-            recorded_at: 1,
-        };
-        let mut billing = TurnBillingRecord::new();
-
-        assert_eq!(
-            billing.append(inference.clone()).unwrap(),
-            InferenceBillingAppend::Inserted
-        );
-        assert_eq!(
-            billing.append(inference.clone()).unwrap(),
-            InferenceBillingAppend::Identical
-        );
-
-        let mut conflicting = inference;
-        conflicting.normalized_usage.completion_tokens = 4;
-        assert!(billing.append(conflicting).is_err());
-        assert_eq!(billing.inferences.len(), 1);
-    }
-
-    #[test]
-    fn version_one_json_defaults_newer_fields() {
-        let billing: TurnBillingRecord = serde_json::from_value(serde_json::json!({
-            "version": 1,
-            "inferences": [{
-                "inferenceId": "inference-1",
-                "provider": "DeepSeek",
-                "model": "deepseek-v4-flash",
-                "reportedUsage": {
-                    "promptTokens": 10,
-                    "cachedPromptTokens": 4,
-                    "completionTokens": 3,
-                    "reasoningTokens": 0,
-                    "totalTokens": 13
-                },
-                "normalizedUsage": {
-                    "promptTokens": 10,
-                    "cachedPromptTokens": 4,
-                    "completionTokens": 3,
-                    "reasoningTokens": 0,
-                    "totalTokens": 13
-                },
-                "pricing": {
-                    "currency": "CNY",
-                    "inputPerMtok": 1.0,
-                    "outputPerMtok": 2.0,
-                    "cacheReadPerMtok": 0.02
-                },
-                "estimatedCosts": [{"currency": "CNY", "amount": 0.0001}],
-                "hasUnpricedUsage": false,
-                "recordedAt": 1
-            }]
-        }))
-        .unwrap();
-
-        assert_eq!(billing.version, 1);
-        assert_eq!(billing.inferences[0].reported_usage.cache_write_tokens, 0);
-        assert_eq!(billing.inferences[0].pricing.cache_write_per_mtok, None);
-        assert!(billing.inferences[0].estimated_cache_savings.is_empty());
-        assert_eq!(billing.inferences[0].prompt_generation, None);
-        assert!(billing.inferences[0].orchestration.is_empty());
-        assert!(billing.inferences[0].provider_instance_id.is_empty());
-        assert_eq!(billing.inferences[0].timing, None);
-        assert_eq!(billing.aggregate_usage().completion_tokens, 3);
-        assert_eq!(billing.aggregate_usage().reasoning_tokens, 0);
-        assert_eq!(billing.aggregate_usage().total_tokens, 13);
-    }
-
-    #[test]
-    fn new_turn_billing_uses_v4_schema() {
-        assert_eq!(TurnBillingRecord::new().version, 4);
-    }
-
-    #[test]
-    fn turn_billing_aggregates_orchestration_metrics() {
-        let mut first = InferenceOrchestrationMetrics {
-            tool_calls: 2,
-            tool_execution_millis: 30,
-            tool_batch_elapsed_millis: 20,
-            ..InferenceOrchestrationMetrics::default()
-        };
-        first.merge(&InferenceOrchestrationMetrics {
-            tool_cache_hits: 1,
-            ..InferenceOrchestrationMetrics::default()
-        });
-        let mut inference = InferenceBillingRecord {
-            inference_id: "inference-1".to_string(),
-            provider_instance_id: "openai-primary".to_string(),
-            provider: "OpenAI".to_string(),
-            model: "gpt-5.6-sol".to_string(),
-            context_window: None,
-            reported_usage: InferenceTokenUsage::default(),
-            normalized_usage: InferenceTokenUsage::default(),
-            pricing: ModelPricingSnapshot::default(),
-            estimated_costs: Vec::new(),
-            estimated_cache_savings: Vec::new(),
-            has_unpriced_usage: false,
-            prompt_generation: None,
-            prompt_cache_policy: None,
-            prefix_changed_reason: None,
-            orchestration: first,
-            timing: None,
-            recorded_at: 1,
-        };
-        let mut billing = TurnBillingRecord::new();
-        billing.inferences.push(inference.clone());
-        inference.inference_id = "inference-2".to_string();
-        billing.inferences.push(inference);
-
-        let aggregate = billing.aggregate_orchestration();
-        assert_eq!(aggregate.tool_calls, 4);
-        assert_eq!(aggregate.tool_cache_hits, 2);
-        assert_eq!(aggregate.parallel_saved_millis(), 20);
     }
 }

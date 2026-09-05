@@ -1055,7 +1055,8 @@ mod orchestration_tests {
         let first = provider
             .complete(
                 complete_workflow_wire_request(),
-                ModelInvocationContext::new(session.clone(), event_tx.clone())
+                ModelInvocationContext::new(session.clone())
+                    .with_events(event_tx.clone())
                     .with_prompt_cache_key(Some("thread-generation-key".to_string())),
             )
             .await
@@ -1087,7 +1088,8 @@ mod orchestration_tests {
         let second = provider
             .complete(
                 second_request,
-                ModelInvocationContext::new(session, event_tx)
+                ModelInvocationContext::new(session)
+                    .with_events(event_tx)
                     .with_prompt_cache_key(Some("thread-generation-key".to_string())),
             )
             .await
@@ -1163,14 +1165,16 @@ mod orchestration_tests {
         let session = ModelSession::default();
         let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(64);
         let trace_sink = Arc::new(pl_trace::InMemoryTraceEventSink::new("session-1", 0));
-        let context = ModelInvocationContext::new(session.clone(), event_tx).with_trace(
-            CompletionTraceContext {
-                session_id: "session-1".to_string(),
-                turn_id: "turn-1".to_string(),
-                inference_id: "turn-1-inf-0".to_string(),
-            },
-            trace_sink,
-        );
+        let context = ModelInvocationContext::new(session.clone())
+            .with_events(event_tx)
+            .with_trace(
+                CompletionTraceContext {
+                    session_id: "session-1".to_string(),
+                    turn_id: "turn-1".to_string(),
+                    inference_id: "turn-1-inf-0".to_string(),
+                },
+                trace_sink,
+            );
 
         let error = provider
             .complete(minimal_request("local-responses"), context)
@@ -1225,7 +1229,7 @@ mod orchestration_tests {
         let error = provider
             .complete(
                 minimal_request("local-responses"),
-                ModelInvocationContext::new(ModelSession::default(), event_tx),
+                ModelInvocationContext::new(ModelSession::default()).with_events(event_tx),
             )
             .await
             .expect_err("invalid request must fail without transport retry");
@@ -1261,7 +1265,7 @@ mod orchestration_tests {
         let error = provider
             .complete(
                 minimal_request("local-responses"),
-                ModelInvocationContext::new(ModelSession::default(), event_tx),
+                ModelInvocationContext::new(ModelSession::default()).with_events(event_tx),
             )
             .await
             .expect_err("unauthorized handshake must fail without transport retry");
@@ -1300,7 +1304,8 @@ mod orchestration_tests {
         let response = provider
             .complete(
                 minimal_request("local-responses"),
-                ModelInvocationContext::new(ModelSession::default(), event_tx)
+                ModelInvocationContext::new(ModelSession::default())
+                    .with_events(event_tx)
                     .with_prompt_cache_key(Some("thread-generation-key".to_string())),
             )
             .await
@@ -1352,7 +1357,7 @@ mod orchestration_tests {
         let first = provider
             .complete(
                 minimal_request("local-responses"),
-                ModelInvocationContext::new(session.clone(), event_tx.clone()),
+                ModelInvocationContext::new(session.clone()).with_events(event_tx.clone()),
             )
             .await
             .unwrap();
@@ -1361,7 +1366,7 @@ mod orchestration_tests {
         let second = provider
             .complete(
                 followup_request("http-ok-1"),
-                ModelInvocationContext::new(session, event_tx),
+                ModelInvocationContext::new(session).with_events(event_tx),
             )
             .await
             .unwrap();
@@ -1445,14 +1450,14 @@ mod orchestration_tests {
         let first = provider
             .complete(
                 minimal_request("local-responses"),
-                ModelInvocationContext::new(session.clone(), event_tx.clone()),
+                ModelInvocationContext::new(session.clone()).with_events(event_tx.clone()),
             )
             .await
             .unwrap();
         let second = provider
             .complete(
                 followup_request("ok-1"),
-                ModelInvocationContext::new(session, event_tx),
+                ModelInvocationContext::new(session).with_events(event_tx),
             )
             .await
             .unwrap();
@@ -1534,14 +1539,14 @@ mod orchestration_tests {
         let first = provider
             .complete(
                 minimal_request("local-responses"),
-                ModelInvocationContext::new(session.clone(), event_tx.clone()),
+                ModelInvocationContext::new(session.clone()).with_events(event_tx.clone()),
             )
             .await
             .unwrap();
         let second = provider
             .complete(
                 followup_request("ok-1"),
-                ModelInvocationContext::new(session.clone(), event_tx),
+                ModelInvocationContext::new(session.clone()).with_events(event_tx),
             )
             .await
             .unwrap();
@@ -1563,32 +1568,24 @@ mod orchestration_tests {
     }
 
     #[tokio::test]
-    async fn responses_websocket_does_not_commit_unconsumed_completion() {
+    async fn cancelled_websocket_task_replays_full_history_without_uncommitted_continuation() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
+        let ready = std::sync::Arc::new(tokio::sync::Notify::new());
+        let signal = ready.clone();
         let server = tokio::spawn(async move {
             let (mut writer, mut reader) = accept_websocket(&listener).await;
             let first = read_json_frame(&mut reader).await;
             writer
                 .send(WebSocketMessage::Text(
-                    serde_json::json!({
-                        "type": "response.completed",
-                        "response": {
-                            "id": "resp-unconsumed",
-                            "model": "local-responses",
-                            "output": [{
-                                "type": "message",
-                                "role": "assistant",
-                                "content": [{"type": "output_text", "text": "not-consumed"}]
-                            }],
-                            "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
-                        }
-                    })
+                    serde_json::json!({"type":"response.output_text.delta","item_id":"unfinished","delta":"not-consumed"})
                     .to_string()
                     .into(),
                 ))
                 .await
                 .unwrap();
+            signal.notify_one();
+            let _ = reader.next().await;
             drop(writer);
 
             let (mut writer, mut reader) = accept_websocket(&listener).await;
@@ -1604,22 +1601,23 @@ mod orchestration_tests {
         let provider = local_websocket_provider(&address.to_string(), None);
         let session = ModelSession::default();
         let first_request = minimal_request("local-responses");
-        let mut stream = provider
-            .stream_events(first_request, session.clone(), None, None)
-            .await
-            .unwrap();
-        stream
-            .next()
-            .await
-            .expect("first decoded completion event")
-            .unwrap();
-        drop(stream);
+        let token = tokio_util::sync::CancellationToken::new();
+        let (event_tx, _) = tokio::sync::broadcast::channel(16);
+        let running_provider = provider.clone();
+        let context = ModelInvocationContext::new(session.clone())
+            .with_events(event_tx)
+            .with_cancellation(Some(token.clone()));
+        let first =
+            tokio::spawn(async move { running_provider.complete(first_request, context).await });
+        ready.notified().await;
+        token.cancel();
+        assert!(first.await.unwrap().is_err());
 
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
         let response = provider
             .complete(
                 followup_request("not-consumed"),
-                ModelInvocationContext::new(session, event_tx),
+                ModelInvocationContext::new(session).with_events(event_tx),
             )
             .await
             .unwrap();

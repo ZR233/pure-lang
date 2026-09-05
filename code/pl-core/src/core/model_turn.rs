@@ -120,8 +120,14 @@ impl ModelTurnClient {
                 route.provider_id.as_str(),
                 route.endpoint.clone(),
                 route.model.clone(),
-            )?,
+            )?
+            .with_pricing_mode(route.pricing_mode),
         })
+    }
+
+    /// Explicit access to the bound native client; ordinary completion remains provider-neutral.
+    pub fn provider(&self) -> &pl_model::provider::ProviderClient {
+        self.runtime.provider()
     }
 
     /// 执行一次模型调用，并返回不暴露 provider/wire 类型的宿主快照。
@@ -130,7 +136,8 @@ impl ModelTurnClient {
         session: &AgentSession,
         request: ModelTurnRequest,
         options: ModelTurnOptions,
-    ) -> Result<CompletionResponseSnapshot> {
+    ) -> std::result::Result<CompletionResponseSnapshot, pl_model::completion::CompletionFailure>
+    {
         let response = self.complete_raw(session, request, options).await?;
         Ok(completion_response_snapshot(&response))
     }
@@ -141,7 +148,7 @@ impl ModelTurnClient {
         session: &AgentSession,
         request: ModelTurnRequest,
         options: ModelTurnOptions,
-    ) -> Result<String> {
+    ) -> std::result::Result<String, pl_model::completion::CompletionFailure> {
         let response = self.complete_raw(session, request, options).await?;
         Ok(completion_response_message_text(&response))
     }
@@ -151,7 +158,7 @@ impl ModelTurnClient {
         session: &AgentSession,
         request: ModelTurnRequest,
         options: ModelTurnOptions,
-    ) -> Result<CompletionResponse> {
+    ) -> std::result::Result<CompletionResponse, pl_model::completion::CompletionFailure> {
         let request = CompletionRequest::builder()
             .maybe_instructions(request.instructions)
             .input(session.items().to_vec())
@@ -162,7 +169,8 @@ impl ModelTurnClient {
             .reasoning(request.reasoning)
             .build();
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(16);
-        let invocation = ModelInvocationContext::new(session.model_session(), event_tx)
+        let invocation = ModelInvocationContext::new(session.model_session())
+            .with_events(event_tx)
             .with_prompt_cache_key(session.prompt_cache_key().map(ToString::to_string))
             .with_cancellation(options.cancellation_token);
         self.runtime.complete(request, invocation).await

@@ -81,6 +81,17 @@ abstract final class StudioDriverKeys {
   static const providerEditor = ValueKey<String>('provider-editor');
   static const providerEdit = ValueKey<String>('provider-edit');
   static const providerSave = ValueKey<String>('provider-save');
+  static const providerPricing = ValueKey<String>('provider-pricing');
+  static const providerEditorScroll = ValueKey<String>(
+    'provider-editor-scroll',
+  );
+  static const providerAdd = ValueKey<String>('provider-add');
+  static const providerPreset = ValueKey<String>('provider-preset');
+  static const providerBaseUrl = ValueKey<String>('provider-base-url');
+  static const providerApiKey = ValueKey<String>('provider-api-key');
+  static const providerModelAdd = ValueKey<String>('provider-model-add');
+  static ValueKey<String> customModelId(int index) =>
+      ValueKey<String>('provider-model-$index-id');
   static const providerCancel = ValueKey<String>('provider-cancel');
   static const toolApprove = ValueKey<String>('tool-approve');
   static const toolDeny = ValueKey<String>('tool-deny');

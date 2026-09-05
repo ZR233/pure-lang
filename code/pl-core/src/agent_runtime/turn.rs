@@ -291,6 +291,7 @@ impl PreparedSessionRuntime {
     ) -> ThreadRuntimeSnapshot {
         let usage = current.runtime.as_ref().map_or_else(
             || ThreadRuntimeUsage {
+                has_incomplete_usage: false,
                 model: self.model.clone(),
                 context_window: self.context_window,
                 latest_context_tokens: 0,
@@ -506,6 +507,7 @@ mod tests {
         current.runtime = Some(ThreadRuntimeSnapshot {
             thread_id: "session".to_string(),
             usage: ThreadRuntimeUsage {
+                has_incomplete_usage: false,
                 model: "old-model".to_string(),
                 context_window: Some(10),
                 latest_context_tokens: 7,

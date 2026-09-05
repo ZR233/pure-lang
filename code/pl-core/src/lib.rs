@@ -128,7 +128,6 @@ pub use pl_protocol::{
 pub(crate) use prompt_cache::{
     PromptCacheInput, derive_prompt_cache_key, prepare_prompt_context, stable_tool_schemas,
 };
-pub use runtime_usage::ModelTokenUsageSnapshot;
 pub use session::plan::tools::{
     PlanCurrentTool, PlanHistoryTool, PlanNextTool, PlanRestartTool, PlanSubmitTool,
     TOOL_PLAN_CURRENT, TOOL_PLAN_HISTORY, TOOL_PLAN_NEXT, TOOL_PLAN_RESTART, TOOL_PLAN_SUBMIT,
@@ -194,6 +193,8 @@ pub use workspace::{
     WorkspaceInstructionDocument, WorkspaceInstructions, load_workspace_instruction_documents,
     resolve_workspace_root,
 };
+
+pub use pl_model::runtime::{InferenceClock, ModelRuntime};
 
 #[cfg(test)]
 mod signature_reexport_tests {

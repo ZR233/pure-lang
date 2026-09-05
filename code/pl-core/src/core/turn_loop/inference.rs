@@ -18,11 +18,15 @@ pub(super) fn from_billing(
 }
 
 pub(super) async fn record(
+    turn_billing: &mut pl_protocol::TurnBillingRecord,
     options: &TurnOptions,
     session: &AgentSession,
     recorder: &mut TraceRecorder,
     inference: AgentInferenceCommit,
 ) -> Result<()> {
+    turn_billing
+        .append(inference.billing.clone())
+        .map_err(pl_protocol::PureError::Protocol)?;
     let Some(checkpoint) = &options.checkpoint else {
         recorder.broadcast(AgentEvent::AgentRuntimeUpdated {
             delta: inference.runtime_delta,

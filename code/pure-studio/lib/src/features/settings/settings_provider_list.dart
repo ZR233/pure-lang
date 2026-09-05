@@ -62,6 +62,7 @@ class ProviderList extends StatelessWidget {
                 onPressed: () => onRefreshAll(),
               ),
               FilledButton.icon(
+                key: StudioDriverKeys.providerAdd,
                 icon: const Icon(Icons.add),
                 label: Text(context.l10n.settingsAddProvider),
                 onPressed: onAdd,

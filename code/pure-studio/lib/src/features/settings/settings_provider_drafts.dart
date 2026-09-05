@@ -92,7 +92,8 @@ abstract final class ProviderDraftFactory {
   ) {
     return current.copyWith(
       id: providerId,
-      templateKind: '',
+      templateKind: 'openai-compatible',
+      pricingEnabled: false,
       catalogId: '',
       defaultModels: const [],
       models: current.customModels,
@@ -127,12 +128,9 @@ String providerInitials(String value) {
 }
 
 String providerModelPriceLabel(ProviderModelView model) {
-  if (model.currency.isEmpty ||
-      model.inputPricePerMTok == null ||
-      model.outputPricePerMTok == null) {
-    return '';
-  }
-  return '${model.currency} ${_trimNumber(model.inputPricePerMTok!)}/${_trimNumber(model.outputPricePerMTok!)}';
+  final first = model.priceTiers.firstOrNull;
+  if (model.currency.isEmpty || first == null) return '';
+  return '${model.currency} ${_trimNumber(first.input)}/${_trimNumber(first.output)}${model.priceTiers.length > 1 ? ' · …' : ''}';
 }
 
 String _trimNumber(double value) {

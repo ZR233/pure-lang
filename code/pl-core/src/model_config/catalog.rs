@@ -2,9 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use pl_protocol::{
     CredentialDescriptorDto, ModelCapabilitiesDto, ModelCatalogDescriptor, ModelDescriptor,
-    ModelInputCapabilityDto, ModelInputSourceDto, ModelModalityDto, ModelPricingDto,
-    ModelReasoningDescriptor, ModelTransportDescriptor, PROVIDER_CATALOG_SCHEMA_VERSION,
-    ProviderCatalogSnapshot, ProviderConnectionModeDescriptor, ProviderPresetDescriptor,
+    ModelInputCapabilityDto, ModelInputSourceDto, ModelModalityDto, ModelReasoningDescriptor,
+    ModelTransportDescriptor, PROVIDER_CATALOG_SCHEMA_VERSION, ProviderCatalogSnapshot,
+    ProviderConnectionModeDescriptor, ProviderPresetDescriptor,
     ProviderServiceCapabilitiesDescriptor, PureError, Result,
     WebSearchProviderCapabilitiesDescriptor,
 };
@@ -59,12 +59,13 @@ impl ProviderCatalogRegistry {
             model_catalog("deepseek", deepseek_default_model_slugs()),
             model_catalog("zhipu", zhipu_default_model_slugs()),
             model_catalog("mimo", mimo_default_model_slugs()),
+            model_catalog("openai-compatible", &[]),
         ]
         .into_iter()
         .map(|catalog| (catalog.id.clone(), catalog))
         .collect();
 
-        let presets = vec![
+        let mut presets = vec![
             preset(
                 "openai",
                 ProviderEndpoint::openai(None),
@@ -86,7 +87,7 @@ impl ProviderCatalogRegistry {
             preset(
                 "zhipu",
                 ProviderEndpoint::zhipu(None),
-                "glm-5.2",
+                "glm-5.3",
                 "zhipu",
                 "ZAI_API_KEY",
                 "Zhipu BigModel API.",
@@ -95,7 +96,7 @@ impl ProviderCatalogRegistry {
             preset(
                 "zhipu-coding-plan",
                 ProviderEndpoint::zhipu_coding_plan(None),
-                "glm-5.2",
+                "glm-5.3",
                 "zhipu",
                 "ZAI_API_KEY",
                 "Zhipu Coding Plan endpoint.",
@@ -103,7 +104,8 @@ impl ProviderCatalogRegistry {
             ),
             preset(
                 "mimo-api",
-                ProviderEndpoint::compatible("MiMo API", MIMO_API_BASE_URL),
+                ProviderEndpoint::compatible("MiMo API", MIMO_API_BASE_URL)
+                    .with_adapter(pl_model::provider::ProviderAdapterKind::MiMo),
                 "mimo-v2.5-pro",
                 "mimo",
                 "MIMO_API_KEY",
@@ -112,7 +114,8 @@ impl ProviderCatalogRegistry {
             ),
             preset(
                 "mimo-token-plan",
-                ProviderEndpoint::compatible("MiMo Token Plan", MIMO_TOKEN_PLAN_BASE_URL),
+                ProviderEndpoint::compatible("MiMo Token Plan", MIMO_TOKEN_PLAN_BASE_URL)
+                    .with_adapter(pl_model::provider::ProviderAdapterKind::MiMo),
                 "mimo-v2.5-pro",
                 "mimo",
                 "MIMO_TOKEN_PLAN_API_KEY",
@@ -120,6 +123,24 @@ impl ProviderCatalogRegistry {
                 "mimo",
             ),
         ];
+
+        let mut compatible = preset(
+            "openai-compatible",
+            ProviderEndpoint::compatible("OpenAI API 兼容", "http://localhost:11434/v1"),
+            "",
+            "openai-compatible",
+            "",
+            "Connect a custom Chat Completions or Responses model.",
+            "openai",
+        );
+        compatible.credential_label = "API Key (optional)".to_owned();
+        compatible.credential_env = None;
+        compatible.provider.bearer_token_env = None;
+        compatible.provider.catalog = super::ProviderModelCatalogConfig::Explicit {
+            models: Vec::new(),
+            connection_overrides: BTreeMap::new(),
+        };
+        presets.push(compatible);
 
         Self {
             presets,
@@ -148,14 +169,16 @@ impl ProviderCatalogRegistry {
                 })?;
             for model in &catalog.models {
                 model
+                    .binding
                     .transport
                     .validate(&model.slug)
                     .map_err(|error| PureError::ConfigError(error.to_string()))?;
             }
-            if !catalog
-                .models
-                .iter()
-                .any(|model| model.slug == preset.suggested_model)
+            if !preset.suggested_model.is_empty()
+                && !catalog
+                    .models
+                    .iter()
+                    .any(|model| model.slug == preset.suggested_model)
             {
                 return Err(PureError::ConfigError(format!(
                     "provider preset {} references missing suggested model: {}",
@@ -198,11 +221,14 @@ impl ProviderCatalogRegistry {
             .map_err(|error| PureError::ConfigError(error.to_string()))?;
         for catalog in self.model_catalogs.values() {
             for model in &catalog.models {
-                for mode in &model.transport.supported_connection_modes {
+                for mode in &model.binding.transport.supported_connection_modes {
                     canonical.push(0);
                     canonical.extend_from_slice(
-                        provider_transport_profile_revision(model.transport.protocol, *mode)
-                            .as_bytes(),
+                        provider_transport_profile_revision(
+                            model.binding.transport.protocol,
+                            *mode,
+                        )
+                        .as_bytes(),
                     );
                 }
             }
@@ -280,6 +306,7 @@ fn preset_descriptor(preset: &ProviderPreset) -> ProviderPresetDescriptor {
         model_catalog_id: preset.model_catalog.to_string(),
         suggested_model: preset.suggested_model.clone(),
         icon_key: preset.icon_key.clone(),
+        pricing_enabled: preset.provider.pricing_mode == pl_protocol::PricingMode::Catalog,
         service_capabilities: provider_service_capabilities_descriptor(
             &preset.service_capabilities,
         ),
@@ -334,13 +361,7 @@ fn model_descriptor(model: &ModelInfo) -> ModelDescriptor {
             default: parameter.candidates.first().cloned(),
             candidates: parameter.candidates.clone(),
         });
-    let pricing = model.currency.as_ref().map(|currency| ModelPricingDto {
-        currency: currency.clone(),
-        input_per_mtok: model.input_price_per_mtok,
-        output_per_mtok: model.output_price_per_mtok,
-        cache_read_per_mtok: model.cache_read_price_per_mtok,
-        cache_write_per_mtok: model.cache_write_price_per_mtok,
-    });
+    let pricing = model.pricing.catalog_pricing();
     ModelDescriptor {
         id: model.slug.clone(),
         display_name: model.display_name.clone(),
@@ -349,16 +370,19 @@ fn model_descriptor(model: &ModelInfo) -> ModelDescriptor {
         max_context_window: model.max_context_window,
         max_output_tokens: model.max_output_tokens,
         transport: ModelTransportDescriptor {
-            protocol: protocol_label(model.transport.protocol).to_string(),
+            protocol: protocol_label(model.binding.transport.protocol).to_string(),
             connection_modes: model
+                .binding
                 .transport
                 .supported_connection_modes
                 .iter()
                 .copied()
                 .map(connection_mode_descriptor)
                 .collect(),
-            default_connection_mode: connection_mode_label(model.transport.default_connection_mode)
-                .to_string(),
+            default_connection_mode: connection_mode_label(
+                model.binding.transport.default_connection_mode,
+            )
+            .to_string(),
         },
         capabilities: ModelCapabilitiesDto {
             input: capabilities
@@ -470,7 +494,7 @@ mod tests {
                 .iter()
                 .map(|model| model.id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-pro", "mimo-v2-omni"]
+            vec!["mimo-v2.5-pro", "mimo-v2.5"]
         );
         assert_eq!(
             snapshot
@@ -491,7 +515,7 @@ mod tests {
             .find(|preset| preset.id == "deepseek")
             .unwrap();
 
-        assert_eq!(snapshot.schema_version, 9);
+        assert_eq!(snapshot.schema_version, PROVIDER_CATALOG_SCHEMA_VERSION);
         assert!(deepseek.service_capabilities.web_search.hosted_responses);
         assert_eq!(
             deepseek.service_capabilities.web_search.hosted_dialect,
@@ -522,6 +546,7 @@ mod tests {
             .models
             .first_mut()
             .unwrap()
+            .binding
             .transport
             .supported_connection_modes
             .reverse();

@@ -841,6 +841,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeModelPriceTier dco_decode_bridge_model_price_tier(dynamic raw);
+
+  @protected
   BridgeModelPricing dco_decode_bridge_model_pricing(dynamic raw);
 
   @protected
@@ -1426,6 +1429,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   List<BridgeModelPerformanceSummary>
   dco_decode_list_bridge_model_performance_summary(dynamic raw);
+
+  @protected
+  List<BridgeModelPriceTier> dco_decode_list_bridge_model_price_tier(
+    dynamic raw,
+  );
 
   @protected
   List<BridgeProviderConnectionModeDescriptor>
@@ -2761,6 +2769,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeModelPriceTier sse_decode_bridge_model_price_tier(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeModelPricing sse_decode_bridge_model_pricing(
     SseDeserializer deserializer,
   );
@@ -3480,6 +3493,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   List<BridgeModelPerformanceSummary>
   sse_decode_list_bridge_model_performance_summary(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<BridgeModelPriceTier> sse_decode_list_bridge_model_price_tier(
     SseDeserializer deserializer,
   );
 
@@ -5062,6 +5080,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_model_price_tier(
+    BridgeModelPriceTier self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_model_pricing(
     BridgeModelPricing self,
     SseSerializer serializer,
@@ -5940,6 +5964,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_bridge_model_performance_summary(
     List<BridgeModelPerformanceSummary> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_model_price_tier(
+    List<BridgeModelPriceTier> self,
     SseSerializer serializer,
   );
 

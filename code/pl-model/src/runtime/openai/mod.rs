@@ -11,7 +11,7 @@ mod request;
 #[cfg(test)]
 mod response;
 pub(crate) mod sse;
-mod usage;
+pub(crate) mod usage;
 
 pub(crate) use client_config::PureOpenAiConfig;
 pub(crate) use request::OpenAiRequestBody;
@@ -61,8 +61,30 @@ impl OpenAiProtocol {
     }
 
     #[cfg(test)]
+    fn build_request_for_fixture(
+        &self,
+        request: &CompletionRequest,
+        model: &ModelInfo,
+        cache_key: Option<&str>,
+    ) -> Result<OpenAiRequestBody> {
+        let mut model = model.clone();
+        model.binding.set_transport(match self.endpoint {
+            OpenAiEndpoint::Responses => crate::model::ModelTransportProfile::responses_http(),
+            OpenAiEndpoint::ChatCompletions => {
+                crate::model::ModelTransportProfile::chat_completions_http()
+            }
+        });
+        self.build_request(request, &model, cache_key)
+    }
+
+    #[cfg(test)]
     fn build_request_body(&self, request: &CompletionRequest) -> serde_json::Value {
-        let fallback = ModelInfo::fallback("test-model");
+        let mut fallback = ModelInfo::compatible("test-model");
+        if self.endpoint == OpenAiEndpoint::Responses {
+            fallback
+                .binding
+                .set_transport(crate::model::ModelTransportProfile::responses_http());
+        }
         self.build_request_body_with_model(request, &fallback)
     }
 
@@ -72,8 +94,15 @@ impl OpenAiProtocol {
         request: &CompletionRequest,
         model: &ModelInfo,
     ) -> serde_json::Value {
+        let mut model = model.clone();
+        model.binding.set_transport(match self.endpoint {
+            OpenAiEndpoint::Responses => crate::model::ModelTransportProfile::responses_http(),
+            OpenAiEndpoint::ChatCompletions => {
+                crate::model::ModelTransportProfile::chat_completions_http()
+            }
+        });
         serde_json::to_value(
-            self.build_request(request, model, None)
+            self.build_request(request, &model, None)
                 .expect("typed provider request should build"),
         )
         .expect("typed provider request should serialize")

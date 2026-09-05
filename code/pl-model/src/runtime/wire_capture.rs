@@ -56,6 +56,47 @@ struct TransportStageReceipt<'a> {
     captured_at_unix_millis: u128,
 }
 
+/// Captures only recognized numeric usage fields, never provider content or headers.
+pub(crate) async fn capture_usage(event: &SseStreamEvent) -> Result<()> {
+    let Some(directory) = std::env::var_os(CAPTURE_DIRECTORY_ENV).map(PathBuf::from) else {
+        return Ok(());
+    };
+    let response = event.response.as_ref();
+    let response_usage = response
+        .and_then(|response| response.get("usage"))
+        .and_then(super::openai::usage::ProviderTokenUsage::from_value);
+    let Some(usage) = event.usage.as_ref().or(response_usage.as_ref()) else {
+        return Ok(());
+    };
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct UsageReceipt<'a> {
+        response_id: Option<&'a str>,
+        model: Option<&'a str>,
+        service_tier: Option<&'a str>,
+        usage: &'a super::openai::usage::ProviderTokenUsage,
+    }
+    let receipt = UsageReceipt {
+        response_id: event
+            .id
+            .as_deref()
+            .or_else(|| response.and_then(|r| r.get("id")?.as_str())),
+        model: event
+            .model
+            .as_deref()
+            .or_else(|| response.and_then(|r| r.get("model")?.as_str())),
+        service_tier: response.and_then(|r| r.get("service_tier")?.as_str()),
+        usage,
+    };
+    let sequence = CAPTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed) + 1;
+    let bytes = serde_json::to_vec_pretty(&receipt)?;
+    tokio::fs::write(directory.join(format!("usage-{sequence:06}.json")), bytes)
+        .await
+        .map_err(|error| {
+            PureError::ConfigError(format!("cannot write provider usage receipt: {error}"))
+        })
+}
+
 pub(super) async fn capture_http(
     body: &OpenAiRequestBody,
     trace: Option<&CompletionTraceContext>,

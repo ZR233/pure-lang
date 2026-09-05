@@ -1,26 +1,59 @@
 part of '../widget_test.dart';
 
-ProviderSettingsView _providerFromSettings(Object? value) {
-  final json = value as Map<String, Object?>;
-  final defaultModel = json['defaultModel'] as String? ?? '';
-  return ProviderSettingsView(
-    id: json['id'] as String? ?? '',
-    templateKind: json['templateKind'] as String? ?? 'openai',
-    name: json['name'] as String? ?? '',
-    baseUrl: json['baseUrl'] as String? ?? '',
-    bearerToken: '',
-    hasBearerToken: (json['bearerToken'] as String? ?? '').isNotEmpty,
-    defaultModel: defaultModel,
-    models: [
+ProviderSettingsView _providerFromCommand(
+  ProviderCommand command,
+  ProviderSettingsView? previous,
+) {
+  final preset = _testProviderCatalog.preset(command.templateKind);
+  final defaults = _testProviderCatalog.modelsFor(preset?.modelCatalogId ?? '');
+  final custom = [
+    for (final model in command.customModels)
       ProviderModelView(
-        slug: defaultModel,
-        displayName: defaultModel,
-        reasoningEfforts: const ['high'],
+        slug: model.slug,
+        displayName: model.displayName,
+        reasoningEfforts: const [],
+        contextWindow: model.contextWindow,
+        maxOutputTokens: model.maxOutputTokens,
+        wireProtocol: model.wireProtocol,
       ),
-    ],
+  ];
+  final keep = previous?.templateKind == command.templateKind ? previous : null;
+  return ProviderSettingsView(
+    id: command.id,
+    templateKind: command.templateKind,
+    name: command.name,
+    baseUrl: command.baseUrl,
+    pricingEnabled: command.pricingEnabled,
+    hasBearerToken: switch (command.secret.action) {
+      ProviderSecretAction.replace => true,
+      ProviderSecretAction.preserve => previous?.hasBearerToken ?? false,
+      ProviderSecretAction.clear => false,
+    },
+    defaultModel: command.defaultModel,
+    models: [...defaults, ...custom],
+    defaultModels: defaults,
+    customModels: custom,
+    modelConnectionModes: {
+      for (final connection in command.modelConnectionModes)
+        connection.slug: connection.connectionMode,
+    },
     status: 'ready',
-    usageLabel: '1 models',
-    promptCacheDialect: json['promptCacheDialect'] as String? ?? 'none',
+    usageLabel: '',
+    catalogId: preset?.modelCatalogId ?? '',
+    capabilitySource: keep?.capabilitySource ?? 'preset_defaults',
+    hostedWebSearch: keep?.hostedWebSearch ?? preset?.hostedWebSearch ?? false,
+    hostedWebSearchDialect:
+        keep?.hostedWebSearchDialect ??
+        preset?.hostedWebSearchDialect ??
+        'open_ai_responses',
+    standaloneWebSearch:
+        keep?.standaloneWebSearch ?? preset?.standaloneWebSearch ?? '',
+    promptCacheDialect:
+        keep?.promptCacheDialect ?? preset?.promptCacheDialect ?? 'none',
+    responsesProgrammaticToolCalling:
+        keep?.responsesProgrammaticToolCalling ??
+        preset?.responsesProgrammaticToolCalling ??
+        false,
   );
 }
 

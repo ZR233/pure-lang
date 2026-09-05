@@ -236,7 +236,8 @@ pub(super) fn validate_model_source(
         modality
     );
     let profile = model
-        .request_profile
+        .binding
+        .request
         .media_profile(model_modality)
         .with_context(|| format!("model {} has no {:?} request profile", model.slug, modality))?;
     ensure!(
@@ -255,7 +256,7 @@ fn validate_mix_policy(
     model: &ModelInfo,
     modalities: impl Iterator<Item = StudioAttachmentModality>,
 ) -> Result<()> {
-    if model.request_profile.media_mix_policy != MediaMixPolicy::SingleModality {
+    if model.binding.request.media_mix_policy != MediaMixPolicy::SingleModality {
         return Ok(());
     }
     let unique = modalities.collect::<BTreeSet<_>>();

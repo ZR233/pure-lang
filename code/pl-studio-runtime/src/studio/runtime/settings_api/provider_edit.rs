@@ -2,20 +2,14 @@
 
 use anyhow::Result;
 use pl_model::completion::WebSearchMode;
-use pl_model::provider::{
-    PromptCacheDialect, PromptCacheProviderCapabilities, ProviderConnectionMode,
-    ProviderServiceCapabilities, ProviderWireProtocol, ResponsesHostedToolCapabilities,
-    StandaloneWebSearchDialect, WebSearchProviderCapabilities,
-};
+use pl_model::provider::{ProviderConnectionMode, ProviderWireProtocol};
 use pl_protocol::WebSearchContextSize;
 use pl_protocol::studio::{
     ProviderModelConnectionUpdate, ProviderModelUpdate, ProviderSecretUpdate,
     ProviderSettingsUpdate, RoleSettingsUpdate, StudioError, UpdateWebSearchSettingsRequest,
 };
 
-use crate::{
-    ProviderCapabilitySelection, ProviderEdit, ProviderModelEdit, ProviderPresetId, RoleEdit,
-};
+use crate::{ProviderEdit, ProviderModelEdit, ProviderPresetId, RoleEdit};
 
 use super::view::{normalized_optional, normalized_string_list};
 
@@ -46,49 +40,6 @@ pub(super) fn provider_edit(
         }
         ProviderSecretUpdate::Clear => None,
     };
-    let capabilities =
-        match input.capability_source.as_str() {
-            "preset_defaults" if preset.is_some() => ProviderCapabilitySelection::PresetDefaults,
-            "preset_defaults" => {
-                return Err(invalid_settings_argument(
-                    "Custom providers must use explicit service capabilities",
-                ));
-            }
-            "explicit" => ProviderCapabilitySelection::Explicit(ProviderServiceCapabilities {
-                web_search: WebSearchProviderCapabilities {
-                    hosted_responses: input.hosted_web_search,
-                    hosted_dialect: input.hosted_web_search_dialect.trim().parse().map_err(
-                        |_| invalid_settings_argument("Unsupported hosted web search dialect"),
-                    )?,
-                    standalone: input
-                        .standalone_web_search
-                        .as_deref()
-                        .filter(|value| !value.trim().is_empty())
-                        .map(str::parse::<StandaloneWebSearchDialect>)
-                        .transpose()
-                        .map_err(|_| {
-                            invalid_settings_argument("Unsupported standalone web search dialect")
-                        })?,
-                },
-                prompt_cache: PromptCacheProviderCapabilities {
-                    dialect: input
-                        .prompt_cache_dialect
-                        .trim()
-                        .parse::<PromptCacheDialect>()
-                        .map_err(|_| {
-                            invalid_settings_argument("Unsupported prompt cache dialect")
-                        })?,
-                },
-                responses_tools: ResponsesHostedToolCapabilities {
-                    programmatic_tool_calling: input.responses_programmatic_tool_calling,
-                },
-            }),
-            _ => {
-                return Err(invalid_settings_argument(
-                    "Unsupported provider capability source",
-                ));
-            }
-        };
     Ok(ProviderEdit {
         key: input.id,
         original_key: input.original_id,
@@ -96,7 +47,11 @@ pub(super) fn provider_edit(
         name: input.name,
         base_url: Some(input.base_url),
         bearer_token,
-        capabilities,
+        pricing_mode: if input.pricing_enabled {
+            pl_protocol::PricingMode::Catalog
+        } else {
+            pl_protocol::PricingMode::Disabled
+        },
         default_model: input.default_model,
         custom_models: input
             .custom_models
@@ -111,15 +66,9 @@ fn provider_model_edit(input: ProviderModelUpdate) -> Result<ProviderModelEdit> 
     Ok(ProviderModelEdit {
         slug: input.slug,
         display_name: input.display_name,
-        efforts: input.reasoning_efforts,
-        base_instructions: input.base_instructions.unwrap_or_default(),
         protocol: parse_provider_protocol(&input.wire_protocol)?,
-        supported_connection_modes: input
-            .supported_connection_modes
-            .iter()
-            .map(|mode| parse_provider_connection_mode(mode))
-            .collect::<Result<Vec<_>>>()?,
-        default_connection_mode: parse_provider_connection_mode(&input.default_connection_mode)?,
+        context_window: input.context_window,
+        max_output_tokens: input.max_output_tokens,
     })
 }
 

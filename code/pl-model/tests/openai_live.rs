@@ -1,14 +1,16 @@
 use std::collections::HashMap;
 
-use pl_model::{
-    CompletionRequest, CompletionTraceContext, ModelInfo, ModelInvocationContext, ModelRuntime,
-    ModelSession, ProviderEndpoint, ReasoningConfig, ReasoningSummary, default_models,
-    openai_default_model_slugs,
+use pl_model::completion::{
+    CompletionRequest, CompletionTraceContext, ReasoningConfig, ReasoningSummary,
 };
+use pl_model::model::{ModelInfo, default_models, openai_default_model_slugs};
+use pl_model::provider::ProviderEndpoint;
+use pl_model::runtime::{ModelInvocationContext, ModelRuntime, ModelSession};
+
 use pl_protocol::{Message, MessageContent, MessageRole};
 use pl_trace::{AgentEvent, TraceDelta};
 
-const OPENAI_LIVE_ENV_KEY: &str = "API_KEY_OPENAI";
+const OPENAI_LIVE_ENV_KEY: &str = "OPENAI_API_KEY";
 const OPENAI_LIVE_BASE_URL_ENV_KEY: &str = "API_BASE_OPENAI";
 const OPENAI_LIVE_MODEL_ENV_KEY: &str = "API_MODEL_OPENAI";
 
@@ -18,14 +20,11 @@ struct TraceDeltaCounts {
     thinking: usize,
 }
 
-fn live_api_key() -> Option<String> {
-    match std::env::var(OPENAI_LIVE_ENV_KEY) {
-        Ok(value) if !value.trim().is_empty() => Some(value),
-        _ => {
-            eprintln!("{OPENAI_LIVE_ENV_KEY} is not set; skipping live OpenAI API test");
-            None
-        }
-    }
+fn live_api_key() -> String {
+    std::env::var(OPENAI_LIVE_ENV_KEY)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .expect("explicit live acceptance requires OPENAI_API_KEY")
 }
 
 fn user_message(content: &str) -> Message {
@@ -90,9 +89,7 @@ async fn collect_trace_delta_counts(
 
 #[tokio::test]
 async fn openai_responses_smoke() {
-    let Some(api_key) = live_api_key() else {
-        return;
-    };
+    let api_key = live_api_key();
 
     let base_url = std::env::var(OPENAI_LIVE_BASE_URL_ENV_KEY)
         .ok()
@@ -110,22 +107,19 @@ async fn openai_responses_smoke() {
         "openai-live-session",
         0,
     ));
-    let context = ModelInvocationContext::new(ModelSession::default(), event_tx).with_trace(
-        CompletionTraceContext {
-            session_id: "openai-live-session".to_string(),
-            turn_id: "openai-live-turn".to_string(),
-            inference_id: "openai-live-inference".to_string(),
-        },
-        trace_sink,
-    );
+    let context = ModelInvocationContext::new(ModelSession::default())
+        .with_events(event_tx)
+        .with_trace(
+            CompletionTraceContext {
+                session_id: "openai-live-session".to_string(),
+                turn_id: "openai-live-turn".to_string(),
+                inference_id: "openai-live-inference".to_string(),
+            },
+            trace_sink,
+        );
 
     let response = match runtime.complete(openai_request(), context).await {
         Ok(response) => response,
-        Err(error) if is_live_auth_or_quota_error(&error.to_string()) => {
-            eprintln!("skipping live OpenAI API test: {error}");
-            let _ = counter.await;
-            return;
-        }
         Err(error) => panic!("live OpenAI API request failed: {error}"),
     };
     let counts = counter.await.unwrap();
@@ -136,14 +130,6 @@ async fn openai_responses_smoke() {
         !content.contains("<final>"),
         "OpenAI Responses native phase output should not require visible tags: {content:?}"
     );
-    assert!(response.usage.total_tokens > 0);
+    assert!(response.accounting.usage.totals().total_tokens > 0);
     assert!(counts.text > 0, "OpenAI stream should emit text deltas");
-}
-
-fn is_live_auth_or_quota_error(error: &str) -> bool {
-    error.contains("401")
-        || error.contains("403")
-        || error.contains("429")
-        || error.contains("invalid_api_key")
-        || error.contains("insufficient_quota")
 }

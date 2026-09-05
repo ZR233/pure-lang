@@ -26,6 +26,21 @@ class ModelInputCapabilityView {
   bool supportsSource(ModelInputSourceView source) => sources.contains(source);
 }
 
+class ProviderPriceTierView {
+  const ProviderPriceTierView({
+    required this.label,
+    required this.input,
+    required this.output,
+    this.cacheRead,
+    this.cacheWrite,
+  });
+  final String label;
+  final double input;
+  final double output;
+  final double? cacheRead;
+  final double? cacheWrite;
+}
+
 class ProviderModelView {
   const ProviderModelView({
     required this.slug,
@@ -41,10 +56,7 @@ class ProviderModelView {
     this.reasoningLabel = '',
     this.defaultReasoningEffort = '',
     this.currency = '',
-    this.inputPricePerMTok,
-    this.outputPricePerMTok,
-    this.cacheReadPricePerMTok,
-    this.cacheWritePricePerMTok,
+    this.priceTiers = const [],
     this.baseInstructions = '',
     this.wireProtocol = 'chat_completions',
     this.supportedConnectionModes = const ['http'],
@@ -65,10 +77,7 @@ class ProviderModelView {
   final String reasoningLabel;
   final String defaultReasoningEffort;
   final String currency;
-  final double? inputPricePerMTok;
-  final double? outputPricePerMTok;
-  final double? cacheReadPricePerMTok;
-  final double? cacheWritePricePerMTok;
+  final List<ProviderPriceTierView> priceTiers;
   final String baseInstructions;
   final String wireProtocol;
   final List<String> supportedConnectionModes;
@@ -89,10 +98,7 @@ class ProviderModelView {
     String? reasoningLabel,
     String? defaultReasoningEffort,
     String? currency,
-    double? inputPricePerMTok,
-    double? outputPricePerMTok,
-    double? cacheReadPricePerMTok,
-    double? cacheWritePricePerMTok,
+    List<ProviderPriceTierView>? priceTiers,
     String? baseInstructions,
     String? wireProtocol,
     List<String>? supportedConnectionModes,
@@ -114,12 +120,7 @@ class ProviderModelView {
       defaultReasoningEffort:
           defaultReasoningEffort ?? this.defaultReasoningEffort,
       currency: currency ?? this.currency,
-      inputPricePerMTok: inputPricePerMTok ?? this.inputPricePerMTok,
-      outputPricePerMTok: outputPricePerMTok ?? this.outputPricePerMTok,
-      cacheReadPricePerMTok:
-          cacheReadPricePerMTok ?? this.cacheReadPricePerMTok,
-      cacheWritePricePerMTok:
-          cacheWritePricePerMTok ?? this.cacheWritePricePerMTok,
+      priceTiers: priceTiers ?? this.priceTiers,
       baseInstructions: baseInstructions ?? this.baseInstructions,
       wireProtocol: wireProtocol ?? this.wireProtocol,
       supportedConnectionModes:
@@ -133,6 +134,7 @@ class ProviderModelView {
 
 class ProviderSettingsView {
   const ProviderSettingsView({
+    this.pricingEnabled = false,
     required this.id,
     this.templateKind = '',
     required this.name,
@@ -140,6 +142,7 @@ class ProviderSettingsView {
     required this.baseUrl,
     this.bearerToken = '',
     this.hasBearerToken = false,
+    this.credentialRequired = true,
     required this.defaultModel,
     required this.models,
     this.defaultModels = const [],
@@ -161,6 +164,7 @@ class ProviderSettingsView {
     this.iconKey,
   });
 
+  final bool pricingEnabled;
   final String id;
   final String templateKind;
   final String name;
@@ -168,6 +172,7 @@ class ProviderSettingsView {
   final String baseUrl;
   final String bearerToken;
   final bool hasBearerToken;
+  final bool credentialRequired;
   final String defaultModel;
   final List<ProviderModelView> models;
   final List<ProviderModelView> defaultModels;
@@ -207,6 +212,7 @@ class ProviderSettingsView {
   }
 
   ProviderSettingsView copyWith({
+    bool? pricingEnabled,
     String? id,
     String? templateKind,
     String? name,
@@ -214,6 +220,7 @@ class ProviderSettingsView {
     String? baseUrl,
     String? bearerToken,
     bool? hasBearerToken,
+    bool? credentialRequired,
     String? defaultModel,
     List<ProviderModelView>? models,
     List<ProviderModelView>? defaultModels,
@@ -235,6 +242,7 @@ class ProviderSettingsView {
     Object? iconKey = _providerSettingsUnset,
   }) {
     return ProviderSettingsView(
+      pricingEnabled: pricingEnabled ?? this.pricingEnabled,
       id: id ?? this.id,
       templateKind: templateKind ?? this.templateKind,
       name: name ?? this.name,
@@ -242,6 +250,7 @@ class ProviderSettingsView {
       baseUrl: baseUrl ?? this.baseUrl,
       bearerToken: bearerToken ?? this.bearerToken,
       hasBearerToken: hasBearerToken ?? this.hasBearerToken,
+      credentialRequired: credentialRequired ?? this.credentialRequired,
       defaultModel: defaultModel ?? this.defaultModel,
       models: models ?? this.models,
       defaultModels: defaultModels ?? this.defaultModels,
@@ -305,6 +314,7 @@ class ProviderCatalogView {
 
 class ProviderPresetView {
   const ProviderPresetView({
+    this.pricingEnabled = true,
     required this.id,
     required this.displayName,
     required this.description,
@@ -321,6 +331,7 @@ class ProviderPresetView {
     this.iconKey,
   });
 
+  final bool pricingEnabled;
   final String id;
   final String displayName;
   final String description;
@@ -341,6 +352,7 @@ class ProviderPresetView {
     List<ProviderModelView> models,
   ) {
     return ProviderSettingsView(
+      pricingEnabled: pricingEnabled,
       id: providerId,
       templateKind: id,
       name: displayName,
@@ -352,7 +364,8 @@ class ProviderPresetView {
       models: models,
       defaultModels: models,
       customModels: const [],
-      status: 'missingCredential',
+      status: credentialEnv.isEmpty ? 'ready' : 'missingCredential',
+      credentialRequired: credentialEnv.isNotEmpty,
       usageLabel: '${models.length} models',
       modelCount: '${models.length}',
       updatedAt: 'Draft',

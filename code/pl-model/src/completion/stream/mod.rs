@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use futures::StreamExt;
 
-use pl_protocol::{PureError, Result};
+use pl_protocol::PureError;
 use pl_trace::{AgentEventSender, TraceEventSink};
 
 use crate::completion::CompletionTraceContext;
@@ -41,7 +41,8 @@ pub(crate) struct StreamCollectContext<'a> {
 pub(crate) async fn collect_completion_event_stream(
     stream: CompletionEventStream,
     context: StreamCollectContext<'_>,
-) -> Result<crate::completion::CompletionResponse> {
+) -> std::result::Result<crate::completion::CompletionResponse, crate::completion::CompletionFailure>
+{
     collect_completion_event_stream_with_idle_timeout(
         stream,
         context,
@@ -54,7 +55,8 @@ pub(crate) async fn collect_completion_event_stream_with_idle_timeout(
     mut stream: CompletionEventStream,
     context: StreamCollectContext<'_>,
     idle_timeout: Duration,
-) -> Result<crate::completion::CompletionResponse> {
+) -> std::result::Result<crate::completion::CompletionResponse, crate::completion::CompletionFailure>
+{
     let StreamCollectContext {
         event_tx,
         trace,
@@ -71,7 +73,7 @@ pub(crate) async fn collect_completion_event_stream_with_idle_timeout(
                     event = next_event => event,
                     _ = token.cancelled() => {
                         accumulator.cancel_attempt("model invocation cancelled", event_tx);
-                        return Err(PureError::LlmError("model invocation cancelled".to_string()));
+                        return Err(crate::completion::CompletionFailure { source: PureError::LlmError("model invocation cancelled".to_string()), accounting: Box::new(accumulator.accounting()) });
                     }
                 }
             }
@@ -85,23 +87,38 @@ pub(crate) async fn collect_completion_event_stream_with_idle_timeout(
                     "stream error: idle timeout waiting for provider event",
                 );
                 accumulator.fail_attempt(&error, event_tx);
-                return Err(error);
+                return Err(crate::completion::CompletionFailure {
+                    source: error,
+                    accounting: Box::new(accumulator.accounting()),
+                });
             }
         };
         let event = match event {
             Ok(event) => event,
             Err(error) => {
                 accumulator.fail_attempt(&error, event_tx);
-                return Err(error);
+                return Err(crate::completion::CompletionFailure {
+                    source: error,
+                    accounting: Box::new(accumulator.accounting()),
+                });
             }
         };
         if let Err(error) = accumulator.apply(event, event_tx) {
             accumulator.fail_attempt(&error, event_tx);
-            return Err(error);
+            return Err(crate::completion::CompletionFailure {
+                source: error,
+                accounting: Box::new(accumulator.accounting()),
+            });
         }
     }
 
-    accumulator.finish(event_tx)
+    let accounting = accumulator.accounting();
+    accumulator
+        .finish(event_tx)
+        .map_err(|source| crate::completion::CompletionFailure {
+            source,
+            accounting: Box::new(accounting),
+        })
 }
 
 #[cfg(test)]

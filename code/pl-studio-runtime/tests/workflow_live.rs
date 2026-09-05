@@ -4,6 +4,7 @@
 //! Studio home 和没有 `.git` 的临时项目，验证内置 Thread Mode Prompt、通用交互、工作流终态
 //! 以及关机后重新打开 Thread 的持久化事实。
 
+use pl_protocol::TurnState;
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::Path;
@@ -16,8 +17,7 @@ use pl_protocol::{
 };
 use pl_studio_runtime::{
     ConfigPaths, ConfigStore, STUDIO_CONFIG_SCHEMA_VERSION, StudioConfig, StudioHostKind,
-    StudioRuntime, StudioRuntimeOptions, StudioSubmitPromptOptions, StudioSubmitPromptRequest,
-    ThreadModeId, TurnState,
+    StudioRuntime, StudioRuntimeOptions, ThreadModeId,
 };
 
 const LIVE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
@@ -70,9 +70,8 @@ fn normalize_installed_config(source: &ConfigStore, destination: &Path) -> Resul
         .and_then(toml::Value::as_integer)
         .context("installed Studio config has no integer schema_version")?;
     ensure!(
-        schema_version == i64::from(STUDIO_CONFIG_SCHEMA_VERSION)
-            || schema_version.checked_add(1) == Some(i64::from(STUDIO_CONFIG_SCHEMA_VERSION)),
-        "installed config schema is {schema_version}, expected {} or the previous version",
+        schema_version == i64::from(STUDIO_CONFIG_SCHEMA_VERSION),
+        "installed config schema is {schema_version}, expected {}",
         STUDIO_CONFIG_SCHEMA_VERSION
     );
     table.insert(
@@ -128,14 +127,15 @@ async fn run_live_mode(
         .set_thread_mode(&thread.id, ThreadModeId::new(mode_id)?)
         .await?;
     let submitted = runtime
-        .submit_prompt(StudioSubmitPromptRequest {
-            thread_id: thread.id.clone(),
-            input: pl_protocol::studio::StudioPromptInput {
-                text: prompt.trim().to_string(),
-                attachment_draft_ids: Vec::new(),
+        .start_turn(
+            thread.id.clone(),
+            pl_protocol::studio::StartTurnRequest {
+                input: pl_protocol::studio::StudioPromptInput {
+                    text: prompt.trim().to_string(),
+                    attachment_draft_ids: Vec::new(),
+                },
             },
-            options: StudioSubmitPromptOptions::default(),
-        })
+        )
         .await?;
 
     if mode_id == "mode.task" {

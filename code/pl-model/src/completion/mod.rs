@@ -21,9 +21,10 @@ mod web_search;
 
 pub use compaction::*;
 pub use pl_protocol::{
-    AttachmentModality, ContentPart, InferenceOrchestrationMetrics, InferenceTiming, Message,
-    MessageContent, MessageRole, ModelContextItem, PureError, ResponsesContextItem, Result,
-    TokenUsage, ToolCallCaller, ToolCallKind, ToolSpec, WebSearchContextSize, WebSearchFilters,
+    AttachmentModality, ContentPart, HostedWebSearchOptions, InferenceAccounting,
+    InferenceOrchestrationMetrics, InferenceTiming, InferenceTokenUsage, Message, MessageContent,
+    MessageRole, ModelContextItem, PureError, ResponsesContextItem, Result, ToolCallCaller,
+    ToolCallKind, ToolSpec, UsageReport, WebSearchContextSize, WebSearchFilters,
     WebSearchUserLocation,
 };
 pub use request::*;

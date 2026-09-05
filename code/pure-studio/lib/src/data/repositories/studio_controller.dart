@@ -924,7 +924,7 @@ class StudioController extends _$StudioController {
       roleKey: roleKey,
       providerId: providerId,
       model: model,
-      effort: effort ?? defaultEffortForModel(current, providerId, model),
+      effort: effort ?? target?.reasoningEfforts.firstOrNull,
     );
     final latest = state.value;
     if (latest != null) state = AsyncData(applySettingsState(latest, next));

@@ -1031,6 +1031,13 @@ class DemoStudioApi implements StudioApi {
   }) async {
     _checkSettingsRevision(expectedSettingsRevision);
     final current = await readStudioState();
+    final selected = current.providers
+        .firstWhere((provider) => provider.id == providerId)
+        .allModels
+        .firstWhere((candidate) => candidate.slug == model);
+    final selectedEffort = selected.reasoningEfforts.contains(effort)
+        ? effort
+        : selected.reasoningEfforts.firstOrNull;
     _roles = [
       for (final role in current.roles)
         role.key == roleKey
@@ -1038,7 +1045,7 @@ class DemoStudioApi implements StudioApi {
                 key: role.key,
                 providerId: providerId,
                 model: model,
-                effort: effort ?? role.effort,
+                effort: selectedEffort ?? '',
               )
             : role,
     ];
@@ -1206,6 +1213,19 @@ class DemoStudioApi implements StudioApi {
     }
     final workspace = _workspaces[threadId];
     if (workspace == null) throw StateError('unknown demo thread $threadId');
+    final settings = await readStudioState();
+    final route = settings.roles
+        .where((role) => role.key == workspace.thread.role)
+        .firstOrNull;
+    if (route != null) {
+      _emitThreadUpdate(
+        threadId,
+        ThreadRuntimeUpdate(
+          runtime: workspace.runtime.copyWith(model: route.model),
+          todo: null,
+        ),
+      );
+    }
     final generation = _promptGenerations.update(
       threadId,
       (value) => value + 1,

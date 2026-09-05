@@ -1,18 +1,20 @@
 use std::collections::HashMap;
 
-use pl_model::{
-    CompletionRequest, CompletionTraceContext, ModelInvocationContext, ModelRuntime, ModelSession,
-    ProviderEndpoint, ReasoningConfig, ReasoningSummary, deepseek_default_model_slugs,
-    default_models,
+use pl_model::completion::{
+    CompletionRequest, CompletionTraceContext, ReasoningConfig, ReasoningSummary,
 };
+use pl_model::model::{deepseek_default_model_slugs, default_models};
+use pl_model::provider::ProviderEndpoint;
+use pl_model::runtime::{ModelInvocationContext, ModelRuntime, ModelSession};
+
 use pl_protocol::{
-    HostedWebSearchDialect, Message, MessageContent, MessageRole, ModelContextItem,
-    ResponsesContextItem, ResponsesContextItemKind, ToolSpec,
+    Message, MessageContent, MessageRole, ModelContextItem, ResponsesContextItem,
+    ResponsesContextItemKind, ToolSpec,
 };
 use pl_trace::{AgentEvent, TraceDelta, TraceEvent, TraceEventKind};
 use tokio::sync::broadcast::error::RecvError;
 
-const DEEPSEEK_LIVE_ENV_KEY: &str = "API_KEY_DEEPSEEK";
+const DEEPSEEK_LIVE_ENV_KEY: &str = "DEEPSEEK_API_KEY";
 
 fn user_message(content: &str) -> Message {
     Message {
@@ -38,14 +40,11 @@ fn assistant_message(content: String, reasoning_content: String) -> Message {
     }
 }
 
-fn live_api_key() -> Option<String> {
-    match std::env::var(DEEPSEEK_LIVE_ENV_KEY) {
-        Ok(value) if !value.trim().is_empty() => Some(value),
-        _ => {
-            eprintln!("{DEEPSEEK_LIVE_ENV_KEY} is not set; skipping live DeepSeek API test");
-            None
-        }
-    }
+fn live_api_key() -> String {
+    std::env::var(DEEPSEEK_LIVE_ENV_KEY)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .expect("explicit live acceptance requires DEEPSEEK_API_KEY")
 }
 
 fn deepseek_request(messages: Vec<Message>) -> CompletionRequest {
@@ -105,14 +104,16 @@ async fn run_request(api_key: &str, request: CompletionRequest, turn_id: &str) -
     });
 
     let trace_sink = std::sync::Arc::new(pl_trace::InMemoryTraceEventSink::new("live-session", 0));
-    let context = ModelInvocationContext::new(ModelSession::default(), event_tx).with_trace(
-        CompletionTraceContext {
-            session_id: "live-session".to_string(),
-            turn_id: turn_id.to_string(),
-            inference_id: format!("{turn_id}-inference"),
-        },
-        trace_sink.clone(),
-    );
+    let context = ModelInvocationContext::new(ModelSession::default())
+        .with_events(event_tx)
+        .with_trace(
+            CompletionTraceContext {
+                session_id: "live-session".to_string(),
+                turn_id: turn_id.to_string(),
+                inference_id: format!("{turn_id}-inference"),
+            },
+            trace_sink.clone(),
+        );
     let response = runtime.complete(request, context).await.unwrap();
     let text_delta_count = event_counter.await.unwrap();
     TurnOutcome {
@@ -129,13 +130,7 @@ fn deepseek_web_search_request(input: Vec<ModelContextItem>) -> CompletionReques
         .instructions("需要最新信息时必须使用联网搜索；回答保持简短。")
         .input(input)
         .tools(vec![ToolSpec::WebSearch {
-            dialect: HostedWebSearchDialect::DeepSeekResponses,
-            external_web_access: true,
-            indexed_web_access: None,
-            filters: None,
-            user_location: None,
-            search_context_size: None,
-            search_content_types: None,
+            options: pl_protocol::HostedWebSearchOptions::DeepSeek,
         }])
         .max_tokens(2048)
         .build()
@@ -171,9 +166,7 @@ fn assert_sequences_strictly_increasing(events: &[TraceEvent]) {
 
 #[tokio::test]
 async fn deepseek_streams_multi_turn_with_thinking_mode() {
-    let Some(api_key) = live_api_key() else {
-        return;
-    };
+    let api_key = live_api_key();
 
     let first_messages = vec![user_message(
         "比较 9.11 和 9.8 哪个更大，只给结论和一句理由。",
@@ -222,9 +215,7 @@ async fn deepseek_streams_multi_turn_with_thinking_mode() {
 
 #[tokio::test]
 async fn deepseek_native_web_search_can_replay_opaque_context_next_turn() {
-    let Some(api_key) = live_api_key() else {
-        return;
-    };
+    let api_key = live_api_key();
 
     let question = user_message(
         "联网搜索 DeepSeek Responses API 当前支持的 web_search 工具，并用一句话回答。",

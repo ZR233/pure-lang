@@ -83,10 +83,11 @@ mod tests {
 
     fn test_turn_engine() -> TurnEngine {
         TurnEngineBuilder::from_route(&crate::ResolvedModelRoute {
+            pricing_mode: pl_protocol::PricingMode::Catalog,
             role: crate::AgentRoleId::new("test").unwrap(),
             provider_id: crate::ProviderId::new("test").unwrap(),
             endpoint: pl_model::provider::ProviderEndpoint::deepseek(None),
-            model: pl_model::model::ModelInfo::fallback("deepseek-v4-flash"),
+            model: pl_model::model::ModelInfo::compatible("deepseek-v4-flash"),
             effort: None,
         })
         .unwrap()
@@ -793,7 +794,7 @@ mod tests {
             .with_workspace_instructions("rules");
         let mut core = test_turn_engine_builder(
             pl_model::provider::ProviderEndpoint::deepseek(None),
-            pl_model::model::ModelInfo::fallback("deepseek-v4-flash"),
+            pl_model::model::ModelInfo::compatible("deepseek-v4-flash"),
         )
         .with_runtime_profile(runtime)
         .build();
@@ -830,7 +831,7 @@ mod tests {
             .with_workspace_instructions("rules");
         let mut core = test_turn_engine_builder(
             pl_model::provider::ProviderEndpoint::deepseek(None),
-            pl_model::model::ModelInfo::fallback("deepseek-v4-flash"),
+            pl_model::model::ModelInfo::compatible("deepseek-v4-flash"),
         )
         .with_runtime_profile(runtime)
         .build();
@@ -905,6 +906,7 @@ pub(crate) mod test_support {
         model: ModelInfo,
     ) -> crate::ResolvedModelRoute {
         crate::ResolvedModelRoute {
+            pricing_mode: pl_protocol::PricingMode::Catalog,
             role: crate::AgentRoleId::new("test").unwrap(),
             provider_id: crate::ProviderId::new("test").unwrap(),
             endpoint,
@@ -923,7 +925,7 @@ pub(crate) mod test_support {
     pub(crate) fn test_turn_engine() -> TurnEngine {
         test_turn_engine_builder(
             ProviderEndpoint::deepseek(None),
-            ModelInfo::fallback("deepseek-v4-flash"),
+            ModelInfo::compatible("deepseek-v4-flash"),
         )
         .build()
     }
