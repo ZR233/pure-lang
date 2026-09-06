@@ -1420,6 +1420,7 @@ void registerShellSettingsTests() {
       authKind: SshAuthKind.agentOrKey,
     );
     final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
+    api.selectProjectStates['remote-project'] = _remoteProjectAdoptedState();
     await _pumpSettingsPage(tester, api);
 
     await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
@@ -1488,6 +1489,408 @@ void registerShellSettingsTests() {
     expect(api.savedSshServer?.username, 'zhourui');
     expect(api.savedSshServer?.port, 22);
     expect(find.text('zhourui@10.3.10.9:22'), findsOneWidget);
+  });
+
+  testWidgets(
+    'SSH directory dialog syncs a manual absolute path and opens it',
+    (tester) async {
+      _configureSettingsTestView(tester);
+      const server = SshServer(
+        id: 'ssh-arm',
+        name: 'ARM dev',
+        host: '192.168.100.12',
+        port: 22,
+        username: 'root',
+        authKind: SshAuthKind.agentOrKey,
+      );
+      final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
+      api.selectProjectStates['remote-project'] = _remoteProjectAdoptedState(
+        path: '/workspace/project',
+      );
+      await _pumpSettingsPage(tester, api);
+
+      await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.id)));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(StudioDriverKeys.sshDirectoryPathInput),
+        findsOneWidget,
+      );
+      expect(_dialogText('root@192.168.100.12:22'), findsOneWidget);
+
+      await tester.enterText(
+        find.byKey(StudioDriverKeys.sshDirectoryPathInput),
+        '/workspace/project',
+      );
+      await tester.tap(find.byKey(StudioDriverKeys.sshDirectoryGo));
+      await tester.pumpAndSettle();
+
+      expect(api.browsedRemoteDirectory, (
+        serverId: server.id,
+        path: '/workspace/project',
+      ));
+      expect(
+        find.byKey(StudioDriverKeys.sshDirectoryCurrent('/workspace/project')),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.text('Open this directory'));
+      await tester.pumpAndSettle();
+      expect(api.openedRemoteProject, (
+        serverId: server.id,
+        path: '/workspace/project',
+      ));
+    },
+  );
+
+  testWidgets('SSH directory dialog treats Enter like the Go button', (
+    tester,
+  ) async {
+    _configureSettingsTestView(tester);
+    const server = SshServer(
+      id: 'ssh-arm',
+      name: 'ARM dev',
+      host: '192.168.100.12',
+      port: 22,
+      username: 'root',
+      authKind: SshAuthKind.agentOrKey,
+    );
+    final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
+    await _pumpSettingsPage(tester, api);
+
+    await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.id)));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(StudioDriverKeys.sshDirectoryPathInput),
+      '/workspace/project',
+    );
+    expect(
+      tester
+          .widget<TextField>(find.byKey(StudioDriverKeys.sshDirectoryPathInput))
+          .textInputAction,
+      TextInputAction.go,
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.go);
+    await tester.pumpAndSettle();
+
+    expect(api.browsedRemoteDirectory, (
+      serverId: server.id,
+      path: '/workspace/project',
+    ));
+  });
+
+  testWidgets(
+    'SSH directory dialog rejects invalid paths without calling the API',
+    (tester) async {
+      _configureSettingsTestView(tester);
+      const server = SshServer(
+        id: 'ssh-arm',
+        name: 'ARM dev',
+        host: '192.168.100.12',
+        port: 22,
+        username: 'root',
+        authKind: SshAuthKind.agentOrKey,
+      );
+      final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
+      await _pumpSettingsPage(tester, api);
+
+      await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.id)));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.byKey(StudioDriverKeys.sshDirectoryPathInput),
+        '',
+      );
+      await tester.tap(find.byKey(StudioDriverKeys.sshDirectoryGo));
+      await tester.pump();
+      expect(find.byKey(StudioDriverKeys.sshDirectoryError), findsOneWidget);
+      expect(find.text('Enter a remote directory path'), findsOneWidget);
+      expect(api.browsedRemoteDirectory, (serverId: server.id, path: null));
+
+      await tester.enterText(
+        find.byKey(StudioDriverKeys.sshDirectoryPathInput),
+        'relative/path',
+      );
+      await tester.tap(find.byKey(StudioDriverKeys.sshDirectoryGo));
+      await tester.pump();
+      expect(
+        find.text('Path must be an absolute POSIX path starting with /'),
+        findsOneWidget,
+      );
+      expect(api.browsedRemoteDirectory, (serverId: server.id, path: null));
+
+      for (final invalid in const [
+        '~',
+        'ssh://example.test/workspace',
+        'root@example.test:/workspace',
+      ]) {
+        await tester.enterText(
+          find.byKey(StudioDriverKeys.sshDirectoryPathInput),
+          invalid,
+        );
+        await tester.tap(find.byKey(StudioDriverKeys.sshDirectoryGo));
+        await tester.pump();
+        expect(
+          find.text('Path must be an absolute POSIX path starting with /'),
+          findsOneWidget,
+        );
+      }
+      expect(api.browseRemoteCallCount, 1);
+    },
+  );
+
+  testWidgets(
+    'SSH directory dialog disables open when input drifts from the loaded path',
+    (tester) async {
+      _configureSettingsTestView(tester);
+      const server = SshServer(
+        id: 'ssh-arm',
+        name: 'ARM dev',
+        host: '192.168.100.12',
+        port: 22,
+        username: 'root',
+        authKind: SshAuthKind.agentOrKey,
+      );
+      final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
+      await _pumpSettingsPage(tester, api);
+
+      await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.id)));
+      await tester.pumpAndSettle();
+
+      final openButton = find.byKey(StudioDriverKeys.sshOpenCurrentDirectory);
+      expect(tester.widget<FilledButton>(openButton).onPressed, isNotNull);
+
+      await tester.enterText(
+        find.byKey(StudioDriverKeys.sshDirectoryPathInput),
+        '/other',
+      );
+      await tester.pump();
+      expect(tester.widget<FilledButton>(openButton).onPressed, isNull);
+    },
+  );
+
+  testWidgets(
+    'SSH directory dialog navigates into a subdirectory and back up',
+    (tester) async {
+      _configureSettingsTestView(tester);
+      const server = SshServer(
+        id: 'ssh-arm',
+        name: 'ARM dev',
+        host: '192.168.100.12',
+        port: 22,
+        username: 'root',
+        authKind: SshAuthKind.agentOrKey,
+      );
+      final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
+      api.remoteDirListings['/workspace'] = const RemoteDirectoryListing(
+        path: '/workspace',
+        parent: '/',
+        entries: [
+          RemoteDirectoryEntry(name: 'project', path: '/workspace/project'),
+        ],
+      );
+      api.remoteDirListings['/workspace/project'] =
+          const RemoteDirectoryListing(
+            path: '/workspace/project',
+            parent: '/workspace',
+            entries: [
+              RemoteDirectoryEntry(name: 'src', path: '/workspace/project/src'),
+            ],
+          );
+      await _pumpSettingsPage(tester, api);
+
+      await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.id)));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(StudioDriverKeys.sshDirectoryCurrent('/workspace')),
+        findsOneWidget,
+      );
+
+      await tester.tap(
+        find.byKey(StudioDriverKeys.sshDirectoryEntry('/workspace/project')),
+      );
+      await tester.pumpAndSettle();
+      expect(api.browsedRemoteDirectory, (
+        serverId: server.id,
+        path: '/workspace/project',
+      ));
+      expect(
+        find.byKey(StudioDriverKeys.sshDirectoryCurrent('/workspace/project')),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byKey(StudioDriverKeys.sshDirectoryUp));
+      await tester.pumpAndSettle();
+      expect(api.browsedRemoteDirectory, (
+        serverId: server.id,
+        path: '/workspace',
+      ));
+      expect(
+        find.byKey(StudioDriverKeys.sshDirectoryCurrent('/workspace')),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets('SSH directory dialog shows a localized empty state', (
+    tester,
+  ) async {
+    _configureSettingsTestView(tester);
+    const server = SshServer(
+      id: 'ssh-arm',
+      name: 'ARM dev',
+      host: '192.168.100.12',
+      port: 22,
+      username: 'root',
+      authKind: SshAuthKind.agentOrKey,
+    );
+    final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
+    api.remoteDirListings['/workspace'] = const RemoteDirectoryListing(
+      path: '/workspace',
+      parent: '/',
+      entries: [],
+    );
+    await _pumpSettingsPage(tester, api);
+
+    await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.id)));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(StudioDriverKeys.sshDirectoryEmpty), findsOneWidget);
+    expect(find.text('This directory is empty'), findsOneWidget);
+    expect(
+      find.text('No subdirectories here — you can still open this directory.'),
+      findsOneWidget,
+    );
+    final openButton = tester.widget<FilledButton>(
+      find.byKey(StudioDriverKeys.sshOpenCurrentDirectory),
+    );
+    expect(openButton.onPressed, isNotNull);
+  });
+
+  testWidgets('SSH directory dialog recovers from a browse failure', (
+    tester,
+  ) async {
+    _configureSettingsTestView(tester);
+    const server = SshServer(
+      id: 'ssh-arm',
+      name: 'ARM dev',
+      host: '192.168.100.12',
+      port: 22,
+      username: 'root',
+      authKind: SshAuthKind.agentOrKey,
+    );
+    final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
+    api.browseRemoteError = StateError('unreachable');
+    await _pumpSettingsPage(tester, api);
+
+    await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.id)));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(StudioDriverKeys.sshDirectoryError), findsOneWidget);
+    expect(find.byKey(StudioDriverKeys.sshDirectoryDialog), findsOneWidget);
+
+    api.browseRemoteError = null;
+    await tester.enterText(
+      find.byKey(StudioDriverKeys.sshDirectoryPathInput),
+      '/workspace',
+    );
+    await tester.tap(find.byKey(StudioDriverKeys.sshDirectoryGo));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(StudioDriverKeys.sshDirectoryError), findsNothing);
+    expect(find.byKey(StudioDriverKeys.sshDirectoryList), findsOneWidget);
+    expect(api.browsedRemoteDirectory, (
+      serverId: server.id,
+      path: '/workspace',
+    ));
+
+    // 已有 listing 后再次浏览同一路径失败时，旧结果不能绕过 canonical
+    // 校验重新启用 Open；修正连接后仍可在原上下文重试。
+    api.browseRemoteError = StateError('temporary browse failure');
+    await tester.tap(find.byKey(StudioDriverKeys.sshDirectoryGo));
+    await tester.pumpAndSettle();
+    expect(find.byKey(StudioDriverKeys.sshDirectoryError), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.byKey(StudioDriverKeys.sshOpenCurrentDirectory),
+          )
+          .onPressed,
+      isNull,
+    );
+
+    api.browseRemoteError = null;
+    await tester.tap(find.byKey(StudioDriverKeys.sshDirectoryGo));
+    await tester.pumpAndSettle();
+    expect(find.byKey(StudioDriverKeys.sshDirectoryError), findsNothing);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.byKey(StudioDriverKeys.sshOpenCurrentDirectory),
+          )
+          .onPressed,
+      isNotNull,
+    );
+  });
+
+  testWidgets('SSH directory dialog keeps the window on open failure', (
+    tester,
+  ) async {
+    _configureSettingsTestView(tester);
+    const server = SshServer(
+      id: 'ssh-arm',
+      name: 'ARM dev',
+      host: '192.168.100.12',
+      port: 22,
+      username: 'root',
+      authKind: SshAuthKind.agentOrKey,
+    );
+    final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
+    api.openRemoteProjectError = StateError('remote open failed');
+    await _pumpSettingsPage(tester, api);
+
+    await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.id)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Open this directory'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(StudioDriverKeys.sshDirectoryDialog), findsOneWidget);
+    expect(find.byKey(StudioDriverKeys.sshDirectoryError), findsOneWidget);
+    expect(api.openedRemoteProject, (serverId: server.id, path: '/workspace'));
+    final pathController = tester
+        .widget<TextField>(find.byKey(StudioDriverKeys.sshDirectoryPathInput))
+        .controller;
+    expect(
+      pathController,
+      isNotNull,
+      reason: 'The SSH directory path field must expose its input controller.',
+    );
+    expect(pathController!.text, '/workspace');
+
+    api.openRemoteProjectError = null;
+    api.selectProjectStates['remote-project'] = _remoteProjectAdoptedState();
+    await tester.tap(find.text('Open this directory'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(StudioDriverKeys.sshDirectoryDialog), findsNothing);
   });
 
   testWidgets('MCP runtime errors stay scoped to the unavailable server', (
@@ -3482,6 +3885,483 @@ void registerShellSettingsTests() {
       expect(find.textContaining('变更文件'), findsNothing);
     },
   );
+
+  testWidgets(
+    'SSH directory dialog serializes browse so a repeated trigger is dropped',
+    (tester) async {
+      _configureSettingsTestView(tester);
+      const server = SshServer(
+        id: 'ssh-arm',
+        name: 'ARM dev',
+        host: '192.168.100.12',
+        port: 22,
+        username: 'root',
+        authKind: SshAuthKind.agentOrKey,
+      );
+      final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
+      api.remoteDirListings['/workspace'] = const RemoteDirectoryListing(
+        path: '/workspace',
+        parent: '/',
+        entries: [
+          RemoteDirectoryEntry(name: 'project', path: '/workspace/project'),
+        ],
+      );
+      await _pumpSettingsPage(tester, api);
+      await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.id)));
+      await tester.pumpAndSettle();
+      expect(api.browseRemoteCallCount, 1);
+
+      final gate = Completer<void>();
+      api.blockedBrowseRemote = gate;
+      await tester.enterText(
+        find.byKey(StudioDriverKeys.sshDirectoryPathInput),
+        '/workspace/project',
+      );
+      await tester.tap(find.byKey(StudioDriverKeys.sshDirectoryGo));
+      await tester.pump();
+      await tester.tap(find.byKey(StudioDriverKeys.sshDirectoryGo));
+      await tester.pump();
+
+      // 同一 pending 期间第二次触发被入口 guard 拒绝，仅一次浏览。
+      expect(api.browseRemoteCallCount, 2);
+
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(api.browseRemoteCallCount, 2);
+      expect(
+        find.byKey(StudioDriverKeys.sshDirectoryCurrent('/workspace/project')),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'SSH directory dialog adopts the canonical path returned by the server',
+    (tester) async {
+      _configureSettingsTestView(tester);
+      const server = SshServer(
+        id: 'ssh-arm',
+        name: 'ARM dev',
+        host: '192.168.100.12',
+        port: 22,
+        username: 'root',
+        authKind: SshAuthKind.agentOrKey,
+      );
+      final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
+      api.selectProjectStates['remote-project'] = _remoteProjectAdoptedState(
+        path: '/workspace/project',
+      );
+      // 输入带尾斜杠，服务器返回 canonical 路径 `/workspace/project`。
+      api.remoteDirListings['/workspace/project/'] =
+          const RemoteDirectoryListing(
+            path: '/workspace/project',
+            parent: '/workspace',
+            entries: [],
+          );
+      await _pumpSettingsPage(tester, api);
+      await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.id)));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.byKey(StudioDriverKeys.sshDirectoryPathInput),
+        '/workspace/project/',
+      );
+      await tester.tap(find.byKey(StudioDriverKeys.sshDirectoryGo));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(StudioDriverKeys.sshDirectoryCurrent('/workspace/project')),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Open this directory'));
+      await tester.pumpAndSettle();
+      expect(api.openedRemoteProject, (
+        serverId: server.id,
+        path: '/workspace/project',
+      ));
+    },
+  );
+
+  testWidgets(
+    'SSH directory dialog keeps the window when the controller refuses silently',
+    (tester) async {
+      _configureSettingsTestView(tester);
+      const server = SshServer(
+        id: 'ssh-arm',
+        name: 'ARM dev',
+        host: '192.168.100.12',
+        port: 22,
+        username: 'root',
+        authKind: SshAuthKind.agentOrKey,
+      );
+      // 没有让 canonical 采用远端项目：controller 静默返回 false。
+      final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
+      await _pumpSettingsPage(tester, api);
+      await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.id)));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Open this directory'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(StudioDriverKeys.sshDirectoryDialog), findsOneWidget);
+      expect(find.byKey(StudioDriverKeys.sshDirectoryError), findsOneWidget);
+      expect(
+        find.text(
+          "Couldn't open this directory. Check the server and try again.",
+        ),
+        findsOneWidget,
+      );
+      expect(api.openRemoteProjectCallCount, 1);
+    },
+  );
+
+  testWidgets(
+    'SSH directory dialog closes only after the canonical state adopts the project',
+    (tester) async {
+      _configureSettingsTestView(tester);
+      const server = SshServer(
+        id: 'ssh-arm',
+        name: 'ARM dev',
+        host: '192.168.100.12',
+        port: 22,
+        username: 'root',
+        authKind: SshAuthKind.agentOrKey,
+      );
+      final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
+      api.selectProjectStates['remote-project'] = _remoteProjectAdoptedState();
+      await _pumpSettingsPage(tester, api);
+      await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.id)));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Open this directory'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(StudioDriverKeys.sshDirectoryDialog), findsNothing);
+      expect(api.openRemoteProjectCallCount, 1);
+      expect(api.openedRemoteProject, (
+        serverId: server.id,
+        path: '/workspace',
+      ));
+    },
+  );
+
+  testWidgets('SSH directory dialog blocks cancel and back while opening', (
+    tester,
+  ) async {
+    _configureSettingsTestView(tester);
+    const server = SshServer(
+      id: 'ssh-arm',
+      name: 'ARM dev',
+      host: '192.168.100.12',
+      port: 22,
+      username: 'root',
+      authKind: SshAuthKind.agentOrKey,
+    );
+    final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
+    api.selectProjectStates['remote-project'] = _remoteProjectAdoptedState();
+    final gate = Completer<void>();
+    api.blockedOpenRemoteProject = gate;
+    await _pumpSettingsPage(tester, api);
+    await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.id)));
+    await tester.pumpAndSettle();
+
+    // 正常态 Cancel 可关闭。
+    final cancelIdle = tester.widget<TextButton>(
+      find.widgetWithText(TextButton, 'Cancel'),
+    );
+    expect(cancelIdle.onPressed, isNotNull);
+
+    await tester.tap(find.text('Open this directory'));
+    // 同一 pending 期间重复触发被入口 guard 拒绝，仅执行一次打开。
+    await tester.tap(find.text('Open this directory'));
+    await tester.pump();
+
+    // opening pending：PopScope 关闭被门控，Cancel 被禁用。
+    // PopScope 是泛型组件，`find.byType(PopScope)` 按运行时类型等值匹配可能
+    // 因类型参数推断不同而落空；用 `is PopScope` 谓词定位更稳定。
+    final popScope = tester.widget<PopScope>(
+      find.byWidgetPredicate((widget) => widget is PopScope),
+    );
+    expect(popScope.canPop, isFalse);
+    expect(api.openRemoteProjectCallCount, 1);
+    final cancelPending = tester.widget<TextButton>(
+      find.widgetWithText(TextButton, 'Cancel'),
+    );
+    expect(cancelPending.onPressed, isNull);
+    await tester.binding.handlePopRoute();
+    await tester.pump();
+    expect(find.byKey(StudioDriverKeys.sshDirectoryDialog), findsOneWidget);
+
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(find.byKey(StudioDriverKeys.sshDirectoryDialog), findsNothing);
+    expect(api.openRemoteProjectCallCount, 1);
+  });
+
+  testWidgets(
+    'SSH directory dialog ignores a pre-open Cancel callback in the same frame as Open',
+    (tester) async {
+      _configureSettingsTestView(tester);
+      final api = await _openSshDirectoryDialog(tester, adoptProject: true);
+      final gate = Completer<void>();
+      api.blockedOpenRemoteProject = gate;
+
+      // 捕获 idle 态 Cancel 的 onPressed：重建前仍持有旧 closure。
+      final idleCancel = tester
+          .widget<TextButton>(find.widgetWithText(TextButton, 'Cancel'))
+          .onPressed!;
+
+      await tester.tap(find.text('Open this directory'));
+      // 同一帧（尚未 rebuild）直接调用旧 Cancel closure：`_cancel` 在执行瞬间
+      // 检查 `_opening`，绝不会关闭 pending 窗口。
+      idleCancel();
+      await tester.pump();
+
+      expect(find.byKey(StudioDriverKeys.sshDirectoryDialog), findsOneWidget);
+      expect(api.openRemoteProjectCallCount, 1);
+
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(find.byKey(StudioDriverKeys.sshDirectoryDialog), findsNothing);
+      expect(api.openRemoteProjectCallCount, 1);
+    },
+  );
+
+  testWidgets(
+    'SSH directory dialog blocks system back in the same frame as Open',
+    (tester) async {
+      _configureSettingsTestView(tester);
+      final api = await _openSshDirectoryDialog(tester, adoptProject: true);
+      final gate = Completer<void>();
+      api.blockedOpenRemoteProject = gate;
+
+      await tester.tap(find.text('Open this directory'));
+      // 不 pump 的同帧系统返回：canPop 恒为 false，pending 期间不会关闭。
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+
+      expect(find.byKey(StudioDriverKeys.sshDirectoryDialog), findsOneWidget);
+      expect(api.openRemoteProjectCallCount, 1);
+
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(find.byKey(StudioDriverKeys.sshDirectoryDialog), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'SSH directory dialog blocks ModalBarrier and Escape while opening',
+    (tester) async {
+      _configureSettingsTestView(tester);
+      final api = await _openSshDirectoryDialog(tester, adoptProject: true);
+      final gate = Completer<void>();
+      api.blockedOpenRemoteProject = gate;
+
+      await tester.tap(find.text('Open this directory'));
+      // 遮罩（对话框外的 barrier）与 Escape 都走 maybePop → PopScope guard。
+      await tester.tapAt(const Offset(10, 10));
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+
+      expect(find.byKey(StudioDriverKeys.sshDirectoryDialog), findsOneWidget);
+      expect(api.openRemoteProjectCallCount, 1);
+
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(find.byKey(StudioDriverKeys.sshDirectoryDialog), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'SSH directory dialog still closes via back, barrier, Escape, and Cancel when idle',
+    (tester) async {
+      _configureSettingsTestView(tester);
+      await _openSshDirectoryDialog(tester);
+
+      // Cancel（idle）关闭。
+      await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(StudioDriverKeys.sshDirectoryDialog), findsNothing);
+
+      // barrier 关闭。
+      await tester.tap(find.byKey(StudioDriverKeys.sshOpen('ssh-arm')));
+      await tester.pumpAndSettle();
+      await tester.tapAt(const Offset(10, 10));
+      await tester.pumpAndSettle();
+      expect(find.byKey(StudioDriverKeys.sshDirectoryDialog), findsNothing);
+
+      // Escape 关闭。
+      await tester.tap(find.byKey(StudioDriverKeys.sshOpen('ssh-arm')));
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.byKey(StudioDriverKeys.sshDirectoryDialog), findsNothing);
+
+      // 系统返回关闭。
+      await tester.tap(find.byKey(StudioDriverKeys.sshOpen('ssh-arm')));
+      await tester.pumpAndSettle();
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.byKey(StudioDriverKeys.sshDirectoryDialog), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'SSH directory dialog exposes a localized tooltip for the up icon',
+    (tester) async {
+      _configureSettingsTestView(tester);
+      const server = SshServer(
+        id: 'ssh-arm',
+        name: 'ARM dev',
+        host: '192.168.100.12',
+        port: 22,
+        username: 'root',
+        authKind: SshAuthKind.agentOrKey,
+      );
+      final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
+      await _pumpSettingsPage(tester, api);
+      await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.id)));
+      await tester.pumpAndSettle();
+
+      expect(find.byTooltip('Parent directory'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'SSH directory dialog stays usable at a narrow viewport with large text',
+    (tester) async {
+      tester.view.physicalSize = const Size(380, 640);
+      tester.view.devicePixelRatio = 1;
+      tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      const server = SshServer(
+        id: 'ssh-arm',
+        name: 'ARM dev',
+        host: '192.168.100.12',
+        port: 22,
+        username: 'root',
+        authKind: SshAuthKind.agentOrKey,
+      );
+      final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
+      api.selectProjectStates['remote-project'] = _remoteProjectAdoptedState(
+        path: '/workspace/project',
+      );
+      api.remoteDirListings['/workspace'] = const RemoteDirectoryListing(
+        path: '/workspace',
+        parent: '/',
+        entries: [
+          RemoteDirectoryEntry(name: 'project', path: '/workspace/project'),
+        ],
+      );
+      api.remoteDirListings['/workspace/project'] =
+          const RemoteDirectoryListing(
+            path: '/workspace/project',
+            parent: '/workspace',
+            entries: [
+              RemoteDirectoryEntry(name: 'src', path: '/workspace/project/src'),
+            ],
+          );
+      await _pumpSshTab(tester, api);
+      final open = find.byKey(StudioDriverKeys.sshOpen(server.id));
+      await _dragUntilBuilt(tester, open);
+      await tester.tap(open);
+      await tester.pumpAndSettle();
+
+      // 无布局溢出（RenderFlex overflow 会通过 takeException 暴露）。
+      expect(tester.takeException(), isNull);
+
+      final pathInput = find.byKey(StudioDriverKeys.sshDirectoryPathInput);
+      final go = find.byKey(StudioDriverKeys.sshDirectoryGo);
+      final up = find.byKey(StudioDriverKeys.sshDirectoryUp);
+      final openDir = find.byKey(StudioDriverKeys.sshOpenCurrentDirectory);
+      final cancel = find.widgetWithText(TextButton, 'Cancel');
+
+      // 内容可滚动：把 path/Go/Up 依次滚入视口，证明用户能到达并触发控件，
+      // 而不是仅“构建存在”。actions 固定在 Dialog 底部，始终可命中。
+      await tester.ensureVisible(pathInput);
+      await tester.pumpAndSettle();
+      expect(pathInput.hitTestable(), findsOneWidget);
+
+      // 几何断言：actions 不与 path 输入重叠（actions 顶边在 path 底边下方）。
+      final pathRect = tester.getRect(pathInput);
+      final openRect = tester.getRect(openDir);
+      final cancelRect = tester.getRect(cancel);
+      expect(openRect.top >= pathRect.bottom, isTrue);
+      expect(cancelRect.top >= pathRect.bottom, isTrue);
+
+      await tester.ensureVisible(go);
+      await tester.pumpAndSettle();
+      expect(go.hitTestable(), findsOneWidget);
+      await tester.ensureVisible(up);
+      await tester.pumpAndSettle();
+      expect(up.hitTestable(), findsOneWidget);
+      expect(openDir.hitTestable(), findsOneWidget);
+
+      // 实际输入 + Go：导航到子目录。
+      await tester.ensureVisible(pathInput);
+      await tester.enterText(pathInput, '/workspace/project');
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(go);
+      await tester.tap(go);
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(StudioDriverKeys.sshDirectoryCurrent('/workspace/project')),
+        findsOneWidget,
+      );
+      expect(api.browsedRemoteDirectory, (
+        serverId: server.id,
+        path: '/workspace/project',
+      ));
+
+      // Up：回到父目录。
+      await tester.ensureVisible(up);
+      await tester.tap(up);
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(StudioDriverKeys.sshDirectoryCurrent('/workspace')),
+        findsOneWidget,
+      );
+
+      // 再次进入子目录后 Open 成功并关闭对话框。
+      await tester.ensureVisible(pathInput);
+      await tester.enterText(pathInput, '/workspace/project');
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(go);
+      await tester.tap(go);
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(openDir);
+      expect(
+        tester.widget<FilledButton>(openDir).onPressed,
+        isNotNull,
+        reason: 'A canonical remote directory must enable the Open action.',
+      );
+      expect(openDir.hitTestable(), findsOneWidget);
+      expect(api.openRemoteProjectCallCount, 0);
+      await tester.tap(openDir);
+      await tester.pumpAndSettle();
+      expect(api.openRemoteProjectCallCount, 1);
+      expect(find.byKey(StudioDriverKeys.sshDirectoryDialog), findsNothing);
+      expect(api.openedRemoteProject, (
+        serverId: server.id,
+        path: '/workspace/project',
+      ));
+      expect(tester.takeException(), isNull);
+    },
+  );
 }
 
 const _sidebarTooltipProjectName =
@@ -3578,6 +4458,49 @@ Future<void> _pumpSettingsPage(
     ),
   );
   await tester.pumpAndSettle();
+}
+
+Future<void> _pumpSshTab(WidgetTester tester, _FakeStudioApi api) async {
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+      child: _localizedApp(
+        home: Consumer(
+          builder: (context, ref, child) {
+            ref.watch(studioControllerProvider);
+            return const Scaffold(body: SshTab());
+          },
+        ),
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
+
+/// 打开 SSH 设置标签并进入远端目录选择对话框（默认浏览 `/workspace`）。
+/// 返回使用的 fake；[adoptProject] 为 true 时让 canonical 采用 `remote-project`。
+Future<_FakeStudioApi> _openSshDirectoryDialog(
+  WidgetTester tester, {
+  bool adoptProject = false,
+}) async {
+  const server = SshServer(
+    id: 'ssh-arm',
+    name: 'ARM dev',
+    host: '192.168.100.12',
+    port: 22,
+    username: 'root',
+    authKind: SshAuthKind.agentOrKey,
+  );
+  final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
+  if (adoptProject) {
+    api.selectProjectStates['remote-project'] = _remoteProjectAdoptedState();
+  }
+  await _pumpSettingsPage(tester, api);
+  await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.id)));
+  await tester.pumpAndSettle();
+  return api;
 }
 
 /// Agents tab 内固定文案统一收敛到 AlertDialog 作用域断言，

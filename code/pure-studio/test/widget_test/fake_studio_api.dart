@@ -42,6 +42,13 @@ class _FakeStudioApi implements StudioApi {
   String? reconnectedSshServerId;
   ({String serverId, String? path})? browsedRemoteDirectory;
   ({String serverId, String path})? openedRemoteProject;
+  Object? browseRemoteError;
+  Object? openRemoteProjectError;
+  Map<String, RemoteDirectoryListing> remoteDirListings = {};
+  int browseRemoteCallCount = 0;
+  int openRemoteProjectCallCount = 0;
+  Completer<void>? blockedBrowseRemote;
+  Completer<void>? blockedOpenRemoteProject;
   String? selectedProjectRequest;
   int activateCallCount = 0;
   String? activatedProjectId;
@@ -322,9 +329,15 @@ class _FakeStudioApi implements StudioApi {
     String serverId, {
     String? path,
   }) async {
+    browseRemoteCallCount += 1;
     browsedRemoteDirectory = (serverId: serverId, path: path);
+    if (browseRemoteError case final error?) throw error;
+    final blocked = blockedBrowseRemote;
+    if (blocked != null) await blocked.future;
+    final key = path ?? '/workspace';
+    if (remoteDirListings[key] case final listing?) return listing;
     return RemoteDirectoryListing(
-      path: path ?? '/workspace',
+      path: key,
       parent: path == null ? '/' : null,
       entries: const [
         RemoteDirectoryEntry(name: 'project', path: '/workspace/project'),
@@ -334,7 +347,11 @@ class _FakeStudioApi implements StudioApi {
 
   @override
   Future<StudioProject> openRemoteProject(String serverId, String path) async {
+    openRemoteProjectCallCount += 1;
     openedRemoteProject = (serverId: serverId, path: path);
+    if (openRemoteProjectError case final error?) throw error;
+    final blocked = blockedOpenRemoteProject;
+    if (blocked != null) await blocked.future;
     return StudioProject(
       id: 'remote-project',
       name: 'project',

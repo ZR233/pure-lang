@@ -107,6 +107,20 @@ escape 错误拒绝。runtime 不把绝对路径猜成 `.` 或静默截断前缀
 策略而非 OS shell 沙箱，命令正文拥有 SSH 用户本身的系统权限。GUI 目录浏览是独立宿主功能，
 不注册为模型工具。
 
+Studio 的“打开远程项目”窗口绑定一个已保存的 SSH 服务器，并同时提供目录浏览与路径输入；
+输入只接受该服务器上的绝对 POSIX 目录路径，不解析 `~`、相对路径、`ssh://` URI 或
+`user@host:path`，也不隐式创建服务器配置。初次进入仍浏览远端默认目录，之后的向上导航、
+子目录导航和手工路径都先通过 Studio 的 `browseRemoteDirectories` 取得 canonical listing；该
+typed 功能在远端协议层使用 `browseDirectories`。只有与当前输入一致、已经验证的 canonical path
+才能提交给 Studio 的 `openRemoteProject`，再由远端协议的 `openWorkspace` 打开。Studio controller
+拒绝新工作或未采用打开后的 canonical project snapshot 都不是成功，窗口不得因此关闭。
+
+浏览与打开操作必须串行化：pending 期间所有调用入口都拒绝重复或冲突请求，不能只依赖下一帧的
+按钮禁用状态。打开期间窗口不可通过取消、遮罩或系统返回动作关闭；浏览或打开失败必须保留窗口与
+用户输入，让用户可在原上下文中修正并重试，只有 project 已成功打开并被 Studio 采用才关闭窗口。
+目录没有子目录时显示明确空态，但仍允许打开已经验证的当前目录。窗口在 Studio 支持的窄视口与
+放大文本下仍须保持路径输入和主要操作可达；图标导航必须提供可本地化的可访问名称。
+
 Studio schema v16 新增非敏感 `ssh_servers` 表与 nullable `projects.ssh_server_id`。本地项目按
 `path` 唯一，远端项目按 `(ssh_server_id, path)` 唯一；远端 path 保存 canonical POSIX path。
 Session、Turn、Item、Interaction、working state 与 tool record 的 wire 语义不因远程 host 改变。

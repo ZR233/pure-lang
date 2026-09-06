@@ -68,8 +68,11 @@ class DemoStudioApi implements StudioApi {
   int _providerUsageRevision = 1;
   int _mcpRevision = 0;
   int _lspRevision = 0;
+  int _projectDirectoryRevision = 1;
   final Set<String> _disabledSystemAgents = <String>{};
   final Map<String, AgentProfileView> _userAgentProfiles = {};
+  final List<StudioProject> _openedRemoteProjects = [];
+  String? _selectedProjectId;
   String? _selectedThreadId;
   DateTime? _fixtureNow;
 
@@ -152,8 +155,9 @@ class DemoStudioApi implements StudioApi {
               '';
     if (_archivedProjectIds.contains(project.id)) {
       return StudioState(
-        projectDirectory: ProjectDirectoryState.fromState(
-          state: _demoInitialResource(),
+        projectDirectory: ProjectDirectoryState(
+          revision: _projectDirectoryRevision,
+          values: const [],
         ),
         threadDirectory: const ThreadDirectoryWindow(),
         agentDirectory: AgentDirectoryState.fromState(
@@ -182,15 +186,19 @@ class DemoStudioApi implements StudioApi {
         selectedThreadId: null,
       );
     }
-    final selectedThreadId = threads
-        .where((thread) => thread.id == _selectedThreadId)
-        .firstOrNull
-        ?.id;
+    final projects = [project, ..._openedRemoteProjects];
+    final selectedProjectId = _selectedProjectId ?? project.id;
+    final selectedThreadId = selectedProjectId == project.id
+        ? threads
+              .where((thread) => thread.id == _selectedThreadId)
+              .firstOrNull
+              ?.id
+        : null;
     final directory = _sortedDirectoryThreads();
     final firstPage = directory.take(directoryPageSize).toList();
     return StudioState(
       projectDirectory: ProjectDirectoryState.fromState(
-        state: _demoReadyResource(1, [project]),
+        state: _demoReadyResource(_projectDirectoryRevision, projects),
       ),
       threadDirectory: ThreadDirectoryWindow(
         threads: firstPage,
@@ -228,6 +236,8 @@ class DemoStudioApi implements StudioApi {
       lspState: LspStateSnapshot.fromState(state: _demoInitialResource()),
       skillsByProject: {
         project.id: _demoSkillsState(project.id, _skillsRevision),
+        for (final remote in _openedRemoteProjects)
+          remote.id: _demoSkillsState(remote.id, _skillsRevision),
       },
       providerUsageState: ProviderUsageStateSnapshot.fromState(
         state: _demoReadyResource(
@@ -254,7 +264,7 @@ class DemoStudioApi implements StudioApi {
           ),
       },
       providerCatalog: _providerCatalog,
-      selectedProjectId: project.id,
+      selectedProjectId: selectedProjectId,
       selectedThreadId: selectedThreadId,
     );
   }
@@ -809,7 +819,9 @@ class DemoStudioApi implements StudioApi {
 
   @override
   Future<StudioProject> openProject(String path) async {
-    _archivedProjectIds.remove('project-local');
+    if (_archivedProjectIds.remove('project-local')) {
+      _projectDirectoryRevision += 1;
+    }
     return (await readStudioState()).projects.first;
   }
 
@@ -869,12 +881,28 @@ class DemoStudioApi implements StudioApi {
 
   @override
   Future<StudioProject> openRemoteProject(String serverId, String path) async {
-    return StudioProject(
+    final project = StudioProject(
       id: 'project-remote',
       name: path.split('/').last,
       path: path,
       sshServerId: serverId,
     );
+    final existingIndex = _openedRemoteProjects.indexWhere(
+      (candidate) => candidate.id == project.id,
+    );
+    if (existingIndex < 0) {
+      _openedRemoteProjects.add(project);
+      _projectDirectoryRevision += 1;
+    } else {
+      final existing = _openedRemoteProjects[existingIndex];
+      if (existing.name != project.name ||
+          existing.path != project.path ||
+          existing.sshServerId != project.sshServerId) {
+        _openedRemoteProjects[existingIndex] = project;
+        _projectDirectoryRevision += 1;
+      }
+    }
+    return project;
   }
 
   @override
@@ -884,6 +912,7 @@ class DemoStudioApi implements StudioApi {
     )) {
       throw StateError('unknown demo project $projectId');
     }
+    _selectedProjectId = projectId;
   }
 
   @override
@@ -1014,7 +1043,9 @@ class DemoStudioApi implements StudioApi {
 
   @override
   Future<void> archiveProject(String projectId) async {
-    _archivedProjectIds.add(projectId);
+    if (projectId == 'project-local' && _archivedProjectIds.add(projectId)) {
+      _projectDirectoryRevision += 1;
+    }
   }
 
   @override

@@ -298,6 +298,33 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsSshOpenThisDirectory => '打开此目录';
 
   @override
+  String get settingsSshGo => '前往';
+
+  @override
+  String get settingsSshDirectoryPathLabel => '远端路径';
+
+  @override
+  String get settingsSshDirectoryPathHint => '/home/user/project';
+
+  @override
+  String get settingsSshPathRequired => '请输入远端目录路径';
+
+  @override
+  String get settingsSshPathAbsolute => '路径必须是绝对 POSIX 路径，以 / 开头';
+
+  @override
+  String get settingsSshDirectoryEmpty => '此目录为空';
+
+  @override
+  String get settingsSshDirectoryEmptyHint => '此处没有子目录，但仍可打开当前目录。';
+
+  @override
+  String get settingsSshUp => '上一级目录';
+
+  @override
+  String get settingsSshOpenFailed => '无法打开该目录，请检查服务器后重试。';
+
+  @override
   String get composerHint => '描述你的需求...';
 
   @override

@@ -95,11 +95,76 @@ class StudioController extends _$StudioController {
     await _reloadProductState(selection: _ProjectDefaultSelection(project.id));
   }
 
-  Future<void> openRemoteProject(String serverId, String path) async {
-    if (!_isInitialized(state.value)) return;
-    final project = await _api.openRemoteProject(serverId, path);
-    await _api.activateProject(project.id);
-    await _reloadProductState(selection: _ProjectDefaultSelection(project.id));
+  /// 打开远端项目的结果合同。
+  ///
+  /// 返回 true 仅当请求真正执行、同步后的 canonical project snapshot 成功采用，
+  /// 且 adopted 状态中被选中的项目正是刚打开的项目：其 id 匹配、`sshServerId`
+  /// 等于请求的 server、path 与后端返回的 canonical 项目路径一致。controller 尚未
+  /// 初始化、打开失败或 snapshot 未采用都返回 false。调用方只有收到 true 才应关闭
+  /// 打开窗口；false 时应保留窗口与输入并允许重试。
+  Future<bool> openRemoteProject(String serverId, String path) async {
+    final current = state.value;
+    if (!_isInitialized(current)) return false;
+    final StudioProject project;
+    try {
+      project = await _api.openRemoteProject(serverId, path);
+      await _api.activateProject(project.id);
+    } on Object {
+      return false;
+    }
+    if (!ref.mounted) return false;
+    return _adoptSelectedProject(
+      expectedId: project.id,
+      expectedServerId: serverId,
+      expectedPath: project.path,
+    );
+  }
+
+  /// 读取并采用 canonical product snapshot，把 [expectedId] 解析为选中项目。
+  ///
+  /// 采用完成后从 [state.value] 读取实际被选中的项目，并验证其 id、`sshServerId`
+  /// 与请求 server 一致、path 与后端返回的 canonical 路径一致。之所以在采用后而非
+  /// 采用前检查，是因为 `incoming` 可能只是解析前视图，adoption 会把 snapshot 与本地
+  /// 增量合并，最终真实选中项必须以 adopted state 为准。
+  ///
+  /// 返回 false 表示 snapshot 读取/采用失败，或 adopted state 中不存在与请求身份
+  /// 完全一致的选中项目。
+  Future<bool> _adoptSelectedProject({
+    required String expectedId,
+    required String expectedServerId,
+    required String expectedPath,
+  }) async {
+    final current = state.value;
+    final StudioState incoming;
+    try {
+      final snapshot = await _api.readStudioState();
+      // `_resolveSelection` normally applies an explicit project intent and
+      // may choose an available project even when the backend snapshot still
+      // reports another selection. Verify the raw canonical selection first,
+      // otherwise a stale snapshot could be mistaken for successful adoption.
+      if (snapshot.selectedProjectId != expectedId) return false;
+      incoming = _resolveSelection(
+        snapshot,
+        previous: current,
+        intent: _ProjectDefaultSelection(expectedId),
+      );
+    } on Object {
+      return false;
+    }
+    if (!ref.mounted) return false;
+    try {
+      await _adoptProductState(incoming);
+    } on Object {
+      return false;
+    }
+    final adopted = state.value;
+    final selectedProject = adopted?.projects
+        .where((project) => project.id == adopted.selectedProjectId)
+        .firstOrNull;
+    return selectedProject != null &&
+        selectedProject.id == expectedId &&
+        selectedProject.sshServerId == expectedServerId &&
+        selectedProject.path == expectedPath;
   }
 
   Future<void> selectProject(String projectId) async {

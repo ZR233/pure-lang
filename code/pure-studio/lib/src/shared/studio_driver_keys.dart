@@ -52,6 +52,13 @@ abstract final class StudioDriverKeys {
   static const sshOpenCurrentDirectory = ValueKey<String>(
     'ssh-open-current-directory',
   );
+  static const sshDirectoryPathInput = ValueKey<String>(
+    'ssh-directory-path-input',
+  );
+  static const sshDirectoryGo = ValueKey<String>('ssh-directory-go');
+  static const sshDirectoryError = ValueKey<String>('ssh-directory-error');
+  static const sshDirectoryEmpty = ValueKey<String>('ssh-directory-empty');
+  static const sshDirectoryUp = ValueKey<String>('ssh-directory-up');
   static const composerInput = ValueKey<String>('composer-input');
   static const composerSubmit = ValueKey<String>('composer-submit');
   static const composerStop = ValueKey<String>('composer-stop');

@@ -638,6 +638,60 @@ abstract class AppLocalizations {
   /// **'Open this directory'**
   String get settingsSshOpenThisDirectory;
 
+  /// No description provided for @settingsSshGo.
+  ///
+  /// In en, this message translates to:
+  /// **'Go'**
+  String get settingsSshGo;
+
+  /// No description provided for @settingsSshDirectoryPathLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Remote path'**
+  String get settingsSshDirectoryPathLabel;
+
+  /// No description provided for @settingsSshDirectoryPathHint.
+  ///
+  /// In en, this message translates to:
+  /// **'/home/user/project'**
+  String get settingsSshDirectoryPathHint;
+
+  /// No description provided for @settingsSshPathRequired.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter a remote directory path'**
+  String get settingsSshPathRequired;
+
+  /// No description provided for @settingsSshPathAbsolute.
+  ///
+  /// In en, this message translates to:
+  /// **'Path must be an absolute POSIX path starting with /'**
+  String get settingsSshPathAbsolute;
+
+  /// No description provided for @settingsSshDirectoryEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'This directory is empty'**
+  String get settingsSshDirectoryEmpty;
+
+  /// No description provided for @settingsSshDirectoryEmptyHint.
+  ///
+  /// In en, this message translates to:
+  /// **'No subdirectories here — you can still open this directory.'**
+  String get settingsSshDirectoryEmptyHint;
+
+  /// No description provided for @settingsSshUp.
+  ///
+  /// In en, this message translates to:
+  /// **'Parent directory'**
+  String get settingsSshUp;
+
+  /// No description provided for @settingsSshOpenFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t open this directory. Check the server and try again.'**
+  String get settingsSshOpenFailed;
+
   /// No description provided for @composerHint.
   ///
   /// In en, this message translates to:

@@ -51,6 +51,57 @@ void registerDemoProjectTests() {
     );
   });
 
+  test(
+    'Demo project directory revision advances with project mutations',
+    () async {
+      final api = DemoStudioApi();
+      final initial = await api.readStudioState();
+      final unchanged = await api.readStudioState();
+
+      expect(
+        unchanged.projectDirectory.revision,
+        initial.projectDirectory.revision,
+      );
+
+      await api.openRemoteProject('demo-ssh', '/home/projects');
+      final withRemote = await api.readStudioState();
+      expect(
+        withRemote.projectDirectory.revision,
+        initial.projectDirectory.revision + 1,
+      );
+      expect(withRemote.projects.map((project) => project.id), [
+        'project-local',
+        'project-remote',
+      ]);
+
+      await api.openRemoteProject('demo-ssh', '/home/projects');
+      final sameRemote = await api.readStudioState();
+      expect(
+        sameRemote.projectDirectory.revision,
+        withRemote.projectDirectory.revision,
+      );
+
+      await api.archiveProject('project-local');
+      final archived = await api.readStudioState();
+      expect(
+        archived.projectDirectory.revision,
+        sameRemote.projectDirectory.revision + 1,
+      );
+      expect(archived.projects, isEmpty);
+
+      await api.openProject('/workspace/pure-lang');
+      final reopened = await api.readStudioState();
+      expect(
+        reopened.projectDirectory.revision,
+        archived.projectDirectory.revision + 1,
+      );
+      expect(reopened.projects.map((project) => project.id), [
+        'project-local',
+        'project-remote',
+      ]);
+    },
+  );
+
   test('Demo startTurn publishes typed Turn and Item notifications', () async {
     final api = DemoStudioApi();
     final frames = <ThreadStreamFrame>[];

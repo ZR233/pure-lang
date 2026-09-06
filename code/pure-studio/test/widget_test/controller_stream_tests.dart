@@ -1261,4 +1261,127 @@ void registerControllerStreamTests() {
       );
     },
   );
+
+  test(
+    'openRemoteProject refuses work before controller initialization',
+    () async {
+      final initializationGate = Completer<void>();
+      final api = _FakeStudioApi(_emptyState())
+        ..blockedStudioStateLoad = initializationGate;
+      final container = ProviderContainer(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+      final initialization = container.read(studioControllerProvider.future);
+      await pumpEventQueue();
+
+      final opened = await container
+          .read(studioControllerProvider.notifier)
+          .openRemoteProject('ssh-arm', '/workspace');
+
+      expect(opened, isFalse);
+      expect(api.openRemoteProjectCallCount, 0);
+      initializationGate.complete();
+      await initialization;
+    },
+  );
+
+  test(
+    'openRemoteProject reports failure when backend rejects the request',
+    () async {
+      final api = _FakeStudioApi(_emptyState())
+        ..openRemoteProjectError = StateError('remote host refused');
+      final container = ProviderContainer(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+      await container.read(studioControllerProvider.future);
+
+      final opened = await container
+          .read(studioControllerProvider.notifier)
+          .openRemoteProject('ssh-arm', '/workspace');
+
+      expect(opened, isFalse);
+      expect(api.openRemoteProjectCallCount, 1);
+    },
+  );
+
+  test(
+    'openRemoteProject reports failure when canonical snapshot does not adopt',
+    () async {
+      // canonical snapshot 虽然列出远端项目，但仍选中本地项目；
+      // controller 不能用 selection intent 掩盖这个未采用状态。
+      final api = _FakeStudioApi(_emptyState())
+        ..selectProjectStates['remote-project'] = _remoteProjectAdoptedState()
+            .copyWith(selectedProjectId: 'project-1');
+      final container = ProviderContainer(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+      await container.read(studioControllerProvider.future);
+
+      final opened = await container
+          .read(studioControllerProvider.notifier)
+          .openRemoteProject('ssh-arm', '/workspace');
+
+      expect(opened, isFalse);
+      expect(api.openRemoteProjectCallCount, 1);
+      expect(
+        container.read(studioControllerProvider).requireValue.selectedProjectId,
+        'project-1',
+      );
+    },
+  );
+
+  test(
+    'openRemoteProject reports success only after canonical state adopts it',
+    () async {
+      final api = _FakeStudioApi(_emptyState())
+        ..selectProjectStates['remote-project'] = _remoteProjectAdoptedState();
+      final container = ProviderContainer(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+      await container.read(studioControllerProvider.future);
+
+      final opened = await container
+          .read(studioControllerProvider.notifier)
+          .openRemoteProject('ssh-arm', '/workspace');
+
+      expect(opened, isTrue);
+      expect(api.openRemoteProjectCallCount, 1);
+      // 采用后实际状态中的选中项目必须是请求的远端项目：
+      // 与 API 返回同 id、同 server、同 canonical path。
+      final adopted = container.read(studioControllerProvider).requireValue;
+      expect(adopted.selectedProjectId, 'remote-project');
+      final selected = adopted.projects.firstWhere(
+        (project) => project.id == 'remote-project',
+      );
+      expect(selected.sshServerId, 'ssh-arm');
+      expect(selected.path, '/workspace');
+    },
+  );
+
+  test('openRemoteProject rejects adoption when the project is local or on another server', () async {
+    Future<bool> openWith(StudioState adopted) async {
+      final api = _FakeStudioApi(_emptyState())
+        ..selectProjectStates['remote-project'] = adopted;
+      final container = ProviderContainer(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+      await container.read(studioControllerProvider.future);
+      return container
+          .read(studioControllerProvider.notifier)
+          .openRemoteProject('ssh-arm', '/workspace');
+    }
+
+    // 同 id 但 local（无 sshServerId）→ 拒绝。
+    expect(await openWith(_remoteProjectAdoptedState(serverId: null)), isFalse);
+    // 同 id 但归属另一台 server → 拒绝。
+    expect(
+      await openWith(_remoteProjectAdoptedState(serverId: 'other-server')),
+      isFalse,
+    );
+  });
 }

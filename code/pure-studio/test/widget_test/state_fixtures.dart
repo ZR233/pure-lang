@@ -348,6 +348,28 @@ StudioState _stateWithPlannerModels() {
   );
 }
 
+/// canonical 快照中已把远端 [projectId] 作为选中项目的状态。
+/// 用于验证打开远端项目只有在 snapshot 采用该项目时才报告成功。
+StudioState _remoteProjectAdoptedState({
+  String projectId = 'remote-project',
+  String path = '/workspace',
+  String? serverId = 'ssh-arm',
+}) {
+  final remote = StudioProject(
+    id: projectId,
+    name: 'project',
+    path: path,
+    sshServerId: serverId,
+  );
+  return _emptyState().copyWith(
+    projectDirectory: ProjectDirectoryState.fromState(
+      state: _testReady([remote, ..._emptyState().projects]),
+    ),
+    selectedProjectId: projectId,
+    selectedThreadId: null,
+  );
+}
+
 StudioState _stateWithAttachmentModels() {
   final state = _emptyState();
   const imageModel = ProviderModelView(

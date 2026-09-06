@@ -211,10 +211,28 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(StudioDriverKeys.sshDirectoryDialog), findsOneWidget);
     expect(api.browsedServerId, 'demo-ssh');
+    await tester.enterText(
+      find.byKey(StudioDriverKeys.sshDirectoryPathInput),
+      '/home/projects',
+    );
+    await tester.tap(find.byKey(StudioDriverKeys.sshDirectoryGo));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(StudioDriverKeys.sshDirectoryCurrent('/home/projects')),
+      findsOneWidget,
+    );
     await tester.tap(find.byKey(StudioDriverKeys.sshOpenCurrentDirectory));
     await tester.pumpAndSettle();
-    expect(api.openedRemoteProject, ('demo-ssh', '/home'));
+    expect(api.openedRemoteProject, ('demo-ssh', '/home/projects'));
     expect(api.activatedProjectId, 'project-remote');
+    // 打开成功且 canonical snapshot 采用远端项目后，目录对话框关闭。
+    expect(find.byKey(StudioDriverKeys.sshDirectoryDialog), findsNothing);
+    final adoptedState = await api.readStudioState();
+    expect(adoptedState.selectedProjectId, 'project-remote');
+    expect(
+      adoptedState.projects.any((project) => project.id == 'project-remote'),
+      isTrue,
+    );
 
     await tester.tap(find.byKey(StudioDriverKeys.settingsTab('providers')));
     await tester.pumpAndSettle();
@@ -355,6 +373,7 @@ class _RemoteDriverDemoStudioApi extends DriverDemoStudioApi {
 
   @override
   Future<void> activateProject(String projectId) async {
+    await super.activateProject(projectId);
     activatedProjectId = projectId;
   }
 }

@@ -306,6 +306,36 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsSshOpenThisDirectory => 'Open this directory';
 
   @override
+  String get settingsSshGo => 'Go';
+
+  @override
+  String get settingsSshDirectoryPathLabel => 'Remote path';
+
+  @override
+  String get settingsSshDirectoryPathHint => '/home/user/project';
+
+  @override
+  String get settingsSshPathRequired => 'Enter a remote directory path';
+
+  @override
+  String get settingsSshPathAbsolute =>
+      'Path must be an absolute POSIX path starting with /';
+
+  @override
+  String get settingsSshDirectoryEmpty => 'This directory is empty';
+
+  @override
+  String get settingsSshDirectoryEmptyHint =>
+      'No subdirectories here — you can still open this directory.';
+
+  @override
+  String get settingsSshUp => 'Parent directory';
+
+  @override
+  String get settingsSshOpenFailed =>
+      'Couldn\'t open this directory. Check the server and try again.';
+
+  @override
   String get composerHint => 'Describe what you need...';
 
   @override
