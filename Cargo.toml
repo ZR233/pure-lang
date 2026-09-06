@@ -68,6 +68,7 @@ process-wrap = { version = "9.0.0", features = ["tokio1"] }
 lsp-server = "0.10"
 lsp-types = "0.97.0"
 async-openai = { version = "0.41.1", default-features = false, features = [
+    "middleware",
     "rustls",
     "responses",
     "chat-completion",

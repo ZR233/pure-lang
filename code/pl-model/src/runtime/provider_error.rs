@@ -54,6 +54,13 @@ pub(crate) fn openai_error_to_pure(error: OpenAIError) -> PureError {
             }
         }
         OpenAIError::Reqwest(error) => reqwest_error_to_pure(error),
+        OpenAIError::Boxed(error) => PureError::provider_failure(ProviderFailure {
+            kind: ProviderFailureKind::Unknown,
+            code: None,
+            http_status: None,
+            message: redact_secret_like_values(&error.to_string()),
+            retry: RetryDisposition::Permanent,
+        }),
         OpenAIError::JSONDeserialize(error, content) => {
             protocol_failure(redact_secret_like_values(&format!("{error}: {content}")))
         }

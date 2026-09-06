@@ -47,6 +47,15 @@ Future<String> _handleDriverData(String? message) async {
         });
       }
       return jsonEncode({'serverId': matches.single.id});
+    case 'prepare-connection-retry-demo':
+      final api = _container.read(studioApiProvider);
+      if (api is! DriverDemoStudioApi) {
+        return jsonEncode({
+          'error': 'connection retry scenario requires demo mode',
+        });
+      }
+      api.prepareConnectionRetryScenario();
+      return jsonEncode({'prepared': true});
     case 'prepare-persistence-failure-demo':
       final api = _container.read(studioApiProvider);
       if (api is! DriverDemoStudioApi) {

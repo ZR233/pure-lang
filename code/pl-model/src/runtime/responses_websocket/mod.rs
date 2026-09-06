@@ -871,7 +871,6 @@ mod orchestration_tests {
     use crate::runtime::transport_policy::RESPONSES_WEBSOCKET_MAX_RETRIES;
     use crate::runtime::{ModelInvocationContext, ModelRuntime, ModelSession};
     use pl_protocol::{Message, MessageContent, MessageRole};
-    use pl_trace::AgentEvent;
 
     type WsStream = WebSocketStream<TcpStream>;
     type WsSender = futures::stream::SplitSink<WsStream, WebSocketMessage>;
@@ -1125,76 +1124,89 @@ mod orchestration_tests {
     }
 
     #[tokio::test]
-    async fn responses_websocket_partial_failure_falls_back_only_for_the_next_turn() {
+    async fn partial_disconnect_recovers_on_fifth_retry_with_shared_budget_and_visible_progress() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {
-            let (mut writer, mut reader) = accept_websocket(&listener).await;
-            let first = read_json_frame(&mut reader).await;
-            send_json_events(
-                &mut writer,
-                &started_stream_events("partial-response", "partial-message", "partial"),
-            )
-            .await;
-            writer
-                .send(WebSocketMessage::Text(
-                    serde_json::json!({
-                        "type": "error",
-                        "error": {
-                            "code": "server_error",
-                            "message": "upstream websocket proxy failed"
-                        }
-                    })
-                    .to_string()
-                    .into(),
-                ))
-                .await
-                .unwrap();
-            drop(writer);
-
-            assert!(
-                tokio::time::timeout(std::time::Duration::from_millis(750), listener.accept())
+            let mut inputs = Vec::new();
+            for _ in 0..2 {
+                let (mut writer, mut reader) = accept_websocket(&listener).await;
+                inputs.push(read_json_frame(&mut reader).await["input"].clone());
+                send_json_events(
+                    &mut writer,
+                    &started_stream_events("partial-response", "partial-message", "partial"),
+                )
+                .await;
+                writer
+                    .send(WebSocketMessage::Close(Some(CloseFrame {
+                        code: CloseCode::Error,
+                        reason: "upstream websocket proxy failed".into(),
+                    })))
                     .await
-                    .is_err(),
-                "a request that emitted stream events must not be replayed"
-            );
-            first
+                    .unwrap();
+            }
+            for attempt in 2..=5 {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                inputs.push(capture_http_request(&mut socket).await.body["input"].clone());
+                if attempt == 5 {
+                    send_responses_sse(&mut socket, "recovered", "message", "success").await;
+                } else {
+                    socket.shutdown().await.unwrap();
+                }
+            }
+            inputs
         });
-
         let provider = local_websocket_provider(&address.to_string(), Some(128_000));
         let session = ModelSession::default();
-        let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(64);
-        let trace_sink = Arc::new(pl_trace::InMemoryTraceEventSink::new("session-1", 0));
+        let (event_tx, _event_rx) = tokio::sync::broadcast::channel(128);
+        let sink = Arc::new(pl_trace::InMemoryTraceEventSink::new("session-1", 0));
         let context = ModelInvocationContext::new(session.clone())
             .with_events(event_tx)
             .with_trace(
                 CompletionTraceContext {
-                    session_id: "session-1".to_string(),
-                    turn_id: "turn-1".to_string(),
-                    inference_id: "turn-1-inf-0".to_string(),
+                    session_id: "session-1".into(),
+                    turn_id: "turn-1".into(),
+                    inference_id: "turn-1-inf-0".into(),
                 },
-                trace_sink,
+                sink.clone(),
             );
-
-        let error = provider
+        let response = provider
             .complete(minimal_request("local-responses"), context)
             .await
-            .expect_err("partial stream failure must be returned without replay");
-        let initial = server.await.unwrap();
-        let events = std::iter::from_fn(|| event_rx.try_recv().ok()).collect::<Vec<_>>();
-
-        assert!(error.is_transient_model_transport());
-        assert_eq!(initial["type"], "response.create");
+            .unwrap();
+        let inputs = server.await.unwrap();
+        assert_eq!(inputs.len(), 6);
         assert!(
-            session.uses_responses_http_fallback(provider.connection_fingerprint()),
-            "a partial WebSocket failure must move only the next turn to HTTP"
+            inputs.iter().all(|input| input == &inputs[0]),
+            "retry must preserve frozen history"
         );
-        assert!(events.iter().any(|event| matches!(
-            event,
-            AgentEvent::TracePartFailed { item }
-                if item.item_id() == "turn-1-inf-0-text-final-1"
-                    && item.failure().is_some_and(|error| error.contains("upstream websocket proxy failed"))
-        )));
+        assert_eq!(response.content.as_deref(), Some("success"));
+        assert_eq!(response.orchestration.transport_attempts, 6);
+        assert_eq!(response.orchestration.http_fallbacks, 1);
+        assert!(session.uses_responses_http_fallback(provider.connection_fingerprint()));
+        let events = sink.events();
+        let notices = events
+            .iter()
+            .filter_map(|event| match &event.kind {
+                pl_trace::TraceEventKind::TracePartCompleted { item }
+                    if item.source() == pl_trace::TracePartSource::Runtime =>
+                {
+                    match item.state() {
+                        pl_trace::TracePartState::Text(text) => Some(text.content().to_string()),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let mut expected = (1..=5)
+            .map(|n| format!("连接中断，正在重试（{n}/5）。"))
+            .collect::<Vec<_>>();
+        expected.push("连接已恢复，继续执行。".into());
+        assert_eq!(notices, expected);
+        assert_eq!(events.iter().filter(|event| matches!(&event.kind,
+            pl_trace::TraceEventKind::TracePartFailed { item }
+                if item.failure().is_some_and(|error| error.contains("upstream websocket proxy failed")))).count(), 2);
     }
 
     #[tokio::test]

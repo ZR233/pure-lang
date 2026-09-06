@@ -8,8 +8,8 @@ pub(crate) const RESPONSES_WEBSOCKET_CONNECT_TIMEOUT: Duration = Duration::from_
 pub(crate) const RESPONSES_WEBSOCKET_SEND_TIMEOUT: Duration = Duration::from_secs(15);
 pub(crate) const RESPONSES_WEBSOCKET_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 pub(crate) const RESPONSES_WEBSOCKET_MAX_RETRIES: u32 = 1;
-pub(crate) const OPENAI_HTTP_MAX_RETRIES: u32 = 2;
-pub(crate) const RESPONSES_WEBSOCKET_PROFILE_REVISION: &str = "responses_websockets=2026-02-06;pl-ws-v2;happy-eyeballs=250ms;connect=15s;send=15s;idle=300s;ws-retries=1;http-retries=2;replay-budget=shared;fallback=http-session";
+pub(crate) const MODEL_MAX_RETRIES: u32 = 5;
+pub(crate) const RESPONSES_WEBSOCKET_PROFILE_REVISION: &str = "responses_websockets=2026-02-06;pl-ws-v2;happy-eyeballs=250ms;connect=15s;send=15s;idle=300s;ws-retries=1;total-retries=5;replay-budget=shared;fallback=http-session";
 
 pub(crate) fn model_request_retry_delay(
     retry_number: u32,

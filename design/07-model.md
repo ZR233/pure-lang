@@ -149,21 +149,33 @@ Web 与 Flutter 只渲染模型目录返回的 transport 和当前 override，�
 V4 Flash Vision Exp 使用 Responses/HTTP；全部 GLM 和全部 MiMo 使用 Chat Completions/HTTP。
 runtime 必须按当前模型选择对应 endpoint path，同一 provider 实例可以路由不同协议的模型。
 
-Responses WebSocket 使用 `/responses` 握手和 `response.create` 帧，并强制发送 `store: false`；continuation 只依赖当前物理连接，不能把响应持久化到供应商侧。物理连接属于 `AgentSession` 持有的 `ModelSession`：同一会话跨 turn 复用，不同会话绝不共享，持久化恢复后重新建立。模型目录中该模型的 WebSocket 选择表示首选连接模式；尚未产出 canonical 流事件的一次完整历史重放仍遇到瞬态 WS 错误时，当前 `ModelSession` 必须熔断到 Responses HTTP，并在该 session 后续 turn 保持 HTTP，避免重复发送大体积完整历史。这个运行期 fallback 不修改持久化模型 override，新建、fork 或持久化恢复后的 AgentSession 会重新尝试用户选择的 WebSocket。WS session、HTTP fallback 与 transport fingerprint 必须同时包含模型 slug、模型协议和最终连接方式，避免同一 provider 下不同模型共享错误状态。`previous_response_id` continuation 只在 WebSocket 模式启用，因为该状态与物理连接绑定；HTTP/SSE 始终发送完整 canonical history，不依赖连接级 continuation。
+Responses WebSocket 使用 `/responses` 握手和 `response.create` 帧，并固定 `store: false`。
+连接及 continuation 属于 `AgentSession` 的 `ModelSession`，按模型、协议和连接方式隔离。
+断线、取消、未完整消费或无效 continuation 都丢弃旧连接；新连接使用冻结的完整输入和附件。
+建连保持系统 DNS、IPv4/IPv6 交错竞争及 15 秒握手上限。
 
-WebSocket 建连通过系统 DNS 解析全部目标地址，并以 250ms 间隔交错竞争 IPv4/IPv6；首个成功的 TCP 连接继续使用原始域名完成 SNI、证书校验和 WebSocket 握手。单次完整握手保持 15 秒上限，超时保留 transient 分类并进入同一 WS 模式的一次完整重试。无效 continuation 也必须在尚未产出 canonical 流事件时退出当前流并消费这同一个重试预算，由外层在新 WS 上发送完整历史；transport 内部不得再嵌套第二套 full replay。收到首个 canonical 流事件后，任何断线或 provider 失败都直接返回原错误，不重放当前请求；若该失败仍是瞬态 WS 故障，则必须熔断当前 session 的 WS，使宿主显式创建的下一 Turn 使用 Responses HTTP 完整历史继续，而不能再次连接同一不稳定 WS 路径。可重试失败采用带 0.9–1.1 稳定抖动的有界指数退避，provider `Retry-After` 优先且不加抖动。唯一 WS 重试仍失败时立即启用 session-scoped HTTP fallback，不继续制造 full replay 风暴；日志和 inference diagnostics 必须记录 fallback 原因、作用范围与来源连接模式。
+每次逻辑模型请求在首次发送之外最多重试 5 次；建连、流中断、无效 continuation 和切换连接方式
+共用这一预算，内部不嵌套重试；底层 HTTP 客户端与第三方库的默认重试关闭。瞬态失败使用有界指数退避和稳定抖动，优先采用供应商等待提示；
+等待和建连均可取消。WS 完整重试一次仍失败后，同一模型会话切换 HTTP，后续请求保持 HTTP；
+切换也计入剩余重试预算，不重置次数。认证、配置、协议等永久错误立即返回。
+
+普通文本、推理及尚未交付执行的本地工具参数流中断时，也允许重试当前模型请求。
+失败尝试的可见片段保留为独立项目并结束其流状态，新尝试采用独立项目身份；只把成功尝试交给
+核心层执行工具和追加模型上下文，已执行的前序工具结果保留在冻结输入中，不重跑整轮。
+含供应商托管工具且已经产生流事件的请求，以及已经报告使用量的未正常结束响应不自动重放，以免重复远端
+副作用或丢失计费事实。耗尽预算返回原始类型化失败，保留已提交内容。
+
+重试开始通过现有运行时进度项目显示“连接中断，正在重试（n/5）”，恢复及耗尽也显示明确结果。
+进度只进入界面与冷历史，不注入模型上下文。重试期间轮次保持运行、允许停止；不修改数据库布局
+或界面协议，也不依赖持久化进度。日志记录次数、等待时间、连接方式与脱敏错误分类。
 
 effort 等可调参数的 wire 写入由通用透传机制驱动，协议层不再为每供应商硬编码 reasoning/thinking 映射。`build_request` 接收当前 `ModelInfo`，先序列化强类型核心字段（model、messages、stream、tools 等）为 JSON 对象，再依次注入：base body（`ModelRequestProfile.body`，如 DeepSeek 固定的 `thinking.type = enabled`），以及 parameter wire（用户选中的候选值按模型 `parameters` 声明写入或移除字段，见 7.8）。覆盖优先级为 parameter wire > base body > 协议默认字段。
 
 OpenAI Responses 的 `reasoning.summary` 仍按 Codex wire 语义发送（`Auto` 和兼容层的 `Enabled` 都发送 `auto`，`Disabled` 不发送 summary 字段），由 `ReasoningConfig.summary` 独立驱动，不进入 parameter wire。模型返回的 `reasoning_content` 进入 canonical reasoning event；历史回放时仍通过 assistant message 的 `reasoning_content` 字段写回 Chat Completions。
 
 核心层提交的 `CompletionRequest` 始终带完整 canonical input，且不携带 model、stream、store、previous response、trace 或 transport session。runtime 固定使用流式请求；Responses 固定 `store: false`。prompt cache 和 trace 属于单次 invocation context，continuation 只由 `ModelSession` 管理。`pl-core` 的宿主 façade 在 invocation 内创建事件 sink；`ModelTurnOptions` 只承载宿主可控的取消状态，不暴露 `pl-trace` 类型。
-`ModelSession` 在相同连接和 fingerprint 下由上次完整请求前缀计算增量，在 transport
-内部克隆请求并只对 Responses WebSocket 帧设置 `previous_response_id`。断线、取消、未完整消费、配置变化或无效 continuation
-都会关闭旧连接；只有首个 canonical 流事件前的瞬态失败可在新 WS 上用完整历史重试一次。该重试
-仍失败时，同一 session 从当前请求开始切换到 Responses HTTP，不再创建新的 WS full replay；已经
-产出事件的请求不得切换 transport 后重放，但瞬态 WS 失败仍会把 session 的后续 Turn 熔断到 HTTP。
-Responses HTTP/SSE 和 Chat Completions 始终发送完整历史。
+`ModelSession` 在相同连接和 fingerprint 下由上次完整请求前缀计算增量，仅 WebSocket 帧
+设置 `previous_response_id`。Responses HTTP/SSE 和 Chat Completions 始终发送完整历史。
 
 `CompletionRequest.messages` 中的 `MessageRole::System` 表示本轮临时前置指令或开发者上下文。Responses endpoint 序列化为 input message role `developer`，避免发送不被部分 Responses 兼容服务接受的 `system` role；Chat Completions 仍序列化为 `system` role。
 
@@ -215,7 +227,9 @@ Responses hosted tools 属于 endpoint 服务能力，不由 URL 字符串在运
 Responses endpoint 不会因未支持的 `programmatic_tool_calling` 返回 400。
 
 provider transport 层把第三方 API 错误统一转换为 `PureError` 时必须先脱敏。错误文本中不得包含 bearer token、API key 或形如 `sk-...` 的密钥片段；鉴权失败、配额不足、模型不存在等服务端错误可以保留 status、错误类型、code 和可读原因，但密钥值必须替换为稳定占位。
-Responses HTTP/SSE 与 Chat Completions HTTP 必须和 WebSocket 一样，用 Serde typed error DTO 保留结构化 provider code、HTTP status、message 与可选 retry hint；请求级 HTTP 错误、SSE `response.failed` 与顶层 `type:error` 必须进入同一个分类器，进入控制流后不得把 DTO 降级成待解析字符串。408/409/425/429、5xx、建流前的瞬态网络错误以及 `server_is_overloaded` 等容量错误只允许在流对象建立前最多重试两次，并采用同一有界指数退避与抖动；一旦 HTTP 流已经产生首个可见或 canonical 事件，transport 不得因为后续流错误自动重放并制造重复输出；尚未产生任何事件的流中断（如连接被掐断、响应体解码失败）按瞬态处理，允许在既有重试预算内完整重放，与 13 的运行时错误分类一致。WS 切换 HTTP 后使用独立的 HTTP 重试预算，但不会再回到 WS；因此仅在两个 transport 都未产出流事件的最坏情况下，单次请求最多产生两次 WS 发送和三次 HTTP 发送。
+Responses HTTP/SSE 与 Chat Completions HTTP 和 WebSocket 使用同一类型化错误分类器，保留
+provider code、HTTP status、message 与可选 retry hint。408/409/425/429、5xx、连接中断和超时
+按上述统一 5 次预算处理；不得在传输层叠加额外预算。
 
 `ProviderFailureKind` 固定为 authentication、authorization、capacity、configuration、transport、
 protocol 与 unknown。`RetryDisposition` 只回答同一次模型请求是否能在尚无副作用时安全重放，

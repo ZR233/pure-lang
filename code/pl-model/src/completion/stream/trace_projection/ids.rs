@@ -13,14 +13,6 @@ use super::text::{text_provider_key, thinking_provider_key_prefix};
 use super::tool::{tool_aliases, trace_tool_part_id};
 
 impl TraceProjection {
-    fn namespaced_item_id(&self, item_id: &str) -> String {
-        let turn_id = &self.turn_id;
-        if item_id == self.turn_id || item_id.starts_with(&format!("{turn_id}-")) {
-            return item_id.to_string();
-        }
-        format!("{turn_id}-{item_id}")
-    }
-
     pub(super) fn active_text_item_id(
         &mut self,
         provider_item_id: &str,
@@ -73,7 +65,8 @@ impl TraceProjection {
             }
             return item_id;
         }
-        let item_id = self.namespaced_item_id(trace_id);
+        // 项目身份属于当前模型尝试；供应商调用 ID 可在重试间重复。
+        let item_id = format!("{}-{trace_id}", self.inference_id);
         for alias in aliases {
             self.active_tool_items.insert(alias, item_id.clone());
         }

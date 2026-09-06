@@ -25,7 +25,7 @@ use crate::provider::{ProviderConnectionMode, ProviderEndpoint, ProviderWireProt
 use crate::runtime::openai::sse;
 use crate::runtime::openai::{OpenAiProtocol, OpenAiRequestBody, PureOpenAiConfig};
 use crate::runtime::transport_policy::{
-    OPENAI_HTTP_MAX_RETRIES, RESPONSES_WEBSOCKET_MAX_RETRIES, model_request_retry_delay,
+    MODEL_MAX_RETRIES, RESPONSES_WEBSOCKET_MAX_RETRIES, model_request_retry_delay,
 };
 /// 单次模型调用的运行期上下文。
 ///
@@ -82,6 +82,64 @@ impl ModelInvocationContext {
         self.prompt_cache_key = prompt_cache_key;
         self
     }
+    fn publish_retry_notice(&self, attempt: u32, notice: ConnectionNotice) -> Result<()> {
+        use pl_trace::{
+            AgentEvent, TraceEventDraft, TraceEventKind, TracePartAction, TracePartCompletion,
+            TracePartSource, TracePartState, TraceTextChannel, TraceTextPart,
+        };
+        let (Some(trace), Some(sink)) = (&self.trace, &self.trace_sink) else {
+            return Ok(());
+        };
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        let (phase, message) = match notice {
+            ConnectionNotice::Retrying => (
+                "retry",
+                format!("连接中断，正在重试（{attempt}/{MODEL_MAX_RETRIES}）。"),
+            ),
+            ConnectionNotice::Recovered => ("result", "连接已恢复，继续执行。".into()),
+            ConnectionNotice::Exhausted => (
+                "result",
+                format!("连接重试 {MODEL_MAX_RETRIES} 次仍失败，本轮已停止。"),
+            ),
+        };
+        let item_id = format!("{}-connection-{attempt}-{phase}", trace.inference_id);
+        let start = sink
+            .emit(TraceEventDraft::start(
+                timestamp,
+                trace.turn_id.clone(),
+                item_id.clone(),
+                TracePartSource::Runtime,
+                TracePartState::Text(TraceTextPart::streaming(
+                    TraceTextChannel::Commentary,
+                    message,
+                )),
+            ))
+            .map_err(|error| {
+                PureError::Protocol(format!("retry progress publication failed: {error}"))
+            })?;
+        if let TraceEventKind::TracePartStarted { item } = start.kind {
+            let _ = self.event_tx.send(AgentEvent::TracePartStarted { item });
+        }
+        let end = sink
+            .emit(TraceEventDraft::apply(
+                timestamp,
+                trace.turn_id.clone(),
+                item_id,
+                TracePartAction::Complete(TracePartCompletion::Text {
+                    authoritative_content: None,
+                }),
+            ))
+            .map_err(|error| {
+                PureError::Protocol(format!("retry progress publication failed: {error}"))
+            })?;
+        if let TraceEventKind::TracePartCompleted { item } = end.kind {
+            let _ = self.event_tx.send(AgentEvent::TracePartCompleted { item });
+        }
+        Ok(())
+    }
 }
 
 impl Default for ModelInvocationContext {
@@ -103,6 +161,12 @@ pub(crate) struct InvocationRunner {
 }
 
 use super::provider_error::openai_error_to_pure;
+
+enum ConnectionNotice {
+    Retrying,
+    Recovered,
+    Exhausted,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InvocationPurpose {
@@ -128,13 +192,6 @@ impl OpenAiTransport {
         match self {
             Self::ResponsesWebSocket => "ws",
             Self::Http => "http",
-        }
-    }
-
-    fn max_retries(self) -> u32 {
-        match self {
-            Self::ResponsesWebSocket => RESPONSES_WEBSOCKET_MAX_RETRIES,
-            Self::Http => OPENAI_HTTP_MAX_RETRIES,
         }
     }
 }
@@ -215,6 +272,7 @@ impl InvocationRunner {
             ));
         }
         let http_client = reqwest::Client::builder()
+            .retry(reqwest::retry::never())
             .timeout(Duration::from_secs(300))
             .build()
             .map_err(|e| PureError::HttpError(e.to_string()))?;
@@ -280,14 +338,19 @@ impl InvocationRunner {
             .unwrap_or(self.model.slug.as_str())
             .to_string();
         let mut attempt_number = 0_u32;
-        let mut transport_retry_number = 0_u32;
         let transport_metrics_before = context.session.orchestration_snapshot();
         let mut http_fallbacks = 0_u64;
 
         loop {
+            if context
+                .cancellation
+                .as_ref()
+                .is_some_and(|token| token.is_cancelled())
+            {
+                return Err(PureError::LlmError("model invocation cancelled".into()).into());
+            }
             let transport = self.active_transport(&context.session);
-            let trace_checkpoint = context.trace_sink.as_ref().map(|sink| sink.next_sequence());
-            let max_retries = transport.max_retries();
+            let max_retries = MODEL_MAX_RETRIES;
             let attempt_request = request.clone();
             let mut trace = original_trace.clone();
             if attempt_number > 0
@@ -303,13 +366,7 @@ impl InvocationRunner {
             }
             let request_started_at = self.clock.unix_seconds()?;
             let (result, retry_allowed) = self
-                .run_stream_attempt(
-                    attempt_request,
-                    &context,
-                    trace,
-                    &inference_timer,
-                    trace_checkpoint,
-                )
+                .run_stream_attempt(attempt_request, &context, trace, &inference_timer)
                 .await;
             let error = match result {
                 Ok(mut response) => {
@@ -334,6 +391,10 @@ impl InvocationRunner {
                         self.pricing_mode,
                         request_started_at,
                     );
+                    if attempt_number > 0 {
+                        context
+                            .publish_retry_notice(attempt_number, ConnectionNotice::Recovered)?;
+                    }
                     return Ok(response);
                 }
                 Err(mut error) => {
@@ -371,55 +432,30 @@ impl InvocationRunner {
                 }
                 return Err(error);
             }
-            if !request.prepared_content.is_empty() {
-                let (provider_code, http_status) =
-                    error.transient_model_metadata().unwrap_or((None, None));
-                tracing::warn!(
-                    provider = %self.endpoint.name,
-                    transport = transport.label(),
-                    provider_code,
-                    http_status,
-                    attachment_count = request.prepared_content.len(),
-                    error_bytes = error.to_string().len(),
-                    "含附件的推理请求已开始，禁止自动重放"
-                );
-                return Err(error);
-            }
             if !error.is_transient_model_transport() {
                 return Err(error);
             }
 
-            if transport_retry_number >= max_retries {
-                if transport == OpenAiTransport::ResponsesWebSocket {
-                    let connection_key = self.connection_fingerprint();
-                    let activated = context
-                        .session
-                        .activate_responses_http_fallback(connection_key)
-                        .await;
-                    if activated {
-                        http_fallbacks = http_fallbacks.saturating_add(1);
-                    }
-                    tracing::warn!(
-                        provider = %self.endpoint.name,
-                        from_transport = transport.label(),
-                        fallback_transport = OpenAiTransport::Http.label(),
-                        fallback_reason = "retryBudgetExhausted",
-                        fallback_activated = activated,
-                        retries = transport_retry_number,
-                        error_bytes = error.to_string().len(),
-                        "Responses WebSocket 重试预算耗尽，当前模型会话切换到 HTTP"
-                    );
-                    attempt_number += 1;
-                    transport_retry_number = 0;
-                    continue;
-                }
+            if attempt_number >= max_retries {
+                context.publish_retry_notice(attempt_number, ConnectionNotice::Exhausted)?;
                 return Err(error);
             }
-
-            transport_retry_number += 1;
+            // WS 重连一次仍失败后切换 HTTP；切换不重置逻辑请求的总预算。
+            if transport == OpenAiTransport::ResponsesWebSocket
+                && attempt_number >= RESPONSES_WEBSOCKET_MAX_RETRIES
+            {
+                let activated = context
+                    .session
+                    .activate_responses_http_fallback(self.connection_fingerprint())
+                    .await;
+                if activated {
+                    http_fallbacks = http_fallbacks.saturating_add(1);
+                }
+            }
             attempt_number += 1;
+            context.publish_retry_notice(attempt_number, ConnectionNotice::Retrying)?;
             let delay = model_request_retry_delay(
-                transport_retry_number,
+                attempt_number,
                 error.retry_after_ms(),
                 &retry_jitter_key,
             );
@@ -428,13 +464,13 @@ impl InvocationRunner {
             tracing::warn!(
                 provider = %self.endpoint.name,
                 transport = transport.label(),
-                retry_number = transport_retry_number,
+                retry_number = attempt_number,
                 max_retries,
                 delay_ms = delay.as_millis(),
                 provider_code,
                 http_status,
                 error_bytes = error.to_string().len(),
-                "模型请求遇到瞬态 provider 错误，将在同一连接模式下重放完整请求"
+                "模型连接中断，将在统一预算内重试当前请求"
             );
             if let Some(token) = &context.cancellation {
                 tokio::select! {
@@ -450,18 +486,25 @@ impl InvocationRunner {
         }
     }
 
-    /// 执行单次流式尝试并收集结果；返回结果与「尚未产出 canonical 事件、允许完整重放」。
+    /// 收集一次尝试；本地工具仅在成功返回后执行，托管工具和已报告使用量的响应不能重放。
     async fn run_stream_attempt(
         &self,
         request: CompletionRequest,
         context: &ModelInvocationContext,
         trace: Option<CompletionTraceContext>,
         inference_timer: &InferenceTimer,
-        trace_checkpoint: Option<u64>,
     ) -> (
         std::result::Result<CompletionResponse, CompletionFailure>,
         bool,
     ) {
+        let has_hosted_tools = self.purpose == InvocationPurpose::RemoteCompaction
+            || request.tools.iter().any(|tool| match tool {
+                pl_protocol::ToolSpec::Function { .. } | pl_protocol::ToolSpec::Custom { .. } => {
+                    false
+                }
+                pl_protocol::ToolSpec::ProgrammaticToolCalling
+                | pl_protocol::ToolSpec::WebSearch { .. } => true,
+            });
         let opening = self.stream_events(
             request,
             context.session.clone(),
@@ -478,14 +521,18 @@ impl InvocationRunner {
         };
         match opened {
             Ok(event_stream) => {
-                let stream_started = Arc::new(AtomicBool::new(false));
+                let replay_unsafe = Arc::new(AtomicBool::new(false));
                 let tracked_stream: CompletionEventStream = event_stream
                     .inspect({
-                        let stream_started = Arc::clone(&stream_started);
+                        let replay_unsafe = Arc::clone(&replay_unsafe);
                         let inference_timer = inference_timer.clone();
                         move |event| {
-                            if event.is_ok() {
-                                stream_started.store(true, Ordering::Release);
+                            if let Ok(event) = event
+                                && (has_hosted_tools || matches!(event,
+                                    crate::completion::stream::event::ModelStreamEvent::Usage(_)
+                                    | crate::completion::stream::event::ModelStreamEvent::Completed { .. }))
+                            {
+                                replay_unsafe.store(true, Ordering::Release);
                             }
                             if let Ok(event) = event {
                                 inference_timer.observe(event);
@@ -503,13 +550,7 @@ impl InvocationRunner {
                     },
                 )
                 .await;
-                // design/13：仅在模型流尚未产生任何 canonical 事件时允许完整重放。
-                // 该门控对全部 transport 一致；事件一旦出现即禁止重放，避免重复输出。
-                let retry_allowed = !stream_started.load(Ordering::Acquire)
-                    && context
-                        .trace_sink
-                        .as_ref()
-                        .is_none_or(|sink| Some(sink.next_sequence()) == trace_checkpoint);
+                let retry_allowed = !replay_unsafe.load(Ordering::Acquire);
                 (result, retry_allowed)
             }
             Err(error) => (Err(error.into()), true),
@@ -595,7 +636,9 @@ impl InvocationRunner {
                 endpoint.http_headers.as_ref(),
                 &model_info.binding.request.headers,
             )?;
-            let client = Client::build(http_client, config);
+            // 仅当前逻辑请求所有者重试；库默认执行器另有重试预算，必须绕过。
+            let service = async_openai::middleware::ReqwestService::new(http_client.clone());
+            let client = Client::build(http_client, config).with_http_service(service);
             let stream_result: std::result::Result<
                 StreamResponse<sse::SseStreamEvent>,
                 async_openai::error::OpenAIError,
@@ -1112,10 +1155,16 @@ mod tests {
         let provider = openai_provider(base_url, ProviderConnectionMode::Http);
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
 
-        let error = provider
-            .complete(minimal_request("local-responses"), invocation(event_tx))
-            .await
-            .expect_err("response.failed must surface a typed provider failure");
+        let context = invocation(event_tx);
+        let (result, _) = provider
+            .run_stream_attempt(
+                minimal_request("local-responses"),
+                &context,
+                None,
+                &InferenceTimer::start(),
+            )
+            .await;
+        let error = result.expect_err("response.failed must surface a typed provider failure");
         server.await.unwrap();
 
         let failure = error
@@ -1429,10 +1478,10 @@ mod tests {
         let address = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {
             let mut requests = Vec::new();
-            for attempt in 0..=OPENAI_HTTP_MAX_RETRIES {
+            for attempt in 0..=MODEL_MAX_RETRIES {
                 let (mut socket, _) = listener.accept().await.unwrap();
                 requests.push(capture_http_request(&mut socket).await);
-                if attempt < OPENAI_HTTP_MAX_RETRIES {
+                if attempt < MODEL_MAX_RETRIES {
                     socket.shutdown().await.unwrap();
                 } else {
                     send_responses_sse(&mut socket, "http-response", "http-message", "http-ok")
@@ -1452,7 +1501,7 @@ mod tests {
         let requests = server.await.unwrap();
 
         assert_eq!(response.content.as_deref(), Some("http-ok"));
-        assert_eq!(requests.len(), 1 + OPENAI_HTTP_MAX_RETRIES as usize);
+        assert_eq!(requests.len(), 1 + MODEL_MAX_RETRIES as usize);
         assert!(
             requests
                 .iter()
@@ -1461,17 +1510,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn http_does_not_replay_media_requests_after_the_first_send() {
+    async fn http_retries_with_the_same_frozen_media() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
             let first = capture_http_request(&mut socket).await;
             socket.shutdown().await.unwrap();
-            let replayed =
-                tokio::time::timeout(std::time::Duration::from_millis(750), listener.accept())
-                    .await
-                    .is_ok();
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let replayed = capture_http_request(&mut socket).await;
+            let body = chat_success_sse("recovered");
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+            socket.shutdown().await.unwrap();
             (first, replayed)
         });
 
@@ -1521,10 +1575,94 @@ mod tests {
         provider
             .complete(request, invocation(event_tx))
             .await
-            .expect_err("a failed media request must surface without automatic replay");
+            .expect("frozen media can be resent without reading user files again");
         let (first, replayed) = server.await.unwrap();
 
         assert_eq!(first.request_line, "POST /v1/chat/completions HTTP/1.1");
-        assert!(!replayed, "the media inference request was replayed");
+        assert_eq!(first.body, replayed.body);
+    }
+    #[tokio::test]
+    async fn retry_exhaustion_and_cancellation_never_send_a_seventh_request() {
+        for cancel in [false, true] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                let mut count = 0;
+                loop {
+                    let (mut socket, _) = listener.accept().await.unwrap();
+                    capture_http_request(&mut socket).await;
+                    count += 1;
+                    let body =
+                        r#"{"error":{"code":"server_error","message":"upstream unavailable"}}"#;
+                    let wait = if cancel { 30 } else { 0 };
+                    let reply = format!(
+                        "HTTP/1.1 503 Service Unavailable\r\ncontent-type: application/json\r\nretry-after: {wait}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    socket.write_all(reply.as_bytes()).await.unwrap();
+                    socket.shutdown().await.unwrap();
+                    if count == if cancel { 1 } else { 6 } {
+                        break;
+                    }
+                }
+                (listener, count)
+            });
+            let token = tokio_util::sync::CancellationToken::new();
+            let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(64);
+            let sink = Arc::new(pl_trace::InMemoryTraceEventSink::new("s", 0));
+            let context = invocation(event_tx)
+                .with_cancellation(Some(token.clone()))
+                .with_trace(
+                    CompletionTraceContext {
+                        session_id: "s".into(),
+                        turn_id: "t".into(),
+                        inference_id: "i".into(),
+                    },
+                    sink.clone(),
+                );
+            let provider =
+                openai_provider(format!("http://{address}/v1"), ProviderConnectionMode::Http);
+            let pending = tokio::spawn(async move {
+                provider
+                    .complete(minimal_request("local-responses"), context)
+                    .await
+            });
+            if cancel {
+                while let Ok(event) = event_rx.recv().await {
+                    if matches!(event, AgentEvent::TracePartCompleted { .. }) {
+                        token.cancel();
+                        break;
+                    }
+                }
+            }
+            let error = tokio::time::timeout(Duration::from_secs(10), pending)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap_err();
+            let (listener, count) = server.await.unwrap();
+            assert_eq!(count, if cancel { 1 } else { 6 });
+            assert!(
+                tokio::time::timeout(Duration::from_millis(100), listener.accept())
+                    .await
+                    .is_err()
+            );
+            let notices = sink
+                .events()
+                .into_iter()
+                .filter_map(|event| match event.kind {
+                    TraceEventKind::TracePartCompleted { item } => Some(trace_part_text(&item)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            if cancel {
+                assert!(error.to_string().contains("cancelled"));
+                assert_eq!(notices, vec!["连接中断，正在重试（1/5）。"]);
+            } else {
+                assert_eq!(error.provider_failure_ref().unwrap().http_status, Some(503));
+                assert_eq!(notices.len(), 6);
+                assert_eq!(notices.last().unwrap(), "连接重试 5 次仍失败，本轮已停止。");
+            }
+        }
     }
 }

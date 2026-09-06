@@ -44,6 +44,13 @@ Future<void> main(List<String> arguments) async {
       expectedStatus: 'failed',
     );
     await _submitCompletedTurn(session, snapshots, options.promptFile);
+    await session.requestData('prepare-connection-retry-demo');
+    await _submitCompletedTurn(
+      session,
+      snapshots,
+      options.promptFile,
+      expectRetries: true,
+    );
     final finalSnapshot = await _snapshot(session, snapshots);
     if ((finalSnapshot['persistence'] as Map?)?['kind'] != 'degraded') {
       throw StateError('saving must remain degraded throughout both turns');
@@ -134,6 +141,7 @@ Future<void> _submitCompletedTurn(
   File snapshots,
   String promptFile, {
   String expectedStatus = 'completed',
+  bool expectRetries = false,
 }) async {
   await _waitForSnapshot(session, snapshots, 'composer restoration', (
     snapshot,
@@ -181,6 +189,23 @@ Future<void> _submitCompletedTurn(
     },
   );
   final turnId = (_workspace(running)!['turn'] as Map<String, dynamic>)['id'];
+  if (expectRetries) {
+    for (var attempt = 1; attempt <= 5; attempt++) {
+      final message = '连接中断，正在重试（$attempt/5）。';
+      await _waitForSnapshot(session, snapshots, 'connection retry $attempt', (
+        snapshot,
+      ) {
+        final workspace = _workspace(snapshot);
+        return (workspace?['turn'] as Map?)?['status'] == 'running' &&
+            (workspace?['timeline'] as List? ?? []).any(
+              (row) => (row as Map)['text'] == message,
+            );
+      });
+      await session.waitFor(find.text(message));
+    }
+    await File('${snapshots.parent.path}/connection-retry.png')
+        .writeAsBytes(await session.screenshot(), flush: true);
+  }
   await _waitForSnapshot(session, snapshots, 'normal turn completion', (
     snapshot,
   ) {

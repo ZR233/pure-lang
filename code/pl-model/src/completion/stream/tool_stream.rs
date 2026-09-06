@@ -696,10 +696,10 @@ mod accumulator_tests {
             TraceEventKind::TracePartStarted { item }
             | TraceEventKind::TracePartCompleted { item }
             | TraceEventKind::TracePartFailed { item } => {
-                item.item_id() == "turn-1-call_1" && item.kind() == TracePartKind::Tool
+                item.item_id() == "turn-1-inf-0-call_1" && item.kind() == TracePartKind::Tool
             }
             TraceEventKind::TracePartDelta { event } => {
-                event.item_id == "turn-1-call_1" && event.kind() == TracePartKind::Tool
+                event.item_id == "turn-1-inf-0-call_1" && event.kind() == TracePartKind::Tool
             }
             TraceEventKind::InteractionChanged { .. }
             | TraceEventKind::SkillActivated { .. }
@@ -898,7 +898,7 @@ mod accumulator_tests {
             TracePartKind::Text,
             String::new(),
         )));
-        assert!(started.contains(&("turn-1-fc_1", TracePartKind::Tool, String::new(),)));
+        assert!(started.contains(&("turn-1-inf-0-fc_1", TracePartKind::Tool, String::new(),)));
 
         let mut live = std::collections::HashMap::new();
         for event in &live_events {
@@ -935,7 +935,7 @@ mod accumulator_tests {
                 }
                 TraceEventKind::TracePartStarted { item }
                     if item.kind() == TracePartKind::Tool
-                        && item.item_id() == "turn-1-fc_1"
+                        && item.item_id() == "turn-1-inf-0-fc_1"
                         && item
                             .tool()
                             .is_some_and(|tool| !tool.invocation().arguments().is_empty()) =>
@@ -960,11 +960,14 @@ mod accumulator_tests {
             live.get("turn-1-inf-0-text-final-1"),
             replay.get("turn-1-inf-0-text-final-1")
         );
-        assert_eq!(live.get("turn-1-fc_1"), replay.get("turn-1-fc_1"));
+        assert_eq!(
+            live.get("turn-1-inf-0-fc_1"),
+            replay.get("turn-1-inf-0-fc_1")
+        );
     }
 
     #[test]
-    fn stream_trace_part_ids_are_scoped_to_turn() {
+    fn stream_trace_part_ids_are_scoped_to_inference() {
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
         let mut accumulator = StreamCompletionAccumulator::new(Some(CompletionTraceContext {
             session_id: "session-1".to_string(),
@@ -1021,7 +1024,11 @@ mod accumulator_tests {
             .collect::<Vec<_>>();
         assert_eq!(
             item_ids,
-            vec!["turn-1-call_0", "turn-1-call_0", "turn-1-call_0"]
+            vec![
+                "turn-1-inf-0-call_0",
+                "turn-1-inf-0-call_0",
+                "turn-1-inf-0-call_0"
+            ]
         );
     }
 
@@ -1105,7 +1112,12 @@ mod accumulator_tests {
             .collect::<Vec<_>>();
         assert_eq!(
             item_ids,
-            vec!["turn-1-fc_1", "turn-1-fc_1", "turn-1-fc_1", "turn-1-fc_1"]
+            vec![
+                "turn-1-inf-0-fc_1",
+                "turn-1-inf-0-fc_1",
+                "turn-1-inf-0-fc_1",
+                "turn-1-inf-0-fc_1"
+            ]
         );
     }
 
@@ -1193,16 +1205,16 @@ mod accumulator_tests {
                 .iter()
                 .copied()
                 .collect::<std::collections::BTreeSet<_>>(),
-            std::collections::BTreeSet::from(["turn-1-call_1"])
+            std::collections::BTreeSet::from(["turn-1-inf-0-call_1"])
         );
         assert_eq!(
             item_ids,
             vec![
-                "turn-1-call_1",
-                "turn-1-call_1",
-                "turn-1-call_1",
-                "turn-1-call_1",
-                "turn-1-call_1"
+                "turn-1-inf-0-call_1",
+                "turn-1-inf-0-call_1",
+                "turn-1-inf-0-call_1",
+                "turn-1-inf-0-call_1",
+                "turn-1-inf-0-call_1"
             ]
         );
     }
@@ -1250,7 +1262,7 @@ mod accumulator_tests {
             &event.kind,
             TraceEventKind::TracePartStarted { item }
                 if item.kind() == TracePartKind::Tool
-                    && item.item_id() == "turn-1-turn-10-call"
+                    && item.item_id() == "turn-1-inf-0-turn-10-call"
         )));
     }
 

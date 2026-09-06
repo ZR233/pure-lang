@@ -251,7 +251,7 @@ mod tests {
             .find_map(started_tool_item)
             .expect("updated tool snapshot");
 
-        assert_eq!(updated.item_id(), "turn-1-provider-tool-1");
+        assert_eq!(updated.item_id(), "inference-1-provider-tool-1");
         assert!(matches!(
             updated.tool().map(|tool| tool.state()),
             Some(TraceToolState::Streaming(_))
@@ -283,9 +283,9 @@ mod tests {
             .find_map(started_tool_item)
             .expect("updated tool snapshot");
 
-        assert_eq!(first_delta, "turn-1-call-1");
-        assert_eq!(second_delta, "turn-1-call-1");
-        assert_eq!(updated.item_id(), "turn-1-call-1");
+        assert_eq!(first_delta, "inference-1-call-1");
+        assert_eq!(second_delta, "inference-1-call-1");
+        assert_eq!(updated.item_id(), "inference-1-call-1");
         assert_eq!(updated.revision(), 3);
         let tool = updated.tool().expect("tool metadata");
         assert_eq!(
@@ -347,5 +347,34 @@ mod tests {
                 ("snapshot", 3),
             ]
         );
+    }
+    #[test]
+    fn retried_tool_call_keeps_provider_identity_but_has_a_new_trace_item() {
+        let sink = Arc::new(pl_trace::InMemoryTraceEventSink::new("session-1", 0));
+        let mut first = trace_with_sink(sink.clone());
+        let snapshot = accumulator_snapshot("provider-tool-1", "call-1");
+        let first_item = first
+            .start_tool(&snapshot)
+            .iter()
+            .find_map(started_tool_item)
+            .unwrap()
+            .clone();
+        first.fail_attempt("disconnected");
+        let mut context = super::super::test_support::test_trace_context("inference-1-retry-1");
+        context.turn_id = "turn-1".into();
+        let mut second = super::TraceProjection::with_sink(context, Some(sink));
+        let second_item = second
+            .start_tool(&snapshot)
+            .iter()
+            .find_map(started_tool_item)
+            .unwrap()
+            .clone();
+        assert_ne!(first_item.item_id(), second_item.item_id());
+        assert_eq!(
+            first_item.tool().unwrap().invocation().call_id(),
+            second_item.tool().unwrap().invocation().call_id()
+        );
+        assert!(first.take_trace_error().is_none());
+        assert!(second.take_trace_error().is_none());
     }
 }

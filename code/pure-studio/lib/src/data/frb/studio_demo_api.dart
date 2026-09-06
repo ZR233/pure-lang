@@ -2187,6 +2187,11 @@ class DriverDemoStudioApi extends DemoStudioApi {
   bool _sessionLifecycleScenario = false;
   bool _persistenceFailureScenario = false;
   bool _failNextTurn = false;
+  bool _retryNextTurn = false;
+
+  void prepareConnectionRetryScenario() {
+    _retryNextTurn = true;
+  }
 
   void preparePersistenceFailureScenario() {
     prepareSessionLifecycleScenario();
@@ -2203,6 +2208,34 @@ class DriverDemoStudioApi extends DemoStudioApi {
     required int generation,
     required DateTime startedAt,
   }) async {
+    if (_retryNextTurn) {
+      _retryNextTurn = false;
+      for (var attempt = 1; attempt <= 5; attempt++) {
+        await Future<void>.delayed(promptActivityDelay);
+        if (_promptGenerations[threadId] != generation) return;
+        final now = DateTime.now();
+        _emitThreadUpdate(
+          threadId,
+          ThreadItemUpsert(
+            ThreadItemView(
+              id: '$turnId:connection-retry-$attempt',
+              threadId: threadId,
+              turnId: turnId,
+              ordinal: _nextOrdinal(threadId),
+              revision: 0,
+              createdAt: now,
+              updatedAt: now,
+              state: ThreadTextItemStateView(
+                channel: ThreadTextChannel.commentary,
+                text: '连接中断，正在重试（$attempt/5）。',
+                attachments: const [],
+                lifecycle: CompletedThreadContentView(now),
+              ),
+            ),
+          ),
+        );
+      }
+    }
     if (!_failNextTurn) {
       return super._completePrompt(
         threadId: threadId,
