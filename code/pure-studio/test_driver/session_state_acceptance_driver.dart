@@ -177,8 +177,7 @@ Future<void> _submitCompletedTurn(
     'normal turn start',
     (snapshot) {
       final turn = _workspace(snapshot)?['turn'];
-      return turn is Map<String, dynamic> &&
-          turn['status'] == 'running';
+      return turn is Map<String, dynamic> && turn['status'] == 'running';
     },
   );
   final turnId = (_workspace(running)!['turn'] as Map<String, dynamic>)['id'];
