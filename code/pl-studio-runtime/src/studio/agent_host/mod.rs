@@ -35,6 +35,7 @@ impl StudioAgentHost {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         repository: StudioAgentRepository,
+        worktrees: worktree_lease::WorktreeLeaseOwner,
         store: StudioStore,
         config_runtime: ConfigRuntime,
         mcp_runtime: McpRuntimeHandle,
@@ -63,7 +64,7 @@ impl StudioAgentHost {
                 ssh_manager.clone(),
             ),
             lifecycle: StudioAgentLifecycle::new(
-                store,
+                worktrees,
                 product_events.clone(),
                 resources.clone(),
                 ssh_manager,

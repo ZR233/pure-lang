@@ -1,4 +1,3 @@
-use super::read_file::{ReadFileRange, ReadFileRequest};
 use crate::tool::{ToolDirective, ToolResult, model_visible_tool_output};
 
 #[derive(Debug, Clone)]
@@ -8,21 +7,9 @@ pub(super) struct ToolCacheEntry {
     output: ToolResult,
     result_hash: String,
     total_bytes: u64,
-    pub(super) read_file_range: Option<ReadFileRange>,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(super) enum CacheReuseKind {
-    Exact,
-    CoveredReadRange,
-}
-
-pub(super) fn cache_entry(
-    tool_name: &str,
-    call_id: String,
-    output: &ToolResult,
-    read_file_request: Option<&ReadFileRequest>,
-) -> ToolCacheEntry {
+pub(super) fn cache_entry(tool_name: &str, call_id: String, output: &ToolResult) -> ToolCacheEntry {
     let canonical_output = output.canonical_output();
     let total_bytes = canonical_output.len() as u64;
     let result_hash = output
@@ -47,29 +34,29 @@ pub(super) fn cache_entry(
         output: output.clone(),
         result_hash,
         total_bytes,
-        read_file_range: read_file_request
-            .and_then(|request| ReadFileRange::from_output(request, output)),
     }
 }
 
-pub(super) fn compact_cache_hit(entry: &ToolCacheEntry, reuse_kind: CacheReuseKind) -> ToolResult {
-    let summary = model_visible_tool_output(entry.output.model_output());
-    let summary = summary.chars().take(512).collect::<String>();
-    let description = serde_json::json!({
-        "cacheHit": true,
-        "reusedFromCallId": entry.call_id,
-        "resultHash": entry.result_hash,
-        "totalBytes": entry.total_bytes,
-        "reuseKind": match reuse_kind {
-            CacheReuseKind::Exact => "exact",
-            CacheReuseKind::CoveredReadRange => "coveredReadRange",
-        },
-        "summary": summary,
-    })
-    .to_string();
+pub(super) fn cache_hit(entry: &ToolCacheEntry) -> ToolResult {
     let mut output = entry.output.clone();
-    output.model_output = description;
-    // 媒体上下文只在首次成功读取时注入；缓存命中只回放紧凑 receipt。
+    // File content may have been truncated or removed from the model context.
+    // Reuse the IO result, but do not replace the requested text with a receipt.
+    output.model_output = if entry.tool_name == "read_file" {
+        model_visible_tool_output(&entry.output.canonical_output())
+    } else {
+        let summary = model_visible_tool_output(entry.output.model_output());
+        let summary = summary.chars().take(512).collect::<String>();
+        serde_json::json!({
+            "cacheHit": true,
+            "reusedFromCallId": entry.call_id,
+            "resultHash": entry.result_hash,
+            "totalBytes": entry.total_bytes,
+            "reuseKind": "exact",
+            "summary": summary,
+        })
+        .to_string()
+    };
+    // 媒体上下文只在首次成功读取时注入；缓存重放不重复插入附件。
     output.model_attachments.clear();
     let (artifact_bytes, result_hash) = output
         .runtime_events

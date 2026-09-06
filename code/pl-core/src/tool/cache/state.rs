@@ -4,10 +4,9 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::Value;
 
-use super::entry::{CacheReuseKind, ToolCacheEntry, cache_entry, compact_cache_hit};
+use super::entry::{ToolCacheEntry, cache_entry, cache_hit};
 use super::failure::ToolFailureEnvelopeV1;
 use super::key::cache_key;
-use super::read_file::{ReadFileRequest, read_file_request};
 use super::{ToolCachePolicy, TurnToolCacheHandle, TurnToolCacheSnapshot};
 use crate::tool::ToolResult;
 use crate::turn::ToolEffect;
@@ -30,7 +29,6 @@ pub(super) enum CacheAcquisition {
 pub(super) struct ToolCacheReservation {
     inner: Arc<Mutex<TurnToolCache>>,
     key: Option<String>,
-    read_file_request: Option<ReadFileRequest>,
 }
 
 impl TurnToolCacheHandle {
@@ -63,28 +61,7 @@ impl TurnToolCacheHandle {
             executor_generation,
         );
         if let Some(entry) = state.entries.get(&key) {
-            return CacheAcquisition::Hit(compact_cache_hit(entry, CacheReuseKind::Exact));
-        }
-        let read_file_request = read_file_request(
-            tool_name,
-            arguments,
-            workspace_root,
-            policy,
-            workspace_epoch,
-            executor_generation,
-        );
-        if let Some(entry) = read_file_request.as_ref().and_then(|request| {
-            state.entries.values().find(|entry| {
-                entry
-                    .read_file_range
-                    .as_ref()
-                    .is_some_and(|range| range.covers(request))
-            })
-        }) {
-            return CacheAcquisition::Hit(compact_cache_hit(
-                entry,
-                CacheReuseKind::CoveredReadRange,
-            ));
+            return CacheAcquisition::Hit(cache_hit(entry));
         }
         if let Some(failure) = state.failures.get(&key) {
             return CacheAcquisition::Failed(failure.clone());
@@ -98,7 +75,6 @@ impl TurnToolCacheHandle {
         CacheAcquisition::Reserved(ToolCacheReservation {
             inner: Arc::clone(&self.inner),
             key: Some(key),
-            read_file_request,
         })
     }
 
@@ -125,10 +101,7 @@ impl TurnToolCacheHandle {
             state.workspace_epoch,
             0,
         );
-        state
-            .entries
-            .get(&key)
-            .map(|entry| compact_cache_hit(entry, CacheReuseKind::Exact))
+        state.entries.get(&key).map(cache_hit)
     }
 
     #[cfg(test)]
@@ -156,24 +129,20 @@ impl TurnToolCacheHandle {
             state.workspace_epoch,
             0,
         );
-        let read_file_request = read_file_request(
-            tool_name,
-            arguments,
-            workspace_root,
-            policy,
-            state.workspace_epoch,
-            0,
-        );
-        state.entries.insert(
-            key,
-            cache_entry(tool_name, call_id, output, read_file_request.as_ref()),
-        );
+        state
+            .entries
+            .insert(key, cache_entry(tool_name, call_id, output));
     }
 
     pub(crate) fn record_effect(&self, effect: Option<ToolEffect>, _success: bool) {
         if matches!(
             effect,
-            Some(ToolEffect::WorkspaceWrite | ToolEffect::Process | ToolEffect::BranchControl)
+            Some(
+                ToolEffect::WorkspaceWrite
+                    | ToolEffect::Process
+                    | ToolEffect::BranchControl
+                    | ToolEffect::AgentControl
+            )
         ) {
             let mut state = self
                 .inner
@@ -207,7 +176,7 @@ impl TurnToolCacheHandle {
 impl ToolCacheReservation {
     pub(super) fn store(mut self, tool_name: &str, call_id: String, output: &ToolResult) {
         let key = self.key.take().expect("active cache reservation");
-        let entry = cache_entry(tool_name, call_id, output, self.read_file_request.as_ref());
+        let entry = cache_entry(tool_name, call_id, output);
         let waiters = {
             let mut state = self
                 .inner

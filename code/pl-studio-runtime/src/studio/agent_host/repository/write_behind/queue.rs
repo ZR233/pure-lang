@@ -37,6 +37,7 @@ pub(super) enum StudioDirectoryMutation {
     Delta(DirectoryDelta),
     Attachments(Vec<crate::studio::AttachmentRecord>),
     ModelPerformance(ObservedStateCommit),
+    WorktreeLease(crate::studio::agent_host::worktree_lease::WorktreeLease),
 }
 
 #[derive(Debug, Clone)]
@@ -116,6 +117,7 @@ impl QueueEntry {
                     records.iter().any(|record| record.thread_id == owner_id)
                 }
                 StudioDirectoryMutation::ModelPerformance(_) => false,
+                StudioDirectoryMutation::WorktreeLease(lease) => lease.child_id == owner_id,
             },
             Self::Mutation(QueuedMutation {
                 mutation: StudioMutation::Thread(_),
@@ -141,6 +143,14 @@ pub(super) fn queue_attachments(records: Vec<crate::studio::AttachmentRecord>) -
 pub(super) fn queue_directory(delta: DirectoryDelta) -> QueueEntry {
     QueueEntry::Mutation(QueuedMutation::new(StudioMutation::Directory(Box::new(
         StudioDirectoryMutation::Delta(delta),
+    ))))
+}
+
+pub(super) fn queue_worktree_lease(
+    lease: crate::studio::agent_host::worktree_lease::WorktreeLease,
+) -> QueueEntry {
+    QueueEntry::Mutation(QueuedMutation::new(StudioMutation::Directory(Box::new(
+        StudioDirectoryMutation::WorktreeLease(lease),
     ))))
 }
 

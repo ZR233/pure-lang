@@ -180,6 +180,23 @@ impl ThreadWriteBehindWriter {
         self.shared.work_notify.notify_one();
     }
 
+    pub(in crate::studio) fn record_worktree_lease(
+        &self,
+        lease: crate::studio::agent_host::worktree_lease::WorktreeLease,
+    ) {
+        self.ensure_task();
+        let mut queue = self
+            .shared
+            .queue
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        queue.push_back(super::queue::queue_worktree_lease(lease));
+        self.record_visible_commit();
+        drop(queue);
+        update_healthy_state(&self.shared, self.pending_commit_count());
+        self.shared.work_notify.notify_one();
+    }
+
     /// 把模型性能 owner 的版本化 typed snapshot 送入同一 write-behind 队列。
     ///
     /// 尚未落库的旧 revision 会被最新完整值覆盖；此处不执行 serde。

@@ -33,10 +33,10 @@ canonical revision 和一级 Markdown 标题调用 `plan_submit`。用户会要�
 Prompt 决定 implementation ready frontier 和调度顺序。Root 取得四份 durable delivery 后，审查并
 先后显式 cherry-pick 两个 worktree commit；只有第二次 cherry-pick 成功后，才分别以
 `workspaceDisposition:"cleanup"` 关闭
-两个 worktree child。全部 cleanup 后完成下文两个边界独立的只读 review 目标。只有最终 review
-wave 的全部 durable verdict 都为 `REVIEWER_READ_ONLY_APPROVED`，root 才运行最终 `cargo test`、
+两个 worktree child。整合后保留原执行者与 worktree，完成下文两个边界独立的只读 review 目标。只有最终 review
+wave 的全部 durable verdict 都为 `REVIEWER_READ_ONLY_APPROVED`，root 才运行最终 `cargo test`，通过后 cleanup，再
 推进到 `completed` 并输出 `PURE_SUBAGENTS_LIVE_OK`。若任一 reviewer 报告 `REVIEWER_FINDING`，
-修复后必须创建新的 review wave。
+通过 `send_message` 续跑负责该部分的原执行者，取得本轮 terminal receipt 和新交付后重新整合，再创建新的 review wave。
 
 ## Spawn 与交付合同
 
@@ -131,3 +131,7 @@ planning、implementation 与 review ready frontier；每个 child 有 receipt-b
 durable submission；两个越界写入均被拒绝；两份目录产物和两份 worktree commit 正确；root 逐个整合
 并 cleanup；最终 review wave 的全部 durable approval 被读取；最终测试通过、无残留 worktree/branch、
 五个 marker 文件正确、GUI 截图与 terminal receipt 存在。
+
+执行者与 reviewer 的交付都要列出 Executed、Reused、Not run 验证记录。这里明确要求各 child
+和 root 执行的 cargo test 属于本夹具的独立验收步骤；若命令与已有有效证据重复，报告
+Rerun reason 并说明本夹具的明确门禁要求，不把这项要求泛化为普通任务的机械重复测试。

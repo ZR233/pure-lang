@@ -24,14 +24,22 @@ use crate::studio::store_support::non_empty_title;
 #[derive(Debug, Clone, Default)]
 pub(in crate::studio) struct DirectoryDelta {
     pub(in crate::studio) thread_upserts: Vec<Thread>,
+    pub(in crate::studio) unregistered_faults: Vec<UnregisteredChildFault>,
     pub(in crate::studio) thread_removals: Vec<ThreadRemoval>,
     pub(in crate::studio) project_upserts: Vec<ProjectDirectoryRecord>,
     pub(in crate::studio) project_removals: Vec<ProjectRemoval>,
 }
 
+#[derive(Debug, Clone)]
+pub(in crate::studio) struct UnregisteredChildFault {
+    pub thread_id: String,
+    pub state: pl_core::AgentState,
+}
+
 impl DirectoryDelta {
     pub(in crate::studio) fn is_empty(&self) -> bool {
-        self.thread_upserts.is_empty()
+        self.unregistered_faults.is_empty()
+            && self.thread_upserts.is_empty()
             && self.thread_removals.is_empty()
             && self.project_upserts.is_empty()
             && self.project_removals.is_empty()
@@ -42,9 +50,13 @@ impl DirectoryDelta {
     /// LRU 逐出在释放 Thread 热对象前使用它扩展 owner durability barrier，避免
     /// runtime revision 已耐久但同一 owner 的标题、归档或 Project 关闭事实仍在队列。
     pub(in crate::studio) fn touches_thread(&self, thread_id: &str) -> bool {
-        self.thread_upserts
+        self.unregistered_faults
             .iter()
-            .any(|thread| thread.id == thread_id)
+            .any(|fault| fault.thread_id == thread_id)
+            || self
+                .thread_upserts
+                .iter()
+                .any(|thread| thread.id == thread_id)
             || self
                 .thread_removals
                 .iter()
@@ -173,6 +185,9 @@ pub(in crate::studio) async fn apply_directory_delta(
 ) -> Result<()> {
     for thread in &delta.thread_upserts {
         upsert_thread_directory_row(tx, thread).await?;
+    }
+    for fault in &delta.unregistered_faults {
+        super::agent_framework::apply_unregistered_child_fault(tx, fault).await?;
     }
     for removal in &delta.thread_removals {
         archive_thread_rows(tx, &removal.thread_ids, removal.archived_at).await?;

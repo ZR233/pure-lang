@@ -20,6 +20,9 @@ use pl_studio_runtime::{
     StudioRuntime, StudioRuntimeOptions, ThreadModeId,
 };
 
+#[path = "support/workflow_rework.rs"]
+mod workflow_rework;
+
 const LIVE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
 const VERIFY_MARKER: &str = "PURE_WORKFLOW_GUI_VERIFY_OK";
@@ -48,15 +51,50 @@ async fn installed_config_workflow_mode_delivers_rust_project() -> Result<()> {
         "planner route has no credential resolved by the system credential store"
     );
 
-    run_live_mode(
-        &installed,
-        &installed_config,
-        "mode.simple",
-        SIMPLE_PROMPT,
-        "Simple",
-    )
-    .await?;
-    run_live_mode(&installed, &installed_config, "mode.task", PROMPT, "Task").await
+    workflow_rework::run(&installed, &installed_config).await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "optional legacy Simple/Task baseline; not part of rework acceptance"]
+async fn installed_config_legacy_workflow_baseline() -> Result<()> {
+    let source = ConfigStore::default_app()?;
+    let home = tempfile::tempdir()?;
+    let installed = normalize_installed_config(&source, home.path())?;
+    let config = installed.load()?;
+    run_live_mode(&installed, &config, "mode.simple", SIMPLE_PROMPT, "Simple").await?;
+    run_live_mode(&installed, &config, "mode.task", PROMPT, "Task").await
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "focused real-provider directory/worktree rework acceptance; uses installed credentials"]
+async fn installed_config_workflow_rework_preserves_original_owners() -> Result<()> {
+    let source = ConfigStore::default_app()?;
+    let isolated = tempfile::tempdir()?;
+    let installed = normalize_installed_config(&source, isolated.path())?;
+    let config = installed.load()?;
+    for role in pl_studio_runtime::StudioRole::all() {
+        let route = config.resolve_role(role)?;
+        let url = route.endpoint.base_url.to_ascii_lowercase();
+        ensure!(
+            !["localhost", "127.0.0.1", "[::1]", "0.0.0.0"]
+                .iter()
+                .any(|host| url.contains(host)),
+            "rework acceptance cannot use a local/scripted endpoint"
+        );
+    }
+    match std::env::var("PURE_STUDIO_WORKFLOW_REWORK_SCENARIO") {
+        Ok(name) => workflow_rework::run_selected(&installed, &config, &name).await,
+        Err(std::env::VarError::NotPresent) => workflow_rework::run(&installed, &config).await,
+        Err(error) => Err(error.into()),
+    }
+}
+
+#[tokio::test]
+#[ignore = "revalidates saved real-provider evidence without repeating model work"]
+async fn saved_workflow_rework_evidence_matches_current_contract() -> Result<()> {
+    let directory = std::env::var_os("PURE_STUDIO_REWORK_REPLAY_DIR")
+        .context("PURE_STUDIO_REWORK_REPLAY_DIR is required")?;
+    workflow_rework::replay_saved(Path::new(&directory)).await
 }
 
 fn normalize_installed_config(source: &ConfigStore, destination: &Path) -> Result<ConfigStore> {
@@ -69,8 +107,55 @@ fn normalize_installed_config(source: &ConfigStore, destination: &Path) -> Resul
         .get("schema_version")
         .and_then(toml::Value::as_integer)
         .context("installed Studio config has no integer schema_version")?;
+    if schema_version == 17 {
+        // Test-only conversion of bundled preset references. Preserve endpoints, routes,
+        // effort and environment credential names; never migrate the installed file.
+        let catalog = pl_core::builtin_provider_catalog();
+        let providers = table
+            .get_mut("models")
+            .and_then(toml::Value::as_table_mut)
+            .and_then(|models| models.get_mut("providers"))
+            .and_then(toml::Value::as_table_mut)
+            .context("legacy fixture config has no providers")?;
+        for (id, value) in providers {
+            let provider = value.as_table_mut().context("provider is not a table")?;
+            ensure!(
+                !provider.contains_key("bearer_token"),
+                "inline credentials are not allowed in live fixture copies"
+            );
+            ensure!(
+                provider
+                    .get("capabilities")
+                    .and_then(toml::Value::as_table)
+                    .and_then(|value| value.get("source"))
+                    .and_then(toml::Value::as_str)
+                    == Some("preset_defaults")
+                    && provider
+                        .get("catalog")
+                        .and_then(toml::Value::as_table)
+                        .and_then(|value| value.get("source"))
+                        .and_then(toml::Value::as_str)
+                        == Some("bundled"),
+                "schema 17 provider {id} requires explicit capability/catalog conversion"
+            );
+            let preset_id = provider
+                .get("preset")
+                .and_then(toml::Value::as_str)
+                .context("legacy provider has no preset")?;
+            let preset = catalog
+                .presets
+                .iter()
+                .find(|preset| preset.id.as_str() == preset_id)
+                .context("legacy provider preset is not available")?;
+            let adapter = serde_json::to_value(preset.provider.adapter)?;
+            provider.insert(
+                "adapter".into(),
+                toml::Value::String(adapter.as_str().context("adapter is not a string")?.into()),
+            );
+        }
+    }
     ensure!(
-        schema_version == i64::from(STUDIO_CONFIG_SCHEMA_VERSION),
+        schema_version == 17 || schema_version == i64::from(STUDIO_CONFIG_SCHEMA_VERSION),
         "installed config schema is {schema_version}, expected {}",
         STUDIO_CONFIG_SCHEMA_VERSION
     );

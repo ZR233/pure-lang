@@ -18,10 +18,7 @@ fn main() {
             byte: b'!'
         })
     );
-    assert_eq!(
-        normalize_key(&"a".repeat(49)),
-        Err(NormalizeError::TooLong)
-    );
+    assert_eq!(normalize_key(&"a".repeat(49)), Err(NormalizeError::TooLong));
     assert_eq!(validate_key("release-candidate-42"), Ok(()));
     assert_eq!(
         validate_key("release--candidate"),

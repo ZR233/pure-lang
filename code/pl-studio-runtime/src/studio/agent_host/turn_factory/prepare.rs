@@ -35,31 +35,20 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .thread_id(&context.snapshot.identity.id)
             .await
             .ok_or_else(|| turn_error("agent has no Studio Thread boundary"))?;
-        // 内存优先读取目录事实：注册与 mode 变更的落库是异步跟随的。
-        let thread_record = match self.product_events.thread_snapshot(&thread_id) {
-            Some(thread) => ThreadRecord::from_directory_thread(thread),
-            None => self
-                .store
-                .read_thread(&thread_id)
-                .await
-                .map_err(anyhow_error)?
-                .ok_or_else(|| turn_error("selected Studio Thread not found"))?,
-        };
-        let project = match self
+        // Activated sessions must have resident directory facts. Cold fallback would
+        // make an unrelated storage outage change turn preparation semantics.
+        let thread_record = self
+            .product_events
+            .thread_snapshot(&thread_id)
+            .map(ThreadRecord::from_directory_thread)
+            .ok_or_else(|| turn_error("selected Studio Thread is not resident"))?;
+        let project = self
             .product_events
             .project_snapshot()
             .await
             .into_iter()
             .find(|project| project.id == thread_record.project_id)
-        {
-            Some(project) => project,
-            None => self
-                .store
-                .read_project(&thread_record.project_id)
-                .await
-                .map_err(anyhow_error)?
-                .ok_or_else(|| turn_error("selected Studio project not found"))?,
-        };
+            .ok_or_else(|| turn_error("selected Studio project is not resident"))?;
         let config = self.config_runtime.read()?.config;
         let agent_profile_catalog = self.config_runtime.agent_profiles()?;
         for diagnostic in &agent_profile_catalog.diagnostics {

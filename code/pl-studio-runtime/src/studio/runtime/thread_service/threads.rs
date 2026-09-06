@@ -606,4 +606,192 @@ mod tests {
         );
         runtime.shutdown_runtime().await.unwrap();
     }
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn worktree_lifecycle_and_new_submissions_do_not_wait_for_sqlite() {
+        use pl_core::{AgentProgressStage, AgentSpawnRequest, ThreadContextState};
+        use pl_protocol::{AgentWorkspaceDisposition, AgentWorkspaceMode};
+        use sea_orm::TransactionTrait;
+        let (_home, workspace, runtime, root_id) = runtime_with_thread().await;
+        for args in [
+            vec!["init"],
+            vec![
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "fixture",
+            ],
+        ] {
+            let output = tokio::process::Command::new("git")
+                .args(args)
+                .current_dir(workspace.path())
+                .output()
+                .await
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        let (handle, root) = runtime.ensure_thread_agent(&root_id).await.unwrap();
+        let writer = runtime
+            .persistence_repository()
+            .await
+            .unwrap()
+            .writer()
+            .clone();
+        writer.flush().await.unwrap();
+        let profile = pl_protocol::AgentProfileSnapshot {
+            profile_id: "worktree_executor".into(),
+            display_name: "Executor".into(),
+            description: String::new(),
+            when_to_use: String::new(),
+            system_instructions: String::new(),
+            provider_id: "unused".into(),
+            model: "unused".into(),
+            effort: None,
+            source: "test".into(),
+            revision: "1".into(),
+            content_hash: "fixture".into(),
+            system: true,
+            enabled: true,
+            workspace_mode: AgentWorkspaceMode::Worktree,
+        };
+        let mut session = ThreadContextState::empty();
+        session.session.replace_agent_profile(Some(profile));
+        // The single SQLite connection remains occupied throughout the real lifecycle.
+        // Old prepare_spawn/prepare_close perform SQL and cannot finish before release.
+        let blocked = runtime.store.database().begin().await.unwrap();
+        let operation = async {
+            let spawned = handle
+                .spawn(AgentSpawnRequest {
+                    thread_id: pl_core::ThreadId::new("memory-worktree-child").unwrap(),
+                    parent_id: root,
+                    role: pl_core::AgentRoleId::new("worktree_executor").unwrap(),
+                    session,
+                    initial_turn_id: None,
+                    initial_message: None,
+                    metadata: serde_json::Value::Null,
+                })
+                .await
+                .unwrap();
+            let child = spawned.snapshot.identity.id;
+            let assignment = spawned.workspace_assignment.unwrap();
+            let path = std::path::PathBuf::from(&assignment.root);
+            assert!(path.exists());
+            for detail in ["first delivery", "new repair delivery"] {
+                handle
+                    .report_progress(
+                        child.clone(),
+                        AgentProgressStage::Verifying,
+                        detail.into(),
+                        "await review".into(),
+                        Some(detail.into()),
+                    )
+                    .await
+                    .unwrap();
+            }
+            let submissions = handle.read_submissions(child.clone(), 0, 10).await.unwrap();
+            assert_eq!(submissions.total, 2);
+            assert!(writer.pending_commit_count() > 0);
+            handle
+                .close_with_disposition(child.clone(), AgentWorkspaceDisposition::Preserve)
+                .await
+                .unwrap();
+            assert!(path.exists());
+            let locked = tokio::process::Command::new("git")
+                .args(["worktree", "lock"])
+                .arg(&path)
+                .current_dir(workspace.path())
+                .output()
+                .await
+                .unwrap();
+            assert!(locked.status.success());
+            assert!(
+                handle
+                    .close_with_disposition(child.clone(), AgentWorkspaceDisposition::Cleanup)
+                    .await
+                    .is_err(),
+                "physical cleanup failure must reach the caller"
+            );
+            assert!(path.exists());
+            assert_eq!(
+                runtime
+                    .agent_facility
+                    .worktrees
+                    .get(child.as_str())
+                    .unwrap()
+                    .state,
+                crate::studio::agent_host::worktree_lease::WorktreeLeaseState::Preserved
+            );
+            let unlocked = tokio::process::Command::new("git")
+                .args(["worktree", "unlock"])
+                .arg(&path)
+                .current_dir(workspace.path())
+                .output()
+                .await
+                .unwrap();
+            assert!(unlocked.status.success());
+            handle
+                .close_with_disposition(child.clone(), AgentWorkspaceDisposition::Cleanup)
+                .await
+                .unwrap();
+            handle
+                .close_with_disposition(child.clone(), AgentWorkspaceDisposition::Cleanup)
+                .await
+                .unwrap();
+            assert!(!path.exists());
+            let lease = runtime
+                .agent_facility
+                .worktrees
+                .get(child.as_str())
+                .unwrap();
+            assert_eq!(
+                lease.state,
+                crate::studio::agent_host::worktree_lease::WorktreeLeaseState::Cleaned
+            );
+            lease
+        };
+        let lease = tokio::time::timeout(std::time::Duration::from_secs(5), operation)
+            .await
+            .expect("live lifecycle attempted to wait for the occupied database connection");
+        blocked.rollback().await.unwrap();
+        writer.retry_now();
+        writer.flush().await.unwrap();
+        let durable =
+            crate::studio::agent_host::worktree_lease::load_lease(&runtime.store, &lease.child_id)
+                .await
+                .unwrap();
+        assert_eq!(durable, Some(lease));
+        let orphan = workspace
+            .path()
+            .join(".pure/worktrees/orphan-root/orphan-child");
+        let created = tokio::process::Command::new("git")
+            .args(["worktree", "add", "-b", "pure-agent-orphan-child"])
+            .arg(&orphan)
+            .arg("HEAD")
+            .current_dir(workspace.path())
+            .output()
+            .await
+            .unwrap();
+        assert!(created.status.success());
+        let mut issues = Vec::new();
+        runtime
+            .append_worktree_recovery_issues(&mut issues)
+            .await
+            .unwrap();
+        assert!(
+            issues.iter().any(
+                |issue| issue.message.contains(&orphan.display().to_string())
+                    && issue.worktree.is_none()
+            ),
+            "unregistered physical worktree must be reported without inventing ownership"
+        );
+        assert!(orphan.exists());
+        runtime.shutdown().await;
+    }
 }

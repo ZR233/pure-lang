@@ -113,7 +113,7 @@ root 保存成功 spawn receipt 中的 `agentId`，循环 `wait_agents` 直到 t
 `read_agent_submissions`，从而让每份 durable delivery 都有先行的 receipt-bound terminal 证据。
 
 integrating 中 root 串行维护 canonical Git 状态，审查 directory 组合 diff、显式采纳 worktree commit、
-cleanup 并处理冲突。并行
+处理冲突，并将 cleanup 推迟至最终审查与验证通过。并行
 worktree 批次必须先把全部接受的 commit 整合进主 workspace，再开始逐个 cleanup；不得在同批次仍有
 未整合 commit 时提前清理其中任一 child。冲突处理中
 允许完成相邻必要实现或测试修复，但不能展开无关工作。child 持续不可用时，root 收窄重派一次后可以
@@ -123,7 +123,7 @@ worktree 批次必须先把全部接受的 commit 整合进主 workspace，再�
 等待该 wave 的每个 reviewer terminal 并按 agentId 读取 durable verdict，只有全部 approval 才能进入最终
 门禁，任一阻塞 finding 都必须返工、重新整合并创建新的 review wave。
 工具参数错误必须先对照 schema 修正再重试，禁止原样重复失败调用；模式专属字段必须使用 camelCase，
-`writablePaths` 只传给 directory child，`workspaceDisposition:cleanup` 只在 worktree commit 已整合后使用。
+`writablePaths` 只传给 directory child，`workspaceDisposition:cleanup` 只在 worktree commit 已整合且最终审查与验证通过后使用。
 验收用的 directory 越界拒绝是明确的 expected rejection，不得重试或借 shell 绕过。
 reviewer 只读完成后以 `report_progress` 提交 durable finding/approval，root 按冻结 reviewer `agentId`
 调用 `read_agent_submissions` 获取结构化 verdict；只有该证据到达后才能执行最终门禁。该提交不改变
@@ -131,6 +131,14 @@ workspace 或 Git，不能扩张 reviewer 的修复权限，也不能由 root �
 
 上述职责由本 Turn 的 Mode/Profile 指令约束，不新增专用 executor/reviewer runtime 生命周期，也不按阶段裁剪
 普通工具能力。
+
+### 原执行者返工与验证证据
+
+任务模式遵循 [原执行者返工与验证证据](15-agent-profiles-and-collaboration.md#原执行者返工与验证证据)：
+root 保存所有权映射，通过 `send_message` 续跑原执行者；返工必须取得本轮 terminal receipt 和新交付，
+重新整合后创建 fresh-context reviewer。执行者与 worktree 保留至最终审查和验证通过，届时才 cleanup。
+阶段完成标准消费可复用的验证记录，只补缺失或失效的检查；不为阶段切换机械重复全量测试。
+阶段指令属于图定义，本次更新仍遵循图 hash 变化时归档旧 run 并建立 replacement 的既有约定。
 
 ## 16.7 GUI 与 live 验收
 
@@ -142,11 +150,11 @@ run/revision/current-state CAS、目标、理由和 completion；查询不接受
 `workflow_state`、definition、compile 或 supersede 输入都直接使验收失败。
 
 最终入口是 `cargo xtask verify-workflow --live --headless` 与 `cargo xtask verify-workflow --live --gui`。
-它们必须使用真实非本地 provider 和真实 Prompt，不得 fallback 到 scripted/demo provider。workflow
+它们必须使用真实非本地 provider 和真实 Prompt，不得 fallback 到 scripted/demo provider。GUI workflow
 harness 在隔离 Rust 项目中分别选择 `mode.simple` 与 `mode.task`：简洁模式直接完成且不产生 workflow
 调用，任务模式在 planning 内走完 Plan clarification/revision/approval，再经过
 editing_documents/working/integrating/reviewing/completed 并调用
-`complete`。真实 Prompt 的 wire 验收必须拒绝任何工具执行失败或 `accepted:false`；后续成功重试不能
+`complete`。旧 GUI 专项 wire 验收拒绝任何工具执行失败或 `accepted:false`；后续成功重试不能
 掩盖首次错误。最终临时 GUI Task 验收还必须先提出真实澄清，接收固定计划修改意见，再重新提交计划并
 获得批准；批准前不得开始实现。fixture 只描述独立交付目标与 workspace 合同，不直接告诉模型何时批量
 spawn 或何时等待；Task Prompt 必须据此在 planning 与 working 中分别识别 ready frontier。验收随后要求
@@ -154,7 +162,9 @@ spawn 或何时等待；Task Prompt 必须据此在 planning 与 working 中分�
 workspace/branch、整合前隔离、显式 commit 采纳与全部 cleanup。整合后必须在首次 review 等待前并行派出
 至少一个综合 reviewer 和一个专项 reviewer，并逐个取得 terminal receipt 与 durable approval。
 两份 worktree commit 必须都先完成显式采纳，之后才允许第一次 cleanup。
-两种模式都运行 `cargo test` 与 verifier；GUI 额外重启任务模式验证 run id/revision/history 持久化。
+上述旧 GUI/专项基线运行 `cargo test` 与 verifier，并重启任务模式验证 run id/revision/history 持久化。
+Headless 入口只运行下述最小返工场景，不附带 Simple 或旧 GUI 编排断言；失败工具调用保留为诊断，
+成功 spawn 回执才建立执行者身份，允许 agent 自行纠正工具参数错误。
 聚焦计划确认的真实 GUI 回归使用 `cargo xtask verify-workflow --live --gui --plan-only`：它只启动一次
 `mode.task`，在 `planning` 中验证完整计划提交、修订、批准与最终 `plan_current=approved`，禁止
 `request_user_input`、`workflow_transition`、`complete` 和项目文件修改，并在该边界停止，不运行 Simple、
@@ -164,3 +174,20 @@ workspace/branch、整合前隔离、显式 commit 采纳与全部 cleanup。整
 子代理 artifact 必须保留未去重的协作调用 attempt、outcome 与 error class；每个 child 都需要绑定成功
 spawn receipt 的 nonempty durable submission。非预期首次调用失败不能因后续成功 receipt 被静默忽略，
 expected directory rejection、正常 progress polling 与空页诊断分别分类。
+
+Headless 验收还在独立 directory 与 Git worktree 临时项目中执行受控返工：首次实现交付并整合后，
+夹具在 reviewer 启动前的交互屏障注入可复现边界缺陷，随后由真实模型独立发现和修复；夹具不指定
+执行者选择。验收要求原 agentId 续跑、新一轮交付、新 reviewer approval、最终验证及延迟清理，
+保留注入记录、各角色验证报告、实际工具调用、日志与最终产物。遗漏报告、失效证据复用或无理由重复
+测试均失败；harness 自身独立检查单列，缓存 usage 缺失标为不可观测。
+
+返工专用夹具预置已确认的边界回归；每个真实 directory/worktree 场景最多 60 分钟，
+headless 全流程最多 180 分钟。超时保留证据，不把仍在执行或未完成清理的场景记为通过。
+
+### 最小 live 验收边界
+
+编排决策由 agent 依据提示词与事实作出；验收器不派发返工、不限定探索或返工次数。
+Directory 与 worktree 使用同一最小函数，观察 finding、原执行者续跑、新交付、重新整合、
+fresh reviewer approval、最终测试及清理。测试记录按原始调用审查，不按自然语言标签判定。
+每场景一次，20 分钟或 100 次模型请求先到即停止；基础设施错误立即保留证据并退出，
+不自动重开。运行观察使用内存快照与事件，冷数据追平单独记录。

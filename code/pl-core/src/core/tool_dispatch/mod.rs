@@ -1604,7 +1604,7 @@ mod tool_execution_tests {
     }
 
     #[tokio::test]
-    async fn tool_runtime_deltas_use_trace_part_id() {
+    async fn tool_runtime_deltas_use_streamed_identity_when_provider_id_arrives_late() {
         let mut core = test_turn_engine();
         core.register_test_tool(DeltaEchoTool);
         let tool_call = ToolCall::function(
@@ -1615,6 +1615,15 @@ mod tool_execution_tests {
         );
         let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(16);
         let mut recorder = TraceRecorder::new("session-1".to_string(), event_tx, 0);
+        let streamed = recorder.tool_item(
+            "turn-1",
+            "turn-1-call-1",
+            "delta_echo".into(),
+            "{}".into(),
+            Some("call-1".into()),
+            None,
+        );
+        recorder.start_item(streamed);
         let mut budget = BudgetTracker::new(crate::turn::TurnBudget::new(
             std::time::Duration::from_millis(60_000),
         ));
@@ -1646,12 +1655,13 @@ mod tool_execution_tests {
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].outcome, ToolExecutionOutcome::Succeeded);
         assert_eq!(
-            live_tool_result_deltas(&live_events, "turn-1-provider-item-1"),
+            live_tool_result_deltas(&live_events, "turn-1-call-1"),
             vec!["runtime delta".to_string()]
         );
         assert_eq!(
-            tool_statuses(&events, "turn-1-provider-item-1"),
+            tool_statuses(&events, "turn-1-call-1"),
             vec![
+                TestToolPhase::Started,
                 TestToolPhase::Started,
                 TestToolPhase::Running,
                 TestToolPhase::Succeeded,

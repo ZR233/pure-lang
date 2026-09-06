@@ -9,9 +9,7 @@ use crate::agent::worktree::{
     LocalWorktreeBackend, RemoteWorktreeBackend, WorktreeBackend, WorktreeHandle, WorktreeManager,
 };
 use crate::resolve_workspace_root;
-use crate::studio::agent_host::worktree_lease::{
-    WorktreeLease, WorktreeLeaseState, load_lease, load_leases, put_lease,
-};
+use crate::studio::agent_host::worktree_lease::{WorktreeLease, WorktreeLeaseState, load_leases};
 use crate::studio::{
     StudioRecoveryIssue, StudioRecoveryIssueAction, StudioRecoveryIssueCategory,
     StudioRecoveryIssueScope,
@@ -24,11 +22,90 @@ impl StudioRuntime {
         &self,
         recovery_issues: &mut Vec<StudioRecoveryIssue>,
     ) -> Result<()> {
-        for lease in load_leases(&self.store).await? {
+        self.agent_facility
+            .worktrees
+            .restore(load_leases(&self.store).await?);
+        for lease in self.agent_facility.worktrees.snapshot() {
             if lease.state == WorktreeLeaseState::Cleaned {
                 continue;
             }
             recovery_issues.push(self.worktree_recovery_issue(&lease).await);
+        }
+        self.append_unregistered_worktrees(recovery_issues).await?;
+        Ok(())
+    }
+
+    /// Discover local resources whose last lease may have been lost with an unflushed process.
+    /// Unknown ownership is diagnostic only: no inferred lease or automatic deletion.
+    async fn append_unregistered_worktrees(
+        &self,
+        issues: &mut Vec<StudioRecoveryIssue>,
+    ) -> Result<()> {
+        let known = self
+            .agent_facility
+            .worktrees
+            .snapshot()
+            .into_iter()
+            .filter(|lease| lease.state != WorktreeLeaseState::Cleaned)
+            .map(|lease| PathBuf::from(lease.path))
+            .collect::<std::collections::BTreeSet<_>>();
+        for project in self.agent_facility.product_events.project_snapshot().await {
+            if project.ssh_server_id.is_some() {
+                continue;
+            }
+            let project_path = PathBuf::from(&project.path);
+            let root = tokio::process::Command::new("git")
+                .args(["rev-parse", "--show-toplevel"])
+                .current_dir(&project_path)
+                .output()
+                .await;
+            let Ok(root) = root else {
+                continue;
+            };
+            if !root.status.success() {
+                continue;
+            }
+            let root = PathBuf::from(String::from_utf8(root.stdout)?.trim());
+            let managed = root.join(".pure/worktrees");
+            let mut found = std::collections::BTreeSet::new();
+            if let Ok(mut parents) = tokio::fs::read_dir(&managed).await {
+                while let Some(parent) = parents.next_entry().await? {
+                    if !parent.file_type().await?.is_dir() {
+                        continue;
+                    }
+                    let mut children = tokio::fs::read_dir(parent.path()).await?;
+                    while let Some(child) = children.next_entry().await? {
+                        found.insert(child.path());
+                    }
+                }
+            }
+            let registered = tokio::process::Command::new("git")
+                .args(["worktree", "list", "--porcelain", "-z"])
+                .current_dir(&root)
+                .output()
+                .await?;
+            anyhow::ensure!(
+                registered.status.success(),
+                "cannot inspect registered worktrees for {}: {}",
+                project.id,
+                String::from_utf8_lossy(&registered.stderr)
+            );
+            for field in registered.stdout.split(|byte| *byte == 0) {
+                if let Some(path) = field.strip_prefix(b"worktree ") {
+                    let path = PathBuf::from(std::str::from_utf8(path)?);
+                    if path.starts_with(&managed) {
+                        found.insert(path);
+                    }
+                }
+            }
+            for path in found.difference(&known) {
+                issues.push(StudioRecoveryIssue {
+                    id: format!("unregistered-worktree:{}:{}", project.id, pl_core::canonical_content_hash(path.to_string_lossy().as_bytes())),
+                    scope: StudioRecoveryIssueScope::Project, category: StudioRecoveryIssueCategory::Repository,
+                    action: StudioRecoveryIssueAction::Retry, project_id: Some(project.id.clone()), thread_id: None,
+                    message: format!("Unregistered worktree preserved at {}; ownership must be inspected before explicit cleanup", path.display()), worktree: None,
+                });
+            }
         }
         Ok(())
     }
@@ -83,8 +160,10 @@ impl StudioRuntime {
         child_id: &str,
         expected_lease_revision: u64,
     ) -> Result<()> {
-        let mut lease = load_lease(&self.store, child_id)
-            .await?
+        let mut lease = self
+            .agent_facility
+            .worktrees
+            .get(child_id)
             .ok_or_else(|| anyhow::anyhow!("worktree lease does not exist"))?;
         anyhow::ensure!(
             lease.revision == expected_lease_revision,
@@ -92,7 +171,8 @@ impl StudioRuntime {
             lease.revision
         );
         anyhow::ensure!(
-            lease.state != WorktreeLeaseState::Cleaned,
+            lease.state != WorktreeLeaseState::Cleaned
+                && lease.state != WorktreeLeaseState::CleanupRequested,
             "worktree lease is already cleaned"
         );
         validate_lease_identity(&lease)?;
@@ -100,14 +180,14 @@ impl StudioRuntime {
         let handle = worktree_handle(&lease);
         manager.preview(&handle).await?;
         lease.transition(WorktreeLeaseState::CleanupRequested);
-        put_lease(&self.store, &lease).await?;
+        self.agent_facility.worktrees.record(lease.clone())?;
         if let Err(error) = manager.discard(&handle).await {
             lease.transition(WorktreeLeaseState::Preserved);
-            put_lease(&self.store, &lease).await?;
+            self.agent_facility.worktrees.record(lease.clone())?;
             return Err(error.into());
         }
         lease.transition(WorktreeLeaseState::Cleaned);
-        put_lease(&self.store, &lease).await?;
+        self.agent_facility.worktrees.record(lease.clone())?;
         let issues = self.recovery.remove(&worktree_issue_id(child_id));
         self.agent_facility
             .product_events

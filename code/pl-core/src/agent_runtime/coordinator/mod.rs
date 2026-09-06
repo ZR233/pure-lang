@@ -441,6 +441,14 @@ async fn evict_agent(
     runtime: &AgentRuntimeHandle,
     agent_id: &ThreadId,
 ) -> AgentRuntimeResult<()> {
+    if runtime.directory.snapshots().iter().any(|child| {
+        child.identity.parent_id.as_ref() == Some(agent_id)
+            && !matches!(child.state, super::AgentState::Closed(_))
+    }) {
+        return Err(AgentRuntimeError::InvalidInput(format!(
+            "agent {agent_id} still owns an unclosed child"
+        )));
+    }
     let actor = actors
         .read()
         .await
@@ -473,8 +481,10 @@ async fn read_agent_session<H>(
 where
     H: AgentRuntimeHost,
 {
-    if let Ok(snapshot) = snapshot_for(actors, &query.target).await {
-        return session::read_memory_session(runtime, snapshot.identity, query);
+    match snapshot_for(actors, &query.target).await {
+        Ok(snapshot) => return session::read_memory_session(runtime, snapshot.identity, query),
+        Err(AgentRuntimeError::NotFound(_)) => {}
+        Err(error) => return Err(error),
     }
     host.repository()
         .list_agent_session(query)

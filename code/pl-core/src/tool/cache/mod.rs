@@ -4,7 +4,6 @@ mod entry;
 mod execution;
 mod failure;
 mod key;
-mod read_file;
 mod state;
 
 use std::sync::{Arc, Mutex};
@@ -121,6 +120,49 @@ mod tests {
 
         assert!(hit.model_attachments.is_empty());
         assert!(hit.model_output().contains("\"cacheHit\":true"));
+    }
+
+    #[test]
+    fn exact_file_read_replays_content_and_collaboration_invalidates_it() {
+        let cache = TurnToolCacheHandle::default();
+        let arguments = serde_json::json!({"path":"src/lib.rs","startLine":1,"maxLines":10});
+        let root = Path::new("/workspace/repo");
+        let mut first = read_file_output(1, 10, Some(11));
+        first.model_output = "truncated preview".into();
+        cache.insert(
+            "read_file",
+            &arguments,
+            root,
+            ToolCachePolicy::UntilWorkspaceMutation,
+            "first".into(),
+            &first,
+        );
+        let hit = cache
+            .lookup(
+                "read_file",
+                &arguments,
+                root,
+                ToolCachePolicy::UntilWorkspaceMutation,
+            )
+            .unwrap();
+        assert_eq!(hit.model_output(), first.canonical_output());
+        assert!(
+            hit.runtime_events
+                .iter()
+                .any(|event| matches!(event, crate::tool::ToolDirective::CacheHit { .. }))
+        );
+        cache.record_effect(Some(ToolEffect::AgentControl), true);
+        assert!(
+            cache
+                .lookup(
+                    "read_file",
+                    &arguments,
+                    root,
+                    ToolCachePolicy::UntilWorkspaceMutation
+                )
+                .is_none(),
+            "parent must not reuse a file read across child dispatch/delivery"
+        );
     }
 
     #[test]
@@ -241,10 +283,18 @@ mod tests {
         }
 
         assert_eq!(executions.load(Ordering::SeqCst), 1);
+        assert!(
+            outputs
+                .iter()
+                .all(|output| output.model_output() == "full file range")
+        );
         assert_eq!(
             outputs
                 .iter()
-                .filter(|output| output.model_output().contains("\"cacheHit\":true"))
+                .filter(|output| output
+                    .runtime_events
+                    .iter()
+                    .any(|event| matches!(event, crate::tool::ToolDirective::CacheHit { .. })))
                 .count(),
             3
         );
@@ -399,7 +449,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn covered_read_file_range_returns_compact_receipt_without_reexecution() {
+    async fn narrowed_read_file_range_returns_content_after_a_large_read() {
         let cache = TurnToolCacheHandle::default();
         let executions = Arc::new(AtomicUsize::new(0));
         let root = Path::new("/workspace/repo");
@@ -422,7 +472,9 @@ mod tests {
                 ),
                 || async move {
                     first_executions.fetch_add(1, Ordering::SeqCst);
-                    Ok(read_file_output(1, 430, Some(431)))
+                    let mut result = read_file_output(1, 430, Some(431));
+                    result.model_output = "large first read was truncated".to_string();
+                    Ok(result)
                 },
             )
             .await
@@ -450,14 +502,13 @@ mod tests {
                 },
             )
             .await
-            .expect("covered read is reused");
-        assert_eq!(executions.load(Ordering::SeqCst), 1);
-        assert!(covered.model_output().contains("\"cacheHit\":true"));
-        assert!(
-            covered
-                .model_output()
-                .contains("\"reuseKind\":\"coveredReadRange\"")
+            .expect("narrowed read returns the requested content");
+        assert_eq!(executions.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            covered.model_output(),
+            read_file_output(100, 299, Some(300)).model_output()
         );
+        assert!(!covered.model_output().contains("coveredReadRange"));
 
         let expanded_executions = Arc::clone(&executions);
         cache
@@ -482,7 +533,7 @@ mod tests {
             )
             .await
             .expect("uncovered suffix executes");
-        assert_eq!(executions.load(Ordering::SeqCst), 2);
+        assert_eq!(executions.load(Ordering::SeqCst), 3);
     }
 
     #[tokio::test]

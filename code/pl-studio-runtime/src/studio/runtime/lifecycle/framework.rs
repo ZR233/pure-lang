@@ -24,6 +24,7 @@ impl StudioRuntime {
             .context("Studio persistence writer is unavailable")?;
         let host = StudioAgentHost::new(
             persistence,
+            self.agent_facility.worktrees.clone(),
             self.store.clone(),
             self.config_runtime.clone(),
             self.external_runtimes.mcp.clone(),
@@ -173,7 +174,8 @@ impl StudioRuntime {
         for thread_id in candidates {
             // 候选计算已排除活跃订阅；这里再次检查订阅 pin，覆盖
             // 候选快照生成后到实际逐出前新建订阅的竞争。
-            if self.residency.is_pinned(&thread_id) {
+            if self.residency.is_pinned(&thread_id)
+                || self.agent_facility.worktrees.get(&thread_id).is_some_and(|lease| lease.state != crate::studio::agent_host::worktree_lease::WorktreeLeaseState::Cleaned) {
                 continue;
             }
             let agent_id = match pl_core::ThreadId::new(thread_id.clone()) {

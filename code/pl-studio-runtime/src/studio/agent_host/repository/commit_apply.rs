@@ -22,9 +22,10 @@ pub(in crate::studio::agent_host) enum ApplyCommitOutcome {
     RevisionConflict { actual_revision: Option<u64> },
 }
 
-pub(in crate::studio::agent_host) async fn apply_state_commit(
+pub(super) async fn apply_state_commit(
     tx: &sea_orm::DatabaseTransaction,
     commit: &ThreadCommit,
+    cache: &mut super::context::TranscriptCache,
 ) -> Result<ApplyCommitOutcome, PureError> {
     let thread_id = commit.agent_id.to_string();
     let payload_hash = thread_commit_payload_hash(commit)?;
@@ -84,7 +85,7 @@ pub(in crate::studio::agent_host) async fn apply_state_commit(
     persist_inputs(tx, &commit.next_state).await?;
     persist_state_turns(tx, &commit.next_state).await?;
     persist_thread_notifications(tx, commit).await?;
-    persist_session_snapshot(tx, commit).await?;
+    persist_session_snapshot(tx, commit, cache).await?;
     persist_inference_billing(tx, commit).await?;
     persist_submission(tx, commit).await?;
     put_object(

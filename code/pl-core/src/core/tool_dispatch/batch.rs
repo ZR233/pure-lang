@@ -107,6 +107,9 @@ pub(in crate::core) async fn execute_tool_call_batch(
                 recorder.start_item(item.clone());
                 item
             });
+        // Streaming may have allocated this item before the provider item ID arrived.
+        // Output producers must use that canonical identity, not the later lookup alias.
+        let trace_part_id = item.item_id().to_string();
         let invocation = TraceToolInvocation::new(
             trace_part_id.clone(),
             tool_call.name.clone(),

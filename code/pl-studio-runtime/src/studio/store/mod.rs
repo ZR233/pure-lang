@@ -20,7 +20,7 @@ pub struct StudioStore {
     attachments_dir: PathBuf,
 }
 
-pub(in crate::studio) use agent_framework::{ThreadRuntimeSeed, UnregisteredThreadFault};
+pub(in crate::studio) use agent_framework::ThreadRuntimeSeed;
 pub use error::StudioDatabaseError;
 impl StudioStore {
     pub(crate) fn database(&self) -> &DatabaseConnection {

@@ -86,6 +86,8 @@ impl StudioRuntime {
         let model_performance =
             ModelPerformanceOwner::new(store.clone(), writer.clone(), product_events.clone());
         let ssh_manager = std::sync::Arc::new(super::super::remote_helper::ssh_manager());
+        let worktrees =
+            crate::studio::agent_host::worktree_lease::WorktreeLeaseOwner::new(writer.clone());
         let persistence = StudioAgentRepository::with_writer_and_performance(
             store.clone(),
             writer,
@@ -117,6 +119,7 @@ impl StudioRuntime {
                 lsp_state_watcher: Default::default(),
             },
             agent_facility: StudioAgentFacility {
+                worktrees,
                 framework: Default::default(),
                 resources: StudioAgentResources::default(),
                 tool_manager,

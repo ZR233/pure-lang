@@ -18,9 +18,11 @@ use super::worker::{BatchError, PersistenceDisposition};
 pub(super) async fn apply_batch(
     store: &StudioStore,
     batch: &PendingBatch,
+    confirmed: &mut super::super::context::TranscriptCache,
 ) -> Result<(), BatchError> {
+    let mut cache = confirmed.clone();
     let tx = store.database().begin().await.map_err(classify_db_error)?;
-    let applied = applied_thread_batches(&tx, batch).await?;
+    let applied = applied_thread_batches(&tx, batch, &mut cache).await?;
     for entry in &batch.entries {
         match entry {
             QueueEntry::Mutation(QueuedMutation {
@@ -32,7 +34,7 @@ pub(super) async fn apply_batch(
             {
                 Ok(ApplyCommitOutcome::AlreadyApplied)
             } else {
-                apply_thread_fact(&tx, commit).await
+                apply_thread_fact(&tx, commit, &mut cache).await
             } {
                 Ok(ApplyCommitOutcome::Applied | ApplyCommitOutcome::AlreadyApplied) => {}
                 Ok(ApplyCommitOutcome::RevisionConflict { actual_revision }) => {
@@ -63,6 +65,14 @@ pub(super) async fn apply_batch(
                         return Err(classify_store_error(store_error(error)));
                     }
                 }
+                StudioDirectoryMutation::WorktreeLease(lease) => {
+                    if let Err(error) =
+                        put_object(&tx, &lease.child_id, lease, crate::studio::unix_seconds()).await
+                    {
+                        let _ = tx.rollback().await;
+                        return Err(classify_store_error(store_error(error)));
+                    }
+                }
                 StudioDirectoryMutation::ModelPerformance(commit) => {
                     if let Err(error) = put_object(
                         &tx,
@@ -81,6 +91,7 @@ pub(super) async fn apply_batch(
         }
     }
     tx.commit().await.map_err(classify_db_error)?;
+    *confirmed = cache;
     Ok(())
 }
 
@@ -89,6 +100,7 @@ pub(super) async fn apply_batch(
 async fn applied_thread_batches(
     tx: &sea_orm::DatabaseTransaction,
     batch: &PendingBatch,
+    cache: &mut super::super::context::TranscriptCache,
 ) -> Result<BTreeMap<pl_core::ThreadId, u64>, BatchError> {
     let mut owners = BTreeMap::<_, Vec<_>>::new();
     for entry in &batch.entries {
@@ -114,7 +126,7 @@ async fn applied_thread_batches(
         else {
             continue;
         };
-        match apply_thread_fact(tx, fact)
+        match apply_thread_fact(tx, fact, cache)
             .await
             .map_err(classify_store_error)?
         {
@@ -133,9 +145,10 @@ async fn applied_thread_batches(
 async fn apply_thread_fact(
     tx: &sea_orm::DatabaseTransaction,
     fact: &super::thread_fact::ThreadFact,
+    cache: &mut super::super::context::TranscriptCache,
 ) -> Result<ApplyCommitOutcome, PureError> {
-    let commit = fact.materialize(tx).await?;
-    apply_state_commit(tx, &commit).await
+    let commit = fact.materialize(tx, cache).await?;
+    apply_state_commit(tx, &commit, cache).await
 }
 
 fn classify_db_error(error: sea_orm::DbErr) -> BatchError {

@@ -64,6 +64,7 @@ impl ThreadFact {
     pub(super) async fn materialize(
         &self,
         tx: &sea_orm::DatabaseTransaction,
+        cache: &mut super::super::context::TranscriptCache,
     ) -> Result<ThreadCommit, PureError> {
         use sea_orm::EntityTrait;
         let row = crate::studio::entity::thread::Entity::find_by_id(self.agent_id.to_string())
@@ -74,14 +75,12 @@ impl ThreadFact {
             .and_then(|row| row.runtime_revision)
             .is_some_and(|revision| u64::try_from(revision).ok() == Some(self.facts.revision));
         let transcript = if already_applied {
-            super::super::context::restore_transcript(tx, self.agent_id.as_str()).await?
+            cache.transcript(tx, self.agent_id.as_str()).await?
         } else {
             match &self.facts.context {
                 Some(ThreadContextMutation::Replace { items }) => items.clone(),
                 mutation @ (Some(ThreadContextMutation::Append { .. }) | None) => {
-                    let mut items =
-                        super::super::context::restore_transcript(tx, self.agent_id.as_str())
-                            .await?;
+                    let mut items = cache.transcript(tx, self.agent_id.as_str()).await?;
                     if let Some(ThreadContextMutation::Append { items: suffix }) = mutation {
                         items.extend_from_slice(suffix);
                     }

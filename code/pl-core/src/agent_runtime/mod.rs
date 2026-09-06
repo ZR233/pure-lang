@@ -420,6 +420,88 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn plan_and_workflow_changes_share_the_updated_inference_checkpoint() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
+            let call = serde_json::json!({"choices":[{"delta":{"tool_calls":[{"index":0,"id":"plan-call","type":"function",
+                "function":{"name":"plan_submit","arguments":serde_json::json!({"expectedRevision":0,"plan":"# Plan\nImplement and verify."}).to_string()}}]},"finish_reason":"tool_calls"}],
+                "usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}});
+            let done = serde_json::json!({"choices":[{"delta":{"content":"done"},"finish_reason":"stop"}],
+                "usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}});
+            for value in [call, done] {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                read_test_http_request(&mut socket).await;
+                let body = format!("data: {value}\n\ndata: [DONE]\n\n");
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                socket.write_all(response.as_bytes()).await.unwrap();
+                socket.shutdown().await.unwrap();
+            }
+        }));
+        let repository = TestRepository::empty();
+        let mut host = TestHost::budget_limited(
+            repository.clone(),
+            format!("http://{address}/v1"),
+            Duration::from_secs(5),
+        );
+        host.turn_factory.mode = FactoryMode::Inference;
+        host.turn_factory.install_plan_tools = true;
+        let runtime = AgentRuntime::start(host, test_options()).await.unwrap();
+        let handle = runtime.handle();
+        let id = ThreadId::new("plan-checkpoint").unwrap();
+        handle
+            .register(registration(id.as_str(), "chat"))
+            .await
+            .unwrap();
+        handle
+            .submit(
+                id.clone(),
+                AgentSubmitRequest::start(id.clone(), "prepare a plan"),
+            )
+            .await
+            .unwrap();
+        let completed = wait_for_idle_with_timeout(&handle, id, Duration::from_secs(5)).await;
+        assert!(
+            completed.last_turn.as_ref().unwrap().outcome.is_completed(),
+            "unexpected outcome: {:?}",
+            completed.last_turn
+        );
+        server.await.unwrap();
+        let commits = repository.commits();
+        let first_inference = commits
+            .iter()
+            .find(|commit| commit.facts.inference.is_some())
+            .expect("tool inference checkpoint");
+        assert_eq!(
+            first_inference
+                .next_state
+                .session
+                .session
+                .plan()
+                .map(|plan| plan.state),
+            Some(AgentSessionPlanPhase::Approved),
+            "inference persistence must not overwrite the pending Plan with pre-tool state: {:?}",
+            first_inference.next_state.session.session.messages()
+        );
+        assert_eq!(
+            first_inference.next_state.session.session.workflow(),
+            Some(&WorkflowSessionState::default())
+        );
+        let revisions = commits
+            .iter()
+            .map(|commit| commit.next_state.session.session.working_state().revision)
+            .collect::<Vec<_>>();
+        assert!(
+            revisions.windows(2).all(|pair| pair[0] <= pair[1]),
+            "working-state revision regressed: {revisions:?}"
+        );
+        runtime.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn registration_persists_non_empty_initial_transcript_as_baseline() {
         let repository = TestRepository::empty();
         let host = TestHost::new(repository.clone(), FactoryMode::Fail);
@@ -484,6 +566,7 @@ mod tests {
         blocker: Arc<Notify>,
         rollover_base_url: Option<String>,
         rollover_timeout: Duration,
+        install_plan_tools: bool,
     }
 
     impl TestTurnFactory {
@@ -497,6 +580,7 @@ mod tests {
                 blocker: Arc::new(Notify::new()),
                 rollover_base_url: None,
                 rollover_timeout: Duration::from_secs(120),
+                install_plan_tools: false,
             }
         }
 
@@ -556,15 +640,73 @@ mod tests {
                         model: ModelInfo::compatible("rollover-test"),
                         effort: None,
                     };
-                    let engine = TurnEngineBuilder::from_route(&route).unwrap().build();
+                    let mut engine = TurnEngineBuilder::from_route(&route).unwrap().build();
+                    if self.install_plan_tools {
+                        engine
+                            .install_default_tools(std::env::temp_dir(), None)
+                            .await
+                            .unwrap();
+                    }
                     let request = TurnRequest::new(context.input.payload.message);
-                    let options = TurnOptions::default()
+                    let mut options = TurnOptions::default()
                         .with_debug_context_compaction_timeout(self.rollover_timeout);
+                    if self.install_plan_tools {
+                        let working_set = engine.tool_session_runtime().working_set();
+                        let runtime = context.runtime.clone();
+                        let agent_id = context.snapshot.identity.id.clone();
+                        let thread_id = context.thread_id.clone();
+                        options = options.with_interaction_callback(Arc::new(move |interaction| {
+                            let working_set = working_set.clone();
+                            let runtime = runtime.clone();
+                            let agent_id = agent_id.clone();
+                            let thread_id = thread_id.clone();
+                            Box::pin(async move {
+                                runtime
+                                    .record_thread_facts(
+                                        agent_id,
+                                        thread_id,
+                                        vec![crate::ThreadNotificationFact::durable(
+                                            interaction.created_at,
+                                            ThreadNotification::InteractionChanged {
+                                                interaction: Box::new(interaction),
+                                            },
+                                        )],
+                                    )
+                                    .await
+                                    .unwrap();
+                                working_set
+                                    .apply(crate::TurnWorkingSetChange::ReplaceWorkflow(Some(
+                                        WorkflowSessionState::default(),
+                                    )))
+                                    .unwrap();
+                                pl_protocol::InteractionResolution::UserInput(
+                                    pl_protocol::UserInputResolution {
+                                        answers: std::collections::HashMap::from([(
+                                            AGENT_SESSION_PLAN_CONFIRMATION_QUESTION_ID.into(),
+                                            UserInputAnswer {
+                                                answers: vec!["Approve".into()],
+                                            },
+                                        )]),
+                                    },
+                                )
+                            })
+                        }));
+                    }
                     let prepared = PreparedAgentTurn::new(
                         engine,
                         request,
                         options,
-                        AgentExecutionPolicy::default(),
+                        AgentExecutionPolicy {
+                            allowed_effects: if self.install_plan_tools {
+                                ToolEffectSet::from_effects([
+                                    crate::ToolEffect::AgentControl,
+                                    crate::ToolEffect::Read,
+                                ])
+                            } else {
+                                ToolEffectSet::default()
+                            },
+                            ..AgentExecutionPolicy::default()
+                        },
                     );
                     Ok(if self.mode == FactoryMode::BudgetLimited {
                         prepared.with_budget(TurnBudget::new(std::time::Duration::ZERO))
@@ -3138,6 +3280,14 @@ mod tests {
             .spawn(child_spawn_request(root.clone()))
             .await
             .unwrap();
+        assert!(
+            handle.evict_agent(child.clone()).await.is_err(),
+            "an unclosed child is still available for follow-up"
+        );
+        assert!(
+            handle.evict_agent(root.clone()).await.is_err(),
+            "a parent with an unclosed child remains resident"
+        );
         handle.close(child.clone()).await.unwrap();
         let query = || AgentSessionTimelineQuery {
             target: child.clone(),

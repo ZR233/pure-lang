@@ -197,12 +197,15 @@ where
                         },
                     )],
                 );
+                // project() reads the still-uncommitted bus snapshot. Include the
+                // inference prefix when projecting the workflow suffix against it.
+                notifications.extend(projected.notifications);
                 let projected_thread = self
                     .runtime
                     .thread_events
-                    .project(checkpoint.thread_id.as_str(), &projected.notifications)
+                    .project(checkpoint.thread_id.as_str(), &notifications)
                     .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
-                notifications.extend(projected_thread.notifications);
+                notifications = projected_thread.notifications;
                 current = projected_thread.snapshot;
             }
             next.session.thread_revision = current.revision;

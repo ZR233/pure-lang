@@ -516,5 +516,28 @@ model = "gpt-5"
         assert!(reviewer.contains("report_progress"));
         assert!(reviewer.contains("REVIEWER_READ_ONLY_APPROVED"));
         assert!(!reviewer.contains("可以直接修改"));
+        for role in [executor, worktree, reviewer] {
+            for label in [
+                "验证表",
+                "实际执行",
+                "引用已有证据",
+                "尚未验证",
+                "重复执行",
+                "代码基线",
+            ] {
+                assert!(
+                    role.contains(label),
+                    "profile omits verification contract: {label}"
+                );
+            }
+        }
+        assert!(reviewer.contains("原执行者"));
+        assert!(reviewer.contains("不执行 shell 或测试命令"));
+        assert!(reviewer.contains("read_file.contentHash"));
+        for role in [executor, worktree, reviewer] {
+            assert!(role.contains("不从环境变量"));
+            assert!(role.contains("spawn 回执绑定"));
+        }
+        assert!(worktree.contains("最终审查和验证通过前保留 worktree"));
     }
 }

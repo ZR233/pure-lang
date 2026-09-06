@@ -74,10 +74,41 @@ Every non-reviewer child must publish a durable `CHILD_DELIVERY_READY` submissio
 reply; a worktree delivery also includes `WORKTREE_COMMIT_READY`, a full commit ID, and workspace
 root. The root waits for terminal state and reads canonical submissions by the real child ID.
 Directory diffs are reviewed in place. Worktree commits are explicitly reviewed and cherry-picked
-or merged, then their worktrees and temporary branches are cleaned. For a parallel worktree batch,
-integrate every accepted commit before issuing the first cleanup; only then clean and verify each
-child workspace. Never interleave one child's integration and cleanup while another accepted sibling
+or merged. Keep implementation agents idle and resumable, and retain their worktrees until final
+review approval and final validation have both succeeded. For a parallel worktree batch,
+integrate every accepted commit before issuing the first cleanup; cleanup also requires that final
+approval and validation. Only then close executors and clean and verify each child workspace. Never interleave one child's integration and cleanup while another accepted sibling
 commit is still pending integration.
+
+Keep a task-scope-to-original-agentId ownership map. Route code findings back with `send_message`
+to the original executor, preserving its AgentSession and context. Include the finding evidence,
+current integrated baseline, owned repair scope, and existing verification records. Spawn a replacement
+only if the original executor is unavailable or its frozen permissions cannot cover the repair; record
+the concrete reason. Design findings remain root-owned. Before worktree rework, coordinate synchronization
+with the canonical baseline without discarding other changes; integrate only new repair commits.
+Do not close an executor after its first delivery. After each follow-up message, establish a new pending
+wave and require terminal evidence and a durable submission from that new turn. Old terminal receipts,
+old CHILD_DELIVERY_READY submissions, or an idle snapshot from the previous turn cannot satisfy rework.
+On failure or cancellation, preserve undelivered work and report its location.
+
+Bind every verification actor to the actual Pure agentId from its successful spawn receipt, never
+an ID claimed in child prose or inherited host environment variables. If a child cannot identify
+itself, it reports role and ownership; the root supplies the canonical ID when forwarding records.
+
+Every delivery includes a compact verification table distinguishing actual execution, cited evidence,
+and unverified checks. Include actor/agentId, command, cwd, code baseline, scope/environment, result
+and log/tool evidence. Cite original records when reusing evidence, explain unverified gaps, and
+explain reasons only when repeating a check. No fixed language or labels are required. Reading test
+source is not running tests. Pass confirmed records downstream and consolidate them in the final
+reply. Reuse valid evidence for unchanged code and environment; retain final integrated-tree gates.
+Agent judgment determines necessary checks; do not mechanically repeat full suites at each phase.
+Report provider cache counters when available without claiming guaranteed savings.
+
+Every reviewer message must explicitly prohibit `exec`, `write_stdin`, and workspace mutations,
+including shell commands intended only to read hashes or run tests. Request read_file/list_files and
+available read-only Git/LSP queries, use read_file.contentHash for hashes, and split large files into
+small line ranges when output is truncated. Existing test evidence belongs in cited evidence; needed test
+execution goes to the original executor or root. Verification reporting never grants reviewer tools.
 
 After integration, always create one fresh-context read-only comprehensive reviewer. When the change
 is broad enough that API/error paths, tests, GUI behavior, or Git/integration risks form substantial
@@ -86,7 +117,7 @@ before waiting. Every reviewer must reach terminal state and publish a canonical
 `REVIEWER_FINDING` or `REVIEWER_READ_ONLY_APPROVED`; root summaries and session text are not
 substitutes. Every reviewer in the final wave must approve. Any finding blocks completion and returns
 through the registered graph for repair, integration, and a new review wave. Only then may the root
-run final gates, transition to `completed`, call `complete`, and deliver the final result. Ordinary
+satisfy final gates, close implementation agents and clean their worktrees, transition to `completed`, call `complete`, and deliver the final result. Ordinary
 file, command, Git, collaboration, and final-answer capabilities are not removed by workflow states."#;
 
 const STATES: &[StaticWorkflowState] = &[
@@ -115,7 +146,7 @@ const STATES: &[StaticWorkflowState] = &[
     StaticWorkflowState {
         id: "working",
         title: "Working",
-        instructions: "Implement the approved plan by repeatedly dispatching the cost-qualified ready frontier. Use isolated directory and worktree children for independent owned changes, start the complete wave before waiting, and collect canonical durable deliveries and targeted tests before releasing dependent work.",
+        instructions: "Implement the approved plan by repeatedly dispatching the cost-qualified ready frontier. Use isolated directory and worktree children for independent owned changes, start the complete wave before waiting, and collect canonical durable deliveries and targeted tests before releasing dependent work. For findings, resume the original executor with send_message and collect fresh turn-bound evidence.",
         completion_criteria: &[
             "Every qualifying ready implementation item was dispatched before its wave first wait, and every owner completed or produced an explicit failure receipt.",
             "Directory scopes are mutually isolated and worktree changes have reviewable commits.",
@@ -126,22 +157,22 @@ const STATES: &[StaticWorkflowState] = &[
     StaticWorkflowState {
         id: "integrating",
         title: "Integrating",
-        instructions: "As the sole canonical Git owner, review the combined directory diff, explicitly integrate worktree commits in dependency order, resolve conflicts without losing other owners' changes, and clean temporary worktrees and branches after durable integration.",
+        instructions: "As the sole canonical Git owner, review the combined directory diff, explicitly integrate worktree commits in dependency order, resolve conflicts without losing other owners' changes, and retain implementation agents and worktrees for possible rework until final approval and validation.",
         completion_criteria: &[
             "All accepted child deliveries are present exactly once in the canonical workspace.",
-            "Worktree commits and cleanup are recorded.",
-            "The integrated tree passes focused formatting, compile, and test checks.",
+            "Worktree commits are recorded and their agents/workspaces remain available for rework.",
+            "Verification records identify valid reused checks and missing integrated-tree checks without mechanically rerunning suites.",
         ],
         kind: WorkflowStateKind::Atomic,
     },
     StaticWorkflowState {
         id: "reviewing",
         title: "Reviewing",
-        instructions: "Run one fresh-context comprehensive read-only reviewer plus cost-qualified specialized reviewers for independent risk surfaces, spawn the complete review wave before waiting, consume every canonical durable verdict, then run the proportional final validation matrix. Findings must route back through the graph.",
+        instructions: "Run one fresh-context comprehensive read-only reviewer plus cost-qualified specialized reviewers for independent risk surfaces, spawn the complete review wave before waiting, consume every canonical durable verdict, then satisfy the proportional final validation matrix using valid evidence and justified missing checks before cleanup. Findings must route back through the graph to their original executor.",
         completion_criteria: &[
             "Every reviewer in the final wave reached terminal state and produced a canonical durable approval for the integrated head.",
             "No unresolved design or code finding remains.",
-            "All required deterministic and live acceptance gates have terminal evidence.",
+            "All required deterministic and live acceptance gates have terminal evidence; verification records and post-approval cleanup are reported.",
         ],
         kind: WorkflowStateKind::Atomic,
     },
@@ -342,6 +373,22 @@ mod tests {
         assert!(task.contains("fresh-context"));
         assert!(task.contains("fresh-context") && task.contains("review"));
         assert!(task.contains("CHILD_DELIVERY_READY"));
+        for contract in [
+            "task-scope-to-original-agentId",
+            "to the original executor",
+            "old CHILD_DELIVERY_READY",
+            "compact verification table",
+            "reasons only when repeating",
+            "approval and validation",
+            "Every reviewer message must explicitly prohibit",
+            "an ID claimed in child prose",
+        ] {
+            assert!(
+                task.contains(contract),
+                "missing rework contract: {contract}"
+            );
+        }
+
         assert!(task.contains("canonical submissions"));
         assert!(task.contains("integrate every accepted commit before issuing the first cleanup"));
 

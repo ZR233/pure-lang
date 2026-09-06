@@ -61,6 +61,7 @@ pub(super) async fn supervise_writer(shared: Arc<WriterShared>, pending_commits:
 
 async fn run_writer(shared: Arc<WriterShared>, pending_commits: Arc<AtomicUsize>) {
     let mut retries = 0usize;
+    let mut transcript_cache = super::super::context::TranscriptCache::default();
     loop {
         let stopping = shared.stopping.load(Ordering::Acquire);
         let (queued_commits, flush_immediately, oldest_accepted_at) = queued_work(&shared);
@@ -90,8 +91,13 @@ async fn run_writer(shared: Arc<WriterShared>, pending_commits: Arc<AtomicUsize>
         let outcome = if commit_count == 0 {
             Ok(())
         } else {
-            apply_batch(&shared.store, &batch).await
+            apply_batch(&shared.store, &batch, &mut transcript_cache).await
         };
+        // An ambiguous commit error may mean SQLite committed before acknowledgement.
+        // Reload on retry instead of trusting an older in-process prefix.
+        if outcome.is_err() {
+            transcript_cache = Default::default();
+        }
         match outcome {
             Ok(()) => {
                 #[cfg(test)]

@@ -236,6 +236,40 @@ impl ProductEventBus {
         Ok(())
     }
 
+    pub(in crate::studio) async fn fault_unregistered_child(
+        &self,
+        id: &str,
+        message: &str,
+    ) -> Result<()> {
+        use pl_core::AgentStateTransition;
+        let mut thread = self
+            .thread_snapshot(id)
+            .ok_or_else(|| anyhow::anyhow!("unregistered child is not resident: {id}"))?;
+        let state = pl_core::AgentState::idle()
+            .decide(pl_core::AgentCommand::Fault {
+                error: pl_protocol::StateError {
+                    code: "agentRegistrationFailed".into(),
+                    message: message.into(),
+                    retryable: false,
+                },
+                turn_id: None,
+                classification: pl_core::AgentFaultClassification::RecoverableRuntime,
+            })?
+            .next_state;
+        thread.status = pl_protocol::ThreadStatus::Faulted;
+        thread.updated_at = crate::studio::unix_seconds();
+        let delta = DirectoryDelta {
+            unregistered_faults: vec![crate::studio::store::directory::UnregisteredChildFault {
+                thread_id: id.into(),
+                state,
+            }],
+            ..Default::default()
+        };
+        self.writer.record_directory(delta);
+        self.apply_thread_delta(vec![thread], Vec::new()).await?;
+        Ok(())
+    }
+
     /// 热集合移除一个已耐久化且不再活动的 Thread 条目（LRU 淘汰路径）。
     pub(in crate::studio) fn evict_thread_entry(&self, thread_id: &str) {
         self.thread_index

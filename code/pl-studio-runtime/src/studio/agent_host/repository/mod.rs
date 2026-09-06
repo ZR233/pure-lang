@@ -25,7 +25,7 @@ mod write_behind;
 use context::SessionSnapshotAuditError;
 use submissions::list_thread_submissions;
 
-pub(super) use commit_apply::{ApplyCommitOutcome, apply_state_commit};
+use commit_apply::{ApplyCommitOutcome, apply_state_commit};
 pub(in crate::studio) use write_behind::ThreadWriteBehindWriter;
 
 /// Studio 单库对 canonical Thread 状态的 write-behind repository。

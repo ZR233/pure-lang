@@ -61,7 +61,9 @@ Plan 内层 revision 同时是并发汇合时的逻辑步数。Interaction actor
 而不是无条件只加一。这样逐步路径与批量路径到达同一 Plan 快照时具有相同外层 revision，旧 checkpoint
 不会在 write-behind store 中表现为 revision 回退。缺失 Plan 按隐式 revision 0 计算；物化 revision 0、
 同 revision 内容变化、向后恢复或移除仍只推进一个外层 revision，这些路径不伪装成多次成功的 Plan
-状态转换。
+状态转换。工具执行后的首个 inference/checkpoint 必须同时携带该批工具结果与已同步的 working set，
+不能先提交旧 Plan 状态的计量快照，再补写 Plan 更新。同批还包含 workflow 更新时，
+计量与 workflow 通知必须作为连续 revision 的完整批次投影和提交，不能对尚未提交的后缀单独投影。
 
 `plan_submit` 生成仍由通用 `UserInput` UI 展示的 confirmation Interaction，但 Interaction scope 带
 typed `agentSessionPlanConfirmation` purpose，绑定 expected Plan revision、operation identity、参数 hash

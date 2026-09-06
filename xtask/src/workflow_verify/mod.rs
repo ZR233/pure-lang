@@ -69,7 +69,12 @@ struct WorkflowFixtureSkillUsage {
 }
 
 pub(crate) fn run(options: VerifyWorkflowOptions) -> Result<()> {
-    let deadline = Instant::now() + TOTAL_TIMEOUT;
+    let deadline = Instant::now()
+        + if options.headless {
+            Duration::from_secs(45 * 60)
+        } else {
+            TOTAL_TIMEOUT
+        };
     ensure!(
         options.live,
         "verify-workflow requires --live because it uses real credentials, incurs model fees, and never falls back to a scripted provider"

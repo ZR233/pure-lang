@@ -93,3 +93,11 @@ MCP tool executor 必须捕获创建它的 `McpTurnLease`、server identity、ra
 工具返回结构化完成事实并结束当前 turn；普通文本不能替代该调用。未选择 workflow 的 Mode 不需要
 调用 workflow 工具，但仍必须通过 `complete` 结束。child（包括 `worktree_executor`）保持直接结束，
 不得要求其调用 root 专用的 `complete`。
+
+### 文件读取缓存与可见内容
+
+`read_file` 的精确请求可复用同一工作区 epoch 内的结果，但命中仍返回所请求的文件内容，不能只返回
+“此前已读取”的摘要。不同的行范围按独立请求处理；模型可能是在输出截断或上下文压缩后补读，
+不能把旧范围被覆盖等同于正文仍在模型上下文中。文件 IO 的精确请求去重及变更失效规则保持有效。
+协作控制调用可能触发或观察 child 的文件变更，因此使父代理的 workspace 缓存 epoch 前进；
+不能跨 child 派发、续跑或交付边界复用旧文件视图。

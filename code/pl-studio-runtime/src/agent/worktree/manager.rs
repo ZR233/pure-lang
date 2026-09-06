@@ -147,6 +147,13 @@ impl WorktreeManager {
             .await
             .err();
         let leaf_error = match self.backend.path_exists(&handle.path).await {
+            Ok(true) if registration_error.is_some() => {
+                // A lock or ownership refusal must not be bypassed by filesystem deletion.
+                return Err(WorktreeError::CleanupFailed {
+                    context: handle.path.display().to_string(),
+                    failures: registration_error.into_iter().collect(),
+                });
+            }
             Ok(true) => self
                 .backend
                 .remove_leaf(&self.repo_root, &handle.path)

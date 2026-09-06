@@ -1,11 +1,10 @@
-use pl_core::{
-    AgentSession, ThreadCommit, ThreadContextMutation, canonical_content_hash, canonical_json_hash,
-};
+use pl_core::{AgentSession, ThreadCommit, ThreadContextMutation, canonical_content_hash};
 use pl_protocol::{AgentSessionSnapshot, AgentWorkingState, ModelContextItem};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait,
     QueryFilter, QueryOrder,
 };
+use sha2::{Digest, Sha256};
 
 use crate::PureError;
 use crate::studio::StudioStore;
@@ -13,6 +12,70 @@ use crate::studio::entity::thread_context_segment;
 use crate::studio::store::object::{decode_object, load_object, load_object_row, put_object};
 
 use super::{i64_from_u64, store_error};
+
+/// Background-only confirmed transcript prefixes; never read by an active actor.
+#[derive(Clone, Default)]
+pub(super) struct TranscriptCache(std::collections::BTreeMap<String, TranscriptPrefix>);
+
+#[derive(Clone)]
+struct TranscriptPrefix {
+    items: Vec<ModelContextItem>,
+    ordinal: i64,
+    digest: Sha256,
+}
+
+impl TranscriptPrefix {
+    fn empty() -> Self {
+        let mut digest = Sha256::new();
+        digest.update(b"[");
+        Self {
+            items: Vec::new(),
+            ordinal: 0,
+            digest,
+        }
+    }
+
+    fn append(&mut self, items: &[ModelContextItem]) -> Result<(), PureError> {
+        for item in items {
+            if !self.items.is_empty() {
+                self.digest.update(b",");
+            }
+            let mut value = serde_json::to_value(item)?;
+            value.sort_all_objects();
+            self.digest.update(serde_json::to_vec(&value)?);
+            self.items.push(item.clone());
+        }
+        Ok(())
+    }
+
+    fn hash(&self) -> String {
+        let mut digest = self.digest.clone();
+        digest.update(b"]");
+        format!("sha256:{:x}", digest.finalize())
+    }
+}
+
+impl TranscriptCache {
+    pub(super) async fn transcript(
+        &mut self,
+        tx: &sea_orm::DatabaseTransaction,
+        id: &str,
+    ) -> Result<Vec<ModelContextItem>, PureError> {
+        if !self.0.contains_key(id) {
+            let items = restore_transcript(tx, id).await?;
+            let mut prefix = TranscriptPrefix::empty();
+            prefix.append(&items)?;
+            prefix.ordinal = i64_from_u64(segment_count(tx, id).await?)?;
+            self.0.insert(id.into(), prefix);
+        }
+        Ok(self
+            .0
+            .get(id)
+            .ok_or_else(|| store_error("transcript prefix not loaded"))?
+            .items
+            .clone())
+    }
+}
 
 pub(super) enum SessionSnapshotAuditError {
     Fatal(PureError),
@@ -56,6 +119,7 @@ pub(super) async fn restore_session_snapshot(
 pub(super) async fn persist_session_snapshot(
     tx: &sea_orm::DatabaseTransaction,
     commit: &ThreadCommit,
+    cache: &mut TranscriptCache,
 ) -> Result<(), PureError> {
     let snapshot = commit.next_state.session.session.snapshot();
     persist_working_state(
@@ -68,13 +132,14 @@ pub(super) async fn persist_session_snapshot(
     let Some(mutation) = commit.facts.context.as_ref() else {
         return Ok(());
     };
-    persist_transcript_mutation(
+    persist_transcript_mutation_cached(
         tx,
         commit.facts.thread_id.as_str(),
         commit.facts.revision,
         commit.next_state.snapshot.updated_at,
         mutation,
         &snapshot.transcript,
+        cache,
     )
     .await
 }
@@ -118,6 +183,8 @@ fn fold_transcript(
     rows: Vec<thread_context_segment::Model>,
 ) -> Result<Vec<ModelContextItem>, PureError> {
     let mut transcript = Vec::new();
+    let mut prefix_digest = Sha256::new();
+    prefix_digest.update(b"[");
     let mut previous_revision = None;
     for (expected_ordinal, row) in rows.into_iter().enumerate() {
         let expected_ordinal = i64::try_from(expected_ordinal)
@@ -142,8 +209,8 @@ fn fold_transcript(
         )?;
         let items = serde_json::from_str::<Vec<ModelContextItem>>(&row.payload_json)?;
         match row.kind.as_str() {
-            "append" => transcript.extend(items),
-            "replace" if row.ordinal == 0 => transcript = items,
+            "append" => {}
+            "replace" if row.ordinal == 0 => {}
             "replace" => {
                 return Err(store_error(format!(
                     "Thread {thread_id} replace segment must be the baseline"
@@ -155,13 +222,26 @@ fn fold_transcript(
                 )));
             }
         }
-        let resulting_value = serde_json::to_value(&transcript)?;
-        verify_canonical_json_hash(
-            "context result",
-            &row.id,
-            &resulting_value,
-            &row.resulting_hash,
-        )?;
+        for item in items {
+            if !transcript.is_empty() {
+                prefix_digest.update(b",");
+            }
+            let mut value = serde_json::to_value(&item)?;
+            value.sort_all_objects();
+            prefix_digest.update(serde_json::to_vec(&value)?);
+            transcript.push(item);
+        }
+        // Closing the array on a cloned digest validates each stored prefix without
+        // re-serializing earlier items. Canonical key ordering matches pl-core.
+        let mut closed_prefix = prefix_digest.clone();
+        closed_prefix.update(b"]");
+        let actual = format!("sha256:{:x}", closed_prefix.finalize());
+        if actual != row.resulting_hash {
+            return Err(store_error(format!(
+                "context result {} hash mismatch: expected {}, got {actual}",
+                row.id, row.resulting_hash
+            )));
+        }
     }
     Ok(transcript)
 }
@@ -177,6 +257,7 @@ async fn persist_working_state(
         .map_err(store_error)
 }
 
+#[cfg(test)]
 async fn persist_transcript_mutation(
     tx: &sea_orm::DatabaseTransaction,
     thread_id: &str,
@@ -185,8 +266,29 @@ async fn persist_transcript_mutation(
     mutation: &ThreadContextMutation,
     resulting_transcript: &[ModelContextItem],
 ) -> Result<(), PureError> {
-    let persisted = restore_transcript(tx, thread_id).await?;
-    let (kind, payload, ordinal) = match mutation {
+    persist_transcript_mutation_cached(
+        tx,
+        thread_id,
+        revision,
+        created_at,
+        mutation,
+        resulting_transcript,
+        &mut TranscriptCache::default(),
+    )
+    .await
+}
+
+async fn persist_transcript_mutation_cached(
+    tx: &sea_orm::DatabaseTransaction,
+    thread_id: &str,
+    revision: u64,
+    created_at: i64,
+    mutation: &ThreadContextMutation,
+    resulting_transcript: &[ModelContextItem],
+    cache: &mut TranscriptCache,
+) -> Result<(), PureError> {
+    let persisted = cache.transcript(tx, thread_id).await?;
+    let (kind, payload, mut prefix) = match mutation {
         ThreadContextMutation::Append { items } => {
             let expected = resulting_transcript
                 .strip_prefix(persisted.as_slice())
@@ -199,12 +301,12 @@ async fn persist_transcript_mutation(
             if items.is_empty() {
                 return Ok(());
             }
-            (
-                "append",
-                items.as_slice(),
-                i64::try_from(segment_count(tx, thread_id).await?)
-                    .map_err(|_| store_error("context segment ordinal exceeds SQLite range"))?,
-            )
+            let prefix = cache
+                .0
+                .get(thread_id)
+                .ok_or_else(|| store_error("transcript prefix not loaded"))?
+                .clone();
+            ("append", items.as_slice(), prefix)
         }
         ThreadContextMutation::Replace { items } => {
             if items != resulting_transcript {
@@ -218,28 +320,34 @@ async fn persist_transcript_mutation(
                 .await
                 .map_err(store_error)?;
             if items.is_empty() {
+                cache.0.insert(thread_id.into(), TranscriptPrefix::empty());
                 return Ok(());
             }
-            ("replace", items.as_slice(), 0)
+            ("replace", items.as_slice(), TranscriptPrefix::empty())
         }
     };
+    prefix.append(payload)?;
     let payload_json = serde_json::to_string(payload)?;
-    let resulting_value = serde_json::to_value(resulting_transcript)?;
     let revision = i64_from_u64(revision)?;
     thread_context_segment::ActiveModel {
         id: Set(format!("context:{thread_id}:{revision}")),
         thread_id: Set(thread_id.to_string()),
-        ordinal: Set(ordinal),
+        ordinal: Set(prefix.ordinal),
         revision: Set(revision),
         kind: Set(kind.to_string()),
         payload_hash: Set(canonical_content_hash(payload_json.as_bytes())),
         payload_json: Set(payload_json),
-        resulting_hash: Set(canonical_json_hash(&resulting_value)),
+        resulting_hash: Set(prefix.hash()),
         created_at: Set(created_at),
     }
     .insert(tx)
     .await
     .map_err(store_error)?;
+    prefix.ordinal = prefix
+        .ordinal
+        .checked_add(1)
+        .ok_or_else(|| store_error("context ordinal exhausted"))?;
+    cache.0.insert(thread_id.into(), prefix);
     Ok(())
 }
 
@@ -261,23 +369,9 @@ fn verify_hash(kind: &str, id: &str, value: &str, expected: &str) -> Result<(), 
     )))
 }
 
-fn verify_canonical_json_hash(
-    kind: &str,
-    id: &str,
-    value: &serde_json::Value,
-    expected: &str,
-) -> Result<(), PureError> {
-    let actual = canonical_json_hash(value);
-    if actual == expected {
-        return Ok(());
-    }
-    Err(store_error(format!(
-        "{kind} {id} hash mismatch: expected {expected}, got {actual}"
-    )))
-}
-
 #[cfg(test)]
 mod tests {
+    use pl_core::canonical_json_hash;
     use std::collections::HashMap;
 
     use pl_protocol::{Message, MessageContent, MessageRole};
@@ -286,6 +380,127 @@ mod tests {
     use super::*;
     use crate::ThreadModeId;
     use crate::studio::entity::studio_object;
+
+    #[test]
+    fn long_transcript_preserves_every_canonical_prefix_hash() {
+        let mut rows = Vec::new();
+        let mut transcript = Vec::new();
+        for ordinal in 0..64 {
+            let item = text_item(&format!("segment-{ordinal}: {}", "验证\"\n".repeat(800)));
+            transcript.push(item.clone());
+            let payload_json = serde_json::to_string(&vec![item]).unwrap();
+            rows.push(thread_context_segment::Model {
+                id: format!("context:long:{ordinal}"),
+                thread_id: "long".into(),
+                ordinal,
+                revision: ordinal + 1,
+                kind: if ordinal == 0 { "replace" } else { "append" }.into(),
+                payload_hash: canonical_content_hash(payload_json.as_bytes()),
+                payload_json,
+                resulting_hash: canonical_json_hash(&serde_json::to_value(&transcript).unwrap()),
+                created_at: ordinal,
+            });
+        }
+        let started = std::time::Instant::now();
+        assert_eq!(fold_transcript("long", rows.clone()).unwrap(), transcript);
+        eprintln!("64-segment transcript audit: {:?}", started.elapsed());
+        rows[31].resulting_hash = "sha256:corrupt".into();
+        assert!(
+            fold_transcript("long", rows)
+                .unwrap_err()
+                .to_string()
+                .contains("context:long:31"),
+            "an intermediate prefix must still be validated"
+        );
+    }
+
+    #[tokio::test]
+    async fn cached_append_survives_rollback_and_restores_exact_history() {
+        let (store, id) = store_with_thread("cached-append").await;
+        let mut confirmed = TranscriptCache::default();
+        let first = text_item("first");
+        let second = text_item("second");
+        let tx = store.database().begin().await.unwrap();
+        persist_transcript_mutation_cached(
+            &tx,
+            &id,
+            1,
+            1,
+            &ThreadContextMutation::Replace {
+                items: vec![first.clone()],
+            },
+            std::slice::from_ref(&first),
+            &mut confirmed,
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+        let mut pending = confirmed.clone();
+        let tx = store.database().begin().await.unwrap();
+        let expected = vec![first.clone(), second.clone()];
+        persist_transcript_mutation_cached(
+            &tx,
+            &id,
+            2,
+            2,
+            &ThreadContextMutation::Append {
+                items: vec![second.clone()],
+            },
+            &expected,
+            &mut pending,
+        )
+        .await
+        .unwrap();
+        tx.rollback().await.unwrap();
+        assert_eq!(confirmed.0[&id].items, vec![first]);
+        let tx = store.database().begin().await.unwrap();
+        assert_eq!(
+            restore_transcript(&tx, &id).await.unwrap(),
+            confirmed.0[&id].items
+        );
+        // If append unnecessarily restores historical rows, this deliberately corrupted
+        // transaction-local prefix would fail. Confirmed memory is the writer's baseline.
+        use sea_orm::ConnectionTrait;
+        tx.execute_unprepared("UPDATE thread_context_segments SET resulting_hash='corrupt'")
+            .await
+            .unwrap();
+        let original_hash = confirmed.0[&id].hash();
+        let mut retry = confirmed.clone();
+        persist_transcript_mutation_cached(
+            &tx,
+            &id,
+            2,
+            2,
+            &ThreadContextMutation::Append {
+                items: vec![second],
+            },
+            &expected,
+            &mut retry,
+        )
+        .await
+        .unwrap();
+        assert!(
+            restore_transcript(&tx, &id).await.is_err(),
+            "cold recovery must still reject corrupted history"
+        );
+        thread_context_segment::Entity::update_many()
+            .col_expr(
+                thread_context_segment::Column::ResultingHash,
+                sea_orm::sea_query::Expr::value(original_hash),
+            )
+            .filter(thread_context_segment::Column::Revision.eq(1))
+            .exec(&tx)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        confirmed = retry;
+        assert_eq!(
+            restore_transcript(store.database(), &id).await.unwrap(),
+            expected
+        );
+        assert_eq!(confirmed.0[&id].items, expected);
+        assert_eq!(confirmed.0[&id].ordinal, 2);
+    }
 
     #[tokio::test]
     async fn transcript_segments_append_only_suffix_and_replace_after_compaction() {

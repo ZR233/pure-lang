@@ -157,6 +157,7 @@ struct StudioExternalRuntimes {
 
 #[derive(Clone)]
 struct StudioAgentFacility {
+    worktrees: crate::studio::agent_host::worktree_lease::WorktreeLeaseOwner,
     framework: std::sync::Arc<tokio::sync::Mutex<Option<std::sync::Arc<StudioAgentRuntime>>>>,
     resources: StudioAgentResources,
     tool_manager: pl_core::ToolManager,

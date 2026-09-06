@@ -17,15 +17,15 @@ use crate::agent::worktree::{
 use crate::studio::product_event_bus::ProductEventBus;
 use crate::studio::records::{ProjectRecord, ThreadRecord};
 use crate::studio::store::directory::RegisteredChildThread;
-use crate::studio::{StudioStore, UnregisteredThreadFault};
+
 use crate::{PureError, Result};
 
 use super::resources::{StudioAgentResource, StudioAgentResources};
-use super::worktree_lease::{WorktreeLease, WorktreeLeaseState, load_lease, put_lease};
+use super::worktree_lease::{WorktreeLease, WorktreeLeaseOwner, WorktreeLeaseState};
 
 #[derive(Clone)]
 pub(in crate::studio) struct StudioAgentLifecycle {
-    store: StudioStore,
+    worktrees: WorktreeLeaseOwner,
     product_events: ProductEventBus,
     resources: StudioAgentResources,
     ssh_manager: Arc<pl_core::remote::SshManager>,
@@ -60,13 +60,13 @@ struct CloseWorktreeLease {
 
 impl StudioAgentLifecycle {
     pub(super) fn new(
-        store: StudioStore,
+        worktrees: WorktreeLeaseOwner,
         product_events: ProductEventBus,
         resources: StudioAgentResources,
         ssh_manager: Arc<pl_core::remote::SshManager>,
     ) -> Self {
         Self {
-            store,
+            worktrees,
             product_events,
             resources,
             ssh_manager,
@@ -74,21 +74,12 @@ impl StudioAgentLifecycle {
     }
 
     async fn project_for_thread(&self, thread: &ThreadRecord) -> Result<ProjectRecord> {
-        match self
-            .product_events
+        self.product_events
             .project_snapshot()
             .await
             .into_iter()
             .find(|project| project.id == thread.project_id)
-        {
-            Some(project) => Ok(project),
-            None => self
-                .store
-                .read_project(&thread.project_id)
-                .await
-                .map_err(|error| lifecycle_error(error.to_string()))?
-                .ok_or_else(|| lifecycle_error("spawn parent Studio project does not exist")),
-        }
+            .ok_or_else(|| lifecycle_error("spawn parent project is not resident"))
     }
 
     fn backend_for(
@@ -127,7 +118,7 @@ impl StudioAgentLifecycle {
             _ => WorktreeLeaseState::Cleaned,
         };
         lease.transition(state);
-        if let Err(persist_error) = put_lease(&self.store, &lease).await {
+        if let Err(persist_error) = self.worktrees.record(lease.clone()) {
             tracing::error!(
                 child_id = lease.child_id,
                 error = %persist_error,
@@ -148,15 +139,11 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
             .thread_id(&request.parent.identity.id)
             .await
             .ok_or_else(|| lifecycle_error("spawn has no Studio Thread boundary"))?;
-        let parent_thread = match self.product_events.thread_snapshot(&parent_thread_id) {
-            Some(thread) => ThreadRecord::from_directory_thread(thread),
-            None => self
-                .store
-                .read_thread(&parent_thread_id)
-                .await
-                .map_err(|error| lifecycle_error(error.to_string()))?
-                .ok_or_else(|| lifecycle_error("spawn parent Studio Thread does not exist"))?,
-        };
+        let parent_thread = self
+            .product_events
+            .thread_snapshot(&parent_thread_id)
+            .map(ThreadRecord::from_directory_thread)
+            .ok_or_else(|| lifecycle_error("spawn parent Thread is not resident"))?;
         let project = self.project_for_thread(&parent_thread).await?;
         let profile = request
             .agent_profile
@@ -273,8 +260,8 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
                     branch: branch.clone(),
                     base_commit: base_commit.clone(),
                 };
-                put_lease(&self.store, &durable)
-                    .await
+                self.worktrees
+                    .record(durable.clone())
                     .map_err(|error| lifecycle_error(error.to_string()))?;
                 let handle = match manager
                     .create(WorktreeCreateSpec {
@@ -336,13 +323,13 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
                     Ok(()) => durable.transition(WorktreeLeaseState::Cleaned),
                     Err(cleanup) => {
                         durable.transition(WorktreeLeaseState::Preserved);
-                        let _ = put_lease(&self.store, &durable).await;
+                        let _ = self.worktrees.record(durable.clone());
                         return Err(lifecycle_error(format!(
                             "child Thread registration failed: {error}; worktree cleanup failed: {cleanup}"
                         )));
                     }
                 }
-                let _ = put_lease(&self.store, &durable).await;
+                let _ = self.worktrees.record(durable.clone());
             }
             return Err(lifecycle_error(error.to_string()));
         }
@@ -393,8 +380,8 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
         if let Some(worktree) = &lease.worktree {
             let mut durable = worktree.lease.clone();
             durable.transition(WorktreeLeaseState::Active);
-            put_lease(&self.store, &durable)
-                .await
+            self.worktrees
+                .record(durable.clone())
                 .map_err(|error| lifecycle_error(error.to_string()))?;
         }
         self.resources
@@ -409,26 +396,27 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
         reason: SpawnRollbackReason,
     ) -> Result<()> {
         self.resources.remove(&lease.agent_id).await;
-        let thread_result = self
-            .store
-            .fault_unregistered_child_thread(&lease.resource.thread_id, &reason.message)
-            .await
-            .map_err(|error| lifecycle_error(error.to_string()))
-            .map(|fault| match fault {
-                UnregisteredThreadFault::Faulted | UnregisteredThreadFault::RuntimeOwned => (),
-            });
+        let thread_result = match reason.phase {
+            pl_core::SpawnRollbackPhase::InitialContext => self
+                .product_events
+                .fault_unregistered_child(&lease.resource.thread_id, &reason.message)
+                .await
+                .map_err(|error| lifecycle_error(error.to_string())),
+            pl_core::SpawnRollbackPhase::AgentRegistration
+            | pl_core::SpawnRollbackPhase::Activation => Ok(()),
+        };
         let worktree_result = if let Some(worktree) = lease.worktree {
             let mut durable = worktree.lease;
             match worktree.manager.discard(&worktree.handle).await {
                 Ok(()) => {
                     durable.transition(WorktreeLeaseState::Cleaned);
-                    put_lease(&self.store, &durable)
-                        .await
+                    self.worktrees
+                        .record(durable.clone())
                         .map_err(|error| lifecycle_error(error.to_string()))
                 }
                 Err(error) => {
                     durable.transition(WorktreeLeaseState::Preserved);
-                    let persist = put_lease(&self.store, &durable).await;
+                    let persist = self.worktrees.record(durable.clone());
                     Err(lifecycle_error(match persist {
                         Ok(()) => error.to_string(),
                         Err(persist) => format!("{error}; failed to preserve lease: {persist}"),
@@ -450,11 +438,11 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
 
     async fn prepare_close(&self, request: CloseLifecycleRequest) -> Result<Self::CloseLease> {
         let agent_id = request.agent.identity.id;
-        let worktree = match load_lease(&self.store, agent_id.as_str())
-            .await
-            .map_err(|error| lifecycle_error(error.to_string()))?
-        {
+        let worktree = match self.worktrees.get(agent_id.as_str()) {
             Some(mut lease) if lease.state != WorktreeLeaseState::Cleaned => {
+                if lease.state == WorktreeLeaseState::CleanupRequested {
+                    return Err(lifecycle_error("worktree cleanup is already in progress"));
+                }
                 let previous_state = lease.state;
                 let manager = self.manager_from_lease(&lease);
                 let handle = WorktreeHandle {
@@ -464,8 +452,8 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
                 };
                 if request.workspace_disposition == AgentWorkspaceDisposition::Cleanup {
                     lease.transition(WorktreeLeaseState::CleanupRequested);
-                    put_lease(&self.store, &lease)
-                        .await
+                    self.worktrees
+                        .record(lease.clone())
                         .map_err(|error| lifecycle_error(error.to_string()))?;
                 }
                 Some(CloseWorktreeLease {
@@ -502,8 +490,8 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
                     durable.transition(WorktreeLeaseState::Cleaned);
                 }
             }
-            put_lease(&self.store, &durable)
-                .await
+            self.worktrees
+                .record(durable.clone())
                 .map_err(|error| lifecycle_error(error.to_string()))?;
         }
         self.resources.remove(&lease.agent_id).await;
@@ -515,13 +503,13 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
             let mut durable = worktree.lease;
             if worktree.cleanup_performed.load(Ordering::Acquire) {
                 durable.transition(WorktreeLeaseState::Cleaned);
-                put_lease(&self.store, &durable)
-                    .await
+                self.worktrees
+                    .record(durable.clone())
                     .map_err(|error| lifecycle_error(error.to_string()))?;
             } else if durable.state == WorktreeLeaseState::CleanupRequested {
                 durable.transition(worktree.previous_state);
-                put_lease(&self.store, &durable)
-                    .await
+                self.worktrees
+                    .record(durable.clone())
                     .map_err(|error| lifecycle_error(error.to_string()))?;
             }
         }

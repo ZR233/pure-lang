@@ -25,5 +25,4 @@ pub use recovery_registry::StudioRecoveryRegistry;
 pub use runtime::*;
 pub use runtime_lock::{StudioHostKind, StudioRuntimeOptions};
 pub use runtime_state::*;
-pub(in crate::studio) use store::UnregisteredThreadFault;
 pub use store::{StudioDatabaseError, StudioStore};

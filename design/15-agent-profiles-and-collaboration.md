@@ -130,7 +130,8 @@ Item。查询在驻留 child 上先等待目标 revision 耐久化，也能读�
   pipeline 拼成一个 exec，从而保证任一步失败都保留准确的首次调用责任和可重试边界。
 
 Task 默认在 working 后进入 integrating。directory 成果由 root 检查组合 diff 并形成最终提交；worktree
-成果由 root 审查 commit、用普通 Git 显式整合并 cleanup。同一并行批次包含多个 worktree child 时，
+成果由 root 审查 commit、用普通 Git 显式整合；执行者和 worktree 保留至最终审查与验证通过后才 cleanup。
+同一并行批次包含多个 worktree child 时，
 root 必须先审查并整合该批次全部接受的 commit，第二次及后续整合全部成功后才能发出第一次 cleanup；
 随后再逐个 cleanup 并验证对应 branch/worktree 消失，不得按 child 交错执行“整合一个、清理一个”。
 root 可在解决冲突时完成保持合并语义所需的
@@ -147,6 +148,26 @@ editing_documents 由 root 修订；重新整合后必须再派新的 reviewer�
 `read_agent_submissions` 读取与冻结 reviewer `agentId`、读取 call ID 绑定的 canonical page。该协作报告
 是只读审查的结构化交付，不允许文件/Git/exec 修复，也不能用 root 转述或 session 摘要伪造 approval。
 
+### 原执行者返工与验证证据
+
+root 保存任务读写范围与原执行者 `agentId` 的映射，交付后保持执行者 idle、可续跑，不提前关闭或清理
+worktree。代码 finding 必须先用 `send_message` 续跑原执行者，附 finding、当前整合基线、修复范围和
+验证记录；只有执行者不可用或原权限无法覆盖修复时才重派，并记录具体原因。设计 finding 仍由 root
+修订。worktree 返工前由 root 协调同步 canonical 基线；只采纳本轮新增修复提交，不重复整合旧提交。
+每次续跑都重新建立 pending 集合，使用本轮消息之后的 terminal receipt 和 durable submission；旧轮次
+完成状态与旧交付不能证明返工完成。重新整合后创建 fresh-context reviewer，全部 approval 且最终验证
+通过后才关闭执行者、清理 worktree；停止或失败保留未交付现场并报告原因。
+
+执行者、reviewer 的 durable submission 和最终回复都包含验证记录：实际执行者、完整命令、工作目录、
+代码基线（commit 加相关未提交 diff 或文件内容身份）、覆盖范围、环境、结果和工具/日志证据。明确区分
+本次实际执行、引用已有证据、尚未验证；没有执行测试也必须说明原因，阅读测试代码不算执行测试。
+root 向后续 child 传递已确认的记录，并在最终交付逐项汇总。执行身份以成功 spawn 回执中的 Pure
+agentId 为准；child 无法确认时报告角色/范围，由 root 绑定 ID，不使用环境变量、进程或外层宿主 ID。相同命令、相关代码范围与环境未变且已有
+成功证据时复用；修改或依赖变化、冲突、失败诊断、覆盖缺口与强制门禁要求重跑时，报告具体原因。
+不同角色不机械重复全量检查，最终整合验证与项目强制门禁仍须满足；reviewer 不为补测试越过只读工具边界。
+验证记录使用现有 submission detail，不新增生产协议、持久化字段或 GUI 接口。复用会话增加上下文及
+provider prompt cache 复用机会，缓存命中只按上游实际 usage 报告，不承诺固定收益。
+
 ## 15.6 worktree 生命周期
 
 本地和 SSH 后端都以 spawn 时解析的 `HEAD` 执行 `git worktree add -b`，禁用 hooks 和 credential
@@ -160,7 +181,7 @@ Thread、热资源、worktree 与 branch。启动恢复只按 durable lease 对�
 
 `close_agent` 对 worktree child 接受 `workspaceDisposition = preserve | cleanup`，默认 `preserve`。
 关闭不自动 commit、merge、cherry-pick 或修改主分支。父 Agent 应先审查 child commit、用普通 Git 显式
-整合，再请求 cleanup。已经 preserved 的 lease 在 Agents/Recovery 中显示 revision、branch、base/head、
+整合，最终审查与验证通过后再请求 cleanup。已经 preserved 的 lease 在 Agents/Recovery 中显示 revision、branch、base/head、
 dirty 与 changed-files 预览，并提供显式清理。
 
 ## 15.7 GUI 与验证
@@ -174,7 +195,7 @@ provider/model/effort 控件，用户编辑器额外显示三模式选择。所�
 `cargo xtask verify-subagents --live --gui`：使用隔离的临时 Studio home 与 Git fixture，并仅在该临时
 配置中把会话 Permission Mode 设为 `full-access`，从 GUI 配置并提交真实 Task prompt，证明并行
 explorer、两种 executor 的 spawn receipt、详细任务合同、目录拒绝、
-worktree 分支、显式整合、cleanup、整合后的只读 reviewer、最终测试、截图和 terminal receipt。
+worktree 分支、显式整合、整合后的只读 reviewer、最终测试、通过后的 cleanup、截图和 terminal receipt。
 artifact 还必须保留每次协作工具调用的 attempt/outcome 分类；成功重试不能隐藏先前的参数、容量或
 provider 失败。验收要求每个 child 都有绑定真实 `agentId` 的 canonical nonempty durable submission，
 两个 worktree commit 都必须在第一次 cleanup 前显式整合，
@@ -188,3 +209,10 @@ home 下创建唯一临时 Git fixture；Driver 必须从 Agents 页面切到 SS
 内存 secret lease，不得进入 CLI argv、GUI 进程环境、SQLite、wire 或 artifact。验收额外要求 executor
 在不同 inference 中多次以 `cwd:"."` 执行只读命令，所有 SSH `exec.cwd` 首次即为 `.` 或省略，且没有
 process id 冲突；成功或失败都按精确路径核验并清理远端 fixture。
+
+验证交付采用简短表格，记录实际执行、引用证据与尚未验证，不要求固定语言或标签。
+必要性、返工目标和复审时机由 agent 判断；生产代码只处理通用状态、权限和资源所有权。
+验收器保存原始调用与提交供交付审查，不用自然语言关键词代替证据有效性判断。
+
+物理 worktree 清理尊重 Git 锁与注册身份拒绝。注销失败且目录仍存在时，不继续绕过 Git
+删除目录或分支；保留现场并返回实际错误，显式解除原因后可重试。

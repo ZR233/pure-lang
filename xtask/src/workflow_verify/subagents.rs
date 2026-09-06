@@ -2458,7 +2458,6 @@ fn ensure_orchestration_order(calls: &[WireCall], outputs: &[WireOutput]) -> Res
         "wire captures contain fewer than two explicit worktree cleanups"
     );
     let first_cleanup = cleanups[0];
-    let initial_batch_last_cleanup = cleanups[1];
     let reviewers = successful_spawns("reviewer")?;
     ensure!(
         reviewers.len() >= 2,
@@ -2472,8 +2471,18 @@ fn ensure_orchestration_order(calls: &[WireCall], outputs: &[WireOutput]) -> Res
         "a cleanup occurred before both cherry-picks"
     );
     ensure!(
-        reviewers[0].0 > initial_batch_last_cleanup,
-        "a reviewer was spawned before integration and cleanup"
+        reviewers[0].0 > cherry_picks[1],
+        "a reviewer was spawned before integration"
+    );
+    let review_evidence = reviewer_submission_evidence(calls, outputs)?;
+    let last_approval = review_evidence
+        .iter()
+        .filter_map(|item| item.approval_index)
+        .max()
+        .context("cleanup requires a durable review approval")?;
+    ensure!(
+        first_cleanup > last_approval,
+        "worktree cleanup preceded final review approval"
     );
     for (spawn_index, _) in reviewers {
         ensure!(
@@ -2622,15 +2631,24 @@ fn ensure_parallel_review_waves(calls: &[WireCall], outputs: &[WireOutput]) -> R
         );
     }
 
+    let receipts = bound_receipts(calls, outputs)?;
     let last_implementation_spawn = calls
         .iter()
         .enumerate()
         .filter(|(_, call)| {
-            call.name == "spawn_agent"
+            (call.name == "spawn_agent"
                 && matches!(
                     call.arguments.get("profileId").and_then(Value::as_str),
                     Some("executor") | Some("worktree_executor")
-                )
+                ))
+                || (call.name == "send_message"
+                    && receipts.iter().any(|(spawn, receipt)| {
+                        receipt.get("agentId") == call.arguments.get("target")
+                            && matches!(
+                                spawn.arguments.get("profileId").and_then(Value::as_str),
+                                Some("executor" | "worktree_executor")
+                            )
+                    }))
         })
         .map(|(index, _)| index)
         .max()
@@ -2734,86 +2752,153 @@ fn ensure_finding_re_review(calls: &[WireCall], outputs: &[WireOutput]) -> Resul
         "finding re-review requires a different final reviewer agentId"
     );
     let final_reviewer_spawn = final_reviewer.spawn_index;
-    let implementation_spawns = calls
+    let receipts = bound_receipts(calls, outputs)?;
+    let repairs = calls
         .iter()
         .enumerate()
         .filter(|(index, call)| {
-            *index > finding_index
-                && *index < final_reviewer_spawn
-                && call.name == "spawn_agent"
-                && matches!(
-                    call.arguments.get("profileId").and_then(Value::as_str),
-                    Some("executor") | Some("worktree_executor")
-                )
+            *index > finding_index && *index < final_reviewer_spawn && call.name == "send_message"
+        })
+        .filter_map(|(index, message)| {
+            let target = message.arguments.get("target")?.as_str()?;
+            let (spawn, _) = receipts.iter().find(|(spawn, receipt)| {
+                receipt.get("agentId").and_then(Value::as_str) == Some(target)
+                    && matches!(
+                        spawn.arguments.get("profileId").and_then(Value::as_str),
+                        Some("executor" | "worktree_executor")
+                    )
+                    && calls
+                        .iter()
+                        .position(|call| call.call_id == spawn.call_id)
+                        .is_some_and(|i| i < finding_index)
+            })?;
+            Some((index, message, spawn, target))
         })
         .collect::<Vec<_>>();
     ensure!(
-        !implementation_spawns.is_empty(),
-        "REVIEWER_FINDING requires a new implementation spawn"
+        !repairs.is_empty(),
+        "REVIEWER_FINDING requires send_message to an original executor"
     );
-    let receipts = bound_receipts(calls, outputs)?;
-    for (spawn_index, spawn) in implementation_spawns.into_iter().filter(|(_, call)| {
-        call.arguments.get("profileId").and_then(Value::as_str) == Some("worktree_executor")
-    }) {
-        let receipt = receipts
+    for (message_index, message, spawn, agent) in repairs {
+        let message_output = outputs
             .iter()
-            .find(|(candidate, _)| candidate.call_id == spawn.call_id)
-            .map(|(_, receipt)| receipt)
-            .context("rework worktree spawn has no canonical receipt")?;
-        let agent = receipt
-            .get("agentId")
+            .find(|output| output.call_id == message.call_id)
+            .context("rework send_message has no bound receipt")?;
+        let receipt: Value = serde_json::from_str(&message_output.content)?;
+        let turn_id = receipt
+            .get("turnId")
             .and_then(Value::as_str)
-            .context("rework worktree receipt has no agentId")?;
+            .context("rework send_message has no turnId")?;
+        ensure!(
+            receipt.get("target").and_then(Value::as_str) == Some(agent),
+            "rework receipt has wrong target"
+        );
         let (read_index, read) = calls
             .iter()
             .enumerate()
             .find(|(index, call)| {
-                *index > spawn_index
+                *index > message_index
                     && *index < final_reviewer_spawn
                     && call.name == "read_agent_submissions"
                     && call.arguments.get("target").and_then(Value::as_str) == Some(agent)
             })
-            .with_context(|| {
-                format!("rework worktree agent {agent} has no durable delivery read")
-            })?;
-        let read_id = read
-            .call_id
-            .as_ref()
-            .context("rework worktree durable delivery read has no call_id")?;
-        let page = outputs
-            .iter()
-            .find(|output| output.call_id.as_ref() == Some(read_id))
-            .context("rework worktree durable delivery read has no bound output")?;
-        let commit = worktree_submission_commit(&parse_submission_page(&page.content)?.items)?;
-        let cherry_pick = calls
-            .iter()
-            .enumerate()
-            .find(|(index, call)| {
-                *index > read_index
-                    && *index < final_reviewer_spawn
-                    && call.name == "exec"
-                    && call
-                        .arguments
-                        .get("command")
-                        .and_then(Value::as_str)
-                        .is_some_and(|command| is_git_cherry_pick_command(command, Some(&commit)))
-            })
-            .map(|(index, _)| index)
-            .with_context(|| format!("rework worktree agent {agent} was not integrated"))?;
+            .context("rework has no new durable submission read")?;
         ensure!(
-            calls.iter().enumerate().any(|(index, call)| {
-                index > cherry_pick
-                    && index < final_reviewer_spawn
-                    && call.name == "close_agent"
-                    && call.arguments.get("target").and_then(Value::as_str) == Some(agent)
-                    && call
-                        .arguments
-                        .get("workspaceDisposition")
-                        .and_then(Value::as_str)
-                        == Some("cleanup")
+            calls[message_index + 1..read_index].iter().any(|call| {
+                if wait_has_terminal_evidence(call, outputs, agent).is_err() {
+                    return false;
+                }
+                outputs
+                    .iter()
+                    .find(|output| output.call_id == call.call_id)
+                    .and_then(|output| serde_json::from_str::<Value>(&output.content).ok())
+                    .and_then(|value| value.get("messages").and_then(Value::as_array).cloned())
+                    .is_some_and(|messages| {
+                        messages.iter().any(|message| {
+                            message.get("agentId").and_then(Value::as_str) == Some(agent)
+                                && message
+                                    .pointer("/state/lastTurnOutcome/turnId")
+                                    .and_then(Value::as_str)
+                                    == Some(turn_id)
+                        })
+                    })
             }),
-            "rework worktree agent {agent} was not cleaned after integration"
+            "rework lacks terminal evidence for the resumed turn"
         );
+        let output = outputs
+            .iter()
+            .find(|output| output.call_id == read.call_id)
+            .context("rework submission has no bound output")?;
+        let page = parse_submission_page(&output.content)?;
+        let prior_revision = calls[..message_index]
+            .iter()
+            .filter(|call| {
+                call.name == "read_agent_submissions"
+                    && call.arguments.get("target").and_then(Value::as_str) == Some(agent)
+            })
+            .filter_map(|call| outputs.iter().find(|output| output.call_id == call.call_id))
+            .filter_map(|output| parse_submission_page(&output.content).ok())
+            .flat_map(|page| page.items)
+            .filter_map(|item| item.get("revision").and_then(Value::as_u64))
+            .max()
+            .unwrap_or(0);
+        let fresh = page
+            .items
+            .into_iter()
+            .filter(|item| {
+                item.get("revision")
+                    .and_then(Value::as_u64)
+                    .is_some_and(|revision| revision > prior_revision)
+            })
+            .collect::<Vec<_>>();
+        ensure!(
+            fresh
+                .iter()
+                .any(|item| item.to_string().contains("CHILD_DELIVERY_READY")),
+            "rework reused an old or empty durable delivery"
+        );
+        if spawn.arguments.get("profileId").and_then(Value::as_str) == Some("worktree_executor") {
+            let commit = worktree_submission_commit(&fresh)?;
+            ensure!(
+                calls[read_index + 1..final_reviewer_spawn]
+                    .iter()
+                    .any(|call| {
+                        call.name == "exec"
+                            && call
+                                .arguments
+                                .get("command")
+                                .and_then(Value::as_str)
+                                .is_some_and(|command| {
+                                    is_git_cherry_pick_command(command, Some(&commit))
+                                })
+                    }),
+                "rework worktree agent {agent} was not integrated"
+            );
+            let approval = final_reviewer
+                .approval_index
+                .context("missing final approval")?;
+            ensure!(
+                calls
+                    .iter()
+                    .enumerate()
+                    .any(|(index, call)| index > approval
+                        && call.name == "close_agent"
+                        && call.arguments.get("target").and_then(Value::as_str) == Some(agent)
+                        && call
+                            .arguments
+                            .get("workspaceDisposition")
+                            .and_then(Value::as_str)
+                            == Some("cleanup")),
+                "rework worktree agent {agent} was not cleaned after final approval"
+            );
+            ensure!(
+                !calls[..approval]
+                    .iter()
+                    .any(|call| call.name == "close_agent"
+                        && call.arguments.get("target").and_then(Value::as_str) == Some(agent)),
+                "original executor was closed before final approval"
+            );
+        }
     }
     Ok(())
 }
@@ -4784,16 +4869,6 @@ mod tests {
                 serde_json::json!({"command":format!("git cherry-pick {SECOND_WORKTREE_COMMIT}")}),
             ),
             orchestration_call(
-                "c1",
-                "close_agent",
-                serde_json::json!({"workspaceDisposition":"cleanup"}),
-            ),
-            orchestration_call(
-                "c2",
-                "close_agent",
-                serde_json::json!({"workspaceDisposition":"cleanup"}),
-            ),
-            orchestration_call(
                 "r1",
                 "spawn_agent",
                 serde_json::json!({"profileId":"reviewer"}),
@@ -4802,6 +4877,26 @@ mod tests {
                 "r2",
                 "spawn_agent",
                 serde_json::json!({"profileId":"reviewer"}),
+            ),
+            orchestration_call(
+                "rr1",
+                "read_agent_submissions",
+                serde_json::json!({"target":"reviewer-a"}),
+            ),
+            orchestration_call(
+                "rr2",
+                "read_agent_submissions",
+                serde_json::json!({"target":"reviewer-b"}),
+            ),
+            orchestration_call(
+                "c1",
+                "close_agent",
+                serde_json::json!({"workspaceDisposition":"cleanup"}),
+            ),
+            orchestration_call(
+                "c2",
+                "close_agent",
+                serde_json::json!({"workspaceDisposition":"cleanup"}),
             ),
         ]);
         let outputs = vec![
@@ -4815,6 +4910,8 @@ mod tests {
             spawn_output("x4", "worktree_executor", "worktree-b"),
             spawn_output("r1", "reviewer", "reviewer-a"),
             spawn_output("r2", "reviewer", "reviewer-b"),
+            approval_output(Some("rr1")),
+            approval_output(Some("rr2")),
         ];
         (calls, outputs)
     }
@@ -4936,6 +5033,11 @@ mod tests {
     fn valid_finding_re_review() -> (Vec<WireCall>, Vec<WireOutput>) {
         let calls = vec![
             orchestration_call(
+                "x1",
+                "spawn_agent",
+                serde_json::json!({"profileId":"worktree_executor"}),
+            ),
+            orchestration_call(
                 "r1",
                 "spawn_agent",
                 serde_json::json!({"profileId":"reviewer"}),
@@ -4946,9 +5048,14 @@ mod tests {
                 serde_json::json!({"target":"reviewer-a"}),
             ),
             orchestration_call(
-                "x1",
-                "spawn_agent",
-                serde_json::json!({"profileId":"worktree_executor"}),
+                "repair",
+                "send_message",
+                serde_json::json!({"target":"worktree-a","message":"repair finding"}),
+            ),
+            orchestration_call(
+                "wait-repair",
+                "wait_agents",
+                serde_json::json!({"targets":["worktree-a"]}),
             ),
             orchestration_call(
                 "xr1",
@@ -4961,14 +5068,6 @@ mod tests {
                 serde_json::json!({"command":format!("git cherry-pick {REWORK_WORKTREE_COMMIT}")}),
             ),
             orchestration_call(
-                "c1",
-                "close_agent",
-                serde_json::json!({
-                    "target":"worktree-a",
-                    "workspaceDisposition":"cleanup"
-                }),
-            ),
-            orchestration_call(
                 "r2",
                 "spawn_agent",
                 serde_json::json!({"profileId":"reviewer"}),
@@ -4978,19 +5077,33 @@ mod tests {
                 "read_agent_submissions",
                 serde_json::json!({"target":"reviewer-b"}),
             ),
+            orchestration_call(
+                "c1",
+                "close_agent",
+                serde_json::json!({"target":"worktree-a","workspaceDisposition":"cleanup"}),
+            ),
         ];
+        let mut wait = terminal_wait_output("wait-repair", "worktree-a");
+        let mut value: Value = serde_json::from_str(&wait.content).unwrap();
+        value["messages"][0]["state"]["lastTurnOutcome"]["turnId"] =
+            serde_json::json!("repair-turn");
+        wait.content = value.to_string();
+        let mut submission = submission_item(&[(
+            "detail",
+            "CHILD_DELIVERY_READY WORKTREE_COMMIT_READY commit=3333333333333333333333333333333333333333",
+        )]);
+        submission["revision"] = serde_json::json!(2);
         let outputs = vec![
+            spawn_output("x1", "worktree_executor", "worktree-a"),
             reviewer_receipt("r1", "reviewer-a"),
             finding_output("rr1"),
-            spawn_output("x1", "worktree_executor", "worktree-a"),
-            reviewer_read_output(
-                Some("xr1"),
-                vec![submission_item(&[(
-                    "detail",
-                    "CHILD_DELIVERY_READY WORKTREE_COMMIT_READY commit=3333333333333333333333333333333333333333",
-                )])],
-                1,
-            ),
+            WireOutput {
+                call_id: Some("repair".into()),
+                content: serde_json::json!({"target":"worktree-a","turnId":"repair-turn"})
+                    .to_string(),
+            },
+            wait,
+            reviewer_read_output(Some("xr1"), vec![submission], 1),
             reviewer_receipt("r2", "reviewer-b"),
             approval_output(Some("rr2")),
         ];
@@ -5077,9 +5190,19 @@ mod tests {
             .unwrap() = finding_output("rr1");
         calls.extend([
             orchestration_call(
-                "x2",
-                "spawn_agent",
-                serde_json::json!({"profileId":"executor"}),
+                "repair",
+                "send_message",
+                serde_json::json!({"target":"executor-a", "message":"repair finding"}),
+            ),
+            orchestration_call(
+                "wait-repair",
+                "wait_agents",
+                serde_json::json!({"targets":["executor-a"]}),
+            ),
+            orchestration_call(
+                "read-repair",
+                "read_agent_submissions",
+                serde_json::json!({"target":"executor-a"}),
             ),
             orchestration_call(
                 "r3",
@@ -5113,7 +5236,24 @@ mod tests {
             ),
         ]);
         outputs.extend([
-            spawn_output("x2", "executor", "executor-b"),
+            WireOutput {
+                call_id: Some("repair".into()),
+                content: serde_json::json!({"target":"executor-a","turnId":"repair-turn"})
+                    .to_string(),
+            },
+            {
+                let mut wait = terminal_wait_output("wait-repair", "executor-a");
+                let mut value: Value = serde_json::from_str(&wait.content).unwrap();
+                value["messages"][0]["state"]["lastTurnOutcome"]["turnId"] =
+                    serde_json::json!("repair-turn");
+                wait.content = value.to_string();
+                wait
+            },
+            reviewer_read_output(
+                Some("read-repair"),
+                vec![serde_json::json!({"detail":"CHILD_DELIVERY_READY", "revision":2})],
+                1,
+            ),
             reviewer_receipt("r3", "reviewer-c"),
             reviewer_receipt("r4", "reviewer-d"),
             terminal_wait_output("w3", "reviewer-c"),
@@ -5268,8 +5408,46 @@ mod tests {
     #[test]
     fn finding_re_review_requires_implementation_after_actual_finding_read() {
         let (mut calls, outputs) = valid_finding_re_review();
-        calls.swap(1, 2);
+        swap_calls(&mut calls, "rr1", "repair");
         assert!(ensure_finding_re_review(&calls, &outputs).is_err());
+    }
+
+    #[test]
+    fn finding_re_review_rejects_stale_turn_delivery_and_early_cleanup() {
+        for defect in ["turn", "delivery", "cleanup", "target"] {
+            let (mut calls, mut outputs) = valid_finding_re_review();
+            match defect {
+                "turn" => {
+                    let output = outputs
+                        .iter_mut()
+                        .find(|o| o.call_id.as_deref() == Some("repair"))
+                        .unwrap();
+                    output.content = output.content.replace("repair-turn", "new-turn");
+                }
+                "delivery" => {
+                    let output = outputs
+                        .iter_mut()
+                        .find(|o| o.call_id.as_deref() == Some("xr1"))
+                        .unwrap();
+                    let mut value: Value = serde_json::from_str(&output.content).unwrap();
+                    value["items"][0]["revision"] = serde_json::json!(0);
+                    output.content = value.to_string();
+                }
+                "cleanup" => swap_calls(&mut calls, "c1", "r2"),
+                "target" => {
+                    calls
+                        .iter_mut()
+                        .find(|c| c.name == "send_message")
+                        .unwrap()
+                        .arguments["target"] = serde_json::json!("unrelated")
+                }
+                _ => unreachable!(),
+            }
+            assert!(
+                ensure_finding_re_review(&calls, &outputs).is_err(),
+                "accepted {defect}"
+            );
+        }
     }
 
     #[test]

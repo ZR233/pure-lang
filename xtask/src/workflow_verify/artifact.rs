@@ -102,6 +102,9 @@ pub(super) fn finalize(
     simple_prompt_hash: &str,
     scope: WorkflowAcceptanceScope,
 ) -> Result<()> {
+    if surface == "headless" {
+        return write_headless_manifest(artifact_dir, wire_dir);
+    }
     let prompt_bytes = fs::read(artifact_dir.join("fixture-prompt.md"))?;
     let artifact_prompt_hash = format!("{:x}", Sha256::digest(&prompt_bytes));
     ensure!(
@@ -879,6 +882,23 @@ fn detected_prompt_sections(
     detected
 }
 
+/// Headless business acceptance belongs to the rework harness. This only inventories
+/// requests; a diagnostic artifact failure must not invent a second orchestration gate.
+fn write_headless_manifest(artifact_dir: &Path, wire_dir: &Path) -> Result<()> {
+    let mut paths = Vec::new();
+    collect_json_files(wire_dir, &mut paths)?;
+    paths.sort();
+    let captures = paths
+        .iter()
+        .map(|path| capture_entry(artifact_dir, path))
+        .collect::<Result<Vec<_>>>()?;
+    fs::write(
+        artifact_dir.join("wire-request-manifest.json"),
+        serde_json::to_vec_pretty(&captures)?,
+    )?;
+    Ok(())
+}
+
 fn collect_json_files(root: &Path, output: &mut Vec<PathBuf>) -> Result<()> {
     if !root.exists() {
         return Ok(());
@@ -890,9 +910,10 @@ fn collect_json_files(root: &Path, output: &mut Vec<PathBuf>) -> Result<()> {
         let path = entry.path();
         if entry.file_type()?.is_dir() {
             collect_json_files(&path, output)?;
-        } else if path
-            .extension()
-            .is_some_and(|extension| extension == "json")
+        } else if !entry.file_name().to_string_lossy().starts_with("usage-")
+            && path
+                .extension()
+                .is_some_and(|extension| extension == "json")
         {
             output.push(path);
         }
@@ -903,6 +924,31 @@ fn collect_json_files(root: &Path, output: &mut Vec<PathBuf>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "replays saved wire without starting a provider"]
+    fn saved_headless_wire_is_an_inventory_not_a_second_workflow_gate() {
+        let directory = std::env::var_os("PURE_STUDIO_WIRE_REPLAY_DIR")
+            .expect("saved artifact directory required");
+        let directory = PathBuf::from(directory);
+        write_headless_manifest(&directory, &directory.join("wire")).unwrap();
+        let manifest: Vec<Value> = serde_json::from_slice(
+            &fs::read(directory.join("wire-request-manifest.json")).unwrap(),
+        )
+        .unwrap();
+        assert!(!manifest.is_empty());
+    }
+
+    #[test]
+    fn request_inventory_excludes_provider_usage_sidecars() {
+        let directory = tempfile::tempdir().unwrap();
+        let request = directory.path().join("000001-responsesHttp-full.json");
+        fs::write(&request, "{}").unwrap();
+        fs::write(directory.path().join("usage-000001.json"), "{}").unwrap();
+        let mut paths = Vec::new();
+        collect_json_files(directory.path(), &mut paths).unwrap();
+        assert_eq!(paths, vec![request]);
+    }
 
     #[test]
     fn recognizes_tool_names_without_old_task_aliases() {

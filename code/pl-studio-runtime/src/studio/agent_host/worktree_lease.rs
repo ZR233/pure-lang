@@ -2,7 +2,9 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::studio::StudioStore;
-use crate::studio::store::object::{PersistedStudioObject, load_object, load_objects, put_object};
+use crate::studio::store::object::{PersistedStudioObject, load_objects};
+#[cfg(test)]
+use crate::studio::store::object::{load_object, put_object};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -68,6 +70,7 @@ impl PersistedStudioObject for WorktreeLease {
     }
 }
 
+#[cfg(test)]
 pub(in crate::studio) async fn load_lease(
     store: &StudioStore,
     child_id: &str,
@@ -75,6 +78,7 @@ pub(in crate::studio) async fn load_lease(
     load_object(store.database(), child_id).await
 }
 
+#[cfg(test)]
 pub(in crate::studio) async fn put_lease(store: &StudioStore, lease: &WorktreeLease) -> Result<()> {
     put_object(
         store.database(),
@@ -87,6 +91,84 @@ pub(in crate::studio) async fn put_lease(store: &StudioStore, lease: &WorktreeLe
 
 pub(in crate::studio) async fn load_leases(store: &StudioStore) -> Result<Vec<WorktreeLease>> {
     load_objects(store.database()).await
+}
+
+/// Canonical process-local lease owner. Storage never participates in admission.
+#[derive(Clone)]
+pub(in crate::studio) struct WorktreeLeaseOwner {
+    entries: std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<String, WorktreeLease>>>,
+    writer: super::ThreadWriteBehindWriter,
+}
+
+impl WorktreeLeaseOwner {
+    pub(in crate::studio) fn new(writer: super::ThreadWriteBehindWriter) -> Self {
+        Self {
+            entries: Default::default(),
+            writer,
+        }
+    }
+
+    /// Startup hydration never replaces facts already admitted in this process.
+    pub(in crate::studio) fn restore(&self, leases: Vec<WorktreeLease>) {
+        let mut entries = self.entries.lock().expect("worktree lease lock poisoned");
+        for mut lease in leases {
+            if let std::collections::btree_map::Entry::Vacant(entry) =
+                entries.entry(lease.child_id.clone())
+            {
+                // An interrupted process no longer owns an in-flight cleanup operation.
+                // Preserve uncertain physical state for explicit reconciliation.
+                if lease.state == WorktreeLeaseState::CleanupRequested {
+                    lease.transition(WorktreeLeaseState::Preserved);
+                    self.writer.record_worktree_lease(lease.clone());
+                }
+                entry.insert(lease);
+            }
+        }
+    }
+
+    pub(in crate::studio) fn get(&self, child_id: &str) -> Option<WorktreeLease> {
+        self.entries
+            .lock()
+            .expect("worktree lease lock poisoned")
+            .get(child_id)
+            .cloned()
+    }
+
+    pub(in crate::studio) fn snapshot(&self) -> Vec<WorktreeLease> {
+        self.entries
+            .lock()
+            .expect("worktree lease lock poisoned")
+            .values()
+            .cloned()
+            .collect()
+    }
+
+    /// Revision admission and queue order share one short, IO-free critical section.
+    pub(in crate::studio) fn record(&self, lease: WorktreeLease) -> Result<()> {
+        let mut entries = self.entries.lock().expect("worktree lease lock poisoned");
+        if let Some(previous) = entries.get(&lease.child_id) {
+            if previous == &lease {
+                return Ok(());
+            }
+            anyhow::ensure!(
+                lease.revision
+                    == previous
+                        .revision
+                        .checked_add(1)
+                        .ok_or_else(|| anyhow::anyhow!("worktree lease revision exhausted"))?,
+                "worktree lease revision conflict for {}",
+                lease.child_id
+            );
+        } else {
+            anyhow::ensure!(
+                lease.state == WorktreeLeaseState::Prepared,
+                "new worktree lease must be prepared"
+            );
+        }
+        entries.insert(lease.child_id.clone(), lease.clone());
+        self.writer.record_worktree_lease(lease);
+        Ok(())
+    }
 }
 
 #[cfg(test)]

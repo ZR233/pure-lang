@@ -237,7 +237,8 @@ where
                         AgentLoopCommand::Evict { reply } => {
                             // 与输入接受共享 owner 命令序列，避免检查后又提交了新事实。
                             let snapshot = &self.state.snapshot;
-                            if self.active.is_some() || snapshot.pending_inputs > 0
+                            if (snapshot.identity.parent_id.is_some() && !matches!(snapshot.state, AgentState::Closed(_)))
+                                || self.active.is_some() || snapshot.pending_inputs > 0
                                 || snapshot.active_turn_id().is_some() || snapshot.state.is_budget_paused()
                                 || !self.host.repository().is_durable(&snapshot.identity.id, snapshot.revision)
                             {

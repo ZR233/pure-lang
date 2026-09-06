@@ -607,14 +607,7 @@ async fn run_steps(
                 }
             }
         }
-        if session.replace_tool_discovery(tool_plan.normalized_discovery_state(&discovery)) {
-            super::checkpoint::persist(
-                &options,
-                session,
-                crate::TurnCheckpointReason::WorkingSetChanged,
-            )
-            .await?;
-        }
+        session.replace_tool_discovery(tool_plan.normalized_discovery_state(&discovery));
         progress.tool_detail(recorder, "工具执行完成，准备回写结果。");
         let requested_interaction = tool_results.iter().any(|tool_result| {
             tool_result.runtime_events.iter().any(|event| {
@@ -713,6 +706,10 @@ async fn run_steps(
             recorder.final_text_item(&turn_id, content.clone());
             last_content = content;
         }
+        // Interaction publication may already have committed the pending Plan in the
+        // actor. The first post-tool checkpoint must include the updated working set
+        // together with every tool result, including discovery changes.
+        working_set.sync_session(session)?;
         super::inference::record(
             turn_billing,
             &options,
