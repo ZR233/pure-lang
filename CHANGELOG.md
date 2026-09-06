@@ -5,6 +5,179 @@ Pure Studio release notes are generated from Conventional Commits by Release Ple
 > 从采用 `pure_studio.exe` 的版本开始，请先手动卸载旧版 Pure Studio，再安装新版。
 > 安装器允许直接覆盖，但不会检测或删除旧程序文件；跳过卸载可能留下旧文件。
 
+## [3.0.0](https://github.com/ZR233/pure-lang/compare/v2.0.0...v3.0.0) (2026-09-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* **model:** 替换模型协议绑定、定价和计量 API；Studio 配置仅接受 schema 18，旧格式按仓库约定备份后重建，不保留旧 API 或迁移兼容层。
+* **thread-mode:** 删除 Mode Skill、旧 workflow_state/submit_plan、旧 Mode 类型及兼容路径。
+* **pl-model:** 两个校验方法与 WS 通道的错误类型由 String 改为类型化错误。
+* **pl-model:** pl_model::X 扁平路径迁移为 pl_model::<domain>::X； pl_core 不再转发 pl_model 与 pl-protocol 的模型类型。
+* **pl-lsp:** 重组模块与公开命名空间
+* **pl-core:** 删除旧 Tool、TypedTool、LocalTool 及兼容注册入口，统一使用 StaticTool、DynTool、ToolExecutor 和 ToolInstallGroup。
+* **agent-runtime:** expose typed turn budgets
+* **studio:** Studio 本地数据库升级为 v17，并破坏性重建旧项目、Thread、附件和 Task 历史。
+* **agent-runtime:** thread schema 升级至 9，并以 typed tool attachments 和 ToolMedia 替换旧工具媒体表达。
+* **studio:** 移除旧消息内容、附件命令和模型能力兼容结构，统一使用 typed parts、attachment draft 与 request profile。
+* **studio:** Thread wire 升级为 v7，plan_exit 仅接受严格的 plan 字段，旧 Skill payload 不再兼容恢复。
+* **skills:** 原生承载 Turn Skill 指令
+* **skills:** 开放宿主原生 Skill 目录注册
+* **agent-runtime:** 统一 Agent 协议状态事实源
+* **tool:** 删除旧工具注册、可见性与旁路执行 API，所有工具统一通过 ToolManager、AgentToolSet 和冻结 ToolPlan 注册与调用。
+
+### Features
+
+* **agent-runtime:** expose typed turn budgets ([ba2b345](https://github.com/ZR233/pure-lang/commit/ba2b345bc0bba25d62f7fa5a694d865b2486f4a1))
+* **agent-runtime:** 优化子代理预算暂停与会话查询 ([4139317](https://github.com/ZR233/pure-lang/commit/4139317358b2e41689fd19412e323cad8294bdf3))
+* **agent-runtime:** 保留产品生命周期所需语义 ([dbcba70](https://github.com/ZR233/pure-lang/commit/dbcba70eec7102ca3fbf7c7e0b12a6be6142d437))
+* **agent-runtime:** 支持代理主动读取图片 ([7f057b4](https://github.com/ZR233/pure-lang/commit/7f057b4808ed9563579ef0990f32387b97c9b8f6))
+* **gui:** 增加环境预检与 Web 远程验收 ([54acafa](https://github.com/ZR233/pure-lang/commit/54acafa449ad00bbc5cbe366f68356d7d0daef48))
+* **model:** 增加 DeepSeek 原生联网搜索 ([585150d](https://github.com/ZR233/pure-lang/commit/585150d10c41b4e539ff72de268479ad11b88557))
+* **model:** 新增 GLM-5.3-Flash 多模态模型支持 ([83cfe18](https://github.com/ZR233/pure-lang/commit/83cfe183f50f3e9496ed5c38d6b2f2357141ac5a))
+* **pl-core:** 注入动态执行环境与 shell 类型 ([767f454](https://github.com/ZR233/pure-lang/commit/767f454e78a8f78039231daf3b9b6a18bd49a942))
+* **release:** 分发 SSH remote helper ([c39c1ec](https://github.com/ZR233/pure-lang/commit/c39c1ec245b853e761e136c89f0e043cb4b33e75))
+* **remote:** 将 SSH helper 嵌入应用二进制 ([5d37f4d](https://github.com/ZR233/pure-lang/commit/5d37f4db6eea2e9a895bf61785426752e0986908))
+* **runtime:** 统一流式提交合并语义 ([307801a](https://github.com/ZR233/pure-lang/commit/307801ac8a60ea374f3228d4d9525b99e1413858))
+* **skills:** 优化名称与描述发现 ([0fc595b](https://github.com/ZR233/pure-lang/commit/0fc595be0f8d32222ea62b0b2b3f8b2db5b6980e))
+* **skills:** 开放宿主原生 Skill 目录注册 ([4d26311](https://github.com/ZR233/pure-lang/commit/4d26311ed481a4ae095d9af28e944c96ff29e84e))
+* **studio:** add configurable subagent workspaces ([839c0a3](https://github.com/ZR233/pure-lang/commit/839c0a36ecb861f2e79c73d8fbfcce83ec9d6e1b))
+* **studio:** enforce subagent-first task prompts ([cf2be0e](https://github.com/ZR233/pure-lang/commit/cf2be0e3f2653f3c84e835cfce950ccf2521cf99))
+* **studio:** 优化 Timeline 等待状态动效 ([9bdc1bc](https://github.com/ZR233/pure-lang/commit/9bdc1bc3c78294d4974ac562abc8252e37143979))
+* **studio:** 优化任务模式动态并行调度 ([861a39e](https://github.com/ZR233/pure-lang/commit/861a39e9dd07982061325eab9b53f6f128505c5d))
+* **studio:** 在子代理时间线显示主代理消息 ([3d06631](https://github.com/ZR233/pure-lang/commit/3d06631ff0be6f0e98016911669183d155a06a85))
+* **studio:** 增加会话费用与模型性能统计 ([9473f15](https://github.com/ZR233/pure-lang/commit/9473f152f8c26be2b7b7f8450065d4741ff157ca))
+* **studio:** 完善 Skill Provider 与 Linux Flutter 验收 ([caaaaa8](https://github.com/ZR233/pure-lang/commit/caaaaa87f5ae5dc83dc1233be464ab2bcfee8641))
+* **studio:** 完善子代理隔离与任务编排 ([01ee7c3](https://github.com/ZR233/pure-lang/commit/01ee7c39226c883505f83e2f6281683c769753a4))
+* **studio:** 完善预置 Skill 资源管理 ([8566177](https://github.com/ZR233/pure-lang/commit/8566177306ec256494449bc24e856eea683a1402))
+* **studio:** 实现 Timeline 端到端真流式 ([c83c0d5](https://github.com/ZR233/pure-lang/commit/c83c0d54666c01c9610c15fe34f958d18ae4963c))
+* **studio:** 展示 Skill 激活状态 ([d49686d](https://github.com/ZR233/pure-lang/commit/d49686d2427979f3abccb5608b4fdb9623a0774a))
+* **studio:** 支持 SSH 远端路径直接输入 ([30a8ef7](https://github.com/ZR233/pure-lang/commit/30a8ef7a0f716af08a7ffff41e5e7a861157cc08))
+* **studio:** 支持最小 SSH 远程开发 ([0f3aa23](https://github.com/ZR233/pure-lang/commit/0f3aa23fa6f6844f788342440fcea78611c64a84))
+* **studio:** 支持对话 Web 超链接 ([6ccb07a](https://github.com/ZR233/pure-lang/commit/6ccb07ab0303e98c0f25efe752d1bfd0cfb51772))
+* **studio:** 支持工具图片展示与安全预览 ([f22a37e](https://github.com/ZR233/pure-lang/commit/f22a37ee8a555c24b3c47e31297d79422fc87642))
+* **studio:** 显示侧栏完整项目与会话名称 ([b3667fc](https://github.com/ZR233/pure-lang/commit/b3667fc95924537bb8850dbc6df05cf189b93d4f))
+* **studio:** 自动生成并同步会话标题 ([58682b4](https://github.com/ZR233/pure-lang/commit/58682b4fc7e245d00aab20db1ee738e194e957e9))
+* **studio:** 自由化简洁模式并统一完成工具 ([9082b58](https://github.com/ZR233/pure-lang/commit/9082b58ca17709219d0a08cfc618f1d0082c7cfe))
+* **studio:** 重构多模态输入与模型自适应 ([8d323b3](https://github.com/ZR233/pure-lang/commit/8d323b3446bf18cae19a500f904774c703f84e7a))
+* **studio:** 预置上游系统技能并提供 xtask 同步命令 ([5e6ddc0](https://github.com/ZR233/pure-lang/commit/5e6ddc09aaef6c163f706f80836de94011930cb4))
+* **timeline:** integrate plan confirmation UI and functionality ([c1fdee9](https://github.com/ZR233/pure-lang/commit/c1fdee96f41b50fa5b72f826eafc01e657bb9dd1))
+
+
+### Bug Fixes
+
+* **agent-runtime:** initialize lazy restore thread events ([cc967ef](https://github.com/ZR233/pure-lang/commit/cc967ef382f263d2a82fd80e16c866a4aa52b077))
+* **agent-runtime:** 修复工作流状态参数生成失败 ([c6987bb](https://github.com/ZR233/pure-lang/commit/c6987bb61ffdef2a3984f7c8cc9efae9371f7c8f))
+* **agent-runtime:** 淘汰前等待 Thread 耐久化 ([89ef14f](https://github.com/ZR233/pure-lang/commit/89ef14f3c2b04c1245766e585fc4820293f656dd))
+* **agent-runtime:** 隔离冷存储并复用任务返工上下文 ([430bb51](https://github.com/ZR233/pure-lang/commit/430bb51bdfd71eabb3b44f7d47a4946543547169))
+* **build:** 避免清理被占用的发布根目录 ([c613026](https://github.com/ZR233/pure-lang/commit/c61302627648e9901f8c6808be382198a17462e4))
+* **ci:** 修复 Windows 测试辅助函数告警 ([2a78096](https://github.com/ZR233/pure-lang/commit/2a78096bd34d55ae3c69749d1661c932dee70548))
+* **ci:** 修复严格 clippy 检查 ([b53ebd0](https://github.com/ZR233/pure-lang/commit/b53ebd01add3897f3b13bbd7cb46e8a5c467346f))
+* **ci:** 区分工作流脚本 shell ([3bbb1d4](https://github.com/ZR233/pure-lang/commit/3bbb1d4a4d6b1cd518cfeb93b32cb1350d849a18))
+* **gui:** 修复 Windows Web 验收构建 ([361acab](https://github.com/ZR233/pure-lang/commit/361acab5eb4ec093f0e1bbf976791e3171a66055))
+* **gui:** 修复 Windows 生成检查路径 ([0adb28c](https://github.com/ZR233/pure-lang/commit/0adb28ca7980b9a13fdb3f12e8dd9a8a37464239))
+* **model:** partial WS 失败后熔断后续 Turn ([989864c](https://github.com/ZR233/pure-lang/commit/989864ca7aba15c00352d9516ed83e02aee2f31a))
+* **model:** 保留 HTTP 流式供应商错误分类 ([05a6a57](https://github.com/ZR233/pure-lang/commit/05a6a57dbcd80757372ba34fb7446b0edb9000aa))
+* **pl-core:** 修复 Windows 目录写边界判断 ([e9b8ac0](https://github.com/ZR233/pure-lang/commit/e9b8ac0bf2c723e913783fe06930b61b7920dc4c))
+* **pl-core:** 统一目录边界的 canonical 根路径 ([59ff06c](https://github.com/ZR233/pure-lang/commit/59ff06ca73445a91253294ab351e10f301ca486b))
+* **quality:** 清理重复逻辑并修复任务模式 GUI ([98beab0](https://github.com/ZR233/pure-lang/commit/98beab0728b75e203729b0843be4359d3f0fba5b))
+* **remote-helper:** 修复 Windows Clippy 错误 ([d03237d](https://github.com/ZR233/pure-lang/commit/d03237d65f2c41f7e3ccda4df915a37d1b50df99))
+* **remote-helper:** 修复 Windows 测试 Clippy 错误 ([91b9d71](https://github.com/ZR233/pure-lang/commit/91b9d71363ef40b357def59336124d26a984262e))
+* **remote-helper:** 让协议测试脱离宿主 shell ([b4aa47f](https://github.com/ZR233/pure-lang/commit/b4aa47fe436ac8fd5c12c1290d313fc2c80ab5b9))
+* **remote:** reuse loaded workspace instructions ([d984816](https://github.com/ZR233/pure-lang/commit/d9848163fc7d3855fd4bbd631edd426881ceda44))
+* **remote:** 统一远端 POSIX 路径语义 ([fcbd177](https://github.com/ZR233/pure-lang/commit/fcbd177e471d9c06ad9bdc84b8beb5e6f4319f94))
+* **remote:** 自动准备助手工具链并隐藏 SSH 终端 ([e438dad](https://github.com/ZR233/pure-lang/commit/e438dadf8abd2236793310653775cc49bb15c833))
+* **skills:** preserve provider-owned trust roots ([3234f8a](https://github.com/ZR233/pure-lang/commit/3234f8a119fbc52e1c2742b4138d2ef859ccad89))
+* **skills:** 修复标准目录发现与项目默认路径 ([8cf7f4f](https://github.com/ZR233/pure-lang/commit/8cf7f4f5d78543d68bf13e2e5055de6a9b14f11f))
+* **skills:** 原生承载 Turn Skill 指令 ([df7018a](https://github.com/ZR233/pure-lang/commit/df7018a0fa3cdd3814e9855100b76893aba92561))
+* **studio:** accept bound child session fallbacks ([38f6e38](https://github.com/ZR233/pure-lang/commit/38f6e3883e559580240e2c35224209a3d4f6204d))
+* **studio:** accept bounded explorer step fences ([7c421d8](https://github.com/ZR233/pure-lang/commit/7c421d842f2ff60c32ecbeb7a86f230ab85e3675))
+* **studio:** accept canonical agent route no-op ([aeeb579](https://github.com/ZR233/pure-lang/commit/aeeb579cec1f5ad9eb6c303787d1d904d58fdfc6))
+* **studio:** adapt verifier to Rust 1.98 ([d0ddd7e](https://github.com/ZR233/pure-lang/commit/d0ddd7e6be77dee889835489922c25e5d2c7fcf8))
+* **studio:** aggregate task wire evidence ([d8334f4](https://github.com/ZR233/pure-lang/commit/d8334f4cb3f35d096c279d3cccdc948edc2a6796))
+* **studio:** allow reviewer progress before verdict ([88f95e1](https://github.com/ZR233/pure-lang/commit/88f95e1125a5e104d06103152e1d210cb44d0346))
+* **studio:** await completed subagent workflow ([1d316f7](https://github.com/ZR233/pure-lang/commit/1d316f7972eef4846e5368a63bca8ad2aade0caa))
+* **studio:** bind live explorer evidence ([c7801a1](https://github.com/ZR233/pure-lang/commit/c7801a1b83e64600eb5a07351c5f209078ac05e6))
+* **studio:** bind reviewer approval evidence ([07c4b7e](https://github.com/ZR233/pure-lang/commit/07c4b7e66763bc0e20f95045467c10e27e86a8d3))
+* **studio:** bind task evidence to agent receipts ([abd02b2](https://github.com/ZR233/pure-lang/commit/abd02b23f72b924b9616cdfb5a6f225185d90240))
+* **studio:** bound live driver settings scroll ([a20bbe0](https://github.com/ZR233/pure-lang/commit/a20bbe0090993d4c6f586511df75c5d1eae21421))
+* **studio:** bound live explorer planning scope ([ed84ed9](https://github.com/ZR233/pure-lang/commit/ed84ed911ffb7b8f81952b3fffe0a366a6a8d936))
+* **studio:** complete task subagent live orchestration ([9edd1ce](https://github.com/ZR233/pure-lang/commit/9edd1cee2edd9cbbc049dbde2f2a6fd199aa6a13))
+* **studio:** correct task live evidence ordering ([7a7c2a0](https://github.com/ZR233/pure-lang/commit/7a7c2a0ee4a980144e01582c39a9d8e24fc65a34))
+* **studio:** count successful explorer receipts ([f41d905](https://github.com/ZR233/pure-lang/commit/f41d905a831721a34a8b2f79c3b1845504b7a8b1))
+* **studio:** ignore failed spawn receipts in live verifier ([3ab7cbb](https://github.com/ZR233/pure-lang/commit/3ab7cbbf2facad6d0d26842ce5a836e85ec90523))
+* **studio:** make task live fixture executable ([9c4e4f3](https://github.com/ZR233/pure-lang/commit/9c4e4f32aa71441a3e926ab46c08221c9028bfb1))
+* **studio:** observe canonical agent settings revision ([f64a773](https://github.com/ZR233/pure-lang/commit/f64a773640b6154ca08c9c4b57c7c4b2023856ce))
+* **studio:** require durable reviewer verdicts ([6a4d315](https://github.com/ZR233/pure-lang/commit/6a4d31541ed85517a8c82a756c1043d52eed2f74))
+* **studio:** strengthen task subagent evidence ([e74de5d](https://github.com/ZR233/pure-lang/commit/e74de5d593369d539f75748af8ff259dc2e4f2d2))
+* **studio:** validate every task child contract ([8cac429](https://github.com/ZR233/pure-lang/commit/8cac42933a303e6489364e9281278eaf92d09891))
+* **studio:** validate live output markers ([7ce082a](https://github.com/ZR233/pure-lang/commit/7ce082a9d5fd13141ad3d75ea57c79e652a0419e))
+* **studio:** validate terminal child fallbacks ([39ae11a](https://github.com/ZR233/pure-lang/commit/39ae11ab6b73ac3c203108659bdf1a3044a3e2fa))
+* **studio:** 优化 Timeline 等待态布局 ([1780c2e](https://github.com/ZR233/pure-lang/commit/1780c2ec7ffd94c8b4f17b9e6557b0d4f6249d60))
+* **studio:** 会话时间线文本支持选中与复制 ([746b7ac](https://github.com/ZR233/pure-lang/commit/746b7acee9f5327e21d50817a213882c27c5a9a1))
+* **studio:** 使用冻结子代理配置准备工作区 ([7afc750](https://github.com/ZR233/pure-lang/commit/7afc750eea83bc7b6912b120c47e7a65d74924b0))
+* **studio:** 修复 SSH 服务器添加确认流程 ([520be23](https://github.com/ZR233/pure-lang/commit/520be23ca2c308ba24572ca563724a39377c39ba))
+* **studio:** 修复 SSH 项目技能目录不进入设置页 ([b025b87](https://github.com/ZR233/pure-lang/commit/b025b87b06af3fbc6d155ba0f7b38d4a78d3da71))
+* **studio:** 修复 Windows worktree Git 路径 ([4b1e4d3](https://github.com/ZR233/pure-lang/commit/4b1e4d38ac16da4073171f3105a856ade8630082))
+* **studio:** 修复任务工作流真实 GUI 验收 ([540a58b](https://github.com/ZR233/pure-lang/commit/540a58bbaaeb4a788b4aac819417358c552922a3))
+* **studio:** 修复会话费用归集与显示 ([35e59c7](https://github.com/ZR233/pure-lang/commit/35e59c764ba93842ae873c4fd37fc13ce707bcb1))
+* **studio:** 修复计划确认失败与残留交互 ([618e449](https://github.com/ZR233/pure-lang/commit/618e449952fe827d00c8c8bf9dc7efbfe5da5075))
+* **studio:** 同步供应商模板默认配置 ([20d46f1](https://github.com/ZR233/pure-lang/commit/20d46f1ce27c9421bc4551edf9eb185b93ce105d))
+* **studio:** 增加五次断联重试并显示重试进度 ([e8e0c93](https://github.com/ZR233/pure-lang/commit/e8e0c93007f900dbe6fa3265bd953808b59991ec))
+* **studio:** 完善 Agents 设置国际化 ([4e3fa33](https://github.com/ZR233/pure-lang/commit/4e3fa33fd68c0c87b7768d74b82525b480ea1bb3))
+* **studio:** 恢复不兼容配置并继续启动 ([c875be3](https://github.com/ZR233/pure-lang/commit/c875be3e86e7625e10a1360b3d858b013455bf5c))
+* **studio:** 按子代理轮次验证返工整合 ([5cea504](https://github.com/ZR233/pure-lang/commit/5cea504f10ec72da6c02e3844ee6bb80ef2e0f61))
+* **studio:** 明确 planning 澄清与计划提交顺序 ([6e1adab](https://github.com/ZR233/pure-lang/commit/6e1adabf08c293a2461ab835688c301a478a242b))
+* **studio:** 明确工作流工具参数契约 ([e6ba2b3](https://github.com/ZR233/pure-lang/commit/e6ba2b3f785b57f13fcd4392218d0b9f415b14d2))
+* **studio:** 显示会话部分未计价状态 ([468a461](https://github.com/ZR233/pure-lang/commit/468a46162d336ceac426cd8de468b47f37270bfa))
+* **studio:** 绑定 worktree 交付提交与整合 ([3653c76](https://github.com/ZR233/pure-lang/commit/3653c76fb2add085bd8b3964d7a4c9171ebaa473))
+* **studio:** 统一任务模式计划确认入口 ([0efc5a9](https://github.com/ZR233/pure-lang/commit/0efc5a92baf85217d9398f97ef1f60ea8e83d9fb))
+* **studio:** 补全界面硬编码文案的国际化 ([3a1ffba](https://github.com/ZR233/pure-lang/commit/3a1ffbaf1ba25faa53e858d2d16a07b25eea9a9b))
+* **studio:** 规范化 executor 工作区路径身份 ([9a4b1e3](https://github.com/ZR233/pure-lang/commit/9a4b1e3ab98f0dae5e92a61d6b4ed9887de78b83))
+* **studio:** 解耦内存会话与异步持久化并修复轮次停滞 ([ab28dca](https://github.com/ZR233/pure-lang/commit/ab28dca491fafe3dd38f3bc133f1f7dabba944f3))
+* **workflow:** allow partial transition wire replays ([ae4344f](https://github.com/ZR233/pure-lang/commit/ae4344fed7f88bbd675858279d31e1b2b4bc3c17))
+
+
+### Refactoring
+
+* **agent-runtime:** 统一 Agent 协议状态事实源 ([d5e49e5](https://github.com/ZR233/pure-lang/commit/d5e49e5aa7011069b873199100d15d8c8c9c63d7))
+* **model:** 分层供应商能力并统一推理计量与分时计价 ([e332b00](https://github.com/ZR233/pure-lang/commit/e332b00eb352c34824cd80880313772f9d8e25ce))
+* **pl-core:** 统一工具定义与动态执行框架 ([9f340eb](https://github.com/ZR233/pure-lang/commit/9f340eb02bfd0998b71afdee2e007d0ffa20045c))
+* **pl-core:** 重构模块结构与 crate 根命名空间门面 ([e1d1f13](https://github.com/ZR233/pure-lang/commit/e1d1f134ac341f9522c585a4190012ae88de0f4b))
+* **pl-lsp:** 重组模块与公开命名空间 ([c6adabf](https://github.com/ZR233/pure-lang/commit/c6adabfbc570dff10585673528d9bb508bfa724d))
+* **pl-model,pl-core:** 按公共接口完整性重导出依赖类型 ([fac7250](https://github.com/ZR233/pure-lang/commit/fac725003bd6b1aea22bbc52866b2e6b3d546f5c))
+* **pl-model:** 含糊布尔参数领域化 ([839db4c](https://github.com/ZR233/pure-lang/commit/839db4c956e4c2662157b2987096338d66102907))
+* **pl-model:** 拆分超长模块并分解巨型函数 ([04f7c66](https://github.com/ZR233/pure-lang/commit/04f7c6692d85a6e0b1a6e04a01914fc42895f230))
+* **pl-model:** 类型化模型校验错误 ([2690ecd](https://github.com/ZR233/pure-lang/commit/2690ecd0ec176a53df7c72f11f37b4316fad64d9))
+* **pl-model:** 重组公开命名空间为域模块 ([345d6eb](https://github.com/ZR233/pure-lang/commit/345d6eba316936b4e48d94781f872b86cc39f793))
+* **studio-runtime:** 重构模块结构、根命名空间门面与测试质量 ([f8a549a](https://github.com/ZR233/pure-lang/commit/f8a549af9f6034a61070d9759fb39fbd4de53491))
+* **studio:** 合并重复简体中文资源 ([4937a80](https://github.com/ZR233/pure-lang/commit/4937a8075fabedba611fbe3429c4f3ed617b6c7f))
+* **studio:** 统一模式与可编译工作流 ([e7fcae9](https://github.com/ZR233/pure-lang/commit/e7fcae91ba76d0f92652c4f46c868384c258fb2f))
+* **studio:** 重构会话热状态与任务验收 ([dba1edb](https://github.com/ZR233/pure-lang/commit/dba1edbe9b8457c07498257a230b547343f7df5b))
+* **thread-mode:** 统一 Mode 与 AgentSession Plan ([ddb256c](https://github.com/ZR233/pure-lang/commit/ddb256c27cada012dab288f5cb4bff7f84a38167))
+* **tool:** 统一工具运行时 ([1d0aebf](https://github.com/ZR233/pure-lang/commit/1d0aebf1731a84cbfa98b92d2a9da3963bdad0ac))
+
+
+### Documentation
+
+* clarify authorization and validation boundaries ([7cf2459](https://github.com/ZR233/pure-lang/commit/7cf2459e4d50c83aea3afe50aa2e06c8477e9ca7))
+* **pl-protocol:** 修正 TokenUsageSnapshot 来源注释 ([7ab28c4](https://github.com/ZR233/pure-lang/commit/7ab28c43dfee917a5cccd6c5f9c2a8f244bcce4f))
+* **remote:** document remote instruction loading ([d3810b7](https://github.com/ZR233/pure-lang/commit/d3810b74aa274586fbd7eb267626ab2381880d7f))
+* **skills:** 固化产品宿主注册语义 ([5475a20](https://github.com/ZR233/pure-lang/commit/5475a20ad25faed0df2ea2f982baf46e3ac4189e))
+* **skills:** 泛化代码质量重构规范 ([5e8ba78](https://github.com/ZR233/pure-lang/commit/5e8ba789571f00f93e7b2bce203f307b358f28ed))
+* **studio:** define subagent-first task orchestration ([3429097](https://github.com/ZR233/pure-lang/commit/3429097c99f5dcd636c63affc3308aba0c498d00))
+* **studio:** require durable reviewer verdicts ([175ce44](https://github.com/ZR233/pure-lang/commit/175ce443ce8a6f60fd77214a5252a028637994c7))
+* **workflow:** document partial wire replay semantics ([31ee90e](https://github.com/ZR233/pure-lang/commit/31ee90e986ab42d7f300fea7ad8e0df0c56c8103))
+* 固化 Rust 测试分层规范并清理残余兄弟测试文件 ([d528984](https://github.com/ZR233/pure-lang/commit/d528984ea4be6857a23b363a7663f3a0a01c4caa))
+
+
+### Maintenance
+
+* merge latest origin/main ([3d35393](https://github.com/ZR233/pure-lang/commit/3d35393b2037ce24908ea90f949f832e660e1a4a))
+* **skills:** 清理重复的代码审查技能 ([35af488](https://github.com/ZR233/pure-lang/commit/35af4888dc208f0417831fcec8481da7bd0a7727))
+* **studio:** 修复 Driver 脚本格式 ([79ae863](https://github.com/ZR233/pure-lang/commit/79ae863ebbc40643cfe8e729c2447a364bee9730))
+* 添加 Rust 与测试质量项目技能 ([db0435d](https://github.com/ZR233/pure-lang/commit/db0435d3b34bd3e4155455da911a02baace013d0))
+
 ## [2.0.0](https://github.com/ZR233/pure-lang/compare/v1.0.3...v2.0.0) (2026-08-25)
 
 
