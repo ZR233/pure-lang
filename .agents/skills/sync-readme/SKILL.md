@@ -50,15 +50,8 @@ README 的架构图、crate 表、项目结构、技术栈、核心概念、工�
 
 ## 验证
 
-README 修改本身至少执行链接和路径核验以及 `git diff --check`。若同时改变代码或配置，则按
-`AGENTS.md` 执行对应门禁：
-
-```powershell
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-cargo xtask verify-gui
-git diff --check
-```
+README 修改本身执行事实、链接和路径核验以及 `git diff --check`；核验通过即完成文档交付，
+不因文档中列出构建命令而运行全仓测试。授权与完成边界遵循根 `AGENTS.md`；同时修改代码或
+配置时按影响范围验证，提交前执行其完整门禁，不在本技能重复维护命令清单。
 
 `cargo check --workspace` 只能证明代码仍可编译，不能证明 README 中的数量、链接或架构事实正确。

@@ -13,6 +13,9 @@ factory dispatch 或兼容 wrapper。
 
 ## 前置确认
 
+以下信息先从用户需求、现有配置和供应商文档核实，不是逐项向用户审批；仅在无法核实且影响
+实现选择时按根 `AGENTS.md` 询问。已授权的新增工作连续完成到相应验证与交付。
+
 1. 确定 wire API：Responses 或 Chat Completions。
 2. 确定模型 transport：Responses 可声明 HTTP/WS；Chat 只允许 HTTP。
 3. 确定 endpoint：base URL、headers、凭据、tool wire policy 与服务能力。
@@ -72,13 +75,16 @@ factory dispatch 或兼容 wrapper。
 
 ## 验证
 
+模型与配置路径变更先运行受影响 crate 的检查与测试；以下为入口，按实际影响选择，提交前
+完整门禁以根 `AGENTS.md` 为准：
+
 ```powershell
 cargo check -p pl-model --tests
 cargo check -p pl-core --tests
 cargo test -p pl-model
 cargo test -p pl-core
-cargo xtask verify-gui
 ```
 
-需要真实服务时再显式启用 `live-tests`；Studio 可见变更还要使用隔离数据目录运行
+涉及 Studio 或 bridge 时执行 `cargo xtask verify-gui`，GUI 行为变更按根 `AGENTS.md` 补充
+integration 验收。需要真实服务时再显式启用 `live-tests`；Studio 可见变更还要使用隔离数据目录运行
 `cargo xtask run-gui --driver`，核对配置、模型选择、usage/billing/cache 与运行时错误。

@@ -69,13 +69,14 @@ Windows 发布目录通常包含 `pure_studio.exe`、`flutter_windows.dll`、
 `pl_studio_bridge.dll`、可选 PDB 以及 `data/`。Linux 发布目录包含对应可执行文件、Flutter 库、
 `libpl_studio_bridge.so` 与数据目录。
 
-## 验证顺序
+## 按任务选择验证
 
-1. 生成输入变更时先执行 `cargo xtask generate-gui`。
-2. 执行 `cargo xtask check-gui-generated`，确认生成稳定。
-3. 执行 `cargo xtask verify-gui` 完成格式、分析、测试和桥接检查。
-4. 原生行为变更时执行 `cargo xtask verify-gui --integration`。
-5. 需要确定性交互验收时运行 `cargo xtask run-gui --demo --driver`。
+- 只要求构建或运行时，完成对应 xtask 命令并核实产物或启动结果；不自动扩展为完整验收。
+- 生成输入变更时先执行 `cargo xtask generate-gui`，再执行 `cargo xtask check-gui-generated`。
+- GUI 或桥接修改执行 `cargo xtask verify-gui`；GUI 行为变更按根 `AGENTS.md` 执行
+  `cargo xtask verify-gui --integration` 与相应 Driver/harness 验收。
+- 授权、提交前门禁与完成条件以根 `AGENTS.md` 为准；适用检查通过后直接交付，只有新修改、
+  失败或具体未决风险才重跑。已通过的生成检查不另行重复，门禁命令内部自带的检查正常保留。
 
 Linux 缺少编译器、CMake、Ninja、pkg-config 或 GTK 3 开发文件时，保留 xtask 返回的真实预检命令
 和原始错误，不注入机器专用 include/library 路径。
