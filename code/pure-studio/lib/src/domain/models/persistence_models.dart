@@ -11,7 +11,7 @@ class PersistenceStateSnapshot {
   final int revision;
   final PersistenceState state;
 
-  bool get acceptsNewWork => state.acceptsNewWork;
+  bool get needsAttention => state.needsAttention;
 }
 
 sealed class PersistenceState {
@@ -21,8 +21,10 @@ sealed class PersistenceState {
   int? get oldestPendingRevision;
   int? get firstFailedAt => null;
   ObservedResourceError? get error => null;
-  bool get acceptsNewWork =>
-      this is ReadyPersistenceState || this is FlushingPersistenceState;
+  bool get needsAttention =>
+      this is DegradedPersistenceState ||
+      this is RecoveringPersistenceState ||
+      this is BlockedPersistenceState;
 }
 
 final class ReadyPersistenceState extends PersistenceState {

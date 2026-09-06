@@ -141,8 +141,7 @@ pub(super) fn interrupted_turn_result(
 ) -> TurnResult {
     recorder.cancel_open_items(turn_id, &reason);
     let outcome = TurnOutcome::cancelled(TurnCancellationCause::UserRequested);
-    let item = recorder.terminal_turn_item(turn_id, &outcome);
-    recorder.fail_item(item);
+    recorder.finish_turn_item(turn_id, &outcome);
     recorder.broadcast(AgentEvent::TurnInterrupted { reason });
     recorder.broadcast(AgentEvent::Done);
 
@@ -203,8 +202,7 @@ pub(super) fn failed_turn_result_with_abort_reason(
     failure.message = error.clone();
     recorder.fail_open_items(turn_id, &error);
     let outcome = TurnOutcome::failed(failure);
-    let item = recorder.terminal_turn_item(turn_id, &outcome);
-    recorder.fail_item(item);
+    recorder.finish_turn_item(turn_id, &outcome);
     recorder.broadcast(AgentEvent::Error {
         message: error.clone(),
         severity,
@@ -246,8 +244,7 @@ pub(super) fn budget_limited_turn_result(
         },
         TurnRolloverOutcome::NotAttempted,
     );
-    let item = recorder.terminal_turn_item(turn_id, &outcome);
-    recorder.fail_item(item);
+    recorder.finish_turn_item(turn_id, &outcome);
     recorder.broadcast(AgentEvent::TurnBudgetLimited {
         reason,
         limit_kind,

@@ -49,12 +49,7 @@ pub(super) fn finish(
             message,
         ))
     };
-    let completed_turn_item = recorder.terminal_turn_item(turn_id, &outcome);
-    if matches!(outcome, TurnOutcome::Completed(_)) {
-        recorder.complete_item(completed_turn_item);
-    } else {
-        recorder.fail_item(completed_turn_item);
-    }
+    recorder.finish_turn_item(turn_id, &outcome);
     if matches!(outcome, TurnOutcome::Completed(_))
         && let Some(error) = recorder.publication_error()
     {

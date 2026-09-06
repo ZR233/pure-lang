@@ -163,6 +163,13 @@ where
             return;
         }
 
+        // A new turn never shares a producer channel with its predecessor.
+        let (trace_sender, trace_receiver) = mpsc::unbounded_channel();
+        let (observation_sender, observation_receiver) = mpsc::unbounded_channel();
+        self.channels.trace_sender = trace_sender;
+        self.channels.trace_receiver = trace_receiver;
+        self.channels.observation_sender = observation_sender;
+        self.channels.observation_receiver = observation_receiver;
         let cancellation = CancellationToken::new();
         let (steer_sender, steer_receiver) = mpsc::unbounded_channel();
         let mailbox = AgentTurnMailboxHandle::new(
@@ -315,8 +322,12 @@ where
                 }
             }
         }
-        self.flush_pending_traces().await?;
-        self.flush_pending_observations().await?;
+        if let Err(error) = self.flush_pending_traces().await {
+            self.mark_projection_failure(&error);
+        }
+        if let Err(error) = self.flush_pending_observations().await {
+            self.mark_projection_failure(&error);
+        }
         let active = self
             .active
             .take()
@@ -324,7 +335,10 @@ where
         let mut outcome = turn_outcome(
             active.turn_id.clone(),
             active.thread_id,
-            TurnExecutionTerminal::CancelledBeforeReturn { cause },
+            match active.projection_failure {
+                Some(error) => TurnExecutionTerminal::ProtocolFailed { error },
+                None => TurnExecutionTerminal::CancelledBeforeReturn { cause },
+            },
             Some(active.started_at),
         )
         .outcome;

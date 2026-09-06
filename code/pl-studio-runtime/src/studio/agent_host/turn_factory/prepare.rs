@@ -222,11 +222,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             None => config.models.resolve(&model_role)?,
         };
         validate_thread_mode_model(registered_mode.as_deref(), &route.model)?;
-        let attachment_runtime = attachment_runtime(
-            self.store.clone(),
-            self.resources.clone(),
-            thread_id.clone(),
-        );
+        let attachment_runtime = attachment_runtime(self, thread_id.clone());
         let mcp_image_output =
             pl_core::McpImageOutputContext::for_model(&route.model, attachment_runtime.clone());
         let web_search = plan_web_searches(

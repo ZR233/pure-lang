@@ -13,7 +13,6 @@ use super::super::thread_title::ThreadTitleCancellationCause;
 
 impl StudioRuntime {
     pub async fn open_project(&self, path: impl AsRef<Path>) -> Result<ProjectRecord> {
-        self.ensure_persistence_accepts_new_work()?;
         let path = path.as_ref();
         let _ = resolve_workspace_root(path)?;
         let path_text = path.to_string_lossy().to_string();
@@ -76,7 +75,6 @@ impl StudioRuntime {
     }
 
     pub async fn archive_project(&self, project_id: &str) -> Result<Option<ProjectRecord>> {
-        self.ensure_persistence_accepts_new_work()?;
         let Some(project) = self
             .agent_facility
             .product_events

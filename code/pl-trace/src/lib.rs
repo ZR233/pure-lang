@@ -72,6 +72,21 @@ pub struct TraceEvent {
     pub kind: TraceEventKind,
 }
 
+impl TraceEvent {
+    /// The turn that owns this event, independent of the active session projection.
+    pub fn turn_id(&self) -> &str {
+        match &self.kind {
+            TraceEventKind::TracePartStarted { item }
+            | TraceEventKind::TracePartCompleted { item }
+            | TraceEventKind::TracePartFailed { item } => item.turn_id(),
+            TraceEventKind::TracePartDelta { event } => &event.turn_id,
+            TraceEventKind::InteractionChanged { event } => &event.interaction.scope.turn_id,
+            TraceEventKind::SkillActivated { activation } => &activation.turn_id,
+            TraceEventKind::EnabledToolsRecorded { event } => &event.turn_id,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct EnabledToolsEvent {

@@ -31,7 +31,23 @@ Future<void> main(List<String> arguments) async {
     await _resolveUserInput(session, snapshots);
     await _submitCompletedTurn(session, snapshots, options.promptFile);
 
+    await session.requestData('prepare-persistence-failure-demo');
+    await _waitForSnapshot(session, snapshots, 'save failure banner', (
+      snapshot,
+    ) {
+      return (snapshot['persistence'] as Map?)?['kind'] == 'degraded';
+    });
+    await _submitCompletedTurn(
+      session,
+      snapshots,
+      options.promptFile,
+      expectedStatus: 'failed',
+    );
+    await _submitCompletedTurn(session, snapshots, options.promptFile);
     final finalSnapshot = await _snapshot(session, snapshots);
+    if ((finalSnapshot['persistence'] as Map?)?['kind'] != 'degraded') {
+      throw StateError('saving must remain degraded throughout both turns');
+    }
     await File(options.screenshotOutput)
         .writeAsBytes(await session.screenshot(), flush: true);
     stdout.writeln(
@@ -97,7 +113,7 @@ Future<void> _resolveUserInput(
     kind: 'userInput',
   );
   _expectLockedCompletedOrigin(snapshot);
-  final input = find.byValueKey('user-input-text-driver-question');
+  final input = find.byValueKey('user-input-first-text');
   await _command(session.tap(input), 'focus deterministic user input');
   await _command(session.enterText('Continue'), 'enter deterministic answer');
   final answer = await _command(
@@ -116,8 +132,9 @@ Future<void> _resolveUserInput(
 Future<void> _submitCompletedTurn(
   FlutterDriverSession session,
   File snapshots,
-  String promptFile,
-) async {
+  String promptFile, {
+  String expectedStatus = 'completed',
+}) async {
   await _waitForSnapshot(session, snapshots, 'composer restoration', (
     snapshot,
   ) {
@@ -161,7 +178,7 @@ Future<void> _submitCompletedTurn(
     (snapshot) {
       final turn = _workspace(snapshot)?['turn'];
       return turn is Map<String, dynamic> &&
-          const {'queued', 'inProgress'}.contains(turn['status']);
+          turn['status'] == 'running';
     },
   );
   final turnId = (_workspace(running)!['turn'] as Map<String, dynamic>)['id'];
@@ -174,7 +191,7 @@ Future<void> _submitCompletedTurn(
         workspace?['isBusy'] == false &&
         lastTurn is Map<String, dynamic> &&
         lastTurn['id'] == turnId &&
-        lastTurn['status'] == 'completed';
+        lastTurn['status'] == expectedStatus;
   }, timeout: const Duration(seconds: 45));
 }
 

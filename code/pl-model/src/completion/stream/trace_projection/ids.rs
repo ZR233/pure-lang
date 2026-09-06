@@ -1,8 +1,8 @@
 //! trace part item id 的解析、别名收敛与段落编号。
 
 use pl_trace::{
-    AgentEvent, TraceEventKind, TracePartAction, TracePartCompletion, TracePartKind,
-    TracePartState, TraceTextChannel,
+    AgentEvent, TracePartAction, TracePartCompletion, TracePartKind, TracePartState,
+    TraceTextChannel,
 };
 
 use crate::completion::ToolCall;
@@ -11,7 +11,6 @@ use super::super::tool_stream::ToolCallAccumulatorSnapshot;
 use super::TraceProjection;
 use super::text::{text_provider_key, thinking_provider_key_prefix};
 use super::tool::{tool_aliases, trace_tool_part_id};
-use super::unix_seconds;
 
 impl TraceProjection {
     fn namespaced_item_id(&self, item_id: &str) -> String {
@@ -114,23 +113,7 @@ impl TraceProjection {
         {
             return Vec::new();
         }
-        let now = unix_seconds();
-        if let Err(error) = item.apply(item.command(now, TracePartAction::Complete(completion))) {
-            self.trace_error.get_or_insert_with(|| {
-                pl_trace::TraceEventSinkError::new(format!(
-                    "failed to complete resolved trace item: {error}"
-                ))
-            });
-            return Vec::new();
-        }
-        let item = item.clone();
-        if !self.record(
-            TraceEventKind::TracePartCompleted { item: item.clone() },
-            item.updated_at(),
-        ) {
-            return Vec::new();
-        }
-        vec![AgentEvent::TracePartCompleted { item }]
+        self.apply_item(item_id, TracePartAction::Complete(completion))
     }
 }
 

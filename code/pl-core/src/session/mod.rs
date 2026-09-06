@@ -105,6 +105,11 @@ impl AgentSession {
         }
     }
 
+    /// 当前工作状态，不复制完整对话。
+    pub fn working_state(&self) -> &AgentWorkingState {
+        &self.state.working_state
+    }
+
     pub fn snapshot(&self) -> AgentSessionSnapshot {
         AgentSessionSnapshot {
             transcript: self.state.items.clone(),

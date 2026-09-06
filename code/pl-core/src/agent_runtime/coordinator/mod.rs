@@ -12,11 +12,12 @@ use super::{
     AgentCommittedEvent, AgentRegistration, AgentRuntimeEvent, AgentRuntimeEventKind,
     AgentRuntimeHandle, AgentRuntimeHost, AgentRuntimeResult, AgentSessionTimelineQuery,
     AgentSessionTimelineRepositoryPage, AgentSnapshot, AgentSpawnRequest, AgentSpawnResult,
-    AgentState, DurableCommitFacts, DurableMailboxEnvelope, RestoredAgentRuntime,
-    SpawnLifecycleRequest, SpawnRollbackPhase, SpawnRollbackReason, ThreadCommit, ThreadId, TurnId,
+    DurableCommitFacts, DurableMailboxEnvelope, RestoredAgentRuntime, SpawnLifecycleRequest,
+    SpawnRollbackPhase, SpawnRollbackReason, ThreadCommit, ThreadId, TurnId,
 };
 use crate::ThreadEventBus;
 
+mod session;
 mod spawn;
 use spawn::{register_agent, spawn_child_agent};
 
@@ -128,7 +129,7 @@ async fn run_coordinator<H>(
                 let _ = reply.send(result);
             }
             CoordinatorCommand::EvictAgent { agent_id, reply } => {
-                let result = evict_agent(&host, &actors, &runtime, &agent_id).await;
+                let result = evict_agent(&actors, &runtime, &agent_id).await;
                 let _ = reply.send(result);
             }
             CoordinatorCommand::Spawn { request, reply } => {
@@ -151,14 +152,14 @@ async fn run_coordinator<H>(
                 let _ = reply.send(list_snapshots(&actors).await);
             }
             CoordinatorCommand::ReadAgentSession { query, reply } => {
-                let result = read_agent_session(&host, &actors, query).await;
+                let result = read_agent_session(&host, &actors, &runtime, query).await;
                 let _ = reply.send(result);
             }
             CoordinatorCommand::StartRestoredInputs { reply } => {
                 let _ = reply.send(start_pending_inputs(&actors).await);
             }
             CoordinatorCommand::Shutdown { reply } => {
-                let result = shutdown_agents(&host, &actors).await;
+                let result = shutdown_agents(&actors).await;
                 actors.write().await.clear();
                 let _ = reply.send(result);
                 break;
@@ -171,16 +172,13 @@ async fn run_coordinator<H>(
     }
 }
 
-async fn shutdown_agents<H>(host: &H, actors: &AgentRegistry) -> AgentRuntimeResult<()>
-where
-    H: AgentRuntimeHost,
-{
+async fn shutdown_agents(actors: &AgentRegistry) -> AgentRuntimeResult<()> {
     let mut first_error = None;
     for actor in actor_handles(actors).await {
         let (reply, receiver) = oneshot::channel();
         let result = match actor.send(AgentLoopCommand::Shutdown { reply }).await {
             Ok(()) => match receiver.await {
-                Ok(Ok(snapshot)) => await_snapshot_durable(host, &snapshot).await,
+                Ok(Ok(_snapshot)) => Ok(()),
                 Ok(Err(error)) => Err(error),
                 Err(_) => Err(AgentRuntimeError::ChannelClosed),
             },
@@ -250,7 +248,14 @@ where
     )
     .await?;
     for snapshot in close_order {
-        evict_agent(host, actors, runtime, &snapshot.identity.id).await?;
+        let current = snapshot_for(actors, &snapshot.identity.id).await?;
+        // 关闭事实先在内存成立；未保存的已关闭会话保留 owner，后续再淘汰。
+        if host
+            .repository()
+            .is_durable(&current.identity.id, current.revision)
+        {
+            evict_agent(actors, runtime, &current.identity.id).await?;
+        }
     }
     Ok(target)
 }
@@ -431,30 +436,11 @@ where
 }
 
 /// 淘汰一个空闲驻留 actor：通知 loop 退出并从 registry/directory 移除。
-async fn evict_agent<H>(
-    host: &H,
+async fn evict_agent(
     actors: &AgentRegistry,
     runtime: &AgentRuntimeHandle,
     agent_id: &ThreadId,
-) -> AgentRuntimeResult<()>
-where
-    H: AgentRuntimeHost,
-{
-    let snapshot = snapshot_for(actors, agent_id).await?;
-    if matches!(
-        snapshot.state,
-        AgentState::Queued(_)
-            | AgentState::Running(_)
-            | AgentState::WaitingTool(_)
-            | AgentState::WaitingInteraction(_)
-            | AgentState::Cancelling(_)
-    ) || snapshot.state.is_budget_paused()
-        || snapshot.pending_inputs > 0
-    {
-        return Err(AgentRuntimeError::InvalidInput(format!(
-            "agent {agent_id} is busy and cannot be evicted"
-        )));
-    }
+) -> AgentRuntimeResult<()> {
     let actor = actors
         .read()
         .await
@@ -463,13 +449,12 @@ where
         .ok_or_else(|| AgentRuntimeError::NotFound(agent_id.clone()))?;
     let (reply, receiver) = oneshot::channel();
     actor
-        .send(AgentLoopCommand::Shutdown { reply })
+        .send(AgentLoopCommand::Evict { reply })
         .await
         .map_err(|_| AgentRuntimeError::ChannelClosed)?;
-    let final_snapshot = receiver
+    let _final_snapshot = receiver
         .await
         .map_err(|_| AgentRuntimeError::ChannelClosed)??;
-    await_snapshot_durable(host, &final_snapshot).await?;
     actors.write().await.remove(agent_id);
     runtime.directory.remove(agent_id);
     runtime
@@ -479,26 +464,17 @@ where
     Ok(())
 }
 
-async fn await_snapshot_durable<H>(host: &H, snapshot: &AgentSnapshot) -> AgentRuntimeResult<()>
-where
-    H: AgentRuntimeHost,
-{
-    host.repository()
-        .await_durable(&snapshot.identity.id, snapshot.revision)
-        .await
-        .map_err(|error| AgentRuntimeError::Repository(error.to_string()))
-}
-
 async fn read_agent_session<H>(
     host: &H,
     actors: &AgentRegistry,
+    runtime: &AgentRuntimeHandle,
     query: AgentSessionTimelineQuery,
 ) -> AgentRuntimeResult<AgentSessionTimelineRepositoryPage>
 where
     H: AgentRuntimeHost,
 {
     if let Ok(snapshot) = snapshot_for(actors, &query.target).await {
-        await_snapshot_durable(host, &snapshot).await?;
+        return session::read_memory_session(runtime, snapshot.identity, query);
     }
     host.repository()
         .list_agent_session(query)

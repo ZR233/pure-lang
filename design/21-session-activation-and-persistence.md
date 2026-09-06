@@ -4,7 +4,7 @@
 
 Thread 是唯一会话 owner。用户选择 Thread、向冷 Thread 提交输入或后台 Agent 继续执行时，运行时
 通过显式 activation command 在同一个一致读视图中加载版本化 working state、有效 transcript、
-最近 Timeline 窗口、pending Interaction 与活动 Turn。所有校验完成后才一次性安装
+Timeline 项目与阶段报告、pending Interaction 与活动 Turn。所有校验完成后才一次性安装
 `ActiveSessionState`，不得发布半恢复状态。
 
 activation 完成后，类型化 Rust 内存对象是唯一运行时事实源。模型请求、拆分后的 workflow 工具、
@@ -30,9 +30,12 @@ transaction。worker panic 必须发布 `Blocked` 并保留待提交事实。
 
 ## 21.3 提交、批量与释放
 
-每次 mutation 必须先被 writer 原子接受，再替换 owner 热 snapshot 并广播。接受失败时业务状态、
-revision 与事件均不得变化。writer 的五秒最大延迟不被后续写入重置；累计 64 条、显式 flush、
-owner 淘汰、shutdown、上下文 replacement 或不可逆外部动作触发立即提交。
+每次 mutation 在 owner 内校验并原子提交热 snapshot、projection 与 revision，同时登记不可变的
+待保存事实，再广播。writer 只是异步冷存储消费者，延迟、故障、退出或积压不能拒绝输入、阻塞
+内存提交或改变 Turn 结果。未保存事实完整保留在进程内，允许随积压增长；只有确认落库后才释放。
+writer 的五秒最大延迟不被后续写入重置；累计 64 条、显式 flush、
+shutdown 和上下文 replacement 触发立即提交。活动会话与工具执行不等待落库。
+未保存的 owner 不可淘汰；正常关闭保存失败时报告错误并保留进程内事实，不报告成功。
 
 `workflow_transition` 与 `workflow_restart` 使用 `ToolBatchPolicy::Solo`。同一 provider response
 中若 mutation 与任何第二个工具并存，整批在产生副作用前拒绝；`workflow_current`、
@@ -43,16 +46,15 @@ mutation 批次，不限制任何阶段之后可使用的文件、命令、Git�
 transcript；崩溃恢复时遗留 running Turn 收束为 interrupted/cancelled。Timeline 采用独立热窗口，
 冷页先转为领域对象再合并热状态。
 
-协作工具对 child 的完整会话诊断使用 durable Timeline keyset 分页，不读取或伪装 provider transcript。
-驻留目标先在不持 actor 锁的情况下等待当前 runtime revision 落库，再从 repository 读取；冷目标直接
-读取持久层，因此关闭、淘汰和重启不会截断可查范围。cursor 绑定目标、排序、详细级别和首次查询水位，
-后续追加不能改变既有分页窗口；该只读查询不得激活目标或向 ThreadEventBus 合并冷页。
+协作工具的驻留目标查询直接读取内存 Timeline 和阶段报告；冷激活一次性装载这些事实，
+活动期不等待数据库追赶。附件文件准备完成后，记录先交给内存资源所有者，元数据与其他冷事实一起异步保存；没有附件的发送不访问附件数据库。未驻留目标的历史查询读取冷存储。cursor 绑定目标、排序、详细级别和
+首次查询水位，后续追加不能改变既有分页窗口。
 
 ## 21.4 驻留
 
 当前选中 Thread、存在活动 Turn 或 pending Interaction 的 Thread，以及仍有运行中子 Agent 的根
 Thread 会被 pin。GUI 切换不能淘汰后台工作。未选中且无活动工作的 Thread 进入 LRU；淘汰前必须
-通过 durability barrier。工作流阶段本身不是“正在执行”的证明，idle 判断聚合整棵 Agent tree 的
+只读确认当前内存版本已经保存；未保存时保留驻留，不等待数据库。工作流阶段本身不是“正在执行”的证明，idle 判断聚合整棵 Agent tree 的
 活动 Turn。
 
 ## 21.5 验收

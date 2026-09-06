@@ -17,7 +17,6 @@ use super::super::{
 
 impl StudioRuntime {
     pub async fn create_thread(&self, project_id: &str, title: &str) -> Result<ThreadRecord> {
-        self.ensure_persistence_accepts_new_work()?;
         let (delta, thread) = DirectoryDelta::register_root_thread(
             project_id,
             title,
@@ -27,7 +26,9 @@ impl StudioRuntime {
             .product_events
             .commit_directory(delta)
             .await?;
-        Ok(ThreadRecord::from_directory_thread(thread))
+        let thread = ThreadRecord::from_directory_thread(thread);
+        self.register_new_thread(thread.clone()).await?;
+        Ok(thread)
     }
 
     pub async fn start_new_thread(
@@ -43,7 +44,6 @@ impl StudioRuntime {
         let title_prompt = request.input.text.clone();
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
         self.ensure_prompt_runtime_ready().await?;
-        self.ensure_persistence_accepts_new_work()?;
         let drafts = self
             .attachment_drafts
             .resolve(&request.input.attachment_draft_ids)
@@ -71,6 +71,7 @@ impl StudioRuntime {
             .commit_directory(delta)
             .await?;
         let thread = ThreadRecord::from_directory_thread(thread);
+        self.register_new_thread(thread.clone()).await?;
         let submission = self
             .submit_prompt_for_owned_thread_with_lifecycle_lock(
                 StudioSubmitPromptRequest {
@@ -104,7 +105,6 @@ impl StudioRuntime {
     /// Renames a root Thread and publishes the canonical directory update.
     pub async fn rename_thread(&self, thread_id: String, title: String) -> Result<ThreadRecord> {
         let title = manual_title(&title)?;
-        self.ensure_persistence_accepts_new_work()?;
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
         self.ensure_prompt_runtime_ready().await?;
         let mut thread = self.read_protocol_thread(&thread_id).await?;
@@ -176,7 +176,6 @@ impl StudioRuntime {
         &self,
         thread_id: String,
     ) -> Result<Option<StudioArchiveThreadResult>> {
-        self.ensure_persistence_accepts_new_work()?;
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
         let Some((thread, roots, thread_tree)) =
             self.activate_thread_archive_scope(&thread_id).await?
@@ -321,7 +320,6 @@ impl StudioRuntime {
         thread_id: &str,
         mode: pl_protocol::ThreadModeId,
     ) -> Result<()> {
-        self.ensure_persistence_accepts_new_work()?;
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
         let thread = self.read_owned_thread(thread_id).await?;
         if thread.parent_thread_id.is_some() {
@@ -409,6 +407,77 @@ mod tests {
             .await
             .unwrap();
         (home, workspace, runtime, thread.id)
+    }
+
+    #[tokio::test]
+    async fn unsaved_new_thread_stays_resident_and_reconnects_from_memory() {
+        use sea_orm::ConnectionTrait;
+        let (_home, _workspace, runtime, existing_id) = runtime_with_thread().await;
+        let project_id = runtime
+            .read_owned_thread(&existing_id)
+            .await
+            .unwrap()
+            .project_id;
+        let repository = runtime.persistence_repository().await.unwrap();
+        repository.writer().flush().await.unwrap();
+        runtime.store.database().execute_unprepared("CREATE TRIGGER fail_new_thread BEFORE INSERT ON threads BEGIN SELECT RAISE(ABORT, 'disk i/o error'); END").await.unwrap();
+        let thread = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            runtime.create_thread(&project_id, "Unsaved"),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let renamed = runtime
+            .rename_thread(thread.id.clone(), "Latest memory title".into())
+            .await
+            .unwrap();
+        assert!(repository.writer().shutdown().await.is_err());
+        assert!(
+            runtime
+                .store
+                .read_thread(&thread.id)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let (handle, id) = runtime.ensure_thread_agent(&thread.id).await.unwrap();
+        assert!(handle.evict_agent(id.clone()).await.is_err());
+        assert!(handle.snapshot(id).await.is_ok());
+        for selected in [&existing_id, &thread.id] {
+            let mut subscription = runtime
+                .subscribe_thread(pl_protocol::ThreadSubscriptionRequest {
+                    thread_id: selected.clone(),
+                })
+                .await
+                .unwrap();
+            let frame = subscription.recv().await.unwrap();
+            if selected == &thread.id {
+                let pl_protocol::ThreadSubscriptionUpdate::Snapshot { snapshot } = frame else {
+                    panic!("initial memory snapshot");
+                };
+                assert_eq!(snapshot.thread.title, renamed.title);
+            }
+        }
+        runtime
+            .store
+            .database()
+            .execute_unprepared("DROP TRIGGER fail_new_thread")
+            .await
+            .unwrap();
+        repository.writer().retry_now();
+        repository.writer().flush().await.unwrap();
+        assert_eq!(
+            runtime
+                .store
+                .read_thread(&thread.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .title,
+            renamed.title
+        );
+        runtime.shutdown_runtime().await.unwrap();
     }
 
     #[tokio::test]

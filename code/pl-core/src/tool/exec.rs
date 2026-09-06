@@ -138,20 +138,15 @@ where
 
 struct ToolResultOutputObserver {
     emitter: super::ToolOutputDeltaEmitter,
-    revision_base: u64,
 }
 
 impl CommandOutputObserver for ToolResultOutputObserver {
-    fn output_chunk(&self, stream: CommandOutputStream, chunk: &[u8], revision: u64) {
+    fn output_chunk(&self, stream: CommandOutputStream, chunk: &[u8], _revision: u64) {
         let stream = match stream {
             CommandOutputStream::Stdout => OutputStream::Stdout,
             CommandOutputStream::Stderr => OutputStream::Stderr,
         };
-        let _ = self.emitter.emit_at(
-            stream,
-            String::from_utf8_lossy(chunk),
-            self.revision_base.saturating_add(revision),
-        );
+        let _ = self.emitter.emit(stream, String::from_utf8_lossy(chunk));
     }
 }
 
@@ -229,7 +224,6 @@ where
                 .unwrap_or(self.default_timeout);
             let observer = Arc::new(ToolResultOutputObserver {
                 emitter: context.output_delta_emitter(),
-                revision_base: context.identity().revision_base,
             });
             let call_id = context.identity().call_id.clone();
             let snapshot = self
@@ -259,7 +253,7 @@ where
                 });
             }
 
-            tool_output_from_snapshot(snapshot, TOOL_EXEC, context.identity().revision_base)
+            tool_output_from_snapshot(snapshot, TOOL_EXEC)
         }
     }
 }
@@ -284,7 +278,7 @@ where
     fn execute(
         &self,
         stdin_input: WriteStdinInput,
-        context: ToolCallContext,
+        _context: ToolCallContext,
     ) -> impl Future<Output = Result<ToolResult, PureError>> + Send {
         async move {
             let chars = stdin_input.chars.unwrap_or_default();
@@ -308,7 +302,7 @@ where
                 })
                 .await?;
 
-            tool_output_from_snapshot(snapshot, TOOL_WRITE_STDIN, context.identity().revision_base)
+            tool_output_from_snapshot(snapshot, TOOL_WRITE_STDIN)
         }
     }
 }
@@ -338,7 +332,6 @@ fn max_output_chars(value: Option<usize>, default: usize) -> usize {
 fn tool_output_from_snapshot(
     snapshot: CommandOutputSnapshot,
     tool: &str,
-    revision_base: u64,
 ) -> Result<ToolResult, PureError> {
     let capture_file = snapshot.capture_file.clone();
     let exit_code = snapshot.state.exit_code();
@@ -357,9 +350,7 @@ fn tool_output_from_snapshot(
             tool: tool.to_string(),
             error: format!("failed to serialize command output: {error}"),
         })?;
-    let mut runtime_events = vec![ToolDirective::ToolResultRevision {
-        revision: revision_base.saturating_add(snapshot.output_revision),
-    }];
+    let mut runtime_events = Vec::new();
     if !snapshot.output_artifacts.is_empty() {
         runtime_events.push(ToolDirective::OutputArtifacts {
             artifacts: snapshot.output_artifacts,
@@ -697,19 +688,6 @@ mod tests {
         ToolCallContext::test(event_tx)
     }
 
-    fn test_context_with_revision(
-        event_tx: pl_trace::AgentEventSender,
-        revision_base: u64,
-    ) -> ToolCallContext {
-        ToolCallContext::new(
-            crate::tool::ToolCallIdentity {
-                revision_base,
-                ..crate::tool::ToolCallIdentity::default()
-            },
-            event_tx,
-        )
-    }
-
     fn sleep_then_echo_command() -> &'static str {
         if cfg!(target_os = "windows") {
             "Start-Sleep -Milliseconds 700; Write-Output 'done'"
@@ -779,7 +757,6 @@ mod tests {
         );
         let observer = ToolResultOutputObserver {
             emitter: context.output_delta_emitter(),
-            revision_base: 0,
         };
         drop(context);
 
@@ -816,9 +793,12 @@ mod tests {
         );
         pl_trace::TraceEventSink::emit(
             sink.as_ref(),
-            pl_trace::TraceEventDraft::new(
+            pl_trace::TraceEventDraft::start(
                 started_at,
-                pl_trace::TraceEventKind::TracePartStarted { item: item.clone() },
+                item.turn_id().to_owned(),
+                item.item_id().to_owned(),
+                item.source(),
+                item.state().clone(),
             ),
         )
         .expect("tool start must seed the canonical lifecycle");
@@ -831,9 +811,13 @@ mod tests {
         .expect("tool must enter its running phase");
         pl_trace::TraceEventSink::emit(
             sink.as_ref(),
-            pl_trace::TraceEventDraft::new(
+            pl_trace::TraceEventDraft::apply(
                 started_at,
-                pl_trace::TraceEventKind::TracePartStarted { item: item.clone() },
+                item.turn_id().to_owned(),
+                item.item_id().to_owned(),
+                pl_trace::TracePartAction::EnterToolPhase {
+                    phase: pl_trace::TraceToolActivePhase::Running,
+                },
             ),
         )
         .expect("running tool snapshot must reach the canonical sink");
@@ -841,8 +825,6 @@ mod tests {
             crate::tool::ToolCallIdentity {
                 item_id: "tool-1".to_string(),
                 turn_id: "turn-1".to_string(),
-                started_sequence: 11,
-                revision_base: item.revision(),
                 ..crate::tool::ToolCallIdentity::default()
             },
             event_tx,
@@ -850,7 +832,6 @@ mod tests {
         .with_trace_sink(Some(sink.clone()));
         let observer = ToolResultOutputObserver {
             emitter: context.output_delta_emitter(),
-            revision_base: item.revision(),
         };
 
         observer.output_chunk(CommandOutputStream::Stdout, b"out", 1);
@@ -930,20 +911,16 @@ mod tests {
         let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(16);
         let input = tool_input("echo streaming", "stream-session", "stream-tool");
         let output = tool
-            .execute_raw(input, test_context_with_revision(event_tx, 5))
+            .execute_raw(input, test_context_with_sender(event_tx))
             .await
             .unwrap();
 
         let (streamed, revision) = collect_tool_result_stream(&mut event_rx);
 
         assert!(streamed.contains("streaming"));
-        assert!(revision > 5);
-        assert!(output.runtime_events.iter().any(|event| matches!(
-            event,
-            ToolDirective::ToolResultRevision {
-                revision: output_revision
-            } if *output_revision >= revision
-        )));
+        assert!(revision > 0);
+        assert!(!output.model_output().is_empty());
+        assert!(revision > 0);
     }
 
     #[tokio::test]
@@ -966,12 +943,8 @@ mod tests {
 
         assert!(streamed.contains("[stderr]"));
         assert!(streamed.contains("err"));
-        assert!(output.runtime_events.iter().any(|event| matches!(
-            event,
-            ToolDirective::ToolResultRevision {
-                revision: output_revision
-            } if *output_revision >= revision
-        )));
+        assert!(!output.model_output().is_empty());
+        assert!(revision > 0);
     }
 
     #[cfg(windows)]

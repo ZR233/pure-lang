@@ -2,10 +2,8 @@
 
 use pl_core::AttachmentRuntime;
 
-use crate::studio::StudioStore;
 use crate::{AttachmentModality, ContentPart, MessageContent};
 
-use super::super::resources::StudioAgentResources;
 use super::errors::anyhow_error;
 
 pub(super) fn prompt_content(
@@ -43,11 +41,12 @@ pub(super) fn prompt_content(
 }
 
 pub(super) fn attachment_runtime(
-    store: StudioStore,
-    resources: StudioAgentResources,
+    factory: &super::StudioAgentTurnFactory,
     thread_id: String,
 ) -> AttachmentRuntime {
-    let writer_store = store.clone();
+    let writer_store = factory.store.clone();
+    let resources = factory.resources.clone();
+    let product_events = factory.product_events.clone();
     let writer_resources = resources.clone();
     let writer_thread_id = thread_id.clone();
     AttachmentRuntime::new_batch(
@@ -55,9 +54,10 @@ pub(super) fn attachment_runtime(
             let store = writer_store.clone();
             let resources = writer_resources.clone();
             let thread_id = writer_thread_id.clone();
+            let product_events = product_events.clone();
             async move {
                 let records = store
-                    .persist_tool_image_records(&thread_id, inputs)
+                    .prepare_tool_image_records(&thread_id, inputs)
                     .await
                     .map_err(anyhow_error)?;
                 let attachments = records
@@ -65,8 +65,9 @@ pub(super) fn attachment_runtime(
                     .map(crate::studio::store::attachment::thread_attachment)
                     .collect();
                 resources
-                    .insert_thread_attachments(&thread_id, records)
+                    .insert_thread_attachments(&thread_id, records.clone())
                     .await;
+                product_events.record_attachments(records);
                 Ok(attachments)
             }
         },

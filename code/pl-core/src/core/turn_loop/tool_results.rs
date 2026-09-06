@@ -93,7 +93,6 @@ pub(super) fn receipt(result: &ToolExecutionRecord) -> ToolResultReceipt {
             crate::tool::ToolDirective::OutputArtifacts { artifacts } => Some(artifacts.as_slice()),
             crate::tool::ToolDirective::InteractionRequested { .. }
             | crate::tool::ToolDirective::SkillActivated { .. }
-            | crate::tool::ToolDirective::ToolResultRevision { .. }
             | crate::tool::ToolDirective::RevealTools { .. }
             | crate::tool::ToolDirective::AuditMetadata { .. }
             | crate::tool::ToolDirective::ExecutionFailed
@@ -113,7 +112,6 @@ pub(super) fn receipt(result: &ToolExecutionRecord) -> ToolResultReceipt {
         } => Some((reused_from_call_id, result_hash, *total_bytes)),
         crate::tool::ToolDirective::InteractionRequested { .. }
         | crate::tool::ToolDirective::SkillActivated { .. }
-        | crate::tool::ToolDirective::ToolResultRevision { .. }
         | crate::tool::ToolDirective::OutputArtifacts { .. }
         | crate::tool::ToolDirective::RevealTools { .. }
         | crate::tool::ToolDirective::AuditMetadata { .. }
@@ -131,7 +129,6 @@ pub(super) fn receipt(result: &ToolExecutionRecord) -> ToolResultReceipt {
         } => Some((*raw_bytes, *model_visible_bytes, result_hash)),
         crate::tool::ToolDirective::InteractionRequested { .. }
         | crate::tool::ToolDirective::SkillActivated { .. }
-        | crate::tool::ToolDirective::ToolResultRevision { .. }
         | crate::tool::ToolDirective::OutputArtifacts { .. }
         | crate::tool::ToolDirective::RevealTools { .. }
         | crate::tool::ToolDirective::AuditMetadata { .. }

@@ -113,32 +113,36 @@ where
                 let activity_turn_id = turn_id.clone();
                 let observation_turn_id = turn_id.to_string();
                 let observation_thread_id = trace_thread_id.clone();
-                let event_task = tokio::spawn(async move {
-                    loop {
-                        match event_rx.recv().await {
-                            Ok(event) => {
-                                if let Some(observation) = observation_from_agent_event(&event) {
-                                    let _ = observation_tx.send(ObservedTurnEvent {
-                                        turn_id: observation_turn_id.clone(),
-                                        thread_id: observation_thread_id.clone(),
-                                        observation,
-                                    });
+                let event_task =
+                    tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
+                        loop {
+                            match event_rx.recv().await {
+                                Ok(event) => {
+                                    if let Some(observation) = observation_from_agent_event(&event)
+                                    {
+                                        let _ = observation_tx.send(ObservedTurnEvent {
+                                            turn_id: observation_turn_id.clone(),
+                                            thread_id: observation_thread_id.clone(),
+                                            observation,
+                                        });
+                                    }
+                                    if let Some(activity) = activity_for_event(&event) {
+                                        let _ = activity_runtime
+                                            .set_activity(
+                                                activity_agent_id.clone(),
+                                                activity_turn_id.clone(),
+                                                activity,
+                                            )
+                                            .await;
+                                    }
                                 }
-                                if let Some(activity) = activity_for_event(&event) {
-                                    let _ = activity_runtime
-                                        .set_activity(
-                                            activity_agent_id.clone(),
-                                            activity_turn_id.clone(),
-                                            activity,
-                                        )
-                                        .await;
+                                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                                    continue;
                                 }
                             }
-                            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                            Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                         }
-                    }
-                });
+                    }));
                 let mut recorder = TraceRecorder::streaming(
                     trace_thread_id,
                     event_tx,

@@ -3,7 +3,8 @@
 use std::collections::VecDeque;
 use std::time::Duration;
 
-use pl_core::{PersistenceClass, ThreadCommit};
+use super::thread_fact::ThreadFact;
+use pl_core::PersistenceClass;
 use tokio::sync::oneshot;
 
 use crate::PureError;
@@ -12,10 +13,6 @@ use crate::studio::store::directory::DirectoryDelta;
 
 /// 单批最多应用的 commit 数；一批共享一个 SQLite 事务。
 pub(super) const MAX_BATCH_COMMITS: usize = 64;
-/// 普通提交上限；其后的容量只供终态收束使用。
-pub(super) const NORMAL_PENDING_COMMITS: usize = 768;
-/// 总积压上限；达到后入队方等待 writer 追赶（背压而不是丢弃）。
-pub(super) const MAX_PENDING_COMMITS: usize = 1024;
 /// 首条待写事实允许等待的最大批量时间窗口。
 pub(super) const FLUSH_INTERVAL: Duration = Duration::from_secs(5);
 /// 进入公开 Degraded 状态前的快速重试次数。
@@ -31,13 +28,14 @@ pub(super) const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(30);
 /// Directory 包含产品目录和其他有界 Studio object。
 #[derive(Debug, Clone)]
 pub(super) enum StudioMutation {
-    Thread(Box<ThreadCommit>),
+    Thread(std::sync::Arc<ThreadFact>),
     Directory(Box<StudioDirectoryMutation>),
 }
 
 #[derive(Debug, Clone)]
 pub(super) enum StudioDirectoryMutation {
     Delta(DirectoryDelta),
+    Attachments(Vec<crate::studio::AttachmentRecord>),
     ModelPerformance(ObservedStateCommit),
 }
 
@@ -70,16 +68,6 @@ pub(super) struct ObservedStateCommit {
 impl QueueEntry {
     pub(super) const fn is_commit(&self) -> bool {
         matches!(self, Self::Mutation(_))
-    }
-
-    pub(super) fn terminal_key(&self) -> Option<String> {
-        match self {
-            Self::Mutation(QueuedMutation {
-                mutation: StudioMutation::Thread(commit),
-                ..
-            }) => terminal_turn_key(commit),
-            Self::Mutation(_) | Self::Barrier(_) => None,
-        }
     }
 
     /// worker panic 恢复只复制 typed mutation；barrier 由失败路径显式唤醒。
@@ -118,22 +106,35 @@ impl QueueEntry {
     }
 
     pub(super) fn contains_directory_fact_for(&self, owner_id: &str) -> bool {
-        matches!(
-            self,
+        match self {
             Self::Mutation(QueuedMutation {
                 mutation: StudioMutation::Directory(directory),
                 ..
-            }) if matches!(
-                directory.as_ref(),
-                StudioDirectoryMutation::Delta(delta) if delta.touches_thread(owner_id)
-            )
-        )
+            }) => match directory.as_ref() {
+                StudioDirectoryMutation::Delta(delta) => delta.touches_thread(owner_id),
+                StudioDirectoryMutation::Attachments(records) => {
+                    records.iter().any(|record| record.thread_id == owner_id)
+                }
+                StudioDirectoryMutation::ModelPerformance(_) => false,
+            },
+            Self::Mutation(QueuedMutation {
+                mutation: StudioMutation::Thread(_),
+                ..
+            })
+            | Self::Barrier(_) => false,
+        }
     }
 }
 
-pub(super) fn queue_thread(commit: ThreadCommit) -> QueueEntry {
-    QueueEntry::Mutation(QueuedMutation::new(StudioMutation::Thread(Box::new(
-        commit,
+pub(super) fn queue_thread(commit: ThreadFact) -> QueueEntry {
+    QueueEntry::Mutation(QueuedMutation::new(StudioMutation::Thread(
+        std::sync::Arc::new(commit),
+    )))
+}
+
+pub(super) fn queue_attachments(records: Vec<crate::studio::AttachmentRecord>) -> QueueEntry {
+    QueueEntry::Mutation(QueuedMutation::new(StudioMutation::Directory(Box::new(
+        StudioDirectoryMutation::Attachments(records),
     ))))
 }
 
@@ -147,55 +148,6 @@ pub(super) fn queue_model_performance(commit: ObservedStateCommit) -> QueueEntry
     QueueEntry::Mutation(QueuedMutation::new(StudioMutation::Directory(Box::new(
         StudioDirectoryMutation::ModelPerformance(commit),
     ))))
-}
-
-pub(super) fn started_turn_key(commit: &ThreadCommit) -> Option<String> {
-    commit.facts.runtime_events.iter().find_map(|event| {
-        let pl_core::AgentRuntimeEventKind::TurnStarted { turn_id, .. } = &event.kind else {
-            return None;
-        };
-        Some(format!("{}:{turn_id}", commit.agent_id))
-    })
-}
-
-pub(super) fn terminal_turn_key(commit: &ThreadCommit) -> Option<String> {
-    commit.facts.runtime_events.iter().find_map(|event| {
-        let turn_id = match &event.kind {
-            pl_core::AgentRuntimeEventKind::TurnFinished { outcome, .. }
-            | pl_core::AgentRuntimeEventKind::RecoveryCancelledTurn { outcome, .. } => {
-                Some(outcome.turn_id.as_str())
-            }
-            pl_core::AgentRuntimeEventKind::Faulted { snapshot, .. } => snapshot
-                .last_turn
-                .as_ref()
-                .map(|outcome| outcome.turn_id.as_str())
-                .or_else(|| {
-                    commit
-                        .facts
-                        .turn_id
-                        .as_ref()
-                        .map(|turn_id| turn_id.as_str())
-                }),
-            pl_core::AgentRuntimeEventKind::Registered { .. }
-            | pl_core::AgentRuntimeEventKind::StateChanged { .. }
-            | pl_core::AgentRuntimeEventKind::ThreadOpened { .. }
-            | pl_core::AgentRuntimeEventKind::TurnQueued { .. }
-            | pl_core::AgentRuntimeEventKind::TurnStarted { .. }
-            | pl_core::AgentRuntimeEventKind::TurnActivityChanged { .. } => None,
-        }?;
-        Some(format!("{}:{turn_id}", commit.agent_id))
-    })
-}
-
-pub(super) fn try_coalesce_tail(queue: &mut VecDeque<QueueEntry>, next: ThreadCommit) -> bool {
-    let Some(QueueEntry::Mutation(QueuedMutation {
-        mutation: StudioMutation::Thread(previous),
-        ..
-    })) = queue.back_mut()
-    else {
-        return false;
-    };
-    previous.coalesce(Box::new(next)).is_ok()
 }
 
 pub(super) fn try_coalesce_observed_state(

@@ -1,6 +1,7 @@
 //! 把一个 write-behind 批次应用进单个 SQLite 事务，并对持久化错误分类。
 
-use sea_orm::TransactionTrait;
+use sea_orm::{EntityTrait, TransactionTrait};
+use std::collections::BTreeMap;
 
 use crate::PureError;
 use crate::studio::StudioStore;
@@ -19,12 +20,20 @@ pub(super) async fn apply_batch(
     batch: &PendingBatch,
 ) -> Result<(), BatchError> {
     let tx = store.database().begin().await.map_err(classify_db_error)?;
+    let applied = applied_thread_batches(&tx, batch).await?;
     for entry in &batch.entries {
         match entry {
             QueueEntry::Mutation(QueuedMutation {
                 mutation: StudioMutation::Thread(commit),
                 ..
-            }) => match apply_state_commit(&tx, commit).await {
+            }) => match if applied
+                .get(&commit.agent_id)
+                .is_some_and(|revision| commit.facts.revision <= *revision)
+            {
+                Ok(ApplyCommitOutcome::AlreadyApplied)
+            } else {
+                apply_thread_fact(&tx, commit).await
+            } {
                 Ok(ApplyCommitOutcome::Applied | ApplyCommitOutcome::AlreadyApplied) => {}
                 Ok(ApplyCommitOutcome::RevisionConflict { actual_revision }) => {
                     let _ = tx.rollback().await;
@@ -41,6 +50,15 @@ pub(super) async fn apply_batch(
             }) => match directory.as_ref() {
                 StudioDirectoryMutation::Delta(delta) => {
                     if let Err(error) = apply_directory_delta(&tx, delta).await {
+                        let _ = tx.rollback().await;
+                        return Err(classify_store_error(store_error(error)));
+                    }
+                }
+                StudioDirectoryMutation::Attachments(records) => {
+                    if let Err(error) =
+                        crate::studio::store::attachment::persist_attachment_records(&tx, records)
+                            .await
+                    {
                         let _ = tx.rollback().await;
                         return Err(classify_store_error(store_error(error)));
                     }
@@ -64,6 +82,60 @@ pub(super) async fn apply_batch(
     }
     tx.commit().await.map_err(classify_db_error)?;
     Ok(())
+}
+
+// 一个事务可能已提交，而 worker 尚未推进内存水位就退出。
+// 恢复后的批次可能还包含新事实；只跳过由相同 receipt 确认的已保存前缀。
+async fn applied_thread_batches(
+    tx: &sea_orm::DatabaseTransaction,
+    batch: &PendingBatch,
+) -> Result<BTreeMap<pl_core::ThreadId, u64>, BatchError> {
+    let mut owners = BTreeMap::<_, Vec<_>>::new();
+    for entry in &batch.entries {
+        if let QueueEntry::Mutation(QueuedMutation {
+            mutation: StudioMutation::Thread(fact),
+            ..
+        }) = entry
+        {
+            owners.entry(fact.agent_id.clone()).or_default().push(fact);
+        }
+    }
+    let mut applied = BTreeMap::new();
+    for (id, facts) in owners {
+        let revision = crate::studio::entity::thread::Entity::find_by_id(id.to_string())
+            .one(tx)
+            .await
+            .map_err(classify_db_error)?
+            .and_then(|row| row.runtime_revision)
+            .and_then(|revision| u64::try_from(revision).ok());
+        let Some(fact) = facts
+            .into_iter()
+            .find(|fact| Some(fact.facts.revision) == revision)
+        else {
+            continue;
+        };
+        match apply_thread_fact(tx, fact)
+            .await
+            .map_err(classify_store_error)?
+        {
+            ApplyCommitOutcome::AlreadyApplied => {
+                applied.insert(id, fact.facts.revision);
+            }
+            ApplyCommitOutcome::RevisionConflict { actual_revision } => {
+                return Err(BatchError::Conflict { actual_revision });
+            }
+            ApplyCommitOutcome::Applied => {}
+        }
+    }
+    Ok(applied)
+}
+
+async fn apply_thread_fact(
+    tx: &sea_orm::DatabaseTransaction,
+    fact: &super::thread_fact::ThreadFact,
+) -> Result<ApplyCommitOutcome, PureError> {
+    let commit = fact.materialize(tx).await?;
+    apply_state_commit(tx, &commit).await
 }
 
 fn classify_db_error(error: sea_orm::DbErr) -> BatchError {

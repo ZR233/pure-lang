@@ -82,7 +82,7 @@ async fn run_steps(
         request.trace_attachments.clone(),
     );
     for activation in &request.skill_activations {
-        recorder.record_trace_only(pl_trace::TraceEventKind::SkillActivated {
+        recorder.record_trace_only(pl_trace::TraceOperation::SkillActivated {
             activation: activation.clone(),
         });
     }
@@ -383,13 +383,15 @@ async fn run_steps(
         } else {
             response.model.clone()
         };
-        if let Err(error) = inference_item.apply(inference_item.command(
-            unix_seconds(),
-            pl_trace::TracePartAction::UpdateInferenceModel {
-                model: actual_model.clone(),
-            },
-        )) {
-            tracing::error!(%error, "failed to update inference model trace");
+        if actual_model != model
+            && let Some(current) = recorder.apply_item(
+                &inference_item,
+                pl_trace::TracePartAction::UpdateInferenceModel {
+                    model: actual_model.clone(),
+                },
+            )
+        {
+            inference_item = current;
         }
         let usage_snapshot = response_usage.public_snapshot();
         recorder.complete_inference_item(inference_item, usage_snapshot.clone());
@@ -638,7 +640,6 @@ async fn run_steps(
                     } => Some(content.clone()),
                     crate::tool::ToolDirective::InteractionRequested { .. }
                     | crate::tool::ToolDirective::SkillActivated { .. }
-                    | crate::tool::ToolDirective::ToolResultRevision { .. }
                     | crate::tool::ToolDirective::OutputArtifacts { .. }
                     | crate::tool::ToolDirective::RevealTools { .. }
                     | crate::tool::ToolDirective::AuditMetadata { .. }

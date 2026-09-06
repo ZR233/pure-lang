@@ -100,7 +100,7 @@ fn missing_working_state_error(thread_id: &str) -> PureError {
     store_error(format!("Thread {thread_id} session state is missing"))
 }
 
-async fn restore_transcript(
+pub(in crate::studio::agent_host::repository) async fn restore_transcript(
     db: &impl ConnectionTrait,
     thread_id: &str,
 ) -> Result<Vec<ModelContextItem>, PureError> {

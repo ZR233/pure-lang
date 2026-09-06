@@ -12,9 +12,7 @@ use crate::PureError;
 use crate::studio::PersistenceState;
 
 use super::apply::apply_batch;
-use super::durability::{
-    advance_batch_durability, complete_applied_batch, release_applied_settlement_slots,
-};
+use super::durability::{advance_batch_durability, complete_applied_batch};
 use super::handle::WriterShared;
 use super::queue::{
     FAST_BATCH_RETRIES, FLUSH_INTERVAL, MAX_BATCH_COMMITS, MAX_RETRY_BACKOFF, PendingBatch,
@@ -54,7 +52,7 @@ pub(super) async fn supervise_writer(shared: Arc<WriterShared>, pending_commits:
         if shared.stopping.load(Ordering::Acquire) {
             return;
         }
-        shared.retry_notify.notified().await;
+        wait_for_retry(&shared, Duration::from_secs(1)).await;
         if shared.stopping.load(Ordering::Acquire) {
             return;
         }
@@ -96,6 +94,11 @@ async fn run_writer(shared: Arc<WriterShared>, pending_commits: Arc<AtomicUsize>
         };
         match outcome {
             Ok(()) => {
+                #[cfg(test)]
+                assert!(
+                    !shared.panic_after_apply.swap(false, Ordering::AcqRel),
+                    "injected worker exit after database commit"
+                );
                 let was_unhealthy = matches!(
                     shared.state.borrow().state,
                     PersistenceState::Degraded(_) | PersistenceState::Recovering(_)
@@ -103,12 +106,8 @@ async fn run_writer(shared: Arc<WriterShared>, pending_commits: Arc<AtomicUsize>
                 retries = 0;
                 clear_inflight(&shared);
                 advance_batch_durability(&shared, &batch);
-                release_applied_settlement_slots(&shared, &batch);
                 pending_commits.fetch_sub(commit_count, Ordering::AcqRel);
                 complete_applied_batch(batch);
-                // 注意：borrow 的 Ref 必须先 drop 再 send_replace，否则读写锁自锁。
-                let next_progress = shared.progress.borrow().wrapping_add(1);
-                shared.progress.send_replace(next_progress);
                 update_after_success(
                     &shared,
                     pending_commits.load(Ordering::Acquire),
@@ -142,11 +141,17 @@ async fn run_writer(shared: Arc<WriterShared>, pending_commits: Arc<AtomicUsize>
                     fail_barriers(&shared, "write-behind writer is blocked");
                     return;
                 }
-                shared.retry_notify.notified().await;
+                fail_barriers(&shared, "write-behind storage is unavailable");
+                wait_for_retry(&shared, MAX_RETRY_BACKOFF).await;
             }
             Err(BatchError::RetryableStore(error)) => {
                 retries += 1;
                 requeue_batch(&shared, batch);
+                if shared.stopping.load(Ordering::Acquire) {
+                    publish_degraded(&shared, &error);
+                    fail_barriers(&shared, "shutdown could not save pending facts");
+                    return;
+                }
                 if retries <= FAST_BATCH_RETRIES {
                     tracing::warn!(
                         attempt = retries,

@@ -122,7 +122,6 @@ AsyncValue<StartPageView> startPage(Ref ref) {
             .firstOrNull;
         final healthy =
             project != null &&
-            state.persistenceState.acceptsNewWork &&
             state.recoveryIssue(
                   scope: RecoveryIssueScope.project,
                   projectId: project.id,

@@ -2154,6 +2154,71 @@ class DriverDemoStudioApi extends DemoStudioApi {
   DriverDemoStudioApi({super.lspActivityLoop});
 
   bool _sessionLifecycleScenario = false;
+  bool _persistenceFailureScenario = false;
+  bool _failNextTurn = false;
+
+  void preparePersistenceFailureScenario() {
+    prepareSessionLifecycleScenario();
+    _persistenceFailureScenario = true;
+    _failNextTurn = true;
+    _selectedThreadId = 'thread-main';
+  }
+
+  @override
+  Future<void> _completePrompt({
+    required String threadId,
+    required String turnId,
+    required String trimmedPrompt,
+    required int generation,
+    required DateTime startedAt,
+  }) async {
+    if (!_failNextTurn) {
+      return super._completePrompt(
+        threadId: threadId,
+        turnId: turnId,
+        trimmedPrompt: trimmedPrompt,
+        generation: generation,
+        startedAt: startedAt,
+      );
+    }
+    _failNextTurn = false;
+    await Future<void>.delayed(promptActivityDelay);
+    if (_promptGenerations[threadId] != generation) return;
+    _emitThreadUpdate(
+      threadId,
+      ThreadTurnUpdate(
+        StudioTurnView(
+          turnId: turnId,
+          threadId: threadId,
+          revision: 1,
+          updatedAt: DateTime.now(),
+          state: FailedStudioTurnState(
+            startedAt: startedAt.millisecondsSinceEpoch ~/ 1000,
+            completedAt: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+            failure: const StudioTurnFailureView(
+              category: 'protocol',
+              providerKind: null,
+              code: 'turnProtocolProjectionFailed',
+              httpStatus: null,
+              message: 'Injected turn protocol failure',
+              retryable: false,
+              retryAfterMs: null,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Future<PersistenceStateSnapshot> retryPersistence() async {
+    _persistenceFailureScenario = false;
+    return const PersistenceStateSnapshot(
+      revision: 2,
+      state: ReadyPersistenceState(pendingCommits: 0),
+    );
+  }
+
   bool _fallbackInputScenario = false;
   int _pagingFixtureCount = 42;
 
@@ -2199,6 +2264,23 @@ class DriverDemoStudioApi extends DemoStudioApi {
   @override
   Future<StudioState> readStudioState() async {
     final state = await super.readStudioState();
+    if (_persistenceFailureScenario) {
+      return state.copyWith(
+        persistenceState: const PersistenceStateSnapshot(
+          revision: 1,
+          state: DegradedPersistenceState(
+            pendingCommits: 3,
+            oldestPendingRevision: 8,
+            firstFailedAt: 1,
+            error: ObservedResourceError(
+              code: 'storageUnavailable',
+              message: 'Injected save failure',
+              retryable: true,
+            ),
+          ),
+        ),
+      );
+    }
     if (_sessionLifecycleScenario) return state;
     const threadId = 'thread-main';
     final workspace = state.workspacesByThread[threadId];

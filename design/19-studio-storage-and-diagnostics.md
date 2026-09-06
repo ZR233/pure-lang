@@ -18,6 +18,8 @@ lease 复用 `studio_objects`，不新增 Task 表；lease 保存
 
 活动 Thread owner 是唯一事实源。write-behind queue 接收不可变 typed checkpoint；worker 负责编码、
 hash 和 SQLite transaction。workflow tool-call、tool result 与 working state 同批提交，失败共同回滚。
+上述回滚仅限数据库事务，不回滚已提交内存。后台写入独立重试并完整保留未保存事实；队列不对
+实时会话施加容量背压。内存 revision 与 durable revision 独立，持久化状态仅用于诊断和释放判断。
 完整 workflow state 最大 256 KiB；图 hash 与尾部历史在进入 repository 前已由 core 验证。完整图与
 Mode Prompt 只存在于当前内存注册快照，不写入 repository。
 

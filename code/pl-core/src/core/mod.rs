@@ -1163,19 +1163,10 @@ pub(crate) mod test_support {
             context: ToolCallContext,
         ) -> impl std::future::Future<Output = crate::Result<ToolResult>> + Send {
             async move {
-                let now = crate::time::unix_seconds();
-                let event = pl_trace::TracePartDeltaEvent {
-                    turn_id: context.identity().turn_id.clone(),
-                    item_id: context.identity().item_id.clone(),
-                    started_sequence: 0,
-                    revision: context.identity().revision_base.saturating_add(1),
-                    created_at: now,
-                    updated_at: now,
-                    delta: pl_trace::TraceDelta::ToolResult {
-                        delta: "runtime delta".to_string(),
-                    },
-                };
-                let _ = context.events().send(AgentEvent::TracePartDelta { event });
+                context
+                    .output_delta_emitter()
+                    .emit(pl_protocol::OutputStream::Stdout, "runtime delta")
+                    .expect("canonical tool output");
                 Ok(ToolResult::success("delta complete"))
             }
         }

@@ -414,6 +414,111 @@ mod tests {
         assert_eq!(after_conflict, inserted);
     }
 
+    #[tokio::test]
+    async fn failed_save_retries_messages_tool_results_billing_and_submission_once() {
+        use super::super::write_behind::ThreadWriteBehindWriter;
+        use sea_orm::ConnectionTrait;
+        let store = StudioStore::open_memory().await.unwrap();
+        let project = store
+            .upsert_project(std::env::temp_dir().join("save-facts"))
+            .await
+            .unwrap();
+        let thread = store
+            .create_thread(&project.id, "facts", ThreadModeId::simple())
+            .await
+            .unwrap();
+        let billing = billing_record("saved-inference", 10, 4, 3);
+        let mut commit = billing_commit(&thread.id, "saved-turn", billing.clone());
+        let session = &mut commit.next_state.session.session;
+        session.push_user_prompt("Keep this message".into());
+        session.push_tool_result(
+            pl_protocol::ToolResultRecord {
+                item_id: "tool-item".into(),
+                call_id: "call-1".into(),
+                name: "exec".into(),
+                kind: pl_protocol::ToolCallKind::Function,
+            },
+            "Keep this tool output".into(),
+            "{}".into(),
+        );
+        let transcript = session.snapshot().transcript;
+        commit.facts.context = Some(pl_core::ThreadContextMutation::Append {
+            items: transcript.clone(),
+        });
+        let submission = pl_core::ProgressSubmissionCommit {
+            report: pl_protocol::AgentProgressReport {
+                stage: pl_protocol::AgentProgressStage::Verifying,
+                summary: "Keep this report".into(),
+                next_step: "Finish".into(),
+                revision: 1,
+            },
+            detail: Some("Report detail".into()),
+            created_at: 1,
+        };
+        commit.facts.submission = Some(submission.clone());
+        store.database().execute_unprepared("CREATE TRIGGER fail_facts BEFORE UPDATE ON threads BEGIN SELECT RAISE(ABORT, 'disk i/o error'); END").await.unwrap();
+        let writer = ThreadWriteBehindWriter::new(store.clone());
+        let attachment = crate::studio::AttachmentRecord {
+            id: "saved-attachment".into(),
+            thread_id: thread.id.clone(),
+            modality: pl_protocol::studio::StudioAttachmentModality::Image,
+            media_type: "image/png".into(),
+            filename: Some("output.png".into()),
+            storage_path: "immutable-image.png".into(),
+            byte_size: 4,
+            content_sha256: "test-digest".into(),
+            width: Some(1),
+            height: Some(1),
+            created_at: 1,
+        };
+        writer.record_attachments(vec![attachment.clone()]);
+        writer.record_thread(commit.clone());
+        assert!(writer.shutdown().await.is_err());
+        assert_eq!(writer.pending_commit_count(), 2);
+        store
+            .database()
+            .execute_unprepared("DROP TRIGGER fail_facts")
+            .await
+            .unwrap();
+        writer.retry_now();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            writer.await_durable(&thread.id, 1),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        writer.record_attachments(vec![attachment.clone()]);
+        writer.record_thread(commit);
+        writer.flush().await.unwrap();
+        pretty_assertions::assert_eq!(
+            super::super::context::restore_transcript(store.database(), &thread.id)
+                .await
+                .unwrap(),
+            transcript
+        );
+        pretty_assertions::assert_eq!(
+            store.list_thread_attachments(&thread.id).await.unwrap(),
+            vec![attachment]
+        );
+        let restored_billing = restore_billing(&store, &thread.id).await.unwrap();
+        pretty_assertions::assert_eq!(restored_billing["saved-turn"].inferences, vec![billing]);
+        let reports = super::super::submissions::list_thread_submissions(
+            &store,
+            &ThreadId::new(thread.id).unwrap(),
+            0,
+            10,
+        )
+        .await
+        .unwrap();
+        pretty_assertions::assert_eq!(
+            reports.items,
+            vec![pl_core::AgentSubmissionRecord::from(&submission)]
+        );
+        assert_eq!(reports.total, 1);
+        writer.shutdown().await.unwrap();
+    }
+
     #[test]
     fn terminal_projection_cannot_overwrite_authoritative_billing_usage() {
         let billing = TurnBillingRecord {
@@ -497,6 +602,7 @@ mod tests {
         ]);
         let usage = aggregate_billing_usage(billing.values());
         let context = ThreadContextState {
+            submissions: Default::default(),
             metadata: pl_core::ThreadContextMetadata::default(),
             session: pl_core::AgentSession::new(),
             usage,

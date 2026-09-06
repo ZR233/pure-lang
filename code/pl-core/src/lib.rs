@@ -51,11 +51,11 @@ pub use agent_runtime::{
     DurableMailboxEnvelope, FaultedAgentState, IdleAgentState, MailboxBudgetAction, MailboxCommand,
     MailboxDeliveryState, MailboxInputPayload, MailboxInputSource, MailboxMetadata,
     MailboxMetadataValue, PersistenceClass, PreparedAgentTurn, PreparedSessionRuntime,
-    QueuedAgentState, RestoredAgentRuntime, RestoredInputPolicy, RestoredThreadSnapshot,
-    RunningAgentState, SpawnLifecycleRequest, SpawnRollbackReason, ThreadActorState, ThreadCommit,
-    ThreadContextMetadata, ThreadContextMutation, ThreadContextState, ThreadMutation,
-    ThreadRepository, ToolEffectSet, TurnCheckpointReason, TurnFinalizationPolicy,
-    WaitingInteractionAgentState, WaitingToolAgentState,
+    ProgressSubmissionCommit, QueuedAgentState, RestoredAgentRuntime, RestoredInputPolicy,
+    RestoredThreadSnapshot, RunningAgentState, SpawnLifecycleRequest, SpawnRollbackReason,
+    ThreadActorState, ThreadCommit, ThreadContextMetadata, ThreadContextMutation,
+    ThreadContextState, ThreadMutation, ThreadRepository, ToolEffectSet, TurnCheckpointReason,
+    TurnFinalizationPolicy, WaitingInteractionAgentState, WaitingToolAgentState,
 };
 pub use attachment::{AttachmentRuntime, MaterializedAttachment, ToolImageAttachmentInput};
 pub use config::{

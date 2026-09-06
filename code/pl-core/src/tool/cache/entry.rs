@@ -32,7 +32,6 @@ pub(super) fn cache_entry(
             ToolDirective::OutputMetrics { result_hash, .. } => Some(result_hash.clone()),
             ToolDirective::InteractionRequested { .. }
             | ToolDirective::SkillActivated { .. }
-            | ToolDirective::ToolResultRevision { .. }
             | ToolDirective::OutputArtifacts { .. }
             | ToolDirective::RevealTools { .. }
             | ToolDirective::AuditMetadata { .. }
@@ -83,7 +82,6 @@ pub(super) fn compact_cache_hit(entry: &ToolCacheEntry, reuse_kind: CacheReuseKi
             } => Some((*artifact_bytes, result_hash.clone())),
             ToolDirective::InteractionRequested { .. }
             | ToolDirective::SkillActivated { .. }
-            | ToolDirective::ToolResultRevision { .. }
             | ToolDirective::OutputArtifacts { .. }
             | ToolDirective::RevealTools { .. }
             | ToolDirective::AuditMetadata { .. }

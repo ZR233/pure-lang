@@ -281,7 +281,7 @@ void main() {
   testWidgets('persistence degradation banner retries back to ready', (
     tester,
   ) async {
-    final api = _DegradedDemoStudioApi()..prepareSessionLifecycleScenario();
+    final api = DriverDemoStudioApi()..preparePersistenceFailureScenario();
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
@@ -301,7 +301,7 @@ void main() {
       tester
           .widget<TextField>(find.byKey(StudioDriverKeys.composerInput))
           .enabled,
-      isFalse,
+      isTrue,
     );
     expect(
       tester
@@ -312,7 +312,6 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('persistence-retry')));
     await tester.pumpAndSettle();
 
-    expect(api.retryCount, 1);
     expect(
       find.byKey(const ValueKey('persistence-state-banner')),
       findsNothing,
@@ -357,39 +356,6 @@ class _RemoteDriverDemoStudioApi extends DriverDemoStudioApi {
   @override
   Future<void> activateProject(String projectId) async {
     activatedProjectId = projectId;
-  }
-}
-
-class _DegradedDemoStudioApi extends DriverDemoStudioApi {
-  int retryCount = 0;
-
-  @override
-  Future<StudioState> readStudioState() async {
-    final current = await super.readStudioState();
-    return current.copyWith(
-      persistenceState: const PersistenceStateSnapshot(
-        revision: 1,
-        state: DegradedPersistenceState(
-          pendingCommits: 3,
-          oldestPendingRevision: 8,
-          firstFailedAt: 1,
-          error: ObservedResourceError(
-            code: 'storageUnavailable',
-            message: 'database is temporarily unavailable',
-            retryable: true,
-          ),
-        ),
-      ),
-    );
-  }
-
-  @override
-  Future<PersistenceStateSnapshot> retryPersistence() async {
-    retryCount += 1;
-    return const PersistenceStateSnapshot(
-      revision: 2,
-      state: ReadyPersistenceState(pendingCommits: 0),
-    );
   }
 }
 

@@ -1,6 +1,5 @@
 use super::super::host::{
     AgentLifecycleAdapter, DurableCommitFacts, PersistenceClass, ThreadProjectionCommit,
-    ThreadRepository,
 };
 use super::super::state::{AgentRuntimeError, unix_timestamp};
 use super::super::{
@@ -275,23 +274,12 @@ where
             return Err(error);
         }
         self.stop_active_turn();
-        let close_result = match self
+        let close_result = self
             .host
-            .repository()
-            .await_durable(
-                &self.state.snapshot.identity.id,
-                self.state.snapshot.revision,
-            )
+            .lifecycle()
+            .commit_close(&lease)
             .await
-        {
-            Ok(()) => self
-                .host
-                .lifecycle()
-                .commit_close(&lease)
-                .await
-                .map_err(|error| AgentRuntimeError::Lifecycle(error.to_string())),
-            Err(error) => Err(AgentRuntimeError::Repository(error.to_string())),
-        };
+            .map_err(|error| AgentRuntimeError::Lifecycle(error.to_string()));
         if let Err(error) = close_result {
             let rollback = self.host.lifecycle().rollback_close(lease).await;
             let (return_error, compensation) = match rollback {
@@ -387,6 +375,7 @@ where
     }
 
     pub(super) async fn shutdown(&mut self) -> AgentRuntimeResult<AgentSnapshot> {
+        self.dispatch_enabled = false;
         if self.active.is_none() {
             return Ok(self.state.snapshot.clone());
         }

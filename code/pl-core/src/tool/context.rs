@@ -1,12 +1,11 @@
 use std::fmt;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 
 use pl_protocol::OutputStream;
 use pl_trace::{
     AgentEvent, AgentEventSender, TraceDelta, TraceEventDraft, TraceEventKind, TraceEventSink,
-    TraceEventSinkError, TracePartDeltaEvent,
+    TraceEventSinkError,
 };
 use tokio::sync::{Mutex, OwnedMutexGuard};
 use tokio_util::sync::CancellationToken;
@@ -270,8 +269,6 @@ pub struct ToolCallIdentity {
     pub session_id: String,
     pub turn_id: String,
     pub step: u32,
-    pub started_sequence: u64,
-    pub revision_base: u64,
 }
 
 /// 工具运行期输出的 canonical delta 出口。
@@ -281,9 +278,9 @@ pub struct ToolCallIdentity {
 #[derive(Clone)]
 pub struct ToolOutputDeltaEmitter {
     event_tx: tokio::sync::broadcast::WeakSender<AgentEvent>,
-    trace_sink: Option<Arc<dyn TraceEventSink>>,
+    trace_sink: Arc<dyn TraceEventSink>,
     identity: ToolCallIdentity,
-    next_revision: Arc<AtomicU64>,
+    publication: Arc<StdMutex<()>>,
     last_error: Arc<StdMutex<Option<TraceEventSinkError>>>,
 }
 
@@ -292,7 +289,7 @@ impl fmt::Debug for ToolOutputDeltaEmitter {
         formatter
             .debug_struct("ToolOutputDeltaEmitter")
             .field("item_id", &self.identity.item_id)
-            .field("trace_sink", &self.trace_sink.as_ref().map(|_| "<sink>"))
+            .field("trace_sink", &"<sink>")
             .finish_non_exhaustive()
     }
 }
@@ -303,12 +300,46 @@ impl ToolOutputDeltaEmitter {
         event_tx: &AgentEventSender,
         trace_sink: Option<Arc<dyn TraceEventSink>>,
     ) -> Self {
+        let mut initial_error = None;
+        let trace_sink = trace_sink.unwrap_or_else(|| {
+            let sink = Arc::new(pl_trace::InMemoryTraceEventSink::new(
+                identity.session_id.clone(),
+                0,
+            ));
+            let invocation = pl_trace::TraceToolInvocation::new(
+                identity.item_id.clone(),
+                String::new(),
+                String::new(),
+            );
+            initial_error = sink
+                .emit(TraceEventDraft::start(
+                    crate::time::unix_seconds(),
+                    identity.turn_id.clone(),
+                    identity.item_id.clone(),
+                    pl_trace::TracePartSource::Runtime,
+                    pl_trace::TracePartState::Tool(pl_trace::TraceToolPart::started(invocation)),
+                ))
+                .err();
+            if initial_error.is_none() {
+                initial_error = sink
+                    .emit(TraceEventDraft::apply(
+                        crate::time::unix_seconds(),
+                        identity.turn_id.clone(),
+                        identity.item_id.clone(),
+                        pl_trace::TracePartAction::EnterToolPhase {
+                            phase: pl_trace::TraceToolActivePhase::Running,
+                        },
+                    ))
+                    .err();
+            }
+            sink
+        });
         Self {
             event_tx: event_tx.downgrade(),
             trace_sink,
-            next_revision: Arc::new(AtomicU64::new(identity.revision_base)),
             identity,
-            last_error: Arc::new(StdMutex::new(None)),
+            publication: Arc::new(StdMutex::new(())),
+            last_error: Arc::new(StdMutex::new(initial_error)),
         }
     }
 
@@ -317,48 +348,36 @@ impl ToolOutputDeltaEmitter {
         stream: OutputStream,
         text: impl Into<String>,
     ) -> Result<(), TraceEventSinkError> {
-        let revision = self
-            .next_revision
-            .fetch_add(1, Ordering::Relaxed)
-            .saturating_add(1);
-        self.emit_at(stream, text, revision)
-    }
-
-    pub(crate) fn emit_at(
-        &self,
-        stream: OutputStream,
-        text: impl Into<String>,
-        revision: u64,
-    ) -> Result<(), TraceEventSinkError> {
-        self.next_revision.fetch_max(revision, Ordering::Relaxed);
         let mut delta = text.into();
+        if delta.is_empty() {
+            return Ok(());
+        }
         if matches!(stream, OutputStream::Stderr) {
             delta = format!("[stderr] {delta}");
         }
-        let timestamp = crate::time::unix_seconds();
-        let event = TracePartDeltaEvent {
-            turn_id: self.identity.turn_id.clone(),
-            item_id: self.identity.item_id.clone(),
-            started_sequence: self.identity.started_sequence,
-            revision,
-            created_at: timestamp,
-            updated_at: timestamp,
-            delta: TraceDelta::ToolResult { delta },
-        };
-        if let Some(sink) = &self.trace_sink
-            && let Err(error) = sink.emit(TraceEventDraft::new(
-                timestamp,
-                TraceEventKind::TracePartDelta {
-                    event: event.clone(),
-                },
-            ))
-        {
-            if let Ok(mut slot) = self.last_error.lock() {
-                *slot = Some(error.clone());
+        // Keep this producer's live delivery in the same order as canonical publication.
+        let _publication = self
+            .publication
+            .lock()
+            .map_err(|_| TraceEventSinkError::new("tool output publication lock poisoned"))?;
+        let result = self.trace_sink.emit(TraceEventDraft::apply(
+            crate::time::unix_seconds(),
+            self.identity.turn_id.clone(),
+            self.identity.item_id.clone(),
+            pl_trace::TracePartAction::Append(TraceDelta::ToolResult { delta }),
+        ));
+        let event = match result {
+            Ok(event) => event,
+            Err(error) => {
+                if let Ok(mut slot) = self.last_error.lock() {
+                    slot.get_or_insert(error.clone());
+                }
+                return Err(error);
             }
-            return Err(error);
-        }
-        if let Some(event_tx) = self.event_tx.upgrade() {
+        };
+        if let TraceEventKind::TracePartDelta { event } = event.kind
+            && let Some(event_tx) = self.event_tx.upgrade()
+        {
             let _ = event_tx.send(AgentEvent::TracePartDelta { event });
         }
         Ok(())
@@ -529,8 +548,6 @@ impl ToolCallContext {
                 session_id: "session-1".to_string(),
                 turn_id: "turn-1".to_string(),
                 step: 0,
-                started_sequence: 0,
-                revision_base: 0,
             },
             event_tx,
         )

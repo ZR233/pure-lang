@@ -114,17 +114,17 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String persistenceDegraded(int count) {
-    return '保存暂时不可用，$count 项内存更新正在等待落库；新工作已暂停。';
+    return '保存暂时不可用，$count 项内存更新正在等待落库；可以继续会话。';
   }
 
   @override
   String persistenceRecovering(int count) {
-    return '存储已恢复，正在保存 $count 项积压更新；排空前新工作保持暂停。';
+    return '存储已恢复，正在保存 $count 项积压更新；可以继续会话。';
   }
 
   @override
   String persistenceBlocked(int count) {
-    return '保存已阻塞，仍有 $count 项内存更新等待处理；新工作已暂停。';
+    return '保存已阻塞，仍有 $count 项内存更新等待处理；可以继续会话。';
   }
 
   @override

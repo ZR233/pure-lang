@@ -13,23 +13,21 @@ use std::sync::Arc;
 
 use pl_trace::{
     AgentEvent, TraceEvent, TraceEventDraft, TraceEventKind, TraceEventSink, TracePart,
-    TracePartAction, TracePartCompletion, TracePartKind, TracePartState, TraceToolFailureKind,
+    TracePartAction, TracePartCompletion, TracePartState, TraceToolFailureKind,
 };
 
 use crate::completion::CompletionTraceContext;
 
 pub(crate) struct TraceProjection {
-    session_id: String,
     turn_id: String,
     inference_id: String,
-    sequence: u64,
     started: HashMap<String, TracePart>,
     active_text_items: HashMap<String, String>,
     active_thinking_items: HashMap<String, String>,
     active_tool_items: HashMap<String, String>,
     segment_occurrences: HashMap<String, u64>,
     events: Vec<TraceEvent>,
-    sink: Option<Arc<dyn TraceEventSink>>,
+    sink: Arc<dyn TraceEventSink>,
     trace_error: Option<pl_trace::TraceEventSinkError>,
 }
 
@@ -43,12 +41,15 @@ impl TraceProjection {
         context: CompletionTraceContext,
         sink: Option<Arc<dyn TraceEventSink>>,
     ) -> Self {
-        let sequence = sink.as_ref().map_or(0, |sink| sink.next_sequence());
+        let sink = sink.unwrap_or_else(|| {
+            Arc::new(pl_trace::InMemoryTraceEventSink::new(
+                context.session_id.clone(),
+                0,
+            ))
+        });
         Self {
-            session_id: context.session_id,
             turn_id: context.turn_id,
             inference_id: context.inference_id,
-            sequence,
             started: HashMap::new(),
             active_text_items: HashMap::new(),
             active_thinking_items: HashMap::new(),
@@ -70,22 +71,14 @@ impl TraceProjection {
     }
 
     pub(crate) fn complete_streaming_items(&mut self) -> Vec<AgentEvent> {
-        let item_ids = self
+        let items = self
             .started
-            .iter()
-            .filter(|(_, item)| {
-                matches!(item.kind(), TracePartKind::Text | TracePartKind::Thinking)
-            })
-            .map(|(item_id, _)| item_id.clone())
+            .values()
+            .filter(|item| !item.is_terminal())
+            .cloned()
             .collect::<Vec<_>>();
         let mut events = Vec::new();
-        for item_id in item_ids {
-            let Some(item) = self.started.get_mut(&item_id) else {
-                continue;
-            };
-            if item.is_terminal() {
-                continue;
-            }
+        for item in items {
             let completion = match item.state() {
                 TracePartState::Text(_) => TracePartCompletion::Text {
                     authoritative_content: None,
@@ -98,140 +91,109 @@ impl TraceProjection {
                 | TracePartState::Turn(_)
                 | TracePartState::Inference(_) => continue,
             };
-            let now = unix_seconds();
-            if let Err(error) = item.apply(item.command(now, TracePartAction::Complete(completion)))
-            {
-                self.trace_error.get_or_insert_with(|| {
-                    pl_trace::TraceEventSinkError::new(format!(
-                        "failed to complete streaming trace item: {error}"
-                    ))
-                });
-                continue;
-            }
-            let item = item.clone();
-            if !self.record(
-                TraceEventKind::TracePartCompleted { item: item.clone() },
-                item.updated_at(),
-            ) {
-                continue;
-            }
-            events.push(AgentEvent::TracePartCompleted { item });
+            events.extend(self.apply_item(item.item_id(), TracePartAction::Complete(completion)));
         }
         events
     }
 
     pub(crate) fn fail_attempt(&mut self, error: &str) -> Vec<AgentEvent> {
-        let mut item_ids = self.started.keys().cloned().collect::<Vec<_>>();
-        item_ids.sort_by_key(|item_id| {
-            self.started
-                .get(item_id)
-                .map(TracePart::started_sequence)
-                .unwrap_or_default()
-        });
-        let mut events = Vec::new();
-        for item_id in item_ids {
-            let Some(item) = self.started.get_mut(&item_id) else {
-                continue;
-            };
-            if item.is_terminal() {
-                continue;
-            }
-            let now = unix_seconds();
-            if let Err(transition_error) = item.apply(item.command(
-                now,
-                TracePartAction::Fail {
-                    error: error.to_string(),
-                    tool_kind: TraceToolFailureKind::Execution,
-                },
-            )) {
-                self.trace_error.get_or_insert_with(|| {
-                    pl_trace::TraceEventSinkError::new(format!(
-                        "failed to fail open trace item: {transition_error}"
-                    ))
-                });
-                continue;
-            }
-            let item = item.clone();
-            if !self.record(
-                TraceEventKind::TracePartFailed { item: item.clone() },
-                item.updated_at(),
-            ) {
-                continue;
-            }
-            events.push(AgentEvent::TracePartFailed { item });
-        }
-        events
+        self.settle_open(TracePartAction::Fail {
+            error: error.to_owned(),
+            tool_kind: TraceToolFailureKind::Execution,
+        })
     }
 
     pub(crate) fn cancel_attempt(&mut self, reason: &str) -> Vec<AgentEvent> {
-        let mut item_ids = self.started.keys().cloned().collect::<Vec<_>>();
-        item_ids.sort_by_key(|item_id| {
-            self.started
-                .get(item_id)
-                .map(TracePart::started_sequence)
-                .unwrap_or_default()
-        });
+        self.settle_open(TracePartAction::Cancel {
+            reason: reason.to_owned(),
+        })
+    }
+
+    fn settle_open(&mut self, action: TracePartAction) -> Vec<AgentEvent> {
+        let mut items = self
+            .started
+            .values()
+            .filter(|item| !item.is_terminal())
+            .cloned()
+            .collect::<Vec<_>>();
+        items.sort_by_key(TracePart::started_sequence);
         let mut events = Vec::new();
-        for item_id in item_ids {
-            let Some(item) = self.started.get_mut(&item_id) else {
-                continue;
-            };
-            if item.is_terminal() {
-                continue;
-            }
-            let now = unix_seconds();
-            if let Err(error) = item.apply(item.command(
-                now,
-                TracePartAction::Cancel {
-                    reason: reason.to_string(),
-                },
-            )) {
-                self.trace_error.get_or_insert_with(|| {
-                    pl_trace::TraceEventSinkError::new(format!(
-                        "failed to cancel open trace item: {error}"
-                    ))
-                });
-                continue;
-            }
-            let item = item.clone();
-            if !self.record(
-                TraceEventKind::TracePartFailed { item: item.clone() },
-                item.updated_at(),
-            ) {
-                continue;
-            }
-            events.push(AgentEvent::TracePartFailed { item });
+        for item in items {
+            events.extend(self.apply_item(item.item_id(), action.clone()));
         }
         events
     }
 
-    /// Publishes one canonical trace event before exposing its matching live event.
-    ///
-    /// A sink rejection is terminal for this projection. Callers must use the
-    /// return value as the broadcast gate so the live event stream can never
-    /// advance beyond the durable trace owner.
-    fn record(&mut self, kind: TraceEventKind, timestamp: i64) -> bool {
-        let event = if let Some(sink) = &self.sink {
-            match sink.emit(TraceEventDraft::new(timestamp, kind)) {
-                Ok(event) => event,
-                Err(error) => {
-                    if self.trace_error.is_none() {
-                        self.trace_error = Some(error);
-                    }
-                    return false;
-                }
-            }
-        } else {
-            TraceEvent {
-                session_id: self.session_id.clone(),
-                sequence: self.sequence,
-                timestamp,
-                kind,
+    fn start_item(&mut self, item_id: String, state: TracePartState) -> Vec<AgentEvent> {
+        self.record(TraceEventDraft::start(
+            unix_seconds(),
+            self.turn_id.clone(),
+            item_id,
+            pl_trace::TracePartSource::Model,
+            state,
+        ))
+        .into_iter()
+        .collect()
+    }
+
+    fn apply_item(&mut self, item_id: &str, action: TracePartAction) -> Vec<AgentEvent> {
+        self.record(TraceEventDraft::apply(
+            unix_seconds(),
+            self.turn_id.clone(),
+            item_id.to_owned(),
+            action,
+        ))
+        .into_iter()
+        .collect()
+    }
+
+    /// Only returned canonical events enter the producer's read projection and live stream.
+    fn record(&mut self, draft: TraceEventDraft) -> Option<AgentEvent> {
+        let event = match self.sink.emit(draft) {
+            Ok(event) => event,
+            Err(error) => {
+                self.trace_error.get_or_insert(error);
+                return None;
             }
         };
-        self.sequence = event.sequence.saturating_add(1);
+        let live = match &event.kind {
+            TraceEventKind::TracePartStarted { item } => {
+                self.started.insert(item.item_id().to_owned(), item.clone());
+                AgentEvent::TracePartStarted { item: item.clone() }
+            }
+            TraceEventKind::TracePartCompleted { item } => {
+                self.started.insert(item.item_id().to_owned(), item.clone());
+                AgentEvent::TracePartCompleted { item: item.clone() }
+            }
+            TraceEventKind::TracePartFailed { item } => {
+                self.started.insert(item.item_id().to_owned(), item.clone());
+                AgentEvent::TracePartFailed { item: item.clone() }
+            }
+            TraceEventKind::TracePartDelta { event } => {
+                let item = self.started.get_mut(&event.item_id)?;
+                if let Err(error) = item.apply(item.command(
+                    event.updated_at,
+                    TracePartAction::Append(event.delta.clone()),
+                )) {
+                    self.trace_error.get_or_insert_with(|| {
+                        pl_trace::TraceEventSinkError::new(error.to_string())
+                    });
+                    return None;
+                }
+                AgentEvent::TracePartDelta {
+                    event: event.clone(),
+                }
+            }
+            TraceEventKind::InteractionChanged { event } => AgentEvent::InteractionChanged {
+                event: event.clone(),
+            },
+            TraceEventKind::SkillActivated { activation } => AgentEvent::SkillActivated {
+                activation: activation.clone(),
+            },
+            TraceEventKind::EnabledToolsRecorded { .. } => return None,
+        };
         self.events.push(event);
-        true
+        Some(live)
     }
 }
 

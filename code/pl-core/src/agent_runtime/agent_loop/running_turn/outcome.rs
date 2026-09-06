@@ -411,7 +411,7 @@ mod tests {
     fn tool_event(name: &str, outcome: ToolTraceOutcome) -> TraceEvent {
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(1);
         let mut recorder = TraceRecorder::new("test-session".to_string(), event_tx, 0);
-        let mut item = recorder.tool_item(
+        let item = recorder.tool_item(
             "turn-1",
             "call-1",
             name.to_string(),
@@ -434,17 +434,9 @@ mod tests {
                 output: None,
             },
         };
-        let command = pl_trace::TracePartCommand {
-            item_id: item.item_id().to_string(),
-            expected_revision: item.revision(),
-            updated_at: crate::time::unix_seconds(),
-            action,
-        };
-        item.apply(command).expect("valid tool terminal state");
-        match outcome {
-            ToolTraceOutcome::Completed => recorder.complete_item(item),
-            ToolTraceOutcome::Failed(_) => recorder.fail_item(item),
-        }
+        recorder
+            .apply_item(&item, action)
+            .expect("valid tool terminal state");
         recorder.drain().pop().unwrap()
     }
 }

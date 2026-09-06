@@ -5,7 +5,7 @@ use pl_core::runtime_usage::merge_costs;
 use pl_protocol::{InferenceBillingRecord, RuntimeCostAmount};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tokio::sync::Mutex;
+use std::sync::Mutex;
 
 use crate::studio::store::object::{PersistedStudioObject, load_object};
 use crate::studio::{ProductEventBus, StudioStore, unix_seconds};
@@ -152,23 +152,22 @@ impl ModelPerformanceOwner {
         while restored.history.len() > HISTORY_LIMIT {
             restored.history.pop_front();
         }
-        *self.state.lock().await = restored;
+        *self.state.lock().unwrap_or_else(|error| error.into_inner()) = restored;
         Ok(())
     }
 
     pub(crate) async fn snapshot(&self) -> StudioModelPerformanceSnapshot {
-        let state = self.state.lock().await;
+        let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         public_snapshot(&state)
     }
 
-    pub(crate) async fn record_inference(
+    pub(crate) fn record_inference(
         &self,
         root_thread_id: &str,
         thread_id: &str,
         billing: &InferenceBillingRecord,
     ) -> Result<(), PureError> {
         self.record(root_thread_id, thread_id, billing, BillingRetention::Turn)
-            .await
     }
 
     pub(crate) async fn record_internal_inference(
@@ -182,10 +181,9 @@ impl ModelPerformanceOwner {
             billing,
             BillingRetention::Internal,
         )
-        .await
     }
 
-    async fn record(
+    fn record(
         &self,
         root_thread_id: &str,
         thread_id: &str,
@@ -200,7 +198,7 @@ impl ModelPerformanceOwner {
         let identity = format!("{thread_id}:{}", billing.inference_id);
         let fingerprint = billing_fingerprint(billing)?;
         let snapshot = {
-            let mut state = self.state.lock().await;
+            let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
             let mut next = state.clone();
             let session = next.sessions.entry(root_thread_id.to_string()).or_default();
             if let Some(existing) = session.inference_fingerprints.get(&identity) {
@@ -239,8 +237,8 @@ impl ModelPerformanceOwner {
             next.revision = next.revision.saturating_add(1);
             next.updated_at = unix_seconds();
             let snapshot = public_snapshot(&next);
-            self.writer.accept_model_performance(next.clone())?;
             *state = next;
+            self.writer.record_model_performance(state.clone());
             snapshot
         };
         self.product_events.emit_model_performance_state(snapshot);
@@ -249,7 +247,7 @@ impl ModelPerformanceOwner {
 
     pub(crate) async fn remove_session(&self, root_thread_id: &str) -> Result<(), PureError> {
         let update = {
-            let mut state = self.state.lock().await;
+            let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
             if !state.sessions.contains_key(root_thread_id) {
                 return Ok(());
             }
@@ -258,8 +256,8 @@ impl ModelPerformanceOwner {
             next.revision = next.revision.saturating_add(1);
             next.updated_at = unix_seconds();
             let snapshot = public_snapshot(&next);
-            self.writer.accept_model_performance(next.clone())?;
             *state = next;
+            self.writer.record_model_performance(state.clone());
             Some(snapshot)
         };
         if let Some(snapshot) = update {
@@ -441,7 +439,6 @@ mod tests {
         };
         owner
             .record_inference("root", "child-usd", &usd_child)
-            .await
             .unwrap();
         let mut unmeasured =
             billing_record("unmeasured-inference", "provider-a", "model-a", 30, 300, 3);
@@ -452,15 +449,12 @@ mod tests {
 
         owner
             .record_inference("root", "root", &root)
-            .await
             .expect("root billing");
         owner
             .record_inference("root", "child", &child)
-            .await
             .expect("child billing");
         owner
             .record_inference("root", "child-2", &unmeasured)
-            .await
             .expect("unmeasured billing");
 
         let snapshot = owner.snapshot().await;
@@ -491,11 +485,9 @@ mod tests {
 
         owner
             .record_inference("root", "root", &root)
-            .await
             .expect("unpriced root billing");
         owner
             .record_inference("root", "child", &child)
-            .await
             .expect("priced child billing");
 
         let snapshot = owner.snapshot().await;
@@ -519,7 +511,6 @@ mod tests {
                 "root",
                 &billing_record("first", "provider-a", "shared-model", 100, 1_000, 1),
             )
-            .await
             .expect("first sample");
         owner
             .record_inference(
@@ -527,7 +518,6 @@ mod tests {
                 "root",
                 &billing_record("second", "provider-a", "shared-model", 50, 250, 2),
             )
-            .await
             .expect("second sample");
         owner
             .record_inference(
@@ -535,7 +525,6 @@ mod tests {
                 "root",
                 &billing_record("isolated", "provider-b", "shared-model", 30, 100, 3),
             )
-            .await
             .expect("isolated sample");
 
         let snapshot = owner.snapshot().await;
@@ -571,7 +560,6 @@ mod tests {
                         index as i64,
                     ),
                 )
-                .await
                 .expect("history sample");
         }
 
@@ -590,7 +578,6 @@ mod tests {
 
         owner
             .record_inference("root", "child", &billing)
-            .await
             .expect("record inference");
         assert_eq!(owner.snapshot().await.revision, 1);
         let event = receiver.recv().await.expect("performance product event");
@@ -679,7 +666,7 @@ mod tests {
         let restored = ModelPerformanceOwner::new(store.clone(), writer.clone(), product_events);
         restored.load_cache().await.expect("restore cache");
         assert_eq!(restored.snapshot().await, owner.snapshot().await);
-        let restored_receipts = restored.state.lock().await.sessions["root"]
+        let restored_receipts = restored.state.lock().unwrap().sessions["root"]
             .internal_billing
             .clone();
         assert_eq!(restored_receipts.inferences, vec![internal]);
@@ -707,23 +694,16 @@ mod tests {
         let billing = billing_record("same", "provider-a", "model-a", 10, 100, 1);
         owner
             .record_inference("root", "child", &billing)
-            .await
             .expect("first record");
         owner
             .record_inference("root", "child", &billing)
-            .await
             .expect("identical retry");
         assert_eq!(owner.snapshot().await.revision, 1);
 
         let mut conflict = billing;
         conflict.accounting.usage.output_tokens = Some(11);
         conflict.accounting.usage.total_tokens = Some(31);
-        assert!(
-            owner
-                .record_inference("root", "child", &conflict)
-                .await
-                .is_err()
-        );
+        assert!(owner.record_inference("root", "child", &conflict).is_err());
         let snapshot = owner.snapshot().await;
         assert_eq!(snapshot.revision, 1);
         assert_eq!(snapshot.history.len(), 1);

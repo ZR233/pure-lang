@@ -47,6 +47,15 @@ Future<String> _handleDriverData(String? message) async {
         });
       }
       return jsonEncode({'serverId': matches.single.id});
+    case 'prepare-persistence-failure-demo':
+      final api = _container.read(studioApiProvider);
+      if (api is! DriverDemoStudioApi) {
+        return jsonEncode({'error': 'failure scenario requires demo mode'});
+      }
+      api.preparePersistenceFailureScenario();
+      _container.invalidate(studioControllerProvider);
+      await _container.read(studioControllerProvider.future);
+      return jsonEncode({'prepared': true});
     case 'prepare-session-lifecycle-demo':
       final api = _container.read(studioApiProvider);
       if (api is! DriverDemoStudioApi) {

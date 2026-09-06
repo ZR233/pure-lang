@@ -100,8 +100,13 @@ impl StudioRuntime {
             self.residency.touch(&thread_record.id).await;
             return Ok(());
         }
+        let seed = self
+            .store
+            .thread_runtime_seed(&thread_record.id)
+            .await?
+            .context("cold Thread runtime seed is missing")?;
         let registration = self
-            .thread_agent_registration(handle, thread_record.clone())
+            .thread_agent_registration(handle, thread_record.clone(), seed)
             .await?;
         match handle.register(registration).await {
             Ok(_) | Err(pl_core::AgentRuntimeError::AlreadyExists(_)) => {}
@@ -115,10 +120,35 @@ impl StudioRuntime {
         Ok(())
     }
 
+    pub(in crate::studio::runtime) async fn register_new_thread(
+        &self,
+        thread: ThreadRecord,
+    ) -> Result<()> {
+        let framework = self.agent_framework().await?;
+        let handle = framework.handle();
+        let registration = self
+            .thread_agent_registration(
+                &handle,
+                thread,
+                crate::studio::store::ThreadRuntimeSeed {
+                    thread_revision: 0,
+                    runtime_revision: 1,
+                    event_sequence: 1,
+                },
+            )
+            .await?;
+        handle
+            .register(registration)
+            .await
+            .map_err(|error| anyhow::anyhow!(error))?;
+        Ok(())
+    }
+
     async fn thread_agent_registration(
         &self,
         handle: &pl_core::AgentRuntimeHandle,
         thread_record: ThreadRecord,
+        seed: crate::studio::store::ThreadRuntimeSeed,
     ) -> Result<pl_core::AgentRegistration> {
         let agent_id = pl_core::ThreadId::new(thread_record.agent_path.clone())?;
         let (parent_id, role, depth) = match thread_record.thread_kind {
@@ -153,17 +183,6 @@ impl StudioRuntime {
                 (Some(parent_id), role, parent_snapshot.identity.depth + 1)
             }
         };
-        // 新建 Thread 已先进入 typed write-behind 与热目录，首次 actor 注册不得
-        // 为等待 SQLite 再序列化/回读。冷激活则使用 durable seed。
-        let seed = self
-            .store
-            .thread_runtime_seed(&thread_record.id)
-            .await?
-            .unwrap_or(crate::studio::store::ThreadRuntimeSeed {
-                thread_revision: 0,
-                runtime_revision: 1,
-                event_sequence: 1,
-            });
         let registration = pl_core::AgentRegistration {
             identity: pl_core::AgentIdentity {
                 id: agent_id,
@@ -172,6 +191,7 @@ impl StudioRuntime {
                 depth,
             },
             session: pl_core::ThreadContextState {
+                submissions: Default::default(),
                 metadata: pl_core::ThreadContextMetadata {
                     project_id: Some(thread_record.project_id),
                     title: Some(thread_record.title),

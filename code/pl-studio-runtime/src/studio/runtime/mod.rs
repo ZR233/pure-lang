@@ -233,16 +233,6 @@ impl StudioRuntime {
         self.config_runtime.startup_recovery()
     }
 
-    pub(crate) fn ensure_persistence_accepts_new_work(&self) -> Result<()> {
-        let snapshot = self.agent_facility.product_events.persistence_state();
-        if snapshot.state.accepts_new_work() {
-            return Ok(());
-        }
-        anyhow::bail!(
-            "Studio persistence is unavailable; new work is paused until pending facts are durable"
-        )
-    }
-
     /// 立即重试待落库事实；查询和停止路径不需要调用本命令。
     pub async fn retry_persistence(&self) -> Result<crate::PersistenceStateSnapshot> {
         let persistence = self.agent_facility.persistence.lock().await.clone();

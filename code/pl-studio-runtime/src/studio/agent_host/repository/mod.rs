@@ -136,24 +136,20 @@ impl ThreadRepository for StudioAgentRepository {
         Ok(Some(self.restore_model(model, &parents).await?))
     }
 
-    async fn commit(&self, commit: ThreadCommit) -> Result<(), Self::Error> {
-        self.writer
-            .accept_thread_with_backpressure(commit.clone())
-            .await?;
+    fn record_committed(&self, commit: ThreadCommit) {
+        self.writer.record_thread(commit.clone());
         if let (Some(owner), Some(inference)) =
             (&self.model_performance, commit.facts.inference.as_ref())
         {
-            let projection = commit.facts.projection_snapshot.as_ref().ok_or_else(|| {
-                store_error("inference commit is missing its canonical Thread projection")
-            })?;
-            if let Err(error) = owner
-                .record_inference(
-                    &projection.thread.root_thread_id,
-                    commit.agent_id.as_str(),
-                    &inference.billing,
-                )
-                .await
-            {
+            let Some(projection) = commit.facts.projection_snapshot.as_ref() else {
+                tracing::error!("inference commit is missing its canonical Thread projection");
+                return;
+            };
+            if let Err(error) = owner.record_inference(
+                &projection.thread.root_thread_id,
+                commit.agent_id.as_str(),
+                &inference.billing,
+            ) {
                 tracing::error!(
                     agent_id = %commit.agent_id,
                     inference_id = %inference.billing.inference_id,
@@ -162,7 +158,10 @@ impl ThreadRepository for StudioAgentRepository {
                 );
             }
         }
-        Ok(())
+    }
+
+    fn is_durable(&self, thread_id: &ThreadId, revision: u64) -> bool {
+        self.writer.is_durable(thread_id.as_str(), revision)
     }
 
     async fn await_durable(&self, thread_id: &ThreadId, revision: u64) -> Result<(), Self::Error> {

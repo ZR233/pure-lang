@@ -43,6 +43,8 @@ impl From<&ProgressSubmissionCommit> for AgentSubmissionRecord {
 pub struct ThreadContextState {
     /// 产品可持久化的类型化 session 展示元数据。
     pub metadata: ThreadContextMetadata,
+    /// 驻留期间的完整阶段报告，冷激活后只从内存分页。
+    pub submissions: std::sync::Arc<Vec<AgentSubmissionRecord>>,
     pub session: AgentSession,
     pub usage: InferenceTokenUsage,
     /// 按 Turn 保存的 inference 计费快照；durable truth 位于 `turns.model_json`。
@@ -59,6 +61,7 @@ impl ThreadContextState {
     pub fn empty() -> Self {
         Self {
             metadata: ThreadContextMetadata::default(),
+            submissions: Default::default(),
             session: AgentSession::new(),
             usage: InferenceTokenUsage::default(),
             billing_by_turn: BTreeMap::new(),

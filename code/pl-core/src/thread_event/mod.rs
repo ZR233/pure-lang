@@ -67,7 +67,7 @@ struct BusInner {
 
 struct ThreadChannel {
     state: Mutex<ThreadChannelState>,
-    publish_lock: AsyncMutex<()>,
+    publish_lock: Arc<AsyncMutex<()>>,
     next_subscriber_id: AtomicU64,
     capacity: usize,
 }
@@ -95,6 +95,12 @@ pub struct ThreadHotHistory {
 struct ThreadSubscriber {
     sender: mpsc::Sender<ThreadSubscriptionUpdate>,
     pending_lag: u64,
+}
+
+pub(crate) struct ThreadPublication {
+    channel: Arc<ThreadChannel>,
+    notifications: Vec<ThreadNotificationEnvelope>,
+    _guard: tokio::sync::OwnedMutexGuard<()>,
 }
 
 impl ThreadEventBus {
@@ -137,21 +143,64 @@ impl ThreadEventBus {
         &self,
         notification: ThreadNotificationEnvelope,
     ) -> Result<(), ThreadEventError> {
-        let channel = self.channel_or_create(&notification.thread_id)?;
-        let _publish_guard = channel.publish_lock.lock().await;
-        if is_lossless_notification(&notification.notification) {
-            self.publish_lossless(&channel, notification).await
-        } else {
-            self.publish_best_effort(&channel, notification)
-        }
+        self.publish_batch(vec![notification]).await
     }
 
+    /// 提交整批内存投影后再通知订阅者。
     pub async fn publish_batch(
         &self,
         notifications: Vec<ThreadNotificationEnvelope>,
     ) -> Result<(), ThreadEventError> {
-        for notification in notifications {
-            self.publish(notification).await?;
+        let publication = self.commit_batch(notifications).await?;
+        self.deliver_batch(publication).await
+    }
+
+    pub(crate) async fn commit_batch(
+        &self,
+        notifications: Vec<ThreadNotificationEnvelope>,
+    ) -> Result<Option<ThreadPublication>, ThreadEventError> {
+        let Some(first) = notifications.first() else {
+            return Ok(None);
+        };
+        let channel = self.channel_or_create(&first.thread_id)?;
+        let guard = channel.publish_lock.clone().lock_owned().await;
+        let notifications = {
+            let mut state = channel
+                .state
+                .lock()
+                .map_err(|_| ThreadEventError::LockPoisoned)?;
+            let mut snapshot = state.snapshot.clone();
+            let normalized = notifications
+                .iter()
+                .map(|notification| apply_notification(&mut snapshot, notification))
+                .collect::<Result<Vec<_>, _>>()?;
+            state.snapshot = snapshot;
+            for notification in &normalized {
+                record_hot_turn(&mut state.hot_turns, &notification.notification);
+            }
+            normalized
+        };
+        Ok(Some(ThreadPublication {
+            channel,
+            notifications,
+            _guard: guard,
+        }))
+    }
+
+    pub(crate) async fn deliver_batch(
+        &self,
+        publication: Option<ThreadPublication>,
+    ) -> Result<(), ThreadEventError> {
+        let Some(publication) = publication else {
+            return Ok(());
+        };
+        for notification in publication.notifications {
+            if is_lossless_notification(&notification.notification) {
+                self.publish_lossless(&publication.channel, notification)
+                    .await?;
+            } else {
+                self.publish_best_effort(&publication.channel, notification)?;
+            }
         }
         Ok(())
     }
@@ -294,8 +343,6 @@ impl ThreadEventBus {
                 .state
                 .lock()
                 .map_err(|_| ThreadEventError::LockPoisoned)?;
-            let notification = apply_notification(&mut state.snapshot, &notification)?;
-            record_hot_turn(&mut state.hot_turns, &notification.notification);
             let deliveries = state
                 .subscribers
                 .iter_mut()
@@ -339,8 +386,6 @@ impl ThreadEventBus {
             .state
             .lock()
             .map_err(|_| ThreadEventError::LockPoisoned)?;
-        let notification = apply_notification(&mut state.snapshot, &notification)?;
-        record_hot_turn(&mut state.hot_turns, &notification.notification);
         state.subscribers.retain(|_, subscriber| {
             if subscriber.pending_lag > 0 {
                 match subscriber
@@ -414,7 +459,7 @@ impl ThreadEventBus {
                         hot_turns: Vec::new(),
                         subscribers: BTreeMap::new(),
                     }),
-                    publish_lock: AsyncMutex::new(()),
+                    publish_lock: Arc::new(AsyncMutex::new(())),
                     next_subscriber_id: AtomicU64::new(0),
                     capacity: self.inner.options.channel_capacity.max(1),
                 })
@@ -462,6 +507,20 @@ pub struct ThreadEventBusHandle {
 }
 
 impl ThreadEventBusHandle {
+    pub(crate) async fn commit_batch(
+        &self,
+        notifications: Vec<ThreadNotificationEnvelope>,
+    ) -> Result<Option<ThreadPublication>, ThreadEventError> {
+        self.bus.commit_batch(notifications).await
+    }
+
+    pub(crate) async fn deliver_batch(
+        &self,
+        publication: Option<ThreadPublication>,
+    ) -> Result<(), ThreadEventError> {
+        self.bus.deliver_batch(publication).await
+    }
+
     pub fn replace_snapshot(&self, snapshot: ThreadSnapshot) -> Result<(), ThreadEventError> {
         self.bus.replace_snapshot(snapshot)
     }

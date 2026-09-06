@@ -326,6 +326,7 @@ impl CollaborationTool {
             fork_session(&self.session_runtime.parent_session(), args.fork_turns)?;
         child_session.replace_agent_profile(Some(profile.clone()));
         let session = ThreadContextState {
+            submissions: Default::default(),
             metadata: crate::ThreadContextMetadata::default(),
             session: child_session,
             usage: pl_protocol::InferenceTokenUsage::default(),

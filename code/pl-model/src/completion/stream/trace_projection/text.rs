@@ -1,12 +1,8 @@
 //! 正文与 reasoning 流的 trace part 投影。
 
-use pl_trace::{
-    AgentEvent, TraceDelta, TraceEventKind, TracePart, TracePartCompletion, TracePartKind,
-    TraceTextChannel,
-};
+use pl_trace::{AgentEvent, TraceDelta, TracePartCompletion, TracePartKind, TraceTextChannel};
 
 use super::TraceProjection;
-use super::unix_seconds;
 
 /// 每个供应方 reasoning 分块都会投影成独立 TracePart，因此条目内索引从零开始。
 const LOCAL_THINKING_CHUNK_INDEX: u32 = 0;
@@ -15,68 +11,35 @@ impl TraceProjection {
     pub(crate) fn start_text(
         &mut self,
         item_id: &str,
-        text_channel: TraceTextChannel,
+        channel: TraceTextChannel,
     ) -> Vec<AgentEvent> {
-        let now = unix_seconds();
-        let item_id = self.active_text_item_id(item_id, text_channel);
-        let mut events = Vec::new();
-        if !self.started.contains_key(&item_id) {
-            let item = TracePart::streaming_text(
-                self.turn_id.clone(),
-                item_id.clone(),
-                self.sequence,
-                text_channel,
-                now,
-            );
-            if !self.record(TraceEventKind::TracePartStarted { item: item.clone() }, now) {
-                return events;
-            }
-            events.push(AgentEvent::TracePartStarted { item: item.clone() });
-            self.started.insert(item_id.clone(), item);
+        let item_id = self.active_text_item_id(item_id, channel);
+        if self.started.contains_key(&item_id) {
+            return Vec::new();
         }
-        events
+        self.start_item(
+            item_id,
+            pl_trace::TracePartState::Text(pl_trace::TraceTextPart::streaming(
+                channel,
+                String::new(),
+            )),
+        )
     }
 
     pub(crate) fn append_text_delta(
         &mut self,
         item_id: &str,
-        text_channel: TraceTextChannel,
+        channel: TraceTextChannel,
         delta: String,
     ) -> Vec<AgentEvent> {
-        let now = unix_seconds();
-        let mut events = self.start_text(item_id, text_channel);
-        if delta.is_empty() {
-            return events;
+        let mut events = self.start_text(item_id, channel);
+        if !delta.is_empty() {
+            let item_id = self.active_text_item_id(item_id, channel);
+            events.extend(self.apply_item(
+                &item_id,
+                pl_trace::TracePartAction::Append(TraceDelta::Text { channel, delta }),
+            ));
         }
-        let item_id = self.active_text_item_id(item_id, text_channel);
-        let trace_delta = TraceDelta::Text {
-            channel: text_channel,
-            delta,
-        };
-        let Some(item) = self.started.get_mut(&item_id) else {
-            return events;
-        };
-        let event = match item.apply_delta(now, trace_delta) {
-            Ok(Some(event)) => event,
-            Ok(None) => return events,
-            Err(error) => {
-                self.trace_error.get_or_insert_with(|| {
-                    pl_trace::TraceEventSinkError::new(format!(
-                        "failed to append text trace delta: {error}"
-                    ))
-                });
-                return events;
-            }
-        };
-        if !self.record(
-            TraceEventKind::TracePartDelta {
-                event: event.clone(),
-            },
-            now,
-        ) {
-            return events;
-        }
-        events.push(AgentEvent::TracePartDelta { event });
         events
     }
 
@@ -100,23 +63,14 @@ impl TraceProjection {
     }
 
     pub(crate) fn start_thinking(&mut self, item_id: &str, chunk_index: u32) -> Vec<AgentEvent> {
-        let now = unix_seconds();
         let item_id = self.active_thinking_item_id(item_id, chunk_index);
-        let mut events = Vec::new();
-        if !self.started.contains_key(&item_id) {
-            let item = TracePart::streaming_thinking(
-                self.turn_id.clone(),
-                item_id.clone(),
-                self.sequence,
-                now,
-            );
-            if !self.record(TraceEventKind::TracePartStarted { item: item.clone() }, now) {
-                return events;
-            }
-            events.push(AgentEvent::TracePartStarted { item: item.clone() });
-            self.started.insert(item_id, item);
+        if self.started.contains_key(&item_id) {
+            return Vec::new();
         }
-        events
+        self.start_item(
+            item_id,
+            pl_trace::TracePartState::Thinking(pl_trace::TraceThinkingPart::streaming()),
+        )
     }
 
     pub(crate) fn append_thinking_delta(
@@ -125,40 +79,17 @@ impl TraceProjection {
         chunk_index: u32,
         delta: String,
     ) -> Vec<AgentEvent> {
-        let now = unix_seconds();
         let mut events = self.start_thinking(item_id, chunk_index);
-        if delta.is_empty() {
-            return events;
+        if !delta.is_empty() {
+            let item_id = self.active_thinking_item_id(item_id, chunk_index);
+            events.extend(self.apply_item(
+                &item_id,
+                pl_trace::TracePartAction::Append(TraceDelta::Thinking {
+                    chunk_index: LOCAL_THINKING_CHUNK_INDEX,
+                    delta,
+                }),
+            ));
         }
-        let item_id = self.active_thinking_item_id(item_id, chunk_index);
-        let trace_delta = TraceDelta::Thinking {
-            chunk_index: LOCAL_THINKING_CHUNK_INDEX,
-            delta,
-        };
-        let Some(item) = self.started.get_mut(&item_id) else {
-            return events;
-        };
-        let event = match item.apply_delta(now, trace_delta) {
-            Ok(Some(event)) => event,
-            Ok(None) => return events,
-            Err(error) => {
-                self.trace_error.get_or_insert_with(|| {
-                    pl_trace::TraceEventSinkError::new(format!(
-                        "failed to append thinking trace delta: {error}"
-                    ))
-                });
-                return events;
-            }
-        };
-        if !self.record(
-            TraceEventKind::TracePartDelta {
-                event: event.clone(),
-            },
-            now,
-        ) {
-            return events;
-        }
-        events.push(AgentEvent::TracePartDelta { event });
         events
     }
 
@@ -168,40 +99,17 @@ impl TraceProjection {
         chunk_index: u32,
         delta: String,
     ) -> Vec<AgentEvent> {
-        let now = unix_seconds();
         let mut events = self.start_thinking(item_id, chunk_index);
-        if delta.is_empty() {
-            return events;
+        if !delta.is_empty() {
+            let item_id = self.active_thinking_item_id(item_id, chunk_index);
+            events.extend(self.apply_item(
+                &item_id,
+                pl_trace::TracePartAction::Append(TraceDelta::ReasoningContent {
+                    chunk_index: LOCAL_THINKING_CHUNK_INDEX,
+                    delta,
+                }),
+            ));
         }
-        let item_id = self.active_thinking_item_id(item_id, chunk_index);
-        let trace_delta = TraceDelta::ReasoningContent {
-            chunk_index: LOCAL_THINKING_CHUNK_INDEX,
-            delta,
-        };
-        let Some(item) = self.started.get_mut(&item_id) else {
-            return events;
-        };
-        let event = match item.apply_delta(now, trace_delta) {
-            Ok(Some(event)) => event,
-            Ok(None) => return events,
-            Err(error) => {
-                self.trace_error.get_or_insert_with(|| {
-                    pl_trace::TraceEventSinkError::new(format!(
-                        "failed to append reasoning content trace delta: {error}"
-                    ))
-                });
-                return events;
-            }
-        };
-        if !self.record(
-            TraceEventKind::TracePartDelta {
-                event: event.clone(),
-            },
-            now,
-        ) {
-            return events;
-        }
-        events.push(AgentEvent::TracePartDelta { event });
         events
     }
 

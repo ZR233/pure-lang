@@ -26,11 +26,6 @@ class ComposerDock extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final persistenceAllowsNewWork = ref.watch(
-      studioControllerProvider.select(
-        (state) => state.value?.persistenceState.acceptsNewWork ?? false,
-      ),
-    );
     // Driver 快照需要完整 timelineRows；controls 视图为省内存清空了行。
     final full = switch (ref.watch(selectedAgentWorkspaceProvider)) {
       AsyncData(:final value) => value,
@@ -53,14 +48,11 @@ class ComposerDock extends ConsumerWidget {
             child: interaction == null
                 ? workspace.composerMode == AgentComposerMode.runtimeDriven
                       ? _RuntimeDrivenAgentDock(workspace: workspace)
-                      : _PromptComposer(
-                          workspace: workspace,
-                          enabled: persistenceAllowsNewWork,
-                        )
+                      : _PromptComposer(workspace: workspace, enabled: true)
                 : _InteractionDock(
                     workspace: workspace,
                     interaction: interaction,
-                    // 活动交互属于当前 Turn 的收束；持久化降级只暂停新工作。
+                    // 活动交互与消息提交仅依赖内存会话。
                     enabled: true,
                   ),
           ),

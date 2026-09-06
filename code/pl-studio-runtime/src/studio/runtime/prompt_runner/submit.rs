@@ -49,7 +49,6 @@ impl StudioRuntime {
         request: StudioSubmitPromptRequest,
     ) -> Result<StudioSubmitPromptResponse> {
         validate_prompt_content(&request.input)?;
-        self.ensure_persistence_accepts_new_work()?;
         // Serialize turn registration with the updater's final idle check.
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
         self.submit_prompt_with_lifecycle_lock(request).await
@@ -79,7 +78,6 @@ impl StudioRuntime {
             text: prompt,
             attachment_draft_ids,
         } = input;
-        self.ensure_persistence_accepts_new_work()?;
         anyhow::ensure!(
             thread_record.id == thread_id,
             "prompt Thread does not match its canonical owner"
@@ -173,6 +171,9 @@ impl StudioRuntime {
         }
         .await;
         if accepted {
+            self.agent_facility
+                .product_events
+                .record_attachments(attachments);
             self.attachment_drafts.commit(&attachment_draft_ids).await;
             return result;
         }
@@ -184,18 +185,6 @@ impl StudioRuntime {
             .resources
             .remove_thread_attachment_ids(&thread_record.id, &attachment_ids)
             .await;
-        if let Err(cleanup_error) = self
-            .store
-            .delete_attachments(&thread_record.id, &attachment_ids)
-            .await
-        {
-            return Err(result
-                .err()
-                .unwrap_or_else(|| anyhow::anyhow!("prompt submission failed"))
-                .context(format!(
-                    "failed to roll back attachments: {cleanup_error:#}"
-                )));
-        }
         result
     }
 

@@ -9,7 +9,7 @@
 //! - `handle`: 队列与后台 task 的共享状态及对外句柄;
 //! - `worker`: supervisor 与 writer 主循环（取批、应用、重试、恢复）;
 //! - `apply`: 批次的 SQLite 事务应用与错误分类;
-//! - `durability`: 耐久修订推进、终态许可释放与屏障完成;
+//! - `durability`: 耐久修订推进与屏障完成;
 //! - `state`: PersistenceState 的计算与发布、屏障失败处理。
 
 mod apply;
@@ -17,6 +17,7 @@ mod durability;
 mod handle;
 mod queue;
 mod state;
+mod thread_fact;
 mod worker;
 
 pub(in crate::studio) use handle::ThreadWriteBehindWriter;

@@ -230,6 +230,66 @@ void registerControllerStreamTests() {
     expect(api.submitPromptCount, 2);
   });
 
+  test('terminal reconnect snapshot releases pending submission and allows another send', () async {
+    final initial = _emptyState();
+    final api = _FakeStudioApi(initial);
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+    await container.read(studioControllerProvider.future);
+    await pumpEventQueue();
+    final controller = container.read(studioControllerProvider.notifier);
+    controller.updateComposer('session-1', 'first');
+    await controller.submitComposer('session-1');
+    final timestamp = DateTime.fromMillisecondsSinceEpoch(2000, isUtc: true);
+    api.emitThreadFrame(
+      ThreadSnapshotFrame(
+        workspace: initial.selectedWorkspace!.copyWith(
+          revision: 2,
+          activeTurn: null,
+          items: [
+            ThreadItemView(
+              id: 'terminal-item',
+              threadId: 'session-1',
+              turnId: api.submitTurnId,
+              ordinal: 1,
+              revision: 2,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+              state: const ThreadTurnItemStateView(
+                FailedStudioTurnState(
+                  startedAt: 1,
+                  completedAt: 2,
+                  failure: StudioTurnFailureView(
+                    category: 'protocol',
+                    providerKind: null,
+                    code: null,
+                    httpStatus: null,
+                    message: 'Invalid event revision',
+                    retryable: false,
+                    retryAfterMs: null,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    await pumpEventQueue();
+    final composer = container
+        .read(studioControllerProvider)
+        .requireValue
+        .composer;
+    expect(composer.isSubmissionPending, isFalse);
+    expect(composer.error, 'Invalid event revision');
+    controller.updateComposer('session-1', 'second');
+    await controller.submitComposer('session-1');
+    expect(api.submitPromptCount, 2);
+    expect(api.submittedPrompts.last.prompt, 'second');
+  });
+
   test('TurnStarted clears the matching pending composer submission', () async {
     final initial = _emptyState();
     final api = _FakeStudioApi(initial);
@@ -1049,7 +1109,7 @@ void registerControllerStreamTests() {
     expect(persistence.state.pendingCommits, 4);
   });
 
-  test('degraded persistence blocks submit but keeps stop available', () async {
+  test('degraded persistence keeps submit and stop available', () async {
     final initial = _emptyState();
     final workspace = initial.selectedWorkspace!.copyWith(
       activeTurn: _testTurn(
@@ -1086,11 +1146,11 @@ void registerControllerStreamTests() {
     await container.read(studioControllerProvider.future);
     final controller = container.read(studioControllerProvider.notifier);
 
-    controller.updateComposer('session-1', 'must not start');
+    controller.updateComposer('session-1', 'continue in memory');
     await controller.submitComposer('session-1');
     await controller.stop('session-1');
 
-    expect(api.submitPromptCount, 0);
+    expect(api.submitPromptCount, 1);
     expect(api.interruptedTurn, (threadId: 'session-1', turnId: 'turn-active'));
   });
 

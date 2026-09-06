@@ -250,23 +250,20 @@ where
             });
         }
         agent.state.session.thread_revision = projected.through_revision;
-        host.repository()
-            .commit(super::ThreadCommit {
-                agent_id: agent.state.snapshot.identity.id.clone(),
-                persistence: PersistenceClass::Settlement,
-                expected_revision: Some(expected_revision),
-                next_state: agent.state.clone(),
-                facts: super::DurableCommitFacts::from_state(
-                    &agent.state,
-                    vec![event.clone()],
-                    Vec::new(),
-                    Some(projection.clone()),
-                    None,
-                ),
-                mutation: super::ThreadMutation::SnapshotAndQueue,
-            })
-            .await
-            .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
+        host.repository().record_committed(super::ThreadCommit {
+            agent_id: agent.state.snapshot.identity.id.clone(),
+            persistence: PersistenceClass::Settlement,
+            expected_revision: Some(expected_revision),
+            next_state: agent.state.clone(),
+            facts: super::DurableCommitFacts::from_state(
+                &agent.state,
+                vec![event.clone()],
+                Vec::new(),
+                Some(projection.clone()),
+                None,
+            ),
+            mutation: super::ThreadMutation::SnapshotAndQueue,
+        });
         // 恢复事件与普通 actor commit 使用同一个 parent subscription 事实源。
         if let Err(error) = thread_events
             .publish_batch(projected.notifications.clone())

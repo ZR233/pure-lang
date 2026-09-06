@@ -46,23 +46,20 @@ where
             snapshot: Box::new(state.snapshot.clone()),
         },
     };
-    host.repository()
-        .commit(ThreadCommit {
-            agent_id: id.clone(),
-            persistence: PersistenceClass::Standard,
-            expected_revision: None,
-            next_state: state.clone(),
-            facts: DurableCommitFacts::from_state(
-                &state,
-                vec![event.clone()],
-                Vec::new(),
-                None,
-                initial_transcript_mutation(state.session.session.items()),
-            ),
-            mutation: super::super::ThreadMutation::SnapshotAndQueue,
-        })
-        .await
-        .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
+    host.repository().record_committed(ThreadCommit {
+        agent_id: id.clone(),
+        persistence: PersistenceClass::Standard,
+        expected_revision: None,
+        next_state: state.clone(),
+        facts: DurableCommitFacts::from_state(
+            &state,
+            vec![event.clone()],
+            Vec::new(),
+            None,
+            initial_transcript_mutation(state.session.session.items()),
+        ),
+        mutation: super::super::ThreadMutation::SnapshotAndQueue,
+    });
     let mut thread_snapshot = pl_protocol::ThreadSnapshot::empty(id.as_str());
     thread_snapshot.revision = state.session.thread_revision;
     runtime
@@ -204,38 +201,20 @@ where
             snapshot: Box::new(state.snapshot.clone()),
         },
     };
-    let persisted = host
-        .repository()
-        .commit(ThreadCommit {
-            agent_id: child_id.clone(),
-            persistence: PersistenceClass::Standard,
-            expected_revision: None,
-            next_state: state.clone(),
-            facts: DurableCommitFacts::from_state(
-                &state,
-                vec![event.clone()],
-                Vec::new(),
-                None,
-                initial_transcript_mutation(state.session.session.items()),
-            ),
-            mutation: super::super::ThreadMutation::SnapshotAndQueue,
-        })
-        .await;
-    match persisted {
-        Ok(()) => {}
-        Err(error) => {
-            let reason = SpawnRollbackReason {
-                phase: SpawnRollbackPhase::AgentRegistration,
-                message: error.to_string(),
-            };
-            return match host.lifecycle().rollback_spawn(lease, reason).await {
-                Ok(()) => Err(AgentRuntimeError::Repository(error.to_string())),
-                Err(rollback_error) => Err(AgentRuntimeError::Lifecycle(format!(
-                    "agent registration failed: {error}; spawn rollback failed: {rollback_error}"
-                ))),
-            };
-        }
-    }
+    host.repository().record_committed(ThreadCommit {
+        agent_id: child_id.clone(),
+        persistence: PersistenceClass::Standard,
+        expected_revision: None,
+        next_state: state.clone(),
+        facts: DurableCommitFacts::from_state(
+            &state,
+            vec![event.clone()],
+            Vec::new(),
+            None,
+            initial_transcript_mutation(state.session.session.items()),
+        ),
+        mutation: super::super::ThreadMutation::SnapshotAndQueue,
+    });
     let thread_snapshot = thread_snapshot_for_agent(
         &state.snapshot.identity,
         &root_agent_id,
@@ -370,23 +349,14 @@ where
             },
         },
     };
-    host.repository()
-        .commit(ThreadCommit {
-            agent_id: state.snapshot.identity.id.clone(),
-            persistence: PersistenceClass::Settlement,
-            expected_revision: Some(expected_revision),
-            next_state: state.clone(),
-            facts: DurableCommitFacts::from_state(
-                &state,
-                vec![event.clone()],
-                Vec::new(),
-                None,
-                None,
-            ),
-            mutation: super::super::ThreadMutation::SnapshotAndQueue,
-        })
-        .await
-        .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
+    host.repository().record_committed(ThreadCommit {
+        agent_id: state.snapshot.identity.id.clone(),
+        persistence: PersistenceClass::Settlement,
+        expected_revision: Some(expected_revision),
+        next_state: state.clone(),
+        facts: DurableCommitFacts::from_state(&state, vec![event.clone()], Vec::new(), None, None),
+        mutation: super::super::ThreadMutation::SnapshotAndQueue,
+    });
     runtime.directory.store_snapshot(state.snapshot.clone());
     host.observer()
         .publish(AgentCommittedEvent::runtime(event))

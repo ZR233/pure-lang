@@ -163,7 +163,7 @@ abstract final class StudioDriverState {
         'pendingCommits': _persistenceState.state.pendingCommits,
         'oldestPendingRevision': _persistenceState.state.oldestPendingRevision,
         'firstFailedAt': _persistenceState.state.firstFailedAt,
-        'acceptsNewWork': _persistenceState.acceptsNewWork,
+        'needsAttention': _persistenceState.needsAttention,
       },
       'project': _project == null
           ? null

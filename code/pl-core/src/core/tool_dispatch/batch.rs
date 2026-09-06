@@ -29,7 +29,6 @@ use super::super::permission::{
 };
 use super::super::progress::{ProgressEmitter, ProgressVerbosity};
 use super::super::turn_result::is_cancelled;
-use crate::time::unix_seconds;
 
 use super::progress_messages::{emit_tool_progress, tool_start_progress_message};
 use super::records::{
@@ -114,11 +113,13 @@ pub(in crate::core) async fn execute_tool_call_batch(
             tool_call.payload_text(),
         )
         .with_provider_identity(Some(tool_call.call_id.clone()), Some(tool_call.id.clone()));
-        if let Err(error) = item.apply(item.command(
-            unix_seconds(),
-            TracePartAction::UpdateToolInvocation { invocation },
-        )) {
-            tracing::error!(%error, "failed to update tool invocation before dispatch");
+        if item
+            .tool()
+            .is_none_or(|tool| tool.invocation() != &invocation)
+            && let Some(current) =
+                recorder.apply_item(&item, TracePartAction::UpdateToolInvocation { invocation })
+        {
+            item = current;
         }
         budget_tracker.record_tool_call(&tool_call.name);
 
@@ -317,8 +318,6 @@ pub(in crate::core) async fn execute_tool_call_batch(
                     session_id: context.session_id.to_string(),
                     turn_id: context.turn_id.to_string(),
                     step: context.step,
-                    started_sequence: item.started_sequence(),
-                    revision_base: item.revision(),
                 };
                 let approval = ToolApprovalContext::new(
                     context.options.permission_mode,

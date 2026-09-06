@@ -25,8 +25,7 @@ class StudioController extends _$StudioController {
 
   StudioApi get _api => ref.read(studioApiProvider);
 
-  bool _acceptsNewWork(StudioState? current) =>
-      current?.persistenceState.acceptsNewWork ?? false;
+  bool _isInitialized(StudioState? current) => current != null;
 
   @override
   Future<StudioState> build() async {
@@ -90,14 +89,14 @@ class StudioController extends _$StudioController {
   }
 
   Future<void> openProject(String path) async {
-    if (!_acceptsNewWork(state.value)) return;
+    if (!_isInitialized(state.value)) return;
     final project = await _api.openProject(path);
     await _api.activateProject(project.id);
     await _reloadProductState(selection: _ProjectDefaultSelection(project.id));
   }
 
   Future<void> openRemoteProject(String serverId, String path) async {
-    if (!_acceptsNewWork(state.value)) return;
+    if (!_isInitialized(state.value)) return;
     final project = await _api.openRemoteProject(serverId, path);
     await _api.activateProject(project.id);
     await _reloadProductState(selection: _ProjectDefaultSelection(project.id));
@@ -173,7 +172,7 @@ class StudioController extends _$StudioController {
         .where((candidate) => candidate.id == threadId && candidate.isRoot)
         .firstOrNull;
     if (current == null ||
-        !_acceptsNewWork(current) ||
+        !_isInitialized(current) ||
         thread == null ||
         current.recoveryIssue(
               scope: RecoveryIssueScope.thread,
@@ -206,7 +205,7 @@ class StudioController extends _$StudioController {
         .where((candidate) => candidate.id == threadId && candidate.isRoot)
         .firstOrNull;
     if (current == null ||
-        !_acceptsNewWork(current) ||
+        !_isInitialized(current) ||
         thread == null ||
         current.recoveryIssue(
               scope: RecoveryIssueScope.thread,
@@ -237,7 +236,7 @@ class StudioController extends _$StudioController {
   Future<void> archiveProject(String projectId) async {
     final current = state.value;
     if (current == null ||
-        !_acceptsNewWork(current) ||
+        !_isInitialized(current) ||
         (current.isBusy && current.selectedProjectId == projectId)) {
       return;
     }
@@ -596,7 +595,7 @@ class StudioController extends _$StudioController {
         current?.newThreadComposer ?? const ComposerThreadState.idle();
     final prompt = composer.draft.trim();
     if (current == null ||
-        !_acceptsNewWork(current) ||
+        !_isInitialized(current) ||
         projectId == null ||
         current.selectedThreadId != null ||
         current.recoveryIssue(
@@ -728,7 +727,7 @@ class StudioController extends _$StudioController {
         : _workspaceUi(current, threadId).composer;
     final prompt = composer.draft.trim();
     if (current == null ||
-        !_acceptsNewWork(current) ||
+        !_isInitialized(current) ||
         current.selectedThreadId != threadId ||
         (prompt.isEmpty && composer.attachments.isEmpty) ||
         composer.isSubmissionPending) {
@@ -838,7 +837,7 @@ class StudioController extends _$StudioController {
     final current = state.value;
     final thread = current?.selectedThread;
     if (current == null ||
-        !_acceptsNewWork(current) ||
+        !_isInitialized(current) ||
         thread == null ||
         !thread.isRoot ||
         thread.mode == mode ||
@@ -1350,6 +1349,22 @@ StudioState _reconcileComposer(
 }) {
   final workspace = state.workspacesByThread[threadId];
   if (workspace == null) return state;
+  final composer = _workspaceUi(state, threadId).composer;
+  if (composer case PendingStartComposerThreadState(:final acceptedTurnId)) {
+    for (final item in workspace.items) {
+      if (item.state case ThreadTurnItemStateView(:final state)
+          when item.turnId == acceptedTurnId) {
+        observedTurn = StudioTurnView(
+          turnId: acceptedTurnId,
+          threadId: threadId,
+          revision: item.revision,
+          state: state,
+          updatedAt: item.updatedAt,
+        );
+        break;
+      }
+    }
+  }
   return _withWorkspaceUi(
     state,
     threadId,

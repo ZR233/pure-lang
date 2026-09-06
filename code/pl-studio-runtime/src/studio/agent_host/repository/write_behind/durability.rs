@@ -1,6 +1,6 @@
-//! 批次成功落库后的耐久修订推进、终态许可释放与屏障完成。
+//! 批次成功落库后的耐久修订推进与屏障完成。
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use super::handle::WriterShared;
 use super::queue::{PendingBatch, QueueEntry, QueuedMutation, StudioMutation};
@@ -45,24 +45,6 @@ pub(super) fn advance_batch_durability(shared: &WriterShared, batch: &PendingBat
     if changed {
         let next = shared.durable_progress.borrow().wrapping_add(1);
         shared.durable_progress.send_replace(next);
-    }
-}
-
-pub(super) fn release_applied_settlement_slots(shared: &WriterShared, batch: &PendingBatch) {
-    let applied = batch
-        .entries
-        .iter()
-        .filter_map(QueueEntry::terminal_key)
-        .collect::<HashSet<_>>();
-    if applied.is_empty() {
-        return;
-    }
-    let mut slots = shared
-        .settlement_slots
-        .lock()
-        .expect("settlement slot lock poisoned");
-    for terminal_key in applied {
-        slots.pending_terminal_turns.remove(&terminal_key);
     }
 }
 

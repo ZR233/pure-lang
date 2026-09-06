@@ -103,24 +103,15 @@ impl ProgressEmitter {
         let item_id = format!("{prefix}:{ordinal}");
         let now = unix_seconds();
         let content = text.into();
-        let mut item = TracePart::runtime_commentary(
-            self.turn_id.clone(),
-            item_id,
-            recorder.current_sequence(),
-            content.clone(),
-            now,
-        );
+        let item =
+            TracePart::runtime_commentary(self.turn_id.clone(), item_id, 0, content.clone(), now);
         recorder.start_item(item.clone());
-        if let Err(error) = item.apply(item.command(
-            now,
+        recorder.apply_item(
+            &item,
             pl_trace::TracePartAction::Complete(pl_trace::TracePartCompletion::Text {
                 authoritative_content: Some(content),
             }),
-        )) {
-            tracing::error!(%error, "failed to complete runtime progress item");
-            return;
-        }
-        recorder.complete_item(item);
+        );
     }
 }
 

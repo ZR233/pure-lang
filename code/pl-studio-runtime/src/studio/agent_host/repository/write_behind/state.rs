@@ -128,7 +128,7 @@ fn oldest_pending_revision(shared: &WriterShared) -> Option<u64> {
                 ..
             }) => match directory.as_ref() {
                 StudioDirectoryMutation::ModelPerformance(commit) => Some(commit.revision),
-                StudioDirectoryMutation::Delta(_) => None,
+                StudioDirectoryMutation::Delta(_) | StudioDirectoryMutation::Attachments(_) => None,
             },
             QueueEntry::Barrier(_) => None,
         })

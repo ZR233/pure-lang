@@ -26,7 +26,6 @@ impl StudioRuntime {
         mut profile: SshServerProfile,
         password: Option<String>,
     ) -> Result<SshServerProfile> {
-        self.ensure_persistence_accepts_new_work()?;
         if profile.id.trim().is_empty() {
             profile.id = crate::studio::ids::new_id("ssh-server");
         }
@@ -52,7 +51,6 @@ impl StudioRuntime {
     }
 
     pub async fn delete_ssh_server(&self, server_id: &str) -> Result<()> {
-        self.ensure_persistence_accepts_new_work()?;
         self.store.delete_ssh_server(server_id).await?;
         self.ssh_manager.delete_server(server_id).await?;
         Ok(())
@@ -80,7 +78,6 @@ impl StudioRuntime {
         server_id: &str,
         path: String,
     ) -> Result<ProjectRecord> {
-        self.ensure_persistence_accepts_new_work()?;
         let workspace = self.ssh_manager.open_workspace(server_id, path).await?;
         let canonical_path = workspace.canonical_path().to_string();
         let name = canonical_path

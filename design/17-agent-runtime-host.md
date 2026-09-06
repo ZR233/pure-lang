@@ -65,6 +65,10 @@ pending mailbox 自动启动。父 Agent 的下一条显式输入同时清除 pa
 
 ## 17.5 生命周期
 
+每轮独立拥有事件通道与待处理事件。结束时停止并等待生产者，处理合法事件并在内存提交唯一终态，
+再启动下一轮；旧轮次事件不得进入新轮次。协议错误终结当前轮次并明确报告，未保存事实由独立
+冷存储缓冲保留，不参与实时收束。持久化健康状态不决定 Thread 是否接受输入或执行工具。
+
 公开状态为 `Idle | Queued | Running | WaitingTool | WaitingInteraction | Cancelling | Closing |
 Closed | Faulted`。普通 close 释放热资源；worktree close 默认 preserve，只有显式 cleanup 才在精确
 leaf 与 Pure branch 身份校验通过后清理。shutdown 先停止新输入，再中断/等待 Turn、flush checkpoint、

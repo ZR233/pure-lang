@@ -77,7 +77,9 @@ where
         &mut self,
         mut checkpoint: AgentTurnCheckpoint,
     ) -> AgentRuntimeResult<()> {
-        self.flush_pending_traces().await?;
+        if let Err(error) = self.flush_pending_traces().await {
+            self.mark_projection_failure(&error);
+        }
         let Some(active) = &self.active else {
             return Ok(());
         };
@@ -405,6 +407,7 @@ where
         };
         let mut next = self.state.clone();
         next.snapshot.progress = Some(checkpoint.clone());
+        std::sync::Arc::make_mut(&mut next.session.submissions).push((&submission).into());
         self.commit_transition(
             super::persist::TransitionCommit::new(next).with_submission(submission),
             |snapshot| AgentRuntimeEventKind::StateChanged {

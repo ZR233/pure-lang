@@ -6,10 +6,7 @@ use base64::Engine;
 use image::GenericImageView;
 use pl_protocol::{AttachmentModality, ThreadAttachment};
 use pl_trace::TraceAttachment;
-use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, TransactionTrait,
-};
+use sea_orm::{ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
 use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
@@ -133,39 +130,25 @@ impl StudioStore {
             }
         }
 
-        let result = async {
-            let transaction = self.db.begin().await?;
-            let mut records = Vec::with_capacity(drafts.len());
-            for (draft, storage_path) in prepared {
-                let row = entities::attachment::ActiveModel {
-                    id: Set(new_id("attachment")),
-                    thread_id: Set(thread_id.to_string()),
-                    kind: Set(attachment_kind_label(draft.modality).to_string()),
-                    media_type: Set(draft.media_type.clone()),
-                    filename: Set(Some(draft.filename.clone())),
-                    storage_path: Set(storage_path.to_string_lossy().to_string()),
-                    byte_size: Set(i64::try_from(draft.byte_size)
-                        .context("attachment byte size exceeds SQLite range")?),
-                    content_sha256: Set(draft.content_sha256.clone()),
-                    width: Set(draft.width.map(i64::from)),
-                    height: Set(draft.height.map(i64::from)),
-                    created_at: Set(unix_seconds()),
-                }
-                .insert(&transaction)
-                .await?;
-                records.push(attachment_record(row)?);
-            }
-            transaction.commit().await?;
-            Ok::<_, anyhow::Error>(records)
-        }
-        .await;
-        if result.is_err() {
-            cleanup_created_blobs(created_paths).await;
-        }
-        result
+        Ok(prepared
+            .into_iter()
+            .map(|(draft, storage_path)| AttachmentRecord {
+                id: new_id("attachment"),
+                thread_id: thread_id.to_string(),
+                modality: draft.modality,
+                media_type: draft.media_type.clone(),
+                filename: Some(draft.filename.clone()),
+                storage_path: storage_path.to_string_lossy().to_string(),
+                byte_size: draft.byte_size,
+                content_sha256: draft.content_sha256.clone(),
+                width: draft.width,
+                height: draft.height,
+                created_at: unix_seconds(),
+            })
+            .collect())
     }
 
-    pub(crate) async fn persist_tool_image_records(
+    pub(crate) async fn prepare_tool_image_records(
         &self,
         thread_id: &str,
         inputs: Vec<pl_core::ToolImageAttachmentInput>,
@@ -226,65 +209,56 @@ impl StudioStore {
             }
         }
 
-        let result = async {
-            let transaction = self.db.begin().await?;
-            let mut records = Vec::with_capacity(prepared.len());
-            for (input, storage_path) in prepared {
-                let row = entities::attachment::ActiveModel {
-                    id: Set(new_id("attachment")),
-                    thread_id: Set(thread_id.to_string()),
-                    kind: Set("image".to_string()),
-                    media_type: Set(input.media_type),
-                    filename: Set(Some(input.filename)),
-                    storage_path: Set(storage_path.to_string_lossy().to_string()),
-                    byte_size: Set(i64::try_from(input.data.len())
-                        .context("tool image byte size exceeds SQLite range")?),
-                    content_sha256: Set(input.content_sha256),
-                    width: Set(Some(i64::from(input.width))),
-                    height: Set(Some(i64::from(input.height))),
-                    created_at: Set(unix_seconds()),
-                }
-                .insert(&transaction)
-                .await?;
-                records.push(attachment_record(row)?);
-            }
-            transaction.commit().await?;
-            Ok::<_, anyhow::Error>(records)
-        }
-        .await;
-        if result.is_err() {
-            cleanup_created_blobs(created_paths).await;
-        }
-        result
+        Ok(prepared
+            .into_iter()
+            .map(|(input, storage_path)| AttachmentRecord {
+                id: new_id("attachment"),
+                thread_id: thread_id.to_string(),
+                modality: pl_protocol::studio::StudioAttachmentModality::Image,
+                media_type: input.media_type,
+                filename: Some(input.filename),
+                storage_path: storage_path.to_string_lossy().to_string(),
+                byte_size: input.data.len() as u64,
+                content_sha256: input.content_sha256,
+                width: Some(input.width),
+                height: Some(input.height),
+                created_at: unix_seconds(),
+            })
+            .collect())
     }
+}
 
-    pub(crate) async fn delete_attachments(
-        &self,
-        thread_id: &str,
-        attachment_ids: &[String],
-    ) -> Result<()> {
-        if attachment_ids.is_empty() {
-            return Ok(());
-        }
-        let records = self.load_attachments(thread_id, attachment_ids).await?;
-        entities::attachment::Entity::delete_many()
-            .filter(entities::attachment::Column::ThreadId.eq(thread_id.to_string()))
-            .filter(entities::attachment::Column::Id.is_in(attachment_ids.iter().cloned()))
-            .exec(&self.db)
-            .await?;
-        for record in records {
-            let remaining = entities::attachment::Entity::find()
-                .filter(
-                    entities::attachment::Column::ContentSha256.eq(record.content_sha256.clone()),
-                )
-                .count(&self.db)
-                .await?;
-            if remaining == 0 {
-                let _ = tokio::fs::remove_file(record.storage_path).await;
-            }
-        }
-        Ok(())
+/// 后台保存不可变附件元数据，重复批次按稳定标识幂等。
+pub(in crate::studio) async fn persist_attachment_records(
+    tx: &sea_orm::DatabaseTransaction,
+    records: &[AttachmentRecord],
+) -> Result<()> {
+    for record in records {
+        entities::attachment::Entity::insert(entities::attachment::ActiveModel {
+            id: Set(record.id.clone()),
+            thread_id: Set(record.thread_id.clone()),
+            kind: Set(attachment_kind_label(record.modality).to_string()),
+            media_type: Set(record.media_type.clone()),
+            filename: Set(record.filename.clone()),
+            storage_path: Set(record.storage_path.clone()),
+            byte_size: Set(
+                i64::try_from(record.byte_size).context("attachment size exceeds SQLite range")?
+            ),
+            content_sha256: Set(record.content_sha256.clone()),
+            width: Set(record.width.map(i64::from)),
+            height: Set(record.height.map(i64::from)),
+            created_at: Set(record.created_at),
+        })
+        .on_conflict(
+            sea_orm::sea_query::OnConflict::column(entities::attachment::Column::Id)
+                .do_nothing()
+                .to_owned(),
+        )
+        .try_insert()
+        .exec(tx)
+        .await?;
     }
+    Ok(())
 }
 
 async fn cleanup_created_blobs(paths: Vec<PathBuf>) {

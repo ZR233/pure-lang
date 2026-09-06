@@ -299,19 +299,19 @@ abstract class AppLocalizations {
   /// No description provided for @persistenceDegraded.
   ///
   /// In en, this message translates to:
-  /// **'Saving is temporarily unavailable. {count} in-memory update(s) are waiting; new work is paused.'**
+  /// **'Saving is temporarily unavailable. {count} in-memory update(s) are waiting; you can continue the conversation.'**
   String persistenceDegraded(int count);
 
   /// No description provided for @persistenceRecovering.
   ///
   /// In en, this message translates to:
-  /// **'Saving has recovered and is flushing {count} pending update(s). New work remains paused.'**
+  /// **'Saving has recovered and is flushing {count} pending update(s). You can continue the conversation.'**
   String persistenceRecovering(int count);
 
   /// No description provided for @persistenceBlocked.
   ///
   /// In en, this message translates to:
-  /// **'Saving is blocked with {count} pending update(s) and needs attention. New work is paused.'**
+  /// **'Saving is blocked with {count} pending update(s) and needs attention. You can continue the conversation.'**
   String persistenceBlocked(int count);
 
   /// No description provided for @persistenceRetry.

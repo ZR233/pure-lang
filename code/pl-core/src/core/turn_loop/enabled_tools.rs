@@ -1,4 +1,4 @@
-use pl_trace::{EnabledToolsEvent, TraceEventKind};
+use pl_trace::EnabledToolsEvent;
 
 use crate::trace::TraceRecorder;
 pub(in crate::core) fn record_enabled_tools(
@@ -8,7 +8,7 @@ pub(in crate::core) fn record_enabled_tools(
     plan: &crate::tool::ToolPlan,
 ) {
     let tools = plan.names().map(ToOwned::to_owned).collect();
-    recorder.record_trace_only(TraceEventKind::EnabledToolsRecorded {
+    recorder.record_trace_only(pl_trace::TraceOperation::EnabledToolsRecorded {
         event: EnabledToolsEvent {
             turn_id: turn_id.to_string(),
             step,

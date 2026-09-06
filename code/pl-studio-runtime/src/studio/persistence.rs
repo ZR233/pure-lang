@@ -68,11 +68,6 @@ impl PersistenceState {
             Self::Blocked(state) => state.pending_commits,
         }
     }
-
-    /// 只有健康或正常排空状态允许启动新的生命周期。
-    pub fn accepts_new_work(&self) -> bool {
-        matches!(self, Self::Ready(_) | Self::Flushing(_))
-    }
 }
 
 /// 对产品事件和 Bridge 发布的持久化快照。

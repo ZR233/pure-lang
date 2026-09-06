@@ -37,9 +37,6 @@ pub enum ToolDirective {
     SkillActivated {
         activation: SkillActivation,
     },
-    ToolResultRevision {
-        revision: u64,
-    },
     OutputArtifacts {
         artifacts: Vec<serde_json::Value>,
     },

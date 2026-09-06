@@ -81,6 +81,9 @@ pub(crate) enum AgentLoopCommand {
         reply: oneshot::Sender<AgentRuntimeResult<AgentSnapshot>>,
     },
     TurnFinished(Box<TurnCompletion>),
+    Evict {
+        reply: oneshot::Sender<AgentRuntimeResult<AgentSnapshot>>,
+    },
     Shutdown {
         reply: oneshot::Sender<AgentRuntimeResult<AgentSnapshot>>,
     },

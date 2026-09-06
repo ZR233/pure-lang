@@ -160,7 +160,7 @@ impl StudioRuntime {
         }
     }
 
-    /// 淘汰超出 LRU 容量的空闲驻留 actor；淘汰前先排空 pending commits。
+    /// 淘汰超出 LRU 容量且已保存的空闲驻留 actor；未保存时保留内存。
     pub(in crate::studio::runtime) async fn enforce_residency_limit(&self) {
         let candidates = self.residency.over_capacity().await;
         if candidates.is_empty() {
@@ -193,20 +193,6 @@ impl StudioRuntime {
                 Ok(snapshot)
                     if snapshot.active_turn_id().is_none() && snapshot.pending_inputs == 0 =>
                 {
-                    if let Some(repository) = self.agent_facility.persistence.lock().await.clone()
-                        && let Err(error) = repository
-                            .writer()
-                            .await_durable(agent_id.as_str(), snapshot.revision)
-                            .await
-                    {
-                        tracing::warn!(
-                            thread_id = %thread_id,
-                            error_bytes = error.to_string().len(),
-                            "failed to flush pending commits before eviction; retrying later"
-                        );
-                        self.residency.touch(&thread_id).await;
-                        continue;
-                    }
                     match handle.evict_agent(agent_id).await {
                         Ok(()) => {
                             self.residency.remove(&thread_id).await;
@@ -263,11 +249,6 @@ impl StudioRuntime {
     pub(super) async fn flush_persistence(&self) -> Result<()> {
         let repository = self.agent_facility.persistence.lock().await.clone();
         if let Some(repository) = repository {
-            repository
-                .writer()
-                .flush()
-                .await
-                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
             repository
                 .writer()
                 .shutdown()

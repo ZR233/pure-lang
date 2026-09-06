@@ -11,8 +11,7 @@ use crate::thread_event::ObservedTurnEvent;
 pub(crate) use command::{AgentLoopCommand, AgentLoopHandle};
 use running_turn::{RunningTurn, TurnExecutionTerminal, turn_outcome};
 
-/// UI streaming stays responsive while repository admission sees bounded
-/// typed batches instead of one full owner snapshot per provider token.
+/// 合并短时间内的事件，减少内存投影与异步保存事实的重复快照。
 const TRACE_BATCH_MAX_DELAY: Duration = Duration::from_millis(100);
 const TRACE_BATCH_MAX_EVENTS: usize = 256;
 
@@ -45,9 +44,6 @@ where
     state: ThreadActorState,
     runtime: AgentRuntimeHandle,
     channels: LoopChannels,
-    /// Canonical trace facts removed from the producer channel but not yet
-    /// accepted by the repository.
-    pending_trace_events: Vec<TraceEvent>,
     active: Option<RunningTurn>,
     dispatch_enabled: bool,
     cancel_grace: Duration,
@@ -83,7 +79,6 @@ where
                 observation_sender,
                 observation_receiver,
             },
-            pending_trace_events: Vec::new(),
             active: None,
             dispatch_enabled,
             cancel_grace,
@@ -239,6 +234,21 @@ where
                         AgentLoopCommand::TurnFinished(completion) => {
                             self.finish_turn(*completion).boxed().await;
                         }
+                        AgentLoopCommand::Evict { reply } => {
+                            // 与输入接受共享 owner 命令序列，避免检查后又提交了新事实。
+                            let snapshot = &self.state.snapshot;
+                            if self.active.is_some() || snapshot.pending_inputs > 0
+                                || snapshot.active_turn_id().is_some() || snapshot.state.is_budget_paused()
+                                || !self.host.repository().is_durable(&snapshot.identity.id, snapshot.revision)
+                            {
+                                let _ = reply.send(Err(AgentRuntimeError::InvalidInput(
+                                    format!("agent {} is busy or has unsaved facts", snapshot.identity.id),
+                                )));
+                            } else {
+                                let _ = reply.send(Ok(snapshot.clone()));
+                                break;
+                            }
+                        }
                         AgentLoopCommand::Shutdown { reply } => {
                             let result = self.shutdown().boxed().await;
                             let _ = reply.send(result);
@@ -289,6 +299,14 @@ where
         if active.projection_failure.is_none() {
             active.projection_failure = Some(format!("turn protocol projection failed: {detail}"));
             active.cancellation.cancel();
+            // 复用 owner 的取消收束路径：生产者不响应令牌时仍有宽限期与强制停止。
+            let (reply, _receiver) = tokio::sync::oneshot::channel();
+            self.channels
+                .deferred_commands
+                .push_front(AgentLoopCommand::CancelTurn {
+                    turn_id: active.turn_id.clone(),
+                    reply,
+                });
         }
     }
 
@@ -313,7 +331,7 @@ where
         while let Ok(trace) = self.channels.trace_receiver.try_recv() {
             trace_events.push(trace);
         }
-        if trace_events.is_empty() && self.pending_trace_events.is_empty() {
+        if trace_events.is_empty() {
             return Ok(());
         }
         self.persist_trace_batch(trace_events).await
@@ -430,5 +448,123 @@ fn notification_turn_id(notification: &ThreadNotificationEnvelope) -> Option<&st
         ThreadNotification::ItemDelta { .. }
         | ThreadNotification::ThreadRuntimeUpdated { .. }
         | ThreadNotification::Lagged { .. } => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent_runtime::test_support::{FactoryMode, TestRepository};
+    use crate::agent_runtime::tests::{TestHost, registration, test_options};
+    use pl_trace::{
+        InMemoryTraceEventSink, TraceEventDraft, TraceEventSink, TracePart, TraceTextChannel,
+    };
+
+    #[tokio::test]
+    async fn invalid_batch_keeps_prefix_settles_blocked_producer_and_isolates_next_turn() {
+        let repository = TestRepository::empty();
+        let host = TestHost::new(repository.clone(), FactoryMode::Block);
+        let runtime = AgentRuntime::start(host.clone(), test_options())
+            .await
+            .unwrap();
+        let handle = runtime.handle();
+        let id = ThreadId::new("isolated").unwrap();
+        handle
+            .register(registration(id.as_str(), "chat"))
+            .await
+            .unwrap();
+        let (command_sender, command_receiver) = mpsc::channel(32);
+        let (trace_sender, trace_receiver) = mpsc::unbounded_channel();
+        let (observation_sender, observation_receiver) = mpsc::unbounded_channel();
+        let mut owner = AgentLoop {
+            host,
+            state: repository.state(&id),
+            runtime: handle,
+            channels: LoopChannels {
+                deferred_commands: Default::default(),
+                command_sender,
+                command_receiver,
+                trace_sender,
+                trace_receiver,
+                observation_sender,
+                observation_receiver,
+            },
+            active: None,
+            dispatch_enabled: true,
+            cancel_grace: Duration::from_millis(10),
+        };
+        let first = owner
+            .submit(AgentSubmitRequest::start(id.clone(), "first"))
+            .await
+            .unwrap();
+        let old_sender = owner.channels.trace_sender.clone();
+        let sink = InMemoryTraceEventSink::new(id.to_string(), owner.state.session.trace_sequence);
+        let item =
+            TracePart::streaming_text(first.as_str(), "kept-prefix", 0, TraceTextChannel::Final, 1);
+        let start = sink
+            .emit(TraceEventDraft::start(
+                1,
+                first.to_string(),
+                item.item_id().into(),
+                item.source(),
+                item.state().clone(),
+            ))
+            .unwrap();
+        let invalid = sink
+            .emit(TraceEventDraft::start(
+                1,
+                "wrong-turn".into(),
+                "invalid-item".into(),
+                item.source(),
+                item.state().clone(),
+            ))
+            .unwrap();
+        let error = owner
+            .persist_trace_batch(vec![start, invalid.clone()])
+            .await
+            .unwrap_err();
+        let snapshot = owner.runtime.thread_snapshot(&id).unwrap();
+        assert!(snapshot.items.iter().any(|item| item.id == "kept-prefix"));
+        assert!(!snapshot.items.iter().any(|item| item.id == "invalid-item"));
+        owner.mark_projection_failure(&error);
+        let Some(AgentLoopCommand::CancelTurn { turn_id, .. }) =
+            owner.channels.deferred_commands.pop_front()
+        else {
+            panic!("protocol failure schedules bounded producer shutdown");
+        };
+        tokio::time::timeout(Duration::from_secs(2), owner.cancel_turn(turn_id))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(owner.active.is_none());
+        assert!(owner.state.snapshot.state.is_idle());
+        assert!(matches!(
+            owner.state.snapshot.last_turn.as_ref().unwrap().outcome,
+            pl_protocol::TurnOutcome::Failed(_)
+        ));
+        let late_completion = match owner.channels.deferred_commands.pop_front() {
+            Some(command) => command,
+            None => tokio::time::timeout(
+                Duration::from_secs(2),
+                owner.channels.command_receiver.recv(),
+            )
+            .await
+            .unwrap()
+            .unwrap(),
+        };
+        let second = owner
+            .submit(AgentSubmitRequest::start(id.clone(), "second"))
+            .await
+            .unwrap();
+        assert_ne!(first, second);
+        assert!(old_sender.send(invalid).is_err());
+        let AgentLoopCommand::TurnFinished(completion) = late_completion else {
+            panic!("worker completion");
+        };
+        owner.finish_turn(*completion).await;
+        assert_eq!(owner.active.as_ref().unwrap().turn_id, second);
+        assert_eq!(repository.commits().iter().flat_map(|commit| &commit.facts.runtime_events).filter(|event| matches!(&event.kind, AgentRuntimeEventKind::TurnFinished { outcome, .. } if outcome.turn_id == first)).count(), 1);
+        owner.cancel_turn(second).await.unwrap();
+        runtime.shutdown().await.unwrap();
     }
 }

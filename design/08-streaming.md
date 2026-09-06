@@ -23,6 +23,11 @@ Thread directory 元数据。订阅注册完成后，StudioRuntime 必须用内�
 
 ## 8.2 Notification
 
+内部 trace 的生产者提交开始、追加和终态操作，不预分配 sequence 或 item revision。
+唯一内存发布入口在同一短临界区内校验、编号、更新项目状态并入队，返回规范事件；所有投影消费
+返回事实。入队失败不推进状态。项目身份由 Turn ID 与 Item ID 确定，开始序号首次分配后不变。
+实时投影与异步保存分别消费已提交事实，存储故障不阻塞实时通知，也不使旧事件重入实时投影。
+
 通知穷尽为：
 
 - `turnStarted`

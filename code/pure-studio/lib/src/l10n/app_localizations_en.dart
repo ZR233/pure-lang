@@ -118,17 +118,17 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String persistenceDegraded(int count) {
-    return 'Saving is temporarily unavailable. $count in-memory update(s) are waiting; new work is paused.';
+    return 'Saving is temporarily unavailable. $count in-memory update(s) are waiting; you can continue the conversation.';
   }
 
   @override
   String persistenceRecovering(int count) {
-    return 'Saving has recovered and is flushing $count pending update(s). New work remains paused.';
+    return 'Saving has recovered and is flushing $count pending update(s). You can continue the conversation.';
   }
 
   @override
   String persistenceBlocked(int count) {
-    return 'Saving is blocked with $count pending update(s) and needs attention. New work is paused.';
+    return 'Saving is blocked with $count pending update(s) and needs attention. You can continue the conversation.';
   }
 
   @override

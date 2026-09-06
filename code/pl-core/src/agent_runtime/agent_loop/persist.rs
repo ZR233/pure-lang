@@ -152,45 +152,50 @@ where
         &mut self,
         mut trace_events: Vec<TraceEvent>,
     ) -> AgentRuntimeResult<()> {
-        self.pending_trace_events.append(&mut trace_events);
         while let Ok(trace) = self.channels.trace_receiver.try_recv() {
-            self.pending_trace_events.push(trace);
+            trace_events.push(trace);
         }
-        if !self.pending_trace_events.is_empty()
-            && self.pending_trace_events.len() < TRACE_BATCH_MAX_EVENTS
-        {
+        if !trace_events.is_empty() && trace_events.len() < TRACE_BATCH_MAX_EVENTS {
             let deadline = tokio::time::Instant::now() + TRACE_BATCH_MAX_DELAY;
-            while self.pending_trace_events.len() < TRACE_BATCH_MAX_EVENTS {
+            while trace_events.len() < TRACE_BATCH_MAX_EVENTS {
                 match tokio::time::timeout_at(deadline, self.channels.trace_receiver.recv()).await {
-                    Ok(Some(trace)) => self.pending_trace_events.push(trace),
+                    Ok(Some(trace)) => trace_events.push(trace),
                     Ok(None) | Err(_) => break,
                 }
             }
         }
+        self.commit_trace_batch(trace_events).await
+    }
+
+    async fn commit_trace_batch(
+        &mut self,
+        trace_events: Vec<TraceEvent>,
+    ) -> AgentRuntimeResult<()> {
         let Some(active) = &self.active else {
             return Ok(());
         };
         let thread_id = active.thread_id.clone();
         let turn_id = active.turn_id.clone();
-        if self
-            .pending_trace_events
-            .iter()
-            .any(|trace| trace.session_id != thread_id.as_str())
-        {
-            return Err(AgentRuntimeError::ThreadEvents(format!(
-                "trace session mismatch for agent {}",
-                self.state.snapshot.identity.id
-            )));
-        }
-        self.pending_trace_events
-            .sort_by_key(|trace| trace.sequence);
         let current_sequence = self.state.session.trace_sequence;
-        self.pending_trace_events
-            .retain(|trace| trace.sequence >= current_sequence);
-        if self.pending_trace_events.is_empty() {
+        if trace_events.is_empty() {
             return Ok(());
         }
-        let trace_events = self.pending_trace_events.clone();
+        let invalid_identity = trace_events.iter().enumerate().any(|(index, trace)| {
+            trace.session_id != thread_id.as_str()
+                || trace.turn_id() != turn_id.as_str()
+                || trace.sequence != current_sequence.saturating_add(index as u64)
+        });
+        if invalid_identity {
+            if trace_events.len() > 1 {
+                for trace in trace_events {
+                    Box::pin(self.commit_trace_batch(vec![trace])).await?;
+                }
+                return Ok(());
+            }
+            return Err(AgentRuntimeError::ThreadEvents(
+                "trace identity or sequence differs from active turn".to_owned(),
+            ));
+        }
         let next_trace_sequence = trace_events
             .last()
             .map(|trace| trace.sequence.saturating_add(1))
@@ -205,12 +210,22 @@ where
         let projected_thread = if projected.notifications.is_empty() {
             None
         } else {
-            Some(
-                self.runtime
-                    .thread_events
-                    .project(thread_id.as_str(), &projected.notifications)
-                    .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?,
-            )
+            match self
+                .runtime
+                .thread_events
+                .project(thread_id.as_str(), &projected.notifications)
+            {
+                Ok(projected) => Some(projected),
+                Err(error) => {
+                    if trace_events.len() > 1 {
+                        for trace in trace_events {
+                            Box::pin(self.commit_trace_batch(vec![trace])).await?;
+                        }
+                        return Ok(());
+                    }
+                    return Err(AgentRuntimeError::ThreadEvents(error.to_string()));
+                }
+            }
         };
         let session_projection =
             projected_thread
@@ -237,21 +252,15 @@ where
             session_projection,
             None,
         );
-        let result = self
-            .commit_and_publish(
-                PendingCommit::new(next, facts, ThreadMutation::AppendTrace).publish(
-                    CommitPublication::new(Some(thread_id), Some(turn_id))
-                        .store_directory_snapshot()
-                        .with_trace_events(committed_trace_events)
-                        .with_thread_notifications(committed_thread_events),
-                ),
-            )
-            .await;
-        if result.is_ok() {
-            self.pending_trace_events
-                .retain(|trace| trace.sequence >= next_trace_sequence);
-        }
-        result
+        self.commit_and_publish(
+            PendingCommit::new(next, facts, ThreadMutation::AppendTrace).publish(
+                CommitPublication::new(Some(thread_id), Some(turn_id))
+                    .store_directory_snapshot()
+                    .with_trace_events(committed_trace_events)
+                    .with_thread_notifications(committed_thread_events),
+            ),
+        )
+        .await
     }
 
     pub(super) async fn commit_transition<F>(
@@ -389,7 +398,7 @@ where
     }
 }
 
-/// Interaction 需要保留终态容量；其余 observation 可以作为流式增量调度。
+/// 交互事实提示后台及时保存；其他观察数据可以批量合并。
 fn observation_persistence(observation: &TurnObservation) -> PersistenceClass {
     match observation {
         TurnObservation::InteractionChanged { .. } => PersistenceClass::Settlement,

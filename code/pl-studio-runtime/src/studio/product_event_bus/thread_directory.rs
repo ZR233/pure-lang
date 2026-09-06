@@ -31,6 +31,13 @@ impl HotColdEntry for Thread {
 }
 
 impl ProductEventBus {
+    pub(in crate::studio) fn record_attachments(
+        &self,
+        records: Vec<crate::studio::AttachmentRecord>,
+    ) {
+        self.writer.record_attachments(records);
+    }
+
     pub async fn read_thread_directory(&self) -> Result<StudioThreadDirectoryState> {
         Ok(StudioThreadDirectoryState {
             state: self.resource(
@@ -135,14 +142,13 @@ impl ProductEventBus {
             .lock()
             .expect("thread index lock poisoned");
         for thread in entries {
-            index.insert(thread.id.clone(), thread);
+            index.entry(thread.id.clone()).or_insert(thread);
         }
     }
 
-    /// 提交一次目录事实：先加入 write-behind 队列，再更新内存热集合并广播。
+    /// 提交一次目录事实：在内存登记事实、更新热集合并广播。
     ///
-    /// 这是 Thread/Project 目录 mutation 的唯一命令通道；admission 失败时不发布
-    /// 半状态，后台 SQLite 失败只影响持久化健康状态。
+    /// 这是 Thread/Project 目录 mutation 的唯一命令通道；后台保存不能拒绝目录事实。
     pub(in crate::studio) async fn commit_directory(
         &self,
         delta: DirectoryDelta,
@@ -150,7 +156,7 @@ impl ProductEventBus {
         if delta.is_empty() {
             return Err(anyhow::anyhow!("directory delta is empty"));
         }
-        self.writer.accept_directory(delta.clone())?;
+        self.writer.record_directory(delta.clone());
         let (thread_upserts, thread_removals): (Vec<Thread>, Vec<String>) = (
             delta.thread_upserts.clone(),
             delta
@@ -218,13 +224,13 @@ impl ProductEventBus {
             .cloned()
     }
 
-    /// 注册一个 child Thread：typed delta 先完成 admission，热集合随后更新。
+    /// 注册一个 child Thread：typed delta 与热集合共同形成内存提交。
     pub(in crate::studio) async fn register_child_thread(
         &self,
         spec: RegisteredChildThread,
     ) -> Result<()> {
         let delta = DirectoryDelta::register_child_thread(spec);
-        self.writer.accept_directory(delta.clone())?;
+        self.writer.record_directory(delta.clone());
         self.apply_thread_delta(delta.thread_upserts.clone(), Vec::new())
             .await?;
         Ok(())
@@ -400,6 +406,9 @@ mod tests {
 
         bus.warm_thread_index(vec![entry.clone()]);
 
+        let mut stale = entry.clone();
+        stale.title = "Stale cold title".to_string();
+        bus.warm_thread_index(vec![stale]);
         let after = bus.read_thread_directory().await.expect("directory");
         assert_eq!(after.state.revision(), before_revision);
         assert_eq!(after.state.value().unwrap().threads, vec![entry]);

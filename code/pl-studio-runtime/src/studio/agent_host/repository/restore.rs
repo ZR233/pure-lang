@@ -12,7 +12,7 @@ use pl_protocol::{
     PureError, ThreadItem, ThreadItemState, ThreadRuntimeSnapshot, ThreadRuntimeUsage,
     ThreadSnapshot, Turn,
 };
-use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
 use crate::studio::entity::{interaction, item, thread, thread_input, turn};
 
@@ -22,8 +22,6 @@ use super::context::{SessionSnapshotAuditError, audit_session_snapshot, restore_
 use super::labels::agent_state_kind;
 use super::projection::latest_turn;
 use super::{StudioSessionRecoveryFailure, store_error, u64_from_i64};
-
-const HOT_TIMELINE_ITEM_LIMIT: u64 = 400;
 
 impl StudioAgentRepository {
     /// 钉住集合：pending input、pending Interaction 与活动 Turn。
@@ -269,7 +267,16 @@ impl StudioAgentRepository {
         } else {
             aggregate_billing_usage(billing_by_turn.values())
         };
+        let submissions = super::submissions::list_thread_submissions(
+            &self.store,
+            &ThreadId::new(model.id.clone())?,
+            0,
+            i64::MAX as usize,
+        )
+        .await?
+        .items;
         Ok(ThreadContextState {
+            submissions: std::sync::Arc::new(submissions),
             metadata: serde_json::from_str(&model.metadata_json)?,
             session: AgentSession::from_snapshot(session),
             usage,
@@ -289,29 +296,9 @@ impl StudioAgentRepository {
         let mut item_rows = item::Entity::find()
             .filter(item::Column::ThreadId.eq(thread_id.clone()))
             .order_by_desc(item::Column::Ordinal)
-            .limit(HOT_TIMELINE_ITEM_LIMIT)
             .all(self.store.database())
             .await
             .map_err(store_error)?;
-        if item_rows.len() == HOT_TIMELINE_ITEM_LIMIT as usize
-            && let Some(cutoff_turn_id) = item_rows.last().map(|row| row.turn_id.clone())
-        {
-            let existing_ids = item_rows
-                .iter()
-                .map(|row| row.id.clone())
-                .collect::<BTreeSet<_>>();
-            item_rows.extend(
-                item::Entity::find()
-                    .filter(item::Column::ThreadId.eq(thread_id.clone()))
-                    .filter(item::Column::TurnId.eq(cutoff_turn_id))
-                    .order_by_asc(item::Column::Ordinal)
-                    .all(self.store.database())
-                    .await
-                    .map_err(store_error)?
-                    .into_iter()
-                    .filter(|row| !existing_ids.contains(&row.id)),
-            );
-        }
         item_rows.sort_by_key(|row| row.ordinal);
         let items: Vec<ThreadItem> = item_rows
             .into_iter()
@@ -320,20 +307,8 @@ impl StudioAgentRepository {
             .into_iter()
             .filter(|item| !matches!(item.state(), ThreadItemState::ContextCompaction(_)))
             .collect();
-        // active skill 属于 working runtime，而不是 Timeline 窗口。它可能早于最近
-        // 400 项，因此单独按 typed Skill item 恢复，但不把旧 item 混入 GUI 热窗口。
-        let skill_items = item::Entity::find()
-            .filter(item::Column::ThreadId.eq(thread_id.clone()))
-            .filter(item::Column::StateKind.eq("skill"))
-            .order_by_asc(item::Column::Ordinal)
-            .all(self.store.database())
-            .await
-            .map_err(store_error)?
-            .into_iter()
-            .map(ThreadItem::try_from)
-            .collect::<Result<Vec<ThreadItem>, PureError>>()?;
-        let active_skills = active_skills_from_items(&skill_items);
-        let latest_activation_at = skill_items
+        let active_skills = active_skills_from_items(&items);
+        let latest_activation_at = items
             .iter()
             .filter_map(|item| match item.state() {
                 ThreadItemState::Skill(skill) => Some(skill.activation().activated_at),
@@ -681,7 +656,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn activation_restores_recent_four_hundred_items_and_older_active_skills() {
+    async fn activation_restores_all_items_and_active_skills() {
         let store = StudioStore::open_memory().await.expect("memory store");
         let workspace = std::env::temp_dir().join("pure-studio-hot-timeline-window");
         let project = store.upsert_project(&workspace).await.expect("project");
@@ -738,8 +713,8 @@ mod tests {
             .expect("restore hot snapshot")
             .snapshot;
 
-        assert_eq!(restored.items.len(), 400);
-        assert!(restored.items.iter().all(|item| item.turn_id == "new-turn"));
+        assert_eq!(restored.items.len(), 406);
+        assert_eq!(restored.items.first().unwrap().turn_id, "old-turn");
         assert_eq!(
             restored
                 .runtime

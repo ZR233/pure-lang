@@ -229,27 +229,6 @@ impl TracePart {
         self.revision
     }
 
-    /// Advances an open item to the revision reached by externally published deltas.
-    ///
-    /// Tool output observers publish deltas while the dispatcher retains its own item copy;
-    /// the authoritative terminal snapshot must first join that delta revision before applying
-    /// the terminal transition.
-    pub fn synchronize_open_revision(
-        &mut self,
-        revision: u64,
-        updated_at: i64,
-    ) -> Result<(), &'static str> {
-        if self.is_terminal() {
-            return Err("cannot synchronize a terminal trace part");
-        }
-        if revision < self.revision {
-            return Err("cannot move a trace part revision backwards");
-        }
-        self.revision = revision;
-        self.updated_at = self.updated_at.max(updated_at);
-        Ok(())
-    }
-
     pub fn created_at(&self) -> i64 {
         self.created_at
     }

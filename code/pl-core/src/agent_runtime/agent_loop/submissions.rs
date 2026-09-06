@@ -1,6 +1,4 @@
-use super::super::{
-    AgentRuntimeError, AgentRuntimeHost, AgentRuntimeResult, AgentSubmissionPage, ThreadRepository,
-};
+use super::super::{AgentRuntimeHost, AgentRuntimeResult, AgentSubmissionPage};
 use super::AgentLoop;
 
 impl<H> AgentLoop<H>
@@ -16,10 +14,20 @@ where
         offset: usize,
         limit: usize,
     ) -> AgentRuntimeResult<AgentSubmissionPage> {
-        self.host
-            .repository()
-            .list_submissions(&self.state.snapshot.identity.id, offset, limit)
-            .await
-            .map_err(|error| AgentRuntimeError::Repository(error.to_string()))
+        let history = &self.state.session.submissions;
+        let limit = limit.max(1);
+        let items = history
+            .iter()
+            .skip(offset)
+            .take(limit)
+            .cloned()
+            .collect::<Vec<_>>();
+        Ok(AgentSubmissionPage {
+            has_more: offset.saturating_add(items.len()) < history.len(),
+            items,
+            offset,
+            limit,
+            total: history.len(),
+        })
     }
 }

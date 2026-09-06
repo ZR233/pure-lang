@@ -9,7 +9,6 @@ use crate::tool::{
 use crate::turn::TurnOptions;
 
 use super::TurnEngine;
-use crate::time::unix_seconds;
 
 mod display;
 mod progress_messages;
@@ -1595,6 +1594,7 @@ mod tool_execution_tests {
             tool_statuses(&events, "turn-1-call-1"),
             vec![
                 TestToolPhase::Started,
+                TestToolPhase::Started, // Provider identity update keeps the same item.
                 TestToolPhase::Running,
                 TestToolPhase::Succeeded,
             ]

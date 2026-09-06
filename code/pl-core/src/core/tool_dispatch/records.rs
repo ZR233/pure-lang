@@ -2,15 +2,14 @@ use std::path::PathBuf;
 
 use pl_protocol::PureError;
 use pl_trace::{
-    AgentEvent, TraceEventKind, TracePartAction, TracePartCompletion, TraceToolActivePhase,
-    TraceToolFailure, TraceToolFailureKind, TraceToolOutput,
+    AgentEvent, TracePartAction, TracePartCompletion, TraceToolActivePhase, TraceToolFailure,
+    TraceToolFailureKind, TraceToolOutput,
 };
 
 use crate::tool::model_visible_tool_output;
 use crate::tool::{ToolDirective, ToolResult};
 
 use super::display::display_result_for_tool;
-use super::unix_seconds;
 use super::{ToolExecutionError, ToolExecutionOutcome, ToolExecutionRecord};
 
 #[derive(Debug, Clone)]
@@ -29,32 +28,16 @@ pub(super) fn emit_tool_snapshot(
     item: &mut pl_trace::TracePart,
     phase: TraceToolActivePhase,
 ) {
-    let now = unix_seconds();
-    if let Err(error) = item.apply(item.command(now, TracePartAction::EnterToolPhase { phase })) {
-        tracing::error!(%error, "failed to advance active tool trace state");
-        return;
+    if let Some(current) = recorder.apply_item(item, TracePartAction::EnterToolPhase { phase }) {
+        *item = current;
     }
-    recorder.update_item_snapshot(item.clone());
 }
 
 pub(super) fn finalize_tool_item(
     recorder: &mut crate::trace::TraceRecorder,
-    mut item: pl_trace::TracePart,
+    item: pl_trace::TracePart,
     record: &ToolExecutionRecord,
 ) {
-    if let Some(revision) = record
-        .runtime_events
-        .iter()
-        .filter_map(|event| match event {
-            ToolDirective::ToolResultRevision { revision } => Some(*revision),
-            _ => None,
-        })
-        .max()
-        && let Err(error) = item.synchronize_open_revision(revision, unix_seconds())
-    {
-        tracing::error!(%error, "failed to join streamed tool-result revision");
-        return;
-    }
     let output = TraceToolOutput::new(record.display_result.clone()).with_details(
         record.exit_code,
         record
@@ -81,17 +64,7 @@ pub(super) fn finalize_tool_item(
             reason: record.display_result.clone(),
         },
     };
-    let now = unix_seconds();
-    if let Err(error) = item.apply(item.command(now, action)) {
-        tracing::error!(%error, "failed to terminalize tool trace item");
-        return;
-    }
-    match record.outcome {
-        ToolExecutionOutcome::Succeeded => recorder.complete_item(item),
-        ToolExecutionOutcome::Failed(_)
-        | ToolExecutionOutcome::Denied
-        | ToolExecutionOutcome::Cancelled => recorder.fail_item(item),
-    }
+    recorder.apply_item(&item, action);
     if record.outcome == ToolExecutionOutcome::Succeeded {
         for event in &record.runtime_events {
             match event {
@@ -103,14 +76,13 @@ pub(super) fn finalize_tool_item(
                     });
                 }
                 ToolDirective::SkillActivated { activation } => {
-                    recorder.record_trace_only(TraceEventKind::SkillActivated {
+                    recorder.record_trace_only(pl_trace::TraceOperation::SkillActivated {
                         activation: activation.clone(),
                     });
                     recorder.broadcast(AgentEvent::SkillActivated {
                         activation: activation.clone(),
                     });
                 }
-                ToolDirective::ToolResultRevision { .. } => {}
                 ToolDirective::OutputArtifacts { .. } => {}
                 ToolDirective::RevealTools { .. } => {}
                 ToolDirective::AuditMetadata { .. } => {}
@@ -245,7 +217,6 @@ fn tool_execution_record_from_envelope(
             } => Some((*raw_bytes, *model_visible_bytes, *artifact_bytes)),
             ToolDirective::InteractionRequested { .. }
             | ToolDirective::SkillActivated { .. }
-            | ToolDirective::ToolResultRevision { .. }
             | ToolDirective::OutputArtifacts { .. }
             | ToolDirective::RevealTools { .. }
             | ToolDirective::AuditMetadata { .. }
@@ -296,7 +267,6 @@ fn output_artifacts(runtime_events: &[ToolDirective]) -> Vec<serde_json::Value> 
             ToolDirective::OutputArtifacts { artifacts } => Some(artifacts.as_slice()),
             ToolDirective::InteractionRequested { .. }
             | ToolDirective::SkillActivated { .. }
-            | ToolDirective::ToolResultRevision { .. }
             | ToolDirective::RevealTools { .. }
             | ToolDirective::AuditMetadata { .. }
             | ToolDirective::CacheHit { .. }
@@ -317,7 +287,6 @@ fn audit_metadata(runtime_events: &[ToolDirective]) -> Vec<serde_json::Value> {
             ToolDirective::AuditMetadata { metadata } => Some(metadata.clone()),
             ToolDirective::InteractionRequested { .. }
             | ToolDirective::SkillActivated { .. }
-            | ToolDirective::ToolResultRevision { .. }
             | ToolDirective::OutputArtifacts { .. }
             | ToolDirective::RevealTools { .. }
             | ToolDirective::ExecutionFailed
@@ -348,7 +317,6 @@ fn output_metrics(runtime_events: &[ToolDirective]) -> Option<pl_trace::TraceToo
         }),
         ToolDirective::InteractionRequested { .. }
         | ToolDirective::SkillActivated { .. }
-        | ToolDirective::ToolResultRevision { .. }
         | ToolDirective::OutputArtifacts { .. }
         | ToolDirective::RevealTools { .. }
         | ToolDirective::AuditMetadata { .. }

@@ -104,11 +104,7 @@ impl<H> AgentLoop<H>
 where
     H: AgentRuntimeHost,
 {
-    /// 统一执行待落库入队与内存状态/事件发布模板。
-    ///
-    /// 调用方负责准备领域 state、facts 与 mutation；repository 只接受到进程内
-    /// 待落库队列，不等待 SQLite。只有队列接受完整 typed snapshot 后，owner
-    /// snapshot 与 live notification 才能对外可见；因此 admission 失败不会发布半状态。
+    /// 提交校验后的内存事实，并登记异步保存。冷存储不参与业务裁决。
     pub(super) async fn commit_and_publish(
         &mut self,
         commit: PendingCommit,
@@ -127,14 +123,19 @@ where
             facts: commit.facts,
             mutation: commit.mutation,
         };
-        let repository_result = self.host.repository().commit(repository_commit).await;
-        if let Err(error) = repository_result {
-            return Err(super::super::AgentRuntimeError::Repository(
-                error.to_string(),
-            ));
-        }
-        self.state = commit.next_state;
         let publication = commit.publication;
+        let delivery = self
+            .runtime
+            .thread_events
+            .commit_batch(
+                publication
+                    .as_ref()
+                    .map_or_else(Vec::new, |value| value.thread_notifications.clone()),
+            )
+            .await
+            .map_err(|error| super::super::AgentRuntimeError::ThreadEvents(error.to_string()))?;
+        self.state = commit.next_state;
+        self.host.repository().record_committed(repository_commit);
         if let Some(publication) = &publication {
             match &publication.directory_update {
                 DirectoryUpdate::Unchanged => {}
@@ -146,19 +147,9 @@ where
                     self.runtime.directory.publish_runtime_event(event);
                 }
             }
-            if let Err(error) = self
-                .runtime
-                .thread_events
-                .publish_batch(publication.thread_notifications.clone())
-                .await
-            {
-                tracing::error!(
-                    agent_id = %self.state.snapshot.identity.id,
-                    revision = self.state.snapshot.revision,
-                    error = %error,
-                    "thread projection rejected a committed in-memory fact; subscribers must resync"
-                );
-            }
+        }
+        if let Err(error) = self.runtime.thread_events.deliver_batch(delivery).await {
+            tracing::error!(%error, "failed to notify subscribers of committed memory state");
         }
         if let Some(publication) = publication {
             self.host

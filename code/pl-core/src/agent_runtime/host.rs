@@ -30,7 +30,7 @@ pub struct RestoredThreadSnapshot {
 
 /// Thread commit 的持久化调度分类。
 ///
-/// 所有分类都只表示进程内待落库队列的容量与合并策略，绝不决定内存事实何时
+/// 所有分类都只表示进程内待落库队列的批量与合并策略，绝不决定内存事实何时
 /// 可见。需要等待 SQLite 的调用方必须使用独立的耐久化屏障。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PersistenceClass {
@@ -38,7 +38,7 @@ pub enum PersistenceClass {
     Coalescible,
     /// 不可合并的普通业务事实。
     Standard,
-    /// 已开始生命周期的终态或停止事实，可使用终态预留容量。
+    /// 已开始生命周期的终态或停止事实，提示后台尽快保存。
     Settlement,
 }
 
@@ -74,147 +74,6 @@ pub struct ThreadCommit {
     pub next_state: ThreadActorState,
     pub facts: DurableCommitFacts,
     pub mutation: ThreadMutation,
-}
-
-impl ThreadCommit {
-    /// 把严格连续、同一 owner/Turn 的流式提交合并到当前提交。
-    ///
-    /// 合并只压缩 write-behind 队列中的完整快照写入；规范通知、trace、runtime
-    /// event 与 context mutation 都会保留。不可合并时原样返还 `next`，repository
-    /// 必须把它作为独立提交入队。
-    pub fn coalesce(&mut self, next: Box<Self>) -> std::result::Result<(), Box<Self>> {
-        if !self.can_coalesce(&next) {
-            return Err(next);
-        }
-        let next = *next;
-
-        self.facts.notifications.extend(next.facts.notifications);
-        self.facts.runtime_events.extend(next.facts.runtime_events);
-        self.facts.trace_events.extend(next.facts.trace_events);
-        self.facts.context = merge_context_mutations(self.facts.context.take(), next.facts.context);
-        if next.facts.turn_transition.is_some() {
-            self.facts.turn_transition = next.facts.turn_transition;
-        }
-        if next.facts.projection_snapshot.is_some() {
-            self.facts.projection_snapshot = next.facts.projection_snapshot;
-        }
-        self.facts.turn_id = next.facts.turn_id;
-        self.facts.through_revision = next.facts.through_revision;
-        self.facts.revision = next.facts.revision;
-        self.next_state = next.next_state;
-        self.mutation = next.mutation;
-        Ok(())
-    }
-
-    fn can_coalesce(&self, next: &Self) -> bool {
-        let common_boundary = self.persistence == PersistenceClass::Coalescible
-            && next.persistence == PersistenceClass::Coalescible
-            && self.agent_id == next.agent_id
-            && next.expected_revision == Some(self.facts.revision)
-            && self.facts.turn_id == next.facts.turn_id
-            && self.facts.inference.is_none()
-            && next.facts.inference.is_none()
-            && self.facts.submission.is_none()
-            && next.facts.submission.is_none()
-            && !contains_turn_start(&self.facts.runtime_events)
-            && !contains_turn_start(&next.facts.runtime_events)
-            && !contains_turn_terminal(&self.facts.runtime_events)
-            && !contains_turn_terminal(&next.facts.runtime_events);
-        if !common_boundary {
-            return false;
-        }
-        match (&self.mutation, &next.mutation) {
-            (ThreadMutation::AppendTrace, ThreadMutation::AppendTrace) => {
-                self.facts.context.is_none()
-                    && next.facts.context.is_none()
-                    && self.facts.runtime_events.is_empty()
-                    && next.facts.runtime_events.is_empty()
-            }
-            (ThreadMutation::SnapshotAndQueue, ThreadMutation::SnapshotAndQueue) => {
-                coalescing_subject(&self.facts.notifications)
-                    == coalescing_subject(&next.facts.notifications)
-                    && coalescing_subject(&self.facts.notifications).is_some()
-            }
-            (ThreadMutation::SnapshotAndQueue, ThreadMutation::AppendTrace)
-            | (ThreadMutation::AppendTrace, ThreadMutation::SnapshotAndQueue)
-            | (ThreadMutation::ReplaceThread { .. }, _)
-            | (_, ThreadMutation::ReplaceThread { .. })
-            | (ThreadMutation::AppendThreadNotifications { .. }, _)
-            | (_, ThreadMutation::AppendThreadNotifications { .. }) => false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CoalescingSubject<'a> {
-    Runtime,
-    Item(&'a str),
-}
-
-fn coalescing_subject(
-    notifications: &[ThreadNotificationEnvelope],
-) -> Option<CoalescingSubject<'_>> {
-    let mut item_id = None;
-    for envelope in notifications {
-        match &envelope.notification {
-            ThreadNotification::ItemDelta { delta } => match item_id {
-                Some(current) if current != delta.item_id => return None,
-                Some(_) => {}
-                None => item_id = Some(delta.item_id.as_str()),
-            },
-            ThreadNotification::ThreadRuntimeUpdated { .. } => {}
-            ThreadNotification::TurnStarted { .. }
-            | ThreadNotification::TurnUpdated { .. }
-            | ThreadNotification::TurnCompleted { .. }
-            | ThreadNotification::ItemStarted { .. }
-            | ThreadNotification::ItemCompleted { .. }
-            | ThreadNotification::InteractionChanged { .. }
-            | ThreadNotification::Lagged { .. } => return None,
-        }
-    }
-    Some(item_id.map_or(CoalescingSubject::Runtime, CoalescingSubject::Item))
-}
-
-fn contains_turn_start(events: &[AgentRuntimeEvent]) -> bool {
-    events
-        .iter()
-        .any(|event| matches!(event.kind, super::AgentRuntimeEventKind::TurnStarted { .. }))
-}
-
-fn contains_turn_terminal(events: &[AgentRuntimeEvent]) -> bool {
-    events.iter().any(|event| {
-        matches!(
-            event.kind,
-            super::AgentRuntimeEventKind::TurnFinished { .. }
-                | super::AgentRuntimeEventKind::RecoveryCancelledTurn { .. }
-                | super::AgentRuntimeEventKind::Faulted { .. }
-        )
-    })
-}
-
-fn merge_context_mutations(
-    previous: Option<ThreadContextMutation>,
-    next: Option<ThreadContextMutation>,
-) -> Option<ThreadContextMutation> {
-    match (previous, next) {
-        (None, next) => next,
-        (previous, None) => previous,
-        (
-            Some(ThreadContextMutation::Append { mut items }),
-            Some(ThreadContextMutation::Append { items: suffix }),
-        ) => {
-            items.extend(suffix);
-            Some(ThreadContextMutation::Append { items })
-        }
-        (
-            Some(ThreadContextMutation::Replace { mut items }),
-            Some(ThreadContextMutation::Append { items: suffix }),
-        ) => {
-            items.extend(suffix);
-            Some(ThreadContextMutation::Replace { items })
-        }
-        (_, Some(replacement @ ThreadContextMutation::Replace { .. })) => Some(replacement),
-    }
 }
 
 /// 一次提交中需要原子持久化的 typed Thread 变更。
@@ -402,13 +261,10 @@ impl AgentCommittedEvent {
     }
 }
 
-/// ThreadActor 使用的持久化端口。
+/// 会话的冷存储端口。活动内存不依赖数据库写入结果。
 ///
-/// 内存 snapshot 是进程内唯一权威实例。`commit` 只为已经决定的事实执行
-/// 进程内待落库队列 admission；admission 成功后业务转换才能对外可见，后台
-/// SQLite 结果不得回滚已接受的业务转换。`await_durable` 与
-/// `pending_commit_count` 只供淘汰、不可逆外部动作和正常关机使用；耐久屏障
-/// 只有显式目标修订号一种形式，全局排空属于宿主关机流程。
+/// `record_committed` 同步保留已提交事实，不执行 I/O、不等待容量，存储故障只由
+/// 独立健康状态报告。冷恢复与显式耐久屏障可以失败，但不能回滚活动会话。
 pub trait ThreadRepository: Clone + Send + Sync + 'static {
     type Error: Error + Send + Sync + 'static;
 
@@ -425,10 +281,11 @@ pub trait ThreadRepository: Clone + Send + Sync + 'static {
         thread_id: &super::ThreadId,
     ) -> impl Future<Output = std::result::Result<Option<RestoredAgentRuntime>, Self::Error>> + Send;
 
-    fn commit(
-        &self,
-        commit: ThreadCommit,
-    ) -> impl Future<Output = std::result::Result<(), Self::Error>> + Send;
+    /// 保留已提交内存事实供异步保存；不得等待存储或拒绝已提交事实。
+    fn record_committed(&self, commit: ThreadCommit);
+
+    /// 只读检查指定内存版本是否已保存，不等待后台写入。
+    fn is_durable(&self, thread_id: &super::ThreadId, revision: u64) -> bool;
 
     /// 等待指定 Thread 的目标运行时修订号完成耐久化。
     ///

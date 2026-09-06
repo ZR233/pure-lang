@@ -262,7 +262,6 @@ impl ToolResult {
                 ToolDirective::OutputArtifacts { artifacts } => Some(artifacts.as_slice()),
                 ToolDirective::InteractionRequested { .. }
                 | ToolDirective::SkillActivated { .. }
-                | ToolDirective::ToolResultRevision { .. }
                 | ToolDirective::RevealTools { .. }
                 | ToolDirective::AuditMetadata { .. }
                 | ToolDirective::ExecutionFailed
@@ -289,7 +288,6 @@ impl ToolResult {
             } => Some(content.as_str()),
             ToolDirective::InteractionRequested { .. }
             | ToolDirective::SkillActivated { .. }
-            | ToolDirective::ToolResultRevision { .. }
             | ToolDirective::OutputArtifacts { .. }
             | ToolDirective::RevealTools { .. }
             | ToolDirective::AuditMetadata { .. }
