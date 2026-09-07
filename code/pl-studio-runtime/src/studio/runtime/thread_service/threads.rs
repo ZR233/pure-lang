@@ -786,38 +786,26 @@ mod tests {
             .append_worktree_recovery_issues(&mut issues)
             .await
             .unwrap();
-        let root_probe = tokio::process::Command::new("git")
-            .args(["rev-parse", "--show-toplevel"])
-            .current_dir(workspace.path())
-            .output()
-            .await
-            .unwrap();
-        let registered_probe = tokio::process::Command::new("git")
-            .args(["worktree", "list", "--porcelain", "-z"])
-            .current_dir(workspace.path())
-            .output()
-            .await
-            .unwrap();
+        let expected_orphan = dunce::canonicalize(&orphan).unwrap();
+        const MESSAGE_PREFIX: &str = "Unregistered worktree preserved at ";
+        const MESSAGE_SUFFIX: &str = "; ownership must be inspected before explicit cleanup";
+        let reported = issues.iter().any(|issue| {
+            let Some(reported_path) = issue
+                .message
+                .strip_prefix(MESSAGE_PREFIX)
+                .and_then(|message| message.strip_suffix(MESSAGE_SUFFIX))
+            else {
+                return false;
+            };
+            issue.worktree.is_none()
+                && matches!(
+                    dunce::canonicalize(reported_path),
+                    Ok(path) if path == expected_orphan
+                )
+        });
         assert!(
-            issues.iter().any(
-                |issue| issue.message.contains(&orphan.display().to_string())
-                    && issue.worktree.is_none()
-            ),
-            concat!(
-                "unregistered physical worktree must be reported without inventing ownership;\n",
-                "orphan={:?}\nissues={:#?}\nleases={:?}\n",
-                "root_status={} root_stdout={:?} root_stderr={:?}\n",
-                "registered_status={} registered_stdout={:?} registered_stderr={:?}",
-            ),
-            orphan,
-            issues,
-            runtime.agent_facility.worktrees.snapshot(),
-            root_probe.status,
-            String::from_utf8_lossy(&root_probe.stdout),
-            String::from_utf8_lossy(&root_probe.stderr),
-            registered_probe.status,
-            String::from_utf8_lossy(&registered_probe.stdout),
-            String::from_utf8_lossy(&registered_probe.stderr),
+            reported,
+            "unregistered physical worktree must be reported without inventing ownership; orphan={orphan:?}; issues={issues:#?}"
         );
         assert!(orphan.exists());
         runtime.shutdown().await;
