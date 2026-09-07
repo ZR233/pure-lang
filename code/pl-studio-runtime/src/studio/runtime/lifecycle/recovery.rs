@@ -281,14 +281,15 @@ impl StudioRuntime {
     }
 }
 
+#[cfg(windows)]
 fn normalized_local_path(path: &Path) -> PathBuf {
     let path = dunce::simplified(path);
-    #[cfg(windows)]
-    {
-        return PathBuf::from(path.to_string_lossy().replace('\\', "/"));
-    }
-    #[cfg(not(windows))]
-    path.to_path_buf()
+    PathBuf::from(path.to_string_lossy().replace('\\', "/"))
+}
+
+#[cfg(not(windows))]
+fn normalized_local_path(path: &Path) -> PathBuf {
+    dunce::simplified(path).to_path_buf()
 }
 
 fn worktree_issue_id(child_id: &str) -> String {
