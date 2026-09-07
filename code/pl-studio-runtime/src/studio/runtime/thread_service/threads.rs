@@ -786,12 +786,38 @@ mod tests {
             .append_worktree_recovery_issues(&mut issues)
             .await
             .unwrap();
+        let root_probe = tokio::process::Command::new("git")
+            .args(["rev-parse", "--show-toplevel"])
+            .current_dir(workspace.path())
+            .output()
+            .await
+            .unwrap();
+        let registered_probe = tokio::process::Command::new("git")
+            .args(["worktree", "list", "--porcelain", "-z"])
+            .current_dir(workspace.path())
+            .output()
+            .await
+            .unwrap();
         assert!(
             issues.iter().any(
                 |issue| issue.message.contains(&orphan.display().to_string())
                     && issue.worktree.is_none()
             ),
-            "unregistered physical worktree must be reported without inventing ownership"
+            concat!(
+                "unregistered physical worktree must be reported without inventing ownership;\n",
+                "orphan={:?}\nissues={:#?}\nleases={:?}\n",
+                "root_status={} root_stdout={:?} root_stderr={:?}\n",
+                "registered_status={} registered_stdout={:?} registered_stderr={:?}",
+            ),
+            &orphan,
+            &issues,
+            runtime.agent_facility.worktrees.snapshot(),
+            root_probe.status,
+            String::from_utf8_lossy(&root_probe.stdout),
+            String::from_utf8_lossy(&root_probe.stderr),
+            registered_probe.status,
+            String::from_utf8_lossy(&registered_probe.stdout),
+            String::from_utf8_lossy(&registered_probe.stderr),
         );
         assert!(orphan.exists());
         runtime.shutdown().await;
