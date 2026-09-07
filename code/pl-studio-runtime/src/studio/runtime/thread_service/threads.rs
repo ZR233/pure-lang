@@ -767,9 +767,11 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(durable, Some(lease));
-        let orphan = workspace
-            .path()
-            .join(".pure/worktrees/orphan-root/orphan-child");
+        let orphan_root = dunce::simplified(workspace.path());
+        #[cfg(windows)]
+        let orphan_root =
+            std::path::PathBuf::from(orphan_root.to_string_lossy().replace('\\', "/"));
+        let orphan = orphan_root.join(".pure/worktrees/orphan-root/orphan-child");
         let created = tokio::process::Command::new("git")
             .args(["worktree", "add", "-b", "pure-agent-orphan-child"])
             .arg(&orphan)
@@ -784,12 +786,26 @@ mod tests {
             .append_worktree_recovery_issues(&mut issues)
             .await
             .unwrap();
+        let expected_orphan = dunce::canonicalize(&orphan).unwrap();
+        const MESSAGE_PREFIX: &str = "Unregistered worktree preserved at ";
+        const MESSAGE_SUFFIX: &str = "; ownership must be inspected before explicit cleanup";
+        let reported = issues.iter().any(|issue| {
+            let Some(reported_path) = issue
+                .message
+                .strip_prefix(MESSAGE_PREFIX)
+                .and_then(|message| message.strip_suffix(MESSAGE_SUFFIX))
+            else {
+                return false;
+            };
+            issue.worktree.is_none()
+                && matches!(
+                    dunce::canonicalize(reported_path),
+                    Ok(path) if path == expected_orphan
+                )
+        });
         assert!(
-            issues.iter().any(
-                |issue| issue.message.contains(&orphan.display().to_string())
-                    && issue.worktree.is_none()
-            ),
-            "unregistered physical worktree must be reported without inventing ownership"
+            reported,
+            "unregistered physical worktree must be reported without inventing ownership; orphan={orphan:?}; issues={issues:#?}"
         );
         assert!(orphan.exists());
         runtime.shutdown().await;
