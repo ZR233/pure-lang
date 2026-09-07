@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -47,8 +47,8 @@ impl StudioRuntime {
             .snapshot()
             .into_iter()
             .filter(|lease| lease.state != WorktreeLeaseState::Cleaned)
-            .map(|lease| PathBuf::from(lease.path))
-            .collect::<std::collections::BTreeSet<_>>();
+            .map(|lease| normalized_local_path(Path::new(&lease.path)))
+            .collect::<BTreeSet<_>>();
         for project in self.agent_facility.product_events.project_snapshot().await {
             if project.ssh_server_id.is_some() {
                 continue;
@@ -65,9 +65,9 @@ impl StudioRuntime {
             if !root.status.success() {
                 continue;
             }
-            let root = PathBuf::from(String::from_utf8(root.stdout)?.trim());
+            let root = normalized_local_path(Path::new(String::from_utf8(root.stdout)?.trim()));
             let managed = root.join(".pure/worktrees");
-            let mut found = std::collections::BTreeSet::new();
+            let mut found = BTreeSet::new();
             if let Ok(mut parents) = tokio::fs::read_dir(&managed).await {
                 while let Some(parent) = parents.next_entry().await? {
                     if !parent.file_type().await?.is_dir() {
@@ -75,7 +75,7 @@ impl StudioRuntime {
                     }
                     let mut children = tokio::fs::read_dir(parent.path()).await?;
                     while let Some(child) = children.next_entry().await? {
-                        found.insert(child.path());
+                        found.insert(normalized_local_path(&child.path()));
                     }
                 }
             }
@@ -92,7 +92,7 @@ impl StudioRuntime {
             );
             for field in registered.stdout.split(|byte| *byte == 0) {
                 if let Some(path) = field.strip_prefix(b"worktree ") {
-                    let path = PathBuf::from(std::str::from_utf8(path)?);
+                    let path = normalized_local_path(Path::new(std::str::from_utf8(path)?));
                     if path.starts_with(&managed) {
                         found.insert(path);
                     }
@@ -279,6 +279,16 @@ impl StudioRuntime {
         }
         Ok(())
     }
+}
+
+fn normalized_local_path(path: &Path) -> PathBuf {
+    let path = dunce::simplified(path);
+    #[cfg(windows)]
+    {
+        return PathBuf::from(path.to_string_lossy().replace('\\', "/"));
+    }
+    #[cfg(not(windows))]
+    path.to_path_buf()
 }
 
 fn worktree_issue_id(child_id: &str) -> String {
