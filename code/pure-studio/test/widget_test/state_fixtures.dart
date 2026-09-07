@@ -348,8 +348,8 @@ StudioState _stateWithPlannerModels() {
   );
 }
 
-/// canonical 快照中已把远端 [projectId] 作为选中项目的状态。
-/// 用于验证打开远端项目只有在 snapshot 采用该项目时才报告成功。
+/// canonical 快照中已经包含远端 [projectId] 的项目目录状态。
+/// Flutter 当前选择由 controller 的显式 selection intent 独立解析。
 StudioState _remoteProjectAdoptedState({
   String projectId = 'remote-project',
   String path = '/workspace',

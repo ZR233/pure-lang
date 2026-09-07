@@ -112,8 +112,10 @@ Studio 的“打开远程项目”窗口绑定一个已保存的 SSH 服务器�
 `user@host:path`，也不隐式创建服务器配置。初次进入仍浏览远端默认目录，之后的向上导航、
 子目录导航和手工路径都先通过 Studio 的 `browseRemoteDirectories` 取得 canonical listing；该
 typed 功能在远端协议层使用 `browseDirectories`。只有与当前输入一致、已经验证的 canonical path
-才能提交给 Studio 的 `openRemoteProject`，再由远端协议的 `openWorkspace` 打开。Studio controller
-拒绝新工作或未采用打开后的 canonical project snapshot 都不是成功，窗口不得因此关闭。
+才能提交给 Studio 的 `openRemoteProject`，再由远端协议的 `openWorkspace` 打开。后端 product
+snapshot 只拥有 canonical Project 目录，不拥有 Flutter 当前选择；Studio controller 只有在重新读取
+的目录中找到与打开结果同 id、同 SSH server、同 canonical path 的 Project，并由显式 selection
+intent 采用它之后才报告成功。拒绝新工作或 canonical Project 身份未被采用都不是成功，窗口不得因此关闭。
 
 浏览与打开操作必须串行化：pending 期间所有调用入口都拒绝重复或冲突请求，不能只依赖下一帧的
 按钮禁用状态。打开期间窗口不可通过取消、遮罩或系统返回动作关闭；浏览或打开失败必须保留窗口与

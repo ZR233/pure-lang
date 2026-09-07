@@ -1306,38 +1306,33 @@ void registerControllerStreamTests() {
     },
   );
 
+  test('openRemoteProject reports failure when canonical snapshot omits the project', () async {
+    final api = _FakeStudioApi(_emptyState())
+      ..selectProjectStates['remote-project'] = _emptyState();
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+    await container.read(studioControllerProvider.future);
+
+    final opened = await container
+        .read(studioControllerProvider.notifier)
+        .openRemoteProject('ssh-arm', '/workspace');
+
+    expect(opened, isFalse);
+    expect(api.openRemoteProjectCallCount, 1);
+    expect(
+      container.read(studioControllerProvider).requireValue.selectedProjectId,
+      'project-1',
+    );
+  });
+
   test(
-    'openRemoteProject reports failure when canonical snapshot does not adopt',
+    'openRemoteProject adopts canonical project without backend selection',
     () async {
-      // canonical snapshot 虽然列出远端项目，但仍选中本地项目；
-      // controller 不能用 selection intent 掩盖这个未采用状态。
       final api = _FakeStudioApi(_emptyState())
         ..selectProjectStates['remote-project'] = _remoteProjectAdoptedState()
-            .copyWith(selectedProjectId: 'project-1');
-      final container = ProviderContainer(
-        overrides: [studioApiProvider.overrideWithValue(api)],
-      );
-      addTearDown(container.dispose);
-      await container.read(studioControllerProvider.future);
-
-      final opened = await container
-          .read(studioControllerProvider.notifier)
-          .openRemoteProject('ssh-arm', '/workspace');
-
-      expect(opened, isFalse);
-      expect(api.openRemoteProjectCallCount, 1);
-      expect(
-        container.read(studioControllerProvider).requireValue.selectedProjectId,
-        'project-1',
-      );
-    },
-  );
-
-  test(
-    'openRemoteProject reports success only after canonical state adopts it',
-    () async {
-      final api = _FakeStudioApi(_emptyState())
-        ..selectProjectStates['remote-project'] = _remoteProjectAdoptedState();
+            .copyWith(selectedProjectId: null);
       final container = ProviderContainer(
         overrides: [studioApiProvider.overrideWithValue(api)],
       );
