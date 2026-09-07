@@ -9,7 +9,7 @@ use pl_core::{
 /// `complete` 记录完成事实并结束 turn。文件、命令、Git 和 Agent 能力始终保持可用。
 pub(super) fn studio_execution_policy(
     snapshot: &AgentSnapshot,
-    profiles: &[pl_protocol::AgentProfileSnapshot],
+    profiles: &[pl_core::AgentProfileSnapshot],
 ) -> AgentExecutionPolicy {
     let collaboration = if snapshot.identity.parent_id.is_none() {
         AgentAccessPolicy {
@@ -100,8 +100,8 @@ mod tests {
         assert_eq!(policy.finalization, TurnFinalizationPolicy::Direct);
     }
 
-    fn profile(profile_id: &str) -> pl_protocol::AgentProfileSnapshot {
-        pl_protocol::AgentProfileSnapshot {
+    fn profile(profile_id: &str) -> pl_core::AgentProfileSnapshot {
+        pl_core::AgentProfileSnapshot {
             profile_id: profile_id.to_string(),
             display_name: profile_id.to_string(),
             description: String::new(),
@@ -115,7 +115,7 @@ mod tests {
             content_hash: "hash".to_string(),
             system: true,
             enabled: true,
-            workspace_mode: pl_protocol::AgentWorkspaceMode::Unrestricted,
+            workspace_mode: pl_core::AgentWorkspaceMode::Unrestricted,
         }
     }
 

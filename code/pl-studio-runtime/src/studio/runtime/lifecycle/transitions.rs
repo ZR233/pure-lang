@@ -93,7 +93,7 @@ impl StudioRuntime {
                     .apply(StudioRuntimeCommand::FailInitialize {
                         expected_revision: self.runtime_state.snapshot().revision,
                         at: unix_seconds(),
-                        error: pl_protocol::StateError {
+                        error: pl_core::StateError {
                             code: "studioInitializationFailed".to_string(),
                             message: format!("{error:#}"),
                             retryable: true,
@@ -201,7 +201,7 @@ impl StudioRuntime {
                 .apply(StudioRuntimeCommand::FailShutdown {
                     expected_revision: self.runtime_state.snapshot().revision,
                     at: unix_seconds(),
-                    error: pl_protocol::StateError {
+                    error: pl_core::StateError {
                         code: "studioShutdownFailed".to_string(),
                         message: format!("{error:#}"),
                         retryable: true,

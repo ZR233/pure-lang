@@ -1,7 +1,7 @@
 //! Thread 目录：活动热集合维护、SQLite 冷分页 overlay 与目录事实的命令提交。
 
 use anyhow::Result;
-use pl_protocol::Thread;
+use pl_core::Thread;
 
 use crate::studio::merged_page::{HotColdEntry, merge_page_desc};
 use crate::studio::store::directory::{
@@ -34,8 +34,13 @@ impl ProductEventBus {
     pub(in crate::studio) fn record_attachments(
         &self,
         records: Vec<crate::studio::AttachmentRecord>,
-    ) {
-        self.writer.record_attachments(records);
+    ) -> Result<()> {
+        for record in records {
+            self.store
+                .sessions()
+                .register_resource(&record.thread_id, &record.id, &record)?;
+        }
+        Ok(())
     }
 
     pub async fn read_thread_directory(&self) -> Result<StudioThreadDirectoryState> {
@@ -247,7 +252,7 @@ impl ProductEventBus {
             .ok_or_else(|| anyhow::anyhow!("unregistered child is not resident: {id}"))?;
         let state = pl_core::AgentState::idle()
             .decide(pl_core::AgentCommand::Fault {
-                error: pl_protocol::StateError {
+                error: pl_core::StateError {
                     code: "agentRegistrationFailed".into(),
                     message: message.into(),
                     retryable: false,
@@ -256,7 +261,7 @@ impl ProductEventBus {
                 classification: pl_core::AgentFaultClassification::RecoverableRuntime,
             })?
             .next_state;
-        thread.status = pl_protocol::ThreadStatus::Faulted;
+        thread.status = pl_core::ThreadStatus::Faulted;
         thread.updated_at = crate::studio::unix_seconds();
         let delta = DirectoryDelta {
             unregistered_faults: vec![crate::studio::store::directory::UnregisteredChildFault {
@@ -292,7 +297,7 @@ impl ProductEventBus {
 
 #[cfg(test)]
 mod tests {
-    use pl_protocol::Thread;
+    use pl_core::Thread;
 
     use crate::studio::StudioStore;
     use crate::studio::ids::unix_seconds;
@@ -305,7 +310,7 @@ mod tests {
                 .create_thread(
                     project_id,
                     &format!("Session {index}"),
-                    pl_protocol::ThreadModeId::simple(),
+                    pl_core::ThreadModeId::simple(),
                 )
                 .await
                 .expect("thread");

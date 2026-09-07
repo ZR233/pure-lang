@@ -12,7 +12,7 @@ use crate::PureError;
 use crate::studio::PersistenceState;
 
 use super::apply::apply_batch;
-use super::durability::{advance_batch_durability, complete_applied_batch};
+use super::durability::complete_applied_batch;
 use super::handle::WriterShared;
 use super::queue::{
     FAST_BATCH_RETRIES, FLUSH_INTERVAL, MAX_BATCH_COMMITS, MAX_RETRY_BACKOFF, PendingBatch,
@@ -22,10 +22,6 @@ use super::state::{fail_barriers, publish_blocked, publish_degraded, update_afte
 
 #[derive(Debug)]
 pub(super) enum BatchError {
-    /// 内存是唯一 writer，revision 冲突属于内部错误，不得重试。
-    Conflict {
-        actual_revision: Option<u64>,
-    },
     RetryableStore(PureError),
     BlockedStore(PureError),
 }
@@ -61,7 +57,6 @@ pub(super) async fn supervise_writer(shared: Arc<WriterShared>, pending_commits:
 
 async fn run_writer(shared: Arc<WriterShared>, pending_commits: Arc<AtomicUsize>) {
     let mut retries = 0usize;
-    let mut transcript_cache = super::super::context::TranscriptCache::default();
     loop {
         let stopping = shared.stopping.load(Ordering::Acquire);
         let (queued_commits, flush_immediately, oldest_accepted_at) = queued_work(&shared);
@@ -91,13 +86,8 @@ async fn run_writer(shared: Arc<WriterShared>, pending_commits: Arc<AtomicUsize>
         let outcome = if commit_count == 0 {
             Ok(())
         } else {
-            apply_batch(&shared.store, &batch, &mut transcript_cache).await
+            apply_batch(&shared.store, &batch).await
         };
-        // An ambiguous commit error may mean SQLite committed before acknowledgement.
-        // Reload on retry instead of trusting an older in-process prefix.
-        if outcome.is_err() {
-            transcript_cache = Default::default();
-        }
         match outcome {
             Ok(()) => {
                 #[cfg(test)]
@@ -111,7 +101,6 @@ async fn run_writer(shared: Arc<WriterShared>, pending_commits: Arc<AtomicUsize>
                 );
                 retries = 0;
                 clear_inflight(&shared);
-                advance_batch_durability(&shared, &batch);
                 pending_commits.fetch_sub(commit_count, Ordering::AcqRel);
                 complete_applied_batch(batch);
                 update_after_success(
@@ -124,21 +113,6 @@ async fn run_writer(shared: Arc<WriterShared>, pending_commits: Arc<AtomicUsize>
                     elapsed_ms = started_at.elapsed().as_millis() as u64,
                     "write-behind batch applied"
                 );
-            }
-            Err(BatchError::Conflict { actual_revision }) => {
-                requeue_batch(&shared, batch);
-                publish_blocked(
-                    &shared,
-                    &format!(
-                        "write-behind revision conflict (actual revision {actual_revision:?}); \
-                         memory must be the sole writer"
-                    ),
-                );
-                if shared.stopping.load(Ordering::Acquire) {
-                    fail_barriers(&shared, "write-behind writer is blocked");
-                    return;
-                }
-                shared.retry_notify.notified().await;
             }
             Err(BatchError::BlockedStore(error)) => {
                 requeue_batch(&shared, batch);

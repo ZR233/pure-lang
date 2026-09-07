@@ -69,7 +69,7 @@ impl StudioRuntime {
     /// 订阅是显式激活命令：未驻留的 Thread 在这里按需恢复。
     pub async fn subscribe_thread(
         &self,
-        request: pl_protocol::ThreadSubscriptionRequest,
+        request: pl_core::ThreadSubscriptionRequest,
     ) -> Result<pl_core::ThreadEventSubscription> {
         let (handle, _) = self.ensure_thread_agent(&request.thread_id).await?;
         let thread_id = request.thread_id.clone();
@@ -83,7 +83,7 @@ impl StudioRuntime {
     }
 
     /// 读取包含尚未终态化 delta overlay 的 authoritative Thread snapshot。
-    pub async fn thread_snapshot(&self, thread_id: &str) -> Result<pl_protocol::ThreadSnapshot> {
+    pub async fn thread_snapshot(&self, thread_id: &str) -> Result<pl_core::ThreadSnapshot> {
         let (handle, agent_id) = self.ensure_thread_agent(thread_id).await?;
         let mut snapshot = handle
             .thread_snapshot(&agent_id)
@@ -121,7 +121,7 @@ impl StudioRuntime {
     pub(in crate::studio::runtime) async fn read_protocol_thread(
         &self,
         thread_id: &str,
-    ) -> Result<pl_protocol::Thread> {
+    ) -> Result<pl_core::Thread> {
         if let Some(thread) = self
             .agent_facility
             .product_events
@@ -133,7 +133,7 @@ impl StudioRuntime {
         let Some(record) = self.store.read_thread(thread_id).await? else {
             return Err(anyhow::anyhow!("selected Thread not found"));
         };
-        Ok(pl_protocol::Thread::from(record))
+        Ok(pl_core::Thread::from(record))
     }
 
     pub(super) async fn start_lsp_state_watcher(&self) {
@@ -249,8 +249,18 @@ impl StudioRuntime {
 
     /// 排空 agent framework 的 write-behind 队列并停止 writer。
     pub(super) async fn flush_persistence(&self) -> Result<()> {
+        self.store
+            .sessions()
+            .shutdown()
+            .await
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
         let repository = self.agent_facility.persistence.lock().await.clone();
         if let Some(repository) = repository {
+            repository
+                .writer()
+                .flush()
+                .await
+                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
             repository
                 .writer()
                 .shutdown()
@@ -265,6 +275,7 @@ impl StudioRuntime {
     pub async fn pending_persistence_commits(&self) -> usize {
         let repository = self.agent_facility.persistence.lock().await.clone();
         repository.map_or(0, |repository| repository.writer().pending_commit_count())
+            + self.store.sessions().persistence().pending_commits
     }
 }
 

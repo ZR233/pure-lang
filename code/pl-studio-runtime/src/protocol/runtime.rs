@@ -1,7 +1,7 @@
 //! Runtime health projections shared by the Studio bridge.
 //!
 //! Workflow state is intentionally not duplicated here: it is projected from the
-//! canonical `AgentWorkingState` into `pl_protocol::ThreadRuntimeSnapshot`.
+//! canonical `AgentWorkingState` into `pl_core::ThreadRuntimeSnapshot`.
 
 use serde::{Deserialize, Serialize};
 
@@ -17,8 +17,8 @@ pub struct StudioAgentDirectoryEntry {
     pub task: String,
     pub summary: Option<String>,
     pub depth: u32,
-    pub state: pl_protocol::AgentState,
-    pub progress: Option<pl_protocol::AgentProgressCheckpoint>,
+    pub state: pl_core::AgentState,
+    pub progress: Option<pl_core::AgentProgressCheckpoint>,
     pub updated_at: i64,
     pub summary_age_seconds: u64,
 }

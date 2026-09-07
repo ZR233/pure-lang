@@ -17,7 +17,7 @@ pub struct ThreadRecord {
     pub id: String,
     pub project_id: String,
     pub title: String,
-    pub mode: pl_protocol::ThreadModeId,
+    pub mode: pl_core::ThreadModeId,
     pub created_at: i64,
     pub updated_at: i64,
     pub visibility: ThreadVisibility,
@@ -26,7 +26,7 @@ pub struct ThreadRecord {
     pub thread_kind: ThreadKind,
     pub agent_path: String,
     pub role: String,
-    pub status: pl_protocol::ThreadStatus,
+    pub status: pl_core::ThreadStatus,
     pub summary: Option<String>,
     pub error: Option<String>,
     pub runtime_updated_at: Option<i64>,
@@ -34,7 +34,7 @@ pub struct ThreadRecord {
 
 impl ThreadRecord {
     /// 从目录事实构造记录（创建命令返回值用）；runtime 派生列取缺省值。
-    pub(in crate::studio) fn from_directory_thread(thread: pl_protocol::Thread) -> Self {
+    pub(in crate::studio) fn from_directory_thread(thread: pl_core::Thread) -> Self {
         let thread_kind = if thread.parent_thread_id.is_some() {
             ThreadKind::Agent
         } else {
@@ -65,7 +65,7 @@ impl ThreadRecord {
     }
 }
 
-impl From<ThreadRecord> for pl_protocol::Thread {
+impl From<ThreadRecord> for pl_core::Thread {
     fn from(value: ThreadRecord) -> Self {
         Self {
             id: value.id,
@@ -116,7 +116,8 @@ impl ThreadVisibility {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AttachmentRecord {
     pub id: String,
     pub thread_id: String,
@@ -129,4 +130,9 @@ pub struct AttachmentRecord {
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub created_at: i64,
+}
+
+impl pl_core::session::entry::SessionEntryPayload for AttachmentRecord {
+    const TYPE_ID: &'static str = "studio.attachment";
+    const SCHEMA_VERSION: u32 = 1;
 }

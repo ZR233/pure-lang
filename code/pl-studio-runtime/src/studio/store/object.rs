@@ -2,7 +2,6 @@
 
 use anyhow::{Context, Result, bail};
 use pl_core::canonical_content_hash;
-use pl_protocol::AgentWorkingState;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel,
     QueryFilter,
@@ -23,65 +22,6 @@ pub(in crate::studio) trait PersistedStudioObject: Sized {
     fn revision(&self) -> u64;
     fn to_persistence_dto(&self) -> Self::PersistenceDto;
     fn from_persistence_dto(dto: Self::PersistenceDto) -> Result<Self>;
-}
-
-#[derive(Serialize, serde::Deserialize)]
-#[serde(transparent)]
-pub(in crate::studio) struct AgentWorkingStateDto(AgentWorkingState);
-
-impl PersistedStudioObject for AgentWorkingState {
-    type PersistenceDto = AgentWorkingStateDto;
-
-    const OWNER_KIND: &'static str = "thread";
-    const OBJECT_KIND: &'static str = "agentWorkingState";
-    const SCHEMA_VERSION: i64 = 1;
-
-    fn revision(&self) -> u64 {
-        self.revision
-    }
-
-    fn to_persistence_dto(&self) -> Self::PersistenceDto {
-        AgentWorkingStateDto(self.clone())
-    }
-
-    fn from_persistence_dto(dto: Self::PersistenceDto) -> Result<Self> {
-        Ok(dto.0)
-    }
-}
-
-/// 最近一次成功应用的 Thread typed commit receipt。
-///
-/// receipt 使 worker 能区分“事务已提交但确认丢失”的精确重试与同 revision
-/// 不同内容的内部冲突，不把编码结果带回热状态。
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(in crate::studio) struct ThreadCommitReceipt {
-    pub revision: u64,
-    pub payload_hash: String,
-}
-
-#[derive(Serialize, serde::Deserialize)]
-#[serde(transparent)]
-pub(in crate::studio) struct ThreadCommitReceiptDto(ThreadCommitReceipt);
-
-impl PersistedStudioObject for ThreadCommitReceipt {
-    type PersistenceDto = ThreadCommitReceiptDto;
-
-    const OWNER_KIND: &'static str = "thread";
-    const OBJECT_KIND: &'static str = "commitReceipt";
-    const SCHEMA_VERSION: i64 = 1;
-
-    fn revision(&self) -> u64 {
-        self.revision
-    }
-
-    fn to_persistence_dto(&self) -> Self::PersistenceDto {
-        ThreadCommitReceiptDto(self.clone())
-    }
-
-    fn from_persistence_dto(dto: Self::PersistenceDto) -> Result<Self> {
-        Ok(dto.0)
-    }
 }
 
 pub(in crate::studio) async fn load_object<T>(
@@ -206,33 +146,4 @@ where
     ))
     .one(db)
     .await?)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn additive_working_state_fields_use_serde_defaults_without_a_sqlite_migration() {
-        let payload_json = r#"{"revision":7}"#.to_string();
-        let restored = decode_object::<AgentWorkingState>(studio_object::Model {
-            owner_kind: "thread".to_string(),
-            owner_id: "thread-additive".to_string(),
-            object_kind: "agentWorkingState".to_string(),
-            revision: 7,
-            schema_version: 1,
-            payload_hash: canonical_content_hash(payload_json.as_bytes()),
-            payload_json,
-            updated_at: 1,
-        })
-        .expect("older additive object payload must decode");
-
-        assert_eq!(
-            restored,
-            AgentWorkingState {
-                revision: 7,
-                ..AgentWorkingState::default()
-            }
-        );
-    }
 }

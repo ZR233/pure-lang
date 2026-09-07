@@ -2,8 +2,10 @@
 
 ## 19.1 数据库
 
-Studio 默认使用 `~/.pure/studio/studio.sqlite`。统一工作流版本采用破坏性 schema 重建：旧本地项目、
-Thread、附件和 Task 历史不迁移。启动前取得 Studio home 的跨进程独占 lock；数据库使用 WAL、foreign
+Studio 产品数据使用 `~/.pure/studio/studio.sqlite`，会话使用同目录的 `sessions.sqlite`。
+拆库升级清空旧会话但保留项目与配置，不允许通过整库重建清理会话。
+统一条目契约见 [25-session-entry-storage.md](./25-session-entry-storage.md)。
+启动前取得 Studio home 的跨进程独占 lock；数据库使用 WAL、foreign
 keys、busy timeout 与串行 write-behind transaction。
 
 核心持久化只包含项目、Thread、Turn/input、Item、Interaction、working state、附件、设置、观测缓存与
@@ -57,13 +59,12 @@ artifact 保留 workflow snapshot、GUI/Driver 日志、截图、文件 diff、�
 工具流式 trace 已分配的 item identity 在执行与输出期间保持不变。provider item ID 后到时只补充
 provider identity，不重命名 canonical trace item；后续命令输出必须发布到已存在的 canonical item。
 
-上下文段恢复必须验证每段 payload hash 和 resulting prefix hash；前缀 JSON 数组摘要以增量方式
-推进，不能对每一段重新序列化全部既有前缀。保留全部完整性校验，同时避免长会话在单连接 SQLite
-事务中产生二次复杂度并阻塞生命周期读写。
+上下文恢复验证每个条目的内容摘要、信封与索引一致性、连续 ordinal，以及同一 checkpoint 的
+transcript manifest 总数；中间缺口和尾部丢失都必须失败关闭。追加只写入新增条目，整体替换与新
+manifest 在同一事务提交，不反复编码完整历史前缀。
 
-后台 writer 缓存已经确认的 transcript 前缀、摘要和段 ordinal；每个事务使用暂存副本，
-提交成功后才推进缓存。事务失败或确认结果不明时清空缓存，重试从冷数据完整校验恢复。
-运行中的 actor 从不读取这个后台缓存。
+后台 writer 通过 revision receipt 识别已保存的批次前缀；事务失败或确认结果不明时保留不可变
+待保存事实并幂等重试。后台编码结果与 SQLite 查询结果不作为活动 actor 的第二份热状态。
 
 通用协作 ownership 约束 LRU：未关闭的 child 与仍拥有未关闭 child 的 parent 保持驻留，
 不依赖任务模式、角色名或返工计数。关闭后可在全部事实耐久且无其他活动引用时转为冷历史。

@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 use pl_core::ThreadHotHistory;
-use pl_protocol::{ThreadContextDisposition, ThreadItem, ThreadTurnHistory, ThreadTurnPage, Turn};
+use pl_core::{ThreadContextDisposition, ThreadItem, ThreadTurnHistory, ThreadTurnPage, Turn};
 
 use crate::studio::StudioRuntime;
 use crate::studio::merged_page::{HotColdEntry, overlay_cold_page};
@@ -155,7 +155,7 @@ fn hot_items_by_turn(items: Vec<ThreadItem>) -> HashMap<String, Vec<ThreadItem>>
 
 #[cfg(test)]
 mod tests {
-    use pl_protocol::{ThreadContentLifecycle, ThreadItemState, ThreadTextChannel, ThreadTextItem};
+    use pl_core::{ThreadContentLifecycle, ThreadItemState, ThreadTextChannel, ThreadTextItem};
 
     use super::*;
 

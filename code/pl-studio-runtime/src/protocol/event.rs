@@ -1,4 +1,4 @@
-use pl_protocol::{ObservedResource, Thread, ThreadModeCatalogSnapshot};
+use pl_core::{ObservedResource, Thread, ThreadModeCatalogSnapshot};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -124,7 +124,7 @@ pub struct StudioModelPerformanceSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct StudioSessionCostSnapshot {
     pub root_thread_id: String,
-    pub estimated_costs: Vec<pl_protocol::RuntimeCostAmount>,
+    pub estimated_costs: Vec<pl_core::RuntimeCostAmount>,
     pub has_unpriced_usage: bool,
 }
 

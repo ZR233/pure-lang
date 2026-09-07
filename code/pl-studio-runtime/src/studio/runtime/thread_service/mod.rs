@@ -14,7 +14,7 @@ impl StudioRuntime {
         project_id: String,
         request: pl_protocol::studio::CreateThreadRequest,
     ) -> Result<StudioStartNewThreadResponse> {
-        let mode = pl_protocol::ThreadModeId::from_label(request.mode.trim()).map_err(|_| {
+        let mode = pl_core::ThreadModeId::from_label(request.mode.trim()).map_err(|_| {
             anyhow::Error::new(pl_protocol::studio::StudioError::invalid_argument(
                 "mode must be an available mode.* id",
             ))

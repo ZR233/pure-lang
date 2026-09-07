@@ -22,7 +22,7 @@ pub(crate) use view::settings_snapshot;
 
 impl StudioRuntime {
     /// Reads the canonical built-in provider and model catalog.
-    pub fn load_provider_catalog(&self) -> Result<pl_protocol::ProviderCatalogSnapshot> {
+    pub fn load_provider_catalog(&self) -> Result<pl_core::ProviderCatalogSnapshot> {
         Ok(crate::builtin_provider_catalog().snapshot()?)
     }
 
@@ -62,7 +62,7 @@ impl StudioRuntime {
                 config.instructions.user = input.user;
                 config.instructions.project_doc_max_bytes =
                     usize::try_from(input.project_doc_max_bytes).map_err(|_| {
-                        pl_protocol::PureError::ConfigError(
+                        pl_core::PureError::ConfigError(
                             "projectDocMaxBytes exceeds this platform".to_string(),
                         )
                     })?;

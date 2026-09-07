@@ -52,7 +52,7 @@ impl StudioRuntime {
             let _command = self.external_runtimes.lsp_state.command().await;
             self.external_runtimes
                 .lsp_state
-                .begin(pl_protocol::StateOperation::Activate)
+                .begin(pl_core::StateOperation::Activate)
                 .await?;
             self.external_runtimes
                 .lsp
@@ -114,7 +114,7 @@ impl StudioRuntime {
         let _command = self.external_runtimes.lsp_state.command().await;
         self.external_runtimes
             .lsp_state
-            .begin(pl_protocol::StateOperation::Activate)
+            .begin(pl_core::StateOperation::Activate)
             .await?;
         self.external_runtimes
             .lsp
@@ -179,7 +179,7 @@ impl StudioRuntime {
         let _command = self.external_runtimes.lsp_state.command().await;
         self.external_runtimes
             .lsp_state
-            .begin(pl_protocol::StateOperation::Probe)
+            .begin(pl_core::StateOperation::Probe)
             .await?;
         self.external_runtimes
             .lsp
@@ -195,7 +195,7 @@ impl StudioRuntime {
         let _command = self.external_runtimes.lsp_state.command().await;
         self.external_runtimes
             .lsp_state
-            .begin(pl_protocol::StateOperation::Repair)
+            .begin(pl_core::StateOperation::Repair)
             .await?;
         let result = self
             .external_runtimes
@@ -220,7 +220,7 @@ impl StudioRuntime {
         let _command = self.external_runtimes.lsp_state.command().await;
         self.external_runtimes
             .lsp_state
-            .begin(pl_protocol::StateOperation::Reset)
+            .begin(pl_core::StateOperation::Reset)
             .await?;
         let result = self
             .external_runtimes

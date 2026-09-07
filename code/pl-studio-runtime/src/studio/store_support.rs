@@ -10,7 +10,7 @@ use sea_orm::{ConnectionTrait, DatabaseConnection};
 
 use crate::studio::entity;
 
-pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 19;
+pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 20;
 
 pub(super) async fn initialize_studio_schema(db: &DatabaseConnection) -> Result<()> {
     create_thread_lifecycle_tables(db).await?;
@@ -18,9 +18,6 @@ pub(super) async fn initialize_studio_schema(db: &DatabaseConnection) -> Result<
         .register(entity::app_setting::Entity)
         .register(entity::ssh_server::Entity)
         .register(entity::project::Entity)
-        .register(entity::attachment::Entity)
-        .register(entity::thread_submission::Entity)
-        .register(entity::thread_context_segment::Entity)
         .register(entity::studio_object::Entity)
         .apply(db)
         .await?;
@@ -64,91 +61,6 @@ async fn create_thread_lifecycle_tables(db: &DatabaseConnection) -> Result<()> {
             FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
         );
 
-        CREATE TABLE IF NOT EXISTS thread_inputs (
-            id TEXT PRIMARY KEY NOT NULL,
-            thread_id TEXT NOT NULL,
-            mail_id TEXT NOT NULL UNIQUE,
-            turn_id TEXT NOT NULL,
-            content TEXT NOT NULL,
-            attachments_json TEXT NOT NULL CHECK (json_valid(attachments_json)),
-            metadata_json TEXT NOT NULL,
-            presentation TEXT NOT NULL,
-            state_json TEXT NOT NULL CHECK (json_valid(state_json)),
-            state_kind TEXT GENERATED ALWAYS AS (
-                json_extract(state_json, '$.kind')
-            ) STORED NOT NULL CHECK (state_kind IN ('pending', 'claimed', 'consumed')),
-            queue_ordinal INTEGER NOT NULL,
-            queued_at INTEGER NOT NULL,
-            FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE
-        );
-
-        CREATE TABLE IF NOT EXISTS turns (
-            id TEXT PRIMARY KEY NOT NULL,
-            thread_id TEXT NOT NULL,
-            ordinal INTEGER NOT NULL,
-            revision INTEGER NOT NULL CHECK (revision >= 0),
-            state_json TEXT NOT NULL CHECK (json_valid(state_json)),
-            state_kind TEXT GENERATED ALWAYS AS (
-                json_extract(state_json, '$.kind')
-            ) STORED NOT NULL CHECK (
-                state_kind IN (
-                    'queued', 'running', 'completed', 'cancelled', 'failed',
-                    'budgetLimited'
-                )
-            ),
-            model_json TEXT,
-            usage_json TEXT NOT NULL,
-            metadata_json TEXT,
-            updated_at INTEGER NOT NULL,
-            FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE
-        );
-
-        CREATE TABLE IF NOT EXISTS items (
-            id TEXT PRIMARY KEY NOT NULL,
-            thread_id TEXT NOT NULL,
-            turn_id TEXT NOT NULL,
-            ordinal INTEGER NOT NULL,
-            revision INTEGER NOT NULL CHECK (revision >= 0),
-            state_json TEXT NOT NULL CHECK (json_valid(state_json)),
-            state_kind TEXT GENERATED ALWAYS AS (
-                json_extract(state_json, '$.kind')
-            ) STORED NOT NULL CHECK (
-                state_kind IN (
-                    'text', 'thinking', 'tool', 'agent', 'turn', 'inference',
-                    'plan', 'skill', 'file', 'contextCompaction'
-                )
-            ),
-            created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL,
-            FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE,
-            FOREIGN KEY (turn_id) REFERENCES turns(id) ON DELETE CASCADE
-        );
-
-        CREATE TABLE IF NOT EXISTS interactions (
-            id TEXT PRIMARY KEY NOT NULL,
-            thread_id TEXT NOT NULL,
-            turn_id TEXT NOT NULL,
-            item_id TEXT,
-            tool_id TEXT,
-            agent_path TEXT,
-            revision INTEGER NOT NULL CHECK (revision >= 0),
-            purpose_json TEXT NOT NULL CHECK (json_valid(purpose_json)),
-            continuation_json TEXT NOT NULL CHECK (json_valid(continuation_json)),
-            state_json TEXT NOT NULL CHECK (json_valid(state_json)),
-            interaction_kind TEXT GENERATED ALWAYS AS (
-                json_extract(state_json, '$.kind')
-            ) STORED NOT NULL CHECK (
-                interaction_kind IN ('userInput', 'toolApproval')
-            ),
-            state_kind TEXT GENERATED ALWAYS AS (
-                json_extract(state_json, '$.data.state.kind')
-            ) STORED NOT NULL CHECK (
-                state_kind IN ('pending', 'resolved', 'cancelled', 'expired')
-            ),
-            created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL,
-            FOREIGN KEY (thread_id) REFERENCES threads(id) ON DELETE CASCADE
-        )
         "#,
     )
     .await?;
@@ -173,22 +85,8 @@ async fn set_schema_version(db: &impl ConnectionTrait) -> Result<()> {
 }
 
 async fn create_state_indexes(db: &DatabaseConnection) -> Result<()> {
-    create_attachment_indexes(db).await?;
     create_project_indexes(db).await?;
     let indexes = [
-        Index::create()
-            .name("idx_interactions_thread_state_updated")
-            .table(entity::interaction::Entity)
-            .col(entity::interaction::Column::ThreadId)
-            .col(entity::interaction::Column::StateKind)
-            .col((entity::interaction::Column::UpdatedAt, IndexOrder::Desc))
-            .to_owned(),
-        Index::create()
-            .name("idx_interactions_thread_turn")
-            .table(entity::interaction::Entity)
-            .col(entity::interaction::Column::ThreadId)
-            .col(entity::interaction::Column::TurnId)
-            .to_owned(),
         Index::create()
             .name("idx_threads_project_updated")
             .table(entity::thread::Entity)
@@ -203,62 +101,6 @@ async fn create_state_indexes(db: &DatabaseConnection) -> Result<()> {
             .col(entity::thread::Column::RootThreadId)
             .col(entity::thread::Column::ParentThreadId)
             .col(entity::thread::Column::CreatedAt)
-            .to_owned(),
-        Index::create()
-            .name("idx_thread_inputs_queue")
-            .table(entity::thread_input::Entity)
-            .col(entity::thread_input::Column::ThreadId)
-            .col(entity::thread_input::Column::StateKind)
-            .col(entity::thread_input::Column::QueueOrdinal)
-            .unique()
-            .to_owned(),
-        Index::create()
-            .name("idx_thread_submissions_ordinal")
-            .table(entity::thread_submission::Entity)
-            .col(entity::thread_submission::Column::ThreadId)
-            .col(entity::thread_submission::Column::Ordinal)
-            .unique()
-            .to_owned(),
-        Index::create()
-            .name("idx_turns_thread_ordinal")
-            .table(entity::turn::Entity)
-            .col(entity::turn::Column::ThreadId)
-            .col(entity::turn::Column::Ordinal)
-            .unique()
-            .to_owned(),
-        Index::create()
-            .name("idx_items_thread_ordinal")
-            .table(entity::item::Entity)
-            .col(entity::item::Column::ThreadId)
-            .col(entity::item::Column::Ordinal)
-            .unique()
-            .to_owned(),
-        Index::create()
-            .name("idx_items_turn_ordinal")
-            .table(entity::item::Entity)
-            .col(entity::item::Column::TurnId)
-            .col(entity::item::Column::Ordinal)
-            .to_owned(),
-        Index::create()
-            .name("idx_items_thread_state_kind_ordinal")
-            .table(entity::item::Entity)
-            .col(entity::item::Column::ThreadId)
-            .col(entity::item::Column::StateKind)
-            .col((entity::item::Column::Ordinal, IndexOrder::Desc))
-            .to_owned(),
-        Index::create()
-            .name("idx_thread_context_segments_thread_ordinal")
-            .table(entity::thread_context_segment::Entity)
-            .col(entity::thread_context_segment::Column::ThreadId)
-            .col(entity::thread_context_segment::Column::Ordinal)
-            .unique()
-            .to_owned(),
-        Index::create()
-            .name("idx_thread_context_segments_thread_revision")
-            .table(entity::thread_context_segment::Entity)
-            .col(entity::thread_context_segment::Column::ThreadId)
-            .col(entity::thread_context_segment::Column::Revision)
-            .unique()
             .to_owned(),
     ];
     for index in indexes {
@@ -287,17 +129,38 @@ async fn create_project_indexes(db: &impl ConnectionTrait) -> Result<()> {
     Ok(())
 }
 
-async fn create_attachment_indexes(db: &impl ConnectionTrait) -> Result<()> {
-    let index = Index::create()
-        .name("idx_attachments_thread_id")
-        .table(entity::attachment::Entity)
-        .col(entity::attachment::Column::ThreadId)
-        .to_owned();
+async fn execute_index(db: &DatabaseConnection, index: IndexCreateStatement) -> Result<()> {
     db.execute(&index).await?;
     Ok(())
 }
 
-async fn execute_index(db: &DatabaseConnection, index: IndexCreateStatement) -> Result<()> {
-    db.execute(&index).await?;
+/// One-time split: preserve all product facts and physical resources.
+pub(super) async fn upgrade_session_storage(db: &DatabaseConnection) -> Result<()> {
+    use sea_orm::{DatabaseBackend, Statement, TransactionTrait};
+    let tx = db.begin().await?;
+    let row = tx
+        .query_one_raw(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "PRAGMA user_version".to_owned(),
+        ))
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("missing Studio schema version"))?;
+    match row.try_get::<i64>("", "user_version")? {
+        20 => {}
+        19 => {
+            tx.execute_unprepared("DROP TABLE IF EXISTS attachments;
+                DROP TABLE IF EXISTS thread_inputs;
+                DROP TABLE IF EXISTS items;
+                DROP TABLE IF EXISTS interactions;
+                DROP TABLE IF EXISTS turns;
+                DROP TABLE IF EXISTS thread_submissions;
+                DROP TABLE IF EXISTS thread_context_segments;
+                DELETE FROM studio_objects WHERE object_kind IN ('agentWorkingState','commitReceipt','modelPerformance');
+                DELETE FROM threads;
+                PRAGMA user_version=20;").await?;
+        }
+        version => anyhow::bail!("unsupported Studio schema {version}; product data preserved"),
+    }
+    tx.commit().await?;
     Ok(())
 }

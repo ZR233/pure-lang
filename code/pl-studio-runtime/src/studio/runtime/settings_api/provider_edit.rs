@@ -1,9 +1,9 @@
 //! Provider 设置编辑：把 wire 层的 provider/model/role 更新解析为配置编辑对象。
 
 use anyhow::Result;
-use pl_model::completion::WebSearchMode;
-use pl_model::provider::{ProviderConnectionMode, ProviderWireProtocol};
-use pl_protocol::WebSearchContextSize;
+use pl_core::WebSearchContextSize;
+use pl_core::WebSearchMode;
+use pl_core::{ProviderConnectionMode, ProviderWireProtocol};
 use pl_protocol::studio::{
     ProviderModelConnectionUpdate, ProviderModelUpdate, ProviderSecretUpdate,
     ProviderSettingsUpdate, RoleSettingsUpdate, StudioError, UpdateWebSearchSettingsRequest,
@@ -48,9 +48,9 @@ pub(super) fn provider_edit(
         base_url: Some(input.base_url),
         bearer_token,
         pricing_mode: if input.pricing_enabled {
-            pl_protocol::PricingMode::Catalog
+            pl_core::PricingMode::Catalog
         } else {
-            pl_protocol::PricingMode::Disabled
+            pl_core::PricingMode::Disabled
         },
         default_model: input.default_model,
         custom_models: input
@@ -131,7 +131,7 @@ impl From<RoleSettingsUpdate> for RoleEdit {
 
 pub(super) fn web_search_config(
     request: UpdateWebSearchSettingsRequest,
-) -> Result<(u64, pl_model::completion::WebSearchConfig)> {
+) -> Result<(u64, pl_core::WebSearchConfig)> {
     let mode = match request.mode.trim() {
         "disabled" => WebSearchMode::Disabled,
         "cached" => WebSearchMode::Cached,
@@ -158,7 +158,7 @@ pub(super) fn web_search_config(
     };
     Ok((
         request.expected_revision,
-        pl_model::completion::WebSearchConfig {
+        pl_core::WebSearchConfig {
             mode,
             context_size,
             allowed_domains: normalized_string_list(request.allowed_domains),

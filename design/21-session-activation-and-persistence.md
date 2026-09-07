@@ -2,6 +2,9 @@
 
 ## 21.1 Activation 与唯一热状态
 
+会话内存与异步持久化统一由 `pl-core` 提供，SQLite 后端独立使用 `sessions.sqlite`。
+内置与下游数据共用 `SessionEntry` 存储信封，详见 `25-session-entry-storage.md`。
+
 Thread 是唯一会话 owner。用户选择 Thread、向冷 Thread 提交输入或后台 Agent 继续执行时，运行时
 通过显式 activation command 在同一个一致读视图中加载版本化 working state、有效 transcript、
 Timeline 项目与阶段报告、pending Interaction 与活动 Turn。所有校验完成后才一次性安装
@@ -20,8 +23,8 @@ receipt，不保存 Mode prompt 或完整图；恢复时以 `ThreadModeManager` 
 digest 规则由 [16-task-orchestration.md](./16-task-orchestration.md) 定义。
 
 热状态只持有领域对象，不持有 SeaORM entity 或数据库 DTO。一次 provider response 的 assistant
-tool call、tool result 与新 working state 必须在同一 Thread checkpoint 中提交；checkpoint 失败时
-三者共同回滚。模型下一 Turn 使用从 canonical working state 派生的 `pl.workflow` section，
+tool call、tool result 与新 working state 必须在同一 Thread checkpoint 中提交；内存校验失败时
+三者均不发布，后台数据库事务失败则共同重试，不回滚已提交内存。模型下一 Turn 使用从 canonical working state 派生的 `pl.workflow` section，
 上下文压缩后重新捕获最新 projection。
 
 Mailbox metadata 同样使用递归 typed value；只有 repository DTO 与 provider/tool wire 边界执行

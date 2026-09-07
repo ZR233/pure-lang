@@ -59,7 +59,7 @@ pub struct StudioStartNewThreadRequest {
     pub project_id: String,
     pub title: Option<String>,
     pub input: StudioPromptInput,
-    pub mode: pl_protocol::ThreadModeId,
+    pub mode: pl_core::ThreadModeId,
     pub options: StudioSubmitPromptOptions,
 }
 
@@ -241,7 +241,8 @@ impl StudioRuntime {
             return Ok(self.agent_facility.product_events.persistence_state());
         };
         persistence.writer().retry_now();
-        Ok(persistence.writer().state_snapshot())
+        self.store.sessions().retry();
+        Ok(self.agent_facility.product_events.persistence_state())
     }
 
     /// Returns whether an active turn prevents a safe application update.

@@ -133,7 +133,7 @@ impl StudioRuntime {
                         &thread_id,
                         vec![pl_core::ThreadNotificationFact::durable(
                             interaction.updated_at,
-                            pl_protocol::ThreadNotification::InteractionChanged {
+                            pl_core::ThreadNotification::InteractionChanged {
                                 interaction: Box::new(interaction),
                             },
                         )],
@@ -148,20 +148,6 @@ impl StudioRuntime {
     pub(in crate::studio::runtime) async fn recover_interactions_after_restart(
         &self,
     ) -> Result<()> {
-        for interaction in self.store.list_restart_recoverable_user_inputs().await? {
-            let thread_id = interaction.scope.thread_id.clone();
-            let _ = self.ensure_thread_agent(&thread_id).await?;
-            let emitter = self.interaction_emitter(thread_id);
-            let recovered = self
-                .agent_facility
-                .interactions
-                .recover_user_input(interaction, emitter)
-                .await?;
-            self.store
-                .mark_restart_user_input_recovered(&recovered)
-                .await?;
-        }
-
         let mut thread_ids = self
             .store
             .list_threads_with_transient_pending_interactions()

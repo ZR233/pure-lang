@@ -18,6 +18,7 @@ use crate::studio::{InteractionService, ProductEventBus, StudioStore};
 
 use events::StudioAgentCommitObserver;
 use lifecycle::StudioAgentLifecycle;
+pub(in crate::studio) use repository::labels::thread_status;
 pub(in crate::studio) use repository::{StudioAgentRepository, ThreadWriteBehindWriter};
 pub(super) use resources::{StudioAgentResources, root_agent_id};
 use turn_factory::StudioAgentTurnFactory;

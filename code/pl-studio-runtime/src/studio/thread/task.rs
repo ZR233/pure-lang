@@ -1,8 +1,8 @@
+use pl_core::WorkflowStateKind;
 use pl_core::{
     StaticThreadModeRegistration, StaticWorkflowDefinition, StaticWorkflowState,
     StaticWorkflowTransition,
 };
-use pl_protocol::WorkflowStateKind;
 
 pub const PROMPT: &str = r#"# Task Thread Mode
 

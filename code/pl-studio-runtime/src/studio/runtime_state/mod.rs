@@ -16,7 +16,7 @@ pub use uninitialized::UninitializedStudioRuntime;
 
 use std::sync::{Arc, Mutex};
 
-use pl_protocol::StateError;
+use pl_core::StateError;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 

@@ -146,6 +146,9 @@ impl StudioRuntime {
                 .await?;
             let thread = pl_core::ThreadId::new(thread_id.clone())?;
             let metadata = submit_metadata();
+            self.agent_facility
+                .product_events
+                .record_attachments(attachments.clone())?;
             let presentation = options.presentation;
             let turn_id = handle
                 .submit(
@@ -171,9 +174,6 @@ impl StudioRuntime {
         }
         .await;
         if accepted {
-            self.agent_facility
-                .product_events
-                .record_attachments(attachments);
             self.attachment_drafts.commit(&attachment_draft_ids).await;
             return result;
         }

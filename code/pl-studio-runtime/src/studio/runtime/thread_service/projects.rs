@@ -143,7 +143,7 @@ impl StudioRuntime {
             .iter()
             .filter(|thread| thread.visibility == ThreadVisibility::Active)
             .cloned()
-            .map(pl_protocol::Thread::from)
+            .map(pl_core::Thread::from)
             .collect();
         self.agent_facility
             .product_events

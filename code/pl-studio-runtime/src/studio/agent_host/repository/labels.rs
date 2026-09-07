@@ -1,6 +1,6 @@
 //! 数据库↔枚举标签映射。
 //!
-//! 这里的函数是 [`pl_protocol::LabeledEnum`] 在 store 层的薄封装：标签字符串已经
+//! 这里的函数是 [`pl_core::LabeledEnum`] 在 store 层的薄封装：标签字符串已经
 //! 在协议枚举上定义一次（`impl LabeledEnum`），本模块只处理那些无法直接走 trait 的
 //! 聚合类型（如 `&ThreadActorState → 状态字符串`、`&ThreadItemState → 类型字符串`、
 //! `MessagePresentation` 等无需 `LabeledEnum` 的协议枚举）。
@@ -8,8 +8,8 @@
 //! 标签字符串是数据库列值的稳定标识，新增枚举变体时必须同步更新对应映射，
 //! 否则 `cargo check` 会在穷尽 match 处报错。
 
-use pl_core::{AgentState, MessagePresentation};
-use pl_protocol::{ThreadItemState, ThreadModeId, ThreadStatus};
+use pl_core::AgentState;
+use pl_core::{ThreadModeId, ThreadStatus};
 
 use crate::PureError;
 
@@ -44,43 +44,11 @@ pub(super) fn agent_state_kind(state: &AgentState) -> &'static str {
     }
 }
 
-/// 把 canonical [`ThreadItemState`] 映射成 item 表的类别索引值。
-pub(super) fn item_kind_label(state: &ThreadItemState) -> &'static str {
-    match state {
-        ThreadItemState::Text(_) => "text",
-        ThreadItemState::Thinking(_) => "thinking",
-        ThreadItemState::Tool(_) => "tool",
-        ThreadItemState::Agent(_) => "agent",
-        ThreadItemState::Turn(_) => "turn",
-        ThreadItemState::Inference(_) => "inference",
-        ThreadItemState::Skill(_) => "skill",
-        ThreadItemState::File(_) => "file",
-        ThreadItemState::ContextCompaction(_) => "contextCompaction",
-    }
-}
-
-/// 把 [`MessagePresentation`] 映射成 thread_input 表的 `presentation` 列值。
-pub(super) fn presentation_label(value: MessagePresentation) -> &'static str {
-    match value {
-        MessagePresentation::Visible => "visible",
-        MessagePresentation::Hidden => "hidden",
-    }
-}
-
-/// 从 thread_input 表的 `presentation` 列值恢复 [`MessagePresentation`]。
-pub(super) fn presentation_from_label(value: &str) -> Result<MessagePresentation, PureError> {
-    match value {
-        "visible" => Ok(MessagePresentation::Visible),
-        "hidden" => Ok(MessagePresentation::Hidden),
-        other => Err(store_error(format!("unknown input presentation {other}"))),
-    }
-}
-
 /// 从 thread 表的 `mode` 列值恢复 [`ThreadModeId`]。
 pub(super) fn thread_mode_from_label(label: &str) -> Result<ThreadModeId, PureError> {
     ThreadModeId::from_label(label).map_err(map_label_error)
 }
 
-fn map_label_error(error: pl_protocol::UnknownLabelError) -> PureError {
+fn map_label_error(error: pl_core::UnknownLabelError) -> PureError {
     store_error(error.to_string())
 }

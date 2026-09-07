@@ -3,7 +3,6 @@ use std::path::PathBuf;
 
 mod agent_framework;
 pub(super) mod attachment;
-pub(in crate::studio) mod conversation_recovery;
 pub(in crate::studio) mod directory;
 mod error;
 pub(in crate::studio) mod history;
@@ -17,12 +16,16 @@ mod thread;
 #[derive(Clone)]
 pub struct StudioStore {
     db: DatabaseConnection,
+    sessions: pl_core::persistence::SqliteSessionStore,
     attachments_dir: PathBuf,
 }
 
 pub(in crate::studio) use agent_framework::ThreadRuntimeSeed;
 pub use error::StudioDatabaseError;
 impl StudioStore {
+    pub(crate) fn sessions(&self) -> &pl_core::persistence::SqliteSessionStore {
+        &self.sessions
+    }
     pub(crate) fn database(&self) -> &DatabaseConnection {
         &self.db
     }

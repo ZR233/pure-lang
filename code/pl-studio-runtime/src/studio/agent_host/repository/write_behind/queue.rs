@@ -3,8 +3,6 @@
 use std::collections::VecDeque;
 use std::time::Duration;
 
-use super::thread_fact::ThreadFact;
-use pl_core::PersistenceClass;
 use tokio::sync::oneshot;
 
 use crate::PureError;
@@ -28,14 +26,12 @@ pub(super) const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(30);
 /// Directory 包含产品目录和其他有界 Studio object。
 #[derive(Debug, Clone)]
 pub(super) enum StudioMutation {
-    Thread(std::sync::Arc<ThreadFact>),
     Directory(Box<StudioDirectoryMutation>),
 }
 
 #[derive(Debug, Clone)]
 pub(super) enum StudioDirectoryMutation {
     Delta(DirectoryDelta),
-    Attachments(Vec<crate::studio::AttachmentRecord>),
     ModelPerformance(ObservedStateCommit),
     WorktreeLease(crate::studio::agent_host::worktree_lease::WorktreeLease),
 }
@@ -82,16 +78,6 @@ impl QueueEntry {
     pub(super) fn flushes_immediately(&self) -> bool {
         match self {
             Self::Mutation(QueuedMutation {
-                mutation: StudioMutation::Thread(commit),
-                ..
-            }) => {
-                commit.persistence == PersistenceClass::Settlement
-                    || matches!(
-                        commit.facts.context.as_ref(),
-                        Some(pl_core::ThreadContextMutation::Replace { .. })
-                    )
-            }
-            Self::Mutation(QueuedMutation {
                 mutation: StudioMutation::Directory(_),
                 ..
             }) => false,
@@ -113,31 +99,12 @@ impl QueueEntry {
                 ..
             }) => match directory.as_ref() {
                 StudioDirectoryMutation::Delta(delta) => delta.touches_thread(owner_id),
-                StudioDirectoryMutation::Attachments(records) => {
-                    records.iter().any(|record| record.thread_id == owner_id)
-                }
                 StudioDirectoryMutation::ModelPerformance(_) => false,
                 StudioDirectoryMutation::WorktreeLease(lease) => lease.child_id == owner_id,
             },
-            Self::Mutation(QueuedMutation {
-                mutation: StudioMutation::Thread(_),
-                ..
-            })
-            | Self::Barrier(_) => false,
+            Self::Barrier(_) => false,
         }
     }
-}
-
-pub(super) fn queue_thread(commit: ThreadFact) -> QueueEntry {
-    QueueEntry::Mutation(QueuedMutation::new(StudioMutation::Thread(
-        std::sync::Arc::new(commit),
-    )))
-}
-
-pub(super) fn queue_attachments(records: Vec<crate::studio::AttachmentRecord>) -> QueueEntry {
-    QueueEntry::Mutation(QueuedMutation::new(StudioMutation::Directory(Box::new(
-        StudioDirectoryMutation::Attachments(records),
-    ))))
 }
 
 pub(super) fn queue_directory(delta: DirectoryDelta) -> QueueEntry {

@@ -6,7 +6,7 @@ use super::errors::turn_error;
 
 pub(super) fn resolve_frozen_profile_route(
     config: &crate::config::StudioConfig,
-    profile: &pl_protocol::AgentProfileSnapshot,
+    profile: &pl_core::AgentProfileSnapshot,
 ) -> Result<pl_core::ResolvedModelRoute> {
     let role = pl_core::AgentRoleId::new(profile.profile_id.clone())?;
     let mut models = config.models.clone();
@@ -51,10 +51,10 @@ mod tests {
         crate::studio::thread::register_builtins(&manager).expect("register built-in modes");
         let snapshot = manager.snapshot();
         let task = snapshot
-            .mode(&pl_protocol::ThreadModeId::task())
+            .mode(&pl_core::ThreadModeId::task())
             .expect("task mode");
         let simple = snapshot
-            .mode(&pl_protocol::ThreadModeId::simple())
+            .mode(&pl_core::ThreadModeId::simple())
             .expect("simple mode");
         let mut model = pl_core::ModelInfo::compatible("hosted-only-model");
         model.capabilities.tools.function_calling = false;

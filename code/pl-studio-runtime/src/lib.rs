@@ -65,7 +65,7 @@ pub use updater::{
 
 // 公共签名（bridge DTO 字段、runtime API 返回值）使用的 pl-protocol 类型在此
 // 精确重导出，消费方只依赖 pl-studio-runtime 即可命名完整签名。
-pub use pl_protocol::{
+pub use pl_core::{
     AgentProgressStage, AgentState, AgentWorkspaceMode, CancelInteraction, InteractionCommand,
     InteractionContinuationInput, InteractionPurpose, ReopenRecoveredInteraction,
     ResolveToolApproval, ResolveUserInput, ThreadModeId, ToolApprovalResolutionPayload,

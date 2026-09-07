@@ -23,7 +23,10 @@ pl-output = { workspace = true }
 pl-patch = { workspace = true }
 pl-skill-core = { workspace = true }
 anyhow = { workspace = true }
-serde = { workspace = true }
+serde = { workspace = true, features = ["rc"] }
+sea-orm = { workspace = true }
+fs4 = { workspace = true }
+url = { workspace = true }
 serde_json = { workspace = true }
 schemars = { workspace = true }
 secrecy = { workspace = true }

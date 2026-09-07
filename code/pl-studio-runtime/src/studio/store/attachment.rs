@@ -4,26 +4,20 @@ use std::time::Instant;
 use anyhow::{Context, Result, bail};
 use base64::Engine;
 use image::GenericImageView;
-use pl_protocol::{AttachmentModality, ThreadAttachment};
+use pl_core::{AttachmentModality, ThreadAttachment};
 use pl_trace::TraceAttachment;
-use sea_orm::{ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 
-use crate::studio::entity as entities;
 use crate::studio::ids::{new_id, unix_seconds};
-use crate::studio::mappers::attachment_record;
 use crate::studio::records::{AttachmentRecord, MaterializedAttachment};
 use crate::studio::store::StudioStore;
 
 impl StudioStore {
     pub async fn list_thread_attachments(&self, thread_id: &str) -> Result<Vec<AttachmentRecord>> {
-        use entities::attachment;
-        let rows = attachment::Entity::find()
-            .filter(attachment::Column::ThreadId.eq(thread_id.to_string()))
-            .order_by_asc(attachment::Column::CreatedAt)
-            .order_by_asc(attachment::Column::Id)
-            .all(&self.db)
-            .await?;
-        rows.into_iter().map(attachment_record).collect()
+        self.sessions()
+            .resources(thread_id, "studio.attachment")
+            .iter()
+            .map(|entry| pl_core::session::entry::decode_entry(entry).map_err(anyhow::Error::from))
+            .collect()
     }
 
     pub async fn load_attachments(
@@ -34,16 +28,7 @@ impl StudioStore {
         if attachment_ids.is_empty() {
             return Ok(Vec::new());
         }
-        use entities::attachment;
-        let rows = attachment::Entity::find()
-            .filter(attachment::Column::ThreadId.eq(thread_id.to_string()))
-            .filter(attachment::Column::Id.is_in(attachment_ids.iter().cloned()))
-            .all(&self.db)
-            .await?;
-        let mut records = rows
-            .into_iter()
-            .map(attachment_record)
-            .collect::<Result<Vec<_>>>()?;
+        let mut records = self.list_thread_attachments(thread_id).await?;
         let mut ordered = Vec::with_capacity(attachment_ids.len());
         let mut seen = std::collections::BTreeSet::new();
         for attachment_id in attachment_ids {
@@ -228,39 +213,6 @@ impl StudioStore {
     }
 }
 
-/// 后台保存不可变附件元数据，重复批次按稳定标识幂等。
-pub(in crate::studio) async fn persist_attachment_records(
-    tx: &sea_orm::DatabaseTransaction,
-    records: &[AttachmentRecord],
-) -> Result<()> {
-    for record in records {
-        entities::attachment::Entity::insert(entities::attachment::ActiveModel {
-            id: Set(record.id.clone()),
-            thread_id: Set(record.thread_id.clone()),
-            kind: Set(attachment_kind_label(record.modality).to_string()),
-            media_type: Set(record.media_type.clone()),
-            filename: Set(record.filename.clone()),
-            storage_path: Set(record.storage_path.clone()),
-            byte_size: Set(
-                i64::try_from(record.byte_size).context("attachment size exceeds SQLite range")?
-            ),
-            content_sha256: Set(record.content_sha256.clone()),
-            width: Set(record.width.map(i64::from)),
-            height: Set(record.height.map(i64::from)),
-            created_at: Set(record.created_at),
-        })
-        .on_conflict(
-            sea_orm::sea_query::OnConflict::column(entities::attachment::Column::Id)
-                .do_nothing()
-                .to_owned(),
-        )
-        .try_insert()
-        .exec(tx)
-        .await?;
-    }
-    Ok(())
-}
-
 async fn cleanup_created_blobs(paths: Vec<PathBuf>) {
     for path in paths {
         let _ = tokio::fs::remove_file(path).await;
@@ -292,14 +244,6 @@ pub(crate) struct AttachmentDraftObject {
     pub height: Option<u32>,
     pub initial_remote_url: Option<String>,
     pub admitted_at: Instant,
-}
-
-fn attachment_kind_label(modality: pl_protocol::studio::StudioAttachmentModality) -> &'static str {
-    match modality {
-        pl_protocol::studio::StudioAttachmentModality::Image => "image",
-        pl_protocol::studio::StudioAttachmentModality::Video => "video",
-        pl_protocol::studio::StudioAttachmentModality::File => "file",
-    }
 }
 
 pub(super) const MAX_IMAGE_SIDE: u32 = 2000;
@@ -393,13 +337,13 @@ pub(crate) async fn materialize_attachment_records(
             attachment_id: record.id,
             modality: match record.modality {
                 pl_protocol::studio::StudioAttachmentModality::Image => {
-                    pl_protocol::AttachmentModality::Image
+                    pl_core::AttachmentModality::Image
                 }
                 pl_protocol::studio::StudioAttachmentModality::Video => {
-                    pl_protocol::AttachmentModality::Video
+                    pl_core::AttachmentModality::Video
                 }
                 pl_protocol::studio::StudioAttachmentModality::File => {
-                    pl_protocol::AttachmentModality::File
+                    pl_core::AttachmentModality::File
                 }
             },
             media_type: record.media_type,

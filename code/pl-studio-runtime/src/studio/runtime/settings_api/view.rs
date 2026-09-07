@@ -1,10 +1,10 @@
 //! Settings 只读投影：从 StudioConfig 派生 secret-free 的 snapshot 视图与展示标签。
 
 use anyhow::{Context, Result};
-use pl_model::completion::WebSearchMode;
-use pl_model::model::ModelInfo;
-use pl_model::provider::{ProviderConnectionMode, ProviderWireProtocol};
-use pl_protocol::WebSearchContextSize;
+use pl_core::ModelInfo;
+use pl_core::WebSearchContextSize;
+use pl_core::WebSearchMode;
+use pl_core::{ProviderConnectionMode, ProviderWireProtocol};
 use pl_protocol::studio::{
     StudioCustomModelSettings, StudioDeepSeekWebSearchSettings, StudioGeneralSettings,
     StudioInstructionsSettings, StudioMcpServerSettings, StudioModelConnectionSettings,
@@ -50,7 +50,7 @@ fn settings_view(
                 ProviderModelCatalogConfig::Explicit { .. } => None,
             };
             Ok(StudioProviderSettings {
-                pricing_enabled: provider.pricing_mode == pl_protocol::PricingMode::Catalog,
+                pricing_enabled: provider.pricing_mode == pl_core::PricingMode::Catalog,
                 id: id.to_string(),
                 template_kind: provider
                     .preset_id()
@@ -60,7 +60,7 @@ fn settings_view(
                 base_url: provider.base_url.clone(),
                 has_bearer_token: provider.resolved_bearer_token().is_some(),
                 credential_required: provider.adapter
-                    != pl_model::provider::ProviderAdapterKind::OpenAiCompatible,
+                    != pl_core::ProviderAdapterKind::OpenAiCompatible,
                 capability_source: match &provider.capabilities {
                     ProviderCapabilitySelection::PresetDefaults => "preset_defaults",
                     ProviderCapabilitySelection::Explicit(_) => "explicit",

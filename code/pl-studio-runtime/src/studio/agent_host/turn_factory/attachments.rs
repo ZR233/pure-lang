@@ -67,7 +67,9 @@ pub(super) fn attachment_runtime(
                 resources
                     .insert_thread_attachments(&thread_id, records.clone())
                     .await;
-                product_events.record_attachments(records);
+                product_events
+                    .record_attachments(records)
+                    .map_err(anyhow_error)?;
                 Ok(attachments)
             }
         },

@@ -54,6 +54,9 @@ pub enum TurnWorkingSetChange {
 
 #[derive(Clone, Default)]
 struct TurnWorkingSet {
+    entries: BTreeMap<String, crate::session::entry::SessionEntry>,
+    entry_sequence: u64,
+    entry_scope: Option<(String, String)>,
     sections: BTreeMap<ContextSectionId, PinnedContextSection>,
     evidence: EvidenceLedgerDocument,
     session_note: Option<SessionNote>,
@@ -102,6 +105,14 @@ impl TurnWorkingSetHandle {
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .plan = session.plan().cloned();
+        {
+            let mut state = handle
+                .inner
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            state.entries = session.working_state().entries.clone();
+            state.entry_sequence = session.working_state().entry_sequence;
+        }
         Ok(handle)
     }
 
@@ -340,7 +351,80 @@ impl TurnWorkingSetHandle {
         }
         changed |= session.replace_workflow(self.workflow());
         changed |= session.replace_plan(self.plan());
+        let (entries, sequence) = {
+            let state = self
+                .inner
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            (state.entries.clone(), state.entry_sequence)
+        };
+        changed |= session.replace_entries(entries, sequence);
         Ok(changed)
+    }
+
+    pub(crate) fn bind_entry_scope(&self, session_id: &str, turn_id: &str) {
+        self.inner
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry_scope = Some((session_id.to_owned(), turn_id.to_owned()));
+    }
+
+    /// Reads an immutable extension record from this turn's session working set.
+    pub fn entry(&self, id: &str) -> Option<crate::session::entry::SessionEntry> {
+        self.inner
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entries
+            .get(id)
+            .cloned()
+    }
+
+    /// Returns extension records in stable creation order, optionally filtered by type.
+    pub fn entries(&self, type_id: Option<&str>) -> Vec<crate::session::entry::SessionEntry> {
+        let mut entries: Vec<_> = self
+            .inner
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entries
+            .values()
+            .filter(|entry| type_id.is_none_or(|kind| entry.type_id == kind))
+            .cloned()
+            .collect();
+        entries.sort_by_key(|entry| entry.ordinal);
+        entries
+    }
+
+    /// Atomically admits extension mutations. The next checkpoint includes these with tool results.
+    ///
+    /// # Errors
+    /// Rejects unbound use, reserved identities, oversized payloads and stale revisions without partial changes.
+    pub fn mutate_entries(
+        &self,
+        mutations: Vec<crate::session::entry::SessionEntryMutation>,
+    ) -> Result<(), crate::session::entry::SessionEntryError> {
+        use crate::session::entry::{
+            DEFAULT_ENTRY_MAX_BYTES, SessionEntryError, apply_mutations, validate_mutations,
+        };
+        validate_mutations(&mutations, DEFAULT_ENTRY_MAX_BYTES)?;
+        let mut state = self
+            .inner
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (session_id, turn_id) = state
+            .entry_scope
+            .as_ref()
+            .ok_or(SessionEntryError::Unbound)?;
+        let mut entries = state.entries.clone();
+        let mut sequence = state.entry_sequence;
+        apply_mutations(
+            &mut entries,
+            &mut sequence,
+            (session_id, Some(turn_id), unix_seconds()),
+            mutations,
+        )?;
+        state.entries = entries;
+        state.entry_sequence = sequence;
+        Ok(())
     }
 }
 

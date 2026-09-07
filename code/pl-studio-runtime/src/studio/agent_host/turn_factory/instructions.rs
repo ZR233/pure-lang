@@ -13,7 +13,7 @@ use crate::Result;
 
 pub(super) struct StudioInstructionContext<'a> {
     pub(super) config: &'a crate::config::StudioConfig,
-    pub(super) model: &'a pl_model::model::ModelInfo,
+    pub(super) model: &'a pl_core::ModelInfo,
     pub(super) execution_label: &'a str,
     pub(super) execution_instructions: &'a str,
     pub(super) workspace_root: &'a Path,

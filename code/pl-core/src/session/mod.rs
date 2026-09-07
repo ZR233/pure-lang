@@ -15,6 +15,7 @@ use crate::working_set::canonical_content_hash;
 use pl_model::completion::CompletionResponse;
 use pl_model::runtime::ModelSession;
 
+pub mod entry;
 mod fork;
 pub mod plan;
 pub mod tool_history;
@@ -35,6 +36,20 @@ struct AgentSessionState {
     revision: u64,
     prompt_cache_key: Option<String>,
     model_session: ModelSession,
+}
+
+impl serde::Serialize for AgentSession {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.snapshot().serialize(serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for AgentSession {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Self::from_snapshot(AgentSessionSnapshot::deserialize(
+            deserializer,
+        )?))
+    }
 }
 
 /// child agent 从 parent canonical session 继承历史的策略。
@@ -108,6 +123,24 @@ impl AgentSession {
     /// 当前工作状态，不复制完整对话。
     pub fn working_state(&self) -> &AgentWorkingState {
         &self.state.working_state
+    }
+
+    pub(crate) fn replace_entries(
+        &mut self,
+        entries: std::collections::BTreeMap<String, entry::SessionEntry>,
+        sequence: u64,
+    ) -> bool {
+        if self.state.working_state.entries == entries
+            && self.state.working_state.entry_sequence == sequence
+        {
+            return false;
+        }
+        let state = Arc::make_mut(&mut self.state);
+        state.working_state.entries = entries;
+        state.working_state.entry_sequence = sequence;
+        state.working_state.revision = state.working_state.revision.saturating_add(1);
+        state.revision = state.revision.saturating_add(1);
+        true
     }
 
     pub fn snapshot(&self) -> AgentSessionSnapshot {

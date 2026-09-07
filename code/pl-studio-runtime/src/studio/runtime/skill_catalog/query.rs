@@ -90,7 +90,7 @@ impl SkillCatalogRuntime {
 
 #[cfg(test)]
 mod tests {
-    use pl_protocol::ObservedResourceKind;
+    use pl_core::ObservedResourceKind;
 
     use super::*;
 

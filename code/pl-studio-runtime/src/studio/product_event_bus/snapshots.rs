@@ -84,7 +84,7 @@ impl ProductEventBus {
 
     pub fn emit_thread_mode_catalog(
         &self,
-        state: pl_protocol::ThreadModeCatalogSnapshot,
+        state: pl_core::ThreadModeCatalogSnapshot,
     ) -> StudioProductEventEnvelope {
         self.emit(StudioProductEventKind::ThreadModeCatalogChanged(state))
     }
@@ -122,22 +122,65 @@ impl ProductEventBus {
         mut state: watch::Receiver<PersistenceStateSnapshot>,
     ) {
         let bus = self.clone();
+        let mut sessions = bus.store.sessions().subscribe_persistence();
         bus.update_persistence(state.borrow().clone());
         tokio::spawn(async move {
-            while state.changed().await.is_ok() {
+            loop {
+                tokio::select! {
+                    result = state.changed() => if result.is_err() { break; },
+                    result = sessions.changed() => if result.is_err() { break; },
+                }
                 bus.update_persistence(state.borrow_and_update().clone());
+                if sessions.borrow_and_update().stopped
+                    && state.borrow().state.pending_commits() == 0
+                {
+                    break;
+                }
             }
         });
     }
 
-    fn update_persistence(&self, state: PersistenceStateSnapshot) {
+    fn update_persistence(&self, mut state: PersistenceStateSnapshot) {
+        use crate::studio::{BlockedPersistence, FlushingPersistence, PersistenceState};
+        let sessions = self.store.sessions().persistence();
+        let pending = state
+            .state
+            .pending_commits()
+            .saturating_add(sessions.pending_commits as u64);
+        if let Some(error) = sessions.error {
+            state.state = PersistenceState::Blocked(BlockedPersistence {
+                pending_commits: pending,
+                oldest_pending_revision: Some(sessions.durable.saturating_add(1)),
+                first_failed_at: super::unix_seconds(),
+                error: pl_core::StateError {
+                    code: "sessionPersistenceFailed".into(),
+                    message: error.to_string(),
+                    retryable: true,
+                },
+            });
+        } else {
+            match &mut state.state {
+                PersistenceState::Ready(_) if pending > 0 => {
+                    state.state = PersistenceState::Flushing(FlushingPersistence {
+                        pending_commits: pending,
+                        oldest_pending_revision: Some(sessions.durable.saturating_add(1)),
+                    })
+                }
+                PersistenceState::Ready(value) => value.pending_commits = pending,
+                PersistenceState::Flushing(value) => value.pending_commits = pending,
+                PersistenceState::Degraded(value) => value.pending_commits = pending,
+                PersistenceState::Recovering(value) => value.pending_commits = pending,
+                PersistenceState::Blocked(value) => value.pending_commits = pending,
+            }
+        }
         let mut current = self
             .persistence_snapshot
             .lock()
             .expect("persistence snapshot lock poisoned");
-        if state.revision <= current.revision {
+        if state.state == current.state {
             return;
         }
+        state.revision = current.revision.saturating_add(1);
         *current = state.clone();
         drop(current);
         self.emit(StudioProductEventKind::PersistenceStateChanged(state));

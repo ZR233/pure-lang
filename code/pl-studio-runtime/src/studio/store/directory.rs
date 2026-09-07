@@ -5,7 +5,7 @@
 //! 只承载已经由 owner 决定的事实，不做业务校验或状态转换。
 
 use anyhow::{Result, bail};
-use pl_protocol::{Thread, ThreadModeId};
+use pl_core::{Thread, ThreadModeId};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, EntityTrait, QueryFilter,
     QueryOrder, QuerySelect,
@@ -23,6 +23,8 @@ use crate::studio::store_support::non_empty_title;
 /// FIFO 队列保证 `thread_upserts` 的注册先于该 Thread 的首个 state commit 落库。
 #[derive(Debug, Clone, Default)]
 pub(in crate::studio) struct DirectoryDelta {
+    pub(in crate::studio) session_activity: Vec<(String, i64)>,
+    pub(in crate::studio) session_registrations: Vec<String>,
     pub(in crate::studio) thread_upserts: Vec<Thread>,
     pub(in crate::studio) unregistered_faults: Vec<UnregisteredChildFault>,
     pub(in crate::studio) thread_removals: Vec<ThreadRemoval>,
@@ -39,6 +41,8 @@ pub(in crate::studio) struct UnregisteredChildFault {
 impl DirectoryDelta {
     pub(in crate::studio) fn is_empty(&self) -> bool {
         self.unregistered_faults.is_empty()
+            && self.session_registrations.is_empty()
+            && self.session_activity.is_empty()
             && self.thread_upserts.is_empty()
             && self.thread_removals.is_empty()
             && self.project_upserts.is_empty()
@@ -50,9 +54,12 @@ impl DirectoryDelta {
     /// LRU 逐出在释放 Thread 热对象前使用它扩展 owner durability barrier，避免
     /// runtime revision 已耐久但同一 owner 的标题、归档或 Project 关闭事实仍在队列。
     pub(in crate::studio) fn touches_thread(&self, thread_id: &str) -> bool {
-        self.unregistered_faults
-            .iter()
-            .any(|fault| fault.thread_id == thread_id)
+        self.session_activity.iter().any(|(id, _)| id == thread_id)
+            || self.session_registrations.iter().any(|id| id == thread_id)
+            || self
+                .unregistered_faults
+                .iter()
+                .any(|fault| fault.thread_id == thread_id)
             || self
                 .thread_upserts
                 .iter()
@@ -84,7 +91,7 @@ impl DirectoryDelta {
             mode: mode.clone(),
             parent_thread_id: None,
             role: crate::config::StudioRole::Planner.key().to_string(),
-            status: pl_protocol::ThreadStatus::Idle,
+            status: pl_core::ThreadStatus::Idle,
             created_at: now,
             updated_at: now,
             archived: false,
@@ -111,7 +118,7 @@ impl DirectoryDelta {
                 root_thread_id: spec.root_thread_id,
                 parent_thread_id: Some(spec.parent_thread_id),
                 role: spec.role,
-                status: pl_protocol::ThreadStatus::Idle,
+                status: pl_core::ThreadStatus::Idle,
                 created_at: now,
                 updated_at: now,
                 archived: false,
@@ -186,6 +193,23 @@ pub(in crate::studio) async fn apply_directory_delta(
     for thread in &delta.thread_upserts {
         upsert_thread_directory_row(tx, thread).await?;
     }
+    for id in &delta.session_registrations {
+        let row = entities::thread::Entity::find_by_id(id)
+            .one(tx)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("registered session {id} has no product association"))?;
+        let mut row: entities::thread::ActiveModel = row.into();
+        row.runtime_revision = Set(Some(1));
+        row.update(tx).await?;
+    }
+    for (id, updated_at) in &delta.session_activity {
+        if let Some(row) = entities::thread::Entity::find_by_id(id).one(tx).await? {
+            let updated_at = row.updated_at.max(*updated_at);
+            let mut row: entities::thread::ActiveModel = row.into();
+            row.updated_at = Set(updated_at);
+            row.update(tx).await?;
+        }
+    }
     for fault in &delta.unregistered_faults {
         super::agent_framework::apply_unregistered_child_fault(tx, fault).await?;
     }
@@ -231,7 +255,7 @@ async fn upsert_thread_directory_row(
             event_sequence: Set(0),
             metadata_json: Set("{}".to_string()),
             usage_json: Set(serde_json::to_string(
-                &pl_protocol::InferenceTokenUsage::default(),
+                &pl_core::InferenceTokenUsage::default(),
             )?),
             last_context_tokens: Set(None),
             trace_sequence: Set(0),
@@ -399,9 +423,12 @@ impl StudioStore {
             );
         }
         let models = query.limit(u64::try_from(limit)?).all(&self.db).await?;
-        models
-            .into_iter()
-            .map(|model| thread_record(model).map(Thread::from))
-            .collect()
+        let mut threads = Vec::with_capacity(models.len());
+        for model in models {
+            threads.push(Thread::from(
+                self.with_session_status(thread_record(model)?).await?,
+            ));
+        }
+        Ok(threads)
     }
 }

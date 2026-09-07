@@ -9,7 +9,7 @@ use crate::studio::ids::unix_seconds;
 use anyhow::{Error, Result};
 use pl_core::config::SkillsConfig;
 use pl_core::skill::{SkillCatalog, SkillProviderRequest};
-use pl_protocol::{ObservedResourceCommand, ObservedResourceKind, StateError, StateOperation};
+use pl_core::{ObservedResourceCommand, ObservedResourceKind, StateError, StateOperation};
 
 use super::remote;
 use super::{SkillCatalogRuntime, SkillsStateData, SkillsStateSnapshot};

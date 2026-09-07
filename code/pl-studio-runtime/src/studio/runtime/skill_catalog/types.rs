@@ -6,12 +6,12 @@ use std::sync::Arc;
 
 use crate::studio::ids::unix_seconds;
 use anyhow::{Context, Result};
+use pl_core::ObservedResource;
 use pl_core::config::SkillsConfig;
 use pl_core::skill::{
     FileSystemSkillProvider, FrozenSkillCatalog, SkillProviderRegistration, SkillRegistry,
     SkillSummary,
 };
-use pl_protocol::ObservedResource;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
 

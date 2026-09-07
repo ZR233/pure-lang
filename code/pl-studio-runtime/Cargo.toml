@@ -13,7 +13,6 @@ live-tests = []
 pl-core = { workspace = true }
 pl-protocol = { workspace = true }
 pl-trace = { workspace = true }
-pl-model = { workspace = true }
 pl-lsp = { workspace = true }
 anyhow = { workspace = true }
 sea-orm = { workspace = true }

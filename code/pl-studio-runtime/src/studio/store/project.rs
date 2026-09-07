@@ -24,6 +24,7 @@ use crate::studio::store_support::{STUDIO_DATABASE_SCHEMA_VERSION, initialize_st
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExistingDatabaseState {
     Current,
+    PreviousSessionSchema,
 }
 
 impl StudioStore {
@@ -50,6 +51,7 @@ impl StudioStore {
             .keep();
         Ok(Self {
             db,
+            sessions: pl_core::persistence::SqliteSessionStore::open_memory().await?,
             attachments_dir,
         })
     }
@@ -58,30 +60,15 @@ impl StudioStore {
         let path = resolve_configured_database_path(path).await?;
         let database_exists = tokio::fs::try_exists(&path).await?;
         let family_exists = database_family_exists(&path).await?;
-        // 统一工作流升级采用破坏性边界：只接受当前 schema，任何旧数据库均
-        // 连同 WAL/SHM 一起重建，不迁移 Project、Thread、附件或旧编排历史。
         let existing_state = if database_exists {
-            match inspect_database(&path).await {
-                Ok(state) => Some(state),
-                Err(error) => {
-                    tracing::warn!(
-                        path = %path.display(),
-                        error = %error,
-                        "Studio database is incompatible and will be rebuilt"
-                    );
-                    None
-                }
-            }
+            Some(inspect_database(&path).await?)
         } else {
+            anyhow::ensure!(
+                !family_exists,
+                "orphan Studio WAL/SHM files require explicit recovery"
+            );
             None
         };
-
-        if existing_state.is_none() {
-            if family_exists {
-                delete_database_family(&path).await?;
-            }
-            delete_attachment_store(&path)?;
-        }
 
         let db = connect_sqlite(
             &sqlite_url(&path),
@@ -97,13 +84,19 @@ impl StudioStore {
         let initialization = async {
             if created {
                 initialize_studio_schema(&db).await?;
+            } else {
+                crate::studio::store_support::upgrade_session_storage(&db).await?;
             }
             validate_database(&db).await
         }
         .await;
         if let Err(error) = initialization {
             let close = db.close().await;
-            let cleanup = delete_database_family(&path).await;
+            let cleanup = if created {
+                delete_database_family(&path).await
+            } else {
+                Ok(())
+            };
             return match (close, cleanup) {
                 (Ok(()), Ok(())) => {
                     Err(error).context("Studio database initialization failed")
@@ -121,6 +114,12 @@ impl StudioStore {
         }
         Ok(Self {
             db,
+            sessions: pl_core::persistence::SqliteSessionStore::open(
+                pl_core::persistence::SqliteSessionOptions {
+                    path: path.with_file_name("sessions.sqlite"),
+                },
+            )
+            .await?,
             attachments_dir,
         })
     }
@@ -258,6 +257,7 @@ async fn inspect_database(path: &Path) -> Result<ExistingDatabaseState> {
         Ok(STUDIO_DATABASE_SCHEMA_VERSION) => validate_database(&database)
             .await
             .map(|()| ExistingDatabaseState::Current),
+        Ok(19) => Ok(ExistingDatabaseState::PreviousSessionSchema),
         Ok(found) => Err(StudioDatabaseError::UnsupportedSchema {
             found,
             supported: STUDIO_DATABASE_SCHEMA_VERSION,
@@ -432,29 +432,6 @@ async fn delete_database_family(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn delete_attachment_store(database_path: &Path) -> Result<()> {
-    let parent = database_path
-        .parent()
-        .context("configured Studio database path has no parent")?;
-    let parent = std::fs::canonicalize(parent)
-        .context("failed to resolve configured Studio database directory")?;
-    let attachments = parent.join("attachments");
-    match std::fs::symlink_metadata(&attachments) {
-        Ok(metadata) if pl_core::path_safety::is_link_or_reparse(&metadata) => bail!(
-            "Studio attachment cleanup target is a symbolic link or reparse point: {}",
-            attachments.display()
-        ),
-        Ok(metadata) if !metadata.is_dir() => bail!(
-            "Studio attachment cleanup target is not a directory: {}",
-            attachments.display()
-        ),
-        Ok(_) => pl_core::path_safety::remove_dir_all_no_follow(&parent, &attachments)
-            .context("failed to delete incompatible Studio attachments"),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error).context("failed to inspect Studio attachment store"),
-    }
-}
-
 fn validate_database_family_member(path: &Path, expected_parent: &Path) -> Result<()> {
     ensure!(
         path.parent() == Some(expected_parent),
@@ -490,7 +467,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn incompatible_database_rebuild_also_removes_old_attachments() {
+    async fn incompatible_database_is_preserved_with_its_attachments() {
         let temp = tempfile::TempDir::new().unwrap();
         let database = temp.path().join("studio.db");
         tokio::fs::write(&database, b"incompatible database")
@@ -504,12 +481,11 @@ mod tests {
             .await
             .unwrap();
 
-        let store = StudioStore::open(&database).await.unwrap();
-
-        assert!(!old_attachment.exists());
+        assert!(StudioStore::open(&database).await.is_err());
+        assert!(old_attachment.exists());
         assert_eq!(
-            database_schema_version(store.database()).await.unwrap(),
-            STUDIO_DATABASE_SCHEMA_VERSION
+            tokio::fs::read(&database).await.unwrap(),
+            b"incompatible database"
         );
     }
 }

@@ -33,6 +33,12 @@ pub struct ModelContextSnapshot {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentWorkingState {
+    /// Opaque tool-owned entries; never implicitly projected into model context.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub entries: BTreeMap<String, crate::SessionEntry>,
+    /// Monotonic allocation watermarks survive deletion.
+    #[serde(default)]
+    pub entry_sequence: u64,
     #[serde(default)]
     pub sections: Vec<PinnedContextSection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -39,7 +39,8 @@ impl From<&ProgressSubmissionCommit> for AgentSubmissionRecord {
 }
 
 /// runtime 持有的 canonical session 及其统计。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ThreadContextState {
     /// 产品可持久化的类型化 session 展示元数据。
     pub metadata: ThreadContextMetadata,

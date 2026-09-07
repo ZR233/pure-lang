@@ -10,9 +10,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
+use pl_core::ReasoningConfig;
+use pl_core::ResponsesMaxTokensField;
 use pl_core::{AgentSession, ModelTurnClient, ModelTurnOptions, ModelTurnRequest};
-use pl_model::completion::ReasoningConfig;
-use pl_model::model::ResponsesMaxTokensField;
 use tokio::sync::{Mutex, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
@@ -264,7 +264,7 @@ async fn generate_title(
 ) -> Result<String> {
     let config = runtime.config_runtime.read()?;
     let mut route = config.config.resolve_role(StudioRole::Explorer)?;
-    if let pl_model::model::ModelProtocolOptions::Responses(options) =
+    if let pl_core::ModelProtocolOptions::Responses(options) =
         &mut route.model.binding.request.protocol
     {
         options.max_tokens_field = ResponsesMaxTokensField::MaxOutputTokens;
@@ -307,7 +307,7 @@ async fn generate_title(
         Ok(response) => response.accounting().clone(),
         Err(failure) => (*failure.accounting).clone(),
     };
-    let billing = pl_protocol::InferenceBillingRecord {
+    let billing = pl_core::InferenceBillingRecord {
         inference_id: crate::studio::ids::new_id("title"),
         provider_instance_id: route.provider_id.as_str().to_owned(),
         provider: route.endpoint.name.clone(),

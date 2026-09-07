@@ -50,7 +50,7 @@ impl StudioRuntime {
             thread_directory,
             agent_directory,
             settings: StudioSettingsStateSnapshot {
-                state: pl_protocol::ObservedResource::ready(
+                state: pl_core::ObservedResource::ready(
                     settings.revision,
                     settings.updated_at,
                     settings.settings,
@@ -81,7 +81,7 @@ impl StudioRuntime {
     }
 
     /// Reads one canonical Thread without activating its actor.
-    pub async fn read_thread(&self, thread_id: &str) -> Result<pl_protocol::Thread> {
+    pub async fn read_thread(&self, thread_id: &str) -> Result<pl_core::Thread> {
         self.read_protocol_thread(thread_id).await
     }
 
@@ -91,7 +91,7 @@ impl StudioRuntime {
     }
 
     /// Reads the current process-wide Thread Mode catalog.
-    pub fn read_thread_mode_catalog(&self) -> pl_protocol::ThreadModeCatalogSnapshot {
+    pub fn read_thread_mode_catalog(&self) -> pl_core::ThreadModeCatalogSnapshot {
         self.thread_modes.snapshot().catalog().clone()
     }
 

@@ -11,8 +11,8 @@ use crate::{
     AgentModelConfig, ProviderConfig, ProviderModelCatalogConfig, ProviderPresetId,
     builtin_provider_catalog,
 };
-use pl_model::model::ModelInfo;
-use pl_model::provider::ProviderEndpoint;
+use pl_core::ModelInfo;
+use pl_core::ProviderEndpoint;
 
 /// Studio 使用的动态 provider preset 标识。
 ///

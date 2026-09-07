@@ -90,7 +90,14 @@ where
 
     /// 停止 runtime。
     pub async fn shutdown(&self) -> AgentRuntimeResult<()> {
-        self.handle.shutdown().await
+        if !self.handle.sender.is_closed() {
+            self.handle.shutdown().await?;
+        }
+        self.host
+            .repository()
+            .shutdown()
+            .await
+            .map_err(|error| AgentRuntimeError::Repository(error.to_string()))
     }
 }
 

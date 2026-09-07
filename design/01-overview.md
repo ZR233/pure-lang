@@ -27,7 +27,7 @@ Flutter ThreadWorkspace ── typed FRB ─┐
 pl-studio-server ─ REST / typed SSE ─┘        ↓
                                       ThreadManager → ThreadActor → TurnEngine
                                              ↓              ↓ typed notifications
-                                            studio.sqlite
+                                            sessions.sqlite
 ```
 
 - `ThreadManager` 维护 Thread registry、父子关系和 spawn/close。
@@ -36,14 +36,14 @@ pl-studio-server ─ REST / typed SSE ─┘        ↓
 - `TurnEngine` 只负责模型采样、工具调用、Interaction 等待和上下文压缩。
 - root Thread 预加载当前 Mode Prompt，拥有可选的拆分 workflow 工具和统一 `complete` 工具；child
   Thread 使用冻结的 Agent Profile 且不拥有 root workflow 工具。
-- `studio.sqlite` 是 durable Thread/Turn/Item/Interaction、working state 与 Studio 产品事实的
-  唯一数据库。
+- `sessions.sqlite` 保存 core 的通用会话条目；`studio.sqlite` 只保存 Studio 产品事实。
+  两库不共享事务，统一条目与所有权契约见 `25-session-entry-storage.md`。
 
 ## 1.3 唯一事实源
 
 | 事实 | 唯一拥有者 |
 | --- | --- |
-| Thread、Turn、Item、输入、Interaction、working state | `studio.sqlite` |
+| Thread、Turn、Item、输入、Interaction、working state | core 内存 owner；`sessions.sqlite` 用于冷恢复 |
 | 活动 Turn、流式增量、steer、取消 identity、prompt generation | `ThreadActor` |
 | Workflow run、revision、history | `AgentWorkingState.workflow` |
 | Thread Mode Prompt 与预设图 | `pl-core::thread::ThreadModeManager` 不可变快照 |
@@ -60,7 +60,7 @@ UI snapshot 由 canonical 表与活动 actor overlay 组成；历史只按 Turn 
 - `pl-model`：provider 与 transport 适配。
 - `pl-core`：ThreadManager、ThreadActor、TurnEngine、工作流编译/状态工具、通用工具与 Agent
   control plane。
-- `pl-studio-runtime`：唯一 Studio 业务实现，拥有单库 StudioStore、项目、配置、Mode/Profile
+- `pl-studio-runtime`：唯一 Studio 业务实现，拥有产品 StudioStore、项目、配置、Mode/Profile
   catalog、生命周期与产品事件。
 - `pl-studio-bridge`：Studio protocol 到 FRB wire 的机械映射与桌面宿主能力。
 - `pl-studio-server`：可单独运行的 loopback HTTP/OpenAPI/SSE 适配器。

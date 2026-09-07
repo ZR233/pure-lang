@@ -20,8 +20,8 @@ pl-studio-server ───────────────┘          │  
 
 - `pl-protocol`：Thread、Turn、Item、Interaction、workflow、Agent Profile snapshot、通知与错误。
 - `pl-model`：provider 请求、stream 归一化、模型目录与连接协议。
-- `pl-core`：会话编排、模型循环、工具运行时、Skill catalog、working state 与 `thread` 注册表。
-- `pl-studio-runtime`：项目/Thread owner、配置、内置 Thread Mode、Agent Profile catalog、SQLite repository。
+- `pl-core`：完整会话内存编排、模型循环、工具运行时、Skill catalog、统一动态条目、异步持久化与独立 SQLite 会话后端。
+- `pl-studio-runtime`：项目与会话关联、配置、内置 Thread Mode、Agent Profile catalog 和产品 SQLite repository。
 - `pl-studio-bridge`：Rust 与 Dart 的机械映射。
 - `pl-studio-server`：同一 runtime 的 HTTP/SSE 适配。
 - `pure-studio`：Flutter projection、交互与设置 UI。
@@ -35,6 +35,9 @@ Mode 不是运行时类型分支，也不是 Skill。`mode.simple`、`mode.task`
 Thread owner 的 typed 内存 snapshot 是活动状态唯一事实源。SQLite 只用于冷恢复、历史分页和
 checkpoint 持久化。GUI 只消费 bridge 返回的 canonical snapshot/notification，不能在 Dart 侧
 推演工作流状态。
+
+会话消费者只需依赖 `pl-core`；公共签名及其构造所需的依赖类型由 core 精确导出。
+统一条目和拆库契约见 [25-session-entry-storage.md](./25-session-entry-storage.md)。
 
 协作实例与配置 Profile 分离：`list_agent_profiles` 返回可用配置，`list_agents` 返回运行实例。
 系统 Profile 由 Rust 注册且不可编辑、不可删除；用户 Profile 位于 `~/.pure/agents/*.toml`。

@@ -35,6 +35,16 @@ pub struct AgentRuntimeHandle {
 }
 
 impl AgentRuntimeHandle {
+    /// Activates a cold session by identity. Concurrent requests share the coordinator's owner.
+    ///
+    /// # Errors
+    /// Returns a missing session, recovery or runtime error; never publishes partial recovery.
+    pub async fn activate(&self, agent_id: ThreadId) -> AgentRuntimeResult<AgentSnapshot> {
+        let (reply, receiver) = oneshot::channel();
+        self.send(CoordinatorCommand::Activate { agent_id, reply })
+            .await?;
+        receive(receiver).await?
+    }
     pub(crate) fn new(
         sender: mpsc::Sender<CoordinatorCommand>,
         actors: AgentRegistry,
@@ -349,14 +359,12 @@ impl AgentRuntimeHandle {
         limit: usize,
     ) -> AgentRuntimeResult<AgentSubmissionPage> {
         let (reply, receiver) = oneshot::channel();
-        self.send_to_actor(
-            &agent_id,
-            AgentLoopCommand::ReadSubmissions {
-                offset,
-                limit,
-                reply,
-            },
-        )
+        self.send(CoordinatorCommand::ReadSubmissions {
+            agent_id,
+            offset,
+            limit,
+            reply,
+        })
         .await?;
         receive(receiver).await?
     }

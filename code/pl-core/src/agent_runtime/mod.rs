@@ -225,6 +225,19 @@ pub(crate) mod test_support {
             self.pending.lock().unwrap().len()
         }
 
+        async fn flush(&self) -> std::result::Result<(), Self::Error> {
+            self.drain_pending();
+            if self.pending_commit_count() == 0 {
+                Ok(())
+            } else {
+                Err(TestError("persistence remains paused".into()))
+            }
+        }
+
+        async fn shutdown(&self) -> std::result::Result<(), Self::Error> {
+            self.flush().await
+        }
+
         async fn list_submissions(
             &self,
             thread_id: &ThreadId,

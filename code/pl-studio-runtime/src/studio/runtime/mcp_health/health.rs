@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use pl_protocol::StateError;
+use pl_core::StateError;
 
 use crate::config::{EffectiveMcpServerConfig, McpServerStatusKind};
 use crate::mcp::{McpAvailabilityKind, McpAvailabilitySnapshot};

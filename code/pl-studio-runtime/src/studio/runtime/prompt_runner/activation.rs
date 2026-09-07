@@ -5,7 +5,6 @@ use anyhow::{Context, Result};
 use crate::config::StudioRole;
 use crate::studio::agent_host::root_agent_id;
 use crate::studio::{ThreadKind, ThreadRecord, ThreadVisibility};
-use pl_core::ThreadRepository as _;
 
 use super::super::StudioRuntime;
 
@@ -54,7 +53,7 @@ impl StudioRuntime {
         // 激活即入热集合：目录分页在此之后能以内存事实覆盖冷行。
         self.agent_facility
             .product_events
-            .warm_thread_index(vec![pl_protocol::Thread::from(target)]);
+            .warm_thread_index(vec![pl_core::Thread::from(target)]);
         self.enforce_residency_limit().await;
         Ok((handle, target_agent_id))
     }
@@ -76,20 +75,8 @@ impl StudioRuntime {
             .await?
             > 0;
         if registered {
-            // 共享 writer 的 repository 实例：恢复基线 seed 进进程级 writer，
-            // 不构造即弃的第二 writer（design/17 §17.2）。
-            let repository = self
-                .persistence_repository()
-                .await
-                .context("Studio persistence writer is unavailable")?;
             let thread_id = pl_core::ThreadId::new(thread_record.id.clone())?;
-            let Some(restored) = repository.restore_thread(&thread_id).await? else {
-                anyhow::bail!(
-                    "Thread {} has a corrupt durable session and cannot be activated",
-                    thread_record.id
-                );
-            };
-            match handle.restore_agent(restored).await {
+            match handle.activate(thread_id).await {
                 Ok(_) | Err(pl_core::AgentRuntimeError::AlreadyExists(_)) => {}
                 Err(error) => return Err(anyhow::anyhow!(error)),
             }
@@ -197,7 +184,7 @@ impl StudioRuntime {
                     title: Some(thread_record.title),
                 },
                 session: pl_core::AgentSession::new(),
-                usage: pl_protocol::InferenceTokenUsage::default(),
+                usage: pl_core::InferenceTokenUsage::default(),
                 billing_by_turn: std::collections::BTreeMap::new(),
                 last_context_tokens: None,
                 trace_sequence: 0,
@@ -223,7 +210,7 @@ impl StudioRuntime {
             self.store
                 .read_thread(thread_id)
                 .await?
-                .map(pl_protocol::Thread::from)
+                .map(pl_core::Thread::from)
                 .context("selected Thread not found")?
         };
         if self.recovery_issues().iter().any(|issue| {

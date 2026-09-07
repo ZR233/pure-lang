@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use pl_core::{
     AgentLifecycleAdapter, CloseLifecycleRequest, SpawnLifecycleRequest, SpawnRollbackReason,
 };
-use pl_protocol::{
+use pl_core::{
     AgentWorkspaceAssignmentSnapshot, AgentWorkspaceDisposition, AgentWorkspaceMode,
     AgentWorktreeSnapshot,
 };

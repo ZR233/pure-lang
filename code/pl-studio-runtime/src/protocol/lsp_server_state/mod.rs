@@ -23,7 +23,7 @@ pub enum StudioLspServerState {
 
 #[cfg(test)]
 mod tests {
-    use pl_protocol::StateError;
+    use pl_core::StateError;
     use pretty_assertions::assert_eq;
 
     use super::*;

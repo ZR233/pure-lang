@@ -11,9 +11,30 @@ use crate::studio::mappers::thread_record;
 use crate::studio::records::ThreadRecord;
 use crate::studio::store::StudioStore;
 #[cfg(test)]
-use pl_protocol::ThreadModeId;
+use pl_core::ThreadModeId;
 
 impl StudioStore {
+    pub(in crate::studio) async fn with_session_status(
+        &self,
+        mut record: ThreadRecord,
+    ) -> Result<ThreadRecord> {
+        if let Some(snapshot) = self.sessions().read_agent_snapshot(&record.id).await? {
+            record.status = crate::studio::agent_host::thread_status(&snapshot.state);
+            record.error = match &snapshot.state {
+                pl_core::AgentState::Faulted(state) => Some(state.error().message.clone()),
+                pl_core::AgentState::Idle(_)
+                | pl_core::AgentState::Queued(_)
+                | pl_core::AgentState::Running(_)
+                | pl_core::AgentState::WaitingTool(_)
+                | pl_core::AgentState::WaitingInteraction(_)
+                | pl_core::AgentState::Cancelling(_)
+                | pl_core::AgentState::Closing(_)
+                | pl_core::AgentState::Closed(_) => None,
+            };
+            record.runtime_updated_at = Some(snapshot.updated_at);
+        }
+        Ok(record)
+    }
     /// 测试 seed 入口：直接同步创建 root Thread 行。
     ///
     /// 生产路径的创建必须经 `DirectoryDelta::register_root_thread` +
@@ -46,7 +67,7 @@ impl StudioStore {
             event_sequence: Set(0),
             metadata_json: Set("{}".to_string()),
             usage_json: Set(serde_json::to_string(
-                &pl_protocol::InferenceTokenUsage::default(),
+                &pl_core::InferenceTokenUsage::default(),
             )?),
             last_context_tokens: Set(None),
             trace_sequence: Set(0),
@@ -70,7 +91,11 @@ impl StudioStore {
             .order_by_desc(thread::Column::Id)
             .all(&self.db)
             .await?;
-        threads.into_iter().map(thread_record).collect()
+        let mut records = Vec::with_capacity(threads.len());
+        for thread in threads {
+            records.push(self.with_session_status(thread_record(thread)?).await?);
+        }
+        Ok(records)
     }
 
     /// Thread 树 activation 同批装载相邻 root，用于归档后的选择回退。
@@ -98,7 +123,11 @@ impl StudioStore {
             .order_by_asc(thread::Column::Id)
             .all(&self.db)
             .await?;
-        threads.into_iter().map(thread_record).collect()
+        let mut records = Vec::with_capacity(threads.len());
+        for thread in threads {
+            records.push(self.with_session_status(thread_record(thread)?).await?);
+        }
+        Ok(records)
     }
 
     /// Project 归档 activation 一次性装载其完整 Thread 目录。
@@ -110,7 +139,11 @@ impl StudioStore {
             .order_by_asc(thread::Column::Id)
             .all(&self.db)
             .await?;
-        threads.into_iter().map(thread_record).collect()
+        let mut records = Vec::with_capacity(threads.len());
+        for thread in threads {
+            records.push(self.with_session_status(thread_record(thread)?).await?);
+        }
+        Ok(records)
     }
 
     pub async fn list_project_thread_ids(&self, project_id: &str) -> Result<Vec<String>> {
@@ -125,24 +158,48 @@ impl StudioStore {
     }
 
     pub async fn read_thread(&self, thread_id: &str) -> Result<Option<ThreadRecord>> {
+        match self.read_thread_association(thread_id).await? {
+            Some(record) => Ok(Some(self.with_session_status(record).await?)),
+            None => Ok(None),
+        }
+    }
+
+    pub(in crate::studio) async fn read_thread_association(
+        &self,
+        thread_id: &str,
+    ) -> Result<Option<ThreadRecord>> {
         use entities::thread;
-        thread::Entity::find_by_id(thread_id.to_string())
+        match thread::Entity::find_by_id(thread_id.to_string())
             .one(&self.db)
             .await?
-            .map(thread_record)
-            .transpose()
+        {
+            Some(row) => Ok(Some(thread_record(row)?)),
+            None => Ok(None),
+        }
     }
 
     pub(in crate::studio) async fn read_thread_runtime_revision(
         &self,
         thread_id: &str,
     ) -> Result<u64> {
-        use entities::thread;
-        let revision = thread::Entity::find_by_id(thread_id.to_string())
+        if let Some(agent) = self.sessions().read_session(thread_id).await? {
+            return Ok(agent.state.snapshot.revision);
+        }
+        Ok(entities::thread::Entity::find_by_id(thread_id)
             .one(&self.db)
             .await?
-            .and_then(|thread| thread.runtime_revision)
-            .unwrap_or_default();
-        Ok(u64::try_from(revision)?)
+            .and_then(|row| row.runtime_revision)
+            .map_or(0, |_| 1))
+    }
+
+    pub(in crate::studio) async fn registered_session_ids(&self) -> Result<Vec<String>> {
+        Ok(entities::thread::Entity::find()
+            .filter(entities::thread::Column::RuntimeRevision.is_not_null())
+            .filter(entities::thread::Column::Archived.eq(0))
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .map(|row| row.id)
+            .collect())
     }
 }

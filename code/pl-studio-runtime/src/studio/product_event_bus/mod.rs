@@ -14,7 +14,7 @@ use std::sync::{
     atomic::{AtomicI64, AtomicU64, Ordering},
 };
 
-use pl_protocol::{ObservedResource, Thread};
+use pl_core::{ObservedResource, Thread};
 use tokio::sync::{Mutex, broadcast};
 
 use crate::{

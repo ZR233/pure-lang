@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use pl_protocol::{AgentProfileSnapshot, AgentWorkspaceMode};
+use pl_core::{AgentProfileSnapshot, AgentWorkspaceMode};
 use serde::{Deserialize, Serialize};
 
 use crate::{PureError, Result};

@@ -24,6 +24,16 @@ use spawn::{register_agent, spawn_child_agent};
 pub(crate) type AgentRegistry = Arc<RwLock<BTreeMap<ThreadId, AgentLoopHandle>>>;
 
 pub(crate) enum CoordinatorCommand {
+    Activate {
+        agent_id: ThreadId,
+        reply: oneshot::Sender<AgentRuntimeResult<AgentSnapshot>>,
+    },
+    ReadSubmissions {
+        agent_id: ThreadId,
+        offset: usize,
+        limit: usize,
+        reply: oneshot::Sender<AgentRuntimeResult<super::AgentSubmissionPage>>,
+    },
     Register {
         registration: AgentRegistration,
         reply: oneshot::Sender<AgentRuntimeResult<AgentSnapshot>>,
@@ -115,8 +125,72 @@ async fn run_coordinator<H>(
 ) where
     H: AgentRuntimeHost,
 {
-    while let Some(command) = receiver.recv().await {
+    let mut retiring = std::collections::BTreeSet::new();
+    let mut retirement_tick = tokio::time::interval(std::time::Duration::from_secs(1));
+    loop {
+        let command = tokio::select! {
+            command = receiver.recv() => match command { Some(command) => command, None => break },
+            _ = retirement_tick.tick(), if !retiring.is_empty() => {
+                for id in retiring.clone() {
+                    if !actors.read().await.contains_key(&id) { retiring.remove(&id); continue; }
+                    if let Ok(snapshot) = snapshot_for(&actors,&id).await
+                        && host.repository().is_durable(&id,snapshot.revision)
+                        && evict_agent(&actors,&runtime,&id).await.is_ok() {
+                        retiring.remove(&id);
+                    }
+                }
+                continue;
+            }
+        };
         match command {
+            CoordinatorCommand::Activate { agent_id, reply } => {
+                let result = async {
+                    match snapshot_for(&actors, &agent_id).await {
+                        Ok(snapshot) => return Ok(snapshot),
+                        Err(AgentRuntimeError::NotFound(_)) => {}
+                        Err(error) => return Err(error),
+                    }
+                    let restored = host
+                        .repository()
+                        .restore_thread(&agent_id)
+                        .await
+                        .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?
+                        .ok_or_else(|| AgentRuntimeError::NotFound(agent_id.clone()))?;
+                    restore_agent(&host, &runtime, &actors, restored, options).await
+                }
+                .await;
+                let _ = reply.send(result);
+            }
+            CoordinatorCommand::ReadSubmissions {
+                agent_id,
+                offset,
+                limit,
+                reply,
+            } => {
+                let result = async {
+                    let actor = actors.read().await.get(&agent_id).cloned();
+                    if let Some(actor) = actor {
+                        let (reply, receiver) = oneshot::channel();
+                        actor
+                            .send(AgentLoopCommand::ReadSubmissions {
+                                offset,
+                                limit,
+                                reply,
+                            })
+                            .await?;
+                        receiver
+                            .await
+                            .map_err(|_| AgentRuntimeError::ChannelClosed)?
+                    } else {
+                        host.repository()
+                            .list_submissions(&agent_id, offset, limit)
+                            .await
+                            .map_err(|error| AgentRuntimeError::Repository(error.to_string()))
+                    }
+                }
+                .await;
+                let _ = reply.send(result);
+            }
             CoordinatorCommand::Register {
                 registration,
                 reply,
@@ -146,6 +220,13 @@ async fn run_coordinator<H>(
             }
             CoordinatorCommand::Retire { agent_id, reply } => {
                 let result = retire_agent_tree(&host, &actors, &runtime, &agent_id).await;
+                if result.is_ok() {
+                    for snapshot in runtime.directory.snapshots() {
+                        if matches!(snapshot.state, super::AgentState::Closed(_)) {
+                            retiring.insert(snapshot.identity.id);
+                        }
+                    }
+                }
                 let _ = reply.send(result);
             }
             CoordinatorCommand::List { reply } => {

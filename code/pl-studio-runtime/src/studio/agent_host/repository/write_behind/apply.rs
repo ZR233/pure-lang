@@ -1,154 +1,45 @@
-//! 把一个 write-behind 批次应用进单个 SQLite 事务，并对持久化错误分类。
-
-use sea_orm::{EntityTrait, TransactionTrait};
-use std::collections::BTreeMap;
-
+//! Product-only transactions; session facts are persisted independently by pl-core.
+use super::super::store_error;
+use super::queue::{PendingBatch, QueueEntry, StudioDirectoryMutation, StudioMutation};
+use super::worker::{BatchError, PersistenceDisposition};
 use crate::PureError;
 use crate::studio::StudioStore;
 use crate::studio::runtime::MODEL_PERFORMANCE_OWNER_ID;
 use crate::studio::store::directory::apply_directory_delta;
 use crate::studio::store::object::put_object;
-
-use super::super::{ApplyCommitOutcome, apply_state_commit, store_error};
-use super::queue::{
-    PendingBatch, QueueEntry, QueuedMutation, StudioDirectoryMutation, StudioMutation,
-};
-use super::worker::{BatchError, PersistenceDisposition};
+use sea_orm::TransactionTrait;
 
 pub(super) async fn apply_batch(
     store: &StudioStore,
     batch: &PendingBatch,
-    confirmed: &mut super::super::context::TranscriptCache,
 ) -> Result<(), BatchError> {
-    let mut cache = confirmed.clone();
     let tx = store.database().begin().await.map_err(classify_db_error)?;
-    let applied = applied_thread_batches(&tx, batch, &mut cache).await?;
     for entry in &batch.entries {
-        match entry {
-            QueueEntry::Mutation(QueuedMutation {
-                mutation: StudioMutation::Thread(commit),
-                ..
-            }) => match if applied
-                .get(&commit.agent_id)
-                .is_some_and(|revision| commit.facts.revision <= *revision)
-            {
-                Ok(ApplyCommitOutcome::AlreadyApplied)
-            } else {
-                apply_thread_fact(&tx, commit, &mut cache).await
-            } {
-                Ok(ApplyCommitOutcome::Applied | ApplyCommitOutcome::AlreadyApplied) => {}
-                Ok(ApplyCommitOutcome::RevisionConflict { actual_revision }) => {
-                    let _ = tx.rollback().await;
-                    return Err(BatchError::Conflict { actual_revision });
-                }
-                Err(error) => {
-                    let _ = tx.rollback().await;
-                    return Err(classify_store_error(error));
-                }
-            },
-            QueueEntry::Mutation(QueuedMutation {
-                mutation: StudioMutation::Directory(directory),
-                ..
-            }) => match directory.as_ref() {
-                StudioDirectoryMutation::Delta(delta) => {
-                    if let Err(error) = apply_directory_delta(&tx, delta).await {
-                        let _ = tx.rollback().await;
-                        return Err(classify_store_error(store_error(error)));
-                    }
-                }
-                StudioDirectoryMutation::Attachments(records) => {
-                    if let Err(error) =
-                        crate::studio::store::attachment::persist_attachment_records(&tx, records)
-                            .await
-                    {
-                        let _ = tx.rollback().await;
-                        return Err(classify_store_error(store_error(error)));
-                    }
-                }
-                StudioDirectoryMutation::WorktreeLease(lease) => {
-                    if let Err(error) =
-                        put_object(&tx, &lease.child_id, lease, crate::studio::unix_seconds()).await
-                    {
-                        let _ = tx.rollback().await;
-                        return Err(classify_store_error(store_error(error)));
-                    }
-                }
-                StudioDirectoryMutation::ModelPerformance(commit) => {
-                    if let Err(error) = put_object(
-                        &tx,
-                        MODEL_PERFORMANCE_OWNER_ID,
-                        &commit.value,
-                        commit.value.updated_at(),
-                    )
+        let QueueEntry::Mutation(commit) = entry else {
+            continue;
+        };
+        let StudioMutation::Directory(directory) = &commit.mutation;
+        match directory.as_ref() {
+            StudioDirectoryMutation::Delta(delta) => apply_directory_delta(&tx, delta)
+                .await
+                .map_err(|error| classify_store_error(store_error(error)))?,
+            StudioDirectoryMutation::WorktreeLease(lease) => {
+                put_object(&tx, &lease.child_id, lease, crate::studio::unix_seconds())
                     .await
-                    {
-                        let _ = tx.rollback().await;
-                        return Err(classify_store_error(store_error(error)));
-                    }
-                }
-            },
-            QueueEntry::Barrier(_) => {}
+                    .map_err(|error| classify_store_error(store_error(error)))?
+            }
+            StudioDirectoryMutation::ModelPerformance(commit) => put_object(
+                &tx,
+                MODEL_PERFORMANCE_OWNER_ID,
+                &commit.value,
+                commit.value.updated_at(),
+            )
+            .await
+            .map_err(|error| classify_store_error(store_error(error)))?,
         }
     }
     tx.commit().await.map_err(classify_db_error)?;
-    *confirmed = cache;
     Ok(())
-}
-
-// 一个事务可能已提交，而 worker 尚未推进内存水位就退出。
-// 恢复后的批次可能还包含新事实；只跳过由相同 receipt 确认的已保存前缀。
-async fn applied_thread_batches(
-    tx: &sea_orm::DatabaseTransaction,
-    batch: &PendingBatch,
-    cache: &mut super::super::context::TranscriptCache,
-) -> Result<BTreeMap<pl_core::ThreadId, u64>, BatchError> {
-    let mut owners = BTreeMap::<_, Vec<_>>::new();
-    for entry in &batch.entries {
-        if let QueueEntry::Mutation(QueuedMutation {
-            mutation: StudioMutation::Thread(fact),
-            ..
-        }) = entry
-        {
-            owners.entry(fact.agent_id.clone()).or_default().push(fact);
-        }
-    }
-    let mut applied = BTreeMap::new();
-    for (id, facts) in owners {
-        let revision = crate::studio::entity::thread::Entity::find_by_id(id.to_string())
-            .one(tx)
-            .await
-            .map_err(classify_db_error)?
-            .and_then(|row| row.runtime_revision)
-            .and_then(|revision| u64::try_from(revision).ok());
-        let Some(fact) = facts
-            .into_iter()
-            .find(|fact| Some(fact.facts.revision) == revision)
-        else {
-            continue;
-        };
-        match apply_thread_fact(tx, fact, cache)
-            .await
-            .map_err(classify_store_error)?
-        {
-            ApplyCommitOutcome::AlreadyApplied => {
-                applied.insert(id, fact.facts.revision);
-            }
-            ApplyCommitOutcome::RevisionConflict { actual_revision } => {
-                return Err(BatchError::Conflict { actual_revision });
-            }
-            ApplyCommitOutcome::Applied => {}
-        }
-    }
-    Ok(applied)
-}
-
-async fn apply_thread_fact(
-    tx: &sea_orm::DatabaseTransaction,
-    fact: &super::thread_fact::ThreadFact,
-    cache: &mut super::super::context::TranscriptCache,
-) -> Result<ApplyCommitOutcome, PureError> {
-    let commit = fact.materialize(tx, cache).await?;
-    apply_state_commit(tx, &commit, cache).await
 }
 
 fn classify_db_error(error: sea_orm::DbErr) -> BatchError {

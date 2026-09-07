@@ -2,7 +2,7 @@
 
 use std::collections::VecDeque;
 
-use pl_protocol::StateError;
+use pl_core::StateError;
 
 use crate::PureError;
 use crate::studio::{
@@ -120,17 +120,13 @@ fn oldest_pending_revision(shared: &WriterShared) -> Option<u64> {
         .iter()
         .find_map(|entry| match entry {
             QueueEntry::Mutation(QueuedMutation {
-                mutation: StudioMutation::Thread(commit),
-                ..
-            }) => Some(commit.facts.revision),
-            QueueEntry::Mutation(QueuedMutation {
                 mutation: StudioMutation::Directory(directory),
                 ..
             }) => match directory.as_ref() {
                 StudioDirectoryMutation::ModelPerformance(commit) => Some(commit.revision),
-                StudioDirectoryMutation::Delta(_)
-                | StudioDirectoryMutation::Attachments(_)
-                | StudioDirectoryMutation::WorktreeLease(_) => None,
+                StudioDirectoryMutation::Delta(_) | StudioDirectoryMutation::WorktreeLease(_) => {
+                    None
+                }
             },
             QueueEntry::Barrier(_) => None,
         })

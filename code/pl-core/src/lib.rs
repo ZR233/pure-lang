@@ -13,11 +13,26 @@ mod core;
 pub mod execution_environment;
 pub mod instruction;
 mod interaction;
+mod interface;
+pub use interface::*;
+// Trace payloads and LSP capabilities are exposed by core runtime and tool signatures.
+pub use pl_lsp::runtime::LspRuntimeRegistry;
+pub use pl_output::{BoundedOutput, OutputTruncation, TruncatedOutput};
+pub use pl_skill_core::{
+    SkillCoreError, SkillDocument, SkillFrontmatter, SkillFrontmatterMetadata,
+};
+pub use pl_trace::*;
+
+/// Language-service capabilities accepted by the core tool runtime.
+pub mod lsp {
+    pub use pl_lsp::{catalog, driver, host, query, runtime};
+}
 pub mod mcp;
 mod message;
 mod model_config;
 pub mod path_safety;
 mod permission;
+pub mod persistence;
 pub mod process;
 mod prompt_cache;
 pub mod remote;
@@ -34,30 +49,7 @@ mod web_search;
 mod working_set;
 mod workspace;
 
-pub use agent_runtime::{
-    AgentAccessPolicy, AgentCollaborationToolConfig, AgentCollaborationTools, AgentCommand,
-    AgentCommitObserver, AgentCommittedEvent, AgentCurrentSessionSubmitRequest,
-    AgentDirectorySnapshot, AgentDirectorySubscription, AgentExecutionPolicy,
-    AgentFaultClassification, AgentIdentity, AgentInferenceCommit,
-    AgentInteractionContinuationRequest, AgentLifecycleAdapter, AgentProgressReport,
-    AgentProgressStage, AgentRecoveryTarget, AgentRegistration, AgentRuntime, AgentRuntimeError,
-    AgentRuntimeEvent, AgentRuntimeEventKind, AgentRuntimeHandle, AgentRuntimeHost,
-    AgentRuntimeOptions, AgentSessionCommitPolicy, AgentSessionTimelineKey,
-    AgentSessionTimelineQuery, AgentSessionTimelineRepositoryPage, AgentSnapshot,
-    AgentSpawnRequest, AgentState, AgentStateTransition, AgentSubmissionPage,
-    AgentSubmissionRecord, AgentSubmitRequest, AgentTargetSelector, AgentTurnCheckpointHandle,
-    AgentTurnFactory, AgentTurnOutcome, AgentTurnPreparationContext, AgentTurnSubmitPolicy,
-    CancellingAgentState, CloseLifecycleRequest, ClosedAgentState, ClosingAgentState,
-    DurableCommitFacts, DurableMailboxEnvelope, FaultedAgentState, IdleAgentState,
-    MailboxBudgetAction, MailboxCommand, MailboxDeliveryState, MailboxInputPayload,
-    MailboxInputSource, MailboxMetadata, MailboxMetadataValue, PersistenceClass, PreparedAgentTurn,
-    PreparedSessionRuntime, ProgressSubmissionCommit, QueuedAgentState, RestoredAgentRuntime,
-    RestoredInputPolicy, RestoredThreadSnapshot, RunningAgentState, SpawnLifecycleRequest,
-    SpawnRollbackPhase, SpawnRollbackReason, ThreadActorState, ThreadCommit, ThreadContextMetadata,
-    ThreadContextMutation, ThreadContextState, ThreadMutation, ThreadRepository, ToolEffectSet,
-    TurnCheckpointReason, TurnFinalizationPolicy, WaitingInteractionAgentState,
-    WaitingToolAgentState,
-};
+pub use agent_runtime::*;
 pub use attachment::{AttachmentRuntime, MaterializedAttachment, ToolImageAttachmentInput};
 pub use config::{
     BuiltinMcpServerState, DEFAULT_PROJECT_DOC_MAX_BYTES, EffectiveMcpServerConfig,
@@ -104,11 +96,15 @@ pub use model_config::{
 
 // 公共签名（model_config 字段、ModelTurnRequest builder、ToolDefinition::spec 等）
 // 使用的 pl-model 类型在此重导出，消费方无需直接依赖 pl-model。
-pub use pl_model::completion::ReasoningConfig;
-pub use pl_model::model::ModelInfo;
+// Canonical completion and model configuration are part of the core consumer contract.
+pub use pl_model::completion::*;
+pub use pl_model::model::*;
 pub use pl_model::provider::{
-    ApplyPatchToolType, ProviderConnectionMode, ProviderEndpoint, ProviderServiceCapabilities,
-    ToolWirePolicy,
+    ApplyPatchToolType, EffectivePromptCachePolicy, PromptCacheDialect,
+    PromptCacheProviderCapabilities, ProviderAdapterKind, ProviderClient, ProviderConnectionMode,
+    ProviderEndpoint, ProviderServiceCapabilities, ProviderWireProtocol,
+    ResponsesHostedToolCapabilities, StandaloneWebSearchDialect, ToolWirePolicy,
+    WebSearchProviderCapabilities, provider_transport_profile_revision,
 };
 pub use pl_protocol::{
     AgentBudgetPause, AgentRuntimeDelta, AgentSessionPage, AgentSessionReadDetail,
@@ -120,11 +116,12 @@ pub use pl_protocol::{
     PinnedContextSection, PipelineStage, ProviderCatalogSnapshot, ProviderConnectionModeDescriptor,
     ProviderPresetDescriptor, ProviderServiceCapabilitiesDescriptor, PureError, Result,
     RetryDisposition, RuntimeCostAmount, RuntimeUsageSnapshot, SkillActivation, ThreadId,
-    ThreadItem, ThreadModeCatalogSnapshot, ThreadModeDescriptor, ThreadModeId, ThreadSnapshot,
+    ThreadItem, ThreadModeCatalogSnapshot, ThreadModeDescriptor, ThreadModeId, ThreadNotification,
+    ThreadNotificationEnvelope, ThreadSnapshot, ThreadTurnHistory, ThreadTurnPage,
     TokenUsageSnapshot, ToolApprovalResolution, ToolDiscoveryState, ToolResultReceipt, ToolSpec,
-    TurnFailure, TurnFailureCategory, TurnId, UserInputAnswer, UserInputRequest, UserInputResponse,
-    UserQuestion, UserQuestionOption, WorkflowDefinition, WorkflowState, WorkflowStateKind,
-    WorkflowTransition,
+    Turn, TurnFailure, TurnFailureCategory, TurnId, UserInputAnswer, UserInputRequest,
+    UserInputResponse, UserQuestion, UserQuestionOption, WorkflowDefinition, WorkflowState,
+    WorkflowStateKind, WorkflowTransition,
 };
 pub(crate) use prompt_cache::{
     PromptCacheInput, derive_prompt_cache_key, prepare_prompt_context, stable_tool_schemas,
@@ -195,7 +192,9 @@ pub use workspace::{
     resolve_workspace_root,
 };
 
-pub use pl_model::runtime::{InferenceClock, ModelRuntime};
+pub use pl_model::runtime::{
+    InferenceClock, ModelInvocationContext, ModelRuntime, ModelSession, RemoteCompaction,
+};
 
 #[cfg(test)]
 mod signature_reexport_tests {

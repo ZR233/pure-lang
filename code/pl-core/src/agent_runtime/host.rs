@@ -299,6 +299,12 @@ pub trait ThreadRepository: Clone + Send + Sync + 'static {
     /// 当前尚未落库的 pending commit 数量，用于关机进度。
     fn pending_commit_count(&self) -> usize;
 
+    /// Flushes the current admission watermark without waiting for later writes.
+    fn flush(&self) -> impl Future<Output = std::result::Result<(), Self::Error>> + Send;
+
+    /// Drains and stops the writer after runtime owners have stopped producing facts.
+    fn shutdown(&self) -> impl Future<Output = std::result::Result<(), Self::Error>> + Send;
+
     /// 读取某 agent 的 durable 阶段提交历史（含已关闭 agent）。
     ///
     /// 用于主代理主动 pull 子代理报告：覆盖全状态、按提交顺序分页、不截断。

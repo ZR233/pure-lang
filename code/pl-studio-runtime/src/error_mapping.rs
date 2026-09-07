@@ -1,4 +1,4 @@
-use pl_protocol::PureError;
+use pl_core::PureError;
 use pl_protocol::studio::{StudioError, StudioErrorCode};
 
 use crate::ConfigRuntimeError;

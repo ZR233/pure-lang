@@ -90,6 +90,8 @@ pub use thread::{
     ThreadStatus, ThreadSubscriptionRequest, ThreadSubscriptionUpdate, ThreadTurnHistory,
     ThreadTurnPage,
 };
+mod session_entry;
+pub use session_entry::SessionEntry;
 pub use thread_item::*;
 pub use tool::{
     HostedWebSearchDialect, HostedWebSearchOptions, ToolCallerMode, ToolFormat, ToolSpec,

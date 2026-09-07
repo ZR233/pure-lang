@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
 use pl_core::{AgentIdentity, AgentWorkspace, resolve_workspace_root};
-use pl_protocol::{AgentWorkspaceAssignmentSnapshot, AgentWorkspaceMode};
+use pl_core::{AgentWorkspaceAssignmentSnapshot, AgentWorkspaceMode};
 
 use crate::studio::records::{ProjectRecord, ThreadRecord};
 

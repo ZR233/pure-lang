@@ -95,6 +95,7 @@ async fn run_steps(
     );
     core.tool_session_runtime.begin_turn(session)?;
     let working_set = core.tool_session_runtime.working_set();
+    working_set.bind_entry_scope(recorder.session_id(), &turn_id);
     let tool_cache = crate::tool::cache::TurnToolCacheHandle::default();
     let turn_item = recorder.running_turn_item(&turn_id);
     recorder.start_item(turn_item.clone());

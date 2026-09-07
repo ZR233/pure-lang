@@ -1,7 +1,7 @@
 //! MCP reconcile / reset 编排与后台健康 watcher。
 
 use anyhow::Result;
-use pl_protocol::{ObservedResourceCommand, ObservedResourceKind, StateOperation};
+use pl_core::{ObservedResourceCommand, ObservedResourceKind, StateOperation};
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::config::effective_mcp_servers;

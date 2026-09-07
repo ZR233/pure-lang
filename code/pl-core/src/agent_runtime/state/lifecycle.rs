@@ -7,7 +7,8 @@ use super::{AgentIdentity, AgentSnapshot, AgentState};
 use super::{mailbox::*, snapshot::*};
 
 /// repository 原子提交和恢复使用的 agent 全量 durable state。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ThreadActorState {
     pub snapshot: AgentSnapshot,
     pub session: ThreadContextState,

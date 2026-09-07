@@ -20,7 +20,7 @@ impl StudioRuntime {
         let (delta, thread) = DirectoryDelta::register_root_thread(
             project_id,
             title,
-            pl_protocol::ThreadModeId::simple(),
+            pl_core::ThreadModeId::simple(),
         );
         self.agent_facility
             .product_events
@@ -305,7 +305,7 @@ impl StudioRuntime {
             .iter()
             .chain(tree.iter())
             .cloned()
-            .map(pl_protocol::Thread::from)
+            .map(pl_core::Thread::from)
             .collect::<Vec<_>>();
         entries.sort_by(|left, right| left.id.cmp(&right.id));
         entries.dedup_by(|left, right| left.id == right.id);
@@ -318,7 +318,7 @@ impl StudioRuntime {
     pub async fn set_thread_mode(
         &self,
         thread_id: &str,
-        mode: pl_protocol::ThreadModeId,
+        mode: pl_core::ThreadModeId,
     ) -> Result<()> {
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
         let thread = self.read_owned_thread(thread_id).await?;
@@ -348,7 +348,7 @@ impl StudioRuntime {
             .change_idle_thread_mode(agent_id, mode.clone())
             .await
             .map_err(|error| anyhow::anyhow!(error))?;
-        let mut updated = pl_protocol::Thread::from(thread);
+        let mut updated = pl_core::Thread::from(thread);
         updated.mode = mode;
         updated.updated_at = crate::studio::unix_seconds();
         self.agent_facility
@@ -361,7 +361,7 @@ impl StudioRuntime {
         Ok(())
     }
 
-    fn ensure_mode_available(&self, mode_id: &pl_protocol::ThreadModeId) -> Result<()> {
+    fn ensure_mode_available(&self, mode_id: &pl_core::ThreadModeId) -> Result<()> {
         anyhow::ensure!(
             self.thread_modes.snapshot().mode(mode_id).is_some(),
             "selected Thread Mode `{mode_id}` is unavailable"
@@ -446,14 +446,14 @@ mod tests {
         assert!(handle.snapshot(id).await.is_ok());
         for selected in [&existing_id, &thread.id] {
             let mut subscription = runtime
-                .subscribe_thread(pl_protocol::ThreadSubscriptionRequest {
+                .subscribe_thread(pl_core::ThreadSubscriptionRequest {
                     thread_id: selected.clone(),
                 })
                 .await
                 .unwrap();
             let frame = subscription.recv().await.unwrap();
             if selected == &thread.id {
-                let pl_protocol::ThreadSubscriptionUpdate::Snapshot { snapshot } = frame else {
+                let pl_core::ThreadSubscriptionUpdate::Snapshot { snapshot } = frame else {
                     panic!("initial memory snapshot");
                 };
                 assert_eq!(snapshot.thread.title, renamed.title);
@@ -609,7 +609,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn worktree_lifecycle_and_new_submissions_do_not_wait_for_sqlite() {
         use pl_core::{AgentProgressStage, AgentSpawnRequest, ThreadContextState};
-        use pl_protocol::{AgentWorkspaceDisposition, AgentWorkspaceMode};
+        use pl_core::{AgentWorkspaceDisposition, AgentWorkspaceMode};
         use sea_orm::TransactionTrait;
         let (_home, workspace, runtime, root_id) = runtime_with_thread().await;
         for args in [
@@ -645,7 +645,7 @@ mod tests {
             .writer()
             .clone();
         writer.flush().await.unwrap();
-        let profile = pl_protocol::AgentProfileSnapshot {
+        let profile = pl_core::AgentProfileSnapshot {
             profile_id: "worktree_executor".into(),
             display_name: "Executor".into(),
             description: String::new(),

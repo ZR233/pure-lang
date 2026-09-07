@@ -8,7 +8,7 @@ mod validate;
 pub(super) use runtime::AttachmentDraftRuntime;
 
 use anyhow::{Context, Result};
-use pl_model::model::ModelInfo;
+use pl_core::ModelInfo;
 use pl_protocol::studio::{
     AdmitAttachmentDraftsRequest, AdmitAttachmentDraftsResponse, StudioAttachmentAdmissionContext,
 };
@@ -47,7 +47,7 @@ impl StudioRuntime {
                 StudioRole::from_key(&thread.role).context("Thread has an invalid model role")?
             }
             StudioAttachmentAdmissionContext::NewThread { mode } => {
-                pl_protocol::ThreadModeId::from_label(mode)
+                pl_core::ThreadModeId::from_label(mode)
                     .map_err(|_| anyhow::anyhow!("mode must be an available mode.* id"))?;
                 StudioRole::Planner
             }

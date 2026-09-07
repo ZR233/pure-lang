@@ -21,7 +21,7 @@ pub(super) fn interaction_emitter(
                     pl_core::ThreadId::new(thread_id)?,
                     vec![pl_core::ThreadNotificationFact::durable(
                         emitted_at,
-                        pl_protocol::ThreadNotification::InteractionChanged {
+                        pl_core::ThreadNotification::InteractionChanged {
                             interaction: Box::new(interaction),
                         },
                     )],

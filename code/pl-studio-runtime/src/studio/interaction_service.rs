@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use crate::{
     CancelInteraction, InteractionCommand, InteractionKind, InteractionRequest,
-    InteractionResolution, InteractionStatus, ReopenRecoveredInteraction, ResolveToolApproval,
-    ResolveUserInput, ToolApprovalResolution, ToolApprovalResolutionPayload, UserInputResolution,
+    InteractionResolution, InteractionStatus, ResolveToolApproval, ResolveUserInput,
+    ToolApprovalResolution, ToolApprovalResolutionPayload, UserInputResolution,
 };
 use anyhow::Result;
 use futures::FutureExt;
@@ -71,30 +71,6 @@ impl InteractionService {
         interaction: InteractionRequest,
         emitter: InteractionEmitter,
     ) -> Result<InteractionRequest> {
-        self.persist_and_emit(interaction.clone(), emitter).await?;
-        Ok(interaction)
-    }
-
-    pub async fn recover_user_input(
-        &self,
-        mut interaction: InteractionRequest,
-        emitter: InteractionEmitter,
-    ) -> Result<InteractionRequest> {
-        anyhow::ensure!(
-            interaction.kind() == InteractionKind::UserInput
-                && interaction.status() == InteractionStatus::Cancelled,
-            "only a cancelled user input can be recovered"
-        );
-        let now = unix_seconds();
-        let decision = interaction.decide(InteractionCommand::ReopenRecovered(
-            ReopenRecoveredInteraction {
-                interaction_id: interaction.interaction_id.clone(),
-                expected_revision: interaction.revision,
-                operation_id: format!("recovery:{}", interaction.interaction_id),
-                reopened_at: now,
-            },
-        ))?;
-        interaction.apply(decision, now);
         self.persist_and_emit(interaction.clone(), emitter).await?;
         Ok(interaction)
     }
@@ -302,20 +278,45 @@ mod tests {
     use tokio::sync::Mutex;
 
     use super::*;
-    use crate::ThreadModeId;
-    use crate::studio::StudioStore;
+    #[derive(Clone, Default)]
+    struct InteractionRecorder(Arc<Mutex<std::collections::BTreeMap<String, InteractionRequest>>>);
 
-    async fn store_with_session() -> (StudioStore, String) {
-        let store = StudioStore::open_memory().await.unwrap();
-        let project = store.upsert_project("C:/work/interactions").await.unwrap();
-        let session = store
-            .create_thread(&project.id, "Interaction test", ThreadModeId::simple())
-            .await
-            .unwrap();
-        (store, session.id)
+    impl InteractionRecorder {
+        async fn list_pending_interactions(
+            &self,
+            session_id: &str,
+        ) -> Result<Vec<InteractionRequest>> {
+            Ok(self
+                .0
+                .lock()
+                .await
+                .values()
+                .filter(|value| {
+                    value.scope.thread_id == session_id
+                        && value.status() == InteractionStatus::Pending
+                })
+                .cloned()
+                .collect())
+        }
+        async fn read_interaction(&self, id: &str) -> Result<Option<InteractionRequest>> {
+            Ok(self.0.lock().await.get(id).cloned())
+        }
+        async fn record(&self, interaction: &InteractionRequest) {
+            self.0
+                .lock()
+                .await
+                .insert(interaction.interaction_id.clone(), interaction.clone());
+        }
     }
 
-    async fn wait_pending(store: &StudioStore, session_id: &str) -> Vec<InteractionRequest> {
+    async fn store_with_session() -> (InteractionRecorder, String) {
+        (InteractionRecorder::default(), "thread-interactions".into())
+    }
+
+    async fn wait_pending(
+        store: &InteractionRecorder,
+        session_id: &str,
+    ) -> Vec<InteractionRequest> {
         for _ in 0..100 {
             let pending = store.list_pending_interactions(session_id).await.unwrap();
             if !pending.is_empty() {
@@ -341,7 +342,7 @@ mod tests {
     }
 
     fn emitter(
-        store: StudioStore,
+        store: InteractionRecorder,
         events: Arc<Mutex<Vec<InteractionRequest>>>,
     ) -> InteractionEmitter {
         Arc::new(move |interaction| {
@@ -350,7 +351,7 @@ mod tests {
             async move {
                 // 生产 emitter 由 ThreadActor/ThreadRepository 作为 canonical writer；
                 // 这个 unit-test emitter 只模拟该提交边界。
-                store.upsert_interaction(&interaction).await?;
+                store.record(&interaction).await;
                 events.lock().await.push(interaction);
                 Ok(())
             }
@@ -367,7 +368,7 @@ mod tests {
                 item_id: Some("tool-1".to_string()),
                 tool_id: Some("tool-1".to_string()),
                 agent_path: Some("/root/child".to_string()),
-                purpose: pl_protocol::InteractionPurpose::General,
+                purpose: pl_core::InteractionPurpose::General,
             },
             Vec::new(),
             1,
@@ -383,9 +384,9 @@ mod tests {
                 item_id: Some(id.to_string()),
                 tool_id: Some(id.to_string()),
                 agent_path: None,
-                purpose: pl_protocol::InteractionPurpose::General,
+                purpose: pl_core::InteractionPurpose::General,
             },
-            pl_protocol::ToolApprovalRequest {
+            pl_core::InteractionToolApprovalRequest {
                 name: "exec".to_string(),
                 arguments: serde_json::json!({"command": "echo hi"}),
                 working_directory: None,
