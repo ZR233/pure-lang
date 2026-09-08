@@ -4,36 +4,29 @@
 
 ## 项目概览
 
-Pure-Lang 是一个**自然语言编译器**：接收用户的自然语言需求，将其编译为可执行的计划、代码生成意图和后续动作建议。项目采用模块化单体架构，核心编译引擎基于 Rust 实现；桌面端以 Windows 优先的 Flutter + flutter_rust_bridge 实现为唯一入口。
+Pure-Lang 是一个**自然语言编译器**：接收用户的自然语言需求，将其编译为可执行的计划、代码生成意图和后续动作建议。项目采用模块化单体架构，核心编译引擎基于 Rust 实现；提供 Windows 优先的 Flutter + flutter_rust_bridge 桌面端，以及共享业务运行时的独立 HTTP 宿主。
 
 > 📖 详细设计文档见 [`design/`](./design/) 目录
 
 ## 架构
 
 ```text
-pl-core                   产品无关的 Thread/Turn/Item runtime
-  │                       模型采样、工具、MCP、LSP 与 agent 编排
-  ├────► pl-model         LLM Provider 适配层
-  │                       OpenAI 兼容 wire API、SSE 流式、模型元数据
-  ├────► pl-lsp           LSP 客户端
-  │                       rust-analyzer 支持、代码智能查询
-  ├────► pl-protocol      公共协议层
-  │                       Studio wire DTO、消息、权限、错误类型
-  ├────► pl-trace         内部 trace 事件层
-  │                       AgentEvent、TraceEvent、TracePart
-  ▼
-pl-studio-runtime         Studio SQLite、Task、设置与产品事件
-  ├────► pl-studio-server 独立 HTTP/OpenAPI/SSE 宿主
-  └────► pl-studio-bridge Flutter Rust Bridge v2 适配器
-                 ▲
-                 │
-pure-studio              Flutter 桌面应用
-                         Material 3 + Riverpod + Thread 事件流
+pure_studio（Flutter） ──► pl-studio-bridge ─┐
+                                          ├──► pl-studio-runtime ──► pl-core
+pl-studio-server（HTTP/OpenAPI/SSE） ───────┘             │              │
+                                                       │              ├──► pl-model / pl-lsp
+                                                       │              ├──► pl-output / pl-patch / pl-skill-core
+                                                       │              ├──► pl-remote-helper（Linux 进程监督）
+                                                       └──────────────┴──► pl-protocol / pl-trace
 ```
 
-### Workspace Crate
+箭头表示依赖方向。`pl-core` 拥有 Thread、Turn、工具任务与统一会话存储；
+`pl-studio-runtime` 拥有项目、配置和产品事实；FRB 与 HTTP 层只适配同一业务 runtime。
+`pl-remote-helper` 也可作为 SSH 远端助手独立运行，只管理物理进程和远端文件能力。
 
-| Crate | 路径 | 职责 |
+### Workspace 与 Flutter 客户端
+
+| 包 | 路径 | 职责 |
 |-------|------|------|
 | `pl-protocol` | `code/pl-protocol/` | 跨 crate 协议类型：消息、事件、错误、权限 |
 | `pl-trace` | `code/pl-trace/` | 内部运行事件类型：AgentEvent、TraceEvent、TracePart |
@@ -43,20 +36,19 @@ pure-studio              Flutter 桌面应用
 | `pl-patch` | `code/pl-patch/` | apply-patch 语法、匹配与 backend 契约 |
 | `pl-skill-core` | `code/pl-skill-core/` | Skill frontmatter 与路径安全规则 |
 | `pl-core` | `code/pl-core/` | 产品无关的 Thread runtime、模型与工具编排、MCP 和 agent runtime |
-| `pl-studio-runtime` | `code/pl-studio-runtime/` | Studio SQLite、Task、配置、恢复与产品事件的唯一业务 façade |
+| `pl-remote-helper` | `code/pl-remote-helper/` | Linux 本地进程监督与 SSH 远端助手，共用物理进程协议 |
+| `pl-studio-runtime` | `code/pl-studio-runtime/` | Studio 产品 SQLite、项目、配置、恢复与产品事件的唯一业务 façade |
 | `pl-studio-server` | `code/pl-studio-server/` | 独立 HTTP/OpenAPI/SSE transport 宿主 |
 | `pl-studio-bridge` | `code/pure-studio/rust/` | Flutter Rust Bridge v2 transport 适配器 |
-| `pure-studio` | `code/pure-studio/` | Flutter 桌面应用：Material 3、Riverpod、Thread 事件订阅 |
+| `pure_studio`（非 Cargo 成员） | `code/pure-studio/` | Flutter 桌面应用：Material 3、Riverpod、Thread 事件订阅 |
 | `pl-xtask` | `xtask/` | GUI 生成、验证、运行、构建与发布编排入口 |
 
 ### 依赖规则
 
-```
-pl-protocol ← pl-trace ← pl-model ← pl-core ← pl-studio-runtime
-                          pl-lsp  ↗                 ├→ pl-studio-server
-                                                  └→ pl-studio-bridge ← pure-studio
-（底层）                                                                    （顶层）
-```
+`pl-model` 与 `pl-trace` 依赖公共协议；`pl-lsp`、`pl-output`、`pl-patch`、`pl-skill-core`
+不依赖 Studio。`pl-core` 组合这些底层能力，并在 Linux 上复用 `pl-remote-helper` 客户端；
+helper 只依赖 `pl-protocol`，不创建第二套会话 owner。Studio 宿主依赖业务 runtime，
+Flutter 客户端经 FRB 调用；`pl-xtask` 负责开发和发布编排，不是产品入口。
 
 ## 快速开始
 
@@ -154,7 +146,7 @@ cargo xtask build-gui
 #### Windows
 
 - Visual Studio 2022 或 Build Tools，勾选“使用 C++ 的桌面开发”和 Windows 10/11 SDK；
-- Windows 桌面支持：`flutter config --enable-windows-desktop`；
+- Windows 桌面支持：`cargo flutter config --enable-windows-desktop`；
 - Rust 使用 `stable-x86_64-pc-windows-msvc` 工具链；
 - CMake（Visual Studio 安装器可选装）应位于 PATH；
 - 运行 `cargo xtask build-gui` 还需要前文的 Zig、`cargo-zigbuild` 和两个 musl Rust 目标。
@@ -162,7 +154,7 @@ cargo xtask build-gui
 检查环境：
 
 ```powershell
-flutter doctor -v
+cargo flutter doctor -v
 rustc -Vv
 zig version
 cargo zigbuild --version
@@ -183,19 +175,27 @@ Flutter 的 Linux 桌面构建需要 Clang、CMake、Ninja、pkg-config、GTK 3 
 ```bash
 sudo apt-get update
 sudo apt-get install -y clang cmake ninja-build pkg-config build-essential libgtk-3-dev xvfb
-flutter config --enable-linux-desktop
-flutter doctor -v
+cargo flutter config --enable-linux-desktop
+cargo flutter doctor -v
 ```
 
 xtask 会在构建前使用 PATH 中发现的真实工具链编译并链接最小 GTK/C++ 探针；不会写死编译器版本、
 系统库路径，也不会注入 `LIBRARY_PATH` 或 `CPLUS_INCLUDE_PATH`。
 
+未构建桌面内嵌资源、只运行 Rust 工作区测试或独立 Studio server 时，Linux 仍需要安装同一生产 worker：
+
+```bash
+cargo install --path code/pl-remote-helper --locked
+```
+
+确保安装目录位于 PATH。`exec` 不使用裸 shell 后备路径；桌面 xtask 构建会嵌入并保留 worker 可执行资源。
+
 #### macOS
 
 - 安装 Xcode，并执行 `xcode-select --install`；
-- `flutter config --enable-macos-desktop`；
+- `cargo flutter config --enable-macos-desktop`；
 - 接受 Xcode 许可：`sudo xcodebuild -license`；
-- 运行 `flutter doctor -v`，确保 CocoaPods（若项目依赖插件需要）可用。
+- 运行 `cargo flutter doctor -v`，确保 CocoaPods（若项目依赖插件需要）可用。
 
 #### Windows 正式发布（可选）
 
@@ -219,7 +219,8 @@ Flutter 端通过 `pl-studio-bridge` 调用同一个 `pl-studio-runtime`。每�
 
 ```text
 ~/.pure/config.toml                 # 全局配置（provider、模型、角色）
-~/.pure/studio/studio.sqlite        # Studio 的单一 canonical 数据库
+~/.pure/studio/studio.sqlite        # Studio 项目、配置关联与产品事实
+~/.pure/studio/sessions.sqlite      # core 会话、任务、事件收件箱与完整结果
 ```
 
 DeepSeek V4 的 Responses route 支持服务端原生联网搜索；Studio 默认启用
@@ -239,11 +240,12 @@ pure-lang/
 │   ├── pl-output/            # 输出截断算法
 │   ├── pl-patch/             # apply-patch 引擎
 │   ├── pl-skill-core/        # Skill 核心规则
-│   ├── pl-core/              # Thread/Turn/Item 与工具 runtime
+│   ├── pl-core/              # Thread/Turn/Item 与会话工具 runtime
+│   ├── pl-remote-helper/     # 本地进程监督与 SSH 远端助手
 │   ├── pl-studio-runtime/    # Studio 业务 runtime
 │   ├── pl-studio-server/     # HTTP/OpenAPI/SSE server
 │   └── pure-studio/          # Flutter 桌面应用与 FRB crate
-├── design/                   # 21 份顶层架构设计文档及原型/视觉资产
+├── design/                   # 架构设计文档及原型/视觉资产
 ├── .cargo/config.toml        # Cargo 配置
 ├── xtask/                    # pl-xtask 开发任务入口
 └── AGENTS.md                 # 项目协作与工程规范
@@ -253,14 +255,14 @@ pure-lang/
 
 | 层级 | 技术 |
 |------|------|
-| 桌面框架 | Flutter Windows + flutter_rust_bridge v2 |
+| 桌面框架 | Flutter + flutter_rust_bridge v2 |
 | 后端语言 | Rust（edition 2024） |
 | 异步运行时 | tokio |
 | 数据库 | SQLite via SeaORM（SQLx 后端） |
 | 序列化 | serde + serde_json + toml |
 | Flutter 状态管理 | Riverpod |
 | Flutter 路由 | go_router |
-| LLM 集成 | OpenAI 兼容 API（async-openai + SSE 流式） |
+| LLM 集成 | OpenAI 兼容 API、SSE 与 Responses WebSocket（async-openai 等适配） |
 | LSP 客户端 | lsp-types + 自研 JSON-RPC framing（rust-analyzer 支持） |
 | 流式解析 | async-openai stream |
 
@@ -268,20 +270,21 @@ pure-lang/
 
 | 概念 | 说明 |
 |------|------|
-| **Thread** | 一个 agent 独占的对话、输入队列与持久历史 |
-| **Turn** | Thread 中一次由明确输入启动的执行 |
+| **Thread** | 一个 agent 独占的对话、输入队列、会话工具任务与持久历史 |
+| **Turn** | Thread 中一次由明确输入启动的模型执行；结束不丢弃已受理的会话任务 |
 | **Item** | 消息、推理、工具调用、计划等穷尽的 Thread 内容单元 |
-| **Tool** | provider 无关的统一工具抽象；由 `ToolManager` 按 agent 注册并冻结为每个 model step 的 `ToolPlan` |
+| **Tool** | 统一的 `DynTool` 执行容器；会话创建时注册，每步冻结为 `ToolPlan` |
+| **ToolTask** | 会话拥有的工具调用任务，以 `taskId` 查询、输入、取消与读取完整结果 |
 | **LSP** | Language Server Protocol 客户端，支持代码智能查询（定义跳转、引用查找等） |
-| **Agent** | 子代理系统，支持分层任务分解与编排 |
-| **Skill** | 项目技能系统，定义 Codex 协作规则和可复用流程 |
-| **Studio** | Pure Studio 桌面运行时，管理项目、会话和配置 |
+| **Agent** | 拥有独立 Thread 的执行身份，root 与 child 共用同一框架 |
+| **Skill** | 带元数据与资源的可复用指令包，由运行时发现与激活 |
+| **Studio** | 管理项目、配置与产品事件，由桌面和 HTTP 宿主共享 |
 | **Provider** | LLM Provider 抽象（OpenAI、DeepSeek、智谱等） |
 | **ThreadModeId** | root Thread 的 Mode 身份（例如 `mode.simple` / `mode.task`） |
 
 ### 内置工具
 
-内置工具 + MCP 动态工具按分类如下：
+下列为主要工具类别；实际可见集合取决于能力配置、Profile、Thread Mode、Skill 与 MCP/LSP 状态：
 
 | 分类 | 工具 |
 |------|------|
@@ -289,8 +292,9 @@ pure-lang/
 | 文件读取 | `read_file`, `list_files`, `stat_path` |
 | 文件写入 | `write_file`, `create_directory`, `delete_path`, `copy_path`, `move_path` |
 | 补丁 | `apply_patch` |
-| 代码智能 | `lsp_query` |
-| 子代理 | `spawn_agent`, `report_progress`, `send_message`, `interrupt_agent`, `list_agents`, `wait_agents`, `read_agent_session`, `close_agent` |
+| 代码智能 | `lsp_capabilities`, `lsp_query` |
+| 子代理 | `spawn_agent`, `report_progress`, `send_message`, `interrupt_agent`, `list_agents`, `list_agent_profiles`, `read_agent_session`, `read_agent_submissions`, `close_agent` |
+| 会话任务与事件 | `wait`, `sleep`, `list_tool_tasks`, `get_tool_task`, `cancel_tool_task` |
 | 用户交互 | `request_user_input` |
 | 技能 | `skills_list`, `skill_view`, `skill_manage` |
 | MCP | 动态注册（`mcp__<server>__<tool>`） |
@@ -298,11 +302,22 @@ pure-lang/
 
 ### 在其他应用中注册工具
 
-`pl-core` 的工具 API 是破坏性的新边界，不提供旧 registry 兼容层。宿主创建一个
-`ToolManager`，为每个 agent 持久保存独立 `AgentToolSet`，再把自行实现的 `Tool`、`LocalTool`
-或 `TypedTool` 按稳定 `ToolGroupId` 安装。需要同时更新多个动态来源时使用 `install_batch`；每次
-模型 step 前可通过 `BeforeModelStepHook` 刷新，返回后冻结的 `ToolPlan` 同时约束 provider schema
-和本地执行器。外部应用不得保存第二份 name-to-handler 映射或绕过 plan 直接执行工具。
+宿主通过 `AgentTurnFactory::prepare_session` 返回
+`pl_core::session_runtime::SessionRuntimeBuilder`，在发布会话前声明工具和事件源。
+使用 `with_tools` 加入普通 `ToolInstallGroup`，使用 `with_tool_factory` 绑定会话能力，
+使用 `with_event_source` 安装外部监听。静态工具实现 `StaticTool`，动态工具通过
+`DynamicToolExecutor` 构造，两者统一进入 `DynTool`；不保存第二份 name-to-handler 映射。
+
+`SessionBuildContext` 提供限定于本次会话和来源的消息发布、任务控制与取消能力；
+构造期间 owner RPC 返回 `NotReady`。每轮 `prepare_turn` 消费现有会话运行时，
+不重新创建命令管理器或注册表。动态来源通过创建时声明的 `with_refresh` 统一刷新，
+随后冻结的 `ToolPlan` 同时约束 provider schema 与本地执行器；多个安装组用 `install_batch` 原子更新。
+
+普通工具默认为会话任务，框架在共享交付窗口内返回终态结果或 `taskId` 句柄；可信控制工具
+使用 `ToolPolicy::control()`。后续 Turn 可用同一 `taskId` 操作任务，`write_stdin` 只负责输入，
+等待统一使用 `wait`。大型结果在模型侧显示预览与 `resultReference`，通过
+`get_tool_task` 的 `resultCursor` 分页读取完整结果；停止、失败、归档和重启都有明确的收束状态。
+完整生命周期与迁移契约见 [会话工具任务与统一唤醒](design/26-session-tool-runtime.md)。
 
 普通工具名保持平铺，同一 scope 重名会使整批失败；agent-local 工具可覆盖显式继承的 global
 同名工具。MCP 是唯一强制命名空间的来源，公开名为 `mcp__<server>__<raw>`，有损归一化或截断时
@@ -396,12 +411,12 @@ render tree 和 Driver 日志保存在 `target/workflow-live-artifacts/`。
 |------|------|
 | [01-overview.md](./design/01-overview.md) | 系统总览与定位 |
 | [02-crates.md](./design/02-crates.md) | Crate 设计与端口-适配器架构 |
-| [03-pipeline.md](./design/03-pipeline.md) | 编译管线流程 |
+| [03-pipeline.md](./design/03-pipeline.md) | Thread / Turn / Item 流程 |
 | [04-security.md](./design/04-security.md) | 安全与权限模型 |
 | [05-extension.md](./design/05-extension.md) | 扩展机制 |
-| [06-phases.md](./design/06-phases.md) | 编译阶段说明 |
+| [06-phases.md](./design/06-phases.md) | 实施阶段 |
 | [07-model.md](./design/07-model.md) | 模型与 Provider 设计 |
-| [08-streaming.md](./design/08-streaming.md) | SSE 流式处理 |
+| [08-streaming.md](./design/08-streaming.md) | Thread 实时流 |
 | [09-conventions.md](./design/09-conventions.md) | 编码约定 |
 | [10-config.md](./design/10-config.md) | 配置系统 |
 | [11-studio-ui.md](./design/11-studio-ui.md) | Studio UI 设计 |
@@ -411,13 +426,16 @@ render tree 和 Driver 日志保存在 `target/workflow-live-artifacts/`。
 | [14-lsp-runtime.md](./design/14-lsp-runtime.md) | LSP 运行时 |
 | [15-agent-profiles-and-collaboration.md](./design/15-agent-profiles-and-collaboration.md) | Agent Profile 与统一协作 |
 | [16-task-orchestration.md](./design/16-task-orchestration.md) | Thread Mode 与预注册工作流 |
-| [23-thread-mode.md](./design/23-thread-mode.md) | Thread Mode 注册、图生命周期与工具合同 |
-| [24-agent-session-plan.md](./design/24-agent-session-plan.md) | AgentSession Plan 状态机与通用隐藏 continuation |
 | [17-agent-runtime-host.md](./design/17-agent-runtime-host.md) | Agent runtime 与宿主边界 |
 | [18-studio-release-update.md](./design/18-studio-release-update.md) | Studio 发布与更新 |
 | [19-studio-storage-and-diagnostics.md](./design/19-studio-storage-and-diagnostics.md) | Studio 存储与诊断 |
 | [20-studio-state-runtime.md](./design/20-studio-state-runtime.md) | Studio 状态查询与领域生命周期 |
 | [21-session-activation-and-persistence.md](./design/21-session-activation-and-persistence.md) | 会话激活、唯一热状态与异步持久化 |
+| [22-ssh-remote-development.md](./design/22-ssh-remote-development.md) | SSH 远程开发与宿主能力 |
+| [23-thread-mode.md](./design/23-thread-mode.md) | Thread Mode 注册、图生命周期与工具合同 |
+| [24-agent-session-plan.md](./design/24-agent-session-plan.md) | AgentSession Plan 状态机与通用隐藏 continuation |
+| [25-session-entry-storage.md](./design/25-session-entry-storage.md) | 统一会话条目与独立存储 |
+| [26-session-tool-runtime.md](./design/26-session-tool-runtime.md) | 会话工具任务与统一唤醒 |
 
 ## 项目规范
 
