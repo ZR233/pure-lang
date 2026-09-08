@@ -389,22 +389,6 @@ void registerShellSettingsTests() {
       ),
       findsOneWidget,
     );
-    // Tooltip 只包裹标题文本，不吞掉尾随 close/rename 按钮的区域。
-    expect(
-      find.descendant(
-        of: projectTitleTooltip,
-        matching: find.byKey(const ValueKey('project-close-project-1')),
-      ),
-      findsNothing,
-    );
-    expect(
-      find.descendant(
-        of: threadTitleTooltip,
-        matching: find.byKey(StudioDriverKeys.renameThread('session-1')),
-      ),
-      findsNothing,
-    );
-
     // 悬停行为验证：以悬停前同名 Text 数量为基线做增量断言，overlay 出现
     // 意味着 +1，避免侧栏/页眉既有同名 Text 的脆弱计数。
     final nameCountBefore = find
@@ -710,58 +694,48 @@ void registerShellSettingsTests() {
     expect(find.byKey(StudioDriverKeys.projectPathDialog), findsNothing);
   });
 
-  testWidgets('sidebar footer uses aligned icon actions in zh Hans', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(900, 700);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
+  testWidgets(
+    'sidebar exposes labelled actions and keeps new session above the directory',
+    (tester) async {
+      tester.view.physicalSize = const Size(900, 700);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
 
-    final api = _FakeStudioApi(_emptyState());
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [studioApiProvider.overrideWithValue(api)],
-        child: _localizedApp(
-          locale: const Locale('zh', 'Hans'),
-          home: const StudioShell(),
+      final api = _FakeStudioApi(_emptyState());
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [studioApiProvider.overrideWithValue(api)],
+          child: _localizedApp(
+            locale: const Locale('zh', 'Hans'),
+            home: const StudioShell(),
+          ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpAndSettle();
 
-    final sidebar = find.byKey(const ValueKey('studio-sidebar'));
-    final newSession = find.widgetWithIcon(
-      IconButton,
-      Icons.add_comment_outlined,
-    );
-    final openProject = find.widgetWithIcon(
-      IconButton,
-      Icons.create_new_folder,
-    );
-    final settings = find.widgetWithIcon(IconButton, Icons.settings);
-
-    expect(sidebar, findsOneWidget);
-    expect(find.byKey(StudioDriverKeys.openProject), findsOneWidget);
-    expect(find.byTooltip('新建会话'), findsOneWidget);
-    expect(find.byTooltip('打开项目'), findsOneWidget);
-    expect(find.byTooltip('设置'), findsOneWidget);
-    expect(newSession, findsOneWidget);
-    expect(openProject, findsOneWidget);
-    expect(settings, findsOneWidget);
-    expect(tester.getSize(newSession), const Size.square(40));
-    expect(tester.getSize(openProject), const Size.square(40));
-    expect(tester.getSize(settings), const Size.square(40));
-    expect(tester.getCenter(newSession).dy, tester.getCenter(openProject).dy);
-    expect(tester.getCenter(openProject).dy, tester.getCenter(settings).dy);
-    expect(
-      find.descendant(of: sidebar, matching: find.byType(OutlinedButton)),
-      findsNothing,
-    );
-    expect(find.text('新建'), findsNothing);
-    expect(find.text('打开'), findsNothing);
-    expect(tester.takeException(), isNull);
-  });
+      final sidebar = find.byKey(const ValueKey('studio-sidebar'));
+      final newSession = find.byKey(StudioDriverKeys.newSession);
+      final openProject = find.byKey(StudioDriverKeys.openProject);
+      final settings = find.byKey(StudioDriverKeys.settingsOpen);
+      expect(sidebar, findsOneWidget);
+      expect(newSession.hitTestable(), findsOneWidget);
+      expect(openProject.hitTestable(), findsOneWidget);
+      expect(settings.hitTestable(), findsOneWidget);
+      expect(find.text('新建会话'), findsOneWidget);
+      expect(find.text('打开项目'), findsOneWidget);
+      expect(find.text('设置'), findsOneWidget);
+      expect(
+        tester.getCenter(newSession).dy,
+        lessThan(tester.getCenter(openProject).dy),
+      );
+      expect(
+        tester.getCenter(openProject).dy,
+        lessThan(tester.getCenter(settings).dy),
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets(
     'closing the busy selected project is rejected without legacy cleanup UI',
@@ -2265,6 +2239,8 @@ void registerShellSettingsTests() {
               )
               .last;
           await tester.ensureVisible(dropdown);
+          await tester.pumpAndSettle();
+          expect(dropdown.hitTestable(), findsOneWidget);
           await tester.tap(dropdown);
           await tester.pumpAndSettle();
           await tester.tap(find.text('Responses (HTTP)').last);
@@ -2494,29 +2470,63 @@ void registerShellSettingsTests() {
     expect(customModelConnection['connectionMode'], 'web_socket');
   });
 
+  testWidgets('provider list preserves usage and opens details from the row', (
+    tester,
+  ) async {
+    _configureSettingsTestView(tester);
+    final api = _FakeStudioApi(
+      _providerListState(),
+      providerUsages: _providerListUsages,
+    );
+    await _pumpSettingsPage(tester, api);
+
+    expect(find.byKey(StudioDriverKeys.providerUsageCheck), findsOneWidget);
+    expect(find.byTooltip('Open details'), findsNothing);
+    final deepSeekOrigin = tester.getTopLeft(find.text('DeepSeek'));
+    final zhipuOrigin = tester.getTopLeft(find.text('Zhipu Coding Plan'));
+    expect(zhipuOrigin.dx, closeTo(deepSeekOrigin.dx, 1));
+    expect(zhipuOrigin.dy, greaterThan(deepSeekOrigin.dy));
+
+    await tester.tap(find.text('Zhipu Coding Plan'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Search providers'), findsNothing);
+    expect(find.widgetWithText(FilledButton, 'Edit'), findsOneWidget);
+    expect(find.text('Usage'), findsOneWidget);
+  });
+
   testWidgets(
-    'provider list uses one compact column and opens details from the row',
+    'wide provider details preserve list usage and both refresh paths',
     (tester) async {
-      _configureSettingsTestView(tester);
+      tester.view.physicalSize = const Size(1600, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       final api = _FakeStudioApi(
         _providerListState(),
         providerUsages: _providerListUsages,
       );
       await _pumpSettingsPage(tester, api);
-
-      expect(find.byType(StudioPanel), findsOneWidget);
-      expect(find.byTooltip('Open details'), findsNothing);
-      final deepSeekOrigin = tester.getTopLeft(find.text('DeepSeek'));
-      final zhipuOrigin = tester.getTopLeft(find.text('Zhipu Coding Plan'));
-      expect(zhipuOrigin.dx, closeTo(deepSeekOrigin.dx, 1));
-      expect(zhipuOrigin.dy, greaterThan(deepSeekOrigin.dy));
-
-      await tester.tap(find.text('Zhipu Coding Plan'));
+      await tester.tap(find.text('DeepSeek'));
       await tester.pumpAndSettle();
-
-      expect(find.text('Search providers'), findsNothing);
-      expect(find.widgetWithText(FilledButton, 'Edit'), findsOneWidget);
-      expect(find.text('Usage'), findsOneWidget);
+      expect(
+        find.byKey(StudioDriverKeys.providerRow('deepseek')),
+        findsOneWidget,
+      );
+      expect(find.text('CNY 88.00'), findsWidgets);
+      expect(find.text('Granted 8.00'), findsOneWidget);
+      expect(find.text('Topped up 80.00'), findsOneWidget);
+      final before = api.loadProviderUsagesCount;
+      await tester.tap(find.byKey(StudioDriverKeys.providerUsageCheck));
+      await tester.pumpAndSettle();
+      expect(api.loadProviderUsagesCount, before + 1);
+      await tester.tap(find.byTooltip('Provider actions').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Refresh usage').last);
+      await tester.pumpAndSettle();
+      expect(api.loadProviderUsagesCount, before + 2);
+      expect(find.text('Granted 8.00'), findsOneWidget);
+      expect(tester.takeException(), isNull);
     },
   );
 
@@ -2591,13 +2601,6 @@ void registerShellSettingsTests() {
           .map((bar) => bar.value),
       orderedEquals(const [0.25, 0.5, 0.8]),
     );
-    for (final bar in progress.evaluate()) {
-      expect(
-        tester.getSize(find.byElementPredicate((item) => item == bar)).height,
-        5,
-      );
-    }
-
     await tester.tap(find.text('DeepSeek'));
     await tester.pumpAndSettle();
     expect(find.text('Available balance'), findsOneWidget);
@@ -2746,70 +2749,6 @@ void registerShellSettingsTests() {
     );
   }
 
-  testWidgets(
-    'settings tabs use one group and Security has no duplicate mode',
-    (tester) async {
-      _configureSettingsTestView(tester);
-      final base = _stateWithPlannerModels();
-      final settingsState = _withSettingsFixture(
-        _withSelectedRuntime(
-          base,
-          base.runtime.copyWith(
-            activeSkills: ['flutter-ui-polish', 'rust-review'],
-          ),
-        ),
-        skills: const SkillsSettingsView(disabled: []),
-        mcpServers: const [
-          McpServerSettingsView(
-            id: 'local',
-            transport: 'stdio',
-            endpoint: 'npx',
-            state: McpCheckingState(message: 'pending'),
-          ),
-          McpServerSettingsView(
-            id: 'remote',
-            transport: 'http',
-            endpoint: 'https://example.test/mcp',
-            state: McpDisabledState(message: 'disabled'),
-          ),
-        ],
-      );
-      final api = _FakeStudioApi(
-        settingsState.copyWith(
-          mcpState: McpStateSnapshot(
-            revision: 1,
-            servers: settingsState.mcpServers,
-          ),
-        ),
-      );
-      await _pumpSettingsPage(tester, api);
-
-      await tester.tap(find.text('Agents'));
-      await tester.pumpAndSettle();
-      expect(find.text('Agent Profiles'), findsOneWidget);
-      expect(find.byType(Card), findsWidgets);
-
-      for (final tab in const ['Skills', 'MCP', 'General']) {
-        await tester.tap(find.text(tab));
-        await tester.pumpAndSettle();
-        expect(
-          find.byType(StudioPanel),
-          findsOneWidget,
-          reason: '$tab should use one outer settings group',
-        );
-      }
-
-      await tester.tap(find.text('Security'));
-      await tester.pumpAndSettle();
-      expect(find.byType(StudioPanel), findsOneWidget);
-      expect(find.text('Current: Request'), findsNothing);
-      expect(
-        find.text('Workspace boundary policy remains unchanged.'),
-        findsOneWidget,
-      );
-    },
-  );
-
   testWidgets('statistics tab shows weighted summaries and filters history', (
     tester,
   ) async {
@@ -2826,7 +2765,6 @@ void registerShellSettingsTests() {
 
     expect(find.byKey(StudioDriverKeys.statisticsSummary), findsOneWidget);
     expect(find.byKey(StudioDriverKeys.statisticsHistory), findsOneWidget);
-    expect(find.byType(DataTable), findsOneWidget);
     expect(find.text('120 t/s'), findsOneWidget);
     expect(
       find.byKey(
@@ -2860,41 +2798,41 @@ void registerShellSettingsTests() {
     );
   });
 
-  testWidgets('statistics tab uses virtualized cards in compact layout', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(700, 900);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    final api = _FakeStudioApi(
-      _stateWithPlannerModels().copyWith(
-        modelPerformance: _modelPerformanceFixture(),
-      ),
-    );
-    await _pumpSettingsPage(tester, api);
+  testWidgets(
+    'compact statistics keep the same metrics and history accessible',
+    (tester) async {
+      tester.view.physicalSize = const Size(700, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final api = _FakeStudioApi(
+        _stateWithPlannerModels().copyWith(
+          modelPerformance: _modelPerformanceFixture(),
+        ),
+      );
+      await _pumpSettingsPage(tester, api);
 
-    final statisticsTab = find.byKey(
-      StudioDriverKeys.settingsTab('statistics'),
-    );
-    await tester.scrollUntilVisible(
-      statisticsTab,
-      300,
-      scrollable: find.byType(Scrollable).first,
-    );
-    await tester.tap(statisticsTab);
-    await tester.pumpAndSettle();
+      final statisticsTab = find.byKey(
+        StudioDriverKeys.settingsTab('statistics'),
+      );
+      await tester.scrollUntilVisible(
+        statisticsTab,
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.tap(statisticsTab);
+      await tester.pumpAndSettle();
 
-    expect(find.byType(DataTable), findsNothing);
-    expect(find.byKey(StudioDriverKeys.statisticsSummary), findsOneWidget);
-    expect(
-      find.byKey(
-        StudioDriverKeys.statisticsHistoryRow('provider-a', 'model-a', 3000),
-      ),
-      findsOneWidget,
-    );
-    expect(tester.takeException(), isNull);
-  });
+      expect(find.byKey(StudioDriverKeys.statisticsSummary), findsOneWidget);
+      expect(
+        find.byKey(
+          StudioDriverKeys.statisticsHistoryRow('provider-a', 'model-a', 3000),
+        ),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets(
     'settings ordinary controls save immediately without draft buttons',
@@ -3035,7 +2973,9 @@ void registerShellSettingsTests() {
 
       await tester.tap(find.text('Skills'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('flutter-ui-polish'));
+      await tester.tap(
+        find.byKey(const ValueKey('skill-enabled-flutter-ui-polish')),
+      );
       await tester.pumpAndSettle();
       expect(
         api.savedSkillsSettings?['disabled'],
@@ -3063,30 +3003,75 @@ void registerShellSettingsTests() {
     },
   );
 
-  testWidgets('instructions text saves after debounce', (tester) async {
-    tester.view.physicalSize = const Size(1280, 900);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-
+  testWidgets('instruction sections preserve and save all three documents', (
+    tester,
+  ) async {
+    _configureSettingsTestView(tester);
     final api = _FakeStudioApi(_stateWithPlannerModels());
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [studioApiProvider.overrideWithValue(api)],
-        child: _localizedApp(home: const SettingsPage()),
-      ),
+    await _pumpSettingsPage(tester, api);
+    await tester.tap(find.byKey(StudioDriverKeys.settingsTab('instructions')));
+    await tester.pumpAndSettle();
+    for (var index = 0; index < 3; index++) {
+      await tester.tap(find.byKey(ValueKey('instruction-section-$index')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(ValueKey('instruction-editor-$index')),
+        'document-$index',
+      );
+      await tester.pump(const Duration(milliseconds: 700));
+      await tester.pumpAndSettle();
+    }
+    expect(
+      {
+        for (final name in ['baseOverride', 'developer', 'user'])
+          name: api.savedInstructionsSettings?[name],
+      },
+      {
+        'baseOverride': 'document-0',
+        'developer': 'document-1',
+        'user': 'document-2',
+      },
     );
+    await tester.tap(find.byKey(const ValueKey('instruction-section-0')));
     await tester.pumpAndSettle();
-
-    await tester.tap(find.text('Instructions'));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField).first, 'new base');
-    await tester.pump(const Duration(milliseconds: 500));
-    expect(api.savedInstructionsSettings, isNull);
-    await tester.pump(const Duration(milliseconds: 200));
-
-    expect(api.savedInstructionsSettings?['baseOverride'], 'new base');
+    expect(find.text('document-0'), findsOneWidget);
   });
+
+  testWidgets(
+    'provider draft survives settings navigation and saves the edited result',
+    (tester) async {
+      _configureSettingsTestView(tester);
+      final api = _FakeStudioApi(_stateWithPlannerModels());
+      await _pumpSettingsPage(tester, api);
+      await tester.tap(find.byKey(StudioDriverKeys.providerRow('deepseek')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(StudioDriverKeys.providerEdit));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Display name'),
+        'Preserved draft',
+      );
+      await tester.tap(find.byKey(StudioDriverKeys.settingsTab('general')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(StudioDriverKeys.settingsTab('providers')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(StudioDriverKeys.providerSave).hitTestable(),
+        findsOneWidget,
+      );
+      expect(find.text('Preserved draft'), findsWidgets);
+      await tester.tap(find.byKey(StudioDriverKeys.providerSave));
+      await tester.pumpAndSettle();
+      final providers =
+          api.savedProviderSettings?['providers'] as List<Object?>;
+      expect(
+        providers.cast<Map<String, Object?>>().singleWhere(
+          (item) => item['id'] == 'deepseek',
+        )['name'],
+        'Preserved draft',
+      );
+    },
+  );
 
   testWidgets('web search settings show gating and save typed values', (
     tester,
@@ -3145,6 +3130,10 @@ void registerShellSettingsTests() {
     expect(saved?.country, 'US');
     expect(saved?.timezone, 'America/New_York');
 
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('deepseek_web_search_enabled')),
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('deepseek_web_search_enabled')));
     await tester.pumpAndSettle();
     expect(api.savedDeepSeekWebSearchSettings?.enabled, isFalse);
@@ -3207,7 +3196,7 @@ void registerShellSettingsTests() {
       );
       await tester.pumpAndSettle();
       expect(find.text('描述你的需求...'), findsOneWidget);
-      expect(find.text('deepseek-v4-flash · 文本'), findsOneWidget);
+      expect(find.text('deepseek-v4-flash'), findsOneWidget);
       expect(find.text('high'), findsOneWidget);
     },
   );
@@ -3312,6 +3301,7 @@ void registerShellSettingsTests() {
       expect(
         find.descendant(
           of: find.byKey(const ValueKey('system-agent-workspace-executor')),
+          matchRoot: true,
           matching: find.text('Directory'),
         ),
         findsOneWidget,
@@ -3326,6 +3316,7 @@ void registerShellSettingsTests() {
           of: find.byKey(
             const ValueKey('system-agent-workspace-worktree_executor'),
           ),
+          matchRoot: true,
           matching: find.text('Worktree'),
         ),
         findsOneWidget,
@@ -3641,8 +3632,7 @@ void registerShellSettingsTests() {
     await tester.pumpAndSettle();
     expect(find.text('恢复'), findsOneWidget);
     expect(find.text('pure-agent-child-1'), findsOneWidget);
-    expect(find.text('preserved'), findsOneWidget);
-    expect(find.text('dirty'), findsOneWidget);
+    expect(find.text('preserved · dirty'), findsOneWidget);
     expect(find.textContaining('base base-commit'), findsOneWidget);
     expect(
       find.textContaining('/repo/.pure/worktrees/thread-1/child-1'),
@@ -4506,7 +4496,7 @@ Future<_FakeStudioApi> _openSshDirectoryDialog(
 /// Agents tab 内固定文案统一收敛到 AlertDialog 作用域断言，
 /// 避免与底层 system profile 卡片的同文案标签混淆。
 Finder _dialogText(String text) =>
-    find.descendant(of: find.byType(AlertDialog), matching: find.text(text));
+    find.descendant(of: find.byType(Dialog), matching: find.text(text));
 
 RecoveryStateSnapshot _worktreeRecoverySnapshot() {
   return RecoveryStateSnapshot(

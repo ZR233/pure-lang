@@ -60,7 +60,7 @@ class _PlanConfirmationDockState extends ConsumerState<PlanConfirmationDock> {
       footerHint: context.l10n.interactionPlanComposerPausedHint,
       footer: DockActions(
         children: [
-          OutlinedButton.icon(
+          TextButton.icon(
             key: StudioDriverKeys.planSubmitRevision,
             icon: const Icon(Icons.send_outlined),
             label: Text(context.l10n.interactionPlanAdjustSubmit),
@@ -85,7 +85,6 @@ class _PlanConfirmationDockState extends ConsumerState<PlanConfirmationDock> {
         decoration: InputDecoration(
           labelText: context.l10n.interactionPlanAdjust,
           hintText: context.l10n.interactionPlanAdjustHint,
-          prefixIcon: const Icon(Icons.edit_note_outlined),
         ),
         onChanged: (_) => setState(() {}),
       ),

@@ -136,3 +136,9 @@ runtime 对象再次启动时创建新的通道，不复用父令牌或上一生
 临时 title。手动 rename/归档会先取消对应任务；即使取消与 provider 返回发生竞态，手动 mutation
 仍会使陈旧自动结果失效。成功的 title mutation 继续
 通过 `ThreadDirectoryChanged` 增量事件发布，Thread stream 不新增平行 title 通知。
+
+TurnFinished 是最终校验与 worker 失败的终态投影边界：非正常完成必须在 TurnCompleted 前
+发布对应 typed Turn Item，使实时与持久化历史均能显示失败、取消或预算原因。已有同轮
+终态错误 Item 时不重复插入；模型正文生成完成不等同于最终校验通过。
+
+准备阶段保留必要进度；正文后不追加“正文已完成”或“本轮已完成”评论，避免重复最终回答或提前宣告最终校验成功。

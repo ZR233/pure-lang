@@ -6,7 +6,6 @@ import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_driver_keys.dart';
 import '../../shared/upward_popup_menu.dart';
-import 'status_bar_item.dart';
 
 /// 根会话的模式选择器；起始页传新会话草稿，状态栏传当前 Thread 的 mode。
 class SessionModeSelector extends ConsumerWidget {
@@ -62,11 +61,9 @@ class SessionModeSelector extends ConsumerWidget {
             ),
           ),
       ],
-      child: StatusBarItem(
-        icon: sessionModeIcon(mode),
+      child: StudioMenuLabel(
         label: selectedLabel ?? context.compileModeLabel(mode),
         enabled: enabled,
-        trailingIcon: enabled ? Icons.keyboard_arrow_down : Icons.lock_outline,
         maxWidth: 96,
       ),
     );
@@ -148,13 +145,7 @@ class ModelRoleSelector extends ConsumerWidget {
             ),
           ),
       ],
-      child: _ControlItem(
-        label: [
-          current.model,
-          ...current.inputModalities.map(context.modalityLabel),
-        ].join(' · '),
-        enabled: true,
-      ),
+      child: _ControlItem(label: current.model, enabled: true),
     );
   }
 }
@@ -223,12 +214,7 @@ class _ControlItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return StatusBarItem(
-      label: label,
-      enabled: enabled,
-      maxWidth: 140,
-      trailingIcon: Icons.keyboard_arrow_down,
-    );
+    return StudioMenuLabel(label: label, enabled: enabled, maxWidth: 140);
   }
 }
 

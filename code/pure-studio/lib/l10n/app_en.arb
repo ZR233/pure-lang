@@ -1024,5 +1024,19 @@
   "settingsPriceOutput": "Output",
   "settingsPriceCacheRead": "Cache read",
   "settingsPriceCacheWrite": "Cache write",
-  "statusReportedUsageOnly": "reported"
+  "statusReportedUsageOnly": "reported",
+  "settingsSystemAgentsGroup": "System agents",
+  "settingsUserAgentsGroup": "User agents",
+  "settingsAppearanceGroup": "Appearance & conversation",
+  "settingsNetworkGroup": "Search & network",
+  "settingsUpdatesGroup": "Application updates",
+  "settingsModelsGroup": "Models & agents",
+  "settingsExtensionsGroup": "Tools & services",
+  "settingsPreferencesGroup": "Preferences",
+  "settingsFilterAgents": "Filter agents",
+  "settingsPermissionRequestDescription": "Ask for approval when a tool operation requires it.",
+  "settingsPermissionReviewDescription": "Use automatic review to evaluate tool operations.",
+  "settingsPermissionFullDescription": "Run tools with full access under the configured runtime policy.",
+  "timelineToolArguments": "Arguments",
+  "timelineToolOutput": "Output"
 }

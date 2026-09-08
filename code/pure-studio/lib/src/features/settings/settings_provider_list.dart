@@ -13,6 +13,7 @@ class ProviderList extends StatelessWidget {
   const ProviderList({
     super.key,
     required this.providers,
+    this.selectedProviderId,
     required this.defaultProviderId,
     required this.filtering,
     required this.usageByProvider,
@@ -29,6 +30,7 @@ class ProviderList extends StatelessWidget {
   });
 
   final List<ProviderSettingsView> providers;
+  final String? selectedProviderId;
   final String? defaultProviderId;
   final bool filtering;
   final Map<String, ProviderUsageView> usageByProvider;
@@ -95,6 +97,7 @@ class ProviderList extends StatelessWidget {
                       for (final provider in providers)
                         ProviderListRow(
                           provider: provider,
+                          selected: provider.id == selectedProviderId,
                           isDefault: provider.id == defaultProviderId,
                           usage: usageByProvider[provider.id],
                           usageLoading: loadingProviderIds.contains(
@@ -124,6 +127,7 @@ class ProviderListRow extends StatelessWidget {
   const ProviderListRow({
     super.key,
     required this.provider,
+    this.selected = false,
     required this.isDefault,
     required this.usage,
     required this.usageLoading,
@@ -136,6 +140,7 @@ class ProviderListRow extends StatelessWidget {
   });
 
   final ProviderSettingsView provider;
+  final bool selected;
   final bool isDefault;
   final ProviderUsageView? usage;
   final bool usageLoading;
@@ -150,7 +155,7 @@ class ProviderListRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       key: StudioDriverKeys.providerRow(provider.id),
-      color: Colors.transparent,
+      color: selected ? context.studioPaper2 : Colors.transparent,
       child: InkWell(
         onTap: onOpen,
         child: Padding(
@@ -408,20 +413,18 @@ class _ProviderQuotaRow extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
+        Wrap(
+          spacing: 10,
+          runSpacing: 4,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            Expanded(
-              child: Text(
-                quotaTitle(context, limit),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: context.text.labelMedium?.copyWith(
-                  color: context.studioInk,
-                  fontWeight: FontWeight.w600,
-                ),
+            Text(
+              quotaTitle(context, limit),
+              style: context.text.labelMedium?.copyWith(
+                color: context.studioInk,
+                fontWeight: FontWeight.w600,
               ),
             ),
-            const SizedBox(width: 10),
             Text(
               context.l10n.settingsUsagePercentRemaining(
                 formatPercent(percent),
@@ -431,17 +434,13 @@ class _ProviderQuotaRow extends StatelessWidget {
                 fontWeight: FontWeight.w600,
               ),
             ),
-            if (quotaResetLabel(context, limit.nextResetAt).isNotEmpty) ...[
-              const SizedBox(width: 10),
+            if (quotaResetLabel(context, limit.nextResetAt).isNotEmpty)
               Text(
                 quotaResetLabel(context, limit.nextResetAt),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
                 style: context.text.labelSmall?.copyWith(
                   color: context.studioInkSoft,
                 ),
               ),
-            ],
           ],
         ),
         const SizedBox(height: 5),

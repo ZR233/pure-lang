@@ -18,7 +18,6 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
   final Map<String, bool> _todoExpandedByThread = {};
   final Map<String, String> _expandedPlanByThread = {};
   final Map<String, String> _autoOpenedPlanByThread = {};
-  final Set<String> _todoAutoOpened = {};
 
   @override
   Widget build(BuildContext context) {
@@ -76,23 +75,6 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
                 );
               });
             }
-            if (plan == null &&
-                todo != null &&
-                todo.items.any((item) => item.status != 'completed') &&
-                _todoAutoOpened.add(threadId)) {
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (!mounted ||
-                    ref.read(selectedWorkspaceLayoutProvider).value?.threadId !=
-                        threadId) {
-                  return;
-                }
-                if (todoInDrawer) {
-                  _scaffoldKey.currentState?.openEndDrawer();
-                } else {
-                  setState(() => _todoExpandedByThread[threadId] = true);
-                }
-              });
-            }
             return Scaffold(
               key: _scaffoldKey,
               backgroundColor: context.studioPaper,
@@ -119,30 +101,71 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
                           child: Row(
                             children: [
                               Expanded(
-                                child: Stack(
+                                child: Column(
                                   children: [
-                                    Positioned.fill(
-                                      child: _AgentTimelineHost(
-                                        threadId: threadId,
-                                        planConfirmation: plan,
-                                        planExpanded: planExpanded,
-                                        onPlanToggle: plan == null
-                                            ? null
-                                            : () => _togglePlan(
-                                                threadId,
-                                                plan.interactionId,
+                                    Expanded(
+                                      child: Stack(
+                                        children: [
+                                          Positioned.fill(
+                                            child: _AgentTimelineHost(
+                                              threadId: threadId,
+                                              planConfirmation: plan,
+                                              planExpanded: planExpanded,
+                                              onPlanToggle: plan == null
+                                                  ? null
+                                                  : () => _togglePlan(
+                                                      threadId,
+                                                      plan.interactionId,
+                                                    ),
+                                            ),
+                                          ),
+                                          if (layout.isLoading)
+                                            const Positioned.fill(
+                                              child: ColoredBox(
+                                                key: ValueKey(
+                                                  'agent-workspace-loading',
+                                                ),
+                                                color: Colors.transparent,
                                               ),
+                                            ),
+                                          if (planOverlaysTimeline &&
+                                              plan != null &&
+                                              planExpanded)
+                                            Positioned(
+                                              top: 0,
+                                              right: 0,
+                                              bottom: 0,
+                                              width: planOverlayWidth,
+                                              child: PlanDetailPanel(
+                                                plan: plan,
+                                                overlay: true,
+                                                onClose: () =>
+                                                    _closePlan(threadId),
+                                              ),
+                                            ),
+                                        ],
                                       ),
                                     ),
-                                    if (layout.isLoading)
-                                      const Positioned.fill(
-                                        child: ColoredBox(
-                                          key: ValueKey(
-                                            'agent-workspace-loading',
-                                          ),
-                                          color: Colors.transparent,
-                                        ),
-                                      ),
+                                    _AdaptiveFooter(
+                                      maxHeight: footerMaxHeight,
+                                      showTodo: !planExpanded && todo != null,
+                                      todoExpanded:
+                                          !planExpanded && todoExpanded,
+                                      onToggleTodo: planExpanded || todo == null
+                                          ? null
+                                          : () {
+                                              if (todoInDrawer) {
+                                                _scaffoldKey.currentState
+                                                    ?.openEndDrawer();
+                                              } else {
+                                                setState(
+                                                  () =>
+                                                      _todoExpandedByThread[threadId] =
+                                                          !todoExpanded,
+                                                );
+                                              }
+                                            },
+                                    ),
                                   ],
                                 ),
                               ),
@@ -174,39 +197,8 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
                             ],
                           ),
                         ),
-                        if (planOverlaysTimeline &&
-                            plan != null &&
-                            planExpanded)
-                          Positioned(
-                            top: 0,
-                            right: 0,
-                            bottom: 0,
-                            width: planOverlayWidth,
-                            child: PlanDetailPanel(
-                              plan: plan,
-                              overlay: true,
-                              onClose: () => _closePlan(threadId),
-                            ),
-                          ),
                       ],
                     ),
-                  ),
-                  _AdaptiveFooter(
-                    maxHeight: footerMaxHeight,
-                    showTodo: !planExpanded && todo != null,
-                    todoExpanded: !planExpanded && todoExpanded,
-                    onToggleTodo: planExpanded || todo == null
-                        ? null
-                        : () {
-                            if (todoInDrawer) {
-                              _scaffoldKey.currentState?.openEndDrawer();
-                            } else {
-                              setState(
-                                () => _todoExpandedByThread[threadId] =
-                                    !todoExpanded,
-                              );
-                            }
-                          },
                   ),
                 ],
               ),

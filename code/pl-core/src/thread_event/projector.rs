@@ -277,6 +277,31 @@ pub(crate) fn project_runtime_event(
                     ))
                 }
             };
+            // Finalization policy runs after model tracing. Its failure must be
+            // published as a durable item before the active Turn is cleared.
+            if !matches!(state, TurnState::Completed(_))
+                && !current.items.iter().any(|item| {
+                    item.turn_id == outcome.turn_id.as_str()
+                        && matches!(item.state(), ThreadItemState::Turn(_))
+                        && item.failure().is_some()
+                })
+            {
+                projector.push(
+                    event.created_at,
+                    ThreadNotification::ItemCompleted {
+                        item: Box::new(ThreadItem::new(
+                            format!("{}:outcome", outcome.turn_id),
+                            thread_id.to_string(),
+                            outcome.turn_id.to_string(),
+                            0,
+                            0,
+                            outcome.started_at.unwrap_or(outcome.finished_at),
+                            outcome.finished_at,
+                            ThreadItemState::Turn(ThreadTurnItem::new(state.clone())),
+                        )),
+                    },
+                );
+            }
             let completed_turn = projected_turn(
                 outcome.turn_id.as_str(),
                 thread_id,
@@ -1175,6 +1200,15 @@ mod tests {
             ThreadNotification::TurnCompleted { turn }
                 if turn.id == "turn-1" && matches!(turn.state, TurnState::Failed(_))
         ));
+        assert!(
+            batch.notifications.iter().any(|notification| matches!(
+                &notification.notification,
+                ThreadNotification::ItemCompleted { item }
+                    if matches!(item.state(), ThreadItemState::Turn(_))
+                        && item.failure() == Some("turn task join failed")
+            )),
+            "a terminal failure must remain visible in durable timeline history"
+        );
     }
 
     #[test]

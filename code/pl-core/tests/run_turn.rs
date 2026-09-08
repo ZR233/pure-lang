@@ -172,8 +172,6 @@ async fn run_turn_emits_runtime_progress_commentary() {
         vec![
             "已接收请求，正在准备上下文。".to_string(),
             "上下文已整理，准备调用模型。".to_string(),
-            "模型已完成正文生成。".to_string(),
-            "本轮已完成。".to_string(),
         ]
     );
 }

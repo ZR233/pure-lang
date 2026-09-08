@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
 import 'provider_usage_controller.dart';
+import 'settings_provider_details.dart';
 import 'settings_provider_drafts.dart';
 import 'settings_provider_editor.dart';
 import 'settings_provider_list.dart';
@@ -23,10 +24,10 @@ class ProvidersTab extends ConsumerStatefulWidget {
   final List<RoleSettingsView> roles;
 
   @override
-  ConsumerState<ProvidersTab> createState() => ProvidersTabState();
+  ConsumerState<ProvidersTab> createState() => _ProvidersTabState();
 }
 
-class ProvidersTabState extends ConsumerState<ProvidersTab> {
+class _ProvidersTabState extends ConsumerState<ProvidersTab> {
   String _query = '';
   String? _selectedProviderId;
   ProviderDraft? _draft;
@@ -95,55 +96,57 @@ class ProvidersTabState extends ConsumerState<ProvidersTab> {
         ),
       );
     }
-    if (_showDetails) {
-      return Padding(
-        padding: const EdgeInsets.all(20),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 980),
-            child: ProviderDetails(
-              provider: selected,
-              usage: selected == null ? null : usageByProvider[selected.id],
-              usageLoading: selected == null
-                  ? false
-                  : loadingProviderIds.contains(selected.id),
-              usageError: selected == null
-                  ? null
-                  : usageState?.errorFor(selected.id),
-              onBack: () => setState(() => _showDetails = false),
-              onEdit: _startEdit,
-              onRefreshUsage: selected == null
-                  ? null
-                  : () => _refreshUsages(providerId: selected.id),
-            ),
-          ),
-        ),
-      );
-    }
+    final details = ProviderDetails(
+      provider: selected,
+      usage: selected == null ? null : usageByProvider[selected.id],
+      usageLoading:
+          selected != null && loadingProviderIds.contains(selected.id),
+      usageError: selected == null ? null : usageState?.errorFor(selected.id),
+      onBack: () => setState(() => _showDetails = false),
+      onEdit: _startEdit,
+      onRefreshUsage: selected == null
+          ? null
+          : () => _refreshUsages(providerId: selected.id),
+    );
+    final list = ProviderList(
+      providers: filtered,
+      selectedProviderId: _showDetails ? selectedId : null,
+      defaultProviderId: defaultProviderId,
+      filtering: _query.trim().isNotEmpty,
+      usageByProvider: usageByProvider,
+      loadingProviderIds: loadingProviderIds,
+      usageErrorsByProviderId: usageState?.errorsByProviderId ?? const {},
+      onQueryChanged: (value) => setState(() => _query = value),
+      onAdd: _startAdd,
+      onSelect: (provider) => setState(() {
+        _selectedProviderId = provider.id;
+        _showDetails = true;
+      }),
+      onSetDefault: _setDefaultProvider,
+      onRefreshAll: _refreshUsages,
+      onRefreshProvider: (provider) => _refreshUsages(providerId: provider.id),
+      onEdit: _startEdit,
+      onDelete: widget.providers.length <= 1 ? null : _removeProvider,
+    );
     return LayoutBuilder(
       builder: (context, constraints) {
+        final split = constraints.maxWidth >= 1100 && _showDetails;
         return Padding(
-          padding: const EdgeInsets.all(20),
-          child: ProviderList(
-            providers: filtered,
-            defaultProviderId: defaultProviderId,
-            filtering: _query.trim().isNotEmpty,
-            usageByProvider: usageByProvider,
-            loadingProviderIds: loadingProviderIds,
-            usageErrorsByProviderId: usageState?.errorsByProviderId ?? const {},
-            onQueryChanged: (value) => setState(() => _query = value),
-            onAdd: _startAdd,
-            onSelect: (provider) => setState(() {
-              _selectedProviderId = provider.id;
-              _showDetails = true;
-            }),
-            onSetDefault: _setDefaultProvider,
-            onRefreshAll: _refreshUsages,
-            onRefreshProvider: (provider) =>
-                _refreshUsages(providerId: provider.id),
-            onEdit: _startEdit,
-            onDelete: widget.providers.length <= 1 ? null : _removeProvider,
-          ),
+          padding: const EdgeInsets.all(24),
+          child: split
+              ? Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SizedBox(width: 360, child: list),
+                    const SizedBox(width: 24),
+                    const VerticalDivider(width: 1),
+                    const SizedBox(width: 24),
+                    Expanded(child: details),
+                  ],
+                )
+              : _showDetails
+              ? details
+              : list,
         );
       },
     );

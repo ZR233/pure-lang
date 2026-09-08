@@ -82,6 +82,12 @@ ThemeData pureStudioTheme(Brightness brightness) {
       selectedColor: scheme.primary,
       selectedTileColor: scheme.surfaceContainerHighest,
     ),
+    dialogTheme: DialogThemeData(
+      backgroundColor: scheme.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(StudioRadii.md),
+      ),
+    ),
     cardTheme: CardThemeData(
       elevation: 0,
       margin: EdgeInsets.zero,

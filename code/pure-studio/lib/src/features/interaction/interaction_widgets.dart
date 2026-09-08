@@ -34,7 +34,7 @@ class InteractionDockShell extends StatelessWidget {
           backgroundColor: colors.surfaceContainerLowest,
           borderColor: colors.outlineVariant.withValues(alpha: 0.86),
           radius: StudioRadii.lg,
-          shadow: true,
+          shadow: false,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -86,12 +86,7 @@ class _DockHeader extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        StudioIconBadge(
-          icon: _iconFor(kind),
-          size: 34,
-          backgroundColor: _badgeBackgroundFor(kind),
-          foregroundColor: Colors.white,
-        ),
+        Icon(_iconFor(kind), size: 20, color: _badgeBackgroundFor(kind)),
         const SizedBox(width: 11),
         Expanded(
           child: Column(
@@ -135,10 +130,7 @@ class _DockFooter extends StatelessWidget {
   Widget build(BuildContext context) {
     final hintText = hint?.trim();
     return DecoratedBox(
-      decoration: BoxDecoration(
-        color: context.colors.surfaceContainerLow,
-        border: Border(top: BorderSide(color: context.studioLine)),
-      ),
+      decoration: BoxDecoration(color: context.colors.surfaceContainerLowest),
       child: LayoutBuilder(
         builder: (context, constraints) {
           final compact = constraints.maxWidth < 560;
@@ -209,10 +201,20 @@ class InfoChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return StudioPill(
-      icon: icon,
-      label: label,
-      backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 14, color: context.studioInkSoft),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(
+            label,
+            style: context.text.bodySmall?.copyWith(
+              color: context.studioInkSoft,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -260,12 +262,10 @@ class DockOptionRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     return Material(
-      color: selected ? StudioColors.claySoft : colors.surfaceContainerLowest,
+      color: selected ? colors.primaryContainer : colors.surfaceContainerLowest,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(StudioRadii.sm),
-        side: BorderSide(
-          color: selected ? StudioColors.clay : context.studioLine,
-        ),
+        side: selected ? BorderSide(color: colors.primary) : BorderSide.none,
       ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(

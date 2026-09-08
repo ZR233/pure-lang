@@ -444,7 +444,6 @@ async fn run_steps(
         last_model = actual_model;
 
         if tool_calls.is_empty() {
-            progress.milestone(recorder, "模型已完成正文生成。");
             if looks_like_unexecuted_tool_call_text(&content) {
                 super::inference::record(
                     turn_billing,
@@ -799,7 +798,6 @@ async fn run_steps(
         ));
     }
 
-    progress.milestone(recorder, "本轮已完成。");
     if !terminal_checkpointed {
         super::checkpoint::persist(&options, session, crate::TurnCheckpointReason::Terminal)
             .await?;

@@ -188,7 +188,8 @@ void registerControllerStreamTests() {
       expect(state.settingsRevision, initial.settingsRevision + 2);
       expect(state.role('planner')?.providerId, 'openai');
       expect(state.role('planner')?.model, 'gpt-5.6');
-      expect(state.selectedWorkspace, same(initial.selectedWorkspace));
+      expect(state.selectedThreadId, initial.selectedThreadId);
+      expect(state.selectedWorkspace?.items, initial.selectedWorkspace?.items);
       expect(state.runtime, initial.runtime);
     },
   );

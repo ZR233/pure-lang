@@ -16,6 +16,7 @@ enum TimelineRowType {
   skillActivation,
   agentActivity,
   finalAnswer,
+  turnOutcome,
 }
 
 class TimelineSkillActivation {

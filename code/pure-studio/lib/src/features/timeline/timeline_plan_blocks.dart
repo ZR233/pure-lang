@@ -31,11 +31,9 @@ class TimelinePlanSummaryCard extends StatelessWidget {
                 context.colors.surfaceContainerLowest,
               )
             : context.colors.surfaceContainerLowest,
-        borderColor: expanded
-            ? StudioColors.clay.withValues(alpha: 0.66)
-            : context.studioLine2,
+        borderColor: Colors.transparent,
         radius: StudioRadii.lg,
-        shadow: true,
+        shadow: false,
         child: InkWell(
           onTap: onPressed,
           child: Padding(
@@ -43,7 +41,11 @@ class TimelinePlanSummaryCard extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const StudioIconBadge(icon: Icons.checklist_outlined, size: 36),
+                Icon(
+                  Icons.checklist_outlined,
+                  size: 20,
+                  color: context.studioInkSoft,
+                ),
                 const SizedBox(width: 11),
                 Expanded(
                   child: Column(

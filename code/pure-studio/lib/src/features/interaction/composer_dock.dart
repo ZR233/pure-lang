@@ -19,6 +19,8 @@ import 'plan_confirmation_dock.dart';
 import 'tool_approval_dock.dart';
 import 'user_input_dock.dart';
 
+part 'composer_attachments.dart';
+
 class ComposerDock extends ConsumerWidget {
   const ComposerDock({required this.workspace, super.key});
 
@@ -174,6 +176,33 @@ class _PromptComposer extends ConsumerWidget {
       permissionMode: workspace.permissionMode,
       enabled: enabled,
       isBusy: workspace.isBusy,
+      selectorBar: workspace.thread.isRoot
+          ? Wrap(
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 2,
+              runSpacing: 4,
+              children: [
+                SessionModeSelector(
+                  mode: workspace.thread.mode,
+                  enabled:
+                      !workspace.runtime.hasActiveWorkflow &&
+                      workspace.thread.status == ThreadStatusView.idle &&
+                      workspace.activeInteraction == null,
+                  onSelected: controller.setThreadMode,
+                ),
+                ModelRoleSelector(
+                  providers: workspace.providers,
+                  roles: workspace.roles,
+                  mode: workspace.thread.mode,
+                ),
+                ReasoningEffortSelector(
+                  providers: workspace.providers,
+                  roles: workspace.roles,
+                  mode: workspace.thread.mode,
+                ),
+              ],
+            )
+          : null,
       onChanged: (value) =>
           controller.updateComposer(workspace.threadId, value),
       onSubmit: () => unawaited(controller.submitComposer(workspace.threadId)),
@@ -281,7 +310,7 @@ class _PromptComposerPanelState extends State<_PromptComposerPanel> {
           ? colors.primary
           : colors.outlineVariant.withValues(alpha: 0.86),
       radius: StudioRadii.lg,
-      shadow: true,
+      shadow: false,
       padding: const EdgeInsets.fromLTRB(12, 8, 10, 10),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -296,8 +325,8 @@ class _PromptComposerPanelState extends State<_PromptComposerPanel> {
             key: StudioDriverKeys.composerInput,
             controller: _controller,
             enabled: widget.enabled && !composer.isSubmissionPending,
-            minLines: 1,
-            maxLines: 6,
+            minLines: 3,
+            maxLines: 8,
             decoration: InputDecoration(
               hintText: context.l10n.composerHint,
               hintStyle: TextStyle(color: colors.onSurfaceVariant),
@@ -306,10 +335,6 @@ class _PromptComposerPanelState extends State<_PromptComposerPanel> {
               border: InputBorder.none,
               enabledBorder: InputBorder.none,
               focusedBorder: InputBorder.none,
-              prefixIcon: Icon(
-                Icons.edit_outlined,
-                color: colors.onSurfaceVariant,
-              ),
               contentPadding: const EdgeInsets.symmetric(vertical: 8),
             ),
             onChanged: widget.onChanged,
@@ -332,11 +357,6 @@ class _PromptComposerPanelState extends State<_PromptComposerPanel> {
                 ),
               ),
             ),
-          if (widget.selectorBar case final selectorBar?)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(2, 4, 0, 8),
-              child: selectorBar,
-            ),
           Row(
             children: [
               _AttachmentMenu(
@@ -347,8 +367,19 @@ class _PromptComposerPanelState extends State<_PromptComposerPanel> {
                 onAddUrl: _showUrlDialog,
               ),
               const SizedBox(width: 6),
-              _PermissionSelector(mode: widget.permissionMode),
-              const Spacer(),
+              Expanded(
+                child: Wrap(
+                  alignment: WrapAlignment.end,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 2,
+                  runSpacing: 4,
+                  children: [
+                    _PermissionSelector(mode: widget.permissionMode),
+                    ?widget.selectorBar,
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
               if (widget.isBusy)
                 IconButton.filledTonal(
                   key: StudioDriverKeys.composerStop,
@@ -468,153 +499,6 @@ class _PromptComposerPanelState extends State<_PromptComposerPanel> {
   }
 }
 
-class _AttachmentMenu extends StatelessWidget {
-  const _AttachmentMenu({
-    required this.enabled,
-    required this.localCapabilities,
-    required this.remoteCapabilities,
-    required this.onPickLocal,
-    required this.onAddUrl,
-  });
-
-  final bool enabled;
-  final List<ModelInputCapabilityView> localCapabilities;
-  final List<ModelInputCapabilityView> remoteCapabilities;
-  final Future<void> Function(List<ModelInputCapabilityView>) onPickLocal;
-  final Future<void> Function() onAddUrl;
-
-  @override
-  Widget build(BuildContext context) {
-    final hasAny =
-        localCapabilities.isNotEmpty || remoteCapabilities.isNotEmpty;
-    return PopupMenuButton<String>(
-      key: StudioDriverKeys.attachmentEntry,
-      tooltip: hasAny
-          ? context.l10n.composerAttachmentAddTooltip
-          : context.l10n.composerAttachmentUnsupportedTooltip,
-      enabled: enabled && hasAny,
-      icon: const Icon(Icons.attach_file),
-      onSelected: (value) {
-        if (value == 'local') unawaited(onPickLocal(localCapabilities));
-        if (value == 'url') unawaited(onAddUrl());
-      },
-      itemBuilder: (context) => [
-        if (localCapabilities.isNotEmpty)
-          PopupMenuItem(
-            key: StudioDriverKeys.attachmentLocal,
-            value: 'local',
-            child: ListTile(
-              leading: const Icon(Icons.folder_open_outlined),
-              title: Text(context.l10n.composerAttachmentPickLocal),
-            ),
-          ),
-        if (remoteCapabilities.isNotEmpty)
-          PopupMenuItem(
-            key: StudioDriverKeys.attachmentUrl,
-            value: 'url',
-            child: ListTile(
-              leading: const Icon(Icons.link),
-              title: Text(context.l10n.composerAddUrlTitle),
-            ),
-          ),
-      ],
-    );
-  }
-}
-
-class _AttachmentDraftRail extends StatelessWidget {
-  const _AttachmentDraftRail({
-    required this.attachments,
-    required this.enabled,
-    required this.onRemove,
-  });
-
-  final List<AttachmentDraftView> attachments;
-  final bool enabled;
-  final ValueChanged<String> onRemove;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      key: StudioDriverKeys.attachmentDraftRail,
-      height: 72,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: attachments.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 8),
-        itemBuilder: (context, index) {
-          final attachment = attachments[index];
-          return Container(
-            key: StudioDriverKeys.attachmentDraft(attachment.id),
-            width: 210,
-            padding: const EdgeInsets.all(7),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surfaceContainerLow,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              children: [
-                SizedBox.square(
-                  dimension: 48,
-                  child:
-                      attachment.modality == AttachmentModalityView.image &&
-                          attachment.previewBytes?.isNotEmpty == true
-                      ? ClipRRect(
-                          borderRadius: BorderRadius.circular(7),
-                          child: Image.memory(
-                            attachment.previewBytes!,
-                            fit: BoxFit.cover,
-                          ),
-                        )
-                      : Icon(_attachmentIcon(attachment.modality)),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        attachment.filename,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      Text(
-                        '${context.attachmentModalityLabel(attachment.modality)} · ${_formatBytes(attachment.byteSize)}',
-                        key: StudioDriverKeys.attachmentModality(attachment.id),
-                        style: Theme.of(context).textTheme.labelSmall,
-                      ),
-                    ],
-                  ),
-                ),
-                IconButton(
-                  key: StudioDriverKeys.attachmentRemove(attachment.id),
-                  visualDensity: VisualDensity.compact,
-                  tooltip: context.l10n.composerAttachmentRemoveTooltip,
-                  onPressed: enabled ? () => onRemove(attachment.id) : null,
-                  icon: const Icon(Icons.close, size: 18),
-                ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-IconData _attachmentIcon(AttachmentModalityView modality) => switch (modality) {
-  AttachmentModalityView.image => Icons.image_outlined,
-  AttachmentModalityView.video => Icons.movie_outlined,
-  AttachmentModalityView.file => Icons.insert_drive_file_outlined,
-};
-
-String _formatBytes(int bytes) {
-  if (bytes < 1024) return '$bytes B';
-  if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-  return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-}
-
 class _PermissionSelector extends ConsumerWidget {
   const _PermissionSelector({required this.mode});
 
@@ -648,38 +532,7 @@ class _PermissionSelector extends ConsumerWidget {
             ),
           ),
       ],
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: context.studioPaper2,
-          border: Border.all(color: context.studioLine),
-          borderRadius: BorderRadius.circular(StudioRadii.sm),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                _permissionIcon(mode),
-                size: 17,
-                color: context.studioInkSoft,
-              ),
-              const SizedBox(width: 6),
-              Text(
-                context.permissionModeLabel(mode),
-                style: Theme.of(context).textTheme.labelMedium
-                    ?.copyWith(color: context.studioInkSoft),
-              ),
-              const SizedBox(width: 4),
-              Icon(
-                Icons.keyboard_arrow_down,
-                size: 16,
-                color: context.studioInkSoft,
-              ),
-            ],
-          ),
-        ),
-      ),
+      child: StudioMenuLabel(label: context.permissionModeLabel(mode)),
     );
   }
 

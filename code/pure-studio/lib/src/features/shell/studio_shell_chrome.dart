@@ -10,60 +10,62 @@ class _Header extends StatelessWidget {
     final thread = state.selectedRootThread;
     final project = state.selectedProject;
     final projectLabel = project?.name.trim() ?? '';
-    return SizedBox(
-      height: 78,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(
-              maxWidth: StudioLayout.conversationWidth,
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  thread?.title ?? context.l10n.shellNoSession,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: context.studioInk,
-                    fontWeight: FontWeight.w700,
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final title = Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                thread?.title ?? context.l10n.shellNoSession,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: context.text.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              if (projectLabel.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Tooltip(
+                  message: project?.path ?? projectLabel,
+                  child: Text(
+                    projectLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: context.text.bodySmall?.copyWith(
+                      color: context.studioInkSoft,
+                    ),
                   ),
                 ),
-                const SizedBox(height: 5),
-                Row(
-                  children: [
-                    if (projectLabel.isNotEmpty)
-                      Flexible(
-                        child: Tooltip(
-                          message: project?.path ?? projectLabel,
-                          child: Text(
-                            projectLabel,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(color: context.studioInkSoft),
-                          ),
-                        ),
-                      ),
-                    const Spacer(),
-                    if (state.workspaceThreads.isNotEmpty)
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _AgentSwitcher(state: state),
-                          const SizedBox(width: 8),
-                          _SessionCostChip(cost: state.sessionCost),
-                        ],
-                      ),
-                  ],
-                ),
               ],
-            ),
-          ),
-        ),
+            ],
+          );
+          final actions = Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _AgentSwitcher(state: state),
+              const SizedBox(width: 8),
+              _SessionCostChip(cost: state.sessionCost),
+            ],
+          );
+          if (constraints.maxWidth < 520) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [title, if (state.workspaceThreads.isNotEmpty) actions],
+            );
+          }
+          return Row(
+            children: [
+              Expanded(child: title),
+              if (state.workspaceThreads.isNotEmpty) ...[
+                const SizedBox(width: 16),
+                actions,
+              ],
+            ],
+          );
+        },
       ),
     );
   }
@@ -78,10 +80,10 @@ class _SessionCostChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return Tooltip(
       message: context.l10n.sessionAllAgentsCostTooltip,
-      child: Chip(
+      child: Padding(
         key: StudioDriverKeys.sessionCost,
-        avatar: const Icon(Icons.receipt_long_outlined, size: 16),
-        label: Text(cost?.label ?? '-'),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        child: Text(cost?.label ?? '-', style: context.text.labelMedium),
       ),
     );
   }
@@ -215,11 +217,18 @@ class _AgentSwitcherState extends ConsumerState<_AgentSwitcher> {
                 _menuController.open();
               }
             },
-            child: ActionChip(
+            child: TextButton(
               key: StudioDriverKeys.agentSwitcher,
-              avatar: Icon(Icons.hub_outlined, size: 16, color: aggregateColor),
-              label: Text(context.l10n.statusAgentsCount(threads.length)),
-              tooltip: context.l10n.statusAgentsCount(threads.length),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.circle, size: 6, color: aggregateColor),
+                  const SizedBox(width: 8),
+                  Text(context.l10n.statusAgentsCount(threads.length)),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.keyboard_arrow_down, size: 14),
+                ],
+              ),
               onPressed: () => _menuController.isOpen
                   ? _menuController.close()
                   : _menuController.open(),
@@ -334,12 +343,12 @@ class _Footer extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          const _ComposerHost(),
           _StatusBarHost(
             showTodo: showTodo,
             todoExpanded: todoExpanded,
             onToggleTodo: onToggleTodo,
           ),
-          const _ComposerHost(),
         ],
       ),
     );

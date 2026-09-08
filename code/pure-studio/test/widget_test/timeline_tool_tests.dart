@@ -62,6 +62,43 @@ void registerTimelineToolTests() {
     },
   );
 
+  testWidgets(
+    'completed tool exposes full arguments and long output on demand',
+    (tester) async {
+      final output = List.generate(30, (i) => 'result line $i').join('\n');
+      final part = _toolTimelinePart(
+        id: 'completed-output',
+        groupId: 'completed-output-group',
+        turnId: 'turn-output',
+        name: 'read_file',
+        status: 'succeeded',
+        arguments: '{"path":"report.py","startLine":1}',
+        result: output,
+      );
+      await tester.pumpWidget(
+        _timelineApp(
+          home: Scaffold(
+            body: TimelineView(
+              threadId: 'session-1',
+              turn: null,
+              rows: timelineRowsFromFixtureParts([part]),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.tap(
+        find.byKey(const ValueKey('timeline-tool-group-summary')),
+      );
+      await tester.pump();
+      await tester.tap(find.text('read_file completed').last);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('"path": "report.py"'), findsOneWidget);
+      expect(find.text(output), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('successful workflow_transition hides its result payload', (
     tester,
   ) async {
@@ -396,13 +433,6 @@ void registerTimelineToolTests() {
       ),
     ];
     final rows = timelineRowsFromFixtureParts(parts);
-
-    expect(rows, hasLength(1));
-    expect(rows.single.type, TimelineRowType.toolGroup);
-    expect(
-      rows.single.toolGroup!.items.map((item) => item.name),
-      orderedEquals(['edit_file', 'read_file', 'exec']),
-    );
 
     await tester.pumpWidget(
       _timelineApp(

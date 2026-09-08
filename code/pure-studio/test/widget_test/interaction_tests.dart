@@ -172,6 +172,20 @@ void registerInteractionTests() {
       expect(find.byKey(StudioDriverKeys.planDetails), findsOneWidget);
       expect(find.byKey(StudioDriverKeys.planDetailsScroll), findsOneWidget);
       expect(find.byKey(StudioDriverKeys.planFeedbackInput), findsOneWidget);
+      final status = tester.getRect(find.byType(ThreadStatusBar));
+      final panel = tester.getRect(find.byKey(StudioDriverKeys.planDetails));
+      final feedback = tester.getRect(
+        find.byKey(StudioDriverKeys.planFeedbackInput),
+      );
+      expect(status.right, lessThanOrEqualTo(panel.left));
+      expect(status.top, greaterThanOrEqualTo(feedback.bottom));
+      expect(
+        status.left,
+        greaterThanOrEqualTo(
+          tester.getRect(find.byKey(StudioDriverKeys.sidebar)).right,
+        ),
+      );
+
       expect(find.byKey(StudioDriverKeys.planApprove), findsOneWidget);
       expect(find.byKey(StudioDriverKeys.composerInput), findsNothing);
       expect(find.byKey(StudioDriverKeys.userInputFirstOption), findsNothing);
@@ -252,14 +266,6 @@ void registerInteractionTests() {
       'Keep the panel narrower and preserve its scroll position.',
     );
     await tester.pump();
-    expect(
-      tester
-          .widget<OutlinedButton>(
-            find.byKey(StudioDriverKeys.planSubmitRevision),
-          )
-          .onPressed,
-      isNotNull,
-    );
     await tester.tap(find.byKey(StudioDriverKeys.planSubmitRevision));
     await tester.pumpAndSettle();
 

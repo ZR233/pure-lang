@@ -661,5 +661,19 @@
   "settingsPriceOutput": "输出",
   "settingsPriceCacheRead": "缓存读取",
   "settingsPriceCacheWrite": "缓存写入",
-  "statusReportedUsageOnly": "已报告"
+  "statusReportedUsageOnly": "已报告",
+  "settingsSystemAgentsGroup": "系统代理",
+  "settingsUserAgentsGroup": "用户代理",
+  "settingsAppearanceGroup": "界面与会话",
+  "settingsNetworkGroup": "搜索与联网",
+  "settingsUpdatesGroup": "应用更新",
+  "settingsModelsGroup": "模型与代理",
+  "settingsExtensionsGroup": "工具与服务",
+  "settingsPreferencesGroup": "偏好设置",
+  "settingsFilterAgents": "筛选代理",
+  "settingsPermissionRequestDescription": "工具操作需要授权时请求确认。",
+  "settingsPermissionReviewDescription": "通过自动审查评估工具操作。",
+  "settingsPermissionFullDescription": "在已配置的运行时策略下，以完整访问权限执行工具。",
+  "timelineToolArguments": "参数",
+  "timelineToolOutput": "输出"
 }

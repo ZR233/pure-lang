@@ -462,73 +462,85 @@ class _ToolGroupItemRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tool = item.tool;
-    final detailLines = [
-      item.summary,
-      tool?.workingDirectory,
-      if (tool?.exitCode != null)
-        context.l10n.timelineToolExitCode(tool!.exitCode!),
-      if (tool?.timedOut == true) context.l10n.timelineToolTimedOut,
-      tool?.denialReason,
-      item.part.error,
-      _resultDetail(item, tool),
-      _attachmentDetail(tool),
-    ].whereType<String>().where((value) => value.trim().isNotEmpty).toList();
+    final detailLines =
+        [
+              _toolTarget(item),
+              item.summary,
+              tool?.workingDirectory,
+              if (tool?.exitCode != null)
+                context.l10n.timelineToolExitCode(tool!.exitCode!),
+              if (tool?.timedOut == true) context.l10n.timelineToolTimedOut,
+              tool?.denialReason,
+              item.part.error,
+              _resultDetail(item, tool),
+              _attachmentDetail(tool),
+            ]
+            .whereType<String>()
+            .where((value) => value.trim().isNotEmpty)
+            .toSet()
+            .toList();
+    final hidePayload =
+        item.part.status == 'succeeded' &&
+        const {'workflow_transition', 'workflow_restart'}.contains(item.name);
+    final arguments = hidePayload ? null : tool?.arguments;
+    final output = hidePayload ? null : tool?.result;
     return Padding(
       key: tool?.name == 'view_image'
           ? StudioDriverKeys.viewImageTool(
               tool?.callId ?? tool?.toolCallId ?? item.part.id,
             )
           : null,
-      padding: const EdgeInsets.only(top: 9),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 3),
-            child: Icon(Icons.terminal, size: 16, color: context.studioInkSoft),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        _toolTitle(context, item),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: context.text.labelLarge?.copyWith(
-                          color: context.studioInk,
-                        ),
-                      ),
-                    ),
-                    if (showActivePulse && _isExecutingToolItem(item)) ...[
-                      const SizedBox(width: 8),
-                      TimelineWaitIndicator(
-                        key: ValueKey('timeline-tool-item-pulse:${item.id}'),
-                      ),
-                    ],
-                    const SizedBox(width: 8),
-                    _StatusPill(label: item.status),
-                  ],
+      padding: const EdgeInsets.only(top: 6),
+      child: ExpansionTile(
+        key: ValueKey('timeline-tool-details:${item.id}'),
+        tilePadding: const EdgeInsets.symmetric(horizontal: 8),
+        childrenPadding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+        shape: const Border(),
+        collapsedShape: const Border(),
+        dense: true,
+        controlAffinity: ListTileControlAffinity.leading,
+        title: Text(
+          _toolTitle(context, item),
+          style: context.text.bodySmall?.copyWith(color: context.studioInk),
+        ),
+        trailing: showActivePulse && _isExecutingToolItem(item)
+            ? TimelineWaitIndicator(
+                key: ValueKey('timeline-tool-item-pulse:${item.id}'),
+              )
+            : null,
+        subtitle: detailLines.isEmpty
+            ? null
+            : Text(
+                detailLines.join('\n'),
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: context.text.bodySmall?.copyWith(
+                  color: context.studioInkSoft,
+                  height: 1.4,
                 ),
-                if (detailLines.isNotEmpty) ...[
-                  const SizedBox(height: 3),
-                  Text(
-                    detailLines.join('\n'),
-                    maxLines: 8,
-                    overflow: TextOverflow.ellipsis,
-                    style: context.text.bodySmall?.copyWith(
-                      color: context.studioInkSoft,
-                      height: 1.38,
-                    ),
-                  ),
-                ],
-              ],
+              ),
+        children: [
+          if (arguments != null && arguments.trim().isNotEmpty)
+            StudioCodeBlock(
+              text: _prettyToolPayload(arguments),
+              language: context.l10n.timelineToolArguments,
+              maxHeight: 200,
+              margin: const EdgeInsets.only(top: 8),
             ),
-          ),
+          if (output != null && output.trim().isNotEmpty)
+            StudioCodeBlock(
+              text: _prettyToolPayload(output),
+              language: context.l10n.timelineToolOutput,
+              maxHeight: 280,
+              margin: const EdgeInsets.only(top: 8),
+            ),
+          if (item.part.error?.isNotEmpty == true)
+            Text(
+              item.part.error!,
+              style: context.text.bodySmall?.copyWith(
+                color: context.colors.error,
+              ),
+            ),
         ],
       ),
     );
@@ -568,6 +580,30 @@ class _ToolGroupItemRow extends StatelessWidget {
     final attachments = tool?.attachments ?? const <ThreadAttachmentView>[];
     if (attachments.isEmpty) return null;
     return attachments.map(_attachmentDescription).join('\n');
+  }
+}
+
+String? _toolTarget(TimelineToolGroupItem item) {
+  final arguments = decodeJsonObject(item.tool?.arguments ?? '');
+  for (final key in const [
+    'path',
+    'filePath',
+    'command',
+    'cmd',
+    'query',
+    'pattern',
+  ]) {
+    final value = jsonStringValue(arguments[key])?.trim();
+    if (value != null && value.isNotEmpty) return value.split('\n').first;
+  }
+  return null;
+}
+
+String _prettyToolPayload(String value) {
+  try {
+    return const JsonEncoder.withIndent('  ').convert(jsonDecode(value));
+  } on FormatException {
+    return value;
   }
 }
 

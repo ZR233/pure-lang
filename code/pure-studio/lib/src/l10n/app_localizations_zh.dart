@@ -1785,4 +1785,46 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get statusReportedUsageOnly => '已报告';
+
+  @override
+  String get settingsSystemAgentsGroup => '系统代理';
+
+  @override
+  String get settingsUserAgentsGroup => '用户代理';
+
+  @override
+  String get settingsAppearanceGroup => '界面与会话';
+
+  @override
+  String get settingsNetworkGroup => '搜索与联网';
+
+  @override
+  String get settingsUpdatesGroup => '应用更新';
+
+  @override
+  String get settingsModelsGroup => '模型与代理';
+
+  @override
+  String get settingsExtensionsGroup => '工具与服务';
+
+  @override
+  String get settingsPreferencesGroup => '偏好设置';
+
+  @override
+  String get settingsFilterAgents => '筛选代理';
+
+  @override
+  String get settingsPermissionRequestDescription => '工具操作需要授权时请求确认。';
+
+  @override
+  String get settingsPermissionReviewDescription => '通过自动审查评估工具操作。';
+
+  @override
+  String get settingsPermissionFullDescription => '在已配置的运行时策略下，以完整访问权限执行工具。';
+
+  @override
+  String get timelineToolArguments => '参数';
+
+  @override
+  String get timelineToolOutput => '输出';
 }

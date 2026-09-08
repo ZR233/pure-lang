@@ -3364,6 +3364,90 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'reported'**
   String get statusReportedUsageOnly;
+
+  /// No description provided for @settingsSystemAgentsGroup.
+  ///
+  /// In en, this message translates to:
+  /// **'System agents'**
+  String get settingsSystemAgentsGroup;
+
+  /// No description provided for @settingsUserAgentsGroup.
+  ///
+  /// In en, this message translates to:
+  /// **'User agents'**
+  String get settingsUserAgentsGroup;
+
+  /// No description provided for @settingsAppearanceGroup.
+  ///
+  /// In en, this message translates to:
+  /// **'Appearance & conversation'**
+  String get settingsAppearanceGroup;
+
+  /// No description provided for @settingsNetworkGroup.
+  ///
+  /// In en, this message translates to:
+  /// **'Search & network'**
+  String get settingsNetworkGroup;
+
+  /// No description provided for @settingsUpdatesGroup.
+  ///
+  /// In en, this message translates to:
+  /// **'Application updates'**
+  String get settingsUpdatesGroup;
+
+  /// No description provided for @settingsModelsGroup.
+  ///
+  /// In en, this message translates to:
+  /// **'Models & agents'**
+  String get settingsModelsGroup;
+
+  /// No description provided for @settingsExtensionsGroup.
+  ///
+  /// In en, this message translates to:
+  /// **'Tools & services'**
+  String get settingsExtensionsGroup;
+
+  /// No description provided for @settingsPreferencesGroup.
+  ///
+  /// In en, this message translates to:
+  /// **'Preferences'**
+  String get settingsPreferencesGroup;
+
+  /// No description provided for @settingsFilterAgents.
+  ///
+  /// In en, this message translates to:
+  /// **'Filter agents'**
+  String get settingsFilterAgents;
+
+  /// No description provided for @settingsPermissionRequestDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Ask for approval when a tool operation requires it.'**
+  String get settingsPermissionRequestDescription;
+
+  /// No description provided for @settingsPermissionReviewDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Use automatic review to evaluate tool operations.'**
+  String get settingsPermissionReviewDescription;
+
+  /// No description provided for @settingsPermissionFullDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Run tools with full access under the configured runtime policy.'**
+  String get settingsPermissionFullDescription;
+
+  /// No description provided for @timelineToolArguments.
+  ///
+  /// In en, this message translates to:
+  /// **'Arguments'**
+  String get timelineToolArguments;
+
+  /// No description provided for @timelineToolOutput.
+  ///
+  /// In en, this message translates to:
+  /// **'Output'**
+  String get timelineToolOutput;
 }
 
 class _AppLocalizationsDelegate

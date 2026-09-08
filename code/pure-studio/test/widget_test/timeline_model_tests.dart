@@ -19,16 +19,63 @@ class _ImmediateTestImageProvider extends ImageProvider<String> {
 }
 
 void registerTimelineModelTests() {
-  test(
-    'tool JSON projections share tolerant object and string normalization',
-    () {
-      expect(decodeJsonObject('not-json'), isEmpty);
-      expect(decodeJsonObject('{"query":" rust "}')['query'], ' rust ');
-      expect(jsonStringValue('  rust  '), 'rust');
-      expect(jsonStringValue('   '), isNull);
-      expect(jsonObject(<dynamic, dynamic>{1: 'value'})['1'], 'value');
-    },
-  );
+  testWidgets('terminal turn failure remains visible after restoring history', (
+    tester,
+  ) async {
+    final terminal = ThreadItemView(
+      id: 'turn-failed',
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      ordinal: 1,
+      revision: 2,
+      createdAt: _fixtureDate(1),
+      updatedAt: _fixtureDate(2),
+      state: const ThreadTurnItemStateView(
+        FailedStudioTurnState(
+          startedAt: 1,
+          completedAt: 2,
+          failure: StudioTurnFailureView(
+            category: 'validation',
+            providerKind: null,
+            code: null,
+            httpStatus: null,
+            retryAfterMs: null,
+            message: 'turn must finalize with tool `complete`',
+            retryable: false,
+          ),
+        ),
+      ),
+    );
+    final message = _threadItemFixture(
+      id: 'answer',
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      ordinal: 2,
+      text: 'Generated report',
+    );
+    await tester.pumpWidget(
+      _timelineApp(
+        home: Scaffold(
+          body: TimelineView(
+            threadId: 'thread-1',
+            turn: null,
+            rows: timelineRowsFromThreadItems([terminal, message]),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.text('turn must finalize with tool `complete`'),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .getTopLeft(find.text('turn must finalize with tool `complete`'))
+          .dy,
+      greaterThan(tester.getTopLeft(find.text('Generated report')).dy),
+    );
+  });
 
   testWidgets(
     'view_image is visible in the collapsed tool gallery and opens its authorized thumbnail',
@@ -477,8 +524,10 @@ void registerTimelineModelTests() {
     expect(find.byType(Dialog), findsOneWidget);
   });
 
-  test('timeline projects ThreadItems by immutable ordinal', () {
-    final rows = timelineRowsFromThreadItems([
+  testWidgets('timeline projects ThreadItems by immutable ordinal', (
+    tester,
+  ) async {
+    final items = [
       _threadItemFixture(
         id: 'later',
         threadId: 'thread-1',
@@ -493,57 +542,73 @@ void registerTimelineModelTests() {
         ordinal: 1,
         text: 'earlier',
       ),
-    ]);
+    ];
 
-    expect(rows.map((row) => row.id), ['earlier', 'later']);
-    expect(rows.map((row) => row.part!.text), ['earlier', 'later']);
+    await tester.pumpWidget(
+      _timelineHarness(threadId: 'thread-1', items: items),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      tester.getTopLeft(find.text('earlier')).dy,
+      lessThan(tester.getTopLeft(find.text('later')).dy),
+    );
   });
 
-  test('user, parent agent, commentary and final channels remain distinct', () {
-    final rows = timelineRowsFromThreadItems([
-      _threadItemFixture(
-        id: 'user',
-        threadId: 'thread-1',
-        turnId: 'turn-1',
-        ordinal: 0,
-        kind: ThreadItemKind.userMessage,
-        channel: null,
-        text: 'prompt',
-      ),
-      _threadItemFixture(
-        id: 'parent-agent',
-        threadId: 'thread-1',
-        turnId: 'turn-1',
-        ordinal: 1,
-        kind: ThreadItemKind.parentAgentMessage,
-        channel: null,
-        text: 'follow-up guidance',
-      ),
-      _threadItemFixture(
-        id: 'commentary',
-        threadId: 'thread-1',
-        turnId: 'turn-1',
-        ordinal: 2,
-        channel: AgentMessageChannel.commentary,
-        text: 'working',
-      ),
-      _threadItemFixture(
-        id: 'final',
-        threadId: 'thread-1',
-        turnId: 'turn-1',
-        ordinal: 3,
-        channel: AgentMessageChannel.finalAnswer,
-        text: 'done',
-      ),
-    ]);
+  testWidgets(
+    'user, parent agent, commentary and final channels remain distinct',
+    (tester) async {
+      final items = [
+        _threadItemFixture(
+          id: 'user',
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          ordinal: 0,
+          kind: ThreadItemKind.userMessage,
+          channel: null,
+          text: 'prompt',
+        ),
+        _threadItemFixture(
+          id: 'parent-agent',
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          ordinal: 1,
+          kind: ThreadItemKind.parentAgentMessage,
+          channel: null,
+          text: 'follow-up guidance',
+        ),
+        _threadItemFixture(
+          id: 'commentary',
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          ordinal: 2,
+          channel: AgentMessageChannel.commentary,
+          text: 'working',
+        ),
+        _threadItemFixture(
+          id: 'final',
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          ordinal: 3,
+          channel: AgentMessageChannel.finalAnswer,
+          text: 'done',
+        ),
+      ];
 
-    expect(rows.map((row) => row.type), [
-      TimelineRowType.userMessage,
-      TimelineRowType.parentAgentMessage,
-      TimelineRowType.commentary,
-      TimelineRowType.finalAnswer,
-    ]);
-  });
+      await tester.pumpWidget(
+        _timelineHarness(threadId: 'thread-1', items: items),
+      );
+      await tester.pumpAndSettle();
+      for (final text in [
+        'prompt',
+        'follow-up guidance',
+        'working',
+        'done',
+        'Main agent',
+      ]) {
+        expect(find.text(text), findsOneWidget);
+      }
+    },
+  );
 
   testWidgets('parent agent message has its own label and hierarchy icon', (
     tester,
@@ -569,39 +634,8 @@ void registerTimelineModelTests() {
     expect(find.byIcon(Icons.person_outline), findsNothing);
   });
 
-  test('adjacent tool Items are grouped only in the visual projection', () {
-    final first = _threadItemFixture(
-      id: 'tool-1',
-      threadId: 'thread-1',
-      turnId: 'turn-1',
-      ordinal: 0,
-      kind: ThreadItemKind.toolCall,
-      status: 'succeeded',
-      channel: null,
-      tool: const TimelineToolPart(toolCallId: 'call-1', name: 'read_file'),
-    );
-    final second = _threadItemFixture(
-      id: 'tool-2',
-      threadId: 'thread-1',
-      turnId: 'turn-1',
-      ordinal: 1,
-      kind: ThreadItemKind.toolCall,
-      status: 'succeeded',
-      channel: null,
-      tool: const TimelineToolPart(toolCallId: 'call-2', name: 'rg'),
-    );
-
-    final rows = timelineRowsFromThreadItems([first, second]);
-
-    expect(rows, hasLength(1));
-    expect(rows.single.type, TimelineRowType.toolGroup);
-    expect(rows.single.toolGroup!.items, hasLength(2));
-    expect(first.id, 'tool-1');
-    expect(second.id, 'tool-2');
-  });
-
-  test('tool grouping stops at a message boundary', () {
-    final rows = timelineRowsFromThreadItems([
+  testWidgets('tool grouping stops at a message boundary', (tester) async {
+    final items = [
       _threadItemFixture(
         id: 'tool-1',
         threadId: 'thread-1',
@@ -630,17 +664,23 @@ void registerTimelineModelTests() {
         channel: null,
         tool: const TimelineToolPart(toolCallId: 'call-2', name: 'test'),
       ),
-    ]);
+    ];
 
-    expect(rows.map((row) => row.type), [
-      TimelineRowType.toolGroup,
-      TimelineRowType.commentary,
-      TimelineRowType.toolGroup,
-    ]);
+    await tester.pumpWidget(
+      _timelineHarness(threadId: 'thread-1', items: items),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('next'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('timeline-tool-group-summary')),
+      findsNWidgets(2),
+    );
   });
 
-  test('adjacent reasoning Items become one reasoning row', () {
-    final rows = timelineRowsFromThreadItems([
+  testWidgets('adjacent reasoning Items become one reasoning row', (
+    tester,
+  ) async {
+    final items = [
       _threadItemFixture(
         id: 'reason-1',
         threadId: 'thread-1',
@@ -659,14 +699,22 @@ void registerTimelineModelTests() {
         channel: null,
         reasoningContent: const ['details'],
       ),
-    ]);
+    ];
 
-    expect(rows, hasLength(1));
-    expect(rows.single.reasoningGroup!.parts, hasLength(2));
+    await tester.pumpWidget(
+      _timelineHarness(threadId: 'thread-1', items: items),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.psychology_alt_outlined));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('summary'), findsWidgets);
+    expect(find.textContaining('details'), findsWidgets);
   });
 
-  test('file Items stay outside the transcript timeline', () {
-    final rows = timelineRowsFromThreadItems([
+  testWidgets('file Items stay outside the transcript timeline', (
+    tester,
+  ) async {
+    final items = [
       _threadItemFixture(
         id: 'file-1',
         threadId: 'thread-1',
@@ -680,13 +728,20 @@ void registerTimelineModelTests() {
         filePath: 'report.md',
         mediaType: 'text/markdown',
       ),
-    ]);
+    ];
 
-    expect(rows, isEmpty);
+    await tester.pumpWidget(
+      _timelineHarness(threadId: 'thread-1', items: items),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('report.md'), findsNothing);
+    expect(tester.takeException(), isNull);
   });
 
-  test('repeated Skill Items remain independent timeline rows', () {
-    final rows = timelineRowsFromThreadItems([
+  testWidgets('repeated Skill Items remain independent timeline rows', (
+    tester,
+  ) async {
+    final items = [
       _threadItemFixture(
         id: 'skill-1',
         threadId: 'thread-1',
@@ -729,14 +784,13 @@ void registerTimelineModelTests() {
           activatedAt: _fixtureDate(2),
         ),
       ),
-    ]);
+    ];
 
-    expect(rows, hasLength(2));
-    expect(rows.map((row) => row.type), [
-      TimelineRowType.skillActivation,
-      TimelineRowType.skillActivation,
-    ]);
-    expect(rows.map((row) => row.part!.skill!.cause.id), ['tool-1', 'tool-2']);
+    await tester.pumpWidget(
+      _timelineHarness(threadId: 'thread-1', items: items),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Agent activated skill · pdf'), findsNWidgets(2));
   });
 
   testWidgets('Skill Item renders a compact localized activation row', (

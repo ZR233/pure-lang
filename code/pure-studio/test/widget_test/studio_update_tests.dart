@@ -216,6 +216,12 @@ void registerStudioUpdateTests() {
     await tester.tap(find.text('General'));
     await tester.pumpAndSettle();
 
+    await tester.scrollUntilVisible(
+      find.text('Pure Studio update'),
+      300,
+      scrollable: _settingsPaneScrollable(),
+    );
+    await tester.pumpAndSettle();
     expect(find.text('Pure Studio update'), findsOneWidget);
     expect(find.textContaining('Version 1.1.0 is available'), findsOneWidget);
     expect(
@@ -291,6 +297,12 @@ void registerStudioUpdateTests() {
     await tester.tap(find.text('通用'));
     await tester.pumpAndSettle();
 
+    await tester.scrollUntilVisible(
+      find.text('Pure Studio 更新'),
+      300,
+      scrollable: _settingsPaneScrollable(),
+    );
+    await tester.pumpAndSettle();
     expect(find.text('Pure Studio 更新'), findsOneWidget);
     expect(find.text('下载并安装'), findsOneWidget);
     expect(find.text('发行说明'), findsOneWidget);

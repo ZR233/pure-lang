@@ -309,6 +309,33 @@ class _RowCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return switch (row.type) {
+      TimelineRowType.turnOutcome => Semantics(
+        liveRegion: true,
+        child: Container(
+          key: ValueKey('timeline-turn-outcome:${row.turnId}'),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: context.colors.errorContainer.withValues(alpha: 0.35),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.error_outline, size: 18, color: context.colors.error),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  row.part!.error!,
+                  style: context.text.bodySmall?.copyWith(
+                    color: context.colors.error,
+                    height: 1.5,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
       TimelineRowType.userMessage ||
       TimelineRowType.parentAgentMessage => _MarkdownBubble(
         key: ValueKey(row.part!.id),
@@ -747,12 +774,14 @@ class _TimelineActivitySummary extends StatelessWidget {
         excludeSemantics: true,
         child: Row(
           children: [
-            Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              softWrap: false,
-              style: baseStyle,
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                softWrap: false,
+                style: baseStyle,
+              ),
             ),
             const SizedBox(width: 6),
             Expanded(

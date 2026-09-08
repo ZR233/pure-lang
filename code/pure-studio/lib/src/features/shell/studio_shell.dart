@@ -22,6 +22,10 @@ import '../timeline/timeline_view.dart';
 import '../todo/todo_panel.dart';
 
 part 'studio_sidebar.dart';
+part 'sidebar_directory.dart';
+part 'sidebar_entries.dart';
+part 'sidebar_tiles.dart';
+part 'sidebar_actions.dart';
 part 'runtime_banners.dart';
 part 'studio_shell_chrome.dart';
 part 'agent_workspace_pane.dart';

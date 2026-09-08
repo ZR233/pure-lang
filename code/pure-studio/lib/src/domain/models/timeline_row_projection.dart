@@ -37,6 +37,21 @@ class TimelineRow {
     );
   }
 
+  factory TimelineRow.turnOutcome(ThreadItemView item, int lastOrdinal) {
+    final part = _timelineEntryFromThreadItem(item);
+    return TimelineRow._(
+      id: 'turn-outcome:${item.id}',
+      threadId: item.threadId,
+      type: TimelineRowType.turnOutcome,
+      createdAt: item.updatedAt,
+      order: lastOrdinal + 1,
+      sequence: lastOrdinal,
+      renderVersion: _timelineRowRenderVersion(part),
+      turnId: item.turnId,
+      part: part,
+    );
+  }
+
   factory TimelineRow.agentActivity(TimelineAgentEvent event) {
     return TimelineRow._(
       id: 'agent-activity:${timelineAgentEventGroupKey(event)}',
@@ -197,6 +212,17 @@ List<TimelineRow> timelineRowsFromThreadItems(List<ThreadItemView> source) {
   }
   flushTools();
   flushReasoning();
+  final lastOrdinalByTurn = <String, int>{};
+  for (final item in items) {
+    lastOrdinalByTurn[item.turnId] = item.ordinal;
+  }
+  for (final item in items) {
+    if (item.kind == ThreadItemKind.turn &&
+        item.isTerminal &&
+        item.error?.trim().isNotEmpty == true) {
+      rows.add(TimelineRow.turnOutcome(item, lastOrdinalByTurn[item.turnId]!));
+    }
+  }
   rows.sort(_compareRows);
   return rows;
 }

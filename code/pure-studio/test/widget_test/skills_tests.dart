@@ -201,6 +201,8 @@ void registerSkillsTests() {
       await tester.tap(find.text('Skills'));
       await tester.pumpAndSettle();
 
+      await tester.tap(find.text('release-build-triage'));
+      await tester.pumpAndSettle();
       expect(
         find.textContaining(
           'Diagnose Rust release linker and Cargo profile failures.',

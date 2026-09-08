@@ -46,10 +46,7 @@ class ThreadStatusBar extends ConsumerWidget {
         if (_lspActiveActivity(server) != null) server,
     ];
     return DecoratedBox(
-      decoration: BoxDecoration(
-        color: context.studioPaper,
-        border: Border(top: BorderSide(color: context.studioLine)),
-      ),
+      decoration: BoxDecoration(color: context.studioPaper),
       child: SizedBox(
         height: 38,
         child: Padding(
@@ -59,12 +56,10 @@ class ThreadStatusBar extends ConsumerWidget {
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final showModel = constraints.maxWidth >= 610;
-                final showEffort = constraints.maxWidth >= 720;
                 final showCapabilities = constraints.maxWidth >= 840;
                 final showLspActivity = constraints.maxWidth >= 850;
                 final hasOverflow =
-                    (!showEffort &&
-                        thread.isRoot &&
+                    (thread.isRoot &&
                         effortsFor(
                           workspace.providers,
                           workspace.roles,
@@ -106,44 +101,12 @@ class ThreadStatusBar extends ConsumerWidget {
                       tooltip: '${thread.title} · ${thread.status.name}',
                       maxWidth: 96,
                     ),
-                    if (thread.isRoot)
-                      SessionModeSelector(
-                        mode: thread.mode,
-                        enabled:
-                            !runtime.hasActiveWorkflow &&
-                            thread.status == ThreadStatusView.idle,
-                        onSelected: (mode) => ref
-                            .read(studioControllerProvider.notifier)
-                            .setThreadMode(mode),
-                      ),
-                    if (showModel &&
-                        thread.isRoot &&
-                        workspace.providers.isNotEmpty)
-                      ModelRoleSelector(
-                        providers: workspace.providers,
-                        roles: workspace.roles,
-                        mode: thread.mode,
-                      )
-                    else if (showModel &&
-                        thread.isAgent &&
-                        runtime.model.isNotEmpty)
+                    if (showModel && thread.isAgent && runtime.model.isNotEmpty)
                       _StatusReadout(
                         icon: Icons.smart_toy_outlined,
                         label: runtime.model,
                         tooltip: runtime.model,
                         maxWidth: 140,
-                      ),
-                    if (showEffort &&
-                        thread.isRoot &&
-                        effortsFor(
-                          workspace.providers,
-                          workspace.roles,
-                          thread.mode,
-                        ).isNotEmpty)
-                      ReasoningEffortSelector(
-                        providers: workspace.providers,
-                        roles: workspace.roles,
-                        mode: thread.mode,
                       ),
                     if (runtime.workflow?.currentRun case final run?)
                       _WorkflowRuntimeReadout(run: run),

@@ -55,7 +55,7 @@ class _ToolApprovalDockState extends ConsumerState<ToolApprovalDock> {
       footerHint: context.l10n.interactionPermissionFooterHint,
       footer: DockActions(
         children: [
-          OutlinedButton.icon(
+          TextButton.icon(
             key: StudioDriverKeys.toolDeny,
             icon: const Icon(Icons.close),
             label: Text(context.l10n.interactionReject),
@@ -101,7 +101,6 @@ class _ToolApprovalDockState extends ConsumerState<ToolApprovalDock> {
             maxLines: 3,
             decoration: InputDecoration(
               labelText: context.l10n.interactionReasonLabel,
-              prefixIcon: const Icon(Icons.chat_bubble_outline),
             ),
             onChanged: (_) => setState(() {}),
           ),

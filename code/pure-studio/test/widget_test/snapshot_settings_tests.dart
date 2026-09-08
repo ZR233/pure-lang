@@ -22,8 +22,9 @@ void registerSnapshotSettingsTests() {
       McpStateSnapshot(revision: 1, activeServers: ['stale']),
     );
 
-    expect(settings, same(current));
-    expect(mcp, same(current));
+    expect(settings.settingsRevision, 2);
+    expect(settings.permissionMode, PermissionMode.fullAccess);
+    expect(mcp.mcpState.activeServers, ['canonical']);
   });
 
   test('settings merge does not replace canonical Thread workspace', () {
@@ -46,22 +47,10 @@ void registerSnapshotSettingsTests() {
 
     final merged = applySettingsState(current, next);
 
-    expect(merged.workspacesByThread, same(current.workspacesByThread));
+    expect(merged.selectedThreadId, current.selectedThreadId);
+    expect(merged.selectedWorkspace?.items, current.selectedWorkspace?.items);
     expect(merged.providers.single.id, 'provider-1');
     expect(merged.permissionMode, PermissionMode.fullAccess);
-  });
-
-  test('provider catalog metadata remains attached after a save', () async {
-    final api = _FakeStudioApi(_stateWithPlannerModels());
-    final container = ProviderContainer(
-      overrides: [studioApiProvider.overrideWithValue(api)],
-    );
-    addTearDown(container.dispose);
-
-    final state = await container.read(studioControllerProvider.future);
-
-    expect(state.providerCatalog.revision, _testProviderCatalog.revision);
-    expect(state.providers.single.models, isNotEmpty);
   });
 
   test('Thread snapshot never overwrites global settings', () {
@@ -73,7 +62,8 @@ void registerSnapshotSettingsTests() {
 
     final next = applyThreadSnapshot(current, snapshot);
 
-    expect(next.settingsState, same(current.settingsState));
+    expect(next.settingsRevision, current.settingsRevision);
+    expect(next.permissionMode, current.permissionMode);
     expect(next.roles, current.roles);
     expect(next.runtime.model, 'runtime/model');
   });

@@ -1848,4 +1848,49 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get statusReportedUsageOnly => 'reported';
+
+  @override
+  String get settingsSystemAgentsGroup => 'System agents';
+
+  @override
+  String get settingsUserAgentsGroup => 'User agents';
+
+  @override
+  String get settingsAppearanceGroup => 'Appearance & conversation';
+
+  @override
+  String get settingsNetworkGroup => 'Search & network';
+
+  @override
+  String get settingsUpdatesGroup => 'Application updates';
+
+  @override
+  String get settingsModelsGroup => 'Models & agents';
+
+  @override
+  String get settingsExtensionsGroup => 'Tools & services';
+
+  @override
+  String get settingsPreferencesGroup => 'Preferences';
+
+  @override
+  String get settingsFilterAgents => 'Filter agents';
+
+  @override
+  String get settingsPermissionRequestDescription =>
+      'Ask for approval when a tool operation requires it.';
+
+  @override
+  String get settingsPermissionReviewDescription =>
+      'Use automatic review to evaluate tool operations.';
+
+  @override
+  String get settingsPermissionFullDescription =>
+      'Run tools with full access under the configured runtime policy.';
+
+  @override
+  String get timelineToolArguments => 'Arguments';
+
+  @override
+  String get timelineToolOutput => 'Output';
 }

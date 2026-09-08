@@ -93,52 +93,28 @@ void registerStatusAccessibilityTests() {
       }
     });
 
-    testWidgets('context detail shows dash when runtime has no costs', (
+    testWidgets('missing and unpriced usage both show an unavailable cost', (
       tester,
     ) async {
-      await tester.pumpWidget(
-        _localizedApp(
-          home: const Scaffold(
-            body: Align(
-              alignment: Alignment.bottomLeft,
-              child: ContextUsageReadout(runtime: _contextRuntime),
+      for (final runtime in [_contextRuntime, _unpricedRuntime]) {
+        await tester.pumpWidget(
+          _localizedApp(
+            home: Scaffold(
+              body: Align(
+                alignment: Alignment.bottomLeft,
+                child: ContextUsageReadout(runtime: runtime),
+              ),
             ),
           ),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      final contextButton = find.bySemanticsLabel('Context');
-      await tester.tap(contextButton);
-      await tester.pumpAndSettle();
-
-      expect(find.text('Cost'), findsOneWidget);
-      expect(find.text('-'), findsOneWidget);
-      expect(find.text('Partially unpriced'), findsNothing);
-    });
-
-    testWidgets('context detail shows dash for fully unpriced usage', (
-      tester,
-    ) async {
-      await tester.pumpWidget(
-        _localizedApp(
-          home: const Scaffold(
-            body: Align(
-              alignment: Alignment.bottomLeft,
-              child: ContextUsageReadout(runtime: _unpricedRuntime),
-            ),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      final contextButton = find.bySemanticsLabel('Context');
-      await tester.tap(contextButton);
-      await tester.pumpAndSettle();
-
-      expect(find.text('Cost'), findsOneWidget);
-      expect(find.text('-'), findsOneWidget);
-      expect(find.text('Partially unpriced'), findsNothing);
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.bySemanticsLabel('Context'));
+        await tester.pumpAndSettle();
+        expect(find.text('Cost'), findsOneWidget);
+        expect(find.text('-'), findsOneWidget);
+        expect(find.text('Partially unpriced'), findsNothing);
+        await tester.pumpWidget(const SizedBox.shrink());
+      }
     });
 
     testWidgets('status bar omits direct cost and cache text readouts', (
@@ -345,7 +321,7 @@ void registerStatusAccessibilityTests() {
       },
     );
 
-    testWidgets('context detail keeps hover behavior and shared radius', (
+    testWidgets('context details open on hover and close after leaving', (
       tester,
     ) async {
       await tester.pumpWidget(
@@ -369,15 +345,6 @@ void registerStatusAccessibilityTests() {
 
       final detailValue = find.text('42 / 100');
       expect(detailValue, findsOneWidget);
-      final detailCard = find.ancestor(
-        of: detailValue,
-        matching: find.byWidgetPredicate(_isLiftedDetailCard),
-      );
-      expect(detailCard, findsOneWidget);
-      final decoration =
-          tester.widget<DecoratedBox>(detailCard).decoration as BoxDecoration;
-      expect(decoration.borderRadius, BorderRadius.circular(StudioRadii.md));
-
       await gesture.moveTo(Offset.zero);
       await tester.pump(const Duration(milliseconds: 150));
       expect(detailValue, findsNothing);
@@ -690,8 +657,12 @@ Future<_FakeStudioApi> _pumpThreadStatusBar(
             builder: (context, ref, child) {
               final current = ref.watch(studioControllerProvider).value;
               if (current == null) return const SizedBox.shrink();
-              return ThreadStatusBar(
-                workspace: current.selectedAgentWorkspace!,
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ComposerDock(workspace: current.selectedAgentWorkspace!),
+                  ThreadStatusBar(workspace: current.selectedAgentWorkspace!),
+                ],
               );
             },
           ),

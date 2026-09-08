@@ -37,76 +37,56 @@ class _StatisticsTabState extends State<StatisticsTab> {
           for (final item in widget.snapshot.history)
             if (_filter == null || item.filterKey == _filter) item,
         ];
-        return Align(
-          alignment: Alignment.topCenter,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 1120),
-            child: CustomScrollView(
-              key: StudioDriverKeys.statisticsHistory,
-              slivers: [
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(28, 22, 28, 16),
-                  sliver: SliverToBoxAdapter(
-                    child: SettingsHeader(
-                      title: context.l10n.settingsStatisticsTitle,
-                      subtitle: context.l10n.settingsStatisticsSubtitle,
-                    ),
+        return SettingsPageLayout(
+          maxWidth: 1120,
+          header: SettingsHeader(
+            title: context.l10n.settingsStatisticsTitle,
+            subtitle: context.l10n.settingsStatisticsSubtitle,
+          ),
+          child: CustomScrollView(
+            key: StudioDriverKeys.statisticsHistory,
+            slivers: [
+              SliverToBoxAdapter(
+                child: _SummarySection(
+                  compact: compact,
+                  summaries: widget.snapshot.summaries,
+                ),
+              ),
+              SliverPadding(
+                padding: const EdgeInsets.symmetric(vertical: 20),
+                sliver: SliverToBoxAdapter(
+                  child: _HistoryHeader(
+                    summaries: widget.snapshot.summaries,
+                    value: _filter,
+                    onChanged: (value) => setState(() => _filter = value),
                   ),
                 ),
-                SliverPadding(
-                  padding: const EdgeInsets.symmetric(horizontal: 28),
-                  sliver: SliverToBoxAdapter(
-                    child: _SummarySection(
-                      compact: compact,
-                      summaries: widget.snapshot.summaries,
-                    ),
+              ),
+              if (history.isEmpty)
+                SliverToBoxAdapter(
+                  child: _EmptyState(
+                    label: context.l10n.settingsStatisticsEmpty,
                   ),
+                )
+              else ...[
+                if (!compact) SliverToBoxAdapter(child: _WideHistoryHeader()),
+                SliverList.builder(
+                  itemCount: history.length,
+                  itemBuilder: (context, index) {
+                    final sample = history[index];
+                    final key = StudioDriverKeys.statisticsHistoryRow(
+                      sample.providerInstanceId,
+                      sample.model,
+                      sample.completedAt.millisecondsSinceEpoch,
+                    );
+                    return compact
+                        ? _CompactHistoryCard(key: key, sample: sample)
+                        : _WideHistoryRow(key: key, sample: sample);
+                  },
                 ),
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(28, 20, 28, 10),
-                  sliver: SliverToBoxAdapter(
-                    child: _HistoryHeader(
-                      summaries: widget.snapshot.summaries,
-                      value: _filter,
-                      onChanged: (value) => setState(() => _filter = value),
-                    ),
-                  ),
-                ),
-                if (history.isEmpty)
-                  SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(28, 0, 28, 30),
-                    sliver: SliverToBoxAdapter(
-                      child: _EmptyState(
-                        label: context.l10n.settingsStatisticsEmpty,
-                      ),
-                    ),
-                  )
-                else ...[
-                  if (!compact)
-                    SliverPadding(
-                      padding: const EdgeInsets.symmetric(horizontal: 28),
-                      sliver: SliverToBoxAdapter(child: _WideHistoryHeader()),
-                    ),
-                  SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(28, 0, 28, 30),
-                    sliver: SliverList.builder(
-                      itemCount: history.length,
-                      itemBuilder: (context, index) {
-                        final sample = history[index];
-                        final key = StudioDriverKeys.statisticsHistoryRow(
-                          sample.providerInstanceId,
-                          sample.model,
-                          sample.completedAt.millisecondsSinceEpoch,
-                        );
-                        return compact
-                            ? _CompactHistoryCard(key: key, sample: sample)
-                            : _WideHistoryRow(key: key, sample: sample);
-                      },
-                    ),
-                  ),
-                ],
               ],
-            ),
+              const SliverToBoxAdapter(child: SizedBox(height: 24)),
+            ],
           ),
         );
       },
@@ -179,54 +159,39 @@ class _CompactSummaryCard extends StatelessWidget {
   final ModelPerformanceSummaryView summary;
 
   @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: context.studioPaper2,
-          borderRadius: BorderRadius.circular(StudioRadii.sm),
-          border: Border.all(color: context.studioLine),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _ModelLabel(summary: summary),
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 16,
-                runSpacing: 8,
-                children: [
-                  _Metric(
-                    context.l10n.statisticsSpeed,
-                    formatTokenThroughput(summary.tokensPerSecond),
-                  ),
-                  _Metric(
-                    context.l10n.statisticsSamples,
-                    '${summary.sampleCount}',
-                  ),
-                  _Metric(
-                    context.l10n.statisticsOutputTokens,
-                    '${summary.completionTokens}',
-                  ),
-                  _Metric(
-                    context.l10n.statisticsAverageTtft,
-                    _formatMillis(summary.averageTtftMillis),
-                  ),
-                  _Metric(
-                    context.l10n.statisticsAverageResponse,
-                    _formatMillis(summary.averageResponseMillis),
-                  ),
-                ],
-              ),
-            ],
+  Widget build(BuildContext context) => SettingsResourceRow(
+    title: summary.model,
+    subtitle: '${summary.providerDisplayName} · ${summary.providerInstanceId}',
+    children: [
+      Wrap(
+        spacing: 16,
+        runSpacing: 8,
+        children: [
+          SettingsMetric(
+            context.l10n.statisticsSpeed,
+            formatTokenThroughput(summary.tokensPerSecond),
           ),
-        ),
+          SettingsMetric(
+            context.l10n.statisticsSamples,
+            '${summary.sampleCount}',
+          ),
+          SettingsMetric(
+            context.l10n.statisticsOutputTokens,
+            '${summary.completionTokens}',
+          ),
+          SettingsMetric(
+            context.l10n.statisticsAverageTtft,
+            _formatMillis(summary.averageTtftMillis),
+          ),
+          SettingsMetric(
+            context.l10n.statisticsAverageResponse,
+            _formatMillis(summary.averageResponseMillis),
+          ),
+        ],
       ),
-    );
-  }
+      const Divider(height: 24),
+    ],
+  );
 }
 
 class _ModelLabel extends StatelessWidget {
@@ -384,69 +349,36 @@ class _CompactHistoryCard extends StatelessWidget {
   final ModelPerformanceSampleView sample;
 
   @override
-  Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('${sample.providerDisplayName} · ${sample.model}'),
-            const SizedBox(height: 3),
-            Text(
-              _formatCompletedAt(context, sample.completedAt),
-              style: Theme.of(context).textTheme.labelSmall
-                  ?.copyWith(color: context.studioInkSoft),
-            ),
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 16,
-              runSpacing: 8,
-              children: [
-                _Metric(
-                  context.l10n.statisticsSpeed,
-                  formatTokenThroughput(sample.tokensPerSecond),
-                ),
-                _Metric(
-                  context.l10n.statisticsOutputTokens,
-                  '${sample.completionTokens}',
-                ),
-                _Metric('TTFT', _formatMillis(sample.ttftMillis.toDouble())),
-                _Metric(
-                  context.l10n.statisticsDecode,
-                  _formatMillis(sample.decodeMillis.toDouble()),
-                ),
-                _Metric(
-                  context.l10n.statisticsTotalResponse,
-                  _formatMillis(sample.totalResponseMillis.toDouble()),
-                ),
-              ],
-            ),
-          ],
-        ),
+  Widget build(BuildContext context) => SettingsResourceRow(
+    title: '${sample.providerDisplayName} · ${sample.model}',
+    subtitle: _formatCompletedAt(context, sample.completedAt),
+    children: [
+      Wrap(
+        spacing: 16,
+        runSpacing: 8,
+        children: [
+          SettingsMetric(
+            context.l10n.statisticsSpeed,
+            formatTokenThroughput(sample.tokensPerSecond),
+          ),
+          SettingsMetric(
+            context.l10n.statisticsOutputTokens,
+            '${sample.completionTokens}',
+          ),
+          SettingsMetric('TTFT', _formatMillis(sample.ttftMillis.toDouble())),
+          SettingsMetric(
+            context.l10n.statisticsDecode,
+            _formatMillis(sample.decodeMillis.toDouble()),
+          ),
+          SettingsMetric(
+            context.l10n.statisticsTotalResponse,
+            _formatMillis(sample.totalResponseMillis.toDouble()),
+          ),
+        ],
       ),
-    );
-  }
-}
-
-class _Metric extends StatelessWidget {
-  const _Metric(this.label, this.value);
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(label, style: Theme.of(context).textTheme.labelSmall),
-        Text(value, style: Theme.of(context).textTheme.bodyMedium),
-      ],
-    );
-  }
+      const Divider(height: 24),
+    ],
+  );
 }
 
 class _EmptyState extends StatelessWidget {

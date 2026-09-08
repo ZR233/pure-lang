@@ -7,12 +7,16 @@ import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_driver_keys.dart';
-import 'settings_provider_tab.dart';
 import 'settings_agents_tab.dart';
-import 'settings_statistics_tab.dart';
+import 'settings_general_tab.dart';
+import 'settings_instructions_tab.dart';
+import 'settings_lsp_tab.dart';
+import 'settings_mcp_tab.dart';
+import 'settings_provider_tab.dart';
+import 'settings_security_tab.dart';
+import 'settings_skills_tab.dart';
 import 'settings_ssh_tab.dart';
-import 'settings_system_tabs.dart';
-import 'settings_tabs.dart';
+import 'settings_statistics_tab.dart';
 
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
@@ -134,7 +138,13 @@ class _SettingsScaffold extends StatelessWidget {
           return Column(
             children: [
               _SettingsNav(compact: true),
-              Expanded(child: TabBarView(children: views)),
+              Expanded(
+                child: TabBarView(
+                  children: [
+                    for (final view in views) _RetainedSettingsTab(child: view),
+                  ],
+                ),
+              ),
             ],
           );
         }
@@ -142,7 +152,13 @@ class _SettingsScaffold extends StatelessWidget {
           children: [
             const _SettingsNav(compact: false),
             VerticalDivider(width: 1, color: context.studioLine),
-            Expanded(child: TabBarView(children: views)),
+            Expanded(
+              child: TabBarView(
+                children: [
+                  for (final view in views) _RetainedSettingsTab(child: view),
+                ],
+              ),
+            ),
           ],
         );
       },
@@ -204,10 +220,12 @@ class _SettingsNav extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(12, 18, 12, 16),
               children: [
                 const _SettingsBackTile(compact: false),
-                _SettingsNavGroupLabel(context.l10n.settingsWorkspaceGroup),
-                ...navItems.take(6),
-                _SettingsNavGroupLabel(context.l10n.settingsSystemGroup),
-                ...navItems.skip(6),
+                _SettingsNavGroupLabel(context.l10n.settingsModelsGroup),
+                for (final index in [0, 3, 1]) navItems[index],
+                _SettingsNavGroupLabel(context.l10n.settingsExtensionsGroup),
+                for (final index in [2, 4, 5, 6]) navItems[index],
+                _SettingsNavGroupLabel(context.l10n.settingsPreferencesGroup),
+                for (final index in [7, 8, 9]) navItems[index],
               ],
             ),
           ),
@@ -310,9 +328,6 @@ class _SettingsNavItem extends StatelessWidget {
         color: selected ? context.studioPaper : Colors.transparent,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(StudioRadii.sm),
-          side: BorderSide(
-            color: selected ? context.studioLine2 : Colors.transparent,
-          ),
         ),
         child: InkWell(
           key: StudioDriverKeys.settingsTab(tab.tab.name),
@@ -356,5 +371,25 @@ class _SettingsNavItem extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// Keep an already visited settings page alive so changing tabs does not discard
+/// editor text, search results or scroll position. Unvisited tabs remain lazy.
+class _RetainedSettingsTab extends StatefulWidget {
+  const _RetainedSettingsTab({required this.child});
+  final Widget child;
+  @override
+  State<_RetainedSettingsTab> createState() => _RetainedSettingsTabState();
+}
+
+class _RetainedSettingsTabState extends State<_RetainedSettingsTab>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
   }
 }

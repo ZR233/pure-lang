@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../app/theme/studio_tokens.dart';
 import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_driver_keys.dart';
 import 'interaction_payload.dart';
 import 'interaction_widgets.dart';
+import 'fallback_question_dock.dart';
+import 'question_progress.dart';
+import 'question_step.dart';
 
 class UserInputDock extends ConsumerStatefulWidget {
   const UserInputDock({
@@ -67,7 +69,7 @@ class _UserInputDockState extends ConsumerState<UserInputDock> {
   Widget build(BuildContext context) {
     final questions = widget.payload.questions;
     if (questions.isEmpty) {
-      return _FallbackQuestionDock(
+      return FallbackQuestionDock(
         body: widget.payload.rawBody,
         controller: _fallbackController,
         trailing: widget.trailing,
@@ -106,7 +108,7 @@ class _UserInputDockState extends ConsumerState<UserInputDock> {
       footer: DockActions(
         children: [
           if (index > 0)
-            OutlinedButton.icon(
+            TextButton.icon(
               icon: const Icon(Icons.chevron_left),
               label: Text(context.l10n.interactionPreviousQuestion),
               onPressed: () => setState(() => _index -= 1),
@@ -138,7 +140,7 @@ class _UserInputDockState extends ConsumerState<UserInputDock> {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          _QuestionProgress(
+          QuestionProgress(
             total: total,
             currentIndex: index,
             answeredCount: answeredCount,
@@ -147,7 +149,7 @@ class _UserInputDockState extends ConsumerState<UserInputDock> {
             onSelected: (value) => setState(() => _index = value),
           ),
           const SizedBox(height: 12),
-          _QuestionStep(
+          QuestionStep(
             enabled: widget.enabled,
             isFirstQuestion: index == 0,
             firstOptionKey: _firstOptionKey,
@@ -288,309 +290,6 @@ class _UserInputDockState extends ConsumerState<UserInputDock> {
           widget.interactionId,
           UserInputResolutionCommand(answers: _answers()),
         );
-  }
-}
-
-class _FallbackQuestionDock extends StatelessWidget {
-  const _FallbackQuestionDock({
-    required this.body,
-    required this.controller,
-    required this.trailing,
-    required this.onChanged,
-    required this.onSubmit,
-  });
-
-  final String body;
-  final TextEditingController controller;
-  final Widget? trailing;
-  final VoidCallback onChanged;
-  final VoidCallback? onSubmit;
-
-  @override
-  Widget build(BuildContext context) {
-    return InteractionDockShell(
-      kind: InteractionDockKind.question,
-      trailing: trailing,
-      title: context.l10n.interactionNeedInputTitle,
-      subtitle: context.l10n.interactionContinueAfterAnswer,
-      footerHint: context.l10n.interactionAnswerHint,
-      footer: DockActions(
-        children: [
-          FilledButton.icon(
-            key: StudioDriverKeys.fallbackUserInputSubmit,
-            icon: const Icon(Icons.reply),
-            label: Text(context.l10n.interactionAnswerButton),
-            onPressed: onSubmit,
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (body.trim().isNotEmpty) ...[
-            Text(body.trim()),
-            const SizedBox(height: 10),
-          ],
-          TextField(
-            key: StudioDriverKeys.fallbackUserInput,
-            controller: controller,
-            minLines: 1,
-            maxLines: 4,
-            decoration: InputDecoration(
-              labelText: context.l10n.interactionAnswerLabel,
-              prefixIcon: const Icon(Icons.short_text_outlined),
-            ),
-            onChanged: (_) => onChanged(),
-            onSubmitted: (_) => onSubmit?.call(),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _QuestionProgress extends StatelessWidget {
-  const _QuestionProgress({
-    required this.total,
-    required this.currentIndex,
-    required this.answeredCount,
-    required this.questions,
-    required this.answered,
-    required this.onSelected,
-  });
-
-  final int total;
-  final int currentIndex;
-  final int answeredCount;
-  final List<UserQuestionView> questions;
-  final bool Function(UserQuestionView question) answered;
-  final ValueChanged<int> onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: [
-          Text(
-            context.l10n.interactionQuestionProgress(currentIndex + 1, total),
-            style: Theme.of(context).textTheme.labelMedium
-                ?.copyWith(color: colors.onSurfaceVariant),
-          ),
-          const SizedBox(width: 10),
-          for (var index = 0; index < questions.length; index++)
-            Padding(
-              padding: EdgeInsets.only(
-                right: index == questions.length - 1 ? 0 : 6,
-              ),
-              child: _ProgressDot(
-                index: index,
-                active: index == currentIndex,
-                answered: answered(questions[index]),
-                onPressed: () => onSelected(index),
-              ),
-            ),
-          const SizedBox(width: 10),
-          Text(
-            context.l10n.interactionAnsweredCount(answeredCount),
-            style: Theme.of(context).textTheme.labelSmall
-                ?.copyWith(color: colors.onSurfaceVariant),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ProgressDot extends StatelessWidget {
-  const _ProgressDot({
-    required this.index,
-    required this.active,
-    required this.answered,
-    required this.onPressed,
-  });
-
-  final int index;
-  final bool active;
-  final bool answered;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    final background = active
-        ? colors.primary
-        : answered
-        ? colors.primary.withValues(alpha: 0.42)
-        : colors.surfaceContainerHighest;
-    return Tooltip(
-      message: context.l10n.interactionQuestionTooltip(index + 1),
-      child: InkResponse(
-        onTap: onPressed,
-        radius: 12,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 140),
-          width: active ? 18 : 8,
-          height: 8,
-          decoration: BoxDecoration(
-            color: background,
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: colors.outlineVariant),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _QuestionStep extends StatelessWidget {
-  const _QuestionStep({
-    required this.question,
-    required this.questionKey,
-    required this.isFirstQuestion,
-    required this.firstOptionKey,
-    required this.controller,
-    required this.selected,
-    required this.onOptionChanged,
-    required this.onTextChanged,
-    required this.enabled,
-  });
-
-  final UserQuestionView question;
-  final String questionKey;
-  final bool isFirstQuestion;
-  final GlobalKey firstOptionKey;
-  final TextEditingController controller;
-  final Set<String> selected;
-  final void Function(String label, bool selected) onOptionChanged;
-  final ValueChanged<String> onTextChanged;
-  final bool enabled;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          question.header.isEmpty
-              ? context.l10n.interactionQuestionFallback
-              : question.header,
-          style: Theme.of(context).textTheme.labelLarge,
-        ),
-        if (question.question.isNotEmpty) ...[
-          const SizedBox(height: 4),
-          Text(question.question),
-        ],
-        if (question.options.isNotEmpty) ...[
-          const SizedBox(height: 10),
-          for (final (optionIndex, option) in question.options.indexed)
-            Padding(
-              key: optionIndex == 0 && isFirstQuestion
-                  ? StudioDriverKeys.userInputFirstOption
-                  : StudioDriverKeys.userInputOption(questionKey, optionIndex),
-              padding: const EdgeInsets.only(bottom: 7),
-              child: KeyedSubtree(
-                key: optionIndex == 0 && isFirstQuestion
-                    ? firstOptionKey
-                    : null,
-                child: _QuestionOptionRow(
-                  option: option,
-                  selected: selected.contains(option.label),
-                  onChanged: enabled
-                      ? (value) => onOptionChanged(option.label, value)
-                      : null,
-                ),
-              ),
-            ),
-        ],
-        if (question.isOther || question.options.isEmpty) ...[
-          const SizedBox(height: 8),
-          TextField(
-            key: isFirstQuestion
-                ? StudioDriverKeys.userInputFirstText
-                : StudioDriverKeys.userInputText(questionKey),
-            controller: controller,
-            enabled: enabled,
-            obscureText: question.isSecret,
-            minLines: 1,
-            maxLines: question.isSecret ? 1 : 4,
-            decoration: InputDecoration(
-              labelText: question.isOther
-                  ? context.l10n.interactionOtherLabel
-                  : context.l10n.interactionAnswerLabel,
-              hintText: question.isSecret
-                  ? context.l10n.interactionSecretHint
-                  : context.l10n.interactionTextHint,
-              prefixIcon: Icon(
-                question.isSecret
-                    ? Icons.password_outlined
-                    : Icons.short_text_outlined,
-              ),
-            ),
-            onChanged: onTextChanged,
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-class _QuestionOptionRow extends StatelessWidget {
-  const _QuestionOptionRow({
-    required this.option,
-    required this.selected,
-    required this.onChanged,
-  });
-
-  final UserQuestionOptionView option;
-  final bool selected;
-  final ValueChanged<bool>? onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return IgnorePointer(
-      ignoring: onChanged == null,
-      child: Opacity(
-        opacity: onChanged == null ? 0.55 : 1,
-        child: DockOptionRow(
-          title: option.label,
-          subtitle: option.description,
-          selected: selected,
-          onPressed: () => onChanged?.call(!selected),
-          leading: _OptionMark(selected: selected),
-        ),
-      ),
-    );
-  }
-}
-
-class _OptionMark extends StatelessWidget {
-  const _OptionMark({required this.selected});
-
-  final bool selected;
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 140),
-      width: 20,
-      height: 20,
-      margin: const EdgeInsets.only(top: 1),
-      decoration: BoxDecoration(
-        color: selected ? StudioColors.clay : StudioColors.white,
-        borderRadius: BorderRadius.circular(5),
-        border: Border.all(
-          color: selected ? StudioColors.clay : context.studioLine2,
-          width: 2,
-        ),
-      ),
-      child: selected
-          ? const Icon(Icons.check, size: 13, color: StudioColors.white)
-          : null,
-    );
   }
 }
 
