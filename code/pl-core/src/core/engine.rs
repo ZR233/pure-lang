@@ -79,6 +79,10 @@ impl TurnEngine {
         &self.runtime
     }
 
+    pub(crate) fn reasoning_effort(&self) -> Option<&str> {
+        self.effort.as_ref().map(ReasoningEffort::as_str)
+    }
+
     pub fn execution_environment(&self) -> &ExecutionEnvironment {
         &self.execution_environment
     }

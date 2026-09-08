@@ -415,7 +415,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsStatisticsTitle => '统计';
 
   @override
-  String get settingsStatisticsSubtitle => '按 Provider 实例与实际模型汇总最近成功调用。';
+  String get settingsStatisticsSubtitle => '按 Provider 实例、实际模型与思考强度汇总最近成功调用。';
 
   @override
   String get settingsStatisticsSummaryTitle => '模型性能';
@@ -431,6 +431,12 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get statisticsModel => 'Provider / 模型';
+
+  @override
+  String get statisticsReasoningEffort => '思考强度';
+
+  @override
+  String get statisticsReasoningEffortUnspecified => '未指定/未记录';
 
   @override
   String get statisticsSpeed => '速度';

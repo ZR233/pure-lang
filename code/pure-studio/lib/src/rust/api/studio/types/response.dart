@@ -236,6 +236,7 @@ class BridgeModelPerformanceSample {
   final String providerInstanceId;
   final String providerDisplayName;
   final String model;
+  final String? reasoningEffort;
   final BigInt completionTokens;
   final BigInt ttftMillis;
   final BigInt decodeMillis;
@@ -247,6 +248,7 @@ class BridgeModelPerformanceSample {
     required this.providerInstanceId,
     required this.providerDisplayName,
     required this.model,
+    this.reasoningEffort,
     required this.completionTokens,
     required this.ttftMillis,
     required this.decodeMillis,
@@ -260,6 +262,7 @@ class BridgeModelPerformanceSample {
       providerInstanceId.hashCode ^
       providerDisplayName.hashCode ^
       model.hashCode ^
+      reasoningEffort.hashCode ^
       completionTokens.hashCode ^
       ttftMillis.hashCode ^
       decodeMillis.hashCode ^
@@ -275,6 +278,7 @@ class BridgeModelPerformanceSample {
           providerInstanceId == other.providerInstanceId &&
           providerDisplayName == other.providerDisplayName &&
           model == other.model &&
+          reasoningEffort == other.reasoningEffort &&
           completionTokens == other.completionTokens &&
           ttftMillis == other.ttftMillis &&
           decodeMillis == other.decodeMillis &&
@@ -321,6 +325,7 @@ class BridgeModelPerformanceSummary {
   final String providerInstanceId;
   final String providerDisplayName;
   final String model;
+  final String? reasoningEffort;
   final BigInt sampleCount;
   final BigInt completionTokens;
   final BigInt totalTtftMillis;
@@ -334,6 +339,7 @@ class BridgeModelPerformanceSummary {
     required this.providerInstanceId,
     required this.providerDisplayName,
     required this.model,
+    this.reasoningEffort,
     required this.sampleCount,
     required this.completionTokens,
     required this.totalTtftMillis,
@@ -349,6 +355,7 @@ class BridgeModelPerformanceSummary {
       providerInstanceId.hashCode ^
       providerDisplayName.hashCode ^
       model.hashCode ^
+      reasoningEffort.hashCode ^
       sampleCount.hashCode ^
       completionTokens.hashCode ^
       totalTtftMillis.hashCode ^
@@ -366,6 +373,7 @@ class BridgeModelPerformanceSummary {
           providerInstanceId == other.providerInstanceId &&
           providerDisplayName == other.providerDisplayName &&
           model == other.model &&
+          reasoningEffort == other.reasoningEffort &&
           sampleCount == other.sampleCount &&
           completionTokens == other.completionTokens &&
           totalTtftMillis == other.totalTtftMillis &&

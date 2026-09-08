@@ -109,6 +109,8 @@ struct PerformanceSample {
     provider_instance_id: String,
     provider_display_name: String,
     model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<String>,
     completion_tokens: u64,
     ttft_millis: u64,
     decode_millis: u64,
@@ -284,6 +286,7 @@ fn performance_sample(
         provider_instance_id: billing.provider_instance_id.clone(),
         provider_display_name: billing.provider.clone(),
         model: billing.model.clone(),
+        reasoning_effort: billing.reasoning_effort.clone(),
         completion_tokens: billing.accounting.usage.totals().completion_tokens,
         ttft_millis: timing.ttft_millis,
         decode_millis: timing.decode_millis,
@@ -317,6 +320,7 @@ fn public_sample(sample: &PerformanceSample) -> StudioModelPerformanceSample {
         provider_instance_id: sample.provider_instance_id.clone(),
         provider_display_name: sample.provider_display_name.clone(),
         model: sample.model.clone(),
+        reasoning_effort: sample.reasoning_effort.clone(),
         completion_tokens: sample.completion_tokens,
         ttft_millis: sample.ttft_millis,
         decode_millis: sample.decode_millis,
@@ -338,10 +342,14 @@ struct SummaryAccumulator {
 fn performance_summaries(
     history: &VecDeque<PerformanceSample>,
 ) -> Vec<StudioModelPerformanceSummary> {
-    let mut groups = BTreeMap::<(String, String), SummaryAccumulator>::new();
+    let mut groups = BTreeMap::<(String, String, Option<String>), SummaryAccumulator>::new();
     for sample in history {
         let aggregate = groups
-            .entry((sample.provider_instance_id.clone(), sample.model.clone()))
+            .entry((
+                sample.provider_instance_id.clone(),
+                sample.model.clone(),
+                sample.reasoning_effort.clone(),
+            ))
             .or_default();
         aggregate
             .provider_display_name
@@ -362,25 +370,28 @@ fn performance_summaries(
     }
     groups
         .into_iter()
-        .map(|((provider_instance_id, model), aggregate)| {
-            let sample_count = aggregate.sample_count as f64;
-            StudioModelPerformanceSummary {
-                provider_instance_id,
-                provider_display_name: aggregate.provider_display_name,
-                model,
-                sample_count: aggregate.sample_count,
-                completion_tokens: aggregate.completion_tokens,
-                total_ttft_millis: aggregate.total_ttft_millis,
-                total_decode_millis: aggregate.total_decode_millis,
-                total_response_millis: aggregate.total_response_millis,
-                tokens_per_second: throughput(
-                    aggregate.completion_tokens,
-                    aggregate.total_decode_millis,
-                ),
-                average_ttft_millis: aggregate.total_ttft_millis as f64 / sample_count,
-                average_response_millis: aggregate.total_response_millis as f64 / sample_count,
-            }
-        })
+        .map(
+            |((provider_instance_id, model, reasoning_effort), aggregate)| {
+                let sample_count = aggregate.sample_count as f64;
+                StudioModelPerformanceSummary {
+                    provider_instance_id,
+                    provider_display_name: aggregate.provider_display_name,
+                    model,
+                    reasoning_effort,
+                    sample_count: aggregate.sample_count,
+                    completion_tokens: aggregate.completion_tokens,
+                    total_ttft_millis: aggregate.total_ttft_millis,
+                    total_decode_millis: aggregate.total_decode_millis,
+                    total_response_millis: aggregate.total_response_millis,
+                    tokens_per_second: throughput(
+                        aggregate.completion_tokens,
+                        aggregate.total_decode_millis,
+                    ),
+                    average_ttft_millis: aggregate.total_ttft_millis as f64 / sample_count,
+                    average_response_millis: aggregate.total_response_millis as f64 / sample_count,
+                }
+            },
+        )
         .collect()
 }
 
@@ -509,36 +520,151 @@ mod tests {
             .record_inference(
                 "root",
                 "root",
-                &billing_record("first", "provider-a", "shared-model", 100, 1_000, 1),
+                &billing_record_with_effort(
+                    "first",
+                    "provider-a",
+                    "shared-model",
+                    100,
+                    1_000,
+                    1,
+                    Some("low"),
+                ),
             )
             .expect("first sample");
         owner
             .record_inference(
                 "root",
                 "root",
-                &billing_record("second", "provider-a", "shared-model", 50, 250, 2),
+                &billing_record_with_effort(
+                    "second",
+                    "provider-a",
+                    "shared-model",
+                    50,
+                    250,
+                    2,
+                    Some("low"),
+                ),
             )
             .expect("second sample");
         owner
             .record_inference(
                 "root",
                 "root",
-                &billing_record("isolated", "provider-b", "shared-model", 30, 100, 3),
+                &billing_record_with_effort(
+                    "isolated-effort",
+                    "provider-a",
+                    "shared-model",
+                    30,
+                    100,
+                    3,
+                    Some("high"),
+                ),
             )
-            .expect("isolated sample");
+            .expect("isolated effort sample");
+        owner
+            .record_inference(
+                "root",
+                "root",
+                &billing_record_with_effort(
+                    "isolated-provider",
+                    "provider-b",
+                    "shared-model",
+                    40,
+                    200,
+                    4,
+                    Some("low"),
+                ),
+            )
+            .expect("isolated provider sample");
 
         let snapshot = owner.snapshot().await;
-        assert_eq!(snapshot.summaries.len(), 2);
+        assert_eq!(snapshot.summaries.len(), 3);
         let aggregate = snapshot
             .summaries
             .iter()
-            .find(|summary| summary.provider_instance_id == "provider-a")
+            .find(|summary| {
+                summary.provider_instance_id == "provider-a"
+                    && summary.reasoning_effort.as_deref() == Some("low")
+            })
             .expect("provider-a summary");
         assert_eq!(aggregate.sample_count, 2);
         assert_eq!(aggregate.completion_tokens, 150);
         assert_eq!(aggregate.total_decode_millis, 1_250);
         assert_eq!(aggregate.tokens_per_second, 120.0);
         assert_eq!(aggregate.average_ttft_millis, 10.0);
+
+        let high_effort = snapshot
+            .summaries
+            .iter()
+            .find(|summary| {
+                summary.provider_instance_id == "provider-a"
+                    && summary.reasoning_effort.as_deref() == Some("high")
+            })
+            .expect("provider-a high-effort summary");
+        assert_eq!(high_effort.sample_count, 1);
+        assert_eq!(high_effort.tokens_per_second, 300.0);
+
+        let provider_b = snapshot
+            .summaries
+            .iter()
+            .find(|summary| summary.provider_instance_id == "provider-b")
+            .expect("provider-b summary");
+        assert_eq!(provider_b.sample_count, 1);
+        assert_eq!(provider_b.reasoning_effort.as_deref(), Some("low"));
+
+        writer.shutdown().await.expect("writer shutdown");
+    }
+
+    #[tokio::test]
+    async fn summaries_keep_unspecified_and_explicit_none_efforts_separate() {
+        let (owner, _, writer, _) = memory_owner().await;
+        owner
+            .record_inference(
+                "root",
+                "root",
+                &billing_record_with_effort(
+                    "unspecified",
+                    "provider-a",
+                    "model-a",
+                    20,
+                    100,
+                    1,
+                    None,
+                ),
+            )
+            .expect("unspecified sample");
+        owner
+            .record_inference(
+                "root",
+                "root",
+                &billing_record_with_effort(
+                    "explicit-none",
+                    "provider-a",
+                    "model-a",
+                    20,
+                    100,
+                    2,
+                    Some("none"),
+                ),
+            )
+            .expect("explicit-none sample");
+
+        let snapshot = owner.snapshot().await;
+        assert_eq!(snapshot.summaries.len(), 2);
+        assert!(
+            snapshot
+                .summaries
+                .iter()
+                .any(|summary| { summary.reasoning_effort.is_none() && summary.sample_count == 1 })
+        );
+        assert!(snapshot.summaries.iter().any(|summary| {
+            summary.reasoning_effort.as_deref() == Some("none") && summary.sample_count == 1
+        }));
+        assert_eq!(
+            snapshot.history[0].reasoning_effort.as_deref(),
+            Some("none")
+        );
+        assert_eq!(snapshot.history[1].reasoning_effort, None);
 
         writer.shutdown().await.expect("writer shutdown");
     }
@@ -706,6 +832,59 @@ mod tests {
         assert_eq!(snapshot.history.len(), 1);
     }
 
+    #[test]
+    fn performance_cache_defaults_missing_effort_and_round_trips_explicit_none() {
+        let legacy = serde_json::json!({
+            "version": CACHE_VERSION,
+            "revision": 1,
+            "updatedAt": 2,
+            "sessions": {},
+            "history": [{
+                "threadId": "thread-1",
+                "inferenceId": "inference-1",
+                "completedAt": 2,
+                "providerInstanceId": "provider-1",
+                "providerDisplayName": "Provider 1",
+                "model": "model-1",
+                "completionTokens": 10,
+                "ttftMillis": 5,
+                "decodeMillis": 100,
+                "totalResponseMillis": 105
+            }]
+        });
+        let restored: ModelPerformanceState =
+            serde_json::from_value(legacy).expect("legacy performance cache");
+        assert_eq!(restored.history[0].reasoning_effort, None);
+
+        let explicit_none = serde_json::json!({
+            "version": CACHE_VERSION,
+            "revision": 2,
+            "updatedAt": 3,
+            "sessions": {},
+            "history": [{
+                "threadId": "thread-1",
+                "inferenceId": "inference-2",
+                "completedAt": 3,
+                "providerInstanceId": "provider-1",
+                "providerDisplayName": "Provider 1",
+                "model": "model-1",
+                "reasoningEffort": "none",
+                "completionTokens": 10,
+                "ttftMillis": 5,
+                "decodeMillis": 100,
+                "totalResponseMillis": 105
+            }]
+        });
+        let restored: ModelPerformanceState =
+            serde_json::from_value(explicit_none).expect("new performance cache");
+        assert_eq!(
+            restored.history[0].reasoning_effort.as_deref(),
+            Some("none")
+        );
+        let encoded = serde_json::to_value(restored).expect("performance cache encoding");
+        assert_eq!(encoded["history"][0]["reasoningEffort"], "none");
+    }
+
     fn billing_record(
         inference_id: &str,
         provider_instance_id: &str,
@@ -719,6 +898,7 @@ mod tests {
             provider_instance_id: provider_instance_id.to_string(),
             provider: format!("{provider_instance_id} display"),
             model: model.to_string(),
+            reasoning_effort: None,
             context_window: Some(128_000),
             accounting: pl_core::InferenceAccounting {
                 usage: pl_core::UsageReport {
@@ -744,6 +924,27 @@ mod tests {
             }),
             recorded_at,
         }
+    }
+
+    fn billing_record_with_effort(
+        inference_id: &str,
+        provider_instance_id: &str,
+        model: &str,
+        completion_tokens: u64,
+        decode_millis: u64,
+        recorded_at: i64,
+        reasoning_effort: Option<&str>,
+    ) -> InferenceBillingRecord {
+        let mut billing = billing_record(
+            inference_id,
+            provider_instance_id,
+            model,
+            completion_tokens,
+            decode_millis,
+            recorded_at,
+        );
+        billing.reasoning_effort = reasoning_effort.map(str::to_owned);
+        billing
     }
 
     fn cost(currency: &str, amount: f64) -> RuntimeCostAmount {

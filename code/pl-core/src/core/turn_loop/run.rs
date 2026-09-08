@@ -300,6 +300,9 @@ async fn run_steps(
             crate::tool::estimate_tool_schema_tokens(&iteration_tools);
         let mut inference_item = recorder.inference_item(&turn_id, &inference_id, &model);
         recorder.start_item(inference_item.clone());
+        let reasoning_effort = reasoning
+            .as_ref()
+            .and_then(|reasoning| reasoning.effort.clone());
         let completion_request = CompletionRequest::builder()
             .instructions(assembled_context.instructions.clone())
             .input(input.clone())
@@ -333,6 +336,7 @@ async fn run_steps(
                 provider_instance_id: runtime.provider_instance_id(),
                 provider: &runtime.endpoint().name,
                 model: &model,
+                reasoning_effort: reasoning_effort.clone(),
                 accounting: &failure.accounting,
                 model_info: runtime.model(),
                 prompt: super::prompt_cache::current(session, &options.prompt_scope),
@@ -408,6 +412,7 @@ async fn run_steps(
             provider_instance_id: runtime.provider_instance_id(),
             provider: &runtime.endpoint().name,
             model: &actual_model,
+            reasoning_effort,
             accounting: &response.accounting,
             model_info: &model_info,
             prompt: super::prompt_cache::current(session, &options.prompt_scope),

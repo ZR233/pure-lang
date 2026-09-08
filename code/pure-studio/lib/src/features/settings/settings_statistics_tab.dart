@@ -77,7 +77,8 @@ class _StatisticsTabState extends State<StatisticsTab> {
                     final key = StudioDriverKeys.statisticsHistoryRow(
                       sample.providerInstanceId,
                       sample.model,
-                      sample.completedAt.millisecondsSinceEpoch,
+                      sample.reasoningEffort,
+                      index,
                     );
                     return compact
                         ? _CompactHistoryCard(key: key, sample: sample)
@@ -123,6 +124,7 @@ class _SummarySection extends StatelessWidget {
             child: DataTable(
               columns: [
                 DataColumn(label: Text(context.l10n.statisticsModel)),
+                DataColumn(label: Text(context.l10n.statisticsReasoningEffort)),
                 DataColumn(label: Text(context.l10n.statisticsSpeed)),
                 DataColumn(label: Text(context.l10n.statisticsSamples)),
                 DataColumn(label: Text(context.l10n.statisticsOutputTokens)),
@@ -133,7 +135,24 @@ class _SummarySection extends StatelessWidget {
                 for (final summary in summaries)
                   DataRow(
                     cells: [
-                      DataCell(_ModelLabel(summary: summary)),
+                      DataCell(
+                        _ModelLabel(
+                          key: StudioDriverKeys.statisticsSummaryRow(
+                            summary.providerInstanceId,
+                            summary.model,
+                            summary.reasoningEffort,
+                          ),
+                          summary: summary,
+                        ),
+                      ),
+                      DataCell(
+                        Text(
+                          _formatReasoningEffort(
+                            context,
+                            summary.reasoningEffort,
+                          ),
+                        ),
+                      ),
                       DataCell(
                         Text(formatTokenThroughput(summary.tokensPerSecond)),
                       ),
@@ -160,6 +179,11 @@ class _CompactSummaryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => SettingsResourceRow(
+    key: StudioDriverKeys.statisticsSummaryRow(
+      summary.providerInstanceId,
+      summary.model,
+      summary.reasoningEffort,
+    ),
     title: summary.model,
     subtitle: '${summary.providerDisplayName} · ${summary.providerInstanceId}',
     children: [
@@ -167,6 +191,10 @@ class _CompactSummaryCard extends StatelessWidget {
         spacing: 16,
         runSpacing: 8,
         children: [
+          SettingsMetric(
+            context.l10n.statisticsReasoningEffort,
+            _formatReasoningEffort(context, summary.reasoningEffort),
+          ),
           SettingsMetric(
             context.l10n.statisticsSpeed,
             formatTokenThroughput(summary.tokensPerSecond),
@@ -195,7 +223,7 @@ class _CompactSummaryCard extends StatelessWidget {
 }
 
 class _ModelLabel extends StatelessWidget {
-  const _ModelLabel({required this.summary});
+  const _ModelLabel({required this.summary, super.key});
 
   final ModelPerformanceSummaryView summary;
 
@@ -230,17 +258,18 @@ class _HistoryHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: Text(
-            context.l10n.settingsStatisticsHistoryTitle,
-            style: Theme.of(context).textTheme.titleMedium
-                ?.copyWith(fontWeight: FontWeight.w600),
-          ),
-        ),
-        SizedBox(
-          width: 240,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final filterWidth = constraints.maxWidth < 240
+            ? constraints.maxWidth
+            : 240.0;
+        final title = Text(
+          context.l10n.settingsStatisticsHistoryTitle,
+          style: Theme.of(context).textTheme.titleMedium
+              ?.copyWith(fontWeight: FontWeight.w600),
+        );
+        final filter = SizedBox(
+          width: filterWidth,
           child: DropdownButtonFormField<String?>(
             key: StudioDriverKeys.statisticsFilter,
             initialValue: value,
@@ -254,15 +283,27 @@ class _HistoryHeader extends StatelessWidget {
                 DropdownMenuItem<String?>(
                   value: summary.filterKey,
                   child: Text(
-                    '${summary.providerDisplayName} · ${summary.model}',
+                    _formatPerformanceIdentity(context, summary),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
             ],
             onChanged: onChanged,
           ),
-        ),
-      ],
+        );
+        if (constraints.maxWidth < 376) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [title, const SizedBox(height: 12), filter],
+          );
+        }
+        return Row(
+          children: [
+            Expanded(child: title),
+            filter,
+          ],
+        );
+      },
     );
   }
 }
@@ -275,6 +316,7 @@ class _WideHistoryHeader extends StatelessWidget {
       values: [
         context.l10n.statisticsCompletedAt,
         context.l10n.statisticsModel,
+        context.l10n.statisticsReasoningEffort,
         context.l10n.statisticsOutputTokens,
         'TTFT',
         context.l10n.statisticsDecode,
@@ -295,7 +337,9 @@ class _WideHistoryRow extends StatelessWidget {
     return _WideCells(
       values: [
         _formatCompletedAt(context, sample.completedAt),
-        '${sample.providerDisplayName} · ${sample.model}',
+        '${sample.providerDisplayName} · ${sample.providerInstanceId} '
+            '· ${sample.model}',
+        _formatReasoningEffort(context, sample.reasoningEffort),
         '${sample.completionTokens}',
         _formatMillis(sample.ttftMillis.toDouble()),
         _formatMillis(sample.decodeMillis.toDouble()),
@@ -350,13 +394,19 @@ class _CompactHistoryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => SettingsResourceRow(
-    title: '${sample.providerDisplayName} · ${sample.model}',
+    title:
+        '${sample.providerDisplayName} · ${sample.providerInstanceId} '
+        '· ${sample.model}',
     subtitle: _formatCompletedAt(context, sample.completedAt),
     children: [
       Wrap(
         spacing: 16,
         runSpacing: 8,
         children: [
+          SettingsMetric(
+            context.l10n.statisticsReasoningEffort,
+            _formatReasoningEffort(context, sample.reasoningEffort),
+          ),
           SettingsMetric(
             context.l10n.statisticsSpeed,
             formatTokenThroughput(sample.tokensPerSecond),
@@ -400,6 +450,22 @@ class _EmptyState extends StatelessWidget {
 String _formatMillis(double millis) {
   if (millis < 1_000) return '${millis.round()} ms';
   return '${(millis / 1_000).toStringAsFixed(1)} s';
+}
+
+String _formatReasoningEffort(BuildContext context, String? effort) {
+  return effort ?? context.l10n.statisticsReasoningEffortUnspecified;
+}
+
+String _formatPerformanceIdentity(
+  BuildContext context,
+  ModelPerformanceSummaryView summary,
+) {
+  return [
+    summary.providerDisplayName,
+    summary.providerInstanceId,
+    summary.model,
+    _formatReasoningEffort(context, summary.reasoningEffort),
+  ].join(' · ');
 }
 
 String _formatCompletedAt(BuildContext context, DateTime value) {

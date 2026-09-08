@@ -429,7 +429,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsStatisticsSubtitle =>
-      'Recent successful model calls, grouped by provider instance and actual model.';
+      'Recent successful model calls, grouped by provider instance, actual model, and reasoning effort.';
 
   @override
   String get settingsStatisticsSummaryTitle => 'Model performance';
@@ -445,6 +445,13 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get statisticsModel => 'Provider / model';
+
+  @override
+  String get statisticsReasoningEffort => 'Reasoning effort';
+
+  @override
+  String get statisticsReasoningEffortUnspecified =>
+      'Unspecified / not recorded';
 
   @override
   String get statisticsSpeed => 'Speed';

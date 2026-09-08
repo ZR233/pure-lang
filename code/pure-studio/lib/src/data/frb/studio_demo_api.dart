@@ -292,18 +292,33 @@ class DemoStudioApi implements StudioApi {
   }
 
   ModelPerformanceSnapshotView _demoModelPerformance(DateTime now) {
-    const deepseek = ModelPerformanceSummaryView(
+    const deepseekHigh = ModelPerformanceSummaryView(
       providerInstanceId: 'deepseek-primary',
       providerDisplayName: 'DeepSeek',
       model: 'deepseek-v4-flash',
-      sampleCount: 2,
-      completionTokens: 300,
-      totalTtftMillis: 760,
-      totalDecodeMillis: 2000,
-      totalResponseMillis: 2760,
+      reasoningEffort: 'high',
+      sampleCount: 1,
+      completionTokens: 150,
+      totalTtftMillis: 410,
+      totalDecodeMillis: 1000,
+      totalResponseMillis: 1410,
       tokensPerSecond: 150,
-      averageTtftMillis: 380,
-      averageResponseMillis: 1380,
+      averageTtftMillis: 410,
+      averageResponseMillis: 1410,
+    );
+    const deepseekNone = ModelPerformanceSummaryView(
+      providerInstanceId: 'deepseek-primary',
+      providerDisplayName: 'DeepSeek',
+      model: 'deepseek-v4-flash',
+      reasoningEffort: 'none',
+      sampleCount: 1,
+      completionTokens: 150,
+      totalTtftMillis: 350,
+      totalDecodeMillis: 1000,
+      totalResponseMillis: 1350,
+      tokensPerSecond: 150,
+      averageTtftMillis: 350,
+      averageResponseMillis: 1350,
     );
     const openai = ModelPerformanceSummaryView(
       providerInstanceId: 'openai-work',
@@ -336,7 +351,7 @@ class DemoStudioApi implements StudioApi {
           hasUnpricedUsage: true,
         ),
       ],
-      summaries: const [deepseek, openai],
+      summaries: const [deepseekHigh, deepseekNone, openai],
       history: [
         ModelPerformanceSampleView(
           completedAt: now.subtract(const Duration(seconds: 12)),
@@ -351,9 +366,10 @@ class DemoStudioApi implements StudioApi {
         ),
         ModelPerformanceSampleView(
           completedAt: now.subtract(const Duration(seconds: 34)),
-          providerInstanceId: deepseek.providerInstanceId,
-          providerDisplayName: deepseek.providerDisplayName,
-          model: deepseek.model,
+          providerInstanceId: deepseekHigh.providerInstanceId,
+          providerDisplayName: deepseekHigh.providerDisplayName,
+          model: deepseekHigh.model,
+          reasoningEffort: deepseekHigh.reasoningEffort,
           completionTokens: 150,
           ttftMillis: 410,
           decodeMillis: 1000,
@@ -362,9 +378,10 @@ class DemoStudioApi implements StudioApi {
         ),
         ModelPerformanceSampleView(
           completedAt: now.subtract(const Duration(minutes: 2)),
-          providerInstanceId: deepseek.providerInstanceId,
-          providerDisplayName: deepseek.providerDisplayName,
-          model: deepseek.model,
+          providerInstanceId: deepseekNone.providerInstanceId,
+          providerDisplayName: deepseekNone.providerDisplayName,
+          model: deepseekNone.model,
+          reasoningEffort: deepseekNone.reasoningEffort,
           completionTokens: 150,
           ttftMillis: 350,
           decodeMillis: 1000,

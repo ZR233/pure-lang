@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 
 abstract final class StudioDriverKeys {
@@ -78,12 +80,21 @@ abstract final class StudioDriverKeys {
   static const statisticsHistory = ValueKey<String>('statistics-history');
   static const statisticsFilter = ValueKey<String>('statistics-filter');
 
+  static ValueKey<String> statisticsSummaryRow(
+    String providerInstanceId,
+    String model,
+    String? reasoningEffort,
+  ) => ValueKey<String>(
+    'statistics-summary-row:${jsonEncode(<Object?>[providerInstanceId, model, reasoningEffort])}',
+  );
+
   static ValueKey<String> statisticsHistoryRow(
     String providerInstanceId,
     String model,
-    int completedAtMillis,
+    String? reasoningEffort,
+    int sampleIndex,
   ) => ValueKey<String>(
-    'statistics-history-row:$providerInstanceId:$model:$completedAtMillis',
+    'statistics-history-row:${jsonEncode(<Object?>[providerInstanceId, model, reasoningEffort, sampleIndex])}',
   );
   static const providerEditor = ValueKey<String>('provider-editor');
   static const providerEdit = ValueKey<String>('provider-edit');

@@ -256,6 +256,12 @@ fn truncate_generated_title(raw: &str) -> Result<String> {
         .to_string())
 }
 
+fn billing_model(route_model: &str, response_model: Option<&str>) -> String {
+    response_model
+        .filter(|model| !model.is_empty())
+        .map_or_else(|| route_model.to_owned(), str::to_owned)
+}
+
 async fn generate_title(
     runtime: &StudioRuntime,
     thread_id: &str,
@@ -279,6 +285,9 @@ async fn generate_title(
             // 标题任务只消费可见 assistant 文本，不请求或持久化 reasoning summary。
             summary: None,
         });
+    let reasoning_effort = reasoning
+        .as_ref()
+        .and_then(|reasoning| reasoning.effort.clone());
     let client = ModelTurnClient::from_route(&route)?;
     let mut session = AgentSession::new();
     session.push_user_prompt(title_user_prompt(prompt)?);
@@ -307,11 +316,16 @@ async fn generate_title(
         Ok(response) => response.accounting().clone(),
         Err(failure) => (*failure.accounting).clone(),
     };
+    let model = billing_model(
+        &route.model.slug,
+        result.as_ref().ok().map(|response| response.model()),
+    );
     let billing = pl_core::InferenceBillingRecord {
         inference_id: crate::studio::ids::new_id("title"),
         provider_instance_id: route.provider_id.as_str().to_owned(),
         provider: route.endpoint.name.clone(),
-        model: route.model.slug.clone(),
+        model,
+        reasoning_effort,
         context_window: route.model.resolved_context_window(),
         accounting,
         prompt_generation: None,
@@ -381,6 +395,16 @@ mod tests {
             truncate_generated_title("one two three four five six").unwrap(),
             "one two three four five six"
         );
+    }
+
+    #[test]
+    fn billing_model_prefers_response_alias_and_falls_back_for_empty_or_failed_response() {
+        assert_eq!(
+            billing_model("route-model", Some("response-alias")),
+            "response-alias"
+        );
+        assert_eq!(billing_model("route-model", Some("")), "route-model");
+        assert_eq!(billing_model("route-model", None), "route-model");
     }
 
     #[test]

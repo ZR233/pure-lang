@@ -875,7 +875,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsStatisticsSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Recent successful model calls, grouped by provider instance and actual model.'**
+  /// **'Recent successful model calls, grouped by provider instance, actual model, and reasoning effort.'**
   String get settingsStatisticsSubtitle;
 
   /// No description provided for @settingsStatisticsSummaryTitle.
@@ -907,6 +907,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Provider / model'**
   String get statisticsModel;
+
+  /// No description provided for @statisticsReasoningEffort.
+  ///
+  /// In en, this message translates to:
+  /// **'Reasoning effort'**
+  String get statisticsReasoningEffort;
+
+  /// No description provided for @statisticsReasoningEffortUnspecified.
+  ///
+  /// In en, this message translates to:
+  /// **'Unspecified / not recorded'**
+  String get statisticsReasoningEffortUnspecified;
 
   /// No description provided for @statisticsSpeed.
   ///

@@ -134,6 +134,8 @@ pub struct StudioModelPerformanceSummary {
     pub provider_instance_id: String,
     pub provider_display_name: String,
     pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
     pub sample_count: u64,
     pub completion_tokens: u64,
     pub total_ttft_millis: u64,
@@ -151,6 +153,8 @@ pub struct StudioModelPerformanceSample {
     pub provider_instance_id: String,
     pub provider_display_name: String,
     pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
     pub completion_tokens: u64,
     pub ttft_millis: u64,
     pub decode_millis: u64,
