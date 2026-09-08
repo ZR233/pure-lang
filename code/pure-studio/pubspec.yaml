@@ -4,7 +4,7 @@ publish_to: 'none'
 
 # Release Please updates this stable SemVer in its reviewed Release PR.
 # Windows uses these major, minor, and patch components for product and file versions.
-version: 2.0.0 # x-release-please-version
+version: 3.0.0 # x-release-please-version
 
 environment:
   sdk: ^3.13.1
