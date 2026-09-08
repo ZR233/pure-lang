@@ -2768,31 +2768,154 @@ void registerShellSettingsTests() {
     expect(find.text('120 t/s'), findsOneWidget);
     expect(
       find.byKey(
-        StudioDriverKeys.statisticsHistoryRow('provider-a', 'model-a', 3000),
+        StudioDriverKeys.statisticsSummaryRow('provider-a', 'model-a', 'high'),
       ),
       findsOneWidget,
     );
     expect(
       find.byKey(
-        StudioDriverKeys.statisticsHistoryRow('provider-b', 'model-b', 2000),
+        StudioDriverKeys.statisticsSummaryRow('provider-a', 'model-a', 'none'),
       ),
       findsOneWidget,
     );
+    expect(
+      find.byKey(
+        StudioDriverKeys.statisticsSummaryRow('provider-a', 'model-a', null),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(
+        StudioDriverKeys.statisticsSummaryRow('provider-b', 'model-b', null),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(
+        StudioDriverKeys.statisticsHistoryRow(
+          'provider-a',
+          'model-a',
+          'high',
+          0,
+        ),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(
+        StudioDriverKeys.statisticsHistoryRow(
+          'provider-a',
+          'model-a',
+          'high',
+          1,
+        ),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(
+        StudioDriverKeys.statisticsHistoryRow('provider-a', 'model-a', null, 3),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(
+        StudioDriverKeys.statisticsHistoryRow(
+          'provider-a',
+          'model-a',
+          'none',
+          2,
+        ),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(
+        StudioDriverKeys.statisticsHistoryRow('provider-b', 'model-b', null, 4),
+      ),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
 
     await tester.tap(find.byKey(StudioDriverKeys.statisticsFilter));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('OpenAI · model-b').last);
+    await tester.tap(find.text('DeepSeek · provider-a · model-a · high').last);
     await tester.pumpAndSettle();
 
     expect(
       find.byKey(
-        StudioDriverKeys.statisticsHistoryRow('provider-a', 'model-a', 3000),
+        StudioDriverKeys.statisticsHistoryRow(
+          'provider-a',
+          'model-a',
+          'high',
+          0,
+        ),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(
+        StudioDriverKeys.statisticsHistoryRow(
+          'provider-a',
+          'model-a',
+          'high',
+          1,
+        ),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(
+        StudioDriverKeys.statisticsHistoryRow(
+          'provider-a',
+          'model-a',
+          'none',
+          1,
+        ),
       ),
       findsNothing,
     );
     expect(
       find.byKey(
-        StudioDriverKeys.statisticsHistoryRow('provider-b', 'model-b', 2000),
+        StudioDriverKeys.statisticsHistoryRow('provider-a', 'model-a', null, 1),
+      ),
+      findsNothing,
+    );
+
+    await tester.tap(find.byKey(StudioDriverKeys.statisticsFilter));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find
+          .text('OpenAI · provider-b · model-b · Unspecified / not recorded')
+          .last,
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(
+        StudioDriverKeys.statisticsHistoryRow(
+          'provider-a',
+          'model-a',
+          'high',
+          0,
+        ),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.byKey(
+        StudioDriverKeys.statisticsHistoryRow(
+          'provider-a',
+          'model-a',
+          'none',
+          0,
+        ),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.byKey(
+        StudioDriverKeys.statisticsHistoryRow('provider-b', 'model-b', null, 0),
       ),
       findsOneWidget,
     );
@@ -2824,15 +2947,65 @@ void registerShellSettingsTests() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(StudioDriverKeys.statisticsSummary), findsOneWidget);
-      expect(
-        find.byKey(
-          StudioDriverKeys.statisticsHistoryRow('provider-a', 'model-a', 3000),
-        ),
-        findsOneWidget,
+      final highHistoryKey = StudioDriverKeys.statisticsHistoryRow(
+        'provider-a',
+        'model-a',
+        'high',
+        0,
       );
+      final statisticsScrollable = find
+          .descendant(
+            of: find.byKey(StudioDriverKeys.statisticsHistory),
+            matching: find.byType(Scrollable),
+          )
+          .first;
+      await tester.scrollUntilVisible(
+        find.byKey(highHistoryKey),
+        300,
+        scrollable: statisticsScrollable,
+      );
+      expect(find.byKey(highHistoryKey), findsOneWidget);
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets('statistics filter fits the supported compact width', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(240, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      _localizedApp(
+        home: Scaffold(
+          body: StatisticsTab(snapshot: _modelPerformanceFixture()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final filter = find.byKey(StudioDriverKeys.statisticsFilter);
+    final statisticsScrollable = find
+        .descendant(
+          of: find.byKey(StudioDriverKeys.statisticsHistory),
+          matching: find.byType(Scrollable),
+        )
+        .first;
+    await tester.scrollUntilVisible(
+      filter,
+      300,
+      scrollable: statisticsScrollable,
+    );
+    final title = find.text('Call history');
+    expect(filter, findsOneWidget);
+    expect(title, findsOneWidget);
+    expect(tester.getSize(filter).width, lessThanOrEqualTo(208));
+    expect(tester.getSize(title).width, greaterThan(0));
+    expect(tester.getSize(title).height, greaterThan(0));
+    expect(tester.getRect(title).overlaps(tester.getRect(filter)), isFalse);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets(
     'settings ordinary controls save immediately without draft buttons',
@@ -4599,7 +4772,8 @@ ModelPerformanceSnapshotView _modelPerformanceFixture({
         providerInstanceId: 'provider-a',
         providerDisplayName: 'DeepSeek',
         model: 'model-a',
-        sampleCount: 2,
+        reasoningEffort: 'high',
+        sampleCount: 1,
         completionTokens: 150,
         totalTtftMillis: 200,
         totalDecodeMillis: 1250,
@@ -4607,6 +4781,33 @@ ModelPerformanceSnapshotView _modelPerformanceFixture({
         tokensPerSecond: 120,
         averageTtftMillis: 100,
         averageResponseMillis: 725,
+      ),
+      ModelPerformanceSummaryView(
+        providerInstanceId: 'provider-a',
+        providerDisplayName: 'DeepSeek',
+        model: 'model-a',
+        reasoningEffort: 'none',
+        sampleCount: 1,
+        completionTokens: 30,
+        totalTtftMillis: 80,
+        totalDecodeMillis: 300,
+        totalResponseMillis: 380,
+        tokensPerSecond: 100,
+        averageTtftMillis: 80,
+        averageResponseMillis: 380,
+      ),
+      ModelPerformanceSummaryView(
+        providerInstanceId: 'provider-a',
+        providerDisplayName: 'DeepSeek',
+        model: 'model-a',
+        sampleCount: 1,
+        completionTokens: 20,
+        totalTtftMillis: 70,
+        totalDecodeMillis: 250,
+        totalResponseMillis: 320,
+        tokensPerSecond: 80,
+        averageTtftMillis: 70,
+        averageResponseMillis: 320,
       ),
       ModelPerformanceSummaryView(
         providerInstanceId: 'provider-b',
@@ -4628,11 +4829,47 @@ ModelPerformanceSnapshotView _modelPerformanceFixture({
         providerInstanceId: 'provider-a',
         providerDisplayName: 'DeepSeek',
         model: 'model-a',
+        reasoningEffort: 'high',
         completionTokens: 50,
         ttftMillis: 100,
         decodeMillis: 250,
         totalResponseMillis: 350,
         tokensPerSecond: 200,
+      ),
+      ModelPerformanceSampleView(
+        completedAt: DateTime.fromMillisecondsSinceEpoch(3000),
+        providerInstanceId: 'provider-a',
+        providerDisplayName: 'DeepSeek',
+        model: 'model-a',
+        reasoningEffort: 'high',
+        completionTokens: 55,
+        ttftMillis: 110,
+        decodeMillis: 275,
+        totalResponseMillis: 385,
+        tokensPerSecond: 180,
+      ),
+      ModelPerformanceSampleView(
+        completedAt: DateTime.fromMillisecondsSinceEpoch(2500),
+        providerInstanceId: 'provider-a',
+        providerDisplayName: 'DeepSeek',
+        model: 'model-a',
+        reasoningEffort: 'none',
+        completionTokens: 30,
+        ttftMillis: 80,
+        decodeMillis: 300,
+        totalResponseMillis: 380,
+        tokensPerSecond: 100,
+      ),
+      ModelPerformanceSampleView(
+        completedAt: DateTime.fromMillisecondsSinceEpoch(2200),
+        providerInstanceId: 'provider-a',
+        providerDisplayName: 'DeepSeek',
+        model: 'model-a',
+        completionTokens: 20,
+        ttftMillis: 70,
+        decodeMillis: 250,
+        totalResponseMillis: 320,
+        tokensPerSecond: 80,
       ),
       ModelPerformanceSampleView(
         completedAt: DateTime.fromMillisecondsSinceEpoch(2000),

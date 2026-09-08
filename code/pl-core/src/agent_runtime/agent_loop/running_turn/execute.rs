@@ -222,6 +222,7 @@ where
                             provider_instance_id: runtime.provider_instance_id().to_owned(),
                             provider: runtime.endpoint().name.clone(),
                             model: runtime.model().slug.clone(),
+                            reasoning_effort: prepared.engine.reasoning_effort().map(str::to_owned),
                             context_window: runtime.model().resolved_context_window(),
                             accounting,
                             prompt_generation: None,

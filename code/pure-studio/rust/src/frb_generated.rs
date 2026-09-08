@@ -4673,6 +4673,7 @@ impl SseDecode for crate::api::studio::types::response::BridgeModelPerformanceSa
         let mut var_providerInstanceId = <String>::sse_decode(deserializer);
         let mut var_providerDisplayName = <String>::sse_decode(deserializer);
         let mut var_model = <String>::sse_decode(deserializer);
+        let mut var_reasoningEffort = <Option<String>>::sse_decode(deserializer);
         let mut var_completionTokens = <u64>::sse_decode(deserializer);
         let mut var_ttftMillis = <u64>::sse_decode(deserializer);
         let mut var_decodeMillis = <u64>::sse_decode(deserializer);
@@ -4683,6 +4684,7 @@ impl SseDecode for crate::api::studio::types::response::BridgeModelPerformanceSa
             provider_instance_id: var_providerInstanceId,
             provider_display_name: var_providerDisplayName,
             model: var_model,
+            reasoning_effort: var_reasoningEffort,
             completion_tokens: var_completionTokens,
             ttft_millis: var_ttftMillis,
             decode_millis: var_decodeMillis,
@@ -4722,6 +4724,7 @@ impl SseDecode for crate::api::studio::types::response::BridgeModelPerformanceSu
         let mut var_providerInstanceId = <String>::sse_decode(deserializer);
         let mut var_providerDisplayName = <String>::sse_decode(deserializer);
         let mut var_model = <String>::sse_decode(deserializer);
+        let mut var_reasoningEffort = <Option<String>>::sse_decode(deserializer);
         let mut var_sampleCount = <u64>::sse_decode(deserializer);
         let mut var_completionTokens = <u64>::sse_decode(deserializer);
         let mut var_totalTtftMillis = <u64>::sse_decode(deserializer);
@@ -4734,6 +4737,7 @@ impl SseDecode for crate::api::studio::types::response::BridgeModelPerformanceSu
             provider_instance_id: var_providerInstanceId,
             provider_display_name: var_providerDisplayName,
             model: var_model,
+            reasoning_effort: var_reasoningEffort,
             sample_count: var_sampleCount,
             completion_tokens: var_completionTokens,
             total_ttft_millis: var_totalTtftMillis,
@@ -11982,6 +11986,7 @@ impl flutter_rust_bridge::IntoDart
             self.provider_instance_id.into_into_dart().into_dart(),
             self.provider_display_name.into_into_dart().into_dart(),
             self.model.into_into_dart().into_dart(),
+            self.reasoning_effort.into_into_dart().into_dart(),
             self.completion_tokens.into_into_dart().into_dart(),
             self.ttft_millis.into_into_dart().into_dart(),
             self.decode_millis.into_into_dart().into_dart(),
@@ -12041,6 +12046,7 @@ impl flutter_rust_bridge::IntoDart
             self.provider_instance_id.into_into_dart().into_dart(),
             self.provider_display_name.into_into_dart().into_dart(),
             self.model.into_into_dart().into_dart(),
+            self.reasoning_effort.into_into_dart().into_dart(),
             self.sample_count.into_into_dart().into_dart(),
             self.completion_tokens.into_into_dart().into_dart(),
             self.total_ttft_millis.into_into_dart().into_dart(),
@@ -18251,6 +18257,7 @@ impl SseEncode for crate::api::studio::types::response::BridgeModelPerformanceSa
         <String>::sse_encode(self.provider_instance_id, serializer);
         <String>::sse_encode(self.provider_display_name, serializer);
         <String>::sse_encode(self.model, serializer);
+        <Option<String>>::sse_encode(self.reasoning_effort, serializer);
         <u64>::sse_encode(self.completion_tokens, serializer);
         <u64>::sse_encode(self.ttft_millis, serializer);
         <u64>::sse_encode(self.decode_millis, serializer);
@@ -18285,6 +18292,7 @@ impl SseEncode for crate::api::studio::types::response::BridgeModelPerformanceSu
         <String>::sse_encode(self.provider_instance_id, serializer);
         <String>::sse_encode(self.provider_display_name, serializer);
         <String>::sse_encode(self.model, serializer);
+        <Option<String>>::sse_encode(self.reasoning_effort, serializer);
         <u64>::sse_encode(self.sample_count, serializer);
         <u64>::sse_encode(self.completion_tokens, serializer);
         <u64>::sse_encode(self.total_ttft_millis, serializer);

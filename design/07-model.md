@@ -256,6 +256,14 @@ WebSocket full replay 与 HTTP fallback 继续属于同一次 inference，等待
 `t/s = completionTokens × 1000 / decodeMs`。completion token 已包含 reasoning token，不得重复相加；
 timing、usage 不完整或 `decodeMs == 0` 时不生成吞吐样本。失败与取消不携带成功 timing。
 
+模型性能统计以 `(providerInstanceId, actualModel, reasoningEffort)` 为唯一分组键，
+同一 provider/model 的不同思考强度分别累积样本；汇总速度使用组内总 completion tokens
+乘以 1000 再除以总 decode 毫秒，不取各请求速度的算术平均。
+`InferenceBillingRecord`、持久性能样本及公开统计 DTO 的可空 `reasoningEffort` 记录请求期
+实际使用的强度，包括内部请求；不得用当前配置反推历史。显式字符串 `none` 与空值不同。
+未指定强度或历史未记录时保留空值，不制造默认档位；旧计费记录和版本 2 性能缓存缺少该
+字段时仍可读取并归入空值组，不丢弃历史，也不改变计费和有效样本判定。
+
 真实验收 harness 可在显式启用 wire capture 时额外记录少量 transport 阶段回执：
 请求已落盘、HTTP 流已建立、首个 provider 事件以及流终止或失败。回执使用同一
 capture id、单调 elapsed 和墙上时间，不记录 prompt、密钥或 provider 错误原文；它只用于

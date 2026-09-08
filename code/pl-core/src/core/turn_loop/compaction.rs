@@ -98,6 +98,7 @@ pub(super) async fn run(step: CompactionStep<'_>) -> Result<Option<TurnResult>> 
         last_compacted_state,
         provider_prompt_tokens_for_compaction,
     } = step;
+    let reasoning_effort = reasoning.and_then(|reasoning| reasoning.effort.clone());
     let compaction_trigger = provider_prompt_tokens_for_compaction.take().map_or(
         crate::context_compaction::CompactionTrigger::EstimatedTokens,
         |prompt_tokens| {
@@ -144,6 +145,7 @@ pub(super) async fn run(step: CompactionStep<'_>) -> Result<Option<TurnResult>> 
                     provider_instance_id: runtime.provider_instance_id(),
                     provider: &runtime.endpoint().name,
                     model,
+                    reasoning_effort: reasoning_effort.clone(),
                     accounting: &snapshot.accounting,
                     model_info: runtime.model(),
                     prompt: prompt_cache::current(session, &options.prompt_scope),
@@ -203,6 +205,7 @@ pub(super) async fn run(step: CompactionStep<'_>) -> Result<Option<TurnResult>> 
                     provider_instance_id: runtime.provider_instance_id(),
                     provider: &runtime.endpoint().name,
                     model,
+                    reasoning_effort,
                     accounting: &error.accounting,
                     model_info: runtime.model(),
                     prompt: prompt_cache::current(session, &options.prompt_scope),

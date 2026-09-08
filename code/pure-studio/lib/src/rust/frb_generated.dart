@@ -5168,18 +5168,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 9)
-      throw Exception('unexpected arr length: expect 9 but see ${arr.length}');
+    if (arr.length != 10)
+      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
     return BridgeModelPerformanceSample(
       completedAt: dco_decode_i_64(arr[0]),
       providerInstanceId: dco_decode_String(arr[1]),
       providerDisplayName: dco_decode_String(arr[2]),
       model: dco_decode_String(arr[3]),
-      completionTokens: dco_decode_u_64(arr[4]),
-      ttftMillis: dco_decode_u_64(arr[5]),
-      decodeMillis: dco_decode_u_64(arr[6]),
-      totalResponseMillis: dco_decode_u_64(arr[7]),
-      tokensPerSecond: dco_decode_f_64(arr[8]),
+      reasoningEffort: dco_decode_opt_String(arr[4]),
+      completionTokens: dco_decode_u_64(arr[5]),
+      ttftMillis: dco_decode_u_64(arr[6]),
+      decodeMillis: dco_decode_u_64(arr[7]),
+      totalResponseMillis: dco_decode_u_64(arr[8]),
+      tokensPerSecond: dco_decode_f_64(arr[9]),
     );
   }
 
@@ -5206,20 +5207,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 11)
-      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
+    if (arr.length != 12)
+      throw Exception('unexpected arr length: expect 12 but see ${arr.length}');
     return BridgeModelPerformanceSummary(
       providerInstanceId: dco_decode_String(arr[0]),
       providerDisplayName: dco_decode_String(arr[1]),
       model: dco_decode_String(arr[2]),
-      sampleCount: dco_decode_u_64(arr[3]),
-      completionTokens: dco_decode_u_64(arr[4]),
-      totalTtftMillis: dco_decode_u_64(arr[5]),
-      totalDecodeMillis: dco_decode_u_64(arr[6]),
-      totalResponseMillis: dco_decode_u_64(arr[7]),
-      tokensPerSecond: dco_decode_f_64(arr[8]),
-      averageTtftMillis: dco_decode_f_64(arr[9]),
-      averageResponseMillis: dco_decode_f_64(arr[10]),
+      reasoningEffort: dco_decode_opt_String(arr[3]),
+      sampleCount: dco_decode_u_64(arr[4]),
+      completionTokens: dco_decode_u_64(arr[5]),
+      totalTtftMillis: dco_decode_u_64(arr[6]),
+      totalDecodeMillis: dco_decode_u_64(arr[7]),
+      totalResponseMillis: dco_decode_u_64(arr[8]),
+      tokensPerSecond: dco_decode_f_64(arr[9]),
+      averageTtftMillis: dco_decode_f_64(arr[10]),
+      averageResponseMillis: dco_decode_f_64(arr[11]),
     );
   }
 
@@ -11296,6 +11298,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_providerInstanceId = sse_decode_String(deserializer);
     var var_providerDisplayName = sse_decode_String(deserializer);
     var var_model = sse_decode_String(deserializer);
+    var var_reasoningEffort = sse_decode_opt_String(deserializer);
     var var_completionTokens = sse_decode_u_64(deserializer);
     var var_ttftMillis = sse_decode_u_64(deserializer);
     var var_decodeMillis = sse_decode_u_64(deserializer);
@@ -11306,6 +11309,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       providerInstanceId: var_providerInstanceId,
       providerDisplayName: var_providerDisplayName,
       model: var_model,
+      reasoningEffort: var_reasoningEffort,
       completionTokens: var_completionTokens,
       ttftMillis: var_ttftMillis,
       decodeMillis: var_decodeMillis,
@@ -11347,6 +11351,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_providerInstanceId = sse_decode_String(deserializer);
     var var_providerDisplayName = sse_decode_String(deserializer);
     var var_model = sse_decode_String(deserializer);
+    var var_reasoningEffort = sse_decode_opt_String(deserializer);
     var var_sampleCount = sse_decode_u_64(deserializer);
     var var_completionTokens = sse_decode_u_64(deserializer);
     var var_totalTtftMillis = sse_decode_u_64(deserializer);
@@ -11359,6 +11364,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       providerInstanceId: var_providerInstanceId,
       providerDisplayName: var_providerDisplayName,
       model: var_model,
+      reasoningEffort: var_reasoningEffort,
       sampleCount: var_sampleCount,
       completionTokens: var_completionTokens,
       totalTtftMillis: var_totalTtftMillis,
@@ -18453,6 +18459,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.providerInstanceId, serializer);
     sse_encode_String(self.providerDisplayName, serializer);
     sse_encode_String(self.model, serializer);
+    sse_encode_opt_String(self.reasoningEffort, serializer);
     sse_encode_u_64(self.completionTokens, serializer);
     sse_encode_u_64(self.ttftMillis, serializer);
     sse_encode_u_64(self.decodeMillis, serializer);
@@ -18485,6 +18492,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.providerInstanceId, serializer);
     sse_encode_String(self.providerDisplayName, serializer);
     sse_encode_String(self.model, serializer);
+    sse_encode_opt_String(self.reasoningEffort, serializer);
     sse_encode_u_64(self.sampleCount, serializer);
     sse_encode_u_64(self.completionTokens, serializer);
     sse_encode_u_64(self.totalTtftMillis, serializer);

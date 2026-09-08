@@ -199,6 +199,8 @@ pub struct InferenceBillingRecord {
     pub provider: String,
     pub model: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window: Option<u64>,
     pub accounting: crate::InferenceAccounting,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -292,6 +294,58 @@ impl TurnBillingRecord {
                 "inference {} conflicts with the durable billing record",
                 inference.inference_id
             ))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn billing_record_reads_legacy_json_without_reasoning_effort() {
+        let mut value = serde_json::to_value(billing_record(Some("high")))
+            .expect("billing record should serialize");
+        value
+            .as_object_mut()
+            .expect("billing record should be an object")
+            .remove("reasoningEffort");
+
+        let restored: InferenceBillingRecord =
+            serde_json::from_value(value).expect("legacy billing record should deserialize");
+        assert_eq!(restored.reasoning_effort, None);
+    }
+
+    #[test]
+    fn billing_record_round_trips_reasoning_effort_and_distinguishes_none() {
+        let unspecified = billing_record(None);
+        let explicit_none = billing_record(Some("none"));
+        assert_ne!(unspecified, explicit_none);
+
+        let value = serde_json::to_value(&explicit_none).expect("billing record should serialize");
+        assert_eq!(value["reasoningEffort"], "none");
+        assert!(value.get("reasoning_effort").is_none());
+
+        let restored: InferenceBillingRecord =
+            serde_json::from_value(value).expect("billing record should deserialize");
+        assert_eq!(restored.reasoning_effort.as_deref(), Some("none"));
+    }
+
+    fn billing_record(reasoning_effort: Option<&str>) -> InferenceBillingRecord {
+        InferenceBillingRecord {
+            inference_id: "inference-1".to_string(),
+            provider_instance_id: "provider-1".to_string(),
+            provider: "Provider 1".to_string(),
+            model: "model-1".to_string(),
+            reasoning_effort: reasoning_effort.map(str::to_owned),
+            context_window: None,
+            accounting: crate::InferenceAccounting::default(),
+            prompt_generation: None,
+            prompt_cache_policy: None,
+            prefix_changed_reason: None,
+            orchestration: InferenceOrchestrationMetrics::default(),
+            timing: None,
+            recorded_at: 1,
         }
     }
 }

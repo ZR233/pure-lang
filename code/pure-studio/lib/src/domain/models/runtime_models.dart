@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart' show listEquals;
 
 class RuntimeCostView {
@@ -70,6 +72,7 @@ class ModelPerformanceSummaryView {
     required this.providerInstanceId,
     required this.providerDisplayName,
     required this.model,
+    this.reasoningEffort,
     required this.sampleCount,
     required this.completionTokens,
     required this.totalTtftMillis,
@@ -83,6 +86,7 @@ class ModelPerformanceSummaryView {
   final String providerInstanceId;
   final String providerDisplayName;
   final String model;
+  final String? reasoningEffort;
   final int sampleCount;
   final int completionTokens;
   final int totalTtftMillis;
@@ -92,7 +96,8 @@ class ModelPerformanceSummaryView {
   final double averageTtftMillis;
   final double averageResponseMillis;
 
-  String get filterKey => '$providerInstanceId\u0000$model';
+  String get filterKey =>
+      jsonEncode(<Object?>[providerInstanceId, model, reasoningEffort]);
 }
 
 class ModelPerformanceSampleView {
@@ -101,6 +106,7 @@ class ModelPerformanceSampleView {
     required this.providerInstanceId,
     required this.providerDisplayName,
     required this.model,
+    this.reasoningEffort,
     required this.completionTokens,
     required this.ttftMillis,
     required this.decodeMillis,
@@ -112,13 +118,15 @@ class ModelPerformanceSampleView {
   final String providerInstanceId;
   final String providerDisplayName;
   final String model;
+  final String? reasoningEffort;
   final int completionTokens;
   final int ttftMillis;
   final int decodeMillis;
   final int totalResponseMillis;
   final double tokensPerSecond;
 
-  String get filterKey => '$providerInstanceId\u0000$model';
+  String get filterKey =>
+      jsonEncode(<Object?>[providerInstanceId, model, reasoningEffort]);
 }
 
 class ModelPerformanceSnapshotView {
