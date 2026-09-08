@@ -5,7 +5,6 @@ use super::super::{
     AgentSubmitRequest, AgentTurnSubmitPolicy, DurableMailboxEnvelope, TurnId,
 };
 use super::AgentLoop;
-use futures::FutureExt;
 
 impl<H> AgentLoop<H>
 where
@@ -116,9 +115,6 @@ where
             return Ok(turn_id);
         }
         self.dispatch_enabled = true;
-        if self.active.is_none() && self.dispatch_enabled && self.state.has_triggering_input() {
-            self.begin_next_turn().boxed().await;
-        }
         Ok(turn_id)
     }
 
@@ -335,9 +331,6 @@ where
         )
         .await?;
         self.dispatch_enabled = true;
-        if self.active.is_none() && self.state.has_triggering_input() {
-            self.begin_next_turn().boxed().await;
-        }
         Ok(())
     }
 }

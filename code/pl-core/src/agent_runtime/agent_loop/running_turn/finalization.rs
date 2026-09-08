@@ -216,6 +216,7 @@ where
                 durable_trace_tx,
                 observation_tx,
             )
+            .boxed()
             .await
         });
         let abort_handle = worker.abort_handle();
@@ -387,9 +388,6 @@ where
             },
         )
         .await?;
-        if self.dispatch_enabled && self.state.has_triggering_input() {
-            self.begin_next_turn().boxed().await;
-        }
         Ok(())
     }
 }

@@ -3,7 +3,6 @@ use super::AgentLoop;
 use super::running_turn::{TurnCompletion, TurnSessionDisposition, add_usage, turn_outcome};
 use crate::agent_runtime::state::unix_timestamp;
 use crate::thread_event::compaction_observation;
-use futures::FutureExt;
 
 impl<H> AgentLoop<H>
 where
@@ -171,14 +170,6 @@ where
             .await;
         if let Err(error) = committed {
             self.fault(error.to_string()).await;
-            return;
-        }
-        if !waiting_for_interaction
-            && !self.state.snapshot.state.is_budget_paused()
-            && self.dispatch_enabled
-            && self.state.has_triggering_input()
-        {
-            self.begin_next_turn().boxed().await;
         }
     }
 }

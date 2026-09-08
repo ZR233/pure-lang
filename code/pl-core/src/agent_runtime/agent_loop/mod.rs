@@ -20,6 +20,7 @@ mod closing;
 mod command;
 mod commit;
 mod completion;
+mod dispatch;
 mod input;
 mod lifecycle;
 mod persist;
@@ -197,12 +198,6 @@ where
             self.fault(format!("session task recovery failed: {error}"))
                 .await;
         }
-        if self.dispatch_enabled
-            && self.state.snapshot.state.is_queued()
-            && self.state.has_triggering_input()
-        {
-            self.begin_next_turn().boxed().await;
-        }
         if let AgentState::Closing(state) = &self.state.snapshot.state
             && state.error().is_none()
         {
@@ -212,6 +207,14 @@ where
             }
         }
         loop {
+            // Turn creation runs from the owner loop, never inside another command's poll.
+            if self.active.is_none()
+                && self.dispatch_enabled
+                && self.state.snapshot.state.is_queued()
+                && self.state.has_triggering_input()
+            {
+                self.begin_next_turn().boxed().await;
+            }
             if self.host.repository().is_durable(
                 &self.state.snapshot.identity.id,
                 self.state.snapshot.revision,
@@ -255,202 +258,8 @@ where
                     let Some(command) = command else {
                         break;
                     };
-                    match command {
-                        AgentLoopCommand::AdmitToolTasks { turn_id, tasks, reply } => {
-                            let result = self.admit_tool_tasks(&turn_id, tasks).boxed().await;
-                            let _ = reply.send(result);
-                        }
-                        AgentLoopCommand::SelectToolTaskResults { turn_id, ids, deadline, reply } => {
-                            let result = self.select_tool_task_results(&turn_id, &ids, deadline).boxed().await;
-                            let _ = reply.send(result);
-                        }
-                        AgentLoopCommand::ToolTaskOutput { id, delta } => {
-                            if let Err(error) = self.append_session_task_output(&id, &delta).boxed().await {
-                                tracing::warn!(%error, task_id = %id, "task output preview projection failed");
-                            }
-                        }
-                        AgentLoopCommand::ListToolTasks { status, cursor, reply } => {
-                            let _ = reply.send(Ok(self.state.session.tasks.list(status, cursor.as_deref())));
-                        }
-                        AgentLoopCommand::ReadToolTaskResult { id, reply } => {
-                            let result = self.read_complete_task(&id).boxed().await;
-                            let _ = reply.send(result);
-                        }
-                        AgentLoopCommand::GetToolTask { id, reply } => {
-                            let result = self.state.session.tasks.get(&id).cloned()
-                                .map_err(|error| AgentRuntimeError::InvalidInput(error.to_string()));
-                            let _ = reply.send(result);
-                        }
-                        AgentLoopCommand::CancelToolTask { id, reply } => {
-                            let result = self.cancel_session_task(&id).boxed().await;
-                            let _ = reply.send(result);
-                        }
-                        AgentLoopCommand::ToolTaskRunning { id, reply } => {
-                            let result = self.mark_session_task_running(&id).boxed().await;
-                            let _ = reply.send(result);
-                        }
-                        AgentLoopCommand::WaitSessionEvents { reply } => {
-                            self.wait_session_events(reply);
-                        }
-                        AgentLoopCommand::PublishSessionEvent { source, id, event, reply } => {
-                            let result = self.publish_session_event(&source, &id, *event).boxed().await;
-                            let _ = reply.send(result);
-                        }
-                        AgentLoopCommand::Submit { request, reply } => {
-                            // `.boxed()`：把命令处理状态机放堆上，避免 debug 构建下
-                            // 全部命令分支内联进 run 的 select! 状态机导致超大栈帧。
-                            let result = self.submit(request).boxed().await;
-                            let _ = reply.send(result);
-                        }
-                        AgentLoopCommand::SubmitCurrentSession {
-                            root_agent_id,
-                            request,
-                            reply,
-                        } => {
-                            let result =
-                                self.submit_current_session(root_agent_id, request).boxed().await;
-                            let _ = reply.send(result);
-                        }
-                        AgentLoopCommand::SubmitInteractionContinuation {
-                            root_agent_id,
-                            request,
-                            reply,
-                        } => {
-                            let result = self
-                                .submit_interaction_continuation(root_agent_id, *request)
-                                .boxed()
-                                .await;
-                            let _ = reply.send(result);
-                        }
-                        AgentLoopCommand::ReconfigureIdleRole { role, reply } => {
-                            let result = self.reconfigure_idle_role(role).await;
-                            let _ = reply.send(result);
-                        }
-                        AgentLoopCommand::ChangeIdleThreadMode { mode_id, reply } => {
-                            let result = self.change_idle_thread_mode(mode_id).await;
-                            let _ = reply.send(result);
-                        }
-                        AgentLoopCommand::PreviewConversationRecovery { target, reply } => {
-                            let _ = reply.send(self.preview_conversation_recovery(target));
-                        }
-                        AgentLoopCommand::RecoverConversation { request, reply } => {
-                            let result = self.recover_conversation(request).boxed().await;
-                            let _ = reply.send(result);
-                        }
-                        AgentLoopCommand::RecoverFaulted { reply } => {
-                            let result = self.recover_faulted().boxed().await;
-                            let _ = reply.send(result);
-                        }
-                        AgentLoopCommand::CancelTurn { turn_id, reply } => {
-                            let result = self.cancel_turn(turn_id).boxed().await;
-                            let _ = reply.send(result);
-                        }
-                        AgentLoopCommand::SetActivity {
-                            turn_id,
-                            activity,
-                            reply,
-                        } => {
-                            let result = self.set_activity(turn_id, activity).boxed().await;
-                            let _ = reply.send(result);
-                        }
-                        AgentLoopCommand::Checkpoint { checkpoint, reply } => {
-                            let result = self.checkpoint(*checkpoint).boxed().await;
-                            if let Err(error) = &result {
-                                tracing::error!(
-                                    agent_id = %self.state.snapshot.identity.id,
-                                    error = %error,
-                                    "checkpoint was rejected without faulting the agent"
-                                );
-                            }
-                            let _ = reply.send(result);
-                        }
-                        AgentLoopCommand::RecordThreadFacts {
-                            thread_id,
-                            facts,
-                            reply,
-                        } => {
-                            let result = self.record_thread_facts(thread_id, facts).boxed().await;
-                            if let Err(error) = &result {
-                                tracing::error!(
-                                    agent_id = %self.state.snapshot.identity.id,
-                                    error = %error,
-                                    "thread facts were rejected without faulting the agent"
-                                );
-                            }
-                            let _ = reply.send(result);
-                        }
-                        AgentLoopCommand::Snapshot { reply } => {
-                            let _ = reply.send(Ok(self.state.snapshot.clone()));
-                        }
-                        AgentLoopCommand::ReportProgress {
-                            stage,
-                            summary,
-                            next_step,
-                            detail,
-                            reply,
-                        } => {
-                            let result =
-                                self.report_progress(stage, summary, next_step, detail).boxed().await;
-                            let _ = reply.send(result);
-                        }
-                        AgentLoopCommand::ReadThreadContext { reply } => {
-                            let _ = reply.send(Ok(self.state.session.clone()));
-                        }
-                        AgentLoopCommand::ReadSubmissions {
-                            offset,
-                            limit,
-                            reply,
-                        } => {
-                            let result = self.read_submissions(offset, limit);
-                            let _ = reply.send(result);
-                        }
-                        AgentLoopCommand::StartPendingInputs { reply } => {
-                            self.dispatch_enabled = true;
-                            self.begin_next_turn().boxed().await;
-                            let _ = reply.send(Ok(()));
-                        }
-                        AgentLoopCommand::Close {
-                            workspace_disposition,
-                            reply,
-                        } => {
-                            let result = self.close(workspace_disposition).boxed().await;
-                            self.wake_session_waiter();
-                            let _ = reply.send(result);
-                        }
-                        AgentLoopCommand::TurnFinished(completion) => {
-                            self.finish_turn(*completion).boxed().await;
-                        }
-                        AgentLoopCommand::Evict { reply } => {
-                            // 与输入接受共享 owner 命令序列，避免检查后又提交了新事实。
-                            let snapshot = &self.state.snapshot;
-                            if (snapshot.identity.parent_id.is_some() && !matches!(snapshot.state, AgentState::Closed(_)))
-                                || self.active.is_some() || snapshot.pending_inputs > 0
-                                || self.session_waiter.as_ref().is_some_and(|waiter| !waiter.is_closed())
-                                || self.task_resources.has_work() || self.state.session.tasks.active_ids().next().is_some()
-                                || self.session_runtime.has_sources()
-                                || self.closing.is_some() || matches!(snapshot.state, AgentState::Closing(_))
-                                || snapshot.active_turn_id().is_some() || snapshot.state.is_budget_paused()
-                                || !self.host.repository().is_durable(&snapshot.identity.id, snapshot.revision)
-                            {
-                                let _ = reply.send(Err(AgentRuntimeError::InvalidInput(
-                                    format!("agent {} is busy or has unsaved facts", snapshot.identity.id),
-                                )));
-                            } else {
-                                let _ = reply.send(Ok(snapshot.clone()));
-                                break;
-                            }
-                        }
-                        AgentLoopCommand::Shutdown { reply } => {
-                            let result = self.shutdown().boxed().await;
-                            let finished = result.is_ok();
-                            if let Err(error) = &result {
-                                if matches!(self.state.snapshot.state, AgentState::Closing(_)) {
-                                    let _ = self.record_close_error(error.clone()).await;
-                                } else { self.fault(error.to_string()).await; }
-                            }
-                            let _ = reply.send(result);
-                            if finished { break; }
-                        }
+                    if self.dispatch_command(command).await.is_break() {
+                        break;
                     }
                 }
                 trace = self.channels.trace_receiver.recv() => {
@@ -558,85 +367,88 @@ where
         }
     }
 
-    async fn fault(&mut self, reason: String) {
-        let turn_id = self
-            .active
-            .as_ref()
-            .map(|active| active.turn_id.clone())
-            .or_else(|| self.state.snapshot.active_turn_id().cloned());
-        let thread_id = self
-            .active
-            .as_ref()
-            .map(|active| active.thread_id.clone())
-            .or_else(|| {
-                turn_id
-                    .as_ref()
-                    .map(|_| self.state.snapshot.identity.id.clone())
-            });
-        let fault_outcome = turn_id
-            .clone()
-            .zip(thread_id.clone())
-            .map(|(turn_id, thread_id)| {
-                turn_outcome(
-                    turn_id,
-                    thread_id,
-                    TurnExecutionTerminal::WorkerFailed {
-                        error: reason.clone(),
-                    },
-                    None,
-                )
-                .outcome
-            });
-        tracing::error!(
-            agent_id = %self.state.snapshot.identity.id,
-            turn_id = turn_id.as_ref().map(TurnId::as_str),
-            thread_id = thread_id.as_ref().map(ThreadId::as_str),
-            reason_bytes = reason.len(),
-            "agent runtime is committing a faulted state"
-        );
-        self.stop_active_turn();
-        if let Err(error) = self.release_turn_deliveries(turn_id.as_ref()).await {
-            tracing::error!(%error, "undelivered task results retained during fault settlement");
-        }
-        let mut next = self.state.clone();
-        if let Err(error) = next.snapshot.transition(AgentCommand::Fault {
-            error: pl_protocol::StateError {
-                code: "agentRuntimeRecoverable".to_string(),
-                message: reason.clone(),
-                retryable: false,
-            },
-            turn_id: turn_id.clone(),
-            classification: AgentFaultClassification::RecoverableRuntime,
-        }) {
+    fn fault(&mut self, reason: String) -> futures::future::BoxFuture<'_, ()> {
+        // Keep cold error-settlement temporaries out of every caller's polling frame.
+        async move {
+            let turn_id = self
+                .active
+                .as_ref()
+                .map(|active| active.turn_id.clone())
+                .or_else(|| self.state.snapshot.active_turn_id().cloned());
+            let thread_id = self
+                .active
+                .as_ref()
+                .map(|active| active.thread_id.clone())
+                .or_else(|| {
+                    turn_id
+                        .as_ref()
+                        .map(|_| self.state.snapshot.identity.id.clone())
+                });
+            let fault_outcome = turn_id
+                .clone()
+                .zip(thread_id.clone())
+                .map(|(turn_id, thread_id)| {
+                    turn_outcome(
+                        turn_id,
+                        thread_id,
+                        TurnExecutionTerminal::WorkerFailed {
+                            error: reason.clone(),
+                        },
+                        None,
+                    )
+                    .outcome
+                });
             tracing::error!(
                 agent_id = %self.state.snapshot.identity.id,
-                transition_error = %error,
-                "agent fault transition was rejected"
+                turn_id = turn_id.as_ref().map(TurnId::as_str),
+                thread_id = thread_id.as_ref().map(ThreadId::as_str),
+                reason_bytes = reason.len(),
+                "agent runtime is committing a faulted state"
             );
-            return;
-        }
-        next.active_input = None;
-        if fault_outcome.is_some() {
-            next.snapshot.last_turn = fault_outcome.clone();
-        }
-        let event_reason = reason.clone();
-        if self
-            .commit_transition(persist::TransitionCommit::new(next), move |snapshot| {
-                AgentRuntimeEventKind::Faulted {
-                    reason: event_reason,
-                    snapshot: Box::new(snapshot),
-                }
-            })
-            .await
-            .is_ok()
-        {
-            return;
-        }
-        tracing::error!(
-            agent_id = %self.state.snapshot.identity.id,
-            reason_bytes = reason.len(),
-            "fault mutation admission failed; retaining the previous hot state"
-        );
+            self.stop_active_turn();
+            if let Err(error) = self.release_turn_deliveries(turn_id.as_ref()).await {
+                tracing::error!(%error, "undelivered task results retained during fault settlement");
+            }
+            let mut next = self.state.clone();
+            if let Err(error) = next.snapshot.transition(AgentCommand::Fault {
+                error: pl_protocol::StateError {
+                    code: "agentRuntimeRecoverable".to_string(),
+                    message: reason.clone(),
+                    retryable: false,
+                },
+                turn_id: turn_id.clone(),
+                classification: AgentFaultClassification::RecoverableRuntime,
+            }) {
+                tracing::error!(
+                    agent_id = %self.state.snapshot.identity.id,
+                    transition_error = %error,
+                    "agent fault transition was rejected"
+                );
+                return;
+            }
+            next.active_input = None;
+            if fault_outcome.is_some() {
+                next.snapshot.last_turn = fault_outcome.clone();
+            }
+            let event_reason = reason.clone();
+            if self
+                .commit_transition(persist::TransitionCommit::new(next), move |snapshot| {
+                    AgentRuntimeEventKind::Faulted {
+                        reason: event_reason,
+                        snapshot: Box::new(snapshot),
+                    }
+                })
+                .await
+                .is_ok()
+            {
+                return;
+            }
+            tracing::error!(
+                agent_id = %self.state.snapshot.identity.id,
+                reason_bytes = reason.len(),
+                "fault mutation admission failed; retaining the previous hot state"
+            );
+        }.boxed()
     }
 }
 
@@ -695,6 +507,8 @@ mod tests {
             .submit(AgentSubmitRequest::start(id.clone(), "first"))
             .await
             .unwrap();
+        assert!(owner.state.snapshot.state.is_queued());
+        owner.begin_next_turn().boxed().await;
         let old_sender = owner.channels.trace_sender.clone();
         let sink = InMemoryTraceEventSink::new(id.to_string(), owner.state.session.trace_sequence);
         let item =
@@ -754,6 +568,8 @@ mod tests {
             .submit(AgentSubmitRequest::start(id.clone(), "second"))
             .await
             .unwrap();
+        assert!(owner.state.snapshot.state.is_queued());
+        owner.begin_next_turn().boxed().await;
         assert_ne!(first, second);
         assert!(old_sender.send(invalid).is_err());
         let AgentLoopCommand::TurnFinished(completion) = late_completion else {
