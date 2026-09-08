@@ -1,6 +1,6 @@
 //! MCP reconcile / reset 编排与后台健康 watcher。
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use pl_core::{ObservedResourceCommand, ObservedResourceKind, StateOperation};
 use tokio::sync::broadcast::error::RecvError;
 
@@ -9,6 +9,7 @@ use crate::studio::ids::unix_seconds;
 use crate::{StudioMcpHealth, StudioMcpStateSnapshot};
 
 use super::super::StudioRuntime;
+use super::super::background_task::{self, BackgroundTask};
 use super::fingerprint::{effective_mcp_fingerprint, public_mcp_fingerprint};
 use super::health::{mcp_health_from_effective, mcp_server_checked_at};
 use super::state::McpReconcilePlan;
@@ -31,28 +32,21 @@ impl StudioRuntime {
             return Ok(());
         };
         let runtime = self.clone();
-        *task = Some(tokio::spawn(async move {
+        *task = Some(BackgroundTask::new(tokio::spawn(async move {
             if let Err(error) = runtime.complete_mcp_reconcile(plan).await {
                 tracing::warn!(
                     error_bytes = error.to_string().len(),
                     "background MCP startup reconcile failed"
                 );
             }
-        }));
+        })));
         Ok(())
     }
 
-    pub(in crate::studio::runtime) async fn stop_mcp_startup_reconcile(&self) {
-        let task = self
-            .external_runtimes
-            .mcp_startup_reconcile
-            .lock()
+    pub(in crate::studio::runtime) async fn stop_mcp_startup_reconcile(&self) -> Result<()> {
+        background_task::stop(&self.external_runtimes.mcp_startup_reconcile)
             .await
-            .take();
-        if let Some(task) = task {
-            task.abort();
-            let _ = task.await;
-        }
+            .context("failed to join MCP startup reconcile")
     }
 
     async fn prepare_mcp_reconcile(&self) -> Result<Option<McpReconcilePlan>> {
@@ -161,7 +155,7 @@ impl StudioRuntime {
 
         let runtime = self.clone();
         let mut updates = self.external_runtimes.mcp.subscribe();
-        *watcher = Some(tokio::spawn(async move {
+        *watcher = Some(BackgroundTask::new(tokio::spawn(async move {
             while let Ok(()) | Err(RecvError::Lagged(_)) = updates.recv().await {
                 if let Err(error) = runtime.refresh_mcp_health_snapshot().await {
                     tracing::warn!(
@@ -170,19 +164,13 @@ impl StudioRuntime {
                     );
                 }
             }
-        }));
+        })));
     }
 
-    pub(in crate::studio::runtime) async fn stop_mcp_health_watcher(&self) {
-        if let Some(handle) = self
-            .external_runtimes
-            .mcp_health_watcher
-            .lock()
+    pub(in crate::studio::runtime) async fn stop_mcp_health_watcher(&self) -> Result<()> {
+        background_task::stop(&self.external_runtimes.mcp_health_watcher)
             .await
-            .take()
-        {
-            handle.abort();
-        }
+            .context("failed to join MCP health watcher")
     }
 
     pub async fn read_mcp_state(&self) -> Result<StudioMcpStateSnapshot> {

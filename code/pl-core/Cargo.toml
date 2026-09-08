@@ -59,6 +59,9 @@ tempfile = { workspace = true }
 windows = { workspace = true }
 windows-sys = { workspace = true }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+pl-remote-helper = { workspace = true }
+
 [dev-dependencies]
 pretty_assertions = { workspace = true }
 rmcp = { workspace = true, features = ["server"] }

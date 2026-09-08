@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-pub const REMOTE_PROTOCOL_VERSION: u32 = 2;
+pub const REMOTE_PROTOCOL_VERSION: u32 = 3;
 pub const REMOTE_MAX_HEADER_BYTES: usize = 64 * 1024;
 pub const REMOTE_MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
 
@@ -230,6 +230,7 @@ pub struct RemoteProcessExit {
     pub process_id: String,
     pub exit_code: Option<i32>,
     pub signal: Option<i32>,
+    pub failure: Option<RemoteError>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -304,7 +305,7 @@ mod tests {
     }
 
     #[test]
-    fn protocol_version_is_bumped_for_shell_contract() {
-        assert_eq!(REMOTE_PROTOCOL_VERSION, 2);
+    fn protocol_version_is_bumped_for_process_failure_contract() {
+        assert_eq!(REMOTE_PROTOCOL_VERSION, 3);
     }
 }

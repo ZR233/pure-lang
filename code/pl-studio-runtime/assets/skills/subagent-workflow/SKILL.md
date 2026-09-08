@@ -40,7 +40,7 @@ workflow definitions.
 
 Use `spawn_agent` for bounded asynchronous work. Independent explorers use fresh context with
 `forkTurns:none` and run in parallel; root synthesizes their evidence. Use `list_agents` to inspect
-live instances and `wait_agents` when the parent has no independent work. Preserve real semantic
+live instances and `wait` when the parent has no independent work. Preserve real semantic
 dependencies in order; do not parallelize overlapping ownership. In Task `editing_documents`, only
 root writes `design/**`.
 
@@ -63,25 +63,25 @@ as the final reply. A worktree executor additionally includes `WORKTREE_COMMIT_R
 40-character commit, and workspace root. Failure to publish is a delivery failure, not permission to
 claim success in free text.
 
-The parent stores each successful spawn receipt's `agentId`, calls `wait_agents` until that specific
-child is terminal (a progress wake is not terminal), and only then calls
+The parent stores each successful spawn receipt's `agentId` and `turnId`, calls `wait` until that
+specific child turn is terminal (a progress wake is not terminal), and only then calls
 `read_agent_submissions({"target":"<agentId>"})`. The canonical page must be nonempty and contain the
 durable marker. An empty page may trigger `read_agent_session` for diagnosis, but session text is not
 normal delivery and requires a narrowed re-dispatch. Do not poll submissions before terminal.
 
-`wait_agents` wakes when any requested target produces an event; one batch response does not prove
-that the other targets are terminal. Maintain a pending set of the exact spawned agentIds. Remove an
-agent only when the same canonical wait receipt has `reason:"terminal"`, a message whose `agentId`
-matches it, `state.agent.kind` equal to `idle` or `closed`, and a completed `lastTurnOutcome`.
-`CHILD_DELIVERY_READY` inside a `reason:"progress"` response only proves that a delivery was
-published; it is never terminal evidence. Continue waiting on every pending id, and do not call any
-`read_agent_submissions` until each target has its own receipt-bound terminal evidence.
+`wait` receives all registered session sources, not a target list. Inspect `batch.events` for
+`event.type:"agentChanged"`, matching `event.data.identity.id`, and
+`event.data.change.type:"turnCompleted"`; its `data.turnId` must match the spawn or continuation
+receipt and `data.status` must be `completed`. Maintain pending pairs of agentId and turnId; do not
+infer anything about targets absent from a batch. Tool/timer/application events and progress reports
+are not agent completion evidence. `CHILD_DELIVERY_READY` only proves publication. Do not read
+submissions until every pending target has its own bound completion event.
 
-`reason:"budgetLimited"` is a paused child, not terminal success. Keep that agentId pending and call
+An agent turn with `status:"budgetLimited"` is paused, not terminal success. Keep that agentId pending and call
 `read_agent_session` first; its default page returns the newest text Timeline items, and its cursor,
 order, and detail options expose the complete durable Timeline when more evidence is needed. If the
 child is healthy and the assigned work is incomplete, send a concrete continuation with
-`send_message`; that explicit input starts a fresh budget. Do not resume blindly, and do not treat
+`send_message`; bind the new receipt's turnId for the next wait. That input starts a fresh budget. Do not resume blindly, and do not treat
 session history as a substitute for the required durable submission.
 
 The root Agent owns coordination, reconciles conflicting findings, integrates changes, performs
@@ -101,7 +101,8 @@ spawn a new fresh-context read-only `reviewer`; it never fixes. Route code findi
 design findings to `editing_documents`; every repair must be re-integrated and receive a new reviewer.
 For one parallel worktree batch, inspect every branch/base/commit and integrate every accepted commit
 with ordinary Git before the first cleanup. Only after the final accepted sibling commit is integrated,
-call `close_agent({"target":"<agentId>","workspaceDisposition":"cleanup"})` for each child and verify
+call `close_agent({"target":"<agentId>","workspaceDisposition":"cleanup"})` for each child, wait for its
+`agentChanged` / `closed` event (a Closing receipt is not completed cleanup), and verify
 that each Pure-owned worktree and branch is gone. Never interleave one child's integration and cleanup
 while another accepted sibling commit is still pending integration.
 

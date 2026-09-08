@@ -16,6 +16,7 @@ pub use succeeded::SucceededToolLifecycle;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ToolLifecycleState {
+    Accepted { task_id: String },
     Started(StartedToolLifecycle),
     Running(RunningToolLifecycle),
     Succeeded(SucceededToolLifecycle),
@@ -31,7 +32,7 @@ impl ToolLifecycleState {
             Self::Failed(state) => Some(&state.output),
             Self::Denied(state) => Some(&state.reason),
             Self::Cancelled(state) => Some(&state.cause),
-            Self::Started(_) | Self::Running(_) => None,
+            Self::Accepted { .. } | Self::Started(_) | Self::Running(_) => None,
         }
     }
 
@@ -41,7 +42,7 @@ impl ToolLifecycleState {
             Self::Failed(state) => Some(&state.output_preview),
             Self::Denied(state) => Some(&state.reason_preview),
             Self::Cancelled(state) => Some(&state.cause_preview),
-            Self::Started(_) | Self::Running(_) => None,
+            Self::Accepted { .. } | Self::Started(_) | Self::Running(_) => None,
         }
     }
 
@@ -49,7 +50,11 @@ impl ToolLifecycleState {
         match self {
             Self::Succeeded(state) => &state.output_artifacts,
             Self::Failed(state) => &state.output_artifacts,
-            Self::Started(_) | Self::Running(_) | Self::Denied(_) | Self::Cancelled(_) => &[],
+            Self::Accepted { .. }
+            | Self::Started(_)
+            | Self::Running(_)
+            | Self::Denied(_)
+            | Self::Cancelled(_) => &[],
         }
     }
 
@@ -57,7 +62,11 @@ impl ToolLifecycleState {
         match self {
             Self::Succeeded(state) => state.output_metrics.as_ref(),
             Self::Failed(state) => state.output_metrics.as_ref(),
-            Self::Started(_) | Self::Running(_) | Self::Denied(_) | Self::Cancelled(_) => None,
+            Self::Accepted { .. }
+            | Self::Started(_)
+            | Self::Running(_)
+            | Self::Denied(_)
+            | Self::Cancelled(_) => None,
         }
     }
 
@@ -67,7 +76,7 @@ impl ToolLifecycleState {
             Self::Failed(state) => Some(state.duration_ms),
             Self::Denied(state) => Some(state.duration_ms),
             Self::Cancelled(state) => Some(state.duration_ms),
-            Self::Started(_) | Self::Running(_) => None,
+            Self::Accepted { .. } | Self::Started(_) | Self::Running(_) => None,
         }
     }
 
@@ -77,7 +86,7 @@ impl ToolLifecycleState {
             Self::Failed(state) => Some(state.completed_at_unix),
             Self::Denied(state) => Some(state.completed_at_unix),
             Self::Cancelled(state) => Some(state.completed_at_unix),
-            Self::Started(_) | Self::Running(_) => None,
+            Self::Accepted { .. } | Self::Started(_) | Self::Running(_) => None,
         }
     }
 }

@@ -1609,6 +1609,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   dco_decode_opt_box_autoadd_bridge_prompt_prefix_changed_reason(dynamic raw);
 
   @protected
+  BridgeStateError? dco_decode_opt_box_autoadd_bridge_state_error(dynamic raw);
+
+  @protected
   BridgeThread? dco_decode_opt_box_autoadd_bridge_thread(dynamic raw);
 
   @protected
@@ -3709,6 +3712,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   BridgePromptPrefixChangedReason?
   sse_decode_opt_box_autoadd_bridge_prompt_prefix_changed_reason(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeStateError? sse_decode_opt_box_autoadd_bridge_state_error(
     SseDeserializer deserializer,
   );
 
@@ -6227,6 +6235,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_bridge_prompt_prefix_changed_reason(
     BridgePromptPrefixChangedReason? self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_opt_box_autoadd_bridge_state_error(
+    BridgeStateError? self,
     SseSerializer serializer,
   );
 

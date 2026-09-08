@@ -128,6 +128,18 @@ impl ThreadRepository for StudioAgentRepository {
             .map_err(store_error)
     }
 
+    async fn read_tool_task_result(
+        &self,
+        thread_id: &ThreadId,
+        task_id: &str,
+    ) -> Result<Option<pl_core::session_runtime::ToolTaskResult>, Self::Error> {
+        self.store
+            .sessions()
+            .read_tool_task_result(thread_id, task_id)
+            .await
+            .map_err(store_error)
+    }
+
     fn record_committed(&self, commit: ThreadCommit) {
         self.store.sessions().record_committed(commit.clone());
         if !commit.facts.runtime_events.is_empty() {

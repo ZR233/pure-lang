@@ -135,6 +135,7 @@ where
             .await
             .map_err(|error| super::super::AgentRuntimeError::ThreadEvents(error.to_string()))?;
         self.state = commit.next_state;
+        self.session_runtime.notify_inbox_change();
         self.host.repository().record_committed(repository_commit);
         if let Some(publication) = &publication {
             match &publication.directory_update {

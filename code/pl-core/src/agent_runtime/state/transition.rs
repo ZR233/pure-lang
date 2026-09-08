@@ -299,7 +299,14 @@ impl AgentStateTransition for AgentState {
                 Self::Queued(QueuedAgentState::new(turn_id)),
             )),
             (
-                Self::Idle(_) | Self::Queued(_) | Self::WaitingInteraction(_),
+                Self::Idle(_)
+                | Self::Queued(_)
+                | Self::WaitingInteraction(_)
+                | Self::Running(_)
+                | Self::WaitingTool(_)
+                | Self::Cancelling(_)
+                | Self::Closed(_)
+                | Self::Faulted(_),
                 AgentCommand::BeginClose,
             ) => Ok(AgentTransitionDecision::changed(Self::Closing(
                 ClosingAgentState::new(),

@@ -244,8 +244,12 @@ pub struct BridgeCancellingAgent {
     pub turn_id: String,
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct BridgeClosingAgent {}
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeClosingAgent {
+    pub turn_id: Option<String>,
+    pub error: Option<BridgeStateError>,
+}
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BridgeClosedAgent {}

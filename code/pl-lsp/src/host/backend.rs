@@ -33,7 +33,7 @@ pub struct LspHostProcessExit {
 }
 
 /// LSP 宿主原语失败。
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 #[error("{message}")]
 pub struct LspHostError {
     message: String,
@@ -53,13 +53,24 @@ type LspHostWait =
     Pin<Box<dyn Future<Output = Result<LspHostProcessExit, LspHostError>> + Send + 'static>>;
 type LspHostTerminate = Box<dyn FnOnce() -> BoxFuture<'static, ()> + Send>;
 
+enum ProcessWait {
+    Pending(LspHostWait),
+    Finished(Result<LspHostProcessExit, LspHostError>),
+}
+
+enum ProcessTermination {
+    Unrequested(LspHostTerminate),
+    Requested(BoxFuture<'static, ()>),
+    Sent,
+}
+
 /// 一个由宿主维护、由本地 LSP client 消费 stdio 的可观察进程。
 pub struct LspHostProcess {
     stdin: Option<LspHostWriter>,
     stdout: Option<LspHostReader>,
     stderr: Option<LspHostReader>,
-    wait: Option<LspHostWait>,
-    terminate: Option<LspHostTerminate>,
+    wait: ProcessWait,
+    terminate: ProcessTermination,
 }
 
 impl std::fmt::Debug for LspHostProcess {
@@ -86,8 +97,8 @@ impl LspHostProcess {
             stdin,
             stdout,
             stderr,
-            wait: Some(Box::pin(wait)),
-            terminate: Some(Box::new(terminate)),
+            wait: ProcessWait::Pending(Box::pin(wait)),
+            terminate: ProcessTermination::Unrequested(Box::new(terminate)),
         }
     }
 
@@ -104,16 +115,30 @@ impl LspHostProcess {
     }
 
     pub(crate) async fn wait(&mut self) -> Result<LspHostProcessExit, LspHostError> {
-        self.wait
-            .take()
-            .ok_or_else(|| LspHostError::new("LSP host process was already awaited"))?
-            .await
+        let result = match &mut self.wait {
+            ProcessWait::Pending(wait) => wait.await,
+            ProcessWait::Finished(result) => return result.clone(),
+        };
+        self.wait = ProcessWait::Finished(result.clone());
+        result
     }
 
-    pub(crate) async fn terminate(&mut self) {
-        if let Some(terminate) = self.terminate.take() {
-            terminate().await;
+    pub(crate) async fn terminate(&mut self) -> Result<(), LspHostError> {
+        if matches!(self.terminate, ProcessTermination::Unrequested(_)) {
+            let previous = std::mem::replace(&mut self.terminate, ProcessTermination::Sent);
+            self.terminate = match previous {
+                ProcessTermination::Unrequested(terminate) => {
+                    ProcessTermination::Requested(terminate())
+                }
+                ProcessTermination::Requested(pending) => ProcessTermination::Requested(pending),
+                ProcessTermination::Sent => ProcessTermination::Sent,
+            };
         }
+        if let ProcessTermination::Requested(pending) = &mut self.terminate {
+            pending.await;
+            self.terminate = ProcessTermination::Sent;
+        }
+        self.wait().await.map(|_| ())
     }
 }
 

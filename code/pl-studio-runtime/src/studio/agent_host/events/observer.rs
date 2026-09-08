@@ -1,6 +1,6 @@
 use tokio::sync::mpsc;
 
-use pl_core::{AgentCommitObserver, AgentCommittedEvent, AgentRuntimeHandle};
+use pl_core::{AgentCommitObserver, AgentCommittedEvent};
 
 use crate::studio::ProductEventBus;
 
@@ -37,11 +37,6 @@ impl StudioAgentCommitObserver {
         });
         Self { sender }
     }
-
-    pub(in crate::studio::agent_host) async fn attach_runtime(&self, _runtime: AgentRuntimeHandle) {
-    }
-
-    pub(in crate::studio::agent_host) async fn detach_runtime(&self) {}
 }
 
 impl AgentCommitObserver for StudioAgentCommitObserver {

@@ -42,6 +42,16 @@ pub enum ToolExecution {
     ProviderHosted,
 }
 
+/// Trusted scheduling contract, independent of tool origin and provider metadata.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ToolScheduling {
+    /// Accept a session-owned task and deliver its result through wait.
+    #[default]
+    Task,
+    /// Complete a framework control operation in the current model step.
+    Control,
+}
+
 /// A validated internal identity and its provider-visible wire name.
 ///
 /// Namespaced tools retain their structured identity inside core. Providers,
@@ -266,6 +276,7 @@ impl ToolDefinition {
 /// Trusted execution policy, kept separate from external display metadata.
 #[derive(Clone)]
 pub struct ToolPolicy {
+    scheduling: ToolScheduling,
     effect: Option<ToolEffect>,
     supports_parallel_tool_calls: bool,
     supports_programmatic_calls: bool,
@@ -282,6 +293,7 @@ impl fmt::Debug for ToolPolicy {
         formatter
             .debug_struct("ToolPolicy")
             .field("effect", &self.effect)
+            .field("scheduling", &self.scheduling)
             .field(
                 "supports_parallel_tool_calls",
                 &self.supports_parallel_tool_calls,
@@ -301,6 +313,7 @@ impl fmt::Debug for ToolPolicy {
 impl Default for ToolPolicy {
     fn default() -> Self {
         Self {
+            scheduling: ToolScheduling::Task,
             effect: None,
             supports_parallel_tool_calls: false,
             supports_programmatic_calls: false,
@@ -315,6 +328,22 @@ impl Default for ToolPolicy {
 }
 
 impl ToolPolicy {
+    /// Creates a framework control policy; it never schedules another background task.
+    pub fn control() -> Self {
+        Self::default().with_scheduling(ToolScheduling::Control)
+    }
+
+    /// Declares trusted session-task or immediate-control scheduling.
+    pub fn with_scheduling(mut self, scheduling: ToolScheduling) -> Self {
+        self.scheduling = scheduling;
+        self
+    }
+
+    /// Returns the lifetime and result-delivery strategy.
+    pub fn scheduling(&self) -> ToolScheduling {
+        self.scheduling
+    }
+
     /// Creates the standard read-only policy.
     pub fn read_only() -> Self {
         Self::default().with_effect(ToolEffect::Read)

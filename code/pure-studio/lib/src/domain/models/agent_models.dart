@@ -26,6 +26,7 @@ sealed class StudioAgentState {
   };
 
   String? get errorMessage => switch (this) {
+    ClosingStudioAgent(:final failure) => failure?.message,
     FaultedStudioAgent(:final failure) => failure.message,
     IdleStudioAgent() ||
     QueuedStudioAgent() ||
@@ -33,7 +34,6 @@ sealed class StudioAgentState {
     WaitingToolStudioAgent() ||
     WaitingInteractionStudioAgent() ||
     CancellingStudioAgent() ||
-    ClosingStudioAgent() ||
     ClosedStudioAgent() => null,
   };
 
@@ -112,7 +112,17 @@ final class CancellingStudioAgent extends StudioAgentState {
 }
 
 final class ClosingStudioAgent extends StudioAgentState {
-  const ClosingStudioAgent();
+  const ClosingStudioAgent({this.turnId, this.failure});
+  final String? turnId;
+  final AgentStateError? failure;
+
+  @override
+  bool operator ==(Object other) =>
+      other is ClosingStudioAgent &&
+      turnId == other.turnId &&
+      failure == other.failure;
+  @override
+  int get hashCode => Object.hash(runtimeType, turnId, failure);
 }
 
 final class ClosedStudioAgent extends StudioAgentState {

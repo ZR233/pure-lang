@@ -1,17 +1,18 @@
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
+#[cfg(not(target_os = "linux"))]
 use std::process::Stdio;
 
 use pl_protocol::{PureError, Result};
 use serde_json::Value;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 
-use crate::process::{
-    configure_background_command, terminate_process_tree, terminate_process_tree_sync,
-};
+#[cfg(not(target_os = "linux"))]
+use crate::process::{configure_background_command, terminate_process_tree};
 use crate::tool::ToolPathPolicy;
 
+#[cfg(not(target_os = "linux"))]
 use super::shell::command_for_environment;
 use crate::execution_environment::ExecutionEnvironment;
 
@@ -29,6 +30,40 @@ pub type CommandWriter = Pin<Box<dyn AsyncWrite + Send>>;
 type CommandWaitFuture =
     Pin<Box<dyn Future<Output = std::result::Result<CommandExit, String>> + Send>>;
 
+/// Request-only cancellation capability, independent of diagnostic process identifiers.
+#[derive(Debug, Clone)]
+pub struct CommandCancellation(tokio_util::sync::CancellationToken);
+
+impl CommandCancellation {
+    /// Requests cancellation. Physical completion must still be obtained from wait.
+    pub fn cancel(&self) {
+        self.0.cancel();
+    }
+
+    /// Suspends until cancellation is requested; cancelling this wait does not clear it.
+    pub async fn cancelled(&self) {
+        self.0.cancelled().await;
+    }
+}
+
+/// Ownership transfer of business IO from a backend to the command runtime.
+pub struct CommandIo {
+    pub stdin: Option<CommandWriter>,
+    pub stdout: Option<CommandReader>,
+    pub stderr: Option<CommandReader>,
+}
+
+impl std::fmt::Debug for CommandIo {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("CommandIo")
+            .field("stdin", &self.stdin.is_some())
+            .field("stdout", &self.stdout.is_some())
+            .field("stderr", &self.stderr.is_some())
+            .finish()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CommandExit {
     pub exit_code: Option<i32>,
@@ -40,6 +75,7 @@ pub struct ManagedCommand {
     stdout: Option<CommandReader>,
     stderr: Option<CommandReader>,
     wait: Option<CommandWaitFuture>,
+    cancellation: CommandCancellation,
 }
 
 impl std::fmt::Debug for ManagedCommand {
@@ -55,20 +91,31 @@ impl std::fmt::Debug for ManagedCommand {
 }
 
 impl ManagedCommand {
-    pub fn new(
+    /// Transfers the process and its IO into one command lease. The supplied future owns
+    /// physical cleanup and must observe cancellation while retaining its process handle.
+    pub fn new<F>(
         host_pid: Option<u32>,
-        stdin: Option<CommandWriter>,
-        stdout: Option<CommandReader>,
-        stderr: Option<CommandReader>,
-        wait: impl Future<Output = std::result::Result<CommandExit, String>> + Send + 'static,
-    ) -> Self {
+        io: CommandIo,
+        wait: impl FnOnce(CommandCancellation) -> F,
+    ) -> Self
+    where
+        F: Future<Output = std::result::Result<CommandExit, String>> + Send + 'static,
+    {
+        let cancellation = CommandCancellation(tokio_util::sync::CancellationToken::new());
+        let wait = wait(cancellation.clone());
         Self {
             host_pid,
-            stdin,
-            stdout,
-            stderr,
+            stdin: io.stdin,
+            stdout: io.stdout,
+            stderr: io.stderr,
             wait: Some(Box::pin(wait)),
+            cancellation,
         }
+    }
+
+    /// Returns request-only cancellation, never ownership or proof of physical exit.
+    pub fn cancellation(&self) -> CommandCancellation {
+        self.cancellation.clone()
     }
 
     pub fn host_pid(&self) -> Option<u32> {
@@ -90,9 +137,17 @@ impl ManagedCommand {
     pub async fn wait(&mut self) -> std::result::Result<CommandExit, String> {
         let wait = self
             .wait
-            .take()
+            .as_mut()
             .ok_or_else(|| "managed command was already awaited".to_string())?;
-        wait.await
+        let result = wait.await;
+        self.wait = None;
+        result
+    }
+}
+
+impl Drop for ManagedCommand {
+    fn drop(&mut self) {
+        self.cancellation.cancel();
     }
 }
 
@@ -214,14 +269,6 @@ pub trait CommandBackend: std::fmt::Debug + Send + Sync + 'static {
         target: &CommandOutputTarget,
         sizes: CommandOutputSizes,
     ) -> impl std::future::Future<Output = std::result::Result<Vec<Value>, Self::Error>> + Send;
-
-    fn terminate(
-        &self,
-        process_id: &str,
-        host_pid: Option<u32>,
-    ) -> impl std::future::Future<Output = ()> + Send;
-
-    fn terminate_sync(&self, process_id: &str, host_pid: Option<u32>);
 }
 
 /// pure-studio 使用的本地 workspace 命令后端。
@@ -229,6 +276,20 @@ pub trait CommandBackend: std::fmt::Debug + Send + Sync + 'static {
 pub struct LocalCommandBackend {
     workspace_root: PathBuf,
     execution_environment: ExecutionEnvironment,
+    #[cfg(target_os = "linux")]
+    worker: std::sync::Arc<dyn WorkerExecutable>,
+}
+
+#[cfg(target_os = "linux")]
+trait WorkerExecutable: std::fmt::Debug + Send + Sync {
+    fn path(&self) -> &Path;
+}
+
+#[cfg(target_os = "linux")]
+impl<T: AsRef<Path> + std::fmt::Debug + Send + Sync> WorkerExecutable for T {
+    fn path(&self) -> &Path {
+        self.as_ref()
+    }
 }
 
 impl LocalCommandBackend {
@@ -236,7 +297,21 @@ impl LocalCommandBackend {
         Self {
             workspace_root: workspace_root.into(),
             execution_environment: ExecutionEnvironment::detect_local(),
+            #[cfg(target_os = "linux")]
+            worker: std::sync::Arc::new(PathBuf::from("pl-remote-helper")),
         }
+    }
+
+    /// Configures and retains the host's worker executable resource. The default Linux
+    /// backend requires pl-remote-helper on PATH and never falls back to an unmanaged shell.
+    /// An owned temporary-path resource remains alive with every backend clone.
+    #[cfg(target_os = "linux")]
+    pub fn with_worker_executable<P>(mut self, executable: P) -> Self
+    where
+        P: AsRef<Path> + std::fmt::Debug + Send + Sync + 'static,
+    {
+        self.worker = std::sync::Arc::new(executable);
+        self
     }
 
     pub fn execution_environment(&self) -> &ExecutionEnvironment {
@@ -280,6 +355,56 @@ impl CommandBackend for LocalCommandBackend {
         ))
     }
 
+    #[cfg(target_os = "linux")]
+    async fn spawn(&self, request: CommandSpawnRequest) -> Result<ManagedCommand> {
+        use pl_remote_helper::client::{ManagedWorker, ProcessCommand, ProcessTermination};
+        let argv =
+            super::shell::argv_for_environment(&self.execution_environment, &request.command);
+        let (program, arguments) = argv
+            .split_first()
+            .ok_or_else(|| command_error("exec", "shell argv is empty"))?;
+        let specification = ProcessCommand::new(program)
+            .args(arguments)
+            .current_dir(&request.cwd);
+        let mut worker = ManagedWorker::spawn(self.worker.path(), specification)
+            .await
+            .map_err(|error| command_error("exec", error))?;
+        let io = CommandIo {
+            stdin: worker
+                .take_stdin()
+                .map(|value| Box::pin(value) as CommandWriter),
+            stdout: worker
+                .take_stdout()
+                .map(|value| Box::pin(value) as CommandReader),
+            stderr: worker
+                .take_stderr()
+                .map(|value| Box::pin(value) as CommandReader),
+        };
+        let control = worker.control();
+        Ok(ManagedCommand::new(
+            worker.supervisor_pid(),
+            io,
+            move |cancellation| async move {
+                let result = tokio::select! {
+                    result = worker.wait() => result,
+                    _ = cancellation.cancelled() => {
+                        if control.cancel().await.is_err() { control.close(); }
+                        worker.wait().await
+                    }
+                };
+                result
+                    .map(|termination| CommandExit {
+                        exit_code: match termination {
+                            ProcessTermination::ExitCode(code) => Some(code),
+                            ProcessTermination::Signal(_) => None,
+                        },
+                    })
+                    .map_err(|error| error.to_string())
+            },
+        ))
+    }
+
+    #[cfg(not(target_os = "linux"))]
     async fn spawn(&self, request: CommandSpawnRequest) -> Result<ManagedCommand> {
         let mut command = command_for_environment(&self.execution_environment, &request.command);
         command.current_dir(&request.cwd);
@@ -306,13 +431,20 @@ impl CommandBackend for LocalCommandBackend {
             .map(|value| Box::pin(value) as CommandReader);
         Ok(ManagedCommand::new(
             host_pid,
-            stdin,
-            stdout,
-            stderr,
-            async move {
-                child
-                    .wait()
-                    .await
+            CommandIo {
+                stdin,
+                stdout,
+                stderr,
+            },
+            move |cancellation| async move {
+                let result = tokio::select! {
+                    result = child.wait() => result,
+                    _ = cancellation.cancelled() => {
+                        terminate_process_tree(child.id()).await;
+                        child.wait().await
+                    }
+                };
+                result
                     .map(|status| CommandExit {
                         exit_code: status.code(),
                     })
@@ -390,8 +522,13 @@ impl CommandBackend for LocalCommandBackend {
             capture.write_all(chunk).await.map_err(|error| {
                 command_error("exec", format!("failed to write stream capture: {error}"))
             })?;
+            capture.flush().await.map_err(|error| {
+                command_error("exec", format!("failed to flush stream capture: {error}"))
+            })?;
         }
-        Ok(())
+        file.flush().await.map_err(|error| {
+            command_error("exec", format!("failed to flush command output: {error}"))
+        })
     }
 
     async fn publish_output(&self, _target: &CommandOutputTarget) -> Result<()> {
@@ -404,14 +541,6 @@ impl CommandBackend for LocalCommandBackend {
         _sizes: CommandOutputSizes,
     ) -> Result<Vec<Value>> {
         Ok(Vec::new())
-    }
-
-    async fn terminate(&self, _process_id: &str, host_pid: Option<u32>) {
-        terminate_process_tree(host_pid).await;
-    }
-
-    fn terminate_sync(&self, _process_id: &str, host_pid: Option<u32>) {
-        terminate_process_tree_sync(host_pid);
     }
 }
 

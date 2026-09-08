@@ -5,4 +5,4 @@
 - UNC paths (`\\server\share\...`) and verbatim paths (`\\?\C:\...`, `\\?\UNC\...`) are accepted only after runtime policy checks. Do not use them to bypass the workspace boundary.
 - Prefer `rg` for content search and `rg --files` for file discovery when available. Keep fallback search commands compatible with the runtime shell.
 - Do not mix shell deletion pipelines across PowerShell and cmd. For filesystem edits, prefer file tools or apply_patch; when a shell delete is necessary, keep path resolution and deletion in the active shell.
-- Background commands are hidden in the desktop app. Poll running commands with write_stdin using the returned processId instead of launching duplicate commands.
+- Commands return session task receipts. Use `wait` for completion and `write_stdin` with taskId only for nonempty input; do not poll or launch duplicate commands.

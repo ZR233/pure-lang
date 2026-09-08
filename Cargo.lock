@@ -2711,6 +2711,7 @@ dependencies = [
  "pl-output",
  "pl-patch",
  "pl-protocol",
+ "pl-remote-helper",
  "pl-skill-core",
  "pl-trace",
  "pretty_assertions",

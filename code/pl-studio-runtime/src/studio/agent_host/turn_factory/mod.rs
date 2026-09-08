@@ -17,6 +17,8 @@ mod instructions;
 mod interactions;
 mod prepare;
 mod routing;
+mod session;
+mod thread_events;
 mod tools;
 
 pub(in crate::studio) use factory::StudioAgentTurnFactory;

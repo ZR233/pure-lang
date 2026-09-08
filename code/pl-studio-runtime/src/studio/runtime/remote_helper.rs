@@ -66,6 +66,116 @@ pub(super) fn ssh_manager() -> pl_core::remote::SshManager {
     pl_core::remote::SshManager::new(None, None)
 }
 
+/// Immutable host executable lease retained by session executors, including old generations.
+#[cfg(target_os = "linux")]
+#[derive(Clone)]
+pub(in crate::studio) struct LocalWorkerAsset {
+    image: std::sync::Arc<std::fs::File>,
+    path: std::path::PathBuf,
+}
+
+#[cfg(target_os = "linux")]
+impl std::fmt::Debug for LocalWorkerAsset {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LocalWorkerAsset")
+            .field("image", &self.image)
+            .finish_non_exhaustive()
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl AsRef<std::path::Path> for LocalWorkerAsset {
+    fn as_ref(&self) -> &std::path::Path {
+        &self.path
+    }
+}
+
+#[cfg(all(target_os = "linux", feature = "embedded-remote-helpers"))]
+pub(in crate::studio) async fn local_worker() -> crate::Result<LocalWorkerAsset> {
+    tokio::task::spawn_blocking(|| {
+        use std::io::Write;
+        use std::os::fd::AsRawFd;
+        use std::os::unix::fs::PermissionsExt;
+        let target = match std::env::consts::ARCH {
+            "x86_64" => RemoteHelperTarget::X8664Musl,
+            "aarch64" => RemoteHelperTarget::Aarch64Musl,
+            architecture => {
+                return Err(crate::PureError::ConfigError(format!(
+                    "unsupported local worker architecture {architecture}"
+                )));
+            }
+        };
+        let bytes = BundledRemoteHelpers::default()
+            .load(target)
+            .map_err(|error| crate::PureError::ConfigError(error.to_string()))?;
+        let mut file = tempfile::tempfile().map_err(|error| {
+            crate::PureError::ConfigError(format!("create local worker: {error}"))
+        })?;
+        file.write_all(&bytes)
+            .and_then(|()| file.flush())
+            .map_err(|error| {
+                crate::PureError::ConfigError(format!("materialize local worker: {error}"))
+            })?;
+        file.set_permissions(std::fs::Permissions::from_mode(0o700))
+            .map_err(|error| {
+                crate::PureError::ConfigError(format!(
+                    "configure local worker permissions: {error}"
+                ))
+            })?;
+        // Reopen read-only before releasing the writer, otherwise exec can fail ETXTBSY.
+        // The anonymous inode has no directory entry to leak if the GUI is killed.
+        let image = std::fs::File::open(format!("/proc/self/fd/{}", file.as_raw_fd())).map_err(
+            |error| crate::PureError::ConfigError(format!("retain local worker image: {error}")),
+        )?;
+        drop(file);
+        let path = std::path::PathBuf::from(format!("/proc/self/fd/{}", image.as_raw_fd()));
+        Ok(LocalWorkerAsset {
+            image: Arc::new(image),
+            path,
+        })
+    })
+    .await
+    .map_err(|error| {
+        crate::PureError::ConfigError(format!("local worker preparation failed: {error}"))
+    })?
+}
+
+#[cfg(all(target_os = "linux", not(feature = "embedded-remote-helpers")))]
+pub(in crate::studio) async fn local_worker() -> crate::Result<LocalWorkerAsset> {
+    tokio::task::spawn_blocking(|| {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::fs::PermissionsExt;
+        let path = std::env::var_os("PATH")
+            .and_then(|paths| {
+                std::env::split_paths(&paths)
+                    .map(|directory| directory.join("pl-remote-helper"))
+                    .find(|candidate| {
+                        candidate.metadata().is_ok_and(|metadata| {
+                            metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+                        })
+                    })
+            })
+            .ok_or_else(|| {
+                crate::PureError::ConfigError(
+                    "install pl-remote-helper on PATH for non-embedded Studio execution".into(),
+                )
+            })?;
+        let image = std::fs::File::open(&path).map_err(|error| {
+            crate::PureError::ConfigError(format!("open local worker {}: {error}", path.display()))
+        })?;
+        let path = std::path::PathBuf::from(format!("/proc/self/fd/{}", image.as_raw_fd()));
+        Ok(LocalWorkerAsset {
+            image: std::sync::Arc::new(image),
+            path,
+        })
+    })
+    .await
+    .map_err(|error| {
+        crate::PureError::ConfigError(format!("local worker preparation failed: {error}"))
+    })?
+}
+
 #[cfg(all(test, feature = "embedded-remote-helpers"))]
 mod tests {
     use super::*;

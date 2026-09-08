@@ -783,6 +783,27 @@ class AppLocalizationsEn extends AppLocalizations {
   String get timelineToolTimedOut => 'timed out';
 
   @override
+  String get agentDetailStatusClosing => 'Closing';
+
+  @override
+  String get agentDetailStatusCleanupFailed => 'Cleanup failed';
+
+  @override
+  String timelineToolQueued(String name) {
+    return '$name queued';
+  }
+
+  @override
+  String timelineToolCancelling(String name) {
+    return '$name cancelling';
+  }
+
+  @override
+  String timelineToolInterrupted(String name) {
+    return '$name interrupted';
+  }
+
+  @override
   String get timelineAgentSubagent => 'Subagent';
 
   @override

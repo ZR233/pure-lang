@@ -5,7 +5,7 @@ use serde_json::Value;
 
 use super::failure::deterministic_failure;
 use super::state::CacheAcquisition;
-use super::{ToolCachePolicy, TurnToolCacheSnapshot};
+use super::{SessionToolCacheSnapshot, ToolCachePolicy};
 use crate::Result;
 use crate::tool::ToolResult;
 
@@ -18,7 +18,7 @@ pub(crate) struct ToolCacheExecutionRequest<'a> {
     pub(crate) executor_generation: u64,
 }
 
-impl TurnToolCacheSnapshot {
+impl SessionToolCacheSnapshot {
     pub(crate) async fn execute_or_reuse<F, Fut>(
         &self,
         request: ToolCacheExecutionRequest<'_>,
@@ -38,7 +38,6 @@ impl TurnToolCacheSnapshot {
                 request.arguments,
                 request.workspace_root,
                 request.policy,
-                self.workspace_epoch,
                 request.executor_generation,
             ) {
                 CacheAcquisition::Hit(output) => return Ok(output),

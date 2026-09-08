@@ -321,6 +321,7 @@ fn item_state(value: &ThreadItemState) -> Result<BridgeThreadItemState> {
         },
         ThreadItemState::Tool(value) => BridgeThreadItemState::Tool {
             invocation: BridgeThreadToolInvocation {
+                task_id: value.invocation().task_id().map(str::to_owned),
                 tool_call_id: value.invocation().tool_call_id().to_string(),
                 call_id: value.invocation().call_id().map(str::to_string),
                 provider_item_id: value.invocation().provider_item_id().map(str::to_string),
@@ -467,6 +468,14 @@ fn attachment(value: &ThreadAttachment) -> BridgeThreadAttachment {
 
 fn tool_state(value: &ThreadToolState) -> Result<BridgeThreadToolState> {
     Ok(match value {
+        ThreadToolState::Queued(_) => BridgeThreadToolState::Queued,
+        ThreadToolState::Cancelling(state) => BridgeThreadToolState::Cancelling {
+            streamed_output: state.streamed_output().to_owned(),
+        },
+        ThreadToolState::Interrupted(state) => BridgeThreadToolState::Interrupted {
+            interrupted_at: state.interrupted_at(),
+            reason: state.reason().to_owned(),
+        },
         ThreadToolState::Started(_) => BridgeThreadToolState::Started,
         ThreadToolState::Streaming(_) => BridgeThreadToolState::Streaming,
         ThreadToolState::AwaitingApproval(_) => BridgeThreadToolState::AwaitingApproval,

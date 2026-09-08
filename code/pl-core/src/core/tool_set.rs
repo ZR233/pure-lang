@@ -19,6 +19,52 @@ use crate::tool::{
 
 use super::TurnEngine;
 
+/// Constructed tool groups whose resource instances survive capability changes.
+#[derive(Debug, Clone)]
+pub struct BuiltinToolCatalog {
+    exec: Vec<DynTool>,
+    files: Vec<DynTool>,
+    interaction: Vec<DynTool>,
+    state: Vec<DynTool>,
+    git: Vec<DynTool>,
+    plan: Vec<DynTool>,
+}
+
+impl BuiltinToolCatalog {
+    /// Projects capabilities without recreating command managers or executors.
+    pub fn groups(
+        &self,
+        capabilities: &ToolCapabilityConfig,
+        visibility: crate::ToolVisibilityConstraint,
+    ) -> Vec<ToolInstallGroup> {
+        let visible = visibility != crate::ToolVisibilityConstraint::Exclusive;
+        [
+            ("builtin-exec", &self.exec, capabilities.exec),
+            ("builtin-files", &self.files, capabilities.workspace_files),
+            (
+                "builtin-interaction",
+                &self.interaction,
+                capabilities.ask_user,
+            ),
+            ("builtin", &self.state, true),
+            ("builtin-git", &self.git, capabilities.git),
+            ("plan", &self.plan, capabilities.ask_user),
+        ]
+        .into_iter()
+        .map(|(id, tools, enabled)| {
+            ToolInstallGroup::direct(
+                ToolGroupId::new(id),
+                if visible && enabled {
+                    tools.clone()
+                } else {
+                    Vec::new()
+                },
+            )
+        })
+        .collect()
+    }
+}
+
 /// Installs the built-in tool implementations selected by explicit capabilities.
 ///
 /// This type only constructs ordinary [`crate::StaticTool`] implementations and publishes one
@@ -151,13 +197,59 @@ where
             ToolWorkspace::new(workspace.clone()).with_lsp_runtime(core.lsp_runtime.clone());
         core.workspace = Some(workspace);
         core.workspace_instructions = workspace_instructions;
+        core.agent_tools.install_batch(self.build_groups(
+            tool_workspace.clone(),
+            core.tool_session_runtime.clone(),
+            core.execution_environment.clone(),
+        ))?;
+        if self.capabilities.skills {
+            core.register_skill_tools_for_workspace(workspace_root.clone())?;
+        } else {
+            core.agent_tools.uninstall(&ToolGroupId::new("skills"));
+        }
+        if self.capabilities.lsp
+            && let Some(registry) = core.lsp_runtime.clone()
+            && !registry
+                .active_server_names_for_workspace(&workspace_root)
+                .await
+                .is_empty()
+        {
+            core.agent_tools.install(ToolInstallGroup::direct(
+                ToolGroupId::new("lsp"),
+                lsp_tools(registry, tool_workspace),
+            ))?;
+        } else {
+            core.agent_tools.uninstall(&ToolGroupId::new("lsp"));
+        }
+        Ok(())
+    }
+
+    /// Constructs session-owned builtin groups without a TurnEngine or publication side effects.
+    pub fn build_groups(
+        &self,
+        tool_workspace: ToolWorkspace,
+        session: crate::ToolSessionRuntime,
+        environment: crate::ExecutionEnvironment,
+    ) -> Vec<ToolInstallGroup> {
+        self.build_catalog(tool_workspace, session, environment)
+            .groups(
+                &self.capabilities,
+                crate::ToolVisibilityConstraint::Additive,
+            )
+    }
+
+    /// Constructs reusable groups; only configured capabilities acquire resources.
+    pub fn build_catalog(
+        &self,
+        tool_workspace: ToolWorkspace,
+        session: crate::ToolSessionRuntime,
+        environment: crate::ExecutionEnvironment,
+    ) -> BuiltinToolCatalog {
         let mut tools = Vec::<DynTool>::new();
 
-        if self.capabilities.exec && self.local_backends {
-            let (exec, write_stdin) = local_command_tool_pair_with_environment(
-                tool_workspace.clone(),
-                core.execution_environment.clone(),
-            );
+        if self.capabilities.exec && self.local_backends && self.command_runtime.is_none() {
+            let (exec, write_stdin) =
+                local_command_tool_pair_with_environment(tool_workspace.clone(), environment);
             tools.push(exec.into());
             tools.push(write_stdin.into());
         }
@@ -169,6 +261,7 @@ where
             tools.push(exec.into());
             tools.push(write_stdin.into());
         }
+        let exec = std::mem::take(&mut tools);
         if self.capabilities.workspace_files && self.local_backends {
             tools.extend(
                 WorkspaceFileToolKind::all()
@@ -198,60 +291,44 @@ where
             );
         }
         tools.extend(self.additional_tools.iter().cloned());
+        let files = std::mem::take(&mut tools);
         if self.capabilities.ask_user {
             tools.push(AskUserTool.into());
         }
-        tools.push(TodoListTool::new(core.tool_session_runtime.working_set()).into());
-        tools.extend(SessionNoteToolKind::all().iter().map(|kind| {
-            SessionNoteTool::new(*kind, core.tool_session_runtime.working_set()).into()
-        }));
+        let interaction = std::mem::take(&mut tools);
+        tools.push(TodoListTool::new(session.working_set()).into());
+        tools.extend(
+            SessionNoteToolKind::all()
+                .iter()
+                .map(|kind| SessionNoteTool::new(*kind, session.working_set()).into()),
+        );
+        let state = std::mem::take(&mut tools);
         if self.capabilities.git
             && let Some(runtime) = &self.git_runtime
         {
             tools.extend(git_tools(runtime));
         }
-        core.agent_tools
-            .install(ToolInstallGroup::direct(ToolGroupId::new("builtin"), tools))?;
+        let git = std::mem::take(&mut tools);
 
         if self.capabilities.ask_user {
-            let working_set = core.tool_session_runtime.working_set();
-            let binding = core.tool_session_runtime.plan_tools();
-            let plan_tools = vec![
+            let working_set = session.working_set();
+            let binding = session.plan_tools();
+            tools = vec![
                 PlanCurrentTool::new(working_set.clone(), binding.clone()).into(),
                 PlanNextTool::new(working_set.clone(), binding.clone()).into(),
                 PlanHistoryTool::new(working_set.clone(), binding.clone()).into(),
                 PlanSubmitTool::new(working_set.clone(), binding.clone()).into(),
                 PlanRestartTool::new(working_set, binding).into(),
             ];
-            core.agent_tools.install(ToolInstallGroup::direct(
-                ToolGroupId::new("plan"),
-                plan_tools,
-            ))?;
-        } else {
-            core.agent_tools.uninstall(&ToolGroupId::new("plan"));
         }
-
-        if self.capabilities.skills {
-            core.register_skill_tools_for_workspace(workspace_root.clone())?;
-        } else {
-            core.agent_tools.uninstall(&ToolGroupId::new("skills"));
+        BuiltinToolCatalog {
+            exec,
+            files,
+            interaction,
+            state,
+            git,
+            plan: tools,
         }
-
-        if self.capabilities.lsp
-            && let Some(registry) = core.lsp_runtime.clone()
-            && !registry
-                .active_server_names_for_workspace(&workspace_root)
-                .await
-                .is_empty()
-        {
-            core.agent_tools.install(ToolInstallGroup::direct(
-                ToolGroupId::new("lsp"),
-                lsp_tools(registry, tool_workspace),
-            ))?;
-        } else {
-            core.agent_tools.uninstall(&ToolGroupId::new("lsp"));
-        }
-        Ok(())
     }
 }
 

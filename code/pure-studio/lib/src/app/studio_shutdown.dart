@@ -24,12 +24,20 @@ Future<void> runStudioShutdown(
   StudioApi api,
   void Function(StudioShutdownProgress progress) onProgress,
 ) async {
-  final subscription = api.subscribeShutdownProgress().listen((progress) {
+  var stopped = false;
+  void publish(StudioShutdownProgress progress) {
+    if (stopped) return;
+    stopped = progress.phase == StudioShutdownPhase.stopped;
     onProgress(progress);
     StudioDriverState.publishShutdownProgress(progress);
-  });
+  }
+
+  final subscription = api.subscribeShutdownProgress().listen(publish);
   try {
     await api.shutdownRuntime();
+    // Successful command completion acknowledges native Stopped even if bridge
+    // disposal prevented the terminal progress-stream event from arriving.
+    publish(const StoppedProgress());
   } finally {
     await subscription.cancel();
   }

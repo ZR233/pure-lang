@@ -281,6 +281,18 @@ pub trait ThreadRepository: Clone + Send + Sync + 'static {
         thread_id: &super::ThreadId,
     ) -> impl Future<Output = std::result::Result<Option<RestoredAgentRuntime>, Self::Error>> + Send;
 
+    /// Reads immutable complete output for a task owned by this durable Thread.
+    ///
+    /// # Errors
+    /// Returns storage or integrity errors. Missing and nonterminal tasks return None.
+    fn read_tool_task_result(
+        &self,
+        thread_id: &super::ThreadId,
+        task_id: &str,
+    ) -> impl Future<
+        Output = std::result::Result<Option<crate::session_runtime::ToolTaskResult>, Self::Error>,
+    > + Send;
+
     /// 保留已提交内存事实供异步保存；不得等待存储或拒绝已提交事实。
     fn record_committed(&self, commit: ThreadCommit);
 
@@ -331,6 +343,17 @@ pub trait ThreadRepository: Clone + Send + Sync + 'static {
 pub trait AgentTurnFactory: Clone + Send + Sync + 'static {
     type Error: Error + Send + Sync + 'static;
 
+    /// Declares tools and event sources before a new or restored owner is published.
+    /// The default supplies only framework session controls; products add their capabilities here.
+    fn prepare_session(
+        &self,
+        _context: crate::session_runtime::SessionBuildContext,
+    ) -> impl Future<
+        Output = std::result::Result<crate::session_runtime::SessionRuntimeBuilder, Self::Error>,
+    > + Send {
+        async { Ok(crate::session_runtime::SessionRuntimeBuilder::default()) }
+    }
+
     fn prepare_turn(
         &self,
         context: AgentTurnPreparationContext,
@@ -375,8 +398,8 @@ pub struct CloseLifecycleRequest {
 
 /// 产品容器、worktree 等外部资源的幂等 saga 端口。
 ///
-/// prepare 返回可回滚 lease；activate/commit 成功后资源可见。rollback 必须允许重复调用，
-/// 且不能删除不属于该 lease 的外部资源。
+/// spawn 的 prepare 返回可回滚 lease；activate 成功后资源可见。rollback 只回收该 lease 的资源。
+/// close 不回滚到可受理状态；失败保留同一 CloseLease，再次 commit_close 必须幂等。
 pub trait AgentLifecycleAdapter: Clone + Send + Sync + 'static {
     type Error: Error + Send + Sync + 'static;
     type SpawnLease: Send + 'static;
@@ -423,11 +446,6 @@ pub trait AgentLifecycleAdapter: Clone + Send + Sync + 'static {
     fn commit_close(
         &self,
         lease: &Self::CloseLease,
-    ) -> impl Future<Output = std::result::Result<(), Self::Error>> + Send;
-
-    fn rollback_close(
-        &self,
-        lease: Self::CloseLease,
     ) -> impl Future<Output = std::result::Result<(), Self::Error>> + Send;
 }
 

@@ -130,6 +130,9 @@ jobs:
       - name: Cache Rust build
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
 
+      - name: Install local process worker
+        run: cargo install --path code/pl-remote-helper --locked
+
       - name: Test Studio server stack
         run: cargo test -p pl-protocol -p pl-studio-runtime -p pl-studio-server
 

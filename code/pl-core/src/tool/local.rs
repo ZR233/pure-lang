@@ -30,6 +30,10 @@ pub struct ToolDisplayMetadata {
 #[serde(rename_all = "camelCase", tag = "type")]
 /// Typed runtime facts emitted alongside model-visible tool output.
 pub enum ToolDirective {
+    /// A complete wait batch to acknowledge with the corresponding transcript response.
+    SessionEvents {
+        batch: crate::session_runtime::SessionEventBatch,
+    },
     /// 持久化一个由当前 Turn 发起、需要宿主后续处理的交互。
     InteractionRequested {
         interaction: Box<InteractionRequest>,
@@ -71,6 +75,24 @@ pub enum ToolDirective {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         final_content: Option<String>,
     },
+}
+
+impl ToolDirective {
+    pub(crate) fn requires_control_policy(&self) -> bool {
+        match self {
+            Self::SessionEvents { .. }
+            | Self::InteractionRequested { .. }
+            | Self::RevealTools { .. }
+            | Self::EndTurn { .. } => true,
+            Self::SkillActivated { .. }
+            | Self::OutputArtifacts { .. }
+            | Self::AuditMetadata { .. }
+            | Self::ExecutionFailed
+            | Self::CacheHit { .. }
+            | Self::OutputMetrics { .. }
+            | Self::OutputBudget { .. } => false,
+        }
+    }
 }
 
 /// Starts building a statically typed function tool.

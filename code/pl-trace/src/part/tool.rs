@@ -32,6 +32,7 @@ impl TraceToolPart {
 
     pub fn terminal_output(&self) -> Option<&TraceToolOutput> {
         match &self.state {
+            TraceToolState::Accepted(_) => None,
             TraceToolState::Succeeded(state) => Some(&state.output),
             TraceToolState::Failed(state) => state.output.as_ref(),
             TraceToolState::Started(_)
@@ -42,6 +43,15 @@ impl TraceToolPart {
             | TraceToolState::Denied(_)
             | TraceToolState::Cancelled(_) => None,
         }
+    }
+
+    pub(super) fn accept_task(&self, task_id: String) -> Result<Self, &'static str> {
+        if self.state.is_terminal() || task_id.is_empty() {
+            return Err("task acceptance requires an active invocation and task identity");
+        }
+        let mut next = self.clone();
+        next.state = TraceToolState::Accepted(AcceptedTraceTool { task_id });
+        Ok(next)
     }
 
     pub(super) fn update_invocation(
@@ -310,6 +320,7 @@ pub struct TraceToolOutputMetrics {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", content = "data", rename_all = "camelCase")]
 pub enum TraceToolState {
+    Accepted(AcceptedTraceTool),
     Started(StartedTraceTool),
     Streaming(StreamingTraceTool),
     AwaitingApproval(AwaitingApprovalTraceTool),
@@ -325,12 +336,17 @@ impl TraceToolState {
     pub fn is_terminal(&self) -> bool {
         matches!(
             self,
-            Self::Succeeded(_) | Self::Failed(_) | Self::Denied(_) | Self::Cancelled(_)
+            Self::Succeeded(_)
+                | Self::Failed(_)
+                | Self::Denied(_)
+                | Self::Cancelled(_)
+                | Self::Accepted(_)
         )
     }
 
     pub fn failure(&self) -> Option<&str> {
         match self {
+            Self::Accepted(_) => None,
             Self::Failed(state) => Some(state.failure.message()),
             Self::Started(_)
             | Self::Streaming(_)
@@ -341,6 +357,18 @@ impl TraceToolState {
             | Self::Denied(_)
             | Self::Cancelled(_) => None,
         }
+    }
+}
+
+/// The invocation was committed to a session task, not executed successfully in this Turn.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AcceptedTraceTool {
+    task_id: String,
+}
+impl AcceptedTraceTool {
+    pub fn task_id(&self) -> &str {
+        &self.task_id
     }
 }
 

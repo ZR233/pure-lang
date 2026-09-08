@@ -178,17 +178,12 @@ impl StudioRuntime {
                 depth,
             },
             session: pl_core::ThreadContextState {
-                submissions: Default::default(),
                 metadata: pl_core::ThreadContextMetadata {
                     project_id: Some(thread_record.project_id),
                     title: Some(thread_record.title),
                 },
-                session: pl_core::AgentSession::new(),
-                usage: pl_core::InferenceTokenUsage::default(),
-                billing_by_turn: std::collections::BTreeMap::new(),
-                last_context_tokens: None,
-                trace_sequence: 0,
                 thread_revision: seed.thread_revision,
+                ..pl_core::ThreadContextState::empty()
             },
             runtime_revision: seed.runtime_revision,
             event_sequence: seed.event_sequence,

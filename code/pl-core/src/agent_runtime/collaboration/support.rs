@@ -156,7 +156,7 @@ pub(super) fn fork_session(
     }
 }
 
-pub(super) fn filter_visible(
+pub(in crate::agent_runtime) fn filter_visible(
     snapshots: &[AgentSnapshot],
     caller: &ThreadId,
     selector: &AgentTargetSelector,
@@ -465,22 +465,6 @@ pub(super) fn session_schema(selector: &AgentTargetSelector) -> Value {
             false,
         ),
     ])
-}
-
-pub(super) fn wait_schema(selector: &AgentTargetSelector) -> Value {
-    object_schema(vec![(
-        "targets",
-        json!({
-            "type": "array",
-            "items": target_property_schema(
-                selector,
-                Some("Agent id whose next progress, interaction, or terminal change should end the wait.")
-            ),
-            "minItems": 1,
-            "uniqueItems": true
-        }),
-        false,
-    )])
 }
 
 pub(super) fn target_schema(selector: &AgentTargetSelector, description: &str) -> Value {

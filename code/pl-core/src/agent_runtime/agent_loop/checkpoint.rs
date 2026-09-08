@@ -77,43 +77,87 @@ where
         &mut self,
         mut checkpoint: AgentTurnCheckpoint,
     ) -> AgentRuntimeResult<()> {
+        let Some(active) = &self.active else {
+            return Err(AgentRuntimeError::NoActiveTurn(checkpoint.thread_id));
+        };
+        if active.turn_id != checkpoint.turn_id {
+            return Err(AgentRuntimeError::TurnMismatch {
+                expected: active.turn_id.clone(),
+                actual: checkpoint.turn_id,
+            });
+        }
+        if active.thread_id != checkpoint.thread_id {
+            return Err(AgentRuntimeError::ThreadMismatch {
+                agent_id: self.state.snapshot.identity.id.clone(),
+                expected: active.thread_id.clone(),
+                actual: checkpoint.thread_id,
+            });
+        }
+        let accounting_only = active.is_cancelling() || active.cancellation.is_cancelled();
+        let fingerprint = checkpoint_fingerprint(&checkpoint)?;
+        let inference_id = checkpoint
+            .inference
+            .as_ref()
+            .map(|value| value.billing.inference_id.clone());
+        if self.state.session.checkpoints.is_replay(
+            checkpoint.sequence,
+            &fingerprint,
+            inference_id.as_deref(),
+        )? {
+            return Ok(());
+        }
+        if let Some(inference) = checkpoint.inference.as_ref()
+            && let Some(existing) = find_inference(&self.state, &inference.billing.inference_id)
+        {
+            return Err(if existing == &inference.billing {
+                super::super::CheckpointError::Expired {
+                    sequence: checkpoint.sequence,
+                }
+            } else {
+                super::super::CheckpointError::Conflict {
+                    sequence: checkpoint.sequence,
+                }
+            }
+            .into());
+        }
         if let Err(error) = self.flush_pending_traces().await {
             self.mark_projection_failure(&error);
         }
-        let Some(active) = &self.active else {
-            return Ok(());
-        };
-        if active.turn_id != checkpoint.turn_id || active.thread_id != checkpoint.thread_id {
-            return Ok(());
-        }
-        let accounting_only = active.is_cancelling() || active.cancellation.is_cancelled();
         if accounting_only {
             if checkpoint.inference.is_none() {
+                if checkpoint.tools.consumed_events.is_some()
+                    || !checkpoint.tools.direct_results.is_empty()
+                {
+                    return Err(AgentRuntimeError::InvalidInput(
+                        "cancelled Turn cannot commit tool delivery".into(),
+                    ));
+                }
                 return Ok(());
             }
             // Cancellation stops context progress, but cannot revoke provider usage already received.
             checkpoint.session = self.state.session.session.clone();
             checkpoint.consumed_mail_ids.clear();
-        }
-        if let Some(inference) = checkpoint.inference.as_ref()
-            && let Some(existing) = find_inference(&self.state, &inference.billing.inference_id)
-        {
-            return if existing == &inference.billing {
-                Ok(())
-            } else {
-                Err(AgentRuntimeError::InvalidInput(format!(
-                    "inference {} conflicts with the active Thread billing record",
-                    inference.billing.inference_id
-                )))
-            };
-        }
-        if checkpoint.sequence <= active.checkpoint_sequence {
-            return Ok(());
+            checkpoint.tools.consumed_events = None;
+            checkpoint.tools.direct_results.clear();
         }
         let expected_revision = self.state.snapshot.revision;
         let mut next = self.state.clone();
+        next.session
+            .checkpoints
+            .record(checkpoint.sequence, fingerprint, inference_id)?;
         next.snapshot.revision = expected_revision.saturating_add(1);
         next.snapshot.updated_at = unix_timestamp();
+        if let Some(events) = &checkpoint.tools.consumed_events {
+            next.session
+                .inbox
+                .acknowledge(events)
+                .map_err(|error| AgentRuntimeError::InvalidInput(error.to_string()))?;
+        }
+        Self::commit_direct_results(
+            &mut next,
+            &checkpoint.turn_id,
+            &checkpoint.tools.direct_results,
+        )?;
         if let Some(active_input) = next.active_input.as_mut()
             && !accounting_only
             && active_input.turn_id == checkpoint.turn_id
@@ -157,7 +201,10 @@ where
             .workflow()
             .map(pl_protocol::WorkflowRuntimeSnapshot::from);
         next.session.session = checkpoint.session;
-        let projection = if checkpoint.inference.is_some() || workflow_changed {
+        let projection = if checkpoint.inference.is_some()
+            || workflow_changed
+            || !checkpoint.tools.direct_results.is_empty()
+        {
             let mut current = self
                 .runtime
                 .thread_events
@@ -208,6 +255,25 @@ where
                 notifications = projected_thread.notifications;
                 current = projected_thread.snapshot;
             }
+            let changes = crate::session_runtime::task_notifications(
+                &next.session.tasks,
+                &self.state.session.tasks,
+                &current,
+            )
+            .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
+            if !changes.is_empty() {
+                notifications.extend(
+                    project_thread_facts(checkpoint.thread_id.as_str(), &current, changes)
+                        .notifications,
+                );
+                let projected = self
+                    .runtime
+                    .thread_events
+                    .project(checkpoint.thread_id.as_str(), &notifications)
+                    .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
+                current = projected.snapshot;
+                notifications = projected.notifications;
+            }
             next.session.thread_revision = current.revision;
             Some(ThreadProjectionCommit {
                 snapshot: current,
@@ -245,9 +311,6 @@ where
             reason = ?checkpoint.reason,
             "agent turn checkpoint committed"
         );
-        if let Some(active) = &mut self.active {
-            active.checkpoint_sequence = checkpoint.sequence;
-        }
         Ok(())
     }
 
@@ -420,6 +483,32 @@ where
         .await?;
         Ok(checkpoint)
     }
+}
+
+fn checkpoint_fingerprint(checkpoint: &AgentTurnCheckpoint) -> AgentRuntimeResult<String> {
+    let AgentTurnCheckpoint {
+        turn_id,
+        thread_id,
+        sequence: _,
+        session,
+        reason,
+        consumed_mail_ids,
+        inference,
+        tools,
+    } = checkpoint;
+    let payload = serde_json::to_value((
+        turn_id,
+        thread_id,
+        session,
+        reason,
+        consumed_mail_ids,
+        inference,
+        tools,
+    ))
+    .map_err(|error| {
+        AgentRuntimeError::InvalidInput(format!("cannot fingerprint checkpoint: {error}"))
+    })?;
+    Ok(crate::canonical_json_hash(&payload))
 }
 
 fn find_inference<'a>(

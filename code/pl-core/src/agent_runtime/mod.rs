@@ -1,6 +1,6 @@
 //! 产品无关的 agent actor runtime。
 
-mod agent_loop;
+pub(crate) mod agent_loop;
 mod collaboration;
 mod coordinator;
 mod directory;
@@ -190,6 +190,27 @@ pub(crate) mod test_support {
                     state,
                     thread_snapshot: None,
                 }))
+        }
+
+        async fn read_tool_task_result(
+            &self,
+            thread_id: &ThreadId,
+            task_id: &str,
+        ) -> std::result::Result<Option<crate::session_runtime::ToolTaskResult>, Self::Error>
+        {
+            let commits = self.commits.lock().unwrap();
+            for commit in commits
+                .iter()
+                .rev()
+                .filter(|commit| &commit.agent_id == thread_id)
+            {
+                if let Ok(Some(record)) = commit.next_state.session.tasks.complete_result(task_id)
+                    && let Some(content) = &record.content
+                {
+                    return Ok(Some((**content).clone()));
+                }
+            }
+            Ok(None)
         }
 
         fn record_committed(&self, commit: ThreadCommit) {
@@ -610,6 +631,25 @@ mod tests {
     impl AgentTurnFactory for TestTurnFactory {
         type Error = TestError;
 
+        async fn prepare_session(
+            &self,
+            context: crate::session_runtime::SessionBuildContext,
+        ) -> std::result::Result<crate::session_runtime::SessionRuntimeBuilder, Self::Error>
+        {
+            let mut builder = crate::session_runtime::SessionRuntimeBuilder::default();
+            if self.install_plan_tools {
+                let installer = crate::BuiltinToolInstaller::from_capabilities(Default::default());
+                for group in installer.build_groups(
+                    crate::ToolWorkspace::new(crate::AgentWorkspace::local(std::env::temp_dir())),
+                    context.tool_session_runtime(),
+                    crate::ExecutionEnvironment::detect_local(),
+                ) {
+                    builder = builder.with_tools(group);
+                }
+            }
+            Ok(builder)
+        }
+
         async fn prepare_turn(
             &self,
             context: AgentTurnPreparationContext,
@@ -653,18 +693,13 @@ mod tests {
                         model: ModelInfo::compatible("rollover-test"),
                         effort: None,
                     };
-                    let mut engine = TurnEngineBuilder::from_route(&route).unwrap().build();
-                    if self.install_plan_tools {
-                        engine
-                            .install_default_tools(std::env::temp_dir(), None)
-                            .await
-                            .unwrap();
-                    }
+                    let engine = TurnEngineBuilder::from_route(&route).unwrap().build();
                     let request = TurnRequest::new(context.input.payload.message);
                     let mut options = TurnOptions::default()
                         .with_debug_context_compaction_timeout(self.rollover_timeout);
                     if self.install_plan_tools {
-                        let working_set = engine.tool_session_runtime().working_set();
+                        let working_set =
+                            context.session_runtime.tool_session_runtime().working_set();
                         let runtime = context.runtime.clone();
                         let agent_id = context.snapshot.identity.id.clone();
                         let thread_id = context.thread_id.clone();
@@ -736,13 +771,12 @@ mod tests {
         close_order: Arc<Mutex<Vec<ThreadId>>>,
         spawn_profiles: Arc<Mutex<Vec<Option<pl_protocol::AgentProfileSnapshot>>>>,
         spawn_rollbacks: Arc<Mutex<Vec<ThreadId>>>,
-        close_rollbacks: Arc<Mutex<Vec<ThreadId>>>,
+        close_preparations: Arc<Mutex<Vec<ThreadId>>>,
         fail_prepare_spawn: Arc<Mutex<bool>>,
         fail_activate_spawn: Arc<Mutex<bool>>,
         fail_rollback_spawn: Arc<Mutex<bool>>,
         fail_prepare_close: Arc<Mutex<bool>>,
         fail_commit_close: Arc<Mutex<bool>>,
-        fail_rollback_close: Arc<Mutex<bool>>,
     }
 
     impl TestLifecycle {
@@ -764,10 +798,6 @@ mod tests {
 
         fn fail_next_commit_close(&self) {
             *self.fail_commit_close.lock().unwrap() = true;
-        }
-
-        fn fail_next_rollback_close(&self) {
-            *self.fail_rollback_close.lock().unwrap() = true;
         }
     }
 
@@ -819,6 +849,10 @@ mod tests {
             &self,
             request: CloseLifecycleRequest,
         ) -> std::result::Result<Self::CloseLease, Self::Error> {
+            self.close_preparations
+                .lock()
+                .unwrap()
+                .push(request.agent.identity.id.clone());
             if std::mem::take(&mut *self.fail_prepare_close.lock().unwrap()) {
                 Err(TestError("prepare close failed".to_string()))
             } else {
@@ -833,18 +867,6 @@ mod tests {
             self.close_order.lock().unwrap().push(lease.clone());
             if std::mem::take(&mut *self.fail_commit_close.lock().unwrap()) {
                 Err(TestError("commit close failed".to_string()))
-            } else {
-                Ok(())
-            }
-        }
-
-        async fn rollback_close(
-            &self,
-            lease: Self::CloseLease,
-        ) -> std::result::Result<(), Self::Error> {
-            self.close_rollbacks.lock().unwrap().push(lease);
-            if std::mem::take(&mut *self.fail_rollback_close.lock().unwrap()) {
-                Err(TestError("rollback close failed".to_string()))
             } else {
                 Ok(())
             }
@@ -1219,6 +1241,20 @@ mod tests {
         })
         .await
         .expect("turn factory should receive the expected inputs");
+    }
+
+    async fn wait_for_close_result(handle: &AgentRuntimeHandle, id: ThreadId) -> AgentSnapshot {
+        let mut changes = handle.subscribe_directory();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let snapshot = handle.directory_snapshot().agents.into_iter().find(|snapshot| snapshot.identity.id == id).expect("registered closing agent");
+                if matches!(&snapshot.state, AgentState::Closed(_))
+                    || matches!(&snapshot.state, AgentState::Closing(state) if state.error().is_some()) {
+                    return snapshot;
+                }
+                changes.changed().await.unwrap();
+            }
+        }).await.expect("close must produce a terminal state or explicit failure")
     }
 
     async fn wait_for_idle(handle: &AgentRuntimeHandle, agent_id: ThreadId) -> AgentWaitResult {
@@ -3165,7 +3201,8 @@ mod tests {
             .identity
             .id;
 
-        let snapshot = handle.close(root.clone()).await.unwrap();
+        handle.close(root.clone()).await.unwrap();
+        let snapshot = wait_for_close_result(&handle, root.clone()).await;
 
         assert!(matches!(snapshot.state, AgentState::Closed(_)));
         assert_eq!(
@@ -3258,9 +3295,18 @@ mod tests {
             .await
             .unwrap();
 
-        let snapshot = handle.retire(root.clone()).await.unwrap();
-
-        assert!(matches!(snapshot.state, AgentState::Closed(_)));
+        let mut directory = handle.subscribe_directory();
+        handle.retire(root.clone()).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                if handle.list().await.unwrap().is_empty() {
+                    break;
+                }
+                directory.changed().await.unwrap();
+            }
+        })
+        .await
+        .expect("retired tree is closed and evicted");
         assert!(handle.list().await.unwrap().is_empty());
         assert!(handle.directory_snapshot().agents.is_empty());
         assert!(matches!(
@@ -3553,7 +3599,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn close_prepare_failure_keeps_agent_active() {
+    async fn close_prepare_failure_keeps_retryable_closing_state() {
         let repository = TestRepository::empty();
         let host = TestHost::new(repository.clone(), FactoryMode::Fail);
         let runtime = AgentRuntime::start(host.clone(), test_options())
@@ -3564,22 +3610,27 @@ mod tests {
         handle.register(registration("root", "chat")).await.unwrap();
         host.lifecycle.fail_next_prepare_close();
 
-        let error = handle.close(root.clone()).await.unwrap_err();
+        handle.close(root.clone()).await.unwrap();
+        let failed = wait_for_close_result(&handle, root.clone()).await;
+        let AgentState::Closing(state) = &failed.state else {
+            panic!("failed close must remain Closing")
+        };
+        let error = state.error().expect("closing error");
 
-        assert!(error.to_string().contains("prepare close failed"));
+        assert!(error.message.contains("prepare close failed"));
         assert!(matches!(
             handle.snapshot(root.clone()).await.unwrap().state,
-            AgentState::Idle(_)
+            AgentState::Closing(_)
         ));
         assert!(matches!(
             repository.state(&root).snapshot.state,
-            AgentState::Idle(_)
+            AgentState::Closing(_)
         ));
         runtime.shutdown().await.unwrap();
     }
 
     #[tokio::test]
-    async fn closed_agent_accepts_explicit_workspace_cleanup_without_state_transition() {
+    async fn closed_agent_completes_explicit_workspace_cleanup() {
         let repository = TestRepository::empty();
         let host = TestHost::new(repository, FactoryMode::Fail);
         let runtime = AgentRuntime::start(host.clone(), test_options())
@@ -3589,8 +3640,9 @@ mod tests {
         let root = ThreadId::new("root").unwrap();
         handle.register(registration("root", "chat")).await.unwrap();
 
-        let closed = handle.close(root.clone()).await.unwrap();
-        let cleaned = handle
+        handle.close(root.clone()).await.unwrap();
+        let closed = wait_for_close_result(&handle, root.clone()).await;
+        handle
             .close_with_disposition(
                 root.clone(),
                 pl_protocol::AgentWorkspaceDisposition::Cleanup,
@@ -3598,7 +3650,9 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(cleaned, closed);
+        let cleaned = wait_for_close_result(&handle, root.clone()).await;
+        assert_eq!(cleaned.state, closed.state);
+        assert!(cleaned.revision > closed.revision);
         assert_eq!(
             host.lifecycle.close_order.lock().unwrap().as_slice(),
             &[root.clone(), root]
@@ -3617,13 +3671,13 @@ mod tests {
         let root = ThreadId::new("root").unwrap();
         handle.register(registration("root", "chat")).await.unwrap();
         repository.pause_persistence();
-        let closed = handle.close(root.clone()).await.unwrap();
+        handle.close(root.clone()).await.unwrap();
+        let closed = wait_for_close_result(&handle, root.clone()).await;
         assert!(matches!(closed.state, AgentState::Closed(_)));
         assert_eq!(
             host.lifecycle.close_order.lock().unwrap().as_slice(),
             std::slice::from_ref(&root)
         );
-        assert!(host.lifecycle.close_rollbacks.lock().unwrap().is_empty());
         assert!(repository.pending_commit_count() > 0);
         repository.resume_persistence();
         assert_eq!(repository.state(&root).snapshot, closed);
@@ -3631,7 +3685,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn external_close_failure_rolls_back_and_restores_active_state() {
+    async fn external_close_failure_retries_the_original_lease() {
         let repository = TestRepository::empty();
         let host = TestHost::new(repository.clone(), FactoryMode::Fail);
         let runtime = AgentRuntime::start(host.clone(), test_options())
@@ -3642,52 +3696,33 @@ mod tests {
         handle.register(registration("root", "chat")).await.unwrap();
         host.lifecycle.fail_next_commit_close();
 
-        let error = handle.close(root.clone()).await.unwrap_err();
+        handle.close(root.clone()).await.unwrap();
+        let failed = wait_for_close_result(&handle, root.clone()).await;
+        let AgentState::Closing(state) = &failed.state else {
+            panic!("failed close must remain Closing")
+        };
+        let error = state.error().expect("closing error");
 
-        assert!(error.to_string().contains("commit close failed"));
+        assert!(error.message.contains("commit close failed"));
         assert!(matches!(
             handle.snapshot(root.clone()).await.unwrap().state,
-            AgentState::Idle(_)
+            AgentState::Closing(_)
         ));
         assert!(matches!(
             repository.state(&root).snapshot.state,
-            AgentState::Idle(_)
+            AgentState::Closing(_)
         ));
+        handle.close(root.clone()).await.unwrap();
+        let closed = wait_for_close_result(&handle, root.clone()).await;
+        assert!(matches!(closed.state, AgentState::Closed(_)));
         assert_eq!(
-            host.lifecycle.close_rollbacks.lock().unwrap().as_slice(),
-            &[root]
+            host.lifecycle.close_preparations.lock().unwrap().as_slice(),
+            std::slice::from_ref(&root)
         );
-        runtime.shutdown().await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn failed_close_compensation_faults_agent_durably() {
-        let repository = TestRepository::empty();
-        let host = TestHost::new(repository.clone(), FactoryMode::Fail);
-        let runtime = AgentRuntime::start(host.clone(), test_options())
-            .await
-            .unwrap();
-        let handle = runtime.handle();
-        let root = ThreadId::new("root").unwrap();
-        handle.register(registration("root", "chat")).await.unwrap();
-        host.lifecycle.fail_next_commit_close();
-        host.lifecycle.fail_next_rollback_close();
-
-        let error = handle.close(root.clone()).await.unwrap_err();
-
-        assert!(error.to_string().contains("close rollback failed"));
-        assert!(matches!(
-            handle.snapshot(root.clone()).await.unwrap().state,
-            AgentState::Faulted(_)
-        ));
-        assert!(matches!(
-            repository.state(&root).snapshot.state,
-            AgentState::Faulted(_)
-        ));
-        assert!(matches!(
-            handle.wait_until_idle(root).await.unwrap().snapshot.state,
-            AgentState::Faulted(_)
-        ));
+        assert_eq!(
+            host.lifecycle.close_order.lock().unwrap().as_slice(),
+            &[root.clone(), root]
+        );
         runtime.shutdown().await.unwrap();
     }
 
@@ -3707,7 +3742,8 @@ mod tests {
             .await
             .unwrap();
 
-        let snapshot = handle.close(root.clone()).await.unwrap();
+        handle.close(root.clone()).await.unwrap();
+        let snapshot = wait_for_close_result(&handle, root.clone()).await;
 
         assert!(matches!(snapshot.state, AgentState::Closed(_)));
         assert!(matches!(

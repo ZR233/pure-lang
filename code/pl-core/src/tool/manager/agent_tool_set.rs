@@ -150,6 +150,19 @@ impl AgentToolSet {
             .is_some()
     }
 
+    /// Releases every set-owned registration without running executor destructors under its lock.
+    pub fn clear(&self) {
+        let registrations = {
+            let mut owned = self
+                .inner
+                .owned_registrations
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            std::mem::take(&mut *owned)
+        };
+        drop(registrations);
+    }
+
     /// Freezes the exact definitions and executors used by one model step.
     ///
     /// Agent-local bindings shadow inherited global bindings by visible name. Both

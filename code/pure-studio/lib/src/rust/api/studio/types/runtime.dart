@@ -188,18 +188,24 @@ class BridgeClosedAgent {
 }
 
 class BridgeClosingAgent {
-  const BridgeClosingAgent();
+  final String? turnId;
+  final BridgeStateError? error;
+
+  const BridgeClosingAgent({this.turnId, this.error});
 
   static Future<BridgeClosingAgent> default_() => RustLib.instance.api
       .crateApiStudioTypesRuntimeBridgeClosingAgentDefault();
 
   @override
-  int get hashCode => 0;
+  int get hashCode => turnId.hashCode ^ error.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is BridgeClosingAgent && runtimeType == other.runtimeType;
+      other is BridgeClosingAgent &&
+          runtimeType == other.runtimeType &&
+          turnId == other.turnId &&
+          error == other.error;
 }
 
 class BridgeDegradedResource {

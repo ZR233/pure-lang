@@ -4,7 +4,7 @@ use pl_protocol::PureError;
 use serde_json::{Value, json};
 
 use super::*;
-use crate::tool::{DynTool, StaticTool, ToolBudgetTiming, ToolPolicy};
+use crate::tool::{DynTool, StaticTool, ToolPolicy};
 use crate::{AgentRoleId, ToolCallContext, ToolEffect, ToolInput, ToolResult, ToolSessionRuntime};
 
 const TOOL_SPAWN_AGENT: &str = "spawn_agent";
@@ -13,7 +13,6 @@ const TOOL_REPORT_PROGRESS: &str = "report_progress";
 const TOOL_SEND_MESSAGE: &str = "send_message";
 const TOOL_INTERRUPT_AGENT: &str = "interrupt_agent";
 const TOOL_LIST_AGENTS: &str = "list_agents";
-const TOOL_WAIT_AGENTS: &str = "wait_agents";
 const TOOL_READ_AGENT_SESSION: &str = "read_agent_session";
 const TOOL_READ_AGENT_SUBMISSIONS: &str = "read_agent_submissions";
 const TOOL_CLOSE_AGENT: &str = "close_agent";
@@ -27,9 +26,10 @@ const MAX_SUBMISSION_LIMIT: usize = 50;
 const MAX_SUBMISSION_OUTPUT_BYTES: usize = 64 * 1024;
 
 mod args;
+mod event_source;
 mod session;
 mod summary;
-mod support;
+pub(super) mod support;
 
 use crate::tool::tool_error;
 use args::*;
@@ -38,7 +38,7 @@ use support::{
     close_schema, filter_visible, fork_session, json_output, json_output_with_budget,
     object_schema, parse_agent_id, parse_input, progress_schema, resolve_profile_writable_paths,
     send_message_schema, session_schema, session_target_visible, spawn_schema, submissions_schema,
-    target_schema, wait_schema,
+    target_schema,
 };
 
 /// 为一次 turn 构造由 `AgentRuntimeHandle` 驱动的协作工具。
@@ -62,6 +62,16 @@ pub struct AgentCollaborationToolConfig {
 }
 
 impl AgentCollaborationTools {
+    /// Registers collaboration wakeups without exposing a second model waiting tool.
+    pub fn event_source(&self) -> Option<impl crate::session_runtime::SessionEventSource + use<>> {
+        (!matches!(self.policy.list_targets, AgentTargetSelector::None)).then(|| {
+            event_source::AgentEventSource {
+                runtime: self.runtime.clone(),
+                caller: self.caller.clone(),
+                selector: self.policy.list_targets.clone(),
+            }
+        })
+    }
     pub fn new(
         runtime: AgentRuntimeHandle,
         caller: ThreadId,
@@ -96,7 +106,6 @@ impl AgentCollaborationTools {
                 | CollaborationToolKind::SendMessage
                 | CollaborationToolKind::Interrupt
                 | CollaborationToolKind::List
-                | CollaborationToolKind::Wait
                 | CollaborationToolKind::ReadSession
                 | CollaborationToolKind::ReadSubmissions
                 | CollaborationToolKind::Close => controller,
@@ -125,21 +134,19 @@ enum CollaborationToolKind {
     SendMessage,
     Interrupt,
     List,
-    Wait,
     ReadSession,
     ReadSubmissions,
     Close,
 }
 
 impl CollaborationToolKind {
-    const ALL: [Self; 10] = [
+    const ALL: [Self; 9] = [
         Self::Spawn,
         Self::ListProfiles,
         Self::ReportProgress,
         Self::SendMessage,
         Self::Interrupt,
         Self::List,
-        Self::Wait,
         Self::ReadSession,
         Self::ReadSubmissions,
         Self::Close,
@@ -153,7 +160,6 @@ impl CollaborationToolKind {
             Self::SendMessage => TOOL_SEND_MESSAGE,
             Self::Interrupt => TOOL_INTERRUPT_AGENT,
             Self::List => TOOL_LIST_AGENTS,
-            Self::Wait => TOOL_WAIT_AGENTS,
             Self::ReadSession => TOOL_READ_AGENT_SESSION,
             Self::ReadSubmissions => TOOL_READ_AGENT_SUBMISSIONS,
             Self::Close => TOOL_CLOSE_AGENT,
@@ -178,9 +184,6 @@ impl CollaborationToolKind {
             Self::List => {
                 "List full compact canonical snapshots for visible agents when discovering targets, reconciling after restart, or diagnosing stalled work."
             }
-            Self::Wait => {
-                "Wait until a target reports progress, requests interaction, reaches its budget, or finishes a turn, then return only the latest changed agent messages. A budgetLimited result requires session inspection and explicit continuation. Consume this delta directly instead of calling list_agents to refresh."
-            }
             Self::ReadSession => {
                 "Read a complete durable agent Timeline with stable keyset pagination. Defaults to the newest 20 text items; use order and detail to inspect the full execution history. This diagnostic does not replace durable submissions."
             }
@@ -188,23 +191,8 @@ impl CollaborationToolKind {
                 "Read the durable stage submission history for an agent (full content, paginated, not truncated; works after the target has closed)."
             }
             Self::Close => {
-                "Close an accessible child agent. Worktree resources are preserved by default and are cleaned only by explicit workspaceDisposition=cleanup after integration."
+                "Begin closing an accessible child agent and return its canonical state. Closing is not completed cleanup: use wait for the agent's closed event or inspect a cleanup error. Worktrees are preserved by default; workspaceDisposition=cleanup requires completed integration."
             }
-        }
-    }
-
-    fn budget_timing(self) -> ToolBudgetTiming {
-        match self {
-            Self::Wait => ToolBudgetTiming::PauseWhenOnlyScheduledTool,
-            Self::Spawn
-            | Self::ListProfiles
-            | Self::ReportProgress
-            | Self::SendMessage
-            | Self::Interrupt
-            | Self::List
-            | Self::ReadSession
-            | Self::ReadSubmissions
-            | Self::Close => ToolBudgetTiming::Count,
         }
     }
 }
@@ -241,7 +229,6 @@ impl StaticTool for CollaborationTool {
                 "Agent id whose current turn should be interrupted.",
             ),
             CollaborationToolKind::List => object_schema(Vec::new()),
-            CollaborationToolKind::Wait => wait_schema(&self.policy.list_targets),
             CollaborationToolKind::ReadSession => session_schema(&self.policy.list_targets),
             CollaborationToolKind::ReadSubmissions => submissions_schema(&self.policy.list_targets),
             CollaborationToolKind::Close => close_schema(&self.policy.close_targets),
@@ -249,9 +236,7 @@ impl StaticTool for CollaborationTool {
     }
 
     fn policy(&self) -> ToolPolicy {
-        let policy = ToolPolicy::default()
-            .with_effect(ToolEffect::AgentControl)
-            .with_budget_timing(self.kind.budget_timing());
+        let policy = ToolPolicy::control().with_effect(ToolEffect::AgentControl);
         if matches!(
             self.kind,
             CollaborationToolKind::SendMessage
@@ -281,7 +266,6 @@ impl StaticTool for CollaborationTool {
                 CollaborationToolKind::SendMessage => self.send_message(input).await,
                 CollaborationToolKind::Interrupt => self.interrupt(input).await,
                 CollaborationToolKind::List => self.list(input).await,
-                CollaborationToolKind::Wait => self.wait(input, context).await,
                 CollaborationToolKind::ReadSession => self.read_session(input).await,
                 CollaborationToolKind::ReadSubmissions => self.read_submissions(input).await,
                 CollaborationToolKind::Close => self.close(input).await,
@@ -326,14 +310,8 @@ impl CollaborationTool {
             fork_session(&self.session_runtime.parent_session(), args.fork_turns)?;
         child_session.replace_agent_profile(Some(profile.clone()));
         let session = ThreadContextState {
-            submissions: Default::default(),
-            metadata: crate::ThreadContextMetadata::default(),
             session: child_session,
-            usage: pl_protocol::InferenceTokenUsage::default(),
-            billing_by_turn: std::collections::BTreeMap::new(),
-            last_context_tokens: None,
-            trace_sequence: 0,
-            thread_revision: 0,
+            ..ThreadContextState::empty()
         };
         let mut metadata = match args.metadata {
             Value::Object(metadata) => metadata,
@@ -511,79 +489,6 @@ impl CollaborationTool {
         json_output(json!({ "agents": agents }))
     }
 
-    async fn wait(
-        &self,
-        input: ToolInput,
-        context: ToolCallContext,
-    ) -> Result<ToolResult, PureError> {
-        let args: WaitArgs = parse_input(TOOL_WAIT_AGENTS, input.arguments)?;
-        let snapshots = self
-            .runtime
-            .list()
-            .await
-            .map_err(|error| tool_error(TOOL_WAIT_AGENTS, error.to_string()))?;
-        let visible = filter_visible(&snapshots, &self.caller, &self.policy.list_targets);
-        let targets = match args.targets {
-            Some(targets) => {
-                let targets = targets
-                    .into_iter()
-                    .map(|target| parse_agent_id(TOOL_WAIT_AGENTS, target))
-                    .collect::<Result<Vec<_>, _>>()?;
-                for target in &targets {
-                    if !visible
-                        .iter()
-                        .any(|snapshot| &snapshot.identity.id == target)
-                    {
-                        return Err(tool_error(
-                            TOOL_WAIT_AGENTS,
-                            format!("agent `{target}` is not accessible for this turn"),
-                        ));
-                    }
-                }
-                targets
-            }
-            None => visible
-                .iter()
-                .filter(|snapshot| snapshot.identity.parent_id.as_ref() == Some(&self.caller))
-                .map(|snapshot| snapshot.identity.id.clone())
-                .collect(),
-        };
-        if targets.is_empty() {
-            return Err(tool_error(
-                TOOL_WAIT_AGENTS,
-                "no visible target agents to wait for".to_string(),
-            ));
-        }
-
-        let wait = self.runtime.wait_agents(targets);
-        let result = match context.cancellation_token() {
-            Some(token) => {
-                tokio::select! {
-                    result = wait => result,
-                    _ = token.cancelled() => {
-                        return Err(tool_error(
-                            TOOL_WAIT_AGENTS,
-                            "wait cancelled with the current turn".to_string(),
-                        ));
-                    }
-                }
-            }
-            None => wait.await,
-        }
-        .map_err(|error| tool_error(TOOL_WAIT_AGENTS, error.to_string()))?;
-        let messages = result
-            .messages
-            .iter()
-            .map(|message| compact_wait_message(message, &snapshots))
-            .collect::<Vec<_>>();
-        let guidance = wait_guidance(result.reason);
-        json_output(json!({
-            "reason": result.reason,
-            "messages": messages,
-            "guidance": guidance,
-        }))
-    }
-
     async fn read_session(&self, input: ToolInput) -> Result<ToolResult, PureError> {
         let args: SessionArgs = parse_input(TOOL_READ_AGENT_SESSION, input.arguments)?;
         let target = parse_agent_id(TOOL_READ_AGENT_SESSION, args.target)?;
@@ -701,28 +606,6 @@ mod tests {
             CollaborationToolKind::ReportProgress
                 .description()
                 .contains("never creates a completion")
-        );
-    }
-
-    #[test]
-    fn only_wait_agents_pauses_active_wall_clock() {
-        for kind in CollaborationToolKind::ALL {
-            let expected = if matches!(kind, CollaborationToolKind::Wait) {
-                ToolBudgetTiming::PauseWhenOnlyScheduledTool
-            } else {
-                ToolBudgetTiming::Count
-            };
-            assert_eq!(kind.budget_timing(), expected);
-        }
-        assert!(
-            CollaborationToolKind::Wait
-                .description()
-                .contains("latest changed agent messages")
-        );
-        assert!(
-            CollaborationToolKind::List
-                .description()
-                .contains("discovering targets")
         );
     }
 

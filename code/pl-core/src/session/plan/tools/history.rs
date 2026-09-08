@@ -31,7 +31,9 @@ impl StaticTool for PlanHistoryTool {
     }
 
     fn policy(&self) -> ToolPolicy {
-        ToolPolicy::read_only().with_parallel_tool_calls()
+        ToolPolicy::control()
+            .with_effect(crate::ToolEffect::Read)
+            .with_parallel_tool_calls()
     }
 
     fn execute(

@@ -1,3 +1,4 @@
+#[cfg(not(target_os = "linux"))]
 use tokio::process::Command;
 
 use crate::execution_environment::{ExecutionEnvironment, ShellDialect};
@@ -5,6 +6,7 @@ use crate::execution_environment::{ExecutionEnvironment, ShellDialect};
 const POWERSHELL_UTF8_OUTPUT_PREFIX: &str =
     "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;\n";
 
+#[cfg(not(target_os = "linux"))]
 pub(crate) fn command_for_environment(environment: &ExecutionEnvironment, script: &str) -> Command {
     let argv = argv_for_environment(environment, script);
     let mut command = Command::new(&argv[0]);

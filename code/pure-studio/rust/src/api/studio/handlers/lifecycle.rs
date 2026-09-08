@@ -49,8 +49,8 @@ pub async fn shutdown_runtime() -> Result<RuntimeSnapshot, BridgeError> {
         );
     } else {
         tracing::info!("Studio runtime shutdown completed");
+        crate::diagnostics::shutdown();
     }
-    crate::diagnostics::shutdown();
     Ok(runtime_snapshot(shutdown_result?))
 }
 

@@ -182,6 +182,10 @@
   cargo xtask verify-gui
   ```
 
+- Linux 上运行未启用 `embedded-remote-helpers` 的 Studio/Server 或工作区测试前，先执行
+  `cargo install --path code/pl-remote-helper --locked`，确保同一生产进程 worker 位于 PATH。
+  桌面 xtask 构建会嵌入 worker；两种宿主均不使用裸 shell 后备路径。
+
 - 不默认启用 `--all-features`：`live-tests` 等 feature 依赖外部服务与有效
   API key，需要时以 `cargo test -p pl-core --features live-tests` 等显式
   opt-in 执行，CI 与本地默认检查都不包含。

@@ -62,8 +62,10 @@ where
     let budget_refresh = context.budget_refresh.clone();
     let is_child = context.snapshot.identity.parent_id.is_some();
     let mut session = context.session.clone();
+    let session_runtime = context.session_runtime.clone();
     let (result, session_commit) = match host.turn_factory().prepare_turn(context).await {
         Ok(mut prepared) => {
+            prepared.engine.bind_session_runtime(&session_runtime);
             prepared.request.user_presentation = input_presentation;
             let prepared = prepared.with_runtime_context(
                 &turn_id,
@@ -275,13 +277,23 @@ where
         .and_then(|result| result.trace_events.iter().map(|event| event.sequence).max())
         .map(|sequence| sequence.saturating_add(1))
         .unwrap_or(initial_trace_sequence);
+    let replace_session = result.as_ref().is_ok_and(|result| {
+        matches!(
+            &result.outcome,
+            TurnOutcome::Completed(_) | TurnOutcome::BudgetLimited(_)
+        )
+    });
     TurnCompletion {
         turn_id,
         identity,
         start_revision,
         session: match session_commit {
-            AgentSessionCommitPolicy::Persist => TurnSessionDisposition::Replace(session),
-            AgentSessionCommitPolicy::DiscardTurn => TurnSessionDisposition::Preserve,
+            AgentSessionCommitPolicy::Persist if replace_session => {
+                TurnSessionDisposition::Replace(session)
+            }
+            AgentSessionCommitPolicy::Persist | AgentSessionCommitPolicy::DiscardTurn => {
+                TurnSessionDisposition::Preserve
+            }
         },
         worker_outcome: result.into(),
         next_trace_sequence,

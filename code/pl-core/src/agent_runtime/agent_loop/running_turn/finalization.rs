@@ -1,3 +1,4 @@
+use futures::FutureExt;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -32,7 +33,6 @@ pub(in crate::agent_runtime::agent_loop) struct RunningTurn {
     pub(in crate::agent_runtime::agent_loop) settled: oneshot::Receiver<()>,
     pub(in crate::agent_runtime::agent_loop) cancellation_state: RunningTurnCancellation,
     pub(in crate::agent_runtime::agent_loop) activity: AgentActivityUpdate,
-    pub(in crate::agent_runtime::agent_loop) checkpoint_sequence: u64,
     pub(in crate::agent_runtime::agent_loop) steer_sender:
         mpsc::UnboundedSender<super::super::DurableMailboxEnvelope>,
     pub(in crate::agent_runtime::agent_loop) budget_refresh: super::super::TurnBudgetRefreshHandle,
@@ -72,7 +72,10 @@ impl RunningTurn {
         }
     }
 
-    fn request_cancellation(&mut self, cause: pl_protocol::TurnCancellationCause) {
+    pub(in crate::agent_runtime::agent_loop) fn request_cancellation(
+        &mut self,
+        cause: pl_protocol::TurnCancellationCause,
+    ) {
         self.cancellation_state = RunningTurnCancellation::Requested { cause };
     }
 }
@@ -107,6 +110,7 @@ where
             return;
         }
         let mut next = self.state.clone();
+        next.session.checkpoints = Default::default();
         let Some(mut input) = next.pending_inputs.pop_front() else {
             return;
         };
@@ -182,6 +186,7 @@ where
         let (budget_refresh, budget_refresh_receiver) = super::super::turn_budget_refresh_channel();
         let thread_id = self.state.snapshot.identity.id.clone();
         let context = AgentTurnPreparationContext {
+            session_runtime: self.session_runtime.handle.clone(),
             snapshot: self.state.snapshot.clone(),
             turn_id: input.turn_id.clone(),
             thread_id: input.thread_id.clone(),
@@ -258,7 +263,6 @@ where
             settled,
             cancellation_state: RunningTurnCancellation::Open,
             activity: AgentActivityUpdate::Running,
-            checkpoint_sequence: 0,
             steer_sender,
             budget_refresh,
             projection_failure: None,
@@ -274,24 +278,27 @@ where
                 self.state.snapshot.identity.id.clone(),
             ));
         };
-        if active.is_cancelling() {
+        let closing = matches!(self.state.snapshot.state, AgentState::Closing(_));
+        if active.is_cancelling() && !closing {
             return Ok(());
         }
         active.request_cancellation(cause.clone());
         active.cancellation.cancel();
-        let mut next = self.state.clone();
-        next.snapshot
-            .transition(AgentCommand::Cancel {
-                turn_id: active.turn_id.clone(),
-            })
-            .map_err(|error| AgentRuntimeError::InvalidInput(error.to_string()))?;
-        self.commit_transition(
-            super::super::persist::TransitionCommit::new(next),
-            |snapshot| AgentRuntimeEventKind::StateChanged {
-                snapshot: Box::new(snapshot),
-            },
-        )
-        .await?;
+        if !closing {
+            let mut next = self.state.clone();
+            next.snapshot
+                .transition(AgentCommand::Cancel {
+                    turn_id: active.turn_id.clone(),
+                })
+                .map_err(|error| AgentRuntimeError::InvalidInput(error.to_string()))?;
+            self.commit_transition(
+                super::super::persist::TransitionCommit::new(next),
+                |snapshot| AgentRuntimeEventKind::StateChanged {
+                    snapshot: Box::new(snapshot),
+                },
+            )
+            .await?;
+        }
 
         let grace = self.cancel_grace.min(Duration::from_secs(1));
         let deadline = tokio::time::sleep(grace);
@@ -332,6 +339,7 @@ where
             .active
             .take()
             .expect("running turn must remain until cancellation is committed");
+        self.release_turn_deliveries(Some(&active.turn_id)).await?;
         let mut outcome = turn_outcome(
             active.turn_id.clone(),
             active.thread_id,
@@ -363,9 +371,13 @@ where
         next.active_input = None;
         next.refresh_mailbox_snapshot();
         let next_turn_id = next.triggering_turn_id();
-        next.snapshot
-            .transition(AgentCommand::Settle { next_turn_id })
-            .map_err(|error| AgentRuntimeError::InvalidInput(error.to_string()))?;
+        if let AgentState::Closing(state) = &mut next.snapshot.state {
+            state.clear_turn();
+        } else {
+            next.snapshot
+                .transition(AgentCommand::Settle { next_turn_id })
+                .map_err(|error| AgentRuntimeError::InvalidInput(error.to_string()))?;
+        }
         next.snapshot.last_turn = Some(outcome.clone());
         self.commit_transition(
             super::super::persist::TransitionCommit::new(next),
@@ -376,7 +388,7 @@ where
         )
         .await?;
         if self.dispatch_enabled && self.state.has_triggering_input() {
-            self.begin_next_turn().await;
+            self.begin_next_turn().boxed().await;
         }
         Ok(())
     }

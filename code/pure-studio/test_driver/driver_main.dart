@@ -77,10 +77,13 @@ Future<String> _handleDriverData(String? message) async {
       await _container.read(studioControllerProvider.future);
       _publishSidebarDirectory();
       return jsonEncode({'prepared': true});
-    case 'shutdown':
-      // 兼容旧 harness：启动关机并等待阶段序列完成（含落库排空）。
-      await (_shutdownTask ??= _runShutdown());
-      return jsonEncode({'shutdown': 'completed'});
+    case 'shutdown' || 'shutdown-await':
+      try {
+        await (_shutdownTask ??= _runShutdown());
+        return jsonEncode({'shutdown': 'completed'});
+      } on Object catch (error) {
+        return jsonEncode({'shutdown': 'failed', 'error': error.toString()});
+      }
     case final String seed when seed.startsWith('seed-threads:'):
       // Fixture 只属于专用 Driver demo harness，不穿过生产 FRB API。
       final count = int.tryParse(seed.substring('seed-threads:'.length)) ?? 0;
@@ -97,9 +100,6 @@ Future<String> _handleDriverData(String? message) async {
       // 触发关机但不等待；验收脚本可在阶段界面显示期间截图/快照。
       _shutdownTask ??= _runShutdown();
       return jsonEncode({'shutdown': 'started'});
-    case 'shutdown-await':
-      await (_shutdownTask ??= _runShutdown());
-      return jsonEncode({'shutdown': 'completed'});
     default:
       return jsonEncode({
         'error': 'unsupported driver request',
@@ -117,10 +117,15 @@ void _publishSidebarDirectory() {
   StudioDriverState.publishState(state);
 }
 
-Future<void> _runShutdown() {
+Future<void> _runShutdown() async {
   final api = _container.read(studioApiProvider);
   final progress = _container.read(
     studioShutdownProgressStateProvider.notifier,
   );
-  return runStudioShutdown(api, progress.update);
+  try {
+    await runStudioShutdown(api, progress.update);
+  } on Object {
+    _shutdownTask = null;
+    rethrow;
+  }
 }

@@ -319,6 +319,7 @@ int _timelineRowRenderVersion(TimelineEntry part) {
     part.updatedAt?.millisecondsSinceEpoch,
     part.error,
     tool?.arguments,
+    tool?.taskId,
     tool?.result,
     tool?.exitCode,
     tool?.timedOut,
@@ -327,9 +328,21 @@ int _timelineRowRenderVersion(TimelineEntry part) {
 }
 
 bool _isActiveToolStatus(String status) {
-  return const {'started', 'streaming', 'approved', 'running'}.contains(status);
+  return const {
+    'queued',
+    'started',
+    'streaming',
+    'approved',
+    'running',
+    'cancelling',
+  }.contains(status);
 }
 
 bool _isIssueToolStatus(String status) {
-  return const {'failed', 'denied', 'cancelled'}.contains(status);
+  return const {
+    'failed',
+    'denied',
+    'cancelled',
+    'interrupted',
+  }.contains(status);
 }

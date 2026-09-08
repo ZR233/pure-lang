@@ -111,10 +111,6 @@ impl CommandProcessLifecycle {
         matches!(self, Self::Final(_))
     }
 
-    pub(super) fn has_live_child(&self) -> bool {
-        matches!(self, Self::Running(_) | Self::Terminating(_))
-    }
-
     pub(super) fn can_accept_input(&self) -> bool {
         matches!(self, Self::Running(_))
     }
@@ -164,10 +160,6 @@ impl CommandProcessState {
 
     pub(super) fn is_final(&self) -> bool {
         self.lifecycle.is_final()
-    }
-
-    pub(super) fn has_live_child(&self) -> bool {
-        self.lifecycle.has_live_child()
     }
 
     pub(super) fn apply_transition(&mut self, transition: CommandProcessTransition) {
@@ -365,7 +357,7 @@ mod tests {
     }
 
     #[test]
-    fn draining_output_message_only_suggests_polling() {
+    fn draining_output_message_only_suggests_unified_wait() {
         let mut state = running_state();
 
         state.apply_transition(CommandProcessTransition::ProcessExited { exit_code: Some(0) });
@@ -373,12 +365,12 @@ mod tests {
         let message = message_for_state(&state, Some("proc-1"), std::path::Path::new("output.log"));
 
         assert!(message.contains("draining remaining output"));
-        assert!(message.contains("empty chars"));
+        assert!(message.contains("Use wait for completion"));
         assert!(!message.contains("send input"));
     }
 
     #[test]
-    fn terminating_message_only_suggests_polling() {
+    fn terminating_message_only_suggests_unified_wait() {
         let mut timed_out = running_state();
         timed_out.apply_transition(CommandProcessTransition::TimeOut);
         let timeout_message = message_for_state(
@@ -389,7 +381,7 @@ mod tests {
 
         assert!(timeout_message.contains("timed out"));
         assert!(timeout_message.contains("termination is in progress"));
-        assert!(timeout_message.contains("empty chars"));
+        assert!(timeout_message.contains("Use wait for completion"));
         assert!(!timeout_message.contains("send input"));
 
         let mut interrupted = running_state();
@@ -402,7 +394,7 @@ mod tests {
 
         assert!(interrupted_message.contains("was cancelled"));
         assert!(interrupted_message.contains("termination is in progress"));
-        assert!(interrupted_message.contains("empty chars"));
+        assert!(interrupted_message.contains("Use wait for completion"));
         assert!(!interrupted_message.contains("send input"));
     }
 }

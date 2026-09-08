@@ -71,12 +71,6 @@ pub(super) struct CloseArgs {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct WaitArgs {
-    pub(super) targets: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct SessionArgs {
     pub(super) target: String,

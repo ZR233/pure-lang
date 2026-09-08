@@ -45,7 +45,9 @@ impl StudioRuntime {
             return Err(error);
         }
         if let Some(password) = password {
-            self.ssh_manager.lease_password(&profile.id, password).await;
+            self.ssh_manager
+                .lease_password(&profile.id, password)
+                .await?;
         }
         Ok(profile)
     }

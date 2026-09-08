@@ -1,5 +1,5 @@
 use pl_core::{
-    AgentAccessPolicy, AgentExecutionPolicy, AgentRoleId, AgentSnapshot, AgentTargetSelector,
+    AgentAccessPolicy, AgentExecutionPolicy, AgentIdentity, AgentRoleId, AgentTargetSelector,
     ToolEffect, ToolEffectSet, TurnFinalizationPolicy,
 };
 
@@ -8,10 +8,10 @@ use pl_core::{
 /// 注册图只决定 root 是否获得 `workflow_*` 查询/变更工具；root 仍统一以
 /// `complete` 记录完成事实并结束 turn。文件、命令、Git 和 Agent 能力始终保持可用。
 pub(super) fn studio_execution_policy(
-    snapshot: &AgentSnapshot,
+    identity: &AgentIdentity,
     profiles: &[pl_core::AgentProfileSnapshot],
 ) -> AgentExecutionPolicy {
-    let collaboration = if snapshot.identity.parent_id.is_none() {
+    let collaboration = if identity.parent_id.is_none() {
         AgentAccessPolicy {
             spawn_roles: profiles
                 .iter()
@@ -33,7 +33,7 @@ pub(super) fn studio_execution_policy(
             ToolEffect::BranchControl,
         ]),
         collaboration,
-        finalization: if snapshot.identity.parent_id.is_none() {
+        finalization: if identity.parent_id.is_none() {
             TurnFinalizationPolicy::RequiredTool {
                 name: pl_core::TOOL_COMPLETE.to_string(),
             }
@@ -45,7 +45,7 @@ pub(super) fn studio_execution_policy(
 
 #[cfg(test)]
 mod tests {
-    use pl_core::{AgentIdentity, AgentState, ThreadId};
+    use pl_core::{AgentIdentity, AgentSnapshot, AgentState, ThreadId};
 
     use super::*;
 
@@ -61,7 +61,7 @@ mod tests {
         .into_iter()
         .map(profile)
         .collect::<Vec<_>>();
-        let policy = studio_execution_policy(&snapshot("planner", true), &profiles);
+        let policy = studio_execution_policy(&snapshot("planner", true).identity, &profiles);
         for effect in [
             ToolEffect::Read,
             ToolEffect::WorkspaceWrite,
@@ -96,7 +96,7 @@ mod tests {
 
     #[test]
     fn child_profiles_keep_direct_finalization() {
-        let policy = studio_execution_policy(&snapshot("explorer", false), &[]);
+        let policy = studio_execution_policy(&snapshot("explorer", false).identity, &[]);
         assert_eq!(policy.finalization, TurnFinalizationPolicy::Direct);
     }
 

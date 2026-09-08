@@ -73,14 +73,6 @@ impl StudioAgentHost {
             observer: StudioAgentCommitObserver::new(resources, product_events),
         }
     }
-
-    pub(super) async fn attach_runtime(&self, runtime: pl_core::AgentRuntimeHandle) {
-        self.observer.attach_runtime(runtime).await;
-    }
-
-    pub(super) async fn detach_runtime(&self) {
-        self.observer.detach_runtime().await;
-    }
 }
 
 impl AgentRuntimeHost for StudioAgentHost {

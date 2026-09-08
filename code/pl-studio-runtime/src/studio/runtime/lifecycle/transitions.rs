@@ -180,9 +180,9 @@ impl StudioRuntime {
                 .emit(crate::StudioShutdownProgress::StoppingMcp(
                     Default::default(),
                 ));
-            self.stop_mcp_startup_reconcile().await;
-            self.stop_mcp_health_watcher().await;
-            self.stop_lsp_state_watcher().await;
+            self.stop_mcp_startup_reconcile().await?;
+            self.stop_mcp_health_watcher().await?;
+            self.stop_lsp_state_watcher().await?;
             self.external_runtimes.mcp.shutdown().await;
             self.publish_mcp_stopped().await?;
             // 阶段 6：关闭 LSP。
@@ -192,6 +192,7 @@ impl StudioRuntime {
                 ));
             self.external_runtimes.lsp.shutdown().await;
             self.external_runtimes.lsp_state.stopped().await?;
+            self.ssh_manager.shutdown().await?;
             Ok::<_, anyhow::Error>(())
         }
         .await;

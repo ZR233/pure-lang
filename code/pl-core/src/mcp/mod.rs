@@ -65,7 +65,12 @@ pub(crate) mod test_support {
             core.agent_tools()
                 .install(ToolInstallGroup::direct(
                     ToolGroupId::new("mcp"),
-                    lease.agent_tools(None).expect("construct MCP tools"),
+                    lease
+                        .agent_tools(None)
+                        .expect("construct MCP tools")
+                        .into_iter()
+                        .map(crate::core::test_support::immediate_dispatch_tool)
+                        .collect(),
                 ))
                 .expect("install MCP tools");
             Self { runtime, closed }
@@ -426,7 +431,12 @@ pub(crate) mod test_support {
         tools
             .install(ToolInstallGroup::direct(
                 ToolGroupId::new("mcp"),
-                lease.agent_tools(None).expect("construct MCP tools"),
+                lease
+                    .agent_tools(None)
+                    .expect("construct MCP tools")
+                    .into_iter()
+                    .map(crate::core::test_support::immediate_dispatch_tool)
+                    .collect(),
             ))
             .expect("install MCP tools");
         let plan = tools.freeze();

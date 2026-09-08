@@ -115,8 +115,7 @@ impl LspHostBackend for RemoteWorkspaceHost {
             let stdin = process.take_stdin();
             let stdout = process.take_stdout();
             let stderr = process.take_stderr();
-            let commands = self.commands.clone();
-            let process_id = request.process_id;
+            let cancellation = process.cancellation();
             Ok(LspHostProcess::new(
                 stdin,
                 stdout,
@@ -132,7 +131,7 @@ impl LspHostBackend for RemoteWorkspaceHost {
                 },
                 move || {
                     async move {
-                        commands.terminate(&process_id, None).await;
+                        cancellation.cancel();
                     }
                     .boxed()
                 },

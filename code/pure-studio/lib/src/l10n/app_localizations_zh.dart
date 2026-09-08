@@ -749,6 +749,27 @@ class AppLocalizationsZh extends AppLocalizations {
   String get timelineToolTimedOut => '已超时';
 
   @override
+  String get agentDetailStatusClosing => '正在关闭';
+
+  @override
+  String get agentDetailStatusCleanupFailed => '清理失败';
+
+  @override
+  String timelineToolQueued(String name) {
+    return '$name 排队中';
+  }
+
+  @override
+  String timelineToolCancelling(String name) {
+    return '$name 正在取消';
+  }
+
+  @override
+  String timelineToolInterrupted(String name) {
+    return '$name 已中断';
+  }
+
+  @override
   String get timelineAgentSubagent => '子代理';
 
   @override

@@ -4,5 +4,5 @@
 - Absolute paths start at `/`; workspace-relative paths are usually safer for tool input. Do not use `..` to escape the workspace unless the user granted full-access and the task truly requires it.
 - Respect Unix permissions and symlinks. If a path crosses a symlink, the runtime checks the resolved target before workspace-only access is allowed.
 - Prefer `rg` for search when available, and use `find` for filesystem traversal only when needed.
-- For long-running processes, rely on returned processId and write_stdin polling. Use targeted `kill` commands only when a process was intentionally started by the task.
+- Commands return session task receipts. Use `wait` for completion, `write_stdin` with taskId only for nonempty input, and `cancel_tool_task` for cancellation. Do not launch duplicate commands or poll for completion.
 - When changing files, prefer file tools or apply_patch over shell redirection so edits remain reviewable and scoped.

@@ -458,7 +458,17 @@ _AgentStatusStyle _statusStyle(BuildContext context, StudioAgentState state) {
       backgroundColor: StudioColors.rose.withValues(alpha: 0.14),
       label: l10n.agentDetailStatusInterrupted,
     ),
-    ClosingStudioAgent() || ClosedStudioAgent() => _AgentStatusStyle(
+    ClosingStudioAgent(:final failure) => _AgentStatusStyle(
+      icon: failure == null
+          ? Icons.hourglass_top_rounded
+          : Icons.error_outline_rounded,
+      color: failure == null ? context.studioInkSoft : StudioColors.rose,
+      backgroundColor: context.studioPaper3,
+      label: failure == null
+          ? l10n.agentDetailStatusClosing
+          : l10n.agentDetailStatusCleanupFailed,
+    ),
+    ClosedStudioAgent() => _AgentStatusStyle(
       icon: Icons.power_settings_new_rounded,
       color: context.studioInkSoft,
       backgroundColor: context.studioPaper3,

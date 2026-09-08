@@ -6,7 +6,7 @@ use futures::FutureExt;
 
 use crate::McpRuntimeHandle;
 use crate::config::ConfigRuntime;
-use crate::studio::agent_host::{StudioAgentResources, StudioAgentRuntime, root_agent_id};
+use crate::studio::agent_host::{StudioAgentResources, root_agent_id};
 use crate::studio::records::ThreadRecord;
 use crate::studio::{
     InteractionService, ProductEventBus, StudioActiveTurn, StudioRuntimeState, StudioStore,
@@ -14,6 +14,7 @@ use crate::studio::{
 use pl_protocol::studio::StudioPromptInput;
 
 mod attachment_drafts;
+mod background_task;
 mod history;
 mod interaction_continuation;
 mod lifecycle;
@@ -32,6 +33,9 @@ mod state_query;
 mod thread_service;
 mod thread_title;
 mod updater;
+
+#[cfg(target_os = "linux")]
+pub(in crate::studio) use remote_helper::{LocalWorkerAsset, local_worker};
 
 pub(crate) use model_performance::ModelPerformanceOwner;
 pub(in crate::studio) use model_performance::{MODEL_PERFORMANCE_OWNER_ID, ModelPerformanceState};
@@ -148,17 +152,18 @@ pub struct StudioRuntime {
 struct StudioExternalRuntimes {
     mcp: McpRuntimeHandle,
     mcp_state: mcp_health::McpStateRuntime,
-    mcp_startup_reconcile: std::sync::Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
-    mcp_health_watcher: std::sync::Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    mcp_startup_reconcile: background_task::BackgroundTaskSlot,
+    mcp_health_watcher: background_task::BackgroundTaskSlot,
     lsp: pl_lsp::runtime::LspRuntimeRegistry,
     lsp_state: lsp_state::LspStateRuntime,
-    lsp_state_watcher: std::sync::Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    lsp_state_watcher: background_task::BackgroundTaskSlot,
 }
 
 #[derive(Clone)]
 struct StudioAgentFacility {
     worktrees: crate::studio::agent_host::worktree_lease::WorktreeLeaseOwner,
-    framework: std::sync::Arc<tokio::sync::Mutex<Option<std::sync::Arc<StudioAgentRuntime>>>>,
+    framework:
+        std::sync::Arc<tokio::sync::Mutex<Option<std::sync::Arc<lifecycle::FrameworkOwner>>>>,
     resources: StudioAgentResources,
     tool_manager: pl_core::ToolManager,
     interactions: InteractionService,
@@ -256,7 +261,14 @@ impl StudioRuntime {
     /// `AgentSnapshot.active_turn_id`。这里聚合整棵 agent tree 的活动 turn，
     /// 用于 idle 判断。UI 不消费此列表（它从 per-thread 流读取 busy 状态）。
     async fn derive_active_turns(&self) -> Result<Vec<StudioActiveTurn>> {
-        let Some(framework) = self.agent_facility.framework.lock().await.clone() else {
+        let Some(framework) = self
+            .agent_facility
+            .framework
+            .lock()
+            .await
+            .as_ref()
+            .and_then(|owner| owner.ready_runtime())
+        else {
             return Ok(Vec::new());
         };
         let runtime = framework.handle();
@@ -280,7 +292,14 @@ impl StudioRuntime {
     async fn close_project_agent_trees(&self, thread_ids: &[String]) -> Result<()> {
         // `.boxed()`：把 agent 关闭链的大 future 状态机放堆上，减小 studio
         // runtime 侧 async 帧，避免与 agent loop 帧叠加触发线程栈耗尽。
-        let Some(framework) = self.agent_facility.framework.lock().await.clone() else {
+        let Some(framework) = self
+            .agent_facility
+            .framework
+            .lock()
+            .await
+            .as_ref()
+            .and_then(|owner| owner.ready_runtime())
+        else {
             return Ok(());
         };
         let runtime = framework.handle();

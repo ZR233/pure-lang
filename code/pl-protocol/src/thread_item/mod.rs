@@ -146,6 +146,10 @@ impl ThreadItem {
     /// itself are left untouched; the latter is projected from the canonical
     /// [`crate::TurnOutcome`].
     pub fn fail_if_open(&mut self, failed_at: i64, error: String) -> bool {
+        if matches!(&self.state, ThreadItemState::Tool(tool) if tool.invocation().task_id().is_some())
+        {
+            return false;
+        }
         if self.state.is_terminal() {
             return false;
         }

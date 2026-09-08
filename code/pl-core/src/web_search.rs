@@ -100,6 +100,19 @@ impl WebSearchPlan {
     ///
     /// backend 缺失或 builtin 来源发布校验失败时返回错误。
     pub fn install(&self, core: &mut TurnEngine, config: &WebSearchConfig) -> Result<()> {
+        core.agent_tools()
+            .install(self.build_group(config, core.tool_session_runtime())?)
+    }
+
+    /// Constructs a resolved search group before session publication.
+    ///
+    /// # Errors
+    /// Returns invalid backend configuration without changing any tool scope.
+    pub fn build_group(
+        &self,
+        config: &WebSearchConfig,
+        session: crate::ToolSessionRuntime,
+    ) -> Result<ToolInstallGroup> {
         let tool: DynTool = match self.resolution.path {
             Some(WebSearchPath::Standalone) => {
                 let backend = self.backend.as_ref().ok_or_else(|| {
@@ -115,7 +128,7 @@ impl WebSearchPlan {
                             backend.model.clone(),
                             config,
                             backend.max_output_tokens,
-                            core.tool_session_runtime(),
+                            session,
                         );
                         tool.into()
                     }
@@ -137,12 +150,13 @@ impl WebSearchPlan {
                 DynTool::new_executor(tool)
             }
             None => {
-                core.agent_tools()
-                    .uninstall(&ToolGroupId::new("web_search"));
-                return Ok(());
+                return Ok(ToolInstallGroup::direct(
+                    ToolGroupId::new("web_search"),
+                    Vec::new(),
+                ));
             }
         };
-        core.agent_tools().install(ToolInstallGroup::direct(
+        Ok(ToolInstallGroup::direct(
             ToolGroupId::new("web_search"),
             vec![tool],
         ))
@@ -163,6 +177,23 @@ pub struct WebSearchPlans {
 }
 
 impl WebSearchPlans {
+    /// Constructs the selected search group for a session assembly.
+    ///
+    /// # Errors
+    /// Propagates invalid backend configuration.
+    pub fn build_group(
+        &self,
+        config: &WebSearchConfig,
+        session: crate::ToolSessionRuntime,
+    ) -> Result<ToolInstallGroup> {
+        match self.active() {
+            Some(plan) => plan.build_group(config, session),
+            None => Ok(ToolInstallGroup::direct(
+                ToolGroupId::new("web_search"),
+                Vec::new(),
+            )),
+        }
+    }
     pub fn visibility(&self) -> ToolVisibilityConstraint {
         self.active()
             .map(|plan| plan.visibility)

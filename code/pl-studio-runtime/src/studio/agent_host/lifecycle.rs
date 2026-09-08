@@ -54,7 +54,6 @@ struct CloseWorktreeLease {
     manager: WorktreeManager,
     handle: WorktreeHandle,
     lease: WorktreeLease,
-    previous_state: WorktreeLeaseState,
     cleanup_performed: AtomicBool,
 }
 
@@ -440,10 +439,11 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
         let agent_id = request.agent.identity.id;
         let worktree = match self.worktrees.get(agent_id.as_str()) {
             Some(mut lease) if lease.state != WorktreeLeaseState::Cleaned => {
-                if lease.state == WorktreeLeaseState::CleanupRequested {
+                if lease.state == WorktreeLeaseState::CleanupRequested
+                    && !matches!(request.agent.state, pl_core::AgentState::Closing(_))
+                {
                     return Err(lifecycle_error("worktree cleanup is already in progress"));
                 }
-                let previous_state = lease.state;
                 let manager = self.manager_from_lease(&lease);
                 let handle = WorktreeHandle {
                     path: PathBuf::from(&lease.path),
@@ -460,7 +460,6 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
                     manager,
                     handle,
                     lease,
-                    previous_state,
                     cleanup_performed: AtomicBool::new(false),
                 })
             }
@@ -481,12 +480,14 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
                     durable.transition(WorktreeLeaseState::Preserved);
                 }
                 AgentWorkspaceDisposition::Cleanup => {
-                    worktree
-                        .manager
-                        .discard(&worktree.handle)
-                        .await
-                        .map_err(|error| lifecycle_error(error.to_string()))?;
-                    worktree.cleanup_performed.store(true, Ordering::Release);
+                    if !worktree.cleanup_performed.load(Ordering::Acquire) {
+                        worktree
+                            .manager
+                            .discard(&worktree.handle)
+                            .await
+                            .map_err(|error| lifecycle_error(error.to_string()))?;
+                        worktree.cleanup_performed.store(true, Ordering::Release);
+                    }
                     durable.transition(WorktreeLeaseState::Cleaned);
                 }
             }
@@ -495,24 +496,6 @@ impl AgentLifecycleAdapter for StudioAgentLifecycle {
                 .map_err(|error| lifecycle_error(error.to_string()))?;
         }
         self.resources.remove(&lease.agent_id).await;
-        Ok(())
-    }
-
-    async fn rollback_close(&self, lease: Self::CloseLease) -> Result<()> {
-        if let Some(worktree) = lease.worktree {
-            let mut durable = worktree.lease;
-            if worktree.cleanup_performed.load(Ordering::Acquire) {
-                durable.transition(WorktreeLeaseState::Cleaned);
-                self.worktrees
-                    .record(durable.clone())
-                    .map_err(|error| lifecycle_error(error.to_string()))?;
-            } else if durable.state == WorktreeLeaseState::CleanupRequested {
-                durable.transition(worktree.previous_state);
-                self.worktrees
-                    .record(durable.clone())
-                    .map_err(|error| lifecycle_error(error.to_string()))?;
-            }
-        }
         Ok(())
     }
 }

@@ -3,7 +3,6 @@ use std::time::{Duration, Instant};
 
 use tokio_util::sync::CancellationToken;
 
-use crate::tool::command::CommandBackend;
 use crate::tool::command::ManagedCommand;
 
 use super::{CommandProcessEntry, CommandProcessTransition};
@@ -14,6 +13,9 @@ pub(super) async fn wait_for_process_activity(entry: &CommandProcessEntry, yield
     }
     let deadline = Instant::now() + yield_time;
     loop {
+        let notified = entry.notify.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
         if entry.is_final().await {
             break;
         }
@@ -22,41 +24,40 @@ pub(super) async fn wait_for_process_activity(entry: &CommandProcessEntry, yield
             break;
         }
         let remaining = deadline.saturating_duration_since(now);
-        if tokio::time::timeout(remaining, entry.notify.notified())
-            .await
-            .is_err()
-        {
+        if tokio::time::timeout(remaining, notified).await.is_err() {
             break;
         }
     }
 }
 
-pub(super) fn spawn_lifecycle_task<B>(
+pub(super) struct CommandLifecycle {
+    pub timeout: Duration,
+    pub task_cancellation: Option<CancellationToken>,
+    pub manager_cancellation: CancellationToken,
+}
+
+pub(super) fn spawn_lifecycle_task(
     entry: Arc<CommandProcessEntry>,
     mut child: ManagedCommand,
-    timeout: Duration,
-    cancellation_token: Option<CancellationToken>,
-    backend: Arc<B>,
-) where
-    B: CommandBackend,
-{
+    lifecycle: CommandLifecycle,
+) {
     tokio::spawn(async move {
-        let outcome = wait_for_lifecycle_outcome(&mut child, timeout, cancellation_token).await;
+        let outcome = wait_for_lifecycle_outcome(&mut child, lifecycle).await;
         let wait_result = match outcome {
             LifecycleOutcome::Exited(result) => result,
             LifecycleOutcome::TimedOut => {
                 apply_transition(&entry, CommandProcessTransition::TimeOut).await;
-                close_stdin(&entry).await;
-                backend.terminate(&entry.process_id, child.host_pid()).await;
+                child.cancellation().cancel();
                 child.wait().await
             }
             LifecycleOutcome::Interrupted => {
                 apply_transition(&entry, CommandProcessTransition::Cancel).await;
-                close_stdin(&entry).await;
-                backend.terminate(&entry.process_id, child.host_pid()).await;
+                child.cancellation().cancel();
                 child.wait().await
             }
         };
+        // Poll the owned execution through cancellation before taking stdin: an in-flight
+        // write may hold this mutex until the physical process closes its read end.
         {
             let mut stdin = entry.stdin.lock().await;
             stdin.take();
@@ -92,20 +93,19 @@ enum LifecycleOutcome {
 
 async fn wait_for_lifecycle_outcome(
     child: &mut ManagedCommand,
-    timeout: Duration,
-    cancellation_token: Option<CancellationToken>,
+    lifecycle: CommandLifecycle,
 ) -> LifecycleOutcome {
-    if let Some(token) = cancellation_token {
-        tokio::select! {
-            result = child.wait() => LifecycleOutcome::Exited(result),
-            _ = tokio::time::sleep(timeout) => LifecycleOutcome::TimedOut,
-            _ = token.cancelled() => LifecycleOutcome::Interrupted,
+    let cancelled = async {
+        match lifecycle.task_cancellation {
+            Some(token) => token.cancelled().await,
+            None => std::future::pending().await,
         }
-    } else {
-        tokio::select! {
-            result = child.wait() => LifecycleOutcome::Exited(result),
-            _ = tokio::time::sleep(timeout) => LifecycleOutcome::TimedOut,
-        }
+    };
+    tokio::select! {
+        result = child.wait() => LifecycleOutcome::Exited(result),
+        _ = tokio::time::sleep(lifecycle.timeout) => LifecycleOutcome::TimedOut,
+        _ = cancelled => LifecycleOutcome::Interrupted,
+        _ = lifecycle.manager_cancellation.cancelled() => LifecycleOutcome::Interrupted,
     }
 }
 
@@ -117,9 +117,4 @@ pub(super) async fn apply_transition(
     state.apply_transition(transition);
     drop(state);
     entry.notify.notify_waiters();
-}
-
-async fn close_stdin(entry: &CommandProcessEntry) {
-    let mut stdin = entry.stdin.lock().await;
-    stdin.take();
 }

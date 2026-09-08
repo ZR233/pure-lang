@@ -138,7 +138,7 @@ impl ToolResult {
         let model_output =
             model_visible_tool_output_with_budget(&output, max_output_tokens, max_output_bytes);
         let mut result =
-            Self::with_model_output(success, output, model_output, ends_turn, output_artifacts);
+            Self::from_bounded_output(success, output, model_output, ends_turn, output_artifacts);
         result.runtime_events.push(ToolDirective::OutputBudget {
             max_bytes: max_output_bytes,
         });
@@ -155,8 +155,19 @@ impl ToolResult {
     where
         Artifact: Serialize,
     {
-        let raw_bytes = output.len() as u64;
         let model_output = enforce_model_output_limit(&model_output, MAX_MODEL_TOOL_OUTPUT_BYTES);
+        Self::from_bounded_output(success, output, model_output, ends_turn, output_artifacts)
+    }
+
+    // Callers apply either the default budget or their explicit budget exactly once.
+    fn from_bounded_output<Artifact: Serialize>(
+        success: bool,
+        output: String,
+        model_output: String,
+        ends_turn: bool,
+        output_artifacts: Vec<Artifact>,
+    ) -> Self {
+        let raw_bytes = output.len() as u64;
         let artifacts = output_artifacts
             .into_iter()
             .map(|artifact| {
@@ -267,6 +278,7 @@ impl ToolResult {
                 | ToolDirective::ExecutionFailed
                 | ToolDirective::CacheHit { .. }
                 | ToolDirective::OutputMetrics { .. }
+                | ToolDirective::SessionEvents { .. }
                 | ToolDirective::OutputBudget { .. }
                 | ToolDirective::EndTurn { .. } => None,
             })
@@ -294,6 +306,7 @@ impl ToolResult {
             | ToolDirective::ExecutionFailed
             | ToolDirective::CacheHit { .. }
             | ToolDirective::OutputMetrics { .. }
+            | ToolDirective::SessionEvents { .. }
             | ToolDirective::OutputBudget { .. }
             | ToolDirective::EndTurn {
                 final_content: None,

@@ -24,6 +24,7 @@ pub(super) fn cache_entry(tool_name: &str, call_id: String, output: &ToolResult)
             | ToolDirective::AuditMetadata { .. }
             | ToolDirective::ExecutionFailed
             | ToolDirective::CacheHit { .. }
+            | ToolDirective::SessionEvents { .. }
             | ToolDirective::OutputBudget { .. }
             | ToolDirective::EndTurn { .. } => None,
         })
@@ -74,6 +75,7 @@ pub(super) fn cache_hit(entry: &ToolCacheEntry) -> ToolResult {
             | ToolDirective::AuditMetadata { .. }
             | ToolDirective::ExecutionFailed
             | ToolDirective::CacheHit { .. }
+            | ToolDirective::SessionEvents { .. }
             | ToolDirective::OutputBudget { .. }
             | ToolDirective::EndTurn { .. } => None,
         })

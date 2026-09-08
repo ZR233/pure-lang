@@ -49,7 +49,7 @@ impl StaticTool for SessionNoteTool {
     }
 
     fn policy(&self) -> ToolPolicy {
-        let mut policy = ToolPolicy::read_only();
+        let mut policy = ToolPolicy::control().with_effect(crate::ToolEffect::Read);
         if self.kind.supports_parallel_tool_calls() {
             policy = policy.with_parallel_tool_calls();
         }

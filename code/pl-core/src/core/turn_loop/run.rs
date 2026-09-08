@@ -27,7 +27,7 @@ use super::super::engine::TurnEngine;
 use super::super::permission::cancellation_reason;
 use super::super::progress::{ProgressEmitter, ProgressVerbosity};
 use super::super::tool_dispatch::{
-    ToolExecutionContext, ToolExecutionError, execute_tool_call_batch,
+    ToolExecutionContext, ToolExecutionError, ToolExecutionOutcome, execute_tool_call_batch,
 };
 use super::super::turn_result::{
     budget_limited_turn_result, failed_turn_result, failed_turn_result_with_abort_reason,
@@ -96,7 +96,7 @@ async fn run_steps(
     core.tool_session_runtime.begin_turn(session)?;
     let working_set = core.tool_session_runtime.working_set();
     working_set.bind_entry_scope(recorder.session_id(), &turn_id);
-    let tool_cache = crate::tool::cache::TurnToolCacheHandle::default();
+    let tool_cache = core.tool_session_runtime.cache();
     let turn_item = recorder.running_turn_item(&turn_id);
     recorder.start_item(turn_item.clone());
     let mut progress = ProgressEmitter::new(turn_id.clone(), ProgressVerbosity::from_env());
@@ -162,6 +162,10 @@ async fn run_steps(
 
         if let Some(hook) = &core.before_model_step {
             hook.refresh(ModelStepToolContext {
+                model: core.runtime.model().clone(),
+                endpoint: core.runtime.endpoint().clone(),
+                skill_catalog: core.skill_catalog.clone(),
+                thread_mode: working_set.thread_mode(),
                 agent_tools: core.agent_tools.clone(),
                 session_id: recorder.session_id().to_string(),
                 turn_id: turn_id.clone(),
@@ -342,6 +346,7 @@ async fn run_steps(
                 session,
                 recorder,
                 super::inference::from_billing(active_subagent.as_ref(), billing),
+                Default::default(),
             )
             .await?;
         }
@@ -420,6 +425,7 @@ async fn run_steps(
                 session,
                 recorder,
                 super::inference::from_billing(active_subagent.as_ref(), billing),
+                Default::default(),
             )
             .await?;
             budget_limit = Some(limit);
@@ -451,6 +457,7 @@ async fn run_steps(
                     session,
                     recorder,
                     super::inference::from_billing(active_subagent.as_ref(), billing),
+                    Default::default(),
                 )
                 .await?;
                 return Ok(failed_turn_result(
@@ -480,6 +487,7 @@ async fn run_steps(
                 session,
                 recorder,
                 super::inference::from_billing(active_subagent.as_ref(), billing),
+                Default::default(),
             )
             .await?;
             if super::checkpoint::finish_mailbox_window(&options, session, recorder, &turn_id)
@@ -570,6 +578,7 @@ async fn run_steps(
                     session,
                     recorder,
                     super::inference::from_billing(active_subagent.as_ref(), billing),
+                    Default::default(),
                 )
                 .await?;
                 return Ok(failed_turn_result_with_abort_reason(
@@ -591,9 +600,132 @@ async fn run_steps(
         };
         billing.orchestration.merge(&tool_batch.orchestration);
         let mut tool_results = tool_batch.records;
+        let mut direct_call_ids = std::collections::BTreeSet::new();
+        let accepted_tasks: Vec<_> = tool_batch
+            .tasks
+            .iter()
+            .map(|task| (task.receipt.item_id.clone(), task.receipt.task_id.clone()))
+            .collect();
+        let mut tool_changes = crate::session_runtime::ToolCheckpointChanges {
+            direct_results: Vec::new(),
+            consumed_events: None,
+        };
+        if !tool_batch.tasks.is_empty() {
+            let checkpoint = options.checkpoint.as_ref().ok_or_else(|| {
+                crate::PureError::Protocol("task execution requires a session owner".into())
+            })?;
+            let selected = checkpoint
+                .runtime()
+                .execute_task_batch(
+                    checkpoint.agent_id(),
+                    crate::TurnId::new(turn_id.clone())
+                        .map_err(|error| crate::PureError::Protocol(error.to_string()))?,
+                    tool_batch.tasks,
+                )
+                .await
+                .map_err(|error| crate::PureError::Protocol(error.to_string()))?;
+            for task in selected {
+                if task.delivery == crate::session_runtime::ToolTaskDelivery::Background
+                    && let Some(record) = tool_results
+                        .iter_mut()
+                        .find(|record| record.call_id == task.receipt.call_id)
+                {
+                    record.result = serde_json::to_string(&task.receipt)?;
+                    record.display_result = record.result.clone();
+                }
+                if !matches!(
+                    task.delivery,
+                    crate::session_runtime::ToolTaskDelivery::DirectOffered
+                        | crate::session_runtime::ToolTaskDelivery::DirectCommitted
+                ) {
+                    continue;
+                }
+                let model_task = crate::session_runtime::model_task_view(&task)
+                    .map_err(|error| crate::PureError::Protocol(error.to_string()))?;
+                let structured_delivery = task.status
+                    != crate::session_runtime::ToolTaskStatus::Succeeded
+                    || model_task
+                        .result_reference
+                        .as_ref()
+                        .is_some_and(|reference| !reference.preview_complete);
+                let model_output = if structured_delivery {
+                    Some(serde_json::to_string(&model_task)?)
+                } else {
+                    None
+                };
+                let model_attachments = model_task
+                    .result
+                    .as_ref()
+                    .map(|result| result.attachments.clone())
+                    .unwrap_or_default();
+                let result = task.result.ok_or_else(|| {
+                    crate::PureError::Protocol("direct task result missing".into())
+                })?;
+                let record = tool_results
+                    .iter_mut()
+                    .find(|record| record.call_id == task.receipt.call_id)
+                    .ok_or_else(|| {
+                        crate::PureError::Protocol("task has no matching model invocation".into())
+                    })?;
+                record.result = model_output.unwrap_or_else(|| result.output.clone());
+                record
+                    .runtime_events
+                    .extend(crate::session_runtime::direct_result_directives(
+                        &result,
+                        task.status,
+                    ));
+                direct_call_ids.insert(record.call_id.clone());
+                record.display_result = result.output;
+                record.model_attachments = model_attachments;
+                if structured_delivery {
+                    record
+                        .runtime_events
+                        .push(crate::ToolDirective::OutputBudget {
+                            max_bytes: 128 * 1024,
+                        });
+                }
+                record.exit_code = result.exit_code;
+                record.timed_out = result.timed_out;
+                record.outcome = match task.status {
+                    crate::session_runtime::ToolTaskStatus::Succeeded => {
+                        ToolExecutionOutcome::Succeeded
+                    }
+                    crate::session_runtime::ToolTaskStatus::Cancelled => {
+                        ToolExecutionOutcome::Cancelled
+                    }
+                    crate::session_runtime::ToolTaskStatus::Failed
+                    | crate::session_runtime::ToolTaskStatus::Interrupted => {
+                        ToolExecutionOutcome::Failed(if record.timed_out {
+                            pl_trace::TraceToolFailureKind::TimedOut
+                        } else {
+                            pl_trace::TraceToolFailureKind::Execution
+                        })
+                    }
+                    crate::session_runtime::ToolTaskStatus::Queued
+                    | crate::session_runtime::ToolTaskStatus::WaitingApproval
+                    | crate::session_runtime::ToolTaskStatus::Running
+                    | crate::session_runtime::ToolTaskStatus::Cancelling => {
+                        return Err(crate::PureError::Protocol(
+                            "nonterminal task offered as direct result".into(),
+                        ));
+                    }
+                };
+                if task.delivery == crate::session_runtime::ToolTaskDelivery::DirectOffered {
+                    tool_changes.direct_results.push(task.receipt.task_id);
+                }
+            }
+        }
         let mut discovery = session.tool_discovery().clone();
         for result in &tool_results {
             for event in &result.runtime_events {
+                if let crate::ToolDirective::SessionEvents { batch } = event {
+                    if tool_changes.consumed_events.is_some() {
+                        return Err(crate::PureError::Protocol(
+                            "multiple wait batches in one model response".into(),
+                        ));
+                    }
+                    tool_changes.consumed_events = Some(batch.clone());
+                }
                 if let crate::tool::ToolDirective::RevealTools {
                     catalog_fingerprint,
                     tool_names,
@@ -639,6 +771,7 @@ async fn run_steps(
                     | crate::tool::ToolDirective::ExecutionFailed
                     | crate::tool::ToolDirective::CacheHit { .. }
                     | crate::tool::ToolDirective::OutputMetrics { .. }
+                    | crate::tool::ToolDirective::SessionEvents { .. }
                     | crate::tool::ToolDirective::OutputBudget { .. }
                     | crate::tool::ToolDirective::EndTurn {
                         final_content: None,
@@ -716,8 +849,32 @@ async fn run_steps(
             session,
             recorder,
             super::inference::from_billing(active_subagent.as_ref(), billing),
+            tool_changes,
         )
         .await?;
+        for (item_id, task_id) in accepted_tasks {
+            if let Some(item) = recorder.latest_trace_part(&item_id)
+                && !item.is_terminal()
+            {
+                recorder.apply_item(&item, pl_trace::TracePartAction::AcceptToolTask { task_id });
+            }
+        }
+        for (result, _) in &tool_results {
+            if result.outcome == ToolExecutionOutcome::Succeeded
+                && direct_call_ids.contains(&result.call_id)
+            {
+                for event in &result.runtime_events {
+                    if let crate::ToolDirective::SkillActivated { activation } = event {
+                        recorder.record_trace_only(pl_trace::TraceOperation::SkillActivated {
+                            activation: activation.clone(),
+                        });
+                    }
+                }
+            }
+        }
+        // Accepted tasks and delivered events are already committed by the owner.
+        // Subsequent cancellation must not truncate this complete tool round-trip.
+        safe_message_count = session.len();
         for (_, receipt) in tool_results {
             working_set.apply(TurnWorkingSetChange::AppendEvidence(receipt))?;
         }

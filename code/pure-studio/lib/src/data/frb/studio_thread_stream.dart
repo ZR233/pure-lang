@@ -244,6 +244,7 @@ ThreadItemStateView _threadItemStateFromFrb(
     ),
     tool: (invocation, state) => ThreadToolItemStateView(
       invocation: ThreadToolInvocationView(
+        taskId: invocation.taskId,
         toolCallId: invocation.toolCallId,
         callId: invocation.callId,
         providerItemId: invocation.providerItemId,
@@ -344,6 +345,10 @@ ThreadToolLifecycleView _toolLifecycleFromFrb(
   frb_item.BridgeThreadToolState value,
 ) {
   return value.when(
+    queued: () => const QueuedThreadToolView(),
+    cancelling: (streamedOutput) => CancellingThreadToolView(streamedOutput),
+    interrupted: (interruptedAt, reason) =>
+        InterruptedThreadToolView(_dateFromUnix(interruptedAt), reason),
     started: () => const StartedThreadToolView(),
     streaming: () => const StreamingThreadToolView(),
     awaitingApproval: () => const AwaitingApprovalThreadToolView(),

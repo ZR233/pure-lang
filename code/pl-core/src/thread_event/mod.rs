@@ -227,6 +227,15 @@ impl ThreadEventBus {
         })
     }
 
+    pub(crate) fn turns(&self, thread_id: &str) -> Result<Vec<Turn>, ThreadEventError> {
+        let channel = self.channel(thread_id)?;
+        let state = channel
+            .state
+            .lock()
+            .map_err(|_| ThreadEventError::LockPoisoned)?;
+        Ok(state.hot_turns.clone())
+    }
+
     /// 把显式冷分页得到的领域对象合并进驻留热窗口，不广播伪造的 live 事件。
     ///
     /// 同 id 的现有热事实始终胜出；冷页只补齐更早 Turn/Item。这样 GUI 收到分页
@@ -507,6 +516,9 @@ pub struct ThreadEventBusHandle {
 }
 
 impl ThreadEventBusHandle {
+    pub(crate) fn turns(&self, thread_id: &str) -> Result<Vec<Turn>, ThreadEventError> {
+        self.bus.turns(thread_id)
+    }
     pub(crate) async fn commit_batch(
         &self,
         notifications: Vec<ThreadNotificationEnvelope>,

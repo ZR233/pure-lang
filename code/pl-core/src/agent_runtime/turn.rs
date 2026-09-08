@@ -70,6 +70,7 @@ pub enum AgentSessionCommitPolicy {
 /// 宿主准备一次 turn 时可读取的稳定上下文。
 #[derive(Debug, Clone)]
 pub struct AgentTurnPreparationContext {
+    pub session_runtime: crate::session_runtime::SessionRuntimeHandle,
     pub snapshot: AgentSnapshot,
     pub turn_id: TurnId,
     pub thread_id: ThreadId,
@@ -357,7 +358,8 @@ impl PreparedSessionRuntime {
 }
 
 /// mid-turn durable Thread checkpoint 的触发原因。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum TurnCheckpointReason {
     WorkingSetChanged,
     BeforeInference,
@@ -368,14 +370,15 @@ pub enum TurnCheckpointReason {
 }
 
 /// 一次模型调用完成后必须与上下文原子提交的计费与 runtime 增量。
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AgentInferenceCommit {
     pub billing: InferenceBillingRecord,
     pub runtime_delta: AgentRuntimeDelta,
 }
 
 /// worker 交给 actor 做 active-turn 与 sequence 校验的 Thread checkpoint。
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct AgentTurnCheckpoint {
     pub turn_id: TurnId,
     pub thread_id: ThreadId,
@@ -384,6 +387,7 @@ pub struct AgentTurnCheckpoint {
     pub reason: TurnCheckpointReason,
     pub consumed_mail_ids: Vec<String>,
     pub inference: Option<AgentInferenceCommit>,
+    pub(crate) tools: crate::session_runtime::ToolCheckpointChanges,
 }
 
 /// TurnEngine 使用的 durable checkpoint 命令句柄。
@@ -397,6 +401,50 @@ pub struct AgentTurnCheckpointHandle {
 }
 
 impl AgentTurnCheckpointHandle {
+    pub(crate) fn runtime(&self) -> &AgentRuntimeHandle {
+        &self.runtime
+    }
+
+    pub(crate) fn agent_id(&self) -> &ThreadId {
+        &self.agent_id
+    }
+
+    /// Commits a wait response and its offered event prefix in one owner mutation.
+    ///
+    /// The supplied session must already contain the corresponding tool response.
+    ///
+    /// # Errors
+    /// Rejects conflicting/expired receipts, fresh delivery from cancelled or non-current
+    /// Turns, and invalid event prefixes. Retained exact retries do not consume events again.
+    pub async fn checkpoint_session_events(
+        &self,
+        session: AgentSession,
+        events: crate::session_runtime::SessionEventBatch,
+    ) -> super::AgentRuntimeResult<()> {
+        let sequence = self
+            .sequence
+            .fetch_add(1, Ordering::Relaxed)
+            .saturating_add(1);
+        self.runtime
+            .checkpoint_turn(
+                self.agent_id.clone(),
+                AgentTurnCheckpoint {
+                    turn_id: self.turn_id.clone(),
+                    thread_id: self.thread_id.clone(),
+                    sequence,
+                    session,
+                    reason: TurnCheckpointReason::WorkingSetChanged,
+                    consumed_mail_ids: Vec::new(),
+                    inference: None,
+                    tools: crate::session_runtime::ToolCheckpointChanges {
+                        consumed_events: Some(events),
+                        ..Default::default()
+                    },
+                },
+            )
+            .await
+    }
+
     pub(crate) fn new(
         runtime: AgentRuntimeHandle,
         agent_id: super::ThreadId,
@@ -426,7 +474,7 @@ impl AgentTurnCheckpointHandle {
         session: AgentSession,
         inference: AgentInferenceCommit,
     ) -> super::AgentRuntimeResult<()> {
-        self.checkpoint_inference_mailbox(session, inference, Vec::new())
+        self.checkpoint_inference_mailbox(session, inference, Vec::new(), Default::default())
             .await
     }
 
@@ -436,7 +484,7 @@ impl AgentTurnCheckpointHandle {
         reason: TurnCheckpointReason,
         consumed_mail_ids: Vec<String>,
     ) -> super::AgentRuntimeResult<()> {
-        self.checkpoint_with(session, reason, consumed_mail_ids, None)
+        self.checkpoint_with(session, reason, consumed_mail_ids, None, Default::default())
             .await
     }
 
@@ -445,12 +493,14 @@ impl AgentTurnCheckpointHandle {
         session: AgentSession,
         inference: AgentInferenceCommit,
         consumed_mail_ids: Vec<String>,
+        tools: crate::session_runtime::ToolCheckpointChanges,
     ) -> super::AgentRuntimeResult<()> {
         self.checkpoint_with(
             session,
             TurnCheckpointReason::InferenceCompleted,
             consumed_mail_ids,
             Some(inference),
+            tools,
         )
         .await
     }
@@ -461,6 +511,7 @@ impl AgentTurnCheckpointHandle {
         reason: TurnCheckpointReason,
         consumed_mail_ids: Vec<String>,
         inference: Option<AgentInferenceCommit>,
+        tools: crate::session_runtime::ToolCheckpointChanges,
     ) -> super::AgentRuntimeResult<()> {
         let sequence = self
             .sequence
@@ -477,6 +528,7 @@ impl AgentTurnCheckpointHandle {
                     reason,
                     consumed_mail_ids,
                     inference,
+                    tools,
                 },
             )
             .await

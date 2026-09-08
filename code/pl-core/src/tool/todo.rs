@@ -78,7 +78,7 @@ impl StaticTool for TodoListTool {
     }
 
     fn policy(&self) -> ToolPolicy {
-        ToolPolicy::default().with_effect(ToolEffect::Read)
+        ToolPolicy::control().with_effect(ToolEffect::Read)
     }
 
     fn execute(

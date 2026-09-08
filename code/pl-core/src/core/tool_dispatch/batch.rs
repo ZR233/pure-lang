@@ -59,6 +59,7 @@ pub(in crate::core) async fn execute_tool_call_batch(
     context: ToolExecutionContext<'_>,
 ) -> Result<ToolExecutionBatch, ToolExecutionError> {
     let mut scheduled = Vec::new();
+    let mut tasks = Vec::new();
     let mut scheduled_exact_once_calls = HashMap::<(String, String), String>::new();
     let runtime_lock = Arc::new(RwLock::new(()));
     let tool_cache_snapshot = context.tool_cache.snapshot();
@@ -124,7 +125,14 @@ pub(in crate::core) async fn execute_tool_call_batch(
         {
             item = current;
         }
-        budget_tracker.record_tool_call(&tool_call.name);
+        budget_tracker.record_tool_call(
+            context
+                .tool_plan
+                .binding(&tool_call.name)
+                .map_or(ToolBudgetTiming::Count, |binding| {
+                    binding.tool().policy().budget_timing()
+                }),
+        );
 
         if solo_batch_violation {
             scheduled.push(ScheduledToolExecution {
@@ -222,6 +230,32 @@ pub(in crate::core) async fn execute_tool_call_batch(
 
         let executor_generation = binding.generation();
         let tool = binding.tool();
+        if tool.policy().scheduling() == crate::tool::ToolScheduling::Task {
+            let prepared = super::session_task::prepare(tool_call, &trace_part_id, &context);
+            let future = match prepared {
+                Ok((submission, record)) => {
+                    tasks.push(submission);
+                    futures::future::ready(Ok(record)).boxed()
+                }
+                Err(error) => ready_tool_execution_record(
+                    tool_call.clone(),
+                    error,
+                    ToolExecutionOutcome::Failed(TraceToolFailureKind::Execution),
+                    None,
+                    false,
+                )
+                .boxed(),
+            };
+            scheduled.push(ScheduledToolExecution {
+                tool_call: tool_call.clone(),
+                item,
+                future,
+                budget_timing: ToolBudgetTiming::Count,
+                parallel_candidate: false,
+                duplicate_suppressed: false,
+            });
+            continue;
+        }
         let supports_parallel = tool.policy().supports_parallel_tool_calls()
             && matches!(
                 context.options.tool_execution_mode,
@@ -334,6 +368,16 @@ pub(in crate::core) async fn execute_tool_call_batch(
                     .with_trace_sink(recorder.trace_sink())
                     .with_cancellation(context.options.cancellation_token.clone())
                     .with_approval(approval);
+                let tool_context = if let Some(checkpoint) = &context.options.checkpoint {
+                    let control = checkpoint
+                        .runtime()
+                        .session_control(checkpoint.agent_id())
+                        .await
+                        .map_err(|error| ToolExecutionError::Fatal(error.to_string()))?;
+                    tool_context.with_session_control(control)
+                } else {
+                    tool_context
+                };
                 progress.tool_detail(recorder, tool_start_progress_message(&tool_call.name));
                 let invocation = ToolInvocation::from_tool_call(tool_call, tool_context);
                 let _display_arguments = invocation.payload.arguments_for_display();
@@ -488,7 +532,12 @@ pub(in crate::core) async fn execute_tool_call_batch(
         }]
     )
     .then(Instant::now);
-    let result = collect_scheduled_tools(scheduled, recorder, context.options, &mut progress).await;
+    let result = collect_scheduled_tools(scheduled, recorder, context.options, &mut progress)
+        .await
+        .map(|mut batch| {
+            batch.tasks = tasks;
+            batch
+        });
     context.options.apply_budget_refresh(budget_tracker);
     if let Some(started_at) = pause_started_at {
         budget_tracker.exclude_wall_clock(started_at.elapsed());
@@ -642,6 +691,9 @@ pub(super) async fn notify_tool_completion(
     options: &TurnOptions,
     record: &ToolExecutionRecord,
 ) -> Result<(), ToolExecutionError> {
+    if record.outcome == ToolExecutionOutcome::Accepted {
+        return Ok(());
+    }
     let Some(callback) = options.tool_completion_callback.as_ref() else {
         return Ok(());
     };
@@ -677,6 +729,7 @@ fn tool_execution_batch(
     let tool_batch_elapsed_millis = batch_started_at.elapsed().as_millis() as u64;
     ToolExecutionBatch {
         records,
+        tasks: Vec::new(),
         orchestration: InferenceOrchestrationMetrics {
             parallel_candidates,
             actual_parallel_calls: if parallel_candidates > 1 {

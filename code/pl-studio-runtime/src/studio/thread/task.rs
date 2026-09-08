@@ -44,7 +44,7 @@ Never create agents merely to fill capacity, split tiny work, duplicate an activ
 work in parallel across an unstable shared contract or a real semantic dependency.
 
 All qualifying nodes whose prerequisites are satisfied form the ready frontier. Spawn every node in
-that frontier before the wave's first `wait_agents`, `read_agent_session`, or
+that frontier before the wave's first `wait`, `read_agent_session`, or
 `read_agent_submissions`; do not wait after spawning one while another qualifying ready node remains.
 While children run, the root continues only unassigned synthesis, planning, coordination, or other
 root-owned work and does not repeat delegated tasks. After every pending child has receipt-bound

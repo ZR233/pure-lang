@@ -96,7 +96,7 @@ pub(super) async fn open(
         .await?
         .ok_or_else(|| SessionStoreError::Invalid("missing SQLite schema version".into()))?
         .try_get::<i64>("", "user_version")?;
-    if version != 0 && version != 1 {
+    if !(0..=4).contains(&version) {
         return Err(SessionStoreError::Invalid(format!(
             "unsupported session schema {version}"
         )));
@@ -114,9 +114,11 @@ pub(super) async fn open(
          CREATE INDEX IF NOT EXISTS session_entries_turn ON session_entries(session_id,turn_id,type_id,ordinal);
          CREATE TABLE IF NOT EXISTS session_receipts (
             session_id TEXT NOT NULL, revision INTEGER NOT NULL, payload_hash TEXT NOT NULL,
-            PRIMARY KEY(session_id,revision));
-         PRAGMA user_version=1;"
+            PRIMARY KEY(session_id,revision));"
     ).await?;
+    if version < 4 {
+        super::task_records::migrate(&db, version).await?;
+    }
     Ok(db)
 }
 
@@ -195,7 +197,10 @@ pub(super) fn decode_builtin<T: DeserializeOwned>(
     Ok(serde_json::from_value(entry.payload)?)
 }
 
-async fn put(db: &impl ConnectionTrait, entry: &SessionEntry) -> Result<(), SessionStoreError> {
+pub(super) async fn put(
+    db: &impl ConnectionTrait,
+    entry: &SessionEntry,
+) -> Result<(), SessionStoreError> {
     let mut entry = entry.clone();
     if let Some(previous) = db
         .query_one_raw(statement(
@@ -205,6 +210,19 @@ async fn put(db: &impl ConnectionTrait, entry: &SessionEntry) -> Result<(), Sess
         .await?
     {
         let previous = decode_row(previous)?;
+        if entry.type_id == "pl.toolResult" || previous.type_id == "pl.toolResult" {
+            if entry.type_id != previous.type_id
+                || entry.schema_version != previous.schema_version
+                || entry.turn_id != previous.turn_id
+                || entry.payload != previous.payload
+            {
+                return Err(SessionStoreError::Invalid(format!(
+                    "immutable task result {} changed",
+                    entry.id
+                )));
+            }
+            return Ok(());
+        }
         entry.created_at = previous.created_at;
     }
     let encoded = serde_json::to_string(&entry)?;
@@ -273,6 +291,8 @@ pub(super) async fn apply(
             }
         };
         let mut state = commit.next_state.clone();
+        let task_records = super::task_records::encode(&state)?;
+        state.session.tasks = crate::session_runtime::SessionTasks::default();
         let extensions = state.session.session.working_state().entries.clone();
         let mut working_state = state.session.session.working_state().clone();
         working_state.entries.clear();
@@ -288,6 +308,7 @@ pub(super) async fn apply(
             None,
             &state,
         )?];
+        records.extend(task_records);
         records.push(builtin(
             commit,
             "pl.contextManifest".into(),
@@ -491,6 +512,11 @@ pub(super) async fn apply(
             });
         }
         tx.execute_raw(statement("DELETE FROM session_entries WHERE session_id=? AND substr(type_id,1,3) <> 'pl.' AND substr(id,1,12) <> 'pl.resource.'",vec![commit.agent_id.to_string().into()])).await?;
+        tx.execute_raw(statement(
+            "DELETE FROM session_entries WHERE session_id=? AND type_id='pl.toolTask'",
+            vec![commit.agent_id.to_string().into()],
+        ))
+        .await?;
         if replace_context {
             tx.execute_raw(statement(
                 "DELETE FROM session_entries WHERE session_id=? AND type_id='pl.context'",
@@ -522,7 +548,28 @@ pub(super) async fn restore(
     let Some(mut state) = read::<ThreadActorState>(db, session_id, "pl.actor").await? else {
         return Ok(None);
     };
-    let records = entries(db, session_id, None).await?;
+    if state.session.tasks.storage_records().next().is_some() {
+        return Err(SessionStoreError::Invalid(
+            "actor contains noncanonical embedded task records".into(),
+        ));
+    }
+    if state.snapshot.identity.id.as_str() != session_id {
+        return Err(SessionStoreError::Invalid(
+            "actor belongs to another session".into(),
+        ));
+    }
+    state.session.tasks =
+        super::task_records::restore(db, session_id, state.snapshot.revision).await?;
+    state
+        .session
+        .inbox
+        .validate_task_references(&state.session.tasks)
+        .map_err(|error| SessionStoreError::Invalid(error.to_string()))?;
+    // Task/result records have already been validated above; complete bodies are loaded only on demand.
+    let records = db.query_all_raw(statement(
+        "SELECT * FROM session_entries WHERE session_id=? AND type_id NOT IN ('pl.actor','pl.taskManifest','pl.toolTask','pl.toolResult') ORDER BY ordinal,id",
+        vec![session_id.into()],
+    )).await?.into_iter().map(decode_row).collect::<Result<Vec<_>, _>>()?;
     let manifest = read::<ContextManifest>(db, session_id, "pl.contextManifest")
         .await?
         .ok_or_else(|| SessionStoreError::Invalid("missing session transcript manifest".into()))?;

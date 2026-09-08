@@ -2,7 +2,7 @@ use futures::future::BoxFuture;
 use pl_protocol::{InferenceOrchestrationMetrics, ToolCallKind};
 use pl_trace::TraceToolFailureKind;
 
-use crate::tool::cache::TurnToolCacheHandle;
+use crate::tool::cache::SessionToolCacheHandle;
 use crate::tool::{
     AgentWorkspace, SubagentContext, ToolBudgetTiming, ToolCallContext, ToolDirective, ToolPlan,
 };
@@ -32,6 +32,7 @@ pub(super) struct ToolExecutionRecord {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ToolExecutionOutcome {
+    Accepted,
     Succeeded,
     Failed(TraceToolFailureKind),
     Denied,
@@ -41,6 +42,7 @@ pub(super) enum ToolExecutionOutcome {
 impl ToolExecutionOutcome {
     pub(super) fn as_str(self) -> &'static str {
         match self {
+            Self::Accepted => "accepted",
             Self::Succeeded => "succeeded",
             Self::Failed(TraceToolFailureKind::Execution) => "failed",
             Self::Failed(TraceToolFailureKind::TimedOut) => "timedOut",
@@ -63,6 +65,7 @@ pub(super) struct ScheduledToolExecution<'a> {
 pub(super) struct ToolExecutionBatch {
     pub(super) records: Vec<ToolExecutionRecord>,
     pub(super) orchestration: InferenceOrchestrationMetrics,
+    pub(super) tasks: Vec<crate::session_runtime::SessionTaskSubmission>,
 }
 
 #[derive(Debug, Clone)]
@@ -94,10 +97,11 @@ pub(super) struct ToolExecutionContext<'a> {
     pub(super) step: u32,
     pub(super) workspace: AgentWorkspace,
     pub(super) active_subagent: Option<SubagentContext>,
-    pub(super) tool_cache: TurnToolCacheHandle,
+    pub(super) tool_cache: SessionToolCacheHandle,
 }
 
 mod batch;
+mod session_task;
 pub(in crate::core) use batch::execute_tool_call_batch;
 #[cfg(test)]
 pub(super) use batch::execute_tool_calls;
@@ -152,7 +156,7 @@ mod tool_execution_tests {
         }
 
         fn policy(&self) -> ToolPolicy {
-            ToolPolicy::default()
+            ToolPolicy::control()
         }
 
         fn execute(
@@ -225,7 +229,7 @@ mod tool_execution_tests {
         }
 
         fn policy(&self) -> ToolPolicy {
-            ToolPolicy::default()
+            ToolPolicy::control()
         }
 
         fn execute(
@@ -266,7 +270,7 @@ mod tool_execution_tests {
         }
 
         fn policy(&self) -> ToolPolicy {
-            ToolPolicy::default().with_effect(crate::ToolEffect::AgentControl)
+            ToolPolicy::control().with_effect(crate::ToolEffect::AgentControl)
         }
 
         fn execute(
@@ -308,7 +312,7 @@ mod tool_execution_tests {
         }
 
         fn policy(&self) -> ToolPolicy {
-            ToolPolicy::default().with_effect(crate::ToolEffect::Process)
+            ToolPolicy::control().with_effect(crate::ToolEffect::Process)
         }
 
         fn execute(
@@ -342,7 +346,9 @@ mod tool_execution_tests {
         }
 
         fn policy(&self) -> ToolPolicy {
-            ToolPolicy::read_only().with_batch_policy(ToolBatchPolicy::Solo)
+            ToolPolicy::control()
+                .with_effect(crate::ToolEffect::Read)
+                .with_batch_policy(ToolBatchPolicy::Solo)
         }
 
         fn execute(
@@ -402,7 +408,7 @@ mod tool_execution_tests {
                 step: 0,
                 workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
                 active_subagent: None,
-                tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
+                tool_cache: crate::tool::cache::SessionToolCacheHandle::default(),
             },
         )
         .await
@@ -436,7 +442,9 @@ mod tool_execution_tests {
         }
 
         fn policy(&self) -> ToolPolicy {
-            ToolPolicy::read_only().with_cache_policy(ToolCachePolicy::UntilWorkspaceMutation)
+            ToolPolicy::control()
+                .with_effect(crate::ToolEffect::Read)
+                .with_cache_policy(ToolCachePolicy::UntilWorkspaceMutation)
         }
 
         fn execute(
@@ -477,7 +485,8 @@ mod tool_execution_tests {
         }
 
         fn policy(&self) -> ToolPolicy {
-            ToolPolicy::read_only()
+            ToolPolicy::control()
+                .with_effect(crate::ToolEffect::Read)
                 .with_cache_policy(ToolCachePolicy::UntilWorkspaceMutation)
                 .with_runtime_lock_policy(ToolRuntimeLockPolicy::Exclusive)
         }
@@ -521,7 +530,7 @@ mod tool_execution_tests {
         }
 
         fn policy(&self) -> ToolPolicy {
-            ToolPolicy::default()
+            ToolPolicy::control()
                 .with_effect(crate::ToolEffect::Process)
                 .with_runtime_lock_policy(ToolRuntimeLockPolicy::None)
         }
@@ -556,7 +565,7 @@ mod tool_execution_tests {
         }
 
         fn policy(&self) -> ToolPolicy {
-            ToolPolicy::default().with_budget_timing(ToolBudgetTiming::PauseWhenOnlyScheduledTool)
+            ToolPolicy::control().with_budget_timing(ToolBudgetTiming::PauseWhenOnlyScheduledTool)
         }
 
         fn execute(
@@ -634,7 +643,7 @@ mod tool_execution_tests {
                 step: 0,
                 workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
                 active_subagent: None,
-                tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
+                tool_cache: crate::tool::cache::SessionToolCacheHandle::default(),
             },
         )
         .await
@@ -700,7 +709,7 @@ mod tool_execution_tests {
                 step: 0,
                 workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
                 active_subagent: None,
-                tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
+                tool_cache: crate::tool::cache::SessionToolCacheHandle::default(),
             },
         )
         .await
@@ -767,7 +776,7 @@ mod tool_execution_tests {
                 step: 0,
                 workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
                 active_subagent: None,
-                tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
+                tool_cache: crate::tool::cache::SessionToolCacheHandle::default(),
             },
         )
         .await
@@ -806,7 +815,7 @@ mod tool_execution_tests {
                 step: 0,
                 workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
                 active_subagent: None,
-                tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
+                tool_cache: crate::tool::cache::SessionToolCacheHandle::default(),
             },
         )
         .await
@@ -859,7 +868,7 @@ mod tool_execution_tests {
                 step: 0,
                 workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
                 active_subagent: None,
-                tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
+                tool_cache: crate::tool::cache::SessionToolCacheHandle::default(),
             },
         )
         .await
@@ -887,7 +896,8 @@ mod tool_execution_tests {
                 "Test-only parallel metric tool",
             ))
             .policy(
-                ToolPolicy::read_only()
+                ToolPolicy::control()
+                    .with_effect(crate::ToolEffect::Read)
                     .with_parallel_tool_calls()
                     .with_runtime_lock_policy(ToolRuntimeLockPolicy::Shared),
             )
@@ -929,7 +939,7 @@ mod tool_execution_tests {
                 step: 0,
                 workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
                 active_subagent: None,
-                tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
+                tool_cache: crate::tool::cache::SessionToolCacheHandle::default(),
             },
         )
         .await
@@ -983,7 +993,7 @@ mod tool_execution_tests {
                 step: 0,
                 workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
                 active_subagent: None,
-                tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
+                tool_cache: crate::tool::cache::SessionToolCacheHandle::default(),
             },
         )
         .await
@@ -1028,7 +1038,7 @@ mod tool_execution_tests {
                 step: 0,
                 workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
                 active_subagent: None,
-                tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
+                tool_cache: crate::tool::cache::SessionToolCacheHandle::default(),
             },
         )
         .await
@@ -1082,6 +1092,7 @@ mod tool_execution_tests {
                 crate::tool::ToolName::bare("exclusive_metric_read").unwrap(),
                 "Test-only exclusive metric tool",
             ))
+            .policy(ToolPolicy::control())
             .build(|_input, _context| async move {
                 tokio::time::sleep(std::time::Duration::from_millis(25)).await;
                 Ok(ToolResult::success("ok"))
@@ -1120,7 +1131,7 @@ mod tool_execution_tests {
                 step: 0,
                 workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
                 active_subagent: None,
-                tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
+                tool_cache: crate::tool::cache::SessionToolCacheHandle::default(),
             },
         )
         .await
@@ -1177,7 +1188,7 @@ mod tool_execution_tests {
                 step: 0,
                 workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
                 active_subagent: None,
-                tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
+                tool_cache: crate::tool::cache::SessionToolCacheHandle::default(),
             },
         )
         .await
@@ -1226,7 +1237,7 @@ mod tool_execution_tests {
                 step: 0,
                 workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
                 active_subagent: None,
-                tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
+                tool_cache: crate::tool::cache::SessionToolCacheHandle::default(),
             },
         )
         .await
@@ -1266,7 +1277,7 @@ mod tool_execution_tests {
                 step: 0,
                 workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
                 active_subagent: None,
-                tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
+                tool_cache: crate::tool::cache::SessionToolCacheHandle::default(),
             },
         )
         .await
@@ -1309,7 +1320,7 @@ mod tool_execution_tests {
                 step: 0,
                 workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
                 active_subagent: None,
-                tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
+                tool_cache: crate::tool::cache::SessionToolCacheHandle::default(),
             },
         )
         .await
@@ -1348,7 +1359,7 @@ mod tool_execution_tests {
                 step: 0,
                 workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
                 active_subagent: None,
-                tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
+                tool_cache: crate::tool::cache::SessionToolCacheHandle::default(),
             },
         )
         .await
@@ -1388,12 +1399,12 @@ mod tool_execution_tests {
             .await
             .unwrap();
         let mut core = test_turn_engine();
-        core.register_test_tool(LocalWorkspaceFileTool::new(
+        core.register_test_tool(immediate_dispatch_tool(LocalWorkspaceFileTool::new(
             WorkspaceFileToolKind::ReadFile,
             crate::tool::ToolWorkspace::new(crate::tool::AgentWorkspace::local(
                 workspace_root.clone(),
             )),
-        ));
+        )));
         let tool_call = ToolCall::function(
             "provider-item-1",
             "read_file",
@@ -1428,7 +1439,7 @@ mod tool_execution_tests {
                 step: 0,
                 workspace: crate::tool::AgentWorkspace::local(workspace_root.clone()),
                 active_subagent: None,
-                tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
+                tool_cache: crate::tool::cache::SessionToolCacheHandle::default(),
             },
         )
         .await
@@ -1493,12 +1504,12 @@ mod tool_execution_tests {
             .await
             .unwrap();
         let mut core = test_turn_engine();
-        core.register_test_tool(LocalWorkspaceFileTool::new(
+        core.register_test_tool(immediate_dispatch_tool(LocalWorkspaceFileTool::new(
             WorkspaceFileToolKind::ReadFile,
             crate::tool::ToolWorkspace::new(crate::tool::AgentWorkspace::local(
                 workspace_root.clone(),
             )),
-        ));
+        )));
         let tool_call = ToolCall::function(
             "provider-item-1",
             "read_file",
@@ -1533,7 +1544,7 @@ mod tool_execution_tests {
                 step: 0,
                 workspace: crate::tool::AgentWorkspace::local(workspace_root.clone()),
                 active_subagent: None,
-                tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
+                tool_cache: crate::tool::cache::SessionToolCacheHandle::default(),
             },
         )
         .await
@@ -1641,7 +1652,7 @@ mod tool_execution_tests {
                 step: 0,
                 workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
                 active_subagent: None,
-                tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
+                tool_cache: crate::tool::cache::SessionToolCacheHandle::default(),
             },
         )
         .await

@@ -192,6 +192,7 @@ pub(super) async fn run(step: CompactionStep<'_>) -> Result<Option<TurnResult>> 
                     session,
                     recorder,
                     compaction_inference,
+                    Default::default(),
                 )
                 .await?;
             }
@@ -215,6 +216,7 @@ pub(super) async fn run(step: CompactionStep<'_>) -> Result<Option<TurnResult>> 
                     session,
                     recorder,
                     inference::from_billing(active_subagent, billing),
+                    Default::default(),
                 )
                 .await?;
                 if is_cancelled(options) {

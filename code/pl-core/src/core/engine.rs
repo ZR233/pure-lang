@@ -153,6 +153,15 @@ impl TurnEngine {
         self.tool_session_runtime.clone()
     }
 
+    pub(crate) fn bind_session_runtime(
+        &mut self,
+        runtime: &crate::session_runtime::SessionRuntimeHandle,
+    ) {
+        self.agent_tools = runtime.tools().clone();
+        self.tool_session_runtime = runtime.tool_session_runtime();
+        self.before_model_step = runtime.refresh_hook();
+    }
+
     /// 返回供 workspace-aware 工具在构造时捕获的 agent workspace runtime。
     pub fn tool_workspace(&self) -> crate::tool::ToolWorkspace {
         let workspace = self.workspace.clone().unwrap_or_else(|| {
@@ -308,13 +317,13 @@ impl TurnEngine {
             .install(ToolInstallGroup::direct(ToolGroupId::new("skills"), tools))
     }
 
-    pub(super) async fn review_tool_call_with_ai(
+    pub(super) fn review_tool_call_with_ai(
         &self,
         request: &ToolApprovalRequest,
         permission_mode: crate::turn::PermissionMode,
         workspace_access: WorkspaceAccess,
         workspace_root: &std::path::Path,
-    ) -> ToolApprovalDecision {
+    ) -> impl std::future::Future<Output = ToolApprovalDecision> + Send + 'static {
         let provider = self.runtime.clone();
         let effort = self.effort.clone();
         let reasoning = effort.as_ref().map(|effort| ReasoningConfig {
@@ -352,22 +361,24 @@ impl TurnEngine {
             .build();
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(1);
         let invocation = ModelInvocationContext::new(Default::default()).with_events(event_tx);
-        match provider.complete(completion_request, invocation).await {
-            Ok(response) => {
-                let content = response.content.unwrap_or_default().trim().to_string();
-                if content.is_empty() {
-                    return ToolApprovalDecision::Denied {
-                        reason: "AI reviewer returned an empty decision".to_string(),
-                    };
+        async move {
+            match provider.complete(completion_request, invocation).await {
+                Ok(response) => {
+                    let content = response.content.unwrap_or_default().trim().to_string();
+                    if content.is_empty() {
+                        return ToolApprovalDecision::Denied {
+                            reason: "AI reviewer returned an empty decision".to_string(),
+                        };
+                    }
+                    match parse_reviewer_decision(&content) {
+                        Ok(decision) => decision,
+                        Err(error) => ToolApprovalDecision::Denied { reason: error },
+                    }
                 }
-                match parse_reviewer_decision(&content) {
-                    Ok(decision) => decision,
-                    Err(error) => ToolApprovalDecision::Denied { reason: error },
-                }
+                Err(error) => ToolApprovalDecision::Denied {
+                    reason: format!("AI reviewer failed: {error}"),
+                },
             }
-            Err(error) => ToolApprovalDecision::Denied {
-                reason: format!("AI reviewer failed: {error}"),
-            },
         }
     }
 

@@ -15,7 +15,6 @@ pub(super) struct StudioAgentResource {
 #[derive(Clone, Default)]
 pub(in crate::studio) struct StudioAgentResources {
     entries: Arc<RwLock<BTreeMap<ThreadId, StudioAgentResource>>>,
-    tool_sets: Arc<RwLock<BTreeMap<ThreadId, pl_core::AgentToolSet>>>,
     initial_remote_urls: Arc<RwLock<BTreeMap<String, String>>>,
     attachments: Arc<RwLock<BTreeMap<String, BTreeMap<String, AttachmentRecord>>>>,
 }
@@ -37,25 +36,11 @@ impl StudioAgentResources {
     }
 
     pub(super) async fn remove(&self, id: &ThreadId) -> Option<StudioAgentResource> {
-        self.tool_sets.write().await.remove(id);
         let resource = self.entries.write().await.remove(id);
         if let Some(resource) = &resource {
             self.attachments.write().await.remove(&resource.thread_id);
         }
         resource
-    }
-
-    pub(super) async fn tool_set(
-        &self,
-        id: &ThreadId,
-        manager: &pl_core::ToolManager,
-    ) -> pl_core::AgentToolSet {
-        let mut sets = self.tool_sets.write().await;
-        sets.entry(id.clone())
-            .or_insert_with(|| {
-                manager.agent_tool_set(id.to_string(), pl_core::GlobalToolInheritance::Isolated)
-            })
-            .clone()
     }
 
     pub(super) async fn release_after_close(&self, id: &ThreadId) {

@@ -102,16 +102,17 @@ commit/测试/风险证据，以及 workspace、`writablePaths`、Git 与 cleanu
 `report_progress`，以 `readyForCompletion` 阶段提交 `CHILD_DELIVERY_READY` 及完整证据；worktree child
 还必须在 detail 中提供 `WORKTREE_COMMIT_READY`、40 位 commit 与 workspace root，reviewer 继续使用
 专用 verdict marker。
-root 从成功 spawn receipt 冻结真实 `agentId`，循环 `wait_agents` 直到该 child terminal，再按该 id 调用
+root 从成功 spawn receipt 冻结真实 `agentId` 和 `turnId`，循环 `wait` 直到该 child 的对应 Turn terminal，再按该 id 调用
 `read_agent_submissions`。progress 唤醒不等于 terminal；空 submission page 是 child 交付合同失败，
 `read_agent_session` 只用于诊断和收窄重派，不能作为正常成果 fallback。child 命中预算时
-`wait_agents` 以独立的 `budgetLimited` reason 返回，root 不得把它当作 terminal success 或从 pending
+`wait` 的 agent Turn 完成事件以 `status=budgetLimited` 返回，root 不得把它当作 terminal success 或从 pending
 集合移除：先分页读取该 child 的 durable Timeline 判断进展，确认状态正常、任务未完成后再以
 `send_message` 显式续跑；异常时应收窄指令、关闭或重新派发，而不是无条件续轮。
-`wait_agents` 是“任一目标有新事件即返回”，批量等待一次不代表其余目标已完成。root 必须维护尚未
-terminal 的 agentId 集合；只有同一次 canonical wait receipt 同时满足 `reason="terminal"`、message 的
-`agentId` 精确匹配、`state.agent.kind` 为 `idle` 或 `closed`，且 `lastTurnOutcome` 为 completed，才可从
-集合移除该 child。`CHILD_DELIVERY_READY` 出现在 progress message 中只表示成果已发布，不能替代终态；
+`wait` 返回所有已注册会话来源的事件，批量返回一次不代表其余目标已完成。root 必须维护尚未
+完成的 `(agentId, turnId)` 集合；只在 `batch.events` 中找到 `event.type=agentChanged`、匹配的
+`event.data.identity.id`、`change.type=turnCompleted`、对应 `change.data.turnId` 和
+`change.data.status=completed` 后移除。普通工具完成、定时器和应用消息不能冒充 agent 终态。
+`CHILD_DELIVERY_READY` 出现在 progress 中只表示成果已发布，不能替代终态；
 集合非空时继续等待，所有目标分别取得 terminal receipt 后才能开始读取 submissions。
 
 `read_agent_session` 读取持久化可见 Timeline，而不是 provider 当前 transcript。默认按倒序返回最新
@@ -180,6 +181,8 @@ Thread、热资源、worktree 与 branch。启动恢复只按 durable lease 对�
 保留现场并发布 Recovery issue，不盲删目录或非 Pure 分支。
 
 `close_agent` 对 worktree child 接受 `workspaceDisposition = preserve | cleanup`，默认 `preserve`。
+关闭请求先返回 Closing；任务、订阅、子会话与宿主清理完成后才发布 Closed。清理失败保留 Closing、
+冻结的 disposition 与错误，显式重试不能把已经取消的会话恢复为可执行状态。
 关闭不自动 commit、merge、cherry-pick 或修改主分支。父 Agent 应先审查 child commit、用普通 Git 显式
 整合，最终审查与验证通过后再请求 cleanup。已经 preserved 的 lease 在 Agents/Recovery 中显示 revision、branch、base/head、
 dirty 与 changed-files 预览，并提供显式清理。

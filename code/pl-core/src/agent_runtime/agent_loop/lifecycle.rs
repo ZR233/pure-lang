@@ -1,26 +1,22 @@
-use super::super::host::{
-    AgentLifecycleAdapter, DurableCommitFacts, PersistenceClass, ThreadProjectionCommit,
-};
+use super::super::host::{DurableCommitFacts, PersistenceClass, ThreadProjectionCommit};
 use super::super::state::{AgentRuntimeError, unix_timestamp};
 use super::super::{
     AgentCommand, AgentRuntimeEventKind, AgentRuntimeHost, AgentRuntimeResult, AgentSnapshot,
-    AgentSnapshotTransition, AgentState, CloseLifecycleRequest, ThreadMutation,
+    AgentSnapshotTransition, AgentState, ThreadMutation,
 };
 use super::AgentLoop;
 use super::commit::{CommitPublication, PendingCommit};
 use crate::AgentRoleId;
 use crate::thread_event::project_thread_facts;
 
-enum CloseCompensation {
-    Restored,
-    Faulted { reason: String },
-}
-
 impl<H> AgentLoop<H>
 where
     H: AgentRuntimeHost,
 {
     pub(super) async fn recover_faulted(&mut self) -> AgentRuntimeResult<AgentSnapshot> {
+        if self.session_runtime.is_closing() {
+            return Err(AgentRuntimeError::Lifecycle("session resources are shutting down; close or reactivate the session instead of resuming this owner".into()));
+        }
         let AgentState::Faulted(faulted) = &self.state.snapshot.state else {
             return Err(AgentRuntimeError::NotActive(
                 self.state.snapshot.identity.id.clone(),
@@ -33,6 +29,8 @@ where
                     .to_string(),
             ));
         }
+        self.task_resources.resume_settlement();
+        self.release_turn_deliveries(None).await?;
         let mut next = self.state.clone();
         next.pending_inputs
             .retain(|input| input.delivery_state.is_pending());
@@ -51,6 +49,7 @@ where
             },
         )
         .await?;
+        self.start_session_tasks().await?;
         Ok(self.state.snapshot.clone())
     }
 
@@ -186,197 +185,15 @@ where
         Ok(self.state.snapshot.clone())
     }
 
-    pub(super) async fn close(
-        &mut self,
-        workspace_disposition: pl_protocol::AgentWorkspaceDisposition,
-    ) -> AgentRuntimeResult<AgentSnapshot> {
-        if matches!(self.state.snapshot.state, AgentState::Closed(_)) {
-            if workspace_disposition == pl_protocol::AgentWorkspaceDisposition::Cleanup {
-                let lease = self
-                    .host
-                    .lifecycle()
-                    .prepare_close(CloseLifecycleRequest {
-                        agent: self.state.snapshot.clone(),
-                        workspace_disposition,
-                    })
-                    .await
-                    .map_err(|error| AgentRuntimeError::Lifecycle(error.to_string()))?;
-                if let Err(error) = self.host.lifecycle().commit_close(&lease).await {
-                    let rollback = self.host.lifecycle().rollback_close(lease).await;
-                    let reason = match rollback {
-                        Ok(()) => error.to_string(),
-                        Err(rollback_error) => {
-                            format!("{error}; close rollback failed: {rollback_error}")
-                        }
-                    };
-                    return Err(AgentRuntimeError::Lifecycle(reason));
-                }
-            }
-            return Ok(self.state.snapshot.clone());
-        }
-        let lease = self
-            .host
-            .lifecycle()
-            .prepare_close(CloseLifecycleRequest {
-                agent: self.state.snapshot.clone(),
-                workspace_disposition,
-            })
-            .await
-            .map_err(|error| AgentRuntimeError::Lifecycle(error.to_string()))?;
-        if self.active.is_some()
-            && let Err(error) = self
-                .interrupt_active_turn(pl_protocol::TurnCancellationCause::AgentClosed)
-                .await
-        {
-            let rollback = self.host.lifecycle().rollback_close(lease).await;
-            let reason = match rollback {
-                Ok(()) => error.to_string(),
-                Err(rollback_error) => {
-                    format!("{error}; close rollback failed: {rollback_error}")
-                }
-            };
-            self.fault(reason.clone()).await;
-            return Err(AgentRuntimeError::Repository(reason));
-        }
-        if let Err(error) = self.flush_pending_traces().await {
-            let rollback = self.host.lifecycle().rollback_close(lease).await;
-            let reason = match rollback {
-                Ok(()) => error.to_string(),
-                Err(rollback_error) => {
-                    format!("{error}; close rollback failed: {rollback_error}")
-                }
-            };
-            self.fault(reason.clone()).await;
-            return Err(AgentRuntimeError::Repository(reason));
-        }
-        let mut closing = self.state.clone();
-        closing
-            .snapshot
-            .transition(AgentCommand::BeginClose)
-            .map_err(|error| AgentRuntimeError::Lifecycle(error.to_string()))?;
-        closing.active_input = None;
-        if let Err(error) = self
-            .commit_transition(
-                super::persist::TransitionCommit::new(closing).settlement(),
-                |snapshot| AgentRuntimeEventKind::StateChanged {
-                    snapshot: Box::new(snapshot),
-                },
-            )
-            .await
-        {
-            if let Err(rollback_error) = self.host.lifecycle().rollback_close(lease).await {
-                let reason = format!(
-                    "failed to persist closing state: {error}; close rollback failed: {rollback_error}"
-                );
-                self.fault(reason.clone()).await;
-                return Err(AgentRuntimeError::Lifecycle(reason));
-            }
-            return Err(error);
-        }
-        self.stop_active_turn();
-        let close_result = self
-            .host
-            .lifecycle()
-            .commit_close(&lease)
-            .await
-            .map_err(|error| AgentRuntimeError::Lifecycle(error.to_string()));
-        if let Err(error) = close_result {
-            let rollback = self.host.lifecycle().rollback_close(lease).await;
-            let (return_error, compensation) = match rollback {
-                Ok(()) => (error, CloseCompensation::Restored),
-                Err(rollback_error) => {
-                    let reason = format!("{error}; close rollback failed: {rollback_error}");
-                    (
-                        AgentRuntimeError::Lifecycle(reason.clone()),
-                        CloseCompensation::Faulted { reason },
-                    )
-                }
-            };
-            self.persist_close_compensation(compensation).await?;
-            return Err(return_error);
-        }
-        let mut closed = self.state.clone();
-        closed.pending_inputs.clear();
-        closed.active_input = None;
-        closed
-            .snapshot
-            .transition(AgentCommand::Close)
-            .map_err(|error| AgentRuntimeError::Lifecycle(error.to_string()))?;
-        closed.snapshot.pending_inputs = 0;
-        if let Err(error) = self
-            .commit_transition(
-                super::persist::TransitionCommit::new(closed).settlement(),
-                |snapshot| AgentRuntimeEventKind::StateChanged {
-                    snapshot: Box::new(snapshot),
-                },
-            )
-            .await
-        {
-            let rollback = self.host.lifecycle().rollback_close(lease).await;
-            let compensation = match rollback {
-                Ok(()) => CloseCompensation::Restored,
-                Err(rollback_error) => CloseCompensation::Faulted {
-                    reason: format!(
-                        "failed to persist closed state: {error}; close rollback failed: {rollback_error}"
-                    ),
-                },
-            };
-            self.persist_close_compensation(compensation).await?;
-            return Err(error);
-        }
-        Ok(self.state.snapshot.clone())
-    }
-
-    async fn persist_close_compensation(
-        &mut self,
-        compensation: CloseCompensation,
-    ) -> AgentRuntimeResult<()> {
-        let restored = matches!(compensation, CloseCompensation::Restored);
-        let mut next = self.state.clone();
-        let next_turn_id = next.triggering_turn_id();
-        let command = match &compensation {
-            CloseCompensation::Restored => AgentCommand::Restore { next_turn_id },
-            CloseCompensation::Faulted { reason } => AgentCommand::Fault {
-                error: pl_protocol::StateError {
-                    code: "agentCloseCompensationFailed".to_string(),
-                    message: reason.clone(),
-                    retryable: false,
-                },
-                turn_id: None,
-                classification: super::super::AgentFaultClassification::AggregateCorruption,
-            },
-        };
-        next.snapshot
-            .transition(command)
-            .map_err(|error| AgentRuntimeError::Lifecycle(error.to_string()))?;
-        let event_compensation = compensation;
-        if let Err(error) = self
-            .commit_transition(
-                super::persist::TransitionCommit::new(next).settlement(),
-                move |snapshot| match event_compensation {
-                    CloseCompensation::Restored => AgentRuntimeEventKind::StateChanged {
-                        snapshot: Box::new(snapshot),
-                    },
-                    CloseCompensation::Faulted { reason } => AgentRuntimeEventKind::Faulted {
-                        reason,
-                        snapshot: Box::new(snapshot),
-                    },
-                },
-            )
-            .await
-        {
-            self.fault(error.to_string()).await;
-            return Err(error);
-        }
-        if restored && self.dispatch_enabled && self.state.has_triggering_input() {
-            self.begin_next_turn().await;
-        }
-        Ok(())
-    }
-
     pub(super) async fn shutdown(&mut self) -> AgentRuntimeResult<AgentSnapshot> {
         self.dispatch_enabled = false;
+        if self.closing.is_some() || matches!(self.state.snapshot.state, AgentState::Closing(_)) {
+            return self.finish_close_for_shutdown().await;
+        }
+        self.drain_session_sources().await?;
+        self.drain_session_tasks().await?;
         if self.active.is_none() {
+            self.session_runtime.release_tools();
             return Ok(self.state.snapshot.clone());
         }
         let result = self
@@ -385,6 +202,9 @@ where
         if let Err(error) = &result {
             self.fault(error.to_string()).await;
         }
-        result.map(|()| self.state.snapshot.clone())
+        result.map(|()| {
+            self.session_runtime.release_tools();
+            self.state.snapshot.clone()
+        })
     }
 }

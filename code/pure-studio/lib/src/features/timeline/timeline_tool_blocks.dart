@@ -142,6 +142,8 @@ class _ToolGroupPartState extends State<_ToolGroupPart> {
 
 bool _isActiveToolItem(TimelineToolGroupItem item) {
   return const {
+    'queued',
+    'cancelling',
     'awaitingApproval',
     'started',
     'streaming',
@@ -153,6 +155,7 @@ bool _isActiveToolItem(TimelineToolGroupItem item) {
 /// 工具处于真正执行/流式中，可展示紧凑脉冲；等待授权不作为模型思考展示。
 bool _isExecutingToolItem(TimelineToolGroupItem item) {
   return const {
+    'cancelling',
     'started',
     'streaming',
     'approved',
@@ -465,6 +468,7 @@ class _ToolGroupItemRow extends StatelessWidget {
     final detailLines =
         [
               _toolTarget(item),
+              tool?.taskId,
               item.summary,
               tool?.workingDirectory,
               if (tool?.exitCode != null)
@@ -613,12 +617,16 @@ String _toolTitle(BuildContext context, TimelineToolGroupItem item) {
       'succeeded' => context.l10n.timelineViewImageRead,
       'failed' ||
       'denied' ||
-      'cancelled' => context.l10n.timelineViewImageFailed,
+      'cancelled' ||
+      'interrupted' => context.l10n.timelineViewImageFailed,
       _ => context.l10n.timelineViewImageReading,
     };
   }
   final label = _toolDisplayName(context, item);
   return switch (item.status) {
+    'queued' => context.l10n.timelineToolQueued(label),
+    'cancelling' => context.l10n.timelineToolCancelling(label),
+    'interrupted' => context.l10n.timelineToolInterrupted(label),
     'succeeded' => context.l10n.timelineToolCompleted(label),
     'failed' => context.l10n.timelineToolFailed(label),
     'denied' => context.l10n.timelineToolDenied(label),

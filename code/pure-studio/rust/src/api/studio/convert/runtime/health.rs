@@ -50,7 +50,10 @@ fn bridge_agent_state(state: AgentState) -> BridgeAgentState {
         AgentState::Cancelling(value) => BridgeAgentState::Cancelling(BridgeCancellingAgent {
             turn_id: value.turn_id().to_string(),
         }),
-        AgentState::Closing(_) => BridgeAgentState::Closing(BridgeClosingAgent {}),
+        AgentState::Closing(value) => BridgeAgentState::Closing(BridgeClosingAgent {
+            turn_id: value.turn_id().map(ToString::to_string),
+            error: value.error().map(bridge_state_error),
+        }),
         AgentState::Closed(_) => BridgeAgentState::Closed(BridgeClosedAgent {}),
         AgentState::Faulted(value) => BridgeAgentState::Faulted(BridgeFaultedAgent {
             error: bridge_state_error(value.error()),

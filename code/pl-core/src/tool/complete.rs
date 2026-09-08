@@ -50,7 +50,7 @@ impl StaticTool for CompleteTool {
     }
 
     fn policy(&self) -> ToolPolicy {
-        ToolPolicy::default()
+        ToolPolicy::control()
             .with_effect(ToolEffect::Read)
             .with_batch_policy(ToolBatchPolicy::Solo)
     }

@@ -50,15 +50,11 @@ where
     }))
 }
 
-pub(super) async fn write_frame<W>(
-    writer: &mut W,
+pub(super) fn encode_frame(
     request_id: Option<u64>,
     message: RemoteMessage,
     body: &[u8],
-) -> io::Result<()>
-where
-    W: AsyncWrite + Unpin,
-{
+) -> io::Result<EncodedFrame> {
     if body.len() > REMOTE_MAX_BODY_BYTES {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -82,8 +78,22 @@ where
             format!("remote frame header length {} is too large", bytes.len()),
         ));
     }
-    writer.write_u32(bytes.len() as u32).await?;
-    writer.write_all(&bytes).await?;
-    writer.write_all(body).await?;
-    writer.flush().await
+    Ok(EncodedFrame {
+        header: bytes,
+        body: body.to_vec(),
+    })
+}
+
+pub(super) struct EncodedFrame {
+    header: Vec<u8>,
+    body: Vec<u8>,
+}
+
+impl EncodedFrame {
+    pub(super) async fn write<W: AsyncWrite + Unpin>(&self, writer: &mut W) -> io::Result<()> {
+        writer.write_u32(self.header.len() as u32).await?;
+        writer.write_all(&self.header).await?;
+        writer.write_all(&self.body).await?;
+        writer.flush().await
+    }
 }

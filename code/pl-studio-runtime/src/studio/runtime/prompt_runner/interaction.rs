@@ -68,7 +68,14 @@ impl StudioRuntime {
         &self,
         interaction_id: &str,
     ) -> Result<Option<InteractionRequest>> {
-        if let Some(framework) = self.agent_facility.framework.lock().await.clone() {
+        let framework = self
+            .agent_facility
+            .framework
+            .lock()
+            .await
+            .as_ref()
+            .and_then(|owner| owner.ready_runtime());
+        if let Some(framework) = framework {
             let handle = framework.handle();
             for agent in handle.directory_snapshot().agents {
                 let Ok(snapshot) = handle.thread_snapshot(&agent.identity.id) else {

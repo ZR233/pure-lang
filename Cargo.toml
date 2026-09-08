@@ -110,6 +110,7 @@ pl-output = { path = "code/pl-output" }
 pl-patch = { path = "code/pl-patch" }
 pl-skill-core = { path = "code/pl-skill-core" }
 pl-core = { path = "code/pl-core" }
+pl-remote-helper = { path = "code/pl-remote-helper" }
 pl-studio-runtime = { path = "code/pl-studio-runtime" }
 pl-studio-server = { path = "code/pl-studio-server" }
 pl-model = { path = "code/pl-model" }

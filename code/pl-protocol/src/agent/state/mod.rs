@@ -59,7 +59,8 @@ impl AgentState {
             Self::WaitingInteraction(state) => Some(state.turn_id()),
             Self::Cancelling(state) => Some(state.turn_id()),
             Self::Faulted(state) => state.turn_id(),
-            Self::Idle(_) | Self::Closing(_) | Self::Closed(_) => None,
+            Self::Closing(state) => state.turn_id(),
+            Self::Idle(_) | Self::Closed(_) => None,
         }
     }
 
@@ -125,10 +126,7 @@ impl AgentState {
 
     /// 返回 Agent 是否已停止执行并可供等待方收束。
     pub fn is_settled(&self) -> bool {
-        matches!(
-            self,
-            Self::Idle(_) | Self::Closing(_) | Self::Closed(_) | Self::Faulted(_)
-        )
+        matches!(self, Self::Idle(_) | Self::Closed(_) | Self::Faulted(_))
     }
 }
 

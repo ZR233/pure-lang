@@ -6,8 +6,8 @@ use pl_protocol::{PureError, Result};
 use serde_json::Value;
 
 use crate::tool::{
-    CommandBackend, CommandCaptureStream, CommandExit, CommandOutputSizes, CommandOutputTarget,
-    CommandSpawnRequest, ManagedCommand, command_output_model_path,
+    CommandBackend, CommandCaptureStream, CommandExit, CommandIo, CommandOutputSizes,
+    CommandOutputTarget, CommandSpawnRequest, ManagedCommand, command_output_model_path,
 };
 
 use super::RemoteClient;
@@ -50,6 +50,8 @@ impl CommandBackend for RemoteCommandBackend {
     }
 
     async fn spawn(&self, request: CommandSpawnRequest) -> Result<ManagedCommand> {
+        let process_id = request.process_id.clone();
+        let client = self.client.clone();
         let transport = self
             .client
             .spawn_process(RemoteSpawnRequest {
@@ -62,14 +64,24 @@ impl CommandBackend for RemoteCommandBackend {
             })
             .await
             .map_err(remote_exec_error)?;
-        let exit = transport.exit;
+        let mut exit = transport.exit;
         Ok(ManagedCommand::new(
             None,
-            Some(Box::pin(transport.stdin)),
-            Some(Box::pin(transport.stdout)),
-            Some(Box::pin(transport.stderr)),
-            async move {
-                exit.await
+            CommandIo {
+                stdin: Some(Box::pin(transport.stdin)),
+                stdout: Some(Box::pin(transport.stdout)),
+                stderr: Some(Box::pin(transport.stderr)),
+            },
+            move |cancellation| async move {
+                let result = tokio::select! {
+                    result = &mut exit => result,
+                    _ = cancellation.cancelled() => {
+                        // The exit receiver remains owned even if the cancellation RPC fails.
+                        let _ = client.terminate_process(&process_id).await;
+                        exit.await
+                    }
+                };
+                result
                     .map_err(|_| "remote process exit channel closed".to_string())?
                     .map(|exit| CommandExit {
                         exit_code: exit.exit_code,
@@ -108,20 +120,6 @@ impl CommandBackend for RemoteCommandBackend {
         _sizes: CommandOutputSizes,
     ) -> Result<Vec<Value>> {
         Ok(Vec::new())
-    }
-
-    async fn terminate(&self, process_id: &str, _host_pid: Option<u32>) {
-        let _ = self.client.terminate_process(process_id).await;
-    }
-
-    fn terminate_sync(&self, process_id: &str, _host_pid: Option<u32>) {
-        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-            let client = self.client.clone();
-            let process_id = process_id.to_string();
-            runtime.spawn(async move {
-                let _ = client.terminate_process(&process_id).await;
-            });
-        }
     }
 }
 

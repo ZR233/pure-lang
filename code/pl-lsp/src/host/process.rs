@@ -83,10 +83,7 @@ impl LspChild {
                 let kill = child.kill();
                 Pin::from(kill).await.map_err(|error| error.to_string())
             }
-            Self::Hosted(child) => {
-                child.terminate().await;
-                Ok(())
-            }
+            Self::Hosted(child) => child.terminate().await.map_err(|error| error.to_string()),
         }
     }
 

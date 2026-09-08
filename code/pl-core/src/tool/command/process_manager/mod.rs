@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -21,7 +21,7 @@ mod snapshot;
 mod state;
 mod stream_io;
 
-use lifecycle::{spawn_lifecycle_task, wait_for_process_activity};
+use lifecycle::{CommandLifecycle, spawn_lifecycle_task, wait_for_process_activity};
 use snapshot::{message_for_state, truncate_text};
 use state::CommandProcessTransition;
 pub use state::{
@@ -42,6 +42,7 @@ where
 {
     state: Arc<Mutex<CommandProcessManagerState>>,
     backend: Arc<B>,
+    lifetime: Arc<ManagerLifetime>,
 }
 
 impl<B> Clone for CommandProcessManager<B>
@@ -52,6 +53,7 @@ where
         Self {
             state: self.state.clone(),
             backend: self.backend.clone(),
+            lifetime: self.lifetime.clone(),
         }
     }
 }
@@ -60,12 +62,12 @@ where
 struct CommandProcessManagerState {
     entries: HashMap<String, Arc<CommandProcessEntry>>,
     starting: usize,
+    task_reservations: HashSet<String>,
     max_processes: usize,
 }
 
 struct CommandProcessEntry {
     process_id: String,
-    os_pid: Option<u32>,
     output_target: CommandOutputTarget,
     stdin: Mutex<Option<CommandWriter>>,
     state: Mutex<CommandProcessState>,
@@ -77,7 +79,6 @@ impl std::fmt::Debug for CommandProcessEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CommandProcessEntry")
             .field("process_id", &self.process_id)
-            .field("os_pid", &self.os_pid)
             .field("output_file", &self.output_target.model_file())
             .field("state", &self.state)
             .finish_non_exhaustive()
@@ -162,25 +163,12 @@ pub trait CommandOutputObserver: Send + Sync + 'static {
     fn output_chunk(&self, stream: CommandOutputStream, chunk: &[u8], revision: u64);
 }
 
-impl<B> Drop for CommandProcessManager<B>
-where
-    B: CommandBackend,
-{
+#[derive(Debug, Default)]
+struct ManagerLifetime(CancellationToken);
+
+impl Drop for ManagerLifetime {
     fn drop(&mut self) {
-        if Arc::strong_count(&self.state) != 1 {
-            return;
-        }
-        let Ok(state) = self.state.try_lock() else {
-            return;
-        };
-        for entry in state.entries.values() {
-            if let Ok(process_state) = entry.state.try_lock()
-                && !process_state.has_live_child()
-            {
-                continue;
-            }
-            self.backend.terminate_sync(&entry.process_id, entry.os_pid);
-        }
+        self.0.cancel();
     }
 }
 
@@ -197,9 +185,11 @@ where
             state: Arc::new(Mutex::new(CommandProcessManagerState {
                 entries: HashMap::new(),
                 starting: 0,
+                task_reservations: HashSet::new(),
                 max_processes,
             })),
             backend,
+            lifetime: Arc::new(ManagerLifetime::default()),
         }
     }
 
@@ -207,6 +197,42 @@ where
         &self,
         request: CommandStartRequest,
     ) -> Result<CommandOutputSnapshot, PureError> {
+        let yield_time = request.yield_time;
+        let max_output_chars = request.max_output_chars;
+        let entry = self.start_entry(request, None).await?;
+        self.snapshot_after_wait(&entry.process_id, yield_time, max_output_chars)
+            .await
+    }
+
+    /// Runs a command under its session task ID until process exit and output drain.
+    ///
+    /// # Errors
+    /// Returns spawn, capture, identity, or output publication failures. Cancellation
+    /// is passed to the process lifecycle and does not abandon the process waiter.
+    pub async fn run_task(
+        &self,
+        task_id: &str,
+        request: CommandStartRequest,
+    ) -> Result<CommandOutputSnapshot, PureError> {
+        let max_output_chars = request.max_output_chars;
+        let entry = self.start_entry(request, Some(task_id)).await?;
+        loop {
+            let notified = entry.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if entry.is_final().await {
+                break;
+            }
+            notified.await;
+        }
+        self.snapshot_entry(&entry, max_output_chars).await
+    }
+
+    async fn start_entry(
+        &self,
+        request: CommandStartRequest,
+        task_id: Option<&str>,
+    ) -> Result<Arc<CommandProcessEntry>, PureError> {
         let working_directory = self
             .backend
             .resolve_cwd(request.cwd.as_deref(), request.allow_workspace_escape)
@@ -227,7 +253,20 @@ where
             .await
             .map_err(|error| tool_error("exec", error))?;
 
-        let process_id = self.reserve_process_id().await?;
+        if request
+            .cancellation_token
+            .as_ref()
+            .is_some_and(CancellationToken::is_cancelled)
+        {
+            return Err(tool_error("exec", "Task cancelled before process creation"));
+        }
+        let process_id = match task_id {
+            Some(id) => {
+                self.reserve_task_process(id).await?;
+                id.to_owned()
+            }
+            None => self.reserve_process_id().await?,
+        };
         let child = self
             .backend
             .spawn(CommandSpawnRequest {
@@ -241,6 +280,11 @@ where
             Ok(child) => child,
             Err(error) => {
                 self.release_start_reservation().await;
+                self.state
+                    .lock()
+                    .await
+                    .task_reservations
+                    .remove(&process_id);
                 return Err(tool_error("exec", error));
             }
         };
@@ -251,7 +295,6 @@ where
         let stdin = child.take_stdin();
         let entry = Arc::new(CommandProcessEntry {
             process_id: process_id.clone(),
-            os_pid: child.host_pid(),
             output_target,
             stdin: Mutex::new(stdin),
             state: Mutex::new(CommandProcessState::new(stdout_open, stderr_open)),
@@ -261,14 +304,17 @@ where
         {
             let mut state = self.state.lock().await;
             state.starting = state.starting.saturating_sub(1);
+            state.task_reservations.remove(&process_id);
             state.entries.insert(process_id.clone(), entry.clone());
         }
         spawn_lifecycle_task(
             entry.clone(),
             child,
-            request.timeout,
-            request.cancellation_token,
-            self.backend.clone(),
+            CommandLifecycle {
+                timeout: request.timeout,
+                task_cancellation: request.cancellation_token,
+                manager_cancellation: self.lifetime.0.clone(),
+            },
         );
 
         if let Some(stdout) = stdout {
@@ -277,8 +323,7 @@ where
         if let Some(stderr) = stderr {
             tokio::spawn(read_stderr(entry.clone(), stderr, self.backend.clone()));
         }
-        self.snapshot_after_wait(&process_id, request.yield_time, request.max_output_chars)
-            .await
+        Ok(entry)
     }
 
     pub async fn write_stdin(
@@ -289,7 +334,7 @@ where
             return Err(tool_error(
                 "write_stdin",
                 format!(
-                    "processId '{}' is not a live process. Re-check the previous exec result and avoid restarting the same command unless the process has ended.",
+                    "task '{}' has no live process. Inspect get_tool_task before starting another command.",
                     request.process_id
                 ),
             ));
@@ -309,7 +354,7 @@ where
                 return Err(tool_error(
                     "write_stdin",
                     format!(
-                        "processId '{}' does not accept stdin. Poll it with empty chars instead.",
+                        "task '{}' does not accept stdin. Use wait for completion.",
                         request.process_id
                     ),
                 ));
@@ -339,7 +384,7 @@ where
             return Err(tool_error(
                 "exec",
                 format!(
-                    "background process limit reached ({}). Wait for an existing process with write_stdin or let it finish before starting another command.",
+                    "background process limit reached ({}). Use wait for an existing task to finish before starting another command.",
                     state.max_processes
                 ),
             ));
@@ -357,6 +402,25 @@ where
             })?;
         state.starting = state.starting.saturating_add(1);
         Ok(format!("proc-{next_id}"))
+    }
+
+    async fn reserve_task_process(&self, id: &str) -> Result<(), PureError> {
+        if !id.starts_with("task-") || id.len() > 256 {
+            return Err(tool_error("exec", "invalid session task ID"));
+        }
+        let mut state = self.state.lock().await;
+        if state.entries.contains_key(id) || state.task_reservations.contains(id) {
+            return Err(tool_error("exec", "session task already owns a process"));
+        }
+        if state.entries.len().saturating_add(state.starting) >= state.max_processes {
+            return Err(tool_error(
+                "exec",
+                "process capacity reached; wait for an existing task",
+            ));
+        }
+        state.starting += 1;
+        state.task_reservations.insert(id.to_owned());
+        Ok(())
     }
 
     async fn release_start_reservation(&self) {
@@ -381,6 +445,14 @@ where
             ));
         };
         wait_for_process_activity(&entry, yield_time).await;
+        self.snapshot_entry(&entry, max_output_chars).await
+    }
+
+    async fn snapshot_entry(
+        &self,
+        entry: &CommandProcessEntry,
+        max_output_chars: usize,
+    ) -> Result<CommandOutputSnapshot, PureError> {
         self.backend
             .publish_output(&entry.output_target)
             .await
@@ -392,7 +464,7 @@ where
                 .collect_output_artifacts(&entry.output_target, sizes)
                 .await
                 .map_err(|error| tool_error("exec", error))?;
-            self.state.lock().await.entries.remove(process_id);
+            self.state.lock().await.entries.remove(&entry.process_id);
         }
         Ok(snapshot)
     }
@@ -423,8 +495,16 @@ impl CommandProcessEntry {
             stdout_bytes: state.stdout.total_bytes() as u64,
             stderr_bytes: state.stderr.total_bytes() as u64,
         };
-        let stdout = truncate_text(&state.pending_stdout.take_display_text(), max_output_chars);
-        let stderr = truncate_text(&state.pending_stderr.take_display_text(), max_output_chars);
+        let (stdout, stderr) = if state.lifecycle.is_final() {
+            (state.stdout.display_text(), state.stderr.display_text())
+        } else {
+            (
+                state.pending_stdout.take_display_text(),
+                state.pending_stderr.take_display_text(),
+            )
+        };
+        let stdout = truncate_text(&stdout, max_output_chars);
+        let stderr = truncate_text(&stderr, max_output_chars);
         (
             CommandOutputSnapshot {
                 state: state.lifecycle.clone(),

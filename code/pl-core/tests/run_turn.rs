@@ -1170,7 +1170,7 @@ fn step_tool(name: &'static str, output: &'static str) -> pl_core::tool::DynTool
         pl_core::tool::ToolName::bare(name).unwrap(),
         name,
     ))
-    .policy(pl_core::tool::ToolPolicy::read_only())
+    .policy(pl_core::tool::ToolPolicy::control().with_effect(pl_core::ToolEffect::Read))
     .build(move |_input, _context| async move { Ok(ToolResult::success(output)) })
 }
 
@@ -1214,7 +1214,7 @@ impl StaticTool for HostedToolProbe {
     }
 
     fn policy(&self) -> ToolPolicy {
-        ToolPolicy::read_only()
+        ToolPolicy::control().with_effect(pl_core::ToolEffect::Read)
     }
 
     async fn execute(
@@ -1242,7 +1242,7 @@ impl StaticTool for LargeArtifactTool {
     }
 
     fn policy(&self) -> ToolPolicy {
-        ToolPolicy::default()
+        ToolPolicy::control()
     }
 
     async fn execute(
@@ -1282,7 +1282,7 @@ impl StaticTool for EndTurnContentTool {
     }
 
     fn policy(&self) -> ToolPolicy {
-        ToolPolicy::default()
+        ToolPolicy::control()
     }
 
     async fn execute(
@@ -1311,7 +1311,7 @@ impl StaticTool for HistoryMarkerTool {
     }
 
     fn policy(&self) -> ToolPolicy {
-        ToolPolicy::default()
+        ToolPolicy::control()
     }
 
     async fn execute(
@@ -1347,7 +1347,7 @@ impl StaticTool for ParentHistoryProbeTool {
     }
 
     fn policy(&self) -> ToolPolicy {
-        ToolPolicy::default()
+        ToolPolicy::control()
     }
 
     async fn execute(
@@ -1708,7 +1708,7 @@ async fn provider_tool_tasks_preserve_native_optimizations_and_account_for_the_c
             ToolName::bare("double").unwrap(),
             "Double an integer",
         ))
-        .policy(ToolPolicy::read_only())
+        .policy(ToolPolicy::control().with_effect(pl_core::ToolEffect::Read))
         .build(|input, _| async move { Ok(ToolResult::success((input.value * 2).to_string())) });
         install_test_tool(&tools, tool);
         let engine = TurnEngineBuilder::from_route(&route)

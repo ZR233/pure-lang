@@ -13,22 +13,17 @@ use pl_protocol::remote::{
 use tokio::io::AsyncWrite;
 use tokio::sync::Mutex;
 
-use crate::codec::{read_frame, write_frame};
+use crate::ServerError;
+use crate::codec::read_frame;
 use crate::path::{WorkspaceRegistry, io_error, remote_error};
 
+mod outbound;
 mod process;
 
+use outbound::Outbound;
 use process::ProcessRegistry;
 
 static NEXT_ATOMIC_WRITE_ID: AtomicU64 = AtomicU64::new(0);
-
-type SharedWriter = Arc<Mutex<Box<dyn AsyncWrite + Send + Unpin>>>;
-
-#[derive(Debug, thiserror::Error)]
-pub enum ServerError {
-    #[error("remote helper stdio failed: {0}")]
-    Io(#[from] io::Error),
-}
 
 #[derive(Debug)]
 struct ServerState {
@@ -52,26 +47,114 @@ where
 }
 
 async fn run_with_shell<R>(
-    mut reader: R,
+    reader: R,
     writer: Box<dyn AsyncWrite + Send + Unpin>,
     shell: RemoteShellDescriptor,
 ) -> Result<(), ServerError>
 where
     R: tokio::io::AsyncRead + Unpin,
 {
-    let writer = Arc::new(Mutex::new(writer));
+    let (writer, mut writer_task) = Outbound::new(writer);
     let state = Arc::new(Mutex::new(ServerState {
         workspaces: WorkspaceRegistry::default(),
         shell: shell.clone(),
     }));
-    let processes = ProcessRegistry::new(writer.clone(), shell);
-    while let Some(frame) = read_frame(&mut reader).await? {
+    let (processes, mut registry_task) = ProcessRegistry::new(writer.clone(), shell);
+    let outcome = serve_requests(reader, &writer, &state, &processes).await;
+    // EOF, malformed input and write failures all seal the byte stream before cleanup.
+    writer.close();
+    let cleanup = processes.terminate_all().await;
+    let registry_outcome = registry_task.wait().await;
+    let write_outcome = writer_task.wait().await.map_err(ServerError::Io);
+    cleanup.map_err(ServerError::Cleanup)?;
+    registry_outcome.map_err(ServerError::Cleanup)?;
+    outcome.and(write_outcome)
+}
+
+async fn serve_requests<R>(
+    reader: R,
+    writer: &Outbound,
+    state: &Arc<Mutex<ServerState>>,
+    processes: &ProcessRegistry,
+) -> Result<(), ServerError>
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    let mut handlers = tokio::task::JoinSet::new();
+    let outcome = receive_requests(reader, writer, state, processes, &mut handlers).await;
+    if !matches!(outcome, Ok(RequestEnd::Shutdown { .. })) {
+        writer.close();
+    }
+    let cleanup = processes.terminate_all().await;
+    let mut handler_failure = None;
+    while let Some(result) = handlers.join_next().await {
+        match result {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                handler_failure.get_or_insert(error);
+            }
+            Err(error) => {
+                handler_failure.get_or_insert(ServerError::Io(io::Error::other(error)));
+            }
+        }
+    }
+    cleanup.map_err(ServerError::Cleanup)?;
+    let end = outcome?;
+    match end {
+        // EOF has deliberately closed the writer. In-flight replies are abandoned,
+        // while cleanup and genuine writer failures still propagate independently.
+        RequestEnd::Disconnected => Ok(()),
+        RequestEnd::Shutdown { request_id } => {
+            if let Some(error) = handler_failure {
+                return Err(error);
+            }
+            write_response(writer, request_id, RemoteResponse::Ack, &[]).await?;
+            Ok(())
+        }
+    }
+}
+
+enum RequestEnd {
+    Disconnected,
+    Shutdown { request_id: Option<u64> },
+}
+
+async fn receive_requests<R>(
+    mut reader: R,
+    writer: &Outbound,
+    state: &Arc<Mutex<ServerState>>,
+    processes: &ProcessRegistry,
+    handlers: &mut tokio::task::JoinSet<Result<(), ServerError>>,
+) -> Result<RequestEnd, ServerError>
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
+    loop {
+        // read_frame has partial IO state. Keep the same future when a handler completes.
+        let incoming = read_frame(&mut reader);
+        tokio::pin!(incoming);
+        let frame = loop {
+            tokio::select! {
+                frame = &mut incoming => break frame?,
+                error = writer.failed() => return Err(error.into()),
+                result = handlers.join_next(), if !handlers.is_empty() => {
+                    match result {
+                        Some(Ok(result)) => result?,
+                        Some(Err(error)) => return Err(io::Error::other(error).into()),
+                        None => {},
+                    }
+                }
+            }
+        };
+        let Some(frame) = frame else {
+            return Ok(RequestEnd::Disconnected);
+        };
         let request_id = frame.request_id;
         let request = match frame.message {
             RemoteMessage::Request(request) => request,
             RemoteMessage::Response(_) | RemoteMessage::Event(_) => {
                 write_response(
-                    &writer,
+                    writer,
                     request_id,
                     RemoteResponse::Error(remote_error(
                         RemoteErrorCode::InvalidRequest,
@@ -83,37 +166,55 @@ where
                 continue;
             }
         };
-        let shutdown = matches!(request, RemoteRequest::Shutdown);
-        let outcome = handle_request(&state, &processes, request, frame.body).await;
-        match outcome {
-            Ok((response, body)) => {
-                write_response(&writer, request_id, response, &body).await?;
-            }
-            Err(error) => {
-                write_response(&writer, request_id, RemoteResponse::Error(error), &[]).await?;
-            }
+        if matches!(request, RemoteRequest::Shutdown) {
+            return Ok(RequestEnd::Shutdown { request_id });
         }
-        if shutdown {
-            break;
+        // Control remains reachable even when all ordinary request slots are occupied.
+        if let RemoteRequest::Terminate { process_id } = request {
+            let response = match processes.terminate(&process_id).await {
+                Ok(()) => RemoteResponse::Ack,
+                Err(error) => RemoteResponse::Error(error),
+            };
+            write_response(writer, request_id, response, &[]).await?;
+            continue;
         }
+        if handlers.len() >= 32 {
+            write_response(
+                writer,
+                request_id,
+                RemoteResponse::Error(remote_error(
+                    RemoteErrorCode::InvalidRequest,
+                    "remote request capacity is exhausted",
+                )),
+                &[],
+            )
+            .await?;
+            continue;
+        }
+        let state = state.clone();
+        let processes = processes.clone();
+        let writer = writer.clone();
+        handlers.spawn(async move {
+            let outcome = handle_request(&state, &processes, request, frame.body).await;
+            let (response, body) = match outcome {
+                Ok(outcome) => outcome,
+                Err(error) => (RemoteResponse::Error(error), Vec::new()),
+            };
+            write_response(&writer, request_id, response, &body).await?;
+            Ok(())
+        });
     }
-    processes.terminate_all().await;
-    Ok(())
 }
 
 async fn write_response(
-    writer: &SharedWriter,
+    writer: &Outbound,
     request_id: Option<u64>,
     response: RemoteResponse,
     body: &[u8],
 ) -> io::Result<()> {
-    write_frame(
-        &mut *writer.lock().await,
-        request_id,
-        RemoteMessage::Response(response),
-        body,
-    )
-    .await
+    writer
+        .write(request_id, RemoteMessage::Response(response), body)
+        .await
 }
 
 async fn handle_request(
@@ -169,7 +270,7 @@ async fn handle_request(
             Ok(ack())
         }
         RemoteRequest::Shutdown => {
-            processes.terminate_all().await;
+            processes.terminate_all().await?;
             Ok(ack())
         }
     }

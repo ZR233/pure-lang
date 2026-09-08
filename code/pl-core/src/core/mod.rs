@@ -118,12 +118,12 @@ mod tests {
             .await
             .unwrap();
         let mut core = test_turn_engine();
-        core.register_test_tool(LocalWorkspaceFileTool::new(
+        core.register_test_tool(immediate_dispatch_tool(LocalWorkspaceFileTool::new(
             WorkspaceFileToolKind::ReadFile,
             crate::tool::ToolWorkspace::new(crate::tool::AgentWorkspace::local(
                 workspace_root.clone(),
             )),
-        ));
+        )));
         let tool_call = ToolCall::function(
             "call-1",
             "read_file",
@@ -170,7 +170,7 @@ mod tests {
                 step: 0,
                 workspace: crate::tool::AgentWorkspace::local(workspace_root.clone()),
                 active_subagent: None,
-                tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
+                tool_cache: crate::tool::cache::SessionToolCacheHandle::default(),
             },
         )
         .await
@@ -201,8 +201,10 @@ mod tests {
     async fn workspace_tool_without_approval_skips_approved_trace_phase() {
         let workspace = tempfile::tempdir().unwrap();
         let mut core = test_turn_engine();
-        core.register_test_tool(WriteFileTool::new(crate::tool::ToolWorkspace::new(
-            crate::tool::AgentWorkspace::local(workspace.path().to_path_buf()),
+        core.register_test_tool(immediate_dispatch_tool(WriteFileTool::new(
+            crate::tool::ToolWorkspace::new(crate::tool::AgentWorkspace::local(
+                workspace.path().to_path_buf(),
+            )),
         )));
         let tool_call = ToolCall::function(
             "provider-item-1",
@@ -233,7 +235,7 @@ mod tests {
                 step: 0,
                 workspace: crate::tool::AgentWorkspace::local(workspace.path().to_path_buf()),
                 active_subagent: None,
-                tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
+                tool_cache: crate::tool::cache::SessionToolCacheHandle::default(),
             },
         )
         .await
@@ -280,7 +282,7 @@ mod tests {
                 step: 0,
                 workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
                 active_subagent: None,
-                tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
+                tool_cache: crate::tool::cache::SessionToolCacheHandle::default(),
             },
         )
         .await
@@ -334,7 +336,7 @@ mod tests {
                 step: 0,
                 workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
                 active_subagent: None,
-                tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
+                tool_cache: crate::tool::cache::SessionToolCacheHandle::default(),
             },
         )
         .await
@@ -368,7 +370,8 @@ mod tests {
         assert_eq!(
             terminal.tool().and_then(|tool| match tool.state() {
                 pl_trace::TraceToolState::Denied(state) => Some(state.reason()),
-                pl_trace::TraceToolState::Started(_)
+                pl_trace::TraceToolState::Accepted(_)
+                | pl_trace::TraceToolState::Started(_)
                 | pl_trace::TraceToolState::Streaming(_)
                 | pl_trace::TraceToolState::AwaitingApproval(_)
                 | pl_trace::TraceToolState::Approved(_)
@@ -416,7 +419,7 @@ mod tests {
                 step: 0,
                 workspace: crate::tool::AgentWorkspace::local(std::env::temp_dir()),
                 active_subagent: None,
-                tool_cache: crate::tool::cache::TurnToolCacheHandle::default(),
+                tool_cache: crate::tool::cache::SessionToolCacheHandle::default(),
             },
         )
         .await
@@ -894,6 +897,23 @@ pub(crate) mod test_support {
         AgentEvent, TraceEvent, TraceEventKind, TracePartKind, TracePartSource, TraceTextChannel,
     };
 
+    /// Exercises the immediate dispatch pipeline with the real executor and policy.
+    /// Session-task admission and lifetime are verified through the session owner.
+    pub(crate) fn immediate_dispatch_tool(tool: impl Into<crate::DynTool>) -> crate::DynTool {
+        let tool = tool.into();
+        crate::DynTool::new_executor(crate::DynamicToolExecutor::new(
+            tool.definition().clone(),
+            tool.policy()
+                .clone()
+                .with_scheduling(crate::ToolScheduling::Control),
+            tool.execution(),
+            move |invocation| {
+                let tool = tool.clone();
+                async move { tool.execute(invocation).await }
+            },
+        ))
+    }
+
     pub(crate) fn test_static_tool_definition(
         name: &'static str,
         description: &'static str,
@@ -951,6 +971,7 @@ pub(crate) mod test_support {
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub(crate) enum TestToolPhase {
+        Accepted,
         Started,
         Streaming,
         AwaitingApproval,
@@ -965,6 +986,7 @@ pub(crate) mod test_support {
     impl From<&pl_trace::TraceToolState> for TestToolPhase {
         fn from(state: &pl_trace::TraceToolState) -> Self {
             match state {
+                pl_trace::TraceToolState::Accepted(_) => Self::Accepted,
                 pl_trace::TraceToolState::Started(_) => Self::Started,
                 pl_trace::TraceToolState::Streaming(_) => Self::Streaming,
                 pl_trace::TraceToolState::AwaitingApproval(_) => Self::AwaitingApproval,
@@ -1120,7 +1142,7 @@ pub(crate) mod test_support {
         }
 
         fn policy(&self) -> ToolPolicy {
-            ToolPolicy::default().with_parallel_tool_calls()
+            ToolPolicy::control().with_parallel_tool_calls()
         }
 
         fn execute(
@@ -1154,7 +1176,7 @@ pub(crate) mod test_support {
         }
 
         fn policy(&self) -> ToolPolicy {
-            ToolPolicy::default()
+            ToolPolicy::control()
         }
 
         fn execute(

@@ -105,6 +105,7 @@ pub struct BridgeThreadAttachment {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeThreadToolInvocation {
+    pub task_id: Option<String>,
     pub tool_call_id: String,
     pub call_id: Option<String>,
     pub provider_item_id: Option<String>,
@@ -115,6 +116,14 @@ pub struct BridgeThreadToolInvocation {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BridgeThreadToolState {
+    Queued,
+    Cancelling {
+        streamed_output: String,
+    },
+    Interrupted {
+        interrupted_at: i64,
+        reason: String,
+    },
     Started,
     Streaming,
     AwaitingApproval,

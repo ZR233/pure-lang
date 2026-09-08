@@ -45,30 +45,33 @@ pub(crate) async fn run_command_capture(
     })?;
     let stdout = child.stdout().take();
     let stderr = child.stderr().take();
-    let stdout_task = tokio::spawn(read_child_output(stdout));
-    let stderr_task = tokio::spawn(read_child_output(stderr));
-    let status = match tokio::time::timeout(timeout, child.wait()).await {
-        Ok(Ok(status)) => status,
-        Ok(Err(error)) => {
-            return Err(CommandProbeError::Failed {
-                message: error.to_string(),
-                stderr: String::new(),
-            });
-        }
-        Err(_) => {
-            let kill = child.kill();
-            let _ = std::pin::Pin::from(kill).await;
-            return Err(CommandProbeError::Failed {
-                message: timeout_message.to_string(),
-                stderr: String::new(),
-            });
+    let execution = async {
+        match tokio::time::timeout(timeout, child.wait()).await {
+            Ok(Ok(status)) => Ok(status),
+            Ok(Err(error)) => {
+                let cleanup = std::pin::Pin::from(child.kill()).await;
+                Err(CommandProbeError::Failed {
+                    message: cleanup_message(&error.to_string(), cleanup),
+                    stderr: String::new(),
+                })
+            }
+            Err(_) => {
+                let cleanup = std::pin::Pin::from(child.kill()).await;
+                Err(CommandProbeError::Failed {
+                    message: cleanup_message(timeout_message, cleanup),
+                    stderr: String::new(),
+                })
+            }
         }
     };
-    let stdout = stdout_task.await.unwrap_or_else(|error| {
-        tracing::warn!("command stdout task failed: {error}");
-        Vec::new()
-    });
-    let stderr = stderr_task.await.unwrap_or_default();
+    let (status, stdout, stderr) = tokio::join!(
+        execution,
+        read_child_output(stdout),
+        read_child_output(stderr)
+    );
+    let stdout = stdout.map_err(capture_error)?;
+    let stderr = stderr.map_err(capture_error)?;
+    let status = status?;
     if status.success() {
         return Ok(if stdout.is_empty() { stderr } else { stdout });
     }
@@ -100,29 +103,32 @@ async fn run_host_command_capture(
             message: error.to_string(),
             stderr: String::new(),
         })?;
-    let stdout_task = tokio::spawn(read_child_output(child.take_stdout()));
-    let stderr_task = tokio::spawn(read_child_output(child.take_stderr()));
-    let exit = match tokio::time::timeout(timeout, child.wait()).await {
-        Ok(Ok(exit)) => exit,
-        Ok(Err(error)) => {
-            return Err(CommandProbeError::Failed {
+    let stdout = child.take_stdout();
+    let stderr = child.take_stderr();
+    let execution = async {
+        match tokio::time::timeout(timeout, child.wait()).await {
+            Ok(Ok(exit)) => Ok(exit),
+            Ok(Err(error)) => Err(CommandProbeError::Failed {
                 message: error.to_string(),
                 stderr: String::new(),
-            });
-        }
-        Err(_) => {
-            child.terminate().await;
-            return Err(CommandProbeError::Failed {
-                message: timeout_message.to_string(),
-                stderr: String::new(),
-            });
+            }),
+            Err(_) => {
+                let cleanup = child.terminate().await;
+                Err(CommandProbeError::Failed {
+                    message: cleanup_message(timeout_message, cleanup),
+                    stderr: String::new(),
+                })
+            }
         }
     };
-    let stdout = stdout_task.await.unwrap_or_else(|error| {
-        tracing::warn!("host command stdout task failed: {error}");
-        Vec::new()
-    });
-    let stderr = stderr_task.await.unwrap_or_default();
+    let (exit, stdout, stderr) = tokio::join!(
+        execution,
+        read_child_output(stdout),
+        read_child_output(stderr)
+    );
+    let stdout = stdout.map_err(capture_error)?;
+    let stderr = stderr.map_err(capture_error)?;
+    let exit = exit?;
     if exit.exit_code == Some(0) {
         return Ok(if stdout.is_empty() { stderr } else { stdout });
     }
@@ -164,11 +170,27 @@ fn command_failure_message(status: ExitStatus, stdout: &[u8], stderr: &[u8]) -> 
     parts.join("\n")
 }
 
-async fn read_child_output(stream: Option<impl tokio::io::AsyncRead + Unpin>) -> Vec<u8> {
+fn cleanup_message(message: &str, cleanup: Result<(), impl std::fmt::Display>) -> String {
+    match cleanup {
+        Ok(()) => message.to_string(),
+        Err(error) => format!("{message}; process cleanup failed: {error}"),
+    }
+}
+
+fn capture_error(error: std::io::Error) -> CommandProbeError {
+    CommandProbeError::Failed {
+        message: format!("read probe output failed: {error}"),
+        stderr: String::new(),
+    }
+}
+
+async fn read_child_output(
+    stream: Option<impl tokio::io::AsyncRead + Unpin>,
+) -> std::io::Result<Vec<u8>> {
     let Some(mut stream) = stream else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     let mut output = Vec::new();
-    let _ = stream.read_to_end(&mut output).await;
-    output
+    stream.read_to_end(&mut output).await?;
+    Ok(output)
 }

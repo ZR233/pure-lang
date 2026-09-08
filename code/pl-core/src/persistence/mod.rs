@@ -2,6 +2,8 @@
 
 mod repository;
 mod sqlite;
+mod task_records;
+mod task_results;
 mod writer;
 
 use std::sync::Arc;

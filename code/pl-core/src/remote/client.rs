@@ -1,25 +1,59 @@
+use futures::FutureExt;
+use futures::future::{BoxFuture, Shared};
 use std::collections::HashMap;
 use std::io;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use pl_protocol::remote::{
     RemoteError, RemoteEvent, RemoteMessage, RemoteOutputStream, RemoteProcessExit, RemoteRequest,
     RemoteResponse, RemoteSpawnRequest,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, DuplexStream};
-use tokio::sync::{Mutex, Notify, oneshot};
+use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
+use tokio_util::sync::CancellationToken;
 
-use super::codec::{read_frame, write_frame};
+use super::codec::{EncodedFrame, encode_frame, read_frame};
 
-type SharedWriter = Arc<Mutex<Box<dyn AsyncWrite + Send + Unpin>>>;
+const REQUEST_CAPACITY: usize = 32;
+
+struct PendingRequest {
+    reply: oneshot::Sender<Result<RemoteReply, RemoteClientError>>,
+    _permit: OwnedSemaphorePermit,
+}
+
+struct TransportLifetime {
+    cancellation: CancellationToken,
+    completion: Shared<BoxFuture<'static, Result<(), Arc<tokio::task::JoinError>>>>,
+}
+
+impl Drop for TransportLifetime {
+    fn drop(&mut self) {
+        self.cancellation.cancel();
+    }
+}
+
+impl std::fmt::Debug for TransportLifetime {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("TransportLifetime")
+            .field("cancellation", &self.cancellation)
+            .finish_non_exhaustive()
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum RemoteClientError {
+    /// The host has sealed SSH connection admission for shutdown.
+    #[error("SSH manager is closing")]
+    ManagerClosing,
     #[error("SSH password is required")]
     CredentialRequired,
     #[error("remoteDisconnected")]
     Disconnected,
+    /// The bounded transport request capacity is exhausted; no frame was admitted.
+    #[error("remote request capacity is exhausted")]
+    Backpressure,
     #[error("remote helper protocol failed: {0}")]
     Protocol(String),
     #[error("remote helper rejected the request ({code:?}): {message}")]
@@ -56,13 +90,13 @@ impl std::fmt::Debug for RemoteProcessChannels {
 }
 
 struct RemoteClientInner {
-    writer: SharedWriter,
-    pending: Mutex<HashMap<u64, oneshot::Sender<Result<RemoteReply, RemoteClientError>>>>,
+    writer: mpsc::Sender<EncodedFrame>,
+    capacity: Arc<Semaphore>,
+    pending: Mutex<HashMap<u64, PendingRequest>>,
     processes: Mutex<HashMap<String, RemoteProcessChannels>>,
     next_request_id: AtomicU64,
     last_output_sequence: AtomicU64,
-    disconnected: AtomicBool,
-    disconnected_notify: Notify,
+    disconnected: CancellationToken,
 }
 
 impl std::fmt::Debug for RemoteClientInner {
@@ -78,6 +112,7 @@ impl std::fmt::Debug for RemoteClientInner {
 #[derive(Debug, Clone)]
 pub struct RemoteClient {
     inner: Arc<RemoteClientInner>,
+    transport: Arc<TransportLifetime>,
 }
 
 pub struct RemoteProcessTransport {
@@ -101,49 +136,84 @@ impl RemoteClient {
         R: AsyncRead + Send + Unpin + 'static,
         W: AsyncWrite + Send + Unpin + 'static,
     {
+        let (sender, receiver) = mpsc::channel(REQUEST_CAPACITY);
         let inner = Arc::new(RemoteClientInner {
-            writer: Arc::new(Mutex::new(Box::new(writer))),
+            writer: sender,
+            capacity: Arc::new(Semaphore::new(REQUEST_CAPACITY)),
             pending: Mutex::new(HashMap::new()),
             processes: Mutex::new(HashMap::new()),
             next_request_id: AtomicU64::new(0),
             last_output_sequence: AtomicU64::new(0),
-            disconnected: AtomicBool::new(false),
-            disconnected_notify: Notify::new(),
+            disconnected: CancellationToken::new(),
         });
-        tokio::spawn(read_loop(reader, inner.clone()));
-        Self { inner }
+        let read = tokio::spawn(read_loop(reader, inner.clone()));
+        let write = tokio::spawn(write_loop(writer, receiver, inner.clone()));
+        let transport = Arc::new(TransportLifetime {
+            cancellation: inner.disconnected.clone(),
+            completion: async move {
+                let (read, write) = tokio::join!(read, write);
+                read.and(write).map_err(Arc::new)
+            }
+            .boxed()
+            .shared(),
+        });
+        Self { inner, transport }
     }
 
+    /// Admits a bounded request and waits for the remote response.
+    ///
+    /// Once admitted, canceling this future does not cancel frame transmission or
+    /// remote side effects. The outstanding slot is released by the response or
+    /// transport closure, not by cancellation of the caller's wait.
+    ///
+    /// # Errors
+    /// Returns `Backpressure` without admitting a frame when capacity is exhausted,
+    /// or a validation, disconnection, or remote rejection error.
     pub async fn request(
         &self,
         request: RemoteRequest,
         body: &[u8],
     ) -> Result<RemoteReply, RemoteClientError> {
-        if self.inner.disconnected.load(Ordering::Acquire) {
+        if self.is_disconnected() {
             return Err(RemoteClientError::Disconnected);
         }
+        let capacity = self
+            .inner
+            .capacity
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| RemoteClientError::Backpressure)?;
         let request_id = self
             .inner
             .next_request_id
-            .fetch_add(1, Ordering::Relaxed)
-            .saturating_add(1);
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .map_err(|_| {
+                RemoteClientError::Protocol("remote request identity exhausted".to_string())
+            })?
+            + 1;
+        let frame = encode_frame(Some(request_id), RemoteMessage::Request(request), body)?;
+        let admission = tokio::select! {
+            biased;
+            _ = self.inner.disconnected.cancelled() => return Err(RemoteClientError::Disconnected),
+            permit = self.inner.writer.reserve() => permit.map_err(|_| RemoteClientError::Disconnected)?,
+        };
         let (sender, receiver) = oneshot::channel();
-        self.inner.pending.lock().await.insert(request_id, sender);
-        let write_result = write_frame(
-            &mut *self.inner.writer.lock().await,
-            Some(request_id),
-            RemoteMessage::Request(request),
-            body,
-        )
-        .await;
-        if let Err(error) = write_result {
-            self.inner.pending.lock().await.remove(&request_id);
-            if is_disconnect_error(&error) {
-                mark_disconnected(&self.inner).await;
+        {
+            let mut pending = self.inner.pending.lock().await;
+            // Serialize admission with disconnection's pending-request drain.
+            if self.is_disconnected() {
                 return Err(RemoteClientError::Disconnected);
             }
-            return Err(RemoteClientError::Protocol(error.to_string()));
+            pending.insert(
+                request_id,
+                PendingRequest {
+                    reply: sender,
+                    _permit: capacity,
+                },
+            );
         }
+        // No cancellation point between pending registration and frame admission.
+        admission.send(frame);
         receiver
             .await
             .unwrap_or(Err(RemoteClientError::Disconnected))
@@ -212,30 +282,28 @@ impl RemoteClient {
     }
 
     pub fn is_disconnected(&self) -> bool {
-        self.inner.disconnected.load(Ordering::Acquire)
+        self.inner.disconnected.is_cancelled()
     }
 
     pub async fn wait_disconnected(&self) {
-        if self.is_disconnected() {
-            return;
-        }
-        self.inner.disconnected_notify.notified().await;
+        self.inner.disconnected.cancelled().await;
+    }
+
+    /// Closes this transport and waits for both owned IO tasks to exit.
+    ///
+    /// Canceling this wait does not discard their completion handles.
+    /// # Errors
+    /// Reports a transport task panic after both tasks have been joined.
+    pub async fn close(&self) -> Result<(), RemoteClientError> {
+        self.inner.disconnected.cancel();
+        self.transport.completion.clone().await.map_err(|error| {
+            RemoteClientError::Protocol(format!("remote transport task failed: {error}"))
+        })
     }
 
     pub(crate) fn is_same_connection(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.inner, &other.inner)
     }
-}
-
-fn is_disconnect_error(error: &io::Error) -> bool {
-    matches!(
-        error.kind(),
-        io::ErrorKind::BrokenPipe
-            | io::ErrorKind::ConnectionAborted
-            | io::ErrorKind::ConnectionReset
-            | io::ErrorKind::NotConnected
-            | io::ErrorKind::UnexpectedEof
-    )
 }
 
 async fn forward_stdin(client: RemoteClient, process_id: String, mut reader: DuplexStream) {
@@ -273,7 +341,53 @@ async fn forward_stdin(client: RemoteClient, process_id: String, mut reader: Dup
     }
 }
 
-async fn read_loop<R>(mut reader: R, inner: Arc<RemoteClientInner>)
+struct DisconnectOnExit(CancellationToken);
+
+impl Drop for DisconnectOnExit {
+    fn drop(&mut self) {
+        self.0.cancel();
+    }
+}
+
+async fn write_loop<W>(
+    mut writer: W,
+    mut frames: mpsc::Receiver<EncodedFrame>,
+    inner: Arc<RemoteClientInner>,
+) where
+    W: AsyncWrite + Unpin,
+{
+    let _disconnect = DisconnectOnExit(inner.disconnected.clone());
+    tokio::select! {
+        biased;
+        _ = inner.disconnected.cancelled() => {},
+        _ = async {
+            while let Some(frame) = frames.recv().await {
+                if frame.write(&mut writer).await.is_err() {
+                    break;
+                }
+            }
+        } => {},
+    }
+    // Dropping the stream is mandatory even when cancellation interrupted a frame.
+    drop(writer);
+    drop(frames);
+    mark_disconnected(&inner).await;
+}
+
+async fn read_loop<R>(reader: R, inner: Arc<RemoteClientInner>)
+where
+    R: AsyncRead + Unpin,
+{
+    let _disconnect = DisconnectOnExit(inner.disconnected.clone());
+    tokio::select! {
+        biased;
+        _ = inner.disconnected.cancelled() => {},
+        _ = read_frames(reader, &inner) => {},
+    }
+    mark_disconnected(&inner).await;
+}
+
+async fn read_frames<R>(mut reader: R, inner: &RemoteClientInner)
 where
     R: AsyncRead + Unpin,
 {
@@ -293,18 +407,17 @@ where
                     }),
                 };
                 if let Some(sender) = inner.pending.lock().await.remove(&request_id) {
-                    let _ = sender.send(result);
+                    let _ = sender.reply.send(result);
                 }
             }
             RemoteMessage::Event(event) => {
-                if handle_event(&inner, event, frame.body).await.is_err() {
+                if handle_event(inner, event, frame.body).await.is_err() {
                     break;
                 }
             }
             RemoteMessage::Request(_) => break,
         }
     }
-    mark_disconnected(&inner).await;
 }
 
 async fn handle_event(
@@ -341,7 +454,14 @@ async fn handle_event(
             if let Some(mut channels) = inner.processes.lock().await.remove(&exit.process_id)
                 && let Some(sender) = channels.exit.take()
             {
-                let _ = sender.send(Ok(exit));
+                let result = match exit.failure.as_ref() {
+                    Some(error) => Err(RemoteClientError::Remote {
+                        code: error.code,
+                        message: error.message.clone(),
+                    }),
+                    None => Ok(exit),
+                };
+                let _ = sender.send(result);
             }
             Ok(())
         }
@@ -349,12 +469,11 @@ async fn handle_event(
 }
 
 async fn mark_disconnected(inner: &RemoteClientInner) {
-    if inner.disconnected.swap(true, Ordering::AcqRel) {
-        return;
-    }
-    inner.disconnected_notify.notify_waiters();
+    // Repeated drains are intentional: a canceled cleanup waiter must not prevent
+    // another observer from finishing delivery of the disconnected result.
+    inner.disconnected.cancel();
     for (_, sender) in inner.pending.lock().await.drain() {
-        let _ = sender.send(Err(RemoteClientError::Disconnected));
+        let _ = sender.reply.send(Err(RemoteClientError::Disconnected));
     }
     for (_, mut channels) in inner.processes.lock().await.drain() {
         if let Some(sender) = channels.exit.take() {
@@ -369,24 +488,5 @@ pub(super) fn expect_ack(reply: RemoteReply) -> Result<(), RemoteClientError> {
         response => Err(RemoteClientError::Protocol(format!(
             "expected ack, received {response:?}"
         ))),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn broken_transport_writes_are_classified_as_disconnects() {
-        for kind in [
-            io::ErrorKind::BrokenPipe,
-            io::ErrorKind::ConnectionReset,
-            io::ErrorKind::NotConnected,
-        ] {
-            assert!(is_disconnect_error(&io::Error::from(kind)));
-        }
-        assert!(!is_disconnect_error(&io::Error::from(
-            io::ErrorKind::InvalidData
-        )));
     }
 }

@@ -9,7 +9,7 @@ where
     ///
     /// 主代理通过协作工具 `read_agent_submissions` 主动 pull，按提交顺序分页返回，
     /// detail 全文不截断。
-    pub(super) async fn read_submissions(
+    pub(super) fn read_submissions(
         &self,
         offset: usize,
         limit: usize,

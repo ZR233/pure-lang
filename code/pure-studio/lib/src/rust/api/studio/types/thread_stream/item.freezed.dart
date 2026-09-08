@@ -3574,10 +3574,13 @@ extension BridgeThreadToolStatePatterns on BridgeThreadToolState {
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeThreadToolState_Started value)?  started,TResult Function( BridgeThreadToolState_Streaming value)?  streaming,TResult Function( BridgeThreadToolState_AwaitingApproval value)?  awaitingApproval,TResult Function( BridgeThreadToolState_Approved value)?  approved,TResult Function( BridgeThreadToolState_Running value)?  running,TResult Function( BridgeThreadToolState_Succeeded value)?  succeeded,TResult Function( BridgeThreadToolState_Failed value)?  failed,TResult Function( BridgeThreadToolState_Denied value)?  denied,TResult Function( BridgeThreadToolState_Cancelled value)?  cancelled,required TResult orElse(),}){
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeThreadToolState_Queued value)?  queued,TResult Function( BridgeThreadToolState_Cancelling value)?  cancelling,TResult Function( BridgeThreadToolState_Interrupted value)?  interrupted,TResult Function( BridgeThreadToolState_Started value)?  started,TResult Function( BridgeThreadToolState_Streaming value)?  streaming,TResult Function( BridgeThreadToolState_AwaitingApproval value)?  awaitingApproval,TResult Function( BridgeThreadToolState_Approved value)?  approved,TResult Function( BridgeThreadToolState_Running value)?  running,TResult Function( BridgeThreadToolState_Succeeded value)?  succeeded,TResult Function( BridgeThreadToolState_Failed value)?  failed,TResult Function( BridgeThreadToolState_Denied value)?  denied,TResult Function( BridgeThreadToolState_Cancelled value)?  cancelled,required TResult orElse(),}){
 final _that = this;
 switch (_that) {
-case BridgeThreadToolState_Started() when started != null:
+case BridgeThreadToolState_Queued() when queued != null:
+return queued(_that);case BridgeThreadToolState_Cancelling() when cancelling != null:
+return cancelling(_that);case BridgeThreadToolState_Interrupted() when interrupted != null:
+return interrupted(_that);case BridgeThreadToolState_Started() when started != null:
 return started(_that);case BridgeThreadToolState_Streaming() when streaming != null:
 return streaming(_that);case BridgeThreadToolState_AwaitingApproval() when awaitingApproval != null:
 return awaitingApproval(_that);case BridgeThreadToolState_Approved() when approved != null:
@@ -3604,10 +3607,13 @@ return cancelled(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeThreadToolState_Started value)  started,required TResult Function( BridgeThreadToolState_Streaming value)  streaming,required TResult Function( BridgeThreadToolState_AwaitingApproval value)  awaitingApproval,required TResult Function( BridgeThreadToolState_Approved value)  approved,required TResult Function( BridgeThreadToolState_Running value)  running,required TResult Function( BridgeThreadToolState_Succeeded value)  succeeded,required TResult Function( BridgeThreadToolState_Failed value)  failed,required TResult Function( BridgeThreadToolState_Denied value)  denied,required TResult Function( BridgeThreadToolState_Cancelled value)  cancelled,}){
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeThreadToolState_Queued value)  queued,required TResult Function( BridgeThreadToolState_Cancelling value)  cancelling,required TResult Function( BridgeThreadToolState_Interrupted value)  interrupted,required TResult Function( BridgeThreadToolState_Started value)  started,required TResult Function( BridgeThreadToolState_Streaming value)  streaming,required TResult Function( BridgeThreadToolState_AwaitingApproval value)  awaitingApproval,required TResult Function( BridgeThreadToolState_Approved value)  approved,required TResult Function( BridgeThreadToolState_Running value)  running,required TResult Function( BridgeThreadToolState_Succeeded value)  succeeded,required TResult Function( BridgeThreadToolState_Failed value)  failed,required TResult Function( BridgeThreadToolState_Denied value)  denied,required TResult Function( BridgeThreadToolState_Cancelled value)  cancelled,}){
 final _that = this;
 switch (_that) {
-case BridgeThreadToolState_Started():
+case BridgeThreadToolState_Queued():
+return queued(_that);case BridgeThreadToolState_Cancelling():
+return cancelling(_that);case BridgeThreadToolState_Interrupted():
+return interrupted(_that);case BridgeThreadToolState_Started():
 return started(_that);case BridgeThreadToolState_Streaming():
 return streaming(_that);case BridgeThreadToolState_AwaitingApproval():
 return awaitingApproval(_that);case BridgeThreadToolState_Approved():
@@ -3630,10 +3636,13 @@ return cancelled(_that);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeThreadToolState_Started value)?  started,TResult? Function( BridgeThreadToolState_Streaming value)?  streaming,TResult? Function( BridgeThreadToolState_AwaitingApproval value)?  awaitingApproval,TResult? Function( BridgeThreadToolState_Approved value)?  approved,TResult? Function( BridgeThreadToolState_Running value)?  running,TResult? Function( BridgeThreadToolState_Succeeded value)?  succeeded,TResult? Function( BridgeThreadToolState_Failed value)?  failed,TResult? Function( BridgeThreadToolState_Denied value)?  denied,TResult? Function( BridgeThreadToolState_Cancelled value)?  cancelled,}){
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeThreadToolState_Queued value)?  queued,TResult? Function( BridgeThreadToolState_Cancelling value)?  cancelling,TResult? Function( BridgeThreadToolState_Interrupted value)?  interrupted,TResult? Function( BridgeThreadToolState_Started value)?  started,TResult? Function( BridgeThreadToolState_Streaming value)?  streaming,TResult? Function( BridgeThreadToolState_AwaitingApproval value)?  awaitingApproval,TResult? Function( BridgeThreadToolState_Approved value)?  approved,TResult? Function( BridgeThreadToolState_Running value)?  running,TResult? Function( BridgeThreadToolState_Succeeded value)?  succeeded,TResult? Function( BridgeThreadToolState_Failed value)?  failed,TResult? Function( BridgeThreadToolState_Denied value)?  denied,TResult? Function( BridgeThreadToolState_Cancelled value)?  cancelled,}){
 final _that = this;
 switch (_that) {
-case BridgeThreadToolState_Started() when started != null:
+case BridgeThreadToolState_Queued() when queued != null:
+return queued(_that);case BridgeThreadToolState_Cancelling() when cancelling != null:
+return cancelling(_that);case BridgeThreadToolState_Interrupted() when interrupted != null:
+return interrupted(_that);case BridgeThreadToolState_Started() when started != null:
 return started(_that);case BridgeThreadToolState_Streaming() when streaming != null:
 return streaming(_that);case BridgeThreadToolState_AwaitingApproval() when awaitingApproval != null:
 return awaitingApproval(_that);case BridgeThreadToolState_Approved() when approved != null:
@@ -3659,9 +3668,12 @@ return cancelled(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function()?  started,TResult Function()?  streaming,TResult Function()?  awaitingApproval,TResult Function()?  approved,TResult Function( String streamedOutput)?  running,TResult Function( PlatformInt64 completedAt,  BridgeThreadToolOutput output)?  succeeded,TResult Function( PlatformInt64 failedAt,  BridgeThreadToolFailure failure,  BridgeThreadToolOutput? output)?  failed,TResult Function( PlatformInt64 deniedAt,  String reason)?  denied,TResult Function( PlatformInt64 cancelledAt,  String reason)?  cancelled,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function()?  queued,TResult Function( String streamedOutput)?  cancelling,TResult Function( PlatformInt64 interruptedAt,  String reason)?  interrupted,TResult Function()?  started,TResult Function()?  streaming,TResult Function()?  awaitingApproval,TResult Function()?  approved,TResult Function( String streamedOutput)?  running,TResult Function( PlatformInt64 completedAt,  BridgeThreadToolOutput output)?  succeeded,TResult Function( PlatformInt64 failedAt,  BridgeThreadToolFailure failure,  BridgeThreadToolOutput? output)?  failed,TResult Function( PlatformInt64 deniedAt,  String reason)?  denied,TResult Function( PlatformInt64 cancelledAt,  String reason)?  cancelled,required TResult orElse(),}) {final _that = this;
 switch (_that) {
-case BridgeThreadToolState_Started() when started != null:
+case BridgeThreadToolState_Queued() when queued != null:
+return queued();case BridgeThreadToolState_Cancelling() when cancelling != null:
+return cancelling(_that.streamedOutput);case BridgeThreadToolState_Interrupted() when interrupted != null:
+return interrupted(_that.interruptedAt,_that.reason);case BridgeThreadToolState_Started() when started != null:
 return started();case BridgeThreadToolState_Streaming() when streaming != null:
 return streaming();case BridgeThreadToolState_AwaitingApproval() when awaitingApproval != null:
 return awaitingApproval();case BridgeThreadToolState_Approved() when approved != null:
@@ -3688,9 +3700,12 @@ return cancelled(_that.cancelledAt,_that.reason);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function()  started,required TResult Function()  streaming,required TResult Function()  awaitingApproval,required TResult Function()  approved,required TResult Function( String streamedOutput)  running,required TResult Function( PlatformInt64 completedAt,  BridgeThreadToolOutput output)  succeeded,required TResult Function( PlatformInt64 failedAt,  BridgeThreadToolFailure failure,  BridgeThreadToolOutput? output)  failed,required TResult Function( PlatformInt64 deniedAt,  String reason)  denied,required TResult Function( PlatformInt64 cancelledAt,  String reason)  cancelled,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function()  queued,required TResult Function( String streamedOutput)  cancelling,required TResult Function( PlatformInt64 interruptedAt,  String reason)  interrupted,required TResult Function()  started,required TResult Function()  streaming,required TResult Function()  awaitingApproval,required TResult Function()  approved,required TResult Function( String streamedOutput)  running,required TResult Function( PlatformInt64 completedAt,  BridgeThreadToolOutput output)  succeeded,required TResult Function( PlatformInt64 failedAt,  BridgeThreadToolFailure failure,  BridgeThreadToolOutput? output)  failed,required TResult Function( PlatformInt64 deniedAt,  String reason)  denied,required TResult Function( PlatformInt64 cancelledAt,  String reason)  cancelled,}) {final _that = this;
 switch (_that) {
-case BridgeThreadToolState_Started():
+case BridgeThreadToolState_Queued():
+return queued();case BridgeThreadToolState_Cancelling():
+return cancelling(_that.streamedOutput);case BridgeThreadToolState_Interrupted():
+return interrupted(_that.interruptedAt,_that.reason);case BridgeThreadToolState_Started():
 return started();case BridgeThreadToolState_Streaming():
 return streaming();case BridgeThreadToolState_AwaitingApproval():
 return awaitingApproval();case BridgeThreadToolState_Approved():
@@ -3713,9 +3728,12 @@ return cancelled(_that.cancelledAt,_that.reason);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function()?  started,TResult? Function()?  streaming,TResult? Function()?  awaitingApproval,TResult? Function()?  approved,TResult? Function( String streamedOutput)?  running,TResult? Function( PlatformInt64 completedAt,  BridgeThreadToolOutput output)?  succeeded,TResult? Function( PlatformInt64 failedAt,  BridgeThreadToolFailure failure,  BridgeThreadToolOutput? output)?  failed,TResult? Function( PlatformInt64 deniedAt,  String reason)?  denied,TResult? Function( PlatformInt64 cancelledAt,  String reason)?  cancelled,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function()?  queued,TResult? Function( String streamedOutput)?  cancelling,TResult? Function( PlatformInt64 interruptedAt,  String reason)?  interrupted,TResult? Function()?  started,TResult? Function()?  streaming,TResult? Function()?  awaitingApproval,TResult? Function()?  approved,TResult? Function( String streamedOutput)?  running,TResult? Function( PlatformInt64 completedAt,  BridgeThreadToolOutput output)?  succeeded,TResult? Function( PlatformInt64 failedAt,  BridgeThreadToolFailure failure,  BridgeThreadToolOutput? output)?  failed,TResult? Function( PlatformInt64 deniedAt,  String reason)?  denied,TResult? Function( PlatformInt64 cancelledAt,  String reason)?  cancelled,}) {final _that = this;
 switch (_that) {
-case BridgeThreadToolState_Started() when started != null:
+case BridgeThreadToolState_Queued() when queued != null:
+return queued();case BridgeThreadToolState_Cancelling() when cancelling != null:
+return cancelling(_that.streamedOutput);case BridgeThreadToolState_Interrupted() when interrupted != null:
+return interrupted(_that.interruptedAt,_that.reason);case BridgeThreadToolState_Started() when started != null:
 return started();case BridgeThreadToolState_Streaming() when streaming != null:
 return streaming();case BridgeThreadToolState_AwaitingApproval() when awaitingApproval != null:
 return awaitingApproval();case BridgeThreadToolState_Approved() when approved != null:
@@ -3729,6 +3747,176 @@ return cancelled(_that.cancelledAt,_that.reason);case _:
 
 }
 }
+
+}
+
+/// @nodoc
+
+
+class BridgeThreadToolState_Queued extends BridgeThreadToolState {
+  const BridgeThreadToolState_Queued(): super._();
+
+
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadToolState_Queued);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+    return 'BridgeThreadToolState.queued()';
+}
+
+
+}
+
+
+
+
+/// @nodoc
+
+
+class BridgeThreadToolState_Cancelling extends BridgeThreadToolState {
+  const BridgeThreadToolState_Cancelling({required this.streamedOutput}): super._();
+
+
+ final  String streamedOutput;
+
+/// Create a copy of BridgeThreadToolState
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeThreadToolState_CancellingCopyWith<BridgeThreadToolState_Cancelling> get copyWith => _$BridgeThreadToolState_CancellingCopyWithImpl<BridgeThreadToolState_Cancelling>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadToolState_Cancelling&&(identical(other.streamedOutput, streamedOutput) || other.streamedOutput == streamedOutput));
+}
+
+
+@override
+int get hashCode {
+    return Object.hash(runtimeType,streamedOutput);
+}
+
+@override
+String toString() {
+    return 'BridgeThreadToolState.cancelling(streamedOutput: $streamedOutput)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeThreadToolState_CancellingCopyWith<$Res> implements $BridgeThreadToolStateCopyWith<$Res> {
+  factory $BridgeThreadToolState_CancellingCopyWith(BridgeThreadToolState_Cancelling value, $Res Function(BridgeThreadToolState_Cancelling) _then) = _$BridgeThreadToolState_CancellingCopyWithImpl;
+@useResult
+$Res call({
+ String streamedOutput
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeThreadToolState_CancellingCopyWithImpl<$Res>
+    implements $BridgeThreadToolState_CancellingCopyWith<$Res> {
+  _$BridgeThreadToolState_CancellingCopyWithImpl(this._self, this._then);
+
+  final BridgeThreadToolState_Cancelling _self;
+  final $Res Function(BridgeThreadToolState_Cancelling) _then;
+
+/// Create a copy of BridgeThreadToolState
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? streamedOutput = null,}) {
+  return _then(BridgeThreadToolState_Cancelling(
+streamedOutput: null == streamedOutput ? _self.streamedOutput : streamedOutput // ignore: cast_nullable_to_non_nullable
+as String,
+  ));
+}
+
+
+}
+
+/// @nodoc
+
+
+class BridgeThreadToolState_Interrupted extends BridgeThreadToolState {
+  const BridgeThreadToolState_Interrupted({required this.interruptedAt, required this.reason}): super._();
+
+
+ final  PlatformInt64 interruptedAt;
+ final  String reason;
+
+/// Create a copy of BridgeThreadToolState
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeThreadToolState_InterruptedCopyWith<BridgeThreadToolState_Interrupted> get copyWith => _$BridgeThreadToolState_InterruptedCopyWithImpl<BridgeThreadToolState_Interrupted>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadToolState_Interrupted&&(identical(other.interruptedAt, interruptedAt) || other.interruptedAt == interruptedAt)&&(identical(other.reason, reason) || other.reason == reason));
+}
+
+
+@override
+int get hashCode {
+    return Object.hash(runtimeType,interruptedAt,reason);
+}
+
+@override
+String toString() {
+    return 'BridgeThreadToolState.interrupted(interruptedAt: $interruptedAt, reason: $reason)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeThreadToolState_InterruptedCopyWith<$Res> implements $BridgeThreadToolStateCopyWith<$Res> {
+  factory $BridgeThreadToolState_InterruptedCopyWith(BridgeThreadToolState_Interrupted value, $Res Function(BridgeThreadToolState_Interrupted) _then) = _$BridgeThreadToolState_InterruptedCopyWithImpl;
+@useResult
+$Res call({
+ PlatformInt64 interruptedAt, String reason
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeThreadToolState_InterruptedCopyWithImpl<$Res>
+    implements $BridgeThreadToolState_InterruptedCopyWith<$Res> {
+  _$BridgeThreadToolState_InterruptedCopyWithImpl(this._self, this._then);
+
+  final BridgeThreadToolState_Interrupted _self;
+  final $Res Function(BridgeThreadToolState_Interrupted) _then;
+
+/// Create a copy of BridgeThreadToolState
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? interruptedAt = null,Object? reason = null,}) {
+  return _then(BridgeThreadToolState_Interrupted(
+interruptedAt: null == interruptedAt ? _self.interruptedAt : interruptedAt // ignore: cast_nullable_to_non_nullable
+as PlatformInt64,reason: null == reason ? _self.reason : reason // ignore: cast_nullable_to_non_nullable
+as String,
+  ));
+}
+
 
 }
 

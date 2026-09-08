@@ -52,7 +52,7 @@ impl StaticTool for PlanSubmitTool {
     }
 
     fn policy(&self) -> ToolPolicy {
-        ToolPolicy::default()
+        ToolPolicy::control()
             .with_effect(ToolEffect::AgentControl)
             .with_batch_policy(ToolBatchPolicy::Solo)
     }

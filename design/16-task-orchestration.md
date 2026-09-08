@@ -87,7 +87,7 @@ finding 回到 editing_documents；两条返工路径都必须重新经过 integ
 planning 开始和每批 child 交付后，root 都执行一次成本感知的并行化分析。它从需求、仓库边界和验证目标
 列出可交付节点，为每项记录前置依赖、读写范围、适用 Profile、交付证据与 root-only 标记，形成任务 DAG。
 依赖已满足、边界清楚、可独立验收且预计能缩短关键路径或显著增加独立证据的节点构成 ready frontier；
-root 必须在首次 `wait_agents` 前派出该前沿的全部 child，等待期间继续处理未委托的综合和编排工作，不得
+root 必须在首次 `wait` 前派出该前沿的全部 child，等待期间继续处理未委托的综合和编排工作，不得
 重复 child 的任务。收齐本批 durable delivery 后，root 更新 DAG 并立即释放下一 ready frontier，直到
 没有剩余节点。调度不使用固定 agent 数量，也不得为凑数量拆出只有极少操作的微任务、重复目标、共享
 未稳定上下文的工作或具有真实前后依赖的工作。
@@ -102,13 +102,13 @@ editing_documents 中 root 亲自更新设计。working 中普通实现必须交
 所有 child 使用同一成果传递顺序；非 reviewer child 完成探索/实现/验证后先调用 `report_progress`，以
 `readyForCompletion` 提交含 `CHILD_DELIVERY_READY` 的 durable detail，再发送内容一致的 final reply；
 reviewer 使用既有的 durable verdict marker。
-root 保存成功 spawn receipt 中的 `agentId`，循环 `wait_agents` 直到 terminal，然后对该 id 调用
+root 保存成功 spawn receipt 中的 `agentId` 和 `turnId`，循环 `wait` 直到对应 Turn 完成，然后对该 id 调用
 `read_agent_submissions`；progress 事件只能触发继续等待。canonical page 必须非空，空页只允许进入
 诊断和收窄重派，`read_agent_session` 不能替代正常交付。reviewer 使用既有 finding/approval marker，
 并继续保持比通用 child delivery 更严格的最终授权语义。
-批量 `wait_agents` 只为返回 message 中明确绑定的 agent 提供证据，不能推断未返回目标的状态。root
-维护 pending agentId 集合，且只在同一次 receipt 中观察到 `reason=terminal`、匹配 agentId、
-`state.agent.kind=idle|closed` 与 completed `lastTurnOutcome` 后移除；progress 中即使已有
+统一 `wait` 返回所有注册来源的事件，不能推断未返回目标的状态。root 维护 pending `(agentId, turnId)`
+集合，只在 agentChanged 事件的 identity.id 匹配、change 为 turnCompleted、turnId 对应且 status 为
+completed 时移除；具体 wire 约定见 [统一协作](15-agent-profiles-and-collaboration.md)。progress 中即使已有
 `CHILD_DELIVERY_READY` 也必须继续等待。所有 pending 目标清空前禁止调用任何一个目标的
 `read_agent_submissions`，从而让每份 durable delivery 都有先行的 receipt-bound terminal 证据。
 

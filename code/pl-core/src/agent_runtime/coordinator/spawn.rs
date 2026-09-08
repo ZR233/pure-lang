@@ -38,6 +38,15 @@ where
         return Err(AgentRuntimeError::AlreadyExists(id));
     }
     let state = registration.into_durable_state();
+    let prepared = prepare_agent_loop(
+        host.clone(),
+        state.clone(),
+        runtime.clone(),
+        options.cancel_grace,
+        true,
+        options.command_capacity,
+    )
+    .await?;
     let event = AgentRuntimeEvent {
         agent_id: id.clone(),
         sequence: state.snapshot.event_sequence,
@@ -46,6 +55,14 @@ where
             snapshot: Box::new(state.snapshot.clone()),
         },
     };
+    let mut thread_snapshot = pl_protocol::ThreadSnapshot::empty(id.as_str());
+    thread_snapshot.revision = state.session.thread_revision;
+    if let Err(error) = runtime.thread_events.replace_snapshot(thread_snapshot) {
+        prepared.rollback().await.map_err(|cleanup| {
+            AgentRuntimeError::Lifecycle(format!("{error}; rollback: {cleanup}"))
+        })?;
+        return Err(AgentRuntimeError::ThreadEvents(error.to_string()));
+    }
     host.repository().record_committed(ThreadCommit {
         agent_id: id.clone(),
         persistence: PersistenceClass::Standard,
@@ -60,25 +77,12 @@ where
         ),
         mutation: super::super::ThreadMutation::SnapshotAndQueue,
     });
-    let mut thread_snapshot = pl_protocol::ThreadSnapshot::empty(id.as_str());
-    thread_snapshot.revision = state.session.thread_revision;
-    runtime
-        .thread_events
-        .replace_snapshot(thread_snapshot)
-        .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
+    actors.write().await.insert(id, prepared.handle());
     runtime.directory.publish_runtime_event(&event);
+    prepared.start();
     host.observer()
         .publish(AgentCommittedEvent::runtime(event))
         .await;
-    let actor = spawn_agent_loop(
-        host.clone(),
-        state.clone(),
-        runtime.clone(),
-        options.cancel_grace,
-        true,
-        options.command_capacity,
-    );
-    actors.write().await.insert(id, actor);
     Ok(state.snapshot)
 }
 
@@ -237,15 +241,17 @@ where
             }
         };
         let compensated = persist_spawn_compensation(host, runtime, state, compensation).await?;
-        let actor = spawn_agent_loop(
+        let prepared = prepare_agent_loop(
             host.clone(),
             compensated,
             runtime.clone(),
             options.cancel_grace,
             true,
             options.command_capacity,
-        );
-        actors.write().await.insert(child_id, actor);
+        )
+        .await?;
+        actors.write().await.insert(child_id, prepared.handle());
+        prepared.start();
         return Err(AgentRuntimeError::ThreadEvents(reason));
     }
     if let Err(error) = host.lifecycle().activate_spawn(&lease).await {
@@ -265,30 +271,69 @@ where
             }
         };
         let compensated = persist_spawn_compensation(host, runtime, state, compensation).await?;
-        let actor = spawn_agent_loop(
+        let prepared = prepare_agent_loop(
             host.clone(),
             compensated,
             runtime.clone(),
             options.cancel_grace,
             true,
             options.command_capacity,
-        );
-        actors.write().await.insert(child_id, actor);
+        )
+        .await?;
+        actors.write().await.insert(child_id, prepared.handle());
+        prepared.start();
         return Err(AgentRuntimeError::Lifecycle(reason));
     }
-    runtime.directory.publish_runtime_event(&event);
-    host.observer()
-        .publish(AgentCommittedEvent::runtime(event))
-        .await;
-    let actor = spawn_agent_loop(
+    let prepared = match prepare_agent_loop(
         host.clone(),
         state.clone(),
         runtime.clone(),
         options.cancel_grace,
         true,
         options.command_capacity,
-    );
-    actors.write().await.insert(child_id, actor);
+    )
+    .await
+    {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            let rollback = host
+                .lifecycle()
+                .rollback_spawn(
+                    lease,
+                    SpawnRollbackReason {
+                        phase: SpawnRollbackPhase::Activation,
+                        message: error.to_string(),
+                    },
+                )
+                .await;
+            let compensation = match rollback {
+                Ok(()) => SpawnCompensation::RolledBack,
+                Err(cleanup) => SpawnCompensation::Faulted {
+                    reason: format!("{error}; rollback: {cleanup}"),
+                },
+            };
+            let compensated =
+                persist_spawn_compensation(host, runtime, state, compensation).await?;
+            let prepared = prepare_agent_loop(
+                host.clone(),
+                compensated,
+                runtime.clone(),
+                options.cancel_grace,
+                false,
+                options.command_capacity,
+            )
+            .await?;
+            actors.write().await.insert(child_id, prepared.handle());
+            prepared.start();
+            return Err(error);
+        }
+    };
+    actors.write().await.insert(child_id, prepared.handle());
+    runtime.directory.publish_runtime_event(&event);
+    prepared.start();
+    host.observer()
+        .publish(AgentCommittedEvent::runtime(event))
+        .await;
     Ok(AgentSpawnResult {
         snapshot: state.snapshot,
         initial_turn_id,

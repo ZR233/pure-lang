@@ -214,7 +214,7 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    manager.disconnect_server("validation").await;
+    manager.disconnect_server("validation").await?;
     println!("remote SSH validation passed");
     Ok(())
 }

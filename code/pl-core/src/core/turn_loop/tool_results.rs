@@ -10,24 +10,50 @@ pub(super) fn apply_batch_budget(
     if tool_results.len() <= 1 {
         return;
     }
+    let compressible = tool_results
+        .iter()
+        .enumerate()
+        .filter_map(|(index, result)| (!requires_complete_delivery(result)).then_some(index))
+        .collect::<Vec<_>>();
+    if compressible.is_empty() {
+        return;
+    }
+    let preserved_tokens = tool_results
+        .iter()
+        .filter(|result| requires_complete_delivery(result))
+        .fold(0usize, |total, result| {
+            total.saturating_add(
+                result
+                    .result
+                    .len()
+                    .div_ceil(crate::tool::TOKEN_ESTIMATE_BYTES),
+            )
+        });
     let token_budget = crate::tool::model_tool_output_batch_token_budget(
         tool_results.len(),
         remaining_context_tokens,
+    )
+    .saturating_sub(preserved_tokens)
+    .max(
+        compressible
+            .len()
+            .saturating_mul(crate::tool::MIN_MODEL_TOOL_OUTPUT_BATCH_TOKENS),
     );
-    let original_results = tool_results
+    let original_results = compressible
         .iter()
-        .map(|tool_result| tool_result.result.clone())
+        .map(|index| tool_results[*index].result.clone())
         .collect::<Vec<_>>();
     let projected_results =
         crate::tool::model_visible_tool_output_batch_with_tokens(&original_results, token_budget);
     let original_bytes = original_results.iter().map(String::len).sum::<usize>();
     let projected_bytes = projected_results.iter().map(String::len).sum::<usize>();
 
-    for ((tool_result, original_result), projected_result) in tool_results
-        .iter_mut()
+    for ((index, original_result), projected_result) in compressible
+        .into_iter()
         .zip(original_results)
         .zip(projected_results)
     {
+        let tool_result = &mut tool_results[index];
         if projected_result == original_result {
             continue;
         }
@@ -64,9 +90,21 @@ pub(super) fn apply_batch_budget(
             token_budget,
             original_bytes,
             projected_bytes,
+            preserved_tokens,
             "applied model-visible tool output batch budget"
         );
     }
+}
+
+fn requires_complete_delivery(result: &ToolExecutionRecord) -> bool {
+    result.outcome == super::super::tool_dispatch::ToolExecutionOutcome::Accepted
+        || result.runtime_events.iter().any(|event| {
+            matches!(
+                event,
+                crate::tool::ToolDirective::OutputBudget { .. }
+                    | crate::tool::ToolDirective::SessionEvents { .. }
+            )
+        })
 }
 
 pub(super) fn normalize_programmatic_results(
@@ -98,6 +136,7 @@ pub(super) fn receipt(result: &ToolExecutionRecord) -> ToolResultReceipt {
             | crate::tool::ToolDirective::ExecutionFailed
             | crate::tool::ToolDirective::CacheHit { .. }
             | crate::tool::ToolDirective::OutputMetrics { .. }
+            | crate::tool::ToolDirective::SessionEvents { .. }
             | crate::tool::ToolDirective::OutputBudget { .. }
             | crate::tool::ToolDirective::EndTurn { .. } => None,
         })
@@ -117,6 +156,7 @@ pub(super) fn receipt(result: &ToolExecutionRecord) -> ToolResultReceipt {
         | crate::tool::ToolDirective::AuditMetadata { .. }
         | crate::tool::ToolDirective::ExecutionFailed
         | crate::tool::ToolDirective::OutputMetrics { .. }
+        | crate::tool::ToolDirective::SessionEvents { .. }
         | crate::tool::ToolDirective::OutputBudget { .. }
         | crate::tool::ToolDirective::EndTurn { .. } => None,
     });
@@ -134,6 +174,7 @@ pub(super) fn receipt(result: &ToolExecutionRecord) -> ToolResultReceipt {
         | crate::tool::ToolDirective::AuditMetadata { .. }
         | crate::tool::ToolDirective::ExecutionFailed
         | crate::tool::ToolDirective::CacheHit { .. }
+        | crate::tool::ToolDirective::SessionEvents { .. }
         | crate::tool::ToolDirective::OutputBudget { .. }
         | crate::tool::ToolDirective::EndTurn { .. } => None,
     });
@@ -158,9 +199,7 @@ pub(super) fn receipt(result: &ToolExecutionRecord) -> ToolResultReceipt {
             |(_, _, bytes)| bytes,
         ),
         visible_bytes: metrics.map_or(result.result.len() as u64, |(_, visible, _)| visible),
-        truncated: cache_hit.is_some()
-            || metrics.is_some_and(|(raw, visible, _)| raw > visible)
-            || result.result.len() >= crate::tool::MAX_MODEL_TOOL_OUTPUT_BYTES,
+        truncated: cache_hit.is_some() || metrics.is_some_and(|(raw, visible, _)| raw > visible),
         artifacts,
         continuation: continuation(&result.result),
         reused_from_call_id: cache_hit.map(|(call_id, _, _)| call_id.clone()),

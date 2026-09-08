@@ -5,6 +5,10 @@ use super::AgentState;
 /// 非泛型 handle 使用的 runtime 错误。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AgentRuntimeError {
+    #[error(transparent)]
+    Checkpoint(#[from] super::CheckpointError),
+    #[error("session owner is not ready during construction")]
+    NotReady,
     #[error("agent not found: {0}")]
     NotFound(ThreadId),
     #[error("agent already exists: {0}")]

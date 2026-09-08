@@ -19,6 +19,28 @@ MCP / plugin / hosted ToolExecutor ┘
 需要的内置工具，与自己定义的工具放进同一个 `ToolInstallGroup`；不要新增按来源区分的 registry、
 执行 enum 或兼容注册入口。
 
+## 会话创建前装配
+
+运行中的 Thread 不从 TurnFactory 临时安装工具。宿主在
+`AgentTurnFactory::prepare_session` 返回 `pl_core::session_runtime::SessionRuntimeBuilder`：
+已构造的组使用 `with_tools`，需要会话能力的组使用 `with_tool_factory`，外部监听使用
+`with_event_source`。动态 MCP/LSP 等提供者通过 `with_refresh` 预注册刷新窗口；`prepare_turn`
+只消费 `SessionRuntimeHandle`，不得重新创建命令管理器或另一份产品注册表。
+
+下游监听器实现 `SessionEventSource::initialize`，返回拥有订阅资源的 `SessionEventSubscription`。
+初始化阶段只建立订阅，不等待向尚未发布的 actor 发送消息。运行循环使用
+`SessionBuildContext::messages()` 提供的来源限定 publisher；消息是 `SessionMessage`，不能伪造
+工具终态、审批或系统指令。必须观察会话取消，释放资源后才返回，不派生无 owner 的后台生产者。
+
+普通工具默认 `ToolScheduling::Task`，快速完成直接返回结果，否则返回受理回执并由统一 `wait` 交付终态；状态查询、
+Interaction 和原子会话控制显式使用 `ToolPolicy::control()`。`wait` 必须 Solo，事件消费与对应
+transcript 响应由 owner 共同提交；不得在 handler 取出事件时提前删除，也不得裁剪后仍确认消费。
+
+完整执行结果由任务 owner 保存，工具不需要为 `wait` 限额截掉原始正文或结构化内容。
+模型默认接收有界预览和 `resultReference`；通过 `get_tool_task` 的 `resultCursor` 分页读完整结果，
+不消费消息。宿主 SDK 使用 `SessionControl::get` 读取预览，`read_complete` 按需读取完整结果；
+后者可以返回存储完整性错误。不得用受理成功或预览完整性代替任务的真实执行终态。
+
 ## 先确定契约
 
 1. 工具名使用 `ToolName::bare` 或 `ToolName::namespaced` 构造，在定义边界完成校验。

@@ -22,7 +22,8 @@ Shell 命令规则：始终遵循本提示中运行时生成的 `Platform` devel
 - Chat tagged provider 的普通正文不得出现在这些标签之外；native phase provider 不要把 `<commentary>` 或 `<final>` 当作正文文本输出。不要输出 `<proposed_plan>`；完整计划使用固定 Plan 状态机的 `plan_current`、`plan_next`、`plan_history`、`plan_submit`、`plan_restart`，缺失信息或澄清使用 `request_user_input`。注册图只能通过 `workflow_transition` 或 `workflow_restart` 推进；使用 `workflow_current`、`workflow_next`、`workflow_graph`、`workflow_history` 查询 canonical 状态，不得提交或编译工作流定义。
 
 通用工具协作：
-- `exec` 用于在 agent workspace 中启动 shell 命令并获取截断输出；如果结果为 `running`，用 `write_stdin` 携带返回的 `processId` 继续等待或发送输入，不要重复启动同一命令。
+- 普通工具快速完成时直接返回结果，否则返回 `accepted` 任务回执；受理不代表执行成功。空闲时只调用 `wait` 接收后台工具结果、定时器、agent 与外部消息；`wait` 必须独占一次响应。任务跨 Turn 存活，结束 Turn 不取消任务。
+- `exec` 快速完成时直接返回结果，否则返回含 `taskId` 的回执，命令退出且输出排空后才有终态。`write_stdin` 只向该任务写入非空输入，不轮询；取消使用 `cancel_tool_task`，跨 Turn 查找既有句柄使用 `list_tool_tasks`，不要重复启动命令。
 - 需要完整 stdout/stderr 时，读取工具结果里的 `outputFile`，不要要求命令工具把大输出完整塞回上下文。
 - 文件工具包括读取、写入、列目录、stat、建目录、删除、复制、移动和 `apply_patch`。路径可以使用 workspace-relative 形式；运行时会按 workspace root 解析并执行权限检查。
 - 编辑已有文本文件时优先用 `apply_patch` 做精确修改；不要把 patch 当作普通正文输出。

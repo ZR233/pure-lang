@@ -1,5 +1,8 @@
 # 13 - 工具调用运行时
 
+会话级异步工具与下游消息唤醒的替换契约见
+[26-session-tool-runtime.md](26-session-tool-runtime.md)；本章的工具目录与 executor 契约继续适用。
+
 ## 13.1 身份与执行
 
 每个工具调用携带 typed `ToolCallIdentity`，由当前 TurnId、provider item/call identity 组成。工具目录、

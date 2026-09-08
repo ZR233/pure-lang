@@ -53,6 +53,9 @@ abstract class StudioApi {
   Stream<Object> subscribeProductEvents();
   Stream<ThreadStreamFrame> subscribeThread(String threadId);
   Stream<StudioShutdownProgress> subscribeShutdownProgress();
+
+  /// Completes successfully only after native shutdown has reached Stopped.
+  /// Cleanup failures preserve the native owner and propagate to the caller.
   Future<void> shutdownRuntime();
 
   /// 读取线程快照；`historyCursor` 是快照窗口之外的回源锚点（Turn id）。
@@ -236,13 +239,14 @@ class FrbStudioApi implements StudioApi {
     try {
       await frb.shutdownRuntime();
     } on Object {
-      // Process teardown is best effort; Rust diagnostics retain the cause.
-    } finally {
-      RustLib.dispose();
-      _rustInitialized = false;
-      _initFuture = null;
-      _pendingConfigRecoveryNotice = null;
+      // Preserve the native owner and allow an explicit retry of failed cleanup.
+      _shutdownFuture = null;
+      rethrow;
     }
+    RustLib.dispose();
+    _rustInitialized = false;
+    _initFuture = null;
+    _pendingConfigRecoveryNotice = null;
   }
 
   @override
@@ -606,11 +610,22 @@ class FrbStudioApi implements StudioApi {
 
   @override
   Stream<StudioShutdownProgress> subscribeShutdownProgress() {
-    // 冷流：监听即建立；关机期间 bridge 不取消该订阅（Rust 侧独立生命周期）。
-    return frb
-        .subscribeShutdownProgress()
-        .map(
-          (event) => switch (event) {
+    late final StreamController<StudioShutdownProgress> controller;
+    frb.BridgeEventSubscription? handle;
+    StreamSubscription<frb.BridgeShutdownProgress>? subscription;
+    var cancelled = false;
+
+    Future<void> start() async {
+      try {
+        final created = await _bridgeCall(frb.subscribeShutdownProgress);
+        if (cancelled) {
+          await created.cancel();
+          created.dispose();
+          return;
+        }
+        handle = created;
+        subscription = created.shutdownStream().listen(
+          (event) => controller.add(switch (event) {
             frb.BridgeShutdownProgress_StoppingSubscriptions() =>
               const StoppingSubscriptionsProgress(),
             frb.BridgeShutdownProgress_CancellingTurns() =>
@@ -628,9 +643,32 @@ class FrbStudioApi implements StudioApi {
             frb.BridgeShutdownProgress_StoppingLsp() =>
               const StoppingLspProgress(),
             frb.BridgeShutdownProgress_Stopped() => const StoppedProgress(),
-          },
-        )
-        .handleError((Object error) => throw _studioFailure(error));
+          }),
+          onError: (Object error, StackTrace stackTrace) =>
+              controller.addError(_studioFailure(error), stackTrace),
+          onDone: controller.close,
+        );
+      } catch (error, stackTrace) {
+        if (!cancelled) {
+          controller.addError(_studioFailure(error), stackTrace);
+          await controller.close();
+        }
+      }
+    }
+
+    controller = StreamController<StudioShutdownProgress>(
+      onListen: () => unawaited(start()),
+      onCancel: () async {
+        cancelled = true;
+        final activeHandle = handle;
+        if (activeHandle != null) {
+          await activeHandle.cancel();
+          activeHandle.dispose();
+        }
+        await subscription?.cancel();
+      },
+    );
+    return controller.stream;
   }
 
   @override
@@ -705,12 +743,12 @@ class FrbStudioApi implements StudioApi {
       onListen: () => unawaited(start()),
       onCancel: () async {
         cancelled = true;
-        await subscription?.cancel();
         final activeHandle = handle;
         if (activeHandle != null) {
           await activeHandle.cancel();
           activeHandle.dispose();
         }
+        await subscription?.cancel();
       },
     );
     return controller.stream;
@@ -755,12 +793,12 @@ class FrbStudioApi implements StudioApi {
       onListen: () => unawaited(start()),
       onCancel: () async {
         cancelled = true;
-        await subscription?.cancel();
         final activeHandle = handle;
         if (activeHandle != null) {
           await activeHandle.cancel();
           activeHandle.dispose();
         }
+        await subscription?.cancel();
       },
     );
     return controller.stream;

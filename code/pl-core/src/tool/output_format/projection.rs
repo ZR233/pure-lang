@@ -222,6 +222,9 @@ fn projection_from_trace_part(
     let arguments = arguments_value(invocation.arguments());
     let arguments_preview = trace_preview_value(&arguments, preview_chars);
     let state = match tool.state() {
+        pl_trace::TraceToolState::Accepted(state) => ToolLifecycleState::Accepted {
+            task_id: state.task_id().to_owned(),
+        },
         pl_trace::TraceToolState::Started(_) | pl_trace::TraceToolState::Streaming(_) => {
             ToolLifecycleState::Started(StartedToolLifecycle {})
         }

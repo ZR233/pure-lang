@@ -278,7 +278,8 @@ pub struct ToolCallIdentity {
 #[derive(Clone)]
 pub struct ToolOutputDeltaEmitter {
     event_tx: tokio::sync::broadcast::WeakSender<AgentEvent>,
-    trace_sink: Arc<dyn TraceEventSink>,
+    trace_sink: Option<Arc<dyn TraceEventSink>>,
+    task_output: Option<crate::session_runtime::SessionTaskOutput>,
     identity: ToolCallIdentity,
     publication: Arc<StdMutex<()>>,
     last_error: Arc<StdMutex<Option<TraceEventSinkError>>>,
@@ -336,7 +337,8 @@ impl ToolOutputDeltaEmitter {
         });
         Self {
             event_tx: event_tx.downgrade(),
-            trace_sink,
+            trace_sink: Some(trace_sink),
+            task_output: None,
             identity,
             publication: Arc::new(StdMutex::new(())),
             last_error: Arc::new(StdMutex::new(initial_error)),
@@ -355,17 +357,30 @@ impl ToolOutputDeltaEmitter {
         if matches!(stream, OutputStream::Stderr) {
             delta = format!("[stderr] {delta}");
         }
+        if let Some(output) = &self.task_output {
+            let result = output.emit(delta);
+            if let Err(error) = &result
+                && let Ok(mut slot) = self.last_error.lock()
+            {
+                slot.get_or_insert(error.clone());
+            }
+            return result;
+        }
         // Keep this producer's live delivery in the same order as canonical publication.
         let _publication = self
             .publication
             .lock()
             .map_err(|_| TraceEventSinkError::new("tool output publication lock poisoned"))?;
-        let result = self.trace_sink.emit(TraceEventDraft::apply(
-            crate::time::unix_seconds(),
-            self.identity.turn_id.clone(),
-            self.identity.item_id.clone(),
-            pl_trace::TracePartAction::Append(TraceDelta::ToolResult { delta }),
-        ));
+        let result = self
+            .trace_sink
+            .as_ref()
+            .ok_or_else(|| TraceEventSinkError::new("missing control trace sink"))?
+            .emit(TraceEventDraft::apply(
+                crate::time::unix_seconds(),
+                self.identity.turn_id.clone(),
+                self.identity.item_id.clone(),
+                pl_trace::TracePartAction::Append(TraceDelta::ToolResult { delta }),
+            ));
         let event = match result {
             Ok(event) => event,
             Err(error) => {
@@ -462,9 +477,38 @@ pub struct ToolCallContext {
     approval: ToolApprovalContext,
     event_tx: AgentEventSender,
     output: ToolOutputDeltaEmitter,
+    session_control: Option<crate::session_runtime::SessionControl>,
+    task_id: Option<String>,
 }
 
 impl ToolCallContext {
+    pub(crate) fn for_task(
+        identity: ToolCallIdentity,
+        task_id: String,
+        output: crate::session_runtime::SessionTaskOutput,
+    ) -> Self {
+        let (event_tx, _) = tokio::sync::broadcast::channel(1);
+        let emitter = ToolOutputDeltaEmitter {
+            event_tx: event_tx.downgrade(),
+            trace_sink: None,
+            task_output: Some(output),
+            identity: identity.clone(),
+            publication: Arc::new(StdMutex::new(())),
+            last_error: Arc::new(StdMutex::new(None)),
+        };
+        Self {
+            identity,
+            cancellation_token: None,
+            approval: ToolApprovalContext::new(
+                PermissionMode::RequestApproval,
+                WorkspaceAccess::WorkspaceOnly,
+            ),
+            event_tx,
+            output: emitter,
+            session_control: None,
+            task_id: Some(task_id),
+        }
+    }
     pub fn new(identity: ToolCallIdentity, event_tx: AgentEventSender) -> Self {
         let output = ToolOutputDeltaEmitter::new(identity.clone(), &event_tx, None);
         Self {
@@ -476,6 +520,8 @@ impl ToolCallContext {
             ),
             event_tx,
             output,
+            session_control: None,
+            task_id: None,
         }
     }
 
@@ -493,6 +539,32 @@ impl ToolCallContext {
     pub fn with_approval(mut self, approval: ToolApprovalContext) -> Self {
         self.approval = approval;
         self
+    }
+
+    pub(crate) fn with_session_control(
+        mut self,
+        control: crate::session_runtime::SessionControl,
+    ) -> Self {
+        self.session_control = Some(control);
+        self
+    }
+
+    /// Returns the session-owned task ID, absent for direct framework controls.
+    pub fn task_id(&self) -> Option<&str> {
+        self.task_id.as_deref()
+    }
+
+    /// Returns controls scoped to this invocation's session owner.
+    ///
+    /// # Errors
+    /// Returns an error when executing without an AgentRuntime session.
+    pub fn session_control(&self) -> crate::Result<&crate::session_runtime::SessionControl> {
+        self.session_control
+            .as_ref()
+            .ok_or_else(|| crate::PureError::ToolExecutionFailed {
+                tool: "session_control".into(),
+                error: "This tool requires a session runtime owner".into(),
+            })
     }
 
     pub fn identity(&self) -> &ToolCallIdentity {
@@ -513,7 +585,7 @@ impl ToolCallContext {
         &self.approval
     }
 
-    pub fn events(&self) -> &AgentEventSender {
+    pub(crate) fn events(&self) -> &AgentEventSender {
         &self.event_tx
     }
 
@@ -694,6 +766,7 @@ impl fmt::Debug for ToolWorkspace {
 /// 前刷新只读 session 快照。普通工具不会通过 [`ToolCallContext`] 获得产品会话对象。
 #[derive(Clone)]
 pub struct ToolSessionRuntime {
+    cache: super::cache::SessionToolCacheHandle,
     parent_session: Arc<std::sync::RwLock<Arc<crate::session::AgentSession>>>,
     working_set: crate::TurnWorkingSetHandle,
     plan_tools: crate::session::plan::tools::AgentSessionPlanToolBinding,
@@ -708,6 +781,7 @@ impl Default for ToolSessionRuntime {
 impl ToolSessionRuntime {
     pub(crate) fn new(options: crate::AgentSessionPlanOptions) -> Self {
         Self {
+            cache: Default::default(),
             parent_session: Arc::new(std::sync::RwLock::new(Arc::new(
                 crate::session::AgentSession::new(),
             ))),
@@ -732,6 +806,7 @@ impl ToolSessionRuntime {
     }
 
     pub(crate) fn begin_turn(&self, session: &crate::session::AgentSession) -> crate::Result<()> {
+        self.cache.invalidate_all();
         self.working_set.reset_from_session(session)?;
         self.plan_tools
             .replace(session.plan().cloned().unwrap_or_default())?;
@@ -744,6 +819,9 @@ impl ToolSessionRuntime {
             .parent_session
             .write()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = session;
+    }
+    pub(crate) fn cache(&self) -> super::cache::SessionToolCacheHandle {
+        self.cache.clone()
     }
 }
 

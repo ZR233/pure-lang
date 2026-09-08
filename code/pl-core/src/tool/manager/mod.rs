@@ -30,6 +30,11 @@ type RefreshHandler =
 /// Identity and mutable registration window exposed immediately before one model step.
 #[derive(Debug, Clone)]
 pub struct ModelStepToolContext {
+    /// Current model and instruction snapshots used by registered dynamic providers.
+    pub model: crate::ModelInfo,
+    pub endpoint: pl_model::provider::ProviderEndpoint,
+    pub skill_catalog: Option<Arc<crate::skill::FrozenSkillCatalog>>,
+    pub thread_mode: Option<Arc<crate::RegisteredThreadMode>>,
     /// Persistent registration scope that may be atomically refreshed.
     pub agent_tools: AgentToolSet,
     /// Current session identity.

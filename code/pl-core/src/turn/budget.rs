@@ -1,5 +1,6 @@
 use std::time::{Duration, Instant};
 
+use crate::tool::ToolBudgetTiming;
 use pl_protocol::{BudgetLimitKind, BudgetUsage};
 use serde::{Deserialize, Serialize};
 
@@ -94,14 +95,14 @@ impl BudgetTracker {
     }
 
     /// 记录一次工具调用（仅追踪，不限制）。
-    pub fn record_tool_call(&mut self, tool_name: &str) {
+    pub fn record_tool_call(&mut self, timing: ToolBudgetTiming) {
         self.usage.tool_calls += 1;
-        if tool_name == "wait_agents" {
+        if timing == ToolBudgetTiming::PauseWhenOnlyScheduledTool {
             self.usage.wait_calls += 1;
         }
     }
 
-    /// 从活跃 wall-clock 中扣除单独 `wait_agents` 的阻塞区间。
+    /// 从活跃 wall-clock 中扣除声明暂停预算的独占等待区间。
     pub fn exclude_wall_clock(&mut self, duration: Duration) {
         self.excluded_wall_clock = self.excluded_wall_clock.saturating_add(duration);
     }
@@ -157,8 +158,8 @@ mod tests {
             BudgetTracker::new(TurnBudget::new(std::time::Duration::from_millis(60_000)));
 
         tracker.record_model_step();
-        tracker.record_tool_call("exec");
-        tracker.record_tool_call("wait_agents");
+        tracker.record_tool_call(ToolBudgetTiming::Count);
+        tracker.record_tool_call(ToolBudgetTiming::PauseWhenOnlyScheduledTool);
 
         let usage = tracker.usage();
         assert_eq!(usage.model_steps, 1);
@@ -173,7 +174,7 @@ mod tests {
 
         for _ in 0..200 {
             tracker.record_model_step();
-            tracker.record_tool_call("exec");
+            tracker.record_tool_call(ToolBudgetTiming::Count);
         }
 
         assert!(tracker.check_wall_clock().is_ok());
@@ -195,8 +196,8 @@ mod tests {
         let mut tracker =
             BudgetTracker::new(TurnBudget::new(std::time::Duration::from_millis(60_000)));
         tracker.record_model_step();
-        tracker.record_tool_call("exec");
-        tracker.record_tool_call("wait_agents");
+        tracker.record_tool_call(ToolBudgetTiming::Count);
+        tracker.record_tool_call(ToolBudgetTiming::PauseWhenOnlyScheduledTool);
         tracker.exclude_wall_clock(Duration::from_secs(30));
 
         tracker.refresh_at(Instant::now() - Duration::from_millis(5));

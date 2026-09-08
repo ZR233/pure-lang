@@ -7,12 +7,12 @@ use serde_json::Value;
 use super::entry::{ToolCacheEntry, cache_entry, cache_hit};
 use super::failure::ToolFailureEnvelopeV1;
 use super::key::cache_key;
-use super::{ToolCachePolicy, TurnToolCacheHandle, TurnToolCacheSnapshot};
+use super::{SessionToolCacheHandle, SessionToolCacheSnapshot, ToolCachePolicy};
 use crate::tool::ToolResult;
 use crate::turn::ToolEffect;
 
 #[derive(Debug, Default)]
-pub(super) struct TurnToolCache {
+pub(super) struct SessionToolCache {
     workspace_epoch: u64,
     entries: HashMap<String, ToolCacheEntry>,
     failures: HashMap<String, ToolFailureEnvelopeV1>,
@@ -27,15 +27,15 @@ pub(super) enum CacheAcquisition {
 }
 
 pub(super) struct ToolCacheReservation {
-    inner: Arc<Mutex<TurnToolCache>>,
+    inner: Arc<Mutex<SessionToolCache>>,
     key: Option<String>,
+    epoch: u64,
 }
 
-impl TurnToolCacheHandle {
-    pub(crate) fn snapshot(&self) -> TurnToolCacheSnapshot {
-        TurnToolCacheSnapshot {
+impl SessionToolCacheHandle {
+    pub(crate) fn snapshot(&self) -> SessionToolCacheSnapshot {
+        SessionToolCacheSnapshot {
             cache: self.clone(),
-            workspace_epoch: self.workspace_epoch(),
         }
     }
 
@@ -45,7 +45,6 @@ impl TurnToolCacheHandle {
         arguments: &Value,
         workspace_root: &Path,
         policy: ToolCachePolicy,
-        workspace_epoch: u64,
         executor_generation: u64,
     ) -> CacheAcquisition {
         let mut state = self
@@ -57,7 +56,7 @@ impl TurnToolCacheHandle {
             arguments,
             workspace_root,
             policy,
-            workspace_epoch,
+            state.workspace_epoch,
             executor_generation,
         );
         if let Some(entry) = state.entries.get(&key) {
@@ -75,6 +74,7 @@ impl TurnToolCacheHandle {
         CacheAcquisition::Reserved(ToolCacheReservation {
             inner: Arc::clone(&self.inner),
             key: Some(key),
+            epoch: state.workspace_epoch,
         })
     }
 
@@ -144,12 +144,18 @@ impl TurnToolCacheHandle {
                     | ToolEffect::AgentControl
             )
         ) {
-            let mut state = self
-                .inner
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            state.workspace_epoch = state.workspace_epoch.saturating_add(1);
+            self.invalidate_all();
         }
+    }
+
+    pub(crate) fn invalidate_all(&self) {
+        let mut state = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.workspace_epoch = state.workspace_epoch.saturating_add(1);
+        state.entries.clear();
+        state.failures.clear();
     }
 
     pub(crate) fn invalidate_tool(&self, tool_name: &str) {
@@ -176,14 +182,22 @@ impl TurnToolCacheHandle {
 impl ToolCacheReservation {
     pub(super) fn store(mut self, tool_name: &str, call_id: String, output: &ToolResult) {
         let key = self.key.take().expect("active cache reservation");
-        let entry = cache_entry(tool_name, call_id, output);
+        let entry = serde_json::to_vec(output)
+            .ok()
+            .filter(|encoded| encoded.len() <= 64 * 1024)
+            .map(|_| cache_entry(tool_name, call_id, output));
         let waiters = {
             let mut state = self
                 .inner
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             let waiters = state.in_flight.remove(&key).unwrap_or_default();
-            state.entries.insert(key, entry);
+            if self.epoch == state.workspace_epoch
+                && state.entries.len() + state.failures.len() < 256
+                && let Some(entry) = entry
+            {
+                state.entries.insert(key, entry);
+            }
             waiters
         };
         notify_waiters(waiters);
@@ -197,7 +211,11 @@ impl ToolCacheReservation {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             let waiters = state.in_flight.remove(&key).unwrap_or_default();
-            state.failures.insert(key, failure);
+            if self.epoch == state.workspace_epoch
+                && state.entries.len() + state.failures.len() < 256
+            {
+                state.failures.insert(key, failure);
+            }
             waiters
         };
         notify_waiters(waiters);

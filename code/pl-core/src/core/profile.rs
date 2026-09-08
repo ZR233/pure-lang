@@ -122,6 +122,7 @@ pub struct TurnEngineBuilder {
     skill_catalog: Option<std::sync::Arc<crate::skill::FrozenSkillCatalog>>,
     lsp_runtime: Option<pl_lsp::runtime::LspRuntimeRegistry>,
     agent_tools: Option<crate::tool::AgentToolSet>,
+    session_runtime: Option<crate::session_runtime::SessionRuntimeHandle>,
     before_model_step: Option<crate::tool::BeforeModelStepHook>,
     runtime_profile: CoreRuntimeProfile,
 }
@@ -152,6 +153,7 @@ impl TurnEngineBuilder {
             skill_catalog: None,
             lsp_runtime: None,
             agent_tools: None,
+            session_runtime: None,
             before_model_step: None,
             runtime_profile: CoreRuntimeProfile::minimal(),
         })
@@ -188,6 +190,15 @@ impl TurnEngineBuilder {
         self
     }
 
+    /// Uses bindings and refresh providers prepared once by the session owner.
+    pub fn with_session_runtime(
+        mut self,
+        runtime: crate::session_runtime::SessionRuntimeHandle,
+    ) -> Self {
+        self.session_runtime = Some(runtime);
+        self
+    }
+
     /// 安装每个模型 step 冻结工具 plan 前执行的刷新窗口。
     pub fn with_before_model_step(mut self, hook: crate::tool::BeforeModelStepHook) -> Self {
         self.before_model_step = Some(hook);
@@ -211,11 +222,24 @@ impl TurnEngineBuilder {
             execution_environment,
             agent_session_plan,
         } = self.runtime_profile;
-        let agent_tools = self.agent_tools.unwrap_or_else(|| {
-            crate::tool::ToolManager::new()
-                .agent_tool_set("standalone", crate::tool::GlobalToolInheritance::Isolated)
-        });
-        let tool_session_runtime = crate::tool::ToolSessionRuntime::new(agent_session_plan);
+        let agent_tools = self
+            .session_runtime
+            .as_ref()
+            .map(|runtime| runtime.tools().clone())
+            .or(self.agent_tools)
+            .unwrap_or_else(|| {
+                crate::tool::ToolManager::new()
+                    .agent_tool_set("standalone", crate::tool::GlobalToolInheritance::Isolated)
+            });
+        let tool_session_runtime = self.session_runtime.as_ref().map_or_else(
+            || crate::tool::ToolSessionRuntime::new(agent_session_plan),
+            |runtime| runtime.tool_session_runtime(),
+        );
+        let before_model_step = self
+            .session_runtime
+            .as_ref()
+            .and_then(|runtime| runtime.refresh_hook())
+            .or(self.before_model_step);
         TurnEngine {
             runtime: self.runtime,
             effort: self.effort,
@@ -223,7 +247,7 @@ impl TurnEngineBuilder {
             skill_catalog: self.skill_catalog,
             lsp_runtime: self.lsp_runtime,
             agent_tools,
-            before_model_step: self.before_model_step,
+            before_model_step,
             workspace,
             workspace_instructions,
             instruction_profile,

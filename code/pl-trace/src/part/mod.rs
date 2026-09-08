@@ -502,6 +502,9 @@ impl TracePartState {
             (Self::Tool(part), TracePartAction::EnterToolPhase { phase }) => {
                 part.enter(*phase).map(Self::Tool)
             }
+            (Self::Tool(part), TracePartAction::AcceptToolTask { task_id }) => {
+                part.accept_task(task_id.clone()).map(Self::Tool)
+            }
             (Self::Tool(part), TracePartAction::UpdateToolInvocation { invocation }) => {
                 part.update_invocation(invocation.clone()).map(Self::Tool)
             }
@@ -612,6 +615,9 @@ pub struct TracePartCommand {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TracePartAction {
+    AcceptToolTask {
+        task_id: String,
+    },
     Append(TraceDelta),
     Complete(TracePartCompletion),
     Fail {
@@ -649,6 +655,7 @@ impl TracePartAction {
     fn name(&self) -> &'static str {
         match self {
             Self::Append(_) => "append",
+            Self::AcceptToolTask { .. } => "acceptToolTask",
             Self::Complete(_) => "complete",
             Self::Fail { .. } => "fail",
             Self::FailTool { .. } => "failTool",
@@ -665,6 +672,7 @@ impl TracePartAction {
     fn delta(&self) -> Option<&TraceDelta> {
         match self {
             Self::Append(delta) => Some(delta),
+            Self::AcceptToolTask { .. } => None,
             Self::Complete(_)
             | Self::Fail { .. }
             | Self::FailTool { .. }

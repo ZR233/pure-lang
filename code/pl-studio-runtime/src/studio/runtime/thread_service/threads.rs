@@ -606,6 +606,22 @@ mod tests {
         );
         runtime.shutdown_runtime().await.unwrap();
     }
+    async fn close_result(
+        handle: &pl_core::AgentRuntimeHandle,
+        child: &pl_core::ThreadId,
+    ) -> pl_core::AgentSnapshot {
+        let mut changes = handle.subscribe_directory();
+        loop {
+            let snapshot = handle.snapshot(child.clone()).await.unwrap();
+            if matches!(&snapshot.state, pl_core::AgentState::Closed(_))
+                || matches!(&snapshot.state, pl_core::AgentState::Closing(state) if state.error().is_some())
+            {
+                return snapshot;
+            }
+            changes.changed().await.unwrap();
+        }
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn worktree_lifecycle_and_new_submissions_do_not_wait_for_sqlite() {
         use pl_core::{AgentProgressStage, AgentSpawnRequest, ThreadContextState};
@@ -645,15 +661,26 @@ mod tests {
             .writer()
             .clone();
         writer.flush().await.unwrap();
+        let route = runtime
+            .config_runtime
+            .read()
+            .unwrap()
+            .config
+            .models
+            .routes
+            .values()
+            .next()
+            .unwrap()
+            .clone();
         let profile = pl_core::AgentProfileSnapshot {
             profile_id: "worktree_executor".into(),
             display_name: "Executor".into(),
             description: String::new(),
             when_to_use: String::new(),
             system_instructions: String::new(),
-            provider_id: "unused".into(),
-            model: "unused".into(),
-            effort: None,
+            provider_id: route.provider.to_string(),
+            model: route.model,
+            effort: route.effort.map(|effort| effort.as_str().to_owned()),
             source: "test".into(),
             revision: "1".into(),
             content_hash: "fixture".into(),
@@ -702,6 +729,10 @@ mod tests {
                 .close_with_disposition(child.clone(), AgentWorkspaceDisposition::Preserve)
                 .await
                 .unwrap();
+            assert!(matches!(
+                close_result(&handle, &child).await.state,
+                pl_core::AgentState::Closed(_)
+            ));
             assert!(path.exists());
             let locked = tokio::process::Command::new("git")
                 .args(["worktree", "lock"])
@@ -711,12 +742,13 @@ mod tests {
                 .await
                 .unwrap();
             assert!(locked.status.success());
+            handle
+                .close_with_disposition(child.clone(), AgentWorkspaceDisposition::Cleanup)
+                .await
+                .unwrap();
             assert!(
-                handle
-                    .close_with_disposition(child.clone(), AgentWorkspaceDisposition::Cleanup)
-                    .await
-                    .is_err(),
-                "physical cleanup failure must reach the caller"
+                matches!(close_result(&handle, &child).await.state, pl_core::AgentState::Closing(state) if state.error().is_some()),
+                "physical cleanup failure must remain visible on the owner"
             );
             assert!(path.exists());
             assert_eq!(
@@ -726,7 +758,7 @@ mod tests {
                     .get(child.as_str())
                     .unwrap()
                     .state,
-                crate::studio::agent_host::worktree_lease::WorktreeLeaseState::Preserved
+                crate::studio::agent_host::worktree_lease::WorktreeLeaseState::CleanupRequested
             );
             let unlocked = tokio::process::Command::new("git")
                 .args(["worktree", "unlock"])
@@ -740,10 +772,18 @@ mod tests {
                 .close_with_disposition(child.clone(), AgentWorkspaceDisposition::Cleanup)
                 .await
                 .unwrap();
+            assert!(matches!(
+                close_result(&handle, &child).await.state,
+                pl_core::AgentState::Closed(_)
+            ));
             handle
                 .close_with_disposition(child.clone(), AgentWorkspaceDisposition::Cleanup)
                 .await
                 .unwrap();
+            assert!(matches!(
+                close_result(&handle, &child).await.state,
+                pl_core::AgentState::Closed(_)
+            ));
             assert!(!path.exists());
             let lease = runtime
                 .agent_facility

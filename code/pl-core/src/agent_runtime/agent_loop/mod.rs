@@ -16,6 +16,7 @@ const TRACE_BATCH_MAX_DELAY: Duration = Duration::from_millis(100);
 const TRACE_BATCH_MAX_EVENTS: usize = 256;
 
 mod checkpoint;
+mod closing;
 mod command;
 mod commit;
 mod completion;
@@ -24,7 +25,11 @@ mod lifecycle;
 mod persist;
 mod recovery;
 mod running_turn;
+mod session_messages;
+mod session_sources;
+mod session_tasks;
 mod submissions;
+mod task_delivery;
 
 struct LoopChannels {
     deferred_commands: std::collections::VecDeque<AgentLoopCommand>,
@@ -45,18 +50,22 @@ where
     runtime: AgentRuntimeHandle,
     channels: LoopChannels,
     active: Option<RunningTurn>,
+    session_waiter: Option<session_messages::SessionWaitReply>,
+    task_resources: crate::session_runtime::SessionTaskResources,
+    session_runtime: crate::session_runtime::SessionRuntime,
+    closing: Option<closing::SessionClose<<H::Lifecycle as AgentLifecycleAdapter>::CloseLease>>,
     dispatch_enabled: bool,
     cancel_grace: Duration,
 }
 
-pub(crate) fn spawn_agent_loop<H>(
+pub(crate) async fn prepare_agent_loop<H>(
     host: H,
     state: ThreadActorState,
     runtime: AgentRuntimeHandle,
     cancel_grace: Duration,
     start_pending_inputs: bool,
     command_capacity: usize,
-) -> AgentLoopHandle
+) -> AgentRuntimeResult<PreparedAgentLoop<H>>
 where
     H: AgentRuntimeHost,
 {
@@ -65,8 +74,68 @@ where
     let (observation_sender, observation_receiver) = mpsc::unbounded_channel();
     let handle = AgentLoopHandle::new(sender.clone());
     let dispatch_enabled = start_pending_inputs;
-    tokio::spawn(
-        AgentLoop {
+    let initialization = handle.cancellation().drop_guard();
+    let context = crate::session_runtime::SessionBuildContext {
+        identity: state.snapshot.identity.clone(),
+        session: state.session.session.clone(),
+        runtime: runtime.for_session(handle.clone()),
+        actor: handle.clone(),
+        cancellation: handle.cancellation(),
+        tool_session: crate::ToolSessionRuntime::default(),
+        source: "host".into(),
+    };
+    context
+        .tool_session
+        .begin_turn(&context.session)
+        .map_err(|error| AgentRuntimeError::Lifecycle(error.to_string()))?;
+    let builder = if state.snapshot.state.is_operational() {
+        std::panic::AssertUnwindSafe(async {
+            host.turn_factory().prepare_session(context.clone()).await
+        })
+        .catch_unwind()
+        .await
+        .map_err(|_| {
+            AgentRuntimeError::Lifecycle("session factory panicked during preparation".into())
+        })?
+        .map_err(|error| AgentRuntimeError::Lifecycle(error.to_string()))?
+    } else {
+        crate::session_runtime::SessionRuntimeBuilder::default()
+    };
+    let built = std::panic::AssertUnwindSafe(builder.build(context))
+        .catch_unwind()
+        .await
+        .map_err(|_| AgentRuntimeError::Lifecycle("session tool assembly panicked".into()))?;
+    let mut session_runtime = built.map_err(|error| {
+        AgentRuntimeError::Lifecycle(format!(
+            "{error}: {}",
+            std::error::Error::source(&error).map_or(String::new(), ToString::to_string)
+        ))
+    })?;
+    let mut proposed_inbox = state.session.inbox.clone();
+    let source_ids: Vec<_> = session_runtime.source_ids().map(str::to_owned).collect();
+    let obsolete: Vec<_> = proposed_inbox
+        .reservations()
+        .filter(|id| {
+            id.strip_prefix("source:")
+                .is_some_and(|source| !source_ids.iter().any(|id| id == source))
+        })
+        .map(str::to_owned)
+        .collect();
+    for id in obsolete {
+        proposed_inbox.release_reservation(&id);
+    }
+    for source in &source_ids {
+        if let Err(error) = proposed_inbox.reserve(&format!("source:{source}")) {
+            session_runtime.rollback().await.map_err(|cleanup| {
+                AgentRuntimeError::Lifecycle(format!("{error}; rollback: {cleanup}"))
+            })?;
+            return Err(AgentRuntimeError::Lifecycle(error.to_string()));
+        }
+    }
+    initialization.disarm();
+    Ok(PreparedAgentLoop {
+        handle,
+        owner: AgentLoop {
             host,
             state,
             runtime,
@@ -80,12 +149,37 @@ where
                 observation_receiver,
             },
             active: None,
+            session_waiter: None,
+            task_resources: Default::default(),
+            session_runtime,
+            closing: None,
             dispatch_enabled,
             cancel_grace,
-        }
-        .run(),
-    );
-    handle
+        },
+    })
+}
+
+pub(crate) struct PreparedAgentLoop<H: AgentRuntimeHost> {
+    handle: AgentLoopHandle,
+    owner: AgentLoop<H>,
+}
+
+impl<H: AgentRuntimeHost> PreparedAgentLoop<H> {
+    pub(crate) fn handle(&self) -> AgentLoopHandle {
+        self.handle.clone()
+    }
+    pub(crate) fn start(self) -> AgentLoopHandle {
+        self.handle.mark_ready();
+        tokio::spawn(self.owner.run());
+        self.handle
+    }
+    pub(crate) async fn rollback(mut self) -> AgentRuntimeResult<()> {
+        self.owner
+            .session_runtime
+            .rollback()
+            .await
+            .map_err(|error| AgentRuntimeError::Lifecycle(error.to_string()))
+    }
 }
 
 impl<H> AgentLoop<H>
@@ -93,14 +187,65 @@ where
     H: AgentRuntimeHost,
 {
     async fn run(mut self) {
+        if let Err(error) = self.initialize_session_sources().await {
+            self.dispatch_enabled = false;
+            self.fault(format!("session source initialization failed: {error}"))
+                .await;
+        }
+        if let Err(error) = self.recover_session_tasks().await {
+            self.dispatch_enabled = false;
+            self.fault(format!("session task recovery failed: {error}"))
+                .await;
+        }
         if self.dispatch_enabled
             && self.state.snapshot.state.is_queued()
             && self.state.has_triggering_input()
         {
             self.begin_next_turn().boxed().await;
         }
+        if let AgentState::Closing(state) = &self.state.snapshot.state
+            && state.error().is_none()
+        {
+            let disposition = state.workspace_disposition();
+            if let Err(error) = self.close(disposition).await {
+                let _ = self.record_close_error(error).await;
+            }
+        }
         loop {
+            if self.host.repository().is_durable(
+                &self.state.snapshot.identity.id,
+                self.state.snapshot.revision,
+            ) {
+                self.state.session.tasks.release_saved_results();
+            }
+            self.advance_session_close();
             tokio::select! {
+                event = closing::next_close_event(&mut self.closing), if self.closing.is_some() => {
+                    if let Err(error) = self.handle_close_event(event).await {
+                        tracing::error!(%error, "background session close failed");
+                        let _ = self.record_close_error(error).await;
+                    }
+                }
+                source = self.session_runtime.next_source(), if self.session_runtime.has_running_sources() => {
+                    if let Some((id, result)) = source
+                        && let Err(error) = self.finish_session_source(&id, result).await {
+                        self.fault(format!("session source settlement failed: {error}")).await;
+                    }
+                }
+                completion = self.task_resources.next_completion(), if self.task_resources.has_completions_or_workers() => {
+                    if let Some(completion) = completion {
+                        if let Err(error) = self.finish_session_task(completion).boxed().await {
+                            self.dispatch_enabled = false;
+                            self.task_resources.block_settlement();
+                            tracing::error!(%error, "session task completion retained after commit failure");
+                            self.fault(format!("session task settlement failed: {error}")).await;
+                            continue;
+                        }
+                        if let Err(error) = self.start_session_tasks().boxed().await {
+                            self.fault(format!("session task scheduling failed: {error}")).await;
+                        }
+                    }
+                }
                 command = async {
                     match self.channels.deferred_commands.pop_front() {
                         Some(command) => Some(command),
@@ -111,6 +256,46 @@ where
                         break;
                     };
                     match command {
+                        AgentLoopCommand::AdmitToolTasks { turn_id, tasks, reply } => {
+                            let result = self.admit_tool_tasks(&turn_id, tasks).boxed().await;
+                            let _ = reply.send(result);
+                        }
+                        AgentLoopCommand::SelectToolTaskResults { turn_id, ids, deadline, reply } => {
+                            let result = self.select_tool_task_results(&turn_id, &ids, deadline).boxed().await;
+                            let _ = reply.send(result);
+                        }
+                        AgentLoopCommand::ToolTaskOutput { id, delta } => {
+                            if let Err(error) = self.append_session_task_output(&id, &delta).boxed().await {
+                                tracing::warn!(%error, task_id = %id, "task output preview projection failed");
+                            }
+                        }
+                        AgentLoopCommand::ListToolTasks { status, cursor, reply } => {
+                            let _ = reply.send(Ok(self.state.session.tasks.list(status, cursor.as_deref())));
+                        }
+                        AgentLoopCommand::ReadToolTaskResult { id, reply } => {
+                            let result = self.read_complete_task(&id).boxed().await;
+                            let _ = reply.send(result);
+                        }
+                        AgentLoopCommand::GetToolTask { id, reply } => {
+                            let result = self.state.session.tasks.get(&id).cloned()
+                                .map_err(|error| AgentRuntimeError::InvalidInput(error.to_string()));
+                            let _ = reply.send(result);
+                        }
+                        AgentLoopCommand::CancelToolTask { id, reply } => {
+                            let result = self.cancel_session_task(&id).boxed().await;
+                            let _ = reply.send(result);
+                        }
+                        AgentLoopCommand::ToolTaskRunning { id, reply } => {
+                            let result = self.mark_session_task_running(&id).boxed().await;
+                            let _ = reply.send(result);
+                        }
+                        AgentLoopCommand::WaitSessionEvents { reply } => {
+                            self.wait_session_events(reply);
+                        }
+                        AgentLoopCommand::PublishSessionEvent { source, id, event, reply } => {
+                            let result = self.publish_session_event(&source, &id, *event).boxed().await;
+                            let _ = reply.send(result);
+                        }
                         AgentLoopCommand::Submit { request, reply } => {
                             // `.boxed()`：把命令处理状态机放堆上，避免 debug 构建下
                             // 全部命令分支内联进 run 的 select! 状态机导致超大栈帧。
@@ -216,7 +401,7 @@ where
                             limit,
                             reply,
                         } => {
-                            let result = self.read_submissions(offset, limit).boxed().await;
+                            let result = self.read_submissions(offset, limit);
                             let _ = reply.send(result);
                         }
                         AgentLoopCommand::StartPendingInputs { reply } => {
@@ -229,6 +414,7 @@ where
                             reply,
                         } => {
                             let result = self.close(workspace_disposition).boxed().await;
+                            self.wake_session_waiter();
                             let _ = reply.send(result);
                         }
                         AgentLoopCommand::TurnFinished(completion) => {
@@ -239,6 +425,10 @@ where
                             let snapshot = &self.state.snapshot;
                             if (snapshot.identity.parent_id.is_some() && !matches!(snapshot.state, AgentState::Closed(_)))
                                 || self.active.is_some() || snapshot.pending_inputs > 0
+                                || self.session_waiter.as_ref().is_some_and(|waiter| !waiter.is_closed())
+                                || self.task_resources.has_work() || self.state.session.tasks.active_ids().next().is_some()
+                                || self.session_runtime.has_sources()
+                                || self.closing.is_some() || matches!(snapshot.state, AgentState::Closing(_))
                                 || snapshot.active_turn_id().is_some() || snapshot.state.is_budget_paused()
                                 || !self.host.repository().is_durable(&snapshot.identity.id, snapshot.revision)
                             {
@@ -252,8 +442,14 @@ where
                         }
                         AgentLoopCommand::Shutdown { reply } => {
                             let result = self.shutdown().boxed().await;
+                            let finished = result.is_ok();
+                            if let Err(error) = &result {
+                                if matches!(self.state.snapshot.state, AgentState::Closing(_)) {
+                                    let _ = self.record_close_error(error.clone()).await;
+                                } else { self.fault(error.to_string()).await; }
+                            }
                             let _ = reply.send(result);
-                            break;
+                            if finished { break; }
                         }
                     }
                 }
@@ -286,6 +482,12 @@ where
             }
         }
         self.stop_active_turn();
+        if let Err(error) = self.release_turn_deliveries(None).await {
+            tracing::error!(%error, "undelivered task results retained during fault settlement");
+        }
+        if let Some(reply) = self.session_waiter.take() {
+            let _ = reply.send(Err(crate::session_runtime::SessionInboxError::Closed.into()));
+        }
     }
 
     /// 合法模型输入产生的 Thread/trace 投影错误只终结当前 Turn，不把 Agent
@@ -393,6 +595,9 @@ where
             "agent runtime is committing a faulted state"
         );
         self.stop_active_turn();
+        if let Err(error) = self.release_turn_deliveries(turn_id.as_ref()).await {
+            tracing::error!(%error, "undelivered task results retained during fault settlement");
+        }
         let mut next = self.state.clone();
         if let Err(error) = next.snapshot.transition(AgentCommand::Fault {
             error: pl_protocol::StateError {
@@ -474,26 +679,18 @@ mod tests {
             .register(registration(id.as_str(), "chat"))
             .await
             .unwrap();
-        let (command_sender, command_receiver) = mpsc::channel(32);
-        let (trace_sender, trace_receiver) = mpsc::unbounded_channel();
-        let (observation_sender, observation_receiver) = mpsc::unbounded_channel();
-        let mut owner = AgentLoop {
+        let prepared = prepare_agent_loop(
             host,
-            state: repository.state(&id),
-            runtime: handle,
-            channels: LoopChannels {
-                deferred_commands: Default::default(),
-                command_sender,
-                command_receiver,
-                trace_sender,
-                trace_receiver,
-                observation_sender,
-                observation_receiver,
-            },
-            active: None,
-            dispatch_enabled: true,
-            cancel_grace: Duration::from_millis(10),
-        };
+            repository.state(&id),
+            handle,
+            Duration::from_millis(10),
+            true,
+            32,
+        )
+        .await
+        .unwrap();
+        prepared.handle.mark_ready();
+        let mut owner = prepared.owner;
         let first = owner
             .submit(AgentSubmitRequest::start(id.clone(), "first"))
             .await

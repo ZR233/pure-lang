@@ -42,6 +42,14 @@ impl From<&ProgressSubmissionCommit> for AgentSubmissionRecord {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadContextState {
+    /// Checkpoint identities committed atomically with transcript and tool delivery.
+    #[serde(default)]
+    pub checkpoints: super::CheckpointHistory,
+    /// Session wake facts, owned independently of Turn transcript snapshots.
+    #[serde(default = "inbox_codec::empty", with = "inbox_codec")]
+    pub inbox: crate::session_runtime::SessionInbox,
+    #[serde(default, with = "tasks_codec")]
+    pub tasks: crate::session_runtime::SessionTasks,
     /// 产品可持久化的类型化 session 展示元数据。
     pub metadata: ThreadContextMetadata,
     /// 驻留期间的完整阶段报告，冷激活后只从内存分页。
@@ -61,6 +69,9 @@ impl ThreadContextState {
     /// 创建空 session 状态。
     pub fn empty() -> Self {
         Self {
+            checkpoints: Default::default(),
+            inbox: crate::session_runtime::SessionInbox::new(Default::default()),
+            tasks: Default::default(),
             metadata: ThreadContextMetadata::default(),
             submissions: Default::default(),
             session: AgentSession::new(),
@@ -78,4 +89,46 @@ impl ThreadContextState {
 pub struct AgentWaitResult {
     pub snapshot: AgentSnapshot,
     pub last_turn: Option<AgentTurnOutcome>,
+}
+
+mod inbox_codec {
+    use crate::session_runtime::{SessionInbox, SessionInboxSnapshot};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub(super) fn empty() -> SessionInbox {
+        SessionInbox::new(Default::default())
+    }
+
+    pub(super) fn serialize<S: Serializer>(
+        inbox: &SessionInbox,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        inbox.snapshot().serialize(serializer)
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<SessionInbox, D::Error> {
+        let snapshot = SessionInboxSnapshot::deserialize(deserializer)?;
+        SessionInbox::restore(snapshot, Default::default()).map_err(serde::de::Error::custom)
+    }
+}
+
+mod tasks_codec {
+    use crate::session_runtime::{SessionTasks, SessionTasksSnapshot};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub(super) fn serialize<S: Serializer>(
+        tasks: &SessionTasks,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        tasks.snapshot().serialize(serializer)
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<SessionTasks, D::Error> {
+        let snapshot = SessionTasksSnapshot::deserialize(deserializer)?;
+        SessionTasks::restore(snapshot).map_err(serde::de::Error::custom)
+    }
 }

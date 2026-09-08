@@ -28,6 +28,7 @@ use crate::{AgentRoleId, ThreadEventBusHandle, ThreadEventSubscription};
 /// 产品 facade 与协作工具只能通过该句柄访问 agent 状态机，不能直接持有 loop state。
 #[derive(Clone)]
 pub struct AgentRuntimeHandle {
+    session_origin: Option<AgentLoopHandle>,
     pub(crate) sender: mpsc::Sender<CoordinatorCommand>,
     pub(crate) actors: AgentRegistry,
     pub(crate) thread_events: ThreadEventBusHandle,
@@ -35,6 +36,78 @@ pub struct AgentRuntimeHandle {
 }
 
 impl AgentRuntimeHandle {
+    pub(crate) fn for_session(&self, origin: AgentLoopHandle) -> Self {
+        let mut handle = self.clone();
+        handle.session_origin = Some(origin);
+        handle
+    }
+
+    fn ensure_access(&self) -> AgentRuntimeResult<()> {
+        if let Some(origin) = &self.session_origin {
+            if origin.cancellation().is_cancelled() {
+                return Err(AgentRuntimeError::ChannelClosed);
+            }
+            origin.ensure_ready()?;
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn execute_task_batch(
+        &self,
+        agent_id: &ThreadId,
+        turn_id: TurnId,
+        tasks: Vec<crate::session_runtime::SessionTaskSubmission>,
+    ) -> AgentRuntimeResult<Vec<crate::session_runtime::ToolTaskSnapshot>> {
+        let actor = self.actor(agent_id).await?;
+        let ids: Vec<_> = tasks
+            .iter()
+            .map(|task| task.receipt.task_id.clone())
+            .collect();
+        let (reply, receiver) = oneshot::channel();
+        actor
+            .send(AgentLoopCommand::AdmitToolTasks {
+                turn_id: turn_id.clone(),
+                tasks,
+                reply,
+            })
+            .await?;
+        let deadline = receive(receiver).await??;
+        let changed = actor.tasks_changed();
+        loop {
+            let notified = changed.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            let mut complete = true;
+            for id in &ids {
+                let (reply, receiver) = oneshot::channel();
+                actor
+                    .send(AgentLoopCommand::GetToolTask {
+                        id: id.clone(),
+                        reply,
+                    })
+                    .await?;
+                complete &= receive(receiver).await??.status.is_terminal();
+            }
+            if complete || tokio::time::Instant::now() >= deadline {
+                break;
+            }
+            tokio::select! {
+                _ = notified => {},
+                _ = tokio::time::sleep_until(deadline) => break,
+            }
+        }
+        let (reply, receiver) = oneshot::channel();
+        actor
+            .send(AgentLoopCommand::SelectToolTaskResults {
+                turn_id,
+                ids,
+                deadline,
+                reply,
+            })
+            .await?;
+        receive(receiver).await?
+    }
+
     /// Activates a cold session by identity. Concurrent requests share the coordinator's owner.
     ///
     /// # Errors
@@ -45,6 +118,67 @@ impl AgentRuntimeHandle {
             .await?;
         receive(receiver).await?
     }
+    pub(crate) async fn task_output(
+        &self,
+        agent_id: &ThreadId,
+        task_id: String,
+    ) -> AgentRuntimeResult<crate::session_runtime::SessionTaskOutput> {
+        Ok(crate::session_runtime::SessionTaskOutput::new(
+            self.actor(agent_id).await?,
+            task_id,
+        ))
+    }
+    /// Binds task controls to the currently resident Thread incarnation.
+    ///
+    /// Clones cannot silently rebind to a replacement owner after close or eviction.
+    /// # Errors
+    /// Returns an error when the Thread is not resident.
+    pub async fn session_control(
+        &self,
+        agent_id: &ThreadId,
+    ) -> AgentRuntimeResult<crate::session_runtime::SessionControl> {
+        Ok(crate::session_runtime::SessionControl::new(
+            self.actor(agent_id).await?,
+            agent_id.clone(),
+        ))
+    }
+
+    pub(crate) async fn tool_task_running(
+        &self,
+        agent_id: &ThreadId,
+        id: String,
+    ) -> AgentRuntimeResult<()> {
+        let (reply, receiver) = oneshot::channel();
+        self.send_to_actor(agent_id, AgentLoopCommand::ToolTaskRunning { id, reply })
+            .await?;
+        receive(receiver).await?
+    }
+
+    /// Binds an extension publisher to the currently resident Thread incarnation.
+    ///
+    /// This is a trusted host capability, not a model-callable source registration.
+    /// It neither activates a cold session nor submits model input.
+    ///
+    /// # Errors
+    /// Returns an error for missing owners or invalid source identities.
+    pub async fn session_message_sender(
+        &self,
+        agent_id: &ThreadId,
+        source: impl Into<String>,
+    ) -> Result<
+        crate::session_runtime::SessionMessageSender,
+        crate::session_runtime::SessionMessageError,
+    > {
+        let actor = self.actor(agent_id).await.map_err(|error| {
+            if matches!(error, AgentRuntimeError::NotReady) {
+                crate::session_runtime::SessionMessageError::NotReady
+            } else {
+                crate::session_runtime::SessionMessageError::OwnerUnavailable
+            }
+        })?;
+        crate::session_runtime::SessionMessageSender::new(actor, source.into())
+    }
+
     pub(crate) fn new(
         sender: mpsc::Sender<CoordinatorCommand>,
         actors: AgentRegistry,
@@ -52,6 +186,7 @@ impl AgentRuntimeHandle {
         directory: AgentDirectoryHandle,
     ) -> Self {
         Self {
+            session_origin: None,
             sender,
             actors,
             thread_events,
@@ -420,6 +555,7 @@ impl AgentRuntimeHandle {
         &self,
         targets: Vec<ThreadId>,
     ) -> AgentRuntimeResult<AgentDirectoryWaitResult> {
+        self.ensure_access()?;
         if targets.is_empty() {
             return Err(AgentRuntimeError::InvalidInput(
                 "wait_agents requires at least one target".to_string(),
@@ -432,7 +568,7 @@ impl AgentRuntimeHandle {
         }
 
         loop {
-            subscription.changed().await?;
+            self.wait_for_directory_change(&mut subscription).await?;
             let current = target_snapshots(&self.directory.directory_snapshot(), &targets)?;
             if let Some(result) = changed_wait_result(&baseline, &current) {
                 return Ok(result);
@@ -442,6 +578,7 @@ impl AgentRuntimeHandle {
 
     /// 等待 agent 进入 Idle 且队列为空；只由 directory watch 驱动。
     pub async fn wait_until_idle(&self, agent_id: ThreadId) -> AgentRuntimeResult<AgentWaitResult> {
+        self.ensure_access()?;
         let mut subscription = self.directory.subscribe();
         loop {
             let snapshot = self.directory.snapshot(&agent_id)?;
@@ -451,7 +588,7 @@ impl AgentRuntimeHandle {
                     snapshot,
                 });
             }
-            subscription.changed().await?;
+            self.wait_for_directory_change(&mut subscription).await?;
         }
     }
 
@@ -488,6 +625,7 @@ impl AgentRuntimeHandle {
         thread_id: &ThreadId,
         histories: &[ThreadTurnHistory],
     ) -> AgentRuntimeResult<()> {
+        self.ensure_access()?;
         self.thread_events
             .merge_cold_history(thread_id.as_str(), histories)
             .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))
@@ -508,7 +646,25 @@ impl AgentRuntimeHandle {
         receive(receiver).await?
     }
 
+    async fn wait_for_directory_change(
+        &self,
+        subscription: &mut AgentDirectorySubscription,
+    ) -> AgentRuntimeResult<u64> {
+        match &self.session_origin {
+            Some(origin) => {
+                let cancellation = origin.cancellation();
+                tokio::select! {
+                    biased;
+                    _ = cancellation.cancelled() => Err(AgentRuntimeError::ChannelClosed),
+                    changed = subscription.changed() => changed,
+                }
+            }
+            None => subscription.changed().await,
+        }
+    }
+
     async fn send(&self, command: CoordinatorCommand) -> AgentRuntimeResult<()> {
+        self.ensure_access()?;
         self.sender
             .send(command)
             .await
@@ -525,6 +681,7 @@ impl AgentRuntimeHandle {
     }
 
     async fn actor(&self, agent_id: &ThreadId) -> AgentRuntimeResult<AgentLoopHandle> {
+        self.ensure_access()?;
         self.actors
             .read()
             .await
@@ -662,7 +819,10 @@ fn wait_message(snapshot: AgentSnapshot) -> AgentDirectoryWaitMessage {
 
 fn is_settled(snapshot: &AgentSnapshot) -> bool {
     snapshot.state.is_budget_paused()
-        || !snapshot.state.is_operational()
+        || matches!(
+            snapshot.state,
+            super::AgentState::Closed(_) | super::AgentState::Faulted(_)
+        )
         || (snapshot.state.is_idle() && snapshot.pending_inputs == 0)
 }
 

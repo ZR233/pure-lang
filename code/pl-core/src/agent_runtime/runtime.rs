@@ -74,7 +74,7 @@ where
                 .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
         }
         let restored = recover_interrupted_turns(&host, &thread_event_handle, restored).await?;
-        let handle = spawn_coordinator(host.clone(), restored, options, thread_events)?;
+        let handle = spawn_coordinator(host.clone(), restored, options, thread_events).await?;
         Ok(Self { host, handle })
     }
 
@@ -213,11 +213,15 @@ where
         agent.state.snapshot.last_turn = Some(outcome.clone());
         agent.state.refresh_mailbox_snapshot();
         let next_turn_id = agent.state.triggering_turn_id();
-        agent
-            .state
-            .snapshot
-            .transition(AgentCommand::Settle { next_turn_id })
-            .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
+        if let AgentState::Closing(state) = &mut agent.state.snapshot.state {
+            state.clear_turn();
+        } else {
+            agent
+                .state
+                .snapshot
+                .transition(AgentCommand::Settle { next_turn_id })
+                .map_err(|error| AgentRuntimeError::Repository(error.to_string()))?;
+        }
         agent.state.snapshot.updated_at = unix_timestamp();
         let event = AgentRuntimeEvent {
             agent_id: agent.state.snapshot.identity.id.clone(),

@@ -1433,6 +1433,36 @@ abstract class AppLocalizations {
   /// **'timed out'**
   String get timelineToolTimedOut;
 
+  /// No description provided for @agentDetailStatusClosing.
+  ///
+  /// In en, this message translates to:
+  /// **'Closing'**
+  String get agentDetailStatusClosing;
+
+  /// No description provided for @agentDetailStatusCleanupFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Cleanup failed'**
+  String get agentDetailStatusCleanupFailed;
+
+  /// No description provided for @timelineToolQueued.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} queued'**
+  String timelineToolQueued(String name);
+
+  /// No description provided for @timelineToolCancelling.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} cancelling'**
+  String timelineToolCancelling(String name);
+
+  /// No description provided for @timelineToolInterrupted.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} interrupted'**
+  String timelineToolInterrupted(String name);
+
   /// No description provided for @timelineAgentSubagent.
   ///
   /// In en, this message translates to:

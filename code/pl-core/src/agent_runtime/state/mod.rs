@@ -8,6 +8,7 @@ mod transition;
 
 pub(crate) use crate::time::unix_seconds as unix_timestamp;
 
+pub use checkpoint::*;
 pub use error::*;
 pub use event::*;
 pub use lifecycle::*;
@@ -23,3 +24,4 @@ pub use pl_protocol::{
 };
 pub use snapshot::*;
 pub use transition::*;
+mod checkpoint;

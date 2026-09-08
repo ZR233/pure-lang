@@ -51,6 +51,7 @@ class TimelineToolPart {
     this.timedOut = false,
     this.workingDirectory,
     this.denialReason,
+    this.taskId,
   });
 
   final String toolCallId;
@@ -65,6 +66,7 @@ class TimelineToolPart {
   final bool timedOut;
   final String? workingDirectory;
   final String? denialReason;
+  final String? taskId;
 
   TimelineToolPart copyWith({String? arguments, String? result}) {
     return TimelineToolPart(
@@ -80,6 +82,7 @@ class TimelineToolPart {
       timedOut: timedOut,
       workingDirectory: workingDirectory,
       denialReason: denialReason,
+      taskId: taskId,
     );
   }
 }
@@ -156,10 +159,24 @@ class TimelineToolGroup {
     if (statuses.contains('awaitingApproval')) {
       return 'awaitingApproval';
     }
-    if (statuses.any(_isActiveToolStatus)) {
+    if (statuses.contains('cancelling')) {
+      return 'cancelling';
+    }
+    if (statuses.any(
+      (status) => _isActiveToolStatus(status) && status != 'queued',
+    )) {
       return 'running';
     }
-    for (final status in const ['failed', 'denied', 'cancelled', 'succeeded']) {
+    if (statuses.contains('queued')) {
+      return 'queued';
+    }
+    for (final status in const [
+      'failed',
+      'denied',
+      'cancelled',
+      'interrupted',
+      'succeeded',
+    ]) {
       if (statuses.contains(status)) {
         return status;
       }

@@ -182,17 +182,21 @@ impl ToolScope {
         }
         let mut state = self.write();
         validate_batch_scope_conflicts(&self.inner.label, &prepared, &state.groups)?;
+        let mut retired = Vec::new();
         for (group, bindings) in &prepared {
-            state.groups.insert(
+            if let Some(previous) = state.groups.insert(
                 group.clone(),
                 PublishedGroup {
                     generation,
                     bindings: bindings.clone().into(),
                 },
-            );
+            ) {
+                retired.push(previous);
+            }
         }
         state.revision = state.revision.saturating_add(1);
         drop(state);
+        drop(retired);
         Ok(ToolRegistration {
             entries: prepared
                 .into_iter()
@@ -226,8 +230,10 @@ impl ToolScope {
             .get(group)
             .is_some_and(|published| published.generation == generation)
         {
-            state.groups.remove(group);
+            let removed = state.groups.remove(group);
             state.revision = state.revision.saturating_add(1);
+            drop(state);
+            drop(removed);
         }
     }
 

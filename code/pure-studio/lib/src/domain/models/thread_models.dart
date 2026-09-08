@@ -197,6 +197,7 @@ class ThreadToolInvocationView {
     this.callId,
     this.providerItemId,
     this.workingDirectory,
+    this.taskId,
   });
 
   final String toolCallId;
@@ -205,6 +206,7 @@ class ThreadToolInvocationView {
   final String name;
   final String arguments;
   final String? workingDirectory;
+  final String? taskId;
 
   ThreadToolInvocationView withArguments(String arguments) {
     return ThreadToolInvocationView(
@@ -214,6 +216,7 @@ class ThreadToolInvocationView {
       name: name,
       arguments: arguments,
       workingDirectory: workingDirectory,
+      taskId: taskId,
     );
   }
 }
@@ -244,6 +247,9 @@ sealed class ThreadToolLifecycleView {
   const ThreadToolLifecycleView();
 
   String get status => switch (this) {
+    QueuedThreadToolView() => 'queued',
+    CancellingThreadToolView() => 'cancelling',
+    InterruptedThreadToolView() => 'interrupted',
     StartedThreadToolView() => 'started',
     StreamingThreadToolView() => 'streaming',
     AwaitingApprovalThreadToolView() => 'awaitingApproval',
@@ -256,6 +262,8 @@ sealed class ThreadToolLifecycleView {
   };
 
   bool get isTerminal => switch (this) {
+    InterruptedThreadToolView() => true,
+    QueuedThreadToolView() || CancellingThreadToolView() => false,
     SucceededThreadToolView() ||
     FailedThreadToolView() ||
     DeniedThreadToolView() ||
@@ -270,6 +278,21 @@ sealed class ThreadToolLifecycleView {
 
 final class StartedThreadToolView extends ThreadToolLifecycleView {
   const StartedThreadToolView();
+}
+
+final class QueuedThreadToolView extends ThreadToolLifecycleView {
+  const QueuedThreadToolView();
+}
+
+final class CancellingThreadToolView extends ThreadToolLifecycleView {
+  const CancellingThreadToolView(this.streamedOutput);
+  final String streamedOutput;
+}
+
+final class InterruptedThreadToolView extends ThreadToolLifecycleView {
+  const InterruptedThreadToolView(this.interruptedAt, this.reason);
+  final DateTime interruptedAt;
+  final String reason;
 }
 
 final class StreamingThreadToolView extends ThreadToolLifecycleView {
@@ -543,6 +566,8 @@ class ThreadItemView {
     ThreadTextItemStateView(:final lifecycle) ||
     ThreadThinkingItemStateView(:final lifecycle) => lifecycle.terminalAt,
     ThreadToolItemStateView(:final lifecycle) => switch (lifecycle) {
+      InterruptedThreadToolView(:final interruptedAt) => interruptedAt,
+      QueuedThreadToolView() || CancellingThreadToolView() => null,
       SucceededThreadToolView(:final completedAt) => completedAt,
       FailedThreadToolView(:final failedAt) => failedAt,
       DeniedThreadToolView(:final deniedAt) => deniedAt,
@@ -585,6 +610,7 @@ class ThreadItemView {
     ThreadThinkingItemStateView(:final lifecycle) => lifecycle.failure,
     ThreadToolItemStateView(:final lifecycle) => switch (lifecycle) {
       FailedThreadToolView(:final failure) => failure.message,
+      InterruptedThreadToolView(:final reason) => reason,
       _ => null,
     },
     ThreadAgentItemStateView(:final lifecycle) => switch (lifecycle) {
@@ -655,13 +681,15 @@ class ThreadItemView {
   TimelineToolPart? get tool => switch (state) {
     ThreadToolItemStateView(:final invocation, :final lifecycle) =>
       TimelineToolPart(
+        taskId: invocation.taskId,
         toolCallId: invocation.toolCallId,
         callId: invocation.callId,
         providerItemId: invocation.providerItemId,
         name: invocation.name,
         arguments: invocation.arguments,
         result: switch (lifecycle) {
-          RunningThreadToolView(:final streamedOutput) => streamedOutput,
+          RunningThreadToolView(:final streamedOutput) ||
+          CancellingThreadToolView(:final streamedOutput) => streamedOutput,
           SucceededThreadToolView(:final output) => output.result,
           FailedThreadToolView(:final output) => output?.result,
           _ => null,

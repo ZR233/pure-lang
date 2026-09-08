@@ -5,52 +5,90 @@ use crate::studio::agent_host::{
 };
 
 use super::super::StudioRuntime;
+use super::super::background_task::{self, BackgroundTask};
 use super::super::lsp_state::health;
+
+/// Owns initialization progress as well as the runtime needed for failed-start cleanup.
+pub(in crate::studio::runtime) struct FrameworkOwner {
+    runtime: std::sync::Arc<StudioAgentRuntime>,
+    ready: tokio::sync::OnceCell<()>,
+    closing: tokio_util::sync::CancellationToken,
+}
+
+impl FrameworkOwner {
+    pub(in crate::studio::runtime) fn ready_runtime(
+        &self,
+    ) -> Option<std::sync::Arc<StudioAgentRuntime>> {
+        (self.ready.get().is_some() && !self.closing.is_cancelled()).then(|| self.runtime.clone())
+    }
+
+    async fn initialize(&self) -> Result<std::sync::Arc<StudioAgentRuntime>> {
+        anyhow::ensure!(!self.closing.is_cancelled(), "agent framework is closing");
+        tokio::select! {
+            result = self.ready.get_or_try_init(|| async {
+                self.runtime.handle().start_restored_inputs().await.map_err(|error| anyhow::anyhow!(error))
+            }) => { result?; }
+            _ = self.closing.cancelled() => anyhow::bail!("agent framework closed during initialization"),
+        }
+        self.ready_runtime()
+            .context("agent framework closed during initialization")
+    }
+}
 
 impl StudioRuntime {
     pub(in crate::studio) async fn agent_framework(
         &self,
     ) -> Result<std::sync::Arc<StudioAgentRuntime>> {
         let mut framework = self.agent_facility.framework.lock().await;
-        if let Some(runtime) = framework.as_ref() {
-            return Ok(runtime.clone());
-        }
-        let persistence = self
-            .agent_facility
-            .persistence
-            .lock()
-            .await
-            .clone()
-            .context("Studio persistence writer is unavailable")?;
-        let host = StudioAgentHost::new(
-            persistence,
-            self.agent_facility.worktrees.clone(),
-            self.store.clone(),
-            self.config_runtime.clone(),
-            self.external_runtimes.mcp.clone(),
-            self.agent_facility.tool_manager.clone(),
-            self.external_runtimes.lsp.clone(),
-            self.agent_facility.interactions.clone(),
-            self.agent_facility.resources.clone(),
-            self.agent_facility.product_events.clone(),
-            self.skills.clone(),
-            self.thread_modes.clone(),
-            self.ssh_manager.clone(),
+        let state = self.runtime_state.snapshot().state.kind();
+        anyhow::ensure!(
+            matches!(
+                state,
+                crate::studio::StudioRuntimeStateKind::Initializing
+                    | crate::studio::StudioRuntimeStateKind::Ready
+            ),
+            "cannot create agent framework while Studio runtime is {state:?}"
         );
-        let runtime = std::sync::Arc::new(
-            StudioAgentRuntime::start(host, runtime_options())
+        if framework.is_none() {
+            let persistence = self
+                .agent_facility
+                .persistence
+                .lock()
                 .await
-                .map_err(|error| anyhow::anyhow!(error))?,
-        );
-        *framework = Some(runtime.clone());
+                .clone()
+                .context("Studio persistence writer is unavailable")?;
+            let host = StudioAgentHost::new(
+                persistence,
+                self.agent_facility.worktrees.clone(),
+                self.store.clone(),
+                self.config_runtime.clone(),
+                self.external_runtimes.mcp.clone(),
+                self.agent_facility.tool_manager.clone(),
+                self.external_runtimes.lsp.clone(),
+                self.agent_facility.interactions.clone(),
+                self.agent_facility.resources.clone(),
+                self.agent_facility.product_events.clone(),
+                self.skills.clone(),
+                self.thread_modes.clone(),
+                self.ssh_manager.clone(),
+            );
+            let runtime = std::sync::Arc::new(
+                StudioAgentRuntime::start(host, runtime_options())
+                    .await
+                    .map_err(|error| anyhow::anyhow!(error))?,
+            );
+            *framework = Some(std::sync::Arc::new(FrameworkOwner {
+                runtime,
+                ready: tokio::sync::OnceCell::new(),
+                closing: tokio_util::sync::CancellationToken::new(),
+            }));
+        }
+        let owner = framework
+            .as_ref()
+            .context("agent framework owner missing")?
+            .clone();
         drop(framework);
-        let handle = runtime.handle();
-        runtime.host().attach_runtime(handle.clone()).await;
-        handle
-            .start_restored_inputs()
-            .await
-            .map_err(|error| anyhow::anyhow!(error))?;
-        Ok(runtime)
+        owner.initialize().await
     }
 
     /// 订阅 pin：guard 存活期间该线程不参与 LRU 淘汰，Drop 时自动解除。
@@ -105,7 +143,14 @@ impl StudioRuntime {
         &self,
         thread_id: &str,
     ) -> Result<Option<(pl_core::AgentRuntimeHandle, pl_core::ThreadId)>> {
-        let Some(framework) = self.agent_facility.framework.lock().await.clone() else {
+        let Some(framework) = self
+            .agent_facility
+            .framework
+            .lock()
+            .await
+            .as_ref()
+            .and_then(|owner| owner.ready_runtime())
+        else {
             return Ok(None);
         };
         let agent_id = pl_core::ThreadId::new(thread_id.to_string())?;
@@ -143,7 +188,7 @@ impl StudioRuntime {
         }
         let runtime = self.clone();
         let mut updates = self.external_runtimes.lsp.subscribe();
-        *watcher = Some(tokio::spawn(async move {
+        *watcher = Some(BackgroundTask::new(tokio::spawn(async move {
             while let Ok(()) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) =
                 updates.recv().await
             {
@@ -152,13 +197,13 @@ impl StudioRuntime {
                     tracing::warn!(%error, "failed to refresh LSP observed state");
                 }
             }
-        }));
+        })));
     }
 
-    pub(super) async fn stop_lsp_state_watcher(&self) {
-        if let Some(handle) = self.external_runtimes.lsp_state_watcher.lock().await.take() {
-            handle.abort();
-        }
+    pub(super) async fn stop_lsp_state_watcher(&self) -> Result<()> {
+        background_task::stop(&self.external_runtimes.lsp_state_watcher)
+            .await
+            .context("failed to join LSP state watcher")
     }
 
     /// 淘汰超出 LRU 容量且已保存的空闲驻留 actor；未保存时保留内存。
@@ -167,7 +212,14 @@ impl StudioRuntime {
         if candidates.is_empty() {
             return;
         }
-        let Some(framework) = self.agent_facility.framework.lock().await.clone() else {
+        let Some(framework) = self
+            .agent_facility
+            .framework
+            .lock()
+            .await
+            .as_ref()
+            .and_then(|owner| owner.ready_runtime())
+        else {
             return;
         };
         let handle = framework.handle();
@@ -236,13 +288,17 @@ impl StudioRuntime {
     }
 
     pub(super) async fn shutdown_agent_framework(&self) -> Result<()> {
-        let framework = self.agent_facility.framework.lock().await.take();
+        // Keep the retry owner installed across errors and cancellation of this wait.
+        let framework = self.agent_facility.framework.lock().await.clone();
         if let Some(framework) = framework {
-            framework.host().detach_runtime().await;
+            framework.closing.cancel();
             framework
+                .runtime
                 .shutdown()
                 .await
                 .map_err(|error| anyhow::anyhow!(error))?;
+            let released = self.agent_facility.framework.lock().await.take();
+            drop(released);
         }
         Ok(())
     }

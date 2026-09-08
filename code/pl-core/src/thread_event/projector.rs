@@ -40,6 +40,19 @@ pub(crate) fn project_trace_events(
         .clone()
         .unwrap_or_else(|| super::observation::empty_runtime(thread_id));
     for trace in traces {
+        let item_id = match &trace.kind {
+            TraceEventKind::TracePartStarted { item }
+            | TraceEventKind::TracePartCompleted { item }
+            | TraceEventKind::TracePartFailed { item } => Some(item.item_id()),
+            TraceEventKind::TracePartDelta { event } => Some(event.item_id.as_str()),
+            TraceEventKind::InteractionChanged { .. }
+            | TraceEventKind::SkillActivated { .. }
+            | TraceEventKind::EnabledToolsRecorded { .. } => None,
+        };
+        if item_id.is_some_and(|id| current.items.iter().any(|item|
+            item.id == id && matches!(item.state(), ThreadItemState::Tool(tool) if tool.invocation().task_id().is_some()))) {
+            continue;
+        }
         match &trace.kind {
             TraceEventKind::TracePartStarted { item } => {
                 if let Some(phase) = phase_for_item(item) {
@@ -510,6 +523,7 @@ fn thread_tool_item(tool: &pl_trace::TraceToolPart, updated_at: i64) -> ThreadTo
     let invocation = tool.invocation();
     let state =
         match tool.state() {
+            TraceToolState::Accepted(_) => ThreadToolState::Queued(pl_protocol::QueuedThreadTool),
             TraceToolState::Started(_) => ThreadToolState::Started(StartedThreadTool),
             TraceToolState::Streaming(_) => ThreadToolState::Streaming(StreamingThreadTool),
             TraceToolState::AwaitingApproval(_) => {

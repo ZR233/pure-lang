@@ -24,6 +24,8 @@ pub(in crate::studio) struct StudioAgentTurnFactory {
     pub(super) skills: SkillCatalogRuntime,
     pub(super) thread_modes: pl_core::ThreadModeManager,
     pub(super) ssh_manager: Arc<pl_core::remote::SshManager>,
+    #[cfg(target_os = "linux")]
+    pub(super) local_worker: Arc<tokio::sync::OnceCell<crate::studio::runtime::LocalWorkerAsset>>,
 }
 
 impl StudioAgentTurnFactory {
@@ -53,6 +55,8 @@ impl StudioAgentTurnFactory {
             skills,
             thread_modes,
             ssh_manager,
+            #[cfg(target_os = "linux")]
+            local_worker: Arc::new(tokio::sync::OnceCell::new()),
         }
     }
 }

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use tokio::sync::{RwLock, mpsc, oneshot};
 
-use super::agent_loop::{AgentLoopCommand, AgentLoopHandle, spawn_agent_loop};
+use super::agent_loop::{AgentLoopCommand, AgentLoopHandle, prepare_agent_loop};
 use super::directory::AgentDirectoryHandle;
 use super::host::{AgentCommitObserver, AgentLifecycleAdapter, ThreadRepository};
 use super::runtime::{AgentRuntimeOptions, RestoredInputPolicy};
@@ -77,7 +77,7 @@ pub(crate) enum CoordinatorCommand {
     },
 }
 
-pub(crate) fn spawn_coordinator<H>(
+pub(crate) async fn spawn_coordinator<H>(
     host: H,
     restored: Vec<RestoredAgentRuntime>,
     options: AgentRuntimeOptions,
@@ -91,20 +91,41 @@ where
         AgentDirectoryHandle::new(restored.iter().map(|agent| agent.state.snapshot.clone()));
     let actors = Arc::new(RwLock::new(BTreeMap::new()));
     let handle = AgentRuntimeHandle::new(sender, actors.clone(), thread_events.handle(), directory);
+    let mut prepared_actors = Vec::new();
     for restored_agent in restored {
         let id = restored_agent.state.snapshot.identity.id.clone();
-        let actor = spawn_agent_loop(
+        let prepared = prepare_agent_loop(
             host.clone(),
             restored_agent.state,
             handle.clone(),
             options.cancel_grace,
             options.restored_inputs == RestoredInputPolicy::Start,
             options.command_capacity,
-        );
-        actors
-            .try_write()
-            .expect("restored actor registry is not shared before coordinator spawn")
-            .insert(id, actor);
+        )
+        .await;
+        match prepared {
+            Ok(prepared) => prepared_actors.push((id, prepared)),
+            Err(error) => {
+                let mut cleanup_errors = Vec::new();
+                for (_, prepared) in prepared_actors {
+                    if let Err(cleanup) = prepared.rollback().await {
+                        cleanup_errors.push(cleanup.to_string());
+                    }
+                }
+                return if cleanup_errors.is_empty() {
+                    Err(error)
+                } else {
+                    Err(AgentRuntimeError::Lifecycle(format!(
+                        "{error}; rollback: {}",
+                        cleanup_errors.join("; ")
+                    )))
+                };
+            }
+        }
+    }
+    for (id, prepared) in prepared_actors {
+        actors.write().await.insert(id, prepared.handle());
+        prepared.start();
     }
     tokio::spawn(run_coordinator(
         host,
@@ -241,9 +262,11 @@ async fn run_coordinator<H>(
             }
             CoordinatorCommand::Shutdown { reply } => {
                 let result = shutdown_agents(&actors).await;
-                actors.write().await.clear();
+                let finished = result.is_ok();
                 let _ = reply.send(result);
-                break;
+                if finished {
+                    break;
+                }
             }
         }
     }
@@ -255,7 +278,15 @@ async fn run_coordinator<H>(
 
 async fn shutdown_agents(actors: &AgentRegistry) -> AgentRuntimeResult<()> {
     let mut first_error = None;
-    for actor in actor_handles(actors).await {
+    let mut snapshots = list_snapshots(actors).await?;
+    snapshots.sort_by_key(|snapshot| std::cmp::Reverse(snapshot.identity.depth));
+    for snapshot in snapshots {
+        let actor = actors
+            .read()
+            .await
+            .get(&snapshot.identity.id)
+            .cloned()
+            .ok_or_else(|| AgentRuntimeError::NotFound(snapshot.identity.id.clone()))?;
         let (reply, receiver) = oneshot::channel();
         let result = match actor.send(AgentLoopCommand::Shutdown { reply }).await {
             Ok(()) => match receiver.await {
@@ -266,7 +297,10 @@ async fn shutdown_agents(actors: &AgentRegistry) -> AgentRuntimeResult<()> {
             Err(error) => Err(error),
         };
         if first_error.is_none() {
-            first_error = result.err();
+            first_error = result.as_ref().err().cloned();
+        }
+        if result.is_ok() {
+            actors.write().await.remove(&snapshot.identity.id);
         }
     }
     first_error.map_or(Ok(()), Err)
@@ -331,9 +365,11 @@ where
     for snapshot in close_order {
         let current = snapshot_for(actors, &snapshot.identity.id).await?;
         // 关闭事实先在内存成立；未保存的已关闭会话保留 owner，后续再淘汰。
-        if host
-            .repository()
-            .is_durable(&current.identity.id, current.revision)
+        if matches!(current.state, super::AgentState::Closed(_))
+            && host
+                .repository()
+                .is_durable(&current.identity.id, current.revision)
+            && !runtime.directory.history_is_retained(&current.identity.id)
         {
             evict_agent(actors, runtime, &current.identity.id).await?;
         }
@@ -497,22 +533,25 @@ where
                 "restored agent has no materialized Thread snapshot".to_string(),
             )
         })?;
-    runtime
-        .thread_events
-        .replace_snapshot(activated_thread)
-        .map_err(|error| AgentRuntimeError::ThreadEvents(error.to_string()))?;
-    let snapshot = recovered.state.snapshot.clone();
-    runtime.directory.store_snapshot(snapshot.clone());
-    let actor = spawn_agent_loop(
+    let prepared = prepare_agent_loop(
         host.clone(),
-        recovered.state,
+        recovered.state.clone(),
         runtime.clone(),
         options.cancel_grace,
-        // 惰性驻留不自动执行模型：pending input 等待显式 submit/命令放行。
         false,
         options.command_capacity,
-    );
-    actors.write().await.insert(id, actor);
+    )
+    .await?;
+    if let Err(error) = runtime.thread_events.replace_snapshot(activated_thread) {
+        prepared.rollback().await.map_err(|cleanup| {
+            AgentRuntimeError::Lifecycle(format!("{error}; rollback: {cleanup}"))
+        })?;
+        return Err(AgentRuntimeError::ThreadEvents(error.to_string()));
+    }
+    let snapshot = recovered.state.snapshot.clone();
+    runtime.directory.store_snapshot(snapshot.clone());
+    actors.write().await.insert(id, prepared.handle());
+    prepared.start();
     Ok(snapshot)
 }
 
@@ -522,6 +561,11 @@ async fn evict_agent(
     runtime: &AgentRuntimeHandle,
     agent_id: &ThreadId,
 ) -> AgentRuntimeResult<()> {
+    if runtime.directory.history_is_retained(agent_id) {
+        return Err(AgentRuntimeError::InvalidInput(format!(
+            "agent {agent_id} has an active collaboration history reader"
+        )));
+    }
     if runtime.directory.snapshots().iter().any(|child| {
         child.identity.parent_id.as_ref() == Some(agent_id)
             && !matches!(child.state, super::AgentState::Closed(_))

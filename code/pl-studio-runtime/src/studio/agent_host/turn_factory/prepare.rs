@@ -2,12 +2,10 @@
 
 use std::sync::Arc;
 
-use pl_core::ExecutionEnvironment;
 use pl_core::{
-    AgentCollaborationTools, AgentIdentity, AgentTurnFactory, AgentTurnPreparationContext,
-    BeforeModelStepHook, CoreRuntimeProfile, PreparedAgentTurn, PreparedSessionRuntime,
-    SubagentContext, ToolGroupId, ToolInstallGroup, TurnEngineBuilder, TurnOptions, TurnRequest,
-    load_workspace_instruction_documents, plan_web_searches,
+    AgentIdentity, AgentTurnFactory, AgentTurnPreparationContext, CoreRuntimeProfile,
+    PreparedAgentTurn, PreparedSessionRuntime, SubagentContext, TurnEngineBuilder, TurnOptions,
+    TurnRequest, load_workspace_instruction_documents,
 };
 
 use crate::studio::records::ThreadRecord;
@@ -21,10 +19,16 @@ use super::factory::StudioAgentTurnFactory;
 use super::instructions::{StudioInstructionContext, instruction_snapshot};
 use super::interactions::interaction_emitter;
 use super::routing::{resolve_frozen_profile_route, validate_thread_mode_model};
-use super::tools::lsp_tool_group;
 
 impl AgentTurnFactory for StudioAgentTurnFactory {
     type Error = PureError;
+
+    async fn prepare_session(
+        &self,
+        context: pl_core::session_runtime::SessionBuildContext,
+    ) -> Result<pl_core::session_runtime::SessionRuntimeBuilder> {
+        self.build_session(context).await
+    }
 
     async fn prepare_turn(
         &self,
@@ -50,6 +54,15 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .find(|project| project.id == thread_record.project_id)
             .ok_or_else(|| turn_error("selected Studio project is not resident"))?;
         let config = self.config_runtime.read()?.config;
+        let binding = context
+            .session_runtime
+            .workspace_binding()
+            .ok_or_else(|| turn_error("session has no physical workspace binding"))?;
+        if binding.host_identity() != self.session_host_identity(&project).await? {
+            return Err(turn_error(
+                "session project or execution backend changed; recreate or reactivate the session",
+            ));
+        }
         let agent_profile_catalog = self.config_runtime.agent_profiles()?;
         for diagnostic in &agent_profile_catalog.diagnostics {
             tracing::warn!(
@@ -64,7 +77,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         // 所有模式的 root 统一使用 planner 路由；identity.role 只是可自愈投影。
         let root_role = is_root.then_some(crate::config::StudioRole::Planner);
 
-        let workspace = AgentWorkspaceResolver::new()
+        let resolved_workspace = AgentWorkspaceResolver::new()
             .resolve(
                 &context.snapshot.identity,
                 &thread_record,
@@ -73,6 +86,12 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             )
             .await
             .map_err(anyhow_error)?;
+        if resolved_workspace.root() != binding.workspace().root() {
+            return Err(turn_error(
+                "session workspace target changed; recreate or reactivate the session",
+            ));
+        }
+        let workspace = binding.workspace().clone();
         let workspace_root = workspace.root().to_path_buf();
         let remote_host = match &project.ssh_server_id {
             Some(server_id) => Some(
@@ -83,10 +102,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             ),
             None => None,
         };
-        let execution_environment = remote_host
-            .as_ref()
-            .map(|host| host.execution_environment.clone())
-            .unwrap_or_else(ExecutionEnvironment::detect_local);
+        let execution_environment = binding.environment().clone();
         if let Some(remote_host) = &remote_host {
             self.lsp_runtime
                 .apply_user_servers(&config.lsp.servers)
@@ -212,70 +228,12 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         };
         validate_thread_mode_model(registered_mode.as_deref(), &route.model)?;
         let attachment_runtime = attachment_runtime(self, thread_id.clone());
-        let mcp_image_output =
-            pl_core::McpImageOutputContext::for_model(&route.model, attachment_runtime.clone());
-        let web_search = plan_web_searches(
-            &config.models,
-            &route,
-            &config.web_search,
-            config.deepseek_web_search.enabled,
-        )?;
-        let agent_tools = self
-            .resources
-            .tool_set(&context.snapshot.identity.id, &self.tool_manager)
-            .await;
-        let exclusive_web_search =
-            web_search.visibility() == pl_core::ToolVisibilityConstraint::Exclusive;
-        let refresh_mcp = config.runtime.tool_capabilities.mcp && !exclusive_web_search;
-        let refresh_lsp = config.runtime.tool_capabilities.lsp && !exclusive_web_search;
-        let mut builder = TurnEngineBuilder::from_route(&route)?
+        let builder = TurnEngineBuilder::from_route(&route)?
             .with_tool_capabilities(config.runtime.tool_capabilities.clone())
             .with_skills_config(turn_skills_config.clone())
             .with_skill_catalog(skill_catalog.clone())
             .with_lsp_runtime(self.lsp_runtime.clone())
-            .with_agent_tool_set(agent_tools.clone());
-        if refresh_mcp || refresh_lsp {
-            let mcp_runtime = self.mcp_runtime.clone();
-            let lsp_runtime = self.lsp_runtime.clone();
-            let refresh_workspace = pl_core::ToolWorkspace::new(workspace.clone())
-                .with_lsp_runtime(Some(lsp_runtime.clone()));
-            let refresh_workspace_root = workspace_root.clone();
-            let mcp_image_output = mcp_image_output.clone();
-            builder = builder.with_before_model_step(BeforeModelStepHook::new(move |step| {
-                let mcp_runtime = mcp_runtime.clone();
-                let lsp_runtime = lsp_runtime.clone();
-                let refresh_workspace = refresh_workspace.clone();
-                let refresh_workspace_root = refresh_workspace_root.clone();
-                let mcp_image_output = mcp_image_output.clone();
-                async move {
-                    let mut replacements = Vec::with_capacity(2);
-                    if refresh_mcp {
-                        let lease = mcp_runtime.acquire_turn_lease().await?;
-                        replacements.push(ToolInstallGroup::deferred(
-                            ToolGroupId::new("mcp"),
-                            lease.agent_tools(mcp_image_output)?,
-                        ));
-                    }
-                    if refresh_lsp {
-                        let available = !lsp_runtime
-                            .active_server_names_for_workspace(&refresh_workspace_root)
-                            .await
-                            .is_empty();
-                        replacements.push(ToolInstallGroup::direct(
-                            ToolGroupId::new("lsp"),
-                            lsp_tool_group(available, lsp_runtime, refresh_workspace),
-                        ));
-                    }
-                    step.agent_tools.install_batch(replacements)
-                }
-            }));
-        }
-        if !refresh_mcp {
-            agent_tools.uninstall(&ToolGroupId::new("mcp"));
-        }
-        if !refresh_lsp {
-            agent_tools.uninstall(&ToolGroupId::new("lsp"));
-        }
+            .with_session_runtime(context.session_runtime.clone());
         let profile = if remote_host.is_some() {
             CoreRuntimeProfile::minimal().with_agent_workspace(workspace.clone())
         } else {
@@ -304,113 +262,11 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
         if let Some(subagent) = subagent_context {
             engine = engine.with_subagent_context(subagent);
         }
-        if exclusive_web_search {
-            for group in [
-                "builtin",
-                "skills",
-                "lsp",
-                "workflow",
-                "plan",
-                "collaboration",
-                "mcp",
-            ] {
-                engine.agent_tools().uninstall(&ToolGroupId::new(group));
-            }
-        } else if let Some(remote_host) = remote_host {
-            let tool_workspace = pl_core::ToolWorkspace::new(workspace.clone())
-                .with_lsp_runtime(Some(self.lsp_runtime.clone()));
-            let files = Arc::new(remote_host.files);
-            let commands = Arc::new(remote_host.commands);
-            let git = Arc::new(remote_host.git);
-            let mut additional_tools = if config.runtime.tool_capabilities.workspace_files {
-                pl_core::remote::remote_workspace_mutation_tools(
-                    files.clone(),
-                    tool_workspace.clone(),
-                )
-            } else {
-                Vec::new()
-            };
-            if let Some(tool) = pl_core::ViewImageTool::for_remote_model(
-                tool_workspace,
-                files.clone(),
-                &route.model,
-                attachment_runtime,
-            ) {
-                additional_tools.push(tool.into());
-            }
-            pl_core::BuiltinToolInstaller::host_provided(config.runtime.tool_capabilities.clone())
-                .with_git_tools(
-                    pl_core::GitWorkspaceConfig::local(workspace_root.clone())
-                        .with_native_credentials(),
-                    git,
-                    Arc::new(pl_core::NoGitCredentialProvider),
-                )
-                .with_command_backend(commands)
-                .with_workspace_file_backend(files)
-                .with_additional_tools(additional_tools)
-                .install_agent_workspace(
-                    &mut engine,
-                    workspace.clone(),
-                    Some(workspace_instructions.clone()),
-                )
-                .await?;
-        } else {
-            engine.install_profile_tools().await?;
-        }
-
-        web_search.install(&mut engine, &config.web_search)?;
-        if exclusive_web_search {
-            engine
-                .agent_tools()
-                .uninstall(&ToolGroupId::new("programmatic_tool_calling"));
-        } else {
-            pl_core::reconcile_programmatic_tool_calling(engine.agent_tools(), &route)?;
-        }
-
         if let Some(registered_mode) = &registered_mode {
             engine
                 .tool_session_runtime()
                 .working_set()
                 .set_thread_mode(Some(registered_mode.clone()));
-        }
-        if let Some(registered_mode) = registered_mode
-            .as_ref()
-            .filter(|mode| mode.workflow().is_some())
-        {
-            let working_set = engine.tool_session_runtime().working_set();
-            engine.agent_tools().install(ToolInstallGroup::direct(
-                ToolGroupId::new("workflow"),
-                vec![
-                    pl_core::WorkflowCurrentTool::new(working_set.clone(), registered_mode.clone())
-                        .into(),
-                    pl_core::WorkflowNextTool::new(working_set.clone(), registered_mode.clone())
-                        .into(),
-                    pl_core::WorkflowGraphTool::new(working_set.clone(), registered_mode.clone())
-                        .into(),
-                    pl_core::WorkflowHistoryTool::new(working_set.clone(), registered_mode.clone())
-                        .into(),
-                    pl_core::WorkflowTransitionTool::new(
-                        working_set.clone(),
-                        registered_mode.clone(),
-                    )
-                    .into(),
-                    pl_core::WorkflowRestartTool::new(working_set, registered_mode.clone()).into(),
-                ],
-            ))?;
-        } else {
-            engine
-                .agent_tools()
-                .uninstall(&ToolGroupId::new("workflow"));
-        }
-        if is_root {
-            engine.agent_tools().install(ToolInstallGroup::direct(
-                ToolGroupId::new("completion"),
-                vec![pl_core::CompleteTool.into()],
-            ))?;
-        } else {
-            engine
-                .agent_tools()
-                .uninstall(&ToolGroupId::new("completion"));
         }
         let active_mcp_servers = self.mcp_runtime.available_server_names().await;
         let mcp_health = self.mcp_runtime.health_snapshot().await?;
@@ -418,31 +274,7 @@ impl AgentTurnFactory for StudioAgentTurnFactory {
             .lsp_runtime
             .active_server_names_for_workspace(&workspace_root)
             .await;
-
-        let policy = studio_execution_policy(&context.snapshot, &available_agent_profiles);
-        let collaboration = AgentCollaborationTools::new(
-            context.runtime.clone(),
-            context.snapshot.identity.id.clone(),
-            pl_core::AgentCollaborationToolConfig {
-                policy: policy.collaboration.clone(),
-                session_runtime: engine.tool_session_runtime(),
-                workspace_root: workspace_root.clone(),
-                profiles: available_agent_profiles.clone(),
-            },
-        );
-        // 所有 Agent Profile 共享同一套协作基础能力。send_message 统一
-        // 作为 parent→direct-child 调度原语；子代理向主代理的报告改由 durable
-        // 阶段提交 + read_agent_submissions 主动查询承载。
-        if exclusive_web_search {
-            engine
-                .agent_tools()
-                .uninstall(&ToolGroupId::new("collaboration"));
-        } else {
-            engine.agent_tools().install(ToolInstallGroup::direct(
-                ToolGroupId::new("collaboration"),
-                collaboration.tools(),
-            ))?;
-        }
+        let policy = studio_execution_policy(&context.snapshot.identity, &available_agent_profiles);
 
         let attachment_ids = context
             .input

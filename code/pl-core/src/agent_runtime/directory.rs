@@ -1,6 +1,6 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, Weak};
 
 use tokio::sync::watch;
 
@@ -46,6 +46,47 @@ struct AgentDirectoryInner {
     snapshots: RwLock<BTreeMap<ThreadId, AgentSnapshot>>,
     revision: AtomicU64,
     revision_sender: watch::Sender<u64>,
+    history_readers: RwLock<BTreeMap<u64, HistoryReader>>,
+    next_reader: AtomicU64,
+}
+
+#[derive(Debug)]
+struct HistoryReader {
+    caller: ThreadId,
+    selector: super::AgentTargetSelector,
+    released: BTreeSet<ThreadId>,
+}
+
+/// Retains canonical target history until a collaboration source has observed closure.
+pub(crate) struct AgentHistoryLease {
+    directory: Weak<AgentDirectoryInner>,
+    id: u64,
+}
+
+impl AgentHistoryLease {
+    pub(crate) fn acknowledge_closed(&self, id: &ThreadId) {
+        if let Some(directory) = self.directory.upgrade()
+            && let Some(reader) = directory
+                .history_readers
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .get_mut(&self.id)
+        {
+            reader.released.insert(id.clone());
+        }
+    }
+}
+
+impl Drop for AgentHistoryLease {
+    fn drop(&mut self) {
+        if let Some(directory) = self.directory.upgrade() {
+            directory
+                .history_readers
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(&self.id);
+        }
+    }
 }
 
 impl AgentDirectoryHandle {
@@ -60,6 +101,8 @@ impl AgentDirectoryHandle {
                 snapshots: RwLock::new(snapshots),
                 revision: AtomicU64::new(1),
                 revision_sender,
+                history_readers: RwLock::new(BTreeMap::new()),
+                next_reader: AtomicU64::new(1),
             }),
         }
     }
@@ -82,11 +125,72 @@ impl AgentDirectoryHandle {
     }
 
     pub(crate) fn store_snapshot(&self, snapshot: AgentSnapshot) {
+        if !matches!(snapshot.state, super::AgentState::Closed(_)) {
+            for reader in self
+                .inner
+                .history_readers
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .values_mut()
+            {
+                reader.released.remove(&snapshot.identity.id);
+            }
+        }
         self.inner
             .snapshots
             .write()
             .expect("agent directory snapshots lock poisoned")
             .insert(snapshot.identity.id.clone(), snapshot);
+    }
+
+    pub(crate) fn retain_history(
+        &self,
+        caller: ThreadId,
+        selector: super::AgentTargetSelector,
+    ) -> AgentRuntimeResult<AgentHistoryLease> {
+        let id = self
+            .inner
+            .next_reader
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .map_err(|_| {
+                AgentRuntimeError::Lifecycle("agent history lease IDs exhausted".into())
+            })?;
+        self.inner
+            .history_readers
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(
+                id,
+                HistoryReader {
+                    caller,
+                    selector,
+                    released: BTreeSet::new(),
+                },
+            );
+        Ok(AgentHistoryLease {
+            directory: Arc::downgrade(&self.inner),
+            id,
+        })
+    }
+
+    pub(crate) fn history_is_retained(&self, id: &ThreadId) -> bool {
+        let snapshots = self.snapshots();
+        self.inner
+            .history_readers
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .values()
+            .any(|reader| {
+                reader.caller != *id
+                    && !reader.released.contains(id)
+                    && super::collaboration::support::filter_visible(
+                        &snapshots,
+                        &reader.caller,
+                        &reader.selector,
+                    )
+                    .iter()
+                    .any(|snapshot| snapshot.identity.id == *id)
+            })
     }
 
     /// LRU 淘汰驻留 actor 时移除其 directory 条目；返回是否存在。

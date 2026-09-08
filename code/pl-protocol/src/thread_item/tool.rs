@@ -22,6 +22,9 @@ impl ThreadToolItem {
 
     pub fn terminal_output(&self) -> Option<&ThreadToolOutput> {
         match &self.state {
+            ThreadToolState::Queued(_)
+            | ThreadToolState::Cancelling(_)
+            | ThreadToolState::Interrupted(_) => None,
             ThreadToolState::Succeeded(state) => Some(&state.output),
             ThreadToolState::Failed(state) => state.output.as_ref(),
             ThreadToolState::Started(_)
@@ -36,6 +39,9 @@ impl ThreadToolItem {
 
     pub(super) fn append_arguments(&mut self, delta: &str) -> Result<(), &'static str> {
         match self.state {
+            ThreadToolState::Queued(_)
+            | ThreadToolState::Cancelling(_)
+            | ThreadToolState::Interrupted(_) => Err("session task arguments are immutable"),
             ThreadToolState::Started(_) | ThreadToolState::Streaming(_) => {
                 self.invocation.arguments.push_str(delta);
                 self.state = ThreadToolState::Streaming(StreamingThreadTool);
@@ -55,6 +61,13 @@ impl ThreadToolItem {
 
     pub(super) fn append_result(&mut self, delta: &str) -> Result<(), &'static str> {
         match &mut self.state {
+            ThreadToolState::Queued(_) | ThreadToolState::Interrupted(_) => {
+                Err("task output requires an active task")
+            }
+            ThreadToolState::Cancelling(state) => {
+                state.streamed_output.push_str(delta);
+                Ok(())
+            }
             ThreadToolState::Running(state) => {
                 state.streamed_output.push_str(delta);
                 Ok(())
@@ -84,6 +97,8 @@ pub struct ThreadToolInvocation {
     arguments: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     working_directory: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    task_id: Option<String>,
 }
 
 impl ThreadToolInvocation {
@@ -95,6 +110,7 @@ impl ThreadToolInvocation {
             name,
             arguments,
             working_directory: None,
+            task_id: None,
         }
     }
 
@@ -136,11 +152,21 @@ impl ThreadToolInvocation {
     pub fn working_directory(&self) -> Option<&str> {
         self.working_directory.as_deref()
     }
+    pub fn with_task_id(mut self, task_id: String) -> Self {
+        self.task_id = Some(task_id);
+        self
+    }
+    pub fn task_id(&self) -> Option<&str> {
+        self.task_id.as_deref()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", content = "data", rename_all = "camelCase")]
 pub enum ThreadToolState {
+    Queued(QueuedThreadTool),
+    Cancelling(CancellingThreadTool),
+    Interrupted(InterruptedThreadTool),
     Started(StartedThreadTool),
     Streaming(StreamingThreadTool),
     AwaitingApproval(AwaitingApprovalThreadTool),
@@ -156,12 +182,18 @@ impl ThreadToolState {
     pub fn is_terminal(&self) -> bool {
         matches!(
             self,
-            Self::Succeeded(_) | Self::Failed(_) | Self::Denied(_) | Self::Cancelled(_)
+            Self::Succeeded(_)
+                | Self::Failed(_)
+                | Self::Denied(_)
+                | Self::Cancelled(_)
+                | Self::Interrupted(_)
         )
     }
 
     pub fn terminal_at(&self) -> Option<i64> {
         match self {
+            Self::Interrupted(state) => Some(state.interrupted_at),
+            Self::Queued(_) | Self::Cancelling(_) => None,
             Self::Succeeded(state) => Some(state.completed_at),
             Self::Failed(state) => Some(state.failed_at),
             Self::Denied(state) => Some(state.denied_at),
@@ -176,6 +208,8 @@ impl ThreadToolState {
 
     pub fn failure(&self) -> Option<&str> {
         match self {
+            Self::Interrupted(state) => Some(&state.reason),
+            Self::Queued(_) | Self::Cancelling(_) => None,
             Self::Failed(state) => Some(&state.failure.message),
             Self::Started(_)
             | Self::Streaming(_)
@@ -186,6 +220,44 @@ impl ThreadToolState {
             | Self::Denied(_)
             | Self::Cancelled(_) => None,
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct QueuedThreadTool;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CancellingThreadTool {
+    streamed_output: String,
+}
+impl CancellingThreadTool {
+    pub fn new(streamed_output: String) -> Self {
+        Self { streamed_output }
+    }
+    pub fn streamed_output(&self) -> &str {
+        &self.streamed_output
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct InterruptedThreadTool {
+    interrupted_at: i64,
+    reason: String,
+}
+impl InterruptedThreadTool {
+    pub fn new(interrupted_at: i64, reason: String) -> Self {
+        Self {
+            interrupted_at,
+            reason,
+        }
+    }
+    pub fn interrupted_at(&self) -> i64 {
+        self.interrupted_at
+    }
+    pub fn reason(&self) -> &str {
+        &self.reason
     }
 }
 

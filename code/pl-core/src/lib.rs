@@ -38,6 +38,7 @@ mod prompt_cache;
 pub mod remote;
 pub mod runtime_usage;
 pub mod session;
+pub mod session_runtime;
 pub mod skill;
 pub mod thread;
 mod thread_event;
@@ -66,8 +67,8 @@ pub use context_compaction::{
     ManualContextCompactionRequest, RecentInteractionTailConfig,
 };
 pub use core::{
-    BuiltinToolInstaller, CoreRuntimeProfile, ModelTurnClient, ModelTurnOptions, ModelTurnRequest,
-    ToolProfile, TurnEngine, TurnEngineBuilder,
+    BuiltinToolCatalog, BuiltinToolInstaller, CoreRuntimeProfile, ModelTurnClient,
+    ModelTurnOptions, ModelTurnRequest, ToolProfile, TurnEngine, TurnEngineBuilder,
 };
 pub use execution_environment::{
     ExecutionEnvironment, ExecutionOs, ExecutionTransport, ShellDialect, resolve_local_shell,
@@ -163,10 +164,10 @@ pub use tool::{
     SubagentContext, TOOL_COMPLETE, ToolApprovalContext, ToolBatchPolicy, ToolCallContext,
     ToolCallIdentity, ToolDefinition, ToolDirective, ToolExecution, ToolGroupId, ToolInput,
     ToolInstallGroup, ToolInvocation, ToolManager, ToolName, ToolPolicy, ToolResult,
-    ToolSessionRuntime, ToolWorkspace, ViewImageTool, WorkspaceAccess, WorkspaceFileBackend,
-    WorkspaceFileListRequest, WorkspaceFileReadBytesRequest, WorkspaceFileReadRequest,
-    WorkspaceFileStatRequest, WorkspaceFileWriteRequest, WriteFileTool, deserialize_tool_input,
-    lsp_tools, reconcile_programmatic_tool_calling, static_tool,
+    ToolScheduling, ToolSessionRuntime, ToolWorkspace, ViewImageTool, WorkspaceAccess,
+    WorkspaceFileBackend, WorkspaceFileListRequest, WorkspaceFileReadBytesRequest,
+    WorkspaceFileReadRequest, WorkspaceFileStatRequest, WorkspaceFileWriteRequest, WriteFileTool,
+    deserialize_tool_input, lsp_tools, reconcile_programmatic_tool_calling, static_tool,
 };
 pub(crate) use tool::{build_user_input_interaction, execute_user_input_interaction};
 pub use trace::TraceRecorder;

@@ -50,6 +50,7 @@ pub(super) fn finalize_tool_item(
         output_metrics(&record.runtime_events),
     );
     let action = match record.outcome {
+        ToolExecutionOutcome::Accepted => return,
         ToolExecutionOutcome::Succeeded => {
             TracePartAction::Complete(TracePartCompletion::Tool { output })
         }
@@ -68,6 +69,7 @@ pub(super) fn finalize_tool_item(
     if record.outcome == ToolExecutionOutcome::Succeeded {
         for event in &record.runtime_events {
             match event {
+                ToolDirective::SessionEvents { .. } => {}
                 ToolDirective::InteractionRequested { interaction } => {
                     recorder.broadcast(AgentEvent::InteractionChanged {
                         event: pl_protocol::InteractionChangedEvent {
@@ -139,13 +141,21 @@ pub(super) fn tool_execution_record(
                 ToolDirective::OutputBudget { max_bytes } => Some(*max_bytes),
                 _ => None,
             });
-            let model_visible_text = match budget_bytes {
-                Some(max_bytes) => crate::tool::model_visible_tool_output_with_budget(
-                    output.model_output(),
-                    max_bytes / crate::tool::TOKEN_ESTIMATE_BYTES,
-                    max_bytes,
-                ),
-                None => model_visible_tool_output(output.model_output()),
+            let delivering_events = output
+                .runtime_events
+                .iter()
+                .any(|event| matches!(event, ToolDirective::SessionEvents { .. }));
+            let model_visible_text = if delivering_events {
+                output.model_output().to_owned()
+            } else {
+                match budget_bytes {
+                    Some(max_bytes) => crate::tool::model_visible_tool_output_with_budget(
+                        output.model_output(),
+                        max_bytes / crate::tool::TOKEN_ESTIMATE_BYTES,
+                        max_bytes,
+                    ),
+                    None => model_visible_tool_output(output.model_output()),
+                }
             };
             let model_attachments = output.model_attachments;
             let mut runtime_events = output.runtime_events;
@@ -222,6 +232,7 @@ fn tool_execution_record_from_envelope(
             | ToolDirective::AuditMetadata { .. }
             | ToolDirective::ExecutionFailed
             | ToolDirective::CacheHit { .. }
+            | crate::tool::ToolDirective::SessionEvents { .. }
             | ToolDirective::OutputBudget { .. }
             | ToolDirective::EndTurn { .. } => None,
         })
@@ -271,6 +282,7 @@ fn output_artifacts(runtime_events: &[ToolDirective]) -> Vec<serde_json::Value> 
             | ToolDirective::AuditMetadata { .. }
             | ToolDirective::CacheHit { .. }
             | ToolDirective::OutputMetrics { .. }
+            | crate::tool::ToolDirective::SessionEvents { .. }
             | ToolDirective::OutputBudget { .. }
             | ToolDirective::ExecutionFailed
             | ToolDirective::EndTurn { .. } => None,
@@ -292,6 +304,7 @@ fn audit_metadata(runtime_events: &[ToolDirective]) -> Vec<serde_json::Value> {
             | ToolDirective::ExecutionFailed
             | ToolDirective::CacheHit { .. }
             | ToolDirective::OutputMetrics { .. }
+            | crate::tool::ToolDirective::SessionEvents { .. }
             | ToolDirective::OutputBudget { .. }
             | ToolDirective::EndTurn { .. } => None,
         })
@@ -322,6 +335,7 @@ fn output_metrics(runtime_events: &[ToolDirective]) -> Option<pl_trace::TraceToo
         | ToolDirective::AuditMetadata { .. }
         | ToolDirective::ExecutionFailed
         | ToolDirective::CacheHit { .. }
+        | crate::tool::ToolDirective::SessionEvents { .. }
         | ToolDirective::OutputBudget { .. }
         | ToolDirective::EndTurn { .. } => None,
     })

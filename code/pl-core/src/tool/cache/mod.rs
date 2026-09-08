@@ -1,4 +1,4 @@
-//! Turn-scoped tool result caching and reuse.
+//! Session-owned bounded result reuse with invalidation across Turn boundaries.
 
 mod entry;
 mod execution;
@@ -9,7 +9,7 @@ mod state;
 use std::sync::{Arc, Mutex};
 
 pub(crate) use execution::ToolCacheExecutionRequest;
-use state::TurnToolCache;
+use state::SessionToolCache;
 
 /// 工具结果在一次 turn 内的复用策略。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -20,17 +20,16 @@ pub enum ToolCachePolicy {
     UntilWorkspaceMutation,
 }
 
-/// turn-scoped 只读工具缓存。
+/// Session-owned read cache; in-flight reservations observe shared invalidation.
 #[derive(Debug, Clone, Default)]
-pub struct TurnToolCacheHandle {
-    inner: Arc<Mutex<TurnToolCache>>,
+pub struct SessionToolCacheHandle {
+    inner: Arc<Mutex<SessionToolCache>>,
 }
 
 /// 单次 provider response 工具批次共享的缓存 epoch 快照。
 #[derive(Debug, Clone)]
-pub(crate) struct TurnToolCacheSnapshot {
-    cache: TurnToolCacheHandle,
-    workspace_epoch: u64,
+pub(crate) struct SessionToolCacheSnapshot {
+    cache: SessionToolCacheHandle,
 }
 
 #[cfg(test)]
@@ -88,7 +87,7 @@ mod tests {
 
     #[test]
     fn cache_hit_does_not_duplicate_model_media_context() {
-        let cache = TurnToolCacheHandle::default();
+        let cache = SessionToolCacheHandle::default();
         let arguments = serde_json::json!({"path": "image.png"});
         let root = Path::new("/workspace/repo");
         let attachment = pl_protocol::ThreadAttachment {
@@ -124,7 +123,7 @@ mod tests {
 
     #[test]
     fn exact_file_read_replays_content_and_collaboration_invalidates_it() {
-        let cache = TurnToolCacheHandle::default();
+        let cache = SessionToolCacheHandle::default();
         let arguments = serde_json::json!({"path":"src/lib.rs","startLine":1,"maxLines":10});
         let root = Path::new("/workspace/repo");
         let mut first = read_file_output(1, 10, Some(11));
@@ -166,8 +165,8 @@ mod tests {
     }
 
     #[test]
-    fn workspace_mutation_invalidates_workspace_but_not_project_view() {
-        let cache = TurnToolCacheHandle::default();
+    fn workspace_mutation_invalidates_all_read_views() {
+        let cache = SessionToolCacheHandle::default();
         let root = Path::new("/workspace/repo");
         let workspace_args = serde_json::json!({"path": "src/lib.rs"});
         let project_args = serde_json::json!({"path": "/project/repo/AGENTS.md"});
@@ -201,13 +200,13 @@ mod tests {
                     root,
                     ToolCachePolicy::UntilWorkspaceMutation,
                 )
-                .is_some()
+                .is_none()
         );
     }
 
     #[test]
     fn product_write_can_invalidate_only_its_read_cache() {
-        let cache = TurnToolCacheHandle::default();
+        let cache = SessionToolCacheHandle::default();
         let root = Path::new("/workspace/repo");
         let github = serde_json::json!({"method": "GET", "path": "/repos/o/r/pulls/1"});
         let file = serde_json::json!({"path": "src/lib.rs"});
@@ -248,7 +247,7 @@ mod tests {
 
     #[tokio::test]
     async fn concurrent_identical_reads_execute_once() {
-        let cache = TurnToolCacheHandle::default();
+        let cache = SessionToolCacheHandle::default();
         let executions = Arc::new(AtomicUsize::new(0));
         let mut tasks = Vec::new();
         for call in 0..4 {
@@ -302,7 +301,7 @@ mod tests {
 
     #[tokio::test]
     async fn executor_generation_is_part_of_the_execution_cache_key() {
-        let cache = TurnToolCacheHandle::default();
+        let cache = SessionToolCacheHandle::default();
         let snapshot = cache.snapshot();
         let executions = Arc::new(AtomicUsize::new(0));
         let arguments = serde_json::json!({"query": "stable"});
@@ -333,8 +332,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn provider_response_snapshot_keeps_failure_key_stable_while_epoch_advances() {
-        let cache = TurnToolCacheHandle::default();
+    async fn in_flight_failure_cannot_refill_cache_after_epoch_advances() {
+        let cache = SessionToolCacheHandle::default();
         let snapshot = cache.snapshot();
         let executions = Arc::new(AtomicUsize::new(0));
         let first_started = Arc::new(tokio::sync::Notify::new());
@@ -418,9 +417,9 @@ mod tests {
             .expect_err("duplicate read returns compact failure");
 
         assert!(!first_error.to_string().contains("duplicateFailure"));
-        assert!(second_error.to_string().contains("duplicateFailure"));
-        assert!(second_error.to_string().contains("first"));
-        assert_eq!(executions.load(Ordering::SeqCst), 1);
+        assert!(!second_error.to_string().contains("duplicateFailure"));
+        assert!(second_error.to_string().contains("duplicate execution"));
+        assert_eq!(executions.load(Ordering::SeqCst), 2);
 
         let executions_after_batch = Arc::clone(&executions);
         let third_error = cache
@@ -444,13 +443,14 @@ mod tests {
             )
             .await
             .expect_err("new provider response uses the advanced epoch");
-        assert!(!third_error.to_string().contains("duplicateFailure"));
+        assert!(third_error.to_string().contains("duplicateFailure"));
+        assert!(third_error.to_string().contains("second"));
         assert_eq!(executions.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]
     async fn narrowed_read_file_range_returns_content_after_a_large_read() {
-        let cache = TurnToolCacheHandle::default();
+        let cache = SessionToolCacheHandle::default();
         let executions = Arc::new(AtomicUsize::new(0));
         let root = Path::new("/workspace/repo");
 
@@ -538,7 +538,7 @@ mod tests {
 
     #[tokio::test]
     async fn deterministic_read_failure_is_reused_until_any_workspace_mutation_attempt() {
-        let cache = TurnToolCacheHandle::default();
+        let cache = SessionToolCacheHandle::default();
         let executions = Arc::new(AtomicUsize::new(0));
         let arguments = serde_json::json!({"path": "missing.rs"});
         let root = Path::new("/workspace/repo");

@@ -347,6 +347,7 @@ class BridgeThreadToolFailure {
 enum BridgeThreadToolFailureKind { execution, timedOut, budgetLimited }
 
 class BridgeThreadToolInvocation {
+  final String? taskId;
   final String toolCallId;
   final String? callId;
   final String? providerItemId;
@@ -355,6 +356,7 @@ class BridgeThreadToolInvocation {
   final String? workingDirectory;
 
   const BridgeThreadToolInvocation({
+    this.taskId,
     required this.toolCallId,
     this.callId,
     this.providerItemId,
@@ -365,6 +367,7 @@ class BridgeThreadToolInvocation {
 
   @override
   int get hashCode =>
+      taskId.hashCode ^
       toolCallId.hashCode ^
       callId.hashCode ^
       providerItemId.hashCode ^
@@ -377,6 +380,7 @@ class BridgeThreadToolInvocation {
       identical(this, other) ||
       other is BridgeThreadToolInvocation &&
           runtimeType == other.runtimeType &&
+          taskId == other.taskId &&
           toolCallId == other.toolCallId &&
           callId == other.callId &&
           providerItemId == other.providerItemId &&
@@ -420,6 +424,14 @@ class BridgeThreadToolOutput {
 sealed class BridgeThreadToolState with _$BridgeThreadToolState {
   const BridgeThreadToolState._();
 
+  const factory BridgeThreadToolState.queued() = BridgeThreadToolState_Queued;
+  const factory BridgeThreadToolState.cancelling({
+    required String streamedOutput,
+  }) = BridgeThreadToolState_Cancelling;
+  const factory BridgeThreadToolState.interrupted({
+    required PlatformInt64 interruptedAt,
+    required String reason,
+  }) = BridgeThreadToolState_Interrupted;
   const factory BridgeThreadToolState.started() = BridgeThreadToolState_Started;
   const factory BridgeThreadToolState.streaming() =
       BridgeThreadToolState_Streaming;

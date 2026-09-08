@@ -31,12 +31,11 @@ Future<BridgeEventSubscription> subscribeThread({required String threadId}) =>
 Future<BridgeEventSubscription> createProductSubscription() =>
     RustLib.instance.api.crateApiStudioSubscriptionCreateProductSubscription();
 
-/// 订阅关机阶段进度流。
+/// Creates an independently owned shutdown-progress subscription, including during retry.
 ///
-/// 生命周期独立于 product/thread 订阅：不挂到 bridge shutdown token 下，
-/// 从订阅建立一直转发到 `Stopped`（或 Dart 关闭 sink），保证关机期间的
-/// 阶段事件与 `FlushingPersistence` 的 pending=0 完成事件可达。
-Stream<BridgeShutdownProgress> subscribeShutdownProgress() =>
+/// The caller cancels this handle before cancelling its Dart stream, so failed shutdown
+/// does not leave stream cancellation waiting for a future progress event.
+Future<BridgeEventSubscription> subscribeShutdownProgress() =>
     RustLib.instance.api.crateApiStudioSubscriptionSubscribeShutdownProgress();
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<BridgeEventSubscription>>
@@ -44,6 +43,12 @@ abstract class BridgeEventSubscription implements RustOpaqueInterface {
   Future<void> cancel();
 
   Stream<BridgeProductStreamEnvelope> productStream();
+
+  /// Opens this shutdown subscription once. Cancellation closes the native sink.
+  ///
+  /// # Errors
+  /// Rejects another subscription kind or a second stream consumer.
+  Stream<BridgeShutdownProgress> shutdownStream();
 
   Stream<BridgeThreadStreamEnvelope> threadStream();
 }

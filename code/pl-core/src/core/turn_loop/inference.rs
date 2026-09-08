@@ -23,6 +23,7 @@ pub(super) async fn record(
     session: &AgentSession,
     recorder: &mut TraceRecorder,
     inference: AgentInferenceCommit,
+    tools: crate::session_runtime::ToolCheckpointChanges,
 ) -> Result<()> {
     turn_billing
         .append(inference.billing.clone())
@@ -38,7 +39,7 @@ pub(super) async fn record(
         None => Vec::new(),
     };
     checkpoint
-        .checkpoint_inference_mailbox(session.clone(), inference, consumed_mail_ids.clone())
+        .checkpoint_inference_mailbox(session.clone(), inference, consumed_mail_ids.clone(), tools)
         .await
         .map_err(|error| pl_protocol::PureError::MemoryError(error.to_string()))?;
     if let Some(mailbox) = &options.mailbox {

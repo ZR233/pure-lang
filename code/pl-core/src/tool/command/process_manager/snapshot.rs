@@ -12,16 +12,16 @@ pub(super) fn message_for_state(
 ) -> String {
     match &state.lifecycle {
         CommandProcessLifecycle::Running(_) => format!(
-            "Command is still running. Use write_stdin with processId '{}' to wait, poll, or send input. Read outputFile for complete output.",
+            "Command is still running. Use wait for completion or write_stdin with taskId '{}' to send input. Read outputFile for complete output.",
             process_id.unwrap_or_default()
         ),
         CommandProcessLifecycle::Terminating(state) => format!(
-            "Command {} and termination is in progress. Use write_stdin with processId '{}' and empty chars to wait or poll. Read outputFile for captured output.",
+            "Command {} and termination is in progress for task '{}'. Use wait for completion. Read outputFile for captured output.",
             state.reason().message_fragment(),
             process_id.unwrap_or_default()
         ),
         CommandProcessLifecycle::Draining(_) => format!(
-            "Command exited and is draining remaining output. Use write_stdin with processId '{}' and empty chars to wait or poll. Read outputFile for complete output.",
+            "Command exited and is draining remaining output for task '{}'. Use wait for completion. Read outputFile for complete output.",
             process_id.unwrap_or_default()
         ),
         CommandProcessLifecycle::Final(state) => match state.result() {

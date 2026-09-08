@@ -187,6 +187,8 @@ impl ThreadRepository for SqliteSessionStore {
                 let closed = matches!(state, crate::AgentState::Closed(_));
                 if !closed
                     && (!agent.state.pending_inputs.is_empty()
+                        || agent.state.session.inbox.has_pending()
+                        || agent.state.session.tasks.active_ids().next().is_some()
                         || agent.state.active_input.is_some()
                         || !state.is_idle()
                         || state.is_budget_paused()
@@ -229,6 +231,16 @@ impl ThreadRepository for SqliteSessionStore {
         thread_id: &ThreadId,
     ) -> Result<Option<RestoredAgentRuntime>, Self::Error> {
         self.read_session(thread_id.as_str())
+            .await
+            .map_err(Arc::new)
+    }
+
+    async fn read_tool_task_result(
+        &self,
+        thread_id: &ThreadId,
+        task_id: &str,
+    ) -> Result<Option<crate::session_runtime::ToolTaskResult>, Self::Error> {
+        super::task_records::read_result(&self.owner.shared.db, thread_id.as_str(), task_id)
             .await
             .map_err(Arc::new)
     }

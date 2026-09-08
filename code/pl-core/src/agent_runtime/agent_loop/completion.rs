@@ -3,6 +3,7 @@ use super::AgentLoop;
 use super::running_turn::{TurnCompletion, TurnSessionDisposition, add_usage, turn_outcome};
 use crate::agent_runtime::state::unix_timestamp;
 use crate::thread_event::compaction_observation;
+use futures::FutureExt;
 
 impl<H> AgentLoop<H>
 where
@@ -62,6 +63,14 @@ where
                     "compaction observation was rejected while settling the turn"
                 );
             }
+        }
+        if let Err(error) = self
+            .release_turn_deliveries(Some(&completion.turn_id))
+            .await
+        {
+            self.fault(format!("task result handoff failed: {error}"))
+                .await;
+            return;
         }
         let active = self
             .active
@@ -138,7 +147,14 @@ where
             || super::super::AgentCommand::Settle { next_turn_id },
             |pause| super::super::AgentCommand::PauseForBudget { pause },
         );
-        if !waiting_for_interaction && let Err(error) = next.snapshot.transition(transition) {
+        let closing = matches!(next.snapshot.state, super::super::AgentState::Closing(_));
+        if let super::super::AgentState::Closing(state) = &mut next.snapshot.state {
+            state.clear_turn();
+        }
+        if !waiting_for_interaction
+            && !closing
+            && let Err(error) = next.snapshot.transition(transition)
+        {
             self.fault(error.to_string()).await;
             return;
         }
@@ -162,7 +178,7 @@ where
             && self.dispatch_enabled
             && self.state.has_triggering_input()
         {
-            self.begin_next_turn().await;
+            self.begin_next_turn().boxed().await;
         }
     }
 }

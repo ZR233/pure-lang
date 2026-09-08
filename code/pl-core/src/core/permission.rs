@@ -122,7 +122,7 @@ pub(super) fn permission_risk_summary(tool_name: &str) -> &'static str {
     }
     match tool_name {
         "exec" => "shell command; may execute arbitrary process actions",
-        "write_stdin" => "stdin or polling for an already approved shell process",
+        "write_stdin" => "stdin for an already approved shell task",
         "write_file" => "file write; may create, overwrite, or append content",
         "create_directory" => "filesystem write; creates directories",
         "delete_path" => "destructive filesystem operation",
