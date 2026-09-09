@@ -22,7 +22,8 @@ class SshTab extends ConsumerStatefulWidget {
 class _SshTabState extends ConsumerState<SshTab> {
   List<SshServer>? _servers;
   final Map<String, SshConnectionView> _connections = {};
-  String? _busyServerId;
+  final Map<String, SshServerOperation> _operations = {};
+  final Map<String, String> _serverErrors = {};
   String? _error;
 
   @override
@@ -73,11 +74,16 @@ class _SshTabState extends ConsumerState<SshTab> {
             SshServerRow(
               server: server,
               connection: _connections[server.id],
-              busy: _busyServerId == server.id,
+              operation: _operations[server.id],
+              error: _serverErrors[server.id],
               onTest: () => _test(server),
               onReconnect: () => _reconnect(server),
               onOpen: () => _openWorkspace(server),
-              onEdit: () => _editServer(server),
+              onEdit: () => _runServerOperation(
+                server,
+                SshServerOperation.edit,
+                () => _editServer(server),
+              ),
               onDelete: () => _deleteServer(server),
             ),
             const SizedBox(height: 10),
@@ -86,86 +92,92 @@ class _SshTabState extends ConsumerState<SshTab> {
     );
   }
 
-  Future<void> _test(SshServer server) async {
+  Future<void> _runServerOperation(
+    SshServer server,
+    SshServerOperation operation,
+    Future<void> Function() action,
+  ) async {
+    // Reserve synchronously: callbacks from the current frame can still be invoked twice.
+    if (_operations.containsKey(server.id)) return;
     setState(() {
-      _busyServerId = server.id;
-      _error = null;
+      _operations[server.id] = operation;
+      _serverErrors.remove(server.id);
     });
     try {
-      final snapshot = await ref
-          .read(studioApiProvider)
-          .testSshConnection(server.id);
-      if (mounted) setState(() => _connections[server.id] = snapshot);
+      await action();
     } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
+      if (mounted) setState(() => _serverErrors[server.id] = error.toString());
     } finally {
-      if (mounted) setState(() => _busyServerId = null);
+      if (mounted) setState(() => _operations.remove(server.id));
     }
   }
 
-  Future<void> _reconnect(SshServer server) async {
-    setState(() {
-      _busyServerId = server.id;
-      _error = null;
-    });
-    try {
-      final snapshot = await ref
-          .read(studioApiProvider)
-          .reconnectSshServer(server.id);
-      if (mounted) setState(() => _connections[server.id] = snapshot);
-    } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
-    } finally {
-      if (mounted) setState(() => _busyServerId = null);
-    }
-  }
+  Future<void> _test(SshServer server) =>
+      _runServerOperation(server, SshServerOperation.test, () async {
+        setState(() => _connections.remove(server.id));
+        final snapshot = await ref
+            .read(studioApiProvider)
+            .testSshConnection(server.id);
+        if (mounted) setState(() => _connections[server.id] = snapshot);
+      });
+
+  Future<void> _reconnect(SshServer server) =>
+      _runServerOperation(server, SshServerOperation.reconnect, () async {
+        setState(() => _connections.remove(server.id));
+        final snapshot = await ref
+            .read(studioApiProvider)
+            .reconnectSshServer(server.id);
+        if (mounted) setState(() => _connections[server.id] = snapshot);
+      });
 
   Future<void> _editServer([SshServer? server]) async {
     final command = await showDialog<SaveSshServerCommand>(
       context: context,
       builder: (context) => SshServerDialog(server: server),
     );
-    if (command == null) return;
+    if (command == null || !mounted) return;
     setState(() => _error = null);
     try {
       await ref.read(studioApiProvider).saveSshServer(command);
+      if (server != null && mounted) {
+        setState(() => _connections.remove(server.id));
+      }
       await _reload();
     } catch (error) {
       if (mounted) setState(() => _error = error.toString());
     }
   }
 
-  Future<void> _deleteServer(SshServer server) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(context.l10n.settingsSshDeleteTitle),
-        content: Text(context.l10n.settingsSshDeleteBody(server.name)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(context.l10n.settingsCancel),
+  Future<void> _deleteServer(SshServer server) =>
+      _runServerOperation(server, SshServerOperation.delete, () async {
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text(context.l10n.settingsSshDeleteTitle),
+            content: Text(context.l10n.settingsSshDeleteBody(server.name)),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: Text(context.l10n.settingsCancel),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: Text(context.l10n.settingsSshDelete),
+              ),
+            ],
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(context.l10n.settingsSshDelete),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-    try {
-      await ref.read(studioApiProvider).deleteSshServer(server.id);
-      await _reload();
-    } catch (error) {
-      if (mounted) setState(() => _error = error.toString());
-    }
-  }
+        );
+        if (confirmed != true || !mounted) return;
+        await ref.read(studioApiProvider).deleteSshServer(server.id);
+        if (mounted) setState(() => _connections.remove(server.id));
+        await _reload();
+      });
 
-  Future<void> _openWorkspace(SshServer server) async {
-    await showDialog<String>(
-      context: context,
-      builder: (context) => RemoteDirectoryDialog(server: server),
-    );
-  }
+  Future<void> _openWorkspace(SshServer server) =>
+      _runServerOperation(server, SshServerOperation.open, () async {
+        await showDialog<String>(
+          context: context,
+          builder: (context) => RemoteDirectoryDialog(server: server),
+        );
+      });
 }

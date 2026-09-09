@@ -104,7 +104,7 @@ Future<void> _configureSshProject(
   await session.waitFor(find.byValueKey('ssh-test-$serverId'));
   await session.tap(find.byValueKey('ssh-test-$serverId'));
   await session.waitFor(
-    find.byValueKey('ssh-reconnect-$serverId'),
+    find.byValueKey('ssh-ready-$serverId'),
     timeout: const Duration(minutes: 3),
   );
   await session.tap(find.byValueKey('ssh-open-$serverId'));

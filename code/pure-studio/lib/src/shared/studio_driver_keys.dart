@@ -139,6 +139,9 @@ abstract final class StudioDriverKeys {
   static ValueKey<String> sshReconnect(String id) =>
       ValueKey<String>('ssh-reconnect-$id');
 
+  static ValueKey<String> sshReady(String id) =>
+      ValueKey<String>('ssh-ready-$id');
+
   static ValueKey<String> sshOpen(String id) =>
       ValueKey<String>('ssh-open-$id');
 

@@ -125,6 +125,7 @@
   "settingsSshManagedByCore": "OpenSSH and the minimal remote helper are managed locally.",
   "settingsSshTest": "Test connection",
   "settingsSshReconnect": "Reconnect",
+  "settingsSshReconnectHint": "Reconnect to load the latest remote environment. Running remote commands will be interrupted.",
   "settingsSshOpenProject": "Open project",
   "settingsSshEdit": "Edit",
   "settingsSshDelete": "Delete",

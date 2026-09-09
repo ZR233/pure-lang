@@ -1381,6 +1381,160 @@ void registerShellSettingsTests() {
     expect(api.resetAllMcpCount, 1);
   });
 
+  testWidgets(
+    'SSH reconnect reserves each server and retries failures without stale success',
+    (tester) async {
+      _configureSettingsTestView(tester);
+      const first = SshServer(
+        id: 'first',
+        name: 'First',
+        host: 'host-one',
+        port: 22,
+        username: 'runner',
+        authKind: SshAuthKind.agentOrKey,
+      );
+      const second = SshServer(
+        id: 'second',
+        name: 'Second',
+        host: 'host-two',
+        port: 22,
+        username: 'runner',
+        authKind: SshAuthKind.agentOrKey,
+      );
+      final gates = <String, Completer<SshConnectionView>>{
+        first.id: Completer<SshConnectionView>(),
+        second.id: Completer<SshConnectionView>(),
+      };
+      final api = _FakeStudioApi(_emptyState())
+        ..sshServers = const [first, second]
+        ..reconnectSshHandler = (id) => gates[id]!.future;
+      await _pumpSettingsPage(tester, api);
+      await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
+      await tester.pumpAndSettle();
+
+      final firstButton = tester.widget<TextButton>(
+        find.byKey(StudioDriverKeys.sshReconnect(first.id)),
+      );
+      final firstTest = tester.widget<TextButton>(
+        find.byKey(StudioDriverKeys.sshTest(first.id)),
+      );
+      firstButton.onPressed!();
+      firstButton.onPressed!();
+      firstTest.onPressed!();
+      await tester.pump();
+      expect(api.reconnectSshCalls, [first.id]);
+      expect(api.testedSshServerId, isNull);
+      expect(
+        tester
+            .widget<TextButton>(
+              find.byKey(StudioDriverKeys.sshReconnect(first.id)),
+            )
+            .onPressed,
+        isNull,
+      );
+      expect(
+        tester
+            .widget<TextButton>(find.byKey(StudioDriverKeys.sshOpen(first.id)))
+            .onPressed,
+        isNull,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(StudioDriverKeys.sshReconnect(first.id)),
+          matching: find.byType(CircularProgressIndicator),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(StudioDriverKeys.sshTest(first.id)),
+          matching: find.byType(CircularProgressIndicator),
+        ),
+        findsNothing,
+      );
+
+      tester
+          .widget<TextButton>(
+            find.byKey(StudioDriverKeys.sshReconnect(second.id)),
+          )
+          .onPressed!();
+      await tester.pump();
+      expect(api.reconnectSshCalls, [first.id, second.id]);
+      gates[first.id]!.complete(
+        const SshConnectionView(
+          serverId: 'first',
+          state: 'ready',
+          helperVersion: 'new-helper',
+          architecture: 'x86_64',
+        ),
+      );
+      await tester.pump();
+      expect(find.text('x86_64 · helper new-helper'), findsOneWidget);
+      expect(
+        tester
+            .widget<TextButton>(
+              find.byKey(StudioDriverKeys.sshReconnect(second.id)),
+            )
+            .onPressed,
+        isNull,
+      );
+
+      gates[first.id] = Completer<SshConnectionView>();
+      tester
+          .widget<TextButton>(
+            find.byKey(StudioDriverKeys.sshReconnect(first.id)),
+          )
+          .onPressed!();
+      gates[first.id]!.completeError(
+        StateError('environment initialization failed'),
+      );
+      await tester.pump();
+      expect(find.text('x86_64 · helper new-helper'), findsNothing);
+      expect(
+        find.textContaining('environment initialization failed'),
+        findsOneWidget,
+      );
+      expect(
+        tester
+            .widget<TextButton>(
+              find.byKey(StudioDriverKeys.sshReconnect(first.id)),
+            )
+            .onPressed,
+        isNotNull,
+      );
+
+      gates[first.id] = Completer<SshConnectionView>();
+      tester
+          .widget<TextButton>(
+            find.byKey(StudioDriverKeys.sshReconnect(first.id)),
+          )
+          .onPressed!();
+      gates[first.id]!.complete(
+        const SshConnectionView(
+          serverId: 'first',
+          state: 'ready',
+          helperVersion: 'refreshed',
+          architecture: 'x86_64',
+        ),
+      );
+      gates[second.id]!.complete(
+        const SshConnectionView(
+          serverId: 'second',
+          state: 'ready',
+          helperVersion: 'second-helper',
+          architecture: 'aarch64',
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('environment initialization failed'),
+        findsNothing,
+      );
+      expect(find.text('x86_64 · helper refreshed'), findsOneWidget);
+      expect(find.text('aarch64 · helper second-helper'), findsOneWidget);
+    },
+  );
+
   testWidgets('SSH settings delegate connection and project actions to core', (
     tester,
   ) async {
@@ -1400,6 +1554,10 @@ void registerShellSettingsTests() {
     await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
     await tester.pumpAndSettle();
     expect(find.text('root@192.168.100.12:22'), findsOneWidget);
+    expect(
+      find.byKey(StudioDriverKeys.sshReconnect(server.id)),
+      findsOneWidget,
+    );
 
     await tester.tap(find.byKey(StudioDriverKeys.sshTest(server.id)));
     await tester.pumpAndSettle();

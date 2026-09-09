@@ -40,6 +40,8 @@ class _FakeStudioApi implements StudioApi {
   String? deletedSshServerId;
   String? testedSshServerId;
   String? reconnectedSshServerId;
+  final List<String> reconnectSshCalls = [];
+  Future<SshConnectionView> Function(String)? reconnectSshHandler;
   ({String serverId, String? path})? browsedRemoteDirectory;
   ({String serverId, String path})? openedRemoteProject;
   Object? browseRemoteError;
@@ -316,6 +318,8 @@ class _FakeStudioApi implements StudioApi {
   @override
   Future<SshConnectionView> reconnectSshServer(String serverId) async {
     reconnectedSshServerId = serverId;
+    reconnectSshCalls.add(serverId);
+    if (reconnectSshHandler case final handler?) return handler(serverId);
     return SshConnectionView(
       serverId: serverId,
       state: 'ready',

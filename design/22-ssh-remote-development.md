@@ -19,11 +19,18 @@ Timeline、重试或会话持久化；不监听端口、不 daemonize，也不�
 降级猜测。
 
 `hello` 返回结构化 shell descriptor（dialect 与已验证的可执行路径）。Linux helper 启动时优先
-验证 `/bin/bash`，缺失时验证 `/bin/sh`；不会读取 `$SHELL` 或注入完整环境变量。descriptor 是
-远端 helper 的唯一命令启动事实，所有 `exec`、Git 与 LSP 进程都复用它。helper 启动普通远端
-进程时继承当前环境，并在请求没有显式覆盖 `PATH` 时，把该用户的 `$HOME/.cargo/bin` 与
-`$HOME/.local/bin` 放到继承 `PATH` 前；这只补齐非 login SSH channel 常见的用户工具目录，不读取
-shell profile，也不替模型改写命令。调用方显式提供的 `PATH` 始终原样优先。
+验证 `/bin/bash`，缺失时验证 `/bin/sh`；descriptor 只描述实际命令解释器，与用户环境加载 shell 分开。
+
+每次 SSH 连接先按用户账户信息、有效 `$SHELL`、`/bin/sh` 的顺序选择环境加载 shell；未知解释器
+明确失败。Bash 以交互非登录模式读取 `.bashrc`，Zsh/Fish 使用交互登录模式，sh 使用登录模式读取
+profile。配置仅由对应解释器执行，不跨 shell source，不要求 PTY。只继承 exported 环境，不继承
+alias、函数或依赖真实终端的状态。采集受物理进程监督器管理，stdin 为 `/dev/null`，启动输出与 SSH
+协议隔离；15 秒超时、提前退出或无效快照导致连接失败并回收进程树，诊断不包含环境值。
+
+完整环境快照仅在远端连接内存中存在，通过私有 Unix socket 采集，helper 在该环境下启动服务；
+不依赖远端 Python 或 `env -0`。普通命令、Git 和 LSP 统一继承此环境（包括 unset），请求显式 env
+最后覆盖。普通进程不重复执行继承的 `BASH_ENV`/`ENV` 启动钩子；显式请求可覆盖。PATH 完全尊重远端配置，不额外补入固定目录。同一连接不重复加载配置，重连重新采集。
+本地 process worker 的环境策略不受影响。
 
 控制面只提供 `hello`、GUI 专用的 `browseDirectories`、`openWorkspace`、`closeWorkspace` 和
 `shutdown`。文件面只提供远端事实所必需的 `stat`、`readBytes`、`writeAtomic`、
@@ -88,8 +95,9 @@ Pure 调用 PATH 中的系统 OpenSSH，复用 ssh config、known_hosts、ProxyJ
 显式配置的 agent forwarding。Askpass prompt 由本地 core 分类并经宿主 prompt 端口显示。密码只
 存在于系统凭据库或当前进程 secret lease。凭据不得进入 SQLite、DTO、
 日志、helper 参数、helper 环境或远端协议；Askpass secret 只注入本地 OpenSSH 子进程环境。
-Askpass 脚本写入和 chmod 完成后必须关闭可写文件句柄，再以自动清理的路径 lease 覆盖整个
-OpenSSH 子进程生命周期，避免 Unix 首次执行返回 `Text file busy`。
+Askpass 脚本位于私有临时目录，Unix 由隔离写入子进程创建并在启动 OpenSSH 前等待其退出；
+多线程宿主从不持有脚本的可写句柄，避免并发 fork 继承句柄导致 `Text file busy`。目录 lease
+覆盖整个 OpenSSH 子进程生命周期。
 provider token 不得转发。远端 Git 只使用服务器原生配置与凭据。
 
 shell descriptor 不是 login shell 配置，也不携带完整环境变量；它只描述 Pure 实际启动命令所用

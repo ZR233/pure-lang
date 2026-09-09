@@ -24,14 +24,19 @@ use tokio_util::sync::CancellationToken;
 async fn main() -> anyhow::Result<()> {
     let host = required("PURE_SSH_TEST_SERVER")?;
     let workspace = required("PURE_SSH_TEST_WORKSPACE")?;
-    let helper = PathBuf::from(required("PURE_REMOTE_HELPER_AARCH64")?);
-    let manager = SshManager::new(Some(helper), None);
+    let aarch64 = std::env::var_os("PURE_REMOTE_HELPER_AARCH64").map(PathBuf::from);
+    let x86_64 = std::env::var_os("PURE_REMOTE_HELPER_X86_64").map(PathBuf::from);
+    anyhow::ensure!(
+        aarch64.is_some() || x86_64.is_some(),
+        "provide a remote helper artifact"
+    );
+    let manager = SshManager::new(aarch64, x86_64);
     let profile = SshServerProfile {
         id: "validation".to_string(),
-        name: "aarch64 validation".to_string(),
+        name: "SSH validation".to_string(),
         host,
         port: 22,
-        username: "root".to_string(),
+        username: std::env::var("PURE_SSH_TEST_USERNAME").unwrap_or_else(|_| "root".to_string()),
         auth: SshAuth::AgentOrKey {
             identity_file: None,
         },
@@ -129,8 +134,8 @@ async fn main() -> anyhow::Result<()> {
         })
         .await?;
     assert!(final_output.state.final_result().is_some());
-    assert_eq!(final_output.stdout.content, "stdin:hello\n");
-    assert_eq!(final_output.stderr.content, "");
+    assert_eq!(final_output.stdout.content, "stdout-one\nstdin:hello\n");
+    assert_eq!(final_output.stderr.content, "stderr-one\n");
     let capture = files
         .read_text(WorkspaceFileReadRequest {
             path: final_output.capture_file.to_string_lossy().into_owned(),
@@ -141,6 +146,42 @@ async fn main() -> anyhow::Result<()> {
     assert!(capture.contains("stderr-one"));
     assert!(capture.contains("stdin:hello"));
 
+    let environment = run_remote(
+        &host.git,
+        vec!["sh".into(), "-c".into(), "printf '%s' \"$PATH\"".into()],
+    )
+    .await?;
+    anyhow::ensure!(environment.status == 0, "read remote execution PATH");
+    let command_environment = processes
+        .start(CommandStartRequest {
+            command: "printf '%s' \"$PATH\"".to_string(),
+            cwd: None,
+            allow_workspace_escape: false,
+            timeout: Duration::from_secs(10),
+            yield_time: Duration::from_secs(5),
+            max_output_chars: 64 * 1024,
+            session_id: "validation".into(),
+            tool_id: "environment".into(),
+            call_id: "environment".into(),
+            cancellation_token: None,
+            output_observer: None,
+        })
+        .await?;
+    assert_eq!(command_environment.stdout.content, environment.stdout);
+    files
+        .write_text(WorkspaceFileWriteRequest {
+            path: "expected-path.json".into(),
+            cwd: None,
+            content: serde_json::to_string(&environment.stdout)?,
+        })
+        .await?;
+    if let Ok(tool) = std::env::var("PURE_SSH_TEST_TOOL") {
+        let output = run_remote(&host.git, vec![tool, "--version".into()]).await?;
+        anyhow::ensure!(
+            output.status == 0,
+            "configured remote tool must be discoverable"
+        );
+    }
     validate_git(&host.git, files.as_ref()).await?;
     validate_skills(files.clone()).await?;
     validate_image_bytes(files.as_ref()).await?;
@@ -200,6 +241,7 @@ async fn main() -> anyhow::Result<()> {
         "pixel.png",
         "fixture.py",
         "lsp_fixture.py",
+        "expected-path.json",
         "tracked.txt",
         "tree.pid",
     ] {
@@ -346,7 +388,11 @@ async fn validate_lsp_backend(
     files: &pl_core::remote::RemoteWorkspaceFileBackend,
 ) -> anyhow::Result<()> {
     let server = r#"import json
+import os
 import sys
+
+with open("expected-path.json") as expected:
+    assert os.environ["PATH"] == json.load(expected), "LSP must inherit the execution environment"
 
 def read_message():
     length = None

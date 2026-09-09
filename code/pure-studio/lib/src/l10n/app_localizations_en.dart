@@ -234,6 +234,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsSshReconnect => 'Reconnect';
 
   @override
+  String get settingsSshReconnectHint =>
+      'Reconnect to load the latest remote environment. Running remote commands will be interrupted.';
+
+  @override
   String get settingsSshOpenProject => 'Open project';
 
   @override

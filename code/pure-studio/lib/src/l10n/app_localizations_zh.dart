@@ -227,6 +227,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsSshReconnect => '重新连接';
 
   @override
+  String get settingsSshReconnectHint => '重新连接以加载最新远程环境；正在运行的远程命令会中断。';
+
+  @override
   String get settingsSshOpenProject => '打开项目';
 
   @override

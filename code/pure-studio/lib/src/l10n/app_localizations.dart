@@ -500,6 +500,12 @@ abstract class AppLocalizations {
   /// **'Reconnect'**
   String get settingsSshReconnect;
 
+  /// No description provided for @settingsSshReconnectHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Reconnect to load the latest remote environment. Running remote commands will be interrupted.'**
+  String get settingsSshReconnectHint;
+
   /// No description provided for @settingsSshOpenProject.
   ///
   /// In en, this message translates to:

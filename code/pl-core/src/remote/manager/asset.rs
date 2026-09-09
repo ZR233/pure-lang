@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256};
 use tokio::io::AsyncWriteExt;
 
 use super::SshServerProfile;
-use super::ssh::{run_ssh_capture, ssh_command};
+use super::ssh::{posix_remote_command, run_ssh_capture, ssh_command};
 use crate::remote::RemoteClientError;
 
 const HELPER_NAME: &str = "pl-remote-helper";
@@ -141,7 +141,7 @@ pub(super) async fn upload_helper(
 ) -> Result<String, RemoteClientError> {
     let digest = format!("{:x}", Sha256::digest(bytes));
     let version = env!("CARGO_PKG_VERSION");
-    let directory = format!("$HOME/.pure/remote-helper/{version}/{}", &digest[..16]);
+    let directory = format!("\"$HOME/.pure/remote-helper/{version}/{}\"", &digest[..16]);
     let path = format!("{directory}/{HELPER_NAME}");
     let probe = format!("if test -x {path}; then printf present; fi");
     if run_ssh_capture(profile, password, &probe).await?.trim() == "present" {
@@ -151,10 +151,10 @@ pub(super) async fn upload_helper(
     let script = format!(
         "umask 077; mkdir -p {directory} && cat > {temporary} && chmod 700 {temporary} && mv -f {temporary} {path}"
     );
-    let mut prepared = ssh_command(profile, password)?;
+    let mut prepared = ssh_command(profile, password).await?;
     prepared
         .command
-        .arg(script)
+        .arg(posix_remote_command(&script))
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());

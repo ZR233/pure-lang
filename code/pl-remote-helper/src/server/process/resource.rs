@@ -1,4 +1,3 @@
-use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 
 use pl_protocol::remote::{
@@ -118,19 +117,21 @@ async fn prepare(launch: &Launch) -> Result<(ManagedWorker, tokio::fs::File), Re
         RemoteShellDialect::Pwsh | RemoteShellDialect::PowerShell => "-Command",
         RemoteShellDialect::Cmd => "/C",
     };
-    let mut command = ProcessCommand::new(&launch.shell.path)
+    let mut command = ProcessCommand::new(&launch.shell.path);
+    if launch.shell.dialect == RemoteShellDialect::Bash {
+        // SSH environment variables can make bash -c read .bashrc again. The connection
+        // already owns its initialized environment; individual commands must not reload it.
+        command = command.args(["--noprofile", "--norc"]);
+    }
+    let mut command = command
         .args([option, &launch.request.command])
-        .current_dir(&launch.cwd);
+        .current_dir(&launch.cwd)
+        // Startup hooks must not reload configuration after the connection snapshot.
+        // An explicit request may still opt into them via its own environment overrides.
+        .env_remove("BASH_ENV")
+        .env_remove("ENV");
     for (key, value) in &launch.request.environment {
         command = command.env(key, value);
-    }
-    if !launch.request.environment.contains_key("PATH")
-        && let Some(path) = user_tool_path(
-            std::env::var_os("HOME").as_deref(),
-            std::env::var_os("PATH").as_deref(),
-        )?
-    {
-        command = command.env("PATH", path);
     }
     if *launch.cancelled.borrow() {
         return Err(super::closed());
@@ -142,49 +143,4 @@ async fn prepare(launch: &Launch) -> Result<(ManagedWorker, tokio::fs::File), Re
         .await
         .map_err(|error| remote_error(RemoteErrorCode::Io, error.to_string()))?;
     Ok((worker, capture))
-}
-
-fn user_tool_path(
-    home: Option<&OsStr>,
-    inherited: Option<&OsStr>,
-) -> Result<Option<OsString>, RemoteError> {
-    let Some(home) = home else {
-        return Ok(inherited.map(OsStr::to_os_string));
-    };
-    let home = PathBuf::from(home);
-    let mut paths = vec![home.join(".cargo/bin"), home.join(".local/bin")];
-    if let Some(inherited) = inherited {
-        paths.extend(std::env::split_paths(inherited));
-    }
-    std::env::join_paths(paths).map(Some).map_err(|error| {
-        remote_error(
-            RemoteErrorCode::InvalidRequest,
-            format!("failed to assemble remote process PATH: {error}"),
-        )
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn non_login_process_path_includes_common_user_tool_directories() {
-        let home = PathBuf::from("/home/runner");
-        let inherited_entries = [PathBuf::from("/usr/local/bin"), PathBuf::from("/usr/bin")];
-        let inherited = std::env::join_paths(&inherited_entries).unwrap();
-        let path = user_tool_path(Some(home.as_os_str()), Some(inherited.as_os_str()))
-            .unwrap()
-            .unwrap();
-        let entries = std::env::split_paths(&path).collect::<Vec<_>>();
-        assert_eq!(
-            entries,
-            vec![
-                home.join(".cargo/bin"),
-                home.join(".local/bin"),
-                inherited_entries[0].clone(),
-                inherited_entries[1].clone()
-            ]
-        );
-    }
 }

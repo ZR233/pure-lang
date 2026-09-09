@@ -73,6 +73,7 @@
   "settingsSshManagedByCore": "OpenSSH 与最小远程 helper 由本地统一管理。",
   "settingsSshTest": "测试连接",
   "settingsSshReconnect": "重新连接",
+  "settingsSshReconnectHint": "重新连接以加载最新远程环境；正在运行的远程命令会中断。",
   "settingsSshOpenProject": "打开项目",
   "settingsSshEdit": "编辑",
   "settingsSshDelete": "删除",

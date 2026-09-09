@@ -91,7 +91,7 @@ pub enum SshConnectionState {
 struct SshConnection {
     client: RemoteClient,
     process: Arc<Mutex<Child>>,
-    _askpass: Option<tempfile::TempPath>,
+    _askpass: Option<tempfile::TempDir>,
     execution_environment: ExecutionEnvironment,
 }
 
@@ -451,10 +451,10 @@ impl SshManager {
         })?;
         let helper = load_helper(assets, target).await?;
         let remote_path = upload_helper(profile, password, &helper).await?;
-        let mut prepared = ssh_command(profile, password)?;
+        let mut prepared = ssh_command(profile, password).await?;
         prepared
             .command
-            .arg(format!("exec {remote_path}"))
+            .arg(ssh::posix_remote_command(&format!("exec {remote_path}")))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -471,14 +471,35 @@ impl SshManager {
             .take()
             .ok_or_else(|| RemoteClientError::Protocol("ssh process has no stdout".to_string()))?;
         let client = RemoteClient::from_streams(stdout, stdin);
-        let reply = client
-            .request(
+        let handshake = tokio::time::timeout(
+            std::time::Duration::from_secs(25),
+            client.request(
                 RemoteRequest::Hello {
                     protocol_version: REMOTE_PROTOCOL_VERSION,
                 },
                 &[],
-            )
-            .await?;
+            ),
+        )
+        .await
+        .unwrap_or_else(|_| {
+            Err(RemoteClientError::Protocol(
+                "SSH helper handshake timed out".to_string(),
+            ))
+        });
+        let reply = match handshake {
+            Ok(reply) => reply,
+            Err(reason) => {
+                // A failed bootstrap never becomes a managed connection. Close and reap the
+                // local SSH transport before reporting its bounded initialization diagnostic.
+                child.kill().await.map_err(|error| {
+                    RemoteClientError::Protocol(format!("failed to reap SSH bootstrap: {error}"))
+                })?;
+                let diagnostic = ssh::initialization_diagnostic(child.stderr.take()).await?;
+                return Err(RemoteClientError::Protocol(format!(
+                    "SSH helper initialization failed: {reason}; {diagnostic}"
+                )));
+            }
+        };
         let hello = match reply.response {
             RemoteResponse::Hello(hello) => hello,
             response => {

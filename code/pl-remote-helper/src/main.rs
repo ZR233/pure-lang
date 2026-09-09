@@ -1,10 +1,21 @@
 #[cfg(target_os = "linux")]
+mod environment;
+
+#[cfg(target_os = "linux")]
 mod process_worker;
 
 fn main() -> std::process::ExitCode {
     let mut arguments = std::env::args_os().skip(1);
     let result = match arguments.next() {
-        None => run_server(),
+        None => bootstrap_server(),
+        Some(mode) if mode == "--serve" && arguments.next().is_none() => run_server(),
+        #[cfg(target_os = "linux")]
+        Some(mode) if mode == "--emit-environment" => match (arguments.next(), arguments.next()) {
+            (Some(socket), None) => {
+                environment::emit(std::path::Path::new(&socket)).map_err(Into::into)
+            }
+            _ => Err("environment capture requires exactly one socket path".into()),
+        },
         Some(mode) if mode == "--process-worker" => run_worker(arguments.collect()),
         Some(_) => Err("unknown remote helper mode".into()),
     };
@@ -15,6 +26,17 @@ fn main() -> std::process::ExitCode {
             let _ = writeln!(std::io::stderr(), "pl-remote-helper failed: {error}");
             std::process::ExitCode::FAILURE
         }
+    }
+}
+
+fn bootstrap_server() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(target_os = "linux")]
+    {
+        environment::bootstrap().map_err(Into::into)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        run_server()
     }
 }
 

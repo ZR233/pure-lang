@@ -1,7 +1,5 @@
 //! OpenSSH argv、Askpass lease 与一次性命令边界。
 
-use std::io::Write;
-
 use tokio::process::Command;
 
 use super::{SshAuth, SshServerProfile};
@@ -10,7 +8,7 @@ use crate::remote::RemoteClientError;
 
 pub(super) struct PreparedSshCommand {
     pub(super) command: Command,
-    pub(super) askpass: Option<tempfile::TempPath>,
+    pub(super) askpass: Option<tempfile::TempDir>,
 }
 
 pub(super) fn validate_profile(profile: &SshServerProfile) -> Result<(), RemoteClientError> {
@@ -37,7 +35,7 @@ pub(super) fn validate_profile(profile: &SshServerProfile) -> Result<(), RemoteC
     Ok(())
 }
 
-pub(super) fn ssh_command(
+pub(super) async fn ssh_command(
     profile: &SshServerProfile,
     password: Option<&str>,
 ) -> Result<PreparedSshCommand, RemoteClientError> {
@@ -58,27 +56,16 @@ pub(super) fn ssh_command(
         command.arg("-i").arg(identity_file);
     }
     let askpass = if let Some(password) = password {
-        let mut file = tempfile::Builder::new()
+        let directory = tempfile::Builder::new()
             .prefix("pl-ssh-askpass-")
-            .tempfile()
+            .tempdir()
             .map_err(|error| {
-                RemoteClientError::Protocol(format!("failed to create SSH askpass: {error}"))
+                RemoteClientError::Protocol(format!(
+                    "failed to create SSH askpass directory: {error}"
+                ))
             })?;
-        file.write_all(b"#!/bin/sh\nprintf '%s\\n' \"$PURE_SSH_PASSWORD\"\n")
-            .and_then(|()| file.flush())
-            .map_err(|error| {
-                RemoteClientError::Protocol(format!("failed to write SSH askpass: {error}"))
-            })?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(file.path(), std::fs::Permissions::from_mode(0o700)).map_err(
-                |error| {
-                    RemoteClientError::Protocol(format!("failed to secure SSH askpass: {error}"))
-                },
-            )?;
-        }
-        let path = file.into_temp_path();
+        let path = directory.path().join("askpass");
+        write_askpass(&path).await?;
         command
             .arg("-o")
             .arg("NumberOfPasswordPrompts=1")
@@ -88,7 +75,7 @@ pub(super) fn ssh_command(
             .env("SSH_ASKPASS_REQUIRE", "force")
             .env("DISPLAY", "pure-studio")
             .env("PURE_SSH_PASSWORD", password);
-        Some(path)
+        Some(directory)
     } else {
         None
     };
@@ -97,15 +84,55 @@ pub(super) fn ssh_command(
     Ok(PreparedSshCommand { command, askpass })
 }
 
+async fn write_askpass(path: &std::path::Path) -> Result<(), RemoteClientError> {
+    const SCRIPT: &str = "#!/bin/sh\nprintf '%s\\n' \"$PURE_SSH_PASSWORD\"\n";
+    #[cfg(unix)]
+    {
+        // A writable fd in this multithreaded process could be inherited by an unrelated
+        // concurrent fork, even with CLOEXEC. The isolated writer owns every writable fd
+        // and is reaped before the script can be executed. No secret is passed to it.
+        let mut writer = Command::new("/bin/sh");
+        writer
+            .args([
+                "-c",
+                "umask 077; printf '%s' \"$2\" > \"$1\" && chmod 700 \"$1\"",
+                "askpass-writer",
+            ])
+            .arg(path)
+            .arg(SCRIPT)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped());
+        configure_background_command(&mut writer);
+        let output = writer.output().await.map_err(|error| {
+            RemoteClientError::Protocol(format!("failed to write SSH askpass: {error}"))
+        })?;
+        if !output.status.success() {
+            return Err(RemoteClientError::Protocol(format!(
+                "SSH askpass writer failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )));
+        }
+    }
+    #[cfg(not(unix))]
+    tokio::fs::write(path, SCRIPT).await?;
+    Ok(())
+}
+
+/// OpenSSH invokes the account shell; all bootstrap syntax belongs to POSIX sh.
+pub(super) fn posix_remote_command(script: &str) -> String {
+    format!("exec /bin/sh -c '{}'", script.replace('\'', "'\\''"))
+}
+
 pub(super) async fn run_ssh_capture(
     profile: &SshServerProfile,
     password: Option<&str>,
     remote_command: &str,
 ) -> Result<String, RemoteClientError> {
-    let mut prepared = ssh_command(profile, password)?;
+    let mut prepared = ssh_command(profile, password).await?;
     let output = prepared
         .command
-        .arg(remote_command)
+        .arg(posix_remote_command(remote_command))
         .output()
         .await
         .map_err(|error| RemoteClientError::Protocol(format!("failed to start ssh: {error}")))?;
@@ -117,6 +144,18 @@ pub(super) async fn run_ssh_capture(
     }
     String::from_utf8(output.stdout)
         .map_err(|error| RemoteClientError::Protocol(format!("ssh output is not UTF-8: {error}")))
+}
+
+pub(super) async fn initialization_diagnostic(
+    stderr: Option<tokio::process::ChildStderr>,
+) -> Result<String, RemoteClientError> {
+    use tokio::io::AsyncReadExt;
+    let Some(stderr) = stderr else {
+        return Ok(String::new());
+    };
+    let mut bytes = Vec::new();
+    stderr.take(4096).read_to_end(&mut bytes).await?;
+    Ok(String::from_utf8_lossy(&bytes).trim().to_string())
 }
 
 #[cfg(test)]
@@ -136,9 +175,23 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
-    fn command_uses_stdio_only_transport() {
-        let prepared = ssh_command(&profile(), None).expect("valid SSH profile");
+    fn posix_bootstrap_preserves_quoted_arguments() {
+        let script = posix_remote_command("printf '%s' \"a'b \\\"c\\\"\"");
+        let output = std::process::Command::new("/bin/sh")
+            .args(["-c", &script])
+            .output()
+            .expect("POSIX shell");
+        assert!(output.status.success());
+        assert_eq!(output.stdout, b"a'b \"c\"");
+    }
+
+    #[tokio::test]
+    async fn command_uses_stdio_only_transport() {
+        let prepared = ssh_command(&profile(), None)
+            .await
+            .expect("valid SSH profile");
         let args = prepared
             .command
             .as_std()
@@ -152,11 +205,13 @@ mod tests {
     }
 
     #[cfg(unix)]
-    #[test]
-    fn password_askpass_is_executable_after_preparation() {
-        let prepared = ssh_command(&profile(), Some("leased-secret")).expect("SSH command");
+    #[tokio::test]
+    async fn password_askpass_is_executable_after_preparation() {
+        let prepared = ssh_command(&profile(), Some("leased-secret"))
+            .await
+            .expect("SSH command");
         let askpass = prepared.askpass.expect("askpass lease");
-        let output = std::process::Command::new(&askpass)
+        let output = std::process::Command::new(askpass.path().join("askpass"))
             .env("PURE_SSH_PASSWORD", "leased-secret")
             .output()
             .expect("execute askpass");
