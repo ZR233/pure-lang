@@ -739,8 +739,6 @@
   "settingsDiscover": "Discover",
   "settingsDiscovering": "Discovering",
   "settingsFilterSkills": "Filter skills",
-  "settingsSkillDisabled": "Disabled for this workspace",
-  "settingsSkillEnabled": "Enabled",
   "settingsOpenProjectToDiscoverSkills": "Open a project to discover skills",
   "settingsNoSkillsMatchFilter": "No skills match this filter",
   "settingsSkillsDiscoverySources": "Skills are discovered from the selected workspace and configured user/system sources.",

@@ -397,8 +397,6 @@
   "settingsDiscover": "发现",
   "settingsDiscovering": "发现中",
   "settingsFilterSkills": "过滤 skills",
-  "settingsSkillDisabled": "此工作区已禁用",
-  "settingsSkillEnabled": "已启用",
   "settingsOpenProjectToDiscoverSkills": "打开项目以发现 skills",
   "settingsNoSkillsMatchFilter": "没有匹配的 skills",
   "settingsSkillsDiscoverySources": "Skills 会从当前工作区以及已配置的用户/系统来源中发现。",
