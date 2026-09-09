@@ -203,11 +203,12 @@ void registerSkillsTests() {
 
       await tester.tap(find.text('release-build-triage'));
       await tester.pumpAndSettle();
+      // 描述同时出现在折叠行副标题与展开详情中。
       expect(
         find.textContaining(
           'Diagnose Rust release linker and Cargo profile failures.',
         ),
-        findsOneWidget,
+        findsNWidgets(2),
       );
       await tester.enterText(find.byType(TextField).first, 'linker');
       await tester.pump(const Duration(milliseconds: 149));
@@ -297,6 +298,77 @@ void registerSkillsTests() {
     expect(find.text('release-build-triage'), findsNothing);
     expect(api.discoverCallCount, 0);
   });
+
+  testWidgets(
+    'skill row subtitle shows the description instead of the toggle state',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final api = _FakeStudioApi(_stateWithPlannerModels());
+      api.discoveredSkills = const ['flutter-ui-polish'];
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [studioApiProvider.overrideWithValue(api)],
+          child: _localizedApp(home: const SettingsPage()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Skills'));
+      await tester.pumpAndSettle();
+
+      final tile = find.ancestor(
+        of: find.text('flutter-ui-polish'),
+        matching: find.byType(ExpansionTile),
+      );
+      // 折叠状态下直接可见技能描述，启停状态只由开关表达。
+      expect(
+        find.descendant(
+          of: tile,
+          matching: find.text('Description for flutter-ui-polish'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: tile,
+          matching: find.text('Disabled for this workspace'),
+        ),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: tile, matching: find.text('Enabled')),
+        findsNothing,
+      );
+
+      // 关闭技能后副标题仍是描述，不会退回到状态文案。
+      await tester.tap(
+        find.byKey(const ValueKey('skill-enabled-flutter-ui-polish')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        (api.savedSkillsSettings!['disabled'] as List<String>),
+        contains('flutter-ui-polish'),
+      );
+      expect(
+        find.descendant(
+          of: tile,
+          matching: find.text('Description for flutter-ui-polish'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: tile,
+          matching: find.text('Disabled for this workspace'),
+        ),
+        findsNothing,
+      );
+    },
+  );
 
   test('bootstrap activates the selected healthy project once', () async {
     StudioController.resetStartupProjectActivation();

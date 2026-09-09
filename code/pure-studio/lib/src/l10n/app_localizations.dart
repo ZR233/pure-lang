@@ -2297,18 +2297,6 @@ abstract class AppLocalizations {
   /// **'Filter skills'**
   String get settingsFilterSkills;
 
-  /// No description provided for @settingsSkillDisabled.
-  ///
-  /// In en, this message translates to:
-  /// **'Disabled for this workspace'**
-  String get settingsSkillDisabled;
-
-  /// No description provided for @settingsSkillEnabled.
-  ///
-  /// In en, this message translates to:
-  /// **'Enabled'**
-  String get settingsSkillEnabled;
-
   /// No description provided for @settingsOpenProjectToDiscoverSkills.
   ///
   /// In en, this message translates to:

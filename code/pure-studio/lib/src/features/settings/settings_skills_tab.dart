@@ -131,11 +131,14 @@ class _SkillsTabState extends ConsumerState<SkillsTab> {
                   key: PageStorageKey('skill-details-${skill.name}'),
                   tilePadding: EdgeInsets.zero,
                   title: Text(skill.name, style: context.text.titleSmall),
-                  subtitle: Text(
-                    disabledSkills.contains(skill.name)
-                        ? context.l10n.settingsSkillDisabled
-                        : context.l10n.settingsSkillEnabled,
-                  ),
+                  // 开关是唯一的启停指示，副标题改为技能描述，避免与开关语义重复。
+                  subtitle: skill.description.isEmpty
+                      ? null
+                      : Text(
+                          skill.description,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                   trailing: Switch(
                     key: ValueKey('skill-enabled-${skill.name}'),
                     value: !disabledSkills.contains(skill.name),

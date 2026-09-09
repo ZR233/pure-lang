@@ -1262,12 +1262,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsFilterSkills => 'Filter skills';
 
   @override
-  String get settingsSkillDisabled => 'Disabled for this workspace';
-
-  @override
-  String get settingsSkillEnabled => 'Enabled';
-
-  @override
   String get settingsOpenProjectToDiscoverSkills =>
       'Open a project to discover skills';
 

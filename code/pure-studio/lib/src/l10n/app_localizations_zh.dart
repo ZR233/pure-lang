@@ -1216,12 +1216,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsFilterSkills => '过滤 skills';
 
   @override
-  String get settingsSkillDisabled => '此工作区已禁用';
-
-  @override
-  String get settingsSkillEnabled => '已启用';
-
-  @override
   String get settingsOpenProjectToDiscoverSkills => '打开项目以发现 skills';
 
   @override
