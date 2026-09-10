@@ -7,14 +7,14 @@ use crate::client::LspClientRuntimeStatus;
 use super::LspServerSnapshot;
 
 use super::request::diagnostic_counts;
-use super::{LspRuntimeRegistry, canonical_workspace_root};
+use super::{LspRuntimeRegistry, workspace_key};
 
 impl LspRuntimeRegistry {
     pub async fn snapshots_for_workspace(
         &self,
         workspace_root: impl AsRef<Path>,
     ) -> Vec<LspServerSnapshot> {
-        let workspace_root = canonical_workspace_root(workspace_root.as_ref());
+        let workspace_root = workspace_key(workspace_root.as_ref());
         let workspace = {
             let state = self.state.lock().await;
             state.workspaces.get(&workspace_root).map(|workspace| {

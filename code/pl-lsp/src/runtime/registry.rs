@@ -18,6 +18,7 @@ use super::server::ResolvedLspServer;
 use super::{LspActivityKind, LspAvailabilityKind, LspResult, LspServerSnapshot};
 
 /// 进程内 LSP runtime 的唯一 owner；clone 共享同一份状态。
+/// 工作区路径必须由宿主预先解析；registry 不使用本地文件系统重解释远程身份。
 #[derive(Clone)]
 pub struct LspRuntimeRegistry {
     pub(super) state: Arc<Mutex<LspRuntimeState>>,
@@ -91,8 +92,8 @@ impl LspRuntimeRegistry {
     }
 }
 
-pub(super) fn canonical_workspace_root(workspace_root: &std::path::Path) -> PathBuf {
-    std::fs::canonicalize(workspace_root).unwrap_or_else(|_| workspace_root.to_path_buf())
+pub(super) fn workspace_key(workspace_root: &std::path::Path) -> PathBuf {
+    workspace_root.to_path_buf()
 }
 
 pub(super) struct LspRuntimeState {
@@ -158,5 +159,26 @@ impl LspRuntimeServerState {
             last_error: None,
             last_error_at: None,
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod identity_tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    #[cfg(unix)]
+    #[test]
+    fn host_resolved_identity_does_not_follow_a_local_symlink() {
+        let directory = tempfile::tempdir().unwrap();
+        let local = directory.path().join("local");
+        let remote_identity = directory.path().join("remote-identity");
+        std::fs::create_dir(&local).unwrap();
+        std::os::unix::fs::symlink(&local, &remote_identity).unwrap();
+        assert_ne!(
+            std::fs::canonicalize(&remote_identity).unwrap(),
+            remote_identity
+        );
+        assert_eq!(workspace_key(&remote_identity), remote_identity);
     }
 }

@@ -6,20 +6,25 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use pl_core::tool::{
-    GlobalToolInheritance, StaticToolDefinition, ToolGroupId, ToolInstallGroup, ToolManager,
-    ToolName, ToolPolicy, ToolResult,
-};
 use pl_core::{
-    AgentSession, CoreRuntimeProfile, ProviderId, ReasoningEffort, ResolvedModelRoute,
-    TraceRecorder, TurnEngineBuilder, TurnOptions, TurnRequest,
+    context::{ContextContent, OpaquePayload},
+    model::Model,
+    thread::{ThreadHandle, TurnInput, TurnOutcome},
+    tool::{
+        ToolOutput,
+        opaque::{CallContext, Registration, Tool, ToolError},
+    },
 };
 use pl_model::completion::{
     CompletionFailure, CompletionRequest, CompletionResponse, ReasoningConfig,
 };
+use pl_model::config::{ProviderId, ReasoningEffort, ResolvedModelRoute};
 use pl_model::model::{ModelInfo, ModelProtocolOptions, ResponsesMaxTokensField};
 use pl_model::provider::{ProviderConnectionMode, ProviderEndpoint};
 use pl_model::runtime::{ModelInvocationContext, ModelRuntime, ModelSession};
+use pl_model::runtime::{
+    ModelResponseReceipt, ThreadModel, model_response_receipt, thread_tool_declaration,
+};
 use pl_protocol::{
     AgentRoleId, InferenceAccounting, Message, MessageContent, MessageRole, PricingMode,
     UsageStatus,
@@ -53,7 +58,7 @@ struct Observation {
     response_id: Option<String>,
     accounting: Option<InferenceAccounting>,
     detail: Option<String>,
-    inferences: Vec<pl_protocol::InferenceBillingRecord>,
+    inferences: Vec<ModelResponseReceipt>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -73,7 +78,7 @@ async fn main() -> Result<()> {
     let config_path = PathBuf::from(std::env::var_os("HOME").context("HOME is unavailable")?)
         .join(".pure/config.toml");
     let config: ExistingConfig = toml::from_str(&tokio::fs::read_to_string(config_path).await?)?;
-    let registry = pl_core::builtin_provider_catalog();
+    let registry = pl_model::config::builtin_provider_catalog();
     let mut observations = Vec::new();
     for (provider_id, connection) in config.models.providers {
         let Some(preset) = registry
@@ -358,17 +363,31 @@ async fn invoke(
         .build();
     let future = runtime.complete(
         request,
-        ModelInvocationContext::new(session)
+        ModelInvocationContext::new(session.clone())
             .with_events(tx)
             .with_cancellation(Some(cancellation.clone())),
     );
     tokio::pin!(future);
-    match tokio::time::timeout(Duration::from_secs(60), &mut future).await {
+    let result = match tokio::time::timeout(Duration::from_secs(60), &mut future).await {
         Ok(result) => result,
         Err(_) => {
             cancellation.cancel();
             future.await
         }
+    };
+    match (result, session.close().await) {
+        (result, Ok(())) => result,
+        (Ok(response), Err(source)) => Err(CompletionFailure {
+            source,
+            accounting: Box::new(response.accounting),
+        }),
+        (Err(failure), Err(cleanup)) => Err(CompletionFailure {
+            source: pl_protocol::PureError::Io(std::io::Error::other(AcceptanceCleanupFailure {
+                primary: failure.source,
+                cleanup,
+            })),
+            accounting: failure.accounting,
+        }),
     }
 }
 
@@ -377,7 +396,7 @@ async fn tool_task(
     endpoint: ProviderEndpoint,
     model: ModelInfo,
     pricing_mode: PricingMode,
-) -> Result<pl_protocol::TurnBillingRecord> {
+) -> Result<Vec<ModelResponseReceipt>> {
     let effort = model.default_effort().map(ReasoningEffort::new);
     let route = ResolvedModelRoute {
         pricing_mode,
@@ -387,48 +406,36 @@ async fn tool_task(
         model,
         effort,
     };
-    let manager = ToolManager::new();
-    let tools = manager.agent_tool_set("live-check", GlobalToolInheritance::Isolated);
     let observed = Arc::new(Mutex::new(None));
-    let output = observed.clone();
-    let tool = pl_core::tool::static_tool::<DoubleInput>(StaticToolDefinition::new(
-        ToolName::bare("verify_double")?,
+    let model = ThreadModel::new(ModelRuntime::from_route(&route)?, route.reasoning_config());
+    let thread = ThreadHandle::start(format!("live-{provider_id}"), model.open_session().await?)?;
+    let spec = pl_model::completion::ToolSpec::function(
+        "verify_double",
         "Double an integer. Use this to verify the requested result.",
-    ))
-    .policy(ToolPolicy::read_only())
-    .build(move |input, _| {
-        let output = output.clone();
-        async move {
-            *output.lock().expect("acceptance observation") = Some(input.value);
-            Ok(ToolResult::success((input.value * 2).to_string()))
-        }
-    });
-    tools.install(ToolInstallGroup::direct(
-        ToolGroupId::new("live-math"),
-        vec![tool],
-    ))?;
-    let engine = TurnEngineBuilder::from_route(&route)?
-        .with_agent_tool_set(tools)
-        .with_runtime_profile(CoreRuntimeProfile::minimal())
-        .build();
-    let (tx, _) = tokio::sync::broadcast::channel(512);
-    let mut recorder = TraceRecorder::new(format!("live-{provider_id}"), tx, 0);
-    let mut session = AgentSession::new();
+        serde_json::to_value(schemars::schema_for!(DoubleInput))?,
+    );
+    thread
+        .register_tools(vec![Registration::new(
+            "verify_double".into(),
+            thread_tool_declaration(&spec)?,
+            DoubleTool(observed.clone()),
+        )?])
+        .await?;
     let cancellation = tokio_util::sync::CancellationToken::new();
-    let operation = engine.run_turn_with_trace(&mut session,
-        TurnRequest::new("You must first call verify_double with value 21, then reply with its result. Do not calculate it yourself.")
-            .with_budget(pl_core::turn::TurnBudget::new(Duration::from_secs(60))),
-        &mut recorder, TurnOptions::default().with_cancellation(cancellation.clone()));
+    let operation = thread.run_turn(TurnInput { turn_id: "live-turn".into(), attempt_prefix: "live-attempt".into(), content: vec![ContextContent::Text { text: "You must first call verify_double with value 21, then reply with its result. Do not calculate it yourself.".into() }], max_model_steps: std::num::NonZeroU32::new(8).expect("positive step bound"), cancellation: cancellation.clone() });
     tokio::pin!(operation);
     let result = match tokio::time::timeout(Duration::from_secs(75), &mut operation).await {
-        Ok(result) => result?,
+        Ok(result) => result,
         Err(_) => {
             cancellation.cancel();
-            operation.await?
+            operation.await
         }
     };
+    let snapshot = thread.snapshot();
+    thread.close().await?;
+    let result = result?;
     anyhow::ensure!(
-        result.is_completed(),
+        result.outcome == TurnOutcome::Completed,
         "tool task did not complete: {:?}",
         result.outcome
     );
@@ -437,10 +444,45 @@ async fn tool_task(
         "the provider did not execute the required tool"
     );
     anyhow::ensure!(
-        result.content.contains("42"),
+        result
+            .last_output
+            .content
+            .iter()
+            .any(|content| matches!(content, ContextContent::Text { text } if text.contains("42"))),
         "the provider did not use the actual tool result"
     );
-    Ok(result.billing)
+    snapshot
+        .attempts
+        .iter()
+        .map(|attempt| match &attempt.outcome {
+            pl_core::thread::AttemptOutcome::Committed(output) => {
+                model_response_receipt(output)?.context("missing model receipt")
+            }
+            outcome => anyhow::bail!("noncommitted inference: {outcome:?}"),
+        })
+        .collect()
+}
+
+#[derive(Debug)]
+struct DoubleTool(Arc<Mutex<Option<i64>>>);
+impl Tool for DoubleTool {
+    async fn execute(&self, input: OpaquePayload, _: CallContext) -> Result<ToolOutput, ToolError> {
+        let input: DoubleInput = serde_json::from_str(input.content()).map_err(ToolError::new)?;
+        *self
+            .0
+            .lock()
+            .map_err(|_| ToolError::new(std::io::Error::other("observation poisoned")))? =
+            Some(input.value);
+        let value = input
+            .value
+            .checked_mul(2)
+            .ok_or_else(|| ToolError::new(std::io::Error::other("double overflow")))?
+            .to_string();
+        Ok(ToolOutput::new(
+            OpaquePayload::text(value.clone()),
+            vec![ContextContent::Text { text: value.into() }],
+        ))
+    }
 }
 
 async fn native_search_task(runtime: &ModelRuntime) -> Result<Vec<CompletionResponse>> {
@@ -609,12 +651,12 @@ fn tool_observation(
     endpoint: &str,
     model: &str,
     scenario: &str,
-    result: Result<pl_protocol::TurnBillingRecord>,
+    result: Result<Vec<ModelResponseReceipt>>,
 ) -> Observation {
     match result {
         Ok(billing) => {
             let mut row = observation(provider, endpoint, model, scenario, "passed", None, None);
-            row.inferences = billing.inferences;
+            row.inferences = billing;
             row
         }
         Err(error) => observation(
@@ -641,4 +683,12 @@ async fn persist(path: &Path, observations: &[Observation]) -> Result<()> {
         );
     }
     Ok(())
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("acceptance failed ({primary}); session cleanup also failed ({cleanup})")]
+struct AcceptanceCleanupFailure {
+    #[source]
+    primary: pl_protocol::PureError,
+    cleanup: pl_protocol::PureError,
 }

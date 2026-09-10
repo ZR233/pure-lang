@@ -5,7 +5,6 @@ mod agent_framework;
 pub(super) mod attachment;
 pub(in crate::studio) mod directory;
 mod error;
-pub(in crate::studio) mod history;
 mod interaction;
 pub(in crate::studio) mod object;
 mod project;
@@ -20,7 +19,6 @@ pub struct StudioStore {
     attachments_dir: PathBuf,
 }
 
-pub(in crate::studio) use agent_framework::ThreadRuntimeSeed;
 pub use error::StudioDatabaseError;
 impl StudioStore {
     pub(crate) fn sessions(&self) -> &pl_core::persistence::SqliteSessionStore {

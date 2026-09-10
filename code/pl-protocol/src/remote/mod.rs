@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-pub const REMOTE_PROTOCOL_VERSION: u32 = 3;
+pub const REMOTE_PROTOCOL_VERSION: u32 = 5;
 pub const REMOTE_MAX_HEADER_BYTES: usize = 64 * 1024;
 pub const REMOTE_MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
 
@@ -43,7 +43,8 @@ pub enum RemoteRequest {
     CloseWorkspace { workspace_id: String },
     Stat(RemotePathRequest),
     ReadBytes(RemoteReadRequest),
-    WriteAtomic(RemotePathRequest),
+    ReadRange(RemoteReadRangeRequest),
+    WriteFile(RemoteWriteRequest),
     ListDirectory(RemotePathRequest),
     CreateDirectory(RemotePathRequest),
     RemovePath(RemoteRemoveRequest),
@@ -69,6 +70,7 @@ pub enum RemoteResponse {
     WorkspaceOpened(RemoteWorkspaceOpened),
     Stat(RemoteFileStat),
     Bytes,
+    ByteRange { offset: u64, total_len: u64 },
     Directory(RemoteDirectoryListing),
     ProcessSpawned { process_id: String },
     Ack,
@@ -139,11 +141,38 @@ pub struct RemotePathRequest {
     pub path: String,
 }
 
+/// Explicit filesystem write intent; never implemented by a client-side read/modify/write sequence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RemoteWriteMode {
+    Create,
+    Overwrite,
+    Append,
+}
+
+/// A write body applies to this path under the specified mode.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteWriteRequest {
+    pub target: RemotePathRequest,
+    pub mode: RemoteWriteMode,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteReadRequest {
     pub workspace_id: String,
     pub path: String,
+    pub max_bytes: usize,
+}
+
+/// A bounded read; response bytes are carried in the frame body.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteReadRangeRequest {
+    pub workspace_id: String,
+    pub path: String,
+    pub offset: u64,
     pub max_bytes: usize,
 }
 
@@ -190,6 +219,8 @@ pub struct RemoteFileStat {
     pub is_file: bool,
     pub is_directory: bool,
     pub len: Option<u64>,
+    pub readonly: bool,
+    pub modified_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -305,7 +336,26 @@ mod tests {
     }
 
     #[test]
-    fn protocol_version_is_bumped_for_process_failure_contract() {
-        assert_eq!(REMOTE_PROTOCOL_VERSION, 3);
+    fn write_request_roundtrips_explicit_mode_without_a_legacy_write_variant() {
+        for (mode, name) in [
+            (RemoteWriteMode::Create, "create"),
+            (RemoteWriteMode::Overwrite, "overwrite"),
+            (RemoteWriteMode::Append, "append"),
+        ] {
+            let request = RemoteRequest::WriteFile(RemoteWriteRequest {
+                target: RemotePathRequest {
+                    workspace_id: "workspace".into(),
+                    path: "note.txt".into(),
+                },
+                mode,
+            });
+            let encoded = serde_json::to_value(&request).unwrap();
+            assert_eq!(encoded["method"], "writeFile");
+            assert_eq!(encoded["params"]["mode"], name);
+            assert_eq!(
+                serde_json::from_value::<RemoteRequest>(encoded).unwrap(),
+                request
+            );
+        }
     }
 }

@@ -3484,6 +3484,42 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Output'**
   String get timelineToolOutput;
+
+  /// No description provided for @costPurposeMain.
+  ///
+  /// In en, this message translates to:
+  /// **'Main conversation'**
+  String get costPurposeMain;
+
+  /// No description provided for @costPurposeSummary.
+  ///
+  /// In en, this message translates to:
+  /// **'Summarization'**
+  String get costPurposeSummary;
+
+  /// No description provided for @costPurposeReview.
+  ///
+  /// In en, this message translates to:
+  /// **'Review'**
+  String get costPurposeReview;
+
+  /// No description provided for @costPurposeTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Title'**
+  String get costPurposeTitle;
+
+  /// No description provided for @costPurposeUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'Unknown purpose'**
+  String get costPurposeUnknown;
+
+  /// No description provided for @timelineRawRecord.
+  ///
+  /// In en, this message translates to:
+  /// **'Original history record'**
+  String get timelineRawRecord;
 }
 
 class _AppLocalizationsDelegate

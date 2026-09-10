@@ -1851,4 +1851,22 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get timelineToolOutput => '输出';
+
+  @override
+  String get costPurposeMain => '主循环';
+
+  @override
+  String get costPurposeSummary => '摘要';
+
+  @override
+  String get costPurposeReview => '审查';
+
+  @override
+  String get costPurposeTitle => '标题';
+
+  @override
+  String get costPurposeUnknown => '未知用途';
+
+  @override
+  String get timelineRawRecord => '原始历史记录';
 }

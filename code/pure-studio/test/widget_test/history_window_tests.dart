@@ -216,6 +216,87 @@ void registerHistoryWindowTests() {
       established.workspaceUiByThread['thread-a']!.history.epoch,
     );
   });
+  test('same commit revision streams model and tool text without resetting loaded history', () async {
+    final initial = _twoThreadHistoryState();
+    final api = _FakeStudioApi(initial);
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+    await container.read(studioControllerProvider.future);
+    await pumpEventQueue();
+    final history = _windowItems('thread-a', 'a', 0, 2);
+    ThreadItemView preview(String text) =>
+        _threadItemFixture(
+          id: 'live-answer',
+          threadId: 'thread-a',
+          turnId: 'a-turn-live',
+          ordinal: 2,
+          text: text,
+        ).copyWith(
+          state: ThreadTextItemStateView(
+            channel: ThreadTextChannel.commentary,
+            text: text,
+            attachments: const [],
+            lifecycle: const StreamingThreadContentView(),
+          ),
+        );
+    ThreadItemView toolPreview(String text) =>
+        _threadItemFixture(
+          id: 'live-tool',
+          threadId: 'thread-a',
+          turnId: 'a-turn-live',
+          ordinal: 3,
+          text: '',
+        ).copyWith(
+          state: ThreadToolItemStateView(
+            invocation: const ThreadToolInvocationView(
+              toolCallId: 'call',
+              name: 'exec_command',
+              arguments: '{}',
+            ),
+            lifecycle: RunningThreadToolView(text),
+          ),
+        );
+    void emit(String text) => api.emitThreadFrame(
+      ThreadSnapshotFrame(
+        workspace: _workspaceWithItems(
+          'thread-a',
+          revision: 3,
+          items: [...history, preview(text), toolPreview(text)],
+        ),
+        historyCursor: 'a-turn-0',
+      ),
+    );
+    emit('first');
+    await pumpEventQueue();
+    final first = container.read(studioControllerProvider).requireValue;
+    final epoch = first.workspaceUiByThread['thread-a']!.history.epoch;
+    emit('first second');
+    await pumpEventQueue();
+    final next = container.read(studioControllerProvider).requireValue;
+    final workspace = next.workspacesByThread['thread-a']!;
+    expect(workspace.revision, 3);
+    expect(workspace.items.map((item) => item.id).toList(), [
+      ...history.map((item) => item.id),
+      'live-answer',
+      'live-tool',
+    ]);
+    expect(
+      (workspace.items[workspace.items.length - 2].state
+              as ThreadTextItemStateView)
+          .text,
+      'first second',
+    );
+    expect(
+      ((workspace.items.last.state as ThreadToolItemStateView).lifecycle
+              as RunningThreadToolView)
+          .streamedOutput,
+      'first second',
+    );
+    expect(next.workspaceUiByThread['thread-a']!.history.epoch, epoch);
+    expect(next.workspaceUiByThread['thread-a']!.history.hasOlder, isTrue);
+  });
 }
 
 StudioState _twoThreadHistoryState() {

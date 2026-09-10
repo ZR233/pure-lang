@@ -11,15 +11,15 @@ pub use state::{
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use futures::future::join_all;
-use pl_core::ProviderEndpoint;
-use pl_core::{PureError, StateError};
+use pl_model::provider::ProviderEndpoint;
+use pl_protocol::{PureError, StateError};
 use reqwest::header::{ACCEPT_LANGUAGE, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde_json::Value;
 
-use crate::ProviderConfig;
 use crate::config::StudioConfig;
 use crate::config_editor::provider_template_kind;
 use crate::studio::unix_seconds;
+use pl_model::config::ProviderConfig;
 use serde::{Deserialize, Serialize};
 
 const ZHIPU_TOKEN_LIMIT_TYPE: &str = "TOKENS_LIMIT";
@@ -548,7 +548,7 @@ type ProviderUsageQueryFuture = BoxFuture<'static, crate::Result<ProviderUsageDa
 
 async fn provider_usage_data(
     provider: ProviderConfig,
-    query: impl FnOnce(pl_core::ProviderEndpoint) -> ProviderUsageQueryFuture,
+    query: impl FnOnce(pl_model::provider::ProviderEndpoint) -> ProviderUsageQueryFuture,
 ) -> ProviderUsageState {
     if provider
         .resolved_bearer_token()
@@ -577,7 +577,7 @@ async fn provider_usage_data(
     }
 }
 
-fn query_deepseek(info: pl_core::ProviderEndpoint) -> ProviderUsageQueryFuture {
+fn query_deepseek(info: pl_model::provider::ProviderEndpoint) -> ProviderUsageQueryFuture {
     async move {
         query_deepseek_balance(&info)
             .await
@@ -586,7 +586,7 @@ fn query_deepseek(info: pl_core::ProviderEndpoint) -> ProviderUsageQueryFuture {
     .boxed()
 }
 
-fn query_zhipu(info: pl_core::ProviderEndpoint) -> ProviderUsageQueryFuture {
+fn query_zhipu(info: pl_model::provider::ProviderEndpoint) -> ProviderUsageQueryFuture {
     async move {
         query_zhipu_coding_plan_usage(&info)
             .await

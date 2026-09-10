@@ -22,8 +22,8 @@ pub(crate) use view::settings_snapshot;
 
 impl StudioRuntime {
     /// Reads the canonical built-in provider and model catalog.
-    pub fn load_provider_catalog(&self) -> Result<pl_core::ProviderCatalogSnapshot> {
-        Ok(crate::builtin_provider_catalog().snapshot()?)
+    pub fn load_provider_catalog(&self) -> Result<pl_protocol::ProviderCatalogSnapshot> {
+        Ok(pl_model::config::builtin_provider_catalog().snapshot()?)
     }
 
     /// Reads the secret-free canonical Settings snapshot from the in-memory owner.
@@ -62,7 +62,7 @@ impl StudioRuntime {
                 config.instructions.user = input.user;
                 config.instructions.project_doc_max_bytes =
                     usize::try_from(input.project_doc_max_bytes).map_err(|_| {
-                        pl_core::PureError::ConfigError(
+                        pl_protocol::PureError::ConfigError(
                             "projectDocMaxBytes exceeds this platform".to_string(),
                         )
                     })?;
@@ -167,35 +167,34 @@ impl StudioRuntime {
             if server_id.is_empty() {
                 continue;
             }
-            if crate::is_builtin_mcp_server_id(&server_id) {
+            if crate::config::mcp::is_builtin_mcp_server_id(&server_id) {
                 next_builtin.insert(
                     server_id,
-                    crate::BuiltinMcpServerState {
+                    crate::config::mcp::BuiltinMcpServerState {
                         enabled: server.enabled,
                     },
                 );
                 continue;
             }
             let transport = match server.transport.trim() {
-                "stdio" => crate::McpServerTransport::Stdio,
-                "streamableHttp" => crate::McpServerTransport::StreamableHttp,
+                "stdio" => pl_tool::mcp::config::McpServerTransport::Stdio,
+                "streamableHttp" => pl_tool::mcp::config::McpServerTransport::StreamableHttp,
                 _ => return Err(invalid_settings_argument("Unsupported MCP transport")),
             };
-            let mut mcp_config =
-                next_servers
-                    .remove(&server_id)
-                    .unwrap_or_else(|| crate::McpServerConfig {
-                        transport,
-                        ..Default::default()
-                    });
+            let mut mcp_config = next_servers.remove(&server_id).unwrap_or_else(|| {
+                pl_tool::mcp::config::McpServerConfig {
+                    transport,
+                    ..Default::default()
+                }
+            });
             mcp_config.enabled = server.enabled;
             mcp_config.transport = transport;
             let endpoint = server.endpoint.trim();
             match transport {
-                crate::McpServerTransport::Stdio => {
+                pl_tool::mcp::config::McpServerTransport::Stdio => {
                     mcp_config.command = (!endpoint.is_empty()).then(|| endpoint.to_string());
                 }
-                crate::McpServerTransport::StreamableHttp => {
+                pl_tool::mcp::config::McpServerTransport::StreamableHttp => {
                     mcp_config.url = (!endpoint.is_empty()).then(|| endpoint.to_string());
                 }
             }

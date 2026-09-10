@@ -7,12 +7,12 @@ use crate::config::{
     ModelRouteConfig, ProviderId, ReasoningEffort, STUDIO_CONFIG_SCHEMA_VERSION, StudioConfig,
     StudioRole,
 };
-use crate::{
+use pl_model::config::{
     AgentModelConfig, ProviderConfig, ProviderModelCatalogConfig, ProviderPresetId,
     builtin_provider_catalog,
 };
-use pl_core::ModelInfo;
-use pl_core::ProviderEndpoint;
+use pl_model::model::ModelInfo;
+use pl_model::provider::ProviderEndpoint;
 
 /// Studio 使用的动态 provider preset 标识。
 ///
@@ -75,7 +75,7 @@ impl ProviderTemplateKind {
         self.preset().provider
     }
 
-    fn preset(&self) -> crate::ProviderPreset {
+    fn preset(&self) -> pl_model::config::ProviderPreset {
         builtin_provider_catalog()
             .presets
             .into_iter()

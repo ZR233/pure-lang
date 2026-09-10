@@ -144,11 +144,11 @@ async fn run_http_acceptance(base_url: &str, workspace: &Path) -> Result<()> {
         }),
     )
     .await?;
-    wait_for_completed_turn(
+    wait_for_completed_input(
         &client,
         base_url,
         &created.thread.id,
-        &created.submission.turn_id,
+        &created.submission.input_id,
     )
     .await?;
     let snapshot: ThreadSnapshot = get_json(
@@ -176,10 +176,24 @@ async fn run_http_acceptance(base_url: &str, workspace: &Path) -> Result<()> {
         "unexpected Skill activation: {}",
         activation.name
     );
+    let skill_call = snapshot
+        .items
+        .iter()
+        .find_map(|item| match item.state() {
+            ThreadItemState::Tool(tool) if tool.invocation().name() == "skill_view" => {
+                Some(tool.invocation())
+            }
+            _ => None,
+        })
+        .context("successful skill_view tool item is missing")?;
+    ensure!(
+        skill_call.call_id() == Some("call_skill"),
+        "provider identity changed"
+    );
     match &activation.cause {
         SkillActivationCause::Tool { tool_call_id } => ensure!(
-            tool_call_id.ends_with("-call_skill"),
-            "unexpected activation toolCallId: {tool_call_id}"
+            tool_call_id == skill_call.tool_call_id(),
+            "activation must reference its actual Thread tool invocation: {tool_call_id}"
         ),
         SkillActivationCause::UserGesture { .. } => {
             ensure!(false, "scripted activation was attributed to UserGesture")
@@ -212,12 +226,12 @@ async fn run_http_acceptance(base_url: &str, workspace: &Path) -> Result<()> {
     Ok(())
 }
 
-async fn wait_for_completed_turn(
+async fn wait_for_completed_input(
     client: &reqwest::Client,
     base_url: &str,
     thread_id: &str,
-    turn_id: &str,
-) -> Result<()> {
+    input_id: &str,
+) -> Result<String> {
     let deadline = Instant::now() + Duration::from_secs(30);
     while Instant::now() < deadline {
         let page: ThreadTurnPage = get_json(
@@ -228,12 +242,12 @@ async fn wait_for_completed_turn(
         if let Some(turn) = page
             .turns
             .iter()
+            .find(|history| history.items.iter().any(|item| item.id == input_id))
             .map(|history| &history.turn)
-            .find(|turn| turn.id == turn_id)
             && turn.state.is_terminal()
         {
             return match &turn.state {
-                TurnState::Completed(_) => Ok(()),
+                TurnState::Completed(_) => Ok(turn.id.clone()),
                 state => anyhow::bail!("scripted Turn ended without completion: {state:?}"),
             };
         }

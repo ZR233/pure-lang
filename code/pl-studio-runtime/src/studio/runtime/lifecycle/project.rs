@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 
-use crate::resolve_workspace_root;
+use pl_tool::workspace::resolve_workspace_root;
 
 use super::super::StudioRuntime;
 use super::super::lsp_state::health;
@@ -52,7 +52,7 @@ impl StudioRuntime {
             let _command = self.external_runtimes.lsp_state.command().await;
             self.external_runtimes
                 .lsp_state
-                .begin(pl_core::StateOperation::Activate)
+                .begin(pl_protocol::StateOperation::Activate)
                 .await?;
             self.external_runtimes
                 .lsp
@@ -114,7 +114,7 @@ impl StudioRuntime {
         let _command = self.external_runtimes.lsp_state.command().await;
         self.external_runtimes
             .lsp_state
-            .begin(pl_core::StateOperation::Activate)
+            .begin(pl_protocol::StateOperation::Activate)
             .await?;
         self.external_runtimes
             .lsp
@@ -179,7 +179,7 @@ impl StudioRuntime {
         let _command = self.external_runtimes.lsp_state.command().await;
         self.external_runtimes
             .lsp_state
-            .begin(pl_core::StateOperation::Probe)
+            .begin(pl_protocol::StateOperation::Probe)
             .await?;
         self.external_runtimes
             .lsp
@@ -195,7 +195,7 @@ impl StudioRuntime {
         let _command = self.external_runtimes.lsp_state.command().await;
         self.external_runtimes
             .lsp_state
-            .begin(pl_core::StateOperation::Repair)
+            .begin(pl_protocol::StateOperation::Repair)
             .await?;
         let result = self
             .external_runtimes
@@ -220,7 +220,7 @@ impl StudioRuntime {
         let _command = self.external_runtimes.lsp_state.command().await;
         self.external_runtimes
             .lsp_state
-            .begin(pl_core::StateOperation::Reset)
+            .begin(pl_protocol::StateOperation::Reset)
             .await?;
         let result = self
             .external_runtimes

@@ -3,7 +3,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use anyhow::Result;
-use pl_core::{ObservedResource, ObservedResourceCommand, StateError, StateOperation};
+use pl_protocol::{ObservedResource, ObservedResourceCommand, StateError, StateOperation};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
 

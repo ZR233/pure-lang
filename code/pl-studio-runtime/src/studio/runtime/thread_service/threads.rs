@@ -20,7 +20,7 @@ impl StudioRuntime {
         let (delta, thread) = DirectoryDelta::register_root_thread(
             project_id,
             title,
-            pl_core::ThreadModeId::simple(),
+            pl_protocol::ThreadModeId::simple(),
         );
         self.agent_facility
             .product_events
@@ -186,7 +186,7 @@ impl StudioRuntime {
             .residency
             .pin_many(thread_tree.iter().map(|thread| thread.id.clone()));
         for candidate in &thread_tree {
-            let _ = self.ensure_thread_agent(&candidate.id).await?;
+            let _ = self.ensure_thread_owner(&candidate.id).await?;
         }
         let root_index = roots
             .iter()
@@ -201,23 +201,13 @@ impl StudioRuntime {
                 bail!("thread tree has an active turn or pending input");
             }
         }
-        for candidate in &thread_tree {
-            let emitter = self.interaction_emitter(candidate.id.clone());
-            self.agent_facility
-                .interactions
-                .cancel_thread(
-                    self.pending_thread_interactions(&candidate.id).await?,
-                    "thread archived",
-                    emitter,
-                )
-                .await?;
-        }
         let removed_thread_ids = thread_tree
             .iter()
             .map(|candidate| candidate.id.clone())
             .chain(std::iter::once(thread.id.clone()))
             .collect::<Vec<_>>();
-        self.retire_archived_thread_tree(&removed_thread_ids).await;
+        self.retire_archived_thread_tree(&removed_thread_ids)
+            .await?;
         self.agent_facility
             .product_events
             .commit_directory(DirectoryDelta::archive_threads(removed_thread_ids.clone()))
@@ -239,10 +229,7 @@ impl StudioRuntime {
     }
 
     async fn compensate_unstarted_thread(&self, thread_id: &str) -> Result<()> {
-        let actor_cleanup_error = self
-            .close_project_agent_trees(&[thread_id.to_string()])
-            .await
-            .err();
+        self.threads.close(thread_id).await?;
         self.residency.remove(thread_id).await;
         self.agent_facility
             .product_events
@@ -255,28 +242,17 @@ impl StudioRuntime {
             )
             .await;
         self.model_performance.remove_session(thread_id).await?;
-        if let Some(error) = actor_cleanup_error {
-            return Err(error).context(format!(
-                "new Thread {thread_id} was archived but its actor cleanup failed"
-            ));
+        Ok(())
+    }
+
+    pub(super) async fn retire_archived_thread_tree(&self, thread_ids: &[String]) -> Result<()> {
+        self.close_project_agent_trees(thread_ids).await?;
+        for thread_id in thread_ids {
+            self.residency.remove(thread_id).await;
         }
         Ok(())
     }
 
-    pub(super) async fn retire_archived_thread_tree(&self, thread_ids: &[String]) {
-        if let Err(error) = self.close_project_agent_trees(thread_ids).await {
-            tracing::warn!(
-                root_thread_id = thread_ids.first().map(String::as_str).unwrap_or_default(),
-                error = %error,
-                "archived Thread actor cleanup deferred"
-            );
-        }
-        for thread_id in thread_ids {
-            self.residency.remove(thread_id).await;
-        }
-    }
-
-    /// 归档是跨 owner 命令；先原子物化它需要的冷目录范围，再执行全部业务校验。
     async fn activate_thread_archive_scope(
         &self,
         root_thread_id: &str,
@@ -305,7 +281,7 @@ impl StudioRuntime {
             .iter()
             .chain(tree.iter())
             .cloned()
-            .map(pl_core::Thread::from)
+            .map(pl_protocol::Thread::from)
             .collect::<Vec<_>>();
         entries.sort_by(|left, right| left.id.cmp(&right.id));
         entries.dedup_by(|left, right| left.id == right.id);
@@ -315,53 +291,7 @@ impl StudioRuntime {
         Ok(Some((root, roots, tree)))
     }
 
-    pub async fn set_thread_mode(
-        &self,
-        thread_id: &str,
-        mode: pl_core::ThreadModeId,
-    ) -> Result<()> {
-        let _lifecycle_guard = self.lifecycle_lock.lock().await;
-        let thread = self.read_owned_thread(thread_id).await?;
-        if thread.parent_thread_id.is_some() {
-            bail!("only a root Thread can change mode");
-        }
-        self.ensure_mode_available(&mode)?;
-        let (handle, agent_id) = self.ensure_thread_agent(thread_id).await?;
-        let snapshot = handle
-            .snapshot(agent_id.clone())
-            .await
-            .map_err(|error| anyhow::anyhow!(error))?;
-        if snapshot.active_turn_id().is_some()
-            || snapshot.pending_inputs > 0
-            || !snapshot.state.is_idle()
-        {
-            bail!("thread mode cannot change while the Thread is running or has pending input");
-        }
-        if !self
-            .pending_thread_interactions(thread_id)
-            .await?
-            .is_empty()
-        {
-            bail!("thread mode cannot change while an interaction is pending");
-        }
-        handle
-            .change_idle_thread_mode(agent_id, mode.clone())
-            .await
-            .map_err(|error| anyhow::anyhow!(error))?;
-        let mut updated = pl_core::Thread::from(thread);
-        updated.mode = mode;
-        updated.updated_at = crate::studio::unix_seconds();
-        self.agent_facility
-            .product_events
-            .commit_directory(DirectoryDelta {
-                thread_upserts: vec![updated],
-                ..Default::default()
-            })
-            .await?;
-        Ok(())
-    }
-
-    fn ensure_mode_available(&self, mode_id: &pl_core::ThreadModeId) -> Result<()> {
+    fn ensure_mode_available(&self, mode_id: &pl_protocol::ThreadModeId) -> Result<()> {
         anyhow::ensure!(
             self.thread_modes.snapshot().mode(mode_id).is_some(),
             "selected Thread Mode `{mode_id}` is unavailable"
@@ -372,14 +302,19 @@ impl StudioRuntime {
     /// 未驻留即不 busy：钉住集合恢复保证有 pending 工作的 Thread 会被恢复，
     /// LRU 只淘汰空闲且已耐久化的 actor（design/19 §19.6）。
     pub(in crate::studio::runtime) async fn thread_is_busy(&self, thread_id: &str) -> Result<bool> {
-        let Some((handle, agent_id)) = self.try_get_thread_handle(thread_id).await? else {
-            return Ok(false);
-        };
-        match handle.snapshot(agent_id).await {
-            Ok(snapshot) => Ok(snapshot.active_turn_id().is_some() || snapshot.pending_inputs > 0),
-            Err(pl_core::AgentRuntimeError::NotFound(_)) => Ok(false),
-            Err(error) => Err(anyhow::anyhow!(error)),
-        }
+        let (snapshot, _) = self.read_thread_facts(thread_id).await?;
+        Ok(snapshot
+            .turns
+            .iter()
+            .any(|turn| turn.state == pl_core::thread::TurnState::Running)
+            || snapshot
+                .inputs
+                .iter()
+                .any(|input| input.state == pl_core::thread::input::InputState::Pending)
+            || snapshot
+                .tasks
+                .values()
+                .any(|task| task.status == pl_core::thread::task::TaskStatus::Running))
     }
 }
 
@@ -410,7 +345,43 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unsaved_new_thread_stays_resident_and_reconnects_from_memory() {
+    async fn activation_evicts_idle_history_but_keeps_current_target_and_subscription() {
+        let (_home, _workspace, runtime, selected_id) = runtime_with_thread().await;
+        let project = runtime
+            .read_owned_thread(&selected_id)
+            .await
+            .unwrap()
+            .project_id;
+        let mut subscription = runtime
+            .subscribe_thread(pl_protocol::ThreadSubscriptionRequest {
+                thread_id: selected_id.clone(),
+            })
+            .await
+            .unwrap();
+        let mut newest = selected_id.clone();
+        for index in 0..6 {
+            newest = runtime
+                .create_thread(&project, &format!("idle {index}"))
+                .await
+                .unwrap()
+                .id;
+            assert!(
+                runtime.threads.thread(&newest).is_some(),
+                "current activation must survive capacity enforcement"
+            );
+        }
+        assert!(runtime.threads.thread(&selected_id).is_some());
+        assert!(subscription.recv().await.unwrap().is_some());
+        assert!(runtime.threads.observed_threads().len() <= 6);
+        drop(subscription);
+        runtime.ensure_thread_owner(&newest).await.unwrap();
+        assert!(runtime.threads.thread(&newest).is_some());
+        assert!(runtime.threads.thread(&selected_id).is_none());
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn unsaved_new_thread_reconnects_from_memory_and_flushes_latest_directory_after_retry() {
         use sea_orm::ConnectionTrait;
         let (_home, _workspace, runtime, existing_id) = runtime_with_thread().await;
         let project_id = runtime
@@ -419,7 +390,7 @@ mod tests {
             .unwrap()
             .project_id;
         let repository = runtime.persistence_repository().await.unwrap();
-        repository.writer().flush().await.unwrap();
+        repository.flush().await.unwrap();
         runtime.store.database().execute_unprepared("CREATE TRIGGER fail_new_thread BEFORE INSERT ON threads BEGIN SELECT RAISE(ABORT, 'disk i/o error'); END").await.unwrap();
         let thread = tokio::time::timeout(
             std::time::Duration::from_secs(2),
@@ -432,7 +403,7 @@ mod tests {
             .rename_thread(thread.id.clone(), "Latest memory title".into())
             .await
             .unwrap();
-        assert!(repository.writer().shutdown().await.is_err());
+        assert!(repository.shutdown().await.is_err());
         assert!(
             runtime
                 .store
@@ -441,19 +412,21 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
-        let (handle, id) = runtime.ensure_thread_agent(&thread.id).await.unwrap();
-        assert!(handle.evict_agent(id.clone()).await.is_err());
-        assert!(handle.snapshot(id).await.is_ok());
+        let owner = runtime.ensure_thread_owner(&thread.id).await.unwrap();
+        assert_eq!(
+            owner.snapshot().lifecycle,
+            pl_core::thread::ThreadLifecycle::Open
+        );
         for selected in [&existing_id, &thread.id] {
             let mut subscription = runtime
-                .subscribe_thread(pl_core::ThreadSubscriptionRequest {
+                .subscribe_thread(pl_protocol::ThreadSubscriptionRequest {
                     thread_id: selected.clone(),
                 })
                 .await
                 .unwrap();
-            let frame = subscription.recv().await.unwrap();
+            let frame = subscription.recv().await.unwrap().unwrap();
             if selected == &thread.id {
-                let pl_core::ThreadSubscriptionUpdate::Snapshot { snapshot } = frame else {
+                let pl_protocol::ThreadSubscriptionUpdate::Snapshot { snapshot } = frame else {
                     panic!("initial memory snapshot");
                 };
                 assert_eq!(snapshot.thread.title, renamed.title);
@@ -465,8 +438,8 @@ mod tests {
             .execute_unprepared("DROP TRIGGER fail_new_thread")
             .await
             .unwrap();
-        repository.writer().retry_now();
-        repository.writer().flush().await.unwrap();
+        repository.retry_now();
+        repository.flush().await.unwrap();
         assert_eq!(
             runtime
                 .store
@@ -606,26 +579,10 @@ mod tests {
         );
         runtime.shutdown_runtime().await.unwrap();
     }
-    async fn close_result(
-        handle: &pl_core::AgentRuntimeHandle,
-        child: &pl_core::ThreadId,
-    ) -> pl_core::AgentSnapshot {
-        let mut changes = handle.subscribe_directory();
-        loop {
-            let snapshot = handle.snapshot(child.clone()).await.unwrap();
-            if matches!(&snapshot.state, pl_core::AgentState::Closed(_))
-                || matches!(&snapshot.state, pl_core::AgentState::Closing(state) if state.error().is_some())
-            {
-                return snapshot;
-            }
-            changes.changed().await.unwrap();
-        }
-    }
-
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn worktree_lifecycle_and_new_submissions_do_not_wait_for_sqlite() {
-        use pl_core::{AgentProgressStage, AgentSpawnRequest, ThreadContextState};
-        use pl_core::{AgentWorkspaceDisposition, AgentWorkspaceMode};
+        use crate::studio::agent_host::worktree_lease::WorktreeLeaseState;
+        use pl_protocol::AgentWorkspaceMode;
         use sea_orm::TransactionTrait;
         let (_home, workspace, runtime, root_id) = runtime_with_thread().await;
         for args in [
@@ -653,87 +610,65 @@ mod tests {
                 String::from_utf8_lossy(&output.stderr)
             );
         }
-        let (handle, root) = runtime.ensure_thread_agent(&root_id).await.unwrap();
-        let writer = runtime
-            .persistence_repository()
+        let root = runtime.ensure_thread_owner(&root_id).await.unwrap();
+        root.pause_inputs().await.unwrap();
+        let writer = runtime.persistence_repository().await.unwrap();
+        writer.flush().await.unwrap();
+        let project_id = runtime
+            .read_owned_thread(&root_id)
             .await
             .unwrap()
-            .writer()
-            .clone();
-        writer.flush().await.unwrap();
-        let route = runtime
-            .config_runtime
-            .read()
-            .unwrap()
-            .config
-            .models
-            .routes
-            .values()
-            .next()
-            .unwrap()
-            .clone();
-        let profile = pl_core::AgentProfileSnapshot {
-            profile_id: "worktree_executor".into(),
-            display_name: "Executor".into(),
-            description: String::new(),
-            when_to_use: String::new(),
-            system_instructions: String::new(),
-            provider_id: route.provider.to_string(),
-            model: route.model,
-            effort: route.effort.map(|effort| effort.as_str().to_owned()),
-            source: "test".into(),
-            revision: "1".into(),
-            content_hash: "fixture".into(),
-            system: true,
-            enabled: true,
-            workspace_mode: AgentWorkspaceMode::Worktree,
-        };
-        let mut session = ThreadContextState::empty();
-        session.session.replace_agent_profile(Some(profile));
-        // The single SQLite connection remains occupied throughout the real lifecycle.
-        // Old prepare_spawn/prepare_close perform SQL and cannot finish before release.
+            .project_id;
+        let project = runtime
+            .agent_facility
+            .product_events
+            .project_snapshot()
+            .await
+            .into_iter()
+            .find(|project| project.id == project_id)
+            .unwrap();
         let blocked = runtime.store.database().begin().await.unwrap();
         let operation = async {
-            let spawned = handle
-                .spawn(AgentSpawnRequest {
-                    thread_id: pl_core::ThreadId::new("memory-worktree-child").unwrap(),
-                    parent_id: root,
-                    role: pl_core::AgentRoleId::new("worktree_executor").unwrap(),
-                    session,
-                    initial_turn_id: None,
-                    initial_message: None,
-                    metadata: serde_json::Value::Null,
+            let (_, worktree) =
+                crate::studio::agent_host::workspace_preparation::prepare_workspace(
+                    &runtime.agent_facility.worktrees,
+                    &runtime.ssh_manager,
+                    crate::studio::agent_host::workspace_preparation::WorkspacePreparation {
+                        project: &project,
+                        root_thread_id: &root_id,
+                        child_id: "memory-worktree-child",
+                        mode: AgentWorkspaceMode::Worktree,
+                        writable_paths: None,
+                    },
+                )
+                .await
+                .unwrap();
+            let mut lease = worktree.unwrap().lease;
+            let child = lease.child_id.clone();
+            let path = std::path::PathBuf::from(&lease.path);
+            assert!(path.exists());
+            lease.transition(WorktreeLeaseState::Preserved);
+            runtime
+                .agent_facility
+                .worktrees
+                .record(lease.clone())
+                .unwrap();
+            for (index, detail) in ["first delivery", "new repair delivery"]
+                .into_iter()
+                .enumerate()
+            {
+                root.submit_input(pl_core::thread::input::ThreadInput {
+                    id: format!("queued-{index}"),
+                    payload: pl_core::context::OpaquePayload::text(detail),
+                    context: vec![pl_core::context::ContextContent::Text {
+                        text: detail.into(),
+                    }],
                 })
                 .await
                 .unwrap();
-            let child = spawned.snapshot.identity.id;
-            let assignment = spawned.workspace_assignment.unwrap();
-            let path = std::path::PathBuf::from(&assignment.root);
-            assert!(path.exists());
-            for detail in ["first delivery", "new repair delivery"] {
-                handle
-                    .report_progress(
-                        child.clone(),
-                        AgentProgressStage::Verifying,
-                        detail.into(),
-                        "await review".into(),
-                        Some(detail.into()),
-                    )
-                    .await
-                    .unwrap();
             }
-            let submissions = handle.read_submissions(child.clone(), 0, 10).await.unwrap();
-            assert_eq!(submissions.total, 2);
+            assert_eq!(root.snapshot().inputs.len(), 2);
             assert!(writer.pending_commit_count() > 0);
-            handle
-                .close_with_disposition(child.clone(), AgentWorkspaceDisposition::Preserve)
-                .await
-                .unwrap();
-            assert!(matches!(
-                close_result(&handle, &child).await.state,
-                pl_core::AgentState::Closed(_)
-            ));
-            assert!(path.exists());
             let locked = tokio::process::Command::new("git")
                 .args(["worktree", "lock"])
                 .arg(&path)
@@ -742,24 +677,15 @@ mod tests {
                 .await
                 .unwrap();
             assert!(locked.status.success());
-            handle
-                .close_with_disposition(child.clone(), AgentWorkspaceDisposition::Cleanup)
-                .await
-                .unwrap();
             assert!(
-                matches!(close_result(&handle, &child).await.state, pl_core::AgentState::Closing(state) if state.error().is_some()),
-                "physical cleanup failure must remain visible on the owner"
-            );
-            assert!(path.exists());
-            assert_eq!(
                 runtime
-                    .agent_facility
-                    .worktrees
-                    .get(child.as_str())
-                    .unwrap()
-                    .state,
-                crate::studio::agent_host::worktree_lease::WorktreeLeaseState::CleanupRequested
+                    .cleanup_preserved_worktree(&child, lease.revision)
+                    .await
+                    .is_err()
             );
+            let failed = runtime.agent_facility.worktrees.get(&child).unwrap();
+            assert_eq!(failed.state, WorktreeLeaseState::Preserved);
+            assert!(path.exists());
             let unlocked = tokio::process::Command::new("git")
                 .args(["worktree", "unlock"])
                 .arg(&path)
@@ -768,31 +694,39 @@ mod tests {
                 .await
                 .unwrap();
             assert!(unlocked.status.success());
-            handle
-                .close_with_disposition(child.clone(), AgentWorkspaceDisposition::Cleanup)
+            let branch_lock = std::path::Path::new(&failed.repository_root)
+                .join(".git/refs/heads")
+                .join(format!("{}.lock", failed.branch));
+            tokio::fs::create_dir_all(branch_lock.parent().unwrap())
                 .await
                 .unwrap();
-            assert!(matches!(
-                close_result(&handle, &child).await.state,
-                pl_core::AgentState::Closed(_)
-            ));
-            handle
-                .close_with_disposition(child.clone(), AgentWorkspaceDisposition::Cleanup)
+            tokio::fs::write(&branch_lock, "held").await.unwrap();
+            assert!(
+                runtime
+                    .cleanup_preserved_worktree(&child, failed.revision)
+                    .await
+                    .is_err()
+            );
+            assert!(
+                !path.exists(),
+                "first cleanup removed the directory before branch deletion failed"
+            );
+            let partial = runtime.agent_facility.worktrees.get(&child).unwrap();
+            assert_eq!(partial.state, WorktreeLeaseState::Preserved);
+            tokio::fs::remove_file(branch_lock).await.unwrap();
+            runtime
+                .cleanup_preserved_worktree(&child, partial.revision)
                 .await
                 .unwrap();
-            assert!(matches!(
-                close_result(&handle, &child).await.state,
-                pl_core::AgentState::Closed(_)
-            ));
             assert!(!path.exists());
-            let lease = runtime
-                .agent_facility
-                .worktrees
-                .get(child.as_str())
-                .unwrap();
-            assert_eq!(
-                lease.state,
-                crate::studio::agent_host::worktree_lease::WorktreeLeaseState::Cleaned
+            let lease = runtime.agent_facility.worktrees.get(&child).unwrap();
+            assert_eq!(lease.state, WorktreeLeaseState::Cleaned);
+            assert!(
+                runtime
+                    .cleanup_preserved_worktree(&child, lease.revision)
+                    .await
+                    .is_err(),
+                "cleaned leases cannot be cleaned twice"
             );
             lease
         };

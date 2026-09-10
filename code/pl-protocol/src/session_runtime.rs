@@ -110,13 +110,23 @@ pub struct ToolTaskResultPage {
     pub next_cursor: Option<String>,
 }
 
+/// Producer-owned complete task payload. Consumers interpret the format and version.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolTaskPayload {
+    pub format: String,
+    pub version: u32,
+    pub content: String,
+}
+
 /// Final tool output, independent of the Turn that submitted the invocation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolTaskResult {
+    /// Exact model-facing text supplied by the producer.
     pub output: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub structured_content: Option<serde_json::Value>,
+    pub payload: Option<ToolTaskPayload>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skill_activations: Vec<crate::SkillActivation>,
     #[serde(default)]

@@ -1,8 +1,9 @@
 ---
 name: sync-readme
 description: Use when synchronizing the root README.md with the current codebase, manifests, design index, runtime entrypoints, and verification rules.
-category: guides
-platforms: [windows, linux, macos]
+metadata:
+  category: guides
+  platforms: [windows, linux, macos]
 ---
 
 # 同步根 README
@@ -28,8 +29,8 @@ README 的架构图、crate 表、项目结构、技术栈、核心概念、工�
 
 ### 3. 工具运行时
 
-- 从 `TurnEngine::install_default_tools`、`BuiltinToolInstaller`、`ToolCapabilityConfig` 及产品运行时的
-  动态安装入口核对工具来源。
+- 从 `pl-tool` 工具构造器、Thread `Registration`、StudioThreadFactory / StudioThreadAssembler 和
+  动态安装入口核对工具来源；core 不安装默认工具，也不代理 provider 或产品配置。
 - 区分静态内置工具、按能力安装的工具族、MCP/LSP、协作工具和 hosted 工具，不把它们误写成
   单一固定注册表。
 - 如 README 需要数量，必须从当前安装条件逐项计算并注明条件；优先展示稳定类别和名称，不保存

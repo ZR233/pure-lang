@@ -2,7 +2,7 @@
 
 use std::collections::VecDeque;
 
-use pl_core::StateError;
+use pl_protocol::StateError;
 
 use crate::PureError;
 use crate::studio::{

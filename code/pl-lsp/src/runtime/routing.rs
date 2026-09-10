@@ -8,7 +8,7 @@ use crate::query::{LspQuery, LspQueryOperation};
 
 use super::{
     LspAvailabilityKind, LspResult, LspRoutingError, LspRuntimeError, LspRuntimeRegistry,
-    ResolvedLspServer, canonical_workspace_root,
+    ResolvedLspServer, workspace_key,
 };
 
 impl LspRuntimeRegistry {
@@ -127,7 +127,7 @@ impl LspRuntimeRegistry {
         workspace_root: &Path,
         language_id: &str,
     ) -> LspResult<String> {
-        let workspace_root = canonical_workspace_root(workspace_root);
+        let workspace_root = workspace_key(workspace_root);
         let state = self.state.lock().await;
         let Some(workspace) = state.workspaces.get(&workspace_root) else {
             return Err(LspRuntimeError::Unavailable(format!(
@@ -170,7 +170,7 @@ impl LspRuntimeRegistry {
         path: &Path,
     ) -> LspResult<String> {
         let extension = extension_for_path(path);
-        let workspace_root = canonical_workspace_root(workspace_root);
+        let workspace_root = workspace_key(workspace_root);
         let matches = self
             .state
             .lock()

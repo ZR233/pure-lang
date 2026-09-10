@@ -5,7 +5,5 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-pl-protocol = { workspace = true }
+pl-core = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
-tokio = { workspace = true }

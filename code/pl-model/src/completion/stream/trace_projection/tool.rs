@@ -1,12 +1,12 @@
 //! 工具调用与 web search 流的 trace part 投影。
 
-use pl_trace::{
+use pl_protocol::trace::{
     AgentEvent, TraceDelta, TracePart, TracePartAction, TracePartCompletion, TraceToolInvocation,
     TraceToolOutput,
 };
 
 use crate::completion::ToolCall;
-use crate::completion::WebSearchAction;
+use pl_protocol::search::WebSearchAction;
 
 use super::super::tool_stream::ToolCallAccumulatorSnapshot;
 use super::TraceProjection;
@@ -25,7 +25,9 @@ impl TraceProjection {
                 );
         self.start_item(
             item_id,
-            pl_trace::TracePartState::Tool(pl_trace::TraceToolPart::streaming(invocation)),
+            pl_protocol::trace::TracePartState::Tool(pl_protocol::trace::TraceToolPart::streaming(
+                invocation,
+            )),
         )
     }
 
@@ -50,7 +52,9 @@ impl TraceProjection {
         }
         self.start_item(
             item_id,
-            pl_trace::TracePartState::Tool(pl_trace::TraceToolPart::streaming(invocation)),
+            pl_protocol::trace::TracePartState::Tool(pl_protocol::trace::TraceToolPart::streaming(
+                invocation,
+            )),
         )
     }
 
@@ -160,7 +164,9 @@ impl TraceProjection {
         }
         self.start_item(
             item_id,
-            pl_trace::TracePartState::Tool(pl_trace::TraceToolPart::started(invocation)),
+            pl_protocol::trace::TracePartState::Tool(pl_protocol::trace::TraceToolPart::started(
+                invocation,
+            )),
         )
     }
 }
@@ -199,7 +205,7 @@ fn push_tool_alias(aliases: &mut Vec<String>, value: &str) {
 mod tests {
     use std::sync::Arc;
 
-    use pl_trace::{TraceEventKind, TracePartKind, TraceToolState};
+    use pl_protocol::trace::{TraceEventKind, TracePartKind, TraceToolState};
 
     use crate::completion::{ToolCall, ToolCallPayload};
 
@@ -223,14 +229,14 @@ mod tests {
             call_id: "call-1".to_string(),
             name: "exec".to_string(),
             payload: ToolCallPayload::Function {
-                arguments: serde_json::json!({"cmd": "echo hi"}),
+                arguments: serde_json::json!({"cmd": "echo hi"}).to_string(),
             },
             invalid_arguments: None,
             caller: None,
         }
     }
 
-    fn tool_delta_item_id(event: &pl_trace::AgentEvent) -> Option<String> {
+    fn tool_delta_item_id(event: &pl_protocol::trace::AgentEvent) -> Option<String> {
         match trace_part_event(event)? {
             TracePartEvent::Delta {
                 item_id,
@@ -297,7 +303,10 @@ mod tests {
 
     #[test]
     fn tool_metadata_and_argument_deltas_share_one_revision_chain() {
-        let sink = Arc::new(pl_trace::InMemoryTraceEventSink::new("session-1", 0));
+        let sink = Arc::new(pl_protocol::trace::InMemoryTraceEventSink::new(
+            "session-1",
+            0,
+        ));
         let mut trace = trace_with_sink(sink.clone());
         let early = accumulator_snapshot("call-1", "call-1");
         let late = accumulator_snapshot("provider-tool-1", "call-1");
@@ -310,19 +319,19 @@ mod tests {
         assert!(ignored.is_empty());
         assert!(first.iter().any(|event| matches!(
             event,
-            pl_trace::AgentEvent::TracePartDelta { event } if event.revision == 1
+            pl_protocol::trace::AgentEvent::TracePartDelta { event } if event.revision == 1
         )));
         assert!(second.iter().any(|event| matches!(
             event,
-            pl_trace::AgentEvent::TracePartStarted { item } if item.revision() == 2
+            pl_protocol::trace::AgentEvent::TracePartStarted { item } if item.revision() == 2
         )));
         assert!(second.iter().any(|event| matches!(
             event,
-            pl_trace::AgentEvent::TracePartDelta { event } if event.revision == 3
+            pl_protocol::trace::AgentEvent::TracePartDelta { event } if event.revision == 3
         )));
         assert!(canonical.iter().any(|event| matches!(
             event,
-            pl_trace::AgentEvent::TracePartStarted { item } if item.revision() == 3
+            pl_protocol::trace::AgentEvent::TracePartStarted { item } if item.revision() == 3
         )));
         assert!(trace.take_trace_error().is_none());
         assert_eq!(
@@ -350,7 +359,10 @@ mod tests {
     }
     #[test]
     fn retried_tool_call_keeps_provider_identity_but_has_a_new_trace_item() {
-        let sink = Arc::new(pl_trace::InMemoryTraceEventSink::new("session-1", 0));
+        let sink = Arc::new(pl_protocol::trace::InMemoryTraceEventSink::new(
+            "session-1",
+            0,
+        ));
         let mut first = trace_with_sink(sink.clone());
         let snapshot = accumulator_snapshot("provider-tool-1", "call-1");
         let first_item = first

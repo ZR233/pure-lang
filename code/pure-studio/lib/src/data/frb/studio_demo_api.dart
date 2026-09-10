@@ -1283,7 +1283,7 @@ class DemoStudioApi implements StudioApi {
     final now = DateTime.now();
     final receipt = SubmitPromptReceipt(
       threadId: threadId,
-      turnId: turnId,
+      inputId: '$turnId:user',
       cursor: workspace.revision + 1,
     );
     _emitThreadUpdate(
@@ -2108,6 +2108,7 @@ ThreadItemView _messageItem({
       ThreadItemKind.inference ||
       ThreadItemKind.skill ||
       ThreadItemKind.file ||
+      ThreadItemKind.raw ||
       ThreadItemKind.contextCompaction => throw ArgumentError.value(
         kind,
         'kind',

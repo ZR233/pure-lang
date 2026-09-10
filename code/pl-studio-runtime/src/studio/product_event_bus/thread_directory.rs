@@ -1,7 +1,7 @@
 //! Thread 目录：活动热集合维护、SQLite 冷分页 overlay 与目录事实的命令提交。
 
 use anyhow::Result;
-use pl_core::Thread;
+use pl_protocol::Thread;
 
 use crate::studio::merged_page::{HotColdEntry, merge_page_desc};
 use crate::studio::store::directory::{
@@ -36,9 +36,11 @@ impl ProductEventBus {
         records: Vec<crate::studio::AttachmentRecord>,
     ) -> Result<()> {
         for record in records {
-            self.store
-                .sessions()
-                .register_resource(&record.thread_id, &record.id, &record)?;
+            self.store.sessions().register_resource(
+                &record.thread_id,
+                &record.id,
+                record.session_payload()?,
+            )?;
         }
         Ok(())
     }
@@ -134,6 +136,38 @@ impl ProductEventBus {
         )))
     }
 
+    /// Applies only runtime-owned fields to the current hot directory entry.
+    /// Missing or archived entries are never reinserted by a delayed observation.
+    pub(in crate::studio) fn patch_thread_runtime(
+        &self,
+        thread_id: &str,
+        status: pl_protocol::ThreadStatus,
+        committed_at: i64,
+    ) -> Option<Thread> {
+        let mut index = self
+            .thread_index
+            .lock()
+            .expect("thread index lock poisoned");
+        let thread = index.get_mut(thread_id)?;
+        if thread.archived {
+            return None;
+        }
+        thread.status = status;
+        thread.updated_at = thread.updated_at.max(committed_at);
+        let thread = thread.clone();
+        self.bump(&self.revisions.thread);
+        let (revision, updated_at) = self.revision(&self.revisions.thread);
+        self.emit(StudioProductEventKind::ThreadDirectoryChanged(
+            StudioThreadDirectoryDelta {
+                revision,
+                updated_at,
+                upserted: vec![thread.clone()],
+                removed: Vec::new(),
+            },
+        ));
+        Some(thread)
+    }
+
     /// 将已从持久化层加载的目录条目加入热集合，但不改变 revision 或广播事件。
     ///
     /// 激活路径只是建立查询缓存，不代表目录事实发生了变化；真正的目录
@@ -221,7 +255,7 @@ impl ProductEventBus {
     }
 
     /// 从活动热集合读取 Thread 元数据；纯冷数据请走分页冷查询。
-    pub(in crate::studio) fn thread_snapshot(&self, thread_id: &str) -> Option<Thread> {
+    pub(crate) fn thread_snapshot(&self, thread_id: &str) -> Option<Thread> {
         self.thread_index
             .lock()
             .expect("thread index lock poisoned")
@@ -246,22 +280,14 @@ impl ProductEventBus {
         id: &str,
         message: &str,
     ) -> Result<()> {
-        use pl_core::AgentStateTransition;
         let mut thread = self
             .thread_snapshot(id)
             .ok_or_else(|| anyhow::anyhow!("unregistered child is not resident: {id}"))?;
-        let state = pl_core::AgentState::idle()
-            .decide(pl_core::AgentCommand::Fault {
-                error: pl_core::StateError {
-                    code: "agentRegistrationFailed".into(),
-                    message: message.into(),
-                    retryable: false,
-                },
-                turn_id: None,
-                classification: pl_core::AgentFaultClassification::RecoverableRuntime,
-            })?
-            .next_state;
-        thread.status = pl_core::ThreadStatus::Faulted;
+        let state = crate::studio::records::DirectoryState {
+            kind: pl_protocol::ThreadStatus::Faulted,
+            error: Some(message.into()),
+        };
+        thread.status = pl_protocol::ThreadStatus::Faulted;
         thread.updated_at = crate::studio::unix_seconds();
         let delta = DirectoryDelta {
             unregistered_faults: vec![crate::studio::store::directory::UnregisteredChildFault {
@@ -297,7 +323,7 @@ impl ProductEventBus {
 
 #[cfg(test)]
 mod tests {
-    use pl_core::Thread;
+    use pl_protocol::Thread;
 
     use crate::studio::StudioStore;
     use crate::studio::ids::unix_seconds;
@@ -310,7 +336,7 @@ mod tests {
                 .create_thread(
                     project_id,
                     &format!("Session {index}"),
-                    pl_core::ThreadModeId::simple(),
+                    pl_protocol::ThreadModeId::simple(),
                 )
                 .await
                 .expect("thread");
@@ -452,5 +478,61 @@ mod tests {
         assert_eq!(after.state.revision(), before_revision);
         assert_eq!(after.state.value().unwrap().threads, vec![entry]);
         assert!(events.try_recv().is_err());
+    }
+    #[tokio::test]
+    async fn delayed_runtime_patch_preserves_user_metadata_and_never_revives_removed_entries() {
+        let (_store, bus) = memory_bus().await;
+        for remove in [false, true] {
+            let mut original = Thread::placeholder("observed");
+            original.title = "original".into();
+            bus.apply_thread_delta(vec![original], Vec::new())
+                .await
+                .unwrap();
+            let (captured_tx, captured_rx) = tokio::sync::oneshot::channel();
+            let (resume_tx, resume_rx) = tokio::sync::oneshot::channel();
+            let observer = bus.clone();
+            let delayed = tokio::spawn(async move {
+                let stale = observer.thread_snapshot("observed").unwrap();
+                captured_tx.send(()).unwrap();
+                resume_rx.await.unwrap();
+                observer.patch_thread_runtime(&stale.id, pl_protocol::ThreadStatus::Running, 25)
+            });
+            captured_rx.await.unwrap();
+            let mut edited = bus.thread_snapshot("observed").unwrap();
+            edited.title = "user renamed".into();
+            edited.mode = pl_protocol::ThreadModeId::new("mode.user-mode").unwrap();
+            edited.updated_at = 50;
+            if remove {
+                bus.apply_thread_delta(Vec::new(), vec![edited.id.clone()])
+                    .await
+                    .unwrap();
+            } else {
+                bus.apply_thread_delta(vec![edited.clone()], Vec::new())
+                    .await
+                    .unwrap();
+            }
+            resume_tx.send(()).unwrap();
+            let patched = delayed.await.unwrap();
+            if remove {
+                assert!(patched.is_none());
+                assert!(bus.thread_snapshot("observed").is_none());
+            } else {
+                edited.status = pl_protocol::ThreadStatus::Running;
+                pretty_assertions::assert_eq!(patched, Some(edited.clone()));
+                pretty_assertions::assert_eq!(
+                    bus.thread_snapshot("observed"),
+                    Some(edited.clone())
+                );
+                edited.archived = true;
+                bus.apply_thread_delta(vec![edited.clone()], Vec::new())
+                    .await
+                    .unwrap();
+                assert!(
+                    bus.patch_thread_runtime("observed", pl_protocol::ThreadStatus::Closed, 99)
+                        .is_none()
+                );
+                pretty_assertions::assert_eq!(bus.thread_snapshot("observed"), Some(edited));
+            }
+        }
     }
 }

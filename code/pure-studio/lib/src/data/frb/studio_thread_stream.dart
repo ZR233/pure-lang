@@ -265,7 +265,8 @@ ThreadItemStateView _threadItemStateFromFrb(
       ),
       lifecycle: _agentLifecycleFromFrb(state),
     ),
-    turn: (state) => ThreadTurnItemStateView(_turnStateFromFrb(state)),
+    turn: (state, inputId) =>
+        ThreadTurnItemStateView(_turnStateFromFrb(state), inputId: inputId),
     inference: (inferenceId, model, state) => ThreadInferenceItemStateView(
       inferenceId: inferenceId,
       model: model,
@@ -299,10 +300,23 @@ ThreadItemStateView _threadItemStateFromFrb(
         ),
     file: (path, mediaType, completedAt) =>
         ThreadFileItemStateView(path, mediaType, _dateFromUnix(completedAt)),
+    raw: (payloads, notice, recordedAt) => ThreadRawItemStateView(
+      payloads
+          .map(
+            (payload) => RawHistoryPayload(
+              payload.format,
+              payload.version,
+              payload.content,
+            ),
+          )
+          .toList(),
+      notice,
+      _dateFromUnix(recordedAt),
+    ),
     contextCompaction: (beforeTokens, afterTokens, compactedAt) =>
         ThreadContextCompactionItemStateView(
-          beforeTokens.toInt(),
-          afterTokens.toInt(),
+          beforeTokens?.toInt(),
+          afterTokens?.toInt(),
           _dateFromUnix(compactedAt),
         ),
   );
@@ -447,6 +461,7 @@ ThreadItemDeltaView _threadItemDeltaFromFrb(
 
 StudioTurnView _turnFromFrb(frb.BridgeTurn value) {
   return StudioTurnView(
+    inputId: value.inputId,
     turnId: value.id,
     threadId: value.threadId,
     revision: value.revision.toInt(),
@@ -516,6 +531,7 @@ StudioTurnCancellationCause _turnCancellationCauseFromFrb(
   frb.BridgeTurnCancellationCause value,
 ) {
   return value.when(
+    unspecified: () => const UnspecifiedTurnCancellation(),
     userRequested: () => const UserRequestedTurnCancellation(),
     runtimeShutdown: () => const RuntimeShutdownTurnCancellation(),
     agentClosed: () => const AgentClosedTurnCancellation(),

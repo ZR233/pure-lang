@@ -15,7 +15,7 @@ impl LspRuntimeRegistry {
         workspace_root: impl AsRef<Path>,
         query: LspQuery,
     ) -> LspResult<LspQueryResult> {
-        let workspace_root = super::canonical_workspace_root(workspace_root.as_ref());
+        let workspace_root = super::workspace_key(workspace_root.as_ref());
         if query.operation == LspQueryOperation::Diagnostics {
             return self
                 .query_diagnostics_in_workspace(&workspace_root, query)

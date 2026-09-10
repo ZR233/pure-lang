@@ -1,6 +1,6 @@
 //! 更新状态机接收的命令载荷，统一携带乐观锁 revision 与业务数据。
 
-use pl_core::StateError;
+use pl_protocol::StateError;
 
 use crate::StudioUpdate;
 

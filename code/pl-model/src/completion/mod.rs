@@ -17,24 +17,34 @@ pub(crate) mod tool_call;
 pub(crate) mod tool_schema;
 pub(crate) mod usage;
 mod visible_text;
-mod web_search;
 
 pub use compaction::*;
 pub use pl_protocol::{
     AttachmentModality, ContentPart, HostedWebSearchOptions, InferenceAccounting,
     InferenceOrchestrationMetrics, InferenceTiming, InferenceTokenUsage, Message, MessageContent,
     MessageRole, ModelContextItem, PureError, ResponsesContextItem, Result, ToolCallCaller,
-    ToolCallKind, ToolSpec, UsageReport, WebSearchContextSize, WebSearchFilters,
+    ToolCallKind, ToolCallRecord, ToolSpec, UsageReport, WebSearchContextSize, WebSearchFilters,
     WebSearchUserLocation,
 };
 pub use request::*;
 pub use response::*;
 pub use tool_call::*;
 pub use usage::*;
-pub use web_search::{
-    ClickOperation, ExternalWebAccess, ExternalWebAccessMode, FinanceAssetType, FinanceOperation,
-    FindOperation, OpenOperation, ScreenshotOperation, SearchAllowedCaller, SearchCommands,
-    SearchQuery, SearchRequest, SearchResponse, SearchResponseLength, SearchSettings,
-    SportsFunction, SportsLeague, SportsOperation, SportsToolName, TimeOperation, WeatherOperation,
-    WebSearchAction, WebSearchConfig, WebSearchLocation, WebSearchMode,
+
+mod snapshot;
+pub use snapshot::{
+    CompletionResponseFunctionCallSnapshot, CompletionResponseOutputSnapshot,
+    CompletionResponseSnapshot, completion_response_message_text, completion_response_snapshot,
 };
+
+pub use tool_schema::programmatic_tool_declaration;
+
+mod stable_schema;
+pub(crate) use stable_schema::canonicalize_json;
+pub use stable_schema::stable_tool_schemas;
+
+mod summary;
+pub use summary::summary_request;
+
+mod estimate;
+pub use estimate::estimate_text_input_tokens;

@@ -34,11 +34,22 @@ pub struct ToolCallIdentity {
 /// completion 误判为 provider 传输失败。原始参数同时用于历史回放与 trace。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InvalidToolArguments {
-    pub raw: String,
     pub error: String,
 }
 
 impl ToolCall {
+    /// Projects a normalized provider call into immutable history while preserving argument bytes.
+    pub fn history_record(&self) -> pl_protocol::ToolCallRecord {
+        pl_protocol::ToolCallRecord {
+            item_id: self.id.clone(),
+            call_id: self.call_id.clone(),
+            name: self.name.clone(),
+            kind: self.kind(),
+            arguments: serde_json::Value::String(self.payload_text()),
+            caller: self.caller.clone(),
+        }
+    }
+
     pub fn identity(&self) -> ToolCallIdentity {
         ToolCallIdentity {
             item_id: self.id.clone(),
@@ -50,6 +61,25 @@ impl ToolCall {
         id: impl Into<String>,
         name: impl Into<String>,
         arguments: serde_json::Value,
+        call_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            payload: ToolCallPayload::Function {
+                arguments: arguments.to_string(),
+            },
+            call_id: call_id.into(),
+            invalid_arguments: None,
+            caller: None,
+        }
+    }
+
+    /// Carries exact provider argument text. Protocol adapters may attach independent diagnostics.
+    pub fn function_raw(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        arguments: String,
         call_id: impl Into<String>,
     ) -> Self {
         Self {
@@ -74,11 +104,10 @@ impl ToolCall {
             id: id.into(),
             name: name.into(),
             payload: ToolCallPayload::Function {
-                arguments: serde_json::Value::Null,
+                arguments: raw.into(),
             },
             call_id: call_id.into(),
             invalid_arguments: Some(InvalidToolArguments {
-                raw: raw.into(),
                 error: error.into(),
             }),
             caller: None,
@@ -115,9 +144,18 @@ impl ToolCall {
         }
     }
 
-    pub fn arguments_for_tool(&self) -> serde_json::Value {
+    /// Returns raw function arguments or the JSON envelope used by a custom tool adapter.
+    pub fn execution_arguments_text(&self) -> String {
         match &self.payload {
             ToolCallPayload::Function { arguments } => arguments.clone(),
+            ToolCallPayload::Custom { input } => serde_json::json!({"input":input}).to_string(),
+        }
+    }
+
+    pub fn arguments_for_tool(&self) -> serde_json::Value {
+        match &self.payload {
+            ToolCallPayload::Function { arguments } => serde_json::from_str(arguments)
+                .unwrap_or_else(|_| serde_json::Value::String(arguments.clone())),
             ToolCallPayload::Custom { input } => serde_json::json!({ "input": input }),
         }
     }
@@ -125,24 +163,20 @@ impl ToolCall {
     pub fn arguments_for_display(&self) -> serde_json::Value {
         if let Some(invalid) = &self.invalid_arguments {
             return serde_json::json!({
-                "raw": invalid.raw,
+                "raw": self.payload_text(),
                 "parse_error": invalid.error,
             });
         }
         match &self.payload {
-            ToolCallPayload::Function { arguments } => arguments.clone(),
+            ToolCallPayload::Function { arguments } => serde_json::from_str(arguments)
+                .unwrap_or_else(|_| serde_json::Value::String(arguments.clone())),
             ToolCallPayload::Custom { input } => serde_json::json!({ "input": input }),
         }
     }
 
     pub fn payload_text(&self) -> String {
-        if let Some(invalid) = &self.invalid_arguments {
-            return invalid.raw.clone();
-        }
         match &self.payload {
-            ToolCallPayload::Function { arguments } => {
-                serde_json::to_string(arguments).unwrap_or_default()
-            }
+            ToolCallPayload::Function { arguments } => arguments.clone(),
             ToolCallPayload::Custom { input } => input.clone(),
         }
     }
@@ -160,7 +194,7 @@ impl ToolCall {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ToolCallPayload {
-    Function { arguments: serde_json::Value },
+    Function { arguments: String },
     Custom { input: String },
 }
 
@@ -181,5 +215,14 @@ mod tests {
                 call_id: "call-1".to_string(),
             }
         );
+    }
+    #[test]
+    fn history_keeps_raw_function_parameters_instead_of_reserializing_their_fields() {
+        let raw = "{ \"z\": 12345678901234567890, \"a\": \"中文\" }\n";
+        let call = ToolCall::function_raw("item", "unknown_tool", raw.into(), "call");
+        let record = call.history_record();
+        assert_eq!(record.arguments.as_str(), Some(raw));
+        assert_eq!(record.call_id, "call");
+        assert_eq!(record.item_id, "item");
     }
 }

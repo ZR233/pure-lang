@@ -5,9 +5,11 @@ use std::time::Duration;
 
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use pl_core::tool::{
-    ExecutionOutput, ExecutionRequest, GitPolicy, LocalExecutionBackend, LocalExecutionFailure,
+use pl_tool::execution::{
+    ExecutionOutput, ExecutionRequest, LocalExecutionBackend, LocalExecutionFailure,
 };
+
+use pl_tool::git::GitPolicy;
 
 const WORKTREE_GIT_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -204,7 +206,7 @@ impl WorktreeBackend for LocalWorktreeBackend {
         target_path: &'a Path,
     ) -> BoxFuture<'a, Result<(), WorktreeError>> {
         async move {
-            pl_core::path_safety::validate_path_for_write(repo_root, target_path)
+            pl_tool::workspace::path_safety::validate_path_for_write(repo_root, target_path)
                 .map_err(|error| WorktreeError::InvalidResource(error.to_string()))?;
             let parent = target_path.parent().ok_or_else(|| {
                 WorktreeError::InvalidResource("worktree target has no parent".to_string())
@@ -233,7 +235,7 @@ impl WorktreeBackend for LocalWorktreeBackend {
         target_path: &'a Path,
     ) -> BoxFuture<'a, Result<(), WorktreeError>> {
         async move {
-            pl_core::path_safety::remove_dir_all_no_follow_async(
+            pl_tool::workspace::path_safety::remove_dir_all_no_follow_async(
                 &repo_root.join(".pure/worktrees"),
                 target_path,
             )

@@ -3,9 +3,9 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use pl_core::config::SkillsConfig;
-use pl_core::remote::RemoteWorkspaceFileBackend;
-use pl_core::skill::{
+use pl_tool::remote::RemoteWorkspaceFileBackend;
+use pl_tool::skill::SkillsConfig;
+use pl_tool::skill::{
     FileSystemSkillProvider, SkillDirectorySource, SkillProvider, SkillProviderRegistration,
     SkillRegistry, resolve_local_readonly_skill_sources,
 };
@@ -23,7 +23,7 @@ pub(super) fn remote_workspace_registry(
     system_skills_dir: Option<&Path>,
     remote_backend: Arc<RemoteWorkspaceFileBackend>,
 ) -> Result<(SkillRegistry, Vec<Arc<SkillProviderRegistration>>)> {
-    let remote_provider = Arc::new(pl_core::remote::RemoteSkillProvider::new(remote_backend)?);
+    let remote_provider = Arc::new(pl_tool::remote::RemoteSkillProvider::new(remote_backend)?);
     let local_sources = remote_local_sources(config, system_skills_dir)?;
     register_remote_skill_providers(remote_provider, local_sources)
 }
@@ -59,7 +59,7 @@ pub(super) fn remote_local_sources(
 mod tests {
     use std::fs;
 
-    use pl_core::skill::{SkillProviderRequest, SkillSourceKind};
+    use pl_tool::skill::{SkillProviderRequest, SkillSourceKind};
     use tokio_util::sync::CancellationToken;
 
     use super::*;
@@ -109,7 +109,7 @@ mod tests {
         assert!(
             sources
                 .iter()
-                .all(|source| { source.source != pl_core::skill::SkillSourceKind::System })
+                .all(|source| { source.source != pl_tool::skill::SkillSourceKind::System })
         );
     }
 

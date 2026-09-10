@@ -1,4 +1,4 @@
-use pl_core::remote::{SshAuth, SshConnectionSnapshot, SshConnectionState, SshServerProfile};
+use pl_studio_runtime::{SshAuth, SshConnectionSnapshot, SshConnectionState, SshServerProfile};
 
 use crate::api::studio::bridge_runtime::active_bridge;
 use crate::api::studio::types::{

@@ -8,6 +8,7 @@ members = [
     "code/pl-patch",
     "code/pl-skill-core",
     "code/pl-core",
+    "code/pl-tool",
     "code/pl-remote-helper",
     "code/pl-studio-runtime",
     "code/pl-studio-server",
@@ -110,6 +111,7 @@ pl-output = { path = "code/pl-output" }
 pl-patch = { path = "code/pl-patch" }
 pl-skill-core = { path = "code/pl-skill-core" }
 pl-core = { path = "code/pl-core" }
+pl-tool = { path = "code/pl-tool" }
 pl-remote-helper = { path = "code/pl-remote-helper" }
 pl-studio-runtime = { path = "code/pl-studio-runtime" }
 pl-studio-server = { path = "code/pl-studio-server" }

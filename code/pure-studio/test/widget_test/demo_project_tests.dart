@@ -151,8 +151,11 @@ void registerDemoProjectTests() {
     );
     final snapshot =
         await api.subscribeThread('thread-main').first as ThreadSnapshotFrame;
+    final submitted = snapshot.workspace.items.firstWhere(
+      (item) => item.id == receipt.inputId,
+    );
     final turnItems = snapshot.workspace.items.where(
-      (item) => item.turnId == receipt.turnId,
+      (item) => item.turnId == submitted.turnId,
     );
     expect(turnItems, isNotEmpty);
     expect(turnItems.every(_demoItemIsTerminal), isTrue);

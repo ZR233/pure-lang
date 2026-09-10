@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use anyhow::Error;
-use pl_core::{
-    ObservedResource, ObservedResourceCommand, ObservedResourceKind, StateError, StateOperation,
-};
 use pl_lsp::runtime::{
     LspActivityKind, LspAvailabilityKind, LspRuntimeRegistry, LspServerSnapshot,
+};
+use pl_protocol::{
+    ObservedResource, ObservedResourceCommand, ObservedResourceKind, StateError, StateOperation,
 };
 use tokio::sync::{Mutex, RwLock};
 

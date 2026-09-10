@@ -41,9 +41,6 @@ impl StudioRuntime {
                 .await
                 .map_err(|error| startup_failure("initialize_product_directories", error))?;
             let mut recovery_issues = Vec::new();
-            self.recover_interactions_after_restart()
-                .await
-                .map_err(|error| startup_failure("recover_interactions", error))?;
             self.append_session_recovery_issues(&mut recovery_issues)
                 .await
                 .map_err(|error| startup_failure("recover_sessions", error))?;
@@ -53,12 +50,8 @@ impl StudioRuntime {
             self.append_unavailable_project_recovery_issues(&mut recovery_issues)
                 .await
                 .map_err(|error| startup_failure("recover_unavailable_projects", error))?;
-            // 惰性驻留：这里只启动 framework（restore_runtime 恢复钉住集合），
-            // 其余 Thread 在订阅、提交输入或修复时按需恢复。
-            let _ = self
-                .agent_framework()
-                .await
-                .map_err(|error| startup_failure("initialize_agent_framework", error))?;
+            self.start_model_refresh().await;
+            self.start_tool_refresh().await;
             self.start_mcp_health_watcher().await;
             self.start_lsp_state_watcher().await;
             self.start_mcp_reconcile_background()
@@ -93,7 +86,7 @@ impl StudioRuntime {
                     .apply(StudioRuntimeCommand::FailInitialize {
                         expected_revision: self.runtime_state.snapshot().revision,
                         at: unix_seconds(),
-                        error: pl_core::StateError {
+                        error: pl_protocol::StateError {
                             code: "studioInitializationFailed".to_string(),
                             message: format!("{error:#}"),
                             retryable: true,
@@ -152,6 +145,8 @@ impl StudioRuntime {
                 ));
             // 标题任务使用同一 runtime 生命周期；先取消并等待，避免关机后
             // 陈旧 Explorer 结果再次修改目录事实。
+            self.stop_tool_refresh().await?;
+            self.stop_model_refresh().await?;
             self.title_tasks.cancel_and_wait().await;
             self.shutdown_agent_framework().await?;
             // 阶段 3：等待 write-behind 全部 pending commit 落库；完成事件必须 pending=0。
@@ -202,7 +197,7 @@ impl StudioRuntime {
                 .apply(StudioRuntimeCommand::FailShutdown {
                     expected_revision: self.runtime_state.snapshot().revision,
                     at: unix_seconds(),
-                    error: pl_core::StateError {
+                    error: pl_protocol::StateError {
                         code: "studioShutdownFailed".to_string(),
                         message: format!("{error:#}"),
                         retryable: true,

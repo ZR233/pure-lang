@@ -20,7 +20,5 @@ pub use error::*;
 pub use registry::LspRuntimeRegistry;
 pub use state::*;
 
-use registry::{
-    LspRuntimeServerState, LspRuntimeState, LspWorkspaceState, canonical_workspace_root,
-};
+use registry::{LspRuntimeServerState, LspWorkspaceState, workspace_key};
 pub(crate) use server::ResolvedLspServer;

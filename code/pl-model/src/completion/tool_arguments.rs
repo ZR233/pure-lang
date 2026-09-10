@@ -11,20 +11,18 @@ pub(crate) fn function_tool_call_from_raw(
     call_id: String,
 ) -> ToolCall {
     match parse_unique_function_arguments(&arguments) {
-        Ok(arguments) => ToolCall::function(id, tool_name, arguments, call_id),
+        Ok(()) => ToolCall::function_raw(id, tool_name, arguments, call_id),
         Err(error) => {
             ToolCall::invalid_function(id, tool_name, arguments, error.to_string(), call_id)
         }
     }
 }
 
-fn parse_unique_function_arguments(
-    arguments: &str,
-) -> Result<serde_json::Value, serde_json::Error> {
+fn parse_unique_function_arguments(arguments: &str) -> Result<(), serde_json::Error> {
     let mut deserializer = serde_json::Deserializer::from_str(arguments);
     deserializer.deserialize_map(UniqueTopLevelObject)?;
     deserializer.end()?;
-    serde_json::from_str(arguments)
+    Ok(())
 }
 
 struct UniqueTopLevelObject;
@@ -70,5 +68,20 @@ mod tests {
             call.invalid_arguments_message()
                 .is_some_and(|message| message.contains("duplicate top-level field `runId`"))
         );
+    }
+    #[test]
+    fn valid_function_arguments_keep_provider_bytes_after_decoding_and_serialization() {
+        let raw = "{  \"z\":9007199254740993, \"a\": [1, 2] }\n";
+        let call = function_tool_call_from_raw(
+            "item".into(),
+            "plugin_tool".into(),
+            raw.into(),
+            "call".into(),
+        );
+        assert!(call.invalid_arguments.is_none());
+        assert_eq!(call.payload_text(), raw);
+        let restored: ToolCall =
+            serde_json::from_str(&serde_json::to_string(&call).unwrap()).unwrap();
+        assert_eq!(restored.payload_text(), raw);
     }
 }

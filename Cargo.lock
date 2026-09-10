@@ -2695,32 +2695,10 @@ checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
 name = "pl-core"
 version = "0.1.0"
 dependencies = [
- "anyhow",
- "axum",
- "base64 0.22.1",
- "dunce",
  "fs4",
  "futures",
- "grep-matcher",
- "grep-regex",
- "grep-searcher",
- "ignore",
- "image",
- "pl-lsp",
- "pl-model",
- "pl-output",
- "pl-patch",
- "pl-protocol",
- "pl-remote-helper",
- "pl-skill-core",
- "pl-trace",
  "pretty_assertions",
- "process-wrap",
- "reqwest",
- "rmcp",
- "schemars",
  "sea-orm",
- "secrecy",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -2730,9 +2708,6 @@ dependencies = [
  "tokio-util",
  "tracing",
  "url",
- "which",
- "windows",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2761,15 +2736,18 @@ name = "pl-model"
 version = "0.1.0"
 dependencies = [
  "async-openai",
+ "base64 0.22.1",
  "futures",
+ "image",
+ "pl-core",
  "pl-protocol",
- "pl-trace",
  "pretty_assertions",
  "reqwest",
  "schemars",
  "secrecy",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "thiserror 2.0.18",
  "tokio",
  "tokio-tungstenite",
@@ -2799,9 +2777,11 @@ name = "pl-protocol"
 version = "0.1.0"
 dependencies = [
  "pretty_assertions",
+ "schemars",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
+ "tokio",
  "utoipa",
 ]
 
@@ -2811,10 +2791,13 @@ version = "0.1.0"
 dependencies = [
  "libc",
  "pl-protocol",
+ "pretty_assertions",
+ "process-wrap",
  "serde_json",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "windows",
 ]
 
 [[package]]
@@ -2834,7 +2817,7 @@ dependencies = [
  "anyhow",
  "filetime",
  "flutter_rust_bridge",
- "pl-core",
+ "pl-model",
  "pl-protocol",
  "pl-studio-runtime",
  "pretty_assertions",
@@ -2864,7 +2847,10 @@ dependencies = [
  "minisign-verify",
  "pl-core",
  "pl-lsp",
+ "pl-model",
  "pl-protocol",
+ "pl-remote-helper",
+ "pl-tool",
  "pl-trace",
  "pretty_assertions",
  "reqwest",
@@ -2913,13 +2899,51 @@ dependencies = [
 ]
 
 [[package]]
+name = "pl-tool"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "base64 0.22.1",
+ "dunce",
+ "futures",
+ "grep-matcher",
+ "grep-regex",
+ "grep-searcher",
+ "ignore",
+ "image",
+ "pl-core",
+ "pl-lsp",
+ "pl-output",
+ "pl-patch",
+ "pl-protocol",
+ "pl-remote-helper",
+ "pl-skill-core",
+ "pretty_assertions",
+ "process-wrap",
+ "reqwest",
+ "rmcp",
+ "schemars",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "which",
+ "windows",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "pl-trace"
 version = "0.1.0"
 dependencies = [
- "pl-protocol",
+ "pl-core",
  "serde",
- "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -2930,8 +2954,9 @@ dependencies = [
  "clap",
  "libc",
  "minisign-verify",
- "pl-core",
+ "pl-model",
  "pl-skill-core",
+ "pl-studio-runtime",
  "pretty_assertions",
  "sea-orm",
  "semver",

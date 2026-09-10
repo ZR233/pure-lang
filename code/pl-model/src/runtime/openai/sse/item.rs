@@ -1,12 +1,12 @@
 use serde_json::Value;
 
-use crate::completion::WebSearchAction;
 use crate::completion::stream::event::{
     ModelStreamEvent, ToolInputDeltaPayload, ToolInputPayloadKind,
 };
 use crate::runtime::openai::identity::responses_tool_identity;
+use pl_protocol::search::WebSearchAction;
+use pl_protocol::trace::TraceTextChannel;
 use pl_protocol::{ResponsesContextItem, ToolCallCaller};
-use pl_trace::TraceTextChannel;
 
 pub(super) fn output_item_tool_started(item: &Value) -> Option<ModelStreamEvent> {
     let kind = item.get("type")?.as_str()?;

@@ -1,4 +1,4 @@
-use pl_trace::TraceTextChannel;
+use pl_protocol::trace::TraceTextChannel;
 
 use crate::completion::visible_text::{VisibleTextEvent, VisibleTextKind, VisibleTextParser};
 

@@ -10,7 +10,10 @@ embedded-remote-helpers = []
 live-tests = []
 
 [dependencies]
-pl-core = { workspace = true }
+pl-remote-helper = { workspace = true }
+pl-model = { workspace = true }
+pl-core = { workspace = true, features = ["sqlite"] }
+pl-tool = { workspace = true }
 pl-protocol = { workspace = true }
 pl-trace = { workspace = true }
 pl-lsp = { workspace = true }
@@ -54,4 +57,24 @@ required-features = ["live-tests"]
 
 [[example]]
 name = "model_accounting_live"
+required-features = ["live-tests"]
+
+[[test]]
+name = "apply_patch_live"
+path = "tests/apply_patch_live.rs"
+required-features = ["live-tests"]
+
+[[test]]
+name = "trace_live"
+path = "tests/trace_live.rs"
+required-features = ["live-tests"]
+
+[[test]]
+name = "context_compaction_live"
+path = "tests/context_compaction_live.rs"
+required-features = ["live-tests"]
+
+[[test]]
+name = "prompt_cache_live"
+path = "tests/prompt_cache_live.rs"
 required-features = ["live-tests"]

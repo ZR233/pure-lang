@@ -174,6 +174,7 @@ pub(crate) fn bridge_thread(value: Thread) -> BridgeThread {
 
 pub(crate) fn bridge_turn(value: Turn) -> BridgeTurn {
     BridgeTurn {
+        input_id: value.input_id,
         id: value.id,
         thread_id: value.thread_id,
         revision: value.revision,
@@ -221,6 +222,7 @@ fn bridge_turn_state(value: &TurnState) -> BridgeTurnState {
 
 fn turn_cancellation_cause(value: TurnCancellationCause) -> BridgeTurnCancellationCause {
     match value {
+        TurnCancellationCause::Unspecified => BridgeTurnCancellationCause::Unspecified,
         TurnCancellationCause::UserRequested => BridgeTurnCancellationCause::UserRequested,
         TurnCancellationCause::RuntimeShutdown => BridgeTurnCancellationCause::RuntimeShutdown,
         TurnCancellationCause::AgentClosed => BridgeTurnCancellationCause::AgentClosed,
@@ -366,6 +368,7 @@ fn item_state(value: &ThreadItemState) -> Result<BridgeThreadItemState> {
         }
         ThreadItemState::Turn(value) => BridgeThreadItemState::Turn {
             state: bridge_turn_state(value.state()),
+            input_id: value.input_id().map(str::to_owned),
         },
         ThreadItemState::Inference(value) => BridgeThreadItemState::Inference {
             inference_id: value.inference_id().to_string(),
@@ -424,6 +427,19 @@ fn item_state(value: &ThreadItemState) -> Result<BridgeThreadItemState> {
             path: value.path().to_string(),
             media_type: value.media_type().map(str::to_string),
             completed_at: value.completed_at(),
+        },
+        ThreadItemState::Raw(value) => BridgeThreadItemState::Raw {
+            payloads: value
+                .payloads
+                .iter()
+                .map(|payload| BridgeRawPayload {
+                    format: payload.format.clone(),
+                    version: payload.version,
+                    content: payload.content.clone(),
+                })
+                .collect(),
+            notice: value.notice.clone(),
+            recorded_at: value.recorded_at,
         },
         ThreadItemState::ContextCompaction(value) => BridgeThreadItemState::ContextCompaction {
             before_tokens: value.before_tokens(),
@@ -771,6 +787,7 @@ mod tests {
 
     fn running_turn(id: &str, phase: TurnPhase) -> Turn {
         Turn {
+            input_id: None,
             id: id.to_string(),
             thread_id: "thread-1".to_string(),
             revision: 1,
@@ -781,6 +798,7 @@ mod tests {
 
     fn expected_bridge_turn(id: &str, phase: TurnPhase) -> BridgeTurn {
         BridgeTurn {
+            input_id: None,
             id: id.to_string(),
             thread_id: "thread-1".to_string(),
             revision: 1,
@@ -795,7 +813,7 @@ mod tests {
     #[test]
     fn internal_context_items_never_cross_the_bridge_boundary() {
         let context_compaction = item(ThreadItemState::ContextCompaction(
-            ThreadContextCompactionItem::new(100, 25, 1),
+            ThreadContextCompactionItem::new(Some(100), Some(25), 1),
         ));
 
         assert!(

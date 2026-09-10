@@ -2634,10 +2634,11 @@ extension BridgeThreadItemStatePatterns on BridgeThreadItemState {
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeThreadItemState_Text value)?  text,TResult Function( BridgeThreadItemState_Thinking value)?  thinking,TResult Function( BridgeThreadItemState_Tool value)?  tool,TResult Function( BridgeThreadItemState_Agent value)?  agent,TResult Function( BridgeThreadItemState_Turn value)?  turn,TResult Function( BridgeThreadItemState_Inference value)?  inference,TResult Function( BridgeThreadItemState_Skill value)?  skill,TResult Function( BridgeThreadItemState_File value)?  file,TResult Function( BridgeThreadItemState_ContextCompaction value)?  contextCompaction,required TResult orElse(),}){
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeThreadItemState_Raw value)?  raw,TResult Function( BridgeThreadItemState_Text value)?  text,TResult Function( BridgeThreadItemState_Thinking value)?  thinking,TResult Function( BridgeThreadItemState_Tool value)?  tool,TResult Function( BridgeThreadItemState_Agent value)?  agent,TResult Function( BridgeThreadItemState_Turn value)?  turn,TResult Function( BridgeThreadItemState_Inference value)?  inference,TResult Function( BridgeThreadItemState_Skill value)?  skill,TResult Function( BridgeThreadItemState_File value)?  file,TResult Function( BridgeThreadItemState_ContextCompaction value)?  contextCompaction,required TResult orElse(),}){
 final _that = this;
 switch (_that) {
-case BridgeThreadItemState_Text() when text != null:
+case BridgeThreadItemState_Raw() when raw != null:
+return raw(_that);case BridgeThreadItemState_Text() when text != null:
 return text(_that);case BridgeThreadItemState_Thinking() when thinking != null:
 return thinking(_that);case BridgeThreadItemState_Tool() when tool != null:
 return tool(_that);case BridgeThreadItemState_Agent() when agent != null:
@@ -2664,10 +2665,11 @@ return contextCompaction(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeThreadItemState_Text value)  text,required TResult Function( BridgeThreadItemState_Thinking value)  thinking,required TResult Function( BridgeThreadItemState_Tool value)  tool,required TResult Function( BridgeThreadItemState_Agent value)  agent,required TResult Function( BridgeThreadItemState_Turn value)  turn,required TResult Function( BridgeThreadItemState_Inference value)  inference,required TResult Function( BridgeThreadItemState_Skill value)  skill,required TResult Function( BridgeThreadItemState_File value)  file,required TResult Function( BridgeThreadItemState_ContextCompaction value)  contextCompaction,}){
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeThreadItemState_Raw value)  raw,required TResult Function( BridgeThreadItemState_Text value)  text,required TResult Function( BridgeThreadItemState_Thinking value)  thinking,required TResult Function( BridgeThreadItemState_Tool value)  tool,required TResult Function( BridgeThreadItemState_Agent value)  agent,required TResult Function( BridgeThreadItemState_Turn value)  turn,required TResult Function( BridgeThreadItemState_Inference value)  inference,required TResult Function( BridgeThreadItemState_Skill value)  skill,required TResult Function( BridgeThreadItemState_File value)  file,required TResult Function( BridgeThreadItemState_ContextCompaction value)  contextCompaction,}){
 final _that = this;
 switch (_that) {
-case BridgeThreadItemState_Text():
+case BridgeThreadItemState_Raw():
+return raw(_that);case BridgeThreadItemState_Text():
 return text(_that);case BridgeThreadItemState_Thinking():
 return thinking(_that);case BridgeThreadItemState_Tool():
 return tool(_that);case BridgeThreadItemState_Agent():
@@ -2690,10 +2692,11 @@ return contextCompaction(_that);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeThreadItemState_Text value)?  text,TResult? Function( BridgeThreadItemState_Thinking value)?  thinking,TResult? Function( BridgeThreadItemState_Tool value)?  tool,TResult? Function( BridgeThreadItemState_Agent value)?  agent,TResult? Function( BridgeThreadItemState_Turn value)?  turn,TResult? Function( BridgeThreadItemState_Inference value)?  inference,TResult? Function( BridgeThreadItemState_Skill value)?  skill,TResult? Function( BridgeThreadItemState_File value)?  file,TResult? Function( BridgeThreadItemState_ContextCompaction value)?  contextCompaction,}){
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeThreadItemState_Raw value)?  raw,TResult? Function( BridgeThreadItemState_Text value)?  text,TResult? Function( BridgeThreadItemState_Thinking value)?  thinking,TResult? Function( BridgeThreadItemState_Tool value)?  tool,TResult? Function( BridgeThreadItemState_Agent value)?  agent,TResult? Function( BridgeThreadItemState_Turn value)?  turn,TResult? Function( BridgeThreadItemState_Inference value)?  inference,TResult? Function( BridgeThreadItemState_Skill value)?  skill,TResult? Function( BridgeThreadItemState_File value)?  file,TResult? Function( BridgeThreadItemState_ContextCompaction value)?  contextCompaction,}){
 final _that = this;
 switch (_that) {
-case BridgeThreadItemState_Text() when text != null:
+case BridgeThreadItemState_Raw() when raw != null:
+return raw(_that);case BridgeThreadItemState_Text() when text != null:
 return text(_that);case BridgeThreadItemState_Thinking() when thinking != null:
 return thinking(_that);case BridgeThreadItemState_Tool() when tool != null:
 return tool(_that);case BridgeThreadItemState_Agent() when agent != null:
@@ -2719,14 +2722,15 @@ return contextCompaction(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( BridgeThreadTextChannel channel,  String text,  List<BridgeThreadAttachment> attachments,  BridgeThreadContentLifecycle lifecycle)?  text,TResult Function( List<String> summary,  List<String> content,  BridgeThreadContentLifecycle lifecycle)?  thinking,TResult Function( BridgeThreadToolInvocation invocation,  BridgeThreadToolState state)?  tool,TResult Function( BridgeThreadAgentIdentity identity,  BridgeThreadAgentState state)?  agent,TResult Function( BridgeTurnState state)?  turn,TResult Function( String inferenceId,  String model,  BridgeThreadInferenceState state)?  inference,TResult Function( String name,  String source,  String providerId,  BridgeSkillResourceBase resourceBase,  BridgeSkillActivationCause cause,  PlatformInt64 activatedAt)?  skill,TResult Function( String path,  String? mediaType,  PlatformInt64 completedAt)?  file,TResult Function( BigInt beforeTokens,  BigInt afterTokens,  PlatformInt64 compactedAt)?  contextCompaction,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function( List<BridgeRawPayload> payloads,  String notice,  PlatformInt64 recordedAt)?  raw,TResult Function( BridgeThreadTextChannel channel,  String text,  List<BridgeThreadAttachment> attachments,  BridgeThreadContentLifecycle lifecycle)?  text,TResult Function( List<String> summary,  List<String> content,  BridgeThreadContentLifecycle lifecycle)?  thinking,TResult Function( BridgeThreadToolInvocation invocation,  BridgeThreadToolState state)?  tool,TResult Function( BridgeThreadAgentIdentity identity,  BridgeThreadAgentState state)?  agent,TResult Function( BridgeTurnState state,  String? inputId)?  turn,TResult Function( String inferenceId,  String model,  BridgeThreadInferenceState state)?  inference,TResult Function( String name,  String source,  String providerId,  BridgeSkillResourceBase resourceBase,  BridgeSkillActivationCause cause,  PlatformInt64 activatedAt)?  skill,TResult Function( String path,  String? mediaType,  PlatformInt64 completedAt)?  file,TResult Function( BigInt? beforeTokens,  BigInt? afterTokens,  PlatformInt64 compactedAt)?  contextCompaction,required TResult orElse(),}) {final _that = this;
 switch (_that) {
-case BridgeThreadItemState_Text() when text != null:
+case BridgeThreadItemState_Raw() when raw != null:
+return raw(_that.payloads,_that.notice,_that.recordedAt);case BridgeThreadItemState_Text() when text != null:
 return text(_that.channel,_that.text,_that.attachments,_that.lifecycle);case BridgeThreadItemState_Thinking() when thinking != null:
 return thinking(_that.summary,_that.content,_that.lifecycle);case BridgeThreadItemState_Tool() when tool != null:
 return tool(_that.invocation,_that.state);case BridgeThreadItemState_Agent() when agent != null:
 return agent(_that.identity,_that.state);case BridgeThreadItemState_Turn() when turn != null:
-return turn(_that.state);case BridgeThreadItemState_Inference() when inference != null:
+return turn(_that.state,_that.inputId);case BridgeThreadItemState_Inference() when inference != null:
 return inference(_that.inferenceId,_that.model,_that.state);case BridgeThreadItemState_Skill() when skill != null:
 return skill(_that.name,_that.source,_that.providerId,_that.resourceBase,_that.cause,_that.activatedAt);case BridgeThreadItemState_File() when file != null:
 return file(_that.path,_that.mediaType,_that.completedAt);case BridgeThreadItemState_ContextCompaction() when contextCompaction != null:
@@ -2748,14 +2752,15 @@ return contextCompaction(_that.beforeTokens,_that.afterTokens,_that.compactedAt)
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( BridgeThreadTextChannel channel,  String text,  List<BridgeThreadAttachment> attachments,  BridgeThreadContentLifecycle lifecycle)  text,required TResult Function( List<String> summary,  List<String> content,  BridgeThreadContentLifecycle lifecycle)  thinking,required TResult Function( BridgeThreadToolInvocation invocation,  BridgeThreadToolState state)  tool,required TResult Function( BridgeThreadAgentIdentity identity,  BridgeThreadAgentState state)  agent,required TResult Function( BridgeTurnState state)  turn,required TResult Function( String inferenceId,  String model,  BridgeThreadInferenceState state)  inference,required TResult Function( String name,  String source,  String providerId,  BridgeSkillResourceBase resourceBase,  BridgeSkillActivationCause cause,  PlatformInt64 activatedAt)  skill,required TResult Function( String path,  String? mediaType,  PlatformInt64 completedAt)  file,required TResult Function( BigInt beforeTokens,  BigInt afterTokens,  PlatformInt64 compactedAt)  contextCompaction,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function( List<BridgeRawPayload> payloads,  String notice,  PlatformInt64 recordedAt)  raw,required TResult Function( BridgeThreadTextChannel channel,  String text,  List<BridgeThreadAttachment> attachments,  BridgeThreadContentLifecycle lifecycle)  text,required TResult Function( List<String> summary,  List<String> content,  BridgeThreadContentLifecycle lifecycle)  thinking,required TResult Function( BridgeThreadToolInvocation invocation,  BridgeThreadToolState state)  tool,required TResult Function( BridgeThreadAgentIdentity identity,  BridgeThreadAgentState state)  agent,required TResult Function( BridgeTurnState state,  String? inputId)  turn,required TResult Function( String inferenceId,  String model,  BridgeThreadInferenceState state)  inference,required TResult Function( String name,  String source,  String providerId,  BridgeSkillResourceBase resourceBase,  BridgeSkillActivationCause cause,  PlatformInt64 activatedAt)  skill,required TResult Function( String path,  String? mediaType,  PlatformInt64 completedAt)  file,required TResult Function( BigInt? beforeTokens,  BigInt? afterTokens,  PlatformInt64 compactedAt)  contextCompaction,}) {final _that = this;
 switch (_that) {
-case BridgeThreadItemState_Text():
+case BridgeThreadItemState_Raw():
+return raw(_that.payloads,_that.notice,_that.recordedAt);case BridgeThreadItemState_Text():
 return text(_that.channel,_that.text,_that.attachments,_that.lifecycle);case BridgeThreadItemState_Thinking():
 return thinking(_that.summary,_that.content,_that.lifecycle);case BridgeThreadItemState_Tool():
 return tool(_that.invocation,_that.state);case BridgeThreadItemState_Agent():
 return agent(_that.identity,_that.state);case BridgeThreadItemState_Turn():
-return turn(_that.state);case BridgeThreadItemState_Inference():
+return turn(_that.state,_that.inputId);case BridgeThreadItemState_Inference():
 return inference(_that.inferenceId,_that.model,_that.state);case BridgeThreadItemState_Skill():
 return skill(_that.name,_that.source,_that.providerId,_that.resourceBase,_that.cause,_that.activatedAt);case BridgeThreadItemState_File():
 return file(_that.path,_that.mediaType,_that.completedAt);case BridgeThreadItemState_ContextCompaction():
@@ -2773,14 +2778,15 @@ return contextCompaction(_that.beforeTokens,_that.afterTokens,_that.compactedAt)
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( BridgeThreadTextChannel channel,  String text,  List<BridgeThreadAttachment> attachments,  BridgeThreadContentLifecycle lifecycle)?  text,TResult? Function( List<String> summary,  List<String> content,  BridgeThreadContentLifecycle lifecycle)?  thinking,TResult? Function( BridgeThreadToolInvocation invocation,  BridgeThreadToolState state)?  tool,TResult? Function( BridgeThreadAgentIdentity identity,  BridgeThreadAgentState state)?  agent,TResult? Function( BridgeTurnState state)?  turn,TResult? Function( String inferenceId,  String model,  BridgeThreadInferenceState state)?  inference,TResult? Function( String name,  String source,  String providerId,  BridgeSkillResourceBase resourceBase,  BridgeSkillActivationCause cause,  PlatformInt64 activatedAt)?  skill,TResult? Function( String path,  String? mediaType,  PlatformInt64 completedAt)?  file,TResult? Function( BigInt beforeTokens,  BigInt afterTokens,  PlatformInt64 compactedAt)?  contextCompaction,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function( List<BridgeRawPayload> payloads,  String notice,  PlatformInt64 recordedAt)?  raw,TResult? Function( BridgeThreadTextChannel channel,  String text,  List<BridgeThreadAttachment> attachments,  BridgeThreadContentLifecycle lifecycle)?  text,TResult? Function( List<String> summary,  List<String> content,  BridgeThreadContentLifecycle lifecycle)?  thinking,TResult? Function( BridgeThreadToolInvocation invocation,  BridgeThreadToolState state)?  tool,TResult? Function( BridgeThreadAgentIdentity identity,  BridgeThreadAgentState state)?  agent,TResult? Function( BridgeTurnState state,  String? inputId)?  turn,TResult? Function( String inferenceId,  String model,  BridgeThreadInferenceState state)?  inference,TResult? Function( String name,  String source,  String providerId,  BridgeSkillResourceBase resourceBase,  BridgeSkillActivationCause cause,  PlatformInt64 activatedAt)?  skill,TResult? Function( String path,  String? mediaType,  PlatformInt64 completedAt)?  file,TResult? Function( BigInt? beforeTokens,  BigInt? afterTokens,  PlatformInt64 compactedAt)?  contextCompaction,}) {final _that = this;
 switch (_that) {
-case BridgeThreadItemState_Text() when text != null:
+case BridgeThreadItemState_Raw() when raw != null:
+return raw(_that.payloads,_that.notice,_that.recordedAt);case BridgeThreadItemState_Text() when text != null:
 return text(_that.channel,_that.text,_that.attachments,_that.lifecycle);case BridgeThreadItemState_Thinking() when thinking != null:
 return thinking(_that.summary,_that.content,_that.lifecycle);case BridgeThreadItemState_Tool() when tool != null:
 return tool(_that.invocation,_that.state);case BridgeThreadItemState_Agent() when agent != null:
 return agent(_that.identity,_that.state);case BridgeThreadItemState_Turn() when turn != null:
-return turn(_that.state);case BridgeThreadItemState_Inference() when inference != null:
+return turn(_that.state,_that.inputId);case BridgeThreadItemState_Inference() when inference != null:
 return inference(_that.inferenceId,_that.model,_that.state);case BridgeThreadItemState_Skill() when skill != null:
 return skill(_that.name,_that.source,_that.providerId,_that.resourceBase,_that.cause,_that.activatedAt);case BridgeThreadItemState_File() when file != null:
 return file(_that.path,_that.mediaType,_that.completedAt);case BridgeThreadItemState_ContextCompaction() when contextCompaction != null:
@@ -2789,6 +2795,84 @@ return contextCompaction(_that.beforeTokens,_that.afterTokens,_that.compactedAt)
 
 }
 }
+
+}
+
+/// @nodoc
+
+
+class BridgeThreadItemState_Raw extends BridgeThreadItemState {
+  const BridgeThreadItemState_Raw({required  List<BridgeRawPayload> payloads, required this.notice, required this.recordedAt}): _payloads = payloads,super._();
+
+
+ final  List<BridgeRawPayload> _payloads;
+ List<BridgeRawPayload> get payloads {
+  if (_payloads is EqualUnmodifiableListView) return _payloads;
+  // ignore: implicit_dynamic_type
+  return EqualUnmodifiableListView(_payloads);
+}
+
+ final  String notice;
+ final  PlatformInt64 recordedAt;
+
+/// Create a copy of BridgeThreadItemState
+/// with the given fields replaced by the non-null parameter values.
+@JsonKey(includeFromJson: false, includeToJson: false)
+@pragma('vm:prefer-inline')
+$BridgeThreadItemState_RawCopyWith<BridgeThreadItemState_Raw> get copyWith => _$BridgeThreadItemState_RawCopyWithImpl<BridgeThreadItemState_Raw>(this, _$identity);
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadItemState_Raw&&const DeepCollectionEquality().equals(other.payloads, _payloads)&&(identical(other.notice, notice) || other.notice == notice)&&(identical(other.recordedAt, recordedAt) || other.recordedAt == recordedAt));
+}
+
+
+@override
+int get hashCode {
+    return Object.hash(runtimeType,const DeepCollectionEquality().hash(_payloads),notice,recordedAt);
+}
+
+@override
+String toString() {
+    return 'BridgeThreadItemState.raw(payloads: $payloads, notice: $notice, recordedAt: $recordedAt)';
+}
+
+
+}
+
+/// @nodoc
+abstract mixin class $BridgeThreadItemState_RawCopyWith<$Res> implements $BridgeThreadItemStateCopyWith<$Res> {
+  factory $BridgeThreadItemState_RawCopyWith(BridgeThreadItemState_Raw value, $Res Function(BridgeThreadItemState_Raw) _then) = _$BridgeThreadItemState_RawCopyWithImpl;
+@useResult
+$Res call({
+ List<BridgeRawPayload> payloads, String notice, PlatformInt64 recordedAt
+});
+
+
+
+
+}
+/// @nodoc
+class _$BridgeThreadItemState_RawCopyWithImpl<$Res>
+    implements $BridgeThreadItemState_RawCopyWith<$Res> {
+  _$BridgeThreadItemState_RawCopyWithImpl(this._self, this._then);
+
+  final BridgeThreadItemState_Raw _self;
+  final $Res Function(BridgeThreadItemState_Raw) _then;
+
+/// Create a copy of BridgeThreadItemState
+/// with the given fields replaced by the non-null parameter values.
+@pragma('vm:prefer-inline') $Res call({Object? payloads = null,Object? notice = null,Object? recordedAt = null,}) {
+  return _then(BridgeThreadItemState_Raw(
+payloads: null == payloads ? _self._payloads : payloads // ignore: cast_nullable_to_non_nullable
+as List<BridgeRawPayload>,notice: null == notice ? _self.notice : notice // ignore: cast_nullable_to_non_nullable
+as String,recordedAt: null == recordedAt ? _self.recordedAt : recordedAt // ignore: cast_nullable_to_non_nullable
+as PlatformInt64,
+  ));
+}
+
 
 }
 
@@ -3136,10 +3220,11 @@ $BridgeThreadAgentStateCopyWith<$Res> get state {
 
 
 class BridgeThreadItemState_Turn extends BridgeThreadItemState {
-  const BridgeThreadItemState_Turn({required this.state}): super._();
+  const BridgeThreadItemState_Turn({required this.state, this.inputId}): super._();
 
 
  final  BridgeTurnState state;
+ final  String? inputId;
 
 /// Create a copy of BridgeThreadItemState
 /// with the given fields replaced by the non-null parameter values.
@@ -3151,18 +3236,18 @@ $BridgeThreadItemState_TurnCopyWith<BridgeThreadItemState_Turn> get copyWith => 
 
 @override
 bool operator ==(Object other) {
-    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadItemState_Turn&&(identical(other.state, state) || other.state == state));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeThreadItemState_Turn&&(identical(other.state, state) || other.state == state)&&(identical(other.inputId, inputId) || other.inputId == inputId));
 }
 
 
 @override
 int get hashCode {
-    return Object.hash(runtimeType,state);
+    return Object.hash(runtimeType,state,inputId);
 }
 
 @override
 String toString() {
-    return 'BridgeThreadItemState.turn(state: $state)';
+    return 'BridgeThreadItemState.turn(state: $state, inputId: $inputId)';
 }
 
 
@@ -3173,7 +3258,7 @@ abstract mixin class $BridgeThreadItemState_TurnCopyWith<$Res> implements $Bridg
   factory $BridgeThreadItemState_TurnCopyWith(BridgeThreadItemState_Turn value, $Res Function(BridgeThreadItemState_Turn) _then) = _$BridgeThreadItemState_TurnCopyWithImpl;
 @useResult
 $Res call({
- BridgeTurnState state
+ BridgeTurnState state, String? inputId
 });
 
 
@@ -3190,10 +3275,11 @@ class _$BridgeThreadItemState_TurnCopyWithImpl<$Res>
 
 /// Create a copy of BridgeThreadItemState
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') $Res call({Object? state = null,}) {
+@pragma('vm:prefer-inline') $Res call({Object? state = null,Object? inputId = freezed,}) {
   return _then(BridgeThreadItemState_Turn(
 state: null == state ? _self.state : state // ignore: cast_nullable_to_non_nullable
-as BridgeTurnState,
+as BridgeTurnState,inputId: freezed == inputId ? _self.inputId : inputId // ignore: cast_nullable_to_non_nullable
+as String?,
   ));
 }
 
@@ -3462,11 +3548,11 @@ as PlatformInt64,
 
 
 class BridgeThreadItemState_ContextCompaction extends BridgeThreadItemState {
-  const BridgeThreadItemState_ContextCompaction({required this.beforeTokens, required this.afterTokens, required this.compactedAt}): super._();
+  const BridgeThreadItemState_ContextCompaction({this.beforeTokens, this.afterTokens, required this.compactedAt}): super._();
 
 
- final  BigInt beforeTokens;
- final  BigInt afterTokens;
+ final  BigInt? beforeTokens;
+ final  BigInt? afterTokens;
  final  PlatformInt64 compactedAt;
 
 /// Create a copy of BridgeThreadItemState
@@ -3501,7 +3587,7 @@ abstract mixin class $BridgeThreadItemState_ContextCompactionCopyWith<$Res> impl
   factory $BridgeThreadItemState_ContextCompactionCopyWith(BridgeThreadItemState_ContextCompaction value, $Res Function(BridgeThreadItemState_ContextCompaction) _then) = _$BridgeThreadItemState_ContextCompactionCopyWithImpl;
 @useResult
 $Res call({
- BigInt beforeTokens, BigInt afterTokens, PlatformInt64 compactedAt
+ BigInt? beforeTokens, BigInt? afterTokens, PlatformInt64 compactedAt
 });
 
 
@@ -3518,11 +3604,11 @@ class _$BridgeThreadItemState_ContextCompactionCopyWithImpl<$Res>
 
 /// Create a copy of BridgeThreadItemState
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') $Res call({Object? beforeTokens = null,Object? afterTokens = null,Object? compactedAt = null,}) {
+@pragma('vm:prefer-inline') $Res call({Object? beforeTokens = freezed,Object? afterTokens = freezed,Object? compactedAt = null,}) {
   return _then(BridgeThreadItemState_ContextCompaction(
-beforeTokens: null == beforeTokens ? _self.beforeTokens : beforeTokens // ignore: cast_nullable_to_non_nullable
-as BigInt,afterTokens: null == afterTokens ? _self.afterTokens : afterTokens // ignore: cast_nullable_to_non_nullable
-as BigInt,compactedAt: null == compactedAt ? _self.compactedAt : compactedAt // ignore: cast_nullable_to_non_nullable
+beforeTokens: freezed == beforeTokens ? _self.beforeTokens : beforeTokens // ignore: cast_nullable_to_non_nullable
+as BigInt?,afterTokens: freezed == afterTokens ? _self.afterTokens : afterTokens // ignore: cast_nullable_to_non_nullable
+as BigInt?,compactedAt: null == compactedAt ? _self.compactedAt : compactedAt // ignore: cast_nullable_to_non_nullable
 as PlatformInt64,
   ));
 }

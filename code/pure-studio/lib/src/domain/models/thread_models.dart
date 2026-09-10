@@ -9,6 +9,7 @@ import 'timeline_models.dart';
 import 'turn_models.dart';
 
 enum ThreadItemKind {
+  raw,
   userMessage,
   parentAgentMessage,
   agentMessage,
@@ -411,8 +412,9 @@ final class ThreadAgentItemStateView extends ThreadItemStateView {
 }
 
 final class ThreadTurnItemStateView extends ThreadItemStateView {
-  const ThreadTurnItemStateView(this.state);
+  const ThreadTurnItemStateView(this.state, {this.inputId});
   final StudioTurnState state;
+  final String? inputId;
 }
 
 sealed class ThreadInferenceLifecycleView {
@@ -465,6 +467,20 @@ final class ThreadInferenceItemStateView extends ThreadItemStateView {
   final ThreadInferenceLifecycleView lifecycle;
 }
 
+class RawHistoryPayload {
+  const RawHistoryPayload(this.format, this.version, this.content);
+  final String format;
+  final int version;
+  final String content;
+}
+
+final class ThreadRawItemStateView extends ThreadItemStateView {
+  const ThreadRawItemStateView(this.payloads, this.notice, this.recordedAt);
+  final List<RawHistoryPayload> payloads;
+  final String notice;
+  final DateTime recordedAt;
+}
+
 final class ThreadFileItemStateView extends ThreadItemStateView {
   const ThreadFileItemStateView(this.path, this.mediaType, this.completedAt);
   final String path;
@@ -478,8 +494,8 @@ final class ThreadContextCompactionItemStateView extends ThreadItemStateView {
     this.afterTokens,
     this.compactedAt,
   );
-  final int beforeTokens;
-  final int afterTokens;
+  final int? beforeTokens;
+  final int? afterTokens;
   final DateTime compactedAt;
 }
 
@@ -519,6 +535,7 @@ class ThreadItemView {
     ThreadTurnItemStateView() => ThreadItemKind.turn,
     ThreadInferenceItemStateView() => ThreadItemKind.inference,
     ThreadSkillItemStateView() => ThreadItemKind.skill,
+    ThreadRawItemStateView() => ThreadItemKind.raw,
     ThreadFileItemStateView() => ThreadItemKind.file,
     ThreadContextCompactionItemStateView() => ThreadItemKind.contextCompaction,
   };
@@ -544,6 +561,7 @@ class ThreadItemView {
     },
     ThreadSkillItemStateView() ||
     ThreadFileItemStateView() ||
+    ThreadRawItemStateView() ||
     ThreadContextCompactionItemStateView() => 'completed',
   };
 
@@ -559,6 +577,7 @@ class ThreadItemView {
       lifecycle is! RunningThreadInferenceView,
     ThreadSkillItemStateView() ||
     ThreadFileItemStateView() ||
+    ThreadRawItemStateView() ||
     ThreadContextCompactionItemStateView() => true,
   };
 
@@ -601,6 +620,7 @@ class ThreadItemView {
       RunningThreadInferenceView() => null,
     },
     ThreadSkillItemStateView(:final activatedAt) => activatedAt,
+    ThreadRawItemStateView(:final recordedAt) => recordedAt,
     ThreadFileItemStateView(:final completedAt) => completedAt,
     ThreadContextCompactionItemStateView(:final compactedAt) => compactedAt,
   };
@@ -624,10 +644,12 @@ class ThreadItemView {
     },
     ThreadSkillItemStateView() ||
     ThreadFileItemStateView() ||
+    ThreadRawItemStateView() ||
     ThreadContextCompactionItemStateView() => null,
   };
 
   String get text => switch (state) {
+    ThreadRawItemStateView(:final notice) => notice,
     ThreadTextItemStateView(:final text) => text,
     ThreadAgentItemStateView(:final lifecycle) => switch (lifecycle) {
       SucceededThreadAgentView(:final summary) => summary,

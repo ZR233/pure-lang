@@ -1,4 +1,4 @@
-//! Cold interaction reads are owned by the core session database.
+//! Product interactions are projected from the immutable Thread journal.
 use crate::studio::store::StudioStore;
 use crate::{InteractionRequest, InteractionStatus};
 use anyhow::Result;
@@ -8,21 +8,28 @@ impl StudioStore {
         &self,
         interaction_id: &str,
     ) -> Result<Option<InteractionRequest>> {
-        Ok(self.sessions().read_interaction(interaction_id).await?)
+        for id in self.sessions().session_ids().await? {
+            let state = self.sessions().replay_thread(&id).await?;
+            if let Some(interaction) =
+                crate::thread_assembler::project_thread_interaction(&id, interaction_id, &state)?
+            {
+                return Ok(Some(interaction));
+            }
+        }
+        Ok(None)
     }
 
     pub async fn list_pending_interactions(
         &self,
         thread_id: &str,
     ) -> Result<Vec<InteractionRequest>> {
-        let records = self
-            .sessions()
-            .read_entries(thread_id, Some("pl.interaction"))
-            .await?;
+        let state = self.sessions().replay_thread(thread_id).await?;
         let mut pending = Vec::new();
-        for record in records {
-            let interaction: InteractionRequest = serde_json::from_value(record.payload)?;
-            if interaction.status() == InteractionStatus::Pending {
+        for id in state.permissions.keys().chain(state.interactions.keys()) {
+            if let Some(interaction) =
+                crate::thread_assembler::project_thread_interaction(thread_id, id, &state)?
+                && interaction.status() == InteractionStatus::Pending
+            {
                 pending.push(interaction);
             }
         }

@@ -4,8 +4,7 @@ use std::time::Instant;
 use anyhow::{Context, Result, bail};
 use base64::Engine;
 use image::GenericImageView;
-use pl_core::{AttachmentModality, ThreadAttachment};
-use pl_trace::TraceAttachment;
+use pl_protocol::{AttachmentModality, ThreadAttachment};
 
 use crate::studio::ids::{new_id, unix_seconds};
 use crate::studio::records::{AttachmentRecord, MaterializedAttachment};
@@ -16,7 +15,7 @@ impl StudioStore {
         self.sessions()
             .resources(thread_id, "studio.attachment")
             .iter()
-            .map(|entry| pl_core::session::entry::decode_entry(entry).map_err(anyhow::Error::from))
+            .map(AttachmentRecord::from_session_entry)
             .collect()
     }
 
@@ -132,103 +131,12 @@ impl StudioStore {
             })
             .collect())
     }
-
-    pub(crate) async fn prepare_tool_image_records(
-        &self,
-        thread_id: &str,
-        inputs: Vec<pl_core::ToolImageAttachmentInput>,
-    ) -> Result<Vec<AttachmentRecord>> {
-        if inputs.is_empty() {
-            return Ok(Vec::new());
-        }
-        for input in &inputs {
-            let actual_sha256 = sha256_hex(&input.data);
-            if actual_sha256 != input.content_sha256 {
-                bail!("tool image content digest does not match its bytes");
-            }
-            if input.width == 0 || input.height == 0 {
-                bail!("tool image dimensions must be non-zero");
-            }
-            if !matches!(
-                input.media_type.as_str(),
-                "image/png" | "image/jpeg" | "image/webp" | "image/gif"
-            ) {
-                bail!("tool image media type is not supported");
-            }
-        }
-
-        let mut created_paths = Vec::new();
-        let mut prepared = Vec::with_capacity(inputs.len());
-        for input in inputs {
-            let result = async {
-                let dir = self
-                    .attachments_dir()
-                    .join("objects")
-                    .join(&input.content_sha256[..2]);
-                tokio::fs::create_dir_all(&dir).await?;
-                let storage_path = dir.join(&input.content_sha256);
-                let created = !tokio::fs::try_exists(&storage_path).await?;
-                if created {
-                    let path = storage_path.clone();
-                    let data = input.data.clone();
-                    tokio::task::spawn_blocking(move || {
-                        pl_core::atomic_file::write_file_atomically(&path, &data)
-                    })
-                    .await
-                    .context("tool image blob writer task failed")??;
-                }
-                Ok::<_, anyhow::Error>((input, storage_path, created))
-            }
-            .await;
-            match result {
-                Ok((input, storage_path, created)) => {
-                    if created {
-                        created_paths.push(storage_path.clone());
-                    }
-                    prepared.push((input, storage_path));
-                }
-                Err(error) => {
-                    cleanup_created_blobs(created_paths).await;
-                    return Err(error);
-                }
-            }
-        }
-
-        Ok(prepared
-            .into_iter()
-            .map(|(input, storage_path)| AttachmentRecord {
-                id: new_id("attachment"),
-                thread_id: thread_id.to_string(),
-                modality: pl_protocol::studio::StudioAttachmentModality::Image,
-                media_type: input.media_type,
-                filename: Some(input.filename),
-                storage_path: storage_path.to_string_lossy().to_string(),
-                byte_size: input.data.len() as u64,
-                content_sha256: input.content_sha256,
-                width: Some(input.width),
-                height: Some(input.height),
-                created_at: unix_seconds(),
-            })
-            .collect())
-    }
 }
 
 async fn cleanup_created_blobs(paths: Vec<PathBuf>) {
     for path in paths {
         let _ = tokio::fs::remove_file(path).await;
     }
-}
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    hasher
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
 }
 
 #[derive(Debug, Clone)]
@@ -337,13 +245,13 @@ pub(crate) async fn materialize_attachment_records(
             attachment_id: record.id,
             modality: match record.modality {
                 pl_protocol::studio::StudioAttachmentModality::Image => {
-                    pl_core::AttachmentModality::Image
+                    pl_protocol::AttachmentModality::Image
                 }
                 pl_protocol::studio::StudioAttachmentModality::Video => {
-                    pl_core::AttachmentModality::Video
+                    pl_protocol::AttachmentModality::Video
                 }
                 pl_protocol::studio::StudioAttachmentModality::File => {
-                    pl_core::AttachmentModality::File
+                    pl_protocol::AttachmentModality::File
                 }
             },
             media_type: record.media_type,
@@ -356,28 +264,6 @@ pub(crate) async fn materialize_attachment_records(
         });
     }
     Ok(materialized)
-}
-
-pub(crate) fn trace_attachment(record: &AttachmentRecord) -> TraceAttachment {
-    TraceAttachment {
-        id: record.id.clone(),
-        modality: match record.modality {
-            pl_protocol::studio::StudioAttachmentModality::Image => {
-                pl_trace::TraceAttachmentModality::Image
-            }
-            pl_protocol::studio::StudioAttachmentModality::Video => {
-                pl_trace::TraceAttachmentModality::Video
-            }
-            pl_protocol::studio::StudioAttachmentModality::File => {
-                pl_trace::TraceAttachmentModality::File
-            }
-        },
-        media_type: record.media_type.clone(),
-        filename: record.filename.clone(),
-        width: record.width,
-        height: record.height,
-        byte_size: record.byte_size,
-    }
 }
 
 pub(crate) fn thread_attachment(record: &AttachmentRecord) -> ThreadAttachment {

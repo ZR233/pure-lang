@@ -2,193 +2,17 @@
 
 use anyhow::{Context, Result};
 
-use crate::config::StudioRole;
-use crate::studio::agent_host::root_agent_id;
 use crate::studio::{ThreadKind, ThreadRecord, ThreadVisibility};
 
 use super::super::StudioRuntime;
 
 impl StudioRuntime {
-    pub(in crate::studio) async fn ensure_thread_agent(
-        &self,
-        thread_id: &str,
-    ) -> Result<(pl_core::AgentRuntimeHandle, pl_core::ThreadId)> {
-        let target = self.read_owned_thread(thread_id).await?;
-        self.ensure_thread_agent_for_record(target).await
-    }
-
-    pub(super) async fn ensure_thread_agent_for_record(
-        &self,
-        target: ThreadRecord,
-    ) -> Result<(pl_core::AgentRuntimeHandle, pl_core::ThreadId)> {
-        let framework = self.agent_framework().await?;
-        let handle = framework.handle();
-        let target_agent_id = pl_core::ThreadId::new(target.agent_path.clone())?;
-        let target_thread_id = target.id.clone();
-        let mut missing = Vec::new();
-        let mut current = target.clone();
-        loop {
-            let agent_path = pl_core::ThreadId::new(current.agent_path.clone())?;
-            match handle.snapshot(agent_path).await {
-                Ok(_) => break,
-                Err(pl_core::AgentRuntimeError::NotFound(_)) => {}
-                Err(error) => return Err(anyhow::anyhow!(error)),
-            }
-            let parent_thread_id = current.parent_thread_id.clone();
-            missing.push(current);
-            let Some(parent_thread_id) = parent_thread_id else {
-                break;
-            };
-            current = self.read_owned_thread(&parent_thread_id).await?;
-        }
-
-        for thread_record in missing.into_iter().rev() {
-            self.ensure_thread_resident(&handle, thread_record).await?;
-        }
-        handle
-            .snapshot(target_agent_id.clone())
-            .await
-            .map_err(|error| anyhow::anyhow!(error))?;
-        self.residency.touch(&target_thread_id).await;
-        // 激活即入热集合：目录分页在此之后能以内存事实覆盖冷行。
-        self.agent_facility
-            .product_events
-            .warm_thread_index(vec![pl_core::Thread::from(target)]);
-        self.enforce_residency_limit().await;
-        Ok((handle, target_agent_id))
-    }
-
-    /// 让单个缺失的 Thread 驻留：已注册过 runtime 的走 durable 恢复，
-    /// 从未注册的沿用初始注册（空 session）。
-    async fn ensure_thread_resident(
-        &self,
-        handle: &pl_core::AgentRuntimeHandle,
-        thread_record: ThreadRecord,
-    ) -> Result<()> {
-        let attachments = self
-            .store
-            .list_thread_attachments(&thread_record.id)
-            .await?;
-        let registered = self
-            .store
-            .read_thread_runtime_revision(&thread_record.id)
-            .await?
-            > 0;
-        if registered {
-            let thread_id = pl_core::ThreadId::new(thread_record.id.clone())?;
-            match handle.activate(thread_id).await {
-                Ok(_) | Err(pl_core::AgentRuntimeError::AlreadyExists(_)) => {}
-                Err(error) => return Err(anyhow::anyhow!(error)),
-            }
-            self.agent_facility
-                .resources
-                .replace_thread_attachments(&thread_record.id, attachments)
-                .await;
-            self.residency.touch(&thread_record.id).await;
-            return Ok(());
-        }
-        let seed = self
-            .store
-            .thread_runtime_seed(&thread_record.id)
-            .await?
-            .context("cold Thread runtime seed is missing")?;
-        let registration = self
-            .thread_agent_registration(handle, thread_record.clone(), seed)
-            .await?;
-        match handle.register(registration).await {
-            Ok(_) | Err(pl_core::AgentRuntimeError::AlreadyExists(_)) => {}
-            Err(error) => return Err(anyhow::anyhow!(error)),
-        }
-        self.agent_facility
-            .resources
-            .replace_thread_attachments(&thread_record.id, attachments)
-            .await;
-        self.residency.touch(&thread_record.id).await;
-        Ok(())
-    }
-
     pub(in crate::studio::runtime) async fn register_new_thread(
         &self,
         thread: ThreadRecord,
     ) -> Result<()> {
-        let framework = self.agent_framework().await?;
-        let handle = framework.handle();
-        let registration = self
-            .thread_agent_registration(
-                &handle,
-                thread,
-                crate::studio::store::ThreadRuntimeSeed {
-                    thread_revision: 0,
-                    runtime_revision: 1,
-                    event_sequence: 1,
-                },
-            )
-            .await?;
-        handle
-            .register(registration)
-            .await
-            .map_err(|error| anyhow::anyhow!(error))?;
+        self.ensure_thread_owner(&thread.id).await?;
         Ok(())
-    }
-
-    async fn thread_agent_registration(
-        &self,
-        handle: &pl_core::AgentRuntimeHandle,
-        thread_record: ThreadRecord,
-        seed: crate::studio::store::ThreadRuntimeSeed,
-    ) -> Result<pl_core::AgentRegistration> {
-        let agent_id = pl_core::ThreadId::new(thread_record.agent_path.clone())?;
-        let (parent_id, role, depth) = match thread_record.thread_kind {
-            ThreadKind::Root => {
-                anyhow::ensure!(
-                    thread_record.parent_thread_id.is_none()
-                        && agent_id == root_agent_id(&thread_record.id),
-                    "root Studio Thread {} has invalid canonical owner",
-                    thread_record.id
-                );
-                let role = StudioRole::Planner;
-                (None, role, 0)
-            }
-            ThreadKind::Agent => {
-                anyhow::ensure!(
-                    agent_id != root_agent_id(&thread_record.root_thread_id),
-                    "child Studio Thread {} cannot use a root agent identity",
-                    thread_record.id
-                );
-                let parent_thread_id = thread_record
-                    .parent_thread_id
-                    .as_deref()
-                    .context("child Studio Thread has no parent Thread")?;
-                let parent = self.read_owned_thread(parent_thread_id).await?;
-                let parent_id = pl_core::ThreadId::new(parent.agent_path)?;
-                let parent_snapshot = handle
-                    .snapshot(parent_id.clone())
-                    .await
-                    .map_err(|error| anyhow::anyhow!(error))?;
-                let role = StudioRole::from_key(&thread_record.role)
-                    .context("child Studio Thread has an unsupported owner role")?;
-                (Some(parent_id), role, parent_snapshot.identity.depth + 1)
-            }
-        };
-        let registration = pl_core::AgentRegistration {
-            identity: pl_core::AgentIdentity {
-                id: agent_id,
-                parent_id,
-                role: role.id(),
-                depth,
-            },
-            session: pl_core::ThreadContextState {
-                metadata: pl_core::ThreadContextMetadata {
-                    project_id: Some(thread_record.project_id),
-                    title: Some(thread_record.title),
-                },
-                thread_revision: seed.thread_revision,
-                ..pl_core::ThreadContextState::empty()
-            },
-            runtime_revision: seed.runtime_revision,
-            event_sequence: seed.event_sequence,
-        };
-        Ok(registration)
     }
 
     pub(in crate::studio::runtime) async fn read_owned_thread(
@@ -205,7 +29,7 @@ impl StudioRuntime {
             self.store
                 .read_thread(thread_id)
                 .await?
-                .map(pl_core::Thread::from)
+                .map(pl_protocol::Thread::from)
                 .context("selected Thread not found")?
         };
         if self.recovery_issues().iter().any(|issue| {
@@ -244,10 +68,5 @@ impl StudioRuntime {
             error: None,
             runtime_updated_at: None,
         })
-    }
-
-    pub(super) async fn thread_agent_path(&self, thread_id: &str) -> Result<pl_core::ThreadId> {
-        let thread = self.read_owned_thread(thread_id).await?;
-        pl_core::ThreadId::new(thread.agent_path).map_err(Into::into)
     }
 }

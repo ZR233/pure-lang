@@ -4,9 +4,9 @@ use std::path::Path;
 
 use anyhow::{Result, bail};
 
-use crate::resolve_workspace_root;
 use crate::studio::records::{ProjectRecord, ThreadRecord, ThreadVisibility};
 use crate::studio::store::directory::{DirectoryDelta, ProjectDirectoryRecord, ProjectRemoval};
+use pl_tool::workspace::resolve_workspace_root;
 
 use super::super::StudioRuntime;
 use super::super::thread_title::ThreadTitleCancellationCause;
@@ -98,25 +98,14 @@ impl StudioRuntime {
             .residency
             .pin_many(active_threads.iter().map(|thread| thread.id.clone()));
         for thread in &active_threads {
-            let _ = self.ensure_thread_agent(&thread.id).await?;
+            let _ = self.ensure_thread_owner(&thread.id).await?;
         }
         for thread in &active_threads {
             if self.thread_is_busy(&thread.id).await? {
                 bail!("project has an active turn");
             }
         }
-        for thread in &active_threads {
-            let emitter = self.interaction_emitter(thread.id.clone());
-            self.agent_facility
-                .interactions
-                .cancel_thread(
-                    self.pending_thread_interactions(&thread.id).await?,
-                    "project archived",
-                    emitter,
-                )
-                .await?;
-        }
-        self.retire_archived_thread_tree(&thread_ids).await;
+        self.retire_archived_thread_tree(&thread_ids).await?;
         self.agent_facility
             .product_events
             .commit_directory(DirectoryDelta {
@@ -143,7 +132,7 @@ impl StudioRuntime {
             .iter()
             .filter(|thread| thread.visibility == ThreadVisibility::Active)
             .cloned()
-            .map(pl_core::Thread::from)
+            .map(pl_protocol::Thread::from)
             .collect();
         self.agent_facility
             .product_events

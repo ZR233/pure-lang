@@ -110,7 +110,7 @@ fn normalize_installed_config(source: &ConfigStore, destination: &Path) -> Resul
     if schema_version == 17 {
         // Test-only conversion of bundled preset references. Preserve endpoints, routes,
         // effort and environment credential names; never migrate the installed file.
-        let catalog = pl_core::builtin_provider_catalog();
+        let catalog = pl_model::config::builtin_provider_catalog();
         let providers = table
             .get_mut("models")
             .and_then(toml::Value::as_table_mut)
@@ -225,7 +225,7 @@ async fn run_live_mode(
 
     if mode_id == "mode.task" {
         wait_for_terminal_workflow(&runtime, &thread.id).await?;
-        wait_for_completed_turn(&runtime, &thread.id, &submitted.turn_id, mode_id).await?;
+        wait_for_completed_turn(&runtime, &thread.id, &submitted.input_id, mode_id).await?;
         let snapshot = runtime.thread_snapshot(&thread.id).await?;
         let workflow = snapshot
             .runtime
@@ -273,7 +273,7 @@ async fn run_live_mode(
         );
         reopened.shutdown_runtime().await?;
     } else {
-        wait_for_completed_turn(&runtime, &thread.id, &submitted.turn_id, mode_id).await?;
+        wait_for_completed_turn(&runtime, &thread.id, &submitted.input_id, mode_id).await?;
         let snapshot = runtime.thread_snapshot(&thread.id).await?;
         ensure!(
             snapshot
@@ -292,13 +292,17 @@ async fn run_live_mode(
 async fn wait_for_completed_turn(
     runtime: &StudioRuntime,
     thread_id: &str,
-    turn_id: &str,
+    input_id: &str,
     mode_id: &str,
 ) -> Result<()> {
     let deadline = Instant::now() + LIVE_TIMEOUT;
     while Instant::now() < deadline {
         let page = runtime.list_thread_turns(thread_id, None, 100).await?;
-        for history in &page.turns {
+        for history in page
+            .turns
+            .iter()
+            .filter(|history| history.turn.input_id.as_deref() == Some(input_id))
+        {
             if let Some(completion) = complete_receipt(history)? {
                 write_completion_receipt(mode_id, thread_id, &history.turn.id, &completion)?;
                 return Ok(());
@@ -309,7 +313,7 @@ async fn wait_for_completed_turn(
                 latest.turn.state,
                 TurnState::Failed(_) | TurnState::Cancelled(_) | TurnState::BudgetLimited(_)
             )
-            && latest.turn.id == turn_id
+            && latest.turn.input_id.as_deref() == Some(input_id)
         {
             bail!("live Turn ended before completion: {:?}", latest.turn.state);
         }
@@ -338,7 +342,10 @@ fn complete_receipt(history: &pl_protocol::ThreadTurnHistory) -> Result<Option<s
         | pl_protocol::ThreadToolState::Approved(_)
         | pl_protocol::ThreadToolState::Running(_)
         | pl_protocol::ThreadToolState::Denied(_)
-        | pl_protocol::ThreadToolState::Cancelled(_) => return Ok(None),
+        | pl_protocol::ThreadToolState::Cancelled(_)
+        | pl_protocol::ThreadToolState::Queued(_)
+        | pl_protocol::ThreadToolState::Cancelling(_)
+        | pl_protocol::ThreadToolState::Interrupted(_) => return Ok(None),
     };
     let receipt = serde_json::from_str::<serde_json::Value>(output)
         .context("complete tool receipt is not valid JSON")?;

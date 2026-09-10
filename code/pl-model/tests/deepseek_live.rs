@@ -7,11 +7,11 @@ use pl_model::model::{deepseek_default_model_slugs, default_models};
 use pl_model::provider::ProviderEndpoint;
 use pl_model::runtime::{ModelInvocationContext, ModelRuntime, ModelSession};
 
+use pl_protocol::trace::{AgentEvent, TraceDelta, TraceEvent, TraceEventKind};
 use pl_protocol::{
     Message, MessageContent, MessageRole, ModelContextItem, ResponsesContextItem,
     ResponsesContextItemKind, ToolSpec,
 };
-use pl_trace::{AgentEvent, TraceDelta, TraceEvent, TraceEventKind};
 use tokio::sync::broadcast::error::RecvError;
 
 const DEEPSEEK_LIVE_ENV_KEY: &str = "DEEPSEEK_API_KEY";
@@ -103,7 +103,10 @@ async fn run_request(api_key: &str, request: CompletionRequest, turn_id: &str) -
         text_delta_count
     });
 
-    let trace_sink = std::sync::Arc::new(pl_trace::InMemoryTraceEventSink::new("live-session", 0));
+    let trace_sink = std::sync::Arc::new(pl_protocol::trace::InMemoryTraceEventSink::new(
+        "live-session",
+        0,
+    ));
     let context = ModelInvocationContext::new(ModelSession::default())
         .with_events(event_tx)
         .with_trace(

@@ -10,9 +10,9 @@
 - `lagged`：只表示 best-effort 事件发生丢弃，客户端必须重新订阅。
 - `closed`：Thread 或 runtime 已关闭。
 
-驻留 Thread 的订阅实现先注册 receiver，再直接读取 ThreadActor 的内存 authoritative snapshot，
+驻留 Thread 的订阅实现先注册 receiver，再直接读取 Thread owner 的内存 authoritative snapshot，
 最后发送 snapshot，避免 snapshot 与 live 之间漏事件；该路径不得查询 SQLite。未驻留 Thread 必须
-先通过显式激活命令从冷基线创建 ThreadActor，激活完成后再走同一订阅流程。实时流没有 durable
+先通过显式激活命令从冷基线创建 Thread owner，激活完成后再走同一订阅流程。实时流没有 durable
 cursor、journal replay 或 ResyncRequired 补丁协议；恢复永远重新取得同一内存 owner snapshot。
 旧历史通过 `listThreadTurns` 的 opaque keyset cursor 从 SQLite 冷分页读取。
 
@@ -99,7 +99,8 @@ FRB 与 HTTP SSE 消费同一个 runtime subscription API，不各自实现流�
 为 `GET /api/v1/events/product`，Thread stream 为
 `GET /api/v1/threads/{threadId}/events`。Thread 首帧固定为 authoritative snapshot，后续发送
 notification、lagged、closed；producer 在连接存活期间持有 Thread residency pin，断开或 server
-shutdown 必须取消 producer、释放 receiver 与 pin。
+shutdown 必须取消 producer、释放 receiver 与 pin。Runtime subscription 在恢复 owner 前取得 pin，
+并持有至订阅释放；重叠订阅与临时激活分别计数，任一 guard 释放不影响其余 pin。
 
 FRB `readThreadSnapshot` 与 HTTP `GET /api/v1/threads/{threadId}` 机械调用同一个 snapshot
 query，均返回完整 `ThreadSnapshot`，不得让 HTTP route 退化为只返回 Thread directory 元数据。

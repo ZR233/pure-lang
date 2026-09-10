@@ -1,7 +1,6 @@
 use std::io;
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use pl_protocol::remote::{
     REMOTE_PROTOCOL_VERSION, RemoteCapability, RemoteCopyRequest, RemoteDirectoryEntry,
@@ -19,11 +18,11 @@ use crate::path::{WorkspaceRegistry, io_error, remote_error};
 
 mod outbound;
 mod process;
+mod read_range;
+mod write;
 
 use outbound::Outbound;
 use process::ProcessRegistry;
-
-static NEXT_ATOMIC_WRITE_ID: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug)]
 struct ServerState {
@@ -236,7 +235,8 @@ async fn handle_request(
         }
         RemoteRequest::Stat(request) => stat(state, request).await,
         RemoteRequest::ReadBytes(request) => read_bytes(state, request).await,
-        RemoteRequest::WriteAtomic(request) => write_atomic(state, request, body).await,
+        RemoteRequest::ReadRange(request) => read_range::read(state, request).await,
+        RemoteRequest::WriteFile(request) => write::write(state, request, body).await,
         RemoteRequest::ListDirectory(request) => list_directory(state, request).await,
         RemoteRequest::CreateDirectory(request) => create_directory(state, request).await,
         RemoteRequest::RemovePath(request) => remove_path(state, request).await,
@@ -385,6 +385,12 @@ async fn stat(
             is_file: metadata.is_file(),
             is_directory: metadata.is_dir(),
             len: metadata.is_file().then_some(metadata.len()),
+            readonly: metadata.permissions().readonly(),
+            modified_at: metadata
+                .modified()
+                .ok()
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .and_then(|duration| i64::try_from(duration.as_secs()).ok()),
         }),
         Vec::new(),
     ))
@@ -417,45 +423,6 @@ async fn read_bytes(
         .await
         .map_err(|error| io_error("failed to read file", error))?;
     Ok((RemoteResponse::Bytes, bytes))
-}
-
-async fn write_atomic(
-    state: &Arc<Mutex<ServerState>>,
-    request: RemotePathRequest,
-    body: Vec<u8>,
-) -> Result<(RemoteResponse, Vec<u8>), RemoteError> {
-    let workspaces = state.lock().await.workspaces.clone();
-    let path = workspaces
-        .resolve_for_write(&request.workspace_id, &request.path)
-        .await?;
-    let parent = path.parent().ok_or_else(|| {
-        remote_error(
-            RemoteErrorCode::InvalidRequest,
-            "write path has no parent directory",
-        )
-    })?;
-    tokio::fs::create_dir_all(parent)
-        .await
-        .map_err(|error| io_error("failed to create write directory", error))?;
-    let sequence = NEXT_ATOMIC_WRITE_ID
-        .fetch_add(1, Ordering::Relaxed)
-        .saturating_add(1);
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("file");
-    let temporary = parent.join(format!(
-        ".{file_name}.pure-tmp-{}-{sequence}",
-        std::process::id()
-    ));
-    tokio::fs::write(&temporary, body)
-        .await
-        .map_err(|error| io_error("failed to write temporary file", error))?;
-    if let Err(error) = tokio::fs::rename(&temporary, &path).await {
-        let _ = tokio::fs::remove_file(&temporary).await;
-        return Err(io_error("failed to publish file", error));
-    }
-    Ok(ack())
 }
 
 async fn list_directory(

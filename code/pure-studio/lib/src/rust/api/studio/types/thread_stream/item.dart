@@ -11,7 +11,31 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 part 'item.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+
+class BridgeRawPayload {
+  final String format;
+  final int version;
+  final String content;
+
+  const BridgeRawPayload({
+    required this.format,
+    required this.version,
+    required this.content,
+  });
+
+  @override
+  int get hashCode => format.hashCode ^ version.hashCode ^ content.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeRawPayload &&
+          runtimeType == other.runtimeType &&
+          format == other.format &&
+          version == other.version &&
+          content == other.content;
+}
 
 @freezed
 sealed class BridgeSkillActivationCause with _$BridgeSkillActivationCause {
@@ -278,6 +302,11 @@ sealed class BridgeThreadItemDeltaState with _$BridgeThreadItemDeltaState {
 sealed class BridgeThreadItemState with _$BridgeThreadItemState {
   const BridgeThreadItemState._();
 
+  const factory BridgeThreadItemState.raw({
+    required List<BridgeRawPayload> payloads,
+    required String notice,
+    required PlatformInt64 recordedAt,
+  }) = BridgeThreadItemState_Raw;
   const factory BridgeThreadItemState.text({
     required BridgeThreadTextChannel channel,
     required String text,
@@ -297,8 +326,10 @@ sealed class BridgeThreadItemState with _$BridgeThreadItemState {
     required BridgeThreadAgentIdentity identity,
     required BridgeThreadAgentState state,
   }) = BridgeThreadItemState_Agent;
-  const factory BridgeThreadItemState.turn({required BridgeTurnState state}) =
-      BridgeThreadItemState_Turn;
+  const factory BridgeThreadItemState.turn({
+    required BridgeTurnState state,
+    String? inputId,
+  }) = BridgeThreadItemState_Turn;
   const factory BridgeThreadItemState.inference({
     required String inferenceId,
     required String model,
@@ -318,8 +349,8 @@ sealed class BridgeThreadItemState with _$BridgeThreadItemState {
     required PlatformInt64 completedAt,
   }) = BridgeThreadItemState_File;
   const factory BridgeThreadItemState.contextCompaction({
-    required BigInt beforeTokens,
-    required BigInt afterTokens,
+    BigInt? beforeTokens,
+    BigInt? afterTokens,
     required PlatformInt64 compactedAt,
   }) = BridgeThreadItemState_ContextCompaction;
 }

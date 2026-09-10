@@ -79,7 +79,11 @@ class _SessionCostChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: context.l10n.sessionAllAgentsCostTooltip,
+      message: [
+        context.l10n.sessionAllAgentsCostTooltip,
+        for (final item in cost?.purposeCosts ?? const <PurposeCostView>[])
+          '${_purposeLabel(context, item.purpose)}: ${item.label}${item.hasUnpricedUsage ? ' (${context.l10n.statusUnpricedUsageLabel})' : ''}',
+      ].join('\n'),
       child: Padding(
         key: StudioDriverKeys.sessionCost,
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
@@ -88,6 +92,16 @@ class _SessionCostChip extends StatelessWidget {
     );
   }
 }
+
+String _purposeLabel(BuildContext context, String? purpose) =>
+    switch (purpose) {
+      'main' => context.l10n.costPurposeMain,
+      'summary' => context.l10n.costPurposeSummary,
+      'review' => context.l10n.costPurposeReview,
+      'title' => context.l10n.costPurposeTitle,
+      null => context.l10n.costPurposeUnknown,
+      String value => value,
+    };
 
 class _AgentSwitcher extends ConsumerStatefulWidget {
   const _AgentSwitcher({required this.state});

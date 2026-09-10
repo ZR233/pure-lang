@@ -15,5 +15,6 @@ pub struct SessionEntry {
     pub revision: u64,
     pub created_at: i64,
     pub updated_at: i64,
-    pub payload: serde_json::Value,
+    /// Content encoded by its owner. Storage must not parse or normalize these bytes.
+    pub payload: String,
 }

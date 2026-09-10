@@ -40,7 +40,7 @@ pub async fn start_new_thread(
         thread: bridge_thread(thread_from_record(response.thread)),
         receipt: StartTurnResponse {
             thread_id: response.submission.thread_id,
-            turn_id: response.submission.turn_id,
+            input_id: response.submission.input_id,
             revision: response.submission.cursor,
         },
     })

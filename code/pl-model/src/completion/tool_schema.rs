@@ -4,6 +4,20 @@ use pl_protocol::ToolSpec;
 
 const APPLY_PATCH_FUNCTION_FALLBACK_DESCRIPTION: &str = "Complete Codex-style apply_patch text beginning with *** Begin Patch and ending with *** End Patch. Each file operation must use one of these hunk headers: *** Add File: <path>, *** Delete File: <path>, or *** Update File: <path>. Do not use ---/+++ unified diff, *** File: metadata, or natural-language edit instructions such as Insert after. If a previous patch failed, read the target file again and retry with a smaller patch based on current content; do not repeat the same failed patch. Minimal update example:\n*** Begin Patch\n*** Update File: notes.txt\n@@\n-old line\n+new line\n*** End Patch";
 
+/// Projects an explicitly eligible local declaration for a hosted coordinator.
+/// The host validates the executor's side effects before requesting this projection.
+pub fn programmatic_tool_declaration(spec: ToolSpec) -> ToolSpec {
+    let output_schema = match &spec {
+        ToolSpec::Function { output_schema, .. } | ToolSpec::Custom { output_schema, .. } => {
+            output_schema.clone().unwrap_or_else(
+                || serde_json::json!({"type":"object", "additionalProperties":true}),
+            )
+        }
+        ToolSpec::ProgrammaticToolCalling | ToolSpec::WebSearch { .. } => return spec,
+    };
+    spec.allow_programmatic(output_schema)
+}
+
 /// Custom 工具在目标 wire 上的投影策略。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CustomToolProjection {

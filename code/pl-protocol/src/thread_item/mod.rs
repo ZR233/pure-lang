@@ -190,6 +190,7 @@ impl ThreadItem {
             ThreadItemState::Turn(_)
             | ThreadItemState::Skill(_)
             | ThreadItemState::File(_)
+            | ThreadItemState::Raw(_)
             | ThreadItemState::ContextCompaction(_) => return false,
         };
         self.revision = self.revision.saturating_add(1);
@@ -207,6 +208,7 @@ impl ThreadItem {
             | ThreadItemState::Inference(_)
             | ThreadItemState::Skill(_)
             | ThreadItemState::File(_)
+            | ThreadItemState::Raw(_)
             | ThreadItemState::ContextCompaction(_) => None,
         }
     }
@@ -221,6 +223,7 @@ impl ThreadItem {
             | ThreadItemState::Inference(_)
             | ThreadItemState::Skill(_)
             | ThreadItemState::File(_)
+            | ThreadItemState::Raw(_)
             | ThreadItemState::ContextCompaction(_) => None,
         }
     }
@@ -235,6 +238,7 @@ impl ThreadItem {
             | ThreadItemState::Inference(_)
             | ThreadItemState::Skill(_)
             | ThreadItemState::File(_)
+            | ThreadItemState::Raw(_)
             | ThreadItemState::ContextCompaction(_) => None,
         }
     }
@@ -275,6 +279,7 @@ impl ThreadItem {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", content = "data", rename_all = "camelCase")]
 pub enum ThreadItemState {
+    Raw(ThreadRawItem),
     Text(ThreadTextItem),
     Thinking(ThreadThinkingItem),
     Tool(ThreadToolItem),
@@ -289,6 +294,7 @@ pub enum ThreadItemState {
 impl ThreadItemState {
     pub fn kind(&self) -> ThreadItemKind {
         match self {
+            Self::Raw(_) => ThreadItemKind::Raw,
             Self::Text(_) => ThreadItemKind::Text,
             Self::Thinking(_) => ThreadItemKind::Thinking,
             Self::Tool(_) => ThreadItemKind::Tool,
@@ -309,7 +315,7 @@ impl ThreadItemState {
             Self::Agent(value) => value.state().is_terminal(),
             Self::Turn(value) => value.state().is_terminal(),
             Self::Inference(value) => value.state().is_terminal(),
-            Self::Skill(_) | Self::File(_) | Self::ContextCompaction(_) => true,
+            Self::Raw(_) | Self::Skill(_) | Self::File(_) | Self::ContextCompaction(_) => true,
         }
     }
 
@@ -323,6 +329,7 @@ impl ThreadItemState {
             Self::Inference(value) => value.state().terminal_at(),
             Self::Skill(value) => Some(value.activation().activated_at),
             Self::File(value) => Some(value.completed_at()),
+            Self::Raw(value) => Some(value.recorded_at),
             Self::ContextCompaction(value) => Some(value.compacted_at()),
         }
     }
@@ -338,20 +345,53 @@ impl ThreadItemState {
                 .failure()
                 .map(|failure| failure.message.as_str()),
             Self::Inference(value) => value.state().failure(),
-            Self::Skill(_) | Self::File(_) | Self::ContextCompaction(_) => None,
+            Self::Raw(_) | Self::Skill(_) | Self::File(_) | Self::ContextCompaction(_) => None,
         }
     }
+}
+
+/// Original producer data shown when a historical codec is absent or unsupported.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadRawPayload {
+    pub format: String,
+    pub version: u32,
+    pub content: String,
+}
+
+/// Raw history is a product view; it never changes the saved model context or authorizes execution.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadRawItem {
+    pub payloads: Vec<ThreadRawPayload>,
+    pub notice: String,
+    pub recorded_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadTurnItem {
     state: TurnState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    input_id: Option<String>,
 }
 
 impl ThreadTurnItem {
     pub fn new(state: TurnState) -> Self {
-        Self { state }
+        Self {
+            state,
+            input_id: None,
+        }
+    }
+
+    /// Preserves the actual input association for history and disconnected subscribers.
+    pub fn with_input_id(mut self, input_id: Option<String>) -> Self {
+        self.input_id = input_id;
+        self
+    }
+
+    pub fn input_id(&self) -> Option<&str> {
+        self.input_id.as_deref()
     }
 
     pub fn state(&self) -> &TurnState {
@@ -362,6 +402,7 @@ impl ThreadTurnItem {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum ThreadItemKind {
+    Raw,
     Text,
     Thinking,
     Tool,

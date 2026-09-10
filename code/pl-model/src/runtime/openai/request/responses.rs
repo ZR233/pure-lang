@@ -13,6 +13,15 @@ use super::content::{
 };
 use super::protocol_error;
 use super::tool_history::{record_arguments_text, record_custom_input, tool_callers_by_call_id};
+// Provider envelope only: the canonical context remains the producer's original string.
+fn programmatic_result_output(output: String) -> String {
+    match serde_json::from_str::<serde_json::Value>(&output) {
+        Ok(serde_json::Value::Object(_)) => output,
+        Ok(value) => serde_json::json!({ "content": value }).to_string(),
+        Err(_) => serde_json::json!({ "content": output }).to_string(),
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub(super) struct ResponsesRequestBody {
     model: String,
@@ -99,6 +108,11 @@ impl ResponsesRequestBody {
                     })?;
                     let caller = tool_callers.get(&record.call_id).cloned();
                     let output = message_content_text(&msg.content);
+                    let output = if caller.is_some() {
+                        programmatic_result_output(output)
+                    } else {
+                        output
+                    };
                     match record.kind {
                         ToolCallKind::Function => {
                             input.push(ResponsesInputItem::typed(
@@ -638,5 +652,20 @@ mod tests {
         let body = OpenAiProtocol::responses().build_request_body_with_model(&request, &model);
 
         assert_eq!(body["tools"], serde_json::json!([{"type": "web_search"}]));
+    }
+    #[test]
+    fn programmatic_result_encoding_preserves_objects_and_wraps_other_content() {
+        let object = "{  \"large\": 9007199254740993 }".to_string();
+        assert_eq!(programmatic_result_output(object.clone()), object);
+        for (raw, expected) in [
+            ("plain text", serde_json::json!({"content":"plain text"})),
+            ("[1,2]", serde_json::json!({"content":[1,2]})),
+        ] {
+            assert_eq!(
+                serde_json::from_str::<serde_json::Value>(&programmatic_result_output(raw.into()))
+                    .unwrap(),
+                expected
+            );
+        }
     }
 }

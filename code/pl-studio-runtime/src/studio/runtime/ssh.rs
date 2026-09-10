@@ -1,8 +1,8 @@
-//! Typed SSH management commands delegated to `pl-core::remote`.
+//! Typed SSH management commands delegated to `pl-tool::remote`.
 
 use anyhow::Result;
-use pl_core::remote::{SshConnectionSnapshot, SshServerProfile};
 use pl_protocol::remote::RemoteDirectoryListing;
+use pl_tool::remote::{SshConnectionSnapshot, SshServerProfile};
 
 use crate::studio::records::ProjectRecord;
 use crate::studio::store::directory::{DirectoryDelta, ProjectDirectoryRecord};
@@ -44,6 +44,10 @@ impl StudioRuntime {
             }
             return Err(error);
         }
+        if previous.as_ref() != Some(&profile) || password.is_some() {
+            self.thread_factory.invalidate_ssh_bindings(&profile.id);
+            self.tool_catalog_updates.notify_one();
+        }
         if let Some(password) = password {
             self.ssh_manager
                 .lease_password(&profile.id, password)
@@ -55,6 +59,8 @@ impl StudioRuntime {
     pub async fn delete_ssh_server(&self, server_id: &str) -> Result<()> {
         self.store.delete_ssh_server(server_id).await?;
         self.ssh_manager.delete_server(server_id).await?;
+        self.thread_factory.invalidate_ssh_bindings(server_id);
+        self.tool_catalog_updates.notify_one();
         Ok(())
     }
 

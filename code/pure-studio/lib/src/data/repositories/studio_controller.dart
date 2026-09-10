@@ -1411,12 +1411,20 @@ StudioState _reconcileComposer(
   final workspace = state.workspacesByThread[threadId];
   if (workspace == null) return state;
   final composer = _workspaceUi(state, threadId).composer;
-  if (composer case PendingStartComposerThreadState(:final acceptedTurnId)) {
-    for (final item in workspace.items) {
-      if (item.state case ThreadTurnItemStateView(:final state)
-          when item.turnId == acceptedTurnId) {
+  String? observedInputId;
+  if (composer case PendingStartComposerThreadState(:final acceptedInputId)) {
+    final candidate = observedTurn ?? workspace.activeTurn;
+    if (candidate?.inputId == acceptedInputId) {
+      observedInputId = acceptedInputId;
+      observedTurn = candidate;
+    }
+    for (final item in workspace.items.reversed) {
+      if (item.state case ThreadTurnItemStateView(:final state, :final inputId)
+          when inputId == acceptedInputId) {
+        observedInputId = acceptedInputId;
         observedTurn = StudioTurnView(
-          turnId: acceptedTurnId,
+          inputId: inputId,
+          turnId: item.turnId,
           threadId: threadId,
           revision: item.revision,
           state: state,
@@ -1425,12 +1433,36 @@ StudioState _reconcileComposer(
         break;
       }
     }
+    final input = workspace.items
+        .where((item) => item.id == acceptedInputId)
+        .firstOrNull;
+    if (input != null) {
+      observedInputId = input.id;
+      if (observedTurn?.turnId != input.turnId) observedTurn = null;
+      for (final item in workspace.items) {
+        if (item.state case ThreadTurnItemStateView(:final state)
+            when item.turnId == input.turnId) {
+          observedTurn = StudioTurnView(
+            turnId: input.turnId,
+            threadId: threadId,
+            revision: item.revision,
+            state: state,
+            updatedAt: item.updatedAt,
+          );
+          break;
+        }
+      }
+      if (observedTurn == null &&
+          workspace.activeTurn?.turnId == input.turnId) {
+        observedTurn = workspace.activeTurn;
+      }
+    }
   }
   return _withWorkspaceUi(
     state,
     threadId,
     (ui) => ui.copyWith(
-      composer: ui.composer.observeTurn(observedTurn ?? workspace.activeTurn),
+      composer: ui.composer.observeInput(observedInputId, observedTurn),
     ),
   );
 }

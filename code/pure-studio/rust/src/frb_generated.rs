@@ -5457,12 +5457,42 @@ impl SseDecode for crate::api::studio::types::response::BridgeProviderUsageState
     }
 }
 
+impl SseDecode for crate::api::studio::types::response::BridgePurposeCostSnapshot {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_purpose = <Option<String>>::sse_decode(deserializer);
+        let mut var_estimatedCosts = <Vec<
+            crate::api::studio::types::thread_stream::BridgeRuntimeCostAmount,
+        >>::sse_decode(deserializer);
+        let mut var_hasUnpricedUsage = <bool>::sse_decode(deserializer);
+        return crate::api::studio::types::response::BridgePurposeCostSnapshot {
+            purpose: var_purpose,
+            estimated_costs: var_estimatedCosts,
+            has_unpriced_usage: var_hasUnpricedUsage,
+        };
+    }
+}
+
 impl SseDecode for crate::api::studio::types::runtime::BridgeQueuedAgent {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_turnId = <String>::sse_decode(deserializer);
         return crate::api::studio::types::runtime::BridgeQueuedAgent {
             turn_id: var_turnId,
+        };
+    }
+}
+
+impl SseDecode for crate::api::studio::types::thread_stream::item::BridgeRawPayload {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_format = <String>::sse_decode(deserializer);
+        let mut var_version = <u32>::sse_decode(deserializer);
+        let mut var_content = <String>::sse_decode(deserializer);
+        return crate::api::studio::types::thread_stream::item::BridgeRawPayload {
+            format: var_format,
+            version: var_version,
+            content: var_content,
         };
     }
 }
@@ -5757,12 +5787,16 @@ impl SseDecode for crate::api::studio::types::response::BridgeSessionCostSnapsho
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_rootThreadId = <String>::sse_decode(deserializer);
+        let mut var_purposeCosts = <Vec<
+            crate::api::studio::types::response::BridgePurposeCostSnapshot,
+        >>::sse_decode(deserializer);
         let mut var_estimatedCosts = <Vec<
             crate::api::studio::types::thread_stream::BridgeRuntimeCostAmount,
         >>::sse_decode(deserializer);
         let mut var_hasUnpricedUsage = <bool>::sse_decode(deserializer);
         return crate::api::studio::types::response::BridgeSessionCostSnapshot {
             root_thread_id: var_rootThreadId,
+            purpose_costs: var_purposeCosts,
             estimated_costs: var_estimatedCosts,
             has_unpriced_usage: var_hasUnpricedUsage,
         };
@@ -6763,6 +6797,14 @@ impl SseDecode for crate::api::studio::types::thread_stream::item::BridgeThreadI
         let mut tag_ = <i32>::sse_decode(deserializer);
         match tag_ {
             0 => {
+                let mut var_payloads = <Vec<
+                    crate::api::studio::types::thread_stream::item::BridgeRawPayload,
+                >>::sse_decode(deserializer);
+                let mut var_notice = <String>::sse_decode(deserializer);
+                let mut var_recordedAt = <i64>::sse_decode(deserializer);
+                return crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Raw{payloads: var_payloads, notice: var_notice, recorded_at: var_recordedAt};
+            }
+            1 => {
                 let mut var_channel = <crate::api::studio::types::thread_stream::item::BridgeThreadTextChannel>::sse_decode(deserializer);
                 let mut var_text = <String>::sse_decode(deserializer);
                 let mut var_attachments = <Vec<
@@ -6771,36 +6813,37 @@ impl SseDecode for crate::api::studio::types::thread_stream::item::BridgeThreadI
                 let mut var_lifecycle = <crate::api::studio::types::thread_stream::item::BridgeThreadContentLifecycle>::sse_decode(deserializer);
                 return crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Text{channel: var_channel, text: var_text, attachments: var_attachments, lifecycle: var_lifecycle};
             }
-            1 => {
+            2 => {
                 let mut var_summary = <Vec<String>>::sse_decode(deserializer);
                 let mut var_content = <Vec<String>>::sse_decode(deserializer);
                 let mut var_lifecycle = <crate::api::studio::types::thread_stream::item::BridgeThreadContentLifecycle>::sse_decode(deserializer);
                 return crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Thinking{summary: var_summary, content: var_content, lifecycle: var_lifecycle};
             }
-            2 => {
+            3 => {
                 let mut var_invocation = <crate::api::studio::types::thread_stream::item::BridgeThreadToolInvocation>::sse_decode(deserializer);
                 let mut var_state = <crate::api::studio::types::thread_stream::item::BridgeThreadToolState>::sse_decode(deserializer);
                 return crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Tool{invocation: var_invocation, state: var_state};
             }
-            3 => {
+            4 => {
                 let mut var_identity = <crate::api::studio::types::thread_stream::item::BridgeThreadAgentIdentity>::sse_decode(deserializer);
                 let mut var_state = <crate::api::studio::types::thread_stream::item::BridgeThreadAgentState>::sse_decode(deserializer);
                 return crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Agent{identity: var_identity, state: var_state};
             }
-            4 => {
+            5 => {
                 let mut var_state =
                     <crate::api::studio::types::thread_stream::BridgeTurnState>::sse_decode(
                         deserializer,
                     );
-                return crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Turn{state: var_state};
+                let mut var_inputId = <Option<String>>::sse_decode(deserializer);
+                return crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Turn{state: var_state, input_id: var_inputId};
             }
-            5 => {
+            6 => {
                 let mut var_inferenceId = <String>::sse_decode(deserializer);
                 let mut var_model = <String>::sse_decode(deserializer);
                 let mut var_state = <crate::api::studio::types::thread_stream::item::BridgeThreadInferenceState>::sse_decode(deserializer);
                 return crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Inference{inference_id: var_inferenceId, model: var_model, state: var_state};
             }
-            6 => {
+            7 => {
                 let mut var_name = <String>::sse_decode(deserializer);
                 let mut var_source = <String>::sse_decode(deserializer);
                 let mut var_providerId = <String>::sse_decode(deserializer);
@@ -6809,15 +6852,15 @@ impl SseDecode for crate::api::studio::types::thread_stream::item::BridgeThreadI
                 let mut var_activatedAt = <i64>::sse_decode(deserializer);
                 return crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Skill{name: var_name, source: var_source, provider_id: var_providerId, resource_base: var_resourceBase, cause: var_cause, activated_at: var_activatedAt};
             }
-            7 => {
+            8 => {
                 let mut var_path = <String>::sse_decode(deserializer);
                 let mut var_mediaType = <Option<String>>::sse_decode(deserializer);
                 let mut var_completedAt = <i64>::sse_decode(deserializer);
                 return crate::api::studio::types::thread_stream::item::BridgeThreadItemState::File{path: var_path, media_type: var_mediaType, completed_at: var_completedAt};
             }
-            8 => {
-                let mut var_beforeTokens = <u64>::sse_decode(deserializer);
-                let mut var_afterTokens = <u64>::sse_decode(deserializer);
+            9 => {
+                let mut var_beforeTokens = <Option<u64>>::sse_decode(deserializer);
+                let mut var_afterTokens = <Option<u64>>::sse_decode(deserializer);
                 let mut var_compactedAt = <i64>::sse_decode(deserializer);
                 return crate::api::studio::types::thread_stream::item::BridgeThreadItemState::ContextCompaction{before_tokens: var_beforeTokens, after_tokens: var_afterTokens, compacted_at: var_compactedAt};
             }
@@ -7525,6 +7568,7 @@ impl SseDecode for crate::api::studio::types::thread_stream::BridgeToolApprovalR
 impl SseDecode for crate::api::studio::types::thread_stream::BridgeTurn {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_inputId = <Option<String>>::sse_decode(deserializer);
         let mut var_id = <String>::sse_decode(deserializer);
         let mut var_threadId = <String>::sse_decode(deserializer);
         let mut var_revision = <u64>::sse_decode(deserializer);
@@ -7532,6 +7576,7 @@ impl SseDecode for crate::api::studio::types::thread_stream::BridgeTurn {
             <crate::api::studio::types::thread_stream::BridgeTurnState>::sse_decode(deserializer);
         let mut var_updatedAt = <i64>::sse_decode(deserializer);
         return crate::api::studio::types::thread_stream::BridgeTurn {
+            input_id: var_inputId,
             id: var_id,
             thread_id: var_threadId,
             revision: var_revision,
@@ -7598,18 +7643,21 @@ impl SseDecode for crate::api::studio::types::thread_stream::BridgeTurnCancellat
         let mut tag_ = <i32>::sse_decode(deserializer);
         match tag_ {
             0 => {
-                return crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::UserRequested;
+                return crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::Unspecified;
             }
             1 => {
-                return crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::RuntimeShutdown;
+                return crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::UserRequested;
             }
             2 => {
-                return crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::AgentClosed;
+                return crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::RuntimeShutdown;
             }
             3 => {
-                return crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::Recovery;
+                return crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::AgentClosed;
             }
             4 => {
+                return crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::Recovery;
+            }
+            5 => {
                 let mut var_targetTurnId = <String>::sse_decode(deserializer);
                 return crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::Coalesced{target_turn_id: var_targetTurnId};
             }
@@ -8613,6 +8661,38 @@ impl SseDecode for Vec<crate::api::studio::types::settings::BridgeProviderSettin
         for idx_ in 0..len_ {
             ans_.push(
                 <crate::api::studio::types::settings::BridgeProviderSettingsDto>::sse_decode(
+                    deserializer,
+                ),
+            );
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::studio::types::response::BridgePurposeCostSnapshot> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(
+                <crate::api::studio::types::response::BridgePurposeCostSnapshot>::sse_decode(
+                    deserializer,
+                ),
+            );
+        }
+        return ans_;
+    }
+}
+
+impl SseDecode for Vec<crate::api::studio::types::thread_stream::item::BridgeRawPayload> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut len_ = <i32>::sse_decode(deserializer);
+        let mut ans_ = Vec::with_capacity(len_ as usize);
+        for idx_ in 0..len_ {
+            ans_.push(
+                <crate::api::studio::types::thread_stream::item::BridgeRawPayload>::sse_decode(
                     deserializer,
                 ),
             );
@@ -9862,11 +9942,11 @@ impl SseDecode for crate::api::studio::types::response::StartTurnResponse {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_threadId = <String>::sse_decode(deserializer);
-        let mut var_turnId = <String>::sse_decode(deserializer);
+        let mut var_inputId = <String>::sse_decode(deserializer);
         let mut var_revision = <u64>::sse_decode(deserializer);
         return crate::api::studio::types::response::StartTurnResponse {
             thread_id: var_threadId,
-            turn_id: var_turnId,
+            input_id: var_inputId,
             revision: var_revision,
         };
     }
@@ -9876,11 +9956,11 @@ impl SseDecode for crate::api::studio::types::response::SteerTurnResponse {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_threadId = <String>::sse_decode(deserializer);
-        let mut var_turnId = <String>::sse_decode(deserializer);
+        let mut var_inputId = <String>::sse_decode(deserializer);
         let mut var_revision = <u64>::sse_decode(deserializer);
         return crate::api::studio::types::response::SteerTurnResponse {
             thread_id: var_threadId,
-            turn_id: var_turnId,
+            input_id: var_inputId,
             revision: var_revision,
         };
     }
@@ -12798,6 +12878,32 @@ impl
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::response::BridgePurposeCostSnapshot
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.purpose.into_into_dart().into_dart(),
+            self.estimated_costs.into_into_dart().into_dart(),
+            self.has_unpriced_usage.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::response::BridgePurposeCostSnapshot
+{
+}
+impl
+    flutter_rust_bridge::IntoIntoDart<
+        crate::api::studio::types::response::BridgePurposeCostSnapshot,
+    > for crate::api::studio::types::response::BridgePurposeCostSnapshot
+{
+    fn into_into_dart(self) -> crate::api::studio::types::response::BridgePurposeCostSnapshot {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::studio::types::runtime::BridgeQueuedAgent {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [self.turn_id.into_into_dart().into_dart()].into_dart()
@@ -12811,6 +12917,32 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::runtime::Bridg
     for crate::api::studio::types::runtime::BridgeQueuedAgent
 {
     fn into_into_dart(self) -> crate::api::studio::types::runtime::BridgeQueuedAgent {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart
+    for crate::api::studio::types::thread_stream::item::BridgeRawPayload
+{
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.format.into_into_dart().into_dart(),
+            self.version.into_into_dart().into_dart(),
+            self.content.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::thread_stream::item::BridgeRawPayload
+{
+}
+impl
+    flutter_rust_bridge::IntoIntoDart<
+        crate::api::studio::types::thread_stream::item::BridgeRawPayload,
+    > for crate::api::studio::types::thread_stream::item::BridgeRawPayload
+{
+    fn into_into_dart(self) -> crate::api::studio::types::thread_stream::item::BridgeRawPayload {
         self
     }
 }
@@ -13158,6 +13290,7 @@ impl flutter_rust_bridge::IntoDart
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
             self.root_thread_id.into_into_dart().into_dart(),
+            self.purpose_costs.into_into_dart().into_dart(),
             self.estimated_costs.into_into_dart().into_dart(),
             self.has_unpriced_usage.into_into_dart().into_dart(),
         ]
@@ -14261,39 +14394,44 @@ impl flutter_rust_bridge::IntoDart
     for crate::api::studio::types::thread_stream::item::BridgeThreadItemState
 {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
-        match self {crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Text{channel,text,attachments,lifecycle} => { [0.into_dart(),
+        match self {crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Raw{payloads,notice,recorded_at} => { [0.into_dart(),
+payloads.into_into_dart().into_dart(),
+notice.into_into_dart().into_dart(),
+recorded_at.into_into_dart().into_dart()].into_dart() }
+crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Text{channel,text,attachments,lifecycle} => { [1.into_dart(),
 channel.into_into_dart().into_dart(),
 text.into_into_dart().into_dart(),
 attachments.into_into_dart().into_dart(),
 lifecycle.into_into_dart().into_dart()].into_dart() }
-crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Thinking{summary,content,lifecycle} => { [1.into_dart(),
+crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Thinking{summary,content,lifecycle} => { [2.into_dart(),
 summary.into_into_dart().into_dart(),
 content.into_into_dart().into_dart(),
 lifecycle.into_into_dart().into_dart()].into_dart() }
-crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Tool{invocation,state} => { [2.into_dart(),
+crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Tool{invocation,state} => { [3.into_dart(),
 invocation.into_into_dart().into_dart(),
 state.into_into_dart().into_dart()].into_dart() }
-crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Agent{identity,state} => { [3.into_dart(),
+crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Agent{identity,state} => { [4.into_dart(),
 identity.into_into_dart().into_dart(),
 state.into_into_dart().into_dart()].into_dart() }
-crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Turn{state} => { [4.into_dart(),
-state.into_into_dart().into_dart()].into_dart() }
-crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Inference{inference_id,model,state} => { [5.into_dart(),
+crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Turn{state,input_id} => { [5.into_dart(),
+state.into_into_dart().into_dart(),
+input_id.into_into_dart().into_dart()].into_dart() }
+crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Inference{inference_id,model,state} => { [6.into_dart(),
 inference_id.into_into_dart().into_dart(),
 model.into_into_dart().into_dart(),
 state.into_into_dart().into_dart()].into_dart() }
-crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Skill{name,source,provider_id,resource_base,cause,activated_at} => { [6.into_dart(),
+crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Skill{name,source,provider_id,resource_base,cause,activated_at} => { [7.into_dart(),
 name.into_into_dart().into_dart(),
 source.into_into_dart().into_dart(),
 provider_id.into_into_dart().into_dart(),
 resource_base.into_into_dart().into_dart(),
 cause.into_into_dart().into_dart(),
 activated_at.into_into_dart().into_dart()].into_dart() }
-crate::api::studio::types::thread_stream::item::BridgeThreadItemState::File{path,media_type,completed_at} => { [7.into_dart(),
+crate::api::studio::types::thread_stream::item::BridgeThreadItemState::File{path,media_type,completed_at} => { [8.into_dart(),
 path.into_into_dart().into_dart(),
 media_type.into_into_dart().into_dart(),
 completed_at.into_into_dart().into_dart()].into_dart() }
-crate::api::studio::types::thread_stream::item::BridgeThreadItemState::ContextCompaction{before_tokens,after_tokens,compacted_at} => { [8.into_dart(),
+crate::api::studio::types::thread_stream::item::BridgeThreadItemState::ContextCompaction{before_tokens,after_tokens,compacted_at} => { [9.into_dart(),
 before_tokens.into_into_dart().into_dart(),
 after_tokens.into_into_dart().into_dart(),
 compacted_at.into_into_dart().into_dart()].into_dart() }
@@ -15156,6 +15294,7 @@ impl
 impl flutter_rust_bridge::IntoDart for crate::api::studio::types::thread_stream::BridgeTurn {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
+            self.input_id.into_into_dart().into_dart(),
             self.id.into_into_dart().into_dart(),
             self.thread_id.into_into_dart().into_dart(),
             self.revision.into_into_dart().into_dart(),
@@ -15263,11 +15402,12 @@ impl flutter_rust_bridge::IntoDart
     for crate::api::studio::types::thread_stream::BridgeTurnCancellationCause
 {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
-        match self {crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::UserRequested => { [0.into_dart()].into_dart() }
-crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::RuntimeShutdown => { [1.into_dart()].into_dart() }
-crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::AgentClosed => { [2.into_dart()].into_dart() }
-crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::Recovery => { [3.into_dart()].into_dart() }
-crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::Coalesced{target_turn_id} => { [4.into_dart(),
+        match self {crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::Unspecified => { [0.into_dart()].into_dart() }
+crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::UserRequested => { [1.into_dart()].into_dart() }
+crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::RuntimeShutdown => { [2.into_dart()].into_dart() }
+crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::AgentClosed => { [3.into_dart()].into_dart() }
+crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::Recovery => { [4.into_dart()].into_dart() }
+crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::Coalesced{target_turn_id} => { [5.into_dart(),
 target_turn_id.into_into_dart().into_dart()].into_dart() }
  _ => { unimplemented!(""); }}
     }
@@ -16737,7 +16877,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::studio::types::response::Star
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
             self.thread_id.into_into_dart().into_dart(),
-            self.turn_id.into_into_dart().into_dart(),
+            self.input_id.into_into_dart().into_dart(),
             self.revision.into_into_dart().into_dart(),
         ]
         .into_dart()
@@ -16759,7 +16899,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::studio::types::response::Stee
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
             self.thread_id.into_into_dart().into_dart(),
-            self.turn_id.into_into_dart().into_dart(),
+            self.input_id.into_into_dart().into_dart(),
             self.revision.into_into_dart().into_dart(),
         ]
         .into_dart()
@@ -18786,10 +18926,31 @@ crate::api::studio::types::response::BridgeProviderUsageStateSnapshot::Stopped(f
     }
 }
 
+impl SseEncode for crate::api::studio::types::response::BridgePurposeCostSnapshot {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Option<String>>::sse_encode(self.purpose, serializer);
+        <Vec<crate::api::studio::types::thread_stream::BridgeRuntimeCostAmount>>::sse_encode(
+            self.estimated_costs,
+            serializer,
+        );
+        <bool>::sse_encode(self.has_unpriced_usage, serializer);
+    }
+}
+
 impl SseEncode for crate::api::studio::types::runtime::BridgeQueuedAgent {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.turn_id, serializer);
+    }
+}
+
+impl SseEncode for crate::api::studio::types::thread_stream::item::BridgeRawPayload {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.format, serializer);
+        <u32>::sse_encode(self.version, serializer);
+        <String>::sse_encode(self.content, serializer);
     }
 }
 
@@ -19046,6 +19207,10 @@ impl SseEncode for crate::api::studio::types::response::BridgeSessionCostSnapsho
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.root_thread_id, serializer);
+        <Vec<crate::api::studio::types::response::BridgePurposeCostSnapshot>>::sse_encode(
+            self.purpose_costs,
+            serializer,
+        );
         <Vec<crate::api::studio::types::thread_stream::BridgeRuntimeCostAmount>>::sse_encode(
             self.estimated_costs,
             serializer,
@@ -19839,40 +20004,45 @@ crate::api::studio::types::thread_stream::item::BridgeThreadItemDeltaState::Tool
 impl SseEncode for crate::api::studio::types::thread_stream::item::BridgeThreadItemState {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        match self {crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Text{channel,text,attachments,lifecycle} => { <i32>::sse_encode(0, serializer); <crate::api::studio::types::thread_stream::item::BridgeThreadTextChannel>::sse_encode(channel, serializer);
+        match self {crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Raw{payloads,notice,recorded_at} => { <i32>::sse_encode(0, serializer); <Vec<crate::api::studio::types::thread_stream::item::BridgeRawPayload>>::sse_encode(payloads, serializer);
+<String>::sse_encode(notice, serializer);
+<i64>::sse_encode(recorded_at, serializer);
+ }
+crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Text{channel,text,attachments,lifecycle} => { <i32>::sse_encode(1, serializer); <crate::api::studio::types::thread_stream::item::BridgeThreadTextChannel>::sse_encode(channel, serializer);
 <String>::sse_encode(text, serializer);
 <Vec<crate::api::studio::types::thread_stream::item::BridgeThreadAttachment>>::sse_encode(attachments, serializer);
 <crate::api::studio::types::thread_stream::item::BridgeThreadContentLifecycle>::sse_encode(lifecycle, serializer);
  }
-crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Thinking{summary,content,lifecycle} => { <i32>::sse_encode(1, serializer); <Vec<String>>::sse_encode(summary, serializer);
+crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Thinking{summary,content,lifecycle} => { <i32>::sse_encode(2, serializer); <Vec<String>>::sse_encode(summary, serializer);
 <Vec<String>>::sse_encode(content, serializer);
 <crate::api::studio::types::thread_stream::item::BridgeThreadContentLifecycle>::sse_encode(lifecycle, serializer);
  }
-crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Tool{invocation,state} => { <i32>::sse_encode(2, serializer); <crate::api::studio::types::thread_stream::item::BridgeThreadToolInvocation>::sse_encode(invocation, serializer);
+crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Tool{invocation,state} => { <i32>::sse_encode(3, serializer); <crate::api::studio::types::thread_stream::item::BridgeThreadToolInvocation>::sse_encode(invocation, serializer);
 <crate::api::studio::types::thread_stream::item::BridgeThreadToolState>::sse_encode(state, serializer);
  }
-crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Agent{identity,state} => { <i32>::sse_encode(3, serializer); <crate::api::studio::types::thread_stream::item::BridgeThreadAgentIdentity>::sse_encode(identity, serializer);
+crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Agent{identity,state} => { <i32>::sse_encode(4, serializer); <crate::api::studio::types::thread_stream::item::BridgeThreadAgentIdentity>::sse_encode(identity, serializer);
 <crate::api::studio::types::thread_stream::item::BridgeThreadAgentState>::sse_encode(state, serializer);
  }
-crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Turn{state} => { <i32>::sse_encode(4, serializer); <crate::api::studio::types::thread_stream::BridgeTurnState>::sse_encode(state, serializer);
+crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Turn{state,input_id} => { <i32>::sse_encode(5, serializer); <crate::api::studio::types::thread_stream::BridgeTurnState>::sse_encode(state, serializer);
+<Option<String>>::sse_encode(input_id, serializer);
  }
-crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Inference{inference_id,model,state} => { <i32>::sse_encode(5, serializer); <String>::sse_encode(inference_id, serializer);
+crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Inference{inference_id,model,state} => { <i32>::sse_encode(6, serializer); <String>::sse_encode(inference_id, serializer);
 <String>::sse_encode(model, serializer);
 <crate::api::studio::types::thread_stream::item::BridgeThreadInferenceState>::sse_encode(state, serializer);
  }
-crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Skill{name,source,provider_id,resource_base,cause,activated_at} => { <i32>::sse_encode(6, serializer); <String>::sse_encode(name, serializer);
+crate::api::studio::types::thread_stream::item::BridgeThreadItemState::Skill{name,source,provider_id,resource_base,cause,activated_at} => { <i32>::sse_encode(7, serializer); <String>::sse_encode(name, serializer);
 <String>::sse_encode(source, serializer);
 <String>::sse_encode(provider_id, serializer);
 <crate::api::studio::types::thread_stream::item::BridgeSkillResourceBase>::sse_encode(resource_base, serializer);
 <crate::api::studio::types::thread_stream::item::BridgeSkillActivationCause>::sse_encode(cause, serializer);
 <i64>::sse_encode(activated_at, serializer);
  }
-crate::api::studio::types::thread_stream::item::BridgeThreadItemState::File{path,media_type,completed_at} => { <i32>::sse_encode(7, serializer); <String>::sse_encode(path, serializer);
+crate::api::studio::types::thread_stream::item::BridgeThreadItemState::File{path,media_type,completed_at} => { <i32>::sse_encode(8, serializer); <String>::sse_encode(path, serializer);
 <Option<String>>::sse_encode(media_type, serializer);
 <i64>::sse_encode(completed_at, serializer);
  }
-crate::api::studio::types::thread_stream::item::BridgeThreadItemState::ContextCompaction{before_tokens,after_tokens,compacted_at} => { <i32>::sse_encode(8, serializer); <u64>::sse_encode(before_tokens, serializer);
-<u64>::sse_encode(after_tokens, serializer);
+crate::api::studio::types::thread_stream::item::BridgeThreadItemState::ContextCompaction{before_tokens,after_tokens,compacted_at} => { <i32>::sse_encode(9, serializer); <Option<u64>>::sse_encode(before_tokens, serializer);
+<Option<u64>>::sse_encode(after_tokens, serializer);
 <i64>::sse_encode(compacted_at, serializer);
  }
  _ => { unimplemented!(""); }}
@@ -20313,6 +20483,7 @@ crate::api::studio::types::thread_stream::BridgeToolApprovalResolution::Denied =
 impl SseEncode for crate::api::studio::types::thread_stream::BridgeTurn {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <Option<String>>::sse_encode(self.input_id, serializer);
         <String>::sse_encode(self.id, serializer);
         <String>::sse_encode(self.thread_id, serializer);
         <u64>::sse_encode(self.revision, serializer);
@@ -20362,11 +20533,12 @@ impl SseEncode for crate::api::studio::types::thread_stream::BridgeTurnBudgetUsa
 impl SseEncode for crate::api::studio::types::thread_stream::BridgeTurnCancellationCause {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        match self {crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::UserRequested => { <i32>::sse_encode(0, serializer);  }
-crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::RuntimeShutdown => { <i32>::sse_encode(1, serializer);  }
-crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::AgentClosed => { <i32>::sse_encode(2, serializer);  }
-crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::Recovery => { <i32>::sse_encode(3, serializer);  }
-crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::Coalesced{target_turn_id} => { <i32>::sse_encode(4, serializer); <String>::sse_encode(target_turn_id, serializer);
+        match self {crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::Unspecified => { <i32>::sse_encode(0, serializer);  }
+crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::UserRequested => { <i32>::sse_encode(1, serializer);  }
+crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::RuntimeShutdown => { <i32>::sse_encode(2, serializer);  }
+crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::AgentClosed => { <i32>::sse_encode(3, serializer);  }
+crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::Recovery => { <i32>::sse_encode(4, serializer);  }
+crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::Coalesced{target_turn_id} => { <i32>::sse_encode(5, serializer); <String>::sse_encode(target_turn_id, serializer);
  }
  _ => { unimplemented!(""); }}
     }
@@ -21121,6 +21293,30 @@ impl SseEncode for Vec<crate::api::studio::types::settings::BridgeProviderSettin
         <i32>::sse_encode(self.len() as _, serializer);
         for item in self {
             <crate::api::studio::types::settings::BridgeProviderSettingsDto>::sse_encode(
+                item, serializer,
+            );
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::studio::types::response::BridgePurposeCostSnapshot> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::studio::types::response::BridgePurposeCostSnapshot>::sse_encode(
+                item, serializer,
+            );
+        }
+    }
+}
+
+impl SseEncode for Vec<crate::api::studio::types::thread_stream::item::BridgeRawPayload> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(self.len() as _, serializer);
+        for item in self {
+            <crate::api::studio::types::thread_stream::item::BridgeRawPayload>::sse_encode(
                 item, serializer,
             );
         }
@@ -22089,7 +22285,7 @@ impl SseEncode for crate::api::studio::types::response::StartTurnResponse {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.thread_id, serializer);
-        <String>::sse_encode(self.turn_id, serializer);
+        <String>::sse_encode(self.input_id, serializer);
         <u64>::sse_encode(self.revision, serializer);
     }
 }
@@ -22098,7 +22294,7 @@ impl SseEncode for crate::api::studio::types::response::SteerTurnResponse {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.thread_id, serializer);
-        <String>::sse_encode(self.turn_id, serializer);
+        <String>::sse_encode(self.input_id, serializer);
         <u64>::sse_encode(self.revision, serializer);
     }
 }

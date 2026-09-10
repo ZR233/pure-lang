@@ -426,7 +426,7 @@ pub(crate) fn tool_start_payload(kind: ToolInputPayloadKind) -> ToolInputDeltaPa
 
 #[cfg(test)]
 mod tests {
-    use pl_trace::TraceTextChannel;
+    use pl_protocol::trace::TraceTextChannel;
     use pretty_assertions::assert_eq;
 
     use crate::completion::stream::event::{ModelBlockContent, ModelBlockField};

@@ -1,0 +1,61 @@
+[package]
+name = "pl-tool"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = []
+docker-tools = []
+live-tests = ["dep:axum", "rmcp/server", "rmcp/transport-io", "rmcp/transport-streamable-http-server"]
+
+[dependencies]
+pl-skill-core = { workspace = true }
+ignore = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+dunce = { workspace = true }
+pl-remote-helper = { workspace = true }
+process-wrap = { workspace = true }
+tempfile = { workspace = true }
+pl-lsp = { workspace = true }
+secrecy = { workspace = true }
+futures = { workspace = true }
+tokio-util = { workspace = true }
+reqwest = { workspace = true }
+which = { workspace = true }
+image = { workspace = true }
+sha2 = { workspace = true }
+rmcp = { workspace = true, features = ["auth", "client", "transport-child-process", "transport-streamable-http-client-reqwest"] }
+axum = { workspace = true, optional = true }
+pl-protocol = { workspace = true }
+pl-output = { workspace = true }
+pl-patch = { workspace = true }
+serde_json = { workspace = true }
+base64 = { workspace = true }
+grep-regex = { workspace = true }
+grep-matcher = { workspace = true }
+grep-searcher = { workspace = true }
+pl-core = { workspace = true }
+tokio = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+anyhow = { workspace = true }
+rmcp = { workspace = true, features = ["server"] }
+pretty_assertions = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true }
+windows = { workspace = true }
+
+[[test]]
+name = "mcp_transports_live"
+path = "tests/mcp_transports_live.rs"
+required-features = ["live-tests"]
+
+[[bin]]
+name = "pl-mcp-test-server"
+path = "tests/fixtures/rmcp_test_server.rs"
+required-features = ["live-tests"]

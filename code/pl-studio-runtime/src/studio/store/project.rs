@@ -24,7 +24,6 @@ use crate::studio::store_support::{STUDIO_DATABASE_SCHEMA_VERSION, initialize_st
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExistingDatabaseState {
     Current,
-    PreviousSessionSchema,
 }
 
 impl StudioStore {
@@ -112,14 +111,26 @@ impl StudioStore {
                 )),
             };
         }
+        let sessions = match pl_core::persistence::SqliteSessionStore::open(
+            pl_core::persistence::SqliteSessionOptions {
+                path: path.with_file_name("sessions.sqlite"),
+            },
+        )
+        .await
+        {
+            Ok(sessions) => sessions,
+            Err(error) => {
+                return match db.close().await {
+                    Ok(()) => Err(error.into()),
+                    Err(close) => Err(error).context(format!(
+                        "failed to open sessions; product database cleanup also failed: {close}"
+                    )),
+                };
+            }
+        };
         Ok(Self {
             db,
-            sessions: pl_core::persistence::SqliteSessionStore::open(
-                pl_core::persistence::SqliteSessionOptions {
-                    path: path.with_file_name("sessions.sqlite"),
-                },
-            )
-            .await?,
+            sessions,
             attachments_dir,
         })
     }
@@ -257,7 +268,7 @@ async fn inspect_database(path: &Path) -> Result<ExistingDatabaseState> {
         Ok(STUDIO_DATABASE_SCHEMA_VERSION) => validate_database(&database)
             .await
             .map(|()| ExistingDatabaseState::Current),
-        Ok(19) => Ok(ExistingDatabaseState::PreviousSessionSchema),
+        Ok(19) => Err(StudioDatabaseError::SessionResetRequired.into()),
         Ok(found) => Err(StudioDatabaseError::UnsupportedSchema {
             found,
             supported: STUDIO_DATABASE_SCHEMA_VERSION,
@@ -439,7 +450,7 @@ fn validate_database_family_member(path: &Path, expected_parent: &Path) -> Resul
     );
     let metadata = std::fs::symlink_metadata(path)
         .with_context(|| format!("failed to inspect Studio database file {}", path.display()))?;
-    if pl_core::path_safety::is_link_or_reparse(&metadata) || !metadata.is_file() {
+    if pl_tool::workspace::path_safety::is_link_or_reparse(&metadata) || !metadata.is_file() {
         bail!(
             "Studio database cleanup target is not a regular non-reparse file: {}",
             path.display()

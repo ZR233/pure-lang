@@ -7,6 +7,7 @@ use pl_protocol::{InferenceAccounting, PureError};
 use pl_protocol::{InferenceTiming, ResponsesContextItem};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CompletionResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_id: Option<String>,

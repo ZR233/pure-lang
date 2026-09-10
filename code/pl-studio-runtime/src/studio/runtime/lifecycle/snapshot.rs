@@ -7,10 +7,11 @@ use super::super::StudioRuntime;
 
 impl StudioRuntime {
     pub(crate) fn publish_settings_state(&self, settings: ConfigRuntimeSnapshot) -> Result<()> {
-        let canonical = super::super::settings_api::settings_snapshot(settings)?;
+        let canonical = super::super::settings_api::settings_snapshot(settings.clone())?;
+        self.settings_updates.send_replace(settings);
         self.agent_facility.product_events.emit_settings_state(
             crate::StudioSettingsStateSnapshot {
-                state: pl_core::ObservedResource::ready(
+                state: pl_protocol::ObservedResource::ready(
                     canonical.revision,
                     canonical.updated_at,
                     canonical.settings,

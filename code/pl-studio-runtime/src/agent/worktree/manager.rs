@@ -59,6 +59,22 @@ impl WorktreeManager {
         self.backend.status(&handle.path).await
     }
 
+    /// Previews a remaining owned worktree while allowing cleanup retries after directory removal.
+    ///
+    /// # Errors
+    /// Rejects invalid owned-leaf identity, failed existence checks and unreadable existing worktrees.
+    pub async fn preview_existing(
+        &self,
+        handle: &WorktreeHandle,
+    ) -> Result<Option<WorktreeStatus>, WorktreeError> {
+        self.validate_handle(handle)?;
+        if self.backend.path_exists(&handle.path).await? {
+            self.backend.status(&handle.path).await.map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+
     pub async fn create(&self, spec: WorktreeCreateSpec) -> Result<WorktreeHandle, WorktreeError> {
         if spec.repo_root != self.repo_root || spec.base_commit.trim().is_empty() {
             return Err(WorktreeError::InvalidResource(
@@ -107,12 +123,21 @@ impl WorktreeManager {
                 }),
             };
         }
-        let actual = self.backend.resolve_head(&handle.path).await?;
-        if actual != handle.base_commit {
-            let operation = WorktreeError::InvalidResource(format!(
-                "created worktree HEAD {actual} does not match frozen base {}",
-                handle.base_commit
-            ));
+        let verification = self
+            .backend
+            .resolve_head(&handle.path)
+            .await
+            .and_then(|actual| {
+                if actual == handle.base_commit {
+                    Ok(())
+                } else {
+                    Err(WorktreeError::InvalidResource(format!(
+                        "created worktree HEAD {actual} does not match frozen base {}",
+                        handle.base_commit
+                    )))
+                }
+            });
+        if let Err(operation) = verification {
             return match self.discard(&handle).await {
                 Ok(()) => Err(WorktreeError::OperationFailedAfterCleanup {
                     operation: Box::new(operation),
@@ -294,6 +319,142 @@ mod tests {
             std::fs::read_to_string(root.join("tracked.txt")).unwrap(),
             "dirty main\n"
         );
+    }
+
+    #[derive(Debug)]
+    struct UnreadableCreatedHead {
+        local: LocalWorktreeBackend,
+        refuse_cleanup: bool,
+    }
+
+    impl WorktreeBackend for UnreadableCreatedHead {
+        fn resolve_repo_root<'a>(
+            &'a self,
+            path: &'a Path,
+        ) -> futures::future::BoxFuture<'a, Result<PathBuf, WorktreeError>> {
+            self.local.resolve_repo_root(path)
+        }
+        fn create_parent<'a>(
+            &'a self,
+            root: &'a Path,
+            path: &'a Path,
+        ) -> futures::future::BoxFuture<'a, Result<(), WorktreeError>> {
+            self.local.create_parent(root, path)
+        }
+        fn path_exists<'a>(
+            &'a self,
+            path: &'a Path,
+        ) -> futures::future::BoxFuture<'a, Result<bool, WorktreeError>> {
+            self.local.path_exists(path)
+        }
+        fn remove_leaf<'a>(
+            &'a self,
+            root: &'a Path,
+            path: &'a Path,
+        ) -> futures::future::BoxFuture<'a, Result<(), WorktreeError>> {
+            self.local.remove_leaf(root, path)
+        }
+        fn create<'a>(
+            &'a self,
+            root: &'a Path,
+            branch: &'a str,
+            path: &'a Path,
+            base: &'a str,
+        ) -> futures::future::BoxFuture<'a, Result<(), super::super::WorktreeCreateFailure>>
+        {
+            self.local.create(root, branch, path, base)
+        }
+        fn resolve_head<'a>(
+            &'a self,
+            _path: &'a Path,
+        ) -> futures::future::BoxFuture<'a, Result<String, WorktreeError>> {
+            Box::pin(async {
+                Err(WorktreeError::GitStatusUnknown {
+                    args: "rev-parse HEAD".into(),
+                    stderr: "injected verification read failure".into(),
+                })
+            })
+        }
+        fn status<'a>(
+            &'a self,
+            path: &'a Path,
+        ) -> futures::future::BoxFuture<'a, Result<WorktreeStatus, WorktreeError>> {
+            self.local.status(path)
+        }
+        fn remove<'a>(
+            &'a self,
+            root: &'a Path,
+            path: &'a Path,
+            force: bool,
+        ) -> futures::future::BoxFuture<'a, Result<(), WorktreeError>> {
+            if self.refuse_cleanup {
+                Box::pin(async {
+                    Err(WorktreeError::InvalidResource(
+                        "injected cleanup refusal".into(),
+                    ))
+                })
+            } else {
+                self.local.remove(root, path, force)
+            }
+        }
+        fn delete_branch<'a>(
+            &'a self,
+            root: &'a Path,
+            branch: &'a str,
+        ) -> futures::future::BoxFuture<'a, Result<(), WorktreeError>> {
+            self.local.delete_branch(root, branch)
+        }
+    }
+
+    #[tokio::test]
+    async fn head_read_failure_after_creation_rolls_back_or_reports_retained_resources() {
+        for refuse_cleanup in [false, true] {
+            let repository = repository("verification-failure");
+            let root = std::fs::canonicalize(repository.path()).unwrap();
+            let base = git(&root, &["rev-parse", "HEAD"]);
+            let manager = WorktreeManager::new(
+                root.clone(),
+                Arc::new(UnreadableCreatedHead {
+                    local: LocalWorktreeBackend::default(),
+                    refuse_cleanup,
+                }),
+            );
+            let handle = WorktreeHandle {
+                path: WorktreeManager::allocate_path(&root, "root", "child"),
+                branch: WorktreeManager::branch_for("child"),
+                base_commit: base.clone(),
+            };
+            let failure = manager
+                .create(WorktreeCreateSpec {
+                    repo_root: root.clone(),
+                    root_thread_id: "root".into(),
+                    child_id: "child".into(),
+                    base_commit: base,
+                })
+                .await
+                .unwrap_err();
+            if refuse_cleanup {
+                assert!(
+                    matches!(failure, WorktreeError::OperationFailedWithCleanup { .. }),
+                    "{failure:?}"
+                );
+                assert!(
+                    handle.path.exists(),
+                    "a refused cleanup must remain owned for retry"
+                );
+                WorktreeManager::new(root.clone(), Arc::new(LocalWorktreeBackend::default()))
+                    .discard(&handle)
+                    .await
+                    .unwrap();
+            } else {
+                assert!(
+                    matches!(failure, WorktreeError::OperationFailedAfterCleanup { .. }),
+                    "{failure:?}"
+                );
+                assert!(!handle.path.exists());
+            }
+            assert!(git(&root, &["branch", "--list", &handle.branch]).is_empty());
+        }
     }
 
     #[tokio::test]

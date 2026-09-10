@@ -1,6 +1,6 @@
 //! Studio 异步持久化健康状态。
 
-use pl_core::StateError;
+use pl_protocol::StateError;
 use serde::{Deserialize, Serialize};
 
 /// 没有待落库事实，writer 可接受新工作。

@@ -1,114 +1,125 @@
-//! Agent 执行 trace 的 canonical typed 生命周期与事件。
-
-mod part;
-mod sink;
-
+//! Read-only execution diagnostics derived from canonical core Thread commits.
+use pl_core::thread::{AttemptOutcome, ToolOutcome, journal::ThreadCommit};
 use serde::{Deserialize, Serialize};
-use tokio::sync::broadcast;
 
-use pl_protocol::{
-    AgentRuntimeDelta, BudgetLimitKind, BudgetUsage, ErrorSeverity, InteractionChangedEvent,
-    SkillActivation, TodoListSnapshot,
-};
-
-pub use part::*;
-pub use sink::*;
-
-pub type AgentEventSender = broadcast::Sender<AgentEvent>;
-pub type AgentEventReceiver = broadcast::Receiver<AgentEvent>;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", rename_all_fields = "camelCase")]
-pub enum AgentEvent {
-    TracePartStarted {
-        item: TracePart,
-    },
-    TracePartDelta {
-        event: TracePartDeltaEvent,
-    },
-    TracePartCompleted {
-        item: TracePart,
-    },
-    TracePartFailed {
-        item: TracePart,
-    },
-    InteractionChanged {
-        event: InteractionChangedEvent,
-    },
-    AgentRuntimeUpdated {
-        delta: AgentRuntimeDelta,
-    },
-    SkillActivated {
-        activation: SkillActivation,
-    },
-    TodoListUpdated {
-        snapshot: TodoListSnapshot,
-    },
-    TurnInterrupted {
-        reason: String,
-    },
-    TurnBudgetLimited {
-        reason: String,
-        limit_kind: BudgetLimitKind,
-        usage: BudgetUsage,
-    },
-    Done,
-    Error {
-        message: String,
-        severity: ErrorSeverity,
-    },
-}
-
-/// Append-only internal trace event for core diagnostics.
-///
-/// Studio UI may only receive these events after `pl-core` maps them into
-/// durable message/part snapshots or live-only part deltas.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Observed invocation counts. These counts do not assert provider cache hits or token estimates.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct TraceEvent {
-    pub session_id: String,
-    pub sequence: u64,
-    pub timestamp: i64,
-    pub kind: TraceEventKind,
+pub struct ThreadDiagnostics {
+    pub admitted_attempts: u64,
+    pub committed_attempts: u64,
+    pub failed_attempts: u64,
+    pub cancelled_attempts: u64,
+    pub rejected_attempts: u64,
+    pub interrupted_attempts: u64,
+    pub explicit_retries: u64,
+    pub successful_tools: u64,
+    pub failed_tools: u64,
+    pub cancelled_tools: u64,
+    pub interrupted_tools: u64,
+    pub context_replacements: u64,
+    pub usage: pl_core::model::ModelUsage,
 }
 
-impl TraceEvent {
-    /// The turn that owns this event, independent of the active session projection.
-    pub fn turn_id(&self) -> &str {
-        match &self.kind {
-            TraceEventKind::TracePartStarted { item }
-            | TraceEventKind::TracePartCompleted { item }
-            | TraceEventKind::TracePartFailed { item } => item.turn_id(),
-            TraceEventKind::TracePartDelta { event } => &event.turn_id,
-            TraceEventKind::InteractionChanged { event } => &event.interaction.scope.turn_id,
-            TraceEventKind::SkillActivated { activation } => &activation.turn_id,
-            TraceEventKind::EnabledToolsRecorded { event } => &event.turn_id,
+/// Summarizes immutable facts; callers validate/replay the journal through core before diagnosis.
+/// No tool, provider protocol or product configuration is consulted.
+///
+/// # Errors
+/// Returns core journal validation failures instead of reporting statistics from corrupt history.
+pub fn diagnose(
+    commits: &[std::sync::Arc<ThreadCommit>],
+) -> Result<ThreadDiagnostics, pl_core::thread::ThreadError> {
+    pl_core::thread::journal::replay(commits)?;
+    let mut report = ThreadDiagnostics::default();
+    let mut usage = UsageAccumulator::default();
+    for commit in commits {
+        report.context_replacements += commit.replacements.len() as u64;
+        if let Some(attempt) = &commit.attempt {
+            match &attempt.outcome {
+                AttemptOutcome::Running => {}
+                AttemptOutcome::Committed(output) | AttemptOutcome::Rejected(output) => {
+                    usage.add(&output.usage)
+                }
+                AttemptOutcome::Failed(error) => usage.add(&error.usage),
+                AttemptOutcome::Cancelled { result } => usage.add(match result {
+                    Ok(output) => &output.usage,
+                    Err(error) => &error.usage,
+                }),
+                AttemptOutcome::Interrupted => usage.add(&Default::default()),
+            }
+            match &attempt.outcome {
+                AttemptOutcome::Running => {
+                    report.admitted_attempts += 1;
+                    report.explicit_retries += u64::from(attempt.retry_of.is_some());
+                }
+                AttemptOutcome::Committed(_) => report.committed_attempts += 1,
+                AttemptOutcome::Failed(_) => report.failed_attempts += 1,
+                AttemptOutcome::Cancelled { .. } => report.cancelled_attempts += 1,
+                AttemptOutcome::Rejected(_) => report.rejected_attempts += 1,
+                AttemptOutcome::Interrupted => report.interrupted_attempts += 1,
+            }
+        }
+        for delivery in commit.deliveries.iter() {
+            match &delivery.outcome {
+                ToolOutcome::Succeeded => report.successful_tools += 1,
+                ToolOutcome::Failed(_) => report.failed_tools += 1,
+                ToolOutcome::Cancelled => report.cancelled_tools += 1,
+                ToolOutcome::Interrupted => report.interrupted_tools += 1,
+            }
         }
     }
+    report.usage = usage.total.unwrap_or_default();
+    Ok(report)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct EnabledToolsEvent {
-    pub turn_id: String,
-    pub step: u32,
-    pub tools: Vec<String>,
-    pub wire_fingerprint: String,
-    pub execution_fingerprint: String,
+#[derive(Default)]
+struct UsageAccumulator {
+    total: Option<pl_core::model::ModelUsage>,
+}
+impl UsageAccumulator {
+    fn add(&mut self, usage: &pl_core::model::ModelUsage) {
+        let Some(total) = &mut self.total else {
+            self.total = Some(usage.clone());
+            return;
+        };
+        total.input_tokens = sum_known(total.input_tokens, usage.input_tokens);
+        total.cache_read_tokens = sum_known(total.cache_read_tokens, usage.cache_read_tokens);
+        total.cache_write_tokens = sum_known(total.cache_write_tokens, usage.cache_write_tokens);
+        total.output_tokens = sum_known(total.output_tokens, usage.output_tokens);
+        total.reasoning_tokens = sum_known(total.reasoning_tokens, usage.reasoning_tokens);
+    }
+}
+fn sum_known(left: Option<u64>, right: Option<u64>) -> Option<u64> {
+    left.zip(right)
+        .and_then(|(left, right)| left.checked_add(right))
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase",
-    tag = "type"
-)]
-pub enum TraceEventKind {
-    TracePartStarted { item: TracePart },
-    TracePartDelta { event: TracePartDeltaEvent },
-    TracePartCompleted { item: TracePart },
-    TracePartFailed { item: TracePart },
-    InteractionChanged { event: InteractionChangedEvent },
-    SkillActivated { activation: SkillActivation },
-    EnabledToolsRecorded { event: EnabledToolsEvent },
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn real_usage_preserves_unknowns_and_does_not_add_cache_subsets_to_input() {
+        let mut usage = UsageAccumulator::default();
+        usage.add(&pl_core::model::ModelUsage {
+            input_tokens: Some(100),
+            cache_read_tokens: Some(80),
+            cache_write_tokens: None,
+            output_tokens: Some(20),
+            reasoning_tokens: Some(5),
+        });
+        usage.add(&pl_core::model::ModelUsage {
+            input_tokens: Some(50),
+            cache_read_tokens: Some(30),
+            cache_write_tokens: Some(10),
+            output_tokens: Some(10),
+            reasoning_tokens: None,
+        });
+        let total = usage.total.unwrap();
+        assert_eq!(total.input_tokens, Some(150));
+        assert_eq!(total.cache_read_tokens, Some(110));
+        assert_eq!(total.output_tokens, Some(30));
+        assert_eq!(total.cache_write_tokens, None);
+        assert_eq!(total.reasoning_tokens, None);
+        assert_eq!(sum_known(Some(u64::MAX), Some(1)), None);
+    }
 }

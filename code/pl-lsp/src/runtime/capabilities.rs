@@ -4,7 +4,7 @@ use std::path::Path;
 
 use super::{
     LanguageToolInfo, LspAvailabilityKind, LspRuntimeRegistry, LspWorkspaceCapabilities,
-    LspWorkspaceServerCapabilities, LspWorkspaceState, canonical_workspace_root,
+    LspWorkspaceServerCapabilities, LspWorkspaceState, workspace_key,
 };
 
 use super::request::extensions_for_language;
@@ -25,7 +25,7 @@ impl LspRuntimeRegistry {
         &self,
         workspace_root: impl AsRef<Path>,
     ) -> Vec<String> {
-        let workspace_root = canonical_workspace_root(workspace_root.as_ref());
+        let workspace_root = workspace_key(workspace_root.as_ref());
         let mut names = self
             .state
             .lock()
@@ -62,7 +62,7 @@ impl LspRuntimeRegistry {
         &self,
         workspace_root: impl AsRef<Path>,
     ) -> Vec<LanguageToolInfo> {
-        let workspace_root = canonical_workspace_root(workspace_root.as_ref());
+        let workspace_root = workspace_key(workspace_root.as_ref());
         let state = self.state.lock().await;
         let mut result = Vec::new();
         if let Some(workspace) = state.workspaces.get(&workspace_root) {
@@ -87,20 +87,31 @@ impl LspRuntimeRegistry {
         &self,
         workspace_root: impl AsRef<Path>,
     ) -> LspWorkspaceCapabilities {
-        let workspace_root = canonical_workspace_root(workspace_root.as_ref());
+        let workspace_root = workspace_key(workspace_root.as_ref());
         let (catalog, observed) = {
             let state = self.state.lock().await;
             let observed = state
                 .workspaces
                 .get(&workspace_root)
                 .map(|workspace| {
-                    workspace
+                    let mut observed = workspace
                         .servers
                         .iter()
                         .map(|(server_id, server)| {
                             (server_id.clone(), server.availability_kind.clone())
                         })
-                        .collect::<Vec<_>>()
+                        .collect::<Vec<_>>();
+                    if workspace.host.is_some() {
+                        for server in state.catalog.iter() {
+                            if !observed.iter().any(|(id, _)| id == &server.definition.id) {
+                                observed.push((
+                                    server.definition.id.clone(),
+                                    LspAvailabilityKind::Checking,
+                                ));
+                            }
+                        }
+                    }
+                    observed
                 })
                 .unwrap_or_default();
             (state.catalog.clone(), observed)
@@ -132,15 +143,16 @@ fn project_server_capabilities(
     workspace_root: &std::path::Path,
     observed: &[(String, LspAvailabilityKind)],
 ) -> LspWorkspaceServerCapabilities {
-    let matched = server.definition.matches_workspace(workspace_root);
     let availability_kind = observed
         .iter()
         .find(|(server_id, _)| server_id == &server.definition.id)
         .map(|(_, kind)| kind.clone())
-        .unwrap_or(if matched {
-            LspAvailabilityKind::Checking
-        } else {
-            LspAvailabilityKind::Disabled
+        .unwrap_or_else(|| {
+            if server.definition.matches_workspace(workspace_root) {
+                LspAvailabilityKind::Checking
+            } else {
+                LspAvailabilityKind::Disabled
+            }
         });
     LspWorkspaceServerCapabilities {
         id: server.definition.id.clone(),

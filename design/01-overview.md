@@ -1,80 +1,55 @@
 # 01 - 系统总览
 
-## 1.1 系统定位
+Pure-Lang 是自然语言编译器。Pure Studio 的业务核心为 `pl-studio-runtime::StudioRuntime`，
+Flutter/FRB 与独立 HTTP server 是两个 transport，不拥有另一套业务状态。
 
-Pure-Lang 是一个自然语言编译器。Pure Studio 的业务核心只有
-`pl-studio-runtime::StudioRuntime`；桌面 Flutter/FRB 与独立 HTTP server 是两种 API
-适配器，不拥有业务状态或产品规则。
-
-系统只使用四个会话概念：
-
-- `Thread`：一个 Agent 独占的对话、模型上下文和输入队列；root Thread 是用户可见会话，
-  child Thread 是子 Agent 自己的会话。
-- `Turn`：Thread 中一次由明确输入启动的执行，状态为 queued、inProgress、completed、
-  failed 或 interrupted。
-- `Item`：Turn 内按固定顺序出现的用户消息、Agent 消息、reasoning、plan、tool call、file，
-  以及内部 context patch / context compaction。
-- `Interaction`：等待用户回答的 user input 或 tool approval；它不是普通聊天 Item。
-
-Simple、Task 与自定义模式不是独立会话类型。它们都是同一 root Agent 的 `Thread Mode`；Mode Prompt
-与可选预设图由内存注册表提供，模型不负责定义或编译工作流。
-
-## 1.2 运行路径
+## 运行路径
 
 ```text
-Flutter ThreadWorkspace ── typed FRB ─┐
-                                     ├─ StudioRuntime
-pl-studio-server ─ REST / typed SSE ─┘        ↓
-                                      ThreadManager → ThreadActor → TurnEngine
-                                             ↓              ↓ typed notifications
-                                            sessions.sqlite
+Flutter → pl-studio-bridge ─┐
+                           ├→ StudioRuntime → StudioThreadFactory → StudioThreadAssembler
+HTTP → pl-studio-server ───┘                                         ↓
+                                                         pl-core ThreadHandle
+                                                           ↙             ↘
+                                                   pl-model 会话      pl-tool 实例
 ```
 
-- `ThreadManager` 维护 Thread registry、父子关系和 spawn/close。
-- 每个 `ThreadActor` 串行拥有一个 Thread 的输入队列、活动 Turn、取消句柄、live Item overlay
-  与 `AgentWorkingState`。
-- `TurnEngine` 只负责模型采样、工具调用、Interaction 等待和上下文压缩。
-- root Thread 预加载当前 Mode Prompt，拥有可选的拆分 workflow 工具和统一 `complete` 工具；child
-  Thread 使用冻结的 Agent Profile 且不拥有 root workflow 工具。
-- `sessions.sqlite` 保存 core 的通用会话条目；`studio.sqlite` 只保存 Studio 产品事实。
-  两库不共享事务，统一条目与所有权契约见 `25-session-entry-storage.md`。
+上图最后两条表示装配后的调用关系；crate 依赖方向是 model/tool → core。
+Thread owner 串行拥有输入、Turn、模型尝试、工具任务、交互、扩展状态与不可变日志。
+模型和工具执行期间仍可受理消息、读取日志和撤销待执行权限；这些命令不改写已冻结的请求。
+冻结工具集合分别携带通用调用模式及必须独立执行的工具 ID。只有全部可见工具都要求独立执行时使用 Sequential；混合目录允许普通工具并行，适配器明确列举必须单独调用的工具。内核继续拒绝把独立工具与其他调用混合的响应。
 
-## 1.3 唯一事实源
+## 概念与事实源
 
-| 事实 | 唯一拥有者 |
-| --- | --- |
-| Thread、Turn、Item、输入、Interaction、working state | core 内存 owner；`sessions.sqlite` 用于冷恢复 |
-| 活动 Turn、流式增量、steer、取消 identity、prompt generation | `ThreadActor` |
-| Workflow run、revision、history | `AgentWorkingState.workflow` |
-| Thread Mode Prompt 与预设图 | `pl-core::thread::ThreadModeManager` 不可变快照 |
-| Agent Profile 文件 | `~/.pure/agents/*.toml`；系统 Profile 由 runtime 注册 |
-| Composer、滚动、展开、订阅 generation | Flutter `WorkspaceUiState` |
+- Thread 是通用执行 owner，每个 Thread 独占模型会话、工具注册表和工具实例。
+- Turn 是一次输入驱动的有界执行；model attempt 与工具 task 保存独立生命周期。
+- 通用上下文包含角色、来源、文本、资源引用、不透明内容及工具调用关联。
+- Item、Agent Profile、Mode、workflow 和 Plan 是产品概念，由 Studio 从保存的事实投影。
+- Interaction 和 permission 是通用 Pending/Resolved/Cancelled 或许可决定事实；问题和回答正文由上层解释。
 
-不存在第二套 session/message/part projection、durable event journal、Task 产品表或双库 watermark。
-UI snapshot 由 canonical 表与活动 actor overlay 组成；历史只按 Turn keyset 分页。
+运行时事实支持完整替换与按 source 原子 patch；独立生产者只 patch 自己的 source，空内容清除该 source，遗漏 source 保持不变。两者在 owner 串行边界执行，待交付工具调用存在时拒绝修改。
 
-## 1.4 Crate 边界
+活动 Thread 内存快照是唯一可写执行事实源。`sessions.sqlite` 可选保存通用 journal 与不可变资源；
+`studio.sqlite` 保存项目、配置关联和产品目录。两库不共享业务事务。UI snapshot 和 Turn 分页从
+同一日志水位生成，历史模型正文使用保存时的上下文，不调用当前工具重建。
 
-- `pl-protocol`：Thread/Turn/Item、Interaction、workflow/Profile runtime 与 product wire 类型。
-- `pl-trace`：模型和工具内部诊断事件，不作为 UI 协议或持久化事实源。
-- `pl-model`：provider 与 transport 适配。
-- `pl-core`：ThreadManager、ThreadActor、TurnEngine、工作流编译/状态工具、通用工具与 Agent
-  control plane。
-- `pl-studio-runtime`：唯一 Studio 业务实现，拥有产品 StudioStore、项目、配置、Mode/Profile
-  catalog、生命周期与产品事件。
-- `pl-studio-bridge`：Studio protocol 到 FRB wire 的机械映射与桌面宿主能力。
-- `pl-studio-server`：可单独运行的 loopback HTTP/OpenAPI/SSE 适配器。
-- `pure-studio`：ThreadWorkspace reducer、timeline、Interaction、workflow panel、状态栏和设置 UI。
+## 所有权
 
-模块默认私有；Flutter 不能从 Item 或 Interaction 本地推断 canonical Turn、workflow 或 Profile
-状态。
+`pl-core` 定义通用模型/工具接口、Thread 编排、上下文和存储，不依赖 protocol、model、tool、
+trace 或 Studio。`pl-model` 解释 provider 协议、模型目录、路由和缓存；`pl-tool` 实现工具与物理服务；
+`pl-trace` 只读观察 core。Studio 保存配置并完成 root、child、冷恢复的同一路径装配。
+具体依赖见 [02](./02-crates.md)，通用框架契约见 [27](./27-core-boundaries-and-replay.md)。
 
-## 1.5 恢复原则
+## 恢复与关闭
 
-进程重启不能恢复物理模型连接。启动事务把遗留 inProgress Turn/Item 收束为
-`interrupted(runtimeRestarted)`，重新排队未确认消费的明确输入，取消 tool approval，并保留
-user input。Thread 的 typed working state 与 workflow run 原样恢复；恢复后下一 Turn 从最新
-`pl.workflow` projection 继续。
+纯重放只应用已保存事实，不创建模型、工具或外部副作用。恢复把遗留运行收束为 Interrupted，
+保留待处理输入，清空物理 continuation 和旧 executor 授权；显式激活后装入当前服务实例。
+关闭先封闭准入并取消当前代次，收束结果及交互，再关闭模型/工具并保存最终 commit。
+失败保留 owner 和重试入口；归档等待整棵 Thread 树关闭成功。
 
-数据库 schema 不兼容时只执行 `19-studio-storage-and-diagnostics.md` 定义的破坏性重建；普通恢复、
-清理和归档不猜测外部资源所有权，也不自动创建或操作 Git branch/worktree。
+不兼容的旧会话格式由 Studio 在独占启动锁下先备份再协调重建；core 独立打开只报错保留原库。
+配置、凭据、工作区与无法确认所有权的资源不参与会话重建。
+
+工具目录异步准备可使用 `register_tools_if_extensions` 携带冻结快照的 `extension_sequence` 条件发布。
+Owner 在同一 mailbox 操作内验证扩展水位再替换完整目录；过期候选保持未安装并由移交方异步关闭，
+拒绝不修改当前目录或权限。无条件注册仍用于已独占装配；关闭失败同时保留原类型化拒绝原因、cleanup source 与原实例供明确重试。

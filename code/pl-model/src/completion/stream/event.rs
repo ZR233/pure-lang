@@ -1,7 +1,7 @@
-use crate::completion::WebSearchAction;
 use pl_protocol::UsageReport;
+use pl_protocol::search::WebSearchAction;
+use pl_protocol::trace::TraceTextChannel;
 use pl_protocol::{ResponsesContextItem, ToolCallCaller};
-use pl_trace::TraceTextChannel;
 
 /// Provider 无关的模型流式事件。
 ///

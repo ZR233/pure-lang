@@ -27,7 +27,7 @@ pub async fn start_turn(
         .await?;
     Ok(StartTurnResponse {
         thread_id: response.thread_id,
-        turn_id: response.turn_id,
+        input_id: response.input_id,
         revision: response.cursor,
     })
 }
@@ -48,7 +48,7 @@ pub async fn steer_turn(
         .await?;
     Ok(SteerTurnResponse {
         thread_id: response.thread_id,
-        turn_id: response.turn_id,
+        input_id: response.input_id,
         revision: response.cursor,
     })
 }

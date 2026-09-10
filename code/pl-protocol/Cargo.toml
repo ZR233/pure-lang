@@ -8,8 +8,10 @@ license.workspace = true
 default = []
 
 [dependencies]
+tokio = { workspace = true, features = ["sync"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+schemars = { workspace = true }
 thiserror = { workspace = true }
 utoipa = { workspace = true }
 

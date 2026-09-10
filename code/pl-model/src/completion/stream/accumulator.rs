@@ -7,11 +7,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use pl_protocol::trace::{AgentEvent, AgentEventSender, TraceEventSink, TraceTextChannel};
 use pl_protocol::{
     InferenceOrchestrationMetrics, PureError, ResponsesContextItem, ResponsesContextItemKind,
     Result, ToolCallCaller, UsageReport,
 };
-use pl_trace::{AgentEvent, AgentEventSender, TraceEventSink, TraceTextChannel};
 
 use crate::completion::{CompletionResponse, CompletionTraceContext, ToolCall};
 
@@ -320,7 +320,7 @@ impl StreamCompletionAccumulator {
     pub(crate) fn finish_with_trace_events(
         self,
         event_tx: &AgentEventSender,
-        trace_events: &Arc<std::sync::Mutex<Vec<pl_trace::TraceEvent>>>,
+        trace_events: &Arc<std::sync::Mutex<Vec<pl_protocol::trace::TraceEvent>>>,
     ) -> Result<CompletionResponse> {
         self.finish_inner(event_tx, Some(trace_events))
     }
@@ -329,7 +329,7 @@ impl StreamCompletionAccumulator {
         mut self,
         event_tx: &AgentEventSender,
         #[cfg_attr(not(test), allow(unused_variables))] trace_events: Option<
-            &Arc<std::sync::Mutex<Vec<pl_trace::TraceEvent>>>,
+            &Arc<std::sync::Mutex<Vec<pl_protocol::trace::TraceEvent>>>,
         >,
     ) -> Result<CompletionResponse> {
         let terminal_error = match &self.state {
@@ -445,7 +445,7 @@ impl StreamCompletionAccumulator {
     fn record_web_search_started(
         &mut self,
         item_id: &str,
-        action: crate::completion::WebSearchAction,
+        action: pl_protocol::search::WebSearchAction,
         event_tx: &AgentEventSender,
     ) {
         self.publish_trace(event_tx, |trace| trace.start_web_search(item_id, action));
@@ -454,7 +454,7 @@ impl StreamCompletionAccumulator {
     fn record_web_search_completed(
         &mut self,
         item_id: &str,
-        action: crate::completion::WebSearchAction,
+        action: pl_protocol::search::WebSearchAction,
         results: Option<Vec<serde_json::Value>>,
         event_tx: &AgentEventSender,
     ) {
@@ -612,7 +612,7 @@ struct ContentPart {
 mod tests {
     use std::sync::Arc;
 
-    use pl_trace::{AgentEvent, TraceDelta, TraceEventKind, TracePartKind};
+    use pl_protocol::trace::{AgentEvent, TraceDelta, TraceEventKind, TracePartKind};
 
     use super::*;
     use crate::completion::stream::test_support::*;
@@ -622,7 +622,10 @@ mod tests {
     #[test]
     fn text_delta_is_published_before_stream_completion() {
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(8);
-        let sink = Arc::new(pl_trace::InMemoryTraceEventSink::new("session-1", 0));
+        let sink = Arc::new(pl_protocol::trace::InMemoryTraceEventSink::new(
+            "session-1",
+            0,
+        ));
         let mut accumulator = StreamCompletionAccumulator::with_trace_sink(
             Some(CompletionTraceContext {
                 session_id: "session-1".to_string(),
@@ -636,7 +639,7 @@ mod tests {
             .apply(
                 ModelStreamEvent::text_started(
                     "assistant".to_string(),
-                    pl_trace::TraceTextChannel::Final,
+                    pl_protocol::trace::TraceTextChannel::Final,
                 ),
                 &event_tx,
             )
@@ -774,13 +777,13 @@ mod tests {
         assert!(response.trace_events.iter().any(|event| matches!(
             &event.kind,
             TraceEventKind::TracePartCompleted { item }
-                if trace_text_channel(item) == Some(pl_trace::TraceTextChannel::Commentary)
+                if trace_text_channel(item) == Some(pl_protocol::trace::TraceTextChannel::Commentary)
                     && trace_part_text(item) == "检查配置。"
         )));
         assert!(response.trace_events.iter().any(|event| matches!(
             &event.kind,
             TraceEventKind::TracePartCompleted { item }
-                if trace_text_channel(item) == Some(pl_trace::TraceTextChannel::Final)
+                if trace_text_channel(item) == Some(pl_protocol::trace::TraceTextChannel::Final)
             && trace_part_text(item) == "完成。"
         )));
     }
@@ -887,22 +890,22 @@ mod tests {
             vec![
                 (
                     "inf-1-text-commentary-1",
-                    Some(pl_trace::TraceTextChannel::Commentary),
+                    Some(pl_protocol::trace::TraceTextChannel::Commentary),
                     "A".to_string(),
                 ),
                 (
                     "inf-1-text-final-1",
-                    Some(pl_trace::TraceTextChannel::Final),
+                    Some(pl_protocol::trace::TraceTextChannel::Final),
                     "B".to_string(),
                 ),
                 (
                     "inf-1-text-commentary-2",
-                    Some(pl_trace::TraceTextChannel::Commentary),
+                    Some(pl_protocol::trace::TraceTextChannel::Commentary),
                     "C".to_string(),
                 ),
                 (
                     "inf-1-text-final-2",
-                    Some(pl_trace::TraceTextChannel::Final),
+                    Some(pl_protocol::trace::TraceTextChannel::Final),
                     "D".to_string(),
                 ),
             ]
@@ -973,7 +976,7 @@ mod tests {
         assert!(response.trace_events.iter().any(|event| matches!(
             &event.kind,
             TraceEventKind::TracePartCompleted { item }
-                if trace_text_channel(item) == Some(pl_trace::TraceTextChannel::Final)
+                if trace_text_channel(item) == Some(pl_protocol::trace::TraceTextChannel::Final)
                     && trace_part_text(item) == "plain text"
         )));
     }
@@ -997,7 +1000,7 @@ mod tests {
             .apply(
                 completed_text(
                     "msg_1",
-                    pl_trace::TraceTextChannel::Final,
+                    pl_protocol::trace::TraceTextChannel::Final,
                     Some("final text"),
                 ),
                 &event_tx,
@@ -1011,7 +1014,7 @@ mod tests {
         assert!(response.trace_events.iter().any(|event| matches!(
             &event.kind,
             TraceEventKind::TracePartCompleted { item }
-                if trace_text_channel(item) == Some(pl_trace::TraceTextChannel::Final)
+                if trace_text_channel(item) == Some(pl_protocol::trace::TraceTextChannel::Final)
                     && trace_part_text(item) == "final text"
         )));
     }
@@ -1032,7 +1035,7 @@ mod tests {
             .apply(
                 completed_text(
                     "msg_progress",
-                    pl_trace::TraceTextChannel::Commentary,
+                    pl_protocol::trace::TraceTextChannel::Commentary,
                     Some("已完成检查"),
                 ),
                 &event_tx,
@@ -1045,13 +1048,13 @@ mod tests {
         assert!(response.trace_events.iter().any(|event| matches!(
             &event.kind,
             TraceEventKind::TracePartStarted { item }
-                if trace_text_channel(item) == Some(pl_trace::TraceTextChannel::Commentary)
+                if trace_text_channel(item) == Some(pl_protocol::trace::TraceTextChannel::Commentary)
                     && trace_part_text(item).is_empty()
         )));
         assert!(response.trace_events.iter().any(|event| matches!(
             &event.kind,
             TraceEventKind::TracePartCompleted { item }
-                if trace_text_channel(item) == Some(pl_trace::TraceTextChannel::Commentary)
+                if trace_text_channel(item) == Some(pl_protocol::trace::TraceTextChannel::Commentary)
                     && trace_part_text(item) == "已完成检查"
         )));
     }

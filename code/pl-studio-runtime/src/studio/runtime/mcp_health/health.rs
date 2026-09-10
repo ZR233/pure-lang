@@ -2,15 +2,15 @@
 
 use std::collections::BTreeMap;
 
-use pl_core::StateError;
+use pl_protocol::StateError;
 
 use crate::config::{EffectiveMcpServerConfig, McpServerStatusKind};
-use crate::mcp::{McpAvailabilityKind, McpAvailabilitySnapshot};
 use crate::studio::ids::unix_seconds;
 use crate::{
     McpAvailable, McpChecking, McpDisabled, McpMissingCredential, McpUnavailable, StudioMcpHealth,
     StudioMcpServer, StudioMcpServerState,
 };
+use pl_tool::mcp::{McpAvailabilityKind, McpAvailabilitySnapshot};
 
 pub(super) fn mcp_health_from_effective(
     servers: BTreeMap<String, EffectiveMcpServerConfig>,

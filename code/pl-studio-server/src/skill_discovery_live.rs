@@ -201,11 +201,11 @@ async fn run_case(
         }),
     )
     .await?;
-    wait_for_completed_turn(
+    let turn_id = wait_for_completed_input(
         client,
         base_url,
         &created.thread.id,
-        &created.submission.turn_id,
+        &created.submission.input_id,
     )
     .await?;
     let snapshot: ThreadSnapshot = get_json(
@@ -291,7 +291,7 @@ async fn run_case(
     Ok(CaseReceipt {
         case,
         thread_id: created.thread.id,
-        turn_id: created.submission.turn_id,
+        turn_id,
         activation_cause,
         tool_call_id,
         final_marker,
@@ -299,12 +299,12 @@ async fn run_case(
     })
 }
 
-async fn wait_for_completed_turn(
+async fn wait_for_completed_input(
     client: &reqwest::Client,
     base_url: &str,
     thread_id: &str,
-    turn_id: &str,
-) -> Result<()> {
+    input_id: &str,
+) -> Result<String> {
     let deadline = Instant::now() + LIVE_TIMEOUT;
     while Instant::now() < deadline {
         let page: ThreadTurnPage = get_json(
@@ -315,18 +315,18 @@ async fn wait_for_completed_turn(
         if let Some(turn) = page
             .turns
             .iter()
+            .find(|history| history.items.iter().any(|item| item.id == input_id))
             .map(|history| &history.turn)
-            .find(|turn| turn.id == turn_id)
             && turn.state.is_terminal()
         {
             return match &turn.state {
-                TurnState::Completed(_) => Ok(()),
-                state => bail!("Turn {turn_id} ended without completion: {state:?}"),
+                TurnState::Completed(_) => Ok(turn.id.clone()),
+                state => bail!("Input {input_id} ended without completion: {state:?}"),
             };
         }
         tokio::time::sleep(POLL_INTERVAL).await;
     }
-    bail!("Turn {turn_id} exceeded the 10 minute live-test timeout")
+    bail!("Input {input_id} exceeded the 10 minute live-test timeout")
 }
 
 async fn post_empty(client: &reqwest::Client, url: &str) -> Result<()> {

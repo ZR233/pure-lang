@@ -624,6 +624,20 @@ ModelPerformanceSnapshotView _modelPerformanceFromFrb(
       for (final session in value.sessionCosts)
         SessionCostView(
           rootThreadId: session.rootThreadId,
+          purposeCosts: [
+            for (final cost in session.purposeCosts)
+              PurposeCostView(
+                purpose: cost.purpose,
+                estimatedCosts: [
+                  for (final estimate in cost.estimatedCosts)
+                    RuntimeCostView(
+                      currency: estimate.currency,
+                      amount: estimate.amount,
+                    ),
+                ],
+                hasUnpricedUsage: cost.hasUnpricedUsage,
+              ),
+          ],
           estimatedCosts: [
             for (final cost in session.estimatedCosts)
               RuntimeCostView(currency: cost.currency, amount: cost.amount),

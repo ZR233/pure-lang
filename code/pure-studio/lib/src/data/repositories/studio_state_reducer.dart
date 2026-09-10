@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart' show listEquals;
+
 import '../../domain/models/studio_models.dart';
 import '../frb/studio_api.dart';
 
@@ -84,8 +86,8 @@ StudioState applyPersistenceState(
 /// window: items ← snapshot window, [ThreadHistoryWindow.epoch] increments to
 /// invalidate in-flight history responses, and `hasOlder` derives from the
 /// snapshot's history cursor. An equal-revision snapshot keeps the workspace
-/// instance and the window untouched — revision-gap enforcement makes local
-/// state at revision N identical to the canonical N.
+/// window and committed entries untouched; transient model previews may update
+/// text at the same commit revision without creating new durable facts.
 StudioState applyThreadSnapshot(
   StudioState current,
   ThreadWorkspace workspace, {
@@ -97,7 +99,16 @@ StudioState applyThreadSnapshot(
   if (previous != null) {
     if (workspace.revision < previous.revision) return current;
     if (workspace.revision == previous.revision) {
-      return _resolveWorkspaceSyncReady(current, threadId);
+      final preview = _mergeStreamingPreview(previous, workspace);
+      final next = identical(preview, previous)
+          ? current
+          : current.copyWith(
+              workspacesByThread: {
+                ...current.workspacesByThread,
+                threadId: preview,
+              },
+            );
+      return _resolveWorkspaceSyncReady(next, threadId);
     }
   }
   final directoryThread = current.threads
@@ -125,6 +136,72 @@ StudioState applyThreadSnapshot(
     workspacesByThread: workspaces,
     workspaceUiByThread: workspaceUi,
   );
+}
+
+ThreadWorkspace _mergeStreamingPreview(
+  ThreadWorkspace previous,
+  ThreadWorkspace incoming,
+) {
+  final items = {for (final item in previous.items) item.id: item};
+  var changed = false;
+  for (final item in incoming.items) {
+    final streaming = switch (item.state) {
+      ThreadTextItemStateView(lifecycle: StreamingThreadContentView()) ||
+      ThreadThinkingItemStateView(lifecycle: StreamingThreadContentView()) ||
+      ThreadToolItemStateView(
+        lifecycle: RunningThreadToolView() || CancellingThreadToolView(),
+      ) => true,
+      _ => false,
+    };
+    if (!streaming) continue;
+    final old = items[item.id];
+    if (old != null && old.isTerminal) continue;
+    final unchanged = switch ((old?.state, item.state)) {
+      (
+        ThreadTextItemStateView(text: final before),
+        ThreadTextItemStateView(text: final after),
+      ) =>
+        before == after,
+      (
+        ThreadThinkingItemStateView(
+          summary: final beforeSummary,
+          content: final beforeContent,
+        ),
+        ThreadThinkingItemStateView(
+          summary: final afterSummary,
+          content: final afterContent,
+        ),
+      ) =>
+        listEquals(beforeSummary, afterSummary) &&
+            listEquals(beforeContent, afterContent),
+      (
+        ThreadToolItemStateView(
+          lifecycle: RunningThreadToolView(streamedOutput: final before),
+        ),
+        ThreadToolItemStateView(
+          lifecycle: RunningThreadToolView(streamedOutput: final after),
+        ),
+      ) =>
+        before == after,
+      (
+        ThreadToolItemStateView(
+          lifecycle: CancellingThreadToolView(streamedOutput: final before),
+        ),
+        ThreadToolItemStateView(
+          lifecycle: CancellingThreadToolView(streamedOutput: final after),
+        ),
+      ) =>
+        before == after,
+      _ => false,
+    };
+    if (!unchanged) {
+      items[item.id] = item;
+      changed = true;
+    }
+  }
+  return changed
+      ? _sortedWorkspace(previous.copyWith(items: items.values.toList()))
+      : previous;
 }
 
 StudioState _resolveWorkspaceSyncReady(StudioState state, String threadId) {

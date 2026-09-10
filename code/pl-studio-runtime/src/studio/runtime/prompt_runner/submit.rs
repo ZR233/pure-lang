@@ -1,8 +1,7 @@
-//! prompt/turn 提交入口：内容校验、附件接入、运行时就绪检查与 root 角色对齐。
+//! 输入提交入口：内容校验、持久资源准备与 core 的原子路由受理。
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 
-use crate::config::StudioRole;
 use crate::studio::ThreadRecord;
 
 use super::super::{
@@ -10,7 +9,7 @@ use super::super::{
 };
 
 impl StudioRuntime {
-    /// Starts a new active Turn for a Thread.
+    /// Accepts input that requires a new Turn.
     pub async fn start_turn(
         &self,
         thread_id: String,
@@ -20,14 +19,14 @@ impl StudioRuntime {
             thread_id,
             input: request.input,
             options: StudioSubmitPromptOptions {
-                turn_policy: pl_core::AgentTurnSubmitPolicy::StartOnly,
+                turn_policy: pl_core::thread::input::InputPolicy::StartOnly,
                 ..StudioSubmitPromptOptions::default()
             },
         })
         .await
     }
 
-    /// Steers the currently active Turn for a Thread.
+    /// Accepts steering input for the currently running Turn.
     pub async fn steer_turn(
         &self,
         thread_id: String,
@@ -37,7 +36,7 @@ impl StudioRuntime {
             thread_id,
             input: request.input,
             options: StudioSubmitPromptOptions {
-                turn_policy: pl_core::AgentTurnSubmitPolicy::SteerOnly,
+                turn_policy: pl_core::thread::input::InputPolicy::SteerOnly,
                 ..StudioSubmitPromptOptions::default()
             },
         })
@@ -74,6 +73,10 @@ impl StudioRuntime {
             options,
         } = request;
         validate_prompt_content(&input)?;
+        anyhow::ensure!(
+            thread_record.visibility == crate::studio::ThreadVisibility::Active,
+            "archived Thread cannot accept input"
+        );
         let pl_protocol::studio::StudioPromptInput {
             text: prompt,
             attachment_draft_ids,
@@ -82,145 +85,116 @@ impl StudioRuntime {
             thread_record.id == thread_id,
             "prompt Thread does not match its canonical owner"
         );
+        self.ensure_prompt_runtime_ready().await?;
         let drafts = self
             .attachment_drafts
             .resolve(&attachment_draft_ids)
             .await?;
-        let role = if thread_record.parent_thread_id.is_none() {
-            StudioRole::Planner
-        } else {
-            StudioRole::from_key(&thread_record.role).context("Thread has an invalid model role")?
-        };
-        let config = self.config_runtime.read()?;
-        let route = config.config.models.resolve(&role.id())?;
+        let (route, config) = self.model_binding(&thread_id).await?;
         self.attachment_drafts
             .validate_for_model(&route.model, &drafts)?;
         let attachments = self
             .store
             .promote_attachment_drafts(&thread_id, &drafts)
             .await?;
-        self.agent_facility
-            .resources
-            .insert_thread_attachments(&thread_id, attachments.clone())
-            .await;
-        let attachment_ids = attachments
-            .iter()
-            .map(|attachment| attachment.id.clone())
-            .collect::<Vec<_>>();
-        let thread_attachments = attachments
-            .iter()
-            .map(crate::studio::store::attachment::thread_attachment)
-            .collect::<Vec<_>>();
-        self.agent_facility
-            .resources
-            .insert_initial_remote_urls(attachments.iter().zip(&drafts).filter_map(
-                |(attachment, draft)| {
-                    draft
-                        .initial_remote_url
-                        .clone()
-                        .map(|url| (attachment.id.clone(), url))
-                },
-            ))
-            .await;
-        let mut accepted = false;
-        let result = async {
-            self.ensure_prompt_runtime_ready().await?;
-            let (handle, agent_id) = self
-                .ensure_thread_agent_for_record(thread_record.clone())
-                .await?;
-            let mut snapshot = handle
-                .snapshot(agent_id.clone())
-                .await
-                .map_err(|error| anyhow::anyhow!(error))?;
-            if matches!(
-                &snapshot.state,
-                pl_core::AgentState::Faulted(faulted)
-                    if faulted.classification().is_recoverable()
-            ) {
-                snapshot = handle
-                    .recover_faulted(agent_id.clone())
-                    .await
-                    .map_err(|error| anyhow::anyhow!(error))?;
-            }
-            self.reconcile_root_role(&handle, &agent_id, &thread_record, &snapshot)
-                .await?;
-            let thread = pl_core::ThreadId::new(thread_id.clone())?;
-            let metadata = submit_metadata();
-            self.agent_facility
-                .product_events
-                .record_attachments(attachments.clone())?;
-            let presentation = options.presentation;
-            let turn_id = handle
-                .submit(
-                    agent_id.clone(),
-                    pl_core::AgentSubmitRequest::start(thread.clone(), prompt.clone())
-                        .with_presentation(presentation)
-                        .with_attachments(thread_attachments)
-                        .with_metadata(metadata)
-                        .with_turn_policy(options.turn_policy),
+        let resources = crate::resource_store::FileResourceStore::new(
+            self.store.attachments_dir().join("thread-resources"),
+        );
+        let mut context = Vec::new();
+        if !prompt.is_empty() {
+            context.push(pl_core::context::ContextContent::Text {
+                text: prompt.clone().into(),
+            });
+        }
+        for attachment in &attachments {
+            let reference = resources
+                .retain_file(
+                    std::path::Path::new(&attachment.storage_path),
+                    &attachment.media_type,
                 )
-                .await
-                .map_err(|error| anyhow::anyhow!(error))?;
-            accepted = true;
-            let cursor = handle
-                .thread_snapshot(&thread)
-                .map_err(|error| anyhow::anyhow!(error))?
-                .revision;
-            Ok::<_, anyhow::Error>(StudioSubmitPromptResponse {
-                thread_id,
-                turn_id: turn_id.into_string(),
-                cursor,
+                .await?;
+            anyhow::ensure!(
+                reference.byte_len() == attachment.byte_size
+                    && reference.content_digest()
+                        == format!("sha256:{}", attachment.content_sha256),
+                "attachment changed while preparing input"
+            );
+            if let Some(filename) = &attachment.filename {
+                context.push(pl_core::context::ContextContent::Text {
+                    text: format!("Attachment: {filename}").into(),
+                });
+            }
+            let modality = match attachment.modality {
+                pl_protocol::studio::StudioAttachmentModality::Image => {
+                    pl_protocol::AttachmentModality::Image
+                }
+                pl_protocol::studio::StudioAttachmentModality::Video => {
+                    pl_protocol::AttachmentModality::Video
+                }
+                pl_protocol::studio::StudioAttachmentModality::File => {
+                    pl_protocol::AttachmentModality::File
+                }
+            };
+            context.push(pl_model::runtime::attachment_content(reference, modality)?);
+        }
+        #[derive(serde::Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct PromptPayload<'a> {
+            text: &'a str,
+            presentation: pl_protocol::MessagePresentation,
+            attachments: &'a [crate::studio::AttachmentRecord],
+        }
+        let input_id = crate::studio::new_id("input");
+        let payload = pl_core::context::OpaquePayload::new(
+            "pl.studio.prompt",
+            1,
+            serde_json::to_string(&PromptPayload {
+                text: &prompt,
+                presentation: options.presentation,
+                attachments: &attachments,
+            })?,
+        )?;
+        let thread = self.ensure_thread_owner(&thread_id).await?;
+        self.queue_thread_model(&thread, &route, &config).await?;
+        if let Some(suggestions) =
+            self.thread_factory
+                .skill_suggestions(&thread_id, &prompt, &thread.snapshot())
+        {
+            context.push(pl_core::context::ContextContent::Text {
+                text: suggestions.into(),
+            });
+        }
+        // Resource bytes are retained before admission; failures never delete user drafts or replay effects.
+        self.agent_facility
+            .product_events
+            .record_attachments(attachments.clone())?;
+        let accepted = thread
+            .submit_input_with_policy(pl_core::thread::input::InputSubmission {
+                input: pl_core::thread::input::ThreadInput {
+                    id: input_id,
+                    payload,
+                    context,
+                },
+                policy: options.turn_policy,
+                drive: Some(pl_core::thread::input::InputDriverOptions {
+                    max_model_steps: std::num::NonZeroU32::new(64)
+                        .expect("fixed positive model step limit"),
+                }),
             })
-        }
-        .await;
-        if accepted {
-            self.attachment_drafts.commit(&attachment_draft_ids).await;
-            return result;
-        }
-        self.agent_facility
-            .resources
-            .remove_initial_remote_urls(&attachment_ids)
-            .await;
-        self.agent_facility
-            .resources
-            .remove_thread_attachment_ids(&thread_record.id, &attachment_ids)
-            .await;
-        result
+            .await?;
+        self.attachment_drafts.commit(&attachment_draft_ids).await;
+        self.residency.touch(&thread_id).await;
+        Ok(StudioSubmitPromptResponse {
+            thread_id,
+            input_id: accepted.input.id,
+            cursor: accepted.accepted_sequence,
+        })
     }
 
     pub(in crate::studio::runtime) async fn ensure_prompt_runtime_ready(&self) -> Result<()> {
         if !self.runtime_snapshot().await?.state.is_ready() {
             bail!("Studio runtime is not ready");
         }
-        Ok(())
-    }
-
-    /// 把 root actor 的 `identity.role` 对齐到统一 planner 模型路由。
-    /// 非 root、已一致或 actor 非 idle 时是 no-op。
-    async fn reconcile_root_role(
-        &self,
-        handle: &pl_core::AgentRuntimeHandle,
-        agent_id: &pl_core::ThreadId,
-        thread: &ThreadRecord,
-        snapshot: &pl_core::AgentSnapshot,
-    ) -> Result<()> {
-        if thread.parent_thread_id.is_some() {
-            return Ok(());
-        }
-        let desired = StudioRole::Planner.id();
-        if snapshot.identity.role == desired {
-            return Ok(());
-        }
-        if snapshot.active_turn_id().is_some()
-            || snapshot.pending_inputs > 0
-            || !snapshot.state.is_idle()
-        {
-            return Ok(());
-        }
-        handle
-            .reconfigure_idle_role(agent_id.clone(), desired)
-            .await
-            .map_err(|error| anyhow::anyhow!(error))?;
         Ok(())
     }
 }
@@ -232,10 +206,4 @@ pub(in crate::studio::runtime) fn validate_prompt_content(
         bail!("prompt is empty");
     }
     Ok(())
-}
-
-fn submit_metadata() -> serde_json::Value {
-    serde_json::json!({
-        "historyPolicy": "persist",
-    })
 }

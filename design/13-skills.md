@@ -2,7 +2,7 @@
 
 ## 13.1 目标
 
-Skills 是可复用的任务知识文档，供 agent 在需要时按需读取。`pl-core` 提供与来源无关的
+Skills 是可复用的任务知识文档，供 agent 在需要时按需读取。`pl-tool::skill` 提供与来源无关的
 Provider、注册表、发现观测和 Turn 级冻结 catalog；Studio 只拥有进程级 Provider 注册表、项目
 catalog 投影与系统资源目录。系统默认只把自学习产物写入当前项目，避免把项目经验污染到用户
 全局配置。
@@ -15,7 +15,7 @@ catalog 投影与系统资源目录。系统默认只把自学习产物写入当
 - 通过工具创建、修补和删除项目级 skill。
 - 每轮结束后由后台 reviewer 自动沉淀可复用经验。
 
-`pl-core` 的 Provider 注册、冻结 catalog 构造和 Skill 工具安装是公共产品宿主能力，不是
+`pl-tool::skill` 的来源注册、冻结 catalog 构造和 Skill 工具安装是公共产品宿主能力，不是
 Studio 私有实现细节。产品可能从容器 sidecar、只读 Review revision、产品缓存或其它 durable
 资源得到 Skill 根；这些资源的准备和生命周期属于产品，但 `SKILL.md` 解析、winner 选择、冻结
 generation、正文与支持文件读取、激活事实和模型工具语义仍必须由 PL 统一拥有。若注册入口或
@@ -23,7 +23,7 @@ host-supplied catalog 能力消失，产品只能复制一套 Skill 管理器，
 目录，都会重新产生解析差异、信任根错误和同一 Turn 多份 catalog。
 
 这里约束功能语义而不锁定 Rust 接口：后续可以合并 Registry/Provider 类型、改变 builder 名称或
-调整安装阶段，但任意 `pl-core` host 仍必须能够注册产品拥有的 Skill source、在一次 Turn 前冻结
+调整安装阶段，但任意工具宿主 仍必须能够注册产品拥有的 Skill source、在一次 Turn 前冻结
 唯一 catalog，并把同一 catalog 同时用于用户显式调用、模型索引和普通 Skill 工具；Provider 的
 locator 与读取责任不得被强制收回 Studio，也不得要求产品通过 JSON 或兼容适配层重建 PL Skill。
 同一所有权还必须覆盖加载后的 Provider 专属副作用：`Project` 是 winner 排序与产品语义，不代表
@@ -173,7 +173,7 @@ locator 或正文。任务明显匹配某个 skill 时，模型必须先调用 `
 允许模型调用的普通 Skill，排除本轮已由用户手势直接加载的名称；无正分候选时不注入 overlay。
 候选建议不读取正文、不激活 Skill，也不替代 `skill_view`。独立 compaction 不重新生成候选建议。
 
-召回器是 `pl-core` 的共享纯函数边界：query 最多 4 KiB/64 个去重词项，单个 name/description
+召回器是 `pl-tool::skill` 的共享纯函数边界：query 最多 4 KiB/64 个去重词项，单个 name/description
 文档最多 4 KiB/256 个词项，最多处理 1000 个候选、返回 50 个结果。文本按 Unicode 字母数字
 小写化，其他字符作为分隔符，并过滤固定英文停用词。评分依次奖励完整 name 短语、精确 name、
 name 词项与前缀、description 词项与前缀，再加命中 query 词项数平方作为覆盖奖励；零分候选不

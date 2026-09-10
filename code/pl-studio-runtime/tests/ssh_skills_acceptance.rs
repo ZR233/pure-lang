@@ -8,8 +8,8 @@
 use std::fs;
 use std::path::PathBuf;
 
-use pl_core::remote::{SshAuth, SshServerProfile};
 use pl_studio_runtime::{StudioHostKind, StudioRuntime, StudioRuntimeOptions};
+use pl_tool::remote::{SshAuth, SshServerProfile};
 
 fn remote_workspace() -> PathBuf {
     let dir = std::env::temp_dir().join("pure-ssh-skills-acceptance");

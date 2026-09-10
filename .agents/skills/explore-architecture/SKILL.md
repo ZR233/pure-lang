@@ -1,8 +1,9 @@
 ---
 name: explore-architecture
 description: Use when asked to understand, document, or summarize the Pure-Lang architecture across its crates, Studio products, and runtime boundaries.
-category: guides
-platforms: ["windows", "linux", "macos"]
+metadata:
+  category: guides
+  platforms: ["windows", "linux", "macos"]
 ---
 
 # 探索 Pure-Lang 架构
@@ -25,13 +26,15 @@ platforms: ["windows", "linux", "macos"]
 
 ## 当前稳定边界
 
-- 基础库：`pl-protocol`、`pl-trace`、`pl-output`、`pl-patch`、`pl-skill-core`。
-- 模型与语言服务：`pl-model`、`pl-lsp`。
-- 核心编排：`pl-core`，拥有 Thread、Turn、工具、Agent、Skill 与通用远程能力。
-- 产品运行时：`pl-studio-runtime`，拥有 Studio 状态、存储与产品编排。
+- 基础库：`pl-protocol`、`pl-output`、`pl-patch`、`pl-skill-core`。
+- 模型与工具实现：`pl-model`、`pl-tool` 依赖 core 且不相互依赖；语言服务由 `pl-lsp` 提供。
+- 核心编排：`pl-core`，独立拥有 Thread、Turn、Model/Tool 契约、上下文与可选冷存储；不依赖产品协议或具体实现。
+- 产品运行时：`pl-studio-runtime`，拥有配置、项目、Profile、Mode/Plan/workflow、子代理协调和 root/child/恢复的唯一装配。
 - 产品入口：`pl-studio-server` 与 `pl-studio-bridge`。
 - 远程执行：`pl-remote-helper`；工程任务入口：`xtask`；Flutter 客户端位于
   `code/pure-studio/`，但不是 Cargo workspace member。
+
+- 观察层：`pl-trace` 消费 core 日志，不作为 core 的依赖。
 
 具体依赖必须从各 crate 的 `Cargo.toml` 核验，不把上述分层误写成单一线性链。
 

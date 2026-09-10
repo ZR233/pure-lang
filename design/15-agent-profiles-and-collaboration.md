@@ -48,12 +48,12 @@ Studio 注册五个系统 Profile：`explorer`、`planner`、`reviewer` 固定�
 但 Agents 设置页可以配置启用状态、provider/model 和由模型声明驱动的 effort。禁用 `planner` 只从
 子代理目录排除它，不影响 root 继续使用 planner route。
 
-配置变化只影响未来 spawn。每个 child 创建时冻结 Profile id、正文、provider、model、effort、配置
-revision 与 `AgentWorkspaceAssignmentSnapshot`；运行中的 child 不随设置变化，也不在每轮回读 SQLite。
-产品 lifecycle 在准备外部资源时直接接收该 frozen Profile snapshot；不得通过父 Agent 配置、当前
-Profile 文件或非类型化 metadata 重新推导模型路由与系统指令。
+每个 child 创建时冻结 Profile id、正文与 `AgentWorkspaceAssignmentSnapshot`，保存初建 provider、model、effort
+与配置 revision。后续配置更新由宿主事件处理：模型绑定在下一 Turn 生效，工具权限和目录按热刷新契约更新，
+不重写创建指令、不偷切物理工作区，也不在每轮回读 SQLite。产品在准备初始外部资源时接收同一 frozen Profile
+snapshot；不能从父 Agent 配置或非类型化 metadata 猜测权限和系统指令。
 
-Plan 属于各自的 AgentSession，不随 Profile、消息 fork 或 workspace assignment 复制到 child，也不存在
+Plan 属于各自的 Thread，不随 Profile、消息 fork 或 workspace assignment 复制到 child，也不存在
 lineage 共享句柄。root 必须把 child 所需的已批准基线写入 `spawn_agent.message`；child 的 `plan_*` 工具
 只操作自己的 session，不能查询 root Plan。配置冻结与 Plan session 隔离是两条独立边界。
 `spawn_agent.message` 和 root 后续通过 `send_message` 发送的补充输入都在 child Timeline 中显示为
@@ -102,18 +102,37 @@ commit/测试/风险证据，以及 workspace、`writablePaths`、Git 与 cleanu
 `report_progress`，以 `readyForCompletion` 阶段提交 `CHILD_DELIVERY_READY` 及完整证据；worktree child
 还必须在 detail 中提供 `WORKTREE_COMMIT_READY`、40 位 commit 与 workspace root，reviewer 继续使用
 专用 verdict marker。
-root 从成功 spawn receipt 冻结真实 `agentId` 和 `turnId`，循环 `wait` 直到该 child 的对应 Turn terminal，再按该 id 调用
-`read_agent_submissions`。progress 唤醒不等于 terminal；空 submission page 是 child 交付合同失败，
-`read_agent_session` 只用于诊断和收窄重派，不能作为正常成果 fallback。child 命中预算时
-`wait` 的 agent Turn 完成事件以 `status=budgetLimited` 返回，root 不得把它当作 terminal success 或从 pending
-集合移除：先分页读取该 child 的 durable Timeline 判断进展，确认状态正常、任务未完成后再以
-`send_message` 显式续跑；异常时应收窄指令、关闭或重新派发，而不是无条件续轮。
-`wait` 返回所有已注册会话来源的事件，批量返回一次不代表其余目标已完成。root 必须维护尚未
-完成的 `(agentId, turnId)` 集合；只在 `batch.events` 中找到 `event.type=agentChanged`、匹配的
-`event.data.identity.id`、`change.type=turnCompleted`、对应 `change.data.turnId` 和
-`change.data.status=completed` 后移除。普通工具完成、定时器和应用消息不能冒充 agent 终态。
-`CHILD_DELIVERY_READY` 出现在 progress 中只表示成果已发布，不能替代终态；
-集合非空时继续等待，所有目标分别取得 terminal receipt 后才能开始读取 submissions。
+root 从成功 spawn receipt 保存 `agentId`、`profileId`、`messageAccepted` 和 `messageSequence`；
+`send_message` 返回 `target`、`messageId` 与 `sequence`。这些是消息准入收据，不携带 `turnId`，也不代表执行完成。
+每个 child 同时只保留一个待交付任务；复用前记录已知 `lastTurn.turnId` 与通知 `commitSequence`，
+后续必须看到新 Turn，不能用旧完成或旧 submission 满足新任务。消息 sequence 与 journal commitSequence 属于不同域。
+
+父代理没有独立工作时，使用 `wait({"taskIds":[],"timeoutMs":300000})` 等待 Thread 消息；
+这是最长等待时间，消息到达会提前唤醒；只有具体独立动作存在更早期限时才缩短等待。
+超时后不机械调用 `list_agents` 或读取全量历史；按新通知、逾期里程碑、缺失终态证据或显式错误
+进行目标明确的查询，否则继续等待。每条通知都需消费并核对尚未完成目标，不以减少查询为由忽略失败。
+工具返回 `tasks`、`messagesReady`、`timedOut`，
+不返回 `batch.events`。消息就绪、工具任务完成和 progress 都不是 child 的完成证据。宿主将持久 child 通知
+作为 Thread 消息送入父模型上下文，字段为 `childId`、`commitSequence`、`turn`、`lifecycle`、`progress`。
+父模型只在 `childId` 绑定真实 spawn 目标，且 `turn.state.kind=finished`、`turn.state.value=completed | toolCompleted`
+时记录该 `turn.turnId` 为成功完成。`list_agents` 的目标行 `lastTurn`、`pendingInputs` 与 `runningTasks` 可用于核实；
+未出现在一次 wait 结果中的目标不能被推定完成。每个 pending 目标都必须取得自己的当前完成证据，
+再按该 agentId 读取 canonical 非空 `read_agent_submissions`。只有 `CHILD_DELIVERY_READY` 的 progress
+仍需等待成功终态；`stage=readyForCompletion` 不改变 Turn 生命周期。父模型必须已消费匹配 child/Turn 的
+成功终态通知才能推进依赖成果的 checkpoint、整合或状态迁移；checkpoint 请求之后才到达的通知不能倒推授权。
+旧提交不能重复当作续派任务的新成果。大提交按返回的 `nextCursor` 和 `fragment` 完整读取。
+
+`read_agent_submissions` 页增加 `targetState`，其 `agentId`、`throughSequence`、`turn`、`completion`、`guidance`
+均来自与 cursor 相同的冻结 history。`completion` 为穷尽值：`notStarted | running | completed | toolCompleted |
+waitingInteraction | stepLimit | cancelled | interrupted | failed`。`running/notStarted` 页即使非空或含完成 marker，
+也必须保留 pending，按 guidance 等待并消费匹配目标与Turn的成功终态通知，再不带旧cursor重新读取。
+冻结的 Running 页不能靠翻页更新成当前终态。`completed/toolCompleted` 仅补充核实目标状态，不替代父模型消费
+终态通知的要求；其他状态按交互、预算或失败处理。正常顺序仍为先终态再交付查询，不因此新增提交轮询。
+
+`turn.state.value=stepLimit` 是预算暂停，`waitingInteraction` 是等待交互；两者都不是成功交付。
+先读取该 child 的 durable Timeline 判断进展，健康且工作未完成时才发送明确 continuation；
+保留新消息准入收据，等待新观察到的 Turn 身份，不构造不存在的 receipt.turnId。
+取消、中断、失败或空提交进入诊断、收窄重派或显式关闭，`read_agent_session` 不能替代正常 durable submission。
 
 `read_agent_session` 读取持久化可见 Timeline，而不是 provider 当前 transcript。默认按倒序返回最新
 20 条 `user | parentAgent | commentary | final` 文本 Item；调用方可用 opaque cursor 翻页、切换正序，
@@ -181,8 +200,11 @@ Thread、热资源、worktree 与 branch。启动恢复只按 durable lease 对�
 保留现场并发布 Recovery issue，不盲删目录或非 Pure 分支。
 
 `close_agent` 对 worktree child 接受 `workspaceDisposition = preserve | cleanup`，默认 `preserve`。
-关闭请求先返回 Closing；任务、订阅、子会话与宿主清理完成后才发布 Closed。清理失败保留 Closing、
-冻结的 disposition 与错误，显式重试不能把已经取消的会话恢复为可执行状态。
+关闭工具等待子孙 Thread、订阅与所选宿主资源处置完成，成功结果包含目标及 `lifecycle.kind=closed`；
+成功回执同时报告实际 `workspaceDisposition`。它不通过旧 `agentChanged` 事件报告完成；父 inbox 的 core Closed
+通知可能早于物理资源清理，不能代替 `close_agent` 成功回执与路径/分支复核。
+若工具执行仍是 pending task acknowledgement，须等待该任务的最终结果。
+清理失败保留关闭状态、所选 disposition 与可恢复错误，显式重试不能使已取消的会话重新执行。
 关闭不自动 commit、merge、cherry-pick 或修改主分支。父 Agent 应先审查 child commit、用普通 Git 显式
 整合，最终审查与验证通过后再请求 cleanup。已经 preserved 的 lease 在 Agents/Recovery 中显示 revision、branch、base/head、
 dirty 与 changed-files 预览，并提供显式清理。

@@ -1,8 +1,5 @@
-//! Studio 当前数据库 schema。
-//!
-//! v18 是轻量 Thread Mode workflow 持久化的破坏性边界。打开旧版本时由
-//! `store::project` 删除整个数据库
-//! family 并从这里重建，因此本模块不包含旧 Task 表或迁移逻辑。
+//! Studio product schema; configuration, projects and credential references survive session reset.
+//! Session-format upgrades run only through the locked startup reset coordinator after backup.
 
 use anyhow::Result;
 use sea_orm::sea_query::{Index, IndexCreateStatement, IndexOrder};

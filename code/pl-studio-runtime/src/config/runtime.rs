@@ -26,6 +26,26 @@ pub struct ConfigRuntimeSnapshot {
     pub config: StudioConfig,
 }
 
+/// Parameters resolved from one configuration revision for a newly created product Agent.
+#[derive(Clone)]
+pub struct ResolvedAgentProfile {
+    /// The same snapshot used for Profile and route resolution, for coherent resource assembly.
+    pub config: StudioConfig,
+    pub revision: u64,
+    pub profile: pl_protocol::AgentProfileSnapshot,
+    pub route: pl_model::config::ResolvedModelRoute,
+}
+
+impl std::fmt::Debug for ResolvedAgentProfile {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ResolvedAgentProfile")
+            .field("revision", &self.revision)
+            .field("profile_id", &self.profile.profile_id)
+            .finish_non_exhaustive()
+    }
+}
+
 /// Stable Settings owner failures used by transport adapters.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigRuntimeError {
@@ -83,6 +103,34 @@ impl ConfigRuntime {
             self.store.paths(),
             &config,
         ))
+    }
+
+    /// Resolves an enabled Profile and its model from the same snapshot; performs profile-file IO.
+    ///
+    /// # Errors
+    /// Returns unknown/disabled Profile, configuration or provider route errors.
+    pub fn resolve_agent_profile(
+        &self,
+        profile_id: &str,
+    ) -> ConfigRuntimeResult<ResolvedAgentProfile> {
+        let snapshot = self.read()?;
+        let catalog = super::AgentProfileCatalog::discover(self.store.paths(), &snapshot.config);
+        let profile = catalog
+            .profiles
+            .into_iter()
+            .find(|profile| profile.profile_id == profile_id && profile.enabled)
+            .ok_or_else(|| {
+                PureError::ConfigError(format!(
+                    "Agent Profile is missing or disabled: {profile_id}"
+                ))
+            })?;
+        let route = super::resolve_profile_route(&snapshot.config, &profile)?;
+        Ok(ResolvedAgentProfile {
+            config: snapshot.config,
+            revision: snapshot.revision,
+            profile,
+            route,
+        })
     }
 
     /// 返回设置页使用的 Profile；其中包含被禁用的内置 Profile。
@@ -330,5 +378,25 @@ mod tests {
                 .exists()
         );
         assert_eq!(runtime.read().unwrap(), saved);
+    }
+    #[test]
+    fn child_profile_resolution_uses_one_snapshot_without_mutating_routes() {
+        let runtime = runtime("child-profile");
+        let before = runtime.read().unwrap();
+        let profile = runtime
+            .agent_profiles()
+            .unwrap()
+            .profiles
+            .into_iter()
+            .next()
+            .expect("default enabled profile");
+        let resolved = runtime.resolve_agent_profile(&profile.profile_id).unwrap();
+        assert_eq!(resolved.revision, before.revision);
+        assert_eq!(resolved.config, before.config);
+        assert_eq!(resolved.profile, profile);
+        assert_eq!(resolved.route.provider_id.as_str(), profile.provider_id);
+        assert_eq!(resolved.route.model.slug, profile.model);
+        assert!(runtime.resolve_agent_profile("missing-profile").is_err());
+        assert_eq!(runtime.read().unwrap(), before);
     }
 }

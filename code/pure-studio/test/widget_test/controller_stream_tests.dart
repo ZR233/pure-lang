@@ -213,6 +213,13 @@ void registerControllerStreamTests() {
       ThreadSnapshotFrame(
         workspace: initial.selectedWorkspace!.copyWith(
           revision: 1,
+          items: [
+            _submittedInputItem(
+              threadId: 'session-1',
+              turnId: api.submitTurnId,
+              inputId: api.submitInputId,
+            ),
+          ],
           activeTurn: _testTurn(
             threadId: 'session-1',
             state: const RunningStudioTurnState(
@@ -250,11 +257,16 @@ void registerControllerStreamTests() {
           revision: 2,
           activeTurn: null,
           items: [
+            _submittedInputItem(
+              threadId: 'session-1',
+              turnId: api.submitTurnId,
+              inputId: api.submitInputId,
+            ),
             ThreadItemView(
               id: 'terminal-item',
               threadId: 'session-1',
               turnId: api.submitTurnId,
-              ordinal: 1,
+              ordinal: 2,
               revision: 2,
               createdAt: timestamp,
               updatedAt: timestamp,
@@ -310,9 +322,20 @@ void registerControllerStreamTests() {
     );
 
     api.emitThreadFrame(
-      _threadTurnFrame(
+      _threadItemFrame(
         threadId: 'session-1',
         workspaceRevision: 1,
+        item: _submittedInputItem(
+          threadId: 'session-1',
+          turnId: api.submitTurnId,
+          inputId: api.submitInputId,
+        ),
+      ),
+    );
+    api.emitThreadFrame(
+      _threadTurnFrame(
+        threadId: 'session-1',
+        workspaceRevision: 2,
         state: const RunningStudioTurnState(
           startedAt: 1,
           activity: StudioTurnActivity.preparing,
@@ -342,9 +365,20 @@ void registerControllerStreamTests() {
     controller.updateComposer('session-1', 'hello');
     await controller.submitComposer('session-1');
     api.emitThreadFrame(
-      _threadTurnFrame(
+      _threadItemFrame(
         threadId: 'session-1',
         workspaceRevision: 1,
+        item: _submittedInputItem(
+          threadId: 'session-1',
+          turnId: api.submitTurnId,
+          inputId: api.submitInputId,
+        ),
+      ),
+    );
+    api.emitThreadFrame(
+      _threadTurnFrame(
+        threadId: 'session-1',
+        workspaceRevision: 2,
         state: const RunningStudioTurnState(
           startedAt: 1,
           activity: StudioTurnActivity.preparing,
@@ -361,7 +395,7 @@ void registerControllerStreamTests() {
     api.emitThreadFrame(
       _threadTurnFrame(
         threadId: 'session-1',
-        workspaceRevision: 2,
+        workspaceRevision: 3,
         state: const FailedStudioTurnState(
           startedAt: 1,
           completedAt: 2,
@@ -968,7 +1002,7 @@ void registerControllerStreamTests() {
     gate.complete(
       const SubmitPromptReceipt(
         threadId: 'session-created',
-        turnId: 'turn-created',
+        inputId: 'input-created',
         cursor: 1,
       ),
     );

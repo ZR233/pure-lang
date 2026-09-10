@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use pl_core::{AgentProfileSnapshot, AgentWorkspaceMode};
+use pl_protocol::{AgentProfileSnapshot, AgentWorkspaceMode};
 use serde::{Deserialize, Serialize};
 
 use crate::{PureError, Result};
@@ -100,6 +100,30 @@ impl AgentProfileCatalog {
     }
 }
 
+/// Resolves a frozen Profile against one configuration snapshot without changing stored routes.
+///
+/// # Errors
+/// Returns missing provider/model bindings or invalid route parameters.
+pub fn resolve_profile_route(
+    config: &crate::config::StudioConfig,
+    profile: &pl_protocol::AgentProfileSnapshot,
+) -> Result<pl_model::config::ResolvedModelRoute> {
+    let role = pl_model::config::AgentRoleId::new(profile.profile_id.clone())?;
+    let mut models = config.models.clone();
+    models.routes.insert(
+        role.clone(),
+        pl_model::config::ModelRouteConfig {
+            provider: pl_model::config::ProviderId::new(profile.provider_id.clone())?,
+            model: profile.model.clone(),
+            effort: profile
+                .effort
+                .as_ref()
+                .map(|effort| pl_model::config::ReasoningEffort::new(effort.clone())),
+        },
+    );
+    models.resolve(&role)
+}
+
 /// 原子创建或保存单个用户 Agent 文件；系统 Profile ID 永远不可写。
 pub fn save_user_agent_profile(
     paths: &ConfigPaths,
@@ -122,7 +146,7 @@ pub fn save_user_agent_profile(
     let directory = paths.agents_dir();
     fs::create_dir_all(&directory)?;
     let path = directory.join(format!("{profile_id}.toml"));
-    pl_core::atomic_file::write_file_atomically(&path, content.as_bytes())?;
+    pl_tool::workspace::write_file_atomically(&path, content.as_bytes())?;
     Ok(path)
 }
 
@@ -235,7 +259,7 @@ fn load_user_profile(
         model: profile.model,
         effort: profile.effort.map(|effort| effort.as_str().to_string()),
         source: path.to_string_lossy().into_owned(),
-        revision: pl_core::canonical_content_hash(content.as_bytes()),
+        revision: pl_core::context::content_hash(content.as_bytes()),
         content_hash: String::new(),
         system: false,
         enabled: profile.enabled,
@@ -263,7 +287,7 @@ fn validate_user_profile(
         }
     }
     let mut models = config.models.clone();
-    let role = pl_core::AgentRoleId::new(profile_id)?;
+    let role = pl_model::config::AgentRoleId::new(profile_id)?;
     models.routes.insert(
         role.clone(),
         ModelRouteConfig {
@@ -293,7 +317,7 @@ fn validate_profile_id(profile_id: &str) -> Result<()> {
 fn with_content_hash(mut snapshot: AgentProfileSnapshot) -> AgentProfileSnapshot {
     let mut hashable = snapshot.clone();
     hashable.content_hash.clear();
-    snapshot.content_hash = pl_core::canonical_content_hash(
+    snapshot.content_hash = pl_core::context::content_hash(
         &serde_json::to_vec(&hashable).expect("Agent Profile snapshot must serialize"),
     );
     snapshot

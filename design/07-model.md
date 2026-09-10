@@ -2,10 +2,10 @@
 
 ## 7.1 职责
 
-`pl-model` 是模型目录、Provider endpoint 与模型协议适配层，负责把核心层的统一请求转为具体 API 请求，并把流式结果归一化为 provider 无关的模型事件和 `CompletionResponse`。`pl-core` 是宿主唯一使用的高层 runtime facade；产品不直接构造 provider、transport 或 stream accumulator。
+`pl-model` 是模型目录、Provider endpoint 与模型协议适配层，负责把核心层的统一请求转为具体 API 请求，并把流式结果归一化为 provider 无关的模型事件和 `CompletionResponse`。Studio 显式构造 model 适配器并交给核心 ModelSession 契约；core 不代理 provider 或模型配置。
 
 `pl-model` 不维护产品 agent/session 历史，不解析 CLI，也不决定产品阶段。它只维护
-`ModelSession`：与一个 `AgentSession` 同生命周期的物理连接、脱敏 fingerprint 和
+`ModelSession`：与一个 Thread 同生命周期的物理连接、脱敏 fingerprint 和
 Responses continuation 状态。
 `pl-model` 可以消费已经解析好的自定义模型列表，但不读取配置文件。
 
@@ -27,7 +27,7 @@ started/id、文本、思考、reasoning summary、工具参数、工具 ready/d
 response parser 只负责提取各自 envelope，不能各自维护字段优先级或 fallback；同一 usage/tool
 fixture 经过不同 transport 入口必须得到完全相同的 canonical `TokenUsage` 与工具身份。
 
-底层 event stream、decoder 和 accumulator 只服务 `ModelRuntime` 与 `pl-core` 的 trace projector，不是宿主 API。外部宿主通过 `pl-core::TurnEngineBuilder::from_route` 或 `pl-core::ModelTurnClient::from_route` 执行模型请求，避免复刻 provider adapter。
+底层 event stream、decoder 和 accumulator 只服务 `ModelRuntime` 与 只读诊断投影，不是宿主 API。外部宿主通过 `pl-model::runtime::ModelRuntime::from_route` 构造模型绑定，或通过 `pl-model::runtime::ModelTurnClient::from_route` 执行辅助请求。执行器接收已经构造的模型运行时和冻结的 reasoning 参数。
 
 `completion` 内部 stream 状态机负责稳定工具调用 identity。工具调用一经解码即具有必填的
 `ToolCallIdentity { item_id, call_id }`：Responses 使用事件携带的 `item.id` 与 `call_id`，
@@ -42,21 +42,8 @@ provider tool result 匹配。
 
 ## 7.2 依赖
 
-```text
-pl-protocol
-    ↑
-pl-model
-    ↑
-pl-core
-```
-
-`pl-model` 的公共消息和错误边界依赖 `pl-protocol`，内部流式事件边界依赖 `pl-trace`：
-
-- `Message`
-- `PureError`
-- `Result`
-- `ToolSpec`
-- `pl_trace::AgentEventSender`
+`pl-model` 实现并依赖 core 的 ModelSession/ModelRequest 契约，core 不依赖 model。
+产品 DTO 和 adapter 内部消息可依赖 pl-protocol；pl-trace 只读消费 core 观察接口，不作为模型执行门面。
 
 provider 适配实现可以依赖 `async-openai`、`reqwest`、`tokio-tungstenite` 和 `serde`。这些依赖只用于 `pl-model` 内部 transport、typed protocol request 和 typed stream event 解析，不向 `pl-core` 暴露。
 
@@ -81,7 +68,7 @@ provider 适配实现可以依赖 `async-openai`、`reqwest`、`tokio-tungstenit
   `programmatic_tool_calling`。
 - 推理交错字段：`interleaved.field`，当前支持 `reasoning`、`reasoning_content`、`reasoning_details`。
 
-`pl-core` 只读取这些 provider 无关能力来做本地校验和 UI 展示：图片输入必须要求模型声明 `input = ["image"]`，工具调用必须匹配工具能力，推理请求必须匹配 `reasoning = true`。provider 私有差异不扩散到 `pl-core`。
+Studio 读取这些能力做装配校验和 UI 展示：图片输入必须要求模型声明 `input = ["image"]`，工具调用必须匹配工具能力，推理请求必须匹配 `reasoning = true`。provider 私有差异不扩散到 `pl-core`。
 
 提示词缓存不是由模型 slug 隐式推断的基础能力。`ProviderServiceCapabilities.prompt_cache`
 声明 endpoint 的缓存 dialect，模型目录声明该模型是否报告缓存写入 token；核心层把 provider
@@ -150,7 +137,7 @@ V4 Flash Vision Exp 使用 Responses/HTTP；全部 GLM 和全部 MiMo 使用 Cha
 runtime 必须按当前模型选择对应 endpoint path，同一 provider 实例可以路由不同协议的模型。
 
 Responses WebSocket 使用 `/responses` 握手和 `response.create` 帧，并固定 `store: false`。
-连接及 continuation 属于 `AgentSession` 的 `ModelSession`，按模型、协议和连接方式隔离。
+连接及 continuation 属于 Thread 的 `ModelSession`，按模型、协议和连接方式隔离。
 断线、取消、未完整消费或无效 continuation 都丢弃旧连接；新连接使用冻结的完整输入和附件。
 建连保持系统 DNS、IPv4/IPv6 交错竞争及 15 秒握手上限。
 
@@ -173,7 +160,7 @@ effort 等可调参数的 wire 写入由通用透传机制驱动，协议层不�
 
 OpenAI Responses 的 `reasoning.summary` 仍按 Codex wire 语义发送（`Auto` 和兼容层的 `Enabled` 都发送 `auto`，`Disabled` 不发送 summary 字段），由 `ReasoningConfig.summary` 独立驱动，不进入 parameter wire。模型返回的 `reasoning_content` 进入 canonical reasoning event；历史回放时仍通过 assistant message 的 `reasoning_content` 字段写回 Chat Completions。
 
-核心层提交的 `CompletionRequest` 始终带完整 canonical input，且不携带 model、stream、store、previous response、trace 或 transport session。runtime 固定使用流式请求；Responses 固定 `store: false`。prompt cache 和 trace 属于单次 invocation context，continuation 只由 `ModelSession` 管理。`pl-core` 的宿主 façade 在 invocation 内创建事件 sink；`ModelTurnOptions` 只承载宿主可控的取消状态，不暴露 `pl-trace` 类型。
+model 从核心冻结 ModelRequest 转换的 `CompletionRequest` 始终带完整 canonical input，且不携带 model、stream、store、previous response、trace 或 transport session。runtime 固定使用流式请求；Responses 固定 `store: false`。prompt cache 和 trace 属于单次 invocation context，continuation 只由 `ModelSession` 管理。model adapter 在 invocation 内创建事件 sink；`ModelTurnOptions` 只承载宿主可控的取消状态，不暴露 `pl-trace` 类型。
 `ModelSession` 在相同连接和 fingerprint 下由上次完整请求前缀计算增量，仅 WebSocket 帧
 设置 `previous_response_id`。Responses HTTP/SSE 和 Chat Completions 始终发送完整历史。
 
@@ -183,95 +170,12 @@ OpenAI Responses 的 `reasoning.summary` 仍按 Codex wire 语义发送（`Auto`
 每个 model step 携带当前 `ToolPlan` 的完整可见工具列表；OpenAI adapter 只把 frozen specs 转为
 Responses/Chat typed body，不自行发现、过滤或注入 agent 工具。
 
-Core 的运行时工具统一为 `DynTool`，内部持有 `Arc<dyn ToolExecutor>`；definition、policy、execution
-owner 与 executor 在注册时组成一个不可拆分的执行对象。Rust 内置工具和宿主静态工具实现
-`StaticTool`，由 `From<T: StaticTool> for DynTool` 经过 typed adapter 擦除；MCP、插件和 hosted
-adapter 直接实现对象安全的 `ToolExecutor`。`ToolPlan` 只冻结 `DynTool`，不存在按 builtin、MCP、
-插件或 hosted 来源分派的第二条执行链。provider 只能看到从 `DynTool::definition()` 投影出的
-`ToolSpec`，看不到 handler、policy、group generation 或注册来源。
+core 保存不透明工具声明与稳定工具 ID，每步冻结声明和执行租约。model 将声明编码为 provider
+wire 并恢复 assistant 调用名称/原参数；具体工具实现与参数解析属于 pl-tool。hosted 工具仅在
+model 内配置，不向 core 注册占位 executor。MCP 名称映射属于工具适配，不由 core 反解析。
 
-`pl-core` 的 crate 根同时公开工具契约、typed builder、安装组，以及文件、命令、Git、Skill、LSP、
-控制和搜索等可复用内置工具的实现类型与构造入口。下游可自由选择其中任意子集注册；默认 installer
-只是这些公共工具的预设组合，不能依赖私有构造器或维护另一份 registry。
-
-工具名称在 core 内使用 `ToolName { namespace, name, wire_name }`。registry 以稳定 wire name 接收
-provider 回传调用，同时保留结构化 identity；MCP 的 wire name 继续使用既有
-`mcp__<server>__<tool>` 规则，不能从归一化后的 wire name 反解析执行目标。trace、历史和现有 UI
-协议继续记录 wire name 字符串。
-
-注册组显式声明 `ToolExposure::Direct | Deferred`。builtin、LSP、控制类和普通宿主静态工具默认
-Direct；MCP、插件和 App 动态目录默认 Deferred。若当前冻结目录存在 Deferred 工具，core 以普通
-function tool 形式加入 `tool_search`；搜索结果通过 typed runtime directive 更新当前
-`AgentSession` 的 revealed identities，匹配工具从下一 model step 开始进入完整 `ToolSpec` 列表。
-该机制是 provider-neutral 的普通工具调用，不使用 Responses 私有 hosted tool-search wire，Chat 与
-Responses 继续消费同一 `CompletionRequest.tools`。revealed 状态只在当前 AgentSession 持久化，
-子 agent 默认从空状态开始；deferred definition 或 source generation 变化会使旧 reveal 失效。
-
-每个安装组可以提供集中式 developer instructions。只有本 step 最终可见且通过执行策略过滤的组才
-注入其说明；组说明与工具 definition/executor 来自同一个冻结 `ToolPlan`。说明内容参与固定 prompt
-section hash，但 group identity、注册顺序和 executor generation 仍不参与 tool wire fingerprint。
-
-Programmatic Tool Calling 通过 hosted `programmatic_tool_calling` 与工具的 `allowed_callers` 声明。
-首期只允许稳定本地读工具、LSP 查询和 effect 被可信配置明确标为 Read 的 MCP；命令、文件写入、
-Git mutation、审批/交互和 agent-control 始终只能 direct 调用。结构化 eligible 工具必须携带
-`output_schema`。嵌套 function/custom call 的 `caller` 在结果回传时原样保留。由于 runtime 固定
-`store: false`，session 必须按 provider 顺序持久化 reasoning、program、嵌套 call、
-call output 与 program output，并在 HTTP 重放、WebSocket full replay 和恢复后完整重建；Chat
-Completions 遇到这些 Responses 原生 item必须显式拒绝，不能降级成普通 assistant/tool message。
-
-Responses hosted tools 属于 endpoint 服务能力，不由 URL 字符串在运行时猜测。官方 OpenAI preset
-的 canonical `base_url` 可以声明 `programmatic_tool_calling`；preset 实例覆盖为自定义 `base_url`
-时默认关闭，自定义 provider 也默认关闭。只有 manager 在当前 agent scope 中注册了对应
-`ProviderHosted` Tool，provider adapter 才发送 hosted tool type。核心编排必须同时检查模型能力、
-模型 request profile 和 endpoint 服务能力，任一缺失都拒绝冻结该 hosted Tool。该边界保证 OpenAI-compatible
-Responses endpoint 不会因未支持的 `programmatic_tool_calling` 返回 400。
-
-provider transport 层把第三方 API 错误统一转换为 `PureError` 时必须先脱敏。错误文本中不得包含 bearer token、API key 或形如 `sk-...` 的密钥片段；鉴权失败、配额不足、模型不存在等服务端错误可以保留 status、错误类型、code 和可读原因，但密钥值必须替换为稳定占位。
-Responses HTTP/SSE 与 Chat Completions HTTP 和 WebSocket 使用同一类型化错误分类器，保留
-provider code、HTTP status、message 与可选 retry hint。408/409/425/429、5xx、连接中断和超时
-按上述统一 5 次预算处理；不得在传输层叠加额外预算。
-
-`ProviderFailureKind` 固定为 authentication、authorization、capacity、configuration、transport、
-protocol 与 unknown。`RetryDisposition` 只回答同一次模型请求是否能在尚无副作用时安全重放，
-不得被宿主解释为 Task 生命周期。401/`invalid_api_key`、403、无效模型/endpoint/请求配置、
-provider 协议错误和未知永久错误均保持 permanent；408/409/425/429、5xx、连接与超时错误保持
-retryable。Studio 另行从 typed failure 派生 Task disposition，任何层都不得解析 message 或 code
-字符串来决定 Task 是否终结。
-
-提示词分层由 `pl-core` 决定，`pl-model` 只消费已经组装好的 `CompletionRequest`。`CompletionRequest.instructions` 表示 base/system 层，并在 Responses 和 Chat Completions 请求中作为最前面的 system 内容发送。`messages` 可以包含核心层临时插入的 system/user 前置消息；`pl-model` 不区分它们是否来自 developer 或 user context，也不把任何提示词写回会话。
-
-请求体不再由散落的 `serde_json::json!` 直接拼接，而是先转换为 `pl-model` 内部强类型 request，再由 serde 序列化。动态 JSON 只允许出现在 JSON Schema、工具参数、provider 返回的任意 JSON 参数和协议扩展 escape hatch。
-
-`CompletionResponse` 只保留 canonical 内容、reasoning、tool calls、Responses context、usage、orchestration、
-实际模型和可选 inference timing。raw text、finish reason、hosted-search 汇总、trace event 与 sequence
-不再重复存入 response；trace 和 hosted-search 状态分别由 `pl-core` projector 与 canonical
-context/event 维护。
-
-inference timing 由 `ModelRuntime` 在 canonical stream 边界使用单调毫秒时钟测量，不能由 provider
-adapter、核心层或 Flutter 估算。`startedAt` 在一次逻辑 inference 首次发送前确定；transport retry、
-WebSocket full replay 与 HTTP fallback 继续属于同一次 inference，等待时间计入 TTFT，最终成功只
-产生一份 timing。`firstTokenAt` 只由首个非空 text、reasoning 或 tool-input delta 确定，
-`ResponseStarted`、block open 和空 delta 不计；`completedAt` 只在 canonical 成功完成时确定。
-`TTFT = firstTokenAt - startedAt`，`decodeMs = completedAt - firstTokenAt`，
-`t/s = completionTokens × 1000 / decodeMs`。completion token 已包含 reasoning token，不得重复相加；
-timing、usage 不完整或 `decodeMs == 0` 时不生成吞吐样本。失败与取消不携带成功 timing。
-
-模型性能统计以 `(providerInstanceId, actualModel, reasoningEffort)` 为唯一分组键，
-同一 provider/model 的不同思考强度分别累积样本；汇总速度使用组内总 completion tokens
-乘以 1000 再除以总 decode 毫秒，不取各请求速度的算术平均。
-`InferenceBillingRecord`、持久性能样本及公开统计 DTO 的可空 `reasoningEffort` 记录请求期
-实际使用的强度，包括内部请求；不得用当前配置反推历史。显式字符串 `none` 与空值不同。
-未指定强度或历史未记录时保留空值，不制造默认档位；旧计费记录和版本 2 性能缓存缺少该
-字段时仍可读取并归入空值组，不丢弃历史，也不改变计费和有效样本判定。
-
-真实验收 harness 可在显式启用 wire capture 时额外记录少量 transport 阶段回执：
-请求已落盘、HTTP 流已建立、首个 provider 事件以及流终止或失败。回执使用同一
-capture id、单调 elapsed 和墙上时间，不记录 prompt、密钥或 provider 错误原文；它只用于
-区分请求组装、响应头等待与 SSE 等待的耗时，不改变生产超时、重试或成功 timing
-语义。wire capture 顶层可同时记录 invocation trace 的 `sessionId`、`turnId` 与
-`inferenceId`；这些字段只用于把多次 inference 可靠归属于同一会话，不进入 provider 请求体，
-也不从提示词正文或工具行为反推 Agent 身份。普通运行未提供 trace 时省略这些字段。仅出现请求
-落盘回执不能被解释为 provider 已接收或已返回响应。
+deferred reveal 由 Thread 保存稳定声明身份；重连不改写模型可见前缀，删除或声明变更使旧状态失效。
+完整原调用参数和当时使用的名称进入模型历史，下一次编码不按当前工具目录重写过去。
 
 ## 7.6 多模态消息
 
@@ -287,7 +191,7 @@ file id 或请求期 data URL，也不保留 text/multipart 双形态。
 必须至少有一条当前输入可用的首发路线和一条基于持久快照的重放路线；未知模型或缺少完整 profile
 的 modality 按不支持处理，不按模型名、provider 名或 wire 宽松程度推断。
 
-`pl-core` 在进入 provider adapter 前把稳定 attachment ref materialize 为 `pl-model` 私有的
+`pl-model` 在准备阶段通过 ResourceAccess 把稳定 attachment ref materialize 为自身私有的
 `PreparedContentPart`。它只携带已校验 bytes、当前首发允许使用的瞬时 URL 或 provider file id；
 `pl-model` 不读取 Studio 存储，也不解析本地路径。同一 modality 批次选择同一种表示，provider
 文件上传失败只能在推理请求发出前整批切换到下一条 profile 路线，流建立后不得自动重发。
@@ -329,16 +233,16 @@ WebP。官方接口还提供 Files API，但 Pure 在 provider file 上传、瞬
 
 ## 7.7 自定义模型
 
-产品宿主使用 serde 读取自己的完整配置，调用 `pl-core::AgentModelConfig::validate/resolve` 后，
-只把 `ResolvedModelRoute` 交给 `pl-core::TurnEngineBuilder::from_route` 或
-`pl-core::ModelTurnClient::from_route`。宿主不直接调用 `pl-model`；`pl-core` 与 `pl-model` 都不读取
+产品宿主使用 serde 读取自己的完整配置，调用 `pl-model::config::AgentModelConfig::validate/resolve` 后，
+只把 `ResolvedModelRoute` 交给 `pl-model::runtime::ModelRuntime::from_route` 或
+`pl-model::runtime::ModelTurnClient::from_route`。宿主直接装配 `pl-model` 的模型绑定；`pl-core` 与 `pl-model` 都不读取
 `~/.pure/config.toml`。
 
 Bundled catalog 只读，配置只能通过 `additional_models` 追加不冲突 slug；完全自定义 provider
 使用 `Explicit { models }`。附加与显式模型都必须声明 transport；模型目录的
 `connection_overrides` 只保存当前模式选择，不修改模型声明的支持矩阵。
 
-模型信息中的 `base_instructions` 是模型级基础提示词来源，进入 `pl-core` 的 instruction assembler；配置中的 `[instructions].base_override` 可以完整替换它。模型信息中的 `context_window`、`max_context_window` 和 `auto_compact_token_limit` 只描述模型能力与默认阈值。上下文压缩的触发判断、历史保留、原子替换和持久化都在 `pl-core` 完成，`pl-model` 不维护压缩状态。
+模型信息中的 `base_instructions` 是模型级基础提示词来源，进入 Studio 的 instruction assembler；配置中的 `[instructions].base_override` 可以完整替换它。模型信息中的 `context_window`、`max_context_window` 和 `auto_compact_token_limit` 只描述模型能力与默认阈值。压缩政策与摘要要求由 Studio 选择，model 执行辅助调用；core 校验并原子提交上下文替换与持久化，`pl-model` 不维护压缩状态。
 
 `CompletionRequest.input` 使用 provider 无关的有序 `ModelContextItem`，包括普通 `Message` 和专用 `Compaction { encryptedContent }`；`.messages(...)` 只是不含 checkpoint 的便捷构造器。Responses request 可以把 compaction item 映射为原生输入，Chat Completions 必须明确拒绝。`ModelRuntime::compaction()` 返回实际支持远程压缩的能力对象，接收有序上下文并返回保真上下文与最终 accounting。能力由 endpoint 显式声明，不能从 Responses 协议推断；网络执行复用共享执行器并固定使用 HTTP。
 
@@ -427,24 +331,19 @@ wire 与候选值域，并声明 image 的 local/data-url 与 remote-url/snapsho
 
 ## 7.10 Prompt 缓存
 
-核心层按 prompt generation 组装请求，唯一顺序是：模型基础指令、平台与全局配置、模式与
-角色、Skill、Workspace/项目文档组成的固定 instructions 与 prelude，随后是 durable model
-transcript，最后附加至多一条本 Turn 冻结的 working-context message。model、instructions、
-tool choice、reasoning、输出 schema 和 service tier 在同一 generation 内不得变化；工具由每个
-model step 冻结的 `ToolPlan` 提供，列表不变时必须序列化为 byte-identical 前缀，列表变化时形成
-新的 request header；
-transcript 只包含 user、assistant、tool result 与 provider compaction checkpoint。pinned sections、
-Evidence Ledger、session note 和 prompt generation 状态属于可替换 `AgentWorkingState`，不得作为
-append-only `ModelContextItem` 写入 transcript。
+固定 instructions 与 prelude 包含模型基础指令、平台与全局配置、模式与角色、稳定 Skill 目录和
+Workspace/项目文档。每轮 Skill 调用与推荐写入该轮 canonical transcript，不进入旧历史之前的
+固定前缀。工具定义由每步冻结的 ToolPlan 提供；相同模型可见定义保持确定性编码。
 
-每个 Turn 在首个 inference 前从 `AgentWorkingState` 冻结一次模型可见 working context；同一
-Turn 后续 inference 只追加 transcript/tool result，不因 Todo、receipt 或其他 working state 更新
-替换已发送 input。Evidence Ledger 继续有界持久化，但不进入 provider request、token 估算或
-context hash；完整工具结果已在 durable transcript 中提供模型恢复所需事实。其他 pinned section
-在下一 Turn 才以最新版本重新冻结。working context 内容变化只更新 context hash，不提升 prompt
-generation；provider、model、固定指令、工具 schema 或 compaction 变化才提升 generation。
-这样 Responses WebSocket continuation 能保持严格追加前缀，固定前缀与 transcript 也能复用
-provider prompt cache。
+模型可见 working context 在内容变化时以隐藏的 user-role 运行事实完整快照追加到 transcript。
+相同内容不追加；清空时明确声明旧快照失效。快照使用稳定 section ID 排序，不提升为 system 权限。
+同一 Turn 更新也只追加新快照，不覆盖此前模型已观察的内容。压缩移除最新快照后重新补入当前值。
+请求从已记录的历史读取，冷恢复不重新渲染旧快照。Evidence Ledger 和 session note 的完整正文
+继续不进入模型上下文；typed working state 与模型可见投影各自保留。
+
+working context 的变化只更新 context hash，不因追加记录提升固定前缀 generation；provider、model、
+固定指令或工具 schema 的变化仍单独记录。完整依赖倒置与 prepared-call 契约见
+[27-core-boundaries-and-replay.md](./27-core-boundaries-and-replay.md)。
 
 上下文压缩采用 Codex 风格的版本化 replacement：采样前估算完整物化请求，达到 90% 自动阈值
 时 replace transcript，再把当前 working context 注入新窗口一次。provider 报告 token 达到阈值时，

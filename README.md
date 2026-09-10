@@ -11,31 +11,32 @@ Pure-Lang 是一个**自然语言编译器**：接收用户的自然语言需求
 ## 架构
 
 ```text
-pure_studio（Flutter） ──► pl-studio-bridge ─┐
-                                          ├──► pl-studio-runtime ──► pl-core
-pl-studio-server（HTTP/OpenAPI/SSE） ───────┘             │              │
-                                                       │              ├──► pl-model / pl-lsp
-                                                       │              ├──► pl-output / pl-patch / pl-skill-core
-                                                       │              ├──► pl-remote-helper（Linux 进程监督）
-                                                       └──────────────┴──► pl-protocol / pl-trace
+pure_studio → pl-studio-bridge ─┐
+                               ├→ pl-studio-runtime → pl-core
+HTTP → pl-studio-server ───────┘         │              ↑
+                                        ├→ pl-model ───┤
+                                        ├→ pl-tool ────┤
+                                        ├→ pl-trace ───┘
+                                        └→ pl-protocol
 ```
 
-箭头表示依赖方向。`pl-core` 拥有 Thread、Turn、工具任务与统一会话存储；
-`pl-studio-runtime` 拥有项目、配置和产品事实；FRB 与 HTTP 层只适配同一业务 runtime。
-`pl-remote-helper` 也可作为 SSH 远端助手独立运行，只管理物理进程和远端文件能力。
+箭头表示依赖方向。core 定义独立的 Thread、Model/Tool 契约、上下文与可选存储；
+model/tool 实现核心接口且不相互依赖。Studio 拥有配置、项目、Mode/Plan/workflow、
+子代理协调和统一装配；FRB 与 HTTP 适配同一业务 runtime。
 
 ### Workspace 与 Flutter 客户端
 
 | 包 | 路径 | 职责 |
 |-------|------|------|
 | `pl-protocol` | `code/pl-protocol/` | 跨 crate 协议类型：消息、事件、错误、权限 |
-| `pl-trace` | `code/pl-trace/` | 内部运行事件类型：AgentEvent、TraceEvent、TracePart |
+| `pl-trace` | `code/pl-trace/` | 通用 Thread 日志的只读诊断和用量投影 |
 | `pl-model` | `code/pl-model/` | LLM provider 抽象与适配：OpenAI 兼容 API、SSE 流式、模型元数据管理 |
 | `pl-lsp` | `code/pl-lsp/` | LSP 客户端：rust-analyzer 支持、代码智能查询 |
 | `pl-output` | `code/pl-output/` | 工具输出截断与模型可见投影算法 |
 | `pl-patch` | `code/pl-patch/` | apply-patch 语法、匹配与 backend 契约 |
 | `pl-skill-core` | `code/pl-skill-core/` | Skill frontmatter 与路径安全规则 |
-| `pl-core` | `code/pl-core/` | 产品无关的 Thread runtime、模型与工具编排、MCP 和 agent runtime |
+| `pl-core` | `code/pl-core/` | 产品无关的 Thread、模型/工具端口、上下文、不可变日志与可选 SQLite |
+| `pl-tool` | `code/pl-tool/` | 文件、命令、SSH、Git、LSP、MCP、Skill、搜索与交互等工具实现 |
 | `pl-remote-helper` | `code/pl-remote-helper/` | Linux 本地进程监督与 SSH 远端助手，共用物理进程协议 |
 | `pl-studio-runtime` | `code/pl-studio-runtime/` | Studio 产品 SQLite、项目、配置、恢复与产品事件的唯一业务 façade |
 | `pl-studio-server` | `code/pl-studio-server/` | 独立 HTTP/OpenAPI/SSE transport 宿主 |
@@ -45,10 +46,13 @@ pl-studio-server（HTTP/OpenAPI/SSE） ───────┘             │ 
 
 ### 依赖规则
 
-`pl-model` 与 `pl-trace` 依赖公共协议；`pl-lsp`、`pl-output`、`pl-patch`、`pl-skill-core`
-不依赖 Studio。`pl-core` 组合这些底层能力，并在 Linux 上复用 `pl-remote-helper` 客户端；
-helper 只依赖 `pl-protocol`，不创建第二套会话 owner。Studio 宿主依赖业务 runtime，
-Flutter 客户端经 FRB 调用；`pl-xtask` 负责开发和发布编排，不是产品入口。
+core 不依赖 model、tool、trace、protocol、output 或 Studio，包括测试依赖。
+Provider 配置与目录从 model 导入，具体工具从 tool 导入，产品 wire 从 protocol 导入；
+不经过 core 转发。tool 组合 LSP、输出、patch、Skill 与远程 helper 等物理能力。
+
+core 默认纯内存，SQLite 通过 `sqlite` feature 显式启用。独立用法见
+[`minimal_thread.rs`](./code/pl-core/examples/minimal_thread.rs)：实现 ModelSession 和 Tool，
+注册后执行模型/工具循环，并纯重放不透明日志。
 
 ## 快速开始
 
@@ -220,7 +224,7 @@ Flutter 端通过 `pl-studio-bridge` 调用同一个 `pl-studio-runtime`。每�
 ```text
 ~/.pure/config.toml                 # 全局配置（provider、模型、角色）
 ~/.pure/studio/studio.sqlite        # Studio 项目、配置关联与产品事实
-~/.pure/studio/sessions.sqlite      # core 会话、任务、事件收件箱与完整结果
+~/.pure/studio/sessions.sqlite      # 通用 Thread journal、不可变载荷与资源元数据
 ```
 
 DeepSeek V4 的 Responses route 支持服务端原生联网搜索；Studio 默认启用
@@ -240,7 +244,8 @@ pure-lang/
 │   ├── pl-output/            # 输出截断算法
 │   ├── pl-patch/             # apply-patch 引擎
 │   ├── pl-skill-core/        # Skill 核心规则
-│   ├── pl-core/              # Thread/Turn/Item 与会话工具 runtime
+│   ├── pl-core/              # 通用 Thread、context/model/tool/storage
+│   ├── pl-tool/              # 显式装配的工具与物理服务
 │   ├── pl-remote-helper/     # 本地进程监督与 SSH 远端助手
 │   ├── pl-studio-runtime/    # Studio 业务 runtime
 │   ├── pl-studio-server/     # HTTP/OpenAPI/SSE server
@@ -272,8 +277,8 @@ pure-lang/
 |------|------|
 | **Thread** | 一个 agent 独占的对话、输入队列、会话工具任务与持久历史 |
 | **Turn** | Thread 中一次由明确输入启动的模型执行；结束不丢弃已受理的会话任务 |
-| **Item** | 消息、推理、工具调用、计划等穷尽的 Thread 内容单元 |
-| **Tool** | 统一的 `DynTool` 执行容器；会话创建时注册，每步冻结为 `ToolPlan` |
+| **Item** | Studio 从已提交日志投影的消息、推理、工具、计划等内容单元 |
+| **Tool** | 不透明 `Tool` 接口；Registration 转移实例给 Thread，每步冻结声明与执行租约 |
 | **ToolTask** | 会话拥有的工具调用任务，以 `taskId` 查询、输入、取消与读取完整结果 |
 | **LSP** | Language Server Protocol 客户端，支持代码智能查询（定义跳转、引用查找等） |
 | **Agent** | 拥有独立 Thread 的执行身份，root 与 child 共用同一框架 |
@@ -302,26 +307,17 @@ pure-lang/
 
 ### 在其他应用中注册工具
 
-宿主通过 `AgentTurnFactory::prepare_session` 返回
-`pl_core::session_runtime::SessionRuntimeBuilder`，在发布会话前声明工具和事件源。
-使用 `with_tools` 加入普通 `ToolInstallGroup`，使用 `with_tool_factory` 绑定会话能力，
-使用 `with_event_source` 安装外部监听。静态工具实现 `StaticTool`，动态工具通过
-`DynamicToolExecutor` 构造，两者统一进入 `DynTool`；不保存第二份 name-to-handler 映射。
+宿主实现 `pl_core::model::ModelSession`，通过 `ThreadHandle` 创建 owner。工具实现
+`pl_core::tool::opaque::Tool`，用 Registration 转移实例；完整 payload 和模型上下文分别保存，
+工具自行解释格式与参数。core 不安装默认工具、不解析业务 JSON，也不代理 provider 配置。
 
-`SessionBuildContext` 提供限定于本次会话和来源的消息发布、任务控制与取消能力；
-构造期间 owner RPC 返回 `NotReady`。每轮 `prepare_turn` 消费现有会话运行时，
-不重新创建命令管理器或注册表。动态来源通过创建时声明的 `with_refresh` 统一刷新，
-随后冻结的 `ToolPlan` 同时约束 provider schema 与本地执行器；多个安装组用 `install_batch` 原子更新。
+Studio 用同一装配入口创建 root、child 和恢复 Thread，显式组合 pl-model/pl-tool 及产品工具。
+动态目录只更新同一 Thread 注册表，已冻结调用持有原 executor 租约。扩展 CAS、交互和结束 Turn
+使用显式注册授权，正文中的同名字段不能触发控制。
 
-普通工具默认为会话任务，框架在共享交付窗口内返回终态结果或 `taskId` 句柄；可信控制工具
-使用 `ToolPolicy::control()`。后续 Turn 可用同一 `taskId` 操作任务，`write_stdin` 只负责输入，
-等待统一使用 `wait`。大型结果在模型侧显示预览与 `resultReference`，通过
-`get_tool_task` 的 `resultCursor` 分页读取完整结果；停止、失败、归档和重启都有明确的收束状态。
-完整生命周期与迁移契约见 [会话工具任务与统一唤醒](design/26-session-tool-runtime.md)。
-
-普通工具名保持平铺，同一 scope 重名会使整批失败；agent-local 工具可覆盖显式继承的 global
-同名工具。MCP 是唯一强制命名空间的来源，公开名为 `mcp__<server>__<raw>`，有损归一化或截断时
-附加稳定 hash。完整迁移映射和缓存契约见 [工具调用运行时](design/13-tool-calling-runtime.md)。
+普通工具超过交付窗口后转为 Thread 后台任务，结果与消息一起提交，下一模型请求准入时消费。
+历史使用当时保存的实际模型正文；资源关闭失败或保存失败保留 owner 和重试入口。
+详见[工具边界](./design/28-tool-thread-boundary.md)和[任务交付](./design/26-session-tool-runtime.md)。
 
 ## 开发
 
@@ -330,6 +326,8 @@ pure-lang/
 ```bash
 # 与 CI 一致的 Rust 门禁
 cargo fmt --all --check
+cargo check -p pl-core --no-default-features --all-targets
+cargo check -p pl-core --no-default-features --features sqlite --all-targets
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
@@ -397,7 +395,7 @@ cargo xtask run-gui --demo
 `verify-workflow --live` 会产生真实模型调用和费用，不进入默认 CI，也不会回退到 scripted
 provider。GUI 路径启动真实 native Studio，在 `planning` 中先通过 `request_user_input` 补齐事实，再由
 固定 Plan 状态机的 `plan_submit` 完成修订与批准；批准后的完整 Plan 作为 GUI 隐藏的用户消息进入同一
-AgentSession。完成后 durable shutdown，再以同一隔离
+Thread。完成后 durable shutdown，再以同一隔离
 Studio home 恢复相同 Thread 与 workflow run。脱敏 wire、workflow snapshot、命令输出、截图、
 render tree 和 Driver 日志保存在 `target/workflow-live-artifacts/`。
 
@@ -433,9 +431,11 @@ render tree 和 Driver 日志保存在 `target/workflow-live-artifacts/`。
 | [21-session-activation-and-persistence.md](./design/21-session-activation-and-persistence.md) | 会话激活、唯一热状态与异步持久化 |
 | [22-ssh-remote-development.md](./design/22-ssh-remote-development.md) | SSH 远程开发与宿主能力 |
 | [23-thread-mode.md](./design/23-thread-mode.md) | Thread Mode 注册、图生命周期与工具合同 |
-| [24-agent-session-plan.md](./design/24-agent-session-plan.md) | AgentSession Plan 状态机与通用隐藏 continuation |
+| [24-agent-session-plan.md](./design/24-agent-session-plan.md) | Thread 内的产品 Plan 状态机与通用隐藏 continuation |
 | [25-session-entry-storage.md](./design/25-session-entry-storage.md) | 统一会话条目与独立存储 |
 | [26-session-tool-runtime.md](./design/26-session-tool-runtime.md) | 会话工具任务与统一唤醒 |
+| [27-core-boundaries-and-replay.md](./design/27-core-boundaries-and-replay.md) | 极简核心、动态载荷与重放合同 |
+| [28-tool-thread-boundary.md](./design/28-tool-thread-boundary.md) | 工具实例、参数、结果与 Thread 边界 |
 
 ## 项目规范
 

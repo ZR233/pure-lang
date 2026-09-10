@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use pl_trace::TraceTextChannel;
+use pl_protocol::trace::TraceTextChannel;
 
 use crate::completion::stream::event::{ModelBlockKind, ModelStreamEvent};
 use crate::runtime::openai::VisibleOutputProtocol;
@@ -941,7 +941,7 @@ mod tests {
         assert_eq!(response.tool_calls[0].name, "list_agents");
         match &response.tool_calls[0].payload {
             ToolCallPayload::Function { arguments } => {
-                assert_eq!(arguments, &serde_json::json!({}));
+                assert_eq!(arguments, "{}");
             }
             other => panic!("unexpected payload: {other:?}"),
         }

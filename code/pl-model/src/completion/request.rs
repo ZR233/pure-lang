@@ -140,11 +140,12 @@ impl CompletionRequest {
     }
 
     pub(crate) fn provider_compatible(mut self, projection: CustomToolProjection) -> Self {
-        self.tools = self
-            .tools
-            .into_iter()
-            .map(|tool| provider_compatible_tool(tool, projection))
-            .collect();
+        self.tools = crate::completion::stable_tool_schemas(
+            self.tools
+                .into_iter()
+                .map(|tool| provider_compatible_tool(tool, projection))
+                .collect(),
+        );
         self
     }
 

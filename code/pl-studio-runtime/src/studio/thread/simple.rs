@@ -1,4 +1,4 @@
-use pl_core::StaticThreadModeRegistration;
+use crate::mode::StaticThreadModeRegistration;
 
 pub const PROMPT: &str = r#"# Simple Thread Mode
 

@@ -5,12 +5,12 @@ import 'turn_models.dart';
 class SubmitPromptReceipt {
   const SubmitPromptReceipt({
     required this.threadId,
-    required this.turnId,
+    required this.inputId,
     required this.cursor,
   });
 
   final String threadId;
-  final String turnId;
+  final String inputId;
   final int cursor;
 }
 
@@ -134,7 +134,7 @@ sealed class ComposerThreadState {
     if (!_matchesSubmittingRevision(submissionRevision)) return this;
     return PendingStartComposerThreadState(
       submissionRevision: this.submissionRevision,
-      acceptedTurnId: receipt.turnId,
+      acceptedInputId: receipt.inputId,
     );
   }
 
@@ -148,14 +148,17 @@ sealed class ComposerThreadState {
     );
   }
 
-  ComposerThreadState observeTurn(StudioTurnView? turn) {
-    final acceptedTurnId = switch (this) {
-      PendingStartComposerThreadState(:final acceptedTurnId) => acceptedTurnId,
+  ComposerThreadState observeInput(String? inputId, StudioTurnView? turn) {
+    final acceptedInputId = switch (this) {
+      PendingStartComposerThreadState(:final acceptedInputId) =>
+        acceptedInputId,
       IdleComposerThreadState() ||
       SubmittingComposerThreadState() ||
       FailedComposerThreadState() => null,
     };
-    if (turn == null || turn.turnId != acceptedTurnId) return this;
+    if (acceptedInputId == null || turn == null || inputId != acceptedInputId) {
+      return this;
+    }
     if (turn.state.status == StudioTurnStatus.failed) {
       final message = turn.failure?.message.trim();
       final reason = turn.state.reason?.trim();
@@ -209,12 +212,12 @@ final class SubmittingComposerThreadState extends ComposerThreadState {
 final class PendingStartComposerThreadState extends ComposerThreadState {
   const PendingStartComposerThreadState({
     required this.submissionRevision,
-    required this.acceptedTurnId,
+    required this.acceptedInputId,
   });
 
   @override
   final int submissionRevision;
-  final String acceptedTurnId;
+  final String acceptedInputId;
 }
 
 final class FailedComposerThreadState extends ComposerThreadState {

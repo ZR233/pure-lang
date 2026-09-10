@@ -1,7 +1,7 @@
 //! SSH server persistence adapter. Secrets never enter this table.
 
 use anyhow::{Context, Result, ensure};
-use pl_core::remote::{SshAuth, SshServerProfile};
+use pl_tool::remote::{SshAuth, SshServerProfile};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, QueryOrder};
 
 use crate::studio::entity as entities;

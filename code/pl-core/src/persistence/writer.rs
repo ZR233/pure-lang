@@ -8,7 +8,6 @@ use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
 use super::{SessionPersistenceSnapshot, SessionStoreError, SqliteSessionOptions, sqlite};
-use crate::ThreadCommit;
 
 /// Cloneable repository with an owned asynchronous writer. Call `shutdown` before dropping the last handle.
 #[derive(Clone)]
@@ -51,11 +50,11 @@ pub(super) struct Shared {
 }
 
 pub(super) struct WriterState {
-    resources: BTreeMap<(String, String), crate::session::entry::SessionEntry>,
+    resources: BTreeMap<(String, String), crate::storage::SessionEntry>,
     queue: VecDeque<Pending>,
+    resource_admissions: BTreeMap<(String, String), u64>,
     admitted: u64,
     durable: u64,
-    pub(super) revisions: BTreeMap<String, u64>,
     error: Option<Arc<SessionStoreError>>,
     flush: bool,
     stopping: bool,
@@ -65,13 +64,8 @@ pub(super) struct WriterState {
 struct Pending {
     sequence: u64,
     accepted_at: Instant,
-    operation: PendingOperation,
-}
-
-#[derive(Clone)]
-pub(super) enum PendingOperation {
-    Thread(Arc<ThreadCommit>),
-    Resource(Arc<crate::session::entry::SessionEntry>),
+    retained_bytes: u64,
+    operation: Arc<crate::storage::SessionEntry>,
 }
 
 impl SqliteSessionStore {
@@ -117,27 +111,33 @@ impl SqliteSessionStore {
         database_lock: Option<std::fs::File>,
     ) -> Result<Self, SessionStoreError> {
         use sea_orm::ConnectionTrait;
-        let rows = db.query_all_raw(sqlite::statement("SELECT session_id,MAX(revision) AS revision FROM session_receipts GROUP BY session_id",vec![])).await?;
-        let mut revisions = BTreeMap::new();
-        for row in rows {
-            let revision = row.try_get::<i64>("", "revision")?;
-            revisions.insert(
-                row.try_get::<String>("", "session_id")?,
-                u64::try_from(revision)
-                    .map_err(|_| SessionStoreError::Invalid("negative durable revision".into()))?,
-            );
+        let initial_state = async {
+            let mut resources = BTreeMap::new();
+            for row in db
+                .query_all_raw(sqlite::statement(
+                    "SELECT * FROM session_entries WHERE substr(id,1,12)='pl.resource.'",
+                    vec![],
+                ))
+                .await?
+            {
+                let entry = sqlite::decode_row(row)?;
+                resources.insert((entry.session_id.clone(), entry.id.clone()), entry);
+            }
+            Ok::<_, SessionStoreError>(resources)
         }
-        let mut resources = BTreeMap::new();
-        for row in db
-            .query_all_raw(sqlite::statement(
-                "SELECT * FROM session_entries WHERE substr(id,1,12)='pl.resource.'",
-                vec![],
-            ))
-            .await?
-        {
-            let entry = sqlite::decode_row(row)?;
-            resources.insert((entry.session_id.clone(), entry.id.clone()), entry);
-        }
+        .await;
+        let resources = match initial_state {
+            Ok(state) => state,
+            Err(initialization) => {
+                return match db.close().await {
+                    Ok(()) => Err(initialization),
+                    Err(cleanup) => Err(SessionStoreError::InitializationCleanup {
+                        initialization: Box::new(initialization),
+                        cleanup: Box::new(cleanup),
+                    }),
+                };
+            }
+        };
         let (changed, _) = watch::channel(SessionPersistenceSnapshot {
             pending_commits: 0,
             admitted: 0,
@@ -152,9 +152,9 @@ impl SqliteSessionStore {
             state: Mutex::new(WriterState {
                 resources,
                 queue: VecDeque::new(),
+                resource_admissions: BTreeMap::new(),
                 admitted: 0,
                 durable: 0,
-                revisions,
                 error: None,
                 flush: false,
                 stopping: false,
@@ -176,63 +176,72 @@ impl SqliteSessionStore {
         self.owner.shared.changed.borrow().clone()
     }
 
+    /// Returns retained encoded bytes for pressure admission; accepted work is never discarded.
+    pub fn pending_bytes(&self, thread_id: &str) -> (u64, u64) {
+        let state = self
+            .owner
+            .shared
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state
+            .queue
+            .iter()
+            .fold((0_u64, 0_u64), |(thread, store), pending| {
+                let owner = pending.operation.session_id.as_str();
+                (
+                    if owner == thread_id {
+                        thread.saturating_add(pending.retained_bytes)
+                    } else {
+                        thread
+                    },
+                    store.saturating_add(pending.retained_bytes),
+                )
+            })
+    }
+
     /// Subscribes to writer progress and failures.
     pub fn subscribe_persistence(&self) -> watch::Receiver<SessionPersistenceSnapshot> {
         self.owner.shared.changed.subscribe()
     }
 
-    /// Preserves an already committed memory checkpoint. This performs no database I/O.
-    pub(super) fn record(&self, commit: ThreadCommit) {
-        let shared = &self.owner.shared;
-        let mut state = shared
-            .state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        state.admitted = state.admitted.saturating_add(1);
-        let sequence = state.admitted;
-        state.flush |= commit.persistence == crate::PersistenceClass::Settlement
-            || matches!(
-                commit.facts.context,
-                Some(crate::ThreadContextMutation::Replace { .. })
-            );
-        state.queue.push_back(Pending {
-            sequence,
-            accepted_at: Instant::now(),
-            operation: PendingOperation::Thread(Arc::new(commit)),
-        });
-        if state.stopped {
-            state.error = Some(Arc::new(SessionStoreError::Stopped));
-        }
-        publish(shared, &state);
-        drop(state);
-        shared.wake.notify_one();
-    }
-
     /// Registers immutable session resource metadata through the core writer, independently of products.
     ///
     /// # Errors
-    /// Rejects invalid resource identity or payload encoding; storage failures are reported asynchronously.
-    pub fn register_resource<T: crate::session::entry::SessionEntryPayload>(
+    /// Rejects invalid resource identity or excessive payload size; storage failures are reported asynchronously.
+    pub fn register_resource(
         &self,
         session_id: &str,
         id: &str,
-        payload: &T,
-    ) -> Result<(), crate::session::entry::SessionEntryError> {
-        use crate::session::entry::{SessionEntry, SessionEntryError};
-        if session_id.is_empty()
-            || id.is_empty()
-            || !T::TYPE_ID.contains('.')
-            || T::TYPE_ID.starts_with("pl.")
-            || T::SCHEMA_VERSION == 0
-        {
-            return Err(SessionEntryError::InvalidIdentity(id.into()));
-        }
-        let payload = serde_json::to_value(payload)?;
-        if serde_json::to_vec(&payload)?.len() > crate::session::entry::DEFAULT_ENTRY_MAX_BYTES {
-            return Err(SessionEntryError::TooLarge {
-                limit: crate::session::entry::DEFAULT_ENTRY_MAX_BYTES,
+        payload: crate::context::OpaquePayload,
+    ) -> Result<(), super::ResourceAdmissionError> {
+        if payload.content().len() > super::DEFAULT_RESOURCE_MAX_BYTES {
+            return Err(super::ResourceAdmissionError::TooLarge {
+                limit: super::DEFAULT_RESOURCE_MAX_BYTES,
             });
         }
+        self.register_immutable_payload(session_id, id, payload)
+    }
+
+    /// Admits an already committed framework record, governed by queue pressure rather than metadata size.
+    pub(super) fn register_immutable_payload(
+        &self,
+        session_id: &str,
+        id: &str,
+        payload: crate::context::OpaquePayload,
+    ) -> Result<(), super::ResourceAdmissionError> {
+        use super::ResourceAdmissionError;
+        use crate::storage::SessionEntry;
+        if session_id.is_empty()
+            || id.is_empty()
+            || payload.format().is_empty()
+            || payload.version() == 0
+        {
+            return Err(ResourceAdmissionError::InvalidIdentity(id.into()));
+        }
+        let type_id = payload.format().to_owned();
+        let schema_version = payload.version();
+        let payload = payload.content().to_owned();
         let now = crate::time::unix_seconds();
         let mut state = self
             .owner
@@ -242,20 +251,20 @@ impl SqliteSessionStore {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let key = (session_id.to_owned(), format!("pl.resource.{id}"));
         if let Some(previous) = state.resources.get(&key) {
-            if previous.type_id == T::TYPE_ID
-                && previous.schema_version == T::SCHEMA_VERSION
+            if previous.type_id == type_id
+                && previous.schema_version == schema_version
                 && previous.payload == payload
             {
                 return Ok(());
             }
-            return Err(SessionEntryError::Conflict {
+            return Err(ResourceAdmissionError::Conflict {
                 id: id.into(),
                 expected: None,
                 actual: Some(previous.revision),
             });
         }
         if state.stopping || state.stopped {
-            return Err(SessionEntryError::Unbound);
+            return Err(ResourceAdmissionError::StoreClosed);
         }
         let resource_ordinal = state
             .resources
@@ -265,14 +274,17 @@ impl SqliteSessionStore {
             .max()
             .unwrap_or(0)
             .checked_add(1)
-            .ok_or(SessionEntryError::RevisionExhausted)?;
-        state.admitted = state.admitted.saturating_add(1);
+            .ok_or(ResourceAdmissionError::RevisionExhausted)?;
+        state.admitted = state
+            .admitted
+            .checked_add(1)
+            .ok_or(ResourceAdmissionError::RevisionExhausted)?;
         let sequence = state.admitted;
         let entry = SessionEntry {
             session_id: session_id.into(),
             id: format!("pl.resource.{id}"),
-            type_id: T::TYPE_ID.into(),
-            schema_version: T::SCHEMA_VERSION,
+            type_id,
+            schema_version,
             ordinal: resource_ordinal,
             revision: 1,
             turn_id: None,
@@ -280,11 +292,13 @@ impl SqliteSessionStore {
             updated_at: now,
             payload,
         };
+        state.resource_admissions.insert(key.clone(), sequence);
         state.resources.insert(key, entry.clone());
         state.queue.push_back(Pending {
             sequence,
             accepted_at: Instant::now(),
-            operation: PendingOperation::Resource(Arc::new(entry)),
+            retained_bytes: entry.payload.len() as u64,
+            operation: Arc::new(entry),
         });
         publish(&self.owner.shared, &state);
         drop(state);
@@ -293,11 +307,7 @@ impl SqliteSessionStore {
     }
 
     /// Reads registered immutable metadata from its memory owner, including unflushed records.
-    pub fn resources(
-        &self,
-        session_id: &str,
-        type_id: &str,
-    ) -> Vec<crate::session::entry::SessionEntry> {
+    pub fn resources(&self, session_id: &str, type_id: &str) -> Vec<crate::storage::SessionEntry> {
         self.owner
             .shared
             .state
@@ -310,41 +320,6 @@ impl SqliteSessionStore {
             .collect()
     }
 
-    /// Returns whether a specific owner revision has been confirmed by SQLite.
-    pub fn is_durable(&self, session_id: &str, revision: u64) -> bool {
-        self.owner
-            .shared
-            .state
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .revisions
-            .get(session_id)
-            .is_some_and(|saved| *saved >= revision)
-    }
-
-    /// Waits only for the target session revision; cancellation leaves pending writes intact.
-    ///
-    /// # Errors
-    /// Returns the writer failure or premature stop. The caller may retry after repairing storage.
-    pub async fn await_durable(
-        &self,
-        session_id: &str,
-        revision: u64,
-    ) -> Result<(), Arc<SessionStoreError>> {
-        let mut progress = self.subscribe_persistence();
-        self.request_flush();
-        loop {
-            if self.is_durable(session_id, revision) {
-                return Ok(());
-            }
-            check_progress(&progress.borrow())?;
-            progress
-                .changed()
-                .await
-                .map_err(|_| Arc::new(SessionStoreError::Stopped))?;
-        }
-    }
-
     fn request_flush(&self) {
         self.owner
             .shared
@@ -353,6 +328,45 @@ impl SqliteSessionStore {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .flush = true;
         self.owner.shared.wake.notify_one();
+    }
+
+    /// Waits for one immutable record's admission watermark, independent of later queued records.
+    ///
+    /// # Errors
+    /// Rejects unknown records and reports writer failure without dropping pending data.
+    pub async fn flush_resource(
+        &self,
+        session_id: &str,
+        record_id: &str,
+    ) -> Result<(), Arc<SessionStoreError>> {
+        let mut progress = self.subscribe_persistence();
+        let target = {
+            let state = self
+                .owner
+                .shared
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let key = (session_id.to_owned(), record_id.to_owned());
+            if !state.resources.contains_key(&key) {
+                return Err(Arc::new(SessionStoreError::Invalid(
+                    "unknown immutable resource record".into(),
+                )));
+            }
+            state.resource_admissions.get(&key).copied().unwrap_or(0)
+        };
+        self.request_flush();
+        loop {
+            let snapshot = progress.borrow().clone();
+            if snapshot.durable >= target {
+                return Ok(());
+            }
+            check_progress(&snapshot)?;
+            progress
+                .changed()
+                .await
+                .map_err(|_| Arc::new(SessionStoreError::Stopped))?;
+        }
     }
 
     /// Flushes the admission watermark captured at invocation, not subsequent writes.
@@ -407,7 +421,8 @@ impl SqliteSessionStore {
         self.owner.shared.wake.notify_one();
     }
 
-    /// Drains then joins the writer. A failed drain does not destroy its retryable owner.
+    /// Drains and joins the writer, closes its database pool, then releases the file lock.
+    /// A failure retains the owner and file lock for a later shutdown attempt.
     ///
     /// # Errors
     /// Returns an unconfirmed write or worker failure.
@@ -455,6 +470,15 @@ impl SqliteSessionStore {
         if final_state.pending_commits != 0 || final_state.durable != final_state.admitted {
             return Err(Arc::new(SessionStoreError::Stopped));
         }
+        // Closing a clone closes the shared pool, including idle connections retained by readers.
+        // Keep the process lock until SQLite has released every connection and its WAL handles.
+        self.owner
+            .shared
+            .db
+            .clone()
+            .close()
+            .await
+            .map_err(|source| Arc::new(SessionStoreError::from(source)))?;
         self.owner
             .database_lock
             .lock()
@@ -564,12 +588,9 @@ async fn run(shared: &Shared) {
                 for (sequence, operation) in batch {
                     state.queue.pop_front();
                     state.durable = sequence;
-                    if let PendingOperation::Thread(commit) = operation {
-                        state.revisions.insert(
-                            commit.agent_id.to_string(),
-                            commit.next_state.snapshot.revision,
-                        );
-                    }
+                    state
+                        .resource_admissions
+                        .remove(&(operation.session_id.clone(), operation.id.clone()));
                 }
                 state.error = None;
                 publish(shared, &state);

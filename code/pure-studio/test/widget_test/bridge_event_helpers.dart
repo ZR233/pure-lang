@@ -88,3 +88,26 @@ StudioBridgeEvent _threadDirectoryChangedEvent({
 StudioBridgeEvent _settingsChangedEvent(SettingsStateSnapshot settings) {
   return StudioBridgeEvent(payload: SettingsStateChangedPayload(settings));
 }
+
+ThreadItemView _submittedInputItem({
+  required String threadId,
+  required String turnId,
+  required String inputId,
+}) {
+  final at = _fixtureDate(1);
+  return ThreadItemView(
+    id: inputId,
+    threadId: threadId,
+    turnId: turnId,
+    ordinal: 1,
+    revision: 1,
+    createdAt: at,
+    updatedAt: at,
+    state: ThreadTextItemStateView(
+      channel: ThreadTextChannel.user,
+      text: 'submitted input',
+      attachments: const [],
+      lifecycle: CompletedThreadContentView(at),
+    ),
+  );
+}

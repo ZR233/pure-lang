@@ -1,4 +1,4 @@
-pub use crate::attachment::MaterializedAttachment;
+pub use pl_tool::attachment::MaterializedAttachment;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -17,7 +17,7 @@ pub struct ThreadRecord {
     pub id: String,
     pub project_id: String,
     pub title: String,
-    pub mode: pl_core::ThreadModeId,
+    pub mode: pl_protocol::ThreadModeId,
     pub created_at: i64,
     pub updated_at: i64,
     pub visibility: ThreadVisibility,
@@ -26,7 +26,7 @@ pub struct ThreadRecord {
     pub thread_kind: ThreadKind,
     pub agent_path: String,
     pub role: String,
-    pub status: pl_core::ThreadStatus,
+    pub status: pl_protocol::ThreadStatus,
     pub summary: Option<String>,
     pub error: Option<String>,
     pub runtime_updated_at: Option<i64>,
@@ -34,7 +34,7 @@ pub struct ThreadRecord {
 
 impl ThreadRecord {
     /// 从目录事实构造记录（创建命令返回值用）；runtime 派生列取缺省值。
-    pub(in crate::studio) fn from_directory_thread(thread: pl_core::Thread) -> Self {
+    pub(in crate::studio) fn from_directory_thread(thread: pl_protocol::Thread) -> Self {
         let thread_kind = if thread.parent_thread_id.is_some() {
             ThreadKind::Agent
         } else {
@@ -65,7 +65,7 @@ impl ThreadRecord {
     }
 }
 
-impl From<ThreadRecord> for pl_core::Thread {
+impl From<ThreadRecord> for pl_protocol::Thread {
     fn from(value: ThreadRecord) -> Self {
         Self {
             id: value.id,
@@ -132,7 +132,61 @@ pub struct AttachmentRecord {
     pub created_at: i64,
 }
 
-impl pl_core::session::entry::SessionEntryPayload for AttachmentRecord {
-    const TYPE_ID: &'static str = "studio.attachment";
-    const SCHEMA_VERSION: u32 = 1;
+impl AttachmentRecord {
+    pub(crate) fn session_payload(&self) -> anyhow::Result<pl_core::context::OpaquePayload> {
+        Ok(pl_core::context::OpaquePayload::new(
+            "studio.attachment",
+            1,
+            serde_json::to_string(self)?,
+        )?)
+    }
+
+    pub(crate) fn from_session_entry(
+        entry: &pl_core::storage::SessionEntry,
+    ) -> anyhow::Result<Self> {
+        anyhow::ensure!(
+            entry.type_id == "studio.attachment" && entry.schema_version == 1,
+            "unsupported attachment payload {} version {}",
+            entry.type_id,
+            entry.schema_version
+        );
+        let record: Self = serde_json::from_str(&entry.payload)?;
+        anyhow::ensure!(
+            record.thread_id == entry.session_id
+                && entry.id == format!("pl.resource.{}", record.id),
+            "attachment payload ownership differs from its entry"
+        );
+        Ok(record)
+    }
+}
+
+/// Product directory status; runtime state is projected from the Thread journal.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(in crate::studio) struct DirectoryState {
+    pub kind: pl_protocol::ThreadStatus,
+    pub error: Option<String>,
+}
+impl DirectoryState {
+    pub(in crate::studio) fn kind_label(&self) -> &'static str {
+        use pl_protocol::ThreadStatus;
+        match self.kind {
+            ThreadStatus::Idle => "idle",
+            ThreadStatus::Queued => "queued",
+            ThreadStatus::Running => "running",
+            ThreadStatus::WaitingTool => "waitingTool",
+            ThreadStatus::WaitingInteraction => "waitingInteraction",
+            ThreadStatus::Cancelling => "cancelling",
+            ThreadStatus::Closing => "closing",
+            ThreadStatus::Closed => "closed",
+            ThreadStatus::Faulted => "faulted",
+        }
+    }
+
+    pub(in crate::studio) fn idle() -> Self {
+        Self {
+            kind: pl_protocol::ThreadStatus::Idle,
+            error: None,
+        }
+    }
 }

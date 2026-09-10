@@ -583,7 +583,7 @@ mod tests {
 
         let call = &response.tool_calls[0];
         assert_eq!(call.payload_text(), "{bad");
-        assert_eq!(call.invalid_arguments.as_ref().unwrap().raw, "{bad");
+        assert_eq!(call.payload_text(), "{bad");
         assert!(
             call.invalid_arguments_message()
                 .unwrap()
@@ -649,7 +649,7 @@ mod tests {
 
         let call = &response.tool_calls[0];
         assert_eq!(call.payload_text(), "{bad");
-        assert_eq!(call.invalid_arguments.as_ref().unwrap().raw, "{bad");
+        assert_eq!(call.payload_text(), "{bad");
         assert!(
             call.invalid_arguments_message()
                 .unwrap()

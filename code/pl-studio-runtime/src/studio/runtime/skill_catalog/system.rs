@@ -3,8 +3,10 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use pl_core::config::SkillsConfig;
-use pl_core::path_safety::{metadata_if_real, remove_dir_all_no_follow, validate_existing_path};
+use pl_tool::skill::SkillsConfig;
+use pl_tool::workspace::path_safety::{
+    metadata_if_real, remove_dir_all_no_follow, validate_existing_path,
+};
 use rust_embed::Embed;
 
 const LEGACY_SYSTEM_MARKER_FILE_NAME: &str = ".pl-system-skills.marker";
@@ -55,7 +57,7 @@ fn validated_bundled_assets() -> Result<Vec<BundledAsset>> {
                 .context("bundled Skill directory name must be valid UTF-8")?;
             let content = std::str::from_utf8(asset.data.as_ref())
                 .with_context(|| format!("bundled Skill document is not UTF-8: {embedded_path}"))?;
-            pl_core::skill::validate_skill_document(content, Some(skill_name))
+            pl_tool::skill::validate_skill_document(content, Some(skill_name))
                 .with_context(|| format!("invalid bundled Skill document: {embedded_path}"))?;
             skill_documents.insert(skill_name.to_string());
         }
@@ -204,7 +206,7 @@ fn write_assets(staging_dir: &Path, assets: &[BundledAsset]) -> Result<()> {
 }
 
 fn clean_legacy_system_skills(system_dir: &Path, config: &SkillsConfig) -> Result<()> {
-    let user_dir = pl_core::skill::resolve_user_skills_dir(config)?;
+    let user_dir = pl_tool::skill::resolve_user_skills_dir(config)?;
     let legacy_dir = user_dir.join(".system");
     if same_existing_path(&legacy_dir, system_dir) || !has_legacy_marker(&legacy_dir)? {
         return Ok(());

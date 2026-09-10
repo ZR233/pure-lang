@@ -16,6 +16,11 @@ pub struct BridgeThreadItem {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BridgeThreadItemState {
+    Raw {
+        payloads: Vec<BridgeRawPayload>,
+        notice: String,
+        recorded_at: i64,
+    },
     Text {
         channel: BridgeThreadTextChannel,
         text: String,
@@ -37,6 +42,7 @@ pub enum BridgeThreadItemState {
     },
     Turn {
         state: BridgeTurnState,
+        input_id: Option<String>,
     },
     Inference {
         inference_id: String,
@@ -57,10 +63,17 @@ pub enum BridgeThreadItemState {
         completed_at: i64,
     },
     ContextCompaction {
-        before_tokens: u64,
-        after_tokens: u64,
+        before_tokens: Option<u64>,
+        after_tokens: Option<u64>,
         compacted_at: i64,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BridgeRawPayload {
+    pub format: String,
+    pub version: u32,
+    pub content: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

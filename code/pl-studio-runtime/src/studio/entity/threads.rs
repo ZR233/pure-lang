@@ -18,7 +18,7 @@ pub mod thread {
         pub role: String,
         #[sea_orm(unique)]
         pub agent_path: String,
-        /// Canonical serialized [`pl_core::AgentState`].
+        /// Product directory status and preparation error; runtime state belongs to Thread journal.
         pub state_json: String,
         /// SQLite generated discriminator derived from `state_json`.
         pub state_kind: String,

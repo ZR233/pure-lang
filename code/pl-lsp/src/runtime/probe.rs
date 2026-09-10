@@ -2,9 +2,7 @@
 
 use std::path::Path;
 
-use super::{
-    LspAvailabilityKind, LspResult, LspRuntimeError, LspRuntimeRegistry, canonical_workspace_root,
-};
+use super::{LspAvailabilityKind, LspResult, LspRuntimeError, LspRuntimeRegistry, workspace_key};
 use crate::clock::unix_seconds;
 use crate::driver::LspProbeOutcome;
 
@@ -13,7 +11,7 @@ impl LspRuntimeRegistry {
     ///
     /// Disabled（workspace 检测未命中）的 member 不探测；探测不启动 server 进程。
     pub async fn probe_lsp_server(&self, workspace_root: impl AsRef<Path>) {
-        let workspace_root = canonical_workspace_root(workspace_root.as_ref());
+        let workspace_root = workspace_key(workspace_root.as_ref());
         let _lifecycle_guard = self.lifecycle.read().await;
         let targets = {
             let state = self.state.lock().await;
@@ -70,7 +68,7 @@ impl LspRuntimeRegistry {
         workspace_root: impl AsRef<Path>,
         server_id: &str,
     ) -> LspResult<()> {
-        let workspace_root = canonical_workspace_root(workspace_root.as_ref());
+        let workspace_root = workspace_key(workspace_root.as_ref());
         let component = {
             let state = self.state.lock().await;
             if state.closed {

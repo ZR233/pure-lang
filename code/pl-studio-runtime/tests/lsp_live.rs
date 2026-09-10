@@ -1,6 +1,8 @@
-use pl_core::{BuiltinMcpServerState, McpServerStatusKind, builtin_mcp_server_ids};
 use pl_protocol::TurnState;
 use pl_protocol::{ThreadItem, ThreadTextChannel, ThreadToolState};
+use pl_studio_runtime::config::mcp::BuiltinMcpServerState;
+use pl_studio_runtime::config::mcp::builtin_mcp_server_ids;
+use pl_tool::mcp::config::McpServerStatusKind;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -139,7 +141,7 @@ async fn run_prompt_and_assert(runtime: &StudioRuntime, thread_id: &str) -> Resu
             },
         )
         .await?;
-    wait_for_completed_turn(runtime, thread_id, &submitted.turn_id).await?;
+    wait_for_completed_turn(runtime, thread_id, &submitted.input_id).await?;
     let snapshot = runtime.thread_snapshot(thread_id).await?;
     let active_lsp_servers = &snapshot
         .runtime
@@ -242,12 +244,16 @@ fn assert_isolated_capabilities(config: &StudioConfig) -> Result<()> {
 async fn wait_for_completed_turn(
     runtime: &StudioRuntime,
     thread_id: &str,
-    turn_id: &str,
+    input_id: &str,
 ) -> Result<()> {
     let deadline = Instant::now() + Duration::from_secs(10 * 60);
     loop {
         let page = runtime.list_thread_turns(thread_id, None, 100).await?;
-        if let Some(history) = page.turns.iter().find(|history| history.turn.id == turn_id) {
+        if let Some(history) = page
+            .turns
+            .iter()
+            .find(|history| history.turn.input_id.as_deref() == Some(input_id))
+        {
             match &history.turn.state {
                 TurnState::Completed(_) => return Ok(()),
                 TurnState::Failed(_) | TurnState::Cancelled(_) | TurnState::BudgetLimited(_) => {

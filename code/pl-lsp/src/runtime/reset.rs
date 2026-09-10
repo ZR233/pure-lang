@@ -90,6 +90,6 @@ fn scope_matches_workspace(scope: &LspScope, workspace_root: &std::path::Path) -
         | LspScope::Server {
             workspace_root: target,
             ..
-        } => super::canonical_workspace_root(target) == workspace_root,
+        } => super::workspace_key(target) == workspace_root,
     }
 }

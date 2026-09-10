@@ -114,3 +114,12 @@ pub use workflow::{
     WorkflowSessionState, WorkflowState, WorkflowStateKind, WorkflowTransition,
     WorkflowTransitionRecord,
 };
+
+/// Search request and configuration interchange shared by upper adapters.
+pub mod search;
+
+/// Product trace records and their typed wire projection.
+pub mod trace;
+
+/// Shared model/tool projection materials; core carries their encoded payload without decoding.
+pub mod tool_projection;

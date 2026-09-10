@@ -1,6 +1,8 @@
 //! 正文与 reasoning 流的 trace part 投影。
 
-use pl_trace::{AgentEvent, TraceDelta, TracePartCompletion, TracePartKind, TraceTextChannel};
+use pl_protocol::trace::{
+    AgentEvent, TraceDelta, TracePartCompletion, TracePartKind, TraceTextChannel,
+};
 
 use super::TraceProjection;
 
@@ -19,7 +21,7 @@ impl TraceProjection {
         }
         self.start_item(
             item_id,
-            pl_trace::TracePartState::Text(pl_trace::TraceTextPart::streaming(
+            pl_protocol::trace::TracePartState::Text(pl_protocol::trace::TraceTextPart::streaming(
                 channel,
                 String::new(),
             )),
@@ -37,7 +39,7 @@ impl TraceProjection {
             let item_id = self.active_text_item_id(item_id, channel);
             events.extend(self.apply_item(
                 &item_id,
-                pl_trace::TracePartAction::Append(TraceDelta::Text { channel, delta }),
+                pl_protocol::trace::TracePartAction::Append(TraceDelta::Text { channel, delta }),
             ));
         }
         events
@@ -69,7 +71,9 @@ impl TraceProjection {
         }
         self.start_item(
             item_id,
-            pl_trace::TracePartState::Thinking(pl_trace::TraceThinkingPart::streaming()),
+            pl_protocol::trace::TracePartState::Thinking(
+                pl_protocol::trace::TraceThinkingPart::streaming(),
+            ),
         )
     }
 
@@ -84,7 +88,7 @@ impl TraceProjection {
             let item_id = self.active_thinking_item_id(item_id, chunk_index);
             events.extend(self.apply_item(
                 &item_id,
-                pl_trace::TracePartAction::Append(TraceDelta::Thinking {
+                pl_protocol::trace::TracePartAction::Append(TraceDelta::Thinking {
                     chunk_index: LOCAL_THINKING_CHUNK_INDEX,
                     delta,
                 }),
@@ -104,7 +108,7 @@ impl TraceProjection {
             let item_id = self.active_thinking_item_id(item_id, chunk_index);
             events.extend(self.apply_item(
                 &item_id,
-                pl_trace::TracePartAction::Append(TraceDelta::ReasoningContent {
+                pl_protocol::trace::TracePartAction::Append(TraceDelta::ReasoningContent {
                     chunk_index: LOCAL_THINKING_CHUNK_INDEX,
                     delta,
                 }),
@@ -168,7 +172,9 @@ pub(super) fn thinking_provider_key_prefix(provider_item_id: &str) -> String {
 mod tests {
     use std::sync::Arc;
 
-    use pl_trace::{TraceEventKind, TracePart, TracePartKind, TraceTextChannel, TraceTextState};
+    use pl_protocol::trace::{
+        TraceEventKind, TracePart, TracePartKind, TraceTextChannel, TraceTextState,
+    };
 
     use super::super::test_support::{
         TracePartEvent, completed_thinking_item, delta_item_id, test_trace_context, trace,
@@ -294,7 +300,10 @@ mod tests {
 
     #[test]
     fn empty_reasoning_delta_does_not_create_a_revision_gap() {
-        let sink = Arc::new(pl_trace::InMemoryTraceEventSink::new("session-1", 0));
+        let sink = Arc::new(pl_protocol::trace::InMemoryTraceEventSink::new(
+            "session-1",
+            0,
+        ));
         let mut trace = trace_with_sink(sink.clone());
 
         let started = trace.append_reasoning_content_delta("thinking", 0, String::new());
@@ -304,16 +313,16 @@ mod tests {
 
         assert!(matches!(
             started.as_slice(),
-            [pl_trace::AgentEvent::TracePartStarted { .. }]
+            [pl_protocol::trace::AgentEvent::TracePartStarted { .. }]
         ));
         assert!(ignored.is_empty());
         assert!(first.iter().any(|event| matches!(
             event,
-            pl_trace::AgentEvent::TracePartDelta { event } if event.revision == 1
+            pl_protocol::trace::AgentEvent::TracePartDelta { event } if event.revision == 1
         )));
         assert!(second.iter().any(|event| matches!(
             event,
-            pl_trace::AgentEvent::TracePartDelta { event } if event.revision == 2
+            pl_protocol::trace::AgentEvent::TracePartDelta { event } if event.revision == 2
         )));
         assert!(trace.take_trace_error().is_none());
         assert_eq!(

@@ -5,37 +5,18 @@
 
 ## 13.1 身份与执行
 
-每个工具调用携带 typed `ToolCallIdentity`，由当前 TurnId、provider item/call identity 组成。工具目录、
-参数 schema、审批策略和 `ToolBatchPolicy` 在 inference 开始时冻结为代际快照。未知工具、参数解析、
-审批拒绝与执行失败都形成 typed tool result，不伪造成功。
+具体工具实现 `pl_core::tool::opaque::Tool`，Registration 转移实例所有权到 Thread。
+定义和参数是带 format/version 的不透明载荷，tool 解释参数，model 解释模型声明；core 不解析 JSON。
+每次请求冻结同一工具目录与 executor，稳定工具身份和原调用参数进入日志。
 
-运行时唯一执行容器是 `DynTool(Arc<dyn ToolExecutor>)`。`ToolExecutor` 是对象安全的动态边界，同时
-提供冻结 definition、可信 policy、execution owner 与 boxed execute future；registry、`ToolBinding`
-和 `ToolPlan` 不保存来源枚举或具体工具类型。静态 Rust 工具通过 `StaticTool` 的关联 `Input` 保留
-typed 参数和 RPITIT future，再由 `From` adapter 生成 `DynTool`。`StaticTool::definition` 必须返回
-已经持有 `ToolName` 的 `StaticToolDefinition`，`From` 不承担可失败校验。Schemars 从 `Input` 的类型、
-rustdoc 和属性生成参数 schema；adapter 使用同一类型反序列化调用参数，复杂业务不变量仍由领域逻辑验证。
+动态注册与撤销在 Thread owner 中完成，失败不发布部分目录。重连不改变声明身份，
+已冻结调用持有旧执行租约；准入前、执行前和控制提交前仍校验权限未被撤销。
+工具不能由名字、MCP annotations 或输出正文取得控制权。结束、扩展 CAS、交互、发现、
+任务等待与取消均使用显式注册授权及类型化控制值。
 
-`pl-core` 在 crate 根公开 `StaticTool`、`static_tool` builder、`DynTool`、`ToolExecutor`、
-`ToolInstallGroup` 以及可复用内置工具的实现类型和构造函数。下游按所需能力自由选择内置工具，逐个
-`.into()` 后与宿主工具放入同一安装组；`lsp_tools` 等目录构造器直接返回 `Vec<DynTool>`，
-`command_tool_pair` 与 `local_command_tool_pair_with_environment` 返回具体命令工具元组，调用方解构后
-分别转换为 `DynTool`。默认工具安装器只是公共工具的预设组合，不拥有私有工具类型，也不是第二条
-注册路径。
-
-工具注册以 `ToolInstallGroup` 为原子单位，组同时拥有 exposure、可选 developer instructions、
-generation 和 `DynTool` 列表。冻结快照只向模型发送 Direct 和当前 session 已 reveal 的 Deferred
-工具；若目录仍有 Deferred 工具，同时暴露普通 `tool_search`。搜索只返回当前冻结目录中的命中，
-通过 typed `RevealTools` directive 令下一次 inference 重新冻结；当前 inference 的 executor 集合不会
-原地改变。目录 fingerprint 包含 deferred definition 与 source generation，变化时旧 reveal 失效。
-
-`Coexist` 工具可按普通 batch 执行；包含 `Solo` 工具的 response 必须恰好只有该一个调用，否则整批在
-任何工具执行前拒绝。该规则通用，不依赖工具名；workflow 写工具与 `complete` 使用 `Solo`。
-
-Plan 使用独立的固定 `AgentSessionPlanMachine`。`plan_current`、`plan_next`、`plan_history` 为
-`Coexist` 查询，`plan_submit`、`plan_restart` 为 `Solo` mutation；不存在自由 `submit_plan` 或把 Plan
-状态交给 Thread Mode 图推进的路径。完整合同见
-[24-agent-session-plan.md](24-agent-session-plan.md)。
+完整 payload 与实际 delivered_context 分开保存。取消或失败保留观察结果，但不得提交迟到控制
+或扩展更新。普通工具后台任务及交付见 [26](./26-session-tool-runtime.md)。
+Plan/workflow 工具与状态机属于 Studio，不进入 core。
 
 ## 13.2 Thread workflow tools
 
@@ -57,8 +38,8 @@ Runtime 校验 schema、图、CAS、合法直接边、大小限制与 operation 
 
 ## 13.3 原子 checkpoint
 
-状态调用先在 working-state clone 上运行。一个 checkpoint 同时持久化 assistant tool-call Item、tool
-result Item 和更新后的 `AgentWorkingState`；提交失败不发布任何一个新事实，也不消费 revision。
+状态调用从只读扩展快照计算 CAS 候选。core 将扩展更新、工具完整结果和实际模型上下文在同一
+commit 中提交；提交失败保留完成对象用于重试，不再次执行副作用。
 
 transition result 内含最新 stage constraint，供同一 Turn 后续 inference 使用。下一 Turn 从 working
 state 派生 `pl.workflow`；context compaction 后重新捕获最新 projection，不复用压缩前阶段。

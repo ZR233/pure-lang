@@ -6,93 +6,27 @@ license.workspace = true
 
 [features]
 default = []
-docker-tools = []
-live-tests = [
-    "dep:axum",
-    "rmcp/server",
-    "rmcp/transport-io",
-    "rmcp/transport-streamable-http-server",
-]
+sqlite = ["dep:sea-orm", "dep:fs4", "dep:url"]
 
 [dependencies]
-pl-protocol = { workspace = true }
-pl-trace = { workspace = true }
-pl-model = { workspace = true }
-pl-lsp = { workspace = true }
-pl-output = { workspace = true }
-pl-patch = { workspace = true }
-pl-skill-core = { workspace = true }
-anyhow = { workspace = true }
 serde = { workspace = true, features = ["rc"] }
-sea-orm = { workspace = true }
-fs4 = { workspace = true }
-url = { workspace = true }
+sea-orm = { workspace = true, optional = true }
+fs4 = { workspace = true, optional = true }
+url = { workspace = true, optional = true }
 serde_json = { workspace = true }
-schemars = { workspace = true }
-secrecy = { workspace = true }
 tokio = { workspace = true }
-tokio-util = { workspace = true }
+tokio-util = { workspace = true, features = ["rt"] }
 tracing = { workspace = true }
 thiserror = { workspace = true }
 futures = { workspace = true }
-reqwest = { workspace = true }
-axum = { workspace = true, optional = true }
-rmcp = { workspace = true, features = [
-    "auth",
-    "client",
-    "transport-child-process",
-    "transport-streamable-http-client-reqwest",
-] }
-process-wrap = { workspace = true }
-base64 = { workspace = true }
-image = { workspace = true }
-which = { workspace = true }
-dunce = { workspace = true }
 sha2 = { workspace = true }
-grep-regex = { workspace = true }
-grep-matcher = { workspace = true }
-grep-searcher = { workspace = true }
-ignore = { workspace = true }
-tempfile = { workspace = true }
-
-[target.'cfg(windows)'.dependencies]
-windows = { workspace = true }
-windows-sys = { workspace = true }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-pl-remote-helper = { workspace = true }
 
 [dev-dependencies]
+tempfile = { workspace = true }
 pretty_assertions = { workspace = true }
-rmcp = { workspace = true, features = ["server"] }
 tokio = { workspace = true, features = ["test-util"] }
 
 [[test]]
-name = "apply_patch_live"
-path = "tests/apply_patch_live.rs"
-required-features = ["live-tests"]
-
-[[test]]
-name = "context_compaction_live"
-path = "tests/context_compaction_live.rs"
-required-features = ["live-tests"]
-
-[[test]]
-name = "trace_live"
-path = "tests/trace_live.rs"
-required-features = ["live-tests"]
-
-[[test]]
-name = "prompt_cache_live"
-path = "tests/prompt_cache_live.rs"
-required-features = ["live-tests"]
-
-[[test]]
-name = "mcp_transports_live"
-path = "tests/mcp_transports_live.rs"
-required-features = ["live-tests"]
-
-[[bin]]
-name = "pl-mcp-test-server"
-path = "tests/fixtures/rmcp_test_server.rs"
-required-features = ["live-tests"]
+name = "entry_storage"
+path = "tests/entry_storage.rs"
+required-features = ["sqlite"]

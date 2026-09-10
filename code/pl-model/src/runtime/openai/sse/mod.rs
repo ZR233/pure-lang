@@ -3,7 +3,7 @@ use serde::Deserialize;
 use crate::completion::stream::event::{ModelStreamEvent, ToolInputDeltaPayload};
 use crate::runtime::openai::identity::responses_tool_identity;
 use crate::runtime::openai::usage::ProviderTokenUsage;
-use pl_trace::TraceTextChannel;
+use pl_protocol::trace::TraceTextChannel;
 
 mod decoder;
 mod item;
@@ -508,14 +508,14 @@ mod tests {
         assert!(decoded.iter().any(|event| matches!(
             event,
             ModelStreamEvent::WebSearchStarted {
-                action: crate::completion::WebSearchAction::Search { query: Some(query), .. },
+                action: pl_protocol::search::WebSearchAction::Search { query: Some(query), .. },
                 ..
             } if query == "DeepSeek Responses API"
         )));
         assert!(decoded.iter().any(|event| matches!(
             event,
             ModelStreamEvent::WebSearchCompleted {
-                action: crate::completion::WebSearchAction::OpenPage { url: Some(url) },
+                action: pl_protocol::search::WebSearchAction::OpenPage { url: Some(url) },
                 results: Some(results),
                 ..
             } if url == "https://api-docs.deepseek.com" && results[0]["opaque"]["rank"] == 1
@@ -523,7 +523,7 @@ mod tests {
         assert!(decoded.iter().any(|event| matches!(
         event,
         ModelStreamEvent::WebSearchCompleted {
-            action: crate::completion::WebSearchAction::FindInPage { pattern: Some(pattern), .. },
+            action: pl_protocol::search::WebSearchAction::FindInPage { pattern: Some(pattern), .. },
             ..
         } if pattern == "web_search"
     )));

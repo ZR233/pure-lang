@@ -134,7 +134,9 @@ mod tests {
 
     #[test]
     fn provider_catalog_bridge_projects_the_canonical_pl_snapshot() {
-        let canonical = pl_core::builtin_provider_catalog().snapshot().unwrap();
+        let canonical = pl_model::config::builtin_provider_catalog()
+            .snapshot()
+            .unwrap();
         let bridge = super::BridgeProviderCatalogSnapshot::from(canonical.clone());
 
         assert_eq!(bridge.schema_version, canonical.schema_version);

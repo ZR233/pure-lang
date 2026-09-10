@@ -4,7 +4,7 @@
 
 按领域所有权、复用边界和运行时依赖划分 crate。新增 crate 必须有真实调用方、独立不变量和清楚依赖方向；只为规避循环依赖、隐藏转发函数或预留未来扩展而新增 crate，通常说明边界尚未找准。
 
-遵守项目既有职责：跨 crate 公共协议属于 `pl-protocol`，provider 适配与流归一化属于 `pl-model`，核心 turn/session/store/tool 编排属于 `pl-core`。新增概念前先判断真正所有者，不把产品、GUI、存储或第三方 adapter 细节推入核心领域。
+遵守项目依赖倒置：`pl-core` 独立定义 Thread、Model、Tool、context 和 storage，默认纯内存，不依赖产品协议或具体实现（包括 dev-dependencies）。`pl-model`、`pl-tool` 和 `pl-trace` 依赖 core；model 与 tool 不相互依赖。产品 wire 属于 `pl-protocol`，配置持久化、Mode/Plan/workflow、子代理协调和唯一装配属于 Studio。具体 provider、工具与物理服务不进入 core。
 
 ## 2. 模块与可见性
 

@@ -97,7 +97,7 @@ impl LspChild {
 
 /// 派生 LSP server / rustup 探测等后台子进程的统一入口。
 ///
-/// 语义与 `pl_core::process::configure_background_command` 等价（Windows
+/// 语义与 `pl_remote_helper::process::configure_background_command` 等价（Windows
 /// `CREATE_NO_WINDOW` 不弹窗、进程随宿主回收），并额外通过 Job Object /
 /// process group 保证整棵进程树跟随本 crate 退出；因依赖方向
 /// （pl-core → pl-lsp）不能复用 pl-core 的工厂，本入口保持为 pl-lsp 内

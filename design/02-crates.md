@@ -1,46 +1,43 @@
 # 02 - Crate 边界
 
-## 2.1 总体形态
-
-Studio 是模块化单体业务核心，同时提供桌面 FRB 与 HTTP 两个 transport：
+## 依赖方向
 
 ```text
-pure-studio → pl-studio-bridge ─┐
-                               ├→ pl-studio-runtime → pl-core
-pl-studio-server ───────────────┘          │             │
-                                          └→ pl-protocol ←┘
-                                                  ↑
-                                  pl-model / pl-trace / pl-lsp
+pl-studio-bridge / pl-studio-server → pl-studio-runtime
+pl-studio-runtime → pl-core / pl-model / pl-tool / pl-protocol / pl-trace
+pl-model → pl-core
+pl-tool → pl-core
+pl-trace → pl-core
 ```
 
-两个 transport 只做 typed DTO 映射，不拥有业务状态。会话主线统一为
-`Thread → Turn → Item`；root 与 child Agent 使用同一框架。
+model 与 tool 不相互依赖，core 不反向依赖实现或产品协议，包括 dev-dependencies。
+完整成员以根 Cargo.toml 为准；Flutter `code/pure-studio` 不是 Cargo 成员。
 
-## 2.2 稳定边界
+## 稳定职责
 
-- `pl-protocol`：Thread、Turn、Item、Interaction、workflow、Agent Profile snapshot、通知与错误。
-- `pl-model`：provider 请求、stream 归一化、模型目录与连接协议。
-- `pl-core`：完整会话内存编排、模型循环、工具运行时、Skill catalog、统一动态条目、异步持久化与独立 SQLite 会话后端。
-- `pl-studio-runtime`：项目与会话关联、配置、内置 Thread Mode、Agent Profile catalog 和产品 SQLite repository。
-- `pl-studio-bridge`：Rust 与 Dart 的机械映射。
-- `pl-studio-server`：同一 runtime 的 HTTP/SSE 适配。
-- `pure-studio`：Flutter projection、交互与设置 UI。
+| crate | 所有权 |
+| --- | --- |
+| pl-core | context/model/tool/thread/storage 通用契约、内存 owner、不可变日志和可选 SQLite |
+| pl-model | provider/transport、模型目录、配置值对象、路由、媒体编码、缓存、usage 与核心 ModelSession 适配 |
+| pl-tool | 文件、命令、SSH、Git、LSP、MCP、Skill、搜索、交互、笔记、todo、完成和协作工具 |
+| pl-protocol | Studio 与外围 adapter 使用的产品 wire、DTO、错误和业务状态类型 |
+| pl-trace | core 日志的只读诊断与用量投影 |
+| pl-lsp | 语言服务连接、探测和协议 |
+| pl-output / pl-patch / pl-skill-core | 输出算法、patch 规则、Skill 元数据与路径规则 |
+| pl-remote-helper | 本地进程监督、SSH 远端文件/进程协议及统一进程创建策略 |
+| pl-studio-runtime | 配置文件、项目、Profile、Mode/workflow/Plan、协调、资源租约与唯一 Thread 装配 |
+| pl-studio-bridge / pl-studio-server | 同一 Studio runtime 的 FRB / HTTP 适配 |
 
-Mode 不是运行时类型分支，也不是 Skill。`mode.simple`、`mode.task` 与未来自定义 `mode.<id>` 都通过
-`ThreadModeRegistration` 进入同一内存注册表；稳定身份是 `ThreadModeId`。工作流 run 状态存入
-`AgentWorkingState`，Prompt 与完整图不持久化，也不新增产品业务表。
+core 不提供默认工具安装、provider 配置、MCP 目录、产品 working set 或旧引擎门面。
+工具通过 `pl_core::tool::opaque::Registration` 转移实例所有权；模型通过核心 ModelSession 契约传入。
+共用物理服务通过明确租约共享，不共享可变 Thread 工具实例。
 
-## 2.3 事实归属
+## 存储与投影
 
-Thread owner 的 typed 内存 snapshot 是活动状态唯一事实源。SQLite 只用于冷恢复、历史分页和
-checkpoint 持久化。GUI 只消费 bridge 返回的 canonical snapshot/notification，不能在 Dart 侧
-推演工作流状态。
+Thread 内存是活动状态唯一事实源，SQLite 是显式 `sqlite` feature；默认纯内存。
+通用 SessionEntry 和纯重放始终可用，存储不按业务类型分表或执行 decoder。
+Studio 使用通用扩展 CAS 保存业务状态并提交其模型上下文投影；GUI 只消费 canonical 产品 DTO。
+Provider 配置从 model、工具配置从 tool、业务协议从 protocol 导入，不借 core 镜像导出。
 
-会话消费者只需依赖 `pl-core`；公共签名及其构造所需的依赖类型由 core 精确导出。
-统一条目和拆库契约见 [25-session-entry-storage.md](./25-session-entry-storage.md)。
-
-协作实例与配置 Profile 分离：`list_agent_profiles` 返回可用配置，`list_agents` 返回运行实例。
-系统 Profile 由 Rust 注册且不可编辑、不可删除；用户 Profile 位于 `~/.pure/agents/*.toml`。
-
-旧 TaskCoordinator、TaskRuntime、TaskRun、WorkUnit、ReviewRound、MergeRecord、worktree 与
-专用确认/恢复协议不属于任何 crate 边界，也没有兼容 adapter。
+契约详见 [25](./25-session-entry-storage.md)、[27](./27-core-boundaries-and-replay.md)
+与 [28](./28-tool-thread-boundary.md)。文档定义边界；验收结果必须以实际检查记录为准。

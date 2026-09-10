@@ -7,8 +7,8 @@ use pl_model::model::{ModelInfo, default_models, openai_default_model_slugs};
 use pl_model::provider::ProviderEndpoint;
 use pl_model::runtime::{ModelInvocationContext, ModelRuntime, ModelSession};
 
+use pl_protocol::trace::{AgentEvent, TraceDelta};
 use pl_protocol::{Message, MessageContent, MessageRole};
-use pl_trace::{AgentEvent, TraceDelta};
 
 const OPENAI_LIVE_ENV_KEY: &str = "OPENAI_API_KEY";
 const OPENAI_LIVE_BASE_URL_ENV_KEY: &str = "API_BASE_OPENAI";
@@ -103,7 +103,7 @@ async fn openai_responses_smoke() {
     let runtime = ModelRuntime::new(info, live_model(&model_slug)).unwrap();
     let (event_tx, event_rx) = tokio::sync::broadcast::channel(256);
     let counter = tokio::spawn(collect_trace_delta_counts(event_rx));
-    let trace_sink = std::sync::Arc::new(pl_trace::InMemoryTraceEventSink::new(
+    let trace_sink = std::sync::Arc::new(pl_protocol::trace::InMemoryTraceEventSink::new(
         "openai-live-session",
         0,
     ));

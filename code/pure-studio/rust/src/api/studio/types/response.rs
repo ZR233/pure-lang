@@ -57,6 +57,15 @@ pub struct BridgeModelPerformanceSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct BridgeSessionCostSnapshot {
     pub root_thread_id: String,
+    pub purpose_costs: Vec<BridgePurposeCostSnapshot>,
+    pub estimated_costs: Vec<BridgeRuntimeCostAmount>,
+    pub has_unpriced_usage: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgePurposeCostSnapshot {
+    pub purpose: Option<String>,
     pub estimated_costs: Vec<BridgeRuntimeCostAmount>,
     pub has_unpriced_usage: bool,
 }
@@ -464,7 +473,7 @@ pub struct ProjectDto {
 #[serde(rename_all = "camelCase")]
 pub struct StartTurnResponse {
     pub thread_id: String,
-    pub turn_id: String,
+    pub input_id: String,
     pub revision: u64,
 }
 
@@ -495,7 +504,7 @@ pub struct InterruptTurnResponse {
 #[serde(rename_all = "camelCase")]
 pub struct SteerTurnResponse {
     pub thread_id: String,
-    pub turn_id: String,
+    pub input_id: String,
     pub revision: u64,
 }
 

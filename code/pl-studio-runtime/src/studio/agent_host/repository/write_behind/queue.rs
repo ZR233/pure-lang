@@ -91,20 +91,6 @@ impl QueueEntry {
             Self::Barrier(_) => None,
         }
     }
-
-    pub(super) fn contains_directory_fact_for(&self, owner_id: &str) -> bool {
-        match self {
-            Self::Mutation(QueuedMutation {
-                mutation: StudioMutation::Directory(directory),
-                ..
-            }) => match directory.as_ref() {
-                StudioDirectoryMutation::Delta(delta) => delta.touches_thread(owner_id),
-                StudioDirectoryMutation::ModelPerformance(_) => false,
-                StudioDirectoryMutation::WorktreeLease(lease) => lease.child_id == owner_id,
-            },
-            Self::Barrier(_) => false,
-        }
-    }
 }
 
 pub(super) fn queue_directory(delta: DirectoryDelta) -> QueueEntry {

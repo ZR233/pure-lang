@@ -22,6 +22,9 @@ use crate::{BudgetLimitSnapshot, TurnFailure};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Turn {
+    /// Accepted input associated with this execution attempt, when started from a queue.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_id: Option<String>,
     pub id: String,
     pub thread_id: String,
     pub revision: u64,
@@ -33,6 +36,7 @@ impl Turn {
     /// 创建排队中的 Turn。
     pub fn queued(id: impl Into<String>, thread_id: impl Into<String>, queued_at: i64) -> Self {
         Self {
+            input_id: None,
             id: id.into(),
             thread_id: thread_id.into(),
             revision: 0,
@@ -116,11 +120,15 @@ pub enum TurnCompletion {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", content = "data", rename_all = "camelCase")]
 pub enum TurnCancellationCause {
+    /// Cancellation was recorded without a product-specific initiating cause.
+    Unspecified,
     UserRequested,
     RuntimeShutdown,
     AgentClosed,
     Recovery,
-    Coalesced { target_turn_id: String },
+    Coalesced {
+        target_turn_id: String,
+    },
 }
 
 /// 预算终态后的上下文压缩结果。

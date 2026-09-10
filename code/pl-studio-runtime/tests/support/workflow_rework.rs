@@ -45,6 +45,8 @@ struct Actor {
     role: String,
     calls: Vec<Call>,
     snapshot: pl_protocol::ThreadSnapshot,
+    #[serde(default)]
+    journal: Vec<pl_core::thread::journal::ThreadCommit>,
 }
 
 pub(super) async fn run(installed: &ConfigStore, config: &StudioConfig) -> Result<()> {
@@ -174,13 +176,21 @@ async fn run_scenario(
         )
         .await;
         // Capture before checking the result so failures retain the actual first attempt.
-        collect(&runtime, &thread.id, &mut actors).await?;
+        collect(&runtime, &thread.id, &artifacts, &mut actors).await?;
         fs::write(
             artifacts.join("actors.json"),
             serde_json::to_vec_pretty(&actors)?,
         )?;
-        evidence::write_verification_report(&actors, &artifacts)?;
-        result?;
+        let report = evidence::write_verification_report(&actors, &artifacts);
+        if let Err(error) = result {
+            return Err(match report {
+                Ok(()) => error,
+                Err(report) => error.context(format!(
+                    "additional verification report failure: {report:#}"
+                )),
+            });
+        }
+        report?;
         evidence::validate(&actors, &thread.id, kind, &artifacts)?;
         verify_delivery(&workspace, &artifacts, kind).await?;
         fs::write(artifacts.join("result.txt"), "completed\n")?;
@@ -306,8 +316,9 @@ pub(super) async fn replay_saved(artifacts: &Path) -> Result<()> {
         Some("rework-worktree") => WorkspaceKind::Worktree,
         _ => bail!("expected a saved rework-directory or rework-worktree artifact directory"),
     };
-    let actors: BTreeMap<String, Actor> =
+    let mut actors: BTreeMap<String, Actor> =
         serde_json::from_slice(&fs::read(artifacts.join("actors.json"))?)?;
+    read_durable_journals(artifacts, &mut actors).await?;
     let root = actors
         .values()
         .find(|actor| actor.role == "root")
@@ -366,10 +377,33 @@ async fn observe_turns(runtime: &StudioRuntime, thread_id: &str) -> Result<TurnO
     let (turn_tx, turn_updates) =
         tokio::sync::watch::channel(Ok::<_, String>(None::<pl_protocol::Turn>));
     let task = tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
-        while let Some(update) = subscription.recv().await {
+        loop {
+            let update = match subscription.recv().await {
+                Ok(Some(update)) => update,
+                Ok(None) => break,
+                Err(error) => {
+                    let _ = turn_tx.send_replace(Err(error.to_string()));
+                    break;
+                }
+            };
             match update {
                 pl_protocol::ThreadSubscriptionUpdate::Snapshot { snapshot } => {
-                    if let Some(turn) = snapshot.active_turn {
+                    let latest = snapshot.active_turn.or_else(|| {
+                        snapshot.items.iter().rev().find_map(|item| {
+                            let pl_protocol::ThreadItemState::Turn(turn) = item.state() else {
+                                return None;
+                            };
+                            Some(pl_protocol::Turn {
+                                input_id: turn.input_id().map(str::to_owned),
+                                id: item.turn_id.clone(),
+                                thread_id: item.thread_id.clone(),
+                                revision: item.revision,
+                                state: turn.state().clone(),
+                                updated_at: item.updated_at,
+                            })
+                        })
+                    });
+                    if let Some(turn) = latest {
                         let _ = turn_tx.send_replace(Ok(Some(turn)));
                     }
                 }
@@ -426,7 +460,7 @@ async fn drive(
                 if input.questions().iter().any(|question| question.id == "fixture_review_checkpoint"));
             if checkpoint {
                 ensure!(!injected, "review checkpoint repeated");
-                collect(runtime, root, actors).await?;
+                collect(runtime, root, artifacts, actors).await?;
                 evidence::validate_checkpoint(actors, root)?;
                 inject(workspace, artifacts).await?;
                 injected = true;
@@ -478,12 +512,13 @@ async fn drive(
         }
         tokio::time::sleep(super::POLL_INTERVAL).await;
     }
-    bail!("rework live scenario exceeded 60 minutes")
+    bail!("rework live scenario exceeded 20 minutes")
 }
 
 async fn collect(
     runtime: &StudioRuntime,
     root: &str,
+    artifacts: &Path,
     actors: &mut BTreeMap<String, Actor>,
 ) -> Result<()> {
     // Active snapshots are authoritative and already contain the materialized timeline.
@@ -522,6 +557,7 @@ async fn collect(
             .with_context(|| format!("capture child memory snapshot {id}"))?;
         capture_into(actors, id, role, snapshot)?;
     }
+    capture_durable_journals(runtime, artifacts, actors).await?;
     Ok(())
 }
 
@@ -543,6 +579,77 @@ fn capture_into(
     Ok(())
 }
 
+async fn capture_durable_journals(
+    runtime: &StudioRuntime,
+    artifacts: &Path,
+    actors: &mut BTreeMap<String, Actor>,
+) -> Result<()> {
+    runtime.retry_persistence().await?;
+    tokio::time::timeout(std::time::Duration::from_secs(30), async {
+        while runtime.pending_persistence_commits().await != 0 {
+            tokio::time::sleep(super::POLL_INTERVAL).await;
+        }
+    })
+    .await
+    .context("durable evidence did not reach the accepted persistence watermark")?;
+    read_durable_journals(artifacts, actors).await
+}
+
+async fn read_durable_journals(
+    artifacts: &Path,
+    actors: &mut BTreeMap<String, Actor>,
+) -> Result<()> {
+    use sea_orm::{ConnectionTrait, Database, DbBackend, Statement};
+    let path = artifacts.join("studio-home/studio/sessions.sqlite");
+    let database = Database::connect(format!("sqlite:{}?mode=ro", path.display())).await?;
+    let transaction = sea_orm::TransactionTrait::begin(&database).await?;
+    for actor in actors.values_mut() {
+        let rows = transaction.query_all_raw(Statement::from_sql_and_values(DbBackend::Sqlite,
+            "SELECT envelope FROM session_entries WHERE session_id = ? AND type_id = ? ORDER BY ordinal",
+            [actor.id.clone().into(), "pl.core.thread-commit".into()],
+        )).await?;
+        actor.journal = rows
+            .into_iter()
+            .map(|row| -> Result<_> {
+                let envelope: String = row.try_get("", "envelope")?;
+                let entry: pl_core::storage::SessionEntry = serde_json::from_str(&envelope)?;
+                ensure!(entry.schema_version == 1, "unsupported evidence envelope");
+                Ok(serde_json::from_str::<
+                    pl_core::thread::journal::ThreadCommit,
+                >(&entry.payload)?)
+            })
+            .collect::<Result<_>>()?;
+        pl_core::thread::journal::replay(
+            &actor
+                .journal
+                .iter()
+                .cloned()
+                .map(std::sync::Arc::new)
+                .collect::<Vec<_>>(),
+        )?;
+        for call in &mut actor.calls {
+            if !matches!(call.name.as_str(), "exec" | "write_stdin") {
+                continue;
+            }
+            let delivery = actor
+                .journal
+                .iter()
+                .flat_map(|commit| commit.deliveries.iter())
+                .rfind(|delivery| delivery.call_id == call.id)
+                .context("command evidence has no durable delivery")?;
+            let payload = delivery.output.payload();
+            ensure!(
+                payload.format() == "pl.tool.exec" && payload.version() == 1,
+                "command evidence has no supported producer receipt"
+            );
+            call.output = payload.content().to_owned();
+        }
+    }
+    transaction.commit().await?;
+    database.close().await?;
+    Ok(())
+}
+
 fn capture_actor(id: String, role: String, snapshot: pl_protocol::ThreadSnapshot) -> Result<Actor> {
     let mut calls = Vec::new();
     for item in &snapshot.items {
@@ -551,10 +658,16 @@ fn capture_actor(id: String, role: String, snapshot: pl_protocol::ThreadSnapshot
         };
         let output = match tool.state() {
             ThreadToolState::Succeeded(state) => state.output().result().to_string(),
-            ThreadToolState::Failed(state) => format!("TOOL_FAILED: {:?}", state.failure()),
+            ThreadToolState::Failed(state) => state
+                .output()
+                .map(|output| output.result().to_owned())
+                .unwrap_or_else(|| format!("TOOL_FAILED: {:?}", state.failure())),
             ThreadToolState::Denied(state) => format!("TOOL_DENIED: {state:?}"),
             ThreadToolState::Cancelled(state) => format!("TOOL_CANCELLED: {state:?}"),
-            ThreadToolState::Started(_)
+            ThreadToolState::Interrupted(state) => format!("TOOL_INTERRUPTED: {state:?}"),
+            ThreadToolState::Queued(_)
+            | ThreadToolState::Cancelling(_)
+            | ThreadToolState::Started(_)
             | ThreadToolState::Streaming(_)
             | ThreadToolState::AwaitingApproval(_)
             | ThreadToolState::Approved(_)
@@ -577,6 +690,7 @@ fn capture_actor(id: String, role: String, snapshot: pl_protocol::ThreadSnapshot
         role,
         calls,
         snapshot,
+        journal: Vec::new(),
     })
 }
 

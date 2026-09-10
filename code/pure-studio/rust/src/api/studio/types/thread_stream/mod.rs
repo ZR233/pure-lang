@@ -111,6 +111,7 @@ pub enum BridgeThreadStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeTurn {
+    pub input_id: Option<String>,
     pub id: String,
     pub thread_id: String,
     pub revision: u64,
@@ -180,6 +181,7 @@ pub enum BridgeTurnCompletion {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BridgeTurnCancellationCause {
+    Unspecified,
     UserRequested,
     RuntimeShutdown,
     AgentClosed,

@@ -10,14 +10,12 @@ use crate::client::LspClient;
 use crate::driver::LspServerDriver;
 use crate::host::LspHostBackend;
 
-use super::{
-    LspRuntimeRegistry, LspRuntimeServerState, LspWorkspaceState, canonical_workspace_root,
-};
+use super::{LspRuntimeRegistry, LspRuntimeServerState, LspWorkspaceState, workspace_key};
 
 impl LspRuntimeRegistry {
     /// 只更新 workspace/server membership，不启动任何进程或执行 probe。
     pub async fn reconcile_workspace_membership(&self, workspace_root: impl AsRef<Path>) {
-        let workspace_root = canonical_workspace_root(workspace_root.as_ref());
+        let workspace_root = workspace_key(workspace_root.as_ref());
         if self.state.lock().await.closed {
             return;
         }
@@ -32,7 +30,7 @@ impl LspRuntimeRegistry {
         workspace_root: impl AsRef<Path>,
         host: Arc<dyn LspHostBackend>,
     ) {
-        let workspace_root = canonical_workspace_root(workspace_root.as_ref());
+        let workspace_root = workspace_key(workspace_root.as_ref());
         if self.state.lock().await.closed {
             return;
         }
@@ -79,9 +77,32 @@ impl LspRuntimeRegistry {
 
     /// catalog × workspace 检测指纹；宿主用它判断是否需要重新激活 membership。
     pub async fn membership_fingerprint(&self, workspace_root: impl AsRef<Path>) -> String {
-        let workspace_root = canonical_workspace_root(workspace_root.as_ref());
-        let catalog = self.state.lock().await.catalog.clone();
-        catalog.workspace_fingerprint(&workspace_root)
+        let workspace_root = workspace_key(workspace_root.as_ref());
+        let (catalog, host) = {
+            let state = self.state.lock().await;
+            (
+                state.catalog.clone(),
+                state
+                    .workspaces
+                    .get(&workspace_root)
+                    .and_then(|workspace| workspace.host.clone()),
+            )
+        };
+        if let Some(host) = host {
+            let mut detection = Vec::new();
+            for server in catalog.iter() {
+                let matched = workspace_matches_host(
+                    &server.definition.detection,
+                    &workspace_root,
+                    host.as_ref(),
+                )
+                .await;
+                detection.push(format!("{}={matched}", server.definition.id));
+            }
+            format!("{}#{}", catalog.fingerprint(), detection.join(","))
+        } else {
+            catalog.workspace_fingerprint(&workspace_root)
+        }
     }
 
     async fn reconcile_registered_workspaces(&self, workspace_roots: Vec<PathBuf>) {
@@ -124,7 +145,7 @@ impl LspRuntimeRegistry {
             if state.closed {
                 return;
             }
-            let mut retired_clients = retire_foreign_workspace_clients(&mut state, workspace_root);
+            let mut retired_clients = Vec::new();
             let workspace = state
                 .workspaces
                 .entry(workspace_root.to_path_buf())
@@ -251,22 +272,6 @@ pub(super) fn resolve_member(
     }
 }
 
-fn retire_foreign_workspace_clients(
-    state: &mut super::LspRuntimeState,
-    workspace_root: &Path,
-) -> Vec<Arc<LspClient>> {
-    state
-        .workspaces
-        .extract_if(.., |root, _| root != workspace_root)
-        .flat_map(|(_, workspace)| {
-            workspace
-                .servers
-                .into_values()
-                .filter_map(|server| server.client)
-        })
-        .collect()
-}
-
 /// 移除已不在 catalog 中的 member，并回收其 client。
 fn retain_catalog_members(
     workspace: &mut LspWorkspaceState,
@@ -337,4 +342,32 @@ fn merge_desired_member(
             None,
         ),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+
+    #[tokio::test]
+    async fn reconciling_another_workspace_keeps_the_first_membership() {
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let registry = LspRuntimeRegistry::new();
+        registry.reconcile_workspace_membership(first.path()).await;
+        registry.reconcile_workspace_membership(second.path()).await;
+        let roots = registry
+            .state
+            .lock()
+            .await
+            .workspaces
+            .keys()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            roots,
+            std::collections::BTreeSet::from([first.path().to_owned(), second.path().to_owned()])
+        );
+        registry.shutdown().await;
+    }
 }

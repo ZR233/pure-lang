@@ -367,7 +367,7 @@ impl ProviderEndpoint {
     /// 返回只用于进程内连接复用判定的 provider 指纹。
     ///
     /// 指纹覆盖 endpoint、凭证和 headers，但不会暴露这些原始值。配置发生
-    /// 变化时，已有 `AgentSession` 会断开旧 WebSocket 并建立新连接。
+    /// 变化时，已有模型会话 会断开旧 WebSocket 并建立新连接。
     pub fn connection_fingerprint(&self) -> u64 {
         let mut hasher = DefaultHasher::new();
         self.base_url.trim_end_matches('/').hash(&mut hasher);

@@ -10,9 +10,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use pl_core::ReasoningConfig;
-use pl_core::ResponsesMaxTokensField;
-use pl_core::{AgentSession, ModelTurnClient, ModelTurnOptions, ModelTurnRequest};
+use pl_model::completion::ReasoningConfig;
+use pl_model::model::ResponsesMaxTokensField;
+use pl_model::runtime::{ModelTurnClient, ModelTurnOptions, ModelTurnRequest};
+
 use tokio::sync::{Mutex, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::timeout;
@@ -270,7 +271,7 @@ async fn generate_title(
 ) -> Result<String> {
     let config = runtime.config_runtime.read()?;
     let mut route = config.config.resolve_role(StudioRole::Explorer)?;
-    if let pl_core::ModelProtocolOptions::Responses(options) =
+    if let pl_model::model::ModelProtocolOptions::Responses(options) =
         &mut route.model.binding.request.protocol
     {
         options.max_tokens_field = ResponsesMaxTokensField::MaxOutputTokens;
@@ -289,8 +290,17 @@ async fn generate_title(
         .as_ref()
         .and_then(|reasoning| reasoning.effort.clone());
     let client = ModelTurnClient::from_route(&route)?;
-    let mut session = AgentSession::new();
-    session.push_user_prompt(title_user_prompt(prompt)?);
+    let input = vec![pl_model::completion::ModelContextItem::from(
+        pl_model::completion::Message {
+            role: pl_model::completion::MessageRole::User,
+            content: pl_model::completion::MessageContent::text(title_user_prompt(prompt)?),
+            presentation: Default::default(),
+            reasoning_content: None,
+            tool_calls: None,
+            tool_result: None,
+            metadata: Default::default(),
+        },
+    )];
     let request = ModelTurnRequest::new()
         .with_instructions(TITLE_INSTRUCTIONS)
         .with_tools(Vec::new())
@@ -300,7 +310,7 @@ async fn generate_title(
         .with_reasoning(reasoning);
     let token = tokio_util::sync::CancellationToken::new();
     let request = client.complete(
-        &session,
+        &input,
         request,
         ModelTurnOptions::default().with_cancellation(token.clone()),
     );
@@ -320,7 +330,8 @@ async fn generate_title(
         &route.model.slug,
         result.as_ref().ok().map(|response| response.model()),
     );
-    let billing = pl_core::InferenceBillingRecord {
+    let billing = pl_protocol::InferenceBillingRecord {
+        purpose: Some("title".into()),
         inference_id: crate::studio::ids::new_id("title"),
         provider_instance_id: route.provider_id.as_str().to_owned(),
         provider: route.endpoint.name.clone(),

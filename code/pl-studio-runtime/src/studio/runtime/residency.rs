@@ -4,7 +4,7 @@
 //! actor（淘汰前由调用方 flush 该 Thread 的全部 pending commits，被淘汰
 //! Thread 保留目录索引与全部 durable 状态，再次访问时按需恢复）。
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::Mutex as AsyncMutex;
@@ -15,7 +15,7 @@ const INACTIVE_RESIDENT_CAPACITY: usize = 4;
 #[derive(Clone)]
 pub(in crate::studio) struct ThreadResidency {
     order: Arc<AsyncMutex<VecDeque<String>>>,
-    pinned: Arc<Mutex<HashSet<String>>>,
+    pinned: Arc<Mutex<HashMap<String, usize>>>,
     capacity: usize,
 }
 
@@ -36,7 +36,7 @@ impl ThreadResidency {
     pub(in crate::studio) fn new() -> Self {
         Self {
             order: Arc::new(AsyncMutex::new(VecDeque::new())),
-            pinned: Arc::new(Mutex::new(HashSet::new())),
+            pinned: Arc::new(Mutex::new(HashMap::new())),
             capacity: INACTIVE_RESIDENT_CAPACITY,
         }
     }
@@ -61,7 +61,7 @@ impl ThreadResidency {
         let pinned = self.pinned.lock().expect("residency pinned lock poisoned");
         let inactive = order
             .iter()
-            .filter(|id| !pinned.contains(*id))
+            .filter(|id| !pinned.contains_key(*id))
             .cloned()
             .collect::<Vec<_>>();
         if inactive.len() <= self.capacity {
@@ -73,10 +73,8 @@ impl ThreadResidency {
 
     /// 订阅 pin：有活跃订阅的线程不参与 LRU 淘汰（design/17 空闲判定）。
     pub(in crate::studio) fn pin(&self, thread_id: &str) {
-        self.pinned
-            .lock()
-            .expect("residency pinned lock poisoned")
-            .insert(thread_id.to_string());
+        let mut pinned = self.pinned.lock().expect("residency pinned lock poisoned");
+        *pinned.entry(thread_id.to_owned()).or_default() += 1;
     }
 
     /// 在一个跨 Thread 操作期间临时钉住完整 owner 集合。
@@ -95,17 +93,20 @@ impl ThreadResidency {
     }
 
     pub(in crate::studio) fn unpin(&self, thread_id: &str) {
-        self.pinned
-            .lock()
-            .expect("residency pinned lock poisoned")
-            .remove(thread_id);
+        let mut pinned = self.pinned.lock().expect("residency pinned lock poisoned");
+        if let Some(count) = pinned.get_mut(thread_id) {
+            *count -= 1;
+            if *count == 0 {
+                pinned.remove(thread_id);
+            }
+        }
     }
 
     pub(in crate::studio) fn is_pinned(&self, thread_id: &str) -> bool {
         self.pinned
             .lock()
             .expect("residency pinned lock poisoned")
-            .contains(thread_id)
+            .contains_key(thread_id)
     }
 
     /// 测试用：当前驻留顺序快照。
@@ -140,5 +141,21 @@ mod tests {
             residency.touch(id).await;
         }
         assert_eq!(residency.over_capacity().await, ["a"]);
+    }
+    #[tokio::test]
+    async fn overlapping_activation_and_subscription_keep_target_pinned_until_both_release() {
+        let residency = ThreadResidency::new();
+        residency.touch("target").await;
+        let subscription = residency.pin_many(["target".into()]);
+        let activation = residency.pin_many(["target".into()]);
+        for id in ["a", "b", "c", "d", "e"] {
+            residency.touch(id).await;
+        }
+        drop(activation);
+        assert!(residency.is_pinned("target"));
+        assert_eq!(residency.over_capacity().await, ["a"]);
+        drop(subscription);
+        assert!(!residency.is_pinned("target"));
+        assert_eq!(residency.over_capacity().await, ["target", "a"]);
     }
 }

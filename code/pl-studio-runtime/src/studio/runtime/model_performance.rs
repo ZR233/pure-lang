@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 
-use pl_core::runtime_usage::merge_costs;
-use pl_core::{InferenceBillingRecord, RuntimeCostAmount};
+use crate::hash::merge_costs;
+use pl_protocol::{InferenceBillingRecord, RuntimeCostAmount};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::Mutex;
@@ -93,11 +93,60 @@ struct SessionCostState {
     #[serde(default)]
     estimated_costs: Vec<RuntimeCostAmount>,
     #[serde(default)]
+    purpose_costs: Vec<PurposeCostState>,
+    #[serde(default)]
     has_unpriced_usage: bool,
     #[serde(default)]
     inference_fingerprints: BTreeMap<String, String>,
     #[serde(default)]
-    internal_billing: pl_core::TurnBillingRecord,
+    internal_billing: pl_protocol::TurnBillingRecord,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PurposeCostState {
+    purpose: Option<String>,
+    estimated_costs: Vec<RuntimeCostAmount>,
+    has_unpriced_usage: bool,
+}
+
+impl SessionCostState {
+    fn purpose_costs(&self) -> Vec<PurposeCostState> {
+        if self.purpose_costs.is_empty()
+            && (!self.estimated_costs.is_empty() || self.has_unpriced_usage)
+        {
+            vec![PurposeCostState {
+                purpose: None,
+                estimated_costs: self.estimated_costs.clone(),
+                has_unpriced_usage: self.has_unpriced_usage,
+            }]
+        } else {
+            self.purpose_costs.clone()
+        }
+    }
+
+    fn record_accounting(&mut self, billing: &InferenceBillingRecord) {
+        self.purpose_costs = self.purpose_costs();
+        let index = self
+            .purpose_costs
+            .iter()
+            .position(|cost| cost.purpose == billing.purpose)
+            .unwrap_or_else(|| {
+                self.purpose_costs.push(PurposeCostState {
+                    purpose: billing.purpose.clone(),
+                    ..Default::default()
+                });
+                self.purpose_costs.len() - 1
+            });
+        let costs = billing.accounting.estimated_costs();
+        let unpriced = billing.accounting.has_unpriced_usage();
+        merge_costs(&mut self.estimated_costs, &costs);
+        self.has_unpriced_usage |= unpriced;
+        merge_costs(&mut self.purpose_costs[index].estimated_costs, &costs);
+        self.purpose_costs[index].has_unpriced_usage |= unpriced;
+        self.purpose_costs
+            .sort_by(|left, right| left.purpose.cmp(&right.purpose));
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -185,6 +234,20 @@ impl ModelPerformanceOwner {
         )
     }
 
+    pub(crate) fn record_auxiliary_inference(
+        &self,
+        root_thread_id: &str,
+        thread_id: &str,
+        billing: &InferenceBillingRecord,
+    ) -> Result<(), PureError> {
+        self.record(
+            root_thread_id,
+            thread_id,
+            billing,
+            BillingRetention::Internal,
+        )
+    }
+
     fn record(
         &self,
         root_thread_id: &str,
@@ -224,11 +287,7 @@ impl ModelPerformanceOwner {
                 }
             }
             session.inference_fingerprints.insert(identity, fingerprint);
-            merge_costs(
-                &mut session.estimated_costs,
-                &billing.accounting.estimated_costs(),
-            );
-            session.has_unpriced_usage |= billing.accounting.has_unpriced_usage();
+            session.record_accounting(billing);
 
             if let Some(sample) = performance_sample(thread_id, billing) {
                 next.history.push_back(sample);
@@ -300,6 +359,15 @@ fn public_snapshot(state: &ModelPerformanceState) -> StudioModelPerformanceSnaps
         .iter()
         .map(|(root_thread_id, session)| StudioSessionCostSnapshot {
             root_thread_id: root_thread_id.clone(),
+            purpose_costs: session
+                .purpose_costs()
+                .into_iter()
+                .map(|cost| crate::StudioPurposeCostSnapshot {
+                    purpose: cost.purpose,
+                    estimated_costs: cost.estimated_costs,
+                    has_unpriced_usage: cost.has_unpriced_usage,
+                })
+                .collect(),
             estimated_costs: session.estimated_costs.clone(),
             has_unpriced_usage: session.has_unpriced_usage,
         })
@@ -406,7 +474,7 @@ fn billing_fingerprint(billing: &InferenceBillingRecord) -> Result<String, PureE
 
 #[cfg(test)]
 mod tests {
-    use pl_core::{InferenceOrchestrationMetrics, InferenceTiming};
+    use pl_protocol::{InferenceOrchestrationMetrics, InferenceTiming};
 
     use super::*;
     use crate::StudioProductEventKind;
@@ -433,18 +501,18 @@ mod tests {
     async fn priced_and_unpriced_agents_share_one_multi_currency_session() {
         let (owner, _, writer, _) = memory_owner().await;
         let mut root = billing_record("root-inference", "provider-a", "model-a", 20, 200, 1);
-        root.accounting.pricing = pl_core::PricingOutcome::Estimated {
+        root.accounting.pricing = pl_protocol::PricingOutcome::Estimated {
             cost: cost("CNY", 0.04),
             cache_savings: None,
         };
         let mut child = billing_record("child-inference", "provider-a", "model-a", 10, 100, 2);
-        child.accounting.pricing = pl_core::PricingOutcome::Estimated {
+        child.accounting.pricing = pl_protocol::PricingOutcome::Estimated {
             cost: cost("CNY", 0.10),
             cache_savings: None,
         };
         let mut usd_child =
             billing_record("usd-inference", "provider-usd", "model-usd", 10, 100, 2);
-        usd_child.accounting.pricing = pl_core::PricingOutcome::Estimated {
+        usd_child.accounting.pricing = pl_protocol::PricingOutcome::Estimated {
             cost: cost("USD", 0.02),
             cache_savings: None,
         };
@@ -453,8 +521,8 @@ mod tests {
             .unwrap();
         let mut unmeasured =
             billing_record("unmeasured-inference", "provider-a", "model-a", 30, 300, 3);
-        unmeasured.accounting.pricing = pl_core::PricingOutcome::Unpriced {
-            reason: pl_core::UnpricedReason::MissingPrice,
+        unmeasured.accounting.pricing = pl_protocol::PricingOutcome::Unpriced {
+            reason: pl_protocol::UnpricedReason::MissingPrice,
         };
         unmeasured.timing = None;
 
@@ -485,11 +553,11 @@ mod tests {
     async fn unpriced_root_does_not_hide_priced_child_session_cost() {
         let (owner, _, writer, _) = memory_owner().await;
         let mut root = billing_record("root-inference", "provider-a", "model-a", 20, 200, 1);
-        root.accounting.pricing = pl_core::PricingOutcome::Unpriced {
-            reason: pl_core::UnpricedReason::MissingPrice,
+        root.accounting.pricing = pl_protocol::PricingOutcome::Unpriced {
+            reason: pl_protocol::UnpricedReason::MissingPrice,
         };
         let mut child = billing_record("child-inference", "provider-a", "model-a", 10, 100, 2);
-        child.accounting.pricing = pl_core::PricingOutcome::Estimated {
+        child.accounting.pricing = pl_protocol::PricingOutcome::Estimated {
             cost: cost("CNY", 0.10),
             cache_savings: None,
         };
@@ -749,15 +817,18 @@ mod tests {
             );
             socket.write_all(response.as_bytes()).await.unwrap();
         });
-        let model = pl_core::ModelRuntime::new(
-            pl_core::ProviderEndpoint::compatible("title", format!("http://{address}/v1")),
-            pl_core::ModelInfo::compatible("title-model"),
+        let model = pl_model::runtime::ModelRuntime::new(
+            pl_model::provider::ProviderEndpoint::compatible(
+                "title",
+                format!("http://{address}/v1"),
+            ),
+            pl_model::model::ModelInfo::compatible("title-model"),
         )
         .unwrap()
-        .with_pricing_mode(pl_core::PricingMode::Disabled);
+        .with_pricing_mode(pl_protocol::PricingMode::Disabled);
         let title = model
             .complete(
-                pl_core::CompletionRequest::builder()
+                pl_model::completion::CompletionRequest::builder()
                     .instructions("Name this session")
                     .build(),
                 Default::default(),
@@ -894,14 +965,15 @@ mod tests {
         recorded_at: i64,
     ) -> InferenceBillingRecord {
         InferenceBillingRecord {
+            purpose: Some("main".into()),
             inference_id: inference_id.to_string(),
             provider_instance_id: provider_instance_id.to_string(),
             provider: format!("{provider_instance_id} display"),
             model: model.to_string(),
             reasoning_effort: None,
             context_window: Some(128_000),
-            accounting: pl_core::InferenceAccounting {
-                usage: pl_core::UsageReport {
+            accounting: pl_protocol::InferenceAccounting {
+                usage: pl_protocol::UsageReport {
                     input_tokens: Some(20),
                     cache_read_tokens: Some(0),
                     cache_write_tokens: Some(0),
@@ -909,7 +981,7 @@ mod tests {
                     reasoning_tokens: Some(completion_tokens / 2),
                     total_tokens: Some(20 + completion_tokens),
                 },
-                pricing: pl_core::PricingOutcome::Disabled,
+                pricing: pl_protocol::PricingOutcome::Disabled,
                 price_snapshot: None,
                 request_started_at: Some(recorded_at),
             },
@@ -952,5 +1024,66 @@ mod tests {
             currency: currency.to_string(),
             amount,
         }
+    }
+    #[tokio::test]
+    async fn purpose_costs_preserve_totals_and_do_not_double_count_replayed_inferences() {
+        let (owner, _, writer, _) = memory_owner().await;
+        let mut main = billing_record("main", "provider", "model", 20, 100, 1);
+        main.purpose = Some("main".into());
+        main.accounting.pricing = pl_protocol::PricingOutcome::Estimated {
+            cost: cost("USD", 1.0),
+            cache_savings: None,
+        };
+        let mut review = main.clone();
+        review.inference_id = "review".into();
+        review.purpose = Some("review".into());
+        review.accounting.pricing = pl_protocol::PricingOutcome::Estimated {
+            cost: cost("USD", 2.0),
+            cache_savings: None,
+        };
+        owner.record_inference("root", "root", &main).unwrap();
+        owner
+            .record_auxiliary_inference("root", "child", &review)
+            .unwrap();
+        owner
+            .record_auxiliary_inference("root", "child", &review)
+            .unwrap();
+        let snapshot = owner.snapshot().await;
+        let session = &snapshot.session_costs[0];
+        assert_eq!(session.estimated_costs, vec![cost("USD", 3.0)]);
+        assert_eq!(
+            session
+                .purpose_costs
+                .iter()
+                .map(|cost| (cost.purpose.as_deref(), cost.estimated_costs.clone()))
+                .collect::<Vec<_>>(),
+            vec![
+                (Some("main"), vec![cost("USD", 1.0)]),
+                (Some("review"), vec![cost("USD", 2.0)])
+            ]
+        );
+        writer.shutdown().await.unwrap();
+    }
+
+    #[test]
+    fn historical_cost_without_purpose_remains_unknown_when_new_usage_arrives() {
+        let mut state = SessionCostState {
+            estimated_costs: vec![cost("USD", 4.0)],
+            ..Default::default()
+        };
+        let mut review = billing_record("review", "provider", "model", 20, 100, 1);
+        review.purpose = Some("review".into());
+        review.accounting.pricing = pl_protocol::PricingOutcome::Estimated {
+            cost: cost("USD", 2.0),
+            cache_savings: None,
+        };
+        state.record_accounting(&review);
+        assert_eq!(state.estimated_costs, vec![cost("USD", 6.0)]);
+        assert_eq!(state.purpose_costs[0].purpose, None);
+        assert_eq!(
+            state.purpose_costs[0].estimated_costs,
+            vec![cost("USD", 4.0)]
+        );
+        assert_eq!(state.purpose_costs[1].purpose.as_deref(), Some("review"));
     }
 }

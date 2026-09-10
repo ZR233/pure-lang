@@ -25,12 +25,12 @@ hash。图 hash 变化时下一个 Turn 自动归档并建立 replacement；Prom
 
 ## 16.3 持久化状态
 
-`AgentWorkingState.workflow` 保存 `WorkflowSessionState`：单调 revision、当前 run、最近 16 个归档摘要、
+`studio.workflow` Thread 扩展 保存 `WorkflowSessionState`：单调 revision、当前 run、最近 16 个归档摘要、
 滚动摘要以及最近 32 个成功 operation receipt。当前 run 保存 lineage/run id、Mode ID、图 hash、
 active/terminal、当前 state、时间和最近 64 条 transition，不保存完整 definition 或 Prompt。
 
 完整 typed state 最大 256 KiB。图由本 Turn 的 Mode 快照提供，旧细节由 Thread timeline/trace 审计，热状态只保存有界尾部。
-模型上下文不直接暴露完整 JSON；`AgentSession::working_context_snapshot` 派生保留 id `pl.workflow`，
+模型上下文不直接暴露完整 JSON；Studio 上下文投影 派生保留 id `pl.workflow`，
 只包含当前 state 指令、完成标准、允许边、最近摘要和下一次 CAS 参数。
 
 ## 16.4 注册时图编译
@@ -60,11 +60,11 @@ root-only 工具拆为 `workflow_current`、`workflow_next`、`workflow_graph`�
 不同参数返回 `operationIdentityConflict`。run ID、revision 与 current state ID 同时参与 CAS。
 
 两个写工具与 `complete` 使用 `ToolBatchPolicy::Solo`；四个查询工具使用 `Coexist`。
-工具只在 working-set clone 上计算；tool call、result 与新 working state 由随后同一个 Thread checkpoint
+工具从只读扩展快照计算 CAS 候选；tool call、result 与扩展更新 由随后同一个 Thread checkpoint
 共同提交，失败则保持旧 canonical revision。
 
-同一 Turn 的 working context 为 prompt cache 保持冻结，切换结果由 tool result 立即提供；下一 Turn
-由 `pl.workflow` 注入。若发生 compaction，则在 rebase 边界重新捕获最新 workflow projection。
+workflow 状态变化后，下一模型步骤把最新 `pl.workflow` 作为完整运行上下文快照追加到历史，
+不改写已发送前缀。相同内容不重复追加；compaction 移除旧快照后重新补入当前 projection。
 
 ## 16.6 内置 Mode
 
@@ -79,7 +79,7 @@ finding 回到 editing_documents；两条返工路径都必须重新经过 integ
 只有 `plan_current` 返回 `approved` 后才可 transition 到 editing_documents。`request_user_input` 只用于
 计划形成前会实质改变计划的缺失事实或用户偏好，不得询问是否实施、继续或批准完整计划；计划已经完整
 时直接以 `plan_submit` 发起唯一的实施授权。Plan 确认也复用通用 `UserInput` continuation，但生命周期只
-属于当前 AgentSession。批准后的完整 Plan 作为 GUI 隐藏的用户输入进入该 session；进入 `completed` 后调用
+属于当前 Thread。批准后的完整 Plan 作为 GUI 隐藏的用户输入进入该 session；进入 `completed` 后调用
 `complete`。完整合同见 [24-agent-session-plan.md](24-agent-session-plan.md)。
 `completed` 与 `stopped` 都是无任何 outgoing transition 的 final state；停止边只从非终态 state
 进入 `stopped`。
@@ -102,15 +102,22 @@ editing_documents 中 root 亲自更新设计。working 中普通实现必须交
 所有 child 使用同一成果传递顺序；非 reviewer child 完成探索/实现/验证后先调用 `report_progress`，以
 `readyForCompletion` 提交含 `CHILD_DELIVERY_READY` 的 durable detail，再发送内容一致的 final reply；
 reviewer 使用既有的 durable verdict marker。
-root 保存成功 spawn receipt 中的 `agentId` 和 `turnId`，循环 `wait` 直到对应 Turn 完成，然后对该 id 调用
-`read_agent_submissions`；progress 事件只能触发继续等待。canonical page 必须非空，空页只允许进入
-诊断和收窄重派，`read_agent_session` 不能替代正常交付。reviewer 使用既有 finding/approval marker，
+root 保存 spawn receipt 的真实 `agentId`、`profileId` 与消息准入收据，不能读取不存在的 receipt.turnId。
+无独立工作时使用 `wait` 的 `timeoutMs:300000` 上限，消息到达提前唤醒；不在每次超时后机械查询目录或全量历史，
+仅新通知、逾期里程碑、缺失证据或明确错误触发针对性诊断，保持所有目标和通知的完整核对。
+统一 `wait` 返回 `tasks/messagesReady/timedOut`；完成证据来自父 Thread 已接收的持久 child 通知，
+其中 `childId` 绑定目标，`turn.state` 必须为 `finished(completed | toolCompleted)`，并记录实际 `turn.turnId`。
+每个 child 同时只有一个待交付任务，续派前记录旧 Turn 与通知水位，只认新 Turn，不比较消息序号与journal水位。
+具体 wire 与诊断约定见 [统一协作](15-agent-profiles-and-collaboration.md)。progress 中即使已有
+`CHILD_DELIVERY_READY` 或 `readyForCompletion` 也只能说明发布；不得清除 pending 或提前请求 checkpoint。
+父模型必须先消费匹配目标与Turn的成功终态通知，之后到达的通知不能使更早的阶段推进变为有效。每个目标都获得自己的当前成功终态后才按绑定 id 读取
+`read_agent_submissions`；canonical page 必须非空且完整，大提交按cursor/fragment读取，旧提交不可重复消费。
+提交页的 `targetState` 与cursor共享冻结history，含 `agentId/throughSequence/turn/completion/guidance`。
+若 `completion=running/notStarted`，非空提交和ready marker都不能替代完成；继续pending，等待并消费对应成功
+终态后再读取新页，不能以旧cursor分页作为新终态查询。`completed/toolCompleted` 也不替代通知消费证据。
+预算、交互、取消、中断和失败按明确状态诊断；正常仍先终态再查询，不增加机械提交轮询。
+空页进入诊断和收窄重派，`read_agent_session` 不能替代正常交付。reviewer 使用既有 finding/approval marker，
 并继续保持比通用 child delivery 更严格的最终授权语义。
-统一 `wait` 返回所有注册来源的事件，不能推断未返回目标的状态。root 维护 pending `(agentId, turnId)`
-集合，只在 agentChanged 事件的 identity.id 匹配、change 为 turnCompleted、turnId 对应且 status 为
-completed 时移除；具体 wire 约定见 [统一协作](15-agent-profiles-and-collaboration.md)。progress 中即使已有
-`CHILD_DELIVERY_READY` 也必须继续等待。所有 pending 目标清空前禁止调用任何一个目标的
-`read_agent_submissions`，从而让每份 durable delivery 都有先行的 receipt-bound terminal 证据。
 
 integrating 中 root 串行维护 canonical Git 状态，审查 directory 组合 diff、显式采纳 worktree commit、
 处理冲突，并将 cleanup 推迟至最终审查与验证通过。并行
@@ -191,3 +198,7 @@ Directory 与 worktree 使用同一最小函数，观察 finding、原执行者�
 fresh reviewer approval、最终测试及清理。测试记录按原始调用审查，不按自然语言标签判定。
 每场景一次，20 分钟或 100 次模型请求先到即停止；基础设施错误立即保留证据并退出，
 不自动重开。运行观察使用内存快照与事件，冷数据追平单独记录。
+
+工具目录刷新捕获 Mode 扩展身份和扩展水位；异步准备后的发布必须条件验证该水位，防止旧 Mode
+目录覆盖已完成切换的新工具。过期发布不记为已安装、不清空当前目录，关闭候选后安排重新准备。
+刷新指纹包含 Mode 扩展身份；模型/工具执行期间发生的普通状态事件不单独触发目录重建。

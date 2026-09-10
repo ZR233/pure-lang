@@ -36,7 +36,7 @@ impl ProviderUsageState {
         Self::Ready(ReadyProviderUsage::new(data))
     }
 
-    pub fn failed(error: pl_core::StateError) -> Self {
+    pub fn failed(error: pl_protocol::StateError) -> Self {
         Self::Failed(FailedProviderUsage::new(error))
     }
 }

@@ -1,41 +1,37 @@
-use std::collections::{BTreeMap, BTreeSet};
-
 use crate::InteractionRequest;
 use anyhow::Result;
-use futures::FutureExt;
 
-use crate::McpRuntimeHandle;
 use crate::config::ConfigRuntime;
-use crate::studio::agent_host::{StudioAgentResources, root_agent_id};
 use crate::studio::records::ThreadRecord;
-use crate::studio::{
-    InteractionService, ProductEventBus, StudioActiveTurn, StudioRuntimeState, StudioStore,
-};
+use crate::studio::{ProductEventBus, StudioActiveTurn, StudioRuntimeState, StudioStore};
 use pl_protocol::studio::StudioPromptInput;
+use pl_tool::mcp::McpRuntimeHandle;
 
 mod attachment_drafts;
 mod background_task;
 mod history;
-mod interaction_continuation;
 mod lifecycle;
 mod lsp_state;
 mod mcp_health;
 mod model_performance;
+mod model_refresh;
 mod prompt_runner;
 mod provider_usage;
-mod remote_helper;
+mod rejected_tools;
 mod residency;
 mod settings_api;
 mod shutdown_progress;
 mod skill_catalog;
 mod ssh;
 mod state_query;
+mod thread_mode;
 mod thread_service;
+mod thread_stream;
+mod tool_refresh;
+pub use thread_stream::StudioThreadSubscription;
+mod thread_observation;
 mod thread_title;
 mod updater;
-
-#[cfg(target_os = "linux")]
-pub(in crate::studio) use remote_helper::{LocalWorkerAsset, local_worker};
 
 pub(crate) use model_performance::ModelPerformanceOwner;
 pub(in crate::studio) use model_performance::{MODEL_PERFORMANCE_OWNER_ID, ModelPerformanceState};
@@ -51,7 +47,7 @@ pub use updater::*;
 /// Studio UI 提交 prompt 的请求。
 ///
 /// runtime 只负责产品投影；Turn ID、FIFO、取消与 canonical Thread 全部由
-/// `pl_core::AgentRuntime` 管理。
+/// `pl_core::thread::ThreadHandle` 对应的 owner 管理。
 pub struct StudioSubmitPromptRequest {
     pub thread_id: String,
     pub input: StudioPromptInput,
@@ -63,23 +59,23 @@ pub struct StudioStartNewThreadRequest {
     pub project_id: String,
     pub title: Option<String>,
     pub input: StudioPromptInput,
-    pub mode: pl_core::ThreadModeId,
+    pub mode: pl_protocol::ThreadModeId,
     pub options: StudioSubmitPromptOptions,
 }
 
 /// Studio UI 提交 prompt 的附加选项。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StudioSubmitPromptOptions {
-    pub presentation: pl_core::MessagePresentation,
-    pub turn_policy: pl_core::AgentTurnSubmitPolicy,
+    pub presentation: pl_protocol::MessagePresentation,
+    pub turn_policy: pl_core::thread::input::InputPolicy,
 }
 
-/// Studio UI 提交 prompt 后得到的 framework turn 信息。
+/// Studio 输入受理回执；实际 Turn 关联由 Thread 事实流提供。
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioSubmitPromptResponse {
     pub thread_id: String,
-    pub turn_id: String,
+    pub input_id: String,
     pub cursor: u64,
 }
 
@@ -127,6 +123,14 @@ pub struct StudioResolveInteractionResponse {
 
 #[derive(Clone)]
 pub struct StudioRuntime {
+    thread_observations: thread_observation::ThreadObservations,
+    settings_updates: tokio::sync::watch::Sender<crate::config::ConfigRuntimeSnapshot>,
+    settings_refresh: background_task::BackgroundTaskSlot,
+    tool_refresh: background_task::BackgroundTaskSlot,
+    rejected_tools: rejected_tools::RejectedToolOwners,
+    tool_catalog_updates: std::sync::Arc<tokio::sync::Notify>,
+    threads: crate::thread_assembler::StudioThreadAssembler,
+    thread_factory: crate::studio::thread_factory::StudioThreadFactory,
     instance_lock: super::runtime_lock::RuntimeLockOwner,
     store: StudioStore,
     config_runtime: ConfigRuntime,
@@ -137,13 +141,13 @@ pub struct StudioRuntime {
     runtime_state: StudioRuntimeState,
     recovery: crate::studio::StudioRecoveryRegistry,
     skills: SkillCatalogRuntime,
-    thread_modes: pl_core::ThreadModeManager,
+    thread_modes: crate::mode::ThreadModeManager,
     provider_usage: ProviderUsageRuntime,
     model_performance: ModelPerformanceOwner,
     updater: StudioUpdateRuntime,
     activation: ProjectActivationRuntime,
     attachment_drafts: attachment_drafts::AttachmentDraftRuntime,
-    ssh_manager: std::sync::Arc<pl_core::remote::SshManager>,
+    ssh_manager: std::sync::Arc<pl_tool::remote::SshManager>,
     lifecycle_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
     title_tasks: ThreadTitleTasks,
 }
@@ -162,15 +166,10 @@ struct StudioExternalRuntimes {
 #[derive(Clone)]
 struct StudioAgentFacility {
     worktrees: crate::studio::agent_host::worktree_lease::WorktreeLeaseOwner,
-    framework:
-        std::sync::Arc<tokio::sync::Mutex<Option<std::sync::Arc<lifecycle::FrameworkOwner>>>>,
-    resources: StudioAgentResources,
-    tool_manager: pl_core::ToolManager,
-    interactions: InteractionService,
     product_events: ProductEventBus,
     /// agent framework 的 write-behind writer 句柄；framework 被 take 后关机仍能排空。
     persistence: std::sync::Arc<
-        tokio::sync::Mutex<Option<crate::studio::agent_host::StudioAgentRepository>>,
+        tokio::sync::Mutex<Option<crate::studio::agent_host::ThreadWriteBehindWriter>>,
     >,
 }
 
@@ -245,7 +244,7 @@ impl StudioRuntime {
         let Some(persistence) = persistence else {
             return Ok(self.agent_facility.product_events.persistence_state());
         };
-        persistence.writer().retry_now();
+        persistence.retry_now();
         self.store.sessions().retry();
         Ok(self.agent_facility.product_events.persistence_state())
     }
@@ -261,119 +260,35 @@ impl StudioRuntime {
     /// `AgentSnapshot.active_turn_id`。这里聚合整棵 agent tree 的活动 turn，
     /// 用于 idle 判断。UI 不消费此列表（它从 per-thread 流读取 busy 状态）。
     async fn derive_active_turns(&self) -> Result<Vec<StudioActiveTurn>> {
-        let Some(framework) = self
-            .agent_facility
-            .framework
-            .lock()
-            .await
-            .as_ref()
-            .and_then(|owner| owner.ready_runtime())
-        else {
-            return Ok(Vec::new());
-        };
-        let runtime = framework.handle();
-        let snapshots = runtime
-            .list()
-            .await
-            .map_err(|error| anyhow::anyhow!(error))?;
-        let mut turns = Vec::new();
-        for snapshot in snapshots {
-            let Some(turn_id) = snapshot.active_turn_id().cloned() else {
-                continue;
-            };
-            turns.push(StudioActiveTurn {
-                thread_id: snapshot.identity.id.to_string(),
-                turn_id: turn_id.to_string(),
-            });
-        }
-        Ok(turns)
+        Ok(self
+            .threads
+            .observed_threads()
+            .into_iter()
+            .flat_map(|(thread_id, handle)| {
+                handle
+                    .snapshot()
+                    .turns
+                    .iter()
+                    .filter(|turn| turn.state == pl_core::thread::TurnState::Running)
+                    .map(|turn| StudioActiveTurn {
+                        thread_id: thread_id.clone(),
+                        turn_id: turn.turn_id.clone(),
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect())
     }
 
     async fn close_project_agent_trees(&self, thread_ids: &[String]) -> Result<()> {
-        // `.boxed()`：把 agent 关闭链的大 future 状态机放堆上，减小 studio
-        // runtime 侧 async 帧，避免与 agent loop 帧叠加触发线程栈耗尽。
-        let Some(framework) = self
-            .agent_facility
-            .framework
-            .lock()
-            .await
-            .as_ref()
-            .and_then(|owner| owner.ready_runtime())
-        else {
-            return Ok(());
-        };
-        let runtime = framework.handle();
-        let root_agent_ids = thread_ids
-            .iter()
-            .map(|thread_id| root_agent_id(thread_id))
-            .collect::<BTreeSet<_>>();
-        for root_agent_id in &root_agent_ids {
-            retire_agent_if_present(&runtime, root_agent_id.clone())
-                .boxed()
-                .await?;
+        let mut roots = std::collections::BTreeSet::new();
+        for id in thread_ids {
+            roots.insert(self.read_owned_thread(id).await?.root_thread_id);
         }
-
-        let snapshots = runtime
-            .list()
-            .boxed()
-            .await
-            .map_err(|error| anyhow::anyhow!(error))?;
-        let parents = snapshots
-            .iter()
-            .map(|snapshot| {
-                (
-                    snapshot.identity.id.clone(),
-                    snapshot.identity.parent_id.clone(),
-                )
-            })
-            .collect::<BTreeMap<_, _>>();
-        let mut descendants = snapshots
-            .into_iter()
-            .filter(|snapshot| {
-                !matches!(
-                    snapshot.state,
-                    pl_core::AgentState::Closing(_) | pl_core::AgentState::Closed(_)
-                ) && has_project_root(&parents, &snapshot.identity.id, &root_agent_ids)
-            })
-            .collect::<Vec<_>>();
-        descendants.sort_by_key(|snapshot| snapshot.identity.depth);
-        for descendant in descendants {
-            retire_agent_if_present(&runtime, descendant.identity.id)
-                .boxed()
-                .await?;
+        for root in roots {
+            self.threads.close_tree(&root).await?;
         }
         Ok(())
     }
-}
-
-async fn retire_agent_if_present(
-    runtime: &pl_core::AgentRuntimeHandle,
-    agent_id: pl_core::ThreadId,
-) -> Result<()> {
-    match runtime.retire(agent_id).boxed().await {
-        Ok(_) | Err(pl_core::AgentRuntimeError::NotFound(_)) => Ok(()),
-        Err(error) => Err(anyhow::anyhow!(error)),
-    }
-}
-
-fn has_project_root(
-    parents: &BTreeMap<pl_core::ThreadId, Option<pl_core::ThreadId>>,
-    agent_id: &pl_core::ThreadId,
-    roots: &BTreeSet<pl_core::ThreadId>,
-) -> bool {
-    let mut current = Some(agent_id.clone());
-    let mut remaining = parents.len().saturating_add(1);
-    while let Some(agent_id) = current {
-        if roots.contains(&agent_id) {
-            return true;
-        }
-        if remaining == 0 {
-            return false;
-        }
-        remaining -= 1;
-        current = parents.get(&agent_id).cloned().flatten();
-    }
-    false
 }
 
 // Legacy Task orchestration tests were removed with the fixed Task runtime.

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, ensure};
-use pl_core::ModelInfo;
+use pl_model::model::ModelInfo;
 use pl_protocol::studio::{
     AdmitAttachmentDraftsResponse, StudioAttachmentDraft, StudioAttachmentDraftSource,
     StudioAttachmentModality,
@@ -230,19 +230,19 @@ pub(super) mod tests {
     use std::io::Cursor;
 
     use image::{DynamicImage, ImageFormat};
-    use pl_core::ModelModality;
+    use pl_model::model::ModelModality;
 
     use super::*;
 
     pub(in crate::studio::runtime::attachment_drafts) fn glm_flash() -> ModelInfo {
-        pl_core::default_models()
+        pl_model::model::default_models()
             .into_iter()
             .find(|model| model.slug == "glm-5.3-flash")
             .expect("GLM-5.3-Flash must be present in the canonical catalog")
     }
 
     pub(in crate::studio::runtime::attachment_drafts) fn deepseek_vision() -> ModelInfo {
-        pl_core::default_models()
+        pl_model::model::default_models()
             .into_iter()
             .find(|model| model.slug == "deepseek-v4-flash-vision-exp")
             .expect("DeepSeek vision model must be present in the canonical catalog")

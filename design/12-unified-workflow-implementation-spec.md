@@ -18,8 +18,8 @@ revision CAS、Markdown 校验、状态 receipt 与 end-turn 行为，并把确�
 ## 12.2 实施顺序
 
 1. 在 `design/*` 定义 Mode namespace、workflow 协议、Profile、存储和 GUI 事实归属。
-2. 在 `pl-protocol` 增加 typed workflow/Profile 类型，在 `pl-core` 实现纯函数编译器和状态工具。
-3. 将 workflow 放入 `AgentWorkingState`，接入 tool-call identity、Solo batch 与原子 checkpoint。
+2. 在 `pl-protocol` 增加 typed workflow/Profile 类型，在 Studio 实现纯函数编译器和状态工具。
+3. 将 workflow 放入 `studio.workflow` Thread 扩展，接入 tool-call identity、Solo batch 与原子 checkpoint。
 4. 以 Thread Mode registry 和统一 TurnFactory 替换模式/角色分支。
 5. 注册内置 Profile，加载用户单 TOML Profile，并改造协作工具使用 `profileId`。
 6. 删除旧 runtime/store/projection/bridge/Flutter surface，执行数据库破坏性版本切换。

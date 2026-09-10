@@ -1,3 +1,5 @@
+pub mod text;
+
 use std::collections::VecDeque;
 
 use serde::{Deserialize, Serialize};

@@ -46,3 +46,12 @@ pub(super) async fn stop(slot: &BackgroundTaskSlot) -> Result<(), Arc<JoinError>
         Err(error) => Err(error),
     }
 }
+
+/// Joins a cooperatively stopped task without aborting an in-flight resource transfer.
+pub(super) async fn finish(slot: &BackgroundTaskSlot) -> Result<(), Arc<JoinError>> {
+    let task = slot.lock().await.clone();
+    match task {
+        Some(task) => task.completion.clone().await,
+        None => Ok(()),
+    }
+}

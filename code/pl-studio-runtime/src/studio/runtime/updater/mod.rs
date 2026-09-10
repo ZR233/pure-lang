@@ -7,7 +7,7 @@ pub use state::*;
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use pl_core::StateError;
+use pl_protocol::StateError;
 use tokio::sync::{Mutex, RwLock};
 
 use crate::studio::ids::unix_seconds;

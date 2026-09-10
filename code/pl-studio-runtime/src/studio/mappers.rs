@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 
-use pl_core::AgentState;
+use crate::studio::records::DirectoryState;
 
 use crate::studio::entity as entities;
 use crate::studio::records::{ProjectRecord, ThreadKind, ThreadRecord, ThreadVisibility};
@@ -16,33 +16,13 @@ pub fn project_record(model: entities::project::Model) -> ProjectRecord {
 }
 
 pub fn thread_record(model: entities::thread::Model) -> Result<ThreadRecord> {
-    let mode = pl_core::ThreadModeId::from_label(&model.mode)
+    let mode = pl_protocol::ThreadModeId::from_label(&model.mode)
         .map_err(|error| anyhow::anyhow!(error.to_string()))
         .with_context(|| format!("unsupported Thread mode in studio db: {}", model.id))?;
-    let state: AgentState = serde_json::from_str(&model.state_json)
-        .with_context(|| format!("invalid Agent state in studio db: {}", model.id))?;
-    let status = match &state {
-        AgentState::Idle(_) => pl_core::ThreadStatus::Idle,
-        AgentState::Queued(_) => pl_core::ThreadStatus::Queued,
-        AgentState::Running(_) => pl_core::ThreadStatus::Running,
-        AgentState::WaitingTool(_) => pl_core::ThreadStatus::WaitingTool,
-        AgentState::WaitingInteraction(_) => pl_core::ThreadStatus::WaitingInteraction,
-        AgentState::Cancelling(_) => pl_core::ThreadStatus::Cancelling,
-        AgentState::Closing(_) => pl_core::ThreadStatus::Closing,
-        AgentState::Closed(_) => pl_core::ThreadStatus::Closed,
-        AgentState::Faulted(_) => pl_core::ThreadStatus::Faulted,
-    };
-    let error = match &state {
-        AgentState::Faulted(state) => Some(state.error().message.clone()),
-        AgentState::Idle(_)
-        | AgentState::Queued(_)
-        | AgentState::Running(_)
-        | AgentState::WaitingTool(_)
-        | AgentState::WaitingInteraction(_)
-        | AgentState::Cancelling(_)
-        | AgentState::Closing(_)
-        | AgentState::Closed(_) => None,
-    };
+    let state: DirectoryState = serde_json::from_str(&model.state_json)
+        .with_context(|| format!("invalid Thread directory state: {}", model.id))?;
+    let status = state.kind;
+    let error = state.error;
     Ok(ThreadRecord {
         id: model.id.clone(),
         project_id: model.project_id,

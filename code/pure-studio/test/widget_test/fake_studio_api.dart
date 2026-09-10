@@ -136,6 +136,7 @@ class _FakeStudioApi implements StudioApi {
   Exception? submitPromptError;
   String? submitReceiptSessionId;
   String submitTurnId = 'turn-1';
+  String get submitInputId => 'input-$submitTurnId';
   ({String threadId, String turnId})? interruptedTurn;
   int retryPersistenceCallCount = 0;
   Object? retryPersistenceError;
@@ -391,7 +392,7 @@ class _FakeStudioApi implements StudioApi {
     final receipt = blocked == null
         ? SubmitPromptReceipt(
             threadId: submitReceiptSessionId ?? 'session-created',
-            turnId: submitTurnId,
+            inputId: submitInputId,
             cursor: 1,
           )
         : await blocked.future;
@@ -426,7 +427,7 @@ class _FakeStudioApi implements StudioApi {
         threadId: receipt.threadId == 'session-created'
             ? thread.id
             : receipt.threadId,
-        turnId: receipt.turnId,
+        inputId: receipt.inputId,
         cursor: receipt.cursor,
       ),
     );
@@ -759,7 +760,7 @@ class _FakeStudioApi implements StudioApi {
     }
     return SubmitPromptReceipt(
       threadId: submitReceiptSessionId ?? threadId,
-      turnId: submitTurnId,
+      inputId: submitInputId,
       cursor: submitPromptCount,
     );
   }

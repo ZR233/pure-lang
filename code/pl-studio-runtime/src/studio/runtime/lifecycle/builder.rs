@@ -1,12 +1,10 @@
 use anyhow::Result;
 
 use crate::config::{ConfigPaths, ConfigRuntime, ConfigStore};
-use crate::studio::agent_host::{
-    StudioAgentRepository, StudioAgentResources, ThreadWriteBehindWriter,
-};
+use crate::studio::agent_host::ThreadWriteBehindWriter;
 use crate::studio::runtime_lock::{RuntimeLock, RuntimeLockOwner};
-use crate::studio::{InteractionService, ProductEventBus, StudioRuntimeState, StudioStore};
-use crate::{McpConnector, McpRuntime};
+use crate::studio::{ProductEventBus, StudioRuntimeState, StudioStore};
+use pl_tool::mcp::{McpConnector, McpRuntime};
 
 use super::super::StudioRuntime;
 use super::super::attachment_drafts::AttachmentDraftRuntime;
@@ -38,6 +36,22 @@ impl StudioRuntime {
                     tracing::error!(error = %error, "Studio runtime lock task failed");
                     pl_protocol::studio::StudioError::internal()
                 })??;
+        let reset_path = resolved.paths.database();
+        // Once reset starts, its task retains the exclusive owner through every backup/marker IO.
+        // Dropping the startup waiter must not release the lock while blocking filesystem work runs.
+        let instance_lock = tokio::spawn(async move {
+            crate::studio::session_reset::prepare(&reset_path, &instance_lock).await?;
+            Ok::<_, anyhow::Error>(instance_lock)
+        })
+        .await
+        .map_err(|error| {
+            tracing::error!(error = %error, "session recovery owner task failed");
+            pl_protocol::studio::StudioError::internal()
+        })?
+        .map_err(|error| {
+            tracing::error!(error = %error, "failed to coordinate session storage recovery");
+            pl_protocol::studio::StudioError::storage()
+        })?;
         let store = StudioStore::open(resolved.paths.database())
             .await
             .map_err(|error| {
@@ -78,63 +92,99 @@ impl StudioRuntime {
         system_skills_dir: Option<std::path::PathBuf>,
     ) -> Result<Self> {
         let config_runtime = ConfigRuntime::initialize(config_store)?;
-        let interactions = InteractionService::new();
+        let (settings_updates, _) = tokio::sync::watch::channel(config_runtime.read()?);
         // 进程级共享 writer 先于所有 owner 构造：ProductEventBus 与
         // ThreadRepository 共用同一 write-behind 队列。
         let writer = ThreadWriteBehindWriter::new(store.clone());
         let product_events = ProductEventBus::new(store.clone(), writer.clone());
         let model_performance =
             ModelPerformanceOwner::new(store.clone(), writer.clone(), product_events.clone());
-        let ssh_manager = std::sync::Arc::new(super::super::remote_helper::ssh_manager());
+        let ssh_manager = std::sync::Arc::new(crate::worker_assets::ssh_manager());
         let worktrees =
             crate::studio::agent_host::worktree_lease::WorktreeLeaseOwner::new(writer.clone());
-        let persistence = StudioAgentRepository::with_writer_and_performance(
-            store.clone(),
-            writer,
-            model_performance.clone(),
-        );
-        product_events.observe_persistence(persistence.writer().subscribe_state());
+        let persistence = writer;
+        product_events.observe_persistence(persistence.subscribe_state());
         let provider_usage = ProviderUsageRuntime::new(store.clone(), product_events.clone());
         let updater = StudioUpdateRuntime::new(store.clone(), product_events.clone())?;
-        let tool_manager = pl_core::ToolManager::new();
         let mcp_state = McpStateRuntime::new();
         let lsp_state = LspStateRuntime::new(product_events.clone());
         let attachment_drafts =
             AttachmentDraftRuntime::new(store.attachments_dir().join("drafts"))?;
-        let thread_modes = pl_core::ThreadModeManager::default();
+        let thread_modes = crate::mode::ThreadModeManager::default();
         crate::studio::thread::register_builtins(&thread_modes)?;
+        let mcp = McpRuntime::new(McpConnector::default()).handle();
+        let lsp = pl_lsp::runtime::LspRuntimeRegistry::new();
+        let skills = match system_skills_dir {
+            Some(system_skills_dir) => {
+                SkillCatalogRuntime::new(product_events.clone(), system_skills_dir)
+            }
+            None => SkillCatalogRuntime::default(),
+        };
+        let thread_factory = crate::studio::thread_factory::StudioThreadFactory::new(
+            crate::studio::thread_factory::StudioThreadServices {
+                store: store.clone(),
+                worktrees: worktrees.clone(),
+                model_performance: model_performance.clone(),
+                product_events: product_events.clone(),
+                config_runtime: config_runtime.clone(),
+                mcp_runtime: mcp.clone(),
+                lsp_runtime: lsp.clone(),
+                skills: skills.clone(),
+                thread_modes: thread_modes.clone(),
+                ssh_manager: ssh_manager.clone(),
+            },
+        );
+        let threads = crate::thread_assembler::StudioThreadAssembler::default();
+        threads.set_agent_queries(
+            config_runtime.clone(),
+            store.clone(),
+            product_events.clone(),
+        )?;
+        threads.set_child_factory(crate::thread_assembler::ConfiguredChildFactory::new(
+            config_runtime.clone(),
+            thread_factory.clone(),
+        ))?;
+        let thread_observations = super::super::thread_observation::ThreadObservations::new(
+            super::super::thread_observation::ObservationServices {
+                store: store.clone(),
+                events: product_events.clone(),
+                performance: model_performance.clone(),
+                threads: threads.clone(),
+                writer: persistence.clone(),
+            },
+        );
+        thread_observations.install(thread_factory.clone())?;
         Ok(Self {
+            thread_observations,
+            settings_updates,
+            settings_refresh: Default::default(),
+            tool_refresh: Default::default(),
+            rejected_tools: Default::default(),
+            tool_catalog_updates: Default::default(),
+            threads,
+            thread_factory,
             instance_lock: RuntimeLockOwner::new(instance_lock),
             store,
             residency: ThreadResidency::new(),
             shutdown_progress: ShutdownProgressBus::new(),
             config_runtime,
             external_runtimes: StudioExternalRuntimes {
-                mcp: McpRuntime::new(McpConnector::default()).handle(),
+                mcp,
                 mcp_state,
                 mcp_startup_reconcile: Default::default(),
                 mcp_health_watcher: Default::default(),
-                lsp: pl_lsp::runtime::LspRuntimeRegistry::new(),
+                lsp,
                 lsp_state,
                 lsp_state_watcher: Default::default(),
             },
             agent_facility: StudioAgentFacility {
                 worktrees,
-                framework: Default::default(),
-                resources: StudioAgentResources::default(),
-                tool_manager,
-                interactions,
                 persistence: std::sync::Arc::new(tokio::sync::Mutex::new(Some(persistence))),
                 product_events: product_events.clone(),
             },
             runtime_state,
             recovery: crate::studio::StudioRecoveryRegistry::new(),
-            skills: match system_skills_dir {
-                Some(system_skills_dir) => {
-                    SkillCatalogRuntime::new(product_events.clone(), system_skills_dir)
-                }
-                None => SkillCatalogRuntime::default(),
-            },
+            skills,
             thread_modes,
             provider_usage,
             model_performance,

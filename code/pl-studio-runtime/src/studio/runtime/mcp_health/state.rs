@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyhow::Result;
-use pl_core::{ObservedResource, ObservedResourceCommand, StateError, StateOperation};
+use pl_protocol::{ObservedResource, ObservedResourceCommand, StateError, StateOperation};
 use tokio::sync::{Mutex, RwLock};
 
 use crate::config::EffectiveMcpServerConfig;

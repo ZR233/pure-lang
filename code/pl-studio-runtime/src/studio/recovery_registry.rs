@@ -41,6 +41,16 @@ impl StudioRecoveryRegistry {
             .clone()
     }
 
+    pub(in crate::studio) fn upsert(&self, issue: StudioRecoveryIssue) -> Vec<StudioRecoveryIssue> {
+        let mut inner = self
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        inner.retain(|current| current.id != issue.id);
+        inner.push(issue);
+        inner.clone()
+    }
+
     /// 删除指定 id 的恢复问题，返回剩余问题的快照。
     pub fn remove(&self, issue_id: &str) -> Vec<StudioRecoveryIssue> {
         let mut inner = self.inner.lock().expect("recovery registry mutex poisoned");

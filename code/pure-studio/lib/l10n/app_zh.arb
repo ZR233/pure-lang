@@ -684,5 +684,11 @@
   "settingsPermissionReviewDescription": "通过自动审查评估工具操作。",
   "settingsPermissionFullDescription": "在已配置的运行时策略下，以完整访问权限执行工具。",
   "timelineToolArguments": "参数",
-  "timelineToolOutput": "输出"
+  "timelineToolOutput": "输出",
+  "costPurposeMain": "主循环",
+  "costPurposeSummary": "摘要",
+  "costPurposeReview": "审查",
+  "costPurposeTitle": "标题",
+  "costPurposeUnknown": "未知用途",
+  "timelineRawRecord": "原始历史记录"
 }

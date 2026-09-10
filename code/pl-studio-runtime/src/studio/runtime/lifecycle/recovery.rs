@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -8,12 +8,12 @@ use anyhow::Result;
 use crate::agent::worktree::{
     LocalWorktreeBackend, RemoteWorktreeBackend, WorktreeBackend, WorktreeHandle, WorktreeManager,
 };
-use crate::resolve_workspace_root;
 use crate::studio::agent_host::worktree_lease::{WorktreeLease, WorktreeLeaseState, load_leases};
 use crate::studio::{
     StudioRecoveryIssue, StudioRecoveryIssueAction, StudioRecoveryIssueCategory,
     StudioRecoveryIssueScope,
 };
+use pl_tool::workspace::resolve_workspace_root;
 
 use super::super::StudioRuntime;
 
@@ -100,7 +100,7 @@ impl StudioRuntime {
             }
             for path in found.difference(&known) {
                 issues.push(StudioRecoveryIssue {
-                    id: format!("unregistered-worktree:{}:{}", project.id, pl_core::canonical_content_hash(path.to_string_lossy().as_bytes())),
+                    id: format!("unregistered-worktree:{}:{}", project.id, pl_core::context::content_hash(path.to_string_lossy().as_bytes())),
                     scope: StudioRecoveryIssueScope::Project, category: StudioRecoveryIssueCategory::Repository,
                     action: StudioRecoveryIssueAction::Retry, project_id: Some(project.id.clone()), thread_id: None,
                     message: format!("Unregistered worktree preserved at {}; ownership must be inspected before explicit cleanup", path.display()), worktree: None,
@@ -178,7 +178,7 @@ impl StudioRuntime {
         validate_lease_identity(&lease)?;
         let manager = self.worktree_manager(&lease);
         let handle = worktree_handle(&lease);
-        manager.preview(&handle).await?;
+        manager.preview_existing(&handle).await?;
         lease.transition(WorktreeLeaseState::CleanupRequested);
         self.agent_facility.worktrees.record(lease.clone())?;
         if let Err(error) = manager.discard(&handle).await {
@@ -243,40 +243,37 @@ impl StudioRuntime {
         &self,
         recovery_issues: &mut Vec<StudioRecoveryIssue>,
     ) -> Result<()> {
-        let Some(repository) = self.persistence_repository().await else {
-            return Ok(());
-        };
-        let failures = repository.audit_registered_sessions().await?;
-        let mut failures_by_root = BTreeMap::<(String, String), Vec<_>>::new();
-        for failure in failures {
-            failures_by_root
-                .entry((failure.project_id.clone(), failure.root_thread_id.clone()))
-                .or_default()
-                .push(failure);
+        use pl_core::thread::cold::ColdStore;
+        for project in self.agent_facility.product_events.project_snapshot().await {
+            for thread_id in self.store.list_project_thread_ids(&project.id).await? {
+                let Some(thread) = self.store.read_thread_association(&thread_id).await? else {
+                    continue;
+                };
+                let result = self.store.sessions().read_thread_journal(&thread.id).await;
+                match result {
+                    Ok(journal) => {
+                        if let Some(commit) = pl_core::thread::journal::recovery_commit(&journal)? {
+                            self.store.sessions().admit(
+                                &thread.id,
+                                commit.sequence,
+                                commit.encode()?,
+                            )?;
+                        }
+                    }
+                    Err(error) => recovery_issues.push(StudioRecoveryIssue {
+                        id: format!("session-context-{}", thread.id),
+                        scope: StudioRecoveryIssueScope::Thread,
+                        category: StudioRecoveryIssueCategory::AgentState,
+                        action: StudioRecoveryIssueAction::CleanupThread,
+                        project_id: Some(project.id.clone()),
+                        thread_id: Some(thread.root_thread_id),
+                        message: format!("Durable Thread {} is invalid: {error}", thread.id),
+                        worktree: None,
+                    }),
+                }
+            }
         }
-        for ((project_id, root_thread_id), failures) in failures_by_root {
-            let affected = failures
-                .iter()
-                .map(|failure| failure.agent_thread_id.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
-            let detail = failures
-                .first()
-                .map(|failure| failure.detail.as_str())
-                .unwrap_or("invalid durable session snapshot");
-            recovery_issues.push(StudioRecoveryIssue {
-                id: format!("session-context-{root_thread_id}"),
-                scope: StudioRecoveryIssueScope::Thread,
-                category: StudioRecoveryIssueCategory::AgentState,
-                action: StudioRecoveryIssueAction::CleanupThread,
-                project_id: Some(project_id),
-                thread_id: Some(root_thread_id),
-                message: format!(
-                    "Durable Agent session context is invalid for {affected}: {detail}"
-                ),
-                worktree: None,
-            });
-        }
+        self.store.sessions().flush().await?;
         Ok(())
     }
 }
@@ -317,4 +314,107 @@ fn validate_lease_identity(lease: &WorktreeLease) -> Result<()> {
         "worktree cleanup refused a mismatched Pure-owned branch"
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pl_core::{
+        context::OpaquePayload,
+        model::{DynModelSession, ModelError, ModelRequest, ModelSession, PreparedModelCall},
+        thread::{ThreadHandle, cold::ColdStore, input::ThreadInput},
+    };
+
+    struct NoModel;
+    impl ModelSession for NoModel {
+        async fn prepare(&mut self, _: ModelRequest) -> Result<PreparedModelCall, ModelError> {
+            panic!("recovery cannot execute models")
+        }
+        async fn close(&mut self) -> Result<(), ModelError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn corrupt_thread_produces_issue_without_blocking_other_thread_recovery() {
+        let home = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let runtime = StudioRuntime::with_options(crate::StudioRuntimeOptions {
+            studio_home: Some(home.path().into()),
+            host: crate::StudioHostKind::Test,
+        })
+        .await
+        .unwrap();
+        runtime.start_runtime().await.unwrap();
+        let project = runtime.open_project(workspace.path()).await.unwrap();
+        runtime
+            .persistence_repository()
+            .await
+            .unwrap()
+            .flush()
+            .await
+            .unwrap();
+        let bad = runtime
+            .store
+            .create_thread(&project.id, "bad", pl_protocol::ThreadModeId::simple())
+            .await
+            .unwrap();
+        let good = runtime
+            .store
+            .create_thread(&project.id, "good", pl_protocol::ThreadModeId::simple())
+            .await
+            .unwrap();
+        runtime
+            .store
+            .sessions()
+            .admit(&bad.id, 1, OpaquePayload::text("corrupt journal envelope"))
+            .unwrap();
+        let handle = ThreadHandle::start(good.id.clone(), DynModelSession::new(NoModel)).unwrap();
+        handle
+            .submit_input(ThreadInput {
+                id: "pending".into(),
+                payload: OpaquePayload::text("must not execute"),
+                context: Vec::new(),
+            })
+            .await
+            .unwrap();
+        let mut journal = handle.journal().await.unwrap();
+        std::sync::Arc::make_mut(journal.last_mut().unwrap()).turn =
+            Some(pl_core::thread::TurnRecord {
+                turn_id: "unfinished".into(),
+                input_id: None,
+                state: pl_core::thread::TurnState::Running,
+                model_steps: 0,
+                elapsed_ms: None,
+            });
+        for commit in &journal {
+            runtime
+                .store
+                .sessions()
+                .admit(&good.id, commit.sequence, commit.encode().unwrap())
+                .unwrap();
+        }
+        handle.close().await.unwrap();
+        runtime.store.sessions().flush().await.unwrap();
+        let mut issues = Vec::new();
+        runtime
+            .append_session_recovery_issues(&mut issues)
+            .await
+            .unwrap();
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].thread_id.as_deref(), Some(bad.id.as_str()));
+        assert_eq!(issues[0].action, StudioRecoveryIssueAction::CleanupThread);
+        let restored = runtime
+            .store
+            .sessions()
+            .replay_thread(&good.id)
+            .await
+            .unwrap();
+        assert!(restored.commit_sequence > journal.last().unwrap().sequence);
+        assert_eq!(
+            restored.turns[0].state,
+            pl_core::thread::TurnState::Interrupted
+        );
+        runtime.shutdown_runtime().await.unwrap();
+    }
 }

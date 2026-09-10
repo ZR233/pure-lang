@@ -1159,7 +1159,10 @@ mod orchestration_tests {
         let provider = local_websocket_provider(&address.to_string(), Some(128_000));
         let session = ModelSession::default();
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(128);
-        let sink = Arc::new(pl_trace::InMemoryTraceEventSink::new("session-1", 0));
+        let sink = Arc::new(pl_protocol::trace::InMemoryTraceEventSink::new(
+            "session-1",
+            0,
+        ));
         let context = ModelInvocationContext::new(session.clone())
             .with_events(event_tx)
             .with_trace(
@@ -1188,11 +1191,13 @@ mod orchestration_tests {
         let notices = events
             .iter()
             .filter_map(|event| match &event.kind {
-                pl_trace::TraceEventKind::TracePartCompleted { item }
-                    if item.source() == pl_trace::TracePartSource::Runtime =>
+                pl_protocol::trace::TraceEventKind::TracePartCompleted { item }
+                    if item.source() == pl_protocol::trace::TracePartSource::Runtime =>
                 {
                     match item.state() {
-                        pl_trace::TracePartState::Text(text) => Some(text.content().to_string()),
+                        pl_protocol::trace::TracePartState::Text(text) => {
+                            Some(text.content().to_string())
+                        }
                         _ => None,
                     }
                 }
@@ -1205,7 +1210,7 @@ mod orchestration_tests {
         expected.push("连接已恢复，继续执行。".into());
         assert_eq!(notices, expected);
         assert_eq!(events.iter().filter(|event| matches!(&event.kind,
-            pl_trace::TraceEventKind::TracePartFailed { item }
+            pl_protocol::trace::TraceEventKind::TracePartFailed { item }
                 if item.failure().is_some_and(|error| error.contains("upstream websocket proxy failed")))).count(), 2);
     }
 

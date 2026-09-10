@@ -4,27 +4,13 @@
 
 - 库 crate 使用 `pl-` 前缀。
 - Flutter bridge crate 使用 `pl-studio-bridge`，Flutter app package 使用 `pure_studio`。
-- 公共协议类型放入 `pl-protocol`。
+- 产品 wire 放入 `pl-protocol`；core 通用契约在自身领域模块定义。
 
 ## 9.2 依赖方向
 
-```text
-pl-protocol
-    ↑
-pl-trace
-    ↑
-pl-model
-    ↑
-pl-core
-    ↑
-pl-studio-bridge
-    ↑
-pure-studio
-```
-
-允许 `pl-core` 同时直接依赖 `pl-protocol`、`pl-trace`、`pl-model` 和 `pl-lsp`。
-
-禁止 `pl-model` 依赖 `pl-core`，避免循环依赖。
+`pl-model`、`pl-tool` 和 `pl-trace` 依赖 `pl-core`；model 与 tool 不相互依赖。
+core 不依赖这些实现、Studio、pl-protocol 或 pl-output，包括测试依赖。SQLite 是可选 feature。
+Studio 组合上述能力并独占产品装配；FRB 与 HTTP 只依赖同一 Studio runtime。
 
 ## 9.3 异步 Trait
 
@@ -58,9 +44,8 @@ Codex patch 的 Update hunk 每行首字符是控制前缀：空格表示上下�
 单一职责模块使用 `foo.rs`；模块拥有多个真实、内聚的子职责时才使用
 `foo/mod.rs` + `foo/child.rs`。禁止只有 `mod.rs` 的目录，也禁止 `mod.rs` 只转发唯一子文件。
 
-`pl-core` 可以在自身领域边界重导出常用 `pl-protocol` 类型，方便核心层用户使用；`pl-studio-runtime`
-在 crate 根按公共签名实际使用的类型精确重导出 `pl-protocol` 项；两者都不代理重导出其他
-专项 crate 的整套 API。raw `pl-trace` 类型只作为内部运行事件边界，不应作为 Studio wire 或前端事实源。
+core 只导出自身通用契约，不镜像 provider、工具或产品 wire。model、tool 和 Studio
+在各自公共签名需要时精确重导出依赖类型，不建立整套 API 转发门面。
 
 ### 9.5.1 生命周期状态机
 
@@ -99,11 +84,9 @@ JSON discriminator 生成的 stored column。普通分类、配置、能力、sc
   `CREATE_NO_WINDOW`，禁止弹出新的命令行窗口；Job Object 路径在实际 CreateProcess 前必须
   最终合并 `CREATE_SUSPENDED | CREATE_NO_WINDOW`，不得依赖其他 wrapper 在 Job Object 覆盖后
   恢复 flags。Unix 使用独立进程组便于整树回收。
-- 进程配置的唯一工厂是 `pl_core::process`（`configure_background_command`、
+- 进程配置的唯一工厂是 `pl_remote_helper::process`（`configure_background_command`、
   `configure_background_std_command` 和 `wrap_background_command`），原生 Command 与
-  `process-wrap`/Job Object 路径都必须从该工厂取得等价策略，其他 crate 不得复制实现；`pl-lsp` 因依赖
-  方向（pl-core → pl-lsp）保留自己的 `spawn_background` 统一入口，语义与
-  pl-core 工厂等价。`pl-xtask` 的同步构建、生成、签名等前台命令使用普通进程并继承终端
+  `process-wrap`/Job Object 路径都必须从该工厂取得等价策略，其他 crate 不得复制实现；`pl-lsp` 使用同一进程策略。`pl-xtask` 的同步构建、生成、签名等前台命令使用普通进程并继承终端
   stdout/stderr，以便实时显示编译过程；只有驻留命令使用 xtask 自身 process 模块的后台配置和
   进程树托管。Windows GUI 双击回归必须同时检查传统 `ConsoleWindowClass` 和现代终端
   使用的 `PseudoConsoleWindow`，不能只凭控制台启动或只检查传统窗口类判定无弹窗。

@@ -222,17 +222,17 @@ pub(crate) fn bridge_thread_mode_catalog(
     }
 }
 
-fn skill_summary(skill: pl_core::skill::SkillMetadata) -> SkillSummaryDto {
+fn skill_summary(skill: pl_studio_runtime::SkillMetadata) -> SkillSummaryDto {
     SkillSummaryDto {
         name: skill.name,
         description: skill.description,
         category: skill.category,
         platforms: skill.platforms,
         source: match skill.source {
-            pl_core::skill::SkillSourceKind::Project => "project",
-            pl_core::skill::SkillSourceKind::User => "user",
-            pl_core::skill::SkillSourceKind::System => "system",
-            pl_core::skill::SkillSourceKind::External => "external",
+            pl_studio_runtime::SkillSourceKind::Project => "project",
+            pl_studio_runtime::SkillSourceKind::User => "user",
+            pl_studio_runtime::SkillSourceKind::System => "system",
+            pl_studio_runtime::SkillSourceKind::External => "external",
         }
         .to_string(),
         provider_id: skill.provider_id.as_str().to_string(),
@@ -241,13 +241,13 @@ fn skill_summary(skill: pl_core::skill::SkillMetadata) -> SkillSummaryDto {
             user_invocable: skill.invocation.user_invocable,
         },
         resource_base: match skill.resource_base {
-            pl_core::skill::SkillResourceBase::Directory { path } => {
+            pl_studio_runtime::SkillResourceBase::Directory { path } => {
                 SkillResourceBaseDto::Directory {
                     path: path.to_string_lossy().to_string(),
                 }
             }
-            pl_core::skill::SkillResourceBase::Url { url } => SkillResourceBaseDto::Url { url },
-            pl_core::skill::SkillResourceBase::Opaque { description } => {
+            pl_studio_runtime::SkillResourceBase::Url { url } => SkillResourceBaseDto::Url { url },
+            pl_studio_runtime::SkillResourceBase::Opaque { description } => {
                 SkillResourceBaseDto::Opaque { description }
             }
         },

@@ -8,12 +8,12 @@ use crate::config::{
     StudioRole,
 };
 use crate::first_run::ProviderTemplateKind;
-use crate::{
+use pl_model::config::{
     AgentModelConfig, ProviderConfig, ProviderModelCatalogConfig, ProviderPresetId,
     builtin_provider_catalog,
 };
-use pl_core::{ModelInfo, ModelTransportProfile};
-use pl_core::{ProviderConnectionMode, ProviderEndpoint, ProviderWireProtocol};
+use pl_model::model::{ModelInfo, ModelTransportProfile};
+use pl_model::provider::{ProviderConnectionMode, ProviderEndpoint, ProviderWireProtocol};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderModelEdit {
@@ -32,7 +32,7 @@ pub struct ProviderEdit {
     pub name: String,
     pub base_url: Option<String>,
     pub bearer_token: Option<String>,
-    pub pricing_mode: pl_core::PricingMode,
+    pub pricing_mode: pl_protocol::PricingMode,
     pub default_model: String,
     pub custom_models: Vec<ProviderModelEdit>,
     pub model_connection_modes: BTreeMap<String, ProviderConnectionMode>,
@@ -81,13 +81,15 @@ impl ProviderModelEdit {
         model.max_output_tokens = Some(self.max_output_tokens);
         model.binding.request.protocol = match self.protocol {
             ProviderWireProtocol::Responses => {
-                pl_core::ModelProtocolOptions::Responses(Default::default())
+                pl_model::model::ModelProtocolOptions::Responses(Default::default())
             }
             ProviderWireProtocol::ChatCompletions => {
-                pl_core::ModelProtocolOptions::ChatCompletions(pl_core::ChatRequestOptions {
-                    include_usage: true,
-                    ..Default::default()
-                })
+                pl_model::model::ModelProtocolOptions::ChatCompletions(
+                    pl_model::model::ChatRequestOptions {
+                        include_usage: true,
+                        ..Default::default()
+                    },
+                )
             }
         };
         model.binding.transport = ModelTransportProfile {
@@ -162,7 +164,7 @@ impl ProviderEdit {
             None => {
                 let current_custom = current.filter(|provider| provider.preset_id().is_none());
                 let info = ProviderEndpoint {
-                    adapter: pl_core::ProviderAdapterKind::OpenAiCompatible,
+                    adapter: pl_model::provider::ProviderAdapterKind::OpenAiCompatible,
                     name: name.clone(),
                     base_url: base_url.clone(),
                     bearer_token: bearer_token.clone(),
@@ -293,7 +295,7 @@ fn role_edits_to_routes(
     edits: &[RoleEdit],
     providers: &BTreeMap<ProviderId, ProviderConfig>,
     default_models: &BTreeMap<ProviderId, String>,
-) -> Result<BTreeMap<crate::AgentRoleId, ModelRouteConfig>> {
+) -> Result<BTreeMap<pl_model::config::AgentRoleId, ModelRouteConfig>> {
     let fallback_provider = providers
         .keys()
         .next()
@@ -503,7 +505,7 @@ mod tests {
             name: "OpenAI".to_string(),
             base_url: Some("https://api.openai.com/v1".to_string()),
             bearer_token: None,
-            pricing_mode: pl_core::PricingMode::Catalog,
+            pricing_mode: pl_protocol::PricingMode::Catalog,
             default_model: "gpt-5.6-sol".to_string(),
             custom_models: Vec::new(),
             model_connection_modes: BTreeMap::new(),

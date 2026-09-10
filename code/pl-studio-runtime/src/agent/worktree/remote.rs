@@ -5,8 +5,10 @@ use std::time::Duration;
 
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use pl_core::remote::SshManager;
-use pl_core::tool::{ExecutionBackend, ExecutionOutput, ExecutionRequest, GitPolicy};
+use pl_tool::execution::{ExecutionBackend, ExecutionOutput, ExecutionRequest};
+use pl_tool::remote::SshManager;
+
+use pl_tool::git::GitPolicy;
 
 use super::backend::{changed_files, checked_output, non_empty_head};
 use super::{WorktreeBackend, WorktreeCreateFailure, WorktreeError, WorktreeStatus};
@@ -41,7 +43,7 @@ struct SshRemoteWorktreeTransport {
 }
 
 impl SshRemoteWorktreeTransport {
-    async fn host(&self) -> Result<pl_core::remote::RemoteWorkspaceHost, String> {
+    async fn host(&self) -> Result<pl_tool::remote::RemoteWorkspaceHost, String> {
         self.ssh_manager
             .open_workspace_host(
                 &self.server_id,
@@ -128,7 +130,7 @@ impl RemoteWorktreeBackend {
         &self,
         cwd: &Path,
         args: &[String],
-    ) -> Result<pl_core::ExecutionOutput, WorktreeError> {
+    ) -> Result<pl_tool::execution::ExecutionOutput, WorktreeError> {
         let mut full_args = vec![
             "-c".to_string(),
             "core.hooksPath=/dev/null".to_string(),

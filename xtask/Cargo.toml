@@ -6,6 +6,8 @@ license.workspace = true
 publish = false
 
 [dependencies]
+pl-studio-runtime = { workspace = true }
+pl-model = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
 serde = { workspace = true }
@@ -20,7 +22,6 @@ tokio = { workspace = true }
 toml = { workspace = true }
 which = { workspace = true }
 pl-skill-core = { workspace = true }
-pl-core = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true }

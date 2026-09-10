@@ -1,238 +1,54 @@
 ---
 name: add-tool
-description: Use when defining, exposing, registering, or testing a Pure-Lang static, dynamic, hosted, MCP, LSP, plugin, or built-in tool through the unified DynTool runtime.
-category: guides
-platforms: ["windows", "linux", "macos"]
+description: Use when implementing, registering, or testing a Pure-Lang tool through the Thread-owned opaque Tool interface.
 ---
 
-# 添加与注册 Tool
+# 添加或迁移工具
 
-Pure-Lang 只有一条工具注册和执行链：
+具体工具归 `pl-tool`，Plan/workflow 等产品工具归 Studio。core 只定义通用契约与 Thread 执行机制，
+不依赖工具实现、pl-model 或 pl-protocol。先阅读 `design/27-core-boundaries-and-replay.md`、
+`design/28-tool-thread-boundary.md` 和同类现役工具，再沿以下边界修改。
 
-```text
-StaticTool / typed builder ──From──┐
-                                  ├── DynTool ── ToolInstallGroup ── ToolPlan
-MCP / plugin / hosted ToolExecutor ┘
-```
+## 实现与注册
 
-`pl-core` 公开工具契约、typed builder、所有可复用内置工具和安装容器。下游可以自由选择
-需要的内置工具，与自己定义的工具放进同一个 `ToolInstallGroup`；不要新增按来源区分的 registry、
-执行 enum 或兼容注册入口。
+- 实现 `pl_core::tool::opaque::Tool`，用 Registration 转移实例所有权给 Thread。参考
+  `code/pl-core/examples/minimal_thread.rs` 和现役工具，禁止 StaticTool、ToolCallContext、
+  SessionRuntimeBuilder 或旧 working set 兼容包装。
+- 参数与声明使用带 format/version 的 OpaquePayload；工具自己解析原始字符串，model 编码模型声明。
+  JSON 工具使用 typed 参数和 serde/schemars，保留原调用字节，不在 core 规范化参数或 schema。
+- 通过 StudioThreadFactory / StudioThreadAssembler 在创建 root、child、恢复时显式装配，
+  每 Thread 独占工具实例和命令管理器；共用物理服务捕获隔离租约，不共享可变工具状态。
+- 动态注册更新同一 Thread 目录；工具稳定 ID、声明内容身份与 executor 代次分开。重连但声明未变
+  保持 deferred reveal，删除/声明变更清除旧状态；已冻结调用保留旧租约但仍接受权限撤销检查。
 
-## 会话创建前装配
+## 结果与可信控制
 
-运行中的 Thread 不从 TurnFactory 临时安装工具。宿主在
-`AgentTurnFactory::prepare_session` 返回 `pl_core::session_runtime::SessionRuntimeBuilder`：
-已构造的组使用 `with_tools`，需要会话能力的组使用 `with_tool_factory`，外部监听使用
-`with_event_source`。动态 MCP/LSP 等提供者通过 `with_refresh` 预注册刷新窗口；`prepare_turn`
-只消费 `SessionRuntimeHandle`，不得重新创建命令管理器或另一份产品注册表。
+- ToolOutput 分别保存完整 payload 与实际模型 context。大输出用稳定资源引用并校验长度/摘要；
+  预览不能覆盖完整结果，临时 capture 或路径不能冒充已归档资源。
+- 已观察副作用后失败用 ToolError::with_output 保存原输出；取消/失败不丢掉观察事实，也不应用
+  迟到扩展、交互或结束控制。历史只使用已保存 delivered_context，不调用当前渲染器重建。
+- 结束 Turn、扩展 CAS、交互、发现、任务等待和取消须显式注册授权并返回类型化控制值。
+  payload 的 approved/endTurn 等字段、工具名字和 MCP annotations 不授予权限。
+- Note/Todo/Skill/业务状态从 CallContext 只读扩展快照计算 CAS 候选，与结果一同提交；
+  工具不另存可写状态机。冲突保留原结果用于提交处理，不能重新执行副作用。
+- 用户问题返回 AwaitInteraction 与原始问题，core 提供关联 ID；业务回答由工具/Studio 解码，
+  core 不把取消合成空回答。Plan 确认及 continuation 的原子解释属于 Studio。
 
-下游监听器实现 `SessionEventSource::initialize`，返回拥有订阅资源的 `SessionEventSubscription`。
-初始化阶段只建立订阅，不等待向尚未发布的 actor 发送消息。运行循环使用
-`SessionBuildContext::messages()` 提供的来源限定 publisher；消息是 `SessionMessage`，不能伪造
-工具终态、审批或系统指令。必须观察会话取消，释放资源后才返回，不派生无 owner 的后台生产者。
+## 物理执行边界
 
-普通工具默认 `ToolScheduling::Task`，快速完成直接返回结果，否则返回受理回执并由统一 `wait` 交付终态；状态查询、
-Interaction 和原子会话控制显式使用 `ToolPolicy::control()`。`wait` 必须 Solo，事件消费与对应
-transcript 响应由 owner 共同提交；不得在 handler 取出事件时提前删除，也不得裁剪后仍确认消费。
+工作区、路径、文件权限、LSP、MCP、SSH、命令进程和归档由工具后端负责。ExecutionPolicy
+接收工具侧访问解释，core 只管理类型化许可；模型参数不能扩大可信 CallContext 的能力。
+文件能力不隐式授权 exec/Git/MCP；远程和受限工作区不能借本地路径授权放宽边界。
 
-完整执行结果由任务 owner 保存，工具不需要为 `wait` 限额截掉原始正文或结构化内容。
-模型默认接收有界预览和 `resultReference`；通过 `get_tool_task` 的 `resultCursor` 分页读完整结果，
-不消费消息。宿主 SDK 使用 `SessionControl::get` 读取预览，`read_complete` 按需读取完整结果；
-后者可以返回存储完整性错误。不得用受理成功或预览完整性代替任务的真实执行终态。
+MCP executor 固定 server 租约、raw name 与声明；媒体先归档精确字节，再用宿主提供的模型投影。
+归档失败保存明确的原始观察格式，不重跑远端调用。hosted 工具由 model 处理，core 不注册占位 executor。
 
-## 先确定契约
+工具 close 必须等待自身物理资源收束，失败保留可重试状态。被替换实例仍由原 Thread 负责关闭，
+不得在注册表锁内执行 IO/await/外部回调。
 
-1. 工具名使用 `ToolName::bare` 或 `ToolName::namespaced` 构造，在定义边界完成校验。
-2. Rust 静态工具输入使用 `DeserializeOwned + JsonSchema + Send + 'static`；字段 rustdoc 是模型看到的参数说明，
-   `#[schemars(...)]` 表达长度、范围等结构约束，`#[serde(deny_unknown_fields)]` 拒绝未知字段。
-3. `StaticToolDefinition` 显式提供工具总体用途；Schemars 不推断业务语义，也不替代 handler
-   中依赖运行时状态的业务校验。
-4. `ToolPolicy` 声明 effect、并行、批次、锁、缓存和预算语义。工具本身不创建第二套审批机制。
-5. 内置、LSP、控制类和宿主静态工具通常使用 `Direct`；MCP、插件和大型动态目录通常使用
-   `Deferred`，由 `tool_search` 在下一模型 step 揭示。
-6. 跨工具工作流规则放在组级 developer instructions 中，不塞进单个参数 Schema。
+## 验证
 
-## 使用 typed builder
-
-产品或下游 crate 的普通 Rust 工具优先使用 `static_tool`：
-
-```rust
-use pl_core::{
-    DynTool, StaticToolDefinition, ToolCallContext, ToolGroupId, ToolInstallGroup, ToolName,
-    ToolPolicy, ToolResult, static_tool,
-};
-use schemars::JsonSchema;
-use serde::Deserialize;
-
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct LookupInput {
-    /// 要查询的业务键。
-    #[schemars(length(min = 1, max = 128))]
-    key: String,
-}
-
-let definition = StaticToolDefinition::new(
-    ToolName::namespaced("host", "external_lookup")?,
-    "查询宿主应用中的业务数据。",
-);
-
-let tool: DynTool = static_tool::<LookupInput>(definition)
-    .policy(ToolPolicy::read_only())
-    .build(|input, context: ToolCallContext| async move {
-        context.check_cancelled()?;
-        ToolResult::json(serde_json::json!({"key": input.key}))
-    });
-
-agent_tools.install(ToolInstallGroup::direct(
-    ToolGroupId::new("embedding-application"),
-    vec![tool],
-))?;
-```
-
-builder 在构造时生成并缓存输入 Schema，并直接返回 `DynTool`。输入反序列化失败时不会进入 typed
-handler。不要为 builder 工具再包装一次注册类型。
-
-## 实现 `StaticTool`
-
-需要保存复杂运行时依赖或复用实现类型时，直接实现 `StaticTool`：
-
-```rust
-use std::future::Future;
-use pl_core::{
-    Result, StaticTool, StaticToolDefinition, ToolCallContext, ToolName, ToolPolicy, ToolResult,
-};
-
-#[derive(Debug)]
-struct ExternalLookupTool;
-
-impl StaticTool for ExternalLookupTool {
-    type Input = LookupInput;
-
-    fn definition(&self) -> StaticToolDefinition {
-        StaticToolDefinition::new(
-            ToolName::namespaced("host", "external_lookup")
-                .expect("static tool name is valid"),
-            "查询宿主应用中的业务数据。",
-        )
-    }
-
-    fn policy(&self) -> ToolPolicy {
-        ToolPolicy::read_only()
-    }
-
-    fn execute(
-        &self,
-        input: Self::Input,
-        context: ToolCallContext,
-    ) -> impl Future<Output = Result<ToolResult>> + Send {
-        async move {
-            context.check_cancelled()?;
-            ToolResult::json(serde_json::json!({"key": input.key}))
-        }
-    }
-}
-
-let tool: pl_core::DynTool = ExternalLookupTool.into();
-```
-
-`From<T: StaticTool>` 只做不会失败的类型擦除；名称等可失败校验必须在更早的构造边界完成，
-Schema、重名、执行方式与 provider 能力则在安装/冻结边界验证。
-
-## 动态、MCP、插件与 hosted 工具
-
-运行时才知道定义的工具直接实现对象安全的 `ToolExecutor`，或使用
-`DynamicToolExecutor`，再显式进入 newtype：
-
-```rust
-let executor = pl_core::DynamicToolExecutor::new(
-    definition,
-    policy,
-    pl_core::ToolExecution::Local,
-    |invocation| async move {
-        let (_input, context) = invocation.into_parts();
-        context.check_cancelled()?;
-        Ok(pl_core::ToolResult::success("done"))
-    },
-);
-let tool = pl_core::DynTool::new_executor(executor);
-```
-
-MCP adapter 保留 generation、turn lease 和关闭语义，hosted adapter 保留 provider 执行语义；
-Registry 和 `ToolPlan` 只看到 `DynTool`，不按来源再次分派。不要同时实现会重叠的泛型
-`From<T>`；动态来源使用 `DynTool::new_executor`。
-
-## 选择并注册 `pl-core` 内置工具
-
-内置工具实现与大多数构造器由 `pl-core` crate 根公开；远程 workspace 构造器保留在
-`pl_core::remote` 命名空间。下游按能力自由组合，例如：
-
-```rust
-let mut tools: Vec<pl_core::DynTool> = vec![
-    pl_core::AskUserTool.into(),
-    pl_core::PlanSubmitTool.into(),
-    pl_core::StatPathTool::new(tool_workspace.clone()).into(),
-    pl_core::WriteFileTool::new(tool_workspace.clone()).into(),
-];
-tools.extend(pl_core::lsp_tools(lsp_registry, tool_workspace));
-
-agent_tools.install(
-    pl_core::ToolInstallGroup::direct(pl_core::ToolGroupId::new("selected-builtins"), tools)
-        .with_developer_instructions(
-            "先读取和确认现状，再修改 workspace；语义查询优先使用 LSP。",
-        ),
-)?;
-```
-
-主要公共构造入口包括：
-
-- 文件与 workspace：`StatPathTool`、`WriteFileTool`、`CreateDirectoryTool`、
-  `DeletePathTool`、`CopyPathTool`、`MovePathTool`、`WorkspaceFileTool`、
-  `LocalWorkspaceFileTool`、`pl_core::remote::remote_workspace_mutation_tools`；
-- 命令：`ExecTool`、`WriteStdinTool`、`command_tool_pair`、
-  `local_command_tool_pair_with_environment`；
-- LSP 与图片：`LspCapabilitiesTool`、`LspQueryTool`、`lsp_tools`、`ViewImageTool`；
-- Git、Skill 与会话状态：`GitTool`、`SkillsListTool`、`SkillViewTool`、
-  `SkillManageTool`、`skill_tools_from_catalog`、`SessionNoteTool`、`TodoListTool`、
-  `WorkflowCurrentTool`、`WorkflowNextTool`、`WorkflowGraphTool`、`WorkflowHistoryTool`、
-  `WorkflowTransitionTool`、`WorkflowRestartTool`；
-- 控制与交互：`AskUserTool`、`PlanSubmitTool`、`CompleteTool`、
-  `AgentCollaborationTools::tools`；
-- 搜索：`WebSearchClient` + `WebSearchTool`，以及 provider-hosted
-  `HostedWebSearchTool`。
-
-构造器返回 `StaticTool` 实现时使用 `.into()`；已经返回 `Vec<DynTool>` 或本身实现
-`ToolExecutor` 的入口不要重复包装。`command_tool_pair` 与
-`local_command_tool_pair_with_environment` 返回具体工具元组，必须先解构，再分别调用 `.into()`。
-
-## Direct、Deferred 与组提示
-
-```rust
-agent_tools.install(
-    ToolInstallGroup::deferred(ToolGroupId::new("mcp:business"), mcp_tools)
-        .with_developer_instructions(
-            "这些工具只访问业务目录；先通过 tool_search 揭示最相关的工具。",
-        ),
-)?;
-```
-
-Deferred 目录的 fingerprint 和 reveal 状态属于当前 `AgentSession`。工具 generation 或策略变化时
-旧 reveal 自动失效；子代理默认不继承父代理的揭示状态。`ToolPlan` 是不可变快照，旧 plan 继续
-持有旧 executor，新模型 step 才看到替换后的 generation。
-
-## 测试与检查
-
-- 公共契约测试必须从 `pl_core` crate 根导入 API，证明下游无需私有模块。
-- 覆盖 `StaticTool::into()`、builder、`DynTool::new_executor()` 以及同一 plan 混合执行。
-- Schema 集中验证 rustdoc、枚举、范围、长度、必填项和未知字段；业务规则继续测 handler。
-- 动态来源覆盖 generation/lease，deferred 来源覆盖搜索、下一 step 揭示和失效。
-- 修改工具框架后运行：
-
-```text
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-cargo xtask verify-gui
-git diff --check
-```
+按实际风险验证真实工具行为、参数错误、授权、原文保留、取消及物理资源释放；通用执行/注册/CAS/
+冷重放机制由 core 契约测试验证，产品装配在 Studio 验证，不复制旧静态 adapter 测试。
+公共接口迁移在同批更新消费者、文档和生成输入。检查与交付遵循根 AGENTS.md，独立 core
+配置还需无默认 feature 与显式 sqlite 两种组合；live provider 仅显式 opt-in。

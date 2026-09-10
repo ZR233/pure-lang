@@ -15,6 +15,19 @@ pub struct ModelRuntime {
 }
 
 impl ModelRuntime {
+    /// Constructs the selected provider and freezes its configured accounting policy.
+    ///
+    /// # Errors
+    /// Rejects invalid endpoint or model configuration.
+    pub fn from_route(route: &crate::config::ResolvedModelRoute) -> Result<Self> {
+        Ok(Self::new_with_provider_id(
+            route.provider_id.as_str(),
+            route.endpoint.clone(),
+            route.model.clone(),
+        )?
+        .with_pricing_mode(route.pricing_mode))
+    }
+
     /// Binds a concrete adapter and one model.
     /// # Errors
     /// Returns invalid model or endpoint configuration.
@@ -93,7 +106,63 @@ pub struct RemoteCompaction<'a> {
     runner: &'a InvocationRunner,
 }
 
+/// A validated native replacement and its observed service accounting.
+#[derive(Debug)]
+pub struct NativeCompactionCheckpoint {
+    pub item: crate::completion::ModelContextItem,
+    pub accounting: pl_protocol::InferenceAccounting,
+}
+
 impl RemoteCompaction<'_> {
+    /// Executes the adapter's native compaction and validates the returned checkpoint.
+    ///
+    /// # Errors
+    /// Rejects completion-only media/sampling options; preserves observed usage when
+    /// transport or checkpoint validation fails.
+    pub async fn checkpoint(
+        &self,
+        request: CompletionRequest,
+        context: ModelInvocationContext,
+    ) -> std::result::Result<NativeCompactionCheckpoint, CompletionFailure> {
+        if !request.prepared_content.is_empty()
+            || request.temperature.is_some()
+            || request.max_tokens.is_some()
+            || request.tool_choice != "auto"
+        {
+            return Err(pl_protocol::PureError::ConfigError(
+                "native compaction does not support completion-only media or sampling options"
+                    .into(),
+            )
+            .into());
+        }
+        let prompt_cache_key = context.prompt_cache_key();
+        let response = self
+            .complete(
+                ModelCompactionRequest {
+                    mode: crate::completion::OpenAiCompactionMode::RemoteV2,
+                    instructions: request.instructions.unwrap_or_default(),
+                    input: request.input,
+                    tools: request.tools,
+                    parallel_tool_calls: request.parallel_tool_calls,
+                    reasoning: request.reasoning,
+                    prompt_cache_key,
+                },
+                context,
+            )
+            .await?;
+        let item =
+            crate::completion::remote_compaction_checkpoint(response.input).map_err(|source| {
+                CompletionFailure {
+                    source,
+                    accounting: Box::new(response.accounting.clone()),
+                }
+            })?;
+        Ok(NativeCompactionCheckpoint {
+            item,
+            accounting: response.accounting,
+        })
+    }
+
     /// Compacts provider context using the declared native protocol.
     /// # Errors
     /// Returns transport or compaction protocol failures.

@@ -1,7 +1,7 @@
 //! Stable versioned object storage for bounded Studio working state.
 
 use anyhow::{Context, Result, bail};
-use pl_core::canonical_content_hash;
+use pl_core::context::content_hash;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, IntoActiveModel,
     QueryFilter,
@@ -61,7 +61,7 @@ where
     T: PersistedStudioObject,
 {
     let payload_json = serde_json::to_string(&value.to_persistence_dto())?;
-    let payload_hash = canonical_content_hash(payload_json.as_bytes());
+    let payload_hash = content_hash(payload_json.as_bytes());
     let revision = i64::try_from(value.revision()).context("object revision exceeds SQLite")?;
     let existing = load_object_row::<T>(db, owner_id).await?;
     if let Some(existing) = existing {
@@ -113,7 +113,7 @@ where
             row.schema_version
         );
     }
-    let actual_hash = canonical_content_hash(row.payload_json.as_bytes());
+    let actual_hash = content_hash(row.payload_json.as_bytes());
     if actual_hash != row.payload_hash {
         bail!("{} object {} hash mismatch", T::OBJECT_KIND, row.owner_id);
     }

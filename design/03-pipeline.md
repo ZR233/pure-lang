@@ -8,7 +8,7 @@
 Item。
 
 `MessagePresentation::{Visible, Hidden}` 是所有消息共用的协议属性，不属于 Plan、Interaction 或 mailbox
-特例。`Visible` 是省略时的默认值；`Hidden` 消息仍是 canonical AgentSession transcript，必须持久化并
+特例。`Visible` 是省略时的默认值；`Hidden` 消息仍是 canonical Thread 上下文，必须持久化并
 完整发送给 provider，但 Thread 产品 projector 不为它产生 GUI Item/notification。输入进入 Turn 时把同一
 presentation 从 durable mailbox 复制到 `TurnRequest` 和 `Message`，不得在宿主或 GUI 重新推导。上下文
 压缩生成的摘要、压缩指令和 synthetic user input 使用 `Hidden`，未来其他内部输入也在创建点选择该值。
@@ -87,6 +87,10 @@ canonical transcript 和 Timeline；前者由首轮 `TurnStarted` 补齐尚未�
 `plan_submit` 使用 typed `{expectedRevision, plan}`、Markdown 标题校验、结构化状态机 receipt 与提交后
 结束 Turn 的语义，并通过通用 `UserInput` 发起确认；`request_user_input` 和普通文本追问都不得替代计划
 提交或重复询问实施授权。运行时只在
-`AgentWorkingState.plan` 保存当前 AgentSession 的有界状态，不维护专用 `PlanCompleted`、Plan trace part
+`studio.plan` Thread 扩展 保存当前 Thread 的有界状态，不维护专用 `PlanCompleted`、Plan trace part
 或 Thread plan item 投影链。批准后的完整 Plan 通过 `Hidden` mailbox continuation 作为 user message
-进入同一 session transcript，但不投影到 GUI Timeline，也不跨 AgentSession 共享。
+进入同一 session transcript，但不投影到 GUI Timeline，也不跨 Thread 共享。
+
+普通 `write_file`、`apply_patch` 与 `write_stdin` 可同批共存，Thread 按模型给出的调用顺序等待
+每个前台调用完成再执行下一个；它们不因此获得结束 Turn、扩展变更等控制权限。真正 Solo 工具仍
+禁止混批。此顺序不是外部文件系统事务，不承诺阻止已有后台任务或外部进程访问文件。

@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use pl_core::config::SkillsConfig;
-use pl_core::skill::{
+use pl_tool::skill::SkillsConfig;
+use pl_tool::skill::{
     SkillProviderRegistration, SkillRegistry, SkillSelectionRequest, SkillSelector,
 };
 
@@ -68,6 +68,42 @@ impl SkillCatalogRuntime {
         })
     }
 
+    /// Freezes one Thread's workspace catalog without publishing a second project refresh event.
+    pub(in crate::studio) async fn freeze_thread_catalog(
+        &self,
+        root: &Path,
+        config: &SkillsConfig,
+        cancellation: tokio_util::sync::CancellationToken,
+        remote: Option<Arc<pl_tool::remote::RemoteWorkspaceFileBackend>>,
+    ) -> Result<Arc<pl_tool::skill::FrozenSkillCatalog>> {
+        let request = pl_tool::skill::SkillProviderRequest {
+            workspace_root: root.to_owned(),
+            config: config.clone(),
+            system_dir: self.system_skills_dir(),
+            cancellation,
+        };
+        let catalog = if let Some(remote) = remote {
+            let (registry, registrations) =
+                self.remote_workspace_registry(config, request.system_dir.as_deref(), remote)?;
+            let result = registry
+                .discover(pl_tool::skill::SkillProviderRequest {
+                    system_dir: None,
+                    ..request
+                })
+                .await;
+            drop(registrations);
+            result?
+        } else {
+            self.registry.discover(request).await?
+        };
+        anyhow::ensure!(
+            catalog.snapshot().warnings.is_empty(),
+            "Skill directory discovery is incomplete: {}",
+            catalog.snapshot().warnings.join("; ")
+        );
+        Ok(Arc::new(catalog))
+    }
+
     pub(in crate::studio) fn system_skills_dir(&self) -> Option<PathBuf> {
         self.system_skills_dir
             .as_ref()
@@ -82,7 +118,7 @@ impl SkillCatalogRuntime {
         &self,
         config: &SkillsConfig,
         system_skills_dir: Option<&Path>,
-        remote_backend: Arc<pl_core::remote::RemoteWorkspaceFileBackend>,
+        remote_backend: Arc<pl_tool::remote::RemoteWorkspaceFileBackend>,
     ) -> Result<(SkillRegistry, Vec<Arc<SkillProviderRegistration>>)> {
         remote::remote_workspace_registry(config, system_skills_dir, remote_backend)
     }
@@ -90,7 +126,7 @@ impl SkillCatalogRuntime {
 
 #[cfg(test)]
 mod tests {
-    use pl_core::ObservedResourceKind;
+    use pl_protocol::ObservedResourceKind;
 
     use super::*;
 

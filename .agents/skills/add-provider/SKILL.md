@@ -1,8 +1,9 @@
 ---
 name: add-provider
 description: Use when adding an LLM provider or preset to Pure-Lang's single route, catalog, and ModelRuntime architecture.
-category: guides
-platforms: ["windows", "linux", "macos"]
+metadata:
+  category: guides
+  platforms: ["windows", "linux", "macos"]
 ---
 
 # Add an LLM Provider or Preset
@@ -39,18 +40,18 @@ factory dispatch 或兼容 wrapper。
 - `ProviderEndpoint` 不保存默认模型、完整模型目录、protocol 或 connection mode。
 - 不按 provider ID、preset ID、slug 或 URL 在 runtime 中推断能力。
 
-### 3. `code/pl-core/src/model_config/catalog.rs` — preset/catalog 注册
+### 3. `code/pl-model/src/config/catalog.rs` — preset/catalog 注册
 
 - 注册 `ProviderPreset` 和其绑定的 `ModelCatalogId`。
 - 多个套餐可共享同一个模型 catalog，不增加执行分支。
 - 确认 custom endpoint override 后 hosted-tool 能力按设计关闭或由显式配置提供。
 
-### 4. `pl-core` 配置与规划
+### 4. `pl-model` 路由与 Studio 装配
 
 - 使用 `ProviderConfig::effective_models()` 作为唯一目录解析入口。
 - 使用 `AgentModelConfig::resolve()` 生成 `ResolvedModelRoute`。
 - Web Search 从 `plan_web_searches()` 的统一编排入口扩展数据输入或能力矩阵；OpenAI 与
-  DeepSeek 的具体规划分别保留在对应函数中，不在 Studio 复制 resolver。
+  DeepSeek 的具体规划分别保留在对应函数中，Studio 消费 model 的统一 resolver，工具层不导入模型配置。
 
 ### 5. `pl-studio-runtime` 与 Flutter
 
@@ -80,9 +81,9 @@ factory dispatch 或兼容 wrapper。
 
 ```powershell
 cargo check -p pl-model --tests
-cargo check -p pl-core --tests
+cargo check -p pl-studio-runtime --tests
 cargo test -p pl-model
-cargo test -p pl-core
+cargo test -p pl-studio-runtime
 ```
 
 涉及 Studio 或 bridge 时执行 `cargo xtask verify-gui`，GUI 行为变更按根 `AGENTS.md` 补充

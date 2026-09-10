@@ -194,6 +194,9 @@ impl InferenceTokenUsage {
 #[serde(rename_all = "camelCase")]
 pub struct InferenceBillingRecord {
     pub inference_id: String,
+    /// Producer-defined usage purpose; absent when historical provenance is unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub purpose: Option<String>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub provider_instance_id: String,
     pub provider: String,
@@ -333,6 +336,7 @@ mod tests {
 
     fn billing_record(reasoning_effort: Option<&str>) -> InferenceBillingRecord {
         InferenceBillingRecord {
+            purpose: Some("main".into()),
             inference_id: "inference-1".to_string(),
             provider_instance_id: "provider-1".to_string(),
             provider: "Provider 1".to_string(),
@@ -347,5 +351,23 @@ mod tests {
             timing: None,
             recorded_at: 1,
         }
+    }
+    #[test]
+    fn billing_purpose_is_preserved_and_missing_provenance_is_not_inferred() {
+        let mut record = billing_record(None);
+        record.purpose = Some("plugin.custom-purpose/v7".into());
+        let value = serde_json::to_value(&record).unwrap();
+        let restored: InferenceBillingRecord = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(restored, record);
+        let mut unknown = value;
+        unknown.as_object_mut().unwrap().remove("purpose");
+        let restored: InferenceBillingRecord = serde_json::from_value(unknown).unwrap();
+        assert_eq!(restored.purpose, None);
+        let mut history = TurnBillingRecord::new();
+        history.append(record.clone()).unwrap();
+        let mut changed = record;
+        changed.purpose = Some("review".into());
+        assert!(history.append(changed).is_err());
+        assert_eq!(history.inferences.len(), 1);
     }
 }

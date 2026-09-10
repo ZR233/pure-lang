@@ -11,6 +11,7 @@ class TimelineRow {
     required this.renderVersion,
     this.turnId,
     this.part,
+    this.raw,
     this.toolGroup,
     this.reasoningGroup,
     this.agentEvent,
@@ -32,6 +33,9 @@ class TimelineRow {
       renderVersion: _timelineRowRenderVersion(part),
       turnId: item.turnId,
       part: part,
+      raw: item.state is ThreadRawItemStateView
+          ? item.state as ThreadRawItemStateView
+          : null,
       isRolledBack:
           part.contextDisposition == ThreadContextDisposition.rolledBack,
     );
@@ -104,6 +108,7 @@ class TimelineRow {
   final int renderVersion;
   final String? turnId;
   final TimelineEntry? part;
+  final ThreadRawItemStateView? raw;
   final TimelineToolGroup? toolGroup;
   final TimelineReasoningGroup? reasoningGroup;
   final TimelineAgentEvent? agentEvent;
@@ -191,6 +196,7 @@ List<TimelineRow> timelineRowsFromThreadItems(List<ThreadItemView> source) {
         item: item,
         part: part,
         type: switch (item.kind) {
+          ThreadItemKind.raw => TimelineRowType.finalAnswer,
           ThreadItemKind.userMessage => TimelineRowType.userMessage,
           ThreadItemKind.parentAgentMessage =>
             TimelineRowType.parentAgentMessage,
@@ -244,7 +250,8 @@ TimelineEntry _timelineEntryFromThreadItem(ThreadItemView item) {
     type: switch (item.kind) {
       ThreadItemKind.userMessage ||
       ThreadItemKind.parentAgentMessage ||
-      ThreadItemKind.agentMessage => TimelineEntryType.text,
+      ThreadItemKind.agentMessage ||
+      ThreadItemKind.raw => TimelineEntryType.text,
       ThreadItemKind.reasoning => TimelineEntryType.reasoning,
       ThreadItemKind.skill => TimelineEntryType.skill,
       ThreadItemKind.toolCall => TimelineEntryType.tool,

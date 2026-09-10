@@ -8,9 +8,9 @@ Studio 产品数据使用 `~/.pure/studio/studio.sqlite`，会话使用同目录
 启动前取得 Studio home 的跨进程独占 lock；数据库使用 WAL、foreign
 keys、busy timeout 与串行 write-behind transaction。
 
-核心持久化只包含项目、Thread、Turn/input、Item、Interaction、working state、附件、设置、观测缓存与
-版本化 Studio object。
-Workflow 是 `AgentWorkingState` 的 typed 字段，不新增 workflow 阶段/边/转换业务表。旧 TaskRun、
+产品库保存项目、Thread 目录、设置、观测缓存与版本化 Studio object；通用 Thread journal、
+输入、交互、工具交付、扩展及资源元数据保存在独立会话库，Item 由日志投影。
+Workflow 是 Studio 编码的 `studio.workflow` Thread 扩展，不新增 workflow 阶段/边/转换业务表。旧 TaskRun、
 WorkUnit、ReviewRound、MergeRecord、旧 worktree registration 与 Task recovery 表全部删除。新的 worktree
 lease 复用 `studio_objects`，不新增 Task 表；lease 保存
 `prepared | active | preserved | cleanupRequested | cleaned`、repo/path/branch/base 和 revision，仅表达
@@ -18,11 +18,9 @@ lease 复用 `studio_objects`，不新增 Task 表；lease 保存
 
 ## 19.2 checkpoint
 
-活动 Thread owner 是唯一事实源。write-behind queue 接收不可变 typed checkpoint；worker 负责编码、
-hash 和 SQLite transaction。workflow tool-call、tool result 与 working state 同批提交，失败共同回滚。
-上述回滚仅限数据库事务，不回滚已提交内存。后台写入独立重试并完整保留未保存事实；队列不对
-实时会话施加容量背压。内存 revision 与 durable revision 独立，持久化状态仅用于诊断和释放判断。
-完整 workflow state 最大 256 KiB；图 hash 与尾部历史在进入 repository 前已由 core 验证。完整图与
+活动 Thread owner 是唯一事实源。write-behind queue 接收已冻结编码的不可变 commit；worker 只执行外层完整性校验和 SQLite transaction。workflow tool-call、tool result 与 working state 同批提交，失败共同回滚。
+上述回滚仅限数据库事务，不回滚已提交内存。后台写入独立重试并完整保留未保存事实；待保存量达到 Thread/store 阈值时暂停新的执行受理，既有结果继续保存。内存 revision 与 durable revision 独立，持久化状态仅用于诊断和释放判断。
+完整 workflow state 最大 256 KiB；图 hash 与尾部历史在进入 存储前已由 Studio 验证。完整图与
 Mode Prompt 只存在于当前内存注册快照，不写入 repository。
 
 查询不产生 mutation。read snapshot、timeline keyset page 与 observed state 必须可重复且不触发扫描、

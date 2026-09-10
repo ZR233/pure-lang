@@ -23,7 +23,7 @@ enum WebSocketCommand {
 pub(crate) struct ResponsesWebSocketConnection {
     command_tx: mpsc::Sender<WebSocketCommand>,
     message_rx: mpsc::UnboundedReceiver<std::result::Result<Message, PureError>>,
-    pump_task: tokio::task::JoinHandle<()>,
+    pump_task: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl ResponsesWebSocketConnection {
@@ -79,7 +79,23 @@ impl ResponsesWebSocketConnection {
         Self {
             command_tx,
             message_rx,
-            pump_task,
+            pump_task: Some(pump_task),
+        }
+    }
+
+    pub(crate) async fn close(&mut self) -> Result<(), PureError> {
+        let Some(task) = self.pump_task.as_mut() else {
+            return Ok(());
+        };
+        task.abort();
+        let outcome = task.await;
+        self.pump_task = None;
+        match outcome {
+            Ok(()) => Ok(()),
+            Err(error) if error.is_cancelled() => Ok(()),
+            Err(error) => Err(connection_error(format!(
+                "Responses WebSocket pump failed while closing: {error}"
+            ))),
         }
     }
 
@@ -104,6 +120,8 @@ impl ResponsesWebSocketConnection {
 
 impl Drop for ResponsesWebSocketConnection {
     fn drop(&mut self) {
-        self.pump_task.abort();
+        if let Some(task) = &self.pump_task {
+            task.abort();
+        }
     }
 }

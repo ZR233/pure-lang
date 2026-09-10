@@ -1,15 +1,16 @@
 //! Provider 设置编辑：把 wire 层的 provider/model/role 更新解析为配置编辑对象。
 
 use anyhow::Result;
-use pl_core::WebSearchContextSize;
-use pl_core::WebSearchMode;
-use pl_core::{ProviderConnectionMode, ProviderWireProtocol};
+use pl_model::provider::{ProviderConnectionMode, ProviderWireProtocol};
+use pl_protocol::WebSearchContextSize;
+use pl_protocol::search::WebSearchMode;
 use pl_protocol::studio::{
     ProviderModelConnectionUpdate, ProviderModelUpdate, ProviderSecretUpdate,
     ProviderSettingsUpdate, RoleSettingsUpdate, StudioError, UpdateWebSearchSettingsRequest,
 };
 
-use crate::{ProviderEdit, ProviderModelEdit, ProviderPresetId, RoleEdit};
+use crate::{ProviderEdit, ProviderModelEdit, RoleEdit};
+use pl_model::config::ProviderPresetId;
 
 use super::view::{normalized_optional, normalized_string_list};
 
@@ -25,7 +26,7 @@ pub(super) fn provider_edit(
     let current_token = current
         .models
         .providers
-        .get(&crate::ProviderId::new(current_id)?)
+        .get(&pl_model::config::ProviderId::new(current_id)?)
         .and_then(|provider| provider.bearer_token.clone());
     let bearer_token = match input.secret {
         ProviderSecretUpdate::Preserve => current_token,
@@ -48,9 +49,9 @@ pub(super) fn provider_edit(
         base_url: Some(input.base_url),
         bearer_token,
         pricing_mode: if input.pricing_enabled {
-            pl_core::PricingMode::Catalog
+            pl_protocol::PricingMode::Catalog
         } else {
-            pl_core::PricingMode::Disabled
+            pl_protocol::PricingMode::Disabled
         },
         default_model: input.default_model,
         custom_models: input
@@ -131,7 +132,7 @@ impl From<RoleSettingsUpdate> for RoleEdit {
 
 pub(super) fn web_search_config(
     request: UpdateWebSearchSettingsRequest,
-) -> Result<(u64, pl_core::WebSearchConfig)> {
+) -> Result<(u64, pl_protocol::search::WebSearchConfig)> {
     let mode = match request.mode.trim() {
         "disabled" => WebSearchMode::Disabled,
         "cached" => WebSearchMode::Cached,
@@ -150,7 +151,7 @@ pub(super) fn web_search_config(
             ));
         }
     };
-    let location = crate::WebSearchLocation {
+    let location = pl_protocol::search::WebSearchLocation {
         country: normalized_optional(request.country),
         region: normalized_optional(request.region),
         city: normalized_optional(request.city),
@@ -158,7 +159,7 @@ pub(super) fn web_search_config(
     };
     Ok((
         request.expected_revision,
-        pl_core::WebSearchConfig {
+        pl_protocol::search::WebSearchConfig {
             mode,
             context_size,
             allowed_domains: normalized_string_list(request.allowed_domains),

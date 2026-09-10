@@ -1,7 +1,6 @@
 mod agent_host;
 pub(crate) mod entity;
 mod ids;
-mod interaction_service;
 mod mappers;
 mod merged_page;
 mod paths;
@@ -12,12 +11,14 @@ mod recovery_registry;
 mod runtime;
 mod runtime_lock;
 mod runtime_state;
+mod session_reset;
 mod store;
 mod store_support;
 pub(crate) mod thread;
+mod thread_factory;
+pub(crate) mod thread_projection;
 
-pub(crate) use ids::unix_seconds;
-pub use interaction_service::*;
+pub(crate) use ids::{new_id, unix_seconds};
 pub use persistence::*;
 pub use product_event_bus::ProductEventBus;
 pub use records::{AttachmentRecord, ProjectRecord, ThreadKind, ThreadRecord, ThreadVisibility};

@@ -729,6 +729,7 @@ sealed class BridgeToolApprovalInteractionState
 enum BridgeToolApprovalResolution { approved, denied }
 
 class BridgeTurn {
+  final String? inputId;
   final String id;
   final String threadId;
   final BigInt revision;
@@ -736,6 +737,7 @@ class BridgeTurn {
   final PlatformInt64 updatedAt;
 
   const BridgeTurn({
+    this.inputId,
     required this.id,
     required this.threadId,
     required this.revision,
@@ -745,6 +747,7 @@ class BridgeTurn {
 
   @override
   int get hashCode =>
+      inputId.hashCode ^
       id.hashCode ^
       threadId.hashCode ^
       revision.hashCode ^
@@ -756,6 +759,7 @@ class BridgeTurn {
       identical(this, other) ||
       other is BridgeTurn &&
           runtimeType == other.runtimeType &&
+          inputId == other.inputId &&
           id == other.id &&
           threadId == other.threadId &&
           revision == other.revision &&
@@ -826,6 +830,8 @@ class BridgeTurnBudgetUsage {
 sealed class BridgeTurnCancellationCause with _$BridgeTurnCancellationCause {
   const BridgeTurnCancellationCause._();
 
+  const factory BridgeTurnCancellationCause.unspecified() =
+      BridgeTurnCancellationCause_Unspecified;
   const factory BridgeTurnCancellationCause.userRequested() =
       BridgeTurnCancellationCause_UserRequested;
   const factory BridgeTurnCancellationCause.runtimeShutdown() =

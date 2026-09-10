@@ -7,9 +7,9 @@ use std::sync::Arc;
 
 use crate::studio::ids::unix_seconds;
 use anyhow::{Error, Result};
-use pl_core::config::SkillsConfig;
-use pl_core::skill::{SkillCatalog, SkillProviderRequest};
-use pl_core::{ObservedResourceCommand, ObservedResourceKind, StateError, StateOperation};
+use pl_protocol::{ObservedResourceCommand, ObservedResourceKind, StateError, StateOperation};
+use pl_tool::skill::SkillsConfig;
+use pl_tool::skill::{SkillCatalog, SkillProviderRequest};
 
 use super::remote;
 use super::{SkillCatalogRuntime, SkillsStateData, SkillsStateSnapshot};
@@ -17,7 +17,7 @@ use super::{SkillCatalogRuntime, SkillsStateData, SkillsStateSnapshot};
 /// 一次显式发现的 provider 来源。
 enum DiscoverySource {
     Local,
-    Remote(Arc<pl_core::remote::RemoteWorkspaceFileBackend>),
+    Remote(Arc<pl_tool::remote::RemoteWorkspaceFileBackend>),
 }
 
 impl SkillCatalogRuntime {
@@ -47,7 +47,7 @@ impl SkillCatalogRuntime {
         workspace_root: &Path,
         config: &SkillsConfig,
         cancellation: tokio_util::sync::CancellationToken,
-        remote_backend: Arc<pl_core::remote::RemoteWorkspaceFileBackend>,
+        remote_backend: Arc<pl_tool::remote::RemoteWorkspaceFileBackend>,
     ) -> Result<SkillsStateSnapshot> {
         self.discover_from_source(
             project_id,
@@ -371,6 +371,6 @@ mod tests {
             .snapshot()
             .find("demo")
             .expect("global disable must not hide the project Skill from settings");
-        assert_eq!(skill.source, pl_core::skill::SkillSourceKind::Project);
+        assert_eq!(skill.source, pl_tool::skill::SkillSourceKind::Project);
     }
 }

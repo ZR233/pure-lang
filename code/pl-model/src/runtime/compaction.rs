@@ -249,12 +249,22 @@ mod tests {
         let provider =
             crate::runtime::ModelRuntime::new(endpoint, fixture.model().clone()).unwrap();
         let (tx, _) = tokio::sync::broadcast::channel(16);
-        let context = ModelInvocationContext::new(Default::default()).with_events(tx);
+        let context = ModelInvocationContext::new(Default::default())
+            .with_events(tx)
+            .with_prompt_cache_key(Some("stable-native-key".into()));
+        let frozen = compaction_request(OpenAiCompactionMode::RemoteV2);
+        let request = CompletionRequest::builder()
+            .instructions(frozen.instructions)
+            .input(frozen.input)
+            .tools(frozen.tools)
+            .parallel_tool_calls(frozen.parallel_tool_calls)
+            .reasoning(frozen.reasoning)
+            .build();
 
         let response = provider
             .compaction()
             .expect("declared native compaction")
-            .complete(compaction_request(OpenAiCompactionMode::RemoteV2), context)
+            .checkpoint(request, context)
             .await
             .unwrap();
         let captured = handle.await.unwrap();
@@ -268,7 +278,13 @@ mod tests {
             captured.body["input"].as_array().unwrap().last().unwrap(),
             &serde_json::json!({"type": "compaction_trigger"})
         );
-        assert_eq!(response.input.len(), 1);
+        assert_eq!(
+            response.item,
+            ModelContextItem::Compaction {
+                encrypted_content: "encrypted-v2".into(),
+            }
+        );
+        assert_eq!(captured.body["prompt_cache_key"], "stable-native-key");
         assert_eq!(response.accounting.usage.totals().total_tokens, 15);
     }
 

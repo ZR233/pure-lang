@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+process-wrap = { workspace = true }
 pl-protocol = { workspace = true }
 tokio = { workspace = true }
 serde_json = { workspace = true }
@@ -12,3 +13,9 @@ thiserror = { workspace = true }
 libc = { workspace = true }
 
 tempfile = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }

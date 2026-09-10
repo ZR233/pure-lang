@@ -1919,4 +1919,22 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get timelineToolOutput => 'Output';
+
+  @override
+  String get costPurposeMain => 'Main conversation';
+
+  @override
+  String get costPurposeSummary => 'Summarization';
+
+  @override
+  String get costPurposeReview => 'Review';
+
+  @override
+  String get costPurposeTitle => 'Title';
+
+  @override
+  String get costPurposeUnknown => 'Unknown purpose';
+
+  @override
+  String get timelineRawRecord => 'Original history record';
 }

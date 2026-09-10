@@ -4,8 +4,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use anyhow::{Context, Result, ensure};
-use pl_core::PureError;
-use pl_core::{MediaMixPolicy, MediaRepresentation, ModelInfo, ModelInputSource, ModelModality};
+use pl_model::model::{
+    MediaMixPolicy, MediaRepresentation, ModelInfo, ModelInputSource, ModelModality,
+};
+use pl_protocol::PureError;
 use pl_protocol::studio::{StudioAttachmentDraftSource, StudioAttachmentModality};
 use url::Url;
 

@@ -234,8 +234,15 @@ pub async fn subscribe_thread(thread_id: String) -> Result<BridgeEventSubscripti
             tokio::select! {
                 _ = producer_cancel.cancelled() => break,
                 frame = events.recv() => {
-                    let Some(frame) = frame else {
-                        break;
+                    let frame = match frame {
+                        Ok(Some(frame)) => frame,
+                        Ok(None) => break,
+                        Err(error) => {
+                            let _ = sender.send(BridgeThreadStreamEnvelope::Failure {
+                                error: BridgeError::from(error),
+                            }).await;
+                            break;
+                        }
                     };
                     match bridge_thread_update(frame) {
                         Ok(Some(update)) => {

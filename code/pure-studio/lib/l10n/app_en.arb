@@ -1047,5 +1047,11 @@
   "settingsPermissionReviewDescription": "Use automatic review to evaluate tool operations.",
   "settingsPermissionFullDescription": "Run tools with full access under the configured runtime policy.",
   "timelineToolArguments": "Arguments",
-  "timelineToolOutput": "Output"
+  "timelineToolOutput": "Output",
+  "costPurposeMain": "Main conversation",
+  "costPurposeSummary": "Summarization",
+  "costPurposeReview": "Review",
+  "costPurposeTitle": "Title",
+  "costPurposeUnknown": "Unknown purpose",
+  "timelineRawRecord": "Original history record"
 }

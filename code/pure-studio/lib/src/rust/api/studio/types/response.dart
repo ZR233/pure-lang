@@ -15,7 +15,7 @@ import 'updater.dart';
 part 'response.freezed.dart';
 
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `ProviderUsagesResponse`, `SkillsResponse`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 class ArchiveThreadResult {
   final String archivedRootId;
@@ -569,6 +569,31 @@ sealed class BridgeProviderUsageStateSnapshot
   ) = BridgeProviderUsageStateSnapshot_Stopped;
 }
 
+class BridgePurposeCostSnapshot {
+  final String? purpose;
+  final List<BridgeRuntimeCostAmount> estimatedCosts;
+  final bool hasUnpricedUsage;
+
+  const BridgePurposeCostSnapshot({
+    this.purpose,
+    required this.estimatedCosts,
+    required this.hasUnpricedUsage,
+  });
+
+  @override
+  int get hashCode =>
+      purpose.hashCode ^ estimatedCosts.hashCode ^ hasUnpricedUsage.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgePurposeCostSnapshot &&
+          runtimeType == other.runtimeType &&
+          purpose == other.purpose &&
+          estimatedCosts == other.estimatedCosts &&
+          hasUnpricedUsage == other.hasUnpricedUsage;
+}
+
 class BridgeRecoveryStateData {
   final List<BridgeStudioRecoveryIssueDto> issues;
 
@@ -621,11 +646,13 @@ sealed class BridgeRecoveryStateSnapshot with _$BridgeRecoveryStateSnapshot {
 
 class BridgeSessionCostSnapshot {
   final String rootThreadId;
+  final List<BridgePurposeCostSnapshot> purposeCosts;
   final List<BridgeRuntimeCostAmount> estimatedCosts;
   final bool hasUnpricedUsage;
 
   const BridgeSessionCostSnapshot({
     required this.rootThreadId,
+    required this.purposeCosts,
     required this.estimatedCosts,
     required this.hasUnpricedUsage,
   });
@@ -633,6 +660,7 @@ class BridgeSessionCostSnapshot {
   @override
   int get hashCode =>
       rootThreadId.hashCode ^
+      purposeCosts.hashCode ^
       estimatedCosts.hashCode ^
       hasUnpricedUsage.hashCode;
 
@@ -642,6 +670,7 @@ class BridgeSessionCostSnapshot {
       other is BridgeSessionCostSnapshot &&
           runtimeType == other.runtimeType &&
           rootThreadId == other.rootThreadId &&
+          purposeCosts == other.purposeCosts &&
           estimatedCosts == other.estimatedCosts &&
           hasUnpricedUsage == other.hasUnpricedUsage;
 }
@@ -1257,17 +1286,17 @@ class StartNewThreadResponse {
 
 class StartTurnResponse {
   final String threadId;
-  final String turnId;
+  final String inputId;
   final BigInt revision;
 
   const StartTurnResponse({
     required this.threadId,
-    required this.turnId,
+    required this.inputId,
     required this.revision,
   });
 
   @override
-  int get hashCode => threadId.hashCode ^ turnId.hashCode ^ revision.hashCode;
+  int get hashCode => threadId.hashCode ^ inputId.hashCode ^ revision.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1275,23 +1304,23 @@ class StartTurnResponse {
       other is StartTurnResponse &&
           runtimeType == other.runtimeType &&
           threadId == other.threadId &&
-          turnId == other.turnId &&
+          inputId == other.inputId &&
           revision == other.revision;
 }
 
 class SteerTurnResponse {
   final String threadId;
-  final String turnId;
+  final String inputId;
   final BigInt revision;
 
   const SteerTurnResponse({
     required this.threadId,
-    required this.turnId,
+    required this.inputId,
     required this.revision,
   });
 
   @override
-  int get hashCode => threadId.hashCode ^ turnId.hashCode ^ revision.hashCode;
+  int get hashCode => threadId.hashCode ^ inputId.hashCode ^ revision.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1299,7 +1328,7 @@ class SteerTurnResponse {
       other is SteerTurnResponse &&
           runtimeType == other.runtimeType &&
           threadId == other.threadId &&
-          turnId == other.turnId &&
+          inputId == other.inputId &&
           revision == other.revision;
 }
 

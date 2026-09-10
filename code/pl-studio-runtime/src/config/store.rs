@@ -198,10 +198,9 @@ impl ConfigStore {
         let content = serialize_persisted_config(config)?;
         fs::create_dir_all(self.paths.config_dir())?;
         let previous = self.apply_credentials(config, persisted_provider_ids)?;
-        if let Err(error) = pl_core::atomic_file::write_file_atomically(
-            self.paths.config_file(),
-            content.as_bytes(),
-        ) {
+        if let Err(error) =
+            pl_tool::workspace::write_file_atomically(self.paths.config_file(), content.as_bytes())
+        {
             self.restore_credentials(&previous);
             return Err(error.into());
         }
@@ -236,7 +235,7 @@ impl ConfigStore {
             original,
             incompatible,
             |config_path, persisted| {
-                pl_core::atomic_file::write_file_atomically(config_path, persisted)
+                pl_tool::workspace::write_file_atomically(config_path, persisted)
                     .map_err(Into::into)
             },
         )

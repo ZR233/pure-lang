@@ -26,7 +26,7 @@ pub enum StudioMcpServerState {
 
 #[cfg(test)]
 mod tests {
-    use pl_core::StateError;
+    use pl_protocol::StateError;
     use pretty_assertions::assert_eq;
 
     use super::*;

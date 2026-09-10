@@ -84,7 +84,7 @@ impl ProductEventBus {
 
     pub fn emit_thread_mode_catalog(
         &self,
-        state: pl_core::ThreadModeCatalogSnapshot,
+        state: pl_protocol::ThreadModeCatalogSnapshot,
     ) -> StudioProductEventEnvelope {
         self.emit(StudioProductEventKind::ThreadModeCatalogChanged(state))
     }
@@ -152,7 +152,7 @@ impl ProductEventBus {
                 pending_commits: pending,
                 oldest_pending_revision: Some(sessions.durable.saturating_add(1)),
                 first_failed_at: super::unix_seconds(),
-                error: pl_core::StateError {
+                error: pl_protocol::StateError {
                     code: "sessionPersistenceFailed".into(),
                     message: error.to_string(),
                     retryable: true,

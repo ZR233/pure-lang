@@ -459,7 +459,7 @@ mod tests {
             .expect("tool call");
 
         assert_eq!(call.payload_text(), "{bad");
-        assert_eq!(call.invalid_arguments.as_ref().unwrap().raw, "{bad");
+        assert_eq!(call.payload_text(), "{bad");
         assert!(
             call.invalid_arguments_message()
                 .unwrap()
@@ -558,7 +558,7 @@ mod tests {
 #[cfg(test)]
 mod accumulator_tests {
     use pl_protocol::PureError;
-    use pl_trace::{AgentEvent, TraceEventKind, TracePartKind};
+    use pl_protocol::trace::{AgentEvent, TraceEventKind, TracePartKind};
 
     use super::super::StreamCompletionAccumulator;
     use super::*;
@@ -608,7 +608,10 @@ mod accumulator_tests {
         assert_eq!(response.tool_calls[0].name, "read_file");
         match &response.tool_calls[0].payload {
             ToolCallPayload::Function { arguments } => {
-                assert_eq!(arguments, &serde_json::json!({"path": "Cargo.toml"}));
+                assert_eq!(
+                    serde_json::from_str::<serde_json::Value>(arguments).unwrap(),
+                    serde_json::json!({"path": "Cargo.toml"})
+                );
             }
             other => panic!("unexpected payload: {other:?}"),
         }

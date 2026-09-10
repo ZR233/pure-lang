@@ -712,8 +712,12 @@ fn validate_workflow_call_arguments(body: &Value) -> Result<()> {
             _ => bail!("workflow call arguments are not an object"),
         };
         match tool_name(call).expect("filtered workflow tool") {
-            "workflow_transition" => pl_core::validate_workflow_transition_arguments(arguments),
-            "workflow_restart" => pl_core::validate_workflow_restart_arguments(arguments),
+            "workflow_transition" => {
+                pl_studio_runtime::workflow_tool::validate_workflow_transition_arguments(arguments)
+            }
+            "workflow_restart" => {
+                pl_studio_runtime::workflow_tool::validate_workflow_restart_arguments(arguments)
+            }
             _ => {
                 ensure!(
                     arguments.as_object().is_some_and(serde_json::Map::is_empty),

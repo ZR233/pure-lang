@@ -8,7 +8,7 @@
 | `pl-trace` | 内部 AgentEvent、TraceEvent、TracePart 运行事件 |
 | `pl-model` | LLM provider、模型元数据、wire API、SSE |
 | `pl-lsp` | LSP client、语言服务器进程与代码智能查询 |
-| `pl-core` | turn、session、Studio SQLite、角色化配置、工具审批、核心编译流程编排 |
+| `pl-core` | 通用 Thread、上下文、Model/Tool 接口、交互、工具任务与可选 SQLite |
 | `pl-studio-bridge` | Flutter Rust Bridge v2 native crate，转发 Flutter API 与 event stream |
 | `pure-studio` | Flutter Windows 桌面前端，负责 Material 3 UI、FRB 调用、事件订阅和输入回调 |
 

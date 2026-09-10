@@ -50,14 +50,33 @@ String formatTokenThroughput(double? tokensPerSecond) {
   return '$value t/s';
 }
 
+class PurposeCostView {
+  const PurposeCostView({
+    this.purpose,
+    required this.estimatedCosts,
+    required this.hasUnpricedUsage,
+  });
+
+  final String? purpose;
+  final List<RuntimeCostView> estimatedCosts;
+  final bool hasUnpricedUsage;
+
+  String get label {
+    final value = formatRuntimeCosts(estimatedCosts);
+    return value.isEmpty ? '-' : value;
+  }
+}
+
 class SessionCostView {
   const SessionCostView({
+    this.purposeCosts = const [],
     required this.rootThreadId,
     required this.estimatedCosts,
     required this.hasUnpricedUsage,
   });
 
   final String rootThreadId;
+  final List<PurposeCostView> purposeCosts;
   final List<RuntimeCostView> estimatedCosts;
   final bool hasUnpricedUsage;
 

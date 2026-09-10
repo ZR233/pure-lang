@@ -78,25 +78,6 @@ impl ThreadWriteBehindWriter {
         self.pending_commits.load(Ordering::Acquire)
     }
 
-    pub(in crate::studio) fn has_pending_directory(&self, owner_id: &str) -> bool {
-        if self
-            .shared
-            .queue
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .iter()
-            .any(|entry| entry.contains_directory_fact_for(owner_id))
-        {
-            return true;
-        }
-        self.shared
-            .inflight
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .iter()
-            .any(|entry| entry.contains_directory_fact_for(owner_id))
-    }
-
     pub(in crate::studio) fn state_snapshot(&self) -> PersistenceStateSnapshot {
         self.shared.state.borrow().clone()
     }

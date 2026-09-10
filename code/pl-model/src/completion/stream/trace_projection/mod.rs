@@ -11,7 +11,7 @@ mod tool;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use pl_trace::{
+use pl_protocol::trace::{
     AgentEvent, TraceEvent, TraceEventDraft, TraceEventKind, TraceEventSink, TracePart,
     TracePartAction, TracePartCompletion, TracePartState, TraceToolFailureKind,
 };
@@ -28,7 +28,7 @@ pub(crate) struct TraceProjection {
     segment_occurrences: HashMap<String, u64>,
     events: Vec<TraceEvent>,
     sink: Arc<dyn TraceEventSink>,
-    trace_error: Option<pl_trace::TraceEventSinkError>,
+    trace_error: Option<pl_protocol::trace::TraceEventSinkError>,
 }
 
 impl TraceProjection {
@@ -42,7 +42,7 @@ impl TraceProjection {
         sink: Option<Arc<dyn TraceEventSink>>,
     ) -> Self {
         let sink = sink.unwrap_or_else(|| {
-            Arc::new(pl_trace::InMemoryTraceEventSink::new(
+            Arc::new(pl_protocol::trace::InMemoryTraceEventSink::new(
                 context.session_id.clone(),
                 0,
             ))
@@ -66,7 +66,7 @@ impl TraceProjection {
         self.events.clone()
     }
 
-    pub(crate) fn take_trace_error(&mut self) -> Option<pl_trace::TraceEventSinkError> {
+    pub(crate) fn take_trace_error(&mut self) -> Option<pl_protocol::trace::TraceEventSinkError> {
         self.trace_error.take()
     }
 
@@ -129,7 +129,7 @@ impl TraceProjection {
             unix_seconds(),
             self.turn_id.clone(),
             item_id,
-            pl_trace::TracePartSource::Model,
+            pl_protocol::trace::TracePartSource::Model,
             state,
         ))
         .into_iter()
@@ -176,7 +176,7 @@ impl TraceProjection {
                     TracePartAction::Append(event.delta.clone()),
                 )) {
                     self.trace_error.get_or_insert_with(|| {
-                        pl_trace::TraceEventSinkError::new(error.to_string())
+                        pl_protocol::trace::TraceEventSinkError::new(error.to_string())
                     });
                     return None;
                 }
@@ -208,7 +208,7 @@ fn unix_seconds() -> i64 {
 mod test_support {
     use std::sync::Arc;
 
-    use pl_trace::{AgentEvent, TraceEventSink, TracePart, TracePartKind};
+    use pl_protocol::trace::{AgentEvent, TraceEventSink, TracePart, TracePartKind};
 
     use super::{CompletionTraceContext, TraceProjection};
 
@@ -289,21 +289,21 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use pl_trace::{TraceEvent, TraceEventDraft, TraceEventSink, TraceEventSinkError};
+    use pl_protocol::trace::{TraceEvent, TraceEventDraft, TraceEventSink, TraceEventSinkError};
 
     use super::TraceProjection;
     use super::test_support::{test_trace_context, trace, trace_part_event, trace_with_sink};
 
     #[derive(Debug)]
     struct RejectAfterFirstTraceSink {
-        inner: pl_trace::InMemoryTraceEventSink,
+        inner: pl_protocol::trace::InMemoryTraceEventSink,
         attempts: AtomicUsize,
     }
 
     impl RejectAfterFirstTraceSink {
         fn new() -> Self {
             Self {
-                inner: pl_trace::InMemoryTraceEventSink::new("session-1", 0),
+                inner: pl_protocol::trace::InMemoryTraceEventSink::new("session-1", 0),
                 attempts: AtomicUsize::new(0),
             }
         }
@@ -329,13 +329,13 @@ mod tests {
 
         let events = trace.append_text_delta(
             "provider-text",
-            pl_trace::TraceTextChannel::Final,
+            pl_protocol::trace::TraceTextChannel::Final,
             "must not escape".to_string(),
         );
 
         assert!(matches!(
             events.as_slice(),
-            [pl_trace::AgentEvent::TracePartStarted { .. }]
+            [pl_protocol::trace::AgentEvent::TracePartStarted { .. }]
         ));
         assert_eq!(sink.inner.events().len(), 1);
         assert_eq!(trace.events().len(), 1);
@@ -350,8 +350,14 @@ mod tests {
 
     #[test]
     fn trace_sink_sequence_offsets_started_sequence() {
-        let first_sink = Arc::new(pl_trace::InMemoryTraceEventSink::new("session-1", 10));
-        let second_sink = Arc::new(pl_trace::InMemoryTraceEventSink::new("session-1", 20));
+        let first_sink = Arc::new(pl_protocol::trace::InMemoryTraceEventSink::new(
+            "session-1",
+            10,
+        ));
+        let second_sink = Arc::new(pl_protocol::trace::InMemoryTraceEventSink::new(
+            "session-1",
+            20,
+        ));
         let mut first =
             TraceProjection::with_sink(test_trace_context("turn-1-inf-0"), Some(first_sink));
         let mut second =
@@ -383,12 +389,12 @@ mod tests {
         let mut trace = trace();
         let _ = trace.append_text_delta(
             "msg_1",
-            pl_trace::TraceTextChannel::Final,
+            pl_protocol::trace::TraceTextChannel::Final,
             "partial".to_string(),
         );
         let _ = trace.complete_text(
             "msg_1",
-            pl_trace::TraceTextChannel::Final,
+            pl_protocol::trace::TraceTextChannel::Final,
             Some("partial".to_string()),
         );
         let _ = trace.append_thinking_delta("thinking", 0, "reasoning".to_string());

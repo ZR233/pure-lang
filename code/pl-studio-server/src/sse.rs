@@ -140,7 +140,14 @@ pub(crate) async fn thread_events(
             tokio::select! {
                 _ = shutdown.cancelled() => break,
                 update = events.recv() => {
-                    let Some(update) = update else { break; };
+                    let update = match update {
+                        Ok(Some(update)) => update,
+                        Ok(None) => break,
+                        Err(error) => {
+                            send_json(&sender, "error", None, &serde_json::json!({"message": error.to_string()}));
+                            break;
+                        }
+                    };
                     let (event_name, event_id) = match &update {
                         ThreadSubscriptionUpdate::Snapshot { snapshot } => (
                             "snapshot",

@@ -6,8 +6,8 @@ use std::time::Duration;
 use async_openai::Client;
 use async_openai::types::stream::StreamResponse;
 use futures::StreamExt;
+use pl_protocol::trace::{AgentEventSender, TraceEventSink};
 use pl_protocol::{InferenceTiming, PureError, Result};
-use pl_trace::{AgentEventSender, TraceEventSink};
 
 use super::{ModelSession, responses_websocket, wire_capture};
 
@@ -15,7 +15,6 @@ use crate::completion::stream::{
     CompletionEventStream, StreamCollectContext, collect_completion_event_stream,
     decode_raw_event_stream,
 };
-use crate::completion::tool_schema::CustomToolProjection;
 use crate::completion::{
     CompletionFailure, CompletionRequest, CompletionResponse, CompletionTraceContext,
 };
@@ -39,9 +38,27 @@ pub struct ModelInvocationContext {
     trace_sink: Option<Arc<dyn TraceEventSink>>,
     cancellation: Option<tokio_util::sync::CancellationToken>,
     prompt_cache_key: Option<String>,
+    progress: Option<pl_core::model::ModelProgressSender>,
 }
 
 impl ModelInvocationContext {
+    pub(super) fn with_progress(
+        mut self,
+        progress: Option<pl_core::model::ModelProgressSender>,
+    ) -> Self {
+        self.progress = progress;
+        self
+    }
+
+    pub(super) fn prompt_cache_key(&self) -> Option<String> {
+        self.prompt_cache_key.clone()
+    }
+
+    pub(super) fn with_session(mut self, session: ModelSession) -> Self {
+        self.session = session;
+        self
+    }
+
     pub fn new(session: ModelSession) -> Self {
         let (event_tx, _) = tokio::sync::broadcast::channel(16);
         Self {
@@ -51,6 +68,7 @@ impl ModelInvocationContext {
             trace_sink: None,
             cancellation: None,
             prompt_cache_key: None,
+            progress: None,
         }
     }
 
@@ -83,7 +101,7 @@ impl ModelInvocationContext {
         self
     }
     fn publish_retry_notice(&self, attempt: u32, notice: ConnectionNotice) -> Result<()> {
-        use pl_trace::{
+        use pl_protocol::trace::{
             AgentEvent, TraceEventDraft, TraceEventKind, TracePartAction, TracePartCompletion,
             TracePartSource, TracePartState, TraceTextChannel, TraceTextPart,
         };
@@ -330,6 +348,16 @@ impl InvocationRunner {
         request: CompletionRequest,
         context: ModelInvocationContext,
     ) -> std::result::Result<CompletionResponse, CompletionFailure> {
+        super::context::validate(self.model.binding.transport.protocol, &request.input)?;
+        let _session_lease = if let Some(cancellation) = &context.cancellation {
+            tokio::select! {
+                biased;
+                _ = cancellation.cancelled() => return Err(PureError::LlmError("model invocation cancelled before admission".into()).into()),
+                lease = context.session.admit() => lease?,
+            }
+        } else {
+            context.session.admit().await?
+        };
         let inference_timer = InferenceTimer::start();
         let original_trace = context.trace.clone();
         let retry_jitter_key = original_trace
@@ -526,6 +554,7 @@ impl InvocationRunner {
                     .inspect({
                         let replay_unsafe = Arc::clone(&replay_unsafe);
                         let inference_timer = inference_timer.clone();
+                        let mut progress = super::thread_model::progress::ProgressProjection::new(context.progress.clone());
                         move |event| {
                             if let Ok(event) = event
                                 && (has_hosted_tools || matches!(event,
@@ -536,6 +565,7 @@ impl InvocationRunner {
                             }
                             if let Ok(event) = event {
                                 inference_timer.observe(event);
+                                progress.observe(event);
                             }
                         }
                     })
@@ -588,20 +618,7 @@ impl InvocationRunner {
         async move {
             let token = endpoint.bearer_token.clone();
 
-            let effective_capabilities = model_info
-                .capabilities
-                .clone()
-                .with_native_custom_tools(endpoint.uses_native_custom_tools());
-            let custom_tools_native = endpoint.uses_native_custom_tools()
-                && effective_capabilities.supports_custom_tools()
-                && effective_capabilities.supports_freeform_tools();
-            let projection = if custom_tools_native {
-                CustomToolProjection::Native
-            } else {
-                CustomToolProjection::ToFunction
-            };
-            let request = request.provider_compatible(projection);
-            request.validate_against(&model_info.slug, &effective_capabilities)?;
+            let request = super::context::project_request(&endpoint, &model_info, request)?;
             let mut body =
                 protocol.build_request(&request, &model_info, prompt_cache_key.as_deref())?;
             body.apply_native_options(&native_body);
@@ -971,7 +988,9 @@ pub(crate) mod test_support {
             .build()
     }
 
-    pub(crate) fn invocation(event_tx: pl_trace::AgentEventSender) -> ModelInvocationContext {
+    pub(crate) fn invocation(
+        event_tx: pl_protocol::trace::AgentEventSender,
+    ) -> ModelInvocationContext {
         ModelInvocationContext::new(ModelSession::default()).with_events(event_tx)
     }
 
@@ -1008,8 +1027,8 @@ mod tests {
     use crate::completion::stream::test_support::{trace_part_text, trace_text_channel};
     use crate::model::{ModelTransportProfile, default_models};
     use crate::provider::ToolWirePolicy;
+    use pl_protocol::trace::{AgentEvent, TraceDelta, TraceEventKind};
     use pl_protocol::{Message, MessageContent, MessageRole};
-    use pl_trace::{AgentEvent, TraceDelta, TraceEventKind};
 
     fn responses_success_sse(text: &str) -> String {
         format!(
@@ -1098,7 +1117,7 @@ mod tests {
         timer.observe(&ModelStreamEvent::ResponseStarted { response_id: None });
         timer.observe(&ModelStreamEvent::text_delta(
             "output".to_string(),
-            pl_trace::TraceTextChannel::Final,
+            pl_protocol::trace::TraceTextChannel::Final,
             String::new(),
         ));
         tokio::time::advance(std::time::Duration::from_millis(750)).await;
@@ -1131,7 +1150,7 @@ mod tests {
         });
         timer.observe(&ModelStreamEvent::text_delta(
             "output".to_string(),
-            pl_trace::TraceTextChannel::Final,
+            pl_protocol::trace::TraceTextChannel::Final,
             "later".to_string(),
         ));
 
@@ -1301,7 +1320,10 @@ mod tests {
         let (base_url, handle) = serve_sse_once(sse_body).await;
         let provider = local_chat_provider(base_url, ToolWirePolicy::FunctionFallback);
         let (event_tx, _event_rx) = tokio::sync::broadcast::channel(32);
-        let trace_sink = Arc::new(pl_trace::InMemoryTraceEventSink::new("session-1", 0));
+        let trace_sink = Arc::new(pl_protocol::trace::InMemoryTraceEventSink::new(
+            "session-1",
+            0,
+        ));
         let context = invocation(event_tx).with_trace(
             CompletionTraceContext {
                 session_id: "session-1".to_string(),
@@ -1323,13 +1345,13 @@ mod tests {
         assert!(trace_events.iter().any(|event| matches!(
             &event.kind,
             TraceEventKind::TracePartCompleted { item }
-                if trace_text_channel(item) == Some(pl_trace::TraceTextChannel::Commentary)
+                if trace_text_channel(item) == Some(pl_protocol::trace::TraceTextChannel::Commentary)
                     && trace_part_text(item) == "检查配置。"
         )));
         assert!(trace_events.iter().any(|event| matches!(
             &event.kind,
             TraceEventKind::TracePartCompleted { item }
-                if trace_text_channel(item) == Some(pl_trace::TraceTextChannel::Final)
+                if trace_text_channel(item) == Some(pl_protocol::trace::TraceTextChannel::Final)
                     && trace_part_text(item) == "Ready"
         )));
     }
@@ -1372,7 +1394,10 @@ mod tests {
         let provider =
             openai_provider(format!("http://{address}/v1"), ProviderConnectionMode::Http);
         let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(16);
-        let sink = Arc::new(pl_trace::InMemoryTraceEventSink::new("session-1", 0));
+        let sink = Arc::new(pl_protocol::trace::InMemoryTraceEventSink::new(
+            "session-1",
+            0,
+        ));
         let context = invocation(event_tx).with_trace(
             CompletionTraceContext {
                 session_id: "session-1".to_string(),
@@ -1609,7 +1634,7 @@ mod tests {
             });
             let token = tokio_util::sync::CancellationToken::new();
             let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(64);
-            let sink = Arc::new(pl_trace::InMemoryTraceEventSink::new("s", 0));
+            let sink = Arc::new(pl_protocol::trace::InMemoryTraceEventSink::new("s", 0));
             let context = invocation(event_tx)
                 .with_cancellation(Some(token.clone()))
                 .with_trace(

@@ -932,7 +932,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   dco_decode_bridge_provider_usage_state_snapshot(dynamic raw);
 
   @protected
+  BridgePurposeCostSnapshot dco_decode_bridge_purpose_cost_snapshot(
+    dynamic raw,
+  );
+
+  @protected
   BridgeQueuedAgent dco_decode_bridge_queued_agent(dynamic raw);
+
+  @protected
+  BridgeRawPayload dco_decode_bridge_raw_payload(dynamic raw);
 
   @protected
   BridgeReadyResource dco_decode_bridge_ready_resource(dynamic raw);
@@ -1447,6 +1455,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<BridgeProviderSettingsDto> dco_decode_list_bridge_provider_settings_dto(
     dynamic raw,
   );
+
+  @protected
+  List<BridgePurposeCostSnapshot> dco_decode_list_bridge_purpose_cost_snapshot(
+    dynamic raw,
+  );
+
+  @protected
+  List<BridgeRawPayload> dco_decode_list_bridge_raw_payload(dynamic raw);
 
   @protected
   List<BridgeRecoveryIssueAction> dco_decode_list_bridge_recovery_issue_action(
@@ -2877,9 +2893,17 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   sse_decode_bridge_provider_usage_state_snapshot(SseDeserializer deserializer);
 
   @protected
+  BridgePurposeCostSnapshot sse_decode_bridge_purpose_cost_snapshot(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeQueuedAgent sse_decode_bridge_queued_agent(
     SseDeserializer deserializer,
   );
+
+  @protected
+  BridgeRawPayload sse_decode_bridge_raw_payload(SseDeserializer deserializer);
 
   @protected
   BridgeReadyResource sse_decode_bridge_ready_resource(
@@ -3518,6 +3542,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<BridgeProviderSettingsDto> sse_decode_list_bridge_provider_settings_dto(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<BridgePurposeCostSnapshot> sse_decode_list_bridge_purpose_cost_snapshot(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  List<BridgeRawPayload> sse_decode_list_bridge_raw_payload(
     SseDeserializer deserializer,
   );
 
@@ -5214,8 +5248,20 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_purpose_cost_snapshot(
+    BridgePurposeCostSnapshot self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_queued_agent(
     BridgeQueuedAgent self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_raw_payload(
+    BridgeRawPayload self,
     SseSerializer serializer,
   );
 
@@ -5996,6 +6042,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_bridge_provider_settings_dto(
     List<BridgeProviderSettingsDto> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_purpose_cost_snapshot(
+    List<BridgePurposeCostSnapshot> self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_bridge_raw_payload(
+    List<BridgeRawPayload> self,
     SseSerializer serializer,
   );
 

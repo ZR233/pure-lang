@@ -1,35 +1,48 @@
 //! Pure Studio 产品配置。
 //!
-//! `pl-core` 只定义可 serde 的模型路由值对象；本模块组合 Studio 的运行时、
+//! `pl-model` 定义可 serde 的模型路由值对象；本模块组合 Studio 的运行时、
 //! instructions、skills、MCP 与 UI 配置，并独占文件格式、schema 版本和默认角色。
 
 mod agent_profile;
+mod instruction;
+pub use instruction::{DEFAULT_PROJECT_DOC_MAX_BYTES, InstructionsConfig};
 mod credential;
+mod execution;
+pub mod mcp;
+pub use execution::RuntimeConfig;
 mod runtime;
 mod store;
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::config::mcp::BuiltinMcpServerState;
 use crate::{PureError, Result};
-use pl_core::WebSearchConfig;
-use pl_core::config::{
-    BuiltinMcpServerState, InstructionsConfig, McpServerConfig, RuntimeConfig, SkillsConfig,
-};
-use pl_core::{AgentModelConfig, ProviderConfig};
+use pl_protocol::search::WebSearchConfig;
+use pl_tool::mcp::config::McpServerConfig;
+
+use pl_tool::skill::SkillsConfig;
+
+use pl_model::config::{AgentModelConfig, ProviderConfig};
 use serde::{Deserialize, Serialize};
 
 pub use agent_profile::{
     AgentProfileCatalog, AgentProfileDiagnostic, UserAgentProfile, is_system_profile_id,
-    save_user_agent_profile, system_profile_ids,
+    resolve_profile_route, save_user_agent_profile, system_profile_ids,
 };
-pub use pl_core::config::{
-    BuiltinMcpServerState as StudioBuiltinMcpServerState, EffectiveMcpServerConfig,
-    McpServerConfig as StudioMcpServerEntry, McpServerMutationPolicy, McpServerSourceKind,
-    McpServerStatusKind, McpServerTransport, builtin_mcp_server_ids, is_builtin_mcp_server_id,
-    validate_mcp_identifier, zhipu_coding_plan_token,
+pub use mcp::{
+    BuiltinMcpServerState as StudioBuiltinMcpServerState, builtin_mcp_server_ids,
+    is_builtin_mcp_server_id, zhipu_coding_plan_token,
 };
-pub use pl_core::{AgentRoleId, ModelRouteConfig, ProviderId, ReasoningEffort};
-pub use runtime::{ConfigRuntime, ConfigRuntimeError, ConfigRuntimeSnapshot};
+pub use pl_tool::mcp::config::EffectiveMcpServerConfig;
+pub use pl_tool::mcp::config::McpServerConfig as StudioMcpServerEntry;
+pub use pl_tool::mcp::config::McpServerMutationPolicy;
+pub use pl_tool::mcp::config::McpServerSourceKind;
+pub use pl_tool::mcp::config::McpServerStatusKind;
+pub use pl_tool::mcp::config::McpServerTransport;
+pub use pl_tool::mcp::config::validate_mcp_identifier;
+
+pub use pl_model::config::{AgentRoleId, ModelRouteConfig, ProviderId, ReasoningEffort};
+pub use runtime::{ConfigRuntime, ConfigRuntimeError, ConfigRuntimeSnapshot, ResolvedAgentProfile};
 pub use store::{ConfigPaths, ConfigRecoveryReport, ConfigStore};
 
 pub const STUDIO_CONFIG_SCHEMA_VERSION: u32 = 18;
@@ -104,8 +117,8 @@ impl StudioRole {
     }
 }
 
-pub use pl_core::WebSearchContextSize;
-pub use pl_core::{WebSearchLocation, WebSearchMode};
+pub use pl_protocol::WebSearchContextSize;
+pub use pl_protocol::search::{WebSearchLocation, WebSearchMode};
 
 /// Studio 自有的 MCP 配置段。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -263,14 +276,14 @@ impl StudioConfig {
         for role in STUDIO_ROLES {
             self.models.resolve(&AgentRoleId::new(role)?)?;
         }
-        pl_core::skill::validate_skills_config(&self.skills)?;
-        pl_core::config::validate_mcp_servers(&self.mcp.servers)?;
-        pl_core::config::validate_builtin_mcp_server_states(&self.mcp.builtin_servers)?;
+        pl_tool::skill::validate_skills_config(&self.skills)?;
+        crate::config::mcp::validate_mcp_servers(&self.mcp.servers)?;
+        crate::config::mcp::validate_builtin_mcp_server_states(&self.mcp.builtin_servers)?;
         validate_lsp_servers(&self.lsp.servers)?;
         Ok(())
     }
 
-    pub fn resolve_role(&self, role: StudioRole) -> Result<pl_core::ResolvedModelRoute> {
+    pub fn resolve_role(&self, role: StudioRole) -> Result<pl_model::config::ResolvedModelRoute> {
         self.models.resolve(&role.id())
     }
 }
@@ -283,7 +296,7 @@ impl Default for StudioConfig {
 
 /// 返回合并用户配置和 Studio 内置服务后的 MCP 运行时视图。
 pub fn effective_mcp_servers(config: &StudioConfig) -> BTreeMap<String, EffectiveMcpServerConfig> {
-    pl_core::config::effective_mcp_servers(
+    crate::config::mcp::effective_mcp_servers(
         &config.mcp.servers,
         &config.mcp.builtin_servers,
         &config.models,
@@ -301,7 +314,7 @@ pub fn active_mcp_server_names(config: &StudioConfig) -> Vec<String> {
 
 /// 移除内置 MCP 的冗余默认状态。
 pub fn normalize_builtin_mcp_server_states(config: &mut StudioConfig) {
-    pl_core::config::normalize_builtin_mcp_server_states(
+    crate::config::mcp::normalize_builtin_mcp_server_states(
         &mut config.mcp.builtin_servers,
         &config.models,
     );

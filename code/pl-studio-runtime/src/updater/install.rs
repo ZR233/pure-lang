@@ -406,7 +406,7 @@ fn launch_installer(path: &Path) -> Result<(), StudioUpdateError> {
     }
     let mut command = Command::new(path);
     command.args(installer_arguments());
-    crate::process::configure_background_std_command(&mut command);
+    pl_remote_helper::process::configure_background_std_command(&mut command);
     command.spawn().map(|_| ()).map_err(|error| {
         StudioUpdateError::new(
             StudioUpdateErrorCode::InstallerLaunchFailed,

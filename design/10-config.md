@@ -20,9 +20,9 @@ Windows 下对应：
 ~/.pure/studio/studio.sqlite
 ```
 
-产品库保存项目、配置缓存与会话关联；Thread、Turn、Item、input、interaction、attachment 元数据与
-typed working state 由 `pl-core` 保存到同目录 `sessions.sqlite` 的统一动态条目中。Flutter 临时 UI
-状态不入库，实时流不保存 replay journal。core 的 SQLite 后端复用 SeaORM 2.0；产品 schema v20
+产品库保存项目、配置缓存与会话关联；Thread 通用事实、input、interaction、资源引用与扩展载荷由 `pl-core` 保存到同目录
+`sessions.sqlite` 的不可变 journal 中；Item 和业务状态由 Studio 投影。Flutter 临时 UI
+状态不入库，实时产品流由已提交 Thread journal 投影。core 的 SQLite 后端复用 SeaORM 2.0；产品 schema v20
 仅清理旧会话，不重建项目与配置，详见 `19-studio-storage-and-diagnostics.md` 与
 `25-session-entry-storage.md`。provider/model/role 配置仍只由
 `~/.pure/config.toml` schema 18 表达。用户 Agent Profile 单独保存到 `~/.pure/agents/*.toml`，
@@ -51,7 +51,7 @@ fail closed 并保留原文件；默认配置替换失败时已经完整写入�
 
 ## 10.2 配置职责
 
-`pl-core` 只负责产品无关的模型配置值对象：
+`pl-model::config` 负责产品无关的模型配置值对象：
 
 - `AgentModelConfig`、`ProviderConfig`、`ModelRouteConfig`。
 - 校验动态角色到 provider/model/effort 的路由。
@@ -400,7 +400,8 @@ schema、常用配置段、凭据处理和安全编辑行为。其 canonical 源
 
 ## 10.10 配置草稿
 
-通用 provider/model 值对象、preset/catalog 和 endpoint 解析属于 `pl-model`，`pl-core` 只维护动态角色路由并作为宿主 runtime facade 重新导出必要类型；`StudioConfig`、schema、默认角色和配置文件 IO
+通用 provider/model 值对象、preset/catalog、动态角色路由和 endpoint 解析属于 `pl-model`；
+配置值对象统一从 `pl_model::config` 导入。`StudioConfig`、schema、默认角色和配置文件 IO
 属于 `pl-studio-runtime`。`pure-studio` 设置页先加载 canonical provider catalog，再构造产品草稿：
 
 - 默认选中 Studio 产品默认 preset，也可选择 catalog 返回的任意 preset 或 Custom provider。
@@ -433,7 +434,7 @@ schema、常用配置段、凭据处理和安全编辑行为。其 canonical 源
 - Studio 路由编辑投影中的 provider 默认模型和自定义模型；runtime provider 不保存默认模型。
 - 五个模型角色到 provider/model/effort 的路由。
 - Security 标签页选择权限模式：请求批准、替我审批、完全访问。选择后即时写入 `[runtime].permission_mode`。
-- Instructions 标签页编辑 `[instructions]` 的 base override、developer、user 和项目文档预算；保存前由 `pl-core` 校验并即时写入配置。
+- Instructions 标签页编辑 `[instructions]` 的 base override、developer、user 和项目文档预算；保存前由 Studio 校验并即时写入配置。
 - MCP 标签页管理用户 `[mcp.servers]`，包括 server id、启用状态、stdio/Streamable HTTP 传输方式、命令参数、环境变量、HTTP URL 和 token 环境变量；同时展示不可删除的内置 Zhipu Coding Plan MCP server。
 - Provider 列表卡片展示供应商身份、默认模型、模型数量和只读额度状态，不把 base URL 作为主卡片信息。base URL 仍保留在编辑页和 TOML 配置中。
 - Provider 额度查询由后端执行，前端只消费脱敏 DTO。DeepSeek provider 查询账户余额；Zhipu Coding Plan provider 查询 5 小时、7 天和 MCP 工具额度；普通 Zhipu provider 不查询 Coding Plan 额度。
@@ -491,7 +492,7 @@ Todo、interaction 或 context。选择条目后再订阅对应 Thread；底部�
 
 Studio 交互状态统一保存在 core 会话库的 `pl.interaction` 条目中。工具审批、`request_user_input` 和
 `plan_submit` 发起的计划确认都通过通用 Interaction 与 `InteractionChanged` 事件恢复；计划确认的
-typed purpose 与 content 一起持久化并绑定 `AgentWorkingState.plan`；旧
+typed purpose 与 content 一起持久化并绑定 `studio.plan` Thread 扩展；旧
 `tool_approvals` 不再作为读写路径或 UI pending 状态来源。破坏性 schema 版本不迁移旧 pending
 审批、询问或计划确认。
 

@@ -1,6 +1,48 @@
 part of '../widget_test.dart';
 
 void registerTimelineToolTests() {
+  testWidgets(
+    'unknown history payload expands as exact selectable plain text',
+    (tester) async {
+      const original = '  **literal** <script>text</script>\r\n原文  ';
+      final item =
+          _threadItemFixture(
+            id: 'raw-entry',
+            threadId: 'session-1',
+            turnId: 'turn-1',
+            ordinal: 1,
+            text: '',
+          ).copyWith(
+            state: ThreadRawItemStateView(
+              [const RawHistoryPayload('future.payload', 99, original)],
+              'Unsupported saved format',
+              DateTime.fromMillisecondsSinceEpoch(1000),
+            ),
+          );
+      await tester.pumpWidget(
+        _timelineApp(
+          home: Scaffold(
+            body: TimelineView(
+              threadId: 'session-1',
+              turn: null,
+              rows: timelineRowsFromThreadItems([item]),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('raw-history-raw-entry')));
+      await tester.pumpAndSettle();
+      expect(find.text('future.payload · v99'), findsOneWidget);
+      expect(
+        find.byWidgetPredicate(
+          (widget) => widget is SelectableText && widget.data == original,
+        ),
+        findsOneWidget,
+      );
+    },
+  );
+
   test('external web URL policy matches the conversation link boundary', () {
     expect(
       safeExternalWebUrl('https://exa\u0007mple.com/docs'),

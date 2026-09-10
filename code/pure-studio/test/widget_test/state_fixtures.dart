@@ -672,6 +672,7 @@ ThreadItemView _threadItemFixture({
             ),
         activatedAt: skill?.activatedAt ?? terminalAt,
       ),
+      ThreadItemKind.raw ||
       ThreadItemKind.agent ||
       ThreadItemKind.turn ||
       ThreadItemKind.inference ||

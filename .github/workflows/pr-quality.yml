@@ -106,6 +106,12 @@ jobs:
       - name: cargo fmt
         run: cargo fmt --all --check
 
+      - name: Check standalone core without database features
+        run: cargo check -p pl-core --no-default-features --all-targets
+
+      - name: Check core SQLite backend
+        run: cargo check -p pl-core --no-default-features --features sqlite --all-targets
+
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 

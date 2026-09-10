@@ -8,8 +8,8 @@ use pl_model::model::{default_models, zhipu_default_model_slugs};
 use pl_model::provider::ProviderEndpoint;
 use pl_model::runtime::{ModelInvocationContext, ModelRuntime, ModelSession};
 
+use pl_protocol::trace::{AgentEvent, TraceDelta};
 use pl_protocol::{Message, MessageContent, MessageRole};
-use pl_trace::{AgentEvent, TraceDelta};
 
 const ZHIPU_LIVE_ENV_KEY: &str = "ZAI_API_KEY";
 
@@ -100,7 +100,7 @@ async fn run_zhipu(
     let runtime = ModelRuntime::new(info, model).unwrap();
     let (event_tx, event_rx) = tokio::sync::broadcast::channel(4096);
     let counter = tokio::spawn(collect_trace_delta_counts(event_rx));
-    let trace_sink = std::sync::Arc::new(pl_trace::InMemoryTraceEventSink::new(
+    let trace_sink = std::sync::Arc::new(pl_protocol::trace::InMemoryTraceEventSink::new(
         "zhipu-live-session",
         0,
     ));

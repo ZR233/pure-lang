@@ -1,10 +1,10 @@
 //! Settings 只读投影：从 StudioConfig 派生 secret-free 的 snapshot 视图与展示标签。
 
 use anyhow::{Context, Result};
-use pl_core::ModelInfo;
-use pl_core::WebSearchContextSize;
-use pl_core::WebSearchMode;
-use pl_core::{ProviderConnectionMode, ProviderWireProtocol};
+use pl_model::model::ModelInfo;
+use pl_model::provider::{ProviderConnectionMode, ProviderWireProtocol};
+use pl_protocol::WebSearchContextSize;
+use pl_protocol::search::WebSearchMode;
 use pl_protocol::studio::{
     StudioCustomModelSettings, StudioDeepSeekWebSearchSettings, StudioGeneralSettings,
     StudioInstructionsSettings, StudioMcpServerSettings, StudioModelConnectionSettings,
@@ -12,10 +12,9 @@ use pl_protocol::studio::{
     StudioSkillsSettings, StudioWebSearchSettings,
 };
 
-use crate::{
-    ConfigRuntimeSnapshot, ProviderCapabilitySelection, ProviderModelCatalogConfig, StudioRole,
-    WebSearchAvailability, WebSearchBackendKind,
-};
+use crate::search::{WebSearchAvailability, WebSearchBackendKind};
+use crate::{ConfigRuntimeSnapshot, StudioRole};
+use pl_model::config::{ProviderCapabilitySelection, ProviderModelCatalogConfig};
 
 pub(crate) fn settings_snapshot(state: ConfigRuntimeSnapshot) -> Result<StudioSettingsSnapshot> {
     let settings = settings_view(&state.config, StudioRole::Executor)?;
@@ -50,7 +49,7 @@ fn settings_view(
                 ProviderModelCatalogConfig::Explicit { .. } => None,
             };
             Ok(StudioProviderSettings {
-                pricing_enabled: provider.pricing_mode == pl_core::PricingMode::Catalog,
+                pricing_enabled: provider.pricing_mode == pl_protocol::PricingMode::Catalog,
                 id: id.to_string(),
                 template_kind: provider
                     .preset_id()
@@ -60,7 +59,7 @@ fn settings_view(
                 base_url: provider.base_url.clone(),
                 has_bearer_token: provider.resolved_bearer_token().is_some(),
                 credential_required: provider.adapter
-                    != pl_core::ProviderAdapterKind::OpenAiCompatible,
+                    != pl_model::provider::ProviderAdapterKind::OpenAiCompatible,
                 capability_source: match &provider.capabilities {
                     ProviderCapabilitySelection::PresetDefaults => "preset_defaults",
                     ProviderCapabilitySelection::Explicit(_) => "explicit",
@@ -129,13 +128,13 @@ fn settings_view(
             transport: server.config.transport.as_str().to_string(),
             endpoint: server.config.endpoint_summary(),
             configuration: match server.status_kind {
-                pl_core::McpServerStatusKind::Enabled => {
+                pl_tool::mcp::config::McpServerStatusKind::Enabled => {
                     pl_protocol::studio::StudioMcpServerConfiguration::Enabled
                 }
-                pl_core::McpServerStatusKind::Disabled => {
+                pl_tool::mcp::config::McpServerStatusKind::Disabled => {
                     pl_protocol::studio::StudioMcpServerConfiguration::Disabled
                 }
-                pl_core::McpServerStatusKind::MissingCredential => {
+                pl_tool::mcp::config::McpServerStatusKind::MissingCredential => {
                     pl_protocol::studio::StudioMcpServerConfiguration::MissingCredential
                 }
             },
@@ -224,7 +223,7 @@ fn search_settings(
     role: StudioRole,
 ) -> Result<(StudioWebSearchSettings, StudioDeepSeekWebSearchSettings)> {
     let route = config.resolve_role(role)?;
-    let plans = crate::plan_web_searches(
+    let plans = crate::search::plan_web_searches(
         &config.models,
         &route,
         &config.web_search,

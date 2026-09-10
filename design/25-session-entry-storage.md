@@ -1,52 +1,39 @@
-# 25 - 统一会话条目与独立存储
+# 25 - 通用条目、独立存储与无副作用重放
 
-## 25.1 所有权
+## 通用合同
 
-`pl-core` 是会话消费者的完整公共边界，导出模型、工具、会话、事件及持久化接口涉及的类型。
-协议定义仍属于 `pl-protocol`，provider 实现仍属于 `pl-model`。产品不重新实现会话内存状态或 writer。
+`pl_core::storage::SessionEntry` 是独立于产品协议的存储信封，包含 owner/Turn 归属、ID、顺序、
+revision、时间、格式与版本。payload 保留原始 UTF-8 字符串，不要求 JSON；空白、大数字、
+Unicode 和 NUL 不得被规范化。格式不授予控制权限，保留记录身份由框架分配。
 
-活动会话 owner 是唯一事实源。输入、Turn、Item、Interaction、transcript、working state、计量、
-报告与下游自定义数据在同一 checkpoint 中提交。数据库事务失败不回滚已经提交的内存。
+`SessionEntryCommit` 保存有序 Put/Delete，替换和删除保留旧版本。`ReplayState::apply` 先验证
+整个批次，再原子推进状态和水位；归属、序号或删除目标无效时保留之前的完整状态。
+通用重放在默认纯内存构建可用，不调用业务 decoder、模型、工具或当前配置。
 
-## 25.2 动态条目
+## SQLite 后端
 
-`SessionEntry` 使用固定管理信封和动态业务载荷。信封包含 session/turn 归属、条目 ID、顺序、
-revision、时间、命名空间类型标识与独立的载荷版本。内置和下游数据使用相同存储底座，内置领域
-对象仍通过强类型 codec 解释和校验，不把状态机改为任意 JSON 修改。
+显式启用 `pl-core/sqlite` 后可创建 `persistence::SqliteSessionStore`；默认不链接 ORM 和文件锁。
+`register_resource` 接收 `OpaquePayload` 并保存不可变资源；同 ID 同内容幂等，不同内容报冲突。
+元数据默认上限 1 MiB，已提交 Thread journal 不套用该限制，而由队列压力约束下一次执行准入。
 
-公开接口支持强类型 serde 和动态值，追加、查询、CAS 替换和删除。批次全有或全无；下游不能
-覆盖管理字段。未知类型和载荷版本原样保留，强类型读取必须明确校验类型和版本。
-自定义条目默认不进入模型上下文、Timeline 或 child fork，显式复制也不共享可变状态。
-自定义载荷默认单条最多 1 MiB。工具 mutation 经 working set 与工具结果共同提交，不允许旁路写库。
+Thread journal 以框架保留资源 ID 保存已冻结编码，完整业务 payload、模型上下文、调用关联和
+状态同 commit。后端仅解码通用外层信封与 journal，不解释工具或产品正文，不按业务类型建表。
+`read_thread_journal` 校验 owner、序号键和日志顺序；产品通过日志自行投影历史及交互。
 
-## 25.3 冷存储与关闭
+writer 在内存保存受理水位、待保存字节、错误与关闭状态，异步事务批量写入。单资源 flush 等待
+该记录水位，全局 flush 捕获调用时尾部。压力、错误与恢复对 Thread 可观察；失败不丢弃排队事实。
+初始化失败关闭连接；shutdown 排空、join 并关闭共享 pool 后才释放文件锁。
 
-core 提供 SQLite 后端，宿主指定数据库路径；Studio 使用 `sessions.sqlite`，与 `studio.sqlite`
-独立。会话库只保存通用条目、目录、派生索引与提交 receipt，不引用产品表。派生索引可重建。
-项目、配置、工作区 lease 和产品观测留在产品库，不能影响会话事务是否成功。
+## 格式与恢复
 
-任务采用独立的内置 `pl.toolTask` 条目及 `pl.taskManifest` 清单，与 actor、transcript 和提交
-receipt 在同一事务保存；`pl.actor` 不再重复内嵌任务记录。恢复时先校验清单与 actor revision、
-完整任务集合及 session/turn 归属，再组装同一个会话 owner。核心会话库 schema 1 到 2 的升级
-原子提取已有任务并清除内嵌表示，事务失败不更新版本；正常恢复不保留双格式后备路径。
+当前独立会话数据库为 schema 6；schema 5 的旧 actor/业务存储不进入新 Thread 恢复路径。
+core 打开不兼容库返回 UnsupportedSchema 并保留字节，不自动重置。
+Studio 启动持有独占锁，按可恢复 marker 先备份产品/会话数据库，再归档旧库、重建会话关联并
+创建当前库，处理 WAL/SHM 后才发布 runtime。配置、凭据、工作区、附件与未知对象不随之删除。
+未来版本、损坏库和无法确认的资源失败保留现场。
 
-writer 持有不可变待提交事实，最多五秒或 64 条触发批量保存。显式 flush 固定调用时水位；单会话
-屏障等待指定 revision，不等待无关后续写入。失败和 panic 发布健康状态且保留未确认事实。
-shutdown 先停止新输入并收束会话，再排空 writer；保存失败保留可重试 owner 并返回错误。
+## 验证边界
 
-跨库创建与删除以稳定 Thread ID、幂等产品操作和启动对账协调，不使用跨库事务、JOIN 或外键。
-旧产品库会话不迁移；产品升级事务仅清理旧会话和关联，保留项目、配置及物理工作区，并记录版本
-防止重复清理。这不适用于已经进入核心会话库的数据；核心库格式升级保留既有会话事实。
-
-核心库 schema 4 将任务终态结果保存在不可变的 `pl.toolResult` 条目，`pl.toolTask` 中只保留有界预览和摘要引用。
-引用的摘要和编码长度必须与实际结果一致；重复保存同一结果不覆盖记录，内容冲突拒绝整个事务。
-schema 1 的内嵌任务、schema 2 的独立任务和 schema 3 的独立结果通过显式升级事务进入该格式，
-正常读取只有 schema 4 路径。任务预览与未消费终态事件引用都必须与完整结果一致。
-未保存的完整正文由 owner 持有，确认耐久化后释放；后续完整读取通过同一 repository 按需进行，
-恢复时逐条验证并释放正文，不将所有终态结果常驻内存。
-
-## 25.4 本次验收
-
-仅使用临时空项目的真实 provider、原生 GUI 和 Flutter Driver，完成 Python3 文本统计 CLI 需求，
-实际运行产物，正常关闭并重启后追问。保存截图、日志与产物证据，不新增中间测试或故障测试矩阵。
-这次完整 GUI 验收不等价于穷举所有动态载荷和故障场景。
+默认 storage 测试验证原文与原子重放；SQLite 集成验证真实文件重开、旧格式保护、损坏/丢尾、
+历史替换删除、共享 writer、单记录 flush、压力和关闭文件锁。生产服务恢复与产品投影在 Studio
+验证，不为 core 测试引入 model、tool 或 protocol 依赖。具体执行结果以本次验证记录为准。

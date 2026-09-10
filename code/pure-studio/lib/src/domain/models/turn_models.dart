@@ -123,6 +123,7 @@ sealed class StudioTurnCancellationCause {
   const StudioTurnCancellationCause();
 
   String get description => switch (this) {
+    UnspecifiedTurnCancellation() => 'Cancelled',
     UserRequestedTurnCancellation() => 'Cancelled by user',
     RuntimeShutdownTurnCancellation() => 'Runtime shutdown',
     AgentClosedTurnCancellation() => 'Agent closed',
@@ -130,6 +131,10 @@ sealed class StudioTurnCancellationCause {
     CoalescedTurnCancellation(:final targetTurnId) =>
       'Merged into Turn $targetTurnId',
   };
+}
+
+final class UnspecifiedTurnCancellation extends StudioTurnCancellationCause {
+  const UnspecifiedTurnCancellation();
 }
 
 final class UserRequestedTurnCancellation extends StudioTurnCancellationCause {
@@ -323,6 +328,7 @@ final class BudgetLimitedStudioTurnState extends StudioTurnState {
 
 class StudioTurnView {
   const StudioTurnView({
+    this.inputId,
     required this.turnId,
     required this.threadId,
     required this.revision,
@@ -330,6 +336,7 @@ class StudioTurnView {
     required this.updatedAt,
   });
 
+  final String? inputId;
   final String turnId;
   final String threadId;
   final int revision;
@@ -348,6 +355,7 @@ class StudioTurnView {
   @override
   bool operator ==(Object other) {
     return other is StudioTurnView &&
+        other.inputId == inputId &&
         other.turnId == turnId &&
         other.threadId == threadId &&
         other.revision == revision &&
@@ -356,7 +364,8 @@ class StudioTurnView {
   }
 
   @override
-  int get hashCode => Object.hash(turnId, threadId, revision, state, updatedAt);
+  int get hashCode =>
+      Object.hash(inputId, turnId, threadId, revision, state, updatedAt);
 }
 
 class StudioTurnFailureView {

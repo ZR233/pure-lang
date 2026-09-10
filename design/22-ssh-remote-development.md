@@ -4,7 +4,7 @@
 
 Pure 的 SSH 远程开发是本地 runtime 的宿主能力，不是第二套远端 runtime。Flutter 只调用
 typed Studio 功能并展示 canonical snapshot；SSH 服务器管理、连接状态机、helper 安装、协议、
-重连和远端工具 backend 位于 `pl-core`。`pl-studio-runtime` 只实现 SQLite、可选系统凭据库与
+重连和远端工具 backend 位于 `pl-tool`。`pl-studio-runtime` 只实现 SQLite、可选系统凭据库与
 helper 嵌入资产 adapter；当前密码也可只保存在 core 进程的 secret lease 中。
 
 远端 helper 是随 SSH stdio channel 生存的能力代理，只维护 workspace handle 与进程 handle。
@@ -52,7 +52,7 @@ reservation。并发同 id 请求不得通过检查后相互覆盖，关闭连�
 
 ## 21.3 本地工具与 SSH 管理
 
-`pl-core::remote::SshManager` 负责服务器校验、系统 OpenSSH/Askpass、架构探测、内嵌 helper
+`pl-tool::remote::SshManager` 负责服务器校验、系统 OpenSSH/Askpass、架构探测、内嵌 helper
 bootstrap、握手 shell descriptor、连接状态与自动重连，并返回带有 `ExecutionEnvironment` 的
 `RemoteWorkspaceHost`。host 实现或组合现有
 `WorkspaceFileBackend`、`CommandBackend`、Git `ExecutionBackend`、`WorktreeBackend`、

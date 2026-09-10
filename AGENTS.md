@@ -145,10 +145,10 @@
 
 ### 核心 crate
 
-- `pl-core` 是核心编排层，组合 turn、session、model、store 和 tool runtime。
-- 跨 crate 公共协议类型放在 `pl-protocol`。
-- Provider 适配、模型元数据和 provider stream 归一化放在 `pl-model`。
-- 向 `pl-core` 添加概念前先确认它属于核心编排；否则下沉到具体 crate 或提升到 `pl-protocol`。
+- `pl-core` 是产品无关的 Thread 内核，拥有上下文、模型/工具端口、通用状态与可选冷存储；不依赖 `pl-protocol`、`pl-model`、`pl-tool`、`pl-trace`、`pl-output` 或 Studio，包括测试依赖。
+- 跨产品和适配器的 wire 协议放在 `pl-protocol`；通用 Thread、Model、Tool、context 与 storage 契约由 `pl-core` 独立定义。
+- Provider 适配、模型配置值对象、元数据和 stream 归一化放在 `pl-model`；具体工具与物理服务放在 `pl-tool`。二者实现并依赖 core 契约，不相互依赖。
+- 向 `pl-core` 添加概念前先确认它属于核心编排；否则归属 `pl-model`、`pl-tool` 或 `pl-studio-runtime`；不得借 core 门面镜像产品协议。Studio 独占配置持久化、Mode/Plan/workflow、子代理协调及 root/child/恢复装配。
 - OpenAI-compatible、Zhipu-compatible 等现役 provider 适配不是 legacy 层，不得误删；只清理真正废弃的 wrapper。
 
 ### Flutter、Bridge 与 wire
@@ -187,7 +187,7 @@
   桌面 xtask 构建会嵌入 worker；两种宿主均不使用裸 shell 后备路径。
 
 - 不默认启用 `--all-features`：`live-tests` 等 feature 依赖外部服务与有效
-  API key，需要时以 `cargo test -p pl-core --features live-tests` 等显式
+  API key，需要时以 `cargo test -p pl-model --features live-tests` 等显式
   opt-in 执行，CI 与本地默认检查都不包含。
 - CI（PR Quality Gate）只运行上述确定性检查，外加 Conventional PR 标题与发布
   配置校验；Flutter Driver smoke、任务流 harness 与 live 模型验收不在 CI 中

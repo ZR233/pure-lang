@@ -21,7 +21,7 @@ use std::time::Duration;
 use futures::StreamExt;
 
 use pl_protocol::PureError;
-use pl_trace::{AgentEventSender, TraceEventSink};
+use pl_protocol::trace::{AgentEventSender, TraceEventSink};
 
 use crate::completion::CompletionTraceContext;
 
@@ -166,7 +166,7 @@ mod tests {
 #[cfg(test)]
 pub(crate) mod test_support {
     use pl_protocol::Result;
-    use pl_trace::{AgentEventSender, TraceDelta, TracePart};
+    use pl_protocol::trace::{AgentEventSender, TraceDelta, TracePart};
 
     use crate::completion::CompletionResponse;
 
@@ -201,22 +201,25 @@ pub(crate) mod test_support {
     pub(crate) fn final_delta(id: &str, delta: &str) -> ModelStreamEvent {
         ModelStreamEvent::text_delta(
             id.to_string(),
-            pl_trace::TraceTextChannel::Final,
+            pl_protocol::trace::TraceTextChannel::Final,
             delta.to_string(),
         )
     }
 
     pub(crate) fn final_started(id: &str) -> ModelStreamEvent {
-        ModelStreamEvent::text_started(id.to_string(), pl_trace::TraceTextChannel::Final)
+        ModelStreamEvent::text_started(id.to_string(), pl_protocol::trace::TraceTextChannel::Final)
     }
 
     pub(crate) fn commentary_started(id: &str) -> ModelStreamEvent {
-        ModelStreamEvent::text_started(id.to_string(), pl_trace::TraceTextChannel::Commentary)
+        ModelStreamEvent::text_started(
+            id.to_string(),
+            pl_protocol::trace::TraceTextChannel::Commentary,
+        )
     }
 
     pub(crate) fn completed_text(
         id: &str,
-        channel: pl_trace::TraceTextChannel,
+        channel: pl_protocol::trace::TraceTextChannel,
         authoritative_text: Option<&str>,
     ) -> ModelStreamEvent {
         ModelStreamEvent::text_completed(
@@ -236,9 +239,9 @@ pub(crate) mod test_support {
 
     pub(crate) fn trace_part_text(item: &TracePart) -> String {
         match item.state() {
-            pl_trace::TracePartState::Text(text) => text.content().to_string(),
-            pl_trace::TracePartState::Turn(_) => String::new(),
-            pl_trace::TracePartState::Thinking(thinking) => {
+            pl_protocol::trace::TracePartState::Text(text) => text.content().to_string(),
+            pl_protocol::trace::TracePartState::Turn(_) => String::new(),
+            pl_protocol::trace::TracePartState::Thinking(thinking) => {
                 let summary = thinking
                     .summary()
                     .iter()
@@ -256,30 +259,33 @@ pub(crate) mod test_support {
                     summary
                 }
             }
-            pl_trace::TracePartState::Tool(tool) => tool.invocation().arguments().to_string(),
-            pl_trace::TracePartState::Agent(_) | pl_trace::TracePartState::Inference(_) => {
-                String::new()
+            pl_protocol::trace::TracePartState::Tool(tool) => {
+                tool.invocation().arguments().to_string()
             }
+            pl_protocol::trace::TracePartState::Agent(_)
+            | pl_protocol::trace::TracePartState::Inference(_) => String::new(),
         }
     }
 
     pub(crate) fn trace_delta_text(delta: &TraceDelta) -> String {
         match delta {
-            pl_trace::TraceDelta::Text { delta, .. }
-            | pl_trace::TraceDelta::Thinking { delta, .. }
-            | pl_trace::TraceDelta::ReasoningContent { delta, .. }
-            | pl_trace::TraceDelta::ToolArguments { delta }
-            | pl_trace::TraceDelta::ToolResult { delta } => delta.clone(),
+            pl_protocol::trace::TraceDelta::Text { delta, .. }
+            | pl_protocol::trace::TraceDelta::Thinking { delta, .. }
+            | pl_protocol::trace::TraceDelta::ReasoningContent { delta, .. }
+            | pl_protocol::trace::TraceDelta::ToolArguments { delta }
+            | pl_protocol::trace::TraceDelta::ToolResult { delta } => delta.clone(),
         }
     }
 
-    pub(crate) fn trace_text_channel(item: &TracePart) -> Option<pl_trace::TraceTextChannel> {
-        item.text().map(pl_trace::TraceTextPart::channel)
+    pub(crate) fn trace_text_channel(
+        item: &TracePart,
+    ) -> Option<pl_protocol::trace::TraceTextChannel> {
+        item.text().map(pl_protocol::trace::TraceTextPart::channel)
     }
 
     pub(crate) struct TestCompletionResponse {
         pub(crate) response: CompletionResponse,
-        pub(crate) trace_events: Vec<pl_trace::TraceEvent>,
+        pub(crate) trace_events: Vec<pl_protocol::trace::TraceEvent>,
     }
 
     impl std::ops::Deref for TestCompletionResponse {

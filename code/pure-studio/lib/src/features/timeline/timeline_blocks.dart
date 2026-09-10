@@ -185,6 +185,30 @@ class _TimelineRowBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (row.raw case final raw?) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 24),
+        child: ExpansionTile(
+          key: ValueKey('raw-history-${row.id}'),
+          title: Text(context.l10n.timelineRawRecord),
+          subtitle: Text(raw.notice),
+          children: [
+            for (final payload in raw.payloads)
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('${payload.format} · v${payload.version}'),
+                    const SizedBox(height: 8),
+                    SelectableText(payload.content),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      );
+    }
     final isUser = row.type == TimelineRowType.userMessage;
     final isParentAgent = row.type == TimelineRowType.parentAgentMessage;
     final isPrompt = isUser || isParentAgent;

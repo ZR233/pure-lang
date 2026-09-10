@@ -7,7 +7,7 @@ provider wire mode 或另一种会话类型；Simple、Task 与后续自定义 M
 Thread、Turn、模型循环和工具运行时。
 
 跨 crate 的稳定 ID 是 `ThreadModeId`，wire 仍使用 `mode.<id>` 字符串。`pl-protocol::thread::mode`
-拥有 ID 与目录 DTO；`pl-core::thread` 拥有内存注册表、不可变快照、预设图编译和状态工具；
+拥有 ID 与目录 DTO；Studio 的 `mode` 模块拥有内存注册表、不可变快照、预设图编译和状态工具；
 `pl-studio-runtime::studio::thread` 拥有随二进制发布的内置 Mode。
 
 普通 Skill 系统不解析、发现、保护、投影或加载 Mode。Mode 不使用 `SKILL.md`、frontmatter、
@@ -106,9 +106,8 @@ root 工作流工具拆为：
 直接边、图 hash、CAS、大小和 operation identity。成功 mutation 仍由 tool call、tool result 与
 working state 的统一 checkpoint 原子提交；持久化 receipt 尾部中同一 operation 和参数重放返回已有
 receipt，不重复转换，相同 identity 携带不同参数则拒绝。
-六个工具都实现统一的 `StaticTool` 合同，并作为一个 `ToolInstallGroup` 注册到当前 root Agent 的
-`AgentToolSet`；查询通过 `ToolPolicy::read_only().with_parallel_tool_calls()` 冻结为共享执行，mutation
-通过 `AgentControl + Solo` 冻结为独占执行，不保留旧 `Tool` trait 或第二套注册器。
+六个工具实现 core 不透明 Tool 并以 Registration 注册到 root Thread。查询读取同一扩展快照，
+mutation 显式授予扩展更新权限并独占批次。工具不保存第二个 working set 或兼容注册器。
 
 `workflow_transition` 的 mutation 输入只使用一份规范结构：run/revision/state/target CAS 位于顶层，
 完成声明统一位于 `completion`，其内部包含 `reason`、`summary` 与 `evidence`。`reason` 不在顶层，也不

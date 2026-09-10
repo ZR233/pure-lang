@@ -120,7 +120,7 @@ impl VisibleOutputDecoder {
 mod tests {
     use super::*;
     use crate::completion::stream::event::{ModelBlockField, ModelBlockKind};
-    use pl_trace::TraceTextChannel;
+    use pl_protocol::trace::TraceTextChannel;
 
     #[test]
     fn native_phase_decoder_does_not_parse_visible_tags() {

@@ -1,7 +1,7 @@
 //! MCP reconcile / reset 编排与后台健康 watcher。
 
 use anyhow::{Context, Result};
-use pl_core::{ObservedResourceCommand, ObservedResourceKind, StateOperation};
+use pl_protocol::{ObservedResourceCommand, ObservedResourceKind, StateOperation};
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::config::effective_mcp_servers;
@@ -114,9 +114,9 @@ impl StudioRuntime {
     pub async fn reset_mcp(&self, request: pl_protocol::studio::McpResetRequest) -> Result<()> {
         let scope = match request {
             pl_protocol::studio::McpResetRequest::Server { server_id } => {
-                crate::McpResetScope::Server { server_id }
+                pl_tool::mcp::McpResetScope::Server { server_id }
             }
-            pl_protocol::studio::McpResetRequest::All => crate::McpResetScope::All,
+            pl_protocol::studio::McpResetRequest::All => pl_tool::mcp::McpResetScope::All,
         };
         let config = self.config_runtime.read()?.config;
         let servers = effective_mcp_servers(&config);

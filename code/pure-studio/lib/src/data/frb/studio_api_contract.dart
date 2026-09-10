@@ -520,7 +520,7 @@ class FrbStudioApi implements StudioApi {
       thread: _threadFromFrb(response.thread),
       receipt: SubmitPromptReceipt(
         threadId: response.receipt.threadId,
-        turnId: response.receipt.turnId,
+        inputId: response.receipt.inputId,
         cursor: response.receipt.revision.toInt(),
       ),
     );
@@ -847,7 +847,7 @@ class FrbStudioApi implements StudioApi {
     );
     return SubmitPromptReceipt(
       threadId: response.threadId,
-      turnId: response.turnId,
+      inputId: response.inputId,
       cursor: response.revision.toInt(),
     );
   }
@@ -863,7 +863,7 @@ class FrbStudioApi implements StudioApi {
     );
     return SubmitPromptReceipt(
       threadId: response.threadId,
-      turnId: response.turnId,
+      inputId: response.inputId,
       cursor: response.revision.toInt(),
     );
   }

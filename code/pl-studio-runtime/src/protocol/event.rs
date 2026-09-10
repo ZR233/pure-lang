@@ -1,4 +1,4 @@
-use pl_core::{ObservedResource, Thread, ThreadModeCatalogSnapshot};
+use pl_protocol::{ObservedResource, Thread, ThreadModeCatalogSnapshot};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -124,7 +124,16 @@ pub struct StudioModelPerformanceSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct StudioSessionCostSnapshot {
     pub root_thread_id: String,
-    pub estimated_costs: Vec<pl_core::RuntimeCostAmount>,
+    pub purpose_costs: Vec<StudioPurposeCostSnapshot>,
+    pub estimated_costs: Vec<pl_protocol::RuntimeCostAmount>,
+    pub has_unpriced_usage: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct StudioPurposeCostSnapshot {
+    pub purpose: Option<String>,
+    pub estimated_costs: Vec<pl_protocol::RuntimeCostAmount>,
     pub has_unpriced_usage: bool,
 }
 
@@ -201,7 +210,7 @@ pub struct StudioSkillsStateSnapshot {
 pub struct StudioSkillsStateData {
     pub config_fingerprint: String,
     pub catalog_revision: u64,
-    pub catalog: pl_core::skill::SkillCatalog,
+    pub catalog: pl_tool::skill::SkillCatalog,
 }
 
 impl From<SkillsStateSnapshot> for StudioSkillsStateSnapshot {

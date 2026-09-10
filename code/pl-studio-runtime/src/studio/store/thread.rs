@@ -11,27 +11,22 @@ use crate::studio::mappers::thread_record;
 use crate::studio::records::ThreadRecord;
 use crate::studio::store::StudioStore;
 #[cfg(test)]
-use pl_core::ThreadModeId;
+use pl_protocol::ThreadModeId;
 
 impl StudioStore {
     pub(in crate::studio) async fn with_session_status(
         &self,
         mut record: ThreadRecord,
     ) -> Result<ThreadRecord> {
-        if let Some(snapshot) = self.sessions().read_agent_snapshot(&record.id).await? {
-            record.status = crate::studio::agent_host::thread_status(&snapshot.state);
-            record.error = match &snapshot.state {
-                pl_core::AgentState::Faulted(state) => Some(state.error().message.clone()),
-                pl_core::AgentState::Idle(_)
-                | pl_core::AgentState::Queued(_)
-                | pl_core::AgentState::Running(_)
-                | pl_core::AgentState::WaitingTool(_)
-                | pl_core::AgentState::WaitingInteraction(_)
-                | pl_core::AgentState::Cancelling(_)
-                | pl_core::AgentState::Closing(_)
-                | pl_core::AgentState::Closed(_) => None,
-            };
-            record.runtime_updated_at = Some(snapshot.updated_at);
+        let journal = self.sessions().read_thread_journal(&record.id).await?;
+        if let Some(last) = journal.last() {
+            let snapshot = pl_core::thread::journal::replay(&journal)?;
+            record.status = crate::studio::thread_projection::status(&snapshot);
+            record.runtime_updated_at = Some(last.committed_at);
+            // Cold directory reads preserve metadata for unknown codecs; activation validates them.
+            if let Ok(Some(mode)) = crate::studio::thread_projection::saved_mode(&snapshot) {
+                record.mode = mode;
+            }
         }
         Ok(record)
     }
@@ -47,8 +42,8 @@ impl StudioStore {
         mode: ThreadModeId,
     ) -> Result<ThreadRecord> {
         use crate::studio::ids::{new_id, unix_seconds};
+        use crate::studio::records::DirectoryState;
         use crate::studio::store_support::non_empty_title;
-        use pl_core::AgentState;
         use sea_orm::{ActiveModelTrait, ActiveValue::Set};
         let now = unix_seconds();
         let id = new_id("thread");
@@ -61,13 +56,13 @@ impl StudioStore {
             parent_thread_id: Set(None),
             role: Set(crate::config::StudioRole::Planner.key().to_string()),
             agent_path: Set(id),
-            state_json: Set(serde_json::to_string(&AgentState::idle())?),
+            state_json: Set(serde_json::to_string(&DirectoryState::idle())?),
             revision: Set(0),
             runtime_revision: Set(None),
             event_sequence: Set(0),
             metadata_json: Set("{}".to_string()),
             usage_json: Set(serde_json::to_string(
-                &pl_core::InferenceTokenUsage::default(),
+                &pl_protocol::InferenceTokenUsage::default(),
             )?),
             last_context_tokens: Set(None),
             trace_sequence: Set(0),
@@ -177,29 +172,60 @@ impl StudioStore {
             None => Ok(None),
         }
     }
+}
 
-    pub(in crate::studio) async fn read_thread_runtime_revision(
-        &self,
-        thread_id: &str,
-    ) -> Result<u64> {
-        if let Some(agent) = self.sessions().read_session(thread_id).await? {
-            return Ok(agent.state.snapshot.revision);
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pl_core::{
+        context::OpaquePayload,
+        model::{DynModelSession, ModelError, ModelRequest, ModelSession, PreparedModelCall},
+        thread::{ThreadHandle, cold::ColdStoreHandle, extensions::ExtensionMutation},
+    };
+    use pretty_assertions::assert_eq;
+
+    struct NoExecution;
+    impl ModelSession for NoExecution {
+        async fn prepare(&mut self, _: ModelRequest) -> Result<PreparedModelCall, ModelError> {
+            panic!("cold directory reads must never activate a model")
         }
-        Ok(entities::thread::Entity::find_by_id(thread_id)
-            .one(&self.db)
-            .await?
-            .and_then(|row| row.runtime_revision)
-            .map_or(0, |_| 1))
+        async fn close(&mut self) -> Result<(), ModelError> {
+            Ok(())
+        }
     }
 
-    pub(in crate::studio) async fn registered_session_ids(&self) -> Result<Vec<String>> {
-        Ok(entities::thread::Entity::find()
-            .filter(entities::thread::Column::RuntimeRevision.is_not_null())
-            .filter(entities::thread::Column::Archived.eq(0))
-            .all(&self.db)
-            .await?
-            .into_iter()
-            .map(|row| row.id)
-            .collect())
+    #[tokio::test]
+    async fn unknown_saved_mode_keeps_known_directory_metadata_readable() {
+        let store = StudioStore::open_memory().await.unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let project = store.upsert_project(workspace.path()).await.unwrap();
+        let record = store
+            .create_thread(&project.id, "cold mode", ThreadModeId::simple())
+            .await
+            .unwrap();
+        let thread =
+            ThreadHandle::start(record.id.clone(), DynModelSession::new(NoExecution)).unwrap();
+        thread
+            .attach_storage(ColdStoreHandle::new(store.sessions().clone()))
+            .await
+            .unwrap();
+        let original =
+            OpaquePayload::new("future.studio.mode", 99, "{\"mode\":\"future\"}").unwrap();
+        thread
+            .mutate_extensions(vec![ExtensionMutation::Put {
+                id: "studio.mode".into(),
+                expected_revision: None,
+                payload: original.clone(),
+            }])
+            .await
+            .unwrap();
+        thread.close().await.unwrap();
+        let restored = store.read_thread(&record.id).await.unwrap().unwrap();
+        assert_eq!(restored.mode, record.mode);
+        assert_eq!(restored.title, record.title);
+        assert_eq!(restored.status, pl_protocol::ThreadStatus::Closed);
+        let replayed = store.sessions().replay_thread(&record.id).await.unwrap();
+        assert_eq!(replayed.extensions["studio.mode"].payload, original);
+        store.sessions().shutdown().await.unwrap();
     }
 }

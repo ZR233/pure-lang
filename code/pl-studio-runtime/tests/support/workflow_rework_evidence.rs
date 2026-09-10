@@ -78,26 +78,7 @@ pub(super) fn validate_checkpoint(actors: &BTreeMap<String, Actor>, root_id: &st
                 && actor.snapshot.thread.status == pl_protocol::ThreadStatus::Idle
                 && root.calls[last_dispatch + 1..]
                     .iter()
-                    .any(|call| call.name == "wait_agents"
-                        && output(call).ok().is_some_and(|receipt| receipt
-                            .get("reason")
-                            .and_then(Value::as_str)
-                            == Some("terminal")
-                            && receipt
-                                .get("messages")
-                                .and_then(Value::as_array)
-                                .is_some_and(|messages| messages.iter().any(|message| message
-                                    .get("agentId")
-                                    .and_then(Value::as_str)
-                                    == Some(id)
-                                    && message
-                                        .pointer("/state/lastTurnOutcome/turnId")
-                                        .and_then(Value::as_str)
-                                        == Some(latest_turn_id)
-                                    && message
-                                        .pointer("/state/lastTurnOutcome/outcome/kind")
-                                        .and_then(Value::as_str)
-                                        == Some("completed"))))),
+                    .any(|call| { consumed_completion_before(root, id, latest_turn_id, call) }),
             "cannot inject without receipt-bound executor completion: {id}"
         );
         ensure!(
@@ -223,7 +204,7 @@ pub(super) fn validate(
         .context("finding did not resume the normalization executor")?;
     let repair_receipt = output(repair)?;
     let owner = field(&repair_receipt, "target")?;
-    let turn = field(&repair_receipt, "turnId")?;
+
     let owner_spawn = root.calls[..reviewer_spawns[0].0]
         .iter()
         .find(|call| {
@@ -245,6 +226,7 @@ pub(super) fn validate(
     let executor = actors
         .get(owner)
         .context("original owner timeline missing")?;
+    let turn = resumed_message_turn(executor, &repair_receipt)?;
     // The normalization implementation and injected regression belong to this same owner.
     ensure!(
         executor.calls.iter().any(|call| call.turn_id != turn
@@ -290,30 +272,7 @@ pub(super) fn validate(
         "root consumed an old submission instead of resumed delivery"
     );
     ensure!(
-        root.calls[repair_index + 1..read_index].iter().any(|call| {
-            if call.name != "wait_agents" {
-                return false;
-            }
-            output(call).ok().is_some_and(|value| {
-                value.get("reason").and_then(Value::as_str) == Some("terminal")
-                    && value
-                        .get("messages")
-                        .and_then(Value::as_array)
-                        .is_some_and(|messages| {
-                            messages.iter().any(|message| {
-                                message.get("agentId").and_then(Value::as_str) == Some(owner)
-                                    && message
-                                        .pointer("/state/lastTurnOutcome/turnId")
-                                        .and_then(Value::as_str)
-                                        == Some(turn)
-                                    && message
-                                        .pointer("/state/lastTurnOutcome/outcome/kind")
-                                        .and_then(Value::as_str)
-                                        == Some("completed")
-                            })
-                        })
-            })
-        }),
+        consumed_completion_before(root, owner, turn, read),
         "root lacks turn-bound terminal receipt before repaired delivery read"
     );
     let last_spawn = reviewer_spawns.last().context("final reviewer missing")?;
@@ -417,6 +376,11 @@ pub(super) fn validate(
             .context("retained worktree was never cleaned")?;
         ensure!(
             cleanup_index > approval_index
+                && output(cleanup)?.get("lifecycle").and_then(Value::as_str) == Some("closed")
+                && output(cleanup)?
+                    .get("workspaceDisposition")
+                    .and_then(Value::as_str)
+                    == Some("cleanup")
                 && final_checks
                     .iter()
                     .all(
@@ -526,26 +490,106 @@ fn covers_normalization(call: &Call) -> bool {
             })
 }
 
-fn terminal_test_call<'a>(actor: &'a Actor, call: &'a Call) -> Result<&'a Call> {
-    let initial = output(call)?;
-    if initial.pointer("/state/kind").and_then(Value::as_str) == Some("final") {
-        return Ok(call);
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ChildCompletion {
+    child_id: String,
+    turn: Option<pl_core::thread::TurnRecord>,
+}
+
+fn resumed_message_turn<'a>(executor: &'a Actor, receipt: &Value) -> Result<&'a str> {
+    ensure!(
+        field(receipt, "target")? == executor.id,
+        "repair receipt targets another executor"
+    );
+    let message_id = field(receipt, "messageId")?;
+    let sequence = receipt
+        .get("sequence")
+        .and_then(Value::as_u64)
+        .context("repair receipt has no inbox sequence")?;
+    let mut admitted = false;
+    let mut consumed = 0;
+    for commit in &executor.journal {
+        for record in commit.inbox.iter() {
+            if record.sequence == sequence && record.message.id == message_id {
+                admitted = true;
+            }
+        }
+        if let Some(watermark) = commit.consumed_messages {
+            if consumed < sequence && sequence <= watermark {
+                ensure!(
+                    admitted,
+                    "repair consumption has no matching admitted message identity"
+                );
+                let records = match &commit.context {
+                    Some(pl_core::thread::journal::ContextChange::Append { records, .. }) => {
+                        records
+                    }
+                    Some(pl_core::thread::journal::ContextChange::Replace(snapshot)) => {
+                        &snapshot.records
+                    }
+                    None => anyhow::bail!("repair consumption has no committed context binding"),
+                };
+                let record = records
+                    .iter()
+                    .find(|record| record.id == format!("inbox:{sequence}"))
+                    .context("repair consumption did not bind the received inbox record")?;
+                return record
+                    .turn_id
+                    .as_deref()
+                    .context("repair inbox context has no Turn identity");
+            }
+            consumed = watermark;
+        }
     }
-    let process = field(&initial, "processId")?;
-    actor
-        .calls
-        .iter()
-        .filter(|candidate| {
-            candidate.turn_id == call.turn_id
-                && candidate.name == "write_stdin"
-                && candidate.arguments.get("processId").and_then(Value::as_str) == Some(process)
-        })
-        .find(|candidate| {
-            output(candidate).ok().is_some_and(|value| {
-                value.pointer("/state/kind").and_then(Value::as_str) == Some("final")
-            })
-        })
-        .context("test command has no terminal process result")
+    anyhow::bail!("repair message was not consumed by an executor Turn")
+}
+
+fn consumed_completion_before(root: &Actor, child: &str, turn: &str, call: &Call) -> bool {
+    let mut consumed = 0;
+    let mut notification = None;
+    for commit in &root.journal {
+        for record in commit.inbox.iter() {
+            if record.message.payload.format() != "pl.studio.child-notification"
+                || record.message.payload.version() != 1
+                || record.message.source_id != format!("studio.child:{child}")
+            {
+                continue;
+            }
+            if let Ok(message) =
+                serde_json::from_str::<ChildCompletion>(record.message.payload.content())
+                && message.child_id == child
+                && message.turn.as_ref().is_some_and(|value| {
+                    value.turn_id == turn
+                        && value.state
+                            == pl_core::thread::TurnState::Finished(
+                                pl_core::thread::TurnOutcome::Completed,
+                            )
+                })
+            {
+                notification = Some(record.sequence);
+            }
+        }
+        if let Some(watermark) = commit.consumed_messages {
+            consumed = watermark;
+        }
+        if let Some(attempt) = &commit.attempt
+            && let pl_core::thread::AttemptOutcome::Committed(output) = &attempt.outcome
+            && output.tool_calls.iter().any(|tool| tool.call_id == call.id)
+        {
+            return notification.is_some_and(|sequence| sequence <= consumed);
+        }
+    }
+    false
+}
+
+fn terminal_test_call<'a>(_actor: &'a Actor, call: &'a Call) -> Result<&'a Call> {
+    let receipt = output(call)?;
+    ensure!(
+        receipt.pointer("/state/kind").and_then(Value::as_str) == Some("final"),
+        "test command has no terminal result for its own call identity"
+    );
+    Ok(call)
 }
 
 fn verification_cwd(
@@ -585,6 +629,17 @@ fn verification_cwd(
             } else {
                 None
             }
+        })
+        .or_else(|| {
+            actors.values().flat_map(|candidate| candidate.journal.iter()).flat_map(|commit| commit.extensions.iter())
+                .find_map(|change| {
+                    let pl_core::thread::extensions::ExtensionChange::Put { id, record } = change else { return None; };
+                    if id != "studio.workspace" || record.payload.format() != "pl.studio.workspace" || record.payload.version() != 1 { return None; }
+                    let assignment: pl_protocol::AgentWorkspaceAssignmentSnapshot = serde_json::from_str(record.payload.content()).ok()?;
+                    if actor.role == "root" { Some(assignment.project_root) }
+                    else if actor.journal.iter().any(|commit| commit.extensions.iter().any(|entry| matches!(entry, pl_core::thread::extensions::ExtensionChange::Put { record: own, .. } if own.payload == record.payload))) { Some(assignment.root) }
+                    else { None }
+                })
         })
         .context("verification has no bound workspace assignment")?;
     Ok(std::path::Path::new(&workspace)
@@ -633,6 +688,7 @@ mod tests {
 
     fn actor(id: &str, time: i64, detail: &str) -> Actor {
         Actor {
+            journal: Vec::new(),
             id: id.into(),
             role: "executor".into(),
             snapshot: pl_protocol::ThreadSnapshot::empty(id),
@@ -657,6 +713,72 @@ mod tests {
         }
     }
 
+    fn completion_journal(
+        child: &str,
+        turn: &str,
+        call: &str,
+        consumed: bool,
+    ) -> Vec<pl_core::thread::journal::ThreadCommit> {
+        let notification = serde_json::json!({"childId":child,"turn":{"turnId":turn,"inputId":null,"modelSteps":1,"elapsedMs":1,"state":{"kind":"finished","value":"completed"}}});
+        vec![serde_json::from_value(serde_json::json!({
+            "threadId":"root","sequence":1,"committedAt":1,
+            "deliveries":[],"extensions":[],"interactions":[],"replacements":[],
+            "inbox":[{"sequence":1,"message":{"id":"notification","sourceId":format!("studio.child:{child}"),"payload":{"format":"pl.studio.child-notification","version":1,"content":notification.to_string()},"context":[]}}],
+            "consumedMessages":if consumed {1} else {0},
+            "attempt":{"turnId":"root-turn","attemptId":"attempt","inputRevision":0,"tools":[],"outcome":{"kind":"committed","value":{"attemptId":"attempt","baseContextRevision":0,"content":[],"toolCalls":[{"callId":call,"toolId":"read_agent_submissions","arguments":{"format":"text/plain","version":1,"content":"request"}}],"privateContext":null,"usage":{}}}}
+        })).unwrap()]
+    }
+
+    #[test]
+    fn repair_turn_comes_from_consumed_message_identity_and_sequence() {
+        let mut executor = actor("executor", 1, "delivery");
+        let mut journal = completion_journal("child", "old", "call", false);
+        let mut commit = serde_json::to_value(&journal[0]).unwrap();
+        commit["threadId"] = serde_json::json!("executor");
+        commit["inbox"][0]["sequence"] = serde_json::json!(7);
+        commit["inbox"][0]["message"]["id"] = serde_json::json!("repair-message");
+        commit["consumedMessages"] = serde_json::json!(7);
+        commit["context"] = serde_json::json!({"kind":"append","value":{"revision":1,"records":[{"id":"inbox:7","turnId":"resumed-turn","source":{"kind":"runtime","sourceId":"agent:root"},"content":[],"toolCalls":[]}]}});
+        journal[0] = serde_json::from_value(commit).unwrap();
+        executor.journal = journal;
+        let receipt =
+            serde_json::json!({"target":"executor","messageId":"repair-message","sequence":7});
+        assert_eq!(
+            resumed_message_turn(&executor, &receipt).unwrap(),
+            "resumed-turn"
+        );
+        let mut wrong = receipt.clone();
+        wrong["messageId"] = serde_json::json!("other-message");
+        assert!(resumed_message_turn(&executor, &wrong).is_err());
+        wrong = receipt.clone();
+        wrong["sequence"] = serde_json::json!(6);
+        assert!(resumed_message_turn(&executor, &wrong).is_err());
+        executor.journal[0].consumed_messages = Some(6);
+        assert!(resumed_message_turn(&executor, &receipt).is_err());
+    }
+
+    #[test]
+    fn parent_completion_evidence_rejects_unconsumed_and_wrong_call_notifications() {
+        let mut root = actor("root", 1, "");
+        let call = root.calls[0].clone();
+        root.journal = completion_journal("child", "turn", &call.id, false);
+        assert!(!consumed_completion_before(&root, "child", "turn", &call));
+        root.journal = completion_journal("child", "turn", &call.id, true);
+        assert!(consumed_completion_before(&root, "child", "turn", &call));
+        assert!(!consumed_completion_before(
+            &root,
+            "child",
+            "other-turn",
+            &call
+        ));
+        assert!(!consumed_completion_before(
+            &root,
+            "other-child",
+            "turn",
+            &call
+        ));
+    }
+
     const REPORT: &str = "Executed: cargo test --test normalize; cwd=/fixture; baseline=abc; scope=normalize; environment=Linux; result=passed; evidence=tool result. Reused: none. Not run: full suite (owned by root).";
 
     #[test]
@@ -671,6 +793,7 @@ mod tests {
             output: output.to_string(),
         };
         let root = Actor {
+            journal: completion_journal("a", "a", "read_agent_submissions", true),
             id: "root".into(),
             role: "root".into(),
             snapshot: pl_protocol::ThreadSnapshot::empty("root"),
@@ -681,9 +804,9 @@ mod tests {
                     serde_json::json!({"agentId":"a"}),
                 ),
                 call(
-                    "wait_agents",
-                    serde_json::json!({"targets":["a"]}),
-                    serde_json::json!({"reason":"terminal", "messages":[{"agentId":"a","state":{"agent":{"kind":"idle"},"lastTurnOutcome":{"turnId":"a","outcome":{"kind":"completed"}}}}]}),
+                    "wait",
+                    serde_json::json!({}),
+                    serde_json::json!({"tasks":[],"messagesReady":true,"timedOut":false}),
                 ),
                 call(
                     "read_agent_submissions",
@@ -697,7 +820,8 @@ mod tests {
         failed.output = "TOOL_FAILED: invalid writablePaths".into();
         actors.get_mut("root").unwrap().calls.push(failed);
         validate_checkpoint(&actors, "root").unwrap();
-        actors.get_mut("root").unwrap().calls[1].output = serde_json::json!({"reason":"terminal", "messages":[{"agentId":"a","state":{"lastTurnOutcome":{"turnId":"old-turn","outcome":{"kind":"completed"}}}}]}).to_string();
+        actors.get_mut("root").unwrap().journal =
+            completion_journal("a", "old-turn", "read_agent_submissions", true);
         assert!(
             validate_checkpoint(&actors, "root").is_err(),
             "stale turn receipt accepted"
@@ -740,28 +864,33 @@ mod tests {
     }
 
     #[test]
-    fn running_test_requires_its_own_terminal_poll() {
+    fn running_test_requires_its_own_terminal_delivery_and_keeps_nonzero_status() {
         let mut actor = actor("a", 1, REPORT);
         actor.calls[0].output =
-            serde_json::json!({"state":{"kind":"running"},"processId":"proc-a"}).to_string();
+            serde_json::json!({"state":{"kind":"running"},"processId":"task-a"}).to_string();
         assert!(terminal_test_call(&actor, &actor.calls[0]).is_err());
-        actor.calls.push(Call {
-            id: "poll".into(),
-            turn_id: "a".into(),
-            completed_at: 3,
-            name: "write_stdin".into(),
-            arguments: serde_json::json!({"processId":"proc-b"}),
-            output:
-                serde_json::json!({"state":{"kind":"final","data":{"result":{"kind":"succeeded"}}}})
-                    .to_string(),
-        });
+        let mut unrelated = actor.calls[0].clone();
+        unrelated.id = "other-call".into();
+        unrelated.output =
+            serde_json::json!({"state":{"kind":"final","data":{"result":{"kind":"succeeded"}}}})
+                .to_string();
+        actor.calls.push(unrelated);
         assert!(terminal_test_call(&actor, &actor.calls[0]).is_err());
-        actor.calls[2].arguments["processId"] = serde_json::json!("proc-a");
-        assert!(
-            terminal_test_call(&actor, &actor.calls[0])
+        actor.calls[0].output = serde_json::json!({"state":{"kind":"final","data":{"result":{"kind":"failed","data":{"failure":{"kind":"exited","data":{"exit_code":101}}}}}}}).to_string();
+        let terminal = terminal_test_call(&actor, &actor.calls[0]).unwrap();
+        assert_eq!(
+            output(terminal)
                 .unwrap()
-                .output
-                .contains("succeeded")
+                .pointer("/state/data/result/kind")
+                .unwrap(),
+            "failed"
+        );
+        assert_eq!(
+            output(terminal)
+                .unwrap()
+                .pointer("/state/data/result/data/failure/data/exit_code")
+                .unwrap(),
+            101
         );
     }
 }
