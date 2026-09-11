@@ -391,6 +391,9 @@ mod tests {
             .project_id;
         let repository = runtime.persistence_repository().await.unwrap();
         repository.flush().await.unwrap();
+        // Catalog refresh is unrelated to this write-behind recovery proof and
+        // would otherwise contend with the new owner's skill discovery.
+        runtime.stop_tool_refresh().await.unwrap();
         runtime.store.database().execute_unprepared("CREATE TRIGGER fail_new_thread BEFORE INSERT ON threads BEGIN SELECT RAISE(ABORT, 'disk i/o error'); END").await.unwrap();
         let thread = tokio::time::timeout(
             std::time::Duration::from_secs(2),

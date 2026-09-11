@@ -269,7 +269,16 @@ async fn backup_database(source: &Path, destination: &Path) -> Result<()> {
     }
     .await;
     finish_connection(db, result).await?;
-    tokio::fs::File::open(&partial).await?.sync_all().await?;
+    // Windows requires a writable handle for `FlushFileBuffers`, which backs
+    // `sync_all`; opening the SQLite-created file read-only returns
+    // `ERROR_ACCESS_DENIED` there.
+    let partial_file = tokio::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&partial)
+        .await?;
+    partial_file.sync_all().await?;
+    drop(partial_file);
     tokio::fs::rename(&partial, destination).await?;
     sync_directory(destination.parent().context("backup has no parent")?).await
 }
