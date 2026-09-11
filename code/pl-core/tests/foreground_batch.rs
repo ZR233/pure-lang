@@ -7,7 +7,7 @@ use pl_core::{
         DynModelSession, ModelError, ModelRequest, ModelSession, ModelStepOutput, ModelToolCall,
         PreparedModelCall, ToolCallMode,
     },
-    thread::{ThreadError, ThreadHandle, TurnInput},
+    thread::{ModelOutputViolation, ThreadError, ThreadHandle, TurnInput},
     tool::{
         ToolOutput,
         opaque::{CallContext, Registration, Tool, ToolError},
@@ -194,8 +194,15 @@ async fn coexisting_foreground_does_not_weaken_control_solo_admission() {
     let writes = Writes::default();
     let thread = thread(&writes, true).await;
     assert!(matches!(
-        thread.run_turn(input(CancellationToken::new())).await,
-        Err(ThreadError::InvalidOutput)
+        thread
+            .run_turn(TurnInput {
+                max_model_steps: std::num::NonZeroU32::new(1).unwrap(),
+                ..input(CancellationToken::new())
+            })
+            .await,
+        Err(ThreadError::ModelOutput(
+            ModelOutputViolation::SoloBatch { .. }
+        ))
     ));
     assert!(writes.events.lock().unwrap().is_empty());
     thread.close().await.unwrap();

@@ -263,7 +263,7 @@ pub struct TransitionInput {
     pub expected_state_id: String,
     /// One direct successor returned by `workflow_next`.
     pub target_state_id: String,
-    /// Completion declaration for the current state and selected edge.
+    /// Exactly three keys: reason explains why the selected guard holds; summary describes the phase outcome; evidence is an array of supporting records.
     pub completion: CompletionInput,
 }
 
@@ -279,6 +279,7 @@ impl TransitionInput {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[schemars(inline)]
 pub struct CompletionInput {
     /// Why the current state's criteria and selected edge guard are satisfied.
     pub reason: String,
@@ -398,4 +399,21 @@ fn idempotent_response(
 
 fn operation_id(identity: &WorkflowOperation) -> String {
     format!("{}/{}", identity.turn_id, identity.call_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn completion_schema_exposes_closed_fields_at_the_call_site() {
+        let schema = schemars::schema_for!(TransitionInput).to_value();
+        let completion = &schema["properties"]["completion"];
+        assert_eq!(completion["additionalProperties"], false);
+        assert!(completion.get("$ref").is_none());
+        for field in ["reason", "summary", "evidence"] {
+            assert!(completion["properties"].get(field).is_some());
+        }
+        let invalid = serde_json::json!({"expectedRunId":"run", "expectedRevision":1, "expectedStateId":"planning", "targetStateId":"working", "completion":{"reason":"done", "summary":"done", "evidence":[], "summary_evidence":"unexpected"}});
+        assert!(serde_json::from_value::<TransitionInput>(invalid).is_err());
+    }
 }

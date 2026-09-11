@@ -1,6 +1,40 @@
 part of '../widget_test.dart';
 
 void registerInteractionTests() {
+  testWidgets('Plan summary remains scrollable across short viewport heights', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    tester.platformDispatcher.textScaleFactorTestValue = 1.5;
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    final api = _FakeStudioApi(_stateWithPlanConfirmation());
+    for (final size in [
+      const Size(1280, 720),
+      const Size(980, 600),
+      const Size(1280, 520),
+      const Size(760, 620),
+    ]) {
+      tester.view.physicalSize = size;
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [studioApiProvider.overrideWithValue(api)],
+          child: _localizedApp(home: const StudioShell()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: 'Plan layout at $size');
+      expect(find.byKey(StudioDriverKeys.planApprove), findsOneWidget);
+      await tester.tap(find.byKey(StudioDriverKeys.planDetailsClose));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(StudioDriverKeys.planSummary));
+      await tester.tap(find.byKey(StudioDriverKeys.planSummary));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: 'Plan reopened at $size');
+    }
+  });
+
   testWidgets('Composer admits, previews, and removes a remote image draft', (
     tester,
   ) async {

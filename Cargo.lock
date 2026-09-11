@@ -2955,6 +2955,8 @@ dependencies = [
  "libc",
  "minisign-verify",
  "pl-model",
+ "pl-protocol",
+ "pl-remote-helper",
  "pl-skill-core",
  "pl-studio-runtime",
  "pretty_assertions",

@@ -42,7 +42,7 @@ pub(super) fn record(
     };
     let output = match &attempt.outcome {
         AttemptOutcome::Running | AttemptOutcome::Interrupted => return Ok(()),
-        AttemptOutcome::Committed(output) | AttemptOutcome::Rejected(output) => Ok(output),
+        AttemptOutcome::Committed(output) | AttemptOutcome::Rejected { output, .. } => Ok(output),
         AttemptOutcome::Failed(error) => Err(error.as_ref()),
         AttemptOutcome::Cancelled { result } => result.as_ref().map_err(std::sync::Arc::as_ref),
     };

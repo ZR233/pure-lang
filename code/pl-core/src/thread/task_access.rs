@@ -146,7 +146,7 @@ impl TaskAccess {
             .tasks
             .get(id)
             .cloned()
-            .ok_or(ThreadError::InvalidIdentity)
+            .ok_or_else(|| ThreadError::TaskNotFound { task_id: id.into() })
     }
 
     /// Reads a terminal result; `None` means execution has not committed a terminal state.
@@ -155,7 +155,10 @@ impl TaskAccess {
     /// Rejects unknown tasks or an inconsistent terminal result reference.
     pub fn result(&self, id: &str) -> Result<Option<ToolDelivery>, ThreadError> {
         let snapshot = self.snapshots.borrow();
-        let task = snapshot.tasks.get(id).ok_or(ThreadError::InvalidIdentity)?;
+        let task = snapshot
+            .tasks
+            .get(id)
+            .ok_or_else(|| ThreadError::TaskNotFound { task_id: id.into() })?;
         if snapshot.pending_tool_commits.contains(&task.call_id) {
             return Err(ThreadError::PendingToolCommit);
         }
@@ -202,7 +205,7 @@ impl TaskAccess {
                             .tasks
                             .get(id)
                             .cloned()
-                            .ok_or(ThreadError::InvalidIdentity)
+                            .ok_or_else(|| ThreadError::TaskNotFound { task_id: id.into() })
                     })
                     .collect::<Result<Vec<_>, _>>()?;
                 if tasks
@@ -384,6 +387,14 @@ mod tests {
             });
             let access = receiver.recv().await.unwrap();
             let before = thread.snapshot();
+            for id in ["call", "thread-child", "task:CALL", "task:unknown", ""] {
+                assert!(
+                    matches!(access.get(id), Err(ThreadError::TaskNotFound { task_id }) if task_id == id)
+                );
+                assert!(
+                    matches!(access.result(id), Err(ThreadError::TaskNotFound { task_id }) if task_id == id)
+                );
+            }
             let preview = vec![ContextContent::Text {
                 text: "stdout before exit".into(),
             }];

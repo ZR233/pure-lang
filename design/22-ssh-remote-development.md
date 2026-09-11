@@ -170,3 +170,7 @@ Linux job 构建同一提交的两种 helper，并把 CI 内部构建产物交�
 当 password 与任何持久化非 secret 字段都不相同时，artifact 与隔离 Studio home 在结束前扫描
 password 字节，发现泄漏立即失败；若 password 与 username 等合法字段相同，字节扫描无法区分来源，
 验收必须改用 SQLite typed schema/row 检查，确认只存在非 secret 列且 `auth_json` 只记录认证种类。
+
+### 本地嵌入 helper 准入
+
+预编译 helper 除 SHA-256 外必须携带目标架构与 worker 协议版本元数据，缺失或不匹配时拒绝并提示重建。宿主架构复用 worker Ready 协议做实际握手，其他架构仅校验静态元数据。探针拥有并回收子进程，退出、版本不符与超时分别报告，有界保留 stderr 和执行路径。同一物化 helper 的启动失败在当前 runtime 内保持不可用，重启后重新准入，不延长原有超时。

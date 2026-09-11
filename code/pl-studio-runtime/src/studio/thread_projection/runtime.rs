@@ -48,7 +48,7 @@ pub(super) fn project_runtime(
             usage.model = request.binding.requested_model;
         }
         let output = match &attempt.outcome {
-            AttemptOutcome::Committed(output) | AttemptOutcome::Rejected(output) => {
+            AttemptOutcome::Committed(output) | AttemptOutcome::Rejected { output, .. } => {
                 Some(Ok(output))
             }
             AttemptOutcome::Failed(error) => Some(Err(error.as_ref())),

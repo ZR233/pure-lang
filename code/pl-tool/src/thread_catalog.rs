@@ -88,7 +88,7 @@ impl ThreadBuiltin {
             ),
             Self::Task(TaskControlKind::Wait) => schema::<crate::task_control::WaitTasksInput>(
                 "wait",
-                "Wait for selected tasks or incoming messages. Returns readiness; completed background results arrive with the next model step.",
+                "Call wait ALONE in a model response. For a tool use its exact receipt taskId: {\"taskIds\":[\"task:call-id\"]}. For child notifications use {\"taskIds\":[],\"timeoutMs\":300000}, then match childId and turn terminal before read_agent_submissions({\"target\":\"child-id\"}). Never put agentId or callId in taskIds. Returns readiness; completed background results arrive with the next model step.",
             ),
             Self::Task(TaskControlKind::Query) => schema::<crate::task_control::QueryTaskInput>(
                 "get_tool_task",

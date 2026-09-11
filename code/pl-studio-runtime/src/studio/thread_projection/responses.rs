@@ -42,7 +42,7 @@ pub(in crate::studio) fn project_responses(
         )?);
         let output = match &attempt.outcome {
             AttemptOutcome::Committed(output)
-            | AttemptOutcome::Rejected(output)
+            | AttemptOutcome::Rejected { output, .. }
             | AttemptOutcome::Cancelled { result: Ok(output) } => Some(output),
             AttemptOutcome::Running
             | AttemptOutcome::Interrupted
@@ -103,8 +103,8 @@ pub(in crate::studio) fn project_responses(
                 response_content(output)?, ThreadContentLifecycle::completed(updated_at),
                 if output.tool_calls.is_empty() { ThreadTextChannel::Final } else { ThreadTextChannel::Commentary },
             ),
-            AttemptOutcome::Rejected(output) => (
-                response_content(output)?, ThreadContentLifecycle::failed(updated_at, "The model output was rejected before context commit.".into()), ThreadTextChannel::Commentary,
+            AttemptOutcome::Rejected { output, reason } => (
+                response_content(output)?, ThreadContentLifecycle::failed(updated_at, reason.to_string()), ThreadTextChannel::Commentary,
             ),
             AttemptOutcome::Cancelled { result: Ok(output) } => (
                 response_content(output)?, ThreadContentLifecycle::cancelled(updated_at, "The model returned after cancellation; this output was not committed to context.".into()), ThreadTextChannel::Commentary,
@@ -198,10 +198,9 @@ fn inference_item(
             updated_at,
             error.to_string(),
         )),
-        AttemptOutcome::Rejected(_) => State::Failed(pl_protocol::FailedThreadInference::new(
-            updated_at,
-            "Model output rejected before context commit".into(),
-        )),
+        AttemptOutcome::Rejected { reason, .. } => State::Failed(
+            pl_protocol::FailedThreadInference::new(updated_at, reason.to_string()),
+        ),
         AttemptOutcome::Cancelled { .. } => {
             State::Cancelled(pl_protocol::CancelledThreadInference::new(
                 updated_at,

@@ -597,7 +597,12 @@ mod tests {
                 })
                 .await;
             if mix_control {
-                assert!(matches!(result, Err(ThreadError::InvalidOutput)));
+                assert!(matches!(
+                    result,
+                    Err(ThreadError::ModelOutput(
+                        ModelOutputViolation::SoloBatch { .. }
+                    ))
+                ));
             } else {
                 assert_eq!(result.unwrap().tool_calls.len(), 2);
             }
@@ -2913,12 +2918,14 @@ mod tests {
         assert!(thread.snapshot().attempts.is_empty());
         assert!(matches!(
             thread.step(step("fresh")).await,
-            Err(ThreadError::InvalidOutput)
+            Err(ThreadError::ModelOutput(
+                ModelOutputViolation::DuplicateCallIdentity { .. }
+            ))
         ));
         assert_eq!(thread.snapshot().context, original);
         assert!(matches!(
             thread.snapshot().attempts[0].outcome,
-            AttemptOutcome::Rejected(_)
+            AttemptOutcome::Rejected { .. }
         ));
         thread.close().await.unwrap();
     }

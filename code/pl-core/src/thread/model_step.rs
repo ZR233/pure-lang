@@ -79,6 +79,62 @@ impl Owner {
         self.step_with_plan(input, plan, None).await
     }
 
+    pub(super) async fn correct_step(
+        &mut self,
+        input: StepInput,
+        source: String,
+    ) -> Result<ModelStepOutput, ThreadError> {
+        let plan = self.tools.freeze();
+        self.step_with_plan(input, plan, Some(source)).await
+    }
+
+    fn output_violation(
+        &self,
+        attempt_id: &str,
+        revision: u64,
+        plan: &crate::tool::opaque::ToolPlan,
+        output: &ModelStepOutput,
+    ) -> Option<ModelOutputViolation> {
+        if output.attempt_id != attempt_id {
+            return Some(ModelOutputViolation::AttemptIdentity {
+                expected: attempt_id.into(),
+                actual: output.attempt_id.clone(),
+            });
+        }
+        if output.base_context_revision != revision {
+            return Some(ModelOutputViolation::ContextRevision {
+                expected: revision,
+                actual: output.base_context_revision,
+            });
+        }
+        let mut ids = std::collections::BTreeSet::new();
+        for call in &output.tool_calls {
+            if call.call_id.is_empty() {
+                return Some(ModelOutputViolation::EmptyCallIdentity);
+            }
+            if plan.get(&call.tool_id).is_none() {
+                return Some(ModelOutputViolation::UnknownTool {
+                    tool_id: call.tool_id.clone(),
+                    call_id: call.call_id.clone(),
+                });
+            }
+            if !ids.insert(&call.call_id) || self.state.context.records.iter().any(|record| record.tool_calls.iter().any(|old| old.call_id == call.call_id)) || self.state.attempts.iter().any(|attempt| matches!(&attempt.outcome, AttemptOutcome::Committed(previous) if previous.tool_calls.iter().any(|old| old.call_id == call.call_id))) {
+                return Some(ModelOutputViolation::DuplicateCallIdentity { call_id: call.call_id.clone() });
+            }
+        }
+        let solo = output
+            .tool_calls
+            .iter()
+            .filter(|call| {
+                plan.get(&call.tool_id)
+                    .is_some_and(|tool| tool.requires_solo_call())
+            })
+            .map(|call| call.tool_id.clone())
+            .collect::<Vec<_>>();
+        (output.tool_calls.len() > 1 && !solo.is_empty())
+            .then_some(ModelOutputViolation::SoloBatch { tool_ids: solo })
+    }
+
     fn ensure_model_admission(&mut self) -> Result<(), ThreadError> {
         if !self.uncommitted_tools.is_empty() {
             return Err(ThreadError::PendingToolCommit);
@@ -140,17 +196,29 @@ impl Owner {
         if input.cancellation.is_cancelled() {
             return Err(ThreadError::Cancelled);
         }
-        if retry_of.is_none() {
+        let correcting = retry_of.as_ref().is_some_and(|source| {
+            self.state.attempts.last().is_some_and(|previous| {
+                previous.attempt_id == *source
+                    && matches!(
+                        previous.outcome,
+                        AttemptOutcome::Rejected {
+                            reason: ModelOutputViolation::SoloBatch { .. },
+                            ..
+                        }
+                    )
+            })
+        });
+        if retry_of.is_none() || correcting {
             self.prepare_context(&input, tools.clone()).await?;
             self.ensure_model_admission()?;
         }
         let mut records = self.state.context.records.to_vec();
-        let (messages, consumed_messages) = if retry_of.is_none() {
+        let (messages, consumed_messages) = if retry_of.is_none() || correcting {
             self.message_context(&input.turn_id)
         } else {
             (Vec::new(), self.state.consumed_messages)
         };
-        let (steering, steering_ids) = if retry_of.is_none() {
+        let (steering, steering_ids) = if retry_of.is_none() || correcting {
             self.steering_context(&input.turn_id)
         } else {
             (Vec::new(), Vec::new())
@@ -162,7 +230,13 @@ impl Owner {
                 tool_calls: Vec::new(),
                 id: format!("{}:input", input.attempt_id),
                 turn_id: Some(input.turn_id.clone()),
-                source: ContextSource::User,
+                source: if correcting {
+                    ContextSource::Runtime {
+                        source_id: "model-output-correction".into(),
+                    }
+                } else {
+                    ContextSource::User
+                },
                 content: input.content,
             });
         }
@@ -254,21 +328,34 @@ impl Owner {
                     )
                 }
                 Ok(output)
-                    if output.attempt_id != input.attempt_id
-                        || output.base_context_revision != input_revision
-                        || (output.tool_calls.len() > 1 && output.tool_calls.iter().any(|call| plan.get(&call.tool_id).is_some_and(|tool| tool.requires_solo_call())))
-                        || output.tool_calls.iter().any(|call| call.call_id.is_empty() || plan.get(&call.tool_id).is_none() || self.state.context.records.iter().any(|record| record.tool_calls.iter().any(|old| old.call_id == call.call_id)) || self.state.attempts.iter().any(|attempt| matches!(&attempt.outcome, AttemptOutcome::Committed(previous) if previous.tool_calls.iter().any(|old| old.call_id == call.call_id))))
-                        || output.tool_calls.iter().map(|call| &call.call_id).collect::<std::collections::BTreeSet<_>>().len() != output.tool_calls.len() =>
+                    if self
+                        .output_violation(&input.attempt_id, input_revision, &plan, &output)
+                        .is_some() =>
                 {
+                    let reason = self
+                        .output_violation(&input.attempt_id, input_revision, &plan, &output)
+                        .ok_or(ThreadError::InvalidOutput)?;
                     (
-                        AttemptOutcome::Rejected(output),
-                        Err(ThreadError::InvalidOutput),
+                        AttemptOutcome::Rejected {
+                            output,
+                            reason: reason.clone(),
+                        },
+                        Err(reason.into()),
                     )
                 }
                 Ok(output) => {
                     for call in &output.tool_calls {
                         if let Some(executor) = plan.get(&call.tool_id) {
-                            self.pending.insert(call.call_id.clone(), PendingCall { context: tool_context.clone(), model_projection: tool_projection.clone(), turn_id: input.turn_id.clone(), call: call.clone(), executor: executor.clone() });
+                            self.pending.insert(
+                                call.call_id.clone(),
+                                PendingCall {
+                                    context: tool_context.clone(),
+                                    model_projection: tool_projection.clone(),
+                                    turn_id: input.turn_id.clone(),
+                                    call: call.clone(),
+                                    executor: executor.clone(),
+                                },
+                            );
                         }
                     }
                     let mut records = self.state.context.records.to_vec();

@@ -1,6 +1,52 @@
 part of '../widget_test.dart';
 
 void registerTimelineScrollTests() {
+  testWidgets(
+    'Plan tail uses natural height when summary wraps at flex boundary',
+    (tester) async {
+      _configureResponsiveView(tester, const Size(980, 520));
+      for (var length = 35; length <= 125; length += 5) {
+        final plan = PlanConfirmationView(
+          interaction: _planConfirmationInteraction(),
+          question: UserQuestionView(
+            id: agentSessionPlanConfirmationQuestionId,
+            header: 'Plan',
+            question: '# Title\n${List.filled(length, 'a').join()}',
+            isOther: true,
+            isSecret: false,
+            options: const [],
+          ),
+        );
+        await tester.pumpWidget(
+          _timelineApp(
+            home: Scaffold(
+              body: Align(
+                alignment: Alignment.topLeft,
+                child: SizedBox(
+                  width: 812,
+                  height: 107,
+                  child: TimelineView(
+                    threadId: 'session-1',
+                    rows: const [],
+                    turn: null,
+                    planConfirmation: plan,
+                    onPlanToggle: () {},
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          tester.takeException(),
+          isNull,
+          reason: 'summary length $length',
+        );
+      }
+    },
+  );
+
   testWidgets('short timeline anchors current activity above its bottom edge', (
     tester,
   ) async {

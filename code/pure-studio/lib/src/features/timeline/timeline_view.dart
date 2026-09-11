@@ -351,12 +351,23 @@ class _TimelineViewState extends State<TimelineView> {
                       ),
                       SliverPadding(
                         padding: const EdgeInsets.symmetric(horizontal: 24),
-                        sliver: SliverFillRemaining(
-                          hasScrollBody: false,
-                          child: _TimelineTail(
-                            activity: activity,
-                            planSummary: planSummary,
-                          ),
+                        sliver: SliverLayoutBuilder(
+                          builder: (context, constraints) {
+                            final remaining =
+                                constraints.viewportMainAxisExtent -
+                                constraints.precedingScrollExtent;
+                            return SliverToBoxAdapter(
+                              child: ConstrainedBox(
+                                constraints: BoxConstraints(
+                                  minHeight: remaining > 0 ? remaining : 0,
+                                ),
+                                child: _TimelineTail(
+                                  activity: activity,
+                                  planSummary: planSummary,
+                                ),
+                              ),
+                            );
+                          },
                         ),
                       ),
                     ],

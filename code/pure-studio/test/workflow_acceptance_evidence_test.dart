@@ -5,6 +5,70 @@ import 'package:flutter_test/flutter_test.dart';
 import '../test_driver/workflow_acceptance_evidence.dart';
 
 void main() {
+  test(
+    'canonical failed turn stops acceptance even after active turn clears',
+    () {
+      final evidence = WorkflowAcceptanceEvidence();
+      expect(
+        () => evidence.observe({
+          'workspace': {
+            'isBusy': false,
+            'turn': null,
+            'lastTurn': {'status': 'failed', 'reason': 'model output rejected'},
+            'timeline': [],
+          },
+        }),
+        throwsStateError,
+      );
+    },
+  );
+
+  test(
+    'minimal completed workflow requires submissions and actual verification',
+    () {
+      for (final missing in ['read_agent_submissions', 'exec']) {
+        final snapshot = _minimalSnapshot();
+        _tools(snapshot).removeWhere((tool) => tool['name'] == missing);
+        final evidence = WorkflowAcceptanceEvidence()..observe(snapshot);
+        expect(
+          () => evidence.validateMinimalFlow(snapshot),
+          throwsStateError,
+          reason: 'completed must not hide missing $missing',
+        );
+      }
+    },
+  );
+
+  test('minimal completed workflow preserves invalid completion failure', () {
+    final snapshot = _minimalSnapshot();
+    _tools(snapshot).add({
+      'name': 'workflow_transition',
+      'callId': 'invalid-completion',
+      'status': 'failed',
+      'arguments': '{}',
+      'result': 'unknown field reason_note',
+    });
+    final evidence = WorkflowAcceptanceEvidence()..observe(snapshot);
+    expect(() => evidence.validateMinimalFlow(snapshot), throwsStateError);
+  });
+
+  test('minimal approval must belong to the spawned reviewer', () {
+    final snapshot = _minimalSnapshot();
+    _tools(snapshot).firstWhere(
+      (t) => t['name'] == 'read_agent_submissions',
+    )['arguments'] = jsonEncode({
+      'target': 'unrelated-agent',
+    });
+    final evidence = WorkflowAcceptanceEvidence()..observe(snapshot);
+    expect(() => evidence.validateMinimalFlow(snapshot), throwsStateError);
+  });
+
+  test('minimal complete evidence is accepted', () {
+    final snapshot = _minimalSnapshot();
+    final evidence = WorkflowAcceptanceEvidence()..observe(snapshot);
+    expect(() => evidence.validateMinimalFlow(snapshot), returnsNormally);
+  });
+
   test('rebuilds interaction evidence from a durable resumed timeline', () {
     final evidence = WorkflowAcceptanceEvidence();
 
@@ -241,4 +305,45 @@ List<dynamic> _tools(Map<String, dynamic> snapshot) {
   final timeline = workspace['timeline'] as List<dynamic>;
   final row = timeline.single as Map<String, dynamic>;
   return row['tools'] as List<dynamic>;
+}
+
+Map<String, dynamic> _minimalSnapshot() {
+  final snapshot = jsonDecode(
+    jsonEncode(_completedSnapshot(includeRevision: false)),
+  ) as Map<String, dynamic>;
+  final workspace = snapshot['workspace'] as Map<String, dynamic>;
+  workspace['agents'] = [];
+  _tools(snapshot).addAll([
+    for (final name in [
+      'spawn_agent',
+      'read_agent_submissions',
+      'close_agent',
+      'exec',
+      'complete',
+    ])
+      {
+        'name': name,
+        'callId': name,
+        'status': 'succeeded',
+        'arguments': jsonEncode(
+          name == 'spawn_agent'
+              ? {'profileId': 'reviewer'}
+              : name == 'complete'
+              ? {'summary': '结果：hello.txt\n\n验证：通过\n\n剩余问题：无'}
+              : {'target': 'reviewer-1'},
+        ),
+        'result': name == 'exec'
+            ? 'PURE_MINIMAL_VERIFY_OK'
+            : jsonEncode(
+                name == 'spawn_agent'
+                    ? {'agentId': 'reviewer-1'}
+                    : {
+                        'items': [
+                          {'summary': 'REVIEWER_READ_ONLY_APPROVED'},
+                        ],
+                      },
+              ),
+      },
+  ]);
+  return snapshot;
 }

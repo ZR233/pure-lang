@@ -247,6 +247,7 @@ class StudioState {
       todo: selectedTodoList,
       runtime: runtime,
       turn: turn,
+      lastTurn: selectedWorkspace?.lastTurn,
       activeInteraction: activeInteraction,
       composer: composer,
       composerMode: thread.isAgent

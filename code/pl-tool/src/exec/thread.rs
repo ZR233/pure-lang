@@ -126,7 +126,11 @@ impl<B: CommandBackend> Tool for ThreadWriteStdinTool<B> {
             || target.status != pl_core::thread::task::TaskStatus::Running
             || target.cancel_requested
         {
-            return Err(ToolError::new(ExecFailure::InvalidInput));
+            return Err(ToolError::new(ExecFailure::TaskUnavailable {
+                task_id: input.task_id,
+                status: target.status,
+                cancelled: target.cancel_requested,
+            }));
         }
         if context.cancellation.is_cancelled() {
             return Err(ToolError::new(pl_core::thread::ThreadError::Cancelled));
@@ -150,6 +154,14 @@ impl<B: CommandBackend> Tool for ThreadWriteStdinTool<B> {
 
 #[derive(Debug, thiserror::Error)]
 enum ExecFailure {
+    #[error(
+        "stdin task {task_id} is not a running exec task: status={status:?}, cancelRequested={cancelled}"
+    )]
+    TaskUnavailable {
+        task_id: String,
+        status: pl_core::thread::task::TaskStatus,
+        cancelled: bool,
+    },
     #[error("write_stdin requires nonempty input and an active exec task in this Thread")]
     InvalidInput,
     #[error("exec command must not be empty")]
@@ -400,7 +412,7 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(10), async {
             loop {
                 if thread.snapshot().tool_progress.values().flatten().any(|content| matches!(content, ContextContent::Text { text } if text.contains("READY"))) { break; }
-                assert!(!running.is_finished(), "exec failed before publishing READY");
+                assert!(!running.is_finished(), "exec failed before publishing READY; tasks={:?}; deliveries={:?}", thread.snapshot().tasks, thread.snapshot().deliveries);
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
         }).await.unwrap();
@@ -417,7 +429,13 @@ mod tests {
         thread
             .execute_tool("stdin".into(), Default::default())
             .await
-            .unwrap();
+            .unwrap_or_else(|error| {
+                panic!(
+                    "stdin failed: {error}; tasks={:?}; deliveries={:?}",
+                    thread.snapshot().tasks,
+                    thread.snapshot().deliveries
+                )
+            });
         running.await.unwrap().unwrap();
         thread
             .wait_task(&format!("task:{CALL}"), Default::default())

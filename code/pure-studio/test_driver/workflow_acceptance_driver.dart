@@ -33,7 +33,7 @@ Future<void> main(List<String> arguments) async {
       _AcceptanceScope.planOnly =>
         scopedSnapshot ??
             (throw StateError('Plan-only Driver did not produce a snapshot')),
-      _AcceptanceScope.full =>
+      _AcceptanceScope.full || _AcceptanceScope.minimal =>
         options.studioMode == 'mode.simple'
             ? await _waitForSimpleCompletion(
                 session,
@@ -85,7 +85,11 @@ Future<void> main(List<String> arguments) async {
           'workflow did not reach completed terminal: $workflow',
         );
       }
-      evidence.validateTaskFlow();
+      if (options.acceptanceScope == _AcceptanceScope.minimal) {
+        evidence.validateMinimalFlow(finalSnapshot);
+      } else {
+        evidence.validateTaskFlow();
+      }
     }
     if (options.acceptanceScope == _AcceptanceScope.full) {
       final timeline =
@@ -157,6 +161,18 @@ Future<void> main(List<String> arguments) async {
       } on Object {
         // Preserve the original driver failure.
       }
+      if (options.shutdownAfterCompletion) {
+        try {
+          final shutdown = await session.requestData(
+            'shutdown-await',
+            timeout: const Duration(minutes: 2),
+          );
+          await File('${options.snapshotOutput}.failure-shutdown.json')
+              .writeAsString(shutdown, flush: true);
+        } on Object catch (shutdownError) {
+          stderr.writeln('Failed acceptance shutdown: $shutdownError');
+        }
+      }
     }
     rethrow;
   } finally {
@@ -187,6 +203,15 @@ Future<Map<String, dynamic>?> _startNewWorkflow(
     find.byValueKey('project-path-dialog'),
     timeout: const Duration(seconds: 30),
   );
+  if (options.acceptanceScope == _AcceptanceScope.minimal) {
+    await _waitForSnapshot(
+      session,
+      snapshots,
+      'project-opened',
+      (snapshot) => (snapshot['project'] as Map?)?['path'] == options.workspace,
+      timeout: const Duration(seconds: 30),
+    );
+  }
   await session.waitFor(find.byValueKey('sidebar-new-session'));
   await session.tap(find.byValueKey('sidebar-new-session'));
   await session.tap(find.byValueKey('session-mode-selector'));
@@ -204,6 +229,23 @@ Future<Map<String, dynamic>?> _startNewWorkflow(
     timeout: const Duration(seconds: 30),
     evidence: evidence,
   );
+  if (options.acceptanceScope == _AcceptanceScope.minimal) {
+    final config = await session.readSnapshot();
+    final roles = (config['settings'] as Map)['roles'] as List;
+    if (roles.isEmpty ||
+        roles.whereType<Map>().any(
+          (r) =>
+              r['providerId'] != 'deepseek' ||
+              r['model'] != 'deepseek-flash' ||
+              r['effort'] != 'high',
+        )) {
+      throw StateError('Minimal GUI routes must all be DeepSeek Flash high');
+    }
+    await session.tap(find.byValueKey('model-selector'));
+    await session.tap(find.byValueKey('model-deepseek-deepseek-flash'));
+    await session.tap(find.byValueKey('reasoning-effort-selector'));
+    await session.tap(find.byValueKey('reasoning-effort-high'));
+  }
   await session.tap(find.byValueKey('composer-input'));
   await session.enterText(await File(options.promptFile!).readAsString());
   await session.waitForNoPendingFrame(timeout: const Duration(seconds: 20));
@@ -240,6 +282,30 @@ Future<Map<String, dynamic>?> _startNewWorkflow(
         protectedFiles,
         evidence,
       );
+    }
+    if (options.acceptanceScope == _AcceptanceScope.minimal) {
+      final pending = await _waitForSnapshot(
+        session,
+        snapshots,
+        'minimal-plan',
+        (snapshot) =>
+            (snapshot['workspace'] as Map?)?['activeInteraction'] != null,
+        timeout: options.workflowTimeout,
+        evidence: evidence,
+      );
+      final interaction =
+          (pending['workspace'] as Map)['activeInteraction'] as Map;
+      _assertPlanInteraction(interaction);
+      await File('${options.snapshotOutput}.plan.png')
+          .writeAsBytes(await session.screenshot());
+      await _approvePlan(session);
+      await _waitForInteractionChange(
+        session,
+        snapshots,
+        interaction['id'],
+        evidence,
+      );
+      return null;
     }
     await _driveClarificationAndPlanRevision(
       session,
@@ -574,6 +640,9 @@ Future<Map<String, dynamic>> _waitForTerminal(
     if (run is Map<String, dynamic> &&
         run['terminal'] == true &&
         run['currentStateId'] == 'completed' &&
+        ((last['workspace'] as Map?)?['lastTurn'] as Map?)?['status'] ==
+            'completed' &&
+        (last['workspace'] as Map?)?['isBusy'] == false &&
         _hasSuccessfulComplete(last)) {
       return last;
     }
@@ -795,7 +864,8 @@ Future<void> _append(File output, Object value) => output.writeAsString(
 
 enum _AcceptanceScope {
   full('full'),
-  planOnly('plan-only');
+  planOnly('plan-only'),
+  minimal('minimal');
 
   const _AcceptanceScope(this.wireValue);
 
@@ -804,6 +874,7 @@ enum _AcceptanceScope {
   static _AcceptanceScope parse(String value) => switch (value) {
     'full' => full,
     'plan-only' => planOnly,
+    'minimal' => minimal,
     _ => throw ArgumentError('--acceptance-scope must be full or plan-only'),
   };
 }

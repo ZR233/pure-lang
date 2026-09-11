@@ -157,3 +157,11 @@ workflow 成功 mutation 的内部 snapshot 继续隐藏。工具目标只从已
 
 Turn 的失败、取消与预算限制从历史中持久化的 typed Turn item 派生，在该轮内容末尾显示终态
 提示；不能因 activeTurn 清空而丢失，也不能依赖仅供 Driver 的最后状态缓存。
+
+### 最近 Turn 与验收状态
+
+活动 Turn 与最近 Turn 分别表达。活动 Turn 清空后仍保留 canonical 最近终态及原因；同一 Turn 的旧 revision 不得覆盖终态，新 Turn 不受旧 Turn 迟到事件覆盖。GUI 和 Driver 使用同一 typed Turn 数据源，不缓存最后看到的 running 状态来推测最近 Turn。验收必须区分等待计划确认、失败、取消、预算耗尽和成功完成。
+
+计划摘要与活动块按内容高度参与滚动布局，短内容贴底的空白不压缩真实内容。不用固定高度或裁剪隐藏溢出。最终文本只解析一次，保留真实换行与代码中的字面反斜杠。
+
+Linux CMake 的 bridge staging 在安装阶段读取当前 demo/native 环境；缓存 configure 结果不固定运行模式。两种方向切换均保持 demo 不要求 bridge、native 校验并复制当前 bridge 的约定。

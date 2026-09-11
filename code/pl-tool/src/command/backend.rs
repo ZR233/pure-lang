@@ -280,6 +280,10 @@ pub struct LocalCommandBackend {
     execution_environment: ExecutionEnvironment,
     #[cfg(target_os = "linux")]
     worker: std::sync::Arc<dyn WorkerExecutable>,
+    #[cfg(target_os = "linux")]
+    worker_failure: std::sync::Arc<
+        std::sync::OnceLock<std::sync::Arc<pl_remote_helper::client::WorkerClientError>>,
+    >,
 }
 
 #[cfg(target_os = "linux")]
@@ -301,6 +305,8 @@ impl LocalCommandBackend {
             execution_environment: ExecutionEnvironment::detect_local(),
             #[cfg(target_os = "linux")]
             worker: std::sync::Arc::new(PathBuf::from("pl-remote-helper")),
+            #[cfg(target_os = "linux")]
+            worker_failure: Default::default(),
         }
     }
 
@@ -313,6 +319,7 @@ impl LocalCommandBackend {
         P: AsRef<Path> + std::fmt::Debug + Send + Sync + 'static,
     {
         self.worker = std::sync::Arc::new(executable);
+        self.worker_failure = Default::default();
         self
     }
 
@@ -368,9 +375,21 @@ impl CommandBackend for LocalCommandBackend {
         let specification = ProcessCommand::new(program)
             .args(arguments)
             .current_dir(&request.cwd);
+        if let Some(error) = self.worker_failure.get() {
+            return Err(command_error("exec", error));
+        }
         let mut worker = ManagedWorker::spawn(self.worker.path(), specification)
             .await
-            .map_err(|error| command_error("exec", error))?;
+            .map_err(|error| {
+                let error = std::sync::Arc::new(error);
+                if matches!(
+                    error.as_ref(),
+                    pl_remote_helper::client::WorkerClientError::Bootstrap { .. }
+                ) {
+                    let _ = self.worker_failure.set(error.clone());
+                }
+                command_error("exec", error)
+            })?;
         let io = CommandIo {
             stdin: worker
                 .take_stdin()
@@ -575,6 +594,39 @@ fn safe_path_component(value: &str, fallback: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn failed_worker_asset_is_not_restarted_by_backend_clones() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let worker = root.path().join("worker");
+        std::fs::write(&worker, "#!/bin/sh\necho launch >> \"$0.count\"\nexit 9\n").unwrap();
+        std::fs::set_permissions(&worker, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let backend = LocalCommandBackend::new(root.path()).with_worker_executable(worker.clone());
+        let request = CommandSpawnRequest {
+            process_id: "probe".into(),
+            command: "echo must-not-run".into(),
+            cwd: root.path().to_string_lossy().into_owned(),
+            output_target: CommandOutputTarget::new(root.path().join("output"), "output"),
+        };
+        let first = backend
+            .spawn(request.clone())
+            .await
+            .unwrap_err()
+            .to_string();
+        let second = backend
+            .clone()
+            .spawn(request)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert_eq!(first, second);
+        assert_eq!(
+            std::fs::read_to_string(worker.with_extension("count")).unwrap(),
+            "launch\n"
+        );
+    }
 
     #[test]
     fn output_model_path_cannot_escape_workspace() {

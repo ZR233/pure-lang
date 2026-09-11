@@ -260,4 +260,54 @@ mod tests {
             ))
         );
     }
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn cached_cmake_install_observes_current_demo_mode() {
+        let source = include_str!("../../../code/pure-studio/linux/CMakeLists.txt");
+        let staging = source
+            .split("# Stage the prebuilt Rust bridge")
+            .nth(1)
+            .unwrap()
+            .split_once('\n')
+            .unwrap()
+            .1
+            .split("install(TARGETS")
+            .next()
+            .unwrap();
+        for configure_demo in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let library = root.path().join("libfixture.so");
+            fs::write(&library, b"fixture bridge").unwrap();
+            fs::write(root.path().join("CMakeLists.txt"), format!(
+                "cmake_minimum_required(VERSION 3.13)\nproject(probe NONE)\nset(INSTALL_BUNDLE_LIB_DIR \"${{CMAKE_BINARY_DIR}}/staged\")\n{staging}"
+            )).unwrap();
+            let build = root.path().join("build");
+            let configured = std::process::Command::new("cmake")
+                .arg("-S")
+                .arg(root.path())
+                .arg("-B")
+                .arg(&build)
+                .env("PURE_STUDIO_DEMO", configure_demo.to_string())
+                .env(BRIDGE_LIBRARY_ENV, &library)
+                .output()
+                .unwrap();
+            assert!(configured.status.success(), "{configured:?}");
+            let installed = std::process::Command::new("cmake")
+                .arg("--install")
+                .arg(&build)
+                .env("PURE_STUDIO_DEMO", (!configure_demo).to_string())
+                .env(
+                    BRIDGE_LIBRARY_ENV,
+                    if configure_demo {
+                        library.as_os_str()
+                    } else {
+                        OsStr::new("")
+                    },
+                )
+                .output()
+                .unwrap();
+            assert!(installed.status.success(), "{installed:?}");
+            assert_eq!(build.join("staged/libfixture.so").exists(), configure_demo);
+        }
+    }
 }

@@ -116,8 +116,10 @@ else()
       "PURE_STUDIO_BRIDGE_LIBRARY is not a file: "
       "${PURE_STUDIO_BRIDGE_LIBRARY}")
   endif()
-  install(CODE "
-    if(NOT \"$ENV{PURE_STUDIO_DEMO}\" STREQUAL \"true\")
+endif()
+
+install(CODE "
+    if(NOT \"\$ENV{PURE_STUDIO_DEMO}\" STREQUAL \"true\")
       set(_pure_studio_bridge \"\$ENV{PURE_STUDIO_BRIDGE_LIBRARY}\")
       if(_pure_studio_bridge STREQUAL \"\" OR NOT EXISTS \"\${_pure_studio_bridge}\")
         message(FATAL_ERROR
@@ -127,7 +129,6 @@ else()
       file(COPY \"\${_pure_studio_bridge}\" DESTINATION \"${INSTALL_BUNDLE_LIB_DIR}\")
     endif()
   " COMPONENT Runtime)
-endif()
 
 install(TARGETS ${BINARY_NAME} RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
   COMPONENT Runtime)

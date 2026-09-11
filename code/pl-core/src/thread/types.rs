@@ -125,7 +125,10 @@ pub enum AttemptOutcome {
         result: Result<ModelStepOutput, Arc<ModelError>>,
     },
     Failed(Arc<ModelError>),
-    Rejected(ModelStepOutput),
+    Rejected {
+        output: ModelStepOutput,
+        reason: ModelOutputViolation,
+    },
 }
 
 impl RequestAttempt {
@@ -133,7 +136,7 @@ impl RequestAttempt {
     pub fn usage(&self) -> Option<&crate::model::ModelUsage> {
         match &self.outcome {
             AttemptOutcome::Running | AttemptOutcome::Interrupted => None,
-            AttemptOutcome::Committed(output) | AttemptOutcome::Rejected(output) => {
+            AttemptOutcome::Committed(output) | AttemptOutcome::Rejected { output, .. } => {
                 Some(&output.usage)
             }
             AttemptOutcome::Failed(error) => Some(&error.usage),
@@ -143,6 +146,30 @@ impl RequestAttempt {
             }),
         }
     }
+}
+
+/// Exact reason a provider response was rejected before tool execution.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, thiserror::Error)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "kind"
+)]
+pub enum ModelOutputViolation {
+    #[error("model attempt identity mismatch: expected {expected}, got {actual}")]
+    AttemptIdentity { expected: String, actual: String },
+    #[error("model context revision mismatch: expected {expected}, got {actual}")]
+    ContextRevision { expected: u64, actual: u64 },
+    #[error("model called unknown tool {tool_id} (call {call_id})")]
+    UnknownTool { tool_id: String, call_id: String },
+    #[error("model returned an empty tool call identity")]
+    EmptyCallIdentity,
+    #[error("model reused tool call identity {call_id}")]
+    DuplicateCallIdentity { call_id: String },
+    #[error(
+        "tools {tool_ids:?} require an exclusive response; no tools in this batch were executed"
+    )]
+    SoloBatch { tool_ids: Vec<String> },
 }
 
 /// Whether a call completed inside the delivery window or remains owned by the Thread.
@@ -332,6 +359,12 @@ pub enum ThreadError {
     ExtensionSequenceConflict { expected: u64, actual: u64 },
     #[error("model output does not match the admitted request")]
     InvalidOutput,
+    #[error(transparent)]
+    ModelOutput(#[from] ModelOutputViolation),
+    #[error(
+        "taskId {task_id:?} was not found in this Thread; use the exact taskId from the tool receipt, or an empty taskIds list to wait for messages"
+    )]
+    TaskNotFound { task_id: String },
     #[error("context revision exhausted")]
     RevisionExhausted,
     #[error("context revision conflict: expected {expected}, actual {actual}")]

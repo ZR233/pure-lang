@@ -11,12 +11,14 @@ use std::process::Command;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 mod artifact;
+mod minimal;
 mod resident;
 mod subagents;
 
 const LIVE_TEST_NAME: &str = "installed_config_workflow_mode_delivers_rust_project";
 const VERIFY_MARKER: &str = "PURE_WORKFLOW_GUI_VERIFY_OK";
-const LIVE_CONFIG_SCHEMA_VERSION: i64 = 17;
+const LIVE_CONFIG_SCHEMA_VERSION: i64 =
+    pl_studio_runtime::config::STUDIO_CONFIG_SCHEMA_VERSION as i64;
 const TOTAL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const STALL_TIMEOUT_SECONDS: u64 = 10 * 60;
 const WORKFLOW_FIXTURE_USAGE_PATH: &str = ".agents/skills/workflow-fixture-rust/.usage.json";
@@ -32,6 +34,7 @@ const EXPECTED_DELIVERY_PATHS: &[&str] = &[
 pub(super) enum WorkflowAcceptanceScope {
     Full,
     PlanOnly,
+    Minimal,
 }
 
 impl WorkflowAcceptanceScope {
@@ -51,6 +54,7 @@ impl WorkflowAcceptanceScope {
         match self {
             Self::Full => "full",
             Self::PlanOnly => "plan-only",
+            Self::Minimal => "minimal",
         }
     }
 }
@@ -69,6 +73,13 @@ struct WorkflowFixtureSkillUsage {
 }
 
 pub(crate) fn run(options: VerifyWorkflowOptions) -> Result<()> {
+    if options.minimal {
+        ensure!(
+            options.live && options.gui && !options.headless && !options.plan_only,
+            "minimal requires --live --gui"
+        );
+        return minimal::run();
+    }
     let deadline = Instant::now()
         + if options.headless {
             Duration::from_secs(45 * 60)
@@ -95,6 +106,7 @@ pub(crate) fn run(options: VerifyWorkflowOptions) -> Result<()> {
     let prompt_name = match scope {
         WorkflowAcceptanceScope::Full => "prompt.md",
         WorkflowAcceptanceScope::PlanOnly => "plan-only-prompt.md",
+        WorkflowAcceptanceScope::Minimal => "minimal-prompt.md",
     };
     let prompt = workspace_root
         .join("test-fixtures")
@@ -274,6 +286,7 @@ fn run_gui(
         .prefix(match scope {
             WorkflowAcceptanceScope::Full => "pure-workflow-live-gui-",
             WorkflowAcceptanceScope::PlanOnly => "pure-workflow-plan-live-gui-",
+            WorkflowAcceptanceScope::Minimal => "pure-workflow-minimal-",
         })
         .tempdir()
         .context("failed to create isolated GUI acceptance root")?;
@@ -318,6 +331,7 @@ fn run_gui(
         .join("simple-prompt.md");
 
     let acceptance = match scope {
+        WorkflowAcceptanceScope::Minimal => bail!("minimal has its own isolated entry"),
         WorkflowAcceptanceScope::Full => (|| {
             let simple = run_gui_attempt(GuiAttempt {
                 workspace_root,
@@ -413,6 +427,7 @@ fn run_gui(
         })(),
     };
     let diff_artifact = match scope {
+        WorkflowAcceptanceScope::Minimal => bail!("minimal has its own isolated entry"),
         WorkflowAcceptanceScope::Full => (|| {
             write_workspace_diff(
                 &canonical_workspace,
@@ -812,7 +827,9 @@ fn write_driver_receipt(
         })
         .cloned();
     match scope {
-        WorkflowAcceptanceScope::Full if studio_mode == "mode.task" => {
+        WorkflowAcceptanceScope::Full | WorkflowAcceptanceScope::Minimal
+            if studio_mode == "mode.task" =>
+        {
             ensure!(
                 complete.is_some(),
                 "Flutter Driver emitted no successful complete tool receipt"
@@ -825,7 +842,7 @@ fn write_driver_receipt(
                 "Flutter Driver completed receipt does not contain a terminal workflow"
             );
         }
-        WorkflowAcceptanceScope::Full => {
+        WorkflowAcceptanceScope::Full | WorkflowAcceptanceScope::Minimal => {
             ensure!(
                 complete.is_some(),
                 "Flutter Driver emitted no successful complete tool receipt"
@@ -948,6 +965,9 @@ fn write_isolated_live_config(
         .parse::<toml::Table>()
         .with_context(|| format!("installed Studio config `{}` is invalid", source.display()))?;
     upgrade_live_config_copy(&mut config)?;
+    let typed: pl_studio_runtime::config::StudioConfig =
+        toml::Value::Table(config.clone()).try_into()?;
+    typed.validate()?;
     let routes = validate_live_routes(&config)?;
     fs::write(route_manifest, serde_json::to_vec_pretty(&routes)?)?;
     let instructions = config
@@ -982,7 +1002,7 @@ fn upgrade_live_config_copy(config: &mut toml::Table) -> Result<()> {
         return Ok(());
     }
     ensure!(
-        matches!(schema_version, 15 | 16),
+        schema_version == LIVE_CONFIG_SCHEMA_VERSION - 1,
         "installed Studio config schema {schema_version} cannot be upgraded in the live acceptance copy to schema {LIVE_CONFIG_SCHEMA_VERSION}"
     );
     let routes = config
@@ -1305,7 +1325,8 @@ mod tests {
 
     #[test]
     fn live_config_copy_upgrades_only_the_immediately_previous_schema() {
-        for schema_version in [15, 16] {
+        {
+            let schema_version = LIVE_CONFIG_SCHEMA_VERSION - 1;
             let mut previous = toml::toml! {
                 schema_version = schema_version
                 [models.routes.executor]

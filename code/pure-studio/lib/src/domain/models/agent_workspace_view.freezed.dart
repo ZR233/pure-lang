@@ -15,7 +15,7 @@ T _$identity<T>(T value) => value;
 /// @nodoc
 mixin _$AgentWorkspaceView {
 
- StudioThread get thread; StudioThread get rootThread; AgentWorkspaceSyncState get syncState; List<TimelineRow> get timelineRows; TimelineTodoListUpdate? get todo; ThreadRuntimeView get runtime; StudioTurnView? get turn; PendingInteraction? get activeInteraction; ComposerThreadState get composer; AgentComposerMode get composerMode; PermissionMode get permissionMode; List<ProviderSettingsView> get providers; List<RoleSettingsView> get roles; List<StudioAgentView> get agents;
+ StudioThread get thread; StudioThread get rootThread; AgentWorkspaceSyncState get syncState; List<TimelineRow> get timelineRows; TimelineTodoListUpdate? get todo; ThreadRuntimeView get runtime; StudioTurnView? get turn; StudioTurnView? get lastTurn; PendingInteraction? get activeInteraction; ComposerThreadState get composer; AgentComposerMode get composerMode; PermissionMode get permissionMode; List<ProviderSettingsView> get providers; List<RoleSettingsView> get roles; List<StudioAgentView> get agents;
 /// Create a copy of AgentWorkspaceView
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -27,20 +27,20 @@ $AgentWorkspaceViewCopyWith<AgentWorkspaceView> get copyWith => _$AgentWorkspace
 @override
 bool operator ==(Object other) {
   final _this = this as AgentWorkspaceView;
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is AgentWorkspaceView&&(identical(other.thread, _this.thread) || other.thread == _this.thread)&&(identical(other.rootThread, _this.rootThread) || other.rootThread == _this.rootThread)&&(identical(other.syncState, _this.syncState) || other.syncState == _this.syncState)&&const DeepCollectionEquality().equals(other.timelineRows, _this.timelineRows)&&(identical(other.todo, _this.todo) || other.todo == _this.todo)&&(identical(other.runtime, _this.runtime) || other.runtime == _this.runtime)&&(identical(other.turn, _this.turn) || other.turn == _this.turn)&&(identical(other.activeInteraction, _this.activeInteraction) || other.activeInteraction == _this.activeInteraction)&&(identical(other.composer, _this.composer) || other.composer == _this.composer)&&(identical(other.composerMode, _this.composerMode) || other.composerMode == _this.composerMode)&&(identical(other.permissionMode, _this.permissionMode) || other.permissionMode == _this.permissionMode)&&const DeepCollectionEquality().equals(other.providers, _this.providers)&&const DeepCollectionEquality().equals(other.roles, _this.roles)&&const DeepCollectionEquality().equals(other.agents, _this.agents));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is AgentWorkspaceView&&(identical(other.thread, _this.thread) || other.thread == _this.thread)&&(identical(other.rootThread, _this.rootThread) || other.rootThread == _this.rootThread)&&(identical(other.syncState, _this.syncState) || other.syncState == _this.syncState)&&const DeepCollectionEquality().equals(other.timelineRows, _this.timelineRows)&&(identical(other.todo, _this.todo) || other.todo == _this.todo)&&(identical(other.runtime, _this.runtime) || other.runtime == _this.runtime)&&(identical(other.turn, _this.turn) || other.turn == _this.turn)&&(identical(other.lastTurn, _this.lastTurn) || other.lastTurn == _this.lastTurn)&&(identical(other.activeInteraction, _this.activeInteraction) || other.activeInteraction == _this.activeInteraction)&&(identical(other.composer, _this.composer) || other.composer == _this.composer)&&(identical(other.composerMode, _this.composerMode) || other.composerMode == _this.composerMode)&&(identical(other.permissionMode, _this.permissionMode) || other.permissionMode == _this.permissionMode)&&const DeepCollectionEquality().equals(other.providers, _this.providers)&&const DeepCollectionEquality().equals(other.roles, _this.roles)&&const DeepCollectionEquality().equals(other.agents, _this.agents));
 }
 
 
 @override
 int get hashCode {
   final _this = this as AgentWorkspaceView;
-  return Object.hash(runtimeType,_this.thread,_this.rootThread,_this.syncState,const DeepCollectionEquality().hash(_this.timelineRows),_this.todo,_this.runtime,_this.turn,_this.activeInteraction,_this.composer,_this.composerMode,_this.permissionMode,const DeepCollectionEquality().hash(_this.providers),const DeepCollectionEquality().hash(_this.roles),const DeepCollectionEquality().hash(_this.agents));
+  return Object.hash(runtimeType,_this.thread,_this.rootThread,_this.syncState,const DeepCollectionEquality().hash(_this.timelineRows),_this.todo,_this.runtime,_this.turn,_this.lastTurn,_this.activeInteraction,_this.composer,_this.composerMode,_this.permissionMode,const DeepCollectionEquality().hash(_this.providers),const DeepCollectionEquality().hash(_this.roles),const DeepCollectionEquality().hash(_this.agents));
 }
 
 @override
 String toString() {
   final _this = this as AgentWorkspaceView;
-  return 'AgentWorkspaceView(thread: ${_this.thread}, rootThread: ${_this.rootThread}, syncState: ${_this.syncState}, timelineRows: ${_this.timelineRows}, todo: ${_this.todo}, runtime: ${_this.runtime}, turn: ${_this.turn}, activeInteraction: ${_this.activeInteraction}, composer: ${_this.composer}, composerMode: ${_this.composerMode}, permissionMode: ${_this.permissionMode}, providers: ${_this.providers}, roles: ${_this.roles}, agents: ${_this.agents})';
+  return 'AgentWorkspaceView(thread: ${_this.thread}, rootThread: ${_this.rootThread}, syncState: ${_this.syncState}, timelineRows: ${_this.timelineRows}, todo: ${_this.todo}, runtime: ${_this.runtime}, turn: ${_this.turn}, lastTurn: ${_this.lastTurn}, activeInteraction: ${_this.activeInteraction}, composer: ${_this.composer}, composerMode: ${_this.composerMode}, permissionMode: ${_this.permissionMode}, providers: ${_this.providers}, roles: ${_this.roles}, agents: ${_this.agents})';
 }
 
 
@@ -51,7 +51,7 @@ abstract mixin class $AgentWorkspaceViewCopyWith<$Res>  {
   factory $AgentWorkspaceViewCopyWith(AgentWorkspaceView value, $Res Function(AgentWorkspaceView) _then) = _$AgentWorkspaceViewCopyWithImpl;
 @useResult
 $Res call({
- StudioThread thread, StudioThread rootThread, AgentWorkspaceSyncState syncState, List<TimelineRow> timelineRows, TimelineTodoListUpdate? todo, ThreadRuntimeView runtime, StudioTurnView? turn, PendingInteraction? activeInteraction, ComposerThreadState composer, AgentComposerMode composerMode, PermissionMode permissionMode, List<ProviderSettingsView> providers, List<RoleSettingsView> roles, List<StudioAgentView> agents
+ StudioThread thread, StudioThread rootThread, AgentWorkspaceSyncState syncState, List<TimelineRow> timelineRows, TimelineTodoListUpdate? todo, ThreadRuntimeView runtime, StudioTurnView? turn, StudioTurnView? lastTurn, PendingInteraction? activeInteraction, ComposerThreadState composer, AgentComposerMode composerMode, PermissionMode permissionMode, List<ProviderSettingsView> providers, List<RoleSettingsView> roles, List<StudioAgentView> agents
 });
 
 
@@ -68,7 +68,7 @@ class _$AgentWorkspaceViewCopyWithImpl<$Res>
 
 /// Create a copy of AgentWorkspaceView
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? thread = null,Object? rootThread = null,Object? syncState = null,Object? timelineRows = null,Object? todo = freezed,Object? runtime = null,Object? turn = freezed,Object? activeInteraction = freezed,Object? composer = null,Object? composerMode = null,Object? permissionMode = null,Object? providers = null,Object? roles = null,Object? agents = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? thread = null,Object? rootThread = null,Object? syncState = null,Object? timelineRows = null,Object? todo = freezed,Object? runtime = null,Object? turn = freezed,Object? lastTurn = freezed,Object? activeInteraction = freezed,Object? composer = null,Object? composerMode = null,Object? permissionMode = null,Object? providers = null,Object? roles = null,Object? agents = null,}) {
   return _then(AgentWorkspaceView(
 thread: null == thread ? _self.thread : thread // ignore: cast_nullable_to_non_nullable
 as StudioThread,rootThread: null == rootThread ? _self.rootThread : rootThread // ignore: cast_nullable_to_non_nullable
@@ -77,6 +77,7 @@ as AgentWorkspaceSyncState,timelineRows: null == timelineRows ? _self.timelineRo
 as List<TimelineRow>,todo: freezed == todo ? _self.todo : todo // ignore: cast_nullable_to_non_nullable
 as TimelineTodoListUpdate?,runtime: null == runtime ? _self.runtime : runtime // ignore: cast_nullable_to_non_nullable
 as ThreadRuntimeView,turn: freezed == turn ? _self.turn : turn // ignore: cast_nullable_to_non_nullable
+as StudioTurnView?,lastTurn: freezed == lastTurn ? _self.lastTurn : lastTurn // ignore: cast_nullable_to_non_nullable
 as StudioTurnView?,activeInteraction: freezed == activeInteraction ? _self.activeInteraction : activeInteraction // ignore: cast_nullable_to_non_nullable
 as PendingInteraction?,composer: null == composer ? _self.composer : composer // ignore: cast_nullable_to_non_nullable
 as ComposerThreadState,composerMode: null == composerMode ? _self.composerMode : composerMode // ignore: cast_nullable_to_non_nullable
@@ -169,10 +170,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( StudioThread thread,  StudioThread rootThread,  AgentWorkspaceSyncState syncState,  List<TimelineRow> timelineRows,  TimelineTodoListUpdate? todo,  ThreadRuntimeView runtime,  StudioTurnView? turn,  PendingInteraction? activeInteraction,  ComposerThreadState composer,  AgentComposerMode composerMode,  PermissionMode permissionMode,  List<ProviderSettingsView> providers,  List<RoleSettingsView> roles,  List<StudioAgentView> agents)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( StudioThread thread,  StudioThread rootThread,  AgentWorkspaceSyncState syncState,  List<TimelineRow> timelineRows,  TimelineTodoListUpdate? todo,  ThreadRuntimeView runtime,  StudioTurnView? turn,  StudioTurnView? lastTurn,  PendingInteraction? activeInteraction,  ComposerThreadState composer,  AgentComposerMode composerMode,  PermissionMode permissionMode,  List<ProviderSettingsView> providers,  List<RoleSettingsView> roles,  List<StudioAgentView> agents)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _AgentWorkspaceView() when $default != null:
-return $default(_that.thread,_that.rootThread,_that.syncState,_that.timelineRows,_that.todo,_that.runtime,_that.turn,_that.activeInteraction,_that.composer,_that.composerMode,_that.permissionMode,_that.providers,_that.roles,_that.agents);case _:
+return $default(_that.thread,_that.rootThread,_that.syncState,_that.timelineRows,_that.todo,_that.runtime,_that.turn,_that.lastTurn,_that.activeInteraction,_that.composer,_that.composerMode,_that.permissionMode,_that.providers,_that.roles,_that.agents);case _:
   return orElse();
 
 }
@@ -190,10 +191,10 @@ return $default(_that.thread,_that.rootThread,_that.syncState,_that.timelineRows
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( StudioThread thread,  StudioThread rootThread,  AgentWorkspaceSyncState syncState,  List<TimelineRow> timelineRows,  TimelineTodoListUpdate? todo,  ThreadRuntimeView runtime,  StudioTurnView? turn,  PendingInteraction? activeInteraction,  ComposerThreadState composer,  AgentComposerMode composerMode,  PermissionMode permissionMode,  List<ProviderSettingsView> providers,  List<RoleSettingsView> roles,  List<StudioAgentView> agents)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( StudioThread thread,  StudioThread rootThread,  AgentWorkspaceSyncState syncState,  List<TimelineRow> timelineRows,  TimelineTodoListUpdate? todo,  ThreadRuntimeView runtime,  StudioTurnView? turn,  StudioTurnView? lastTurn,  PendingInteraction? activeInteraction,  ComposerThreadState composer,  AgentComposerMode composerMode,  PermissionMode permissionMode,  List<ProviderSettingsView> providers,  List<RoleSettingsView> roles,  List<StudioAgentView> agents)  $default,) {final _that = this;
 switch (_that) {
 case _AgentWorkspaceView():
-return $default(_that.thread,_that.rootThread,_that.syncState,_that.timelineRows,_that.todo,_that.runtime,_that.turn,_that.activeInteraction,_that.composer,_that.composerMode,_that.permissionMode,_that.providers,_that.roles,_that.agents);case _:
+return $default(_that.thread,_that.rootThread,_that.syncState,_that.timelineRows,_that.todo,_that.runtime,_that.turn,_that.lastTurn,_that.activeInteraction,_that.composer,_that.composerMode,_that.permissionMode,_that.providers,_that.roles,_that.agents);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -210,10 +211,10 @@ return $default(_that.thread,_that.rootThread,_that.syncState,_that.timelineRows
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( StudioThread thread,  StudioThread rootThread,  AgentWorkspaceSyncState syncState,  List<TimelineRow> timelineRows,  TimelineTodoListUpdate? todo,  ThreadRuntimeView runtime,  StudioTurnView? turn,  PendingInteraction? activeInteraction,  ComposerThreadState composer,  AgentComposerMode composerMode,  PermissionMode permissionMode,  List<ProviderSettingsView> providers,  List<RoleSettingsView> roles,  List<StudioAgentView> agents)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( StudioThread thread,  StudioThread rootThread,  AgentWorkspaceSyncState syncState,  List<TimelineRow> timelineRows,  TimelineTodoListUpdate? todo,  ThreadRuntimeView runtime,  StudioTurnView? turn,  StudioTurnView? lastTurn,  PendingInteraction? activeInteraction,  ComposerThreadState composer,  AgentComposerMode composerMode,  PermissionMode permissionMode,  List<ProviderSettingsView> providers,  List<RoleSettingsView> roles,  List<StudioAgentView> agents)?  $default,) {final _that = this;
 switch (_that) {
 case _AgentWorkspaceView() when $default != null:
-return $default(_that.thread,_that.rootThread,_that.syncState,_that.timelineRows,_that.todo,_that.runtime,_that.turn,_that.activeInteraction,_that.composer,_that.composerMode,_that.permissionMode,_that.providers,_that.roles,_that.agents);case _:
+return $default(_that.thread,_that.rootThread,_that.syncState,_that.timelineRows,_that.todo,_that.runtime,_that.turn,_that.lastTurn,_that.activeInteraction,_that.composer,_that.composerMode,_that.permissionMode,_that.providers,_that.roles,_that.agents);case _:
   return null;
 
 }
@@ -225,7 +226,7 @@ return $default(_that.thread,_that.rootThread,_that.syncState,_that.timelineRows
 
 
 class _AgentWorkspaceView extends AgentWorkspaceView {
-  const _AgentWorkspaceView({required this.thread, required this.rootThread, required this.syncState, required  List<TimelineRow> timelineRows, required this.todo, required this.runtime, required this.turn, required this.activeInteraction, required this.composer, required this.composerMode, required this.permissionMode, required  List<ProviderSettingsView> providers, required  List<RoleSettingsView> roles, required  List<StudioAgentView> agents}): _timelineRows = timelineRows,_providers = providers,_roles = roles,_agents = agents,super._();
+  const _AgentWorkspaceView({required this.thread, required this.rootThread, required this.syncState, required  List<TimelineRow> timelineRows, required this.todo, required this.runtime, required this.turn, this.lastTurn, required this.activeInteraction, required this.composer, required this.composerMode, required this.permissionMode, required  List<ProviderSettingsView> providers, required  List<RoleSettingsView> roles, required  List<StudioAgentView> agents}): _timelineRows = timelineRows,_providers = providers,_roles = roles,_agents = agents,super._();
 
 
 @override final  StudioThread thread;
@@ -241,6 +242,7 @@ class _AgentWorkspaceView extends AgentWorkspaceView {
 @override final  TimelineTodoListUpdate? todo;
 @override final  ThreadRuntimeView runtime;
 @override final  StudioTurnView? turn;
+@override final  StudioTurnView? lastTurn;
 @override final  PendingInteraction? activeInteraction;
 @override final  ComposerThreadState composer;
 @override final  AgentComposerMode composerMode;
@@ -277,18 +279,18 @@ _$AgentWorkspaceViewCopyWith<_AgentWorkspaceView> get copyWith => __$AgentWorksp
 
 @override
 bool operator ==(Object other) {
-    return identical(this, other) || (other.runtimeType == runtimeType&&other is _AgentWorkspaceView&&(identical(other.thread, thread) || other.thread == thread)&&(identical(other.rootThread, rootThread) || other.rootThread == rootThread)&&(identical(other.syncState, syncState) || other.syncState == syncState)&&const DeepCollectionEquality().equals(other.timelineRows, _timelineRows)&&(identical(other.todo, todo) || other.todo == todo)&&(identical(other.runtime, runtime) || other.runtime == runtime)&&(identical(other.turn, turn) || other.turn == turn)&&(identical(other.activeInteraction, activeInteraction) || other.activeInteraction == activeInteraction)&&(identical(other.composer, composer) || other.composer == composer)&&(identical(other.composerMode, composerMode) || other.composerMode == composerMode)&&(identical(other.permissionMode, permissionMode) || other.permissionMode == permissionMode)&&const DeepCollectionEquality().equals(other.providers, _providers)&&const DeepCollectionEquality().equals(other.roles, _roles)&&const DeepCollectionEquality().equals(other.agents, _agents));
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is _AgentWorkspaceView&&(identical(other.thread, thread) || other.thread == thread)&&(identical(other.rootThread, rootThread) || other.rootThread == rootThread)&&(identical(other.syncState, syncState) || other.syncState == syncState)&&const DeepCollectionEquality().equals(other.timelineRows, _timelineRows)&&(identical(other.todo, todo) || other.todo == todo)&&(identical(other.runtime, runtime) || other.runtime == runtime)&&(identical(other.turn, turn) || other.turn == turn)&&(identical(other.lastTurn, lastTurn) || other.lastTurn == lastTurn)&&(identical(other.activeInteraction, activeInteraction) || other.activeInteraction == activeInteraction)&&(identical(other.composer, composer) || other.composer == composer)&&(identical(other.composerMode, composerMode) || other.composerMode == composerMode)&&(identical(other.permissionMode, permissionMode) || other.permissionMode == permissionMode)&&const DeepCollectionEquality().equals(other.providers, _providers)&&const DeepCollectionEquality().equals(other.roles, _roles)&&const DeepCollectionEquality().equals(other.agents, _agents));
 }
 
 
 @override
 int get hashCode {
-    return Object.hash(runtimeType,thread,rootThread,syncState,const DeepCollectionEquality().hash(_timelineRows),todo,runtime,turn,activeInteraction,composer,composerMode,permissionMode,const DeepCollectionEquality().hash(_providers),const DeepCollectionEquality().hash(_roles),const DeepCollectionEquality().hash(_agents));
+    return Object.hash(runtimeType,thread,rootThread,syncState,const DeepCollectionEquality().hash(_timelineRows),todo,runtime,turn,lastTurn,activeInteraction,composer,composerMode,permissionMode,const DeepCollectionEquality().hash(_providers),const DeepCollectionEquality().hash(_roles),const DeepCollectionEquality().hash(_agents));
 }
 
 @override
 String toString() {
-    return 'AgentWorkspaceView(thread: $thread, rootThread: $rootThread, syncState: $syncState, timelineRows: $timelineRows, todo: $todo, runtime: $runtime, turn: $turn, activeInteraction: $activeInteraction, composer: $composer, composerMode: $composerMode, permissionMode: $permissionMode, providers: $providers, roles: $roles, agents: $agents)';
+    return 'AgentWorkspaceView(thread: $thread, rootThread: $rootThread, syncState: $syncState, timelineRows: $timelineRows, todo: $todo, runtime: $runtime, turn: $turn, lastTurn: $lastTurn, activeInteraction: $activeInteraction, composer: $composer, composerMode: $composerMode, permissionMode: $permissionMode, providers: $providers, roles: $roles, agents: $agents)';
 }
 
 
@@ -299,7 +301,7 @@ abstract mixin class _$AgentWorkspaceViewCopyWith<$Res> implements $AgentWorkspa
   factory _$AgentWorkspaceViewCopyWith(_AgentWorkspaceView value, $Res Function(_AgentWorkspaceView) _then) = __$AgentWorkspaceViewCopyWithImpl;
 @override @useResult
 $Res call({
- StudioThread thread, StudioThread rootThread, AgentWorkspaceSyncState syncState, List<TimelineRow> timelineRows, TimelineTodoListUpdate? todo, ThreadRuntimeView runtime, StudioTurnView? turn, PendingInteraction? activeInteraction, ComposerThreadState composer, AgentComposerMode composerMode, PermissionMode permissionMode, List<ProviderSettingsView> providers, List<RoleSettingsView> roles, List<StudioAgentView> agents
+ StudioThread thread, StudioThread rootThread, AgentWorkspaceSyncState syncState, List<TimelineRow> timelineRows, TimelineTodoListUpdate? todo, ThreadRuntimeView runtime, StudioTurnView? turn, StudioTurnView? lastTurn, PendingInteraction? activeInteraction, ComposerThreadState composer, AgentComposerMode composerMode, PermissionMode permissionMode, List<ProviderSettingsView> providers, List<RoleSettingsView> roles, List<StudioAgentView> agents
 });
 
 
@@ -316,7 +318,7 @@ class __$AgentWorkspaceViewCopyWithImpl<$Res>
 
 /// Create a copy of AgentWorkspaceView
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? thread = null,Object? rootThread = null,Object? syncState = null,Object? timelineRows = null,Object? todo = freezed,Object? runtime = null,Object? turn = freezed,Object? activeInteraction = freezed,Object? composer = null,Object? composerMode = null,Object? permissionMode = null,Object? providers = null,Object? roles = null,Object? agents = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? thread = null,Object? rootThread = null,Object? syncState = null,Object? timelineRows = null,Object? todo = freezed,Object? runtime = null,Object? turn = freezed,Object? lastTurn = freezed,Object? activeInteraction = freezed,Object? composer = null,Object? composerMode = null,Object? permissionMode = null,Object? providers = null,Object? roles = null,Object? agents = null,}) {
   return _then(_AgentWorkspaceView(
 thread: null == thread ? _self.thread : thread // ignore: cast_nullable_to_non_nullable
 as StudioThread,rootThread: null == rootThread ? _self.rootThread : rootThread // ignore: cast_nullable_to_non_nullable
@@ -325,6 +327,7 @@ as AgentWorkspaceSyncState,timelineRows: null == timelineRows ? _self._timelineR
 as List<TimelineRow>,todo: freezed == todo ? _self.todo : todo // ignore: cast_nullable_to_non_nullable
 as TimelineTodoListUpdate?,runtime: null == runtime ? _self.runtime : runtime // ignore: cast_nullable_to_non_nullable
 as ThreadRuntimeView,turn: freezed == turn ? _self.turn : turn // ignore: cast_nullable_to_non_nullable
+as StudioTurnView?,lastTurn: freezed == lastTurn ? _self.lastTurn : lastTurn // ignore: cast_nullable_to_non_nullable
 as StudioTurnView?,activeInteraction: freezed == activeInteraction ? _self.activeInteraction : activeInteraction // ignore: cast_nullable_to_non_nullable
 as PendingInteraction?,composer: null == composer ? _self.composer : composer // ignore: cast_nullable_to_non_nullable
 as ComposerThreadState,composerMode: null == composerMode ? _self.composerMode : composerMode // ignore: cast_nullable_to_non_nullable

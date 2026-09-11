@@ -14,6 +14,15 @@ pub use tokio::sync::watch::Receiver as CleanupReceiver;
 /// Failures of the supervisor transport, distinct from business process failure.
 #[derive(Debug, thiserror::Error)]
 pub enum WorkerClientError {
+    #[error("worker {executable:?} bootstrap failed: {source}; stderr: {stderr}")]
+    Bootstrap {
+        executable: std::path::PathBuf,
+        stderr: String,
+        #[source]
+        source: Box<WorkerClientError>,
+    },
+    #[error("worker protocol version mismatch: expected {expected}, got {actual}")]
+    VersionMismatch { expected: u32, actual: u32 },
     #[error("process worker {operation}: {source}")]
     Io {
         operation: &'static str,

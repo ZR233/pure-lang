@@ -23,7 +23,7 @@ pub(super) fn project_completions(
             AttemptOutcome::Running
             | AttemptOutcome::Interrupted
             | AttemptOutcome::Failed(_)
-            | AttemptOutcome::Rejected(_)
+            | AttemptOutcome::Rejected { .. }
             | AttemptOutcome::Cancelled { .. } => Vec::new(),
         })
         .collect();

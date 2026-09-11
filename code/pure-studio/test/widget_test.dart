@@ -30,6 +30,7 @@ import 'package:pure_studio/src/features/update/studio_update_controller.dart';
 import 'package:pure_studio/src/l10n/app_localizations.dart';
 import 'package:pure_studio/src/platform/external_url_launcher.dart';
 import 'package:pure_studio/src/shared/studio_driver_keys.dart';
+import 'package:pure_studio/src/shared/studio_driver_state.dart';
 
 part 'widget_test/controller_stream_tests.dart';
 part 'widget_test/reducer_recovery_tests.dart';

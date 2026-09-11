@@ -113,7 +113,18 @@ impl CoreModelSession for ThreadModelSession {
                 .map_err(|_| failure(ModelFailureKind::Unavailable, AdapterError::Poisoned))? =
                 None;
         }
-        let declarations = codec::declarations(&request.tools)?;
+        let mut declarations = codec::declarations(&request.tools)?;
+        for (id, declaration) in &mut declarations {
+            if request.solo_tool_ids.contains(id) {
+                match declaration {
+                    ToolSpec::Function { description, .. }
+                    | ToolSpec::Custom { description, .. } => {
+                        description.push_str(" This tool must be the only tool call in its model response; never batch it with queries or other tools.");
+                    }
+                    ToolSpec::ProgrammaticToolCalling | ToolSpec::WebSearch { .. } => {}
+                }
+            }
+        }
         let names = declarations
             .iter()
             .map(|(id, spec)| {

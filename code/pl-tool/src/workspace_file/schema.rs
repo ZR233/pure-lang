@@ -53,7 +53,7 @@ impl WorkspaceFileToolKind {
                 "Read a UTF-8 text file by 1-based source lines. Use startLine and nextStartLine for deterministic paging; each call returns at most 500 lines."
             }
             Self::ListFiles => {
-                "List descendants from the agent workspace with an optional glob and bounded result count. Omit path or use `.` for the workspace root. For pagination, reuse the exact nextCursor and keep path, cwd, glob, and includeDirs unchanged; limit may change. Any intervening workspace write, exec, or Git mutation invalidates existing cursors. A missing or empty workspace directory returns an empty list."
+                "List descendants from the agent workspace with an optional glob and bounded result count. Omit path or use `.` for the workspace root. For pagination, reuse the exact nextCursor and keep path, cwd, glob, and includeDirs unchanged; limit may change. Any intervening workspace write, exec, or Git mutation invalidates existing cursors. Results are filtered (including internal Git/build paths); an empty list does not prove the physical directory is empty. Use stat_path for a specific excluded path. A missing or empty workspace directory returns an empty list."
             }
             Self::ApplyPatch => {
                 "Apply a Codex-style patch to workspace files. The input field must contain a complete patch beginning with *** Begin Patch and ending with *** End Patch. Every Update hunk line starts with a control prefix: space for context, `-` for deletion, or `+` for addition. Preserve a leading `-` or `+` in the file content after that prefix; for example, replace Markdown `- old` with `-- old` and `+- new`."

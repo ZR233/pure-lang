@@ -82,7 +82,7 @@ impl Owner {
             .tasks
             .get(id)
             .cloned()
-            .ok_or(ThreadError::InvalidIdentity)?;
+            .ok_or_else(|| ThreadError::TaskNotFound { task_id: id.into() })?;
         if record.status != TaskStatus::Running {
             return Ok(TaskCancellationReceipt::AlreadyFinished);
         }

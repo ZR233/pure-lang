@@ -233,9 +233,10 @@ StudioReduceResult applyThreadUpdate(
   }
 
   final updated = switch (update) {
-    ThreadTurnUpdate(:final turn) => workspace.copyWith(
-      revision: revision,
-      activeTurn: turn.state.isBusy ? turn : null,
+    ThreadTurnUpdate(:final turn) => _applyCanonicalTurn(
+      workspace,
+      revision,
+      turn,
     ),
     ThreadItemUpsert(:final item) => _upsertThreadItem(
       workspace,
@@ -672,4 +673,24 @@ bool _sameItemIdentity(ThreadItemView left, ThreadItemView right) {
 int _compareItems(ThreadItemView left, ThreadItemView right) {
   final ordinal = left.ordinal.compareTo(right.ordinal);
   return ordinal != 0 ? ordinal : left.id.compareTo(right.id);
+}
+
+ThreadWorkspace _applyCanonicalTurn(
+  ThreadWorkspace workspace,
+  int revision,
+  StudioTurnView turn,
+) {
+  final last = workspace.lastTurn;
+  if (last != null &&
+      (turn.revision <= last.revision ||
+          (last.turnId == turn.turnId &&
+              last.state.isTerminal &&
+              turn.state.isBusy))) {
+    return workspace.copyWith(revision: revision);
+  }
+  return workspace.copyWith(
+    revision: revision,
+    activeTurn: turn.state.isBusy ? turn : null,
+    observedLastTurn: turn,
+  );
 }

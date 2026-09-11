@@ -4,7 +4,6 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../domain/models/studio_models.dart';
-import '../../shared/studio_driver_state.dart';
 import '../frb/studio_api.dart';
 import 'studio_api_provider.dart';
 import 'studio_state_reducer.dart';
@@ -1285,11 +1284,6 @@ class StudioController extends _$StudioController {
         );
         state = AsyncData(next);
       case ThreadNotificationFrame(:final revision, :final update):
-        if (const bool.fromEnvironment('PURE_STUDIO_DRIVER')) {
-          if (update case ThreadTurnUpdate(:final turn)) {
-            StudioDriverState.publishTurn(turn);
-          }
-        }
         final reduced = applyThreadUpdate(
           current,
           threadId: threadId,

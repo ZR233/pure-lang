@@ -54,7 +54,12 @@ ThreadNotificationFrame _threadTurnFrame({
     threadId: threadId,
     revision: workspaceRevision,
     update: ThreadTurnUpdate(
-      _testTurn(threadId: threadId, state: state, turnId: turnId),
+      _testTurn(
+        threadId: threadId,
+        state: state,
+        turnId: turnId,
+        revision: workspaceRevision,
+      ),
     ),
   );
 }

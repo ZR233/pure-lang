@@ -3500,10 +3500,7 @@ void registerShellSettingsTests() {
       await tester.pumpAndSettle();
       expect(find.text('DeepSeek V4.1 Flash'), findsOneWidget);
       final visionCapabilityTags = find.byKey(
-        StudioDriverKeys.modelCapabilityTags(
-          'deepseek',
-          'deepseek-flash',
-        ),
+        StudioDriverKeys.modelCapabilityTags('deepseek', 'deepseek-flash'),
       );
       expect(visionCapabilityTags, findsOneWidget);
       expect(tester.widget<Text>(visionCapabilityTags).data, '文本 · 视觉');

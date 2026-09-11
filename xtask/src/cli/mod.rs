@@ -95,6 +95,9 @@ pub(crate) struct VerifyWorkflowOptions {
     /// Stop the real GUI harness after Plan revision and approval.
     #[arg(long, requires = "gui", conflicts_with = "headless")]
     pub(crate) plan_only: bool,
+    /// Run the smallest complete Task GUI scenario with DeepSeek Flash high.
+    #[arg(long, requires = "gui", conflicts_with_all = ["headless", "plan_only"])]
+    pub(crate) minimal: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Args)]
@@ -389,6 +392,7 @@ mod tests {
                 headless: true,
                 gui: false,
                 plan_only: false,
+                minimal: false,
             }))
         );
         assert!(
@@ -406,6 +410,7 @@ mod tests {
                 headless: false,
                 gui: true,
                 plan_only: true,
+                minimal: false,
             }))
         );
         assert!(

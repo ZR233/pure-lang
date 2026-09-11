@@ -858,6 +858,7 @@ class ThreadWorkspace {
     required this.interactions,
     required this.runtime,
     this.activeTurn,
+    this.observedLastTurn,
     this.todo,
   });
 
@@ -867,7 +868,41 @@ class ThreadWorkspace {
   final List<PendingInteraction> interactions;
   final ThreadRuntimeView runtime;
   final StudioTurnView? activeTurn;
+  final StudioTurnView? observedLastTurn;
   final TimelineTodoListUpdate? todo;
+
+  /// Canonical latest turn, including terminal facts carried by thread items.
+  StudioTurnView? get lastTurn {
+    var observed = observedLastTurn;
+    final active = activeTurn;
+    if (active != null &&
+        (observed == null || active.revision > observed.revision)) {
+      observed = active;
+    }
+    ThreadItemView? latest;
+    for (final item in items) {
+      if (item.state is ThreadTurnItemStateView &&
+          (latest == null ||
+              item.ordinal > latest.ordinal ||
+              (item.ordinal == latest.ordinal &&
+                  item.revision > latest.revision))) {
+        latest = item;
+      }
+    }
+    if (latest == null ||
+        (observed != null && observed.revision >= latest.revision)) {
+      return observed;
+    }
+    final state = latest.state as ThreadTurnItemStateView;
+    return StudioTurnView(
+      inputId: state.inputId,
+      turnId: latest.turnId,
+      threadId: latest.threadId,
+      revision: latest.revision,
+      state: state.state,
+      updatedAt: latest.updatedAt,
+    );
+  }
 
   ThreadWorkspace copyWith({
     StudioThread? thread,
@@ -876,6 +911,7 @@ class ThreadWorkspace {
     List<PendingInteraction>? interactions,
     ThreadRuntimeView? runtime,
     Object? activeTurn = _workspaceUnset,
+    Object? observedLastTurn = _workspaceUnset,
     Object? todo = _workspaceUnset,
   }) {
     return ThreadWorkspace(
@@ -887,6 +923,9 @@ class ThreadWorkspace {
       activeTurn: identical(activeTurn, _workspaceUnset)
           ? this.activeTurn
           : activeTurn as StudioTurnView?,
+      observedLastTurn: identical(observedLastTurn, _workspaceUnset)
+          ? this.observedLastTurn
+          : observedLastTurn as StudioTurnView?,
       todo: identical(todo, _workspaceUnset)
           ? this.todo
           : todo as TimelineTodoListUpdate?,

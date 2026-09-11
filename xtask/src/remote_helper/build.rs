@@ -182,6 +182,14 @@ fn build_target(workspace_root: &Path, target: &str, builder: CargoBuilder) -> R
             checksum.display()
         )
     })?;
+    fs::write(
+        output.with_extension("metadata.json"),
+        serde_json::to_vec_pretty(&super::HelperMetadata {
+            target: target.into(),
+            worker_protocol_version: pl_protocol::process_worker::PROCESS_WORKER_PROTOCOL_VERSION,
+            sha256: digest,
+        })?,
+    )?;
     println!("remote helper artifact: {}", output.display());
     println!("remote helper checksum: {}", checksum.display());
     Ok(())

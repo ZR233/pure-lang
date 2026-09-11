@@ -2367,19 +2367,7 @@ class DriverDemoStudioApi extends DemoStudioApi {
     const threadId = 'thread-main';
     final workspace = state.workspacesByThread[threadId];
     if (workspace == null) return state;
-    StudioDriverState.publishTurn(
-      StudioTurnView(
-        turnId: 'driver-origin-turn',
-        threadId: threadId,
-        revision: 1,
-        state: CompletedStudioTurnState(
-          startedAt: null,
-          completedAt: DateTime.now().millisecondsSinceEpoch ~/ 1000,
-          completion: StudioTurnCompletion.normal,
-        ),
-        updatedAt: DateTime.now(),
-      ),
-    );
+
     return state.copyWith(
       workspacesByThread: {
         ...state.workspacesByThread,

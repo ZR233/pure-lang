@@ -240,9 +240,12 @@ impl Owner {
             self.state.interaction_changes = changes.into();
         }
         if let ToolOutcome::Failed(error) = &outcome {
-            output.append_framework_context(ContextContent::Text {
-                text: Arc::from(format!("Framework recorded tool failure: {error}")),
-            });
+            let diagnostic = error.to_string();
+            if !output.context().iter().any(|content| matches!(content, ContextContent::Text { text } if text.as_ref() == diagnostic)) {
+                output.append_framework_context(ContextContent::Text {
+                    text: Arc::from(format!("Framework recorded tool failure: {diagnostic}")),
+                });
+            }
         }
         let delivered_context = if matches!(outcome, ToolOutcome::Cancelled) {
             vec![ContextContent::Text {

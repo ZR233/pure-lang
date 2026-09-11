@@ -40,6 +40,18 @@ class WorkflowAcceptanceEvidence {
   }
 
   void observe(Map<String, dynamic> snapshot) {
+    final workspace = snapshot['workspace'] as Map?;
+    final lastTurn = workspace?['lastTurn'] as Map?;
+    if (workspace?['isBusy'] != true &&
+        const {
+          'failed',
+          'cancelled',
+          'budgetLimited',
+        }.contains(lastTurn?['status'])) {
+      throw StateError(
+        'Canonical turn terminated: ${lastTurn?['status']}: ${lastTurn?['reason']}',
+      );
+    }
     final run = workflowFromSnapshot(snapshot)?['currentRun'];
     if (run is Map) {
       final state = run['currentStateId'];
@@ -205,6 +217,106 @@ class WorkflowAcceptanceEvidence {
       throw StateError(
         'expected two successful plan_submit calls, got '
         '$_successfulPlanSubmissions',
+      );
+    }
+  }
+
+  void validateMinimalFlow(Map<String, dynamic> snapshot) {
+    for (final state in [
+      'planning',
+      'editing_documents',
+      'working',
+      'integrating',
+      'reviewing',
+      'completed',
+    ]) {
+      if (!_visitedStates.contains(state)) {
+        throw StateError('Missing workflow phase $state');
+      }
+    }
+    final workspace = snapshot['workspace'] as Map;
+    final tools = (workspace['timeline'] as List)
+        .whereType<Map>()
+        .expand((r) => (r['tools'] as List? ?? []).whereType<Map>())
+        .toList();
+    for (final required in [
+      'plan_submit',
+      'spawn_agent',
+      'read_agent_submissions',
+      'close_agent',
+      'complete',
+    ]) {
+      if (!tools.any(
+        (t) => t['name'] == required && t['status'] == 'succeeded',
+      )) {
+        throw StateError('Missing successful $required');
+      }
+    }
+    if (!tools.any(
+      (t) =>
+          t['name'] == 'exec' &&
+          t['status'] == 'succeeded' &&
+          '${t['result']}'.contains('PURE_MINIMAL_VERIFY_OK'),
+    )) {
+      throw StateError('Missing actual Python verification');
+    }
+    final reviewers = tools.where(
+      (t) =>
+          t['name'] == 'spawn_agent' &&
+          t['status'] == 'succeeded' &&
+          _decodeMap(t['arguments'])?['profileId'] == 'reviewer',
+    );
+    if (reviewers.isEmpty) {
+      throw StateError('Missing independent reviewer spawn');
+    }
+    for (final spawn in reviewers) {
+      final id = _decodeMap(spawn['result'])?['agentId'];
+      if (id is! String || id == workspace['rootThreadId']) {
+        throw StateError('Missing canonical reviewer identity');
+      }
+      final readIndex = tools.indexWhere(
+        (t) =>
+            t['name'] == 'read_agent_submissions' &&
+            t['status'] == 'succeeded' &&
+            _decodeMap(t['arguments'])?['target'] == id,
+      );
+      if (readIndex <= tools.indexOf(spawn)) {
+        throw StateError('Missing canonical submissions for reviewer $id');
+      }
+      final items = _decodeMap(tools[readIndex]['result'])?['items'];
+      if (items is! List ||
+          !items.whereType<Map>().any(
+            (i) => '${i['summary']}'.startsWith('REVIEWER_READ_ONLY_APPROVED'),
+          ) ||
+          items.whereType<Map>().any(
+            (i) => '${i['summary']}'.startsWith('REVIEWER_FINDING'),
+          )) {
+        throw StateError('Missing unambiguous canonical reviewer approval');
+      }
+      final closeIndex = tools.indexWhere(
+        (t) =>
+            t['name'] == 'close_agent' &&
+            t['status'] == 'succeeded' &&
+            _decodeMap(t['arguments'])?['target'] == id,
+      );
+      if (closeIndex <= readIndex) {
+        throw StateError('Reviewer $id closed before canonical delivery');
+      }
+    }
+    final complete = tools.lastWhere((t) => t['name'] == 'complete');
+    final summary = _decodeMap(complete['arguments'])?['summary'];
+    if (summary is! String || !summary.contains('\n\n')) {
+      throw StateError('Final report must contain actual paragraph newlines');
+    }
+    if ((workspace['agents'] as List).whereType<Map>().any(
+      (a) => a['id'] != workspace['rootThreadId'] && a['status'] != 'closed',
+    )) {
+      throw StateError('Child was not closed');
+    }
+    final failed = tools.where((t) => t['status'] == 'failed').toList();
+    if (failed.isNotEmpty) {
+      throw StateError(
+        'Minimal flow had failed tools: ${failed.map((t) => t['name']).toList()}',
       );
     }
   }

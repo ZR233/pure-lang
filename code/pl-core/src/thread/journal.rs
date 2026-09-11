@@ -85,7 +85,7 @@ impl ThreadCommit {
     /// Returns an encoding failure without changing the committed state.
     pub fn encode(&self) -> Result<OpaquePayload, JournalCodecError> {
         let content = serde_json::to_string(self)?;
-        Ok(OpaquePayload::new("pl.core.thread-commit", 1, content)
+        Ok(OpaquePayload::new("pl.core.thread-commit", 2, content)
             .expect("static nonempty format and nonzero version"))
     }
 
@@ -94,7 +94,7 @@ impl ThreadCommit {
     /// # Errors
     /// Rejects an unsupported outer schema or invalid envelope encoding.
     pub fn decode(payload: &OpaquePayload) -> Result<Self, JournalCodecError> {
-        if payload.format() != "pl.core.thread-commit" || payload.version() != 1 {
+        if payload.format() != "pl.core.thread-commit" || payload.version() != 2 {
             return Err(JournalCodecError::Unsupported {
                 format: payload.format().into(),
                 version: payload.version(),
@@ -346,12 +346,21 @@ pub fn replay(commits: &[Arc<ThreadCommit>]) -> Result<ThreadSnapshot, ThreadErr
                         .last()
                         .filter(|source| &source.attempt_id == source_id)
                         .ok_or(ThreadError::InvalidIdentity)?;
-                    if !matches!(
+                    let correction = matches!(
                         source.outcome,
-                        AttemptOutcome::Failed(_) | AttemptOutcome::Cancelled { .. }
-                    ) || source.turn_id != attempt.turn_id
-                        || source.input != attempt.input
-                        || source.tools != attempt.tools
+                        AttemptOutcome::Rejected {
+                            reason: ModelOutputViolation::SoloBatch { .. },
+                            ..
+                        }
+                    );
+                    if (!correction
+                        && !matches!(
+                            source.outcome,
+                            AttemptOutcome::Failed(_) | AttemptOutcome::Cancelled { .. }
+                        ))
+                        || source.turn_id != attempt.turn_id
+                        || (!correction
+                            && (source.input != attempt.input || source.tools != attempt.tools))
                     {
                         return Err(ThreadError::InvalidContext);
                     }

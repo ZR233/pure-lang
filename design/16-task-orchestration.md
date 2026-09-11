@@ -85,17 +85,17 @@ finding 回到 editing_documents；两条返工路径都必须重新经过 integ
 进入 `stopped`。
 
 planning 开始和每批 child 交付后，root 都执行一次成本感知的并行化分析。它从需求、仓库边界和验证目标
-列出可交付节点，为每项记录前置依赖、读写范围、适用 Profile、交付证据与 root-only 标记，形成任务 DAG。
+识别可交付节点；仅当多个实质交付存在依赖时，为合格节点记录前置依赖、读写范围、适用 Profile、交付证据与 root-only 标记，形成任务 DAG。
 依赖已满足、边界清楚、可独立验收且预计能缩短关键路径或显著增加独立证据的节点构成 ready frontier；
 root 必须在首次 `wait` 前派出该前沿的全部 child，等待期间继续处理未委托的综合和编排工作，不得
 重复 child 的任务。收齐本批 durable delivery 后，root 更新 DAG 并立即释放下一 ready frontier，直到
 没有剩余节点。调度不使用固定 agent 数量，也不得为凑数量拆出只有极少操作的微任务、重复目标、共享
 未稳定上下文的工作或具有真实前后依赖的工作。
 
-planning 按 crate、前后端层次、独立假设、外部资料或验证面把事实收集交给 fresh-context `explorer`；
+planning 确有独立探索价值时，按 crate、前后端层次、独立假设、外部资料或验证面把合格的事实收集交给 fresh-context `explorer`；
 依赖图复杂时可增加一个 `planner` 独立检查拆分、关键路径与风险，但不得机械重复 root 工作。
-editing_documents 中 root 亲自更新设计。working 中普通实现必须交给 `executor` 或
-`worktree_executor`：稳定接口下的单任务和互斥目录并行优先 directory，可能交叉影响共同接口、清单、
+editing_documents 中 root 亲自更新设计。working 中符合成本和独立验收条件的实现交给 `executor` 或
+`worktree_executor`；平凡单文件写入可由 root 完成：稳定接口下的单任务和互斥目录并行优先 directory，可能交叉影响共同接口、清单、
 生成边界或 Git 状态时使用 worktree；worktree 只能隔离现场，不能消除语义依赖。每个 child 消息必须
 详细描述目的、基线、所有权、禁止范围、有序步骤、完成/失败条件、证据和 workspace/Git 合同。
 
@@ -202,3 +202,13 @@ fresh reviewer approval、最终测试及清理。测试记录按原始调用审
 工具目录刷新捕获 Mode 扩展身份和扩展水位；异步准备后的发布必须条件验证该水位，防止旧 Mode
 目录覆盖已完成切换的新工具。过期发布不记为已安装、不清空当前目录，关闭候选后安排重新准备。
 刷新指纹包含 Mode 扩展身份；模型/工具执行期间发生的普通状态事件不单独触发目录重建。
+
+### 最小任务与故障诊断
+
+平凡单文件任务保留所有阶段、Plan 批准和独立 reviewer；计划目标不超过八行，不机械展开 DAG 或验证表，无独立探索价值时不派 explorer。root 可以承担协调成本高于工作量的写入；无文档或整合变更的阶段复用已有事实简短说明。阶段切换仍按新鲜查询和 Solo mutation 执行。
+
+child 成功终态通知不能替代 canonical submissions 读取，read_agent_session 仅作诊断。reviewer 必须明确批准或阻塞 finding，不能同时批准和要求先完成必要检查。用户要求的验证未完成时不得宣称 completed；同一基础设施故障确认后不派 child 试探同一物理能力。以上均是提示词约束，由验收器核对，不新增运行时完成硬门禁。
+
+最终报告使用真实换行，平凡任务只说明结果、验证和剩余问题，不二次 JSON 转义。内部执行日志不是用户交付物；过滤后的文件列表不能证明物理目录为空。
+
+最小完整原生验收入口为 `cargo xtask verify-workflow --live --gui --minimal`：固定全部角色为 DeepSeek Flash high，使用独立 home 和空目录，要求一次计划批准、所有阶段、canonical reviewer 交付读取、Python 字节断言、真实换行报告及关闭子代理。保留全部拒绝尝试，区分 clean 与 corrected，不人工发送继续；全量和 Plan-only 场景保持独立。

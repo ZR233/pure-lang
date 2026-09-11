@@ -37,7 +37,7 @@ pub fn diagnose(
         if let Some(attempt) = &commit.attempt {
             match &attempt.outcome {
                 AttemptOutcome::Running => {}
-                AttemptOutcome::Committed(output) | AttemptOutcome::Rejected(output) => {
+                AttemptOutcome::Committed(output) | AttemptOutcome::Rejected { output, .. } => {
                     usage.add(&output.usage)
                 }
                 AttemptOutcome::Failed(error) => usage.add(&error.usage),
@@ -55,7 +55,7 @@ pub fn diagnose(
                 AttemptOutcome::Committed(_) => report.committed_attempts += 1,
                 AttemptOutcome::Failed(_) => report.failed_attempts += 1,
                 AttemptOutcome::Cancelled { .. } => report.cancelled_attempts += 1,
-                AttemptOutcome::Rejected(_) => report.rejected_attempts += 1,
+                AttemptOutcome::Rejected { .. } => report.rejected_attempts += 1,
                 AttemptOutcome::Interrupted => report.interrupted_attempts += 1,
             }
         }

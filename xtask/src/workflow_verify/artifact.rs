@@ -139,7 +139,7 @@ pub(super) fn finalize(
         captures.push(capture);
     }
     match scope {
-        WorkflowAcceptanceScope::Full => {
+        WorkflowAcceptanceScope::Full | WorkflowAcceptanceScope::Minimal => {
             assert_completion_receipts(artifact_dir, surface)?;
             assert_workflow_contract(&captures)?;
         }

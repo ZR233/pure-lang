@@ -29,6 +29,7 @@ abstract class AgentWorkspaceView with _$AgentWorkspaceView {
     required TimelineTodoListUpdate? todo,
     required ThreadRuntimeView runtime,
     required StudioTurnView? turn,
+    StudioTurnView? lastTurn,
     required PendingInteraction? activeInteraction,
     required ComposerThreadState composer,
     required AgentComposerMode composerMode,

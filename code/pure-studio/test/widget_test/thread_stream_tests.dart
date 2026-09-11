@@ -1,6 +1,64 @@
 part of '../widget_test.dart';
 
 void registerThreadStreamTests() {
+  test('canonical terminal survives active clearing and stale running notifications in Driver', () {
+    var state = _emptyState();
+    final failed = StudioTurnView(
+      turnId: 'turn-1',
+      threadId: 'session-1',
+      revision: 2,
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(2000),
+      state: const FailedStudioTurnState(
+        startedAt: 1,
+        completedAt: 2,
+        failure: StudioTurnFailureView(
+          category: 'runtime',
+          providerKind: null,
+          code: null,
+          httpStatus: null,
+          message: 'Solo batch rejected',
+          retryable: false,
+          retryAfterMs: null,
+        ),
+      ),
+    );
+    state = applyThreadUpdate(
+      state,
+      threadId: 'session-1',
+      revision: 1,
+      update: ThreadTurnUpdate(failed),
+    ).state;
+    StudioDriverState.publishState(state);
+    final snapshot = jsonDecode(StudioDriverState.snapshotJson()) as Map;
+    expect((snapshot['workspace'] as Map)['turn'], isNull);
+    expect(
+      ((snapshot['workspace'] as Map)['lastTurn'] as Map)['status'],
+      'failed',
+    );
+    expect(
+      ((snapshot['workspace'] as Map)['lastTurn'] as Map)['reason'],
+      'Solo batch rejected',
+    );
+    final stale = StudioTurnView(
+      turnId: 'turn-1',
+      threadId: 'session-1',
+      revision: 1,
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(1000),
+      state: const RunningStudioTurnState(
+        startedAt: 1,
+        activity: StudioTurnActivity.thinking,
+      ),
+    );
+    state = applyThreadUpdate(
+      state,
+      threadId: 'session-1',
+      revision: 2,
+      update: ThreadTurnUpdate(stale),
+    ).state;
+    expect(state.selectedWorkspace?.lastTurn, failed);
+    expect(state.turn, isNull);
+  });
+
   test('authoritative Thread snapshot replaces accumulated delta', () async {
     final base = _emptyState();
     final api = _FakeStudioApi(base);

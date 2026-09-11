@@ -54,7 +54,7 @@ pub trait Tool: Send + Sync + fmt::Debug + 'static {
 
 /// Tool-specific failure retained with its original source.
 #[derive(Debug, thiserror::Error, serde::Serialize, serde::Deserialize)]
-#[error("tool execution failed: {source}")]
+#[error("{source}")]
 pub struct ToolError {
     // The canonical output is serialized once by ToolDelivery; this copy is an execution lease.
     #[serde(skip)]

@@ -395,7 +395,12 @@ mod tests {
                 );
             } else {
                 assert!(
-                    matches!(result, Err(ThreadError::InvalidOutput)),
+                    matches!(
+                        result,
+                        Err(ThreadError::ModelOutput(
+                            pl_core::thread::ModelOutputViolation::SoloBatch { .. }
+                        ))
+                    ),
                     "{name}: {result:?}"
                 );
                 assert!(thread.snapshot().tasks.is_empty());

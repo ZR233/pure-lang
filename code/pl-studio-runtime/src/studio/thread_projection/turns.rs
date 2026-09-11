@@ -169,7 +169,7 @@ fn phase(snapshot: &ThreadSnapshot, turn_id: &str) -> TurnPhase {
             | AttemptOutcome::Interrupted
             | AttemptOutcome::Cancelled { .. }
             | AttemptOutcome::Failed(_)
-            | AttemptOutcome::Rejected(_),
+            | AttemptOutcome::Rejected { .. },
         ) => TurnPhase::Thinking,
     }
 }
@@ -190,7 +190,7 @@ fn failure(
             | AttemptOutcome::Interrupted
             | AttemptOutcome::Committed(_)
             | AttemptOutcome::Cancelled { .. }
-            | AttemptOutcome::Rejected(_) => None,
+            | AttemptOutcome::Rejected { .. } => None,
         })
     else {
         return pl_protocol::TurnFailure::permanent(

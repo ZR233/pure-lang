@@ -29,3 +29,12 @@ pub(crate) fn local_helper_path(workspace_root: &Path, target: &str) -> PathBuf 
         .join(target)
         .join(HELPER_FILE_NAME)
 }
+
+/// Build-owned metadata binds the declared platform/protocol to the exact helper bytes.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct HelperMetadata {
+    target: String,
+    worker_protocol_version: u32,
+    sha256: String,
+}

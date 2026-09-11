@@ -18,7 +18,7 @@ pub struct CompleteTool;
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CompleteInput {
-    /// A concise summary of the result delivered by this turn.
+    /// Concise plain text or Markdown. Use actual paragraph newlines; do not JSON-encode the text a second time. Keep literal backslashes only in code or paths.
     #[schemars(length(min = 1, max = 8192))]
     summary: String,
     /// Optional evidence supporting the completion summary.
@@ -142,6 +142,29 @@ mod tests {
 
     fn context() -> CallContext {
         crate::test_support::thread_context()
+    }
+
+    #[tokio::test]
+    async fn completion_preserves_markdown_newlines_and_literal_code_escapes() {
+        for summary in [
+            "Result\n\nVerified.",
+            r"Literal \n in code",
+            "```python\nvalue = r'C:\\new'\n```",
+        ] {
+            let output = pl_core::tool::opaque::Tool::execute(
+                &CompleteTool,
+                input(serde_json::json!({"summary": summary})),
+                context(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                saved_completion_summary(output.payload())
+                    .unwrap()
+                    .as_deref(),
+                Some(summary)
+            );
+        }
     }
 
     #[test]

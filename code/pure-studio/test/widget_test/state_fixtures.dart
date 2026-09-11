@@ -281,11 +281,12 @@ StudioTurnView _testTurn({
   required StudioTurnState state,
   String turnId = 'turn-1',
   int updatedAt = 1,
+  int revision = 0,
 }) {
   return StudioTurnView(
     turnId: turnId,
     threadId: threadId,
-    revision: 0,
+    revision: revision,
     state: state,
     updatedAt: DateTime.fromMillisecondsSinceEpoch(updatedAt),
   );

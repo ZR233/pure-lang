@@ -6,7 +6,6 @@ import '../domain/models/studio_models.dart';
 abstract final class StudioDriverState {
   static StudioProject? _project;
   static AgentWorkspaceView? _workspace;
-  static final Map<String, StudioTurnView> _lastTurnsByThread = {};
   static final List<StudioShutdownProgress> _shutdownProgress = [];
   static List<String> _sidebarDirectoryIds = const [];
   static List<StudioThread> _currentRootThreads = const [];
@@ -60,12 +59,6 @@ abstract final class StudioDriverState {
 
   static void publishWorkspace(AgentWorkspaceView workspace) {
     _workspace = workspace;
-    final turn = workspace.turn;
-    if (turn != null) publishTurn(turn);
-  }
-
-  static void publishTurn(StudioTurnView turn) {
-    _lastTurnsByThread[turn.threadId] = turn;
   }
 
   static void publishSidebarDirectory(List<String> threadIds, bool hasMore) {
@@ -82,9 +75,7 @@ abstract final class StudioDriverState {
 
   static String snapshotJson() {
     final workspace = _workspace;
-    final lastTurn = workspace == null
-        ? null
-        : _lastTurnsByThread[workspace.threadId];
+    final lastTurn = workspace?.lastTurn;
     return jsonEncode({
       'sidebarDirectory': {
         'count': _sidebarDirectoryIds.length,
@@ -390,6 +381,7 @@ abstract final class StudioDriverState {
   static Map<String, Object?> _turnJson(StudioTurnView turn) => {
     'id': turn.turnId,
     'threadId': turn.threadId,
+    'revision': turn.revision,
     'status': turn.state.status.name,
     'activity': turn.state.activity?.name,
     'reason': turn.state.reason,

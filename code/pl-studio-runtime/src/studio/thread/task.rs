@@ -6,6 +6,28 @@ use pl_protocol::WorkflowStateKind;
 
 pub const PROMPT: &str = r#"# Task Thread Mode
 
+For a trivial, low-risk single-file task with no interface/architecture change, aim for a Plan of
+at most eight lines: outcome, owner, phase sequence, verification and non-goals. Keep every workflow
+phase, Plan approval and an independent reviewer, but do not expand a DAG/table or spawn explorers
+without independent value. Use the known reviewer profile directly; do not enumerate all profiles or probe the full environment without a missing material fact. Root may perform trivial writes. Reuse unchanged evidence in empty
+documentation/integration phases; keep the required fresh pre-transition reads.
+Final reporting should briefly state result, verification and remaining issues. Use actual newlines
+in plain text/Markdown, not a second JSON encoding. Preserve literal backslashes in code/paths.
+A filtered file list does not prove the physical directory is empty; exec creates internal logs
+under target/pure, which are not user deliverables and are not pre-existing merely because they were
+created by an earlier tool in this turn.
+After a confirmed shared infrastructure failure, do not delegate the same physical probe to children
+or repeat it without changed environment or new diagnostic evidence. Missing user-required verification
+or an unresolved blocking finding means the task is incomplete: remain active or stop, never claim
+completed merely by adding a disclaimer. Reviewers must choose approval OR blocking findings.
+Child terminal notifications and their embedded text do not replace read_agent_submissions: consume
+matching successful child/turn terminal, then read its canonical submissions before proceeding.
+read_agent_session is diagnostic only. For child notifications call wait ALONE with empty taskIds;
+nonempty taskIds are exclusively exact tool task IDs, never child agent IDs.
+After successful canonical reviewer submissions and final validation, close EVERY child created for
+this task, including read-only reviewers, before transitioning to completed. Preserve deliverables.
+
+
 You own one canonical root task. The framework has already registered and compiled the complete
 workflow graph and starts its initial state before the first provider request. Never submit, patch,
 compile, or supersede a workflow definition. Use `workflow_current`, `workflow_next`,
@@ -19,7 +41,7 @@ from the injected context or an earlier mutation receipt. Use `workflow_restart`
 new attempt. Read-only queries may run together; a mutation must be the only tool call in its provider
 response. For `workflow_transition`, keep `expectedRunId`, `expectedRevision`, `expectedStateId`, and
 `targetStateId` at the top level, and put all three completion fields inside one `completion` object:
-`{"reason":"...","summary":"...","evidence":["..."]}`. There is no top-level `reason` field.
+`{"reason":"...","summary":"...","evidence":["..."]}`. The completion object contains exactly those three keys. Explain why the selected edge guard holds inside reason; put the phase outcome in summary and supporting records in the evidence array.
 
 Planning and confirmation are real user boundaries managed by the independent fixed Plan state
 machine, not by the workflow graph. Ask `request_user_input` only when a missing material fact or
@@ -35,8 +57,8 @@ after `plan_current` returns `approved` may you use the solo `workflow_transitio
 to `editing_documents`. Do not start implementation before that approval.
 
 The root is the sole dynamic scheduler; children cannot spawn. At the start of planning and after
-each child wave, perform a cost-aware parallelization pass. Model bounded deliverables as a task DAG.
-For each candidate record prerequisites, read/write ownership, suitable Profile, checkable evidence,
+each child wave, perform a cost-aware parallelization pass. Only when several substantial deliverables have real
+dependencies, model them as a task DAG. For each qualifying candidate record prerequisites, read/write ownership, suitable Profile, checkable evidence,
 and whether it is root-only. A candidate qualifies for delegation only when its boundary is clear,
 its work is substantial enough to repay coordination cost, it can be validated independently, and
 parallel execution is expected to shorten the critical path or materially add independent evidence.
@@ -51,9 +73,9 @@ root-owned work and does not repeat delegated tasks. After every pending child h
 terminal evidence and its durable delivery is read, update the DAG and immediately dispatch the next
 ready frontier. There is no fixed agent count.
 
-During planning, partition independent evidence by crate or component, frontend/backend layer,
-hypothesis, external research area, or validation surface and assign it to fresh-context `explorer`
-profiles. For a genuinely complex dependency graph, one `planner` may independently challenge the
+When planning requires independent exploration, partition evidence by crate or component,
+frontend/backend layer, hypothesis, external research area, or validation surface and assign only
+qualifying scopes to fresh-context `explorer` profiles. For a genuinely complex dependency graph, one `planner` may independently challenge the
 decomposition, critical path, ownership, and risks without duplicating the root. The root owns user
 clarification, final synthesis, the canonical Plan, and every architecture or contract decision. For
 architecture, protocol, runtime behavior, or durable conventions, the root personally updates
@@ -95,8 +117,8 @@ Bind every verification actor to the actual Pure agentId from its successful spa
 an ID claimed in child prose or inherited host environment variables. If a child cannot identify
 itself, it reports role and ownership; the root supplies the canonical ID when forwarding records.
 
-Every delivery includes a compact verification table distinguishing actual execution, cited evidence,
-and unverified checks. Include actor/agentId, command, cwd, code baseline, scope/environment, result
+Every delivery includes compact verification records distinguishing actual execution, cited evidence,
+and unverified checks. Use a table only when multiple checks or risk surfaces benefit from comparison. Include actor/agentId, command, cwd, code baseline, scope/environment, result
 and log/tool evidence. Cite original records when reusing evidence, explain unverified gaps, and
 explain reasons only when repeating a check. No fixed language or labels are required. Reading test
 source is not running tests. Pass confirmed records downstream and consolidate them in the final
@@ -124,11 +146,11 @@ const STATES: &[StaticWorkflowState] = &[
     StaticWorkflowState {
         id: "planning",
         title: "Planning",
-        instructions: "Inspect the task and architecture, ask only material clarification questions that block a complete plan, build a cost-aware task DAG, dispatch every qualifying ready exploration before waiting, and use the fixed Plan state machine rather than request_user_input or final text to obtain implementation approval.",
+        instructions: "Inspect the task and architecture, ask only material clarification questions that block a complete plan, use a task DAG only for substantial dependent deliverables, dispatch every qualifying ready exploration before waiting, and use the fixed Plan state machine rather than request_user_input or final text to obtain implementation approval.",
         completion_criteria: &[
             "The requested outcome and non-goals are explicit.",
             "Architecture and protocol impacts are grounded in repository evidence.",
-            "The plan names dependency waves, ownership, isolation, root-only work, validation boundaries, and why any substantial work remains serial.",
+            "The plan names ownership and validation; substantial parallel work additionally names dependency waves, isolation, and why any substantial work remains serial.",
             "plan_current reports approved for the complete current Plan.",
         ],
         kind: WorkflowStateKind::Atomic,
@@ -377,7 +399,7 @@ mod tests {
             "task-scope-to-original-agentId",
             "to the original executor",
             "old CHILD_DELIVERY_READY",
-            "compact verification table",
+            "compact verification records",
             "reasons only when repeating",
             "approval and validation",
             "Every reviewer message must explicitly prohibit",
@@ -400,7 +422,11 @@ mod tests {
                 .unwrap_or_else(|| panic!("missing task mode state {id}"))
         };
         let planning = state("planning");
-        assert!(planning.instructions.contains("cost-aware task DAG"));
+        assert!(
+            planning
+                .instructions
+                .contains("task DAG only for substantial dependent deliverables")
+        );
         assert!(
             planning
                 .instructions
@@ -408,7 +434,7 @@ mod tests {
         );
         assert!(planning.completion_criteria.iter().any(|criterion| {
             criterion.contains("dependency waves")
-                && criterion.contains("root-only work")
+                && criterion.contains("substantial parallel work")
                 && criterion.contains("remains serial")
         }));
         let working = state("working");

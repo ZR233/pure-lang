@@ -65,7 +65,76 @@ impl ManagedWorker {
         command: ProcessCommand,
     ) -> Result<Self, WorkerClientError> {
         let configuration = command.encode()?;
-        let (child, events, control) = transport::spawn(executable)?;
+        let mut worker = Self::ready(executable).await?;
+        match tokio::time::timeout(
+            Duration::from_secs(10),
+            worker.control.configure(&configuration),
+        )
+        .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => return Err(worker.bootstrap_failure(executable, error).await),
+            Err(_) => {
+                return Err(worker
+                    .bootstrap_failure(executable, WorkerClientError::ReadinessTimeout)
+                    .await);
+            }
+        }
+        // Once sending Start is attempted, killing the supervisor could orphan a process.
+        worker.phase = Phase::Starting;
+        if let Err(error) = worker.control.send(ProcessWorkerCommand::Start).await {
+            worker.fail(error);
+            worker.wait().await?;
+            return Err(WorkerClientError::Protocol(
+                "Start failed without a transport error",
+            ));
+        }
+        Ok(worker)
+    }
+
+    /// Checks the Ready protocol without starting any business process, then reaps the probe.
+    /// # Errors
+    /// Reports bootstrap failure or failure to shut down the unstarted worker.
+    pub async fn probe(executable: &Path) -> Result<(), WorkerClientError> {
+        let mut worker = Self::ready(executable).await?;
+        // Complete the existing configuration frame, but never send Start.
+        let configuration = ProcessCommand::new(executable).encode()?;
+        match tokio::time::timeout(
+            Duration::from_secs(10),
+            worker.control.configure(&configuration),
+        )
+        .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => return Err(worker.bootstrap_failure(executable, error).await),
+            Err(_) => {
+                return Err(worker
+                    .bootstrap_failure(executable, WorkerClientError::ReadinessTimeout)
+                    .await);
+            }
+        }
+        worker.control.close();
+        match tokio::time::timeout(Duration::from_secs(10), worker.child.wait()).await {
+            Ok(Ok(status)) if status.success() => Ok(()),
+            Ok(Ok(status)) => Err(worker
+                .bootstrap_failure(executable, WorkerClientError::WorkerExit(status))
+                .await),
+            Ok(Err(error)) => Err(worker
+                .bootstrap_failure(executable, WorkerClientError::io("probeExit", error))
+                .await),
+            Err(_) => Err(worker
+                .bootstrap_failure(executable, WorkerClientError::ReadinessTimeout)
+                .await),
+        }
+    }
+
+    async fn ready(executable: &Path) -> Result<Self, WorkerClientError> {
+        let (child, events, control) =
+            transport::spawn(executable).map_err(|source| WorkerClientError::Bootstrap {
+                executable: executable.into(),
+                stderr: String::new(),
+                source: Box::new(source),
+            })?;
         let mut worker = Self {
             child,
             events,
@@ -78,38 +147,63 @@ impl ManagedWorker {
         let ready = tokio::time::timeout(Duration::from_secs(10), async {
             match worker.events.next().await? {
                 Some(ProcessWorkerEvent::Ready { protocol_version })
-                    if protocol_version == PROCESS_WORKER_PROTOCOL_VERSION => {}
-                Some(_) | None => {
-                    return Err(WorkerClientError::Protocol("expected matching Ready"));
+                    if protocol_version == PROCESS_WORKER_PROTOCOL_VERSION =>
+                {
+                    Ok(())
+                }
+                Some(ProcessWorkerEvent::Ready { protocol_version }) => {
+                    Err(WorkerClientError::VersionMismatch {
+                        expected: PROCESS_WORKER_PROTOCOL_VERSION,
+                        actual: protocol_version,
+                    })
+                }
+                Some(_) => Err(WorkerClientError::Protocol("expected Ready")),
+                None => {
+                    let status = worker
+                        .child
+                        .wait()
+                        .await
+                        .map_err(|e| WorkerClientError::io("bootstrapExit", e))?;
+                    Err(WorkerClientError::WorkerExit(status))
                 }
             }
-            worker.control.configure(&configuration).await
         })
         .await;
-        let error = match ready {
-            Ok(Ok(())) => None,
-            Ok(Err(error)) => Some(error),
-            Err(_) => Some(WorkerClientError::ReadinessTimeout),
+        match ready {
+            Ok(Ok(())) => Ok(worker),
+            Ok(Err(error)) => Err(worker.bootstrap_failure(executable, error).await),
+            Err(_) => Err(worker
+                .bootstrap_failure(executable, WorkerClientError::ReadinessTimeout)
+                .await),
+        }
+    }
+
+    async fn bootstrap_failure(
+        &mut self,
+        executable: &Path,
+        source: WorkerClientError,
+    ) -> WorkerClientError {
+        use tokio::io::AsyncReadExt;
+        self.control.close();
+        // Preparing owns no business process. Kill and await before collecting bounded diagnostics.
+        let cleanup = self.child.kill().await;
+        let mut stderr = Vec::new();
+        if let Some(stream) = self.child.stderr.take() {
+            let _ = tokio::time::timeout(
+                Duration::from_secs(1),
+                stream.take(4096).read_to_end(&mut stderr),
+            )
+            .await;
+        }
+        let source = match cleanup {
+            Ok(()) => source,
+            Err(error) => WorkerClientError::io("reapUnstartedWorker", error),
         };
-        if let Some(error) = error {
-            worker.control.close();
-            worker
-                .child
-                .kill()
-                .await
-                .map_err(|source| WorkerClientError::io("reapUnstartedWorker", source))?;
-            return Err(error);
+        WorkerClientError::Bootstrap {
+            executable: executable.into(),
+            stderr: String::from_utf8_lossy(&stderr).into_owned(),
+            source: Box::new(source),
         }
-        // Once sending Start is attempted, killing the supervisor could orphan a process.
-        worker.phase = Phase::Starting;
-        if let Err(error) = worker.control.send(ProcessWorkerCommand::Start).await {
-            worker.fail(error);
-            worker.wait().await?;
-            return Err(WorkerClientError::Protocol(
-                "Start failed without a transport error",
-            ));
-        }
-        Ok(worker)
     }
 
     /// Clones control capability, not ownership of the physical lease.

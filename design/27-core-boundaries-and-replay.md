@@ -535,3 +535,11 @@ close_agent 的 workspaceDisposition 默认为 preserve，也可显式 cleanup�
 Recovery 显式 cleanup 使用相同部分删除重试契约；恢复展示仍保留实际预览失败诊断，清理命令可在已校验目录缺失时继续收束残余分支。
 
 启动逐 Thread 恢复审计先读取纯目录关联，再独立解码各自 journal；单条日志损坏产生该 Thread 的 CleanupThread 提示，不提前阻断同项目其他日志的恢复收束。
+
+## 模型输出准入与有限纠正
+
+模型输出先校验请求身份、上下文 revision、工具目录和调用身份，再校验 Solo 批次；整批准入成功前不执行任何工具。准入错误保留具体类型与拒绝的原始 attempt。只有 Solo 混批允许通用 Turn 循环追加框架纠正上下文后重新生成，每 Turn 最多两次，计入原有步骤预算；其他一致性错误不自动恢复。纠正以新 attempt 关联被拒绝 attempt，从 canonical 已提交历史准备，拒绝的 provider continuation 不成为已提交上下文。取消、关闭和持久化失败不能被纠正覆盖。
+
+任务查询/等待/取消只接收本 Thread 回执的完整 taskId，未知任务返回 TaskNotFound，不猜测前缀或修改大小写，也不泄露其他 Thread 的任务。业务完成与 reviewer/测试充分性仍由 Studio Prompt 约束，不进入 core。
+
+拒绝记录现在持久化原始输出与类型化原因，`pl.core.thread-commit` 升至格式版本 2；不双读旧版本。旧 journal 保留原始数据并明确报告版本不支持，不自动清空数据库。新验收使用隔离的新 Thread。
