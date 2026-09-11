@@ -25,7 +25,7 @@ class SettingsHeader extends StatelessWidget {
             Text(
               title,
               style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                color: context.studioInk,
+                color: context.colors.onSurface,
                 fontWeight: FontWeight.w500,
                 height: 1.12,
               ),
@@ -39,7 +39,7 @@ class SettingsHeader extends StatelessWidget {
                   maxLines: compact ? 2 : 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.bodySmall
-                      ?.copyWith(color: context.studioInkSoft),
+                      ?.copyWith(color: context.colors.onSurfaceVariant),
                 ),
               ),
             ],
@@ -96,7 +96,7 @@ class SettingsSectionPanel extends StatelessWidget {
                 child: Text(
                   title,
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    color: context.studioInk,
+                    color: context.colors.onSurface,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -127,7 +127,7 @@ class SettingsGroup extends StatelessWidget {
           for (var index = 0; index < children.length; index++) ...[
             children[index],
             if (index < children.length - 1)
-              Divider(height: 1, color: context.studioLine),
+              Divider(height: 1, color: context.colors.outlineVariant),
           ],
         ],
       ),

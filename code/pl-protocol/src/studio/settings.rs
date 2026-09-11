@@ -124,7 +124,6 @@ pub enum StudioMcpServerConfiguration {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StudioGeneralSettings {
-    pub follow_system_theme: bool,
     pub follow_active_turn: bool,
     pub compact_timeline: bool,
 }

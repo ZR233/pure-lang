@@ -19,7 +19,7 @@ class _SettingsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const accent = StudioColors.clay;
+    final accent = context.colors.primary;
     final content = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       child: Row(
@@ -35,7 +35,7 @@ class _SettingsRow extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: context.text.bodyMedium?.copyWith(
-                    color: context.studioInk,
+                    color: context.colors.onSurface,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -46,7 +46,7 @@ class _SettingsRow extends StatelessWidget {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: context.text.bodySmall?.copyWith(
-                      color: context.studioInkSoft.withValues(alpha: 0.72),
+                      color: context.colors.onSurfaceVariant,
                       fontFamily: subtitle!.contains('/') ? 'Consolas' : null,
                     ),
                   ),

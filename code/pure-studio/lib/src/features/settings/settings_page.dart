@@ -7,6 +7,7 @@ import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_driver_keys.dart';
+import '../../shared/studio_badges.dart';
 import 'settings_agents_tab.dart';
 import 'settings_general_tab.dart';
 import 'settings_instructions_tab.dart';
@@ -32,7 +33,7 @@ class SettingsPage extends ConsumerWidget {
       data: (state) => DefaultTabController(
         length: _settingsTabs.length,
         child: Scaffold(
-          backgroundColor: context.studioPaper,
+          backgroundColor: context.colors.surface,
           body: KeyedSubtree(
             key: StudioDriverKeys.settingsPage,
             child: _SettingsScaffold(state: state),
@@ -151,7 +152,7 @@ class _SettingsScaffold extends StatelessWidget {
         return Row(
           children: [
             const _SettingsNav(compact: false),
-            VerticalDivider(width: 1, color: context.studioLine),
+            VerticalDivider(width: 1, color: context.colors.outlineVariant),
             Expanded(
               child: TabBarView(
                 children: [
@@ -189,10 +190,12 @@ class _SettingsNav extends StatelessWidget {
         ];
         if (compact) {
           return Material(
-            color: context.studioPaper2,
+            color: context.colors.surfaceContainer,
             child: DecoratedBox(
               decoration: BoxDecoration(
-                border: Border(bottom: BorderSide(color: context.studioLine)),
+                border: Border(
+                  bottom: BorderSide(color: context.colors.outlineVariant),
+                ),
               ),
               child: SizedBox(
                 height: 56,
@@ -213,7 +216,7 @@ class _SettingsNav extends StatelessWidget {
           );
         }
         return Material(
-          color: context.studioPaper2,
+          color: context.colors.surfaceContainer,
           child: SizedBox(
             width: StudioLayout.settingsNavigationWidth,
             child: ListView(
@@ -245,7 +248,11 @@ class _SettingsBackTile extends StatelessWidget {
     final content = Row(
       mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max,
       children: [
-        Icon(Icons.arrow_back, size: 16, color: context.studioInkSoft),
+        Icon(
+          Icons.arrow_back,
+          size: 16,
+          color: context.colors.onSurfaceVariant,
+        ),
         if (!compact) ...[
           const SizedBox(width: 8),
           Expanded(
@@ -254,7 +261,7 @@ class _SettingsBackTile extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: context.text.labelMedium?.copyWith(
-                color: context.studioInkSoft,
+                color: context.colors.onSurfaceVariant,
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -296,7 +303,7 @@ class _SettingsNavGroupLabel extends StatelessWidget {
       child: Text(
         label,
         style: context.text.labelSmall?.copyWith(
-          color: context.studioInkSoft.withValues(alpha: 0.64),
+          color: context.colors.onSurfaceVariant,
           fontWeight: FontWeight.w700,
           letterSpacing: 0,
         ),
@@ -320,41 +327,37 @@ class _SettingsNavItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final foreground = selected ? StudioColors.clayDeep : context.studioInkSoft;
+    final foreground = selected
+        ? context.colors.onPrimaryContainer
+        : context.colors.onSurfaceVariant;
     final label = tab.label(context);
     return Padding(
       padding: EdgeInsets.only(right: compact ? 8 : 0, bottom: compact ? 0 : 6),
       child: Material(
-        color: selected ? context.studioPaper : Colors.transparent,
+        color: selected
+            ? context.colors.surfaceContainerHigh
+            : Colors.transparent,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(StudioRadii.sm),
         ),
-        child: InkWell(
-          key: StudioDriverKeys.settingsTab(tab.tab.name),
-          borderRadius: BorderRadius.circular(StudioRadii.sm),
-          onTap: onTap,
-          child: Padding(
-            padding: EdgeInsets.symmetric(
-              horizontal: compact ? 12 : 10,
-              vertical: compact ? 8 : 10,
-            ),
-            child: Row(
-              mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max,
-              children: [
-                Icon(tab.icon, size: 18, color: foreground),
-                const SizedBox(width: 10),
-                if (compact)
-                  Text(
-                    label,
-                    overflow: TextOverflow.ellipsis,
-                    style: context.text.labelMedium?.copyWith(
-                      color: foreground,
-                      fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                    ),
-                  )
-                else
-                  Expanded(
-                    child: Text(
+        child: StudioSelectionMarker(
+          selected: selected,
+          child: InkWell(
+            key: StudioDriverKeys.settingsTab(tab.tab.name),
+            borderRadius: BorderRadius.circular(StudioRadii.sm),
+            onTap: onTap,
+            child: Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: compact ? 12 : 10,
+                vertical: compact ? 8 : 10,
+              ),
+              child: Row(
+                mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max,
+                children: [
+                  Icon(tab.icon, size: 18, color: foreground),
+                  const SizedBox(width: 10),
+                  if (compact)
+                    Text(
                       label,
                       overflow: TextOverflow.ellipsis,
                       style: context.text.labelMedium?.copyWith(
@@ -363,9 +366,22 @@ class _SettingsNavItem extends StatelessWidget {
                             ? FontWeight.w600
                             : FontWeight.w500,
                       ),
+                    )
+                  else
+                    Expanded(
+                      child: Text(
+                        label,
+                        overflow: TextOverflow.ellipsis,
+                        style: context.text.labelMedium?.copyWith(
+                          color: foreground,
+                          fontWeight: selected
+                              ? FontWeight.w600
+                              : FontWeight.w500,
+                        ),
+                      ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
         ),

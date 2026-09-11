@@ -1,6 +1,49 @@
 part of '../widget_test.dart';
 
 void registerShellSettingsTests() {
+  testWidgets('Studio stays light when the system appearance changes', (
+    tester,
+  ) async {
+    _configureResponsiveView(tester, const Size(1280, 800));
+    final platform = tester.binding.platformDispatcher;
+    addTearDown(platform.clearPlatformBrightnessTestValue);
+    platform.platformBrightnessTestValue = Brightness.dark;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          studioApiProvider.overrideWithValue(_FakeStudioApi(_emptyState())),
+        ],
+        child: const PureStudioApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    for (final brightness in [
+      Brightness.dark,
+      Brightness.light,
+      Brightness.dark,
+    ]) {
+      platform.platformBrightnessTestValue = brightness;
+      await tester.pumpAndSettle();
+      final context = tester.element(find.byKey(StudioDriverKeys.shell));
+      expect(Theme.of(context).brightness, Brightness.light);
+      unawaited(
+        showDialog<void>(
+          context: context,
+          builder: (_) => const AlertDialog(content: Text('Theme probe')),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        Theme.of(tester.element(find.text('Theme probe'))).brightness,
+        Brightness.light,
+      );
+      Navigator.of(tester.element(find.text('Theme probe'))).pop();
+      await tester.pumpAndSettle();
+    }
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('zero sessions render the unpersisted start page', (
     tester,
   ) async {
@@ -459,8 +502,10 @@ void registerShellSettingsTests() {
     await gesture.moveTo(
       tester.getCenter(find.byKey(const ValueKey('project-close-project-1'))),
     );
-    await tester.pump();
-    await tester.pumpAndSettle();
+    await _pumpTooltipHover(
+      tester,
+      _tooltipHoverWait(tester, find.byTooltip('Close project')),
+    );
     expect(
       find.text('Close project').evaluate().length,
       closeCountBefore + 1,

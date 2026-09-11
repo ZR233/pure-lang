@@ -86,7 +86,11 @@ class _DockHeader extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        Icon(_iconFor(kind), size: 20, color: _badgeBackgroundFor(kind)),
+        Icon(
+          _iconFor(kind),
+          size: 20,
+          color: _badgeBackgroundFor(context, kind),
+        ),
         const SizedBox(width: 11),
         Expanded(
           child: Column(
@@ -98,7 +102,7 @@ class _DockHeader extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  color: context.studioInk,
+                  color: context.colors.onSurface,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -107,9 +111,8 @@ class _DockHeader extends StatelessWidget {
                   subtitle!.trim(),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: context.studioInkSoft.withValues(alpha: 0.68),
-                  ),
+                  style: Theme.of(context).textTheme.labelSmall
+                      ?.copyWith(color: context.colors.onSurfaceVariant),
                 ),
             ],
           ),
@@ -140,7 +143,7 @@ class _DockFooter extends StatelessWidget {
                   maxLines: compact ? 3 : 2,
                   overflow: TextOverflow.ellipsis,
                   style: context.text.labelSmall?.copyWith(
-                    color: context.studioInkSoft.withValues(alpha: 0.66),
+                    color: context.colors.onSurfaceVariant,
                   ),
                 )
               : null;
@@ -204,13 +207,13 @@ class InfoChip extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 14, color: context.studioInkSoft),
+        Icon(icon, size: 14, color: context.colors.onSurfaceVariant),
         const SizedBox(width: 6),
         Flexible(
           child: Text(
             label,
             style: context.text.bodySmall?.copyWith(
-              color: context.studioInkSoft,
+              color: context.colors.onSurfaceVariant,
             ),
           ),
         ),
@@ -286,7 +289,7 @@ class DockOptionRow extends StatelessWidget {
                       Text(
                         subtitle!,
                         style: Theme.of(context).textTheme.bodySmall
-                            ?.copyWith(color: context.studioInkSoft),
+                            ?.copyWith(color: context.colors.onSurfaceVariant),
                       ),
                     ],
                   ],
@@ -308,10 +311,10 @@ IconData _iconFor(InteractionDockKind kind) {
   };
 }
 
-Color _badgeBackgroundFor(InteractionDockKind kind) {
+Color _badgeBackgroundFor(BuildContext context, InteractionDockKind kind) {
   return switch (kind) {
-    InteractionDockKind.question => StudioColors.sage,
-    InteractionDockKind.permission => StudioColors.clay,
-    InteractionDockKind.plan => StudioColors.clay,
+    InteractionDockKind.question => context.colors.primary,
+    InteractionDockKind.permission => context.colors.primary,
+    InteractionDockKind.plan => context.colors.primary,
   };
 }

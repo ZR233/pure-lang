@@ -228,7 +228,7 @@ class StatusDetailPanel extends StatelessWidget {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: context.text.labelSmall?.copyWith(
-            color: context.studioInkSoft.withValues(alpha: 0.72),
+            color: context.colors.onSurfaceVariant,
             fontFamily: 'Consolas',
             fontSize: 9.5,
             fontWeight: FontWeight.w600,
@@ -269,7 +269,7 @@ class StatusDetailRow extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: context.text.bodySmall?.copyWith(
-                color: context.studioInkSoft.withValues(alpha: 0.78),
+                color: context.colors.onSurfaceVariant,
                 height: 1.25,
               ),
             ),
@@ -284,7 +284,7 @@ class StatusDetailRow extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.right,
               style: context.text.bodySmall?.copyWith(
-                color: context.studioInk,
+                color: context.colors.onSurface,
                 fontWeight: FontWeight.w600,
                 height: 1.25,
               ),
@@ -301,16 +301,14 @@ class StatusDetailIconRow extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.detail,
-    required this.iconColor,
-    required this.backgroundColor,
+    this.tone = StudioTone.neutral,
     super.key,
   });
 
   final IconData icon;
   final String title;
   final String detail;
-  final Color iconColor;
-  final Color backgroundColor;
+  final StudioTone tone;
 
   @override
   Widget build(BuildContext context) {
@@ -323,10 +321,10 @@ class StatusDetailIconRow extends StatelessWidget {
             dimension: 22,
             child: DecoratedBox(
               decoration: BoxDecoration(
-                color: backgroundColor,
+                color: tone.background(context),
                 borderRadius: BorderRadius.circular(6),
               ),
-              child: Icon(icon, size: 13, color: iconColor),
+              child: Icon(icon, size: 13, color: tone.indicator(context)),
             ),
           ),
           const SizedBox(width: 9),
@@ -344,7 +342,7 @@ class StatusDetailIconRow extends StatelessWidget {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: context.text.bodySmall?.copyWith(
-                color: context.studioInk,
+                color: context.colors.onSurface,
                 height: 1.35,
               ),
             ),
@@ -360,8 +358,7 @@ class StatusDetailIconList extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.items,
-    required this.iconColor,
-    required this.backgroundColor,
+    this.tone = StudioTone.neutral,
     this.itemKey,
     super.key,
   });
@@ -369,8 +366,7 @@ class StatusDetailIconList extends StatelessWidget {
   final IconData icon;
   final String title;
   final List<String> items;
-  final Color iconColor;
-  final Color backgroundColor;
+  final StudioTone tone;
   final Key Function(String item)? itemKey;
 
   @override
@@ -388,10 +384,10 @@ class StatusDetailIconList extends StatelessWidget {
               dimension: 22,
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  color: backgroundColor,
+                  color: tone.background(context),
                   borderRadius: BorderRadius.circular(6),
                 ),
-                child: Icon(icon, size: 13, color: iconColor),
+                child: Icon(icon, size: 13, color: tone.indicator(context)),
               ),
             ),
             const SizedBox(width: 9),
@@ -402,7 +398,7 @@ class StatusDetailIconList extends StatelessWidget {
                   Text(
                     title,
                     style: context.text.bodySmall?.copyWith(
-                      color: context.studioInk,
+                      color: context.colors.onSurface,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -414,7 +410,7 @@ class StatusDetailIconList extends StatelessWidget {
                         '• $item',
                         key: itemKey?.call(item),
                         style: context.text.bodySmall?.copyWith(
-                          color: context.studioInk,
+                          color: context.colors.onSurface,
                           height: 1.3,
                         ),
                       ),

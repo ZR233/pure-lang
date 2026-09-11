@@ -46,7 +46,7 @@ class ThreadStatusBar extends ConsumerWidget {
         if (_lspActiveActivity(server) != null) server,
     ];
     return DecoratedBox(
-      decoration: BoxDecoration(color: context.studioPaper),
+      decoration: BoxDecoration(color: context.colors.surface),
       child: SizedBox(
         height: 38,
         child: Padding(
@@ -90,8 +90,8 @@ class ThreadStatusBar extends ConsumerWidget {
                               ? Icons.checklist
                               : Icons.checklist_outlined,
                           color: todoExpanded
-                              ? StudioColors.clayDeep
-                              : context.studioInkSoft,
+                              ? context.colors.onPrimaryContainer
+                              : context.colors.onSurfaceVariant,
                         ),
                         onPressed: onToggleTodo,
                       ),
@@ -258,8 +258,7 @@ class _LspActivityDetail extends StatelessWidget {
             icon: Icons.terminal_outlined,
             title: server.displayName,
             detail: _lspServerActivitySummary(context, server),
-            iconColor: StudioColors.ochre,
-            backgroundColor: StudioColors.ochre.withValues(alpha: 0.15),
+            tone: StudioTone.neutral,
           ),
       ],
     );
@@ -445,24 +444,21 @@ class _CapabilityDetail extends StatelessWidget {
             title: context.l10n.statusSkillsSection,
             items: runtime.activeSkills,
             itemKey: StudioDriverKeys.statusActiveSkill,
-            iconColor: StudioColors.clayDeep,
-            backgroundColor: StudioColors.claySoft,
+            tone: StudioTone.brand,
           ),
         if (runtime.activeMcpServers.isNotEmpty)
           StatusDetailIconRow(
             icon: Icons.hub_outlined,
             title: context.l10n.statusMcpSection,
             detail: runtime.activeMcpServers.join(', '),
-            iconColor: StudioColors.sage,
-            backgroundColor: StudioColors.sageSoft,
+            tone: StudioTone.success,
           ),
         if (runtime.activeLspServers.isNotEmpty)
           StatusDetailIconRow(
             icon: Icons.terminal_outlined,
             title: context.l10n.statusLspSection,
             detail: runtime.activeLspServers.join(', '),
-            iconColor: StudioColors.ochre,
-            backgroundColor: StudioColors.ochre.withValues(alpha: 0.15),
+            tone: StudioTone.neutral,
           ),
       ],
     );

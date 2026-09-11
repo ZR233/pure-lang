@@ -35,7 +35,7 @@ class _Header extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: context.text.bodySmall?.copyWith(
-                      color: context.studioInkSoft,
+                      color: context.colors.onSurfaceVariant,
                     ),
                   ),
                 ),
@@ -125,7 +125,7 @@ class _AgentSwitcherState extends ConsumerState<_AgentSwitcher> {
   @override
   Widget build(BuildContext context) {
     final threads = widget.state.workspaceThreads;
-    final aggregateColor = _aggregateAgentColor(widget.state, threads);
+    final aggregateColor = _aggregateAgentColor(context, widget.state, threads);
     final viewport = MediaQuery.sizeOf(context);
     final availableWidth = (viewport.width - 24)
         .clamp(0.0, double.infinity)
@@ -163,7 +163,7 @@ class _AgentSwitcherState extends ConsumerState<_AgentSwitcher> {
                     : 9,
                 color: _agentForThread(widget.state, thread.id)?.error != null
                     ? Theme.of(context).colorScheme.error
-                    : _statusColor(widget.state, thread),
+                    : _statusColor(context, widget.state, thread),
               ),
             ),
             trailingIcon: thread.id == widget.state.selectedThreadId
@@ -195,7 +195,9 @@ class _AgentSwitcherState extends ConsumerState<_AgentSwitcher> {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: Theme.of(context).textTheme.labelSmall
-                                ?.copyWith(color: context.studioInkSoft),
+                                ?.copyWith(
+                                  color: context.colors.onSurfaceVariant,
+                                ),
                           ),
                       ],
                     ),
@@ -207,7 +209,7 @@ class _AgentSwitcherState extends ConsumerState<_AgentSwitcher> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.labelSmall
-                        ?.copyWith(color: context.studioInkSoft),
+                        ?.copyWith(color: context.colors.onSurfaceVariant),
                   ),
                 ],
               ),
@@ -278,34 +280,42 @@ int _agentDepth(StudioThread thread, List<StudioThread> threads) {
   return depth;
 }
 
-Color _aggregateAgentColor(HeaderView state, List<StudioThread> threads) {
+Color _aggregateAgentColor(
+  BuildContext context,
+  HeaderView state,
+  List<StudioThread> threads,
+) {
   if (threads.any((thread) => _isFaultedAgentStatus(thread.status))) {
-    return StudioColors.rose;
+    return context.colors.error;
   }
   if (state.pendingInteractions.any(
     (interaction) => threads.any((thread) => thread.id == interaction.threadId),
   )) {
-    return StudioColors.ochre;
+    return context.statusColors.warning;
   }
   if (threads.any((thread) => _isRunningAgentStatus(thread.status))) {
-    return StudioColors.clay;
+    return context.statusColors.activeIndicator;
   }
-  return StudioColors.sage;
+  return context.statusColors.success;
 }
 
-Color _statusColor(HeaderView state, StudioThread thread) {
+Color _statusColor(
+  BuildContext context,
+  HeaderView state,
+  StudioThread thread,
+) {
   if (_isFaultedAgentStatus(thread.status)) {
-    return StudioColors.rose;
+    return context.colors.error;
   }
   if (state.pendingInteractions.any(
     (interaction) => interaction.threadId == thread.id,
   )) {
-    return StudioColors.ochre;
+    return context.statusColors.warning;
   }
   if (_isRunningAgentStatus(thread.status)) {
-    return StudioColors.clay;
+    return context.statusColors.activeIndicator;
   }
-  return StudioColors.sage;
+  return context.statusColors.success;
 }
 
 bool _isRunningAgentStatus(ThreadStatusView status) => status.isActive;
@@ -353,7 +363,7 @@ class _Footer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
-      decoration: BoxDecoration(color: context.studioPaper),
+      decoration: BoxDecoration(color: context.colors.surface),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [

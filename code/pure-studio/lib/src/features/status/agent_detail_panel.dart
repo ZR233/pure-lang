@@ -54,7 +54,7 @@ class _AgentDetailHeader extends StatelessWidget {
         Icon(
           Icons.account_tree_outlined,
           size: 15,
-          color: StudioColors.clayDeep,
+          color: context.colors.onPrimaryContainer,
         ),
         const SizedBox(width: 8),
         Expanded(
@@ -63,7 +63,7 @@ class _AgentDetailHeader extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: context.text.labelSmall?.copyWith(
-              color: context.studioInkSoft.withValues(alpha: 0.72),
+              color: context.colors.onSurfaceVariant,
               fontFamily: 'Consolas',
               fontSize: 9.5,
               fontWeight: FontWeight.w600,
@@ -77,8 +77,8 @@ class _AgentDetailHeader extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
           style: context.text.labelSmall?.copyWith(
             color: runningCount > 0
-                ? StudioColors.clayDeep
-                : context.studioInkSoft,
+                ? context.colors.onPrimaryContainer
+                : context.colors.onSurfaceVariant,
             fontWeight: FontWeight.w600,
           ),
         ),
@@ -135,12 +135,12 @@ class _AgentTreeCardState extends State<AgentTreeCard> {
     bool hasDetails,
   ) {
     return Material(
-      color: context.studioPaper2,
+      color: context.colors.surfaceContainer,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(StudioRadii.sm),
         side: BorderSide(
           color: agent.state.isActive
-              ? style.color.withValues(alpha: 0.34)
+              ? style.tone.indicator(context).withValues(alpha: 0.34)
               : context.colors.outlineVariant.withValues(alpha: 0.5),
         ),
       ),
@@ -188,7 +188,7 @@ class _AgentTreeCardState extends State<AgentTreeCard> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: context.text.labelLarge?.copyWith(
-                        color: context.studioInk,
+                        color: context.colors.onSurface,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -200,7 +200,7 @@ class _AgentTreeCardState extends State<AgentTreeCard> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: context.text.bodySmall?.copyWith(
-                        color: context.studioInkSoft,
+                        color: context.colors.onSurfaceVariant,
                       ),
                     ),
                   ),
@@ -218,7 +218,7 @@ class _AgentTreeCardState extends State<AgentTreeCard> {
                 ? Icons.keyboard_arrow_up_rounded
                 : Icons.keyboard_arrow_down_rounded,
             size: 16,
-            color: context.studioInkSoft,
+            color: context.colors.onSurfaceVariant,
           ),
         ],
       ],
@@ -247,7 +247,7 @@ class _AgentTreeCardState extends State<AgentTreeCard> {
           _DetailLine(
             label: context.l10n.agentDetailErrorLabel,
             value: agent.error!,
-            valueColor: StudioColors.rose,
+            valueColor: context.colors.error,
           ),
         _DetailLine(
           label: context.l10n.agentDetailPathLabel,
@@ -281,7 +281,7 @@ class _AgentTreeConnector extends StatelessWidget {
               width: 1,
               height: 28,
               child: DecoratedBox(
-                decoration: BoxDecoration(color: context.studioLine2),
+                decoration: BoxDecoration(color: context.colors.outline),
               ),
             ),
           ),
@@ -295,7 +295,7 @@ class _AgentTreeConnector extends StatelessWidget {
                   width: 10,
                   height: 9,
                   child: CustomPaint(
-                    painter: _TreeElbowPainter(color: context.studioLine2),
+                    painter: _TreeElbowPainter(color: context.colors.outline),
                   ),
                 ),
               ],
@@ -342,10 +342,10 @@ class _AgentStatusDot extends StatelessWidget {
       dimension: 16,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: style.backgroundColor,
+          color: style.tone.background(context),
           shape: BoxShape.circle,
         ),
-        child: Icon(style.icon, size: 10, color: style.color),
+        child: Icon(style.icon, size: 10, color: style.tone.indicator(context)),
       ),
     );
   }
@@ -358,11 +358,7 @@ class _AgentStatusLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return StudioPill(
-      label: style.label,
-      backgroundColor: style.backgroundColor,
-      foregroundColor: style.color,
-    );
+    return StudioPill(label: style.label, tone: style.tone);
   }
 }
 
@@ -393,7 +389,7 @@ class _DetailLine extends StatelessWidget {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: context.text.labelSmall?.copyWith(
-                color: context.studioInkSoft.withValues(alpha: 0.72),
+                color: context.colors.onSurfaceVariant,
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -405,7 +401,7 @@ class _DetailLine extends StatelessWidget {
               maxLines: 4,
               overflow: TextOverflow.ellipsis,
               style: context.text.bodySmall?.copyWith(
-                color: valueColor ?? context.studioInk,
+                color: valueColor ?? context.colors.onSurface,
                 height: 1.4,
                 fontFamily: monospace ? 'Consolas' : null,
                 fontSize: monospace ? 11 : null,
@@ -423,55 +419,47 @@ _AgentStatusStyle _statusStyle(BuildContext context, StudioAgentState state) {
   return switch (state) {
     RunningStudioAgent() => _AgentStatusStyle(
       icon: Icons.play_arrow_rounded,
-      color: StudioColors.clayDeep,
-      backgroundColor: StudioColors.claySoft,
+      tone: StudioTone.active,
       label: l10n.agentDetailStatusRunning,
     ),
     QueuedStudioAgent() => _AgentStatusStyle(
       icon: Icons.schedule_rounded,
-      color: StudioColors.clayDeep,
-      backgroundColor: StudioColors.claySoft,
+      tone: StudioTone.neutral,
       label: l10n.agentDetailStatusQueued,
     ),
     WaitingToolStudioAgent() ||
     WaitingInteractionStudioAgent() => _AgentStatusStyle(
       icon: Icons.hourglass_top_rounded,
-      color: StudioColors.ochre,
-      backgroundColor: StudioColors.ochre.withValues(alpha: 0.16),
+      tone: StudioTone.warning,
       label: l10n.agentDetailStatusWaiting,
     ),
     IdleStudioAgent() => _AgentStatusStyle(
       icon: Icons.check_rounded,
-      color: StudioColors.sage,
-      backgroundColor: StudioColors.sageSoft,
+      tone: StudioTone.success,
       label: l10n.agentDetailStatusCompleted,
     ),
     FaultedStudioAgent() => _AgentStatusStyle(
       icon: Icons.error_outline_rounded,
-      color: StudioColors.rose,
-      backgroundColor: StudioColors.rose.withValues(alpha: 0.14),
+      tone: StudioTone.error,
       label: l10n.agentDetailStatusErrored,
     ),
     CancellingStudioAgent() => _AgentStatusStyle(
       icon: Icons.do_not_disturb_on_outlined,
-      color: StudioColors.rose,
-      backgroundColor: StudioColors.rose.withValues(alpha: 0.14),
+      tone: StudioTone.error,
       label: l10n.agentDetailStatusInterrupted,
     ),
     ClosingStudioAgent(:final failure) => _AgentStatusStyle(
       icon: failure == null
           ? Icons.hourglass_top_rounded
           : Icons.error_outline_rounded,
-      color: failure == null ? context.studioInkSoft : StudioColors.rose,
-      backgroundColor: context.studioPaper3,
+      tone: failure == null ? StudioTone.neutral : StudioTone.error,
       label: failure == null
           ? l10n.agentDetailStatusClosing
           : l10n.agentDetailStatusCleanupFailed,
     ),
     ClosedStudioAgent() => _AgentStatusStyle(
       icon: Icons.power_settings_new_rounded,
-      color: context.studioInkSoft,
-      backgroundColor: context.studioPaper3,
+      tone: StudioTone.neutral,
       label: l10n.agentDetailStatusShutdown,
     ),
   };
@@ -480,13 +468,11 @@ _AgentStatusStyle _statusStyle(BuildContext context, StudioAgentState state) {
 class _AgentStatusStyle {
   const _AgentStatusStyle({
     required this.icon,
-    required this.color,
-    required this.backgroundColor,
+    required this.tone,
     required this.label,
   });
 
   final IconData icon;
-  final Color color;
-  final Color backgroundColor;
+  final StudioTone tone;
   final String label;
 }

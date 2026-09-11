@@ -24,12 +24,7 @@ class TimelinePlanSummaryCard extends StatelessWidget {
       child: StudioPanel(
         key: StudioDriverKeys.planSummary,
         backgroundColor: expanded
-            ? Color.alphaBlend(
-                StudioColors.claySoft.withValues(
-                  alpha: context.isDark ? 0.24 : 0.5,
-                ),
-                context.colors.surfaceContainerLowest,
-              )
+            ? context.colors.surfaceContainerLow
             : context.colors.surfaceContainerLowest,
         borderColor: Colors.transparent,
         radius: StudioRadii.lg,
@@ -44,7 +39,7 @@ class TimelinePlanSummaryCard extends StatelessWidget {
                 Icon(
                   Icons.checklist_outlined,
                   size: 20,
-                  color: context.studioInkSoft,
+                  color: context.colors.onSurfaceVariant,
                 ),
                 const SizedBox(width: 11),
                 Expanded(
@@ -57,7 +52,7 @@ class TimelinePlanSummaryCard extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: context.text.titleSmall?.copyWith(
-                          color: context.studioInk,
+                          color: context.colors.onSurface,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -68,7 +63,7 @@ class TimelinePlanSummaryCard extends StatelessWidget {
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: context.text.bodySmall?.copyWith(
-                            color: context.studioInkSoft,
+                            color: context.colors.onSurfaceVariant,
                           ),
                         ),
                       ],
@@ -76,15 +71,11 @@ class TimelinePlanSummaryCard extends StatelessWidget {
                       Row(
                         children: [
                           StudioPill(
+                            tone: StudioTone.warning,
                             icon: Icons.schedule_outlined,
                             label: context
                                 .l10n
                                 .interactionPlanAwaitingConfirmation,
-                            backgroundColor: StudioColors.claySoft,
-                            foregroundColor: StudioColors.clayDeep,
-                            borderColor: StudioColors.clay.withValues(
-                              alpha: 0.24,
-                            ),
                           ),
                           const Spacer(),
                           Flexible(
@@ -93,7 +84,7 @@ class TimelinePlanSummaryCard extends StatelessWidget {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: context.text.labelMedium?.copyWith(
-                                color: StudioColors.clayDeep,
+                                color: context.colors.onPrimaryContainer,
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
@@ -109,7 +100,7 @@ class TimelinePlanSummaryCard extends StatelessWidget {
                   child: Icon(
                     expanded ? Icons.chevron_left : Icons.chevron_right,
                     size: 20,
-                    color: context.studioInkSoft,
+                    color: context.colors.onSurfaceVariant,
                   ),
                 ),
               ],
@@ -140,7 +131,7 @@ class PlanDetailPanel extends StatelessWidget {
       color: context.colors.surfaceContainerLowest,
       elevation: overlay ? 8 : 0,
       shadowColor: context.colors.shadow.withValues(alpha: 0.2),
-      shape: Border(left: BorderSide(color: context.studioLine2)),
+      shape: Border(left: BorderSide(color: context.colors.outline)),
       child: SafeArea(
         left: false,
         child: Column(
@@ -150,10 +141,10 @@ class PlanDetailPanel extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(16, 14, 10, 12),
               child: Row(
                 children: [
-                  const Icon(
+                  Icon(
                     Icons.checklist_outlined,
                     size: 19,
-                    color: StudioColors.clay,
+                    color: context.colors.primary,
                   ),
                   const SizedBox(width: 9),
                   Expanded(
@@ -163,14 +154,14 @@ class PlanDetailPanel extends StatelessWidget {
                         Text(
                           context.l10n.interactionPlanDetailsTitle,
                           style: context.text.titleSmall?.copyWith(
-                            color: context.studioInk,
+                            color: context.colors.onSurface,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
                         Text(
                           context.l10n.interactionPlanAwaitingConfirmation,
                           style: context.text.labelSmall?.copyWith(
-                            color: StudioColors.clayDeep,
+                            color: context.colors.onPrimaryContainer,
                           ),
                         ),
                       ],
@@ -186,7 +177,7 @@ class PlanDetailPanel extends StatelessWidget {
                 ],
               ),
             ),
-            Divider(height: 1, color: context.studioLine),
+            Divider(height: 1, color: context.colors.outlineVariant),
             Expanded(
               child: SelectionArea(
                 child: KeyedSubtree(

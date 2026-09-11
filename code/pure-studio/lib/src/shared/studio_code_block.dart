@@ -79,8 +79,7 @@ class StudioCodeBlock extends StatelessWidget {
               children: [
                 DecoratedBox(
                   decoration: BoxDecoration(
-                    color:
-                        headerBackgroundColor ?? colors.surfaceContainerHighest,
+                    color: headerBackgroundColor ?? colors.surfaceContainerHigh,
                   ),
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(12, 7, 12, 6),

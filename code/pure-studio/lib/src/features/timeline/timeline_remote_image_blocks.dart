@@ -75,9 +75,9 @@ class _RemoteMarkdownImageCardState
       constraints: const BoxConstraints(maxWidth: 360),
       child: Material(
         key: StudioDriverKeys.markdownImageSource(widget.url),
-        color: context.studioPaper,
+        color: context.colors.surface,
         shape: RoundedRectangleBorder(
-          side: BorderSide(color: context.studioLine),
+          side: BorderSide(color: context.colors.outlineVariant),
           borderRadius: BorderRadius.circular(10),
         ),
         clipBehavior: Clip.antiAlias,
@@ -98,7 +98,7 @@ class _RemoteMarkdownImageCardState
                             : Icons.image_outlined,
                         color: _failed
                             ? Theme.of(context).colorScheme.error
-                            : context.studioInkSoft,
+                            : context.colors.onSurfaceVariant,
                       ),
                       const SizedBox(width: 10),
                       Flexible(
@@ -122,7 +122,7 @@ class _RemoteMarkdownImageCardState
                               style: context.text.labelSmall?.copyWith(
                                 color: _failed
                                     ? Theme.of(context).colorScheme.error
-                                    : context.studioInkSoft,
+                                    : context.colors.onSurfaceVariant,
                               ),
                             ),
                           ],

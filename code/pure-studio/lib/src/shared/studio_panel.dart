@@ -30,7 +30,7 @@ class StudioPanel extends StatelessWidget {
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(radius),
-        side: BorderSide(color: borderColor ?? context.studioLine),
+        side: BorderSide(color: borderColor ?? context.colors.outlineVariant),
       ),
       clipBehavior: Clip.antiAlias,
       child: padding == null ? child : Padding(padding: padding!, child: child),

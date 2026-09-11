@@ -71,7 +71,7 @@ class _TimelineWaitIndicatorState extends State<TimelineWaitIndicator>
 
   @override
   Widget build(BuildContext context) {
-    final color = StudioColors.clay;
+    final color = context.statusColors.activeIndicator;
     final reducedMotion = _reducedMotion;
     return ExcludeSemantics(
       child: SizedBox(

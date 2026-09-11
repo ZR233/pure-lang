@@ -22,10 +22,10 @@ class TodoPanel extends StatelessWidget {
         ? todo.explanation!.trim()
         : context.l10n.timelineTodoListFallback;
     return Material(
-      color: context.studioPaper2,
+      color: context.colors.surfaceContainer,
       shape: inDrawer
           ? null
-          : Border(left: BorderSide(color: context.studioLine)),
+          : Border(left: BorderSide(color: context.colors.outlineVariant)),
       child: SafeArea(
         left: false,
         child: Column(
@@ -33,9 +33,9 @@ class TodoPanel extends StatelessWidget {
           children: [
             ListTile(
               dense: true,
-              leading: const Icon(
+              leading: Icon(
                 Icons.checklist_outlined,
-                color: StudioColors.clay,
+                color: context.colors.primary,
               ),
               title: Text(
                 title,
@@ -54,7 +54,7 @@ class TodoPanel extends StatelessWidget {
                       onPressed: onClose,
                     ),
             ),
-            Divider(height: 1, color: context.studioLine),
+            Divider(height: 1, color: context.colors.outlineVariant),
             Expanded(
               child: ListView.separated(
                 padding: const EdgeInsets.symmetric(vertical: 6),
@@ -86,10 +86,10 @@ class _TodoStepTile extends StatelessWidget {
         ? Icons.radio_button_checked
         : Icons.radio_button_unchecked;
     final color = completed
-        ? context.studioInkSoft
+        ? context.statusColors.success
         : inProgress
-        ? StudioColors.clay
-        : context.studioInkSoft.withValues(alpha: 0.72);
+        ? context.statusColors.activeIndicator
+        : context.colors.onSurfaceVariant;
     return ListTile(
       dense: true,
       visualDensity: VisualDensity.compact,
@@ -98,10 +98,12 @@ class _TodoStepTile extends StatelessWidget {
       title: Text(
         item.step,
         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-          color: completed ? context.studioInkSoft : context.studioInk,
+          color: completed
+              ? context.colors.onSurfaceVariant
+              : context.colors.onSurface,
           fontWeight: inProgress ? FontWeight.w600 : FontWeight.w400,
           decoration: completed ? TextDecoration.lineThrough : null,
-          decorationColor: context.studioInkSoft,
+          decorationColor: context.colors.onSurfaceVariant,
         ),
       ),
     );

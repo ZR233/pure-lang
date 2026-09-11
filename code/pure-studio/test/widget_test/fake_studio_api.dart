@@ -1048,7 +1048,6 @@ class _FakeStudioApi implements StudioApi {
     GeneralSettingsCommand command,
   ) async {
     final settings = <String, Object?>{
-      'followSystemTheme': command.followSystemTheme,
       'followActiveTurn': command.followActiveTurn,
       'compactTimeline': command.compactTimeline,
     };
@@ -1057,7 +1056,6 @@ class _FakeStudioApi implements StudioApi {
       _currentState.settingsState,
       revision: expectedSettingsRevision + 1,
       general: GeneralSettingsView(
-        followSystemTheme: settings['followSystemTheme'] as bool? ?? true,
         followActiveTurn: settings['followActiveTurn'] as bool? ?? true,
         compactTimeline: settings['compactTimeline'] as bool? ?? false,
       ),

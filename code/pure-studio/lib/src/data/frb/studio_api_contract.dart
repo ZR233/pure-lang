@@ -1102,7 +1102,6 @@ class FrbStudioApi implements StudioApi {
         () => frb.saveGeneralSettings(
           expectedSettingsRevision: BigInt.from(expectedSettingsRevision),
           input: frb.GeneralSettingsInput(
-            followSystemTheme: command.followSystemTheme,
             followActiveTurn: command.followActiveTurn,
             compactTimeline: command.compactTimeline,
           ),

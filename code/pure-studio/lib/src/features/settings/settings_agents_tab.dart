@@ -144,7 +144,7 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
                               ? ValueKey('system-agent-workspace-${profile.id}')
                               : null,
                           style: context.text.bodySmall?.copyWith(
-                            color: context.studioInkSoft,
+                            color: context.colors.onSurfaceVariant,
                           ),
                         ),
                         actions: [

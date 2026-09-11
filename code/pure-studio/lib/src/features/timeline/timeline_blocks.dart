@@ -133,9 +133,11 @@ class _JumpToLatestButton extends StatelessWidget {
       message: context.l10n.timelineJumpToLatest,
       child: Material(
         elevation: 0,
-        color: StudioColors.claySoft,
+        color: context.colors.primaryContainer,
         shape: StadiumBorder(
-          side: BorderSide(color: StudioColors.clay.withValues(alpha: 0.18)),
+          side: BorderSide(
+            color: context.colors.primary.withValues(alpha: 0.18),
+          ),
         ),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
@@ -151,13 +153,15 @@ class _JumpToLatestButton extends StatelessWidget {
                 Icon(
                   Icons.keyboard_arrow_down_rounded,
                   size: 18,
-                  color: StudioColors.clayDeep,
+                  color: context.colors.onPrimaryContainer,
                 ),
                 if (pendingCount > 0) ...[
                   const SizedBox(width: 4),
                   Text(
                     context.l10n.timelineNew,
-                    style: textStyle?.copyWith(color: StudioColors.clayDeep),
+                    style: textStyle?.copyWith(
+                      color: context.colors.onPrimaryContainer,
+                    ),
                   ),
                 ],
               ],
@@ -239,7 +243,7 @@ class _TimelineRowBlock extends StatelessWidget {
                         context.l10n.timelineParentAgent,
                         key: const ValueKey('timeline-parent-agent-label'),
                         style: Theme.of(context).textTheme.labelSmall
-                            ?.copyWith(color: context.studioInkSoft),
+                            ?.copyWith(color: context.colors.onSurfaceVariant),
                       ),
                     ),
                   Opacity(
@@ -258,8 +262,10 @@ class _TimelineRowBlock extends StatelessWidget {
                       child: DecoratedBox(
                         key: StudioDriverKeys.timelineRolledBack(row.id),
                         decoration: BoxDecoration(
-                          color: context.studioPaper2,
-                          border: Border.all(color: context.studioLine),
+                          color: context.colors.surfaceContainer,
+                          border: Border.all(
+                            color: context.colors.outlineVariant,
+                          ),
                           borderRadius: BorderRadius.circular(999),
                         ),
                         child: Padding(
@@ -270,7 +276,9 @@ class _TimelineRowBlock extends StatelessWidget {
                           child: Text(
                             context.l10n.timelineRolledBack,
                             style: Theme.of(context).textTheme.labelSmall
-                                ?.copyWith(color: context.studioInkSoft),
+                                ?.copyWith(
+                                  color: context.colors.onSurfaceVariant,
+                                ),
                           ),
                         ),
                       ),
@@ -420,8 +428,8 @@ class _SkillActivationPart extends StatelessWidget {
         message: activation.resourceBase.value,
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color: StudioColors.claySoft.withValues(alpha: 0.6),
-            border: Border.all(color: context.studioLine),
+            color: context.colors.primaryContainer.withValues(alpha: 0.6),
+            border: Border.all(color: context.colors.outlineVariant),
             borderRadius: BorderRadius.circular(StudioRadii.md),
           ),
           child: Padding(
@@ -429,10 +437,10 @@ class _SkillActivationPart extends StatelessWidget {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(
+                Icon(
                   Icons.extension_outlined,
                   size: 15,
-                  color: StudioColors.clayDeep,
+                  color: context.colors.onPrimaryContainer,
                 ),
                 const SizedBox(width: 7),
                 Flexible(
@@ -440,7 +448,7 @@ class _SkillActivationPart extends StatelessWidget {
                     label,
                     overflow: TextOverflow.ellipsis,
                     style: context.text.bodySmall?.copyWith(
-                      color: context.studioInk,
+                      color: context.colors.onSurface,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -449,7 +457,7 @@ class _SkillActivationPart extends StatelessWidget {
                   const SizedBox(width: 8),
                   DecoratedBox(
                     decoration: BoxDecoration(
-                      color: context.studioPaper2,
+                      color: context.colors.surfaceContainer,
                       borderRadius: BorderRadius.circular(999),
                     ),
                     child: Padding(
@@ -460,7 +468,7 @@ class _SkillActivationPart extends StatelessWidget {
                       child: Text(
                         activation.source,
                         style: context.text.labelSmall?.copyWith(
-                          color: context.studioInkSoft,
+                          color: context.colors.onSurfaceVariant,
                         ),
                       ),
                     ),
@@ -500,7 +508,7 @@ class _MarkdownBubble extends StatelessWidget {
         : _MarkdownSurface.assistant;
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: isUser ? context.studioPaper2 : Colors.transparent,
+        color: isUser ? context.colors.surfaceContainer : Colors.transparent,
         border: isUser
             ? Border.all(color: scheme.outlineVariant.withValues(alpha: 0.72))
             : null,
@@ -624,7 +632,7 @@ class _ReasoningPart extends StatelessWidget {
             decoration: BoxDecoration(
               border: Border(
                 left: BorderSide(
-                  color: context.studioLine.withValues(alpha: 0.82),
+                  color: context.colors.outlineVariant.withValues(alpha: 0.82),
                 ),
               ),
             ),
@@ -636,7 +644,7 @@ class _ReasoningPart extends StatelessWidget {
                     ? Text(
                         context.l10n.timelineReasoningEmpty,
                         style: context.text.bodySmall?.copyWith(
-                          color: context.studioInkSoft,
+                          color: context.colors.onSurfaceVariant,
                         ),
                       )
                     : _AgentMarkdown(
@@ -721,10 +729,10 @@ class _TimelineActivitySummary extends StatelessWidget {
     final color = isIssue
         ? Theme.of(context).colorScheme.error
         : muted
-        ? context.studioInkSoft
+        ? context.colors.onSurfaceVariant
         : isCurrentActivity
-        ? context.studioInk
-        : context.studioInkSoft;
+        ? context.colors.onSurface
+        : context.colors.onSurfaceVariant;
     final showPulse = _showPulse;
     return ConstrainedBox(
       key: isCurrentActivity
@@ -769,7 +777,7 @@ class _TimelineActivitySummary extends StatelessWidget {
                     ? Icons.keyboard_arrow_up_rounded
                     : Icons.keyboard_arrow_down_rounded,
                 size: 17,
-                color: context.studioInkSoft.withValues(alpha: 0.64),
+                color: context.colors.onSurfaceVariant,
               ),
             ],
           ],
@@ -815,7 +823,7 @@ class _TimelineActivitySummary extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 softWrap: false,
                 style: context.text.bodySmall?.copyWith(
-                  color: context.studioInkSoft.withValues(alpha: 0.82),
+                  color: context.colors.onSurfaceVariant,
                   height: 1.25,
                 ),
               ),
@@ -857,7 +865,7 @@ class _TimelineMetaRow extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
       child: Row(
         children: [
-          Icon(icon, size: 17, color: context.studioInkSoft),
+          Icon(icon, size: 17, color: context.colors.onSurfaceVariant),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -868,7 +876,7 @@ class _TimelineMetaRow extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: context.text.labelLarge?.copyWith(
-                    color: context.studioInk,
+                    color: context.colors.onSurface,
                   ),
                 ),
                 if (subtitle.isNotEmpty) ...[
@@ -878,7 +886,7 @@ class _TimelineMetaRow extends StatelessWidget {
                     maxLines: 3,
                     overflow: TextOverflow.ellipsis,
                     style: context.text.bodySmall?.copyWith(
-                      color: context.studioInkSoft,
+                      color: context.colors.onSurfaceVariant,
                     ),
                   ),
                 ],
@@ -900,7 +908,7 @@ class _TimelinePanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     return StudioPanel(
-      backgroundColor: context.studioPaper2,
+      backgroundColor: context.colors.surfaceContainer,
       borderColor: colors.outlineVariant.withValues(alpha: 0.82),
       radius: StudioRadii.md,
       child: child,

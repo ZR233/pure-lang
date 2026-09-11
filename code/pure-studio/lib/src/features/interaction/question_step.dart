@@ -145,12 +145,12 @@ class _OptionMark extends StatelessWidget {
         color: selected ? context.colors.primary : context.colors.surface,
         borderRadius: BorderRadius.circular(5),
         border: Border.all(
-          color: selected ? StudioColors.clay : context.studioLine2,
+          color: selected ? context.colors.primary : context.colors.outline,
           width: 2,
         ),
       ),
       child: selected
-          ? const Icon(Icons.check, size: 13, color: StudioColors.white)
+          ? Icon(Icons.check, size: 13, color: context.colors.onPrimary)
           : null,
     );
   }

@@ -107,7 +107,6 @@ impl StudioRuntime {
             .config_runtime
             .update(request.expected_revision, |config| {
                 let mut config = config.clone();
-                config.ui.follow_system_theme = input.follow_system_theme;
                 config.ui.follow_active_turn = input.follow_active_turn;
                 config.ui.compact_timeline = input.compact_timeline;
                 Ok(config)

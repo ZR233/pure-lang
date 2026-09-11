@@ -1407,13 +1407,6 @@ class AppLocalizationsEn extends AppLocalizations {
       'Interface preferences saved into the Studio store.';
 
   @override
-  String get settingsFollowSystemTheme => 'Follow system theme';
-
-  @override
-  String get settingsFollowSystemThemeSubtitle =>
-      'Switch light and dark mode with the OS.';
-
-  @override
   String get settingsFollowActiveTurn => 'Follow active turn';
 
   @override

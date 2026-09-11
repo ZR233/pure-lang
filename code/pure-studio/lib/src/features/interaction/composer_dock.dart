@@ -131,8 +131,8 @@ class _RuntimeDrivenAgentDock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return StudioPanel(
-      backgroundColor: context.studioPaper2,
-      borderColor: context.studioLine,
+      backgroundColor: context.colors.surfaceContainer,
+      borderColor: context.colors.outlineVariant,
       radius: StudioRadii.lg,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
       child: Row(
@@ -140,14 +140,14 @@ class _RuntimeDrivenAgentDock extends StatelessWidget {
           Icon(
             Icons.lock_clock_outlined,
             size: 18,
-            color: context.studioInkSoft,
+            color: context.colors.onSurfaceVariant,
           ),
           const SizedBox(width: 9),
           Expanded(
             child: Text(
               context.l10n.composerAgentRuntimeDriven,
               style: Theme.of(context).textTheme.bodyMedium
-                  ?.copyWith(color: context.studioInkSoft),
+                  ?.copyWith(color: context.colors.onSurfaceVariant),
             ),
           ),
           if (workspace.isBusy) _StopButton(threadId: workspace.threadId),
@@ -391,10 +391,6 @@ class _PromptComposerPanelState extends State<_PromptComposerPanel> {
                 IconButton.filled(
                   key: StudioDriverKeys.composerSubmit,
                   tooltip: context.l10n.composerSend,
-                  style: IconButton.styleFrom(
-                    backgroundColor: StudioColors.clay,
-                    foregroundColor: Colors.white,
-                  ),
                   icon: composer.isSubmissionPending
                       ? const SizedBox.square(
                           key: StudioDriverKeys.composerPending,

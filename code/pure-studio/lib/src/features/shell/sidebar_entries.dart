@@ -55,7 +55,7 @@ class _ProjectTile extends ConsumerWidget {
       iconColor: issue != null
           ? colors.error
           : selected
-          ? StudioColors.clayDeep
+          ? context.colors.onPrimaryContainer
           : colors.onSurfaceVariant,
       onTap: issue == null ? () => controller.selectProject(project.id) : null,
       trailing: IconButton(
@@ -142,13 +142,13 @@ class _ThreadTile extends ConsumerWidget {
       iconColor: issue != null
           ? colors.error
           : selected
-          ? StudioColors.clayDeep
+          ? context.colors.onPrimaryContainer
           : colors.onSurfaceVariant,
       markerColor: issue != null
           ? null
           : thread.mode == ThreadModeId.simple
-          ? StudioColors.clay
-          : StudioColors.sage,
+          ? context.colors.primary
+          : context.colors.onSurfaceVariant,
       onTap: issue == null
           ? () => ref
                 .read(studioControllerProvider.notifier)

@@ -84,8 +84,8 @@ class _ThreadAttachmentCardState extends ConsumerState<_ThreadAttachmentCard> {
         constraints: const BoxConstraints(maxWidth: 230),
         padding: const EdgeInsets.all(7),
         decoration: BoxDecoration(
-          color: context.studioPaper,
-          border: Border.all(color: context.studioLine),
+          color: context.colors.surface,
+          border: Border.all(color: context.colors.outlineVariant),
           borderRadius: BorderRadius.circular(10),
         ),
         child: Row(
@@ -241,8 +241,8 @@ class _ThreadImageThumbnailState extends ConsumerState<_ThreadImageThumbnail> {
           height: size.height,
           clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
-            color: context.studioPaper,
-            border: Border.all(color: context.studioLine),
+            color: context.colors.surface,
+            border: Border.all(color: context.colors.outlineVariant),
             borderRadius: BorderRadius.circular(10),
           ),
           child: _ThreadImageFuture(

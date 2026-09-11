@@ -191,7 +191,6 @@ pub async fn save_general_settings(
             .save_general_settings(pl_protocol::studio::UpdateGeneralSettingsRequest {
                 expected_revision: expected_settings_revision,
                 settings: pl_protocol::studio::StudioGeneralSettings {
-                    follow_system_theme: input.follow_system_theme,
                     follow_active_turn: input.follow_active_turn,
                     compact_timeline: input.compact_timeline,
                 },

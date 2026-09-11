@@ -288,12 +288,10 @@ class McpSettingsCommand {
 
 class GeneralSettingsCommand {
   const GeneralSettingsCommand({
-    required this.followSystemTheme,
     required this.followActiveTurn,
     required this.compactTimeline,
   });
 
-  final bool followSystemTheme;
   final bool followActiveTurn;
   final bool compactTimeline;
 }

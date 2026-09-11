@@ -109,7 +109,6 @@ pub(crate) fn bridge_settings(
             })
             .collect(),
         general: BridgeGeneralSettingsDto {
-            follow_system_theme: settings.general.follow_system_theme,
             follow_active_turn: settings.general.follow_active_turn,
             compact_timeline: settings.general.compact_timeline,
         },

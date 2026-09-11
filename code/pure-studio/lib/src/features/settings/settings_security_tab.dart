@@ -51,7 +51,7 @@ class SecurityTab extends ConsumerWidget {
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    selectedTileColor: context.studioPaper2,
+                    selectedTileColor: context.colors.surfaceContainer,
                     contentPadding: const EdgeInsets.symmetric(
                       horizontal: 12,
                       vertical: 12,
@@ -64,7 +64,9 @@ class SecurityTab extends ConsumerWidget {
         const SizedBox(height: 12),
         Text(
           context.l10n.settingsWorkspaceBoundary,
-          style: context.text.bodySmall?.copyWith(color: context.studioInkSoft),
+          style: context.text.bodySmall?.copyWith(
+            color: context.colors.onSurfaceVariant,
+          ),
         ),
       ],
     );

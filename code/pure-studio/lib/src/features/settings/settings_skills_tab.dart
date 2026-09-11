@@ -166,7 +166,7 @@ class _SkillsTabState extends ConsumerState<SkillsTab> {
                             skill.source,
                           ].where((value) => value.isNotEmpty).join('\n'),
                           style: context.text.bodySmall?.copyWith(
-                            color: context.studioInkSoft,
+                            color: context.colors.onSurfaceVariant,
                           ),
                         ),
                       ),

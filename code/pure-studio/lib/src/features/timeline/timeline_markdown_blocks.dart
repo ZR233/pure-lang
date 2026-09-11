@@ -62,7 +62,7 @@ class _AgentMarkdown extends ConsumerWidget {
           borderColor: scheme.outlineVariant,
           textStyle: bodyStyle?.copyWith(
             color: surface == _MarkdownSurface.reasoning
-                ? context.studioInkSoft
+                ? context.colors.onSurfaceVariant
                 : surface == _MarkdownSurface.error
                 ? scheme.error
                 : scheme.onSurface,
@@ -221,7 +221,7 @@ TextStyle? _markdownBodyStyle(BuildContext context, _MarkdownSurface surface) {
   final theme = Theme.of(context);
   if (surface == _MarkdownSurface.reasoning) {
     return theme.textTheme.bodySmall?.copyWith(
-      color: context.studioInkSoft,
+      color: context.colors.onSurfaceVariant,
       height: 1.48,
     );
   }
@@ -251,17 +251,10 @@ class _MarkdownInlineCode extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final fill = switch (surface) {
-      _MarkdownSurface.user => scheme.surface.withValues(alpha: 0.72),
-      _ => Color.alphaBlend(
-        StudioColors.clay.withValues(alpha: context.isDark ? 0.16 : 0.09),
-        context.studioPaper,
-      ),
-    };
-    final border = switch (surface) {
-      _MarkdownSurface.user => scheme.outlineVariant.withValues(alpha: 0.62),
-      _ => StudioColors.clay.withValues(alpha: context.isDark ? 0.38 : 0.22),
-    };
+    final fill = surface == _MarkdownSurface.user
+        ? scheme.surfaceContainerLowest
+        : scheme.surfaceContainerLow;
+    final border = scheme.outlineVariant;
     final codeStyle = style.copyWith(
       color: scheme.onSurface,
       fontFamily: 'JetBrains Mono',
@@ -311,7 +304,7 @@ class _StudioBlockQuote extends MarkdownComponent {
     final data = _plainQuoteText(text);
     final scheme = Theme.of(context).colorScheme;
     final quoteStyle = (config.style ?? DefaultTextStyle.of(context).style)
-        .copyWith(color: context.studioInkSoft, height: 1.5);
+        .copyWith(color: context.colors.onSurfaceVariant, height: 1.5);
     final quoteConfig = config.copyWith(style: quoteStyle);
     final child = TextSpan(
       children: MarkdownComponent.generate(context, data, quoteConfig, true),
@@ -325,12 +318,9 @@ class _StudioBlockQuote extends MarkdownComponent {
           child: DecoratedBox(
             key: const ValueKey('studio-markdown-quote'),
             decoration: BoxDecoration(
-              color: Color.alphaBlend(
-                scheme.primary.withValues(alpha: context.isDark ? 0.12 : 0.05),
-                context.studioPaper,
-              ),
+              color: scheme.surfaceContainerLow,
               border: BorderDirectional(
-                start: BorderSide(color: StudioColors.clay, width: 3),
+                start: BorderSide(color: context.colors.primary, width: 3),
               ),
               borderRadius: BorderRadius.circular(StudioRadii.sm),
             ),

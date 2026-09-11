@@ -113,7 +113,7 @@ class _SummarySection extends StatelessWidget {
             child: Text(
               context.l10n.settingsStatisticsEmpty,
               style: Theme.of(context).textTheme.bodyMedium
-                  ?.copyWith(color: context.studioInkSoft),
+                  ?.copyWith(color: context.colors.onSurfaceVariant),
             ),
           )
         else if (compact)
@@ -238,7 +238,7 @@ class _ModelLabel extends StatelessWidget {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: Theme.of(context).textTheme.labelSmall
-              ?.copyWith(color: context.studioInkSoft),
+              ?.copyWith(color: context.colors.onSurfaceVariant),
         ),
       ],
     );
@@ -360,8 +360,12 @@ class _WideCells extends StatelessWidget {
   Widget build(BuildContext context) {
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: emphasized ? context.studioPaper2 : Colors.transparent,
-        border: Border(bottom: BorderSide(color: context.studioLine)),
+        color: emphasized
+            ? context.colors.surfaceContainer
+            : Colors.transparent,
+        border: Border(
+          bottom: BorderSide(color: context.colors.outlineVariant),
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -441,7 +445,10 @@ class _EmptyState extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 48),
       child: Center(
-        child: Text(label, style: TextStyle(color: context.studioInkSoft)),
+        child: Text(
+          label,
+          style: TextStyle(color: context.colors.onSurfaceVariant),
+        ),
       ),
     );
   }

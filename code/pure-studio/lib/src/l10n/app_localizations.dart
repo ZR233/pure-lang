@@ -2549,18 +2549,6 @@ abstract class AppLocalizations {
   /// **'Interface preferences saved into the Studio store.'**
   String get settingsGeneralSubtitle;
 
-  /// No description provided for @settingsFollowSystemTheme.
-  ///
-  /// In en, this message translates to:
-  /// **'Follow system theme'**
-  String get settingsFollowSystemTheme;
-
-  /// No description provided for @settingsFollowSystemThemeSubtitle.
-  ///
-  /// In en, this message translates to:
-  /// **'Switch light and dark mode with the OS.'**
-  String get settingsFollowSystemThemeSubtitle;
-
   /// No description provided for @settingsFollowActiveTurn.
   ///
   /// In en, this message translates to:

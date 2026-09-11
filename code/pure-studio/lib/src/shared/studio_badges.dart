@@ -6,29 +6,21 @@ class StudioPill extends StatelessWidget {
   const StudioPill({
     required this.label,
     this.icon,
-    this.backgroundColor,
-    this.foregroundColor,
-    this.borderColor,
+    this.tone = StudioTone.neutral,
     super.key,
   });
 
   final String label;
   final IconData? icon;
-  final Color? backgroundColor;
-  final Color? foregroundColor;
-  final Color? borderColor;
+  final StudioTone tone;
 
   @override
   Widget build(BuildContext context) {
-    final foreground = foregroundColor ?? context.colors.onSurfaceVariant;
+    final foreground = tone.foreground(context);
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: backgroundColor ?? context.colors.surfaceContainerLow,
-        border: Border.all(
-          color:
-              borderColor ??
-              context.colors.outlineVariant.withValues(alpha: 0.72),
-        ),
+        color: tone.background(context),
+        border: Border.all(color: context.colors.outlineVariant),
         borderRadius: BorderRadius.circular(StudioRadii.pill),
       ),
       child: Padding(
@@ -37,7 +29,7 @@ class StudioPill extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (icon != null) ...[
-              Icon(icon, size: 14, color: foreground),
+              Icon(icon, size: 14, color: tone.indicator(context)),
               const SizedBox(width: 5),
             ],
             Flexible(
@@ -64,9 +56,7 @@ class StudioCompactChip extends StatelessWidget {
     this.enabled = true,
     this.maxWidth = 180,
     this.margin = EdgeInsets.zero,
-    this.backgroundColor,
-    this.foregroundColor,
-    this.borderColor,
+    this.tone = StudioTone.neutral,
     super.key,
   });
 
@@ -77,26 +67,20 @@ class StudioCompactChip extends StatelessWidget {
   final bool enabled;
   final double maxWidth;
   final EdgeInsetsGeometry margin;
-  final Color? backgroundColor;
-  final Color? foregroundColor;
-  final Color? borderColor;
+  final StudioTone tone;
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final foreground = foregroundColor ?? colors.onSurfaceVariant;
+    final foreground = tone.foreground(context);
     final chip = Padding(
       padding: margin,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color:
-              backgroundColor ??
-              (enabled
-                  ? colors.surfaceContainerLowest.withValues(alpha: 0.78)
-                  : colors.surfaceContainerHighest),
-          border: Border.all(
-            color: borderColor ?? colors.outlineVariant.withValues(alpha: 0.72),
-          ),
+          color: (enabled
+              ? tone.background(context)
+              : colors.surfaceContainerHighest),
+          border: Border.all(color: colors.outlineVariant),
           borderRadius: BorderRadius.circular(StudioRadii.sm),
         ),
         child: Padding(
@@ -105,7 +89,7 @@ class StudioCompactChip extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               if (icon != null) ...[
-                Icon(icon, size: 15, color: foreground),
+                Icon(icon, size: 15, color: tone.indicator(context)),
                 const SizedBox(width: 5),
               ],
               ConstrainedBox(
@@ -136,15 +120,15 @@ class StudioCompactChip extends StatelessWidget {
 class StudioIconBadge extends StatelessWidget {
   const StudioIconBadge({
     required this.icon,
-    this.backgroundColor,
-    this.foregroundColor,
+    this.tone = StudioTone.brand,
+    this.filled = false,
     this.size = 32,
     super.key,
   });
 
   final IconData icon;
-  final Color? backgroundColor;
-  final Color? foregroundColor;
+  final StudioTone tone;
+  final bool filled;
   final double size;
 
   @override
@@ -153,14 +137,14 @@ class StudioIconBadge extends StatelessWidget {
       dimension: size,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: backgroundColor ?? StudioColors.claySoft,
+          color: filled ? context.colors.primary : tone.background(context),
           borderRadius: BorderRadius.circular(StudioRadii.sm),
-          border: Border.all(color: context.studioLine),
+          border: Border.all(color: context.colors.outlineVariant),
         ),
         child: Icon(
           icon,
           size: size * 0.56,
-          color: foregroundColor ?? StudioColors.clayDeep,
+          color: filled ? context.colors.onPrimary : tone.indicator(context),
         ),
       ),
     );
@@ -191,7 +175,7 @@ class StudioProgressDots extends StatelessWidget {
               height: 6,
               decoration: BoxDecoration(
                 color: index == activeIndex
-                    ? StudioColors.clay
+                    ? context.statusColors.activeIndicator
                     : context.colors.outlineVariant,
                 borderRadius: BorderRadius.circular(StudioRadii.pill),
               ),
@@ -200,4 +184,28 @@ class StudioProgressDots extends StatelessWidget {
       ],
     );
   }
+}
+
+/// A supplementary eye-blue marker; the selected surface and label carry state too.
+class StudioSelectionMarker extends StatelessWidget {
+  const StudioSelectionMarker({
+    required this.selected,
+    required this.child,
+    super.key,
+  });
+  final bool selected;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    foregroundDecoration: BoxDecoration(
+      border: BorderDirectional(
+        start: BorderSide(
+          color: selected ? context.statusColors.eyeAccent : Colors.transparent,
+          width: 2,
+        ),
+      ),
+    ),
+    child: child,
+  );
 }

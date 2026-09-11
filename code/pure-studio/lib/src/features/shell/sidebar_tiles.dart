@@ -78,7 +78,7 @@ class _CompactSidebarTileState extends State<_CompactSidebarTile> {
                         minimumSize: const Size.square(20),
                         maximumSize: const Size.square(20),
                         padding: EdgeInsets.zero,
-                        backgroundColor: context.studioPaper,
+                        backgroundColor: context.colors.surface,
                       ),
                       icon: Icon(widget.actionIcon, size: 12),
                       onPressed: widget.onAction,
@@ -103,7 +103,7 @@ class _CompactSidebarTileState extends State<_CompactSidebarTile> {
                         minimumSize: const Size.square(20),
                         maximumSize: const Size.square(20),
                         padding: EdgeInsets.zero,
-                        backgroundColor: context.studioPaper,
+                        backgroundColor: context.colors.surface,
                       ),
                       icon: Icon(widget.secondaryActionIcon, size: 12),
                       onPressed: widget.onSecondaryAction,
@@ -158,8 +158,8 @@ class _SidebarTileState extends State<_SidebarTile> {
   @override
   Widget build(BuildContext context) {
     final foreground = widget.selected
-        ? StudioColors.clayDeep
-        : context.studioInk;
+        ? context.colors.onPrimaryContainer
+        : context.colors.onSurface;
     final trailingVisible =
         widget.markerColor == null || widget.selected || _hovering || _focused;
     final titleText = Text(
@@ -177,73 +177,78 @@ class _SidebarTileState extends State<_SidebarTile> {
         onEnter: (_) => setState(() => _hovering = true),
         onExit: (_) => setState(() => _hovering = false),
         child: Material(
-          color: widget.selected ? context.studioPaper : Colors.transparent,
+          color: widget.selected
+              ? context.colors.surfaceContainerHigh
+              : Colors.transparent,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(StudioRadii.md),
           ),
           clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onFocusChange: (focused) => setState(() => _focused = focused),
-            onTap: widget.onTap,
-            hoverColor: context.studioPaper.withValues(alpha: 0.72),
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(
-                10,
-                widget.dense ? 6 : 8,
-                4,
-                widget.dense ? 6 : 8,
-              ),
-              child: Row(
-                children: [
-                  if (widget.markerColor == null)
-                    Icon(widget.icon, size: 17, color: widget.iconColor)
-                  else
-                    SizedBox(
-                      width: 17,
-                      child: Center(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: widget.markerColor,
-                            borderRadius: BorderRadius.circular(
-                              StudioRadii.pill,
+          child: StudioSelectionMarker(
+            selected: widget.selected,
+            child: InkWell(
+              onFocusChange: (focused) => setState(() => _focused = focused),
+              onTap: widget.onTap,
+              hoverColor: context.colors.surface.withValues(alpha: 0.72),
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  10,
+                  widget.dense ? 6 : 8,
+                  4,
+                  widget.dense ? 6 : 8,
+                ),
+                child: Row(
+                  children: [
+                    if (widget.markerColor == null)
+                      Icon(widget.icon, size: 17, color: widget.iconColor)
+                    else
+                      SizedBox(
+                        width: 17,
+                        child: Center(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: widget.markerColor,
+                              borderRadius: BorderRadius.circular(
+                                StudioRadii.pill,
+                              ),
                             ),
+                            child: const SizedBox.square(dimension: 5),
                           ),
-                          child: const SizedBox.square(dimension: 5),
                         ),
                       ),
-                    ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        widget.showTitleTooltip
-                            ? Tooltip(message: widget.title, child: titleText)
-                            : titleText,
-                        if (widget.subtitle.isNotEmpty) ...[
-                          const SizedBox(height: 1),
-                          Text(
-                            widget.subtitle,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: context.text.bodySmall?.copyWith(
-                              color: widget.selected
-                                  ? context.studioInkSoft
-                                  : context.studioInkSoft.withValues(
-                                      alpha: 0.72,
-                                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          widget.showTitleTooltip
+                              ? Tooltip(message: widget.title, child: titleText)
+                              : titleText,
+                          if (widget.subtitle.isNotEmpty) ...[
+                            const SizedBox(height: 1),
+                            Text(
+                              widget.subtitle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: context.text.bodySmall?.copyWith(
+                                color: widget.selected
+                                    ? context.colors.onSurfaceVariant
+                                    : context.colors.onSurfaceVariant,
+                              ),
                             ),
-                          ),
+                          ],
                         ],
-                      ],
+                      ),
                     ),
-                  ),
-                  if (trailingVisible)
-                    IconTheme.merge(
-                      data: IconThemeData(color: context.studioInkSoft),
-                      child: widget.trailing,
-                    ),
-                ],
+                    if (trailingVisible)
+                      IconTheme.merge(
+                        data: IconThemeData(
+                          color: context.colors.onSurfaceVariant,
+                        ),
+                        child: widget.trailing,
+                      ),
+                  ],
+                ),
               ),
             ),
           ),

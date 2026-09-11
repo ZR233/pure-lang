@@ -174,7 +174,6 @@ fn settings_view(
         },
         mcp_servers,
         general: StudioGeneralSettings {
-            follow_system_theme: config.ui.follow_system_theme,
             follow_active_turn: config.ui.follow_active_turn,
             compact_timeline: config.ui.compact_timeline,
         },

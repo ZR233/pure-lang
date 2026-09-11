@@ -4605,12 +4605,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeGeneralSettingsDto dco_decode_bridge_general_settings_dto(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 3)
-      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
     return BridgeGeneralSettingsDto(
-      followSystemTheme: dco_decode_bool(arr[0]),
-      followActiveTurn: dco_decode_bool(arr[1]),
-      compactTimeline: dco_decode_bool(arr[2]),
+      followActiveTurn: dco_decode_bool(arr[0]),
+      compactTimeline: dco_decode_bool(arr[1]),
     );
   }
 
@@ -7729,12 +7728,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   GeneralSettingsInput dco_decode_general_settings_input(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 3)
-      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
     return GeneralSettingsInput(
-      followSystemTheme: dco_decode_bool(arr[0]),
-      followActiveTurn: dco_decode_bool(arr[1]),
-      compactTimeline: dco_decode_bool(arr[2]),
+      followActiveTurn: dco_decode_bool(arr[0]),
+      compactTimeline: dco_decode_bool(arr[1]),
     );
   }
 
@@ -10617,11 +10615,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     SseDeserializer deserializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_followSystemTheme = sse_decode_bool(deserializer);
     var var_followActiveTurn = sse_decode_bool(deserializer);
     var var_compactTimeline = sse_decode_bool(deserializer);
     return BridgeGeneralSettingsDto(
-      followSystemTheme: var_followSystemTheme,
       followActiveTurn: var_followActiveTurn,
       compactTimeline: var_compactTimeline,
     );
@@ -14645,11 +14641,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     SseDeserializer deserializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_followSystemTheme = sse_decode_bool(deserializer);
     var var_followActiveTurn = sse_decode_bool(deserializer);
     var var_compactTimeline = sse_decode_bool(deserializer);
     return GeneralSettingsInput(
-      followSystemTheme: var_followSystemTheme,
       followActiveTurn: var_followActiveTurn,
       compactTimeline: var_compactTimeline,
     );
@@ -18035,7 +18029,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bool(self.followSystemTheme, serializer);
     sse_encode_bool(self.followActiveTurn, serializer);
     sse_encode_bool(self.compactTimeline, serializer);
   }
@@ -21180,7 +21173,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bool(self.followSystemTheme, serializer);
     sse_encode_bool(self.followActiveTurn, serializer);
     sse_encode_bool(self.compactTimeline, serializer);
   }

@@ -32,7 +32,7 @@ class StudioEmptyState extends StatelessWidget {
           Text(
             title,
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              color: context.studioInk,
+              color: context.colors.onSurface,
               fontWeight: FontWeight.w700,
             ),
             textAlign: TextAlign.center,
@@ -103,31 +103,16 @@ class StudioNotice extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final foreground = switch (tone) {
-      StudioNoticeTone.danger => colors.error,
-      StudioNoticeTone.warning => colors.tertiary,
-      StudioNoticeTone.success => colors.secondary,
-      StudioNoticeTone.info => colors.primary,
-      StudioNoticeTone.neutral => colors.onSurfaceVariant,
+    final intent = switch (tone) {
+      StudioNoticeTone.neutral => StudioTone.neutral,
+      StudioNoticeTone.info => StudioTone.brand,
+      StudioNoticeTone.warning => StudioTone.warning,
+      StudioNoticeTone.danger => StudioTone.error,
+      StudioNoticeTone.success => StudioTone.success,
     };
-    final background = switch (tone) {
-      StudioNoticeTone.danger => colors.errorContainer.withValues(alpha: 0.5),
-      StudioNoticeTone.warning => colors.tertiaryContainer.withValues(
-        alpha: 0.46,
-      ),
-      StudioNoticeTone.success => colors.secondaryContainer.withValues(
-        alpha: 0.46,
-      ),
-      StudioNoticeTone.info => colors.primaryContainer.withValues(alpha: 0.32),
-      StudioNoticeTone.neutral => colors.surfaceContainerLowest,
-    };
-    final border = switch (tone) {
-      StudioNoticeTone.danger => colors.error.withValues(alpha: 0.35),
-      StudioNoticeTone.warning => colors.tertiary.withValues(alpha: 0.22),
-      StudioNoticeTone.success => colors.secondary.withValues(alpha: 0.22),
-      StudioNoticeTone.info => colors.primary.withValues(alpha: 0.22),
-      StudioNoticeTone.neutral => colors.outlineVariant,
-    };
+    final foreground = intent.foreground(context);
+    final background = intent.background(context);
+    final border = colors.outlineVariant;
     return DecoratedBox(
       decoration: BoxDecoration(
         color: background,
@@ -149,7 +134,7 @@ class StudioNotice extends StatelessWidget {
                     Text(
                       title!,
                       style: context.text.titleSmall?.copyWith(
-                        color: context.studioInk,
+                        color: context.colors.onSurface,
                       ),
                     ),
                     const SizedBox(height: 3),

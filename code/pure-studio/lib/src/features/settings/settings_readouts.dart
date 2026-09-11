@@ -41,18 +41,11 @@ class SettingsProviderStatusChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
     final ready = provider.status == 'ready';
     return StudioPill(
       icon: ready ? Icons.check_circle_outline : Icons.error_outline,
       label: ready ? 'ready' : 'setup',
-      backgroundColor: ready
-          ? colors.secondaryContainer.withValues(alpha: 0.42)
-          : colors.tertiaryContainer.withValues(alpha: 0.38),
-      foregroundColor: ready ? colors.secondary : colors.tertiary,
-      borderColor: ready
-          ? colors.secondary.withValues(alpha: 0.24)
-          : colors.tertiary.withValues(alpha: 0.22),
+      tone: ready ? StudioTone.success : StudioTone.warning,
     );
   }
 }
@@ -68,7 +61,7 @@ class SettingsMiniMeta extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 13, color: context.studioInkSoft),
+        Icon(icon, size: 13, color: context.colors.onSurfaceVariant),
         const SizedBox(width: 5),
         Flexible(
           child: Text(
@@ -76,7 +69,7 @@ class SettingsMiniMeta extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: context.text.bodySmall?.copyWith(
-              color: context.studioInkSoft,
+              color: context.colors.onSurfaceVariant,
             ),
           ),
         ),
@@ -93,13 +86,7 @@ class SettingsInfoPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return StudioCompactChip(
-      icon: icon,
-      label: label,
-      backgroundColor: context.studioPaper2,
-      borderColor: context.studioLine,
-      maxWidth: 220,
-    );
+    return StudioCompactChip(icon: icon, label: label, maxWidth: 220);
   }
 }
 

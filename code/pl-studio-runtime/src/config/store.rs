@@ -548,6 +548,40 @@ mod tests {
     }
 
     #[test]
+    fn obsolete_theme_preference_does_not_reset_or_change_other_settings() {
+        for preference in [None, Some(true), Some(false)] {
+            let store = test_store("obsolete-theme");
+            let mut expected = StudioConfig::default_config();
+            expected.ui.follow_active_turn = false;
+            expected.ui.compact_timeline = true;
+            let mut document = toml::Value::try_from(&expected).unwrap();
+            let ui = document.get_mut("ui").unwrap().as_table_mut().unwrap();
+            ui.remove("follow_system_theme");
+            if let Some(preference) = preference {
+                ui.insert(
+                    "follow_system_theme".into(),
+                    toml::Value::Boolean(preference),
+                );
+            }
+            let original = toml::to_string_pretty(&document).unwrap();
+            fs::create_dir_all(store.paths().config_dir()).unwrap();
+            fs::write(store.paths().config_file(), &original).unwrap();
+            let startup = store.load_for_startup().unwrap();
+            assert!(startup.recovery.is_none());
+            assert_eq!(
+                fs::read_to_string(store.paths().config_file()).unwrap(),
+                original
+            );
+            assert_eq!(startup.config, expected);
+            store.save(&startup.config).unwrap();
+            let persisted: toml::Value =
+                toml::from_str(&fs::read_to_string(store.paths().config_file()).unwrap()).unwrap();
+            assert!(persisted["ui"].get("follow_system_theme").is_none());
+            assert_eq!(store.load().unwrap(), expected);
+        }
+    }
+
+    #[test]
     fn save_persists_no_secret_and_load_hydrates_from_credential_store() {
         let store = test_store("roundtrip");
         let mut config = StudioConfig::default_config();

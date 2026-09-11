@@ -12,6 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pure_studio/src/app/pure_studio_app.dart';
 import 'package:pure_studio/src/app/theme/studio_tokens.dart';
+import 'package:pure_studio/src/app/theme/material3_theme.dart';
 import 'package:pure_studio/src/data/frb/studio_api.dart';
 import 'package:pure_studio/src/data/repositories/studio_repository.dart';
 import 'package:pure_studio/src/domain/models/studio_models.dart';

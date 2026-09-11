@@ -83,7 +83,7 @@ class _ToolGroupPartState extends State<_ToolGroupPart> {
             decoration: BoxDecoration(
               border: Border(
                 left: BorderSide(
-                  color: context.studioLine.withValues(alpha: 0.82),
+                  color: context.colors.outlineVariant.withValues(alpha: 0.82),
                 ),
               ),
             ),
@@ -233,7 +233,11 @@ class _WebSearchToolCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(Icons.travel_explore, size: 19, color: StudioColors.clay),
+              Icon(
+                Icons.travel_explore,
+                size: 19,
+                color: context.colors.primary,
+              ),
               const SizedBox(width: 9),
               Expanded(
                 child: Text(
@@ -241,7 +245,7 @@ class _WebSearchToolCard extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: context.text.titleSmall?.copyWith(
-                    color: context.studioInk,
+                    color: context.colors.onSurface,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -260,7 +264,7 @@ class _WebSearchToolCard extends StatelessWidget {
             Text(
               data.details.join('\n'),
               style: context.text.bodySmall?.copyWith(
-                color: context.studioInkSoft,
+                color: context.colors.onSurfaceVariant,
                 height: 1.45,
               ),
             ),
@@ -270,7 +274,7 @@ class _WebSearchToolCard extends StatelessWidget {
             Text(
               context.l10n.timelineWebSearchResults,
               style: context.text.labelSmall?.copyWith(
-                color: context.studioInkSoft,
+                color: context.colors.onSurfaceVariant,
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -312,7 +316,7 @@ class _WebSearchToolCard extends StatelessWidget {
               maxLines: 4,
               overflow: TextOverflow.ellipsis,
               style: context.text.bodySmall?.copyWith(
-                color: context.studioInkSoft,
+                color: context.colors.onSurfaceVariant,
               ),
             ),
           ],
@@ -324,9 +328,9 @@ class _WebSearchToolCard extends StatelessWidget {
         padding: const EdgeInsets.only(top: 9),
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color: context.studioPaper2,
+            color: context.colors.surfaceContainer,
             borderRadius: BorderRadius.circular(StudioRadii.sm),
-            border: Border.all(color: context.studioLine),
+            border: Border.all(color: context.colors.outlineVariant),
           ),
           child: content,
         ),
@@ -505,7 +509,9 @@ class _ToolGroupItemRow extends StatelessWidget {
         controlAffinity: ListTileControlAffinity.leading,
         title: Text(
           _toolTitle(context, item),
-          style: context.text.bodySmall?.copyWith(color: context.studioInk),
+          style: context.text.bodySmall?.copyWith(
+            color: context.colors.onSurface,
+          ),
         ),
         trailing: showActivePulse && _isExecutingToolItem(item)
             ? TimelineWaitIndicator(
@@ -519,7 +525,7 @@ class _ToolGroupItemRow extends StatelessWidget {
                 maxLines: 3,
                 overflow: TextOverflow.ellipsis,
                 style: context.text.bodySmall?.copyWith(
-                  color: context.studioInkSoft,
+                  color: context.colors.onSurfaceVariant,
                   height: 1.4,
                 ),
               ),

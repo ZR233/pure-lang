@@ -58,7 +58,7 @@ class StudioShutdownOverlay extends ConsumerWidget {
         child,
         Positioned.fill(
           child: ColoredBox(
-            color: Colors.black.withValues(alpha: 0.45),
+            color: Theme.of(context).colorScheme.scrim.withValues(alpha: 0.45),
             child: Center(child: _ShutdownProgressCard(progress: progress)),
           ),
         ),

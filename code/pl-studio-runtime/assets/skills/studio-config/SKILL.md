@@ -41,7 +41,7 @@ Product state (projects, threads, tasks) lives in `<home>/studio/studio.sqlite`;
 - `[skills]` — enable/disable, auto-learn, project/user/external skill directories, disabled skills. The default writable project directory is `.agents/skills`; explicit `project_dir` values remain unchanged. In addition to configured `user_dir`, Pure always discovers the read-only user compatibility directory at `$HOME/.agents/skills` on Linux and `%USERPROFILE%\.agents\skills` on Windows.
 - `[mcp]` — custom servers under `[mcp.servers.<id>]` plus builtin server states.
 - `[lsp.servers.<id>]` — command-based LSP servers outside the bundled catalog.
-- `[ui]` — `follow_system_theme`, `follow_active_turn`, `compact_timeline`.
+- `[ui]` — `follow_active_turn`, `compact_timeline`. Studio always uses its fixed light theme. The obsolete `follow_system_theme` key is ignored when reading existing schema 18 files and omitted on the next normal save; no configuration reset is needed.
 - `[web_search]` — search mode, context size, allowed domains, location.
 - `[deepseek_web_search]` — DeepSeek native hosted search toggle. The section and `enabled` field both default to `true`; it deliberately has no OpenAI-specific mode, domain, location, or context options.
 - `[instructions]` — base override, developer/user instructions, project doc limits.

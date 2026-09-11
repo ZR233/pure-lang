@@ -1347,12 +1347,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsGeneralSubtitle => '界面偏好保存到 Studio store。';
 
   @override
-  String get settingsFollowSystemTheme => '跟随系统主题';
-
-  @override
-  String get settingsFollowSystemThemeSubtitle => '随操作系统切换亮色和暗色模式。';
-
-  @override
   String get settingsFollowActiveTurn => '跟随当前 turn';
 
   @override

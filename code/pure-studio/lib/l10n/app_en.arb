@@ -788,8 +788,6 @@
   "settingsWorkspaceBoundary": "Workspace boundary policy remains unchanged.",
   "settingsGeneralTitle": "General",
   "settingsGeneralSubtitle": "Interface preferences saved into the Studio store.",
-  "settingsFollowSystemTheme": "Follow system theme",
-  "settingsFollowSystemThemeSubtitle": "Switch light and dark mode with the OS.",
   "settingsFollowActiveTurn": "Follow active turn",
   "settingsFollowActiveTurnSubtitle": "Keep new timeline output pinned to the latest turn.",
   "settingsCompactTimeline": "Compact timeline",

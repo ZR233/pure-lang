@@ -148,8 +148,6 @@ impl StudioLspConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StudioUiConfig {
     #[serde(default = "default_true")]
-    pub follow_system_theme: bool,
-    #[serde(default = "default_true")]
     pub follow_active_turn: bool,
     #[serde(default)]
     pub compact_timeline: bool,
@@ -158,7 +156,6 @@ pub struct StudioUiConfig {
 impl Default for StudioUiConfig {
     fn default() -> Self {
         Self {
-            follow_system_theme: true,
             follow_active_turn: true,
             compact_timeline: false,
         }

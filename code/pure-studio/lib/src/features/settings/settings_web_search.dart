@@ -77,7 +77,10 @@ class WebSearchSettingsCardState extends ConsumerState<WebSearchSettingsCard> {
         children: [
           Row(
             children: [
-              Icon(Icons.travel_explore, color: context.studioInkSoft),
+              Icon(
+                Icons.travel_explore,
+                color: context.colors.onSurfaceVariant,
+              ),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -86,7 +89,7 @@ class WebSearchSettingsCardState extends ConsumerState<WebSearchSettingsCard> {
                     Text(
                       context.l10n.settingsWebSearchTitle,
                       style: context.text.titleMedium?.copyWith(
-                        color: context.studioInk,
+                        color: context.colors.onSurface,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -94,7 +97,7 @@ class WebSearchSettingsCardState extends ConsumerState<WebSearchSettingsCard> {
                     Text(
                       context.l10n.settingsWebSearchSubtitle,
                       style: context.text.bodySmall?.copyWith(
-                        color: context.studioInkSoft,
+                        color: context.colors.onSurfaceVariant,
                       ),
                     ),
                   ],
@@ -325,7 +328,7 @@ class _WebSearchStatusValue extends StatelessWidget {
           Text(
             label,
             style: context.text.labelSmall?.copyWith(
-              color: context.studioInkSoft,
+              color: context.colors.onSurfaceVariant,
             ),
           ),
           const SizedBox(height: 2),
@@ -333,7 +336,9 @@ class _WebSearchStatusValue extends StatelessWidget {
             value,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: context.text.bodyMedium?.copyWith(color: context.studioInk),
+            style: context.text.bodyMedium?.copyWith(
+              color: context.colors.onSurface,
+            ),
           ),
         ],
       ),
@@ -366,7 +371,7 @@ class _DeepSeekWebSearchSettingsCardState
         children: [
           Row(
             children: [
-              Icon(Icons.public, color: context.studioInkSoft),
+              Icon(Icons.public, color: context.colors.onSurfaceVariant),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -375,7 +380,7 @@ class _DeepSeekWebSearchSettingsCardState
                     Text(
                       context.l10n.settingsDeepSeekWebSearchTitle,
                       style: context.text.titleMedium?.copyWith(
-                        color: context.studioInk,
+                        color: context.colors.onSurface,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -383,7 +388,7 @@ class _DeepSeekWebSearchSettingsCardState
                     Text(
                       context.l10n.settingsDeepSeekWebSearchSubtitle,
                       style: context.text.bodySmall?.copyWith(
-                        color: context.studioInkSoft,
+                        color: context.colors.onSurfaceVariant,
                       ),
                     ),
                   ],
@@ -437,7 +442,7 @@ class _DeepSeekWebSearchSettingsCardState
             ),
             style: context.text.bodySmall?.copyWith(
               color: settings.isAvailable
-                  ? context.studioInkSoft
+                  ? context.colors.onSurfaceVariant
                   : context.colors.error,
             ),
           ),

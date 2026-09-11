@@ -47,7 +47,7 @@ class SshServerRow extends StatelessWidget {
         Text(
           '${server.username}@${server.host}:${server.port}',
           style: context.text.bodyMedium?.copyWith(
-            color: context.studioInk,
+            color: context.colors.onSurface,
             fontFamily: 'monospace',
           ),
         ),
@@ -56,7 +56,9 @@ class SshServerRow extends StatelessWidget {
           ready
               ? '${connection!.architecture} · helper ${connection!.helperVersion}'
               : context.l10n.settingsSshManagedByCore,
-          style: context.text.bodySmall?.copyWith(color: context.studioInkSoft),
+          style: context.text.bodySmall?.copyWith(
+            color: context.colors.onSurfaceVariant,
+          ),
         ),
         const SizedBox(height: 6),
         Text(

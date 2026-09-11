@@ -126,6 +126,8 @@ Widget _localizedApp({
   bool disableAnimations = false,
 }) {
   return MaterialApp(
+    theme: pureStudioTheme(),
+    themeMode: ThemeMode.light,
     locale: locale,
     localizationsDelegates: AppLocalizations.localizationsDelegates,
     supportedLocales: AppLocalizations.supportedLocales,

@@ -77,12 +77,12 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
             }
             return Scaffold(
               key: _scaffoldKey,
-              backgroundColor: context.studioPaper,
+              backgroundColor: context.colors.surface,
               endDrawerEnableOpenDragGesture: false,
               endDrawer: !planExpanded && todoInDrawer && todo != null
                   ? Drawer(
                       width: 328,
-                      backgroundColor: context.studioPaper2,
+                      backgroundColor: context.colors.surfaceContainer,
                       child: TodoPanel(
                         key: const ValueKey('todo-drawer-panel'),
                         todo: todo,
@@ -269,7 +269,7 @@ class _StudioStartPage extends StatelessWidget {
     final project = view.project;
     return Scaffold(
       key: StudioDriverKeys.startPage,
-      backgroundColor: context.studioPaper,
+      backgroundColor: context.colors.surface,
       body: LayoutBuilder(
         builder: (context, constraints) {
           return SingleChildScrollView(
@@ -295,7 +295,7 @@ class _StudioStartPage extends StatelessWidget {
                           textAlign: TextAlign.center,
                           style: Theme.of(context).textTheme.headlineSmall
                               ?.copyWith(
-                                color: context.studioInk,
+                                color: context.colors.onSurface,
                                 fontWeight: FontWeight.w600,
                               ),
                         ),
@@ -306,7 +306,9 @@ class _StudioStartPage extends StatelessWidget {
                               : context.l10n.startPageProject(project.name),
                           textAlign: TextAlign.center,
                           style: Theme.of(context).textTheme.bodyMedium
-                              ?.copyWith(color: context.studioInkSoft),
+                              ?.copyWith(
+                                color: context.colors.onSurfaceVariant,
+                              ),
                         ),
                         const SizedBox(height: 28),
                         StartPageComposerDock(view: view),

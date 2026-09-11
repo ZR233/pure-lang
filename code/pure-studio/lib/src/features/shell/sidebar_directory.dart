@@ -142,7 +142,7 @@ class _DirectoryLoadFooter extends ConsumerWidget {
                   Text(
                     context.l10n.sidebarLoadingMore,
                     style: Theme.of(context).textTheme.bodySmall
-                        ?.copyWith(color: context.studioInkSoft),
+                        ?.copyWith(color: context.colors.onSurfaceVariant),
                   ),
                 ],
               )
@@ -170,7 +170,7 @@ class _SidebarSectionLabel extends StatelessWidget {
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: context.text.labelSmall?.copyWith(
-          color: context.studioInkSoft.withValues(alpha: 0.72),
+          color: context.colors.onSurfaceVariant,
           fontFamily: 'Consolas',
           fontSize: 10,
           fontWeight: FontWeight.w600,

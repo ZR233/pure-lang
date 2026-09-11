@@ -34,7 +34,11 @@ class SettingsResourceRow extends StatelessWidget {
               final identity = Row(
                 children: [
                   if (icon != null) ...[
-                    Icon(icon, size: 20, color: context.studioInkSoft),
+                    Icon(
+                      icon,
+                      size: 20,
+                      color: context.colors.onSurfaceVariant,
+                    ),
                     const SizedBox(width: 12),
                   ],
                   Expanded(
@@ -52,7 +56,7 @@ class SettingsResourceRow extends StatelessWidget {
                           Text(
                             subtitle!,
                             style: context.text.bodySmall?.copyWith(
-                              color: context.studioInkSoft,
+                              color: context.colors.onSurfaceVariant,
                             ),
                           ),
                         ],

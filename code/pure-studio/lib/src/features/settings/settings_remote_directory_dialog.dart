@@ -158,7 +158,7 @@ class _RemoteDirectoryDialogState extends ConsumerState<RemoteDirectoryDialog> {
             Text(
               '${widget.server.username}@${widget.server.host}:${widget.server.port}',
               style: context.text.bodySmall?.copyWith(
-                color: context.studioInkSoft,
+                color: context.colors.onSurfaceVariant,
                 fontFamily: 'monospace',
               ),
               maxLines: 1,

@@ -155,7 +155,7 @@ class ProviderListRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Material(
       key: StudioDriverKeys.providerRow(provider.id),
-      color: selected ? context.studioPaper2 : Colors.transparent,
+      color: selected ? context.colors.surfaceContainer : Colors.transparent,
       child: InkWell(
         onTap: onOpen,
         child: Padding(
@@ -190,9 +190,8 @@ class ProviderListRow extends StatelessWidget {
                         children: [
                           for (final model in provider.allModels.take(4))
                             StudioPill(
+                              tone: StudioTone.neutral,
                               label: model.slug,
-                              backgroundColor: context.studioPaper2,
-                              borderColor: context.studioLine,
                             ),
                           if (provider.allModels.length > 4)
                             StudioPill(
@@ -240,7 +239,9 @@ class _ProviderLogo extends StatelessWidget {
       dimension: 40,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: active ? StudioColors.clay : context.studioPaper2,
+          color: active
+              ? context.colors.primary
+              : context.colors.surfaceContainer,
           borderRadius: BorderRadius.circular(StudioRadii.sm),
           border: Border.all(color: colors.outlineVariant),
         ),
@@ -248,7 +249,7 @@ class _ProviderLogo extends StatelessWidget {
           child: Text(
             providerInitials(provider.name),
             style: Theme.of(context).textTheme.titleSmall?.copyWith(
-              color: active ? Colors.white : context.studioInk,
+              color: active ? colors.onPrimary : context.colors.onSurface,
               fontWeight: FontWeight.w800,
             ),
           ),
@@ -277,7 +278,7 @@ class _ProviderRowTitle extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  color: context.studioInk,
+                  color: context.colors.onSurface,
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -285,10 +286,8 @@ class _ProviderRowTitle extends StatelessWidget {
             if (isDefault) ...[
               const SizedBox(width: 8),
               StudioPill(
+                tone: StudioTone.brand,
                 label: context.l10n.settingsDefaultBadge,
-                backgroundColor: StudioColors.claySoft,
-                foregroundColor: StudioColors.clayDeep,
-                borderColor: StudioColors.claySoft,
               ),
             ],
           ],
@@ -421,7 +420,7 @@ class _ProviderQuotaRow extends StatelessWidget {
             Text(
               quotaTitle(context, limit),
               style: context.text.labelMedium?.copyWith(
-                color: context.studioInk,
+                color: context.colors.onSurface,
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -430,7 +429,7 @@ class _ProviderQuotaRow extends StatelessWidget {
                 formatPercent(percent),
               ),
               style: context.text.labelMedium?.copyWith(
-                color: context.studioInk,
+                color: context.colors.onSurface,
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -438,7 +437,7 @@ class _ProviderQuotaRow extends StatelessWidget {
               Text(
                 quotaResetLabel(context, limit.nextResetAt),
                 style: context.text.labelSmall?.copyWith(
-                  color: context.studioInkSoft,
+                  color: context.colors.onSurfaceVariant,
                 ),
               ),
           ],
@@ -450,8 +449,10 @@ class _ProviderQuotaRow extends StatelessWidget {
             height: 5,
             child: LinearProgressIndicator(
               value: percent / 100,
-              backgroundColor: context.studioPaper3,
-              color: percent >= 65 ? StudioColors.sage : StudioColors.clay,
+              backgroundColor: context.colors.surfaceContainerHigh,
+              color: percent >= 65
+                  ? context.statusColors.success
+                  : context.colors.primary,
             ),
           ),
         ),

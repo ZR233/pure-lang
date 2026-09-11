@@ -3834,11 +3834,9 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeFaultedAgent {
 impl SseDecode for crate::api::studio::types::settings::BridgeGeneralSettingsDto {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_followSystemTheme = <bool>::sse_decode(deserializer);
         let mut var_followActiveTurn = <bool>::sse_decode(deserializer);
         let mut var_compactTimeline = <bool>::sse_decode(deserializer);
         return crate::api::studio::types::settings::BridgeGeneralSettingsDto {
-            follow_system_theme: var_followSystemTheme,
             follow_active_turn: var_followActiveTurn,
             compact_timeline: var_compactTimeline,
         };
@@ -8256,11 +8254,9 @@ impl SseDecode for f64 {
 impl SseDecode for crate::api::studio::types::settings::GeneralSettingsInput {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_followSystemTheme = <bool>::sse_decode(deserializer);
         let mut var_followActiveTurn = <bool>::sse_decode(deserializer);
         let mut var_compactTimeline = <bool>::sse_decode(deserializer);
         return crate::api::studio::types::settings::GeneralSettingsInput {
-            follow_system_theme: var_followSystemTheme,
             follow_active_turn: var_followActiveTurn,
             compact_timeline: var_compactTimeline,
         };
@@ -11080,7 +11076,6 @@ impl flutter_rust_bridge::IntoDart
 {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
-            self.follow_system_theme.into_into_dart().into_dart(),
             self.follow_active_turn.into_into_dart().into_dart(),
             self.compact_timeline.into_into_dart().into_dart(),
         ]
@@ -16185,7 +16180,6 @@ impl
 impl flutter_rust_bridge::IntoDart for crate::api::studio::types::settings::GeneralSettingsInput {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
-            self.follow_system_theme.into_into_dart().into_dart(),
             self.follow_active_turn.into_into_dart().into_dart(),
             self.compact_timeline.into_into_dart().into_dart(),
         ]
@@ -17736,7 +17730,6 @@ impl SseEncode for crate::api::studio::types::runtime::BridgeFaultedAgent {
 impl SseEncode for crate::api::studio::types::settings::BridgeGeneralSettingsDto {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <bool>::sse_encode(self.follow_system_theme, serializer);
         <bool>::sse_encode(self.follow_active_turn, serializer);
         <bool>::sse_encode(self.compact_timeline, serializer);
     }
@@ -20991,7 +20984,6 @@ impl SseEncode for f64 {
 impl SseEncode for crate::api::studio::types::settings::GeneralSettingsInput {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <bool>::sse_encode(self.follow_system_theme, serializer);
         <bool>::sse_encode(self.follow_active_turn, serializer);
         <bool>::sse_encode(self.compact_timeline, serializer);
     }

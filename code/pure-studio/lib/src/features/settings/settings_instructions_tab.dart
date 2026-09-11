@@ -97,9 +97,9 @@ class _InstructionsTabState extends ConsumerState<InstructionsTab> {
               style: TextButton.styleFrom(
                 foregroundColor: index == _section
                     ? context.colors.primary
-                    : context.studioInkSoft,
+                    : context.colors.onSurfaceVariant,
                 backgroundColor: index == _section
-                    ? context.studioPaper2
+                    ? context.colors.surfaceContainer
                     : Colors.transparent,
               ),
               child: Text(labels[index]),

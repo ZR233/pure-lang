@@ -47,6 +47,15 @@ Future<String> _handleDriverData(String? message) async {
         });
       }
       return jsonEncode({'serverId': matches.single.id});
+    case 'prepare-theme-interactions-demo' || 'prepare-theme-plan-demo':
+      final api = _container.read(studioApiProvider);
+      if (api is! DriverDemoStudioApi) {
+        return jsonEncode({'error': 'theme scenarios require demo mode'});
+      }
+      api.prepareThemeScenario(plan: message == 'prepare-theme-plan-demo');
+      _container.invalidate(studioControllerProvider);
+      await _container.read(studioControllerProvider.future);
+      return jsonEncode({'prepared': true});
     case 'prepare-connection-retry-demo':
       final api = _container.read(studioApiProvider);
       if (api is! DriverDemoStudioApi) {

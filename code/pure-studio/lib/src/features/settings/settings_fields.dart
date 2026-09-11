@@ -24,23 +24,8 @@ class SettingsTextEdit extends StatelessWidget {
       initialValue: value,
       enabled: enabled,
       obscureText: obscureText,
-      style: context.text.bodyMedium?.copyWith(color: context.studioInk),
-      decoration: InputDecoration(
-        labelText: label,
-        filled: true,
-        fillColor: context.colors.surfaceContainerLowest,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(StudioRadii.sm),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(StudioRadii.sm),
-          borderSide: BorderSide(color: context.studioLine),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(StudioRadii.sm),
-          borderSide: const BorderSide(color: StudioColors.clay),
-        ),
-      ),
+      style: context.text.bodyMedium?.copyWith(color: context.colors.onSurface),
+      decoration: InputDecoration(labelText: label),
       onChanged: onChanged,
     );
   }
@@ -98,20 +83,6 @@ class SettingsSearchField extends StatelessWidget {
         decoration: InputDecoration(
           hintText: hintText,
           prefixIcon: const Icon(Icons.search, size: 18),
-          filled: true,
-          fillColor: context.colors.surfaceContainerLowest,
-          isDense: true,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(StudioRadii.sm),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(StudioRadii.sm),
-            borderSide: BorderSide(color: context.studioLine),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(StudioRadii.sm),
-            borderSide: const BorderSide(color: StudioColors.clay),
-          ),
         ),
         onChanged: onChanged,
       ),

@@ -4,7 +4,7 @@ part of 'studio_shell.dart';
   name: 'Root workspace',
   group: 'Agent Workspace',
   size: Size(1280, 800),
-  brightness: Brightness.dark,
+  brightness: Brightness.light,
 )
 Widget agentWorkspaceRootPreview() {
   return _agentWorkspacePreview(_agentWorkspacePreviewState());
@@ -14,7 +14,7 @@ Widget agentWorkspaceRootPreview() {
   name: 'Child workspace',
   group: 'Agent Workspace',
   size: Size(1280, 800),
-  brightness: Brightness.dark,
+  brightness: Brightness.light,
 )
 Widget agentWorkspaceChildPreview() {
   return _agentWorkspacePreview(_agentWorkspacePreviewState(selectChild: true));
@@ -24,7 +24,7 @@ Widget agentWorkspaceChildPreview() {
   name: 'Child workspace loading',
   group: 'Agent Workspace',
   size: Size(1280, 800),
-  brightness: Brightness.dark,
+  brightness: Brightness.light,
 )
 Widget agentWorkspaceLoadingPreview() {
   return _agentWorkspacePreview(
@@ -80,9 +80,8 @@ class _AgentWorkspacePreviewScopeState
       container: _container,
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
-        theme: pureStudioTheme(Brightness.light),
-        darkTheme: pureStudioTheme(Brightness.dark),
-        themeMode: ThemeMode.dark,
+        theme: pureStudioTheme(),
+        themeMode: ThemeMode.light,
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
         home: const Scaffold(body: AgentWorkspacePane()),

@@ -120,7 +120,6 @@ pub enum ProviderSecretInput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GeneralSettingsInput {
-    pub follow_system_theme: bool,
     pub follow_active_turn: bool,
     pub compact_timeline: bool,
 }
@@ -297,7 +296,6 @@ pub enum BridgeMcpServerConfiguration {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BridgeGeneralSettingsDto {
-    pub follow_system_theme: bool,
     pub follow_active_turn: bool,
     pub compact_timeline: bool,
 }
@@ -305,7 +303,6 @@ pub struct BridgeGeneralSettingsDto {
 impl Default for BridgeGeneralSettingsDto {
     fn default() -> Self {
         Self {
-            follow_system_theme: true,
             follow_active_turn: true,
             compact_timeline: false,
         }

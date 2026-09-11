@@ -158,9 +158,9 @@ class _SidebarActionButton extends StatelessWidget {
             top: -3,
             child: DecoratedBox(
               decoration: BoxDecoration(
-                color: StudioColors.clay,
+                color: context.statusColors.activeIndicator,
                 shape: BoxShape.circle,
-                border: Border.all(color: context.studioPaper, width: 1.5),
+                border: Border.all(color: context.colors.surface, width: 1.5),
               ),
               child: const SizedBox.square(dimension: 8),
             ),
@@ -190,8 +190,8 @@ class _SidebarActionButton extends StatelessWidget {
         disabledForegroundColor: colors.onSurfaceVariant.withValues(
           alpha: 0.38,
         ),
-        hoverColor: context.studioPaper.withValues(alpha: 0.76),
-        focusColor: context.studioPaper.withValues(alpha: 0.76),
+        hoverColor: context.colors.surface.withValues(alpha: 0.76),
+        focusColor: context.colors.surface.withValues(alpha: 0.76),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(StudioRadii.sm),
         ),

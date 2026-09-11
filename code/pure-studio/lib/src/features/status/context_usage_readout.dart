@@ -40,7 +40,7 @@ class _ContextUsageReadoutState extends State<ContextUsageReadout> {
           child: _ContextDetail(
             runtime: runtime,
             progress: progress,
-            progressColor: _progressColor(progress),
+            progressColor: _progressColor(context, progress),
           ),
         ),
         child: Padding(
@@ -54,7 +54,7 @@ class _ContextUsageReadoutState extends State<ContextUsageReadout> {
               padding: const EdgeInsets.symmetric(horizontal: 7),
               decoration: BoxDecoration(
                 color: _hovering || _focused
-                    ? context.studioPaper.withValues(alpha: 0.76)
+                    ? context.colors.surface.withValues(alpha: 0.76)
                     : Colors.transparent,
                 borderRadius: BorderRadius.circular(StudioRadii.xs),
               ),
@@ -63,8 +63,8 @@ class _ContextUsageReadoutState extends State<ContextUsageReadout> {
                 child: CustomPaint(
                   painter: _ContextUsagePainter(
                     progress: progress,
-                    trackColor: context.studioLine,
-                    progressColor: _progressColor(progress),
+                    trackColor: context.colors.outlineVariant,
+                    progressColor: _progressColor(context, progress),
                     strokeWidth: 2.2,
                     radiusInset: 1.8,
                   ),
@@ -77,14 +77,14 @@ class _ContextUsageReadoutState extends State<ContextUsageReadout> {
     );
   }
 
-  Color _progressColor(double progress) {
+  Color _progressColor(BuildContext context, double progress) {
     if (progress >= 0.9) {
-      return StudioColors.rose;
+      return context.colors.error;
     }
     if (progress >= 0.72) {
-      return StudioColors.ochre;
+      return context.statusColors.warning;
     }
-    return StudioColors.clay;
+    return context.colors.primary;
   }
 }
 
@@ -124,7 +124,7 @@ class _ContextDetail extends StatelessWidget {
                 size: const Size.square(72),
                 painter: _ContextUsagePainter(
                   progress: progress,
-                  trackColor: context.studioLine,
+                  trackColor: context.colors.outlineVariant,
                   progressColor: progressColor,
                   strokeWidth: 7,
                   radiusInset: 6,
@@ -133,7 +133,7 @@ class _ContextDetail extends StatelessWidget {
               Text(
                 '$percent%',
                 style: context.text.titleMedium?.copyWith(
-                  color: context.studioInk,
+                  color: context.colors.onSurface,
                   fontWeight: FontWeight.w700,
                 ),
               ),

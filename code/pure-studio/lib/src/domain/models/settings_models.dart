@@ -151,22 +151,18 @@ class SkillsSettingsView {
 
 class GeneralSettingsView {
   const GeneralSettingsView({
-    this.followSystemTheme = true,
     this.followActiveTurn = true,
     this.compactTimeline = false,
   });
 
-  final bool followSystemTheme;
   final bool followActiveTurn;
   final bool compactTimeline;
 
   GeneralSettingsView copyWith({
-    bool? followSystemTheme,
     bool? followActiveTurn,
     bool? compactTimeline,
   }) {
     return GeneralSettingsView(
-      followSystemTheme: followSystemTheme ?? this.followSystemTheme,
       followActiveTurn: followActiveTurn ?? this.followActiveTurn,
       compactTimeline: compactTimeline ?? this.compactTimeline,
     );

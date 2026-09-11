@@ -1822,7 +1822,6 @@ class DemoStudioApi implements StudioApi {
   ) async {
     _checkSettingsRevision(expectedSettingsRevision);
     _general = GeneralSettingsView(
-      followSystemTheme: command.followSystemTheme,
       followActiveTurn: command.followActiveTurn,
       compactTimeline: command.compactTimeline,
     );
@@ -2202,6 +2201,21 @@ ThreadWorkspace _demoUpdateInteraction(
 class DriverDemoStudioApi extends DemoStudioApi {
   DriverDemoStudioApi({super.lspActivityLoop});
 
+  bool _themeScenario = false;
+  bool _themePlanScenario = false;
+
+  /// Resets the dedicated Driver fixture without introducing product settings.
+  void prepareThemeScenario({bool plan = false}) {
+    _themeScenario = true;
+    _themePlanScenario = plan;
+    _sessionLifecycleScenario = false;
+    _fallbackInputScenario = false;
+    _persistenceFailureScenario = false;
+    _failNextTurn = false;
+    _retryNextTurn = false;
+    _selectedThreadId = 'thread-main';
+  }
+
   bool _sessionLifecycleScenario = false;
   bool _persistenceFailureScenario = false;
   bool _failNextTurn = false;
@@ -2313,6 +2327,8 @@ class DriverDemoStudioApi extends DemoStudioApi {
   }
 
   void prepareSessionLifecycleScenario() {
+    _themeScenario = false;
+    _themePlanScenario = false;
     _sessionLifecycleScenario = true;
     _fallbackInputScenario = false;
     _pageFillThreads.clear();
@@ -2325,6 +2341,30 @@ class DriverDemoStudioApi extends DemoStudioApi {
     _pageFillThreads.clear();
     _selectedThreadId = 'thread-main';
   }
+
+  static const _themePlanMarkdown = '''
+# Siamese workspace palette
+
+Keep the existing workspace and use cream surfaces with seal-brown actions.
+
+## Implementation
+
+1. Archive the approved concept and document semantic colors.
+2. Apply the shared Material theme to all pages and dialogs.
+3. Keep blue limited to selected markers and active status icons.
+
+> Normal text stays warm brown and remains readable on every surface.
+
+```dart
+final theme = pureStudioTheme();
+```
+
+## Acceptance
+
+- [x] Preserve the layout and all existing actions.
+- [ ] Verify narrow windows and keyboard focus.
+- [ ] Inspect [the design reference](https://example.com/design).
+''';
 
   @override
   Duration get promptActivityDelay => const Duration(seconds: 3);
@@ -2372,7 +2412,59 @@ class DriverDemoStudioApi extends DemoStudioApi {
       workspacesByThread: {
         ...state.workspacesByThread,
         threadId: workspace.copyWith(
-          interactions: _fallbackInputScenario
+          todo: _themeScenario
+              ? const TimelineTodoListUpdate(
+                  callId: 'driver-theme-todo',
+                  explanation: 'Palette acceptance',
+                  items: [
+                    TimelineTodoItem(
+                      step: 'Archive the approved concept',
+                      status: 'completed',
+                    ),
+                    TimelineTodoItem(
+                      step: 'Apply the shared theme',
+                      status: 'inProgress',
+                    ),
+                    TimelineTodoItem(
+                      step: 'Inspect all interface states',
+                      status: 'pending',
+                    ),
+                  ],
+                )
+              : workspace.todo,
+          interactions: _themePlanScenario
+              ? const [
+                  PendingInteraction(
+                    id: 'driver-theme-plan',
+                    threadId: threadId,
+                    turnId: 'driver-origin-turn',
+                    kind: InteractionKind.userInput,
+                    title: 'Theme implementation plan',
+                    body: _themePlanMarkdown,
+                    payload: UserInputInteractionPayload(
+                      questions: [
+                        UserQuestionView(
+                          id: agentSessionPlanConfirmationQuestionId,
+                          header: 'Plan',
+                          question: _themePlanMarkdown,
+                          isOther: true,
+                          isSecret: false,
+                          options: [
+                            UserQuestionOptionView(
+                              label: agentSessionPlanApproveAnswer,
+                              description: 'Approve this plan.',
+                            ),
+                            UserQuestionOptionView(
+                              label: agentSessionPlanReviseAnswer,
+                              description: 'Revise this plan.',
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ]
+              : _fallbackInputScenario
               ? const [
                   PendingInteraction(
                     id: 'driver-fallback-input',

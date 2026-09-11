@@ -35,9 +35,8 @@ class PureStudioApp extends StatelessWidget {
         child: MaterialApp.router(
           onGenerateTitle: (context) => context.l10n.appTitle,
           debugShowCheckedModeBanner: false,
-          theme: pureStudioTheme(Brightness.light),
-          darkTheme: pureStudioTheme(Brightness.dark),
-          themeMode: ThemeMode.system,
+          theme: pureStudioTheme(),
+          themeMode: ThemeMode.light,
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
           routerConfig: _router,

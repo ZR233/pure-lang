@@ -56,8 +56,8 @@ class _StatusBarItemState extends State<StatusBarItem> {
   @override
   Widget build(BuildContext context) {
     final foreground = widget.enabled
-        ? context.studioInkSoft
-        : context.studioInkSoft.withValues(alpha: 0.52);
+        ? context.colors.onSurfaceVariant
+        : context.colors.onSurfaceVariant;
     var row = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -123,7 +123,7 @@ class _StatusBarItemState extends State<StatusBarItem> {
       padding: const EdgeInsets.symmetric(horizontal: 7),
       decoration: BoxDecoration(
         color: highlighted
-            ? context.studioPaper.withValues(alpha: 0.76)
+            ? context.colors.surface.withValues(alpha: 0.76)
             : Colors.transparent,
         borderRadius: BorderRadius.circular(StudioRadii.xs),
       ),

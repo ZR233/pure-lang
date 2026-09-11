@@ -28,8 +28,8 @@ class ProviderUsagePanel extends StatelessWidget {
     final colors = Theme.of(context).colorScheme;
     final usage = this.usage;
     return StudioPanel(
-      backgroundColor: context.studioPaper2,
-      borderColor: context.studioLine,
+      backgroundColor: context.colors.surfaceContainer,
+      borderColor: context.colors.outlineVariant,
       radius: StudioRadii.sm,
       padding: const EdgeInsets.all(13),
       child: Column(
@@ -47,7 +47,7 @@ class ProviderUsagePanel extends StatelessWidget {
                 child: Text(
                   context.l10n.settingsUsageTitle,
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    color: context.studioInk,
+                    color: context.colors.onSurface,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -254,7 +254,7 @@ class _QuotaCard extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: context.colors.surfaceContainerLowest,
-        border: Border.all(color: context.studioLine),
+        border: Border.all(color: context.colors.outlineVariant),
         borderRadius: BorderRadius.circular(StudioRadii.sm),
       ),
       child: Padding(
@@ -268,13 +268,13 @@ class _QuotaCard extends StatelessWidget {
                   child: Text(
                     quotaTitle(context, limit),
                     style: Theme.of(context).textTheme.labelLarge
-                        ?.copyWith(color: context.studioInk),
+                        ?.copyWith(color: context.colors.onSurface),
                   ),
                 ),
                 Text(
                   quotaResetLabel(context, limit.nextResetAt),
                   style: Theme.of(context).textTheme.labelSmall
-                      ?.copyWith(color: context.studioInkSoft),
+                      ?.copyWith(color: context.colors.onSurfaceVariant),
                 ),
               ],
             ),
@@ -282,14 +282,14 @@ class _QuotaCard extends StatelessWidget {
             Text(
               formatPercent(percent),
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                color: context.studioInk,
+                color: context.colors.onSurface,
                 fontWeight: FontWeight.w600,
               ),
             ),
             Text(
               quotaDetail(context, limit),
               style: Theme.of(context).textTheme.bodySmall
-                  ?.copyWith(color: context.studioInkSoft),
+                  ?.copyWith(color: context.colors.onSurfaceVariant),
             ),
             const SizedBox(height: 8),
             ClipRRect(
@@ -298,8 +298,10 @@ class _QuotaCard extends StatelessWidget {
                 height: 6,
                 child: LinearProgressIndicator(
                   value: percent / 100,
-                  backgroundColor: context.studioPaper3,
-                  color: percent >= 65 ? StudioColors.sage : StudioColors.clay,
+                  backgroundColor: context.colors.surfaceContainerHigh,
+                  color: percent >= 65
+                      ? context.statusColors.success
+                      : context.colors.primary,
                 ),
               ),
             ),
@@ -313,9 +315,8 @@ class _QuotaCard extends StatelessWidget {
                     Tooltip(
                       message: detail.name,
                       child: StudioPill(
+                        tone: StudioTone.neutral,
                         label: '${detail.name} ${formatToolUsage(detail)}',
-                        backgroundColor: context.studioPaper2,
-                        borderColor: context.studioLine,
                       ),
                     ),
                 ],
@@ -345,7 +346,7 @@ class ProviderUsageMessage extends StatelessWidget {
     final colors = Theme.of(context).colorScheme;
     final color = switch (tone) {
       UsageTone.failed => colors.error,
-      UsageTone.warning => colors.tertiary,
+      UsageTone.warning => context.statusColors.warning,
       UsageTone.neutral || UsageTone.muted => colors.onSurfaceVariant,
     };
     return StudioInlineMessage(icon: icon, message: message, color: color);

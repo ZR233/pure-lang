@@ -77,10 +77,9 @@ class _ConfigRecoveryBanner extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final colors = Theme.of(context).colorScheme;
     return ColoredBox(
       key: const ValueKey('config-recovery-banner'),
-      color: colors.tertiaryContainer,
+      color: context.statusColors.warningContainer,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
         child: Row(

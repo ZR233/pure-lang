@@ -67,6 +67,12 @@ fail closed 并保留原文件；默认配置替换失败时已经完整写入�
 
 `pl-model` 只消费已经解析好的 provider 和模型信息，不负责文件 IO 或路径定位。
 
+UI 固定使用暹罗浅色主题。`[ui]` 仅保留 `follow_active_turn`（默认 true）和
+`compact_timeline`（默认 false）；主题不再属于持久化设置。已有 schema 18 配置中的
+`follow_system_theme` 按既有未知 UI 字段规则忽略，正常保存后不再输出；启动不因该字段重写
+配置或触发恢复，不提升配置 schema、不清理用户其他配置。Settings wire、FRB 与 Dart 同步移除
+该字段，其他设置仍以 revision CAS 和 canonical snapshot 保存。
+
 ## 10.3 根路由与 Agent Profile
 
 配置不使用 `active_provider`。所有模式的 root Agent 统一使用 `planner` route，不再根据

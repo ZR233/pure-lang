@@ -37,10 +37,9 @@ class ProviderModelReadout extends StatelessWidget {
       child: Row(
         children: [
           StudioIconBadge(
+            tone: StudioTone.neutral,
             icon: Icons.smart_toy_outlined,
             size: 30,
-            backgroundColor: context.studioPaper2,
-            foregroundColor: context.studioInkSoft,
           ),
           const SizedBox(width: 11),
           Expanded(
@@ -52,7 +51,7 @@ class ProviderModelReadout extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: context.text.labelLarge?.copyWith(
-                    color: context.studioInk,
+                    color: context.colors.onSurface,
                   ),
                 ),
                 Text(
@@ -60,14 +59,14 @@ class ProviderModelReadout extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: context.text.bodySmall?.copyWith(
-                    color: context.studioInkSoft,
+                    color: context.colors.onSurfaceVariant,
                     fontFamily: 'Consolas',
                   ),
                 ),
                 Text(
                   '${modelProtocolLabel(model.wireProtocol)} · ${modelConnectionLabel(model.connectionMode)}',
                   style: context.text.labelSmall?.copyWith(
-                    color: context.studioInkSoft,
+                    color: context.colors.onSurfaceVariant,
                   ),
                 ),
                 if (inputCapabilities.isNotEmpty)
@@ -78,7 +77,7 @@ class ProviderModelReadout extends StatelessWidget {
                       model.slug,
                     ),
                     style: context.text.labelSmall?.copyWith(
-                      color: context.studioInkSoft,
+                      color: context.colors.onSurfaceVariant,
                     ),
                   ),
                 if (outputCapabilities.isNotEmpty)
@@ -87,7 +86,7 @@ class ProviderModelReadout extends StatelessWidget {
                       outputCapabilities.join(' · '),
                     ),
                     style: context.text.labelSmall?.copyWith(
-                      color: context.studioInkSoft,
+                      color: context.colors.onSurfaceVariant,
                     ),
                   ),
                 if (traits.isNotEmpty)
@@ -96,7 +95,7 @@ class ProviderModelReadout extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: context.text.labelSmall?.copyWith(
-                      color: context.studioInkSoft,
+                      color: context.colors.onSurfaceVariant,
                     ),
                   ),
               ],
@@ -114,7 +113,7 @@ class ProviderModelReadout extends StatelessWidget {
               child: Text(
                 price,
                 style: context.text.labelSmall?.copyWith(
-                  color: context.studioInkSoft,
+                  color: context.colors.onSurfaceVariant,
                 ),
               ),
             ),

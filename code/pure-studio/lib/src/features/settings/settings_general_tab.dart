@@ -44,14 +44,6 @@ class _GeneralTabState extends ConsumerState<GeneralTab> {
           title: context.l10n.settingsAppearanceGroup,
           children: [
             SettingsToggleRow(
-              icon: Icons.dark_mode_outlined,
-              title: context.l10n.settingsFollowSystemTheme,
-              subtitle: context.l10n.settingsFollowSystemThemeSubtitle,
-              value: widget.settings.followSystemTheme,
-              onChanged: (value) =>
-                  _save(widget.settings.copyWith(followSystemTheme: value)),
-            ),
-            SettingsToggleRow(
               icon: Icons.vertical_align_bottom,
               title: context.l10n.settingsFollowActiveTurn,
               subtitle: context.l10n.settingsFollowActiveTurnSubtitle,
@@ -93,7 +85,6 @@ class _GeneralTabState extends ConsumerState<GeneralTab> {
           .read(studioControllerProvider.notifier)
           .saveGeneralSettings(
             GeneralSettingsCommand(
-              followSystemTheme: settings.followSystemTheme,
               followActiveTurn: settings.followActiveTurn,
               compactTimeline: settings.compactTimeline,
             ),

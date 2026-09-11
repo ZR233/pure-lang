@@ -38,7 +38,7 @@ class StudioUpdateSettingsRow extends ConsumerWidget {
                     Text(
                       context.l10n.settingsStudioUpdateTitle,
                       style: context.text.bodyMedium?.copyWith(
-                        color: context.studioInk,
+                        color: context.colors.onSurface,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -46,7 +46,7 @@ class StudioUpdateSettingsRow extends ConsumerWidget {
                     Text(
                       _statusText(context, updateState, currentVersion),
                       style: context.text.bodySmall?.copyWith(
-                        color: context.studioInkSoft,
+                        color: context.colors.onSurfaceVariant,
                       ),
                     ),
                     if (runtimeBusy && _hasUpdate(updateState)) ...[

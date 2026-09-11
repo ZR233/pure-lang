@@ -120,7 +120,6 @@ GeneralSettingsView _generalSettingsFromFrb(
   frb.BridgeGeneralSettingsDto value,
 ) {
   return GeneralSettingsView(
-    followSystemTheme: value.followSystemTheme,
     followActiveTurn: value.followActiveTurn,
     compactTimeline: value.compactTimeline,
   );

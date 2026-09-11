@@ -79,14 +79,17 @@ class _StudioShellState extends ConsumerState<StudioShell> {
                 constraints.maxWidth < StudioLayout.compactBreakpoint;
             return Scaffold(
               key: StudioDriverKeys.shell,
-              backgroundColor: context.studioPaper,
+              backgroundColor: context.colors.surface,
               body: Row(
                 children: [
                   _Sidebar(state: sidebar, compact: compact),
-                  VerticalDivider(width: 1, color: context.studioLine),
+                  VerticalDivider(
+                    width: 1,
+                    color: context.colors.outlineVariant,
+                  ),
                   Expanded(
                     child: DecoratedBox(
-                      decoration: BoxDecoration(color: context.studioPaper),
+                      decoration: BoxDecoration(color: context.colors.surface),
                       child: Column(
                         children: [
                           _Header(state: header),

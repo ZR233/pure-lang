@@ -106,12 +106,10 @@ class BridgeDeepSeekWebSearchSettingsDto {
 
 /// Flutter 本地通用设置的 typed 快照。
 class BridgeGeneralSettingsDto {
-  final bool followSystemTheme;
   final bool followActiveTurn;
   final bool compactTimeline;
 
   const BridgeGeneralSettingsDto({
-    required this.followSystemTheme,
     required this.followActiveTurn,
     required this.compactTimeline,
   });
@@ -120,17 +118,13 @@ class BridgeGeneralSettingsDto {
       .crateApiStudioTypesSettingsBridgeGeneralSettingsDtoDefault();
 
   @override
-  int get hashCode =>
-      followSystemTheme.hashCode ^
-      followActiveTurn.hashCode ^
-      compactTimeline.hashCode;
+  int get hashCode => followActiveTurn.hashCode ^ compactTimeline.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is BridgeGeneralSettingsDto &&
           runtimeType == other.runtimeType &&
-          followSystemTheme == other.followSystemTheme &&
           followActiveTurn == other.followActiveTurn &&
           compactTimeline == other.compactTimeline;
 }
@@ -1002,28 +996,22 @@ class DeepSeekWebSearchSettingsInput {
 }
 
 class GeneralSettingsInput {
-  final bool followSystemTheme;
   final bool followActiveTurn;
   final bool compactTimeline;
 
   const GeneralSettingsInput({
-    required this.followSystemTheme,
     required this.followActiveTurn,
     required this.compactTimeline,
   });
 
   @override
-  int get hashCode =>
-      followSystemTheme.hashCode ^
-      followActiveTurn.hashCode ^
-      compactTimeline.hashCode;
+  int get hashCode => followActiveTurn.hashCode ^ compactTimeline.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is GeneralSettingsInput &&
           runtimeType == other.runtimeType &&
-          followSystemTheme == other.followSystemTheme &&
           followActiveTurn == other.followActiveTurn &&
           compactTimeline == other.compactTimeline;
 }
