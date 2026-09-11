@@ -155,27 +155,27 @@ enabled = true
 
 [models.routes.explorer]
 provider = "deepseek"
-model = "deepseek-v4-flash"
+model = "deepseek-flash"
 effort = "high"
 
 [models.routes.planner]
 provider = "deepseek"
-model = "deepseek-v4-flash"
+model = "deepseek-flash"
 effort = "high"
 
 [models.routes.executor]
 provider = "deepseek"
-model = "deepseek-v4-flash"
+model = "deepseek-flash"
 effort = "high"
 
 [models.routes.worktree_executor]
 provider = "deepseek"
-model = "deepseek-v4-flash"
+model = "deepseek-flash"
 effort = "high"
 
 [models.routes.reviewer]
 provider = "deepseek"
-model = "deepseek-v4-flash"
+model = "deepseek-flash"
 effort = "high"
 
 [models.providers.deepseek]
@@ -264,7 +264,12 @@ provider wire API 接受图片字段，也会在任何附件 IO 和凭据读取�
 
 `ModelPricing` 明确区分未知价格与包含费率的定义。货币不做汇率转换；输入、缓存读、缓存写与输出按互斥类别计费，reasoning 已包含在输出内。用量或参与计算的费率缺失时标记未计价；关闭计价与实际零费用分别表示。每次请求冻结价格定义、计价开关和发送时间，最终账单按最终用量选择长度档位；跨时段请求不拆分 token，这是本地估算口径。历史累计读取冻结账单，不按当前目录重算。
 
-内置价格来源、核对日期及完整档位保存在后端目录，设置页直接展示后端提供的行。DeepSeek 工作日北京时间 09:00–12:00、14:00–18:00 为两倍高峰价，其余时段及周末使用低峰价。Flash/Vision Exp 低峰输入/缓存读/输出为 1.5/0.05/4.5 CNY，Pro 为 4.5/0.15/13.5 CNY，单位均为每百万 token。
+内置价格来源、核对日期及完整档位保存在后端目录，设置页直接展示后端提供的行。截至 2026-09-11，
+DeepSeek 使用 CNY/百万 token 与北京时间峰谷时段：V4.1 Flash 低峰输入未命中/缓存命中/输出为
+1/0.02/4，峰值为 2/0.04/8；V4 Pro 低峰为 4.5/0.15/13.5，峰值为 9/0.30/27。峰值为
+工作日 09:00–12:00、14:00–18:00，其余时段及周末为低峰。
+V4 Flash 与 V4 Flash Vision Exp 已退役，不再加入目录；V4 Pro 在 2026-09-14 12:00（北京时间）
+前仍是当前目录模型，之后官网计划将其请求路由到 V4.1 Flash 并按 Flash 价格计费。
 
 OpenAI 模板包含 GPT‑6 Astra、GPT‑5.5、GPT‑5.6 Sol/Terra/Luna，推荐默认仍为 Sol。GPT‑6 上下文 1,050,000、最大输出 128,000，effort 为 low/medium/high/xhigh/max；标准输入/缓存读/缓存写/输出价格为 10/1/12.5/50 USD，输入超过 272K 时为 20/2/25/75。其余模型依据各自官方资料配置，不从相邻模型推断缺失费率。
 

@@ -1083,7 +1083,7 @@ mod tests {
     fn runtime_binds_the_configured_model() {
         use pretty_assertions::assert_eq;
 
-        let mut model = ModelInfo::compatible("deepseek-v4-flash");
+        let mut model = ModelInfo::compatible("deepseek-flash");
         model.display_name = "Custom DeepSeek".to_string();
         let provider = InvocationRunner::new(ProviderEndpoint::deepseek(None), model).unwrap();
 
@@ -1220,7 +1220,7 @@ mod tests {
         .await;
         let flash = capture_model_http_request(
             ProviderEndpoint::deepseek(None),
-            find_model("deepseek-v4-flash"),
+            find_model("deepseek-flash"),
             responses_success_sse("flash ok"),
         )
         .await;

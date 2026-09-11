@@ -647,7 +647,7 @@ mod tests {
         request.tools = vec![ToolSpec::WebSearch {
             options: pl_protocol::HostedWebSearchOptions::DeepSeek,
         }];
-        let model = bundled_model("deepseek-v4-flash");
+        let model = bundled_model("deepseek-flash");
 
         let body = OpenAiProtocol::responses().build_request_body_with_model(&request, &model);
 

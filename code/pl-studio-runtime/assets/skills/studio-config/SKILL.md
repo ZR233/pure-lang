@@ -75,24 +75,24 @@ catalog = "deepseek"
 
 [models.routes.explorer]
 provider = "deepseek"
-model = "deepseek-v4-flash"
+model = "deepseek-flash"
 
 [models.routes.planner]
 provider = "deepseek"
-model = "deepseek-v4-flash"
+model = "deepseek-flash"
 effort = "high"
 
 [models.routes.executor]
 provider = "deepseek"
-model = "deepseek-v4-flash"
+model = "deepseek-flash"
 
 [models.routes.worktree_executor]
 provider = "deepseek"
-model = "deepseek-v4-flash"
+model = "deepseek-flash"
 
 [models.routes.reviewer]
 provider = "deepseek"
-model = "deepseek-v4-flash"
+model = "deepseek-flash"
 ```
 
 ## Safe Editing Workflow

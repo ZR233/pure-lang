@@ -50,7 +50,7 @@ pub const STUDIO_CONFIG_DIR_NAME: &str = ".pure";
 pub const STUDIO_CONFIG_FILE_NAME: &str = "config.toml";
 
 const DEFAULT_PROVIDER_ID: &str = "deepseek";
-const DEFAULT_MODEL_ID: &str = "deepseek-v4-flash";
+const DEFAULT_MODEL_ID: &str = "deepseek-flash";
 const STUDIO_USER_SKILLS_DIR: &str = "~/.pure/skills";
 const STUDIO_ROLES: [&str; 5] = [
     "explorer",

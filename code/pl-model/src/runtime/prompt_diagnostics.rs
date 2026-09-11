@@ -315,7 +315,7 @@ mod tests {
             input(
                 "simple:root",
                 &provider,
-                "deepseek-v4-flash",
+                "deepseek-flash",
                 "fixed",
                 &tools,
                 false,
@@ -328,7 +328,7 @@ mod tests {
             input(
                 "simple:root",
                 &provider,
-                "deepseek-v4-flash",
+                "deepseek-flash",
                 "fixed",
                 &tools,
                 true,
@@ -361,7 +361,7 @@ mod tests {
             input(
                 "simple:executor",
                 &provider,
-                "deepseek-v4-flash",
+                "deepseek-flash",
                 "fixed",
                 &first_tools,
                 false,
@@ -375,7 +375,7 @@ mod tests {
                 input(
                     "simple:executor",
                     &provider,
-                    "deepseek-v4-flash",
+                    "deepseek-flash",
                     "fixed",
                     &second_tools,
                     false,
@@ -396,7 +396,7 @@ mod tests {
             input(
                 "simple:executor",
                 &provider,
-                "deepseek-v4-flash",
+                "deepseek-flash",
                 "fixed",
                 &tools,
                 false,
@@ -409,7 +409,7 @@ mod tests {
             input(
                 "task:planner",
                 &provider,
-                "deepseek-v4-flash",
+                "deepseek-flash",
                 "fixed",
                 &tools,
                 false,
@@ -422,7 +422,7 @@ mod tests {
             input(
                 "simple:executor",
                 &provider,
-                "deepseek-v4-flash",
+                "deepseek-flash",
                 "fixed",
                 &tools,
                 false,
@@ -457,7 +457,7 @@ mod tests {
             input(
                 "simple:executor",
                 &provider,
-                "deepseek-v4-flash",
+                "deepseek-flash",
                 "fixed",
                 &tools,
                 false,
@@ -470,7 +470,7 @@ mod tests {
             input(
                 "simple:executor",
                 &provider,
-                "deepseek-v4-flash",
+                "deepseek-flash",
                 "changed",
                 &tools,
                 false,
@@ -490,7 +490,7 @@ mod tests {
             input(
                 "simple:executor",
                 &renamed_provider,
-                "deepseek-v4-flash",
+                "deepseek-flash",
                 "changed",
                 &tools,
                 false,
@@ -555,7 +555,7 @@ mod tests {
             input(
                 "simple:executor",
                 &provider,
-                "deepseek-v4-flash",
+                "deepseek-flash",
                 "fixed",
                 &tools,
                 false,
@@ -570,7 +570,7 @@ mod tests {
             input(
                 "simple:executor",
                 &routed,
-                "deepseek-v4-flash",
+                "deepseek-flash",
                 "fixed",
                 &tools,
                 false,
@@ -589,7 +589,7 @@ mod tests {
             input(
                 "simple:executor",
                 &routed,
-                "deepseek-v4-flash",
+                "deepseek-flash",
                 "fixed",
                 &tools,
                 false,
@@ -618,7 +618,7 @@ mod tests {
             input(
                 "simple:executor",
                 &provider,
-                "deepseek-v4-flash",
+                "deepseek-flash",
                 "fixed",
                 &tools,
                 false,
@@ -630,7 +630,7 @@ mod tests {
         let mut tool_choice = input(
             "simple:executor",
             &provider,
-            "deepseek-v4-flash",
+            "deepseek-flash",
             "fixed",
             &tools,
             false,
@@ -640,7 +640,7 @@ mod tests {
         let mut parallel = input(
             "simple:executor",
             &provider,
-            "deepseek-v4-flash",
+            "deepseek-flash",
             "fixed",
             &tools,
             false,
@@ -650,7 +650,7 @@ mod tests {
         let mut with_reasoning = input(
             "simple:executor",
             &provider,
-            "deepseek-v4-flash",
+            "deepseek-flash",
             "fixed",
             &tools,
             false,
@@ -660,7 +660,7 @@ mod tests {
         let mut with_output_schema = input(
             "simple:executor",
             &provider,
-            "deepseek-v4-flash",
+            "deepseek-flash",
             "fixed",
             &tools,
             false,
@@ -670,7 +670,7 @@ mod tests {
         let mut with_service_tier = input(
             "simple:executor",
             &provider,
-            "deepseek-v4-flash",
+            "deepseek-flash",
             "fixed",
             &tools,
             false,
@@ -706,7 +706,7 @@ mod tests {
             let mut baseline = input(
                 "simple:executor",
                 &provider,
-                "deepseek-v4-flash",
+                "deepseek-flash",
                 "fixed",
                 &tools,
                 false,
@@ -720,7 +720,7 @@ mod tests {
             let mut changed = input(
                 "simple:executor",
                 &provider,
-                "deepseek-v4-flash",
+                "deepseek-flash",
                 "fixed",
                 &tools,
                 false,
@@ -772,7 +772,7 @@ mod tests {
             input(
                 "simple:executor",
                 &provider,
-                "deepseek-v4-flash",
+                "deepseek-flash",
                 "fixed",
                 &first_tools,
                 false,
@@ -785,7 +785,7 @@ mod tests {
                 input(
                     "simple:executor",
                     &provider,
-                    "deepseek-v4-flash",
+                    "deepseek-flash",
                     "fixed",
                     &second_tools,
                     false,

@@ -141,21 +141,21 @@ async fn main() -> Result<()> {
                 let result = tool_task(
                     &provider_id,
                     endpoint,
-                    ModelInfo::compatible("deepseek-v4-flash"),
+                    ModelInfo::compatible("deepseek-flash"),
                     PricingMode::Disabled,
                 )
                 .await;
                 observations.push(tool_observation(
                     &provider_id,
                     &connection.base_url,
-                    "deepseek-v4-flash",
+                    "deepseek-flash",
                     "compatible-chat-tool-roundtrip",
                     result,
                 ));
             } else if provider_id == "deepseek" {
                 let mut model = models
                     .iter()
-                    .find(|model| model.slug == "deepseek-v4-flash")
+                    .find(|model| model.slug == "deepseek-flash")
                     .context("DeepSeek Flash")?
                     .clone();
                 constrain_output(&mut model);
@@ -171,7 +171,7 @@ async fn main() -> Result<()> {
                             observations.push(from_result(
                                 &provider_id,
                                 &connection.base_url,
-                                "deepseek-v4-flash",
+                                "deepseek-flash",
                                 &format!("native-search-{}", index + 1),
                                 Ok(response),
                             ));
@@ -180,7 +180,7 @@ async fn main() -> Result<()> {
                     Err(error) => observations.push(observation(
                         &provider_id,
                         &connection.base_url,
-                        "deepseek-v4-flash",
+                        "deepseek-flash",
                         "native-search",
                         "failed",
                         None,

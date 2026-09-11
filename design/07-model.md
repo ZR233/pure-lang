@@ -132,8 +132,8 @@ Responses 支持 `web_socket | http`，Chat Completions 只支持 `http`。协�
 `PureError::ConfigError`。媒体契约校验（`ModelInfo::validate_media_contract`）同样使用该错误类型。
 Web 与 Flutter 只渲染模型目录返回的 transport 和当前 override，不按 preset ID 推断。
 
-内建矩阵固定为：全部 GPT 使用 Responses，支持 WS/HTTP且默认 WS；DeepSeek V4 Flash、V4 Pro 与
-V4 Flash Vision Exp 使用 Responses/HTTP；全部 GLM 和全部 MiMo 使用 Chat Completions/HTTP。
+内建矩阵固定为：全部 GPT 使用 Responses，支持 WS/HTTP且默认 WS；DeepSeek V4.1 Flash 与
+V4 Pro 使用 Responses/HTTP；全部 GLM 和全部 MiMo 使用 Chat Completions/HTTP。
 runtime 必须按当前模型选择对应 endpoint path，同一 provider 实例可以路由不同协议的模型。
 
 Responses WebSocket 使用 `/responses` 握手和 `response.create` 帧，并固定 `store: false`。
@@ -224,12 +224,12 @@ codec 还定义 `video_url` 与 `file_url`，但模型只有在精确请求契�
 才声明对应能力。GLM-5.3-Flash 当前只声明 text/image：远程图片首发优选 URL，本地图片以及历史、
 重试和恢复统一使用 Data URL。未声明相应 modality 的模型必须在任何附件 IO 或凭据读取前拒绝。
 
-DeepSeek V4 Flash Vision Exp 当前声明 text/image，并通过 Responses `input_image` 发送：远程图片
-首发优选 URL，本地图片、历史、重试和恢复使用 Data URL。支持的快照格式固定为 JPEG、PNG、GIF、
-WebP。官方接口还提供 Files API，但 Pure 在 provider file 上传、瞬时 file id 与快照回放生命周期
-全部实现前不声明该表示。官方对少于 15 张与至少 15 张图片使用不同边长上限；canonical profile
-选择全批次均可成立的 4096 像素保守上限，并以 32 MiB snapshot 批次总字节上限保证 Data URL
-重放不会越过接口的 48 MiB 请求体边界。该保守子集不按模型名在 adapter 中特判。
+DeepSeek V4.1 Flash 当前声明 text/image，并通过 Responses `input_image` 发送：远程图片首发优选
+URL，本地图片、历史、重试和恢复使用 Data URL。支持的快照格式固定为 JPEG、PNG、GIF、WebP。
+官方接口还提供 Files API，但 Pure 在 provider file 上传、瞬时 file id 与快照回放生命周期全部实现前
+不声明该表示。官方对少于 15 张与至少 15 张图片使用不同边长上限；canonical profile 选择全批次
+均可成立的 4096 像素保守上限，并以 32 MiB snapshot 批次总字节上限保证 Data URL 重放不会越过
+接口的 48 MiB 请求体边界。该保守子集不按模型名在 adapter 中特判。
 
 ## 7.7 自定义模型
 
@@ -293,7 +293,7 @@ impl ParameterWire {
 | --- | --- | --- | --- |
 | OpenAI（GPT-5.5） | `low` / `medium` / `high` / `xhigh` | `reasoning.effort` = 值 | — |
 | OpenAI（GPT-6 Astra / GPT-5.6 Sol / Terra / Luna） | `low` / `medium` / `high` / `xhigh` / `max` | `reasoning.effort` = 值 | — |
-| DeepSeek | `high` / `max` | `reasoning_effort` = 值（`thinking.type = enabled` 作为 base body） | — |
+| DeepSeek | `low` / `high` / `max` | `reasoning_effort` = 值（`thinking.type = enabled` 作为 base body） | — |
 | Zhipu 普通 | `none` / `enabled` | `thinking.type` = 值 | — |
 | GLM-5.2 | `none` / `high` / `max` | `high`/`max`：`reasoning_effort` + `thinking.type = enabled` + `thinking.clear_thinking = false`；`none`：`thinking.type = disabled` | `none` 移除 `reasoning_effort` |
 | GLM-5.3 / GLM-5.3-Flash | `low` / `high` / `max` | 三档均为 `reasoning_effort` + `thinking.type = enabled` + `thinking.clear_thinking = false` | — |
@@ -318,13 +318,14 @@ GLM-5.2 的「一个选择联动多个字段」和「none 时移除字段」由 
 `ModelFamily::instantiate(ModelInstanceSpec)` 用模型差异创建目录项，共享声明通过组合复用。family 不承担请求生命周期或费用计算；`ModelPricing` 独立表达未知价格或包含长度分档、时段倍率及来源的费率定义，具体结构以公开 Rust 类型为准。
 
 `pl-model` 的内建 family 预设按供应商与模型线划分：`openai_family`、`openai_gpt56_family`、
-`deepseek_family`、`deepseek_vision_family`、`mimo_family`、`zhipu_text_family`、
+`deepseek_family`、`deepseek_flash_family`、`mimo_family`、`zhipu_text_family`、
 `zhipu_glm52_family`、`zhipu_glm53_family`、`zhipu_glm53_flash_family` 与
 `zhipu_vision_family`。共享能力矩阵由 `openai_capabilities` / `deepseek_capabilities` /
-`deepseek_vision_capabilities` / `mimo_capabilities` / `zhipu_capabilities` 构造并供各 family 复用；
+`deepseek_flash_capabilities` / `mimo_capabilities` / `zhipu_capabilities` 构造并供各 family 复用；
 family 之间的差异集中在 effort 候选值域、request profile 与 typed input capabilities。
-DeepSeek Vision Exp 复用 V4 Flash 的 effort、thinking、上下文与计费事实，只增加经过官方文档确认的
-Responses image profile。GLM-5.3 与 GLM-5.2 复用同一条「启用思考」wire 组合，差异只在候选值域：
+DeepSeek V4.1 Flash 使用经过官方文档确认的 Responses image profile；V4 Pro 只声明 text。两者共享
+effort、thinking、上下文和 Responses HTTP 规则，但计费独立保存在各自模型实例。GLM-5.3 与 GLM-5.2
+复用同一条「启用思考」wire 组合，差异只在候选值域：
 GLM-5.3 为 `high` / `low` / `max`，且不提供禁用思考候选。GLM-5.3-Flash 复用 GLM-5.3 的始终思考
 wire 与候选值域，并声明 image 的 local/data-url 与 remote-url/snapshot 路线；不得从相邻视觉模型
 推断 video/file 能力。
@@ -411,10 +412,12 @@ JSON 顺序回放。provider adapter 不自行注入未进入本轮冻结 `ToolP
 关闭计价、价格/用量不足、已估算与零费用分别表示。历史只读取冻结账单，不按现价重算。
 Core、Studio、Flutter 仅归属、累计和展示，不再次解释供应商 usage 或价格。
 
-截至 2026-09-05，DeepSeek 以 CNY/百万 token 计价：Flash（含 Vision Exp）低峰未命中/命中/
-输出为 1.5/0.05/4.5；Pro 为 4.5/0.15/13.5。北京时间工作日 09:00–12:00、14:00–18:00
-使用两倍费率，其他时段与周末为低峰。GPT-6 Astra 新增为 Responses WS/HTTP 模型；删除
-已下线模型。官方价格无法确认时保持未知，免费明确为零。
+截至 2026-09-11，DeepSeek 以 CNY/百万 token 计价：V4.1 Flash 低峰未命中/缓存命中/输出为
+1/0.02/4，峰值为 2/0.04/8；V4 Pro 低峰为 4.5/0.15/13.5，峰值为 9/0.30/27。峰值时段为
+北京时间工作日 09:00–12:00、14:00–18:00，其余时段与周末为低峰。
+V4 Flash 与 V4 Flash Vision Exp 已退役，不再作为目录模型；官网暂时保留旧 API 名称的兼容路由，
+Pure 不新增旧 slug alias。V4 Pro 在 2026-09-14 12:00（北京时间）前仍保留为当前目录模型；此后
+官网计划将其请求路由到 V4.1 Flash 并按 Flash 价格计费。官方价格无法确认时保持未知，免费明确为零。
 
 普通 API 预设默认计价；Coding Plan、Token Plan 和自定义兼容预设默认不计价，用户选择只影响
 之后的调用。账户余额和套餐配额保持独立查询。

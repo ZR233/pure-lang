@@ -19,7 +19,7 @@ fn test_config() -> AgentModelConfig {
             role_id,
             ModelRouteConfig {
                 provider: provider_id,
-                model: "deepseek-v4-flash".to_string(),
+                model: "deepseek-flash".to_string(),
                 effort: Some(ReasoningEffort::new("high")),
             },
         )]),
@@ -34,7 +34,7 @@ fn resolve_uses_route_as_the_only_default_model_source() {
     let resolved = config.resolve(&role).unwrap();
 
     assert_eq!(resolved.provider_id, ProviderId::new("deepseek").unwrap());
-    assert_eq!(resolved.model.slug, "deepseek-v4-flash");
+    assert_eq!(resolved.model.slug, "deepseek-flash");
     assert_eq!(resolved.endpoint.name, "DeepSeek");
     assert_eq!(resolved.effort, Some(ReasoningEffort::new("high")));
 }
@@ -124,7 +124,7 @@ fn bundled_catalog_rejects_additional_model_slug_conflicts() {
     else {
         panic!("builtin preset must use a bundled catalog");
     };
-    additional_models.push(ModelInfo::compatible("deepseek-v4-flash"));
+    additional_models.push(ModelInfo::compatible("deepseek-flash"));
 
     assert!(
         provider
@@ -141,7 +141,7 @@ fn model_rejects_unsupported_websocket_connection_mode() {
     let provider = config.providers.values_mut().next().unwrap();
     assert!(
         provider
-            .set_model_connection_mode("deepseek-v4-flash", ProviderConnectionMode::WebSocket,)
+            .set_model_connection_mode("deepseek-flash", ProviderConnectionMode::WebSocket,)
             .unwrap_err()
             .to_string()
             .contains("does not support connection mode")

@@ -460,7 +460,7 @@ mod tests {
             ProviderEndpoint::compatible("Chat Gateway", "https://chat.example/v1");
         let deepseek_model = crate::model::default_models()
             .into_iter()
-            .find(|model| model.slug == "deepseek-v4-flash")
+            .find(|model| model.slug == "deepseek-flash")
             .unwrap();
         let openai_model = crate::model::default_models()
             .into_iter()

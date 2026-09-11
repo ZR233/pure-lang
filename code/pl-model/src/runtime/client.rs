@@ -234,51 +234,11 @@ mod tests {
     async fn completed_requests_freeze_official_tariffs_and_consume_final_usage() {
         // Full inference scenarios: selection happens before the fake provider advances wall time.
         let cases = [
-            (
-                "deepseek-v4-flash",
-                1_788_483_599,
-                1000,
-                200,
-                400,
-                0,
-                0.00182,
-            ),
-            (
-                "deepseek-v4-flash",
-                1_788_483_600,
-                1000,
-                200,
-                400,
-                0,
-                0.00364,
-            ),
-            (
-                "deepseek-v4-flash",
-                1_788_494_400,
-                1000,
-                200,
-                400,
-                0,
-                0.00182,
-            ),
-            (
-                "deepseek-v4-flash-vision-exp",
-                1_788_501_600,
-                1000,
-                200,
-                400,
-                0,
-                0.00364,
-            ),
-            (
-                "deepseek-v4-flash",
-                1_788_516_000,
-                1000,
-                200,
-                400,
-                0,
-                0.00182,
-            ),
+            ("deepseek-flash", 1_788_483_599, 1000, 200, 400, 0, 0.001408),
+            ("deepseek-flash", 1_788_483_600, 1000, 200, 400, 0, 0.002816),
+            ("deepseek-flash", 1_788_494_400, 1000, 200, 400, 0, 0.001408),
+            ("deepseek-flash", 1_788_501_600, 1000, 200, 400, 0, 0.002816),
+            ("deepseek-flash", 1_788_516_000, 1000, 200, 400, 0, 0.001408),
             ("deepseek-v4-pro", 1_788_570_000, 1000, 200, 400, 0, 0.00546),
             (
                 "gpt-6-astra",
@@ -405,7 +365,7 @@ mod tests {
         let (url, server) = serve_sse_once(format!("data: {terminal}\n\n")).await;
         let runtime = ModelRuntime::new(
             ProviderEndpoint::deepseek(Some(url)),
-            model("deepseek-v4-flash"),
+            model("deepseek-flash"),
         )
         .unwrap()
         .with_pricing_mode(PricingMode::Disabled);

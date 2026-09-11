@@ -201,7 +201,7 @@ class _FakeStudioApi implements StudioApi {
         whenToUse: 'Use for $role work',
         systemInstructions: 'Follow the frozen assignment.',
         providerId: _currentState.role(role)?.providerId ?? 'deepseek',
-        model: _currentState.role(role)?.model ?? 'deepseek-v4-flash',
+        model: _currentState.role(role)?.model ?? 'deepseek-flash',
         effort: _currentState.role(role)?.effort,
         source: 'studio-builtin',
         revision: 'system-v2',

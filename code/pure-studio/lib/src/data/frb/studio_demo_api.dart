@@ -57,7 +57,7 @@ class DemoStudioApi implements StudioApi {
         availability: 'available',
         selected: true,
         providerId: 'deepseek-primary',
-        model: 'deepseek-v4-flash',
+        model: 'deepseek-flash',
       );
   PermissionMode _permissionMode = PermissionMode.requestApproval;
   int _turnSequence = 0;
@@ -295,7 +295,7 @@ class DemoStudioApi implements StudioApi {
     const deepseekHigh = ModelPerformanceSummaryView(
       providerInstanceId: 'deepseek-primary',
       providerDisplayName: 'DeepSeek',
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-flash',
       reasoningEffort: 'high',
       sampleCount: 1,
       completionTokens: 150,
@@ -309,7 +309,7 @@ class DemoStudioApi implements StudioApi {
     const deepseekNone = ModelPerformanceSummaryView(
       providerInstanceId: 'deepseek-primary',
       providerDisplayName: 'DeepSeek',
-      model: 'deepseek-v4-flash',
+      model: 'deepseek-flash',
       reasoningEffort: 'none',
       sampleCount: 1,
       completionTokens: 150,

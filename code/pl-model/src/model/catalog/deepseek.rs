@@ -1,4 +1,4 @@
-//! DeepSeek 内建模型目录：共享 reasoning family，Flash 与 Pro 路由到 Responses HTTP。
+//! DeepSeek 内建模型目录：Flash 与 Pro 路由到 Responses HTTP。
 
 use crate::model::pricing::{ModelPricing, TokenPriceTier};
 use serde_json::{Map, Value};
@@ -14,11 +14,7 @@ use crate::model::info::{
 };
 use crate::model::parameter::ModelParameter;
 
-const DEEPSEEK_DEFAULT_MODEL_SLUGS: &[&str] = &[
-    "deepseek-v4-flash",
-    "deepseek-v4-flash-vision-exp",
-    "deepseek-v4-pro",
-];
+const DEEPSEEK_DEFAULT_MODEL_SLUGS: &[&str] = &["deepseek-flash", "deepseek-v4-pro"];
 
 pub fn deepseek_default_model_slugs() -> &'static [&'static str] {
     DEEPSEEK_DEFAULT_MODEL_SLUGS
@@ -26,24 +22,14 @@ pub fn deepseek_default_model_slugs() -> &'static [&'static str] {
 
 pub(super) fn models() -> Vec<ModelInfo> {
     vec![
-        deepseek_family().instantiate(ModelInstanceSpec {
-            slug: "deepseek-v4-flash",
-            display_name: "DeepSeek V4 Flash",
-            description: "DeepSeek fast reasoning model with thinking mode.",
+        deepseek_flash_family().instantiate(ModelInstanceSpec {
+            slug: "deepseek-flash",
+            display_name: "DeepSeek V4.1 Flash",
+            description: "DeepSeek fast multimodal reasoning model with thinking mode.",
             context_window: 1_000_000,
             max_context_window: 1_000_000,
             max_output_tokens: Some(384_000),
-            pricing: deepseek_pricing(1.5, 4.5, 0.05),
-        }),
-        deepseek_vision_family().instantiate(ModelInstanceSpec {
-            slug: "deepseek-v4-flash-vision-exp",
-            display_name: "DeepSeek V4 Flash Vision Exp",
-            description:
-                "DeepSeek experimental multimodal reasoning model with image understanding.",
-            context_window: 1_000_000,
-            max_context_window: 1_000_000,
-            max_output_tokens: Some(384_000),
-            pricing: deepseek_pricing(1.5, 4.5, 0.05),
+            pricing: deepseek_pricing(1.0, 4.0, 0.02),
         }),
         deepseek_family().instantiate(ModelInstanceSpec {
             slug: "deepseek-v4-pro",
@@ -71,10 +57,10 @@ fn deepseek_family() -> ModelFamily {
     }
 }
 
-fn deepseek_vision_family() -> ModelFamily {
+fn deepseek_flash_family() -> ModelFamily {
     ModelFamily {
-        id: "deepseek-vision-reasoning",
-        capabilities: deepseek_vision_capabilities(),
+        id: "deepseek-flash-reasoning",
+        capabilities: deepseek_flash_capabilities(),
         truncation_mode: TruncationMode::Tokens,
         truncation_limit: 10_000,
         parameters: vec![deepseek_effort_parameter()],
@@ -87,7 +73,7 @@ fn deepseek_vision_family() -> ModelFamily {
     }
 }
 
-/// DeepSeek 固定 base body：`thinking.type = enabled`（DeepSeek 模型始终开启 thinking）。
+/// DeepSeek 产品默认请求开启 thinking：`thinking.type = enabled`。
 fn deepseek_request_profile() -> ModelRequestProfile {
     let mut thinking = Map::new();
     thinking.insert("type".to_string(), Value::String("enabled".to_string()));
@@ -99,13 +85,13 @@ fn deepseek_request_profile() -> ModelRequestProfile {
     }
 }
 
-/// DeepSeek effort：候选值按弱到强 high/max，透传到 `reasoning_effort`。
+/// DeepSeek effort：候选值按弱到强 low/high/max，透传到 `reasoning_effort`。
 fn deepseek_effort_parameter() -> ModelParameter {
     ModelParameter {
         name: "effort".to_string(),
         label: None,
-        candidates: vec!["high".to_string(), "max".to_string()],
-        wire: ["high", "max"]
+        candidates: vec!["low".to_string(), "high".to_string(), "max".to_string()],
+        wire: ["low", "high", "max"]
             .into_iter()
             .map(|value| {
                 (
@@ -139,7 +125,7 @@ fn deepseek_capabilities() -> ModelCapabilities {
     }
 }
 
-fn deepseek_vision_capabilities() -> ModelCapabilities {
+fn deepseek_flash_capabilities() -> ModelCapabilities {
     let mut capabilities = deepseek_capabilities();
     capabilities.input.push(ModelInputCapability {
         modality: ModelModality::Image,
@@ -161,10 +147,11 @@ fn deepseek_vision_capabilities() -> ModelCapabilities {
 
 fn deepseek_pricing(input: f64, output: f64, read: f64) -> ModelPricing {
     use crate::model::pricing::{DailyPriceWindow, WeeklyPriceAdjustment};
-    ModelPricing::published(
+    ModelPricing::published_at(
         "CNY",
         vec![TokenPriceTier::flat(input, output, Some(read), None)],
         "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+        1_789_084_800,
     )
     .with_weekly_adjustment(WeeklyPriceAdjustment {
         utc_offset_minutes: 480,

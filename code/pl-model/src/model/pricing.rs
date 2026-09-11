@@ -185,12 +185,22 @@ impl ModelPricing {
 
     /// Declares an official rate table checked on 2026-09-05 (UTC).
     pub fn published(currency: &str, tiers: Vec<TokenPriceTier>, source: &str) -> Self {
+        Self::published_at(currency, tiers, source, 1_788_566_400)
+    }
+
+    /// Declares an official rate table with an explicit verification timestamp.
+    pub fn published_at(
+        currency: &str,
+        tiers: Vec<TokenPriceTier>,
+        source: &str,
+        verified_at: i64,
+    ) -> Self {
         Self::Rates {
             currency: currency.to_owned(),
             tiers,
             weekly_adjustment: None,
             source: source.to_owned(),
-            verified_at: 1_788_566_400,
+            verified_at,
         }
     }
 

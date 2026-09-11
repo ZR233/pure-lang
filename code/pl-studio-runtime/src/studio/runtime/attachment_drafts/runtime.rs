@@ -241,11 +241,11 @@ pub(super) mod tests {
             .expect("GLM-5.3-Flash must be present in the canonical catalog")
     }
 
-    pub(in crate::studio::runtime::attachment_drafts) fn deepseek_vision() -> ModelInfo {
+    pub(in crate::studio::runtime::attachment_drafts) fn deepseek_flash() -> ModelInfo {
         pl_model::model::default_models()
             .into_iter()
-            .find(|model| model.slug == "deepseek-v4-flash-vision-exp")
-            .expect("DeepSeek vision model must be present in the canonical catalog")
+            .find(|model| model.slug == "deepseek-flash")
+            .expect("DeepSeek Flash model must be present in the canonical catalog")
     }
 
     pub(in crate::studio::runtime::attachment_drafts) fn png_bytes() -> Vec<u8> {

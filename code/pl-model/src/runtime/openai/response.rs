@@ -304,7 +304,7 @@ mod tests {
     fn chat_parse_response_reads_reasoning_content() {
         let response = OpenAiProtocol::chat()
             .parse_response(serde_json::json!({
-                "model": "deepseek-v4-flash",
+                "model": "deepseek-flash",
                 "choices": [{
                     "message": {
                         "role": "assistant",

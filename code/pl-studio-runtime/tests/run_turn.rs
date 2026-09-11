@@ -209,10 +209,10 @@ async fn provider_tool_tasks_preserve_native_optimizations_and_account_for_the_c
             Some(0.0328),
         ),
         (
-            "deepseek-v4-flash",
+            "deepseek-flash",
             ProviderAdapterKind::DeepSeek,
             Some("high"),
-            Some(0.00728),
+            Some(0.005632),
         ),
         (
             "glm-5.3",

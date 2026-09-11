@@ -342,8 +342,8 @@ fn write_skill(workspace: &Path, name: &str, description: &str, marker: &str) ->
 
 fn tool_call_sse() -> String {
     concat!(
-        "data: {\"id\":\"scripted-1\",\"model\":\"deepseek-v4-flash\",\"choices\":[{\"delta\":{\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"id\":\"call_skill\",\"type\":\"function\",\"function\":{\"name\":\"skill_view\",\"arguments\":\"{\\\"name\\\":\\\"release-build-triage\\\"}\"}}]},\"finish_reason\":null}]}\n\n",
-        "data: {\"id\":\"scripted-1\",\"model\":\"deepseek-v4-flash\",\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}\n\n",
+        "data: {\"id\":\"scripted-1\",\"model\":\"deepseek-flash\",\"choices\":[{\"delta\":{\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"id\":\"call_skill\",\"type\":\"function\",\"function\":{\"name\":\"skill_view\",\"arguments\":\"{\\\"name\\\":\\\"release-build-triage\\\"}\"}}]},\"finish_reason\":null}]}\n\n",
+        "data: {\"id\":\"scripted-1\",\"model\":\"deepseek-flash\",\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1,\"total_tokens\":2}}\n\n",
         "data: [DONE]\n\n"
     )
     .to_string()
@@ -351,7 +351,7 @@ fn tool_call_sse() -> String {
 
 fn complete_sse() -> String {
     format!(
-        "data: {{\"id\":\"scripted-2\",\"model\":\"deepseek-v4-flash\",\"choices\":[{{\"delta\":{{\"role\":\"assistant\",\"tool_calls\":[{{\"index\":0,\"id\":\"call_complete\",\"type\":\"function\",\"function\":{{\"name\":\"complete\",\"arguments\":\"{{\\\"summary\\\":\\\"Scripted final {RELEASE_MARKER}\\\"}}\"}}}}]}},\"finish_reason\":null}}]}}\n\ndata: {{\"id\":\"scripted-2\",\"model\":\"deepseek-v4-flash\",\"choices\":[{{\"delta\":{{}},\"finish_reason\":\"tool_calls\"}}],\"usage\":{{\"prompt_tokens\":1,\"completion_tokens\":2,\"total_tokens\":3}}}}\n\ndata: [DONE]\n\n"
+        "data: {{\"id\":\"scripted-2\",\"model\":\"deepseek-flash\",\"choices\":[{{\"delta\":{{\"role\":\"assistant\",\"tool_calls\":[{{\"index\":0,\"id\":\"call_complete\",\"type\":\"function\",\"function\":{{\"name\":\"complete\",\"arguments\":\"{{\\\"summary\\\":\\\"Scripted final {RELEASE_MARKER}\\\"}}\"}}}}]}},\"finish_reason\":null}}]}}\n\ndata: {{\"id\":\"scripted-2\",\"model\":\"deepseek-flash\",\"choices\":[{{\"delta\":{{}},\"finish_reason\":\"tool_calls\"}}],\"usage\":{{\"prompt_tokens\":1,\"completion_tokens\":2,\"total_tokens\":3}}}}\n\ndata: [DONE]\n\n"
     )
 }
 

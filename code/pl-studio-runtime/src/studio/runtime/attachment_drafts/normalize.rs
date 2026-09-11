@@ -96,11 +96,11 @@ mod tests {
     use pl_protocol::studio::StudioAttachmentDraftSource;
 
     use super::super::runtime::AttachmentDraftRuntime;
-    use super::super::runtime::tests::{deepseek_vision, gif_bytes};
+    use super::super::runtime::tests::{deepseek_flash, gif_bytes};
     use super::*;
 
     #[tokio::test]
-    async fn deepseek_vision_accepts_gif_from_actual_file_content() {
+    async fn deepseek_flash_accepts_gif_from_actual_file_content() {
         let root = tempfile::tempdir().unwrap();
         let drafts = AttachmentDraftRuntime::new(root.path().join("drafts")).unwrap();
         let image = root.path().join("animation.gif");
@@ -111,7 +111,7 @@ mod tests {
                 vec![StudioAttachmentDraftSource::LocalFile {
                     path: image.to_string_lossy().to_string(),
                 }],
-                &deepseek_vision(),
+                &deepseek_flash(),
             )
             .await
             .unwrap();

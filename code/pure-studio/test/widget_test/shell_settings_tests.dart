@@ -883,11 +883,11 @@ void registerShellSettingsTests() {
 
     await tester.tap(find.byTooltip('Planner model'));
     await tester.pumpAndSettle();
-    await tester.tap(find.textContaining('Reasoner').last);
+    await tester.tap(find.textContaining('V4 Pro').last);
     await tester.pumpAndSettle();
     expect(api.roleUpdate?.roleKey, 'planner');
     expect(api.roleUpdate?.providerId, 'deepseek');
-    expect(api.roleUpdate?.model, 'deepseek-reasoner');
+    expect(api.roleUpdate?.model, 'deepseek-v4-pro');
 
     api.emitGlobal(
       _threadDirectoryChangedEvent(
@@ -911,7 +911,7 @@ void registerShellSettingsTests() {
     await tester.pumpAndSettle();
     expect(api.roleUpdate?.roleKey, 'planner');
     expect(api.roleUpdate?.providerId, 'deepseek');
-    expect(api.roleUpdate?.model, 'deepseek-reasoner');
+    expect(api.roleUpdate?.model, 'deepseek-v4-pro');
     expect(api.roleUpdate?.effort, 'max');
   });
 
@@ -1286,7 +1286,7 @@ void registerShellSettingsTests() {
     await _expectMenuOpensAboveTrigger(
       tester: tester,
       triggerTooltip: 'Planner model',
-      menuText: 'DeepSeek / DeepSeek Reasoner',
+      menuText: 'DeepSeek / DeepSeek V4.1 Flash',
     );
     await _expectMenuOpensAboveTrigger(
       tester: tester,
@@ -1320,14 +1320,14 @@ void registerShellSettingsTests() {
     await tester.tap(find.byKey(StudioDriverKeys.model));
     await tester.pumpAndSettle();
     expect(
-      find.byKey(StudioDriverKeys.modelOption('deepseek', 'deepseek-reasoner')),
+      find.byKey(StudioDriverKeys.modelOption('deepseek', 'deepseek-v4-pro')),
       findsOneWidget,
     );
     await tester.tap(
-      find.byKey(StudioDriverKeys.modelOption('deepseek', 'deepseek-reasoner')),
+      find.byKey(StudioDriverKeys.modelOption('deepseek', 'deepseek-v4-pro')),
     );
     await tester.pumpAndSettle();
-    expect(api.roleUpdate?.model, 'deepseek-reasoner');
+    expect(api.roleUpdate?.model, 'deepseek-v4-pro');
 
     await tester.tap(find.byKey(StudioDriverKeys.reasoningEffort));
     await tester.pumpAndSettle();
@@ -2448,7 +2448,7 @@ void registerShellSettingsTests() {
                 baseUrl: 'https://api.deepseek.com',
                 secret: ProviderSecretCommand.preserve(),
                 pricingEnabled: false,
-                defaultModel: 'deepseek-v4-flash',
+                defaultModel: 'deepseek-flash',
                 customModels: [],
                 modelConnectionModes: [],
               ),
@@ -3249,39 +3249,39 @@ void registerShellSettingsTests() {
         StudioDriverKeys.settingsRoleModelOption(
           'explorer',
           'deepseek',
-          'deepseek-v4-flash',
+          'deepseek-flash',
         ),
       );
       expect(
         find.descendant(
           of: flashOption,
           matching: find.text(
-            'DeepSeek / DeepSeek V4 Flash · Text · Responses · HTTP',
+            'DeepSeek / DeepSeek V4.1 Flash · Text/Vision · Responses · HTTP',
           ),
         ),
         findsOneWidget,
       );
-      final reasonerOption = find.byKey(
+      final proOption = find.byKey(
         StudioDriverKeys.settingsRoleModelOption(
           'explorer',
           'deepseek',
-          'deepseek-reasoner',
+          'deepseek-v4-pro',
         ),
       );
       expect(
         find.descendant(
-          of: reasonerOption,
+          of: proOption,
           matching: find.text(
-            'DeepSeek / DeepSeek Reasoner · Text · Chat Completions · HTTP',
+            'DeepSeek / DeepSeek V4 Pro · Text · Responses · HTTP',
           ),
         ),
         findsOneWidget,
       );
-      expect(reasonerOption.hitTestable(), findsOneWidget);
-      await tester.tap(reasonerOption);
+      expect(proOption.hitTestable(), findsOneWidget);
+      await tester.tap(proOption);
       await tester.pumpAndSettle();
       expect(api.roleUpdate?.roleKey, 'explorer');
-      expect(api.roleUpdate?.model, 'deepseek-reasoner');
+      expect(api.roleUpdate?.model, 'deepseek-v4-pro');
 
       await tester.tap(
         find.byKey(StudioDriverKeys.settingsRoleEffort('planner')),
@@ -3299,7 +3299,7 @@ void registerShellSettingsTests() {
       await tester.pumpAndSettle();
       expect(api.roleUpdate?.roleKey, 'planner');
       expect(api.roleUpdate?.providerId, 'deepseek');
-      expect(api.roleUpdate?.model, 'deepseek-v4-flash');
+      expect(api.roleUpdate?.model, 'deepseek-flash');
       expect(api.roleUpdate?.effort, 'max');
 
       await tester.tap(find.text('Skills'));
@@ -3426,7 +3426,7 @@ void registerShellSettingsTests() {
           availability: 'available',
           selected: true,
           providerId: 'deepseek',
-          model: 'deepseek-v4-flash',
+          model: 'deepseek-flash',
         ),
       ),
     );
@@ -3498,16 +3498,11 @@ void registerShellSettingsTests() {
       expect(find.text('DeepSeek'), findsOneWidget);
       await tester.tap(find.byKey(StudioDriverKeys.providerRow('deepseek')));
       await tester.pumpAndSettle();
-      expect(find.text('DeepSeek Reasoner'), findsOneWidget);
-      final capabilityTags = find.byKey(
-        StudioDriverKeys.modelCapabilityTags('deepseek', 'deepseek-reasoner'),
-      );
-      expect(capabilityTags, findsOneWidget);
-      expect(tester.widget<Text>(capabilityTags).data, '文本');
+      expect(find.text('DeepSeek V4.1 Flash'), findsOneWidget);
       final visionCapabilityTags = find.byKey(
         StudioDriverKeys.modelCapabilityTags(
           'deepseek',
-          'deepseek-v4-flash-vision-exp',
+          'deepseek-flash',
         ),
       );
       expect(visionCapabilityTags, findsOneWidget);
@@ -3527,7 +3522,7 @@ void registerShellSettingsTests() {
       );
       await tester.pumpAndSettle();
       expect(find.text('描述你的需求...'), findsOneWidget);
-      expect(find.text('deepseek-v4-flash'), findsOneWidget);
+      expect(find.text('deepseek-flash'), findsOneWidget);
       expect(find.text('high'), findsOneWidget);
     },
   );
@@ -3556,7 +3551,7 @@ void registerShellSettingsTests() {
       );
       expect(
         find.byKey(
-          const ValueKey('agent-profile-effort-deepseek-deepseek-v4-flash'),
+          const ValueKey('agent-profile-effort-deepseek-deepseek-flash'),
         ),
         findsOneWidget,
       );
@@ -3587,7 +3582,7 @@ void registerShellSettingsTests() {
       expect(_dialogText('Cancel'), findsOneWidget);
       expect(_dialogText('Save TOML atomically'), findsOneWidget);
       final effortField = find.byKey(
-        const ValueKey('agent-profile-effort-deepseek-deepseek-v4-flash'),
+        const ValueKey('agent-profile-effort-deepseek-deepseek-flash'),
       );
       await tester.ensureVisible(effortField);
       await tester.pumpAndSettle();
@@ -3806,7 +3801,7 @@ void registerShellSettingsTests() {
         whenToUse: 'Use for custom routing',
         systemInstructions: 'Route with care.',
         providerId: 'deepseek',
-        model: 'deepseek-v4-flash',
+        model: 'deepseek-flash',
         effort: null,
         source: 'studio-builtin',
         revision: 'system-v2',
@@ -3929,7 +3924,7 @@ void registerShellSettingsTests() {
     expect(_dialogText('原子保存 TOML'), findsOneWidget);
 
     final effortField = find.byKey(
-      const ValueKey('agent-profile-effort-deepseek-deepseek-v4-flash'),
+      const ValueKey('agent-profile-effort-deepseek-deepseek-flash'),
     );
     await tester.ensureVisible(effortField);
     await tester.pumpAndSettle();
@@ -3993,7 +3988,7 @@ void registerShellSettingsTests() {
       find.descendant(
         of: find.byKey(selector),
         matching: find.text(
-          'DeepSeek / DeepSeek V4 Flash · Text · Responses · HTTP',
+          'DeepSeek / DeepSeek V4.1 Flash · Text/Vision · Responses · HTTP',
         ),
       ),
       findsOneWidget,
@@ -4007,14 +4002,14 @@ void registerShellSettingsTests() {
       StudioDriverKeys.settingsRoleModelOption(
         'executor',
         'deepseek',
-        'deepseek-v4-flash-vision-exp',
+        'deepseek-flash',
       ),
     );
     expect(
       find.descendant(
         of: visionOption,
         matching: find.text(
-          'DeepSeek / DeepSeek V4 Flash Vision Exp · Text/Vision · Responses · HTTP',
+          'DeepSeek / DeepSeek V4.1 Flash · Text/Vision · Responses · HTTP',
         ),
       ),
       findsOneWidget,
@@ -4048,7 +4043,7 @@ void registerShellSettingsTests() {
       find.descendant(
         of: find.byKey(selector),
         matching: find.text(
-          'DeepSeek / DeepSeek V4 Flash · 文本 · Responses · HTTP',
+          'DeepSeek / DeepSeek V4.1 Flash · 文本/视觉 · Responses · HTTP',
         ),
       ),
       findsOneWidget,
@@ -4064,11 +4059,11 @@ void registerShellSettingsTests() {
           StudioDriverKeys.settingsRoleModelOption(
             'executor',
             'deepseek',
-            'deepseek-v4-flash-vision-exp',
+            'deepseek-flash',
           ),
         ),
         matching: find.text(
-          'DeepSeek / DeepSeek V4 Flash Vision Exp · 文本/视觉 · Responses · HTTP',
+          'DeepSeek / DeepSeek V4.1 Flash · 文本/视觉 · Responses · HTTP',
         ),
       ),
       findsOneWidget,
@@ -4896,7 +4891,7 @@ const _userAgentProfile = AgentProfileView(
   whenToUse: 'Use when a helper is needed',
   systemInstructions: 'Follow the user instructions.',
   providerId: 'deepseek',
-  model: 'deepseek-v4-flash',
+  model: 'deepseek-flash',
   effort: 'high',
   source: 'user-toml',
   revision: 'user-v1',

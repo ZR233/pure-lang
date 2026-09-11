@@ -412,7 +412,7 @@ mod tests {
 
     #[test]
     fn deepseek_chat_body_writes_effort_and_base_body_thinking() {
-        let model = bundled_model("deepseek-v4-flash");
+        let model = bundled_model("deepseek-flash");
         let body = OpenAiProtocol::chat()
             .build_request_body_with_model(&request_with_effort("max"), &model);
 
@@ -561,7 +561,7 @@ mod tests {
             OpenAiProtocol::chat()
                 .build_request(
                     &request,
-                    &ModelInfo::compatible("deepseek-v4-flash"),
+                    &ModelInfo::compatible("deepseek-flash"),
                     Some("must-not-cross-chat-wire"),
                 )
                 .unwrap(),

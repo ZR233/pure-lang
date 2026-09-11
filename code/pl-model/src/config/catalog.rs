@@ -78,7 +78,7 @@ impl ProviderCatalogRegistry {
             preset(
                 "deepseek",
                 ProviderEndpoint::deepseek(None),
-                "deepseek-v4-flash",
+                "deepseek-flash",
                 "deepseek",
                 "DEEPSEEK_API_KEY",
                 "DeepSeek reasoning and coding models.",

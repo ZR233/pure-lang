@@ -511,10 +511,10 @@ mod tests {
             .prepared_content(image_prepared_content())
             .build();
 
-        let model = bundled_model("deepseek-v4-flash-vision-exp");
+        let model = bundled_model("deepseek-flash");
         let body = OpenAiProtocol::responses().build_request_body_with_model(&request, &model);
 
-        assert_eq!(body["model"], "deepseek-v4-flash-vision-exp");
+        assert_eq!(body["model"], "deepseek-flash");
         assert_eq!(body["input"][0]["role"], "user");
         assert_eq!(body["input"][0]["content"][0]["type"], "input_text");
         assert_eq!(body["input"][0]["content"][0]["text"], "describe");
@@ -532,10 +532,8 @@ mod tests {
             .prepared_content(image_prepared_content())
             .build();
 
-        let body = OpenAiProtocol::responses().build_request_body_with_model(
-            &request,
-            &bundled_model("deepseek-v4-flash-vision-exp"),
-        );
+        let body = OpenAiProtocol::responses()
+            .build_request_body_with_model(&request, &bundled_model("deepseek-flash"));
 
         assert_eq!(body["input"][0]["type"], "function_call");
         assert_eq!(body["input"][1]["type"], "function_call");

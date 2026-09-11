@@ -144,7 +144,7 @@ void registerControllerStreamTests() {
       final save = controller.setModelRole(
         roleKey: 'planner',
         providerId: 'deepseek',
-        model: 'deepseek-reasoner',
+        model: 'deepseek-flash',
         effort: 'max',
       );
       await pumpEventQueue();
@@ -175,7 +175,7 @@ void registerControllerStreamTests() {
                   ? const RoleSettingsView(
                       key: 'planner',
                       providerId: 'deepseek',
-                      model: 'deepseek-reasoner',
+                      model: 'deepseek-flash',
                       effort: 'max',
                     )
                   : role,

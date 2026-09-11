@@ -395,10 +395,7 @@ mod tests {
             route(&config, StudioRole::Planner).provider.as_str(),
             "deepseek"
         );
-        assert_eq!(
-            route(&config, StudioRole::Planner).model,
-            "deepseek-v4-flash"
-        );
+        assert_eq!(route(&config, StudioRole::Planner).model, "deepseek-flash");
         assert_eq!(
             provider(&config, "deepseek").bearer_token.as_deref(),
             Some("sk-deepseek")

@@ -12,7 +12,7 @@ const _testProviderCatalog = ProviderCatalogView(
       credentialLabel: 'API Key',
       credentialEnv: 'DEEPSEEK_API_KEY',
       modelCatalogId: 'deepseek',
-      suggestedModel: 'deepseek-v4-flash',
+      suggestedModel: 'deepseek-flash',
       hostedWebSearch: true,
       hostedWebSearchDialect: 'deepseek_responses',
       promptCacheDialect: 'implicit_prefix',
@@ -71,22 +71,8 @@ const _testProviderCatalog = ProviderCatalogView(
     'openai-compatible': [],
     'deepseek': [
       ProviderModelView(
-        slug: 'deepseek-v4-flash',
-        displayName: 'DeepSeek V4 Flash',
-        inputCapabilities: [
-          ModelInputCapabilityView(
-            modality: ModelModalityView.text,
-            sources: [],
-          ),
-        ],
-        reasoningEfforts: ['high', 'max'],
-        defaultReasoningEffort: 'high',
-        wireProtocol: 'responses',
-        supportedConnectionModes: ['http'],
-      ),
-      ProviderModelView(
-        slug: 'deepseek-v4-flash-vision-exp',
-        displayName: 'DeepSeek V4 Flash Vision Exp',
+        slug: 'deepseek-flash',
+        displayName: 'DeepSeek V4.1 Flash',
         inputCapabilities: [
           ModelInputCapabilityView(
             modality: ModelModalityView.text,
@@ -106,23 +92,24 @@ const _testProviderCatalog = ProviderCatalogView(
             mediaTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],
           ),
         ],
-        reasoningEfforts: ['high', 'max'],
+        reasoningEfforts: ['low', 'high', 'max'],
         defaultReasoningEffort: 'high',
         wireProtocol: 'responses',
         supportedConnectionModes: ['http'],
       ),
       ProviderModelView(
-        slug: 'deepseek-reasoner',
-        displayName: 'DeepSeek Reasoner',
+        slug: 'deepseek-v4-pro',
+        displayName: 'DeepSeek V4 Pro',
         inputCapabilities: [
           ModelInputCapabilityView(
             modality: ModelModalityView.text,
             sources: [],
           ),
         ],
-        reasoningEfforts: ['high', 'max'],
+        reasoningEfforts: ['low', 'high', 'max'],
         defaultReasoningEffort: 'high',
-        wireProtocol: 'chat_completions',
+        wireProtocol: 'responses',
+        supportedConnectionModes: ['http'],
       ),
     ],
     'openai': [
@@ -316,7 +303,7 @@ StudioState _stateWithPlannerModels() {
               templateKind: 'deepseek',
               name: 'DeepSeek',
               baseUrl: 'https://api.deepseek.com',
-              defaultModel: 'deepseek-v4-flash',
+              defaultModel: 'deepseek-flash',
               models: [],
               status: 'ready',
               usageLabel: '2 models',
@@ -327,13 +314,13 @@ StudioState _stateWithPlannerModels() {
             RoleSettingsView(
               key: 'executor',
               providerId: 'deepseek',
-              model: 'deepseek-v4-flash',
+              model: 'deepseek-flash',
               effort: 'high',
             ),
             RoleSettingsView(
               key: 'planner',
               providerId: 'deepseek',
-              model: 'deepseek-v4-flash',
+              model: 'deepseek-flash',
               effort: 'high',
             ),
           ],
@@ -342,7 +329,7 @@ StudioState _stateWithPlannerModels() {
     ),
     workspacesByThread: {
       state.selectedThreadId!: state.selectedWorkspace!.copyWith(
-        runtime: state.runtime.copyWith(model: 'deepseek-v4-flash'),
+        runtime: state.runtime.copyWith(model: 'deepseek-flash'),
       ),
     },
   );
