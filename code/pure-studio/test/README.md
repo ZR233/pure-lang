@@ -32,3 +32,18 @@
 
 以上缺陷均记录了修复前失败与修复后通过；真实 GUI 另用隔离临时项目、Full 权限和
 真实模型完成文件读取、修改、执行测试、complete 收尾，以及失败提示与历史恢复验收。
+
+## 原生会话重启续聊
+
+保留隔离的 Studio home 与项目，在 GUI 关闭后通过 `cargo xtask run-gui --driver` 重启，
+再从仓库根目录运行（参数依次为 VM URL、原 Thread ID、续聊 prompt 文件、预期工具、证据前缀）：
+
+```sh
+cargo dart run test_driver/thread_recovery_acceptance_driver.dart "$VM_URL" "$THREAD_ID" "$PROMPT_FILE" read_file "$OUTPUT_PREFIX"
+```
+
+prompt 应要求读取原项目中的已知文件。Driver 必须观察到同一 Thread 的新 Turn 完成，且新增的
+工具回执包含预期工具成功；旧 Turn 完成、旧工具回执或仅能加载历史都不能使验收通过。
+Driver 保存快照和截图，并等待 runtime shutdown；启动 GUI 的宿主仍负责回收 Flutter/DTD/GUI 进程树。
+SSH 项目使用相同入口，保留服务器配置与远端测试目录。通用简洁模式允许普通回复完成，
+任务模式的 workflow/complete 专项断言仍要求成功的 `complete` 回执。

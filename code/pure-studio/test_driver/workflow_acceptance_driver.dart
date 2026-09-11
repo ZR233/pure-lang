@@ -446,7 +446,7 @@ Future<Map<String, dynamic>> _waitForSimpleCompletion(
     final lastTurn = workspace?['lastTurn'] as Map?;
     if (workflowFromSnapshot(last) == null &&
         lastTurn?['status'] == 'completed' &&
-        _hasSuccessfulComplete(last)) {
+        workspace?['isBusy'] == false) {
       return last;
     }
     final interaction = workspace?['activeInteraction'];

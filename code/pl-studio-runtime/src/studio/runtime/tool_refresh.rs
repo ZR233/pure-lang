@@ -278,6 +278,64 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     #[tokio::test]
+    async fn cold_activation_keeps_tools_and_directory_available_after_restart() {
+        let home = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let options = || crate::StudioRuntimeOptions {
+            studio_home: Some(home.path().to_owned()),
+            host: crate::StudioHostKind::Test,
+        };
+        let runtime = StudioRuntime::with_options(options()).await.unwrap();
+        runtime.start_runtime().await.unwrap();
+        runtime.stop_tool_refresh().await.unwrap();
+        let project = runtime.open_project(workspace.path()).await.unwrap();
+        let record = runtime
+            .create_thread(&project.id, "cold tools")
+            .await
+            .unwrap();
+        runtime.shutdown_runtime().await.unwrap();
+        drop(runtime);
+
+        let reopened = StudioRuntime::with_options(options()).await.unwrap();
+        reopened.start_runtime().await.unwrap();
+        // Drive the refresh explicitly so the regression does not depend on event timing.
+        reopened.stop_tool_refresh().await.unwrap();
+        assert!(
+            reopened
+                .agent_facility
+                .product_events
+                .thread_snapshot(&record.id)
+                .is_none()
+        );
+        let thread = reopened.ensure_thread_owner(&record.id).await.unwrap();
+        reopened
+            .refresh_tool_catalogs(&CatalogSources::default(), &mut BTreeMap::new())
+            .await;
+        let issues = reopened.recovery_issues();
+        assert!(
+            issues.is_empty(),
+            "cold activation must not invalidate tools: {issues:?}"
+        );
+        thread
+            .reveal_tools(vec!["read_file".into(), "complete".into()])
+            .await
+            .unwrap();
+        reopened
+            .synchronize_thread_observation(&record.id)
+            .await
+            .unwrap();
+        let directory = reopened
+            .agent_facility
+            .product_events
+            .thread_snapshot(&record.id)
+            .unwrap();
+        assert_eq!(directory.status, pl_protocol::ThreadStatus::Idle);
+        assert_eq!(directory.title, record.title);
+        reopened.read_owned_thread(&record.id).await.unwrap();
+        reopened.shutdown_runtime().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn delayed_simple_catalog_cannot_remove_tools_installed_by_task_mode_switch() {
         let home = tempfile::tempdir().unwrap();
         let workspace = tempfile::tempdir().unwrap();

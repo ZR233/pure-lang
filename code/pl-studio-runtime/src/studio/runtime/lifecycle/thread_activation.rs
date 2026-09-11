@@ -15,6 +15,7 @@ impl StudioRuntime {
             return Ok(thread);
         }
         let mut ancestry = Vec::new();
+        let mut directory = Vec::new();
         let mut seen = std::collections::BTreeSet::new();
         let mut cursor = id.to_owned();
         loop {
@@ -27,6 +28,7 @@ impl StudioRuntime {
                 record.visibility == crate::studio::ThreadVisibility::Active,
                 "archived Thread cannot be activated for execution"
             );
+            directory.push(pl_protocol::Thread::from(record.clone()));
             ancestry.push(ThreadActivation {
                 id: record.id,
                 parent_id: record.parent_thread_id.clone(),
@@ -36,6 +38,11 @@ impl StudioRuntime {
             };
             cursor = parent;
         }
+        // Observers and tool refresh can run as soon as activation publishes an owner.
+        // Warm the validated ancestry first, preserving any newer in-memory entries.
+        self.agent_facility
+            .product_events
+            .warm_thread_index(directory);
         for identity in ancestry.into_iter().rev() {
             let activated_id = identity.id.clone();
             self.threads
