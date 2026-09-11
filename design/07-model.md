@@ -244,6 +244,11 @@ Bundled catalog 只读，配置只能通过 `additional_models` 追加不冲突 
 
 模型信息中的 `base_instructions` 是模型级基础提示词来源，进入 Studio 的 instruction assembler；配置中的 `[instructions].base_override` 可以完整替换它。模型信息中的 `context_window`、`max_context_window` 和 `auto_compact_token_limit` 只描述模型能力与默认阈值。压缩政策与摘要要求由 Studio 选择，model 执行辅助调用；core 校验并原子提交上下文替换与持久化，`pl-model` 不维护压缩状态。
 
+模型调用 binding 在请求准备阶段冻结解析后的可选 `context_window`，随请求及结果 receipt 保存，
+供实时和历史消费者读取。容量来自实际绑定模型的 `context_window`，缺失时使用其
+`max_context_window`；未知容量保持 `None`。旧 receipt 缺少该字段仍可解码为未知，不能读取
+当前模型目录补写历史容量，也不能把输出 token 上限或累计用量当成上下文容量。
+
 `CompletionRequest.input` 使用 provider 无关的有序 `ModelContextItem`，包括普通 `Message` 和专用 `Compaction { encryptedContent }`；`.messages(...)` 只是不含 checkpoint 的便捷构造器。Responses request 可以把 compaction item 映射为原生输入，Chat Completions 必须明确拒绝。`ModelRuntime::compaction()` 返回实际支持远程压缩的能力对象，接收有序上下文并返回保真上下文与最终 accounting。能力由 endpoint 显式声明，不能从 Responses 协议推断；网络执行复用共享执行器并固定使用 HTTP。
 
 ## 7.8 模型可调参数

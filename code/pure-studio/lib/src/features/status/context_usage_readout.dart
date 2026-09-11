@@ -24,16 +24,19 @@ class _ContextUsageReadoutState extends State<ContextUsageReadout> {
   @override
   Widget build(BuildContext context) {
     final runtime = widget.runtime;
-    final progress = runtime.contextWindow <= 0
-        ? 0.0
-        : (runtime.contextTokens / runtime.contextWindow).clamp(0.0, 1.0);
-    final percent = (progress * 100).round();
+    final hasKnownCapacity = runtime.contextWindow > 0;
+    final progress = hasKnownCapacity
+        ? (runtime.contextTokens / runtime.contextWindow).clamp(0.0, 1.0)
+        : 0.0;
     return KeyedSubtree(
       key: StudioDriverKeys.contextUsage(),
       child: StatusDetailPopover(
         width: 360,
         semanticsLabel: context.l10n.statusContextLabel,
-        semanticsValue: '$percent%',
+        semanticsValue: _contextPercentLabel(
+          progress: progress,
+          hasKnownCapacity: hasKnownCapacity,
+        ),
         onFocusChange: (focused) => setState(() => _focused = focused),
         detailBuilder: (context) => KeyedSubtree(
           key: StudioDriverKeys.contextUsageDetail(),
@@ -101,7 +104,14 @@ class _ContextDetail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final percent = (progress * 100).round();
+    final hasKnownCapacity = runtime.contextWindow > 0;
+    final percentLabel = _contextPercentLabel(
+      progress: progress,
+      hasKnownCapacity: hasKnownCapacity,
+    );
+    final capacityLabel = hasKnownCapacity
+        ? _formatCount(runtime.contextWindow)
+        : _unknownCapacityPlaceholder;
     final cacheRate = runtime.effectiveCacheHitRate;
     final cost = runtime.estimatedCosts.isEmpty
         ? runtime.costLabel
@@ -131,7 +141,7 @@ class _ContextDetail extends StatelessWidget {
                 ),
               ),
               Text(
-                '$percent%',
+                percentLabel,
                 style: context.text.titleMedium?.copyWith(
                   color: context.colors.onSurface,
                   fontWeight: FontWeight.w700,
@@ -148,7 +158,7 @@ class _ContextDetail extends StatelessWidget {
               StatusDetailRow(
                 label: context.l10n.statusContextLabel,
                 value:
-                    '${_formatCount(runtime.contextTokens)} / ${_formatCount(runtime.contextWindow)}',
+                    '${_formatCount(runtime.contextTokens)} / $capacityLabel',
               ),
               StatusDetailRow(
                 label: context.l10n.statusTotalTokensLabel,
@@ -262,6 +272,26 @@ class _ContextUsagePainter extends CustomPainter {
         strokeWidth != oldDelegate.strokeWidth ||
         radiusInset != oldDelegate.radiusInset;
   }
+}
+
+/// Placeholder shown when the runtime reports no known context capacity.
+///
+/// Unknown or non-positive capacity must not masquerade as a `0` / `0%`
+/// reading; see `design/11-studio-ui.md`.
+const _unknownCapacityPlaceholder = '—';
+
+/// Percentage label for the context ring.
+///
+/// Unknown capacity returns the `—` placeholder instead of a misleading `0%`;
+/// a known positive capacity with zero usage still reports `0%`.
+String _contextPercentLabel({
+  required double progress,
+  required bool hasKnownCapacity,
+}) {
+  if (!hasKnownCapacity) {
+    return _unknownCapacityPlaceholder;
+  }
+  return '${(progress * 100).round()}%';
 }
 
 String _formatCount(int value) {

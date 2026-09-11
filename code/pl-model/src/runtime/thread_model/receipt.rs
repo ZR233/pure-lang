@@ -17,6 +17,12 @@ pub struct ModelCallBinding {
     pub protocol: ProviderWireProtocol,
     pub isolation: String,
     pub purpose: String,
+    /// Context capacity frozen with the bound model before execution; `None` stays unknown.
+    ///
+    /// Receipts saved before this field existed decode as unknown rather than reading a
+    /// current model catalog, and an absent value never falls back to output limits or usage.
+    #[serde(default)]
+    pub context_window: Option<u64>,
 }
 
 impl ModelCallBinding {
@@ -31,6 +37,7 @@ impl ModelCallBinding {
                 runtime.endpoint(),
             ),
             purpose: purpose.to_owned(),
+            context_window: runtime.model().resolved_context_window(),
         }
     }
 }
@@ -188,6 +195,72 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
 
+    fn catalog_runtime(slug: &str) -> ModelRuntime {
+        let info = crate::model::default_models()
+            .into_iter()
+            .find(|model| model.slug == slug)
+            .expect("bundled catalog model exists");
+        ModelRuntime::new(crate::provider::ProviderEndpoint::deepseek(None), info)
+            .expect("bundled model binds to its provider endpoint")
+    }
+
+    #[test]
+    fn binding_freezes_the_resolved_deepseek_catalog_capacity() {
+        for slug in ["deepseek-flash", "deepseek-v4-pro"] {
+            let runtime = catalog_runtime(slug);
+            let binding = ModelCallBinding::capture(&runtime, "turn");
+            assert_eq!(binding.requested_model, slug);
+            assert_eq!(binding.context_window, Some(1_000_000), "slug {slug}");
+        }
+    }
+
+    #[test]
+    fn binding_falls_back_to_max_context_window_and_keeps_missing_capacity_unknown() {
+        let mut fallback = crate::model::ModelInfo::compatible("fallback-model");
+        fallback.context_window = None;
+        fallback.max_context_window = Some(200_000);
+        let runtime =
+            ModelRuntime::new(crate::provider::ProviderEndpoint::deepseek(None), fallback)
+                .expect("compatible model binds to its provider endpoint");
+        assert_eq!(
+            ModelCallBinding::capture(&runtime, "turn").context_window,
+            Some(200_000)
+        );
+
+        let mut unknown = crate::model::ModelInfo::compatible("unknown-model");
+        unknown.context_window = None;
+        unknown.max_context_window = None;
+        let runtime = ModelRuntime::new(crate::provider::ProviderEndpoint::deepseek(None), unknown)
+            .expect("compatible model binds to its provider endpoint");
+        assert_eq!(
+            ModelCallBinding::capture(&runtime, "turn").context_window,
+            None
+        );
+    }
+
+    #[test]
+    fn saved_request_receipt_without_a_capacity_field_decodes_as_unknown() {
+        let runtime = catalog_runtime("deepseek-flash");
+        let binding = ModelCallBinding::capture(&runtime, "turn");
+        let payload = request_metadata(
+            &binding,
+            &crate::completion::CompletionRequest::builder().build(),
+        )
+        .expect("request metadata encodes");
+        let mut saved: serde_json::Value =
+            serde_json::from_str(payload.content()).expect("request metadata is JSON");
+        saved["binding"]
+            .as_object_mut()
+            .expect("binding is a JSON object")
+            .remove("contextWindow");
+        let legacy =
+            pl_core::context::OpaquePayload::new("pl.model.prepared-request", 1, saved.to_string())
+                .expect("static format and version are valid");
+        let decoded = model_request_receipt(&legacy).expect("legacy record decodes");
+        assert_eq!(decoded.binding.requested_model, "deepseek-flash");
+        assert_eq!(decoded.binding.context_window, None);
+    }
+
     #[test]
     fn failure_history_retains_frozen_accounting_and_binding_without_repricing() {
         let accounting = crate::completion::InferenceAccounting {
@@ -215,6 +288,7 @@ mod tests {
             protocol: ProviderWireProtocol::ChatCompletions,
             isolation: "opaque-boundary".into(),
             purpose: "review".into(),
+            context_window: Some(1_000_000),
         };
         let error = failure_error(
             binding,
@@ -230,5 +304,6 @@ mod tests {
         assert_eq!(receipt.accounting, original);
         assert_eq!(receipt.binding.purpose, "review");
         assert_eq!(receipt.binding.provider_instance_id, "original-provider");
+        assert_eq!(receipt.binding.context_window, Some(1_000_000));
     }
 }

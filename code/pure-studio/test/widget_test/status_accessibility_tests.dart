@@ -54,6 +54,69 @@ void registerStatusAccessibilityTests() {
       expect(find.text('42 / 100'), findsOneWidget);
     });
 
+    group('context capacity availability', () {
+      testWidgets('unknown capacity shows a placeholder instead of a fake 0%', (
+        tester,
+      ) async {
+        await _pumpContextReadout(tester, _unknownCapacityRuntime);
+
+        expect(_contextSemanticsValue(tester), '—');
+
+        await tester.tap(find.bySemanticsLabel('Context'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('—'), findsOneWidget);
+        expect(find.text('42 / —'), findsOneWidget);
+        expect(find.text('42 / 0'), findsNothing);
+        expect(find.text('0%'), findsNothing);
+      });
+
+      testWidgets('non-positive capacity mirrors the unknown placeholder', (
+        tester,
+      ) async {
+        await _pumpContextReadout(tester, _nonPositiveCapacityRuntime);
+
+        expect(_contextSemanticsValue(tester), '—');
+
+        await tester.tap(find.bySemanticsLabel('Context'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('—'), findsOneWidget);
+        expect(find.text('42 / —'), findsOneWidget);
+        expect(find.text('0%'), findsNothing);
+      });
+
+      testWidgets('known capacity keeps the existing formatted readout', (
+        tester,
+      ) async {
+        await _pumpContextReadout(tester, _millionCapacityRuntime);
+
+        expect(_contextSemanticsValue(tester), '25%');
+
+        await tester.tap(find.bySemanticsLabel('Context'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('25%'), findsOneWidget);
+        expect(find.text('250,000 / 1,000,000'), findsOneWidget);
+        expect(find.text('—'), findsNothing);
+      });
+
+      testWidgets('known capacity with zero usage still reports 0%', (
+        tester,
+      ) async {
+        await _pumpContextReadout(tester, _zeroUsageKnownCapacityRuntime);
+
+        expect(_contextSemanticsValue(tester), '0%');
+
+        await tester.tap(find.bySemanticsLabel('Context'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('0%'), findsOneWidget);
+        expect(find.text('0 / 100,000'), findsOneWidget);
+        expect(find.text('—'), findsNothing);
+      });
+    });
+
     testWidgets('cache readout exposes aggregate billing details', (
       tester,
     ) async {
@@ -637,6 +700,28 @@ Future<Finder> _pumpContextWithNextFocus(WidgetTester tester) async {
   return contextButton;
 }
 
+Future<void> _pumpContextReadout(
+  WidgetTester tester,
+  ThreadRuntimeView runtime,
+) async {
+  await tester.pumpWidget(
+    _localizedApp(
+      home: Scaffold(
+        body: Align(
+          alignment: Alignment.bottomLeft,
+          child: ContextUsageReadout(runtime: runtime),
+        ),
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
+
+String _contextSemanticsValue(WidgetTester tester) => tester
+    .getSemantics(find.bySemanticsLabel('Context'))
+    .getSemanticsData()
+    .value;
+
 const _contextFocusTargetKey = ValueKey('context-focus-target');
 
 Future<_FakeStudioApi> _pumpThreadStatusBar(
@@ -731,6 +816,54 @@ const _unpricedRuntime = ThreadRuntimeView(
   activeLspServers: [],
   agentCount: 0,
   hasUnpricedUsage: true,
+);
+
+const _unknownCapacityRuntime = ThreadRuntimeView(
+  model: 'planner/local',
+  contextTokens: 42,
+  contextWindow: 0,
+  totalTokens: 128,
+  costLabel: '',
+  activeSkills: [],
+  activeMcpServers: [],
+  activeLspServers: [],
+  agentCount: 0,
+);
+
+const _nonPositiveCapacityRuntime = ThreadRuntimeView(
+  model: 'planner/local',
+  contextTokens: 42,
+  contextWindow: -5,
+  totalTokens: 128,
+  costLabel: '',
+  activeSkills: [],
+  activeMcpServers: [],
+  activeLspServers: [],
+  agentCount: 0,
+);
+
+const _millionCapacityRuntime = ThreadRuntimeView(
+  model: 'deepseek-v4-pro',
+  contextTokens: 250000,
+  contextWindow: 1000000,
+  totalTokens: 250000,
+  costLabel: '',
+  activeSkills: [],
+  activeMcpServers: [],
+  activeLspServers: [],
+  agentCount: 0,
+);
+
+const _zeroUsageKnownCapacityRuntime = ThreadRuntimeView(
+  model: 'planner/local',
+  contextTokens: 0,
+  contextWindow: 100000,
+  totalTokens: 0,
+  costLabel: '',
+  activeSkills: [],
+  activeMcpServers: [],
+  activeLspServers: [],
+  agentCount: 0,
 );
 
 const _cacheRuntime = ThreadRuntimeView(

@@ -587,6 +587,7 @@ mod tests {
                     adapter: crate::provider::ProviderAdapterKind::DeepSeek,
                     protocol: crate::provider::ProviderWireProtocol::ChatCompletions,
                     isolation: "test".into(),
+                    context_window: None,
                 },
                 response: CompletionResponse {
                     response_id: None,
@@ -733,6 +734,7 @@ mod tests {
                     protocol: crate::provider::ProviderWireProtocol::ChatCompletions,
                     isolation: "opaque-isolation-digest".into(),
                     purpose: "review".into(),
+                    context_window: Some(1_000_000),
                 },
             },
             response_value,
@@ -742,6 +744,7 @@ mod tests {
         assert_eq!(serde_json::to_value(&saved.response).unwrap(), original);
         assert_eq!(saved.binding.purpose, "review");
         assert_eq!(saved.binding.requested_model, "requested-model");
+        assert_eq!(saved.binding.context_window, Some(1_000_000));
         assert_eq!(saved.response.model, "reported-model");
         input.context = ContextSnapshot {
             revision: 1,

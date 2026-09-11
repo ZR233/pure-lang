@@ -10,6 +10,11 @@ data 层负责 FRB DTO 到 domain 的一次转换；reducer 只接收 canonical 
 只负责展示与发命令。窗口关闭必须等待 typed shutdown 完成并回收 Flutter、DTD、MCP/LSP 和 child
 process tree。
 
+状态栏上下文悬浮窗展示 runtime 的已用 token 与模型总容量，容量来自模型调用时冻结的 binding，
+不在前端按 provider 硬编码或查询当前目录回填历史。容量未知（包括现有 Dart 映射中的非正值）时，
+总容量及百分比以 `—` 占位，可访问性值同样不报告虚假的 `0%`，圆环只显示底圈。
+已知正容量且已用 token 为零时正常显示 `0%`；累计总 token 与上下文容量仍为不同统计。
+
 ## 11.2 动态模式
 
 新 Thread 默认选择 `mode.simple`。composer 的模式 selector 读取 `ThreadModeCatalogSnapshot`，使用

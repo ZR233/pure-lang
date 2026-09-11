@@ -129,6 +129,7 @@ mod tests {
                     protocol: pl_model::provider::ProviderWireProtocol::ChatCompletions,
                     isolation: "frozen-isolation".into(),
                     purpose: "compaction".into(),
+                    context_window: None,
                 },
                 reasoning_effort: None,
                 context_window: None,
