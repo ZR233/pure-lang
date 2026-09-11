@@ -327,6 +327,23 @@ mod tests {
 
     async fn runtime_with_thread() -> (tempfile::TempDir, tempfile::TempDir, StudioRuntime, String)
     {
+        runtime_with_thread_config(|_| {}).await
+    }
+
+    async fn runtime_with_thread_without_optional_tools()
+    -> (tempfile::TempDir, tempfile::TempDir, StudioRuntime, String) {
+        runtime_with_thread_config(|config| {
+            config.skills.enabled = false;
+            config.runtime.tool_capabilities.skills = false;
+            config.runtime.tool_capabilities.mcp = false;
+            config.runtime.tool_capabilities.lsp = false;
+        })
+        .await
+    }
+
+    async fn runtime_with_thread_config(
+        configure: impl FnOnce(&mut crate::config::StudioConfig),
+    ) -> (tempfile::TempDir, tempfile::TempDir, StudioRuntime, String) {
         let home = tempfile::tempdir().unwrap();
         let workspace = tempfile::tempdir().unwrap();
         let runtime = StudioRuntime::with_options(StudioRuntimeOptions {
@@ -335,6 +352,15 @@ mod tests {
         })
         .await
         .unwrap();
+        let current = runtime.config_runtime.read().unwrap();
+        runtime
+            .config_runtime
+            .update(current.revision, |config| {
+                let mut next = config.clone();
+                configure(&mut next);
+                Ok(next)
+            })
+            .unwrap();
         runtime.start_runtime().await.unwrap();
         let project = runtime.open_project(workspace.path()).await.unwrap();
         let thread = runtime
@@ -383,7 +409,8 @@ mod tests {
     #[tokio::test]
     async fn unsaved_new_thread_reconnects_from_memory_and_flushes_latest_directory_after_retry() {
         use sea_orm::ConnectionTrait;
-        let (_home, _workspace, runtime, existing_id) = runtime_with_thread().await;
+        let (_home, _workspace, runtime, existing_id) =
+            runtime_with_thread_without_optional_tools().await;
         let project_id = runtime
             .read_owned_thread(&existing_id)
             .await
