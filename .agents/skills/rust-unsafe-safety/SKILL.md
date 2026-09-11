@@ -1,27 +1,26 @@
 ---
 name: rust-unsafe-safety
-description: 编写、修改、封装、调试或审查 Pure-Lang 中的 unsafe 块、unsafe 函数或 trait、unsafe impl、裸指针、FFI/FRB/系统 API、C 字符串与缓冲区、回调上下文、手工布局或外部资源句柄时使用。
+description: 编写、修改、封装或审查 Rust unsafe、unsafe trait/impl、裸指针、FFI、手工布局及外部资源句柄时使用。在 Pure-Lang 中包括 FRB、系统 API、C 字符串、缓冲区和回调上下文的安全边界。
 ---
 
-# Rust unsafe 健全性
+# Rust 非安全代码健全性
 
-## 工作流
+本技能关注编译器无法证明、必须由实现者或调用方维护的内存安全前置条件。安全函数内部的非安全操作同样需要证明。
 
-1. 找到所有安全入口、`unsafe` 操作和释放路径，区分调用方必须维护的前置条件与实现内部可以验证的条件。
-2. 任何新增或实质改变的 `unsafe` 边界都完整阅读 [契约与证明](references/contracts-and-proofs.md)。
-3. 涉及 FFI、Flutter Rust Bridge、系统 API、C ABI、外部缓冲区、回调或 OS handle 时，完整阅读 [FFI 与外部边界](references/ffi-and-foreign-boundaries.md)。
-4. 先使用安全类型验证长度、范围、对齐、状态和所有权，再把不可替代操作缩到最小 `unsafe` 块。
-5. 为每个块记录本地证明，并用边界与失败测试补充证据；测试、Miri、sanitizer 或静态检查不能替代逐项证明。
+## 按需阅读
 
-## 基本要求
+- 新增或改变非安全边界：完整阅读[契约与证明](references/contracts-and-proofs.md)。
+- FFI、FRB、系统 API、外部缓冲区、回调或资源句柄：同时完整阅读[FFI 与外部边界](references/ffi-and-foreign-boundaries.md)。
+- 证明涉及同步、取消或跨线程共享：同时使用 `rust-concurrency-safety`。
 
-- 块前说明指针来源、有效范围、对齐、初始化、别名、生命周期、线程访问、释放责任和外部状态中实际相关的条件。
-- 不写“调用方保证安全”或“已检查”这类无证据注释；指向附近检查、类型保证或上层 `# Safety` 条款。
-- 能由实现检查或类型表达的条件不推给调用方。安全包装对所有安全调用都必须健全，包括错误、取消、panic、重复调用和并发路径。
-- 每个 `unsafe fn`、`unsafe trait` 及要求调用方维护安全前置条件的接口都提供 `# Safety` 文档。
-- 每个 `unsafe impl Send/Sync` 逐字段证明跨线程转移或共享成立；存在锁不自动证明所有字段受保护。
-- 不让 panic 穿越不支持 unwind 的 FFI 边界，不从未经验证的外部值构造 Rust enum、引用或字符串。
+## 责任与证明
+
+`unsafe` 块保持最小，在附近说明本次操作的指针来源、范围、对齐、初始化、别名、生命周期、线程访问和释放责任中实际相关的条件。不能只写“调用方保证安全”或“已经检查”。
+
+`unsafe fn` 的 `# Safety` 规定调用方义务；`unsafe trait` 的 `# Safety` 规定实现者义务，`unsafe impl` 说明如何履行。trait 的安全方法不能把额外安全义务转给调用方；需要调用方承担无法检查的条件时，方法自身声明为 `unsafe fn`。能由实现检查或由类型保证的条件留在实现侧。
 
 ## 验收
 
-从每个安全入口追踪到全部 `unsafe` 操作，再追踪正常、错误、取消与 panic 路径的最终释放。每项编译器无法验证的前置条件都有可审查证明；测试覆盖空值、零长度、错位、截断、重复释放、并发关闭与错误回滚。
+从每个安全入口追踪正常、错误、取消、panic 与并发路径，直到最终释放。实质改变安全契约时，由具备相应能力的独立审查者核对证明；这是技术验证，不另设人工授权流程，也不授予提交或发布权限。
+
+测试按 `test-quality` 从合法入口验证行为，不能故意违反 unsafe 调用前置条件制造未定义行为。Miri、sanitizer、模型检查和测试只能补充证据，不能替代安全证明。

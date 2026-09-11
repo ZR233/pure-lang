@@ -1,4 +1,4 @@
 interface:
   display_name: "Rust 并发安全"
-  short_description: "分析 Rust 锁、原子、异步取消、共享状态和资源生命周期"
-  default_prompt: "请使用 $rust-concurrency-safety 分析这项并发改动的同步与生命周期安全性。"
+  short_description: "证明发布与观察、异步取消、等待唤醒及资源回收的正确性"
+  default_prompt: "请使用 $rust-concurrency-safety 核对同步、取消与关闭链路，并给出具体交错证据。"

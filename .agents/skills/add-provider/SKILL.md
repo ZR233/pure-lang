@@ -32,7 +32,7 @@ factory dispatch 或兼容 wrapper。
 - 优先复用 `ModelFamily`，单模型只声明 slug、显示信息、窗口、价格等差异字段。
 - 用 `ModelTransportProfile` 声明 protocol、支持的连接模式与默认连接模式。
 - 用 `ModelRequestProfile`、`ModelParameter` 和 `ParameterWire` 表达 body/header/effort 差异。
-- 更新参数化 catalog 测试，覆盖能力、transport、价格和 request profile。
+- 先按 `test-quality` 检查已有能力、transport、价格及 request profile 的完整行为证明。仅增加遵循既有规则的模型条目不新增名称、数量或默认值清单镜像；解析、选择、计价或 wire 规则改变时，优先用合成样例增强真实行为测试。需要真实 provider 兼容证据时使用显式 opt-in 验收，不以清单回读替代。
 
 ### 2. `code/pl-model/src/provider/mod.rs` — endpoint 数据
 

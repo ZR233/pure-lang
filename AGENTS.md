@@ -1,6 +1,6 @@
 # Pure-Lang Agent 协作规范
 
-本文件是本仓库面向 Codex、Claude 和其他 AI agent 的唯一项目级协作规范。与用户交流、计划、总结和 PR 描述默认使用中文。
+本文件是本仓库面向 Codex、Claude 和其他 AI agent 的唯一项目级协作规范。与用户交流、计划、总结和 PR 描述默认使用中文。命令、路径、代码标识符和正式技术名称保留原文；通用质量方法通过下文技能入口按需读取。
 
 ## 协作与变更原则
 
@@ -28,6 +28,7 @@
 
 ### 基本目录
 
+- 仓库 Python 脚本统一用 `python3` 运行；系统 `python` 是 Python 2。
 - Rust crate 名称统一以 `pl-` 开头，例如 `pl-core`、`pl-model`、`pl-studio-bridge`。
 - Flutter app 的 Dart package 名称是 `pure_studio`。
 - Flutter 项目根目录是 `code/pure-studio`。
@@ -57,8 +58,9 @@
 - 不支持直接执行 `flutter build windows|linux` 或 `flutter run -d windows|linux`，也不新增 PowerShell GUI wrapper。
 - Linux 原生 GUI 需要 Clang/C++ 标准库、CMake、Ninja、pkg-config 与 GTK 3 开发文件；Debian/Ubuntu 示例为 `sudo apt-get install -y clang cmake ninja-build pkg-config build-essential libgtk-3-dev`。xtask 必须用当前 PATH 和真实最小 GTK/C++ 工程预检，缺失时透传实际命令与原始错误；不得写死编译器版本、系统库路径或注入机器专用 include/library 环境。Rust 桥以 `libpl_studio_bridge.so` 预构建并经 `PURE_STUDIO_BRIDGE_LIBRARY` 环境变量注入 CMake，与 Windows 的 DLL 契约一致。
 - `cargo xtask run-gui --driver` 使用 `test_driver/driver_main.dart` 启用 Flutter Driver extension，供 Dart MCP 的 `flutter_driver_command` 操作 GUI；xtask 不负责启动实验性的 `dart mcp-server`。
+- 本地原生验收默认使用当前受支持宿主平台，报告中明确平台与覆盖范围，不把单平台结果外推为跨平台通过；跨平台任务按实际影响说明其他平台的验证结果或缺口。
 - GUI smoke 使用 `cargo xtask run-gui --demo`；需要确定性数据和交互验收时使用 `cargo xtask run-gui --demo --driver`。
-- Driver 命令结束后，其 Flutter、DTD 和 GUI 子进程必须随 Windows Job Object 一起退出，不得残留。
+- Driver 命令在正常完成、失败或取消后都必须等待并回收所属 Flutter、DTD、GUI 及其子进程，不得残留；Windows 使用 Job Object 管理进程树，Linux 使用项目的进程树生命周期机制。
 - 调试和验收 Flutter GUI 时，Flutter Driver 能覆盖的交互必须使用 Flutter Driver，不使用 Computer Use。只有 Driver 无法覆盖且确有必要时，才可使用 Computer Use，以减少对用户鼠标、键盘、窗口焦点和桌面状态的影响。
 
 ### Web GUI 远程验收
@@ -76,7 +78,7 @@
   ```
 
 - 不得手工修改生成文件，也不得直接调用单个生成器。
-- 修改生成输入后运行 `cargo xtask check-gui-generated` 检查 canonical 输出，并分开审查生成 diff 与手写 diff。
+- 修改生成输入后运行 `cargo xtask check-gui-generated` 检查 canonical 输出，并分开审查生成 diff 与手写 diff。已授权的代码修改或生成一致性验证包含这些命令所需的生成操作，不为常规生成另行确认；用户明确限定只读时，不运行会改写跟踪文件的命令，报告未验证项。
 - 普通 `run-gui` 和 `build-gui` 只消费当前源码，不运行生成器或可写格式化；修改生成输入后必须先显式运行 `cargo xtask generate-gui`。
 - `check-gui-generated`、`verify-gui` 和 `build-gui --check-generated` 会重新生成并检查 canonical 输出，适用于提交前、CI 和发布门禁。
 - Git 索引与普通源码统一使用 LF；PowerShell、RC 和 Inno Setup 文件使用 CRLF，`.gitattributes` 与 `.editorconfig` 必须保持一致。不得通过全局 Git 配置、构建后索引刷新或全仓 renormalize 修复行尾。
@@ -95,53 +97,24 @@
 
 ## 工程边界
 
-### Rust 模块与文件
+### 质量技能入口
 
-- 模块默认私有。稳定领域边界优先使用 `pub mod` 形成可读命名空间；只有少量高频入口确实适合上层时，才使用精确 `pub use`。
-- 单一职责模块优先使用 `foo.rs`；只有当模块已拥有多个真实、内聚的子职责时，才升级为 `foo/mod.rs` + `foo/child.rs`。不保留只有 `mod.rs` 的目录，也不用 `mod.rs` 空壳转发唯一子文件。
-- `lib.rs` 和目录模块的 `mod.rs` 是目录页：先写职责，再声明模块并在自然边界导出稳定入口；大量实现必须下沉到职责明确的子文件。
-- 当某个模块的全部公共项都属于上层稳定 API 时，允许使用 `pub use module::*` 简化导出；不得用通配 re-export 暴露 `raw`、`imp`、`sys`、`unsafe_impl` 等内部细节。
-- 同一公开接口只保留一条 canonical 路径；除非存在明确的跨版本兼容责任，不同时保留根导出与子模块导出。
-- 文件和模块按变化原因拆分。单个生产模块目标不超过 500 行；超过约 800 行时必须拆分或说明其仍为单一职责。
-- 源文件按阅读顺序组织：核心类型与公共入口在前，编排步骤向下展开，边界 helper 靠后，`#[cfg(test)] mod tests` 作为最后一个 item。
-- `main.rs` 只负责参数解析、初始化、错误报告和调用库入口，不承载业务规则。
+通用设计、实现与测试规则由以下技能维护，本文件只规定项目约束。按任务语义选择，不以文件名或改动规模代替判断；多个边界同时涉及时组合使用，不把普通改动扩展为无关专项审计。
 
-### Rust API 与实现
+| 任务语义 | 技能 |
+| --- | --- |
+| Rust 实现、错误传播、重构与审查 | [rust-code-quality](.agents/skills/rust-code-quality/SKILL.md) |
+| 公共接口、类型、错误、模块、依赖与协议 | [rust-api-design](.agents/skills/rust-api-design/SKILL.md) |
+| 同步、异步取消、回调与资源生命周期 | [rust-concurrency-safety](.agents/skills/rust-concurrency-safety/SKILL.md) |
+| unsafe、FFI、外部句柄与安全证明 | [rust-unsafe-safety](.agents/skills/rust-unsafe-safety/SKILL.md) |
+| 测试设计、回归、层级、必要性与去重 | [test-quality](.agents/skills/test-quality/SKILL.md) |
 
-- 名字表达业务意图；类型和 trait 使用 `UpperCamelCase`，函数、变量和模块使用 `snake_case`，常量使用 `SCREAMING_SNAKE_CASE`。
-- 编排函数只展示业务步骤，不夹杂底层解析、IO 或 unsafe 细节；不要为只调用一次且不能显著降低复杂度的逻辑创建 helper。
-- 超过 3 个参数时优先考虑 options struct、builder、领域对象或拆分职责；禁止语义不清的 `bool` / `Option<bool>` 参数。既有 API 无法修改时，在调用点用参数名注释说明语义。
-- 除非确实需要取得所有权，否则参数优先接收借用；用返回值、元组或结构体代替输出参数。
-- 用 newtype、enum 和领域类型表达约束，让非法状态难以构造；封闭集合优先使用可穷尽匹配的 enum。
-- struct 字段默认私有，通过构造函数和方法维护不变量；避免无必要的 clone、共享可变状态和 `Arc<Mutex<_>>`。
-- 领域对象维护业务不变量，不直接承担数据库、HTTP、文件系统、硬件或 wire 格式转换；DTO、存储模型和领域对象必须分离。
-- 第三方依赖类型只存在于 adapter/repository/runtime 等边界层，不污染核心领域 API。
-- trait 必须小而专注；共享状态用组合，共享行为用 trait，封闭变化用 enum，静态多态用泛型，确需运行期开放扩展时才用 `dyn Trait`。
-- 新增公共 trait 和公共 API 必须有 rustdoc，说明职责边界，以及适用的 `# Errors`、`# Panics`、`# Safety`；公共类型实现有意义的 `Debug`，文档示例优先用 `?` 而不是 `unwrap`。
+质量技能以 TGOSKits `4713bfc98f` 为迁移基线，经泛化后在本仓库独立维护；运行任务时不依赖源仓库。命令、授权与项目架构以本文件为准；技能负责相应方法与证明，不复制另一套审批或门禁。
 
-### Rust 代码风格与安全
+### Rust 异步接口约定
 
 - 禁止使用 `#[async_trait]` 和 `#[allow(async_fn_in_trait)]`。
-- 异步 trait 使用原生 RPITIT，并在返回 future 上显式声明 `Send`：
-
-  ```rust
-  pub trait Tool: Send + Sync {
-      fn execute(
-          &self,
-          input: ToolInput,
-      ) -> impl std::future::Future<Output = Result<ToolOutput>> + Send;
-  }
-  ```
-
-- 领域 enum、协议消息和状态机使用穷尽 `match`，不得用 `_ => {}` 静默吞掉未来变体。
-- 生产路径不得裸 `unwrap`；可恢复失败使用具体 `Result<T, E>`，不得用 `String`、`()` 或 panic 表达业务失败。错误包含操作、关键上下文和下层 source。测试可使用 `unwrap`，关键断言应提供清楚上下文。
-- `format!` 使用内联变量；合并可折叠 `if`；优先方法引用，避免无意义闭包。
-- JSON、TOML、YAML 等结构化数据使用 typed struct + serde 或现有解析库，不手写字符串拼接或解析。
-- 锁作用域必须短；不得持锁执行 IO、`.await`、复杂计算或外部回调。异步运行时中的阻塞任务必须隔离。
-- `unsafe` 块保持最小并由 safe API 包装；每个块说明安全不变量，`unsafe fn` 提供 `# Safety` 文档和边界测试。
-- 优先使用函数、泛型、trait 和 derive；宏只能解决无法由这些机制清晰消除的重复，不得隐藏复杂控制流。
-- 不把 `todo!()` 或 `unimplemented!()` 合入主分支。
-- 新依赖需说明必要性、维护状态、license、公共 API 影响、编译/体积/安全成本和现有替代方案。
+- 异步 trait 使用原生 RPITIT，在返回 future 上显式声明 `Send`；不通过宏隐藏生命周期或线程安全约束。
 
 ### 核心 crate
 
@@ -162,16 +135,12 @@
 
 ## 测试、检查与交付
 
-- 验证按改动与交付阶段选择：纯文档或技能修改核对内容、链接、规则一致性及可用的技能格式检查；局部代码修改先运行受影响的测试与静态检查，跨 crate、协议、构建或依赖变更扩展到相关消费者。提交前仍执行下列完整门禁；生成输入、GUI 行为与 live 验收分别遵守对应要求。
+- 验证按实际影响选择。纯文档、技能或协作规则修改（包括提交前）只检查内容、引用、规则一致性及适用格式，不运行 Rust、Flutter、GUI 或 live 全量验收；若同时改变构建／生成输入、运行配置或测试执行语义，则按这些实际影响验证。代码修改先运行定向检查，跨 crate、协议、构建或依赖变更扩展到相关消费者；提交前执行下述代码门禁，生成输入、GUI 行为与 live 验收另遵守对应要求。
 - 适用检查通过且需求已满足后直接交付；只有新修改、失败或尚未解决的具体风险才扩展或重复验证。只读分析以结论与出处为完成条件；修改任务以范围内修改完成、适用验证通过和差异可审查为完成条件；提 PR 任务还须交付 PR 链接及实际 CI 状态，排队或运行中不算通过。环境或权限阻塞时报告已完成项、原始失败和剩余工作，不声称全部完成。
-- 每个核心业务规则必须有测试；每个 bug 修复必须增加能覆盖该问题的回归测试。
-- Rust 测试按位置分层：单元测试内联在所测源码文件尾部的 `#[cfg(test)] mod tests`，禁止 `unit_tests.rs` / `unit_tests/` 分离文件与 `#[cfg(test)] mod tests;` 兄弟文件形式；集成测试位于 crate 的 `tests/` 目录且只经公共 API 驱动。跨测试文件共享的 fake/fixture 收敛到 `tests/support/` 或 crate 内单一 `#[cfg(test)]` 支持模块；迁移或删除测试后无消费者的生产 `cfg(test)` 钩子一并删除。
-- 测试名称表达场景和期望；优先比较完整对象并使用 `pretty_assertions::assert_eq!` 获得清晰 diff。
-- 测试 helper 只服务测试时放在测试模块或专用测试模块，不为测试方便扩大生产 API。
-- 避免在测试中修改进程环境变量；确需修改时必须隔离并恢复。
+- 测试设计、布局、必要性与确定性回归统一遵循 [test-quality](.agents/skills/test-quality/SKILL.md)。核心行为必须有充分证明；修复优先复用或增强已有功能测试，同一回归在错误实现失败、修复后通过，不要求每个 bug 新增用例。
 - `code/pure-studio/pubspec.lock` 是必须纳入 Git 的 canonical 应用依赖快照，不得加入 ignore；
   Flutter 直接依赖升级后必须同步提交重新解析的 lockfile。
-- 提交前在本地执行与 CI 门禁一致的检查清单（只需保证当前环境通过；
+- 代码、构建、依赖或生成输入变更提交前，在本地执行与 CI 一致的检查清单（纯说明性变更按本节首条豁免；只需保证当前环境通过；
   `PUB_HOSTED_URL` 镜像导致的已跟踪 pubspec.lock hosted URL 差异由 xtask 自动
   规范化为 pub.dev canonical，无需手工处理）：
 

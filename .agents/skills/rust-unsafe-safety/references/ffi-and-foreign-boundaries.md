@@ -2,7 +2,7 @@
 
 ## 1. ABI 与声明
 
-让外部函数声明与真实 ABI、参数宽度、符号、可变参数和返回语义一致。使用固定宽度 FFI-safe 类型；Rust enum、trait object、slice、`String` 和未声明布局的 struct 不直接跨 ABI。
+让外部函数声明与真实 ABI、参数宽度、符号、可变参数和返回语义一致。使用与外部声明相符的 FFI-safe 类型，平台相关的整数和指针宽度按真实 ABI 选择；Rust enum、trait object、slice、`String` 和未声明布局的 struct 不直接跨 ABI。
 
 进入 Rust 前验证外部指针、长度、枚举值、UTF-8 与回调上下文；离开 Rust 时转换为对方约定的所有权和错误形式。任何 panic 都不得穿越不支持 unwind 的边界；在边界捕获时仍要保证资源与状态一致。
 
@@ -20,7 +20,7 @@ Rust 分配的内存只能由匹配的 Rust 释放入口回收，外部分配同
 
 ## 4. Flutter Rust Bridge 与生成边界
 
-不得手工修改生成的 FRB 文件。修改生成输入后使用仓库唯一生成入口，并分开审查生成 diff 与手写 unsafe 边界。
+FRB 生成输入、唯一生成入口与生成差异检查遵循[项目约束](../../../../AGENTS.md)；手写 unsafe 仍需独立证明，生成工具不能替代该责任。
 
 Rust protocol、FRB DTO 与 Dart model 保持 typed 转换，不通过 raw JSON 或不受检整数绕过生成层。外部对象引用、stream sink、Dart isolate 交互和 library handle 的线程/关闭语义必须按实际生成 API 与平台契约证明。
 
@@ -32,4 +32,4 @@ Rust protocol、FRB DTO 与 Dart model 保持 typed 转换，不通过 raw JSON 
 
 ## 6. 验证
 
-覆盖空值、零长度、最大长度、非 UTF-8、未知枚举、错误 ABI 返回、重复注销、回调与关闭竞争、部分初始化和释放失败。能使用 Miri、sanitizer 或平台检查工具时作为补充，但结论仍以可审查契约和完整释放链为准。
+按真实安全入口的契约，把空值、零长度、最大长度、非 UTF-8、未知枚举、外部错误返回、重复注销、回调与关闭竞争、部分初始化和释放失败并入所属功能验证。模拟外部结果也必须符合声明的 ABI，不能以非法指针或违反 unsafe 前置条件的调用制造未定义行为。能使用 Miri、sanitizer 或平台检查工具时作为补充，但结论仍以可审查契约和完整释放链为准。

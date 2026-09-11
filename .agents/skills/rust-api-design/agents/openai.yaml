@@ -1,4 +1,4 @@
 interface:
   display_name: "Rust API 设计"
-  short_description: "设计和审查 Rust 公共接口、领域类型、模块边界与依赖方向"
-  default_prompt: "请使用 $rust-api-design 设计或审查这项 Rust 公共接口改动。"
+  short_description: "设计 Rust 公共契约、领域类型、公共依赖与兼容边界"
+  default_prompt: "请使用 $rust-api-design 设计或审查接口，区分公共依赖与实现细节并核对消费者。"
