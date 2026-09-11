@@ -333,10 +333,14 @@ mod tests {
     async fn runtime_with_thread_without_optional_tools()
     -> (tempfile::TempDir, tempfile::TempDir, StudioRuntime, String) {
         runtime_with_thread_config(|config| {
+            config.runtime.tool_capabilities.exec = false;
+            config.runtime.tool_capabilities.workspace_files = false;
             config.skills.enabled = false;
             config.runtime.tool_capabilities.skills = false;
             config.runtime.tool_capabilities.mcp = false;
             config.runtime.tool_capabilities.lsp = false;
+            config.runtime.tool_capabilities.ask_user = false;
+            config.runtime.tool_capabilities.git = false;
         })
         .await
     }
