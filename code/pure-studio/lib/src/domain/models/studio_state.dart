@@ -15,6 +15,10 @@ import 'thread_models.dart';
 import 'timeline_models.dart';
 import 'turn_models.dart';
 
+// Canonical workspace values are replaced by reducers. UI-only anchor/composer
+// changes must not rebuild all row projections; old entries are weakly held.
+final _timelineRowsByWorkspace = Expando<List<TimelineRow>>();
+
 class _StudioStateUnset {
   const _StudioStateUnset();
 }
@@ -194,8 +198,14 @@ class StudioState {
     return ordered;
   }
 
-  List<TimelineRow> get selectedTimelineRows =>
-      timelineRowsFromThreadItems(selectedWorkspace?.items ?? const []);
+  List<TimelineRow> get selectedTimelineRows {
+    final workspace = selectedWorkspace;
+    if (workspace == null) return const [];
+    return _timelineRowsByWorkspace[workspace] ??= timelineRowsFromThreadItems(
+      workspace.items,
+      turns: workspace.timelineTurns,
+    );
+  }
 
   TimelineTodoListUpdate? get selectedTodoList => selectedWorkspace?.todo;
 

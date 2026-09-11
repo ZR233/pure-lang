@@ -90,7 +90,7 @@ pub use thread::{
     THREAD_SCHEMA_VERSION, Thread, ThreadContextDisposition, ThreadNotification,
     ThreadNotificationEnvelope, ThreadRuntimeSnapshot, ThreadRuntimeUsage, ThreadSnapshot,
     ThreadStatus, ThreadSubscriptionRequest, ThreadSubscriptionUpdate, ThreadTurnHistory,
-    ThreadTurnPage,
+    ThreadTurnPage, TimelinePage, TimelineQuery, TimelineTurn,
 };
 mod session_entry;
 pub use session_entry::SessionEntry;

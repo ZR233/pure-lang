@@ -41,3 +41,9 @@ SQLite writer 的失败与未保存事实必须可观察；目录 writer 只保�
 
 执行预算、步骤限制和取消属于通用类型化执行政策；Profile、角色和父子生命周期的决定属于宿主。
 不得通过产品 JSON 字段改变 core 控制行为。详见 [27](./27-core-boundaries-and-replay.md)。
+
+## Timeline 分页
+
+Studio 的 Timeline 条目索引从同一 canonical journal 与提交水位派生，可以重建；不改变 core
+日志格式，不建立第二份历史数据库。索引随 Thread 驻留释放，稳定 item 身份用于双向游标和
+锚点查询。分页返回覆盖边界、双向游标、水位与相关 Turn 元数据，不以整 Turn 限制页大小。

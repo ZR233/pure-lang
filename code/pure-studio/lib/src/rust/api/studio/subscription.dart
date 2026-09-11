@@ -11,6 +11,7 @@ import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 import 'types/attachment.dart';
 import 'types/error.dart';
 import 'types/event.dart';
+import 'types/history.dart';
 import 'types/response.dart';
 import 'types/runtime.dart';
 import 'types/settings.dart';

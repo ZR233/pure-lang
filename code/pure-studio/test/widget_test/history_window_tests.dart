@@ -2,7 +2,7 @@ part of '../widget_test.dart';
 
 void registerHistoryWindowTests() {
   test(
-    'switching back rebuilds the history window from the snapshot',
+    'switching back preserves loaded history while adopting new output',
     () async {
       final initial = _twoThreadHistoryState();
       final api = _FakeStudioApi(initial);
@@ -22,12 +22,12 @@ void registerHistoryWindowTests() {
             revision: 1,
             items: _windowItems('thread-a', 'a', 0, 2),
           ),
-          historyCursor: 'a-turn-0',
+          historyCursor: 'a-item-0',
         ),
       );
       await pumpEventQueue();
       api.historyPagesByThread['thread-a'] = {
-        'a-turn-0': ThreadHistoryPage(
+        'a-item-0': ThreadHistoryPage(
           items: _windowItems('thread-a', 'a', -3, 3),
           nextCursor: null,
         ),
@@ -42,7 +42,7 @@ void registerHistoryWindowTests() {
       expect(state.selectedWorkspaceUi.history.hasOlder, isFalse);
 
       // 切到 thread-b 再切回；期间 thread-a 有新事件，重订快照 revision 更大：
-      // 窗口必须整体重建（epoch 递增、hasOlder 由新快照锚点决定）。
+      // 新快照更新尾部，已加载的更旧内容与分页边界保持有效。
       await controller.selectThread('thread-b');
       api.emitThreadFrame(
         ThreadSnapshotFrame(
@@ -71,29 +71,14 @@ void registerHistoryWindowTests() {
             revision: 2,
             items: _windowItems('thread-a', 'a', 0, 3),
           ),
-          historyCursor: 'a-turn-0',
+          historyCursor: 'a-item-0',
         ),
       );
       await pumpEventQueue();
 
       state = container.read(studioControllerProvider).requireValue;
       final window = state.workspaceUiByThread['thread-a']!.history;
-      expect(window.hasOlder, isTrue);
-      expect(window.epoch, greaterThan(0));
-      // 重建后的窗口就是快照内容；再次回源锚点从新窗口首条派生。
-      expect(
-        state.workspacesByThread['thread-a']!.items.map((item) => item.id),
-        ['a-item-0', 'a-item-1', 'a-item-2'],
-      );
-      api.historyPagesByThread['thread-a'] = {
-        'a-turn-0': ThreadHistoryPage(
-          items: _windowItems('thread-a', 'a', -3, 3),
-          nextCursor: null,
-        ),
-      };
-      await controller.loadOlderHistory('thread-a');
-      expect(api.historyRequests.last.cursor, 'a-turn-0');
-      state = container.read(studioControllerProvider).requireValue;
+      expect(window.hasOlder, isFalse);
       expect(
         state.workspacesByThread['thread-a']!.items.map((item) => item.id),
         [
@@ -105,10 +90,12 @@ void registerHistoryWindowTests() {
           'a-item-2',
         ],
       );
+      expect(state.workspacesByThread['thread-b']!.items.single.id, 'b-live-1');
+      expect(state.workspacesByThread['thread-a']!.revision, 2);
     },
   );
 
-  test('late history responses from before a rebuild are dropped', () async {
+  test('jump to latest invalidates an in-flight history response', () async {
     final initial = _twoThreadHistoryState();
     final api = _FakeStudioApi(initial);
     final container = ProviderContainer(
@@ -126,7 +113,7 @@ void registerHistoryWindowTests() {
           revision: 1,
           items: _windowItems('thread-a', 'a', 0, 2),
         ),
-        historyCursor: 'a-turn-0',
+        historyCursor: 'a-item-0',
       ),
     );
     await pumpEventQueue();
@@ -136,37 +123,14 @@ void registerHistoryWindowTests() {
     api.historyGates.add(staleGate);
     unawaited(controller.loadOlderHistory('thread-a'));
 
-    // 新快照落地：窗口重建（epoch 递增），随后发起一次新 epoch 的回源。
-    final rebuildGate = Completer<void>();
-    api.historyGates.add(rebuildGate);
-    api.emitThreadFrame(
-      ThreadSnapshotFrame(
-        workspace: _workspaceWithItems(
-          'thread-a',
-          revision: 5,
-          items: _windowItems('thread-a', 'a', 0, 3),
-        ),
-        historyCursor: 'a-turn-0',
-      ),
-    );
-    await pumpEventQueue();
-    unawaited(controller.loadOlderHistory('thread-a'));
-    await pumpEventQueue();
-
-    // 旧响应在重建之后返回：必须被丢弃，不得污染重建后的窗口。
+    await controller.jumpToLatest('thread-a');
     staleGate.complete();
     await pumpEventQueue();
-    var state = container.read(studioControllerProvider).requireValue;
+    final state = container.read(studioControllerProvider).requireValue;
     expect(state.workspacesByThread['thread-a']!.items.map((item) => item.id), [
       'a-item-0',
       'a-item-1',
-      'a-item-2',
-    ], reason: '跨重建的历史响应属于旧窗口，必须整体丢弃');
-    expect(state.selectedWorkspaceUi.history.isLoading, isTrue);
-
-    rebuildGate.complete();
-    await pumpEventQueue();
-    state = container.read(studioControllerProvider).requireValue;
+    ]);
     expect(state.selectedWorkspaceUi.history.isLoading, isFalse);
   });
 
@@ -187,7 +151,7 @@ void registerHistoryWindowTests() {
           revision: 3,
           items: _windowItems('thread-a', 'a', 0, 2),
         ),
-        historyCursor: 'a-turn-0',
+        historyCursor: 'a-item-0',
       ),
     );
     await pumpEventQueue();
@@ -200,7 +164,7 @@ void registerHistoryWindowTests() {
           revision: 3,
           items: _windowItems('thread-a', 'a', 0, 2),
         ),
-        historyCursor: 'a-turn-0',
+        historyCursor: 'a-item-0',
       ),
     );
     await pumpEventQueue();
@@ -265,13 +229,27 @@ void registerHistoryWindowTests() {
           revision: 3,
           items: [...history, preview(text), toolPreview(text)],
         ),
-        historyCursor: 'a-turn-0',
+        historyCursor: 'a-item-0',
       ),
     );
     emit('first');
     await pumpEventQueue();
     final first = container.read(studioControllerProvider).requireValue;
     final epoch = first.workspaceUiByThread['thread-a']!.history.epoch;
+    final controller = container.read(studioControllerProvider.notifier);
+    await controller.selectThread('thread-b');
+    emit('first second');
+    await pumpEventQueue();
+    expect(
+      container
+          .read(studioControllerProvider)
+          .requireValue
+          .workspacesByThread['thread-a']!
+          .items[2]
+          .text,
+      'first',
+    );
+    await controller.selectThread('thread-a');
     emit('first second');
     await pumpEventQueue();
     final next = container.read(studioControllerProvider).requireValue;
@@ -296,6 +274,78 @@ void registerHistoryWindowTests() {
     );
     expect(next.workspaceUiByThread['thread-a']!.history.epoch, epoch);
     expect(next.workspaceUiByThread['thread-a']!.history.hasOlder, isTrue);
+  });
+  test('history request survives newer snapshots, deduplicates and exposes a retryable edge failure', () async {
+    final api = _FakeStudioApi(_twoThreadHistoryState());
+    final container = ProviderContainer(
+      overrides: [studioApiProvider.overrideWithValue(api)],
+    );
+    addTearDown(container.dispose);
+    await container.read(studioControllerProvider.future);
+    await pumpEventQueue();
+    final controller = container.read(studioControllerProvider.notifier);
+    void emit(int revision) => api.emitThreadFrame(
+      ThreadSnapshotFrame(
+        workspace: _workspaceWithItems(
+          'thread-a',
+          revision: revision,
+          items: _windowItems('thread-a', 'a', 0, 2),
+        ),
+        historyCursor: 'a-item-0',
+      ),
+    );
+    emit(1);
+    await pumpEventQueue();
+    final gate = Completer<void>();
+    api.historyGates.add(gate);
+    final first = controller.loadOlderHistory('thread-a');
+    await controller.loadOlderHistory('thread-a');
+    emit(2);
+    await pumpEventQueue();
+    await controller.loadOlderHistory('thread-a');
+    expect(api.historyRequests.length, 1);
+    gate.completeError(StateError('storage unavailable'));
+    await first;
+    var state = container.read(studioControllerProvider).requireValue;
+    expect(state.selectedWorkspace!.items.map((item) => item.id), [
+      'a-item-0',
+      'a-item-1',
+    ]);
+    expect(
+      state.selectedWorkspaceUi.history.errorMessage,
+      contains('storage unavailable'),
+    );
+    api.historyPagesByThread['thread-a'] = {
+      'a-item-0': ThreadHistoryPage(
+        items: _windowItems('thread-a', 'a', -2, 2),
+        nextCursor: null,
+      ),
+    };
+    await controller.loadOlderHistory('thread-a');
+    state = container.read(studioControllerProvider).requireValue;
+    expect(state.selectedWorkspace!.items.map((item) => item.id), [
+      'a-item--2',
+      'a-item--1',
+      'a-item-0',
+      'a-item-1',
+    ]);
+    expect(state.selectedWorkspaceUi.history.errorMessage, isNull);
+    expect(api.historyRequests.length, 2);
+    final subscriptions = api.threadSubscriptions.length;
+    api.emitThreadFrame(
+      const ThreadResyncRequiredFrame(threadId: 'thread-a', dropped: 1),
+    );
+    await pumpEventQueue();
+    expect(api.threadSubscriptions.length, subscriptions + 1);
+    expect(
+      container
+          .read(studioControllerProvider)
+          .requireValue
+          .selectedWorkspace!
+          .items
+          .map((item) => item.id),
+      ['a-item--2', 'a-item--1', 'a-item-0', 'a-item-1'],
+    );
   });
 }
 

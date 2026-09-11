@@ -74,3 +74,53 @@ pub async fn list_thread_turns(
         next_cursor: page.next_cursor,
     })
 }
+
+/// Reads a bounded, bidirectional item page from the canonical journal projection.
+pub async fn list_timeline_items(
+    request: super::super::types::ListTimelineItemsRequest,
+) -> Result<super::super::types::BridgeTimelinePage, BridgeError> {
+    use super::super::types::{BridgeTimelinePage, BridgeTimelineQuery, BridgeTimelineTurn};
+    let bridge = active_bridge().await?;
+    let query = match request.query {
+        BridgeTimelineQuery::Latest => pl_protocol::TimelineQuery::Latest,
+        BridgeTimelineQuery::Before { item_id } => pl_protocol::TimelineQuery::Before { item_id },
+        BridgeTimelineQuery::After { item_id } => pl_protocol::TimelineQuery::After { item_id },
+        BridgeTimelineQuery::Around { item_id } => pl_protocol::TimelineQuery::Around { item_id },
+    };
+    let page = bridge
+        .studio
+        .list_timeline_items(&request.thread_id, query, request.limit as usize)
+        .await?;
+    Ok(BridgeTimelinePage {
+        thread_id: page.thread_id,
+        watermark: page.watermark,
+        items: page
+            .items
+            .into_iter()
+            .map(bridge_thread_item)
+            .collect::<anyhow::Result<Vec<_>>>()?
+            .into_iter()
+            .flatten()
+            .collect(),
+        first_item_id: page.first_item_id,
+        last_item_id: page.last_item_id,
+        older_cursor: page.older_cursor,
+        newer_cursor: page.newer_cursor,
+        turns: page
+            .turns
+            .into_iter()
+            .map(|entry| BridgeTimelineTurn {
+                turn: bridge_turn(entry.turn),
+                last_item_id: entry.last_item_id,
+                context_disposition: match entry.context_disposition {
+                    pl_protocol::ThreadContextDisposition::Active => {
+                        BridgeThreadContextDisposition::Active
+                    }
+                    pl_protocol::ThreadContextDisposition::RolledBack => {
+                        BridgeThreadContextDisposition::RolledBack
+                    }
+                },
+            })
+            .collect(),
+    })
+}

@@ -91,7 +91,7 @@ fn thread_notification(
 }
 
 /// wire 快照的 item 窗口上限（低于 GUI 侧历史窗口上限，留出加载余量）。
-/// 超过后按整 Turn 从最旧方向截断，被截内容经 `history_cursor` 回源。
+/// 超过后按 item 从最旧方向截断，被截内容经 `history_cursor` 回源。
 const SNAPSHOT_ITEM_WINDOW: usize = 400;
 
 pub(crate) fn bridge_thread_snapshot(value: ThreadSnapshot) -> Result<BridgeThreadSnapshot> {
@@ -108,7 +108,33 @@ pub(crate) fn bridge_thread_snapshot(value: ThreadSnapshot) -> Result<BridgeThre
         .into_iter()
         .flatten()
         .collect::<Vec<_>>();
+    let last_by_turn: std::collections::BTreeMap<_, _> = all_items
+        .iter()
+        .map(|item| (item.turn_id.clone(), item.id.clone()))
+        .collect();
+    let mut timeline_turns: Vec<_> = all_items
+        .iter()
+        .filter_map(|item| {
+            let BridgeThreadItemState::Turn { state, input_id } = &item.state else {
+                return None;
+            };
+            Some(BridgeTimelineTurn {
+                turn: BridgeTurn {
+                    id: item.turn_id.clone(),
+                    thread_id: item.thread_id.clone(),
+                    input_id: input_id.clone(),
+                    revision: item.revision,
+                    state: state.clone(),
+                    updated_at: item.updated_at,
+                },
+                last_item_id: last_by_turn[&item.turn_id].clone(),
+                context_disposition: BridgeThreadContextDisposition::Active,
+            })
+        })
+        .collect();
+    let last_turn = timeline_turns.last().map(|entry| entry.turn.clone());
     let (items, history_cursor) = snapshot_item_window(all_items);
+    timeline_turns.retain(|entry| items.iter().any(|item| item.turn_id == entry.turn.id));
     Ok(BridgeThreadSnapshot {
         schema_version: value.schema_version,
         revision: value.revision,
@@ -116,6 +142,8 @@ pub(crate) fn bridge_thread_snapshot(value: ThreadSnapshot) -> Result<BridgeThre
         active_turn: value.active_turn.map(bridge_turn),
         items,
         history_cursor,
+        timeline_turns,
+        last_turn,
         interactions: value
             .interactions
             .into_iter()
@@ -126,22 +154,15 @@ pub(crate) fn bridge_thread_snapshot(value: ThreadSnapshot) -> Result<BridgeThre
     })
 }
 
-/// 按 item 窗口上限截断快照；窗口起点回退到整 Turn 边界，锚点 Turn 完整保留。
-/// `history_cursor` 是窗口首 Turn 的 id：以它做 before 锚点回源恰好取回被截段。
+/// Hard item budget; the exclusive before cursor can page inside a large Turn.
 fn snapshot_item_window(
     mut items: Vec<BridgeThreadItem>,
 ) -> (Vec<BridgeThreadItem>, Option<String>) {
     if items.len() <= SNAPSHOT_ITEM_WINDOW {
         return (items, None);
     }
-    let mut start = items.len() - SNAPSHOT_ITEM_WINDOW;
-    while start > 0 && items[start - 1].turn_id == items[start].turn_id {
-        start -= 1;
-    }
-    if start == 0 {
-        return (items, None);
-    }
-    let cursor = items[start].turn_id.clone();
+    let start = items.len() - SNAPSHOT_ITEM_WINDOW;
+    let cursor = items[start].id.clone();
     (items.split_off(start), Some(cursor))
 }
 
@@ -870,17 +891,17 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_window_truncates_on_turn_boundaries_with_history_cursor() {
+    fn snapshot_window_pages_inside_large_turns_with_item_cursor() {
         let mut snapshot = ThreadSnapshot::empty("thread-1");
         snapshot.items = (0..500)
-            .map(|ordinal| window_item(ordinal, format!("turn-{}", ordinal / 2)))
+            .map(|ordinal| window_item(ordinal, "large-turn".into()))
             .collect();
         let bridged = bridge_thread_snapshot(snapshot).unwrap();
-        // 截断到窗口上限；锚点 Turn 的 items 完整保留，锚点即窗口首 Turn。
+        // Even one large Turn must respect the item budget.
         assert_eq!(bridged.items.len(), 400);
-        assert_eq!(bridged.history_cursor.as_deref(), Some("turn-50"));
-        assert_eq!(bridged.items.first().unwrap().turn_id, "turn-50");
-        assert_eq!(bridged.items.last().unwrap().turn_id, "turn-249");
+        assert_eq!(bridged.history_cursor.as_deref(), Some("item-100"));
+        assert_eq!(bridged.items.first().unwrap().turn_id, "large-turn");
+        assert_eq!(bridged.items.last().unwrap().turn_id, "large-turn");
     }
 
     #[test]

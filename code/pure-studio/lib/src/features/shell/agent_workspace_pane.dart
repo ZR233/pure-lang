@@ -350,12 +350,35 @@ class _AgentTimelineHost extends ConsumerWidget {
         }
         return TimelineView(
           threadId: threadId,
-          rows: timeline.isLoading ? const [] : timeline.rows,
+          rows: timeline.rows,
           turn: timeline.turn,
           planConfirmation: planConfirmation,
           planExpanded: planExpanded,
           onPlanToggle: onPlanToggle,
           isLoadingOlder: timeline.isLoadingOlderHistory,
+          isLoadingNewer:
+              timeline.history.isLoading &&
+              timeline.history.direction == TimelineDirection.newer,
+          olderError: timeline.history.errorMessage,
+          newerError: timeline.history.newerError,
+          anchor: timeline.history.anchor,
+          hasNewer: timeline.history.hasNewer,
+          olderCursor: timeline.history.olderCursor,
+          newerCursor: timeline.history.newerCursor,
+          windowEpoch: timeline.history.epoch,
+          onAnchorChanged: (anchor) => ref
+              .read(studioControllerProvider.notifier)
+              .updateTimelineAnchor(threadId, anchor),
+          onJumpToLatest: () => unawaited(
+            ref.read(studioControllerProvider.notifier).jumpToLatest(threadId),
+          ),
+          onLoadNewer: timeline.history.hasNewer
+              ? () => unawaited(
+                  ref
+                      .read(studioControllerProvider.notifier)
+                      .loadNewerHistory(threadId),
+                )
+              : null,
           onLoadOlder: timeline.hasOlderHistory
               ? () => unawaited(
                   ref

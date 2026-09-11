@@ -6,6 +6,8 @@ import '../domain/models/studio_models.dart';
 abstract final class StudioDriverState {
   static StudioProject? _project;
   static AgentWorkspaceView? _workspace;
+  static ThreadWorkspace? _timelineWorkspace;
+  static ThreadHistoryWindow _history = const ThreadHistoryWindow();
   static final List<StudioShutdownProgress> _shutdownProgress = [];
   static List<String> _sidebarDirectoryIds = const [];
   static List<StudioThread> _currentRootThreads = const [];
@@ -22,6 +24,8 @@ abstract final class StudioDriverState {
       const PersistenceStateSnapshot.ready();
 
   static void publishState(StudioState state) {
+    _timelineWorkspace = state.selectedWorkspace;
+    _history = state.selectedWorkspaceUi.history;
     _selectedProjectId = state.selectedProjectId;
     _selectedThreadId = state.selectedThreadId;
     _currentRootThreads = List.unmodifiable(state.rootThreads);
@@ -77,6 +81,26 @@ abstract final class StudioDriverState {
     final workspace = _workspace;
     final lastTurn = workspace?.lastTurn;
     return jsonEncode({
+      'timelineWindow': {
+        'itemIds':
+            _timelineWorkspace?.items.map((item) => item.id).toList() ?? [],
+        'cacheCount': _timelineWorkspace?.cachedItems.length ?? 0,
+        'tailCount': _timelineWorkspace?.latestItemIds.length ?? 0,
+        'hasOlder': _history.hasOlder,
+        'hasNewer': _history.hasNewer,
+        'loading': _history.isLoading,
+        'direction': _history.direction.name,
+        'epoch': _history.epoch,
+        'olderError': _history.errorMessage,
+        'newerError': _history.newerError,
+        'anchor': _history.anchor == null
+            ? null
+            : {
+                'itemId': _history.anchor!.itemId,
+                'offset': _history.anchor!.offset,
+                'followingBottom': _history.anchor!.followingBottom,
+              },
+      },
       'sidebarDirectory': {
         'count': _sidebarDirectoryIds.length,
         'hasMore': _sidebarDirectoryHasMore,
@@ -380,6 +404,7 @@ abstract final class StudioDriverState {
 
   static Map<String, Object?> _turnJson(StudioTurnView turn) => {
     'id': turn.turnId,
+    'inputId': turn.inputId,
     'threadId': turn.threadId,
     'revision': turn.revision,
     'status': turn.state.status.name,

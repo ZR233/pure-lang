@@ -53,13 +53,33 @@ void registerTimelineModelTests() {
       ordinal: 2,
       text: 'Generated report',
     );
+    final metadata = {
+      'turn-1': TimelineTurnView(
+        turn: StudioTurnView(
+          inputId: null,
+          turnId: 'turn-1',
+          threadId: 'thread-1',
+          revision: terminal.revision,
+          state: (terminal.state as ThreadTurnItemStateView).state,
+          updatedAt: terminal.updatedAt,
+        ),
+        lastItemId: message.id,
+      ),
+    };
+    expect(
+      timelineRowsFromThreadItems(
+        [terminal],
+        turns: metadata,
+      ).where((row) => row.type == TimelineRowType.turnOutcome),
+      isEmpty,
+    );
     await tester.pumpWidget(
       _timelineApp(
         home: Scaffold(
           body: TimelineView(
             threadId: 'thread-1',
             turn: null,
-            rows: timelineRowsFromThreadItems([terminal, message]),
+            rows: timelineRowsFromThreadItems([message], turns: metadata),
           ),
         ),
       ),

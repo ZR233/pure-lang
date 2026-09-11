@@ -141,6 +141,7 @@ class _JumpToLatestButton extends StatelessWidget {
         ),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
+          key: const ValueKey('timeline-jump-latest'),
           onTap: onPressed,
           child: Padding(
             padding: EdgeInsets.symmetric(

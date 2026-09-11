@@ -27,6 +27,7 @@ mod state_query;
 mod thread_mode;
 mod thread_service;
 mod thread_stream;
+mod timeline;
 mod tool_refresh;
 pub use thread_stream::StudioThreadSubscription;
 mod thread_observation;

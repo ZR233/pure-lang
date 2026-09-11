@@ -19,6 +19,7 @@ typedef TimelinePaneView = ({
   bool isLoading,
   bool hasOlderHistory,
   bool isLoadingOlderHistory,
+  ThreadHistoryWindow history,
 });
 
 typedef StartPageView = ({
@@ -174,7 +175,10 @@ AsyncValue<TimelinePaneView?> agentTimeline(Ref ref, String threadId) {
           turn: workspace.turn,
           isLoading: workspace.isLoading,
           hasOlderHistory: history?.hasOlder ?? false,
-          isLoadingOlderHistory: history?.isLoading ?? false,
+          isLoadingOlderHistory:
+              history?.isLoading == true &&
+              history?.direction == TimelineDirection.older,
+          history: history ?? const ThreadHistoryWindow(),
         );
       }),
     ),

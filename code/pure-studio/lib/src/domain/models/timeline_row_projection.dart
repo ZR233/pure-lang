@@ -115,7 +115,10 @@ class TimelineRow {
   final bool isRolledBack;
 }
 
-List<TimelineRow> timelineRowsFromThreadItems(List<ThreadItemView> source) {
+List<TimelineRow> timelineRowsFromThreadItems(
+  List<ThreadItemView> source, {
+  Map<String, TimelineTurnView> turns = const {},
+}) {
   final items = [...source]
     ..sort((left, right) {
       final ordinal = left.ordinal.compareTo(right.ordinal);
@@ -224,9 +227,29 @@ List<TimelineRow> timelineRowsFromThreadItems(List<ThreadItemView> source) {
   }
   for (final item in items) {
     if (item.kind == ThreadItemKind.turn &&
+        !turns.containsKey(item.turnId) &&
         item.isTerminal &&
         item.error?.trim().isNotEmpty == true) {
       rows.add(TimelineRow.turnOutcome(item, lastOrdinalByTurn[item.turnId]!));
+    }
+  }
+  final byId = {for (final item in items) item.id: item};
+  for (final entry in turns.values) {
+    final end = byId[entry.lastItemId];
+    if (end == null) continue;
+    final turn = entry.turn;
+    final item = ThreadItemView(
+      id: 'turn:${turn.turnId.length}:${turn.turnId}',
+      threadId: turn.threadId,
+      turnId: turn.turnId,
+      ordinal: end.ordinal,
+      revision: turn.revision,
+      createdAt: turn.updatedAt,
+      updatedAt: turn.updatedAt,
+      state: ThreadTurnItemStateView(turn.state, inputId: turn.inputId),
+    );
+    if (item.isTerminal && item.error?.trim().isNotEmpty == true) {
+      rows.add(TimelineRow.turnOutcome(item, end.ordinal));
     }
   }
   rows.sort(_compareRows);

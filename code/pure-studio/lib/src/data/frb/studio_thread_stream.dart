@@ -154,10 +154,51 @@ class ThreadHistoryPage {
   final String? nextCursor;
 }
 
+enum TimelineQueryKind { latest, before, after, around }
+
+class TimelinePage {
+  const TimelinePage({
+    required this.threadId,
+    required this.watermark,
+    required this.items,
+    this.olderCursor,
+    this.newerCursor,
+    this.firstItemId,
+    this.lastItemId,
+    this.turns = const [],
+  });
+  final String threadId;
+  final int watermark;
+  final List<ThreadItemView> items;
+  final String? olderCursor;
+  final String? newerCursor;
+  final String? firstItemId;
+  final String? lastItemId;
+  final List<TimelineTurnView> turns;
+}
+
+TimelineTurnView _timelineTurnFromFrb(frb.BridgeTimelineTurn entry) =>
+    TimelineTurnView(
+      turn: _turnFromFrb(entry.turn),
+      lastItemId: entry.lastItemId,
+      disposition:
+          entry.contextDisposition ==
+              frb.BridgeThreadContextDisposition.rolledBack
+          ? ThreadContextDisposition.rolledBack
+          : ThreadContextDisposition.active,
+    );
+
 ThreadWorkspace _threadWorkspaceFromFrb(frb.BridgeThreadSnapshot value) {
   return ThreadWorkspace(
     thread: _threadFromFrb(value.thread),
     revision: value.revision.toInt(),
+    observedLastTurn: value.lastTurn == null
+        ? null
+        : _turnFromFrb(value.lastTurn!),
+    timelineTurns: {
+      for (final entry in value.timelineTurns)
+        entry.turn.id: _timelineTurnFromFrb(entry),
+    },
     items: value.items.map(_threadItemFromFrb).toList()
       ..sort(_compareThreadItems),
     interactions: value.interactions

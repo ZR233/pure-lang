@@ -5,6 +5,7 @@
 
 import '../../../frb_generated.dart';
 import 'attachment.dart';
+import 'history.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
@@ -539,8 +540,10 @@ class BridgeThreadSnapshot {
   final BridgeThread thread;
   final BridgeTurn? activeTurn;
   final List<BridgeThreadItem> items;
+  final List<BridgeTimelineTurn> timelineTurns;
+  final BridgeTurn? lastTurn;
 
-  /// 更旧历史的回源锚点（窗口首 Turn 的 id，before 语义）；None 表示无更旧内容。
+  /// 更旧历史的回源锚点（窗口首 item 的 id，before 语义）；None 表示无更旧内容。
   final String? historyCursor;
   final List<BridgeInteractionRequest> interactions;
   final BridgeThreadRuntimeSnapshot? runtime;
@@ -552,6 +555,8 @@ class BridgeThreadSnapshot {
     required this.thread,
     this.activeTurn,
     required this.items,
+    required this.timelineTurns,
+    this.lastTurn,
     this.historyCursor,
     required this.interactions,
     this.runtime,
@@ -565,6 +570,8 @@ class BridgeThreadSnapshot {
       thread.hashCode ^
       activeTurn.hashCode ^
       items.hashCode ^
+      timelineTurns.hashCode ^
+      lastTurn.hashCode ^
       historyCursor.hashCode ^
       interactions.hashCode ^
       runtime.hashCode ^
@@ -580,6 +587,8 @@ class BridgeThreadSnapshot {
           thread == other.thread &&
           activeTurn == other.activeTurn &&
           items == other.items &&
+          timelineTurns == other.timelineTurns &&
+          lastTurn == other.lastTurn &&
           historyCursor == other.historyCursor &&
           interactions == other.interactions &&
           runtime == other.runtime &&

@@ -59,7 +59,7 @@ impl StudioRuntime {
     }
 }
 
-fn rolled_back_turns(snapshot: &ThreadSnapshot) -> BTreeSet<String> {
+pub(super) fn rolled_back_turns(snapshot: &ThreadSnapshot) -> BTreeSet<String> {
     let mut removed = BTreeSet::new();
     for replacement in snapshot.context_replacements.iter() {
         if replacement.reason != ContextReplacementReason::Rewind {

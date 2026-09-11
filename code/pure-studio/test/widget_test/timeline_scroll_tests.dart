@@ -126,10 +126,10 @@ void registerTimelineScrollTests() {
 
     await tester.drag(
       find.byKey(StudioDriverKeys.timeline),
-      const Offset(0, 260),
+      const Offset(0, 900),
     );
     await tester.pumpAndSettle();
-    final offsetBeforeAppend = _timelinePixels(tester);
+    final anchorBeforeAppend = _visibleTimelineAnchor(tester);
     expect(_timelineExtentAfter(tester), greaterThan(80));
 
     await tester.pumpWidget(
@@ -140,7 +140,10 @@ void registerTimelineScrollTests() {
     );
     await tester.pumpAndSettle();
 
-    expect(_timelinePixels(tester), closeTo(offsetBeforeAppend, 1));
+    expect(
+      tester.getTopLeft(find.byKey(anchorBeforeAppend.key)).dy,
+      closeTo(anchorBeforeAppend.top, 1),
+    );
     expect(find.byTooltip('Jump to latest'), findsOneWidget);
   });
 
@@ -162,7 +165,7 @@ void registerTimelineScrollTests() {
 
     await tester.drag(
       find.byKey(StudioDriverKeys.timeline),
-      const Offset(0, 260),
+      const Offset(0, 900),
     );
     await tester.pumpAndSettle();
     await tester.pumpWidget(
@@ -224,7 +227,7 @@ void registerTimelineScrollTests() {
     await tester.pumpAndSettle();
     await tester.drag(
       find.byKey(StudioDriverKeys.timeline),
-      const Offset(0, 260),
+      const Offset(0, 900),
     );
     await tester.pumpAndSettle();
     expect(
@@ -274,10 +277,10 @@ void registerTimelineScrollTests() {
     await tester.pumpAndSettle();
     await tester.drag(
       find.byKey(StudioDriverKeys.timeline),
-      const Offset(0, 260),
+      const Offset(0, 900),
     );
     await tester.pumpAndSettle();
-    final sessionAOffset = _timelinePixels(tester);
+    final sessionAAnchor = _visibleTimelineAnchor(tester);
     expect(_timelineExtentAfter(tester), greaterThan(80));
 
     await tester.pumpWidget(
@@ -289,6 +292,7 @@ void registerTimelineScrollTests() {
     await tester.pumpAndSettle();
     expect(_timelineExtentAfter(tester), lessThanOrEqualTo(80));
 
+    tester.view.physicalSize = const Size(700, 520);
     await tester.pumpWidget(
       _timelineHarness(
         threadId: 'session-a',
@@ -297,7 +301,10 @@ void registerTimelineScrollTests() {
     );
     await tester.pumpAndSettle();
 
-    expect(_timelinePixels(tester), closeTo(sessionAOffset, 1));
+    expect(
+      tester.getTopLeft(find.byKey(sessionAAnchor.key)).dy,
+      closeTo(sessionAAnchor.top, 1),
+    );
     expect(find.byTooltip('Jump to latest'), findsOneWidget);
   });
 
@@ -347,6 +354,50 @@ void registerTimelineScrollTests() {
     expect(position.extentAfter, lessThanOrEqualTo(80));
   });
 
+  testWidgets(
+    'fast page completion permits the next prefetch without a loading frame',
+    (tester) async {
+      _configureResponsiveView(tester, const Size(980, 520));
+      var count = 0;
+      var start = 40;
+      var items = _scrollItems('fast-history', 20, startIndex: start);
+      await tester.pumpWidget(
+        _timelineApp(
+          home: Scaffold(
+            body: StatefulBuilder(
+              builder: (context, update) => TimelineView(
+                threadId: 'fast-history',
+                rows: timelineRowsFromThreadItems(items),
+                turn: null,
+                onLoadOlder: () => update(() {
+                  count++;
+                  start -= 20;
+                  items = [
+                    ..._scrollItems('fast-history', 20, startIndex: start),
+                    ...items,
+                  ];
+                }),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.drag(
+        find.byKey(StudioDriverKeys.timeline),
+        const Offset(0, 9000),
+      );
+      await tester.pumpAndSettle();
+      expect(count, 1);
+      await tester.drag(
+        find.byKey(StudioDriverKeys.timeline),
+        const Offset(0, 9000),
+      );
+      await tester.pumpAndSettle();
+      expect(count, 2);
+    },
+  );
+
   testWidgets('loading older history preserves the visible timeline anchor', (
     tester,
   ) async {
@@ -387,13 +438,22 @@ void registerTimelineScrollTests() {
     await tester.pump();
     expect(
       find.byKey(const ValueKey('timeline-history-loading')),
+      findsNothing,
+    );
+    await tester.pump(const Duration(milliseconds: 151));
+    expect(
+      find.byKey(const ValueKey('timeline-history-loading')),
       findsOneWidget,
     );
 
     await tester.pumpWidget(
       _timelineHarness(
         threadId: threadId,
-        items: [..._scrollItems(threadId, 8), ...recentItems],
+        items: [
+          ..._scrollItems(threadId, 8),
+          ...recentItems,
+          ..._scrollItems(threadId, 1, startIndex: 32, expandedLast: true),
+        ],
         onLoadOlder: () => loadCount += 1,
       ),
     );
@@ -402,4 +462,31 @@ void registerTimelineScrollTests() {
     expect(loadCount, 1);
     expect(tester.getTopLeft(anchor).dy, closeTo(anchorTopBeforeLoad, 1));
   });
+}
+
+({Key key, double top}) _visibleTimelineAnchor(WidgetTester tester) {
+  final viewport = tester.getRect(find.byKey(StudioDriverKeys.timeline));
+  final visible =
+      find
+          .byWidgetPredicate(
+            (widget) =>
+                widget.key is ValueKey<String> &&
+                (widget.key! as ValueKey<String>).value.startsWith(
+                  'timeline-block-',
+                ),
+          )
+          .evaluate()
+          .where((element) {
+            final rect = tester.getRect(find.byKey(element.widget.key!));
+            return rect.bottom > viewport.top && rect.top < viewport.bottom;
+          })
+          .toList()
+        ..sort(
+          (left, right) => tester
+              .getTopLeft(find.byKey(left.widget.key!))
+              .dy
+              .compareTo(tester.getTopLeft(find.byKey(right.widget.key!)).dy),
+        );
+  final key = visible.first.widget.key!;
+  return (key: key, top: tester.getTopLeft(find.byKey(key)).dy);
 }

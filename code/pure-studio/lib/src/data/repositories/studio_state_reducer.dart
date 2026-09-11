@@ -78,16 +78,7 @@ StudioState applyPersistenceState(
   return current.copyWith(persistenceState: next);
 }
 
-/// Authoritative snapshots replace the complete canonical workspace.
-///
-/// Subscription generation checks belong to the controller. Once a snapshot
-/// reaches this reducer it wins over every locally accumulated delta.
-/// A replacing snapshot is also the rebuild point of the timeline history
-/// window: items ← snapshot window, [ThreadHistoryWindow.epoch] increments to
-/// invalidate in-flight history responses, and `hasOlder` derives from the
-/// snapshot's history cursor. An equal-revision snapshot keeps the workspace
-/// window and committed entries untouched; transient model previews may update
-/// text at the same commit revision without creating new durable facts.
+/// Snapshot authority applies to runtime/preview facts, not the reading range.
 StudioState applyThreadSnapshot(
   StudioState current,
   ThreadWorkspace workspace, {
@@ -96,45 +87,80 @@ StudioState applyThreadSnapshot(
   final threadId = workspace.thread.id;
   if (threadId.isEmpty) return current;
   final previous = current.workspacesByThread[threadId];
-  if (previous != null) {
-    if (workspace.revision < previous.revision) return current;
-    if (workspace.revision == previous.revision) {
-      final preview = _mergeStreamingPreview(previous, workspace);
-      final next = identical(preview, previous)
-          ? current
-          : current.copyWith(
-              workspacesByThread: {
-                ...current.workspacesByThread,
-                threadId: preview,
-              },
-            );
-      return _resolveWorkspaceSyncReady(next, threadId);
-    }
+  if (previous != null && workspace.revision < previous.revision) {
+    return current;
   }
-  final directoryThread = current.threads
+  final ui = current.workspaceUiByThread[threadId] ?? const WorkspaceUiState();
+  final initialized =
+      previous != null &&
+      (previous.cachedItems.isNotEmpty || previous.revision > 0);
+  final history = ui.history;
+  final sameRevision = previous?.revision == workspace.revision;
+  final base = previous ?? workspace.copyWith(items: const []);
+  final combined = base.copyWith(
+    items: {
+      ...base.cachedItems,
+      for (final item in base.items) item.id: item,
+    }.values.toList(),
+  );
+  final merged = sameRevision
+      ? _mergeStreamingPreview(combined, workspace)
+      : mergeThreadItems(combined, workspace.items)!;
+  final cache = {for (final item in merged.items) item.id: item};
+  final tail = workspace.items.length > 400
+      ? workspace.items.sublist(workspace.items.length - 400)
+      : workspace.items;
+  final latestIds = [for (final item in tail) item.id];
+  final items = initialized && history.detached && base.items.isNotEmpty
+      ? [for (final item in base.items) cache[item.id] ?? item]
+      : merged.items;
+  final directory = current.threads
       .where((thread) => thread.id == threadId)
       .firstOrNull;
-  final workspaces =
-      Map<String, ThreadWorkspace>.from(current.workspacesByThread)
-        ..[threadId] = _sortedWorkspace(
-          workspace.copyWith(thread: directoryThread ?? workspace.thread),
-        );
-  final ui = current.workspaceUiByThread[threadId] ?? const WorkspaceUiState();
-  final workspaceUi = Map<String, WorkspaceUiState>.from(
-    current.workspaceUiByThread,
-  );
-  workspaceUi[threadId] = ui.copyWith(
-    syncState: AgentWorkspaceSyncState.ready,
-    history: ThreadHistoryWindow(
-      hasOlder: historyCursor != null,
-      isLoading: false,
-      epoch: ui.history.epoch + 1,
-      errorMessage: null,
+  final nextWorkspace = _boundedTimeline(
+    (sameRevision ? base : workspace).copyWith(
+      thread: directory ?? workspace.thread,
+      items: items,
+      cachedItems: cache,
+      latestItemIds: latestIds,
+      observedLastTurn: sameRevision ? base.lastTurn : workspace.lastTurn,
+      timelineTurns: {...base.timelineTurns, ...workspace.timelineTurns},
     ),
+    TimelineDirection.newer,
+    anchorId: history.detached ? history.anchor?.itemId : null,
   );
+  final trimmed = items.length > maxTimelineWindowItems;
+  final nextHistory = history.copyWith(
+    olderCursor: trimmed
+        ? nextWorkspace.items.firstOrNull?.id
+        : initialized
+        ? history.olderCursor
+        : historyCursor,
+    newerCursor: history.detached ? nextWorkspace.items.lastOrNull?.id : null,
+    hasOlder: initialized
+        ? history.hasOlder || trimmed
+        : historyCursor != null || trimmed,
+    hasNewer:
+        history.detached &&
+        (history.hasNewer ||
+            (nextWorkspace.items.lastOrNull?.id != tail.lastOrNull?.id)),
+  );
+  // Preserve object identity when an equal-watermark frame changes no preview.
+  if (sameRevision && identical(merged, combined) && initialized) {
+    return _resolveWorkspaceSyncReady(current, threadId);
+  }
   return current.copyWith(
-    workspacesByThread: workspaces,
-    workspaceUiByThread: workspaceUi,
+    workspacesByThread: {
+      ...current.workspacesByThread,
+      threadId: nextWorkspace,
+    },
+    workspaceUiByThread: {
+      ...current.workspaceUiByThread,
+      threadId: ui.copyWith(
+        syncState: AgentWorkspaceSyncState.ready,
+        history: nextHistory,
+      ),
+    },
   );
 }
 
@@ -221,7 +247,7 @@ StudioReduceResult applyThreadUpdate(
   required int revision,
   required ThreadWorkspaceUpdate update,
 }) {
-  final workspace = current.workspacesByThread[threadId];
+  var workspace = current.workspacesByThread[threadId];
   if (workspace == null) {
     return StudioReduceResult(current, resyncThreadId: threadId);
   }
@@ -232,6 +258,14 @@ StudioReduceResult applyThreadUpdate(
     return StudioReduceResult(current, resyncThreadId: threadId);
   }
 
+  workspace = _sortedWorkspace(
+    workspace.copyWith(
+      items: {
+        ...workspace.cachedItems,
+        for (final item in workspace.items) item.id: item,
+      }.values.toList(),
+    ),
+  );
   final updated = switch (update) {
     ThreadTurnUpdate(:final turn) => _applyCanonicalTurn(
       workspace,
@@ -259,51 +293,111 @@ StudioReduceResult applyThreadUpdate(
   if (updated == null) {
     return StudioReduceResult(current, resyncThreadId: threadId);
   }
+  final tail = updated.items.length > 400
+      ? updated.items.sublist(updated.items.length - 400)
+      : updated.items;
   return StudioReduceResult(
-    current.copyWith(
-      workspacesByThread: {...current.workspacesByThread, threadId: updated},
+    applyThreadSnapshot(
+      current,
+      updated.copyWith(items: tail),
+      historyCursor: updated.items.length > tail.length ? tail.first.id : null,
     ),
   );
 }
 
-/// 历史页落地（窗口向旧扩展）：items 幂等合并、hasOlder 推进、超限收缩，
-/// 一次归约完成。调用方（controller）已校验响应属于当前窗口代际。
-StudioState applyThreadHistoryPage(
+/// A page owns only its declared range. It never replaces active previews.
+StudioState applyTimelinePage(
   StudioState current,
   String threadId,
-  ThreadHistoryPage page,
-) {
+  TimelinePage page,
+  TimelineDirection direction, {
+  bool replaceWindow = false,
+}) {
   final workspace = current.workspacesByThread[threadId];
-  if (workspace == null) return current;
+  if (workspace == null || page.threadId != threadId) return current;
   final ui = current.workspaceUiByThread[threadId] ?? const WorkspaceUiState();
-  var items = workspace.items;
-  if (page.items.isNotEmpty) {
-    items =
-        mergeThreadItems(workspace, [
-          for (final item in page.items)
-            if (item.threadId == threadId) item,
-        ])?.items ??
-        workspace.items;
-    items = _overlayRolledBackItems(items, page.items, threadId);
+  final cache = {
+    ...workspace.cachedItems,
+    for (final item in workspace.items) item.id: item,
+  };
+  for (final item in page.items) {
+    if (item.threadId != threadId) continue;
+    final existing = cache[item.id];
+    if (existing == null ||
+        (existing.isTerminal && item.revision > existing.revision)) {
+      cache[item.id] = item;
+    }
+    if (existing != null &&
+        page.watermark >= workspace.revision &&
+        item.contextDisposition != cache[item.id]!.contextDisposition) {
+      cache[item.id] = cache[item.id]!.copyWith(
+        contextDisposition: item.contextDisposition,
+      );
+    }
   }
-  var next = current.copyWith(
-    workspacesByThread: {
-      ...current.workspacesByThread,
-      threadId: workspace.copyWith(items: items),
-    },
+  final ids = {
+    if (!replaceWindow) ...workspace.items.map((item) => item.id),
+    ...page.items
+        .where((item) => item.threadId == threadId)
+        .map((item) => item.id),
+  };
+  final items = [for (final id in ids) cache[id]!]..sort(_compareItems);
+  final trimmed = items.length > maxTimelineWindowItems;
+  final next = _boundedTimeline(
+    workspace.copyWith(
+      items: items,
+      cachedItems: cache,
+      timelineTurns: {
+        ...workspace.timelineTurns,
+        for (final entry in page.turns) entry.turn.turnId: entry,
+      },
+    ),
+    direction,
+    anchorId: ui.history.anchor?.itemId,
+  );
+  final droppedOlder = next.items.firstOrNull?.id != items.firstOrNull?.id;
+  final droppedNewer = next.items.lastOrNull?.id != items.lastOrNull?.id;
+  return current.copyWith(
+    workspacesByThread: {...current.workspacesByThread, threadId: next},
     workspaceUiByThread: {
       ...current.workspaceUiByThread,
       threadId: ui.copyWith(
-        history: ThreadHistoryWindow(
-          hasOlder: page.nextCursor != null,
+        history: ui.history.copyWith(
+          olderCursor: droppedOlder
+              ? next.items.firstOrNull?.id
+              : (replaceWindow || direction == TimelineDirection.older)
+              ? page.olderCursor
+              : ui.history.olderCursor,
+          newerCursor: droppedNewer
+              ? next.items.lastOrNull?.id
+              : (replaceWindow || direction == TimelineDirection.newer)
+              ? page.newerCursor
+              : ui.history.newerCursor,
+          hasOlder:
+              droppedOlder ||
+              ((replaceWindow || direction == TimelineDirection.older)
+                  ? page.olderCursor != null
+                  : ui.history.hasOlder),
+          hasNewer:
+              droppedNewer ||
+              ((replaceWindow || direction == TimelineDirection.newer)
+                  ? page.newerCursor != null
+                  : ui.history.hasNewer),
+          detached:
+              replaceWindow ||
+              ui.history.detached ||
+              (trimmed && direction == TimelineDirection.older),
           isLoading: false,
-          epoch: ui.history.epoch,
-          errorMessage: null,
+          errorMessage: (replaceWindow || direction == TimelineDirection.older)
+              ? null
+              : ui.history.errorMessage,
+          newerError: (replaceWindow || direction == TimelineDirection.newer)
+              ? null
+              : ui.history.newerError,
         ),
       ),
     },
   );
-  return enforceTimelineWindowLimit(next, threadId);
 }
 
 /// 恢复事实注入：历史页携带的 rolledBack 标记优先于窗口内任何条目（标记
@@ -350,36 +444,68 @@ List<ThreadItemView> _overlayRolledBackItems(
   ];
 }
 
-/// 时间线窗口的 item 上限；超过后从最旧方向裁剪。
 const int maxTimelineWindowItems = 500;
 
-/// 窗口收缩：items 超过上限时裁掉最旧一端。被裁内容仍可回源——回源锚点从
-/// 裁剪后的 `items.first.turnId` 派生，因此只需把 hasOlder 置回 true。
-StudioState enforceTimelineWindowLimit(StudioState current, String threadId) {
-  final workspace = current.workspacesByThread[threadId];
-  if (workspace == null || workspace.items.length <= maxTimelineWindowItems) {
-    return current;
+ThreadWorkspace _boundedTimeline(
+  ThreadWorkspace workspace,
+  TimelineDirection direction, {
+  String? anchorId,
+}) {
+  final all = workspace.items;
+  var start =
+      all.length <= maxTimelineWindowItems ||
+          direction == TimelineDirection.older
+      ? 0
+      : all.length - maxTimelineWindowItems;
+  final anchor = all.indexWhere((item) => item.id == anchorId);
+  if (anchor >= 0) {
+    if (anchor < start) start = anchor;
+    if (anchor >= start + maxTimelineWindowItems) {
+      start = anchor - maxTimelineWindowItems + 1;
+    }
   }
-  final items = workspace.items.sublist(
-    workspace.items.length - maxTimelineWindowItems,
+  final items = all.sublist(
+    start,
+    (start + maxTimelineWindowItems).clamp(start, all.length),
   );
+  final ids = {...items.map((item) => item.id), ...workspace.latestItemIds};
+  final cache = {
+    ...workspace.cachedItems,
+    for (final item in items) item.id: item,
+  }..removeWhere((id, _) => !ids.contains(id));
+  final turns = cache.values.map((item) => item.turnId).toSet();
+  return workspace.copyWith(
+    items: [for (final item in items) cache[item.id]!],
+    cachedItems: cache,
+    timelineTurns: {...workspace.timelineTurns}
+      ..removeWhere((id, _) => !turns.contains(id)),
+  );
+}
+
+StudioState jumpTimelineToLatest(StudioState current, String threadId) {
+  final workspace = current.workspacesByThread[threadId];
+  if (workspace == null) return current;
   final ui = current.workspaceUiByThread[threadId] ?? const WorkspaceUiState();
+  final items = workspace.latestItems;
   return current.copyWith(
     workspacesByThread: {
       ...current.workspacesByThread,
-      threadId: workspace.copyWith(items: items),
+      threadId: _boundedTimeline(
+        workspace.copyWith(items: items),
+        TimelineDirection.newer,
+      ),
     },
     workspaceUiByThread: {
       ...current.workspaceUiByThread,
       threadId: ui.copyWith(
-        history: ui.history.hasOlder
-            ? ui.history
-            : ThreadHistoryWindow(
-                hasOlder: true,
-                isLoading: ui.history.isLoading,
-                epoch: ui.history.epoch,
-                errorMessage: ui.history.errorMessage,
-              ),
+        history: ThreadHistoryWindow(
+          isLoading: ui.history.isLoading,
+          direction: ui.history.direction,
+          hasOlder:
+              ui.history.hasOlder ||
+              workspace.items.firstOrNull?.id != items.firstOrNull?.id,
+          epoch: ui.history.epoch + 1,
+        ),
       ),
     },
   );

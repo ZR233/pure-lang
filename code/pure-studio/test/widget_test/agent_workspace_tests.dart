@@ -63,8 +63,8 @@ void registerAgentWorkspaceTests() {
       'root timeline',
     );
     expect(
-      next.workspacesByThread['child-1']!.items.single.text,
-      'new child snapshot',
+      next.workspacesByThread['child-1']!.items.map((item) => item.text),
+      containsAll(['child timeline', 'new child snapshot']),
     );
     expect(next.workspaceUiByThread['child-1']!.composer.draft, 'child draft');
   });

@@ -22,41 +22,56 @@ void registerThreadStreamTests() {
         ),
       ),
     );
-    state = applyThreadUpdate(
-      state,
-      threadId: 'session-1',
-      revision: 1,
-      update: ThreadTurnUpdate(failed),
-    ).state;
-    StudioDriverState.publishState(state);
-    final snapshot = jsonDecode(StudioDriverState.snapshotJson()) as Map;
-    expect((snapshot['workspace'] as Map)['turn'], isNull);
-    expect(
-      ((snapshot['workspace'] as Map)['lastTurn'] as Map)['status'],
-      'failed',
-    );
-    expect(
-      ((snapshot['workspace'] as Map)['lastTurn'] as Map)['reason'],
-      'Solo batch rejected',
-    );
-    final stale = StudioTurnView(
+    final cancelled = StudioTurnView(
       turnId: 'turn-1',
       threadId: 'session-1',
-      revision: 1,
-      updatedAt: DateTime.fromMillisecondsSinceEpoch(1000),
-      state: const RunningStudioTurnState(
+      revision: 2,
+      updatedAt: failed.updatedAt,
+      state: const CancelledStudioTurnState(
         startedAt: 1,
-        activity: StudioTurnActivity.thinking,
+        requestedAt: 2,
+        completedAt: 2,
+        cause: UserRequestedTurnCancellation(),
       ),
     );
-    state = applyThreadUpdate(
-      state,
-      threadId: 'session-1',
-      revision: 2,
-      update: ThreadTurnUpdate(stale),
-    ).state;
-    expect(state.selectedWorkspace?.lastTurn, failed);
-    expect(state.turn, isNull);
+    for (final ended in [failed, cancelled]) {
+      state = _emptyState();
+      state = applyThreadUpdate(
+        state,
+        threadId: 'session-1',
+        revision: 1,
+        update: ThreadTurnUpdate(ended),
+      ).state;
+      StudioDriverState.publishState(state);
+      final snapshot = jsonDecode(StudioDriverState.snapshotJson()) as Map;
+      expect((snapshot['workspace'] as Map)['turn'], isNull);
+      expect(
+        ((snapshot['workspace'] as Map)['lastTurn'] as Map)['status'],
+        ended.state.status.name,
+      );
+      expect(
+        ((snapshot['workspace'] as Map)['lastTurn'] as Map)['reason'],
+        ended.state.reason,
+      );
+      final stale = StudioTurnView(
+        turnId: 'turn-1',
+        threadId: 'session-1',
+        revision: 1,
+        updatedAt: DateTime.fromMillisecondsSinceEpoch(1000),
+        state: const RunningStudioTurnState(
+          startedAt: 1,
+          activity: StudioTurnActivity.thinking,
+        ),
+      );
+      state = applyThreadUpdate(
+        state,
+        threadId: 'session-1',
+        revision: 2,
+        update: ThreadTurnUpdate(stale),
+      ).state;
+      expect(state.selectedWorkspace?.lastTurn, ended);
+      expect(state.turn, isNull);
+    }
   });
 
   test('authoritative Thread snapshot replaces accumulated delta', () async {

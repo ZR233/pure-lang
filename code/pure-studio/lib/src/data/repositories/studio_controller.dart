@@ -19,6 +19,7 @@ class StudioController extends _$StudioController {
 
   late ProductStreamCoordinator _productCoordinator;
   late ThreadStreamCoordinator _threadCoordinator;
+  final Set<String> _historyRequests = {};
   final Set<String> _archivingThreadIds = {};
   final Set<String> _renamingThreadIds = {};
 
@@ -365,45 +366,105 @@ class StudioController extends _$StudioController {
     );
   }
 
-  Future<void> loadOlderHistory(String threadId) async {
+  Future<void> loadOlderHistory(String threadId) =>
+      _loadTimelinePage(threadId, TimelineDirection.older);
+  Future<void> loadNewerHistory(String threadId) =>
+      _loadTimelinePage(threadId, TimelineDirection.newer);
+
+  void updateTimelineAnchor(String threadId, TimelineAnchor anchor) {
     final current = state.value;
     if (current == null) return;
-    final workspace = current.workspacesByThread[threadId];
-    final history = _workspaceUi(current, threadId).history;
-    // 回源锚点从窗口首条内容派生（服务器 cursor 即 Turn id 的 before 语义）；
-    // 窗口为空时不存在可回源的更旧历史。
-    final anchor = workspace?.items.firstOrNull?.turnId;
-    if (workspace == null || anchor == null) return;
-    if (!history.hasOlder || history.isLoading) return;
-    final epoch = history.epoch;
     state = AsyncData(
       _withWorkspaceUi(
         current,
         threadId,
         (ui) => ui.copyWith(
-          history: ThreadHistoryWindow(
-            hasOlder: ui.history.hasOlder,
+          history: ui.history.copyWith(
+            anchor: anchor,
+            detached: !anchor.followingBottom,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> jumpToLatest(String threadId) async {
+    final current = state.value;
+    if (current == null) return;
+    state = AsyncData(jumpTimelineToLatest(current, threadId));
+    if (current.selectedThreadId == threadId) await _subscribeThread(threadId);
+  }
+
+  Future<void> _loadTimelinePage(
+    String threadId,
+    TimelineDirection direction, {
+    String? aroundItemId,
+  }) async {
+    final current = state.value;
+    if (current == null) return;
+    final workspace = current.workspacesByThread[threadId];
+    final history = _workspaceUi(current, threadId).history;
+    final older = direction == TimelineDirection.older;
+    final anchor =
+        aroundItemId ??
+        (older
+            ? history.olderCursor ?? workspace?.items.firstOrNull?.id
+            : history.newerCursor ?? workspace?.items.lastOrNull?.id);
+    if (workspace == null ||
+        anchor == null ||
+        history.isLoading ||
+        _historyRequests.contains(threadId) ||
+        (aroundItemId == null &&
+            !(older ? history.hasOlder : history.hasNewer))) {
+      return;
+    }
+    final epoch = history.epoch;
+    _historyRequests.add(threadId);
+    state = AsyncData(
+      _withWorkspaceUi(
+        current,
+        threadId,
+        (ui) => ui.copyWith(
+          history: ui.history.copyWith(
             isLoading: true,
-            epoch: epoch,
-            errorMessage: null,
+            direction: direction,
+            errorMessage: older ? null : ui.history.errorMessage,
+            newerError: older ? ui.history.newerError : null,
           ),
         ),
       ),
     );
     try {
-      final page = await _api.listThreadTurns(threadId, cursor: anchor);
+      final page = await _api.listTimelineItems(
+        threadId,
+        kind: aroundItemId != null
+            ? TimelineQueryKind.around
+            : older
+            ? TimelineQueryKind.before
+            : TimelineQueryKind.after,
+        itemId: anchor,
+      );
       if (!ref.mounted) return;
       final latest = state.value;
-      // 窗口代际已变（快照重建/线程切换重订）：本次响应属于旧窗口，整体丢弃。
       if (latest == null ||
+          !latest.workspacesByThread.containsKey(threadId) ||
           _workspaceUi(latest, threadId).history.epoch != epoch) {
         return;
       }
-      state = AsyncData(applyThreadHistoryPage(latest, threadId, page));
+      state = AsyncData(
+        applyTimelinePage(
+          latest,
+          threadId,
+          page,
+          direction,
+          replaceWindow: aroundItemId != null,
+        ),
+      );
     } catch (error) {
       if (!ref.mounted) return;
       final latest = state.value;
       if (latest == null ||
+          !latest.workspacesByThread.containsKey(threadId) ||
           _workspaceUi(latest, threadId).history.epoch != epoch) {
         return;
       }
@@ -412,15 +473,31 @@ class StudioController extends _$StudioController {
           latest,
           threadId,
           (ui) => ui.copyWith(
-            history: ThreadHistoryWindow(
-              hasOlder: ui.history.hasOlder,
+            history: ui.history.copyWith(
               isLoading: false,
-              epoch: epoch,
-              errorMessage: error.toString(),
+              errorMessage: older ? error.toString() : ui.history.errorMessage,
+              newerError: older ? ui.history.newerError : error.toString(),
             ),
           ),
         ),
       );
+    } finally {
+      _historyRequests.remove(threadId);
+      if (ref.mounted) {
+        final latest = state.value;
+        if (latest != null &&
+            latest.workspacesByThread.containsKey(threadId) &&
+            _workspaceUi(latest, threadId).history.epoch != epoch) {
+          state = AsyncData(
+            _withWorkspaceUi(
+              latest,
+              threadId,
+              (ui) =>
+                  ui.copyWith(history: ui.history.copyWith(isLoading: false)),
+            ),
+          );
+        }
+      }
     }
   }
 
@@ -1269,6 +1346,12 @@ class StudioController extends _$StudioController {
     String threadId,
     int generation,
   ) {
+    final frameThreadId = switch (frame) {
+      ThreadSnapshotFrame(:final workspace) => workspace.thread.id,
+      ThreadNotificationFrame(:final threadId) => threadId,
+      ThreadResyncRequiredFrame(:final threadId) => threadId,
+    };
+    if (frameThreadId != threadId) return;
     final current = state.value;
     if (current == null ||
         generation != _threadCoordinator.generation ||
@@ -1283,6 +1366,22 @@ class StudioController extends _$StudioController {
           threadId,
         );
         state = AsyncData(next);
+        final history = _workspaceUi(next, threadId).history;
+        final anchor = history.anchor;
+        if (anchor != null &&
+            !anchor.followingBottom &&
+            history.errorMessage == null &&
+            !next.workspacesByThread[threadId]!.items.any(
+              (item) => item.id == anchor.itemId,
+            )) {
+          unawaited(
+            _loadTimelinePage(
+              threadId,
+              TimelineDirection.older,
+              aroundItemId: anchor.itemId,
+            ),
+          );
+        }
       case ThreadNotificationFrame(:final revision, :final update):
         final reduced = applyThreadUpdate(
           current,
@@ -1311,28 +1410,14 @@ class StudioController extends _$StudioController {
   }
 
   Future<void> _resyncThread(String threadId, int generation) async {
-    _markThreadDisconnected(threadId, generation);
-    try {
-      final snapshot = await _api.readThreadSnapshot(threadId);
-      final current = state.value;
-      if (current == null ||
-          generation != _threadCoordinator.generation ||
-          current.selectedThreadId != threadId) {
-        return;
-      }
-      state = AsyncData(
-        _reconcileComposer(
-          applyThreadSnapshot(
-            current,
-            snapshot.workspace,
-            historyCursor: snapshot.historyCursor,
-          ),
-          threadId,
-        ),
-      );
-    } on Object {
-      // The scheduled subscription retry remains the recovery path.
+    if (generation != _threadCoordinator.generation ||
+        state.value?.selectedThreadId != threadId) {
+      return;
     }
+    _markThreadDisconnected(threadId, generation);
+    // A gap invalidates the stream now. The new subscription owns recovery;
+    // subsequent old frames cannot postpone it by resetting the retry timer.
+    await _subscribeThread(threadId);
   }
 
   void _markThreadDisconnected(String threadId, int generation) {

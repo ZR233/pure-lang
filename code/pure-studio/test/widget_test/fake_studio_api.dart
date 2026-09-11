@@ -677,6 +677,29 @@ class _FakeStudioApi implements StudioApi {
   }
 
   @override
+  Future<TimelinePage> listTimelineItems(
+    String threadId, {
+    TimelineQueryKind kind = TimelineQueryKind.latest,
+    String? itemId,
+    int limit = 100,
+  }) async {
+    historyRequests.add((threadId: threadId, cursor: itemId));
+    if (historyGates.isNotEmpty) await historyGates.removeAt(0).future;
+    final page =
+        historyPagesByThread[threadId]?[itemId] ??
+        const ThreadHistoryPage(items: [], nextCursor: null);
+    return TimelinePage(
+      threadId: threadId,
+      watermark: 0,
+      items: page.items,
+      olderCursor: kind == TimelineQueryKind.before ? page.nextCursor : null,
+      newerCursor: kind == TimelineQueryKind.after ? page.nextCursor : null,
+      firstItemId: page.items.firstOrNull?.id,
+      lastItemId: page.items.lastOrNull?.id,
+    );
+  }
+
+  @override
   Future<ThreadHistoryPage> listThreadTurns(
     String threadId, {
     String? cursor,

@@ -7,11 +7,13 @@ import '../../../frb_generated.dart';
 import 'attachment.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
+import 'package:freezed_annotation/freezed_annotation.dart' hide protected;
 
 import 'thread_stream.dart';
 import 'thread_stream/item.dart';
+part 'history.freezed.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 enum BridgeThreadContextDisposition { active, rolledBack }
 
@@ -58,6 +60,91 @@ class BridgeThreadTurnPage {
           nextCursor == other.nextCursor;
 }
 
+class BridgeTimelinePage {
+  final String threadId;
+  final BigInt watermark;
+  final List<BridgeThreadItem> items;
+  final String? olderCursor;
+  final String? newerCursor;
+  final String? firstItemId;
+  final String? lastItemId;
+  final List<BridgeTimelineTurn> turns;
+
+  const BridgeTimelinePage({
+    required this.threadId,
+    required this.watermark,
+    required this.items,
+    this.olderCursor,
+    this.newerCursor,
+    this.firstItemId,
+    this.lastItemId,
+    required this.turns,
+  });
+
+  @override
+  int get hashCode =>
+      threadId.hashCode ^
+      watermark.hashCode ^
+      items.hashCode ^
+      olderCursor.hashCode ^
+      newerCursor.hashCode ^
+      firstItemId.hashCode ^
+      lastItemId.hashCode ^
+      turns.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeTimelinePage &&
+          runtimeType == other.runtimeType &&
+          threadId == other.threadId &&
+          watermark == other.watermark &&
+          items == other.items &&
+          olderCursor == other.olderCursor &&
+          newerCursor == other.newerCursor &&
+          firstItemId == other.firstItemId &&
+          lastItemId == other.lastItemId &&
+          turns == other.turns;
+}
+
+@freezed
+sealed class BridgeTimelineQuery with _$BridgeTimelineQuery {
+  const BridgeTimelineQuery._();
+
+  const factory BridgeTimelineQuery.latest() = BridgeTimelineQuery_Latest;
+  const factory BridgeTimelineQuery.before({required String itemId}) =
+      BridgeTimelineQuery_Before;
+  const factory BridgeTimelineQuery.after({required String itemId}) =
+      BridgeTimelineQuery_After;
+  const factory BridgeTimelineQuery.around({required String itemId}) =
+      BridgeTimelineQuery_Around;
+}
+
+class BridgeTimelineTurn {
+  final BridgeTurn turn;
+  final String lastItemId;
+  final BridgeThreadContextDisposition contextDisposition;
+
+  const BridgeTimelineTurn({
+    required this.turn,
+    required this.lastItemId,
+    required this.contextDisposition,
+  });
+
+  @override
+  int get hashCode =>
+      turn.hashCode ^ lastItemId.hashCode ^ contextDisposition.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeTimelineTurn &&
+          runtimeType == other.runtimeType &&
+          turn == other.turn &&
+          lastItemId == other.lastItemId &&
+          contextDisposition == other.contextDisposition;
+}
+
 class ListThreadTurnsRequest {
   final String threadId;
   final String? cursor;
@@ -79,5 +166,29 @@ class ListThreadTurnsRequest {
           runtimeType == other.runtimeType &&
           threadId == other.threadId &&
           cursor == other.cursor &&
+          limit == other.limit;
+}
+
+class ListTimelineItemsRequest {
+  final String threadId;
+  final BridgeTimelineQuery query;
+  final int limit;
+
+  const ListTimelineItemsRequest({
+    required this.threadId,
+    required this.query,
+    required this.limit,
+  });
+
+  @override
+  int get hashCode => threadId.hashCode ^ query.hashCode ^ limit.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ListTimelineItemsRequest &&
+          runtimeType == other.runtimeType &&
+          threadId == other.threadId &&
+          query == other.query &&
           limit == other.limit;
 }

@@ -17,6 +17,7 @@ pub(in crate::studio) struct ThreadResidency {
     order: Arc<AsyncMutex<VecDeque<String>>>,
     pinned: Arc<Mutex<HashMap<String, usize>>>,
     capacity: usize,
+    pub(super) timelines: Arc<AsyncMutex<HashMap<String, super::timeline::TimelineIndex>>>,
 }
 
 pub(in crate::studio) struct ThreadResidencyPins {
@@ -38,6 +39,7 @@ impl ThreadResidency {
             order: Arc::new(AsyncMutex::new(VecDeque::new())),
             pinned: Arc::new(Mutex::new(HashMap::new())),
             capacity: INACTIVE_RESIDENT_CAPACITY,
+            timelines: Arc::default(),
         }
     }
 
@@ -51,6 +53,7 @@ impl ThreadResidency {
     /// 移除已淘汰条目。
     pub(in crate::studio) async fn remove(&self, thread_id: &str) {
         self.order.lock().await.retain(|id| id != thread_id);
+        self.timelines.lock().await.remove(thread_id);
     }
 
     /// 返回超出非 pin 容量的队首候选（按最久未使用排序）。

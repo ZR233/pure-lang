@@ -31,3 +31,10 @@ Future<BridgeThreadTurnPage> listThreadTurns({
 }) => RustLib.instance.api.crateApiStudioHandlersHistoryListThreadTurns(
   request: request,
 );
+
+/// Reads a bounded, bidirectional item page from the canonical journal projection.
+Future<BridgeTimelinePage> listTimelineItems({
+  required ListTimelineItemsRequest request,
+}) => RustLib.instance.api.crateApiStudioHandlersHistoryListTimelineItems(
+  request: request,
+);

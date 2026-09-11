@@ -1199,6 +1199,40 @@ class DemoStudioApi implements StudioApi {
   }
 
   @override
+  Future<TimelinePage> listTimelineItems(
+    String threadId, {
+    TimelineQueryKind kind = TimelineQueryKind.latest,
+    String? itemId,
+    int limit = 100,
+  }) async {
+    final all = _workspaces[threadId]?.items;
+    if (all == null) throw StateError('unknown demo Thread');
+    final index = itemId == null
+        ? all.length
+        : all.indexWhere((item) => item.id == itemId);
+    if (index < 0) throw StateError('unknown timeline item');
+    final start = switch (kind) {
+      TimelineQueryKind.latest => (all.length - limit).clamp(0, all.length),
+      TimelineQueryKind.before => (index - limit).clamp(0, all.length),
+      TimelineQueryKind.after => (index + 1).clamp(0, all.length),
+      TimelineQueryKind.around => (index - limit ~/ 2).clamp(0, all.length),
+    };
+    final end = kind == TimelineQueryKind.before
+        ? index
+        : (start + limit).clamp(start, all.length);
+    final items = all.sublist(start, end);
+    return TimelinePage(
+      threadId: threadId,
+      watermark: _workspaces[threadId]!.revision,
+      items: items,
+      olderCursor: start > 0 ? items.firstOrNull?.id : null,
+      newerCursor: end < all.length ? items.lastOrNull?.id : null,
+      firstItemId: items.firstOrNull?.id,
+      lastItemId: items.lastOrNull?.id,
+    );
+  }
+
+  @override
   Future<ThreadHistoryPage> listThreadTurns(
     String threadId, {
     String? cursor,

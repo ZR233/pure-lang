@@ -532,12 +532,12 @@ void registerControllerStreamTests() {
             ),
           ],
         ),
-        historyCursor: 'turn-live',
+        historyCursor: 'live-item',
       ),
     );
     await pumpEventQueue();
     api.historyPagesByThread['session-1'] = {
-      'turn-live': ThreadHistoryPage(
+      'live-item': ThreadHistoryPage(
         items: [
           _threadItemFixture(
             id: 'history-item',
@@ -556,7 +556,7 @@ void registerControllerStreamTests() {
         .loadOlderHistory('session-1');
 
     final state = container.read(studioControllerProvider).requireValue;
-    expect(api.historyRequests.single.cursor, 'turn-live');
+    expect(api.historyRequests.single.cursor, 'live-item');
     expect(state.selectedWorkspace!.items.map((item) => item.id), [
       'history-item',
       'live-item',
@@ -670,19 +670,19 @@ void registerControllerStreamTests() {
       await pumpEventQueue();
 
       // 快照携带 400 条窗口内容与更旧回源锚点；随后一页 120 条更旧历史
-      // 使窗口达到 520，超过 500 上限后从最旧方向裁剪 20 条。
+      // 使窗口达到 520，向旧翻页应淘汰远端最新的 20 条。
       api.emitThreadFrame(
         ThreadSnapshotFrame(
           workspace: initial.selectedWorkspace!.copyWith(
             revision: 1,
             items: windowItems(0, 400),
           ),
-          historyCursor: 'turn-0',
+          historyCursor: 'item-0',
         ),
       );
       await pumpEventQueue();
       api.historyPagesByThread['session-1'] = {
-        'turn-0': ThreadHistoryPage(
+        'item-0': ThreadHistoryPage(
           items: windowItems(-120, 120),
           nextCursor: null,
         ),
@@ -695,22 +695,29 @@ void registerControllerStreamTests() {
       final state = container.read(studioControllerProvider).requireValue;
       final history = state.selectedWorkspaceUi.history;
       expect(state.selectedWorkspace!.items.length, 500);
-      // 裁剪后窗口首条是被保留的最旧条目；被裁内容仍可回源（hasOlder 保持）。
-      expect(state.selectedWorkspace!.items.first.id, 'item--100');
-      expect(history.hasOlder, isTrue);
+      expect(state.selectedWorkspace!.items.first.id, 'item--120');
+      expect(state.selectedWorkspace!.items.last.id, 'item-379');
+      expect(history.hasOlder, isFalse);
+      expect(history.hasNewer, isTrue);
       expect(history.isLoading, isFalse);
+      expect(state.selectedWorkspace!.cachedItems.length, 520);
 
-      // 再次回源的锚点从裁剪后的窗口首条派生。
       api.historyPagesByThread['session-1'] = {
-        'turn--100': ThreadHistoryPage(
-          items: windowItems(-140, 40),
+        'item-379': ThreadHistoryPage(
+          items: windowItems(380, 20),
           nextCursor: null,
         ),
       };
       await container
           .read(studioControllerProvider.notifier)
-          .loadOlderHistory('session-1');
-      expect(api.historyRequests.last.cursor, 'turn--100');
+          .loadNewerHistory('session-1');
+      final newer = container.read(studioControllerProvider).requireValue;
+      expect(api.historyRequests.last.cursor, 'item-379');
+      expect(newer.selectedWorkspace!.items.map((item) => item.id), [
+        for (var n = -100; n < 400; n++) 'item-$n',
+      ]);
+      expect(newer.selectedWorkspaceUi.history.hasNewer, isFalse);
+      expect(newer.selectedWorkspaceUi.history.hasOlder, isTrue);
     },
   );
   test('selection survives directory delta that does not remove it', () async {

@@ -249,6 +249,44 @@ pub struct ThreadTurnHistory {
     pub context_disposition: ThreadContextDisposition,
 }
 
+/// Stable item query; before/after exclude the cursor, around includes it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum TimelineQuery {
+    Latest,
+    Before { item_id: String },
+    After { item_id: String },
+    Around { item_id: String },
+}
+
+/// An inclusive item range at one canonical commit watermark.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelinePage {
+    pub thread_id: String,
+    pub watermark: u64,
+    pub items: Vec<ThreadItem>,
+    pub older_cursor: Option<String>,
+    pub newer_cursor: Option<String>,
+    pub first_item_id: Option<String>,
+    pub last_item_id: Option<String>,
+    pub turns: Vec<TimelineTurn>,
+}
+
+/// Turn metadata is independent of whether its admission item is in this page.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineTurn {
+    pub turn: Turn,
+    pub last_item_id: String,
+    pub context_disposition: ThreadContextDisposition,
+}
+
 crate::impl_labeled_enum!(
     ThreadStatus,
     "ThreadStatus",

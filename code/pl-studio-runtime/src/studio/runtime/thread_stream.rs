@@ -39,6 +39,9 @@ impl StudioThreadSubscription {
         let thread = self.runtime.read_protocol_thread(&self.thread_id).await?;
         let snapshot =
             crate::studio::thread_projection::project_snapshot(thread, &state, &self.journal)?;
+        self.runtime
+            .index_timeline(&self.thread_id, &state, &snapshot.items)
+            .await;
         Ok(Some(pl_protocol::ThreadSubscriptionUpdate::Snapshot {
             snapshot: Box::new(snapshot),
         }))

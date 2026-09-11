@@ -520,6 +520,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  ListTimelineItemsRequest dco_decode_box_autoadd_list_timeline_items_request(
+    dynamic raw,
+  );
+
+  @protected
   LspScopeInput dco_decode_box_autoadd_lsp_scope_input(dynamic raw);
 
   @protected
@@ -1205,6 +1210,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeThreadTurnPage dco_decode_bridge_thread_turn_page(dynamic raw);
 
   @protected
+  BridgeTimelinePage dco_decode_bridge_timeline_page(dynamic raw);
+
+  @protected
+  BridgeTimelineQuery dco_decode_bridge_timeline_query(dynamic raw);
+
+  @protected
+  BridgeTimelineTurn dco_decode_bridge_timeline_turn(dynamic raw);
+
+  @protected
   BridgeTodoItem dco_decode_bridge_todo_item(dynamic raw);
 
   @protected
@@ -1518,6 +1532,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<BridgeTimelineTurn> dco_decode_list_bridge_timeline_turn(dynamic raw);
+
+  @protected
   List<BridgeTodoItem> dco_decode_list_bridge_todo_item(dynamic raw);
 
   @protected
@@ -1576,6 +1593,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ListThreadTurnsRequest dco_decode_list_thread_turns_request(dynamic raw);
+
+  @protected
+  ListTimelineItemsRequest dco_decode_list_timeline_items_request(dynamic raw);
 
   @protected
   List<ZhipuQuotaLimitDto> dco_decode_list_zhipu_quota_limit_dto(dynamic raw);
@@ -2373,6 +2393,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ListThreadTurnsRequest sse_decode_box_autoadd_list_thread_turns_request(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  ListTimelineItemsRequest sse_decode_box_autoadd_list_timeline_items_request(
     SseDeserializer deserializer,
   );
 
@@ -3238,6 +3263,21 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeTimelinePage sse_decode_bridge_timeline_page(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeTimelineQuery sse_decode_bridge_timeline_query(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeTimelineTurn sse_decode_bridge_timeline_turn(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeTodoItem sse_decode_bridge_todo_item(SseDeserializer deserializer);
 
   @protected
@@ -3617,6 +3657,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  List<BridgeTimelineTurn> sse_decode_list_bridge_timeline_turn(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   List<BridgeTodoItem> sse_decode_list_bridge_todo_item(
     SseDeserializer deserializer,
   );
@@ -3691,6 +3736,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ListThreadTurnsRequest sse_decode_list_thread_turns_request(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  ListTimelineItemsRequest sse_decode_list_timeline_items_request(
     SseDeserializer deserializer,
   );
 
@@ -4617,6 +4667,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_list_thread_turns_request(
     ListThreadTurnsRequest self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_box_autoadd_list_timeline_items_request(
+    ListTimelineItemsRequest self,
     SseSerializer serializer,
   );
 
@@ -5671,6 +5727,24 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_bridge_timeline_page(
+    BridgeTimelinePage self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_timeline_query(
+    BridgeTimelineQuery self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_timeline_turn(
+    BridgeTimelineTurn self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_bridge_todo_item(
     BridgeTodoItem self,
     SseSerializer serializer,
@@ -6130,6 +6204,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_list_bridge_timeline_turn(
+    List<BridgeTimelineTurn> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_list_bridge_todo_item(
     List<BridgeTodoItem> self,
     SseSerializer serializer,
@@ -6228,6 +6308,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_list_thread_turns_request(
     ListThreadTurnsRequest self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_list_timeline_items_request(
+    ListTimelineItemsRequest self,
     SseSerializer serializer,
   );
 

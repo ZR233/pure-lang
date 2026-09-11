@@ -859,6 +859,9 @@ class ThreadWorkspace {
     required this.runtime,
     this.activeTurn,
     this.observedLastTurn,
+    this.cachedItems = const {},
+    this.latestItemIds = const [],
+    this.timelineTurns = const {},
     this.todo,
   });
 
@@ -869,6 +872,12 @@ class ThreadWorkspace {
   final ThreadRuntimeView runtime;
   final StudioTurnView? activeTurn;
   final StudioTurnView? observedLastTurn;
+  final Map<String, ThreadItemView> cachedItems;
+  final List<String> latestItemIds;
+  final Map<String, TimelineTurnView> timelineTurns;
+  List<ThreadItemView> get latestItems => [
+    for (final id in latestItemIds) ?cachedItems[id],
+  ];
   final TimelineTodoListUpdate? todo;
 
   /// Canonical latest turn, including terminal facts carried by thread items.
@@ -912,12 +921,18 @@ class ThreadWorkspace {
     ThreadRuntimeView? runtime,
     Object? activeTurn = _workspaceUnset,
     Object? observedLastTurn = _workspaceUnset,
+    Map<String, ThreadItemView>? cachedItems,
+    List<String>? latestItemIds,
+    Map<String, TimelineTurnView>? timelineTurns,
     Object? todo = _workspaceUnset,
   }) {
     return ThreadWorkspace(
       thread: thread ?? this.thread,
       revision: revision ?? this.revision,
       items: items ?? this.items,
+      cachedItems: cachedItems ?? this.cachedItems,
+      latestItemIds: latestItemIds ?? this.latestItemIds,
+      timelineTurns: timelineTurns ?? this.timelineTurns,
       interactions: interactions ?? this.interactions,
       runtime: runtime ?? this.runtime,
       activeTurn: identical(activeTurn, _workspaceUnset)
@@ -962,31 +977,91 @@ class WorkspaceUiState {
   }
 }
 
-/// 已加载时间线窗口的分页状态。
-///
-/// 窗口内容就是 workspace.items；向旧方向回源的锚点永远从
-/// `items.first.turnId` 现场派生（服务器 cursor 即 Turn id 的 before 语义），
-/// 因此这里不保存任何 cursor 或页簿记——items 变化不可能让本状态漂移。
-/// [epoch] 是窗口代际：快照重建窗口时递增，用于作废在途的历史页响应。
+enum TimelineDirection { older, newer }
+
+class TimelineTurnView {
+  const TimelineTurnView({
+    required this.turn,
+    required this.lastItemId,
+    this.disposition = ThreadContextDisposition.active,
+  });
+  final StudioTurnView turn;
+  final String lastItemId;
+  final ThreadContextDisposition disposition;
+}
+
+class TimelineAnchor {
+  const TimelineAnchor(
+    this.itemId,
+    this.offset, {
+    this.followingBottom = false,
+  });
+  final String itemId;
+  final double offset;
+  final bool followingBottom;
+}
+
+/// Reading-window ownership is independent from subscription ownership.
 class ThreadHistoryWindow {
   const ThreadHistoryWindow({
     this.hasOlder = false,
+    this.hasNewer = false,
+    this.olderCursor,
+    this.newerCursor,
     this.isLoading = false,
+    this.direction = TimelineDirection.older,
     this.epoch = 0,
     this.errorMessage,
+    this.newerError,
+    this.detached = false,
+    this.anchor,
   });
-
-  /// 窗口最旧一端之外是否还有可回源的历史。
   final bool hasOlder;
-
-  /// 一次向旧方向的回源请求是否在途。
+  final bool hasNewer;
+  final String? olderCursor;
+  final String? newerCursor;
   final bool isLoading;
-
-  /// 窗口代际；快照重建时递增。
+  final TimelineDirection direction;
   final int epoch;
-
-  /// 最近一次回源失败的信息；成功后清空。
   final String? errorMessage;
+  final String? newerError;
+  final bool detached;
+  final TimelineAnchor? anchor;
+  ThreadHistoryWindow copyWith({
+    bool? hasOlder,
+    bool? hasNewer,
+    Object? olderCursor = _workspaceUnset,
+    Object? newerCursor = _workspaceUnset,
+    bool? isLoading,
+    TimelineDirection? direction,
+    int? epoch,
+    Object? errorMessage = _workspaceUnset,
+    Object? newerError = _workspaceUnset,
+    bool? detached,
+    Object? anchor = _workspaceUnset,
+  }) => ThreadHistoryWindow(
+    hasOlder: hasOlder ?? this.hasOlder,
+    hasNewer: hasNewer ?? this.hasNewer,
+    olderCursor: identical(olderCursor, _workspaceUnset)
+        ? this.olderCursor
+        : olderCursor as String?,
+    newerCursor: identical(newerCursor, _workspaceUnset)
+        ? this.newerCursor
+        : newerCursor as String?,
+    isLoading: isLoading ?? this.isLoading,
+    direction: direction ?? this.direction,
+    epoch: epoch ?? this.epoch,
+    detached: detached ?? this.detached,
+    errorMessage: identical(errorMessage, _workspaceUnset)
+        ? this.errorMessage
+        : errorMessage as String?,
+    newerError: identical(newerError, _workspaceUnset)
+        ? this.newerError
+        : newerError as String?,
+    anchor: identical(anchor, _workspaceUnset)
+        ? this.anchor
+        : anchor as TimelineAnchor?,
+  );
 }
 
 const _workspaceUnset = Object();

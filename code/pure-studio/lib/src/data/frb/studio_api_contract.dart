@@ -61,6 +61,12 @@ abstract class StudioApi {
   /// 读取线程快照；`historyCursor` 是快照窗口之外的回源锚点（Turn id）。
   Future<({ThreadWorkspace workspace, String? historyCursor})>
   readThreadSnapshot(String threadId);
+  Future<TimelinePage> listTimelineItems(
+    String threadId, {
+    TimelineQueryKind kind = TimelineQueryKind.latest,
+    String? itemId,
+    int limit = 100,
+  });
   Future<ThreadHistoryPage> listThreadTurns(
     String threadId, {
     String? cursor,
@@ -802,6 +808,56 @@ class FrbStudioApi implements StudioApi {
       },
     );
     return controller.stream;
+  }
+
+  @override
+  Future<TimelinePage> listTimelineItems(
+    String threadId, {
+    TimelineQueryKind kind = TimelineQueryKind.latest,
+    String? itemId,
+    int limit = 100,
+  }) async {
+    await _ensureReady();
+    final query = switch (kind) {
+      TimelineQueryKind.latest => const frb.BridgeTimelineQuery.latest(),
+      TimelineQueryKind.before => frb.BridgeTimelineQuery.before(
+        itemId: itemId!,
+      ),
+      TimelineQueryKind.after => frb.BridgeTimelineQuery.after(itemId: itemId!),
+      TimelineQueryKind.around => frb.BridgeTimelineQuery.around(
+        itemId: itemId!,
+      ),
+    };
+    final page = await _bridgeCall(
+      () => frb.listTimelineItems(
+        request: frb.ListTimelineItemsRequest(
+          threadId: threadId,
+          query: query,
+          limit: limit,
+        ),
+      ),
+    );
+    final turns = page.turns.map(_timelineTurnFromFrb).toList();
+    final dispositions = {
+      for (final entry in turns) entry.turn.turnId: entry.disposition,
+    };
+    return TimelinePage(
+      threadId: page.threadId,
+      watermark: page.watermark.toInt(),
+      items: [
+        for (final item in page.items)
+          _threadItemFromFrb(
+            item,
+            contextDisposition:
+                dispositions[item.turnId] ?? ThreadContextDisposition.active,
+          ),
+      ],
+      olderCursor: page.olderCursor,
+      newerCursor: page.newerCursor,
+      firstItemId: page.firstItemId,
+      lastItemId: page.lastItemId,
+      turns: turns,
+    );
   }
 
   @override

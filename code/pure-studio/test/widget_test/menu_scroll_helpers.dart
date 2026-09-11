@@ -83,7 +83,3 @@ ScrollPosition _timelinePosition(WidgetTester tester) {
 double _timelineExtentAfter(WidgetTester tester) {
   return _timelinePosition(tester).extentAfter;
 }
-
-double _timelinePixels(WidgetTester tester) {
-  return _timelinePosition(tester).pixels;
-}
