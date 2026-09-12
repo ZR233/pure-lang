@@ -5,6 +5,45 @@ Pure Studio release notes are generated from Conventional Commits by Release Ple
 > 从采用 `pure_studio.exe` 的版本开始，请先手动卸载旧版 Pure Studio，再安装新版。
 > 安装器允许直接覆盖，但不会检测或删除旧程序文件；跳过卸载可能留下旧文件。
 
+## [4.0.0](https://github.com/ZR233/pure-lang/compare/v3.0.0...v4.0.0) (2026-09-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* **studio:** anywork installs independently and uses a new data root and credential service. Pure Studio users must install manually; existing settings and history are not migrated.
+* **studio:** 统一暹罗浅色主题并移除系统主题偏好
+* **studio:** pl.core.thread-commit 升级到 v2；保留旧 v1 数据，读取明确返回不支持版本，不提供旧格式双读。
+* **core:** 移除旧 AgentRuntime 与产品协议门面；消费者改用 pl-core Thread 端口、pl-model/pl-tool 适配及 Studio 统一装配。
+
+### Features
+
+* **studio:** rename desktop app to anywork ([6404728](https://github.com/ZR233/pure-lang/commit/6404728fa13da6fb763e64136d1681a3e3ded2fd))
+
+
+### Bug Fixes
+
+* **model:** 更新 DeepSeek 模型目录与人民币定价 ([62a101a](https://github.com/ZR233/pure-lang/commit/62a101ace2e7d71451cddf5a41e649de2a98ad0a))
+* **ssh:** 继承远程用户环境并完善设置重连 ([be4d5dd](https://github.com/ZR233/pure-lang/commit/be4d5ddb20292bed23be926f8036aef307e41eda))
+* **studio:** warm thread directory before publishing cold activation ([e7c196f](https://github.com/ZR233/pure-lang/commit/e7c196ff89354819bfa8c5f7cc38c4015c9729d7))
+* **studio:** 修复 agent 切换与 timeline 连续分页 ([4cfda01](https://github.com/ZR233/pure-lang/commit/4cfda010641bc4cdf894662f3ea620213cd126e0))
+* **studio:** 修复 DeepSeek 上下文容量显示为零 ([2ac66ae](https://github.com/ZR233/pure-lang/commit/2ac66ae198376eceeb1d741cdf3e74629baabdd9))
+* **studio:** 修复 Windows CI 会话备份与线程测试 ([8b75ee1](https://github.com/ZR233/pure-lang/commit/8b75ee1c0d96cb8d95ca8f8cbe9b6547539185d5))
+* **studio:** 修复任务模式恢复与 GUI 验收链路 ([e9d7664](https://github.com/ZR233/pure-lang/commit/e9d766423d92e46202f1d7fa0ecc709803daddf4))
+* **studio:** 技能列表副标题改为技能描述 ([#63](https://github.com/ZR233/pure-lang/issues/63)) ([e8b6c68](https://github.com/ZR233/pure-lang/commit/e8b6c685060f30489282405ffaad655870915184))
+* **studio:** 缩减线程恢复回归测试运行时 ([30452a9](https://github.com/ZR233/pure-lang/commit/30452a9f85fd203201741b3014c8610abec267a0))
+* **studio:** 隔离线程恢复测试的非相关工具发现 ([a5f8235](https://github.com/ZR233/pure-lang/commit/a5f8235fe31ab39239515d6a95f4cadd6e1ca8f9))
+
+
+### Refactoring
+
+* **core:** 分离通用 Thread 内核与 Studio 产品运行时 ([7c69236](https://github.com/ZR233/pure-lang/commit/7c692367dadf486f91eaf04438df30a43f831368))
+* **studio:** 统一暹罗浅色主题并移除系统主题偏好 ([669d096](https://github.com/ZR233/pure-lang/commit/669d096cc62d04fdb0b99f7c3dcf3e2a1599c9b1))
+
+
+### Documentation
+
+* **skills:** 迁移通用质量技能并收敛项目协作规范 ([fa70542](https://github.com/ZR233/pure-lang/commit/fa70542a5dd4d45d37a12f0abb8600c0ebc1e5aa))
+
 ## [3.0.0](https://github.com/ZR233/pure-lang/compare/v2.0.0...v3.0.0) (2026-09-08)
 
 
