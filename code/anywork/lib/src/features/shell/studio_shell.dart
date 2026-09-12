@@ -1,0 +1,120 @@
+import 'dart:async';
+
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/widget_previews.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../app/theme/material3_theme.dart';
+import '../../app/theme/studio_tokens.dart';
+import '../../data/repositories/studio_repository.dart';
+import '../../domain/models/studio_models.dart';
+import '../../l10n/app_localizations.dart';
+import '../../l10n/studio_l10n.dart';
+import '../../shared/studio_chrome.dart';
+import '../../shared/studio_driver_keys.dart';
+import '../../shared/studio_driver_state.dart';
+import '../update/studio_update_controller.dart';
+import '../interaction/composer_dock.dart';
+import '../status/thread_status_bar.dart';
+import '../timeline/timeline_view.dart';
+import '../todo/todo_panel.dart';
+
+part 'studio_sidebar.dart';
+part 'sidebar_directory.dart';
+part 'sidebar_entries.dart';
+part 'sidebar_tiles.dart';
+part 'sidebar_actions.dart';
+part 'runtime_banners.dart';
+part 'studio_shell_chrome.dart';
+part 'agent_workspace_pane.dart';
+part 'agent_workspace_preview.dart';
+
+typedef ProjectDirectoryPicker = Future<String?> Function(BuildContext context);
+
+final projectDirectoryPickerProvider = Provider<ProjectDirectoryPicker>((ref) {
+  if (const bool.fromEnvironment('ANYWORK_DRIVER')) {
+    return showDriverProjectPathDialog;
+  }
+  return (_) => FilePicker.getDirectoryPath();
+});
+
+Future<String?> showDriverProjectPathDialog(BuildContext context) {
+  return showDialog<String>(
+    context: context,
+    builder: (_) => const _DriverProjectPathDialog(),
+  );
+}
+
+class StudioShell extends ConsumerStatefulWidget {
+  const StudioShell({super.key});
+
+  @override
+  ConsumerState<StudioShell> createState() => _StudioShellState();
+}
+
+class _StudioShellState extends ConsumerState<StudioShell> {
+  @override
+  Widget build(BuildContext context) {
+    final asyncChrome = ref.watch(shellChromeProvider);
+    final asyncSidebar = ref.watch(sidebarProvider);
+    final asyncHeader = ref.watch(studioHeaderProvider);
+    return asyncChrome.when(
+      loading: () =>
+          const Scaffold(body: Center(child: CircularProgressIndicator())),
+      error: (error, stackTrace) => _StudioFatalError(error: error),
+      data: (chrome) {
+        final sidebar = asyncSidebar.value;
+        final header = asyncHeader.value;
+        StudioDriverState.publishProject(header?.selectedProject);
+        if (sidebar == null || header == null) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            final compact =
+                constraints.maxWidth < StudioLayout.compactBreakpoint;
+            return Scaffold(
+              key: StudioDriverKeys.shell,
+              backgroundColor: context.colors.surface,
+              body: Row(
+                children: [
+                  _Sidebar(state: sidebar, compact: compact),
+                  VerticalDivider(
+                    width: 1,
+                    color: context.colors.outlineVariant,
+                  ),
+                  Expanded(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(color: context.colors.surface),
+                      child: Column(
+                        children: [
+                          _Header(state: header),
+                          if (chrome.configRecoveryNotice case final notice?)
+                            _ConfigRecoveryBanner(notice: notice),
+                          if (chrome.persistenceState.needsAttention)
+                            _PersistenceBanner(
+                              snapshot: chrome.persistenceState,
+                            ),
+                          if (chrome.applicationRecoveryIssues.isNotEmpty)
+                            _ApplicationRecoveryBanner(
+                              issues: chrome.applicationRecoveryIssues,
+                            ),
+                          const Divider(height: 1),
+                          const Expanded(child: AgentWorkspacePane()),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}

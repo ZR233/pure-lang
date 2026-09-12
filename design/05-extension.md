@@ -23,7 +23,7 @@ Mode 通过 `ThreadModeRegistration` 注册，不复用 Skill frontmatter、Prov
 
 ## 5.4 Agent Profile
 
-用户可在 `~/.pure/agents/<id>.toml` 增加 Profile。文件名 stem 是稳定 id，一个文件包含 enabled、
+用户可在 `~/.anywork/agents/<id>.toml` 增加 Profile。文件名 stem 是稳定 id，一个文件包含 enabled、
 介绍、适用任务、系统指令、provider、model 与 effort。单文件无效不阻断其他 Profile。
 
 新增系统 Profile 需在 Rust builtin registry 注册。系统 Profile 全字段只读且不可删除，只能通过

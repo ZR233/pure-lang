@@ -368,7 +368,7 @@ mod tests {
     #[tokio::test]
     async fn multipart_upload_preflights_unsupported_files() {
         let app = test_app().await;
-        let boundary = "pure-studio-boundary";
+        let boundary = "anywork-boundary";
         let body = format!(
             "--{boundary}\r\nContent-Disposition: form-data; name=\"context\"\r\n\r\n{{\"type\":\"newThread\",\"mode\":\"mode.simple\"}}\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"unsupported.pdf\"\r\nContent-Type: application/pdf\r\n\r\n%PDF-must-not-be-admitted\r\n--{boundary}--\r\n"
         );

@@ -394,7 +394,7 @@ mod tests {
     async fn ssh_backend_uses_safe_timed_git_for_create_and_cleanup() {
         let transport = Arc::new(RecordingTransport::default());
         let backend = backend(transport.clone());
-        let target = PathBuf::from("/repo/.pure/worktrees/root/child");
+        let target = PathBuf::from("/repo/.anywork/worktrees/root/child");
 
         backend
             .create_parent(Path::new("/repo"), &target)
@@ -424,11 +424,11 @@ mod tests {
 
         assert_eq!(
             transport.directories.lock().unwrap().as_slice(),
-            [".pure/worktrees/root"]
+            [".anywork/worktrees/root"]
         );
         assert_eq!(
             transport.removals.lock().unwrap().as_slice(),
-            [".pure/worktrees/root/child"]
+            [".anywork/worktrees/root/child"]
         );
         let requests = transport.requests.lock().unwrap();
         assert_eq!(requests.len(), 3);
@@ -453,14 +453,14 @@ mod tests {
             "add".into(),
             "-b".into(),
             "pure-agent-child".into(),
-            "/repo/.pure/worktrees/root/child".into(),
+            "/repo/.anywork/worktrees/root/child".into(),
             "base-commit".into(),
         ]));
         assert!(requests[1].args.ends_with(&[
             "worktree".into(),
             "remove".into(),
             "--force".into(),
-            "/repo/.pure/worktrees/root/child".into(),
+            "/repo/.anywork/worktrees/root/child".into(),
         ]));
         assert!(requests[2].args.ends_with(&[
             "branch".into(),

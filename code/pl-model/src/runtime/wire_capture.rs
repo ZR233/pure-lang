@@ -1,6 +1,6 @@
 //! 验收专用的最终 provider wire 请求捕获。
 //!
-//! 只有测试/xtask harness 显式设置 `PURE_STUDIO_WIRE_CAPTURE_DIR` 时写盘；
+//! 只有测试/xtask harness 显式设置 `ANYWORK_WIRE_CAPTURE_DIR` 时写盘；
 //! 默认生产路径不记录 prompt，也从不接触认证头。
 
 use std::path::PathBuf;
@@ -17,7 +17,7 @@ use super::openai::OpenAiRequestBody;
 use super::openai::sse::SseStreamEvent;
 use crate::completion::CompletionTraceContext;
 
-const CAPTURE_DIRECTORY_ENV: &str = "PURE_STUDIO_WIRE_CAPTURE_DIR";
+const CAPTURE_DIRECTORY_ENV: &str = "ANYWORK_WIRE_CAPTURE_DIR";
 static CAPTURE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Serialize)]

@@ -4,7 +4,7 @@ use std::sync::Mutex;
 
 use crate::{PureError, Result};
 
-const CREDENTIAL_SERVICE: &str = "pure-studio";
+const CREDENTIAL_SERVICE: &str = "anywork";
 
 pub(super) trait CredentialStore: Send + Sync {
     fn load(&self, provider_id: &str) -> Result<Option<String>>;
@@ -71,4 +71,29 @@ fn credential_error(action: &str, provider_id: &str, error: KeyringError) -> Pur
     PureError::ConfigError(format!(
         "failed to {action} system credential for provider {provider_id}: {error}"
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "requires an isolated OS credential service; run explicitly during native acceptance"]
+    fn old_product_credentials_are_neither_loaded_nor_modified() {
+        assert!(std::env::var_os("ANYWORK_TEST_SECRET_SERVICE").is_some());
+        let provider = format!("brand-isolation-{}", std::process::id());
+        let legacy = Entry::new("pure-studio", &format!("provider:{provider}")).unwrap();
+        legacy.set_password("legacy-test-secret").unwrap();
+        let store = SystemCredentialStore;
+        assert_eq!(store.load(&provider).unwrap(), None);
+        store.save(&provider, "new-test-secret").unwrap();
+        assert_eq!(
+            store.load(&provider).unwrap().as_deref(),
+            Some("new-test-secret")
+        );
+        assert_eq!(legacy.get_password().unwrap(), "legacy-test-secret");
+        store.delete(&provider).unwrap();
+        assert_eq!(legacy.get_password().unwrap(), "legacy-test-secret");
+        legacy.delete_credential().unwrap();
+    }
 }

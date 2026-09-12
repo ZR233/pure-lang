@@ -1,0 +1,1055 @@
+{
+  "appTitle": "anywork",
+  "sidebarProjects": "Projects",
+  "sidebarSessions": "Sessions",
+  "sidebarLoadingMore": "Loading more sessions…",
+  "sidebarLoadError": "Failed to load more sessions",
+  "shutdownTitle": "Shutting down safely",
+  "shutdownPhaseStoppingSubscriptions": "Stopping subscriptions",
+  "shutdownPhaseCancellingTurns": "Stopping active turns",
+  "shutdownPhaseFlushingPersistence": "Saving sessions",
+  "shutdownPhaseStoppingAgents": "Stopping collaborative agents",
+  "shutdownPhaseStoppingMcp": "Stopping MCP servers",
+  "shutdownPhaseStoppingLsp": "Stopping language servers",
+  "shutdownPhaseStopped": "Shutdown complete",
+  "shutdownPendingCommits": "{count} commits pending",
+  "@shutdownPendingCommits": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "sidebarCloseProject": "Close project",
+  "sidebarArchiveSession": "Archive session",
+  "sidebarArchiveSessionFailed": "Could not archive this session. It may still be running.",
+  "sidebarRenameSession": "Rename session",
+  "sidebarRenameSessionTitle": "Rename session",
+  "sidebarRenameSessionInput": "Session title",
+  "sidebarRenameSessionEmpty": "Enter a session title.",
+  "sidebarRenameSessionTooLong": "Session titles can be at most 80 characters.",
+  "sidebarRenameSessionFailed": "Could not rename this session.",
+  "commonCancel": "Cancel",
+  "commonSave": "Save",
+  "sidebarNewSession": "New session",
+  "sidebarOpenProject": "Open project",
+  "sidebarSettings": "Settings",
+  "runtimeFatalTitle": "anywork could not start",
+  "runtimeFatalRetry": "Retry",
+  "configRecoveryMessage": "An incompatible configuration was backed up and replaced with current defaults.",
+  "configRecoveryBackupPath": "Backup: {path}",
+  "@configRecoveryBackupPath": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "configRecoveryDismissTooltip": "Dismiss configuration recovery notice",
+  "persistenceDegraded": "Saving is temporarily unavailable. {count} in-memory update(s) are waiting; you can continue the conversation.",
+  "@persistenceDegraded": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "persistenceRecovering": "Saving has recovered and is flushing {count} pending update(s). You can continue the conversation.",
+  "@persistenceRecovering": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "persistenceBlocked": "Saving is blocked with {count} pending update(s) and needs attention. You can continue the conversation.",
+  "@persistenceBlocked": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "persistenceRetry": "Retry saving",
+  "recoveryGlobalWarning": "{count} recovery issue(s) need attention",
+  "@recoveryGlobalWarning": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "sidebarNew": "New",
+  "sidebarOpen": "Open",
+  "shellNoSession": "New session",
+  "startPageWelcome": "What can I help you build?",
+  "startPageProject": "Working in {project}",
+  "@startPageProject": {
+    "placeholders": {
+      "project": {
+        "type": "String"
+      }
+    }
+  },
+  "startPageOpenProjectTitle": "Open a project to get started",
+  "startPageOpenProjectBody": "Choose a project from the sidebar before sending your first message.",
+  "shellSessionUpdated": "{mode} · updated {time}",
+  "@shellSessionUpdated": {
+    "placeholders": {
+      "mode": {
+        "type": "String"
+      },
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsBack": "Back",
+  "settingsBackToChat": "Back to chat",
+  "settingsWorkspaceGroup": "Workspace",
+  "settingsSystemGroup": "System",
+  "settingsProvidersTab": "Providers",
+  "settingsInstructionsTab": "Instructions",
+  "settingsSkillsTab": "Skills",
+  "settingsAgentsTab": "Agents",
+  "settingsMcpTab": "MCP",
+  "settingsLspTab": "LSP",
+  "settingsStatisticsTab": "Statistics",
+  "settingsSecurityTab": "Security",
+  "settingsGeneralTab": "General",
+  "settingsSshTab": "SSH",
+  "settingsSshTitle": "Remote development",
+  "settingsSshSubtitle": "Manage SSH workspaces. Connections and helper lifecycle are owned by the local core.",
+  "settingsSshAdd": "Add server",
+  "settingsSshEmpty": "No SSH servers yet.",
+  "settingsSshManagedByCore": "OpenSSH and the minimal remote helper are managed locally.",
+  "settingsSshTest": "Test connection",
+  "settingsSshReconnect": "Reconnect",
+  "settingsSshReconnectHint": "Reconnect to load the latest remote environment. Running remote commands will be interrupted.",
+  "settingsSshOpenProject": "Open project",
+  "settingsSshEdit": "Edit",
+  "settingsSshDelete": "Delete",
+  "settingsSshReady": "Ready",
+  "settingsSshDeleteTitle": "Delete SSH server?",
+  "settingsSshDeleteBody": "Delete {name}? Projects using this server must be removed first.",
+  "@settingsSshDeleteBody": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsSshName": "Name",
+  "settingsSshHost": "Host",
+  "settingsSshUsername": "Username",
+  "settingsSshPort": "Port",
+  "settingsSshAuth": "Authentication",
+  "settingsSshAuthAgentOrKey": "SSH agent or key",
+  "settingsSshAuthPassword": "Password",
+  "settingsSshIdentityFile": "Identity file (optional)",
+  "settingsSshPassword": "Password",
+  "settingsSshPasswordLease": "Kept in core memory for this app session only.",
+  "settingsSshSave": "Save",
+  "settingsSshNameRequired": "Enter a server name",
+  "settingsSshHostRequired": "Enter a host address",
+  "settingsSshUsernameRequired": "Enter a username",
+  "settingsSshPortInvalid": "Port must be a number from 1 to 65535",
+  "settingsSshChooseDirectory": "Choose remote directory",
+  "settingsSshOpenThisDirectory": "Open this directory",
+  "settingsSshGo": "Go",
+  "settingsSshDirectoryPathLabel": "Remote path",
+  "settingsSshDirectoryPathHint": "/home/user/project",
+  "settingsSshPathRequired": "Enter a remote directory path",
+  "settingsSshPathAbsolute": "Path must be an absolute POSIX path starting with /",
+  "settingsSshDirectoryEmpty": "This directory is empty",
+  "settingsSshDirectoryEmptyHint": "No subdirectories here — you can still open this directory.",
+  "settingsSshUp": "Parent directory",
+  "settingsSshOpenFailed": "Couldn't open this directory. Check the server and try again.",
+  "composerHint": "Describe what you need...",
+  "composerSend": "Send",
+  "composerStop": "Stop",
+  "permissionModeTooltip": "Permission mode",
+  "compileModeSimple": "Simple",
+  "compileModeTask": "Task",
+  "permissionModeRequestApproval": "Request",
+  "permissionModeAutoReview": "Review",
+  "permissionModeFullAccess": "Full",
+  "statusCost": "Cost",
+  "statusTotalTokensLabel": "Total tokens",
+  "statusModelLabel": "Model",
+  "statusCapabilitiesTitle": "Active capabilities",
+  "statusSessionMode": "Session mode",
+  "statusSessionModeLocked": "Session mode cannot change while the session is running or a workflow is active",
+  "statusPlannerModel": "Planner model",
+  "statusExecutorModel": "Executor model",
+  "statusReasoningEffort": "Reasoning effort",
+  "statusContextLabel": "Context",
+  "statusCacheLabel": "Cache",
+  "statusCacheHitTokensLabel": "Cache read",
+  "statusCacheMissTokensLabel": "Cache miss",
+  "statusCacheWriteTokensLabel": "Cache write",
+  "statusReasoningTokensLabel": "Reasoning tokens",
+  "statusInferenceCountLabel": "Inferences",
+  "statusCacheSavingsLabel": "Cache savings",
+  "statusUnpricedUsageLabel": "Partially unpriced",
+  "sessionAllAgentsCostTooltip": "Cost for all agents in this session",
+  "statusCurrentAgentTokenSpeed": "Current agent token speed",
+  "settingsStatisticsTitle": "Statistics",
+  "settingsStatisticsSubtitle": "Recent successful model calls, grouped by provider instance, actual model, and reasoning effort.",
+  "settingsStatisticsSummaryTitle": "Model performance",
+  "settingsStatisticsHistoryTitle": "Call history",
+  "settingsStatisticsAllModels": "All models",
+  "settingsStatisticsEmpty": "No complete performance samples yet.",
+  "statisticsModel": "Provider / model",
+  "statisticsReasoningEffort": "Reasoning effort",
+  "statisticsReasoningEffortUnspecified": "Unspecified / not recorded",
+  "statisticsSpeed": "Speed",
+  "statisticsSamples": "Samples",
+  "statisticsOutputTokens": "Output tokens",
+  "statisticsAverageTtft": "Average TTFT",
+  "statisticsAverageResponse": "Average response",
+  "statisticsCompletedAt": "Completed",
+  "statisticsDecode": "Decode",
+  "statisticsTotalResponse": "Total",
+  "statusTurnQueued": "Queued",
+  "statusTurnPreparing": "Preparing context",
+  "statusTurnResponding": "Responding",
+  "statusTurnPlanning": "Planning",
+  "statusTurnRunningTool": "Running tool",
+  "statusTurnWaitingForApproval": "Waiting for tool approval",
+  "statusTurnWaitingForUserInput": "Waiting for input",
+  "statusTurnPersisting": "Saving turn",
+  "statusInteractionToolApproval": "Waiting for tool approval",
+  "statusInteractionUserInput": "Waiting for input",
+  "statusContextTooltip": "Context: {contextTokens}/{contextWindow} ({percent}%)\n\nTotal tokens: {totalTokens}\n\nModel: {model}",
+  "@statusContextTooltip": {
+    "placeholders": {
+      "contextTokens": {
+        "type": "int"
+      },
+      "contextWindow": {
+        "type": "int"
+      },
+      "percent": {
+        "type": "int"
+      },
+      "totalTokens": {
+        "type": "int"
+      },
+      "model": {
+        "type": "String"
+      }
+    }
+  },
+  "statusContextTooltipNoModel": "Context: {contextTokens}/{contextWindow} ({percent}%)\n\nTotal tokens: {totalTokens}",
+  "@statusContextTooltipNoModel": {
+    "placeholders": {
+      "contextTokens": {
+        "type": "int"
+      },
+      "contextWindow": {
+        "type": "int"
+      },
+      "percent": {
+        "type": "int"
+      },
+      "totalTokens": {
+        "type": "int"
+      }
+    }
+  },
+  "statusSkillsCount": "{count, plural, =1{1 skill} other{{count} skills}}",
+  "@statusSkillsCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "statusMcpCount": "{count} MCP",
+  "@statusMcpCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "statusLspCount": "{count} LSP",
+  "statusLspIndexing": "Indexing",
+  "statusLspBusy": "Working",
+  "statusLspActivityPercentage": "{percentage}%",
+  "@statusLspActivityPercentage": {
+    "placeholders": {
+      "percentage": {
+        "type": "int"
+      }
+    }
+  },
+  "@statusLspCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "statusAgentsCount": "{count, plural, =1{1 agent} other{{count} agents}}",
+  "@statusAgentsCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "composerAgentRuntimeDriven": "This agent session is driven by the runtime",
+  "statusSkillsSection": "Skills",
+  "statusMcpSection": "MCP",
+  "statusLspSection": "LSP",
+  "statusSubagentsSection": "Subagents",
+  "statusAgentChipTooltip": "Subagent status",
+  "agentDetailTitle": "Subagents",
+  "agentDetailSummary": "{count, plural, =1{1 agent · {running} running} other{{count} agents · {running} running}}",
+  "@agentDetailSummary": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "running": {
+        "type": "int"
+      }
+    }
+  },
+  "agentDetailEmpty": "No subagents",
+  "agentDetailStatusQueued": "Queued",
+  "agentDetailStatusRunning": "Running",
+  "agentDetailStatusWaiting": "Waiting",
+  "agentDetailStatusCompleted": "Completed",
+  "agentDetailStatusErrored": "Errored",
+  "agentDetailStatusInterrupted": "Interrupted",
+  "agentDetailStatusShutdown": "Shutdown",
+  "agentDetailStatusNotFound": "Not found",
+  "agentDetailSummaryLabel": "Summary",
+  "agentDetailErrorLabel": "Error",
+  "agentDetailReasonLabel": "Reason",
+  "agentDetailPathLabel": "Path",
+  "timelineEmptyTitle": "No messages yet",
+  "timelineEmptyMessage": "Open a project or start a session to begin.",
+  "timelineExternalLinkOpenFailed": "Unable to open this link.",
+  "timelineAttachment": "Attachment",
+  "timelineImageLoadFailed": "Unable to load this image.",
+  "timelineImageRetry": "Retry",
+  "timelineImageClose": "Close image preview",
+  "timelineRemoteImageSource": "External image from {host}",
+  "@timelineRemoteImageSource": {
+    "placeholders": {
+      "host": {
+        "type": "String"
+      }
+    }
+  },
+  "timelineRemoteImageOpen": "Click to load and preview",
+  "timelineJumpToLatest": "Jump to latest",
+  "timelineNew": "New",
+  "timelineReasoningFallback": "Thinking",
+  "timelineReasoningActive": "Thinking",
+  "timelineReasoningCompleted": "Thought",
+  "timelineReasoningEmpty": "No reasoning text was provided.",
+  "timelineToolFallback": "Tool",
+  "timelineToolGroupTitle": "Tool activity",
+  "timelineToolGroupSummary": "{count} tools",
+  "@timelineToolGroupSummary": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "timelineToolGroupSummaryRunning": "{count} tools, {runningCount} running",
+  "@timelineToolGroupSummaryRunning": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "runningCount": {
+        "type": "int"
+      }
+    }
+  },
+  "timelineToolGroupSummaryIssues": "{count} tools, {issueCount} need attention",
+  "@timelineToolGroupSummaryIssues": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "issueCount": {
+        "type": "int"
+      }
+    }
+  },
+  "timelineToolGroupSummaryRunningWithIssues": "{count} tools, {runningCount} running, {issueCount} need attention",
+  "@timelineToolGroupSummaryRunningWithIssues": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "runningCount": {
+        "type": "int"
+      },
+      "issueCount": {
+        "type": "int"
+      }
+    }
+  },
+  "timelineSkillActivated": "Activated skill · {name}",
+  "@timelineSkillActivated": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "timelineSkillAgentActivated": "Agent activated skill · {name}",
+  "@timelineSkillAgentActivated": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "timelineParentAgent": "Main agent",
+  "timelineSkillUserActivated": "User activated skill · {name}",
+  "@timelineSkillUserActivated": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "timelineAgentFallback": "Agent",
+  "timelineViewImageRead": "Image read",
+  "timelineViewImageReading": "Reading image",
+  "timelineViewImageFailed": "Failed to read image",
+  "timelineToolCompleted": "{name} completed",
+  "@timelineToolCompleted": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "timelineToolFailed": "{name} failed",
+  "@timelineToolFailed": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "timelineToolDenied": "{name} denied",
+  "@timelineToolDenied": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "timelineToolCancelled": "{name} cancelled",
+  "@timelineToolCancelled": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "timelineToolAwaitingApproval": "{name} awaiting approval",
+  "@timelineToolAwaitingApproval": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "timelineToolRunning": "{name} running",
+  "@timelineToolRunning": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "timelineToolExitCode": "exit code {code}",
+  "@timelineToolExitCode": {
+    "placeholders": {
+      "code": {
+        "type": "int"
+      }
+    }
+  },
+  "timelineToolTimedOut": "timed out",
+  "agentDetailStatusClosing": "Closing",
+  "agentDetailStatusCleanupFailed": "Cleanup failed",
+  "timelineToolQueued": "{name} queued",
+  "@timelineToolQueued": {"placeholders": {"name": {"type": "String"}}},
+  "timelineToolCancelling": "{name} cancelling",
+  "@timelineToolCancelling": {"placeholders": {"name": {"type": "String"}}},
+  "timelineToolInterrupted": "{name} interrupted",
+  "@timelineToolInterrupted": {"placeholders": {"name": {"type": "String"}}},
+  "timelineAgentSubagent": "Subagent",
+  "timelineAgentSubagentMessage": "Subagent message",
+  "timelineAgentWaiting": "Waiting for subagents",
+  "timelineAgentClose": "Close subagent",
+  "timelineTodoListFallback": "Todo list",
+  "timelineTodoPending": "Pending",
+  "timelineTodoInProgress": "In progress",
+  "timelineTodoCompleted": "Completed",
+  "interactionQuestionsTitle": "A few questions",
+  "interactionLastQuestion": "Last question",
+  "interactionContinueAfterAnswer": "Continue after answering",
+  "timelineRolledBack": "Rolled back from active context",
+  "interactionSubmitEmptyAnswersHint": "Unanswered questions are submitted as empty arrays.",
+  "interactionAnsweredPendingHint": "{answeredCount} answered · {pendingCount} pending",
+  "@interactionAnsweredPendingHint": {
+    "placeholders": {
+      "answeredCount": {
+        "type": "int"
+      },
+      "pendingCount": {
+        "type": "int"
+      }
+    }
+  },
+  "interactionPreviousQuestion": "Previous",
+  "interactionNextQuestion": "Next",
+  "interactionSubmitAnswers": "Submit answers",
+  "interactionNeedInputTitle": "Input needed",
+  "interactionAnswerHint": "anywork will use this answer to continue the current question.",
+  "interactionAnswerButton": "Answer",
+  "interactionAnswerLabel": "Answer",
+  "interactionQuestionProgress": "Question {current} / {total}",
+  "@interactionQuestionProgress": {
+    "placeholders": {
+      "current": {
+        "type": "int"
+      },
+      "total": {
+        "type": "int"
+      }
+    }
+  },
+  "interactionAnsweredCount": "{count} answered",
+  "@interactionAnsweredCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "interactionQuestionTooltip": "Question {index}",
+  "@interactionQuestionTooltip": {
+    "placeholders": {
+      "index": {
+        "type": "int"
+      }
+    }
+  },
+  "interactionQuestionFallback": "Question",
+  "interactionOtherLabel": "Other",
+  "interactionSecretHint": "Enter secret answer",
+  "interactionTextHint": "Enter your answer...",
+  "interactionPermissionTitle": "Permission needed",
+  "interactionPermissionSubtitle": "anywork wants to run a tool call",
+  "interactionPermissionFooterHint": "The tool runs in the current working directory; adjust permission mode in the composer.",
+  "interactionReject": "Reject",
+  "interactionApprove": "Approve",
+  "interactionReasonLabel": "Reason",
+  "interactionPlanConfirmTitle": "Confirm this plan?",
+  "interactionPlanConfirmSubtitle": "Confirm it, or describe what should change.",
+  "interactionPlanReadyTitle": "Implementation plan ready",
+  "interactionPlanAwaitingConfirmation": "Awaiting confirmation",
+  "interactionPlanViewDetails": "View full plan",
+  "interactionPlanDetailsTitle": "Implementation plan",
+  "interactionPlanComposerPausedHint": "Normal messages are paused to keep plan feedback unambiguous.",
+  "interactionPlanConfirmFooterHint": "Confirming starts the document-editing checkpoint in {mode} mode.",
+  "@interactionPlanConfirmFooterHint": {
+    "placeholders": {
+      "mode": {
+        "type": "String"
+      }
+    }
+  },
+  "interactionPlanAdjust": "Tell anywork how to adjust",
+  "interactionPlanConfirmAction": "Confirm and execute",
+  "interactionPlanAdjustHint": "Describe what should change...",
+  "interactionPlanAdjustSubmit": "Submit changes",
+  "settingsProvidersTitle": "Providers",
+  "settingsProvidersSubtitle": "Model providers, credentials, models, and usage",
+  "settingsRefreshUsage": "Refresh usage",
+  "settingsAddProvider": "Add provider",
+  "settingsSearchProviders": "Search providers",
+  "settingsNoProvidersMatchTitle": "No providers match this filter",
+  "settingsNoProvidersMatchMessage": "Clear the search to see all configured providers.",
+  "settingsNoProvidersTitle": "No providers found",
+  "settingsNoProvidersMessage": "Add a provider to configure credentials and models.",
+  "settingsDefaultProvider": "Default provider",
+  "settingsSetAsDefaultProvider": "Set as default",
+  "settingsOpenDetails": "Open details",
+  "settingsProviderActions": "Provider actions",
+  "settingsEditProvider": "Edit provider",
+  "settingsDeleteProvider": "Delete provider",
+  "settingsNoProviderSelected": "No provider selected",
+  "settingsProviderTitle": "Provider",
+  "settingsProviderModelsTitle": "Models",
+  "settingsProviderConnectionTitle": "Connection",
+  "settingsProviderDefaultModelsTitle": "Default models",
+  "settingsProviderCustomModelsTitle": "Custom models",
+  "settingsNewProvider": "New provider",
+  "settingsProviderKey": "Provider key",
+  "settingsTemplate": "Template",
+  "settingsCustomProvider": "Custom provider",
+  "settingsDefaultModel": "Default model",
+  "settingsApiKey": "API key",
+  "settingsApiKeyKeepCurrent": "API key (leave blank to keep current)",
+  "settingsConfigured": "configured",
+  "settingsMissing": "missing",
+  "settingsDisplayName": "Display name",
+  "settingsProtocolType": "Protocol type",
+  "settingsBaseUrl": "Base URL",
+  "settingsModelSlug": "Model slug",
+  "settingsReasoningEfforts": "Reasoning efforts",
+  "settingsEdit": "Edit",
+  "settingsCancel": "Cancel",
+  "settingsSave": "Save",
+  "settingsAddModel": "Add model",
+  "settingsRemoveModel": "Remove model",
+  "settingsNoCustomModels": "No custom models",
+  "settingsBundledModels": "{count} bundled",
+  "@settingsBundledModels": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsDefaultBadge": "default",
+  "settingsReadyBadge": "ready",
+  "settingsSetupBadge": "setup",
+  "settingsUsageTitle": "Usage",
+  "settingsUsageUpdated": "Updated {updatedAt}",
+  "@settingsUsageUpdated": {
+    "placeholders": {
+      "updatedAt": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsUsageAvailableBalance": "Available balance",
+  "settingsUsageBalanceUnavailable": "Balance unavailable",
+  "settingsUsageGranted": "Granted {amount}",
+  "@settingsUsageGranted": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsUsageToppedUp": "Topped up {amount}",
+  "@settingsUsageToppedUp": {
+    "placeholders": {
+      "amount": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsUsageRefreshing": "Refreshing usage...",
+  "settingsUsageChecking": "Checking usage...",
+  "settingsUsageCheckingShort": "Checking usage",
+  "settingsUsageNotLoaded": "Usage not loaded",
+  "settingsUsageUnsupported": "Unsupported",
+  "settingsUsageNotSupported": "Usage not supported",
+  "settingsUsageMissingKey": "Missing key",
+  "settingsUsageFailed": "Usage failed",
+  "settingsUsageQueryFailed": "Usage query failed",
+  "settingsUsageApiKeyMissing": "Provider API key is not configured",
+  "settingsUsageUnsupportedForProvider": "Usage is not supported for {providerName}",
+  "@settingsUsageUnsupportedForProvider": {
+    "placeholders": {
+      "providerName": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsUsageNotChecked": "Not checked",
+  "settingsUsageUnavailable": "Usage is unavailable",
+  "settingsUsageError": "Could not load usage",
+  "settingsUsageNoQuota": "No quota details returned.",
+  "settingsUsageTools": "Tools",
+  "settingsUsageToken": "Token usage",
+  "settingsUsageSpend": "Spend",
+  "settingsUsageRemaining": "Remaining",
+  "settingsUsageUsed": "Used",
+  "settingsUsageFiveHourQuota": "5 hour quota",
+  "settingsUsageWeeklyQuota": "Weekly quota",
+  "settingsUsageMcpQuota": "MCP quota",
+  "settingsUsageQuota": "Quota",
+  "settingsUsageQuotaRemaining": "{remaining} of {total} remaining",
+  "@settingsUsageQuotaRemaining": {
+    "placeholders": {
+      "remaining": {
+        "type": "String"
+      },
+      "total": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsUsageQuotaUsed": "{current} of {total} used",
+  "@settingsUsageQuotaUsed": {
+    "placeholders": {
+      "current": {
+        "type": "String"
+      },
+      "total": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsUsagePercentRemaining": "{percent} remaining",
+  "@settingsUsagePercentRemaining": {
+    "placeholders": {
+      "percent": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsUsageReset": "Reset {time}",
+  "@settingsUsageReset": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsInstructionsTitle": "Instructions",
+  "settingsInstructionsSubtitle": "Injected into each turn; changes save after typing stops.",
+  "settingsBaseInstructions": "Base instructions",
+  "settingsDeveloperInstructions": "Developer instructions",
+  "settingsUserContext": "User context",
+  "settingsInstructionHint": "Add project guidance here",
+  "settingsSkillsTitle": "Skills",
+  "settingsSkillsSubtitle": "Disable noisy skills or discover project/user/system catalogs.",
+  "settingsDiscover": "Discover",
+  "settingsDiscovering": "Discovering",
+  "settingsFilterSkills": "Filter skills",
+  "settingsOpenProjectToDiscoverSkills": "Open a project to discover skills",
+  "settingsNoSkillsMatchFilter": "No skills match this filter",
+  "settingsSkillsDiscoverySources": "Skills are discovered from the selected workspace and configured user/system sources.",
+  "settingsClearSearchOrDiscoverAgain": "Clear the search or run discovery again.",
+  "settingsNoSkillsTitle": "No skills found",
+  "settingsNoSkillsMessage": "Try another filter or discover skills for this project.",
+  "settingsRoleExplorerDescription": "Explore code and collect context.",
+  "settingsRolePlannerDescription": "Draft plans and structure intent.",
+  "settingsRoleExecutorDescription": "Apply edits and run tools.",
+  "settingsRoleWorktreeExecutorDescription": "Apply edits and run tools in an isolated Git worktree.",
+  "settingsRoleReviewerDescription": "Review results and verify risk.",
+  "settingsRoleFallbackDescription": "Studio role",
+  "settingsModelField": "Model",
+  "settingsMcpTitle": "MCP",
+  "settingsMcpSubtitle": "Model Context Protocol servers and inline endpoints.",
+  "settingsMcpRefresh": "Refresh",
+  "settingsMcpReconnect": "Reconnect",
+  "settingsMcpResetAll": "Reset all",
+  "settingsMcpResetConfirmTitle": "Reset all MCP servers?",
+  "settingsMcpResetConfirmBody": "Every configured MCP connection will be rebuilt. Active turns keep their current leased generation.",
+  "settingsMcpResetConfirmAction": "Reset all",
+  "settingsEndpoint": "Endpoint",
+  "settingsMcpEmptyTitle": "No MCP servers",
+  "settingsMcpEmptyMessage": "Configured MCP servers will appear here.",
+  "settingsLspTitle": "Language servers",
+  "settingsLspSubtitle": "Last-known project language server status and explicit lifecycle commands.",
+  "settingsLspRefresh": "Refresh",
+  "settingsLspProbe": "Probe",
+  "settingsLspRepair": "Repair",
+  "settingsLspReset": "Reset",
+  "settingsLspResetWorkspace": "Reset workspace",
+  "settingsLspActivityIndexing": "Indexing",
+  "settingsLspActivityBusy": "Busy",
+  "settingsLspEmptyTitle": "No language servers",
+  "settingsLspEmptyMessage": "Activate a supported project to create language server membership.",
+  "settingsSecurityTitle": "Security",
+  "settingsSecuritySubtitle": "Choose the default approval posture for this workspace.",
+  "settingsSecurityModeSubtitle": "Tool execution permission mode; changes apply immediately.",
+  "settingsCurrentMode": "Current: {mode}",
+  "@settingsCurrentMode": {
+    "placeholders": {
+      "mode": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsWorkspaceBoundary": "Workspace boundary policy remains unchanged.",
+  "settingsGeneralTitle": "General",
+  "settingsGeneralSubtitle": "Interface preferences saved into the Studio store.",
+  "settingsFollowActiveTurn": "Follow active turn",
+  "settingsFollowActiveTurnSubtitle": "Keep new timeline output pinned to the latest turn.",
+  "settingsCompactTimeline": "Compact timeline",
+  "settingsCompactTimelineSubtitle": "Reduce message spacing for denser reading.",
+  "settingsWebSearchTitle": "Web search",
+  "settingsWebSearchSubtitle": "Search through an eligible OpenAI account. Changes apply from the next turn.",
+  "settingsWebSearchConfiguredMode": "Configured mode",
+  "settingsWebSearchEffectiveMode": "Effective mode",
+  "settingsWebSearchProvider": "OpenAI provider",
+  "settingsWebSearchModel": "Search model",
+  "settingsWebSearchMode": "Mode",
+  "settingsWebSearchModeDisabled": "Disabled",
+  "settingsWebSearchModeCached": "Cached",
+  "settingsWebSearchModeIndexed": "Indexed",
+  "settingsWebSearchModeLive": "Live",
+  "settingsWebSearchContextSize": "Context size",
+  "settingsWebSearchContextLow": "Low",
+  "settingsWebSearchContextMedium": "Medium",
+  "settingsWebSearchContextHigh": "High",
+  "settingsServiceDefault": "Service default",
+  "settingsWebSearchAllowedDomains": "Allowed domains",
+  "settingsWebSearchDomainsHint": "example.com, docs.example.com",
+  "settingsWebSearchCountry": "Country",
+  "settingsWebSearchRegion": "Region",
+  "settingsWebSearchCity": "City",
+  "settingsWebSearchTimezone": "Timezone",
+  "settingsWebSearchAvailable": "Available",
+  "settingsWebSearchAvailableNotSelected": "Available, not selected",
+  "settingsWebSearchDisabled": "Disabled",
+  "settingsWebSearchMissingCredential": "Missing credential",
+  "settingsWebSearchUnsupportedProvider": "Unsupported provider",
+  "settingsWebSearchUnsupportedModel": "Unsupported model",
+  "settingsWebSearchMissingCredentialReason": "No credentialed provider originating from the OpenAI preset is available. Remote web search is fully disabled.",
+  "settingsWebSearchUnsupportedProviderReason": "The current provider does not expose this web search backend.",
+  "settingsWebSearchUnsupportedModelReason": "The current route cannot expose either the function tool or hosted web search.",
+  "settingsNotAvailable": "Not available",
+  "settingsSaveWebSearch": "Save web search",
+  "settingsDeepSeekWebSearchTitle": "DeepSeek native web search",
+  "settingsDeepSeekWebSearchSubtitle": "Let the current eligible DeepSeek Responses model search the web. It takes priority over the OpenAI fallback.",
+  "settingsDeepSeekWebSearchConfigured": "Configured",
+  "settingsDeepSeekWebSearchEffective": "Effective",
+  "settingsDeepSeekWebSearchEnabled": "Enabled",
+  "settingsStudioUpdateTitle": "anywork update",
+  "settingsStudioUpdateDisabled": "Version {version}. Automatic checks run only in Windows release builds.",
+  "@settingsStudioUpdateDisabled": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsStudioUpdateCurrent": "Current version: {version}",
+  "@settingsStudioUpdateCurrent": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsStudioUpdateChecking": "Version {version}. Checking for updates...",
+  "@settingsStudioUpdateChecking": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsStudioUpdateLatest": "Version {version} is up to date.",
+  "@settingsStudioUpdateLatest": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsStudioUpdateAvailable": "Version {current} is installed. Version {latest} is available.",
+  "@settingsStudioUpdateAvailable": {
+    "placeholders": {
+      "current": {
+        "type": "String"
+      },
+      "latest": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsStudioUpdateDownloading": "Downloading version {version}: {progress}%",
+  "@settingsStudioUpdateDownloading": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      },
+      "progress": {
+        "type": "int"
+      }
+    }
+  },
+  "settingsStudioUpdateVerifying": "Verifying version {version}...",
+  "@settingsStudioUpdateVerifying": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsStudioUpdateInstallerLaunched": "Installer for version {version} started.",
+  "@settingsStudioUpdateInstallerLaunched": {
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsStudioUpdateFailed": "Update failed: {error}",
+  "@settingsStudioUpdateFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsStudioUpdateBusy": "Finish the active turn or task before installing.",
+  "settingsStudioUpdateCheck": "Check for updates",
+  "settingsStudioUpdateInstall": "Download and install",
+  "settingsStudioUpdateReleaseNotes": "Release notes",
+  "timelineWebSearchTitle": "Web search",
+  "timelineWebSearchSearching": "Searching the web",
+  "timelineWebSearchOpening": "Opening a web page",
+  "timelineWebSearchFinding": "Finding text on a page",
+  "timelineWebSearchResults": "Result links",
+  "timelineLspQueryTitle": "LSP query",
+  "timelineLspQueryTitleWithDetail": "LSP query · {detail}",
+  "@timelineLspQueryTitleWithDetail": {
+    "placeholders": {
+      "detail": {
+        "type": "String"
+      }
+    }
+  },
+  "timelineLspCapabilitiesTitle": "LSP capabilities",
+  "modalityText": "Text",
+  "modalityImage": "Vision",
+  "modalityAudio": "Audio",
+  "modalityVideo": "Video",
+  "modalityFile": "File",
+  "composerAddUrlTitle": "Add URL",
+  "composerAddUrlConfirm": "Add",
+  "composerAttachmentAddTooltip": "Add attachment",
+  "composerAttachmentUnsupportedTooltip": "The current model does not support attachments",
+  "composerAttachmentPickLocal": "Choose local files",
+  "composerAttachmentRemoveTooltip": "Remove",
+  "settingsModelOutputCapabilities": "Outputs: {capabilities}",
+  "@settingsModelOutputCapabilities": {
+    "placeholders": {
+      "capabilities": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsAgentsTitle": "Agent Profiles",
+  "settingsAgentsSubtitle": "System profiles have a fixed purpose and workspace mode; enablement and model routing stay configurable. Directory only constrains anywork's built-in file-write tools — shell, Git, and MCP can bypass it.",
+  "settingsAgentsAddUserProfile": "Add user profile",
+  "settingsAgentsEditTooltip": "Edit",
+  "settingsAgentsRecoveryTitle": "Recovery",
+  "settingsWorktreeBase": "base {commit}",
+  "@settingsWorktreeBase": {
+    "placeholders": {
+      "commit": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsWorktreeHead": "head {commit}",
+  "@settingsWorktreeHead": {
+    "placeholders": {
+      "commit": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsWorktreeHeadUnavailable": "head unavailable",
+  "settingsWorktreeChangedFiles": "Changed files: {files}",
+  "@settingsWorktreeChangedFiles": {
+    "placeholders": {
+      "files": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsWorktreeCleanup": "Clean up worktree and branch",
+  "settingsAgentProfileAddTitle": "Add user agent profile",
+  "settingsAgentProfileEditTitle": "Edit user agent profile",
+  "settingsAgentProfileIdField": "Agent ID",
+  "settingsAgentProfileDisplayNameField": "Display name",
+  "settingsAgentProfileDescriptionField": "Description",
+  "settingsAgentProfileWhenToUseField": "Best for",
+  "settingsAgentProfileInstructionsField": "System instructions",
+  "settingsAgentProfileProviderField": "Provider",
+  "settingsAgentProfileEffortDefault": "Use model default",
+  "settingsAgentProfileWorkspaceModeField": "Workspace mode",
+  "settingsAgentWorkspaceModeUnrestricted": "Unrestricted",
+  "settingsAgentWorkspaceModeDirectory": "Directory",
+  "settingsAgentWorkspaceModeWorktree": "Worktree",
+  "settingsAgentProfileWorkspaceDirectoryHint": "Directory is a cooperative file-tool boundary, not an OS sandbox; shell, Git, and MCP can bypass it.",
+  "settingsAgentProfileEnabledTitle": "Enabled",
+  "settingsAgentProfileEnabledSubtitle": "Disabled profiles keep their TOML file but no longer appear in the agent tool catalog.",
+  "settingsAgentProfileSave": "Save TOML atomically",
+  "settingsAgentProfileRequired": "Required",
+  "settingsServiceCapabilitiesTitle": "Service capabilities",
+  "settingsCapabilitySourceField": "Capability source",
+  "settingsCapabilitySourcePreset": "Follow preset defaults",
+  "settingsCapabilitySourceExplicit": "Explicit override",
+  "settingsHostedWebSearchField": "Hosted Web Search",
+  "settingsHostedWebSearchDialectField": "Hosted Web Search dialect",
+  "settingsStandaloneWebSearchField": "Standalone Web Search",
+  "settingsProgrammaticToolCallingField": "Programmatic Tool Calling",
+  "settingsCapabilityEnabled": "Enabled",
+  "settingsCapabilityDisabled": "Disabled",
+  "settingsDefaultConnectionField": "Default connection",
+  "settingsCurrentConnectionField": "Current connection",
+  "settingsSupportedConnectionsLabel": "Supported connections",
+  "settingsAgentRoutesTitle": "System agent model routing",
+  "settingsStateChecking": "Checking",
+  "settingsStateAvailable": "Available",
+  "settingsStateUnavailable": "Unavailable",
+  "settingsStateDisabled": "Disabled",
+  "settingsMcpStateMissingCredential": "Missing credential",
+  "settingsLspActivityIdle": "Idle",
+  "roleExplorer": "Explorer",
+  "rolePlanner": "Planner",
+  "roleExecutor": "Executor",
+  "roleWorktreeExecutor": "Worktree executor",
+  "roleReviewer": "Reviewer",
+  "roleEmpty": "Agent",
+  "settingsPricingEnabled": "Estimate token cost",
+  "settingsPricingHelp": "Controls in-app cost estimates; token and cache statistics remain available. Plans default to off.",
+  "settingsModelAdvanced": "Optional model settings",
+  "settingsContextBudget": "Context budget (tokens)",
+  "settingsOutputBudget": "Maximum output (tokens)",
+  "settingsPriceInput": "Input",
+  "settingsPriceOutput": "Output",
+  "settingsPriceCacheRead": "Cache read",
+  "settingsPriceCacheWrite": "Cache write",
+  "statusReportedUsageOnly": "reported",
+  "settingsSystemAgentsGroup": "System agents",
+  "settingsUserAgentsGroup": "User agents",
+  "settingsAppearanceGroup": "Appearance & conversation",
+  "settingsNetworkGroup": "Search & network",
+  "settingsUpdatesGroup": "Application updates",
+  "settingsModelsGroup": "Models & agents",
+  "settingsExtensionsGroup": "Tools & services",
+  "settingsPreferencesGroup": "Preferences",
+  "settingsFilterAgents": "Filter agents",
+  "settingsPermissionRequestDescription": "Ask for approval when a tool operation requires it.",
+  "settingsPermissionReviewDescription": "Use automatic review to evaluate tool operations.",
+  "settingsPermissionFullDescription": "Run tools with full access under the configured runtime policy.",
+  "timelineToolArguments": "Arguments",
+  "timelineToolOutput": "Output",
+  "costPurposeMain": "Main conversation",
+  "costPurposeSummary": "Summarization",
+  "costPurposeReview": "Review",
+  "costPurposeTitle": "Title",
+  "costPurposeUnknown": "Unknown purpose",
+  "timelineRawRecord": "Original history record"
+}

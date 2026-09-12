@@ -236,7 +236,7 @@ impl WorktreeBackend for LocalWorktreeBackend {
     ) -> BoxFuture<'a, Result<(), WorktreeError>> {
         async move {
             pl_tool::workspace::path_safety::remove_dir_all_no_follow_async(
-                &repo_root.join(".pure/worktrees"),
+                &repo_root.join(".anywork/worktrees"),
                 target_path,
             )
             .await

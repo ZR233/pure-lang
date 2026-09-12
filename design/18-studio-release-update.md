@@ -1,11 +1,11 @@
-# Pure Studio 发布与应用内升级
+# anywork 发布与应用内升级
 
 SSH remote helper 不建立独立发布合同。每次原生 GUI 构建都生成 stripped 静态
 `aarch64-unknown-linux-musl` 与 `x86_64-unknown-linux-musl` helper，并以 zstd 压缩资产嵌入 Rust
 bridge；GitHub Release、安装目录与本地数据目录均不出现独立 helper 文件。helper target 由
 `uname -s/-m` 穷尽映射，未知平台明确失败，runtime 只解压并上传匹配架构。
 
-本文定义 Pure Studio 稳定版的唯一发布渠道、Windows 打包格式和应用内更新信任边界。
+本文定义 anywork 稳定版的唯一发布渠道、Windows 打包格式和应用内更新信任边界。
 首版只支持 Windows x64。RC 构建只作为 GitHub Actions artifact，不进入稳定更新源。
 
 ## 1. 版本与发布入口
@@ -47,8 +47,8 @@ GitHub draft Release 只对具备仓库 push 权限的身份可见，因此负�
 
 稳定 Release 固定包含：
 
-- `Pure-Studio-{version}-windows-x86_64-setup.exe`
-- `Pure-Studio-{version}-windows-x86_64-portable.zip`
+- `anywork-{version}-windows-x86_64-setup.exe`
+- `anywork-{version}-windows-x86_64-portable.zip`
 - 上述两个文件各自的 `.minisig`
 - `latest.json`
 - `SHA256SUMS.txt`
@@ -72,10 +72,7 @@ zstd 压缩资产嵌入 bridge 二进制；安装器和便携包不包含独立 
 不得上传为 GitHub Release 资产。运行时在 SSH 架构探测后只解压匹配资产并直接上传远端，不执行
 helper 网络下载。
 
-采用 `pure_studio.exe` 新文件名的首个版本要求用户先手动卸载旧版再安装。安装器继续使用
-同一 AppId、安装目录和用户数据目录，但允许直接覆盖安装，不检测也不删除旧 EXE 或旧 WER
-配置；跳过手动卸载时，旧文件可能残留。新版快捷方式、卸载项、WER 配置和 Authenticode
-检查只指向 `pure_studio.exe`。
+anywork 使用新的固定 Windows AppId，默认安装到 `%LOCALAPPDATA%\Programs\anywork`，与 Pure Studio 独立安装和卸载。新快捷方式、WER 配置和卸载清理仅管理 anywork。继续使用既有版本序列、签名信任根与 `latest.json` 地址，但资产名称改为 `anywork-{version}-…`；旧版 Pure Studio 的文件名校验会拒绝新版清单，用户必须手动下载安装 anywork，且不会带入旧配置、聊天记录或 API key。
 
 安装器与便携包继续排除 PDB；Windows 构建必须同时产生独立、带 release version、commit
 SHA 与 session protocol version 映射的 symbols artifact，收集 runner 和 Rust bridge 的匹配
@@ -105,10 +102,10 @@ GitHub Actions secrets。私钥轮换必须先通过仍受旧密钥信任的应�
   "notesUrl": "https://github.com/ZR233/pure-lang/releases/tag/v1.2.3",
   "platforms": {
     "windows-x86_64": {
-      "url": "https://github.com/ZR233/pure-lang/releases/download/v1.2.3/Pure-Studio-1.2.3-windows-x86_64-setup.exe",
+      "url": "https://github.com/ZR233/pure-lang/releases/download/v1.2.3/anywork-1.2.3-windows-x86_64-setup.exe",
       "size": 123456,
       "sha256": "...",
-      "signature": "https://github.com/ZR233/pure-lang/releases/download/v1.2.3/Pure-Studio-1.2.3-windows-x86_64-setup.exe.minisig"
+      "signature": "https://github.com/ZR233/pure-lang/releases/download/v1.2.3/anywork-1.2.3-windows-x86_64-setup.exe.minisig"
     }
   }
 }
@@ -147,8 +144,8 @@ state。Dart 不接收或解析 raw manifest JSON，也不维护第二套 instal
 
 ## 5. 生产诊断与后台进程
 
-Studio 在 LocalAppData 的 `Pure Studio/logs` 写入按日滚动 Rust 与 Dart error 日志，panic marker
-和 native dump 写入 `Pure Studio/crashes`。默认 Rust filter 为 `warn`，CLI `--log-level` 优先于
+Studio 在 LocalAppData 的 `anywork/logs` 写入按日滚动 Rust 与 Dart error 日志，panic marker
+和 native dump 写入 `anywork/crashes`。默认 Rust filter 为 `warn`，CLI `--log-level` 优先于
 `RUST_LOG`；启动、每小时与正常关闭清理最后修改时间超过 48 小时的自有日志和 crash 文件。
 完整 prompt、context 和工具结果不进入 tracing；日志只记录 root/agent/session 身份、cursor、
 运行阶段、条目规模、耗时和 outcome。panic 与 error 使用同步兜底持久化，正常关闭显式 flush。

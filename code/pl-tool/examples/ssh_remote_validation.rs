@@ -244,7 +244,7 @@ async fn main() -> anyhow::Result<()> {
         "nested",
         ".agents/skills",
         ".git",
-        ".pure",
+        ".anywork",
         "pixel.png",
         "fixture.py",
         "lsp_fixture.py",
@@ -301,9 +301,9 @@ async fn validate_git(
             "-q",
             "-b",
             "validation/worktree",
-            ".pure/worktree",
+            ".anywork/worktree",
         ],
-        vec!["git", "worktree", "remove", "-f", ".pure/worktree"],
+        vec!["git", "worktree", "remove", "-f", ".anywork/worktree"],
     ] {
         let output = run_remote(backend, args.into_iter().map(str::to_string).collect()).await?;
         anyhow::ensure!(output.status == 0, "git failed: {}", output.stderr);

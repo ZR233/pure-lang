@@ -17,8 +17,8 @@ README 的架构图、crate 表、项目结构、技术栈、核心概念、工�
 
 - 从根 `Cargo.toml` 的 `[workspace].members` 取得完整 Cargo 成员。
 - 从每个成员自己的 `Cargo.toml` 核验包名和直接依赖；目录名与包名不同时明确标注，例如
-  `code/pure-studio/rust` 的包名为 `pl-studio-bridge`。
-- 单独核验非 Cargo 成员的 Flutter 客户端 `code/pure-studio/`、系统技能资源和 xtask 入口。
+  `code/anywork/rust` 的包名为 `pl-studio-bridge`。
+- 单独核验非 Cargo 成员的 Flutter 客户端 `code/anywork/`、系统技能资源和 xtask 入口。
 - README 架构图、crate 表、依赖规则和项目结构树必须使用同一批事实。
 
 ### 2. 设计文档

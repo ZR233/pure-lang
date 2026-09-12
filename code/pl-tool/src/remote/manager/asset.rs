@@ -14,7 +14,7 @@ use crate::remote::RemoteClientError;
 
 const HELPER_NAME: &str = "pl-remote-helper";
 
-/// 可嵌入 Pure Studio 的远端 helper 目标平台。
+/// 可嵌入 anywork 的远端 helper 目标平台。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RemoteHelperTarget {
     Aarch64Musl,
@@ -141,7 +141,10 @@ pub(super) async fn upload_helper(
 ) -> Result<String, RemoteClientError> {
     let digest = format!("{:x}", Sha256::digest(bytes));
     let version = env!("CARGO_PKG_VERSION");
-    let directory = format!("\"$HOME/.pure/remote-helper/{version}/{}\"", &digest[..16]);
+    let directory = format!(
+        "\"$HOME/.anywork/remote-helper/{version}/{}\"",
+        &digest[..16]
+    );
     let path = format!("{directory}/{HELPER_NAME}");
     let probe = format!("if test -x {path}; then printf present; fi");
     if run_ssh_capture(profile, password, &probe).await?.trim() == "present" {

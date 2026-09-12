@@ -3,11 +3,11 @@
 /target-codex
 /dist
 /output
-/code/pure-studio/output/
-/code/pure-studio/node_modules
-/code/pure-studio/dist
-/code/pure-studio/.tmp-tests
-/code/pure-studio/src-tauri/gen
+/code/anywork/output/
+/code/anywork/node_modules
+/code/anywork/dist
+/code/anywork/.tmp-tests
+/code/anywork/src-tauri/gen
 
 # IDE
 /.claude/*
@@ -32,9 +32,11 @@ Thumbs.db
 # Environment
 .env
 /.cargo/config.local.toml
+# Keep both products' local data out of source control.
 /.pure
-/code/pure-studio/target
-/code/pure-studio/rust/target
-/code/pure-studio/src-tauri/target
+/.anywork
+/code/anywork/target
+/code/anywork/rust/target
+/code/anywork/src-tauri/target
 .usage.json
 .playwright-mcp

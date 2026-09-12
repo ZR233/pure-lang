@@ -12,7 +12,7 @@ members = [
     "code/pl-remote-helper",
     "code/pl-studio-runtime",
     "code/pl-studio-server",
-    "code/pure-studio/rust",
+    "code/anywork/rust",
     "xtask",
 ]
 resolver = "3"

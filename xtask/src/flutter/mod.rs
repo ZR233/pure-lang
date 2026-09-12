@@ -404,7 +404,7 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
     let app_dir = paths::studio_app_dir(&workspace_root);
     let target = DesktopTarget::current()?;
     let app_version = studio_version::read(&app_dir)?;
-    let version_define = format!("--dart-define=PURE_STUDIO_VERSION={app_version}");
+    let version_define = format!("--dart-define=ANYWORK_VERSION={app_version}");
     print_context(&workspace_root, &app_dir);
     ensure_desktop_build_environment(target)?;
     ensure_flutter_dependencies(&workspace_root, &app_dir)?;
@@ -434,7 +434,7 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
                 path.display()
             );
             Ok::<_, anyhow::Error>(format!(
-                "--dart-define=PURE_STUDIO_DRIVER_ATTACHMENT_PATH={}",
+                "--dart-define=ANYWORK_DRIVER_ATTACHMENT_PATH={}",
                 path.to_string_lossy()
             ))
         })
@@ -489,7 +489,7 @@ fn run_gui_args<'a>(
         args.extend([
             "-t",
             "test_driver/driver_main.dart",
-            "--dart-define=PURE_STUDIO_DRIVER=true",
+            "--dart-define=ANYWORK_DRIVER=true",
         ]);
         if let Some(define) = driver_attachment_define {
             args.push(define);
@@ -522,7 +522,7 @@ fn build_gui_with_version(options: BuildGuiOptions, release_version: Option<&str
     generated_sources_policy(options.check_generated).prepare(&workspace_root, &app_dir)?;
     remote_helper::prepare_for_embedding(&workspace_root)?;
 
-    let version_define = format!("--dart-define=PURE_STUDIO_VERSION={app_version}");
+    let version_define = format!("--dart-define=ANYWORK_VERSION={app_version}");
     let args = build_gui_args(target, &version_define, options.demo);
     let demo_mode = if options.demo {
         DemoMode::Demo
@@ -574,7 +574,7 @@ fn build_gui_args(target: DesktopTarget, version_define: &str, demo: bool) -> Ve
         "--no-pub",
     ];
     if demo {
-        args.push("--dart-define=PURE_STUDIO_DEMO=true");
+        args.push("--dart-define=ANYWORK_DEMO=true");
     }
     args
 }
@@ -755,18 +755,18 @@ fn configure_flutter_environment(command: &mut Command, invocation: FlutterInvoc
     command.env_remove(BRIDGE_DEBUG_SYMBOLS_ENV);
     match invocation.demo_mode {
         DemoMode::Native => {
-            command.env_remove("PURE_STUDIO_DEMO");
+            command.env_remove("ANYWORK_DEMO");
         }
         DemoMode::Demo => {
-            command.env("PURE_STUDIO_DEMO", "true");
+            command.env("ANYWORK_DEMO", "true");
         }
     }
     match invocation.log_level {
         Some(log_level) => {
-            command.env("PURE_STUDIO_LOG_LEVEL", log_level.as_str());
+            command.env("ANYWORK_LOG_LEVEL", log_level.as_str());
         }
         None => {
-            command.env_remove("PURE_STUDIO_LOG_LEVEL");
+            command.env_remove("ANYWORK_LOG_LEVEL");
         }
     }
     if let Some(artifacts) = invocation.bridge_artifacts {
@@ -779,9 +779,8 @@ fn configure_flutter_environment(command: &mut Command, invocation: FlutterInvoc
 
 fn flutter_args(args: &[&str], demo_mode: DemoMode) -> Vec<OsString> {
     let mut result = args.iter().map(OsString::from).collect::<Vec<_>>();
-    if matches!(demo_mode, DemoMode::Demo) && !args.contains(&"--dart-define=PURE_STUDIO_DEMO=true")
-    {
-        result.push(OsString::from("--dart-define=PURE_STUDIO_DEMO=true"));
+    if matches!(demo_mode, DemoMode::Demo) && !args.contains(&"--dart-define=ANYWORK_DEMO=true") {
+        result.push(OsString::from("--dart-define=ANYWORK_DEMO=true"));
     }
     result
 }
@@ -901,7 +900,7 @@ mod tests {
         let artifact_dir = fixture_root.join("artifacts");
         let dist_dir = fixture_root.join("dist");
         fs::create_dir_all(artifact_dir.join("data"))?;
-        fs::write(artifact_dir.join("pure_studio.exe"), "new executable")?;
+        fs::write(artifact_dir.join("anywork.exe"), "new executable")?;
         fs::write(artifact_dir.join("data").join("asset.bin"), "new asset")?;
         fs::create_dir_all(dist_dir.join("stale"))?;
         fs::write(dist_dir.join("old.exe"), "stale executable")?;
@@ -913,7 +912,7 @@ mod tests {
         assert!(!dist_dir.join("old.exe").exists());
         assert!(!dist_dir.join("stale").exists());
         assert_eq!(
-            fs::read_to_string(dist_dir.join("pure_studio.exe"))?,
+            fs::read_to_string(dist_dir.join("anywork.exe"))?,
             "new executable"
         );
         assert_eq!(
@@ -933,25 +932,25 @@ mod tests {
                 OsString::from("run"),
                 OsString::from("-d"),
                 OsString::from("windows"),
-                OsString::from("--dart-define=PURE_STUDIO_DEMO=true"),
+                OsString::from("--dart-define=ANYWORK_DEMO=true"),
             ]
         );
         assert_eq!(
             flutter_args(
-                &["build", "windows", "--dart-define=PURE_STUDIO_DEMO=true"],
+                &["build", "windows", "--dart-define=ANYWORK_DEMO=true"],
                 DemoMode::Demo
             ),
             vec![
                 OsString::from("build"),
                 OsString::from("windows"),
-                OsString::from("--dart-define=PURE_STUDIO_DEMO=true"),
+                OsString::from("--dart-define=ANYWORK_DEMO=true"),
             ]
         );
     }
 
     #[test]
     fn driver_mode_selects_dedicated_entrypoint() {
-        let version_define = "--dart-define=PURE_STUDIO_VERSION=1.2.3";
+        let version_define = "--dart-define=ANYWORK_VERSION=1.2.3";
 
         assert_eq!(
             run_gui_args(
@@ -969,7 +968,7 @@ mod tests {
                 "--no-pub",
                 "-t",
                 "test_driver/driver_main.dart",
-                "--dart-define=PURE_STUDIO_DRIVER=true",
+                "--dart-define=ANYWORK_DRIVER=true",
                 "--disable-service-auth-codes",
                 "--verbose",
             ]
@@ -1074,12 +1073,12 @@ mod tests {
     fn release_build_never_references_driver_entrypoint() {
         let args = build_gui_args(
             DesktopTarget::Windows,
-            "--dart-define=PURE_STUDIO_VERSION=1.2.3",
+            "--dart-define=ANYWORK_VERSION=1.2.3",
             false,
         );
 
         assert!(!args.contains(&"test_driver/driver_main.dart"));
-        assert!(!args.contains(&"--dart-define=PURE_STUDIO_DRIVER=true"));
+        assert!(!args.contains(&"--dart-define=ANYWORK_DRIVER=true"));
         assert!(!args.contains(&"--disable-service-auth-codes"));
         assert!(!args.contains(&"--no-dds"));
         assert!(!args.contains(&"--print-dtd"));
@@ -1126,9 +1125,9 @@ mod tests {
             command_env(&command, BRIDGE_DEBUG_SYMBOLS_ENV),
             Some(Some(OsString::from(r"C:\artifacts\pl_studio_bridge.pdb")))
         );
-        assert_eq!(command_env(&command, "PURE_STUDIO_DEMO"), Some(None));
+        assert_eq!(command_env(&command, "ANYWORK_DEMO"), Some(None));
         assert_eq!(
-            command_env(&command, "PURE_STUDIO_LOG_LEVEL"),
+            command_env(&command, "ANYWORK_LOG_LEVEL"),
             Some(Some(OsString::from("debug")))
         );
     }
@@ -1150,10 +1149,10 @@ mod tests {
         assert_eq!(command_env(&command, BRIDGE_LIBRARY_ENV), Some(None));
         assert_eq!(command_env(&command, BRIDGE_DEBUG_SYMBOLS_ENV), Some(None));
         assert_eq!(
-            command_env(&command, "PURE_STUDIO_DEMO"),
+            command_env(&command, "ANYWORK_DEMO"),
             Some(Some(OsString::from("true")))
         );
-        assert_eq!(command_env(&command, "PURE_STUDIO_LOG_LEVEL"), Some(None));
+        assert_eq!(command_env(&command, "ANYWORK_LOG_LEVEL"), Some(None));
     }
 
     fn command_env(command: &Command, name: &str) -> Option<Option<OsString>> {

@@ -40,7 +40,7 @@ Provider 的状态。产品提供的 Review revision、容器卷或缓存快照�
 运行时按以下优先级发现 skills：
 
 1. 项目目录：`<workspace_root>/.agents/skills/`
-2. 配置用户目录：`[skills].user_dir`，默认 `~/.pure/skills/`
+2. 配置用户目录：`[skills].user_dir`，默认 `~/.anywork/skills/`
 3. Agents 兼容用户目录：Linux `$HOME/.agents/skills/`、Windows `%USERPROFILE%\.agents\skills\`
 4. Studio 系统目录：`<studio_home>/studio/skills/.system/`
 5. 配置里的外部目录：`[skills].external_dirs`
@@ -96,7 +96,7 @@ feature 合并，而现有 `utoipa-swagger-ui` 的绝对生成目录与 compress
 记录上游版本、校验和与许可，不作为可修改的产品源码，也不是 Git submodule。
 PDF、DOCX 运行依赖、Git submodule 与第三方资源许可清单不属于本合同，后续单独选型。
 
-Pure Studio 配置指南系统 skill 名为 `studio-config`，其主文件位于
+anywork 配置指南系统 skill 名为 `studio-config`，其主文件位于
 `code/pl-studio-runtime/assets/skills/studio-config/SKILL.md`。配置契约及该 skill 的同步维护要求见
 `10-config.md`。
 

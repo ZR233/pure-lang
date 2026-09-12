@@ -97,7 +97,7 @@ impl LspHostBackend for RemoteWorkspaceHost {
                 .collect::<Vec<_>>()
                 .join(" ");
             let cwd = self.relative_path(&request.cwd)?;
-            let capture_path = PathBuf::from(".pure")
+            let capture_path = PathBuf::from(".anywork")
                 .join("remote")
                 .join("lsp")
                 .join(format!("{}.log", request.process_id));

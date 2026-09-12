@@ -45,7 +45,7 @@ impl StudioStore {
         initialize_studio_schema(&db).await?;
         validate_database(&db).await?;
         let attachments_dir = tempfile::Builder::new()
-            .prefix("pure-studio-memory-attachments-")
+            .prefix("anywork-memory-attachments-")
             .tempdir()?
             .keep();
         Ok(Self {

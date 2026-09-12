@@ -104,7 +104,7 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $rootVersion -cne $version) {
             throw "Tag $tag does not contain matching studio-version.txt"
           }
-          $pubspec = git show "${sha}:code/pure-studio/pubspec.yaml"
+          $pubspec = git show "${sha}:code/anywork/pubspec.yaml"
           if ($LASTEXITCODE -ne 0) {
             throw "Tag $tag does not contain the Flutter pubspec"
           }
@@ -295,7 +295,7 @@ jobs:
           AUTHENTICODE_CERTIFICATE_BASE64: ${{ secrets.AUTHENTICODE_CERTIFICATE_BASE64 }}
         run: |
           if (-not [string]::IsNullOrWhiteSpace($env:AUTHENTICODE_CERTIFICATE_BASE64)) {
-            $certificate = Join-Path $env:RUNNER_TEMP 'pure-studio-authenticode.pfx'
+            $certificate = Join-Path $env:RUNNER_TEMP 'anywork-authenticode.pfx'
             [IO.File]::WriteAllBytes($certificate, [Convert]::FromBase64String($env:AUTHENTICODE_CERTIFICATE_BASE64))
             "WINDOWS_CERTIFICATE_PATH=$certificate" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
             $signTool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Filter signtool.exe -Recurse | Sort-Object FullName -Descending | Select-Object -First 1
@@ -311,12 +311,12 @@ jobs:
       - name: Package matching Windows symbols
         shell: pwsh
         run: |
-          $symbolsDir = Join-Path $env:RUNNER_TEMP "pure-studio-symbols-$env:RELEASE_VERSION"
+          $symbolsDir = Join-Path $env:RUNNER_TEMP "anywork-symbols-$env:RELEASE_VERSION"
           New-Item -ItemType Directory -Path $symbolsDir | Out-Null
           $roots = @(
-            (Join-Path $env:GITHUB_WORKSPACE 'dist/pure-studio-release'),
+            (Join-Path $env:GITHUB_WORKSPACE 'dist/anywork-release'),
             (Join-Path $env:GITHUB_WORKSPACE 'target/release'),
-            (Join-Path $env:GITHUB_WORKSPACE 'code/pure-studio/build/windows/x64/rust-target/release')
+            (Join-Path $env:GITHUB_WORKSPACE 'code/anywork/build/windows/x64/rust-target/release')
           )
           $copied = 0
           for ($index = 0; $index -lt $roots.Count; $index += 1) {
@@ -341,7 +341,7 @@ jobs:
             protocolVersion = 2
             generatedAt = [DateTime]::UtcNow.ToString('o')
           } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $symbolsDir 'version-map.json')
-          $archive = Join-Path $env:RUNNER_TEMP "Pure-Studio-$env:RELEASE_VERSION-windows-x86_64-symbols.zip"
+          $archive = Join-Path $env:RUNNER_TEMP "anywork-$env:RELEASE_VERSION-windows-x86_64-symbols.zip"
           Compress-Archive -Path (Join-Path $symbolsDir '*') -DestinationPath $archive
           "SYMBOL_ARCHIVE=$archive" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
@@ -365,7 +365,7 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:MINISIGN_PASSWORD)) {
             throw 'MINISIGN_PASSWORD secret is required'
           }
-          $minisignKey = Join-Path $env:RUNNER_TEMP 'pure-studio.key'
+          $minisignKey = Join-Path $env:RUNNER_TEMP 'anywork.key'
           Set-Content -LiteralPath $minisignKey -Value $env:MINISIGN_SECRET_KEY -NoNewline
           "MINISIGN_SECRET_KEY_FILE=$minisignKey" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
@@ -386,11 +386,11 @@ jobs:
         shell: pwsh
         run: |
           $releaseDir = Join-Path $env:GITHUB_WORKSPACE "dist/studio-release/$env:RELEASE_VERSION"
-          $installer = Join-Path $releaseDir "Pure-Studio-$env:RELEASE_VERSION-windows-x86_64-setup.exe"
-          $installDir = Join-Path $env:RUNNER_TEMP 'pure-studio-smoke'
+          $installer = Join-Path $releaseDir "anywork-$env:RELEASE_VERSION-windows-x86_64-setup.exe"
+          $installDir = Join-Path $env:RUNNER_TEMP 'anywork-smoke'
           $process = Start-Process -FilePath $installer -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/CURRENTUSER',"/DIR=$installDir" -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Installer exited with $($process.ExitCode)" }
-          $executable = Join-Path $installDir 'pure_studio.exe'
+          $executable = Join-Path $installDir 'anywork.exe'
           if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) { throw 'Installed executable missing' }
           $productVersion = (Get-Item -LiteralPath $executable).VersionInfo.ProductVersion
           if (-not $productVersion.StartsWith($env:RELEASE_VERSION)) {
@@ -406,7 +406,7 @@ jobs:
                 Get-ChildItem -LiteralPath $root |
                   Get-ItemProperty |
                   Where-Object {
-                    $_.DisplayName -like 'Pure Studio*' -and
+                    ($_.DisplayName -like 'anywork*' -or $_.DisplayName -like '糊来帮*') -and
                     $_.DisplayVersion -eq $env:RELEASE_VERSION
                   }
               }
@@ -420,12 +420,12 @@ jobs:
       - name: Attest installer provenance
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
-          subject-path: dist/studio-release/${{ needs.resolve.outputs.version }}/Pure-Studio-${{ needs.resolve.outputs.version }}-windows-x86_64-setup.exe
+          subject-path: dist/studio-release/${{ needs.resolve.outputs.version }}/anywork-${{ needs.resolve.outputs.version }}-windows-x86_64-setup.exe
 
       - name: Attest portable provenance
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
-          subject-path: dist/studio-release/${{ needs.resolve.outputs.version }}/Pure-Studio-${{ needs.resolve.outputs.version }}-windows-x86_64-portable.zip
+          subject-path: dist/studio-release/${{ needs.resolve.outputs.version }}/anywork-${{ needs.resolve.outputs.version }}-windows-x86_64-portable.zip
 
       - name: Preserve immutable release assets
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

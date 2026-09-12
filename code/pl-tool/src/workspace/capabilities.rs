@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 /// 共享 agent runtime 的工具能力开关。
 ///
-/// 默认配置保持 pure-studio 既有本地能力：命令执行、workspace 文件、skills、MCP/LSP
+/// 默认配置保持 anywork 既有本地能力：命令执行、workspace 文件、skills、MCP/LSP
 /// 和用户输入工具开启；git 等产品能力关闭。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ToolCapabilityConfig {

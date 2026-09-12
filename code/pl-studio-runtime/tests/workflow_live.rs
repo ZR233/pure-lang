@@ -82,7 +82,7 @@ async fn installed_config_workflow_rework_preserves_original_owners() -> Result<
             "rework acceptance cannot use a local/scripted endpoint"
         );
     }
-    match std::env::var("PURE_STUDIO_WORKFLOW_REWORK_SCENARIO") {
+    match std::env::var("ANYWORK_WORKFLOW_REWORK_SCENARIO") {
         Ok(name) => workflow_rework::run_selected(&installed, &config, &name).await,
         Err(std::env::VarError::NotPresent) => workflow_rework::run(&installed, &config).await,
         Err(error) => Err(error.into()),
@@ -92,8 +92,8 @@ async fn installed_config_workflow_rework_preserves_original_owners() -> Result<
 #[tokio::test]
 #[ignore = "revalidates saved real-provider evidence without repeating model work"]
 async fn saved_workflow_rework_evidence_matches_current_contract() -> Result<()> {
-    let directory = std::env::var_os("PURE_STUDIO_REWORK_REPLAY_DIR")
-        .context("PURE_STUDIO_REWORK_REPLAY_DIR is required")?;
+    let directory = std::env::var_os("ANYWORK_REWORK_REPLAY_DIR")
+        .context("ANYWORK_REWORK_REPLAY_DIR is required")?;
     workflow_rework::replay_saved(Path::new(&directory)).await
 }
 
@@ -369,7 +369,7 @@ fn write_completion_receipt(
     turn_id: &str,
     completion: &serde_json::Value,
 ) -> Result<()> {
-    let Some(artifact_dir) = std::env::var_os("PURE_STUDIO_WORKFLOW_ARTIFACT_DIR") else {
+    let Some(artifact_dir) = std::env::var_os("ANYWORK_WORKFLOW_ARTIFACT_DIR") else {
         return Ok(());
     };
     let path = Path::new(&artifact_dir).join(format!(
@@ -549,8 +549,8 @@ async fn validate_fixture(workspace: &Path) -> Result<()> {
         "workflow fixture must not initialize Git"
     );
     ensure!(
-        !workspace.join(".pure").exists(),
-        "workflow fixture must not create .pure state"
+        !workspace.join(".anywork").exists(),
+        "workflow fixture must not create .anywork state"
     );
     for path in [
         "src/normalize.rs",

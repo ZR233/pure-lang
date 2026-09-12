@@ -12,11 +12,11 @@ pub(crate) fn workspace_root() -> Result<PathBuf> {
 }
 
 pub(crate) fn studio_app_dir(workspace_root: &Path) -> PathBuf {
-    workspace_root.join("code").join("pure-studio")
+    workspace_root.join("code").join("anywork")
 }
 
 pub(crate) fn release_dist_dir(workspace_root: &Path) -> PathBuf {
-    workspace_root.join("dist").join("pure-studio-release")
+    workspace_root.join("dist").join("anywork-release")
 }
 
 pub(crate) fn ensure_workspace_shape(workspace_root: &Path) -> Result<()> {

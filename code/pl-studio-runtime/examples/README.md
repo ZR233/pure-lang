@@ -3,7 +3,7 @@
 从仓库根目录运行：
 
 ```bash
-PURE_STUDIO_WIRE_CAPTURE_DIR="$PWD/target/model-accounting-live/wire" \
+ANYWORK_WIRE_CAPTURE_DIR="$PWD/target/model-accounting-live/wire" \
   cargo run -p pl-studio-runtime --features live-tests \
   --example model_accounting_live -- target/model-accounting-live/report.json
 ```

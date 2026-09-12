@@ -11,7 +11,7 @@ pl-trace → pl-core
 ```
 
 model 与 tool 不相互依赖，core 不反向依赖实现或产品协议，包括 dev-dependencies。
-完整成员以根 Cargo.toml 为准；Flutter `code/pure-studio` 不是 Cargo 成员。
+完整成员以根 Cargo.toml 为准；Flutter `code/anywork` 不是 Cargo 成员。
 
 ## 稳定职责
 

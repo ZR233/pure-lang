@@ -932,8 +932,8 @@ mod tests {
     #[test]
     #[ignore = "replays saved wire without starting a provider"]
     fn saved_headless_wire_is_an_inventory_not_a_second_workflow_gate() {
-        let directory = std::env::var_os("PURE_STUDIO_WIRE_REPLAY_DIR")
-            .expect("saved artifact directory required");
+        let directory =
+            std::env::var_os("ANYWORK_WIRE_REPLAY_DIR").expect("saved artifact directory required");
         let directory = PathBuf::from(directory);
         write_headless_manifest(&directory, &directory.join("wire")).unwrap();
         let manifest: Vec<Value> = serde_json::from_slice(

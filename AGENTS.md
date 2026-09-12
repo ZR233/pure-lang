@@ -30,14 +30,14 @@
 
 - 仓库 Python 脚本统一用 `python3` 运行；系统 `python` 是 Python 2。
 - Rust crate 名称统一以 `pl-` 开头，例如 `pl-core`、`pl-model`、`pl-studio-bridge`。
-- Flutter app 的 Dart package 名称是 `pure_studio`。
-- Flutter 项目根目录是 `code/pure-studio`。
+- Flutter app 的 Dart package 名称是 `anywork`。
+- Flutter 项目根目录是 `code/anywork`。
 
 ### Flutter 与 Dart 命令
 
-- 禁止在 Flutter 或 Dart SDK 安装目录执行本项目的 `flutter`、`dart` 命令。项目命令的工作目录必须是 `code/pure-studio`，或由仓库包装命令显式切换到该目录。
-- 从仓库根目录执行 Flutter/Dart 命令时，优先使用 `cargo flutter <args...>` 和 `cargo dart <args...>`；参数原样透传，包装命令会自动切换到 `code/pure-studio`。
-- 只有包装命令无法满足需求时，才可直接运行 `flutter` 或 `dart`，且必须先把工作目录切换到 `code/pure-studio`；不得把 SDK 目录当作项目目录。
+- 禁止在 Flutter 或 Dart SDK 安装目录执行本项目的 `flutter`、`dart` 命令。项目命令的工作目录必须是 `code/anywork`，或由仓库包装命令显式切换到该目录。
+- 从仓库根目录执行 Flutter/Dart 命令时，优先使用 `cargo flutter <args...>` 和 `cargo dart <args...>`；参数原样透传，包装命令会自动切换到 `code/anywork`。
+- 只有包装命令无法满足需求时，才可直接运行 `flutter` 或 `dart`，且必须先把工作目录切换到 `code/anywork`；不得把 SDK 目录当作项目目录。
 - 常用命令：
 
   ```powershell
@@ -56,7 +56,7 @@
   ```
 
 - 不支持直接执行 `flutter build windows|linux` 或 `flutter run -d windows|linux`，也不新增 PowerShell GUI wrapper。
-- Linux 原生 GUI 需要 Clang/C++ 标准库、CMake、Ninja、pkg-config 与 GTK 3 开发文件；Debian/Ubuntu 示例为 `sudo apt-get install -y clang cmake ninja-build pkg-config build-essential libgtk-3-dev`。xtask 必须用当前 PATH 和真实最小 GTK/C++ 工程预检，缺失时透传实际命令与原始错误；不得写死编译器版本、系统库路径或注入机器专用 include/library 环境。Rust 桥以 `libpl_studio_bridge.so` 预构建并经 `PURE_STUDIO_BRIDGE_LIBRARY` 环境变量注入 CMake，与 Windows 的 DLL 契约一致。
+- Linux 原生 GUI 需要 Clang/C++ 标准库、CMake、Ninja、pkg-config 与 GTK 3 开发文件；Debian/Ubuntu 示例为 `sudo apt-get install -y clang cmake ninja-build pkg-config build-essential libgtk-3-dev`。xtask 必须用当前 PATH 和真实最小 GTK/C++ 工程预检，缺失时透传实际命令与原始错误；不得写死编译器版本、系统库路径或注入机器专用 include/library 环境。Rust 桥以 `libpl_studio_bridge.so` 预构建并经 `ANYWORK_BRIDGE_LIBRARY` 环境变量注入 CMake，与 Windows 的 DLL 契约一致。
 - `cargo xtask run-gui --driver` 使用 `test_driver/driver_main.dart` 启用 Flutter Driver extension，供 Dart MCP 的 `flutter_driver_command` 操作 GUI；xtask 不负责启动实验性的 `dart mcp-server`。
 - 本地原生验收默认使用当前受支持宿主平台，报告中明确平台与覆盖范围，不把单平台结果外推为跨平台通过；跨平台任务按实际影响说明其他平台的验证结果或缺口。
 - GUI smoke 使用 `cargo xtask run-gui --demo`；需要确定性数据和交互验收时使用 `cargo xtask run-gui --demo --driver`。
@@ -66,7 +66,7 @@
 ### Web GUI 远程验收
 
 - `cargo xtask verify-gui --web-integration` 使用纯 Dart demo 和同一套 Flutter integration test 在无头 Chrome/Chromium 中验收布局与交互；它不替代原生 bridge、文件系统、进程、MCP/LSP 或真实 provider 验收。
-- 首次使用先运行 `cargo flutter config --enable-web`，并安装主版本匹配的 Chrome/Chromium 与 ChromeDriver；浏览器不在 PATH 时设置 `CHROME_EXECUTABLE`。xtask 负责发现版本、解析可执行 wrapper/sandbox 载荷、分配临时端口、启动及回收 driver 进程树，失败日志写入 `code/pure-studio/build/web-integration-artifacts`。
+- 首次使用先运行 `cargo flutter config --enable-web`，并安装主版本匹配的 Chrome/Chromium 与 ChromeDriver；浏览器不在 PATH 时设置 `CHROME_EXECUTABLE`。xtask 负责发现版本、解析可执行 wrapper/sandbox 载荷、分配临时端口、启动及回收 driver 进程树，失败日志写入 `code/anywork/build/web-integration-artifacts`。
 - canonical Web 交互使用 Flutter integration test 与稳定 `ValueKey`；Playwright 等工具只能补充截图、console 或可访问性观察，不能维护第二套 DOM/坐标状态机。
 
 ### GUI 生成文件
@@ -138,7 +138,7 @@
 - 验证按实际影响选择。纯文档、技能或协作规则修改（包括提交前）只检查内容、引用、规则一致性及适用格式，不运行 Rust、Flutter、GUI 或 live 全量验收；若同时改变构建／生成输入、运行配置或测试执行语义，则按这些实际影响验证。代码修改先运行定向检查，跨 crate、协议、构建或依赖变更扩展到相关消费者；提交前执行下述代码门禁，生成输入、GUI 行为与 live 验收另遵守对应要求。
 - 适用检查通过且需求已满足后直接交付；只有新修改、失败或尚未解决的具体风险才扩展或重复验证。只读分析以结论与出处为完成条件；修改任务以范围内修改完成、适用验证通过和差异可审查为完成条件；提 PR 任务还须交付 PR 链接及实际 CI 状态，排队或运行中不算通过。环境或权限阻塞时报告已完成项、原始失败和剩余工作，不声称全部完成。
 - 测试设计、布局、必要性与确定性回归统一遵循 [test-quality](.agents/skills/test-quality/SKILL.md)。核心行为必须有充分证明；修复优先复用或增强已有功能测试，同一回归在错误实现失败、修复后通过，不要求每个 bug 新增用例。
-- `code/pure-studio/pubspec.lock` 是必须纳入 Git 的 canonical 应用依赖快照，不得加入 ignore；
+- `code/anywork/pubspec.lock` 是必须纳入 Git 的 canonical 应用依赖快照，不得加入 ignore；
   Flutter 直接依赖升级后必须同步提交重新解析的 lockfile。
 - 代码、构建、依赖或生成输入变更提交前，在本地执行与 CI 一致的检查清单（纯说明性变更按本节首条豁免；只需保证当前环境通过；
   `PUB_HOSTED_URL` 镜像导致的已跟踪 pubspec.lock hosted URL 差异由 xtask 自动

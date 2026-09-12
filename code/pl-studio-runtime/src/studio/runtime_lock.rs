@@ -160,8 +160,85 @@ impl StudioRuntimeOptions {
 mod tests {
     use super::*;
 
+    #[test]
+    fn default_startup_is_independent_of_the_old_product_home() {
+        const CHILD_HOME: &str = "ANYWORK_TEST_BRAND_HOME";
+        if let Some(home) = std::env::var_os(CHILD_HOME) {
+            let home = PathBuf::from(home);
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            runtime.block_on(async {
+                let app = crate::StudioRuntime::with_options(StudioRuntimeOptions {
+                    studio_home: None,
+                    host: StudioHostKind::Test,
+                })
+                .await
+                .unwrap();
+                app.start_runtime().await.unwrap();
+                let config =
+                    crate::ConfigStore::new(crate::ConfigPaths::for_current_user().unwrap());
+                let loaded = config.load_or_default().unwrap();
+                assert_eq!(loaded, crate::StudioConfig::default_config());
+                config.save(&loaded).unwrap();
+                app.shutdown_runtime().await.unwrap();
+            });
+            assert!(home.join(".anywork/config.toml").is_file());
+            let database = std::fs::read(home.join(".anywork/studio/studio.sqlite")).unwrap();
+            assert!(database.starts_with(b"SQLite format 3\0"));
+            return;
+        }
+
+        let home = tempfile::tempdir().unwrap();
+        let legacy = home.path().join(".pure");
+        std::fs::create_dir_all(legacy.join("studio")).unwrap();
+        let legacy_files = [
+            (
+                "config.toml",
+                "old configuration must not be parsed or reset",
+            ),
+            (
+                "studio/studio.sqlite",
+                "old project history must not be opened",
+            ),
+            (
+                "studio/sessions.sqlite",
+                "old session journal must not be opened",
+            ),
+        ];
+        for (path, contents) in legacy_files {
+            std::fs::write(legacy.join(path), contents).unwrap();
+        }
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "studio::runtime_lock::tests::default_startup_is_independent_of_the_old_product_home",
+                "--nocapture",
+            ])
+            .env(CHILD_HOME, home.path())
+            .env("HOME", home.path())
+            .env("USERPROFILE", home.path())
+            .env("PURE_STUDIO_HOME", &legacy)
+            .env_remove("ANYWORK_HOME")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        for (path, contents) in legacy_files {
+            assert_eq!(
+                std::fs::read_to_string(legacy.join(path)).unwrap(),
+                contents
+            );
+        }
+    }
+
     #[cfg(target_os = "linux")]
-    const CREDENTIAL_ISOLATION_CHILD: &str = "PURE_STUDIO_CREDENTIAL_ISOLATION_CHILD";
+    const CREDENTIAL_ISOLATION_CHILD: &str = "ANYWORK_CREDENTIAL_ISOLATION_CHILD";
 
     #[test]
     fn lock_owner_releases_across_all_clones() {
@@ -236,7 +313,7 @@ mod tests {
             .env(CREDENTIAL_ISOLATION_CHILD, "1")
             .env(
                 "DBUS_SESSION_BUS_ADDRESS",
-                "unix:path=/definitely-missing/pure-studio-ci-bus",
+                "unix:path=/definitely-missing/anywork-ci-bus",
             )
             .output()
             .unwrap();

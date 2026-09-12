@@ -10,12 +10,12 @@ const INSTALL_HINT: &str = "请安装完整且彼此匹配的 Flutter Linux 原�
 \n其他发行版请安装等价的 Clang、CMake、Ninja、pkg-config、GTK 3 开发包和 C++ 标准库开发包；不要在仓库中写死编译器版本或系统库路径。";
 
 const PROBE_CMAKE: &str = r#"cmake_minimum_required(VERSION 3.13)
-project(pure_studio_linux_preflight LANGUAGES CXX)
+project(anywork_linux_preflight LANGUAGES CXX)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GTK REQUIRED IMPORTED_TARGET gtk+-3.0)
-add_executable(pure_studio_linux_preflight main.cc)
-target_compile_features(pure_studio_linux_preflight PRIVATE cxx_std_17)
-target_link_libraries(pure_studio_linux_preflight PRIVATE PkgConfig::GTK)
+add_executable(anywork_linux_preflight main.cc)
+target_compile_features(anywork_linux_preflight PRIVATE cxx_std_17)
+target_link_libraries(anywork_linux_preflight PRIVATE PkgConfig::GTK)
 "#;
 
 const PROBE_SOURCE: &str = r#"#include <gtk/gtk.h>
@@ -95,7 +95,7 @@ fn probe_gtk(pkg_config: &Path) -> Result<()> {
 
 fn probe_cmake_toolchain(tools: &NativeTools) -> Result<()> {
     let temp = tempfile::Builder::new()
-        .prefix("pure-studio-linux-preflight-")
+        .prefix("anywork-linux-preflight-")
         .tempdir()
         .context("failed to create isolated Linux GUI preflight directory")?;
     let source_dir = temp.path().join("source");

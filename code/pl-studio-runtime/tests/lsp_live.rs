@@ -13,7 +13,7 @@ use pl_studio_runtime::{
     StudioRole, StudioRuntime, StudioRuntimeOptions, WebSearchMode,
 };
 
-const LIVE_CONFIG_ENV: &str = "PURE_STUDIO_LIVE_INSTALLED_CONFIG";
+const LIVE_CONFIG_ENV: &str = "ANYWORK_LIVE_INSTALLED_CONFIG";
 const LIVE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const LIVE_VERIFY_MARKER: &str = "PURE_LSP_PROMPT_VERIFY_OK";
 const LSP_TOOL_NAME: &str = "lsp_query";

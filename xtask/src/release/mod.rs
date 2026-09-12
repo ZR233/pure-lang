@@ -61,7 +61,7 @@ fn release_dir(workspace_root: &Path, version: &Version) -> PathBuf {
 }
 
 fn asset_name(version: &Version, kind: &str) -> String {
-    format!("Pure-Studio-{version}-{PLATFORM}-{kind}")
+    format!("anywork-{version}-{PLATFORM}-{kind}")
 }
 
 #[cfg(test)]
@@ -81,11 +81,11 @@ mod tests {
         let version = validate_version("1.2.3")?;
         assert_eq!(
             asset_name(&version, "setup.exe"),
-            "Pure-Studio-1.2.3-windows-x86_64-setup.exe"
+            "anywork-1.2.3-windows-x86_64-setup.exe"
         );
         assert_eq!(
             asset_name(&version, "portable.zip"),
-            "Pure-Studio-1.2.3-windows-x86_64-portable.zip"
+            "anywork-1.2.3-windows-x86_64-portable.zip"
         );
         Ok(())
     }

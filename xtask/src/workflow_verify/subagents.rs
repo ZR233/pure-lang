@@ -123,7 +123,7 @@ pub(super) fn run(options: VerifySubagentsOptions) -> Result<()> {
     fs::create_dir_all(&wire_dir)?;
     println!("Subagents live artifacts: {}", artifact_dir.display());
 
-    let installed_home = current_home()?.join(".pure");
+    let installed_home = current_home()?.join(".anywork");
     let installed_config = installed_home.join("config.toml");
     ensure!(
         installed_config.is_file(),
@@ -245,7 +245,7 @@ pub(super) fn run(options: VerifySubagentsOptions) -> Result<()> {
     )?;
     ensure!(
         installed_state_before == installed_state_after,
-        "installed ~/.pure config or Agent files changed during isolated acceptance"
+        "installed ~/.anywork config or Agent files changed during isolated acceptance"
     );
     match acceptance {
         Ok(()) => {
@@ -294,10 +294,10 @@ fn run_gui(run: GuiRun<'_>) -> Result<()> {
         .env_remove(SSH_USERNAME_ENV)
         .env_remove(SSH_PASSWORD_ENV)
         .env_remove(SSH_PORT_ENV)
-        .env("PURE_STUDIO_HOME", run.studio_home)
-        .env("PURE_STUDIO_WIRE_CAPTURE_DIR", run.wire_dir)
+        .env("ANYWORK_HOME", run.studio_home)
+        .env("ANYWORK_WIRE_CAPTURE_DIR", run.wire_dir)
         .env(
-            "PURE_STUDIO_NATIVE_LIFECYCLE_LOG",
+            "ANYWORK_NATIVE_LIFECYCLE_LOG",
             run.artifact_dir.join("native-lifecycle.log"),
         );
     let mut gui = resident::ResidentProcess::start(
@@ -524,7 +524,7 @@ fn prepare_fixture(path: &Path) -> Result<()> {
     fs::write(path.join("allowed/normalize/.gitkeep"), "")?;
     fs::write(path.join("allowed/validate/.gitkeep"), "")?;
     fs::write(path.join("forbidden/.gitkeep"), "")?;
-    fs::write(path.join(".gitignore"), "/target/\n/.pure/\n")?;
+    fs::write(path.join(".gitignore"), "/target/\n/.anywork/\n")?;
     run_git(path, &["init", "-b", "main"])?;
     run_git(path, &["config", "user.name", "Pure Acceptance"])?;
     run_git(
@@ -598,7 +598,7 @@ printf '%s\n' 'pub fn fixture_ready() -> bool { true }' '' '#[cfg(test)]' 'mod t
 	: > "$fixture/allowed/normalize/.gitkeep"
 	: > "$fixture/allowed/validate/.gitkeep"
 : > "$fixture/forbidden/.gitkeep"
-printf '%s\n' '/target/' '/.pure/' > "$fixture/.gitignore"
+printf '%s\n' '/target/' '/.anywork/' > "$fixture/.gitignore"
 git -C "$fixture" init -q -b main
 git -C "$fixture" config user.name 'Pure Acceptance'
 git -C "$fixture" config user.email 'pure-acceptance@example.invalid'
@@ -760,7 +760,7 @@ fn run_ssh_script(ssh: &SshAcceptance, script: &str) -> Result<std::process::Out
         ])
         .env("SSH_ASKPASS", &askpass)
         .env("SSH_ASKPASS_REQUIRE", "force")
-        .env("DISPLAY", "pure-studio")
+        .env("DISPLAY", "anywork")
         .env(SSH_PASSWORD_ENV, &ssh.password)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

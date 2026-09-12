@@ -779,7 +779,7 @@ mod tests {
         #[cfg(windows)]
         let orphan_root =
             std::path::PathBuf::from(orphan_root.to_string_lossy().replace('\\', "/"));
-        let orphan = orphan_root.join(".pure/worktrees/orphan-root/orphan-child");
+        let orphan = orphan_root.join(".anywork/worktrees/orphan-root/orphan-child");
         let created = tokio::process::Command::new("git")
             .args(["worktree", "add", "-b", "pure-agent-orphan-child"])
             .arg(&orphan)

@@ -1,0 +1,1780 @@
+part of '../widget_test.dart';
+
+void registerTimelineToolTests() {
+  testWidgets(
+    'unknown history payload expands as exact selectable plain text',
+    (tester) async {
+      const original = '  **literal** <script>text</script>\r\n原文  ';
+      final item =
+          _threadItemFixture(
+            id: 'raw-entry',
+            threadId: 'session-1',
+            turnId: 'turn-1',
+            ordinal: 1,
+            text: '',
+          ).copyWith(
+            state: ThreadRawItemStateView(
+              [const RawHistoryPayload('future.payload', 99, original)],
+              'Unsupported saved format',
+              DateTime.fromMillisecondsSinceEpoch(1000),
+            ),
+          );
+      await tester.pumpWidget(
+        _timelineApp(
+          home: Scaffold(
+            body: TimelineView(
+              threadId: 'session-1',
+              turn: null,
+              rows: timelineRowsFromThreadItems([item]),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('raw-history-raw-entry')));
+      await tester.pumpAndSettle();
+      expect(find.text('future.payload · v99'), findsOneWidget);
+      expect(
+        find.byWidgetPredicate(
+          (widget) => widget is SelectableText && widget.data == original,
+        ),
+        findsOneWidget,
+      );
+    },
+  );
+
+  test('external web URL policy matches the conversation link boundary', () {
+    expect(
+      safeExternalWebUrl('https://exa\u0007mple.com/docs'),
+      'https://example.com/docs',
+    );
+    expect(safeExternalWebUrl('HTTP://example.com'), 'HTTP://example.com');
+    expect(safeExternalWebUrl('https:///missing-host'), isNull);
+    expect(safeExternalWebUrl('file:///tmp/report.html'), isNull);
+    expect(safeExternalWebUrl('mailto:team@example.com'), isNull);
+    expect(safeExternalWebUrl('custom://example.com'), isNull);
+    expect(
+      safeExternalWebUrl(
+        'https://example.com/${List.filled(8 * 1024, 'a').join()}',
+      ),
+      isNull,
+    );
+  });
+
+  testWidgets(
+    'workflow_transition rejection exposes its stable code and message',
+    (tester) async {
+      final part = _toolTimelinePart(
+        id: 'workflow-transition-1',
+        groupId: 'workflow-transition-group',
+        turnId: 'turn-workflow-transition',
+        name: 'workflow_transition',
+        status: 'failed',
+        result: jsonEncode({
+          'accepted': false,
+          'code': 'staleRevision',
+          'recoveryAction':
+              'Call workflow_current and retry with canonical CAS',
+        }),
+      );
+
+      await tester.pumpWidget(
+        _timelineApp(
+          home: Scaffold(
+            body: TimelineView(
+              threadId: 'session-1',
+              turn: null,
+              rows: timelineRowsFromFixtureParts([part]),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.tap(
+        find.byKey(const ValueKey('timeline-tool-group-summary')),
+      );
+      await tester.pump();
+
+      expect(
+        find.textContaining(
+          'staleRevision\nCall workflow_current and retry with canonical CAS',
+        ),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'completed tool exposes full arguments and long output on demand',
+    (tester) async {
+      final output = List.generate(30, (i) => 'result line $i').join('\n');
+      final part = _toolTimelinePart(
+        id: 'completed-output',
+        groupId: 'completed-output-group',
+        turnId: 'turn-output',
+        name: 'read_file',
+        status: 'succeeded',
+        arguments: '{"path":"report.py","startLine":1}',
+        result: output,
+      );
+      await tester.pumpWidget(
+        _timelineApp(
+          home: Scaffold(
+            body: TimelineView(
+              threadId: 'session-1',
+              turn: null,
+              rows: timelineRowsFromFixtureParts([part]),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.tap(
+        find.byKey(const ValueKey('timeline-tool-group-summary')),
+      );
+      await tester.pump();
+      await tester.tap(find.text('read_file completed').last);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('"path": "report.py"'), findsOneWidget);
+      expect(find.text(output), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('successful workflow_transition hides its result payload', (
+    tester,
+  ) async {
+    final part = _toolTimelinePart(
+      id: 'workflow-transition-2',
+      groupId: 'workflow-transition-completed-group',
+      turnId: 'turn-workflow-completed',
+      name: 'workflow_transition',
+      status: 'succeeded',
+      result: jsonEncode({
+        'accepted': true,
+        'code': 'transitioned',
+        'snapshot': {'runId': 'workflow-run-hidden', 'state': 'completed'},
+      }),
+    );
+
+    await tester.pumpWidget(
+      _timelineApp(
+        home: Scaffold(
+          body: TimelineView(
+            threadId: 'session-1',
+            turn: null,
+            rows: timelineRowsFromFixtureParts([part]),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('timeline-tool-group-summary')));
+    await tester.pump();
+
+    expect(find.textContaining('workflow-run-hidden'), findsNothing);
+  });
+
+  testWidgets('timeline renders dedicated web search action and result links', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 620);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final part = _toolTimelinePart(
+      id: 'web-search-1',
+      groupId: 'message-web-search',
+      turnId: 'turn-web-search',
+      name: 'web_search',
+      status: 'succeeded',
+      arguments: jsonEncode({
+        'type': 'find_in_page',
+        'url': 'https://example.com/page',
+        'pattern': 'needle',
+      }),
+      outputArtifacts: const [
+        {
+          'kind': 'webSearch',
+          'results': [
+            {
+              'url': 'https://example.com/result',
+              'unknownFutureField': {'rank': 1},
+            },
+          ],
+        },
+      ],
+    );
+
+    await tester.pumpWidget(
+      _timelineApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 720,
+            height: 480,
+            child: TimelineView(
+              threadId: 'session-1',
+              turn: null,
+              rows: timelineRowsFromFixtureParts([part]),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('web_search completed'), findsOneWidget);
+    expect(find.text('running'), findsNothing);
+    expect(find.text('Finding text on a page'), findsNothing);
+    expect(find.textContaining('https://example.com/page'), findsNothing);
+    expect(find.text('Result links'), findsNothing);
+    expect(find.text('Tool activity'), findsNothing);
+
+    await tester.tap(find.text('web_search completed'));
+    await tester.pump();
+
+    expect(find.text('Finding text on a page'), findsOneWidget);
+    expect(find.textContaining('https://example.com/page'), findsOneWidget);
+    expect(find.textContaining('needle'), findsOneWidget);
+    expect(find.text('Result links'), findsOneWidget);
+    expect(find.text('https://example.com/result'), findsOneWidget);
+  });
+
+  testWidgets('lsp tool items use parameterized titles with argument summary', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final parts = [
+      _toolTimelinePart(
+        id: 'lsp-query-1',
+        groupId: 'message-lsp',
+        turnId: 'turn-lsp',
+        name: 'lsp_query',
+        status: 'succeeded',
+        arguments: jsonEncode({
+          'languageId': 'rust',
+          'operation': 'documentSymbol',
+          'filePath': 'src/lib.rs',
+        }),
+      ),
+      _toolTimelinePart(
+        id: 'lsp-capabilities-1',
+        groupId: 'message-lsp',
+        turnId: 'turn-lsp',
+        order: 1,
+        name: 'lsp_capabilities',
+        status: 'succeeded',
+        arguments: '{}',
+      ),
+    ];
+
+    await tester.pumpWidget(
+      _timelineApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 980,
+            height: 520,
+            child: TimelineView(
+              threadId: 'session-1',
+              turn: null,
+              rows: timelineRowsFromFixtureParts(parts),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(
+      find.text(
+        'LSP query · rust · documentSymbol · src/lib.rs completed'
+        ' · LSP capabilities completed',
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('todo panel renders the latest flat checklist', (tester) async {
+    tester.view.physicalSize = const Size(900, 620);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    const todo = TimelineTodoListUpdate(
+      callId: 'call-1',
+      explanation: 'Implementation checklist',
+      items: [
+        TimelineTodoItem(
+          step: 'Read existing timeline projection',
+          status: 'completed',
+        ),
+        TimelineTodoItem(
+          step: 'Wire update_todo_list through bridge',
+          status: 'inProgress',
+        ),
+        TimelineTodoItem(
+          step: 'Run the focused Rust and Flutter tests before handoff',
+          status: 'pending',
+        ),
+      ],
+    );
+
+    await tester.pumpWidget(
+      _timelineApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 304,
+            height: 480,
+            child: const TodoPanel(todo: todo),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Implementation checklist'), findsOneWidget);
+    expect(find.text('Read existing timeline projection'), findsOneWidget);
+    expect(find.text('Wire update_todo_list through bridge'), findsOneWidget);
+    expect(
+      find.text('Run the focused Rust and Flutter tests before handoff'),
+      findsOneWidget,
+    );
+    expect(find.byIcon(Icons.check_circle_outline), findsOneWidget);
+    expect(find.byIcon(Icons.radio_button_checked), findsOneWidget);
+    expect(find.byIcon(Icons.radio_button_unchecked), findsOneWidget);
+    expect(find.textContaining('focused Rust and Flutter'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('timeline tool group defaults collapsed and expands details', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final part = TimelineEntry(
+      id: 'tool-part-1',
+      groupId: 'message-tool',
+      threadId: 'session-1',
+      turnId: 'turn-tool',
+      type: TimelineEntryType.tool,
+      order: 0,
+      revision: 0,
+      text: '',
+      status: 'succeeded',
+      createdAt: DateTime.fromMillisecondsSinceEpoch(0),
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+      tool: TimelineToolPart(
+        toolCallId: 'tool-call-1',
+        name: 'exec',
+        arguments: jsonEncode({
+          'command': 'cargo test -p pl-model\ncargo test -p pl-core',
+        }),
+        workingDirectory: 'D:/work/project',
+        result: 'ok',
+      ),
+    );
+
+    await tester.pumpWidget(
+      _timelineApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 980,
+            height: 520,
+            child: TimelineView(
+              threadId: 'session-1',
+              turn: null,
+              rows: timelineRowsFromFixtureParts([part]),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('exec completed'), findsOneWidget);
+    final summary = find.byKey(const ValueKey('timeline-tool-group-summary'));
+    expect(tester.widget<Material>(summary).color, Colors.transparent);
+    expect(tester.getSize(summary).height, greaterThanOrEqualTo(32));
+    final summarySemantics = find.bySemanticsLabel('exec completed');
+    expect(summarySemantics, findsOneWidget);
+    var semanticsData = tester
+        .getSemantics(summarySemantics)
+        .getSemanticsData();
+    expect(semanticsData.flagsCollection.isButton, isTrue);
+    expect(semanticsData.flagsCollection.isExpanded, Tristate.isFalse);
+    expect(semanticsData.hasAction(SemanticsAction.tap), isTrue);
+    expect(
+      find.byKey(const ValueKey('timeline-tool-group-details')),
+      findsNothing,
+    );
+    expect(find.textContaining('cargo test -p pl-model'), findsNothing);
+    expect(find.textContaining('D:/work/project'), findsNothing);
+    expect(find.textContaining('"command"'), findsNothing);
+
+    await tester.tap(find.text('exec completed'));
+    await tester.pump();
+
+    expect(
+      find.byKey(const ValueKey('timeline-tool-group-details')),
+      findsOneWidget,
+    );
+    semanticsData = tester.getSemantics(summarySemantics).getSemanticsData();
+    expect(semanticsData.flagsCollection.isExpanded, Tristate.isTrue);
+    expect(find.textContaining('cargo test -p pl-model'), findsOneWidget);
+    expect(find.textContaining('D:/work/project'), findsOneWidget);
+    expect(find.textContaining('pl-core'), findsNothing);
+
+    await tester.tap(find.text('exec completed').first);
+    await tester.pump();
+
+    expect(
+      find.byKey(const ValueKey('timeline-tool-group-details')),
+      findsNothing,
+    );
+    expect(find.textContaining('cargo test -p pl-model'), findsNothing);
+  });
+
+  testWidgets('timeline merges adjacent mixed tool types in order', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final parts = [
+      _toolTimelinePart(
+        id: 'tool-edit',
+        groupId: 'message-mixed-tools',
+        turnId: 'turn-mixed-tools',
+        name: 'edit_file',
+        arguments: jsonEncode({'path': 'lib/timeline.dart'}),
+      ),
+      _toolTimelinePart(
+        id: 'tool-read',
+        groupId: 'message-mixed-tools',
+        turnId: 'turn-mixed-tools',
+        order: 1,
+        name: 'read_file',
+        arguments: jsonEncode({'path': 'test/timeline_test.dart'}),
+      ),
+      _toolTimelinePart(
+        id: 'tool-exec',
+        groupId: 'message-mixed-tools',
+        turnId: 'turn-mixed-tools',
+        order: 2,
+        name: 'exec',
+        arguments: jsonEncode({'command': 'flutter test'}),
+        workingDirectory: 'code/anywork',
+      ),
+    ];
+    final rows = timelineRowsFromFixtureParts(parts);
+
+    await tester.pumpWidget(
+      _timelineApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 980,
+            height: 520,
+            child: TimelineView(threadId: 'session-1', rows: rows, turn: null),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    const summary =
+        'edit_file completed · read_file completed · exec completed';
+    expect(find.text(summary), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('timeline-tool-group-summary')),
+      findsOneWidget,
+    );
+    expect(find.text('edit_file completed'), findsNothing);
+    expect(find.text('read_file completed'), findsNothing);
+    expect(find.textContaining('lib/timeline.dart'), findsNothing);
+    expect(find.textContaining('flutter test'), findsNothing);
+
+    await tester.tap(find.text(summary));
+    await tester.pump();
+
+    expect(
+      find.byKey(const ValueKey('timeline-tool-group-details')),
+      findsOneWidget,
+    );
+    expect(find.text('edit_file completed'), findsOneWidget);
+    expect(find.text('read_file completed'), findsOneWidget);
+    expect(find.text('exec completed'), findsOneWidget);
+    expect(find.textContaining('lib/timeline.dart'), findsOneWidget);
+    expect(find.textContaining('test/timeline_test.dart'), findsOneWidget);
+    expect(find.textContaining('flutter test'), findsOneWidget);
+    expect(find.textContaining('code/anywork'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('timeline renders separate tool groups around assistant text', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 760);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final parts = [
+      TimelineEntry(
+        id: 'text-before',
+        groupId: 'turn-1:assistant',
+        threadId: 'session-1',
+        turnId: 'turn-1',
+        type: TimelineEntryType.text,
+        text: '先读取相关文件。',
+        textChannel: TimelineTextChannel.commentary,
+        order: 0,
+      ),
+      _toolTimelinePart(
+        id: 'tool-a',
+        groupId: 'turn-1:assistant',
+        turnId: 'turn-1',
+        order: 1,
+        name: 'read_file',
+        arguments: jsonEncode({'path': 'lib/a.dart'}),
+      ),
+      _toolTimelinePart(
+        id: 'tool-b',
+        groupId: 'turn-1:assistant',
+        turnId: 'turn-1',
+        order: 2,
+        name: 'search_files',
+        arguments: jsonEncode({'query': 'TimelineToolGroup'}),
+      ),
+      TimelineEntry(
+        id: 'text-middle',
+        groupId: 'turn-1:assistant',
+        threadId: 'session-1',
+        turnId: 'turn-1',
+        type: TimelineEntryType.text,
+        text: '再跑一下测试。',
+        textChannel: TimelineTextChannel.commentary,
+        order: 3,
+      ),
+      _toolTimelinePart(
+        id: 'tool-c',
+        groupId: 'turn-1:assistant',
+        turnId: 'turn-1',
+        order: 4,
+        name: 'exec',
+        arguments: jsonEncode({'command': 'flutter test'}),
+      ),
+    ];
+
+    await tester.pumpWidget(
+      _timelineApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 980,
+            height: 620,
+            child: TimelineView(
+              threadId: 'session-1',
+              turn: null,
+              rows: timelineRowsFromFixtureParts(parts),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(
+      find.text('read_file completed · search_files completed'),
+      findsOneWidget,
+    );
+    expect(find.text('exec completed'), findsOneWidget);
+    expect(find.text('先读取相关文件。'), findsOneWidget);
+    expect(find.text('再跑一下测试。'), findsOneWidget);
+    expect(find.textContaining('lib/a.dart'), findsNothing);
+    expect(find.textContaining('flutter test'), findsNothing);
+
+    await tester.tap(find.text('read_file completed · search_files completed'));
+    await tester.pump();
+
+    expect(find.text('read_file completed'), findsOneWidget);
+    expect(find.text('search_files completed'), findsOneWidget);
+    expect(find.text('exec completed'), findsOneWidget);
+    expect(find.textContaining('lib/a.dart'), findsOneWidget);
+    expect(find.textContaining('TimelineToolGroup'), findsOneWidget);
+    expect(find.textContaining('flutter test'), findsNothing);
+
+    await tester.tap(find.text('exec completed'));
+    await tester.pump();
+
+    expect(find.text('exec completed'), findsNWidgets(2));
+    expect(find.textContaining('flutter test'), findsOneWidget);
+  });
+
+  testWidgets('timeline tool group summarizes running and issue states', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final parts = [
+      _toolTimelinePart(
+        id: 'tool-awaiting',
+        groupId: 'message-tool',
+        turnId: 'turn-tool',
+        status: 'awaitingApproval',
+        name: 'exec',
+        arguments: jsonEncode({'command': 'cargo test -p pl-core'}),
+      ),
+      _toolTimelinePart(
+        id: 'tool-failed',
+        groupId: 'message-tool',
+        turnId: 'turn-tool',
+        order: 1,
+        status: 'failed',
+        name: 'read_file',
+        arguments: jsonEncode({'path': 'lib/main.dart'}),
+        result: 'file missing',
+        exitCode: 2,
+      ),
+      _toolTimelinePart(
+        id: 'tool-running',
+        groupId: 'message-tool',
+        turnId: 'turn-tool',
+        order: 2,
+        status: 'running',
+        name: 'search_files',
+        arguments: jsonEncode({'query': 'TimelineToolGroup'}),
+      ),
+    ];
+
+    await tester.pumpWidget(
+      _timelineApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 980,
+            height: 520,
+            child: TimelineView(
+              threadId: 'session-1',
+              turn: null,
+              rows: timelineRowsFromFixtureParts(parts),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(
+      find.text(
+        'exec awaiting approval · read_file failed · '
+        'search_files running · file missing',
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('awaitingApproval'), findsNothing);
+
+    await tester.tap(
+      find.text(
+        'exec awaiting approval · read_file failed · '
+        'search_files running · file missing',
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('exec awaiting approval'), findsOneWidget);
+    expect(find.text('read_file failed'), findsOneWidget);
+    expect(find.textContaining('cargo test -p pl-core'), findsOneWidget);
+    expect(find.textContaining('lib/main.dart'), findsOneWidget);
+    expect(find.textContaining('exit code 2'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('timeline-tool-group-details')),
+        matching: find.textContaining('file missing'),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('timeline renders markdown after inline code fence closure', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    const parts = [
+      TimelineEntry(
+        id: 'plan-inline-fence',
+        groupId: 'message-inline-fence',
+        type: TimelineEntryType.text,
+        textChannel: TimelineTextChannel.finalAnswer,
+        title: 'Plan',
+        text:
+            '```text\n'
+            'WttrResponse ├ weather: Vec<WeatherDay>```\n\n'
+            '## 依赖选型\n\n'
+            '| 依赖 | 用途 |\n'
+            '| --- | --- |\n'
+            '| serde | JSON |',
+      ),
+    ];
+
+    await tester.pumpWidget(
+      _timelineApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 980,
+            height: 820,
+            child: TimelineView(
+              threadId: 'session-1',
+              turn: null,
+              rows: timelineRowsFromFixtureParts(parts),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.textContaining('依赖选型'), findsOneWidget);
+    expect(find.textContaining('serde'), findsOneWidget);
+    expect(find.textContaining('JSON'), findsOneWidget);
+    expect(find.textContaining('## 依赖选型'), findsNothing);
+    expect(find.textContaining('| serde | JSON |'), findsNothing);
+  });
+
+  testWidgets('timeline renders inline code and quotes with studio chrome', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    const parts = [
+      TimelineEntry(
+        id: 'text-markdown-chrome',
+        groupId: 'message-markdown-chrome',
+        type: TimelineEntryType.text,
+        text:
+            '项目使用 `std::env::args()` 读取参数。\n\n'
+            '> 这是一段引用\n'
+            '> 包含 `inline` 代码',
+      ),
+    ];
+
+    await tester.pumpWidget(
+      _timelineApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 980,
+            height: 820,
+            child: TimelineView(
+              threadId: 'session-1',
+              turn: null,
+              rows: timelineRowsFromFixtureParts(parts),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    final inlineCode = find.text('std::env::args()');
+    expect(inlineCode, findsOneWidget);
+    expect(
+      find.ancestor(
+        of: inlineCode,
+        matching: find.byKey(const ValueKey('studio-markdown-inline-code')),
+      ),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('studio-markdown-quote')), findsOneWidget);
+    expect(find.textContaining('这是一段引用'), findsOneWidget);
+    expect(find.textContaining('> 这是一段引用'), findsNothing);
+  });
+
+  testWidgets('timeline opens markdown and bare web links', (tester) async {
+    final openedUrls = <String>[];
+    const parts = [
+      TimelineEntry(
+        id: 'text-web-links',
+        groupId: 'message-web-links',
+        type: TimelineEntryType.text,
+        text:
+            '[Docs](https://example.com/docs) '
+            'https://example.org/a(b). '
+            'https://example.net/path).',
+      ),
+    ];
+
+    await tester.pumpWidget(
+      _timelineApp(
+        externalUrlLauncher: (url) async => openedUrls.add(url),
+        home: Scaffold(
+          body: TimelineView(
+            threadId: 'session-1',
+            turn: null,
+            rows: timelineRowsFromFixtureParts(parts),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.text('Docs'));
+    await tester.tap(
+      find.byKey(
+        const ValueKey('studio-markdown-web-link:https://example.org/a(b)'),
+      ),
+    );
+    await tester.tap(
+      find.byKey(
+        const ValueKey('studio-markdown-web-link:https://example.net/path'),
+      ),
+    );
+    await tester.pump();
+
+    expect(openedUrls, [
+      'https://example.com/docs',
+      'https://example.org/a(b)',
+      'https://example.net/path',
+    ]);
+  });
+
+  testWidgets('timeline ignores unsupported markdown link destinations', (
+    tester,
+  ) async {
+    final openedUrls = <String>[];
+    const parts = [
+      TimelineEntry(
+        id: 'text-unsupported-links',
+        groupId: 'message-unsupported-links',
+        type: TimelineEntryType.text,
+        text:
+            '[File](file:///tmp/report.html) '
+            '[Mail](mailto:team@example.com) '
+            '[Custom](custom://example.com) '
+            '[Hostless](https:///missing-host)',
+      ),
+    ];
+
+    await tester.pumpWidget(
+      _timelineApp(
+        externalUrlLauncher: (url) async => openedUrls.add(url),
+        home: Scaffold(
+          body: TimelineView(
+            threadId: 'session-1',
+            turn: null,
+            rows: timelineRowsFromFixtureParts(parts),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    for (final label in ['File', 'Mail', 'Custom', 'Hostless']) {
+      await tester.tap(find.text(label));
+    }
+    await tester.pump();
+
+    expect(openedUrls, isEmpty);
+  });
+
+  testWidgets('timeline reports an external link launch failure', (
+    tester,
+  ) async {
+    const parts = [
+      TimelineEntry(
+        id: 'text-failed-link',
+        groupId: 'message-failed-link',
+        type: TimelineEntryType.text,
+        text: '[Docs](https://example.com/docs)',
+      ),
+    ];
+
+    await tester.pumpWidget(
+      _timelineApp(
+        externalUrlLauncher: (_) async => throw StateError('launch failed'),
+        home: Scaffold(
+          body: TimelineView(
+            threadId: 'session-1',
+            turn: null,
+            rows: timelineRowsFromFixtureParts(parts),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.text('Docs'));
+    await tester.pump();
+
+    expect(find.text('Unable to open this link.'), findsOneWidget);
+    expect(find.text('Docs'), findsOneWidget);
+  });
+
+  testWidgets('timeline renders agent markdown with tight CJK headings', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    const parts = [
+      TimelineEntry(
+        id: 'plan-agent-markdown',
+        groupId: 'message-agent-markdown',
+        type: TimelineEntryType.text,
+        textChannel: TimelineTextChannel.finalAnswer,
+        title: 'Plan',
+        text:
+            'glm-intro.html代码结构单文件 HTML（~850行），GLM产品介绍落地页。\n\n'
+            '###整体层级```\n'
+            '└──<html>\n'
+            '├──<head>\n'
+            '│ └──<style> → 全部 CSS\n'
+            'CSS组织```\n'
+            'hero { display: grid; }\n\n'
+            '###实现计划\n'
+            '- 拆分结构\n'
+            '- 保持动效',
+      ),
+    ];
+
+    await tester.pumpWidget(
+      _timelineApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 980,
+            height: 820,
+            child: TimelineView(
+              threadId: 'session-1',
+              turn: null,
+              rows: timelineRowsFromFixtureParts(parts),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.textContaining('整体层级'), findsOneWidget);
+    expect(find.textContaining('实现计划'), findsOneWidget);
+    expect(find.textContaining('└──<html>'), findsOneWidget);
+    expect(find.textContaining('###整体层级```'), findsNothing);
+    expect(find.textContaining('CSS组织```'), findsNothing);
+  });
+
+  testWidgets('timeline gives the current tool priority over reasoning', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 700);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    const threadId = 'session-1';
+    const turnId = 'turn-1';
+    final reasoning = _threadItemFixture(
+      id: 'reasoning-current',
+      threadId: threadId,
+      turnId: turnId,
+      ordinal: 0,
+      kind: ThreadItemKind.reasoning,
+      channel: null,
+      reasoningSummary: const ['## Inspecting the implementation'],
+      status: 'streaming',
+    );
+
+    ThreadItemView toolItem({required String status, String? result}) {
+      return _threadItemFixture(
+        id: 'tool-current',
+        threadId: threadId,
+        turnId: turnId,
+        ordinal: 1,
+        kind: ThreadItemKind.toolCall,
+        channel: null,
+        status: status,
+        tool: TimelineToolPart(
+          toolCallId: 'tool-current',
+          name: 'exec',
+          arguments: jsonEncode({
+            'command': 'flutter test test/widget_test.dart',
+          }),
+          result: result,
+        ),
+      );
+    }
+
+    Widget timelineFor(ThreadItemView tool, StudioTurnActivity activity) {
+      return _timelineApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 980,
+            height: 520,
+            child: TimelineView(
+              threadId: threadId,
+              rows: timelineRowsFromThreadItems([reasoning, tool]),
+              turn: _testTurn(
+                threadId: threadId,
+                turnId: turnId,
+                state: RunningStudioTurnState(startedAt: 1, activity: activity),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    final runningTool = toolItem(status: 'running');
+    await tester.pumpWidget(
+      timelineFor(runningTool, StudioTurnActivity.runningTool),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 150));
+
+    final currentActivity = find.byKey(
+      const ValueKey('timeline-current-activity'),
+    );
+    expect(currentActivity, findsOneWidget);
+    expect(
+      find.descendant(
+        of: currentActivity,
+        matching: find.textContaining('flutter test test/widget_test.dart'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Inspecting the implementation'), findsOneWidget);
+
+    final completedTool = toolItem(status: 'succeeded', result: 'passed');
+    await tester.pumpWidget(
+      timelineFor(completedTool, StudioTurnActivity.thinking),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 150));
+
+    expect(currentActivity, findsOneWidget);
+    expect(
+      find.descendant(
+        of: currentActivity,
+        matching: find.text('Inspecting the implementation'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('exec completed'), findsOneWidget);
+  });
+
+  testWidgets(
+    'current reasoning shows Thinking label with an animated wait pulse',
+    (tester) async {
+      _configureResponsiveView(tester, const Size(980, 520));
+      final reasoning = _threadItemFixture(
+        id: 'reasoning-wait',
+        threadId: 'session-1',
+        turnId: 'turn-1',
+        ordinal: 0,
+        kind: ThreadItemKind.reasoning,
+        channel: null,
+        reasoningSummary: const ['## Inspecting the implementation'],
+        status: 'streaming',
+      );
+      await tester.pumpWidget(
+        _timelineApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 980,
+              height: 520,
+              child: TimelineView(
+                threadId: 'session-1',
+                rows: timelineRowsFromThreadItems([reasoning]),
+                turn: _testTurn(
+                  threadId: 'session-1',
+                  state: const RunningStudioTurnState(
+                    startedAt: 1,
+                    activity: StudioTurnActivity.thinking,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(find.text('Thinking'), findsOneWidget);
+      expect(find.text('Inspecting the implementation'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('timeline-current-activity-pulse')),
+        findsOneWidget,
+      );
+      expect(tester.binding.hasScheduledFrame, isTrue);
+    },
+  );
+
+  testWidgets(
+    'running tool shows a single group pulse and expands to item pulses',
+    (tester) async {
+      _configureResponsiveView(tester, const Size(980, 520));
+      final toolPart = _toolTimelinePart(
+        id: 'tool-running',
+        groupId: 'group-running',
+        turnId: 'turn-running',
+        name: 'exec',
+        status: 'running',
+        arguments: jsonEncode({'command': 'cargo test'}),
+        workingDirectory: 'code/anywork',
+      );
+      await tester.pumpWidget(
+        _timelineApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 980,
+              height: 520,
+              child: TimelineView(
+                threadId: 'session-1',
+                rows: timelineRowsFromFixtureParts([toolPart]),
+                turn: _testTurn(
+                  threadId: 'session-1',
+                  turnId: 'turn-running',
+                  state: const RunningStudioTurnState(
+                    startedAt: 1,
+                    activity: StudioTurnActivity.runningTool,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(
+        find.byKey(const ValueKey('timeline-current-activity-pulse')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('timeline-tool-item-pulse:tool-running')),
+        findsNothing,
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('timeline-tool-group-summary')),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(
+        find.byKey(const ValueKey('timeline-tool-group-details')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('timeline-tool-item-pulse:tool-running')),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets('terminal turn transition removes the wait pulse and ticker', (
+    tester,
+  ) async {
+    _configureResponsiveView(tester, const Size(980, 520));
+    Widget timeline({
+      required String toolStatus,
+      required StudioTurnState state,
+    }) {
+      final toolPart = _toolTimelinePart(
+        id: 'tool-terminal-transition',
+        groupId: 'group-terminal-transition',
+        turnId: 'turn-terminal-transition',
+        name: 'exec',
+        status: toolStatus,
+        arguments: jsonEncode({'command': 'cargo test'}),
+      );
+      return _timelineApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 980,
+            height: 520,
+            child: TimelineView(
+              threadId: 'session-1',
+              rows: timelineRowsFromFixtureParts([toolPart]),
+              turn: _testTurn(
+                threadId: 'session-1',
+                turnId: 'turn-terminal-transition',
+                state: state,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    await tester.pumpWidget(
+      timeline(
+        toolStatus: 'running',
+        state: const RunningStudioTurnState(
+          startedAt: 1,
+          activity: StudioTurnActivity.runningTool,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(
+      find.byKey(const ValueKey('timeline-current-activity-pulse')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('timeline-current-activity')),
+      findsOneWidget,
+    );
+    expect(tester.binding.hasScheduledFrame, isTrue);
+
+    await tester.pumpWidget(
+      timeline(
+        toolStatus: 'succeeded',
+        state: const CompletedStudioTurnState(
+          startedAt: 1,
+          completedAt: 2,
+          completion: StudioTurnCompletion.normal,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(
+      find.byKey(const ValueKey('timeline-current-activity-pulse')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('timeline-current-activity')),
+      findsNothing,
+    );
+    expect(find.text('exec completed'), findsOneWidget);
+    expect(tester.binding.hasScheduledFrame, isFalse);
+  });
+
+  testWidgets('awaiting approval and terminal tools show no item pulse', (
+    tester,
+  ) async {
+    _configureResponsiveView(tester, const Size(980, 520));
+    final parts = [
+      _toolTimelinePart(
+        id: 'tool-await',
+        groupId: 'group-mixed',
+        turnId: 'turn-mixed',
+        name: 'exec',
+        status: 'awaitingApproval',
+        arguments: jsonEncode({'command': 'rm -rf'}),
+      ),
+      _toolTimelinePart(
+        id: 'tool-succeeded',
+        groupId: 'group-mixed',
+        turnId: 'turn-mixed',
+        order: 1,
+        name: 'read_file',
+        status: 'succeeded',
+        arguments: jsonEncode({'path': 'lib/main.dart'}),
+      ),
+    ];
+    await tester.pumpWidget(
+      _timelineApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 980,
+            height: 520,
+            child: TimelineView(
+              threadId: 'session-1',
+              rows: timelineRowsFromFixtureParts(parts),
+              turn: _testTurn(
+                threadId: 'session-1',
+                turnId: 'turn-mixed',
+                state: const RunningStudioTurnState(
+                  startedAt: 1,
+                  activity: StudioTurnActivity.runningTool,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    await tester.tap(find.byKey(const ValueKey('timeline-tool-group-summary')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(
+      find.byKey(const ValueKey('timeline-tool-item-pulse:tool-await')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('timeline-tool-item-pulse:tool-succeeded')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('reduced motion keeps the wait pulse static and quiet', (
+    tester,
+  ) async {
+    _configureResponsiveView(tester, const Size(980, 520));
+    final reasoning = _threadItemFixture(
+      id: 'reasoning-static',
+      threadId: 'session-1',
+      turnId: 'turn-1',
+      ordinal: 0,
+      kind: ThreadItemKind.reasoning,
+      channel: null,
+      reasoningSummary: const ['## Static reasoning'],
+      status: 'streaming',
+    );
+    await tester.pumpWidget(
+      _timelineApp(
+        home: _DisableAnimations(
+          disabled: true,
+          child: Scaffold(
+            body: SizedBox(
+              width: 980,
+              height: 520,
+              child: TimelineView(
+                threadId: 'session-1',
+                rows: timelineRowsFromThreadItems([reasoning]),
+                turn: _testTurn(
+                  threadId: 'session-1',
+                  state: const RunningStudioTurnState(
+                    startedAt: 1,
+                    activity: StudioTurnActivity.thinking,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(
+      find.byKey(const ValueKey('timeline-current-activity-pulse')),
+      findsOneWidget,
+    );
+    expect(tester.binding.hasScheduledFrame, isFalse);
+  });
+
+  testWidgets('TickerMode stops and resumes the wait pulse ticker', (
+    tester,
+  ) async {
+    _configureResponsiveView(tester, const Size(980, 520));
+    final reasoning = _threadItemFixture(
+      id: 'reasoning-ticker-mode',
+      threadId: 'session-1',
+      turnId: 'turn-1',
+      ordinal: 0,
+      kind: ThreadItemKind.reasoning,
+      channel: null,
+      reasoningSummary: const ['## Ticker mode reasoning'],
+      status: 'streaming',
+    );
+    Widget timeline({required bool enabled}) {
+      return _timelineApp(
+        home: TickerMode(
+          enabled: enabled,
+          child: Scaffold(
+            body: SizedBox(
+              width: 980,
+              height: 520,
+              child: TimelineView(
+                threadId: 'session-1',
+                rows: timelineRowsFromThreadItems([reasoning]),
+                turn: _testTurn(
+                  threadId: 'session-1',
+                  state: const RunningStudioTurnState(
+                    startedAt: 1,
+                    activity: StudioTurnActivity.thinking,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    await tester.pumpWidget(timeline(enabled: false));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(
+      find.byKey(const ValueKey('timeline-current-activity-pulse')),
+      findsOneWidget,
+    );
+    expect(tester.binding.hasScheduledFrame, isFalse);
+
+    await tester.pumpWidget(timeline(enabled: true));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(tester.binding.hasScheduledFrame, isTrue);
+
+    await tester.pumpWidget(timeline(enabled: false));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(tester.binding.hasScheduledFrame, isFalse);
+  });
+
+  testWidgets('reasoning summary stays expandable under the current activity', (
+    tester,
+  ) async {
+    _configureResponsiveView(tester, const Size(980, 520));
+    final reasoning = _threadItemFixture(
+      id: 'reasoning-expand',
+      threadId: 'session-1',
+      turnId: 'turn-1',
+      ordinal: 0,
+      kind: ThreadItemKind.reasoning,
+      channel: null,
+      reasoningSummary: const ['## Inspecting the details'],
+      reasoningContent: const ['Detailed reasoning body'],
+      status: 'streaming',
+    );
+    await tester.pumpWidget(
+      _timelineApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 980,
+            height: 520,
+            child: TimelineView(
+              threadId: 'session-1',
+              rows: timelineRowsFromThreadItems([reasoning]),
+              turn: _testTurn(
+                threadId: 'session-1',
+                state: const RunningStudioTurnState(
+                  startedAt: 1,
+                  activity: StudioTurnActivity.thinking,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(
+      find.byKey(const ValueKey('timeline-reasoning-group-details')),
+      findsNothing,
+    );
+    await tester.tap(find.text('Thinking'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(
+      find.byKey(const ValueKey('timeline-reasoning-group-details')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets(
+    'collapsed current tool group keeps one pulse despite awaiting and terminal items',
+    (tester) async {
+      _configureResponsiveView(tester, const Size(980, 520));
+      final parts = [
+        _toolTimelinePart(
+          id: 'tool-await-collapse',
+          groupId: 'group-collapse',
+          turnId: 'turn-collapse',
+          name: 'exec',
+          status: 'awaitingApproval',
+          arguments: jsonEncode({'command': 'rm -rf'}),
+        ),
+        _toolTimelinePart(
+          id: 'tool-done-collapse',
+          groupId: 'group-collapse',
+          turnId: 'turn-collapse',
+          order: 1,
+          name: 'read_file',
+          status: 'succeeded',
+          arguments: jsonEncode({'path': 'lib/main.dart'}),
+        ),
+      ];
+      await tester.pumpWidget(
+        _timelineApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 980,
+              height: 520,
+              child: TimelineView(
+                threadId: 'session-1',
+                rows: timelineRowsFromFixtureParts(parts),
+                turn: _testTurn(
+                  threadId: 'session-1',
+                  turnId: 'turn-collapse',
+                  state: const RunningStudioTurnState(
+                    startedAt: 1,
+                    activity: StudioTurnActivity.runningTool,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      // 折叠态(current activity)仍应保留一个组级脉冲，不能因子项是
+      // awaitingApproval / 终态而消失。
+      expect(
+        find.byKey(const ValueKey('timeline-current-activity-pulse')),
+        findsOneWidget,
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey('timeline-tool-group-summary')),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      // 展开后 item 脉冲仍只属于执行中状态，awaitingApproval 与终态不显示。
+      expect(
+        find.byKey(
+          const ValueKey('timeline-tool-item-pulse:tool-await-collapse'),
+        ),
+        findsNothing,
+      );
+      expect(
+        find.byKey(
+          const ValueKey('timeline-tool-item-pulse:tool-done-collapse'),
+        ),
+        findsNothing,
+      );
+    },
+  );
+
+  testWidgets(
+    'current reasoning and tool group stay live regions while history is quiet',
+    (tester) async {
+      _configureResponsiveView(tester, const Size(980, 520));
+      final reasoning = _threadItemFixture(
+        id: 'reasoning-live',
+        threadId: 'session-1',
+        turnId: 'turn-live',
+        ordinal: 0,
+        kind: ThreadItemKind.reasoning,
+        channel: null,
+        reasoningSummary: const ['## Inspecting the live region'],
+        status: 'streaming',
+      );
+      final reasoningRows = timelineRowsFromThreadItems([reasoning]);
+
+      // 当前 thinking 的 reasoning 活动块是 live region。
+      await tester.pumpWidget(
+        _timelineApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 980,
+              height: 520,
+              child: TimelineView(
+                threadId: 'session-1',
+                rows: reasoningRows,
+                turn: _testTurn(
+                  threadId: 'session-1',
+                  turnId: 'turn-live',
+                  state: const RunningStudioTurnState(
+                    startedAt: 1,
+                    activity: StudioTurnActivity.thinking,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      final currentReasoning = find.bySemanticsLabel(
+        'Thinking · Inspecting the live region',
+      );
+      expect(currentReasoning, findsOneWidget);
+      expect(
+        tester
+            .getSemantics(currentReasoning)
+            .getSemanticsData()
+            .flagsCollection
+            .isLiveRegion,
+        isTrue,
+      );
+
+      // 历史(终态)reasoning 活动块不带 live region。
+      await tester.pumpWidget(
+        _timelineApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 980,
+              height: 520,
+              child: TimelineView(
+                threadId: 'session-1',
+                rows: reasoningRows,
+                turn: _testTurn(
+                  threadId: 'session-1',
+                  turnId: 'turn-live',
+                  state: const CompletedStudioTurnState(
+                    startedAt: 1,
+                    completedAt: 2,
+                    completion: StudioTurnCompletion.normal,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      final historyReasoning = find.bySemanticsLabel(
+        'Inspecting the live region',
+      );
+      expect(historyReasoning, findsOneWidget);
+      expect(
+        tester
+            .getSemantics(historyReasoning)
+            .getSemanticsData()
+            .flagsCollection
+            .isLiveRegion,
+        isFalse,
+      );
+
+      // 当前 runningTool 的工具组摘要也是 live region。
+      await tester.pumpWidget(
+        _timelineApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 980,
+              height: 520,
+              child: TimelineView(
+                threadId: 'session-1',
+                rows: timelineRowsFromFixtureParts([
+                  _toolTimelinePart(
+                    id: 'tool-live',
+                    groupId: 'group-live',
+                    turnId: 'turn-live',
+                    name: 'exec',
+                    status: 'running',
+                    arguments: '{}',
+                  ),
+                ]),
+                turn: _testTurn(
+                  threadId: 'session-1',
+                  turnId: 'turn-live',
+                  state: const RunningStudioTurnState(
+                    startedAt: 1,
+                    activity: StudioTurnActivity.runningTool,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      final currentToolGroup = find.bySemanticsLabel('exec running');
+      expect(currentToolGroup, findsOneWidget);
+      expect(
+        tester
+            .getSemantics(currentToolGroup)
+            .getSemanticsData()
+            .flagsCollection
+            .isLiveRegion,
+        isTrue,
+      );
+    },
+  );
+
+  testWidgets('reasoning summary equal to Thinking label is announced once', (
+    tester,
+  ) async {
+    _configureResponsiveView(tester, const Size(980, 520));
+    final reasoning = _threadItemFixture(
+      id: 'reasoning-thinking-only',
+      threadId: 'session-1',
+      turnId: 'turn-1',
+      ordinal: 0,
+      kind: ThreadItemKind.reasoning,
+      channel: null,
+      reasoningSummary: const ['## Thinking'],
+      status: 'streaming',
+    );
+    await tester.pumpWidget(
+      _timelineApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 980,
+            height: 520,
+            child: TimelineView(
+              threadId: 'session-1',
+              rows: timelineRowsFromThreadItems([reasoning]),
+              turn: _testTurn(
+                threadId: 'session-1',
+                state: const RunningStudioTurnState(
+                  startedAt: 1,
+                  activity: StudioTurnActivity.thinking,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(find.text('Thinking'), findsOneWidget);
+    expect(find.textContaining('Thinking · Thinking'), findsNothing);
+    expect(find.bySemanticsLabel('Thinking'), findsOneWidget);
+    expect(find.bySemanticsLabel('Thinking · Thinking'), findsNothing);
+  });
+}
+
+class _DisableAnimations extends StatelessWidget {
+  const _DisableAnimations({required this.disabled, required this.child});
+
+  final bool disabled;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return MediaQuery(
+      data: MediaQuery.of(context).copyWith(disableAnimations: disabled),
+      child: child,
+    );
+  }
+}

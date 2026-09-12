@@ -57,7 +57,7 @@ function New-TestAsset {
     }
 }
 
-$testRoot = Join-Path ([IO.Path]::GetTempPath()) "pure-studio-assets-$PID-$([Guid]::NewGuid().ToString('N'))"
+$testRoot = Join-Path ([IO.Path]::GetTempPath()) "anywork-assets-$PID-$([Guid]::NewGuid().ToString('N'))"
 New-Item -ItemType Directory -Path $testRoot | Out-Null
 try {
     $version = '1.2.3'

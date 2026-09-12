@@ -184,7 +184,7 @@ mod tests {
             project_id: "project-1".to_string(),
             ssh_server_id: None,
             repository_root: "/repo".to_string(),
-            path: "/repo/.pure/worktrees/root-1/child-1".to_string(),
+            path: "/repo/.anywork/worktrees/root-1/child-1".to_string(),
             branch: "pure-agent-child-1".to_string(),
             base_commit: "base".to_string(),
         }

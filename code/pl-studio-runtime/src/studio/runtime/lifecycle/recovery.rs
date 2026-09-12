@@ -66,7 +66,7 @@ impl StudioRuntime {
                 continue;
             }
             let root = normalized_local_path(Path::new(String::from_utf8(root.stdout)?.trim()));
-            let managed = root.join(".pure/worktrees");
+            let managed = root.join(".anywork/worktrees");
             let mut found = BTreeSet::new();
             if let Ok(mut parents) = tokio::fs::read_dir(&managed).await {
                 while let Some(parent) = parents.next_entry().await? {

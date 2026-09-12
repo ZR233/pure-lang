@@ -32,7 +32,7 @@ metadata:
 - 产品运行时：`pl-studio-runtime`，拥有配置、项目、Profile、Mode/Plan/workflow、子代理协调和 root/child/恢复的唯一装配。
 - 产品入口：`pl-studio-server` 与 `pl-studio-bridge`。
 - 远程执行：`pl-remote-helper`；工程任务入口：`xtask`；Flutter 客户端位于
-  `code/pure-studio/`，但不是 Cargo workspace member。
+  `code/anywork/`，但不是 Cargo workspace member。
 
 - 观察层：`pl-trace` 消费 core 日志，不作为 core 的依赖。
 

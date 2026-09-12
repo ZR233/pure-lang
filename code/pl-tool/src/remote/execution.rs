@@ -47,7 +47,7 @@ impl ExecutionBackend for RemoteExecutionBackend {
             .map(|part| shell_quote_word(&part))
             .collect::<Vec<_>>()
             .join(" ");
-        let capture_path = format!(".pure/remote/execution/{process_id}.log");
+        let capture_path = format!(".anywork/remote/execution/{process_id}.log");
         let transport = self
             .client
             .spawn_process(RemoteSpawnRequest {

@@ -2,22 +2,24 @@
 
 ## 10.1 配置位置
 
-Pure-Lang 使用用户目录下的 `.pure` 目录保存本地配置：
+anywork 使用独立产品身份，默认仅访问 `~/.anywork`，凭据服务为 `anywork`，产品环境变量前缀为 `ANYWORK_`。不自动读取、迁移或删除 Pure Studio 的 `~/.pure`、旧凭据和旧日志；新旧应用可以并存。显式指定的数据根目录仍遵循既有参数优先级。
+
+anywork 使用用户目录下的 `.anywork` 目录保存本地配置：
 
 ```text
-~/.pure/config.toml
+~/.anywork/config.toml
 ```
 
 Windows 下对应：
 
 ```text
-%USERPROFILE%\.pure\config.toml
+%USERPROFILE%\.anywork\config.toml
 ```
 
-`pure-studio` 的桌面端产品状态与 Thread 历史统一保存在：
+`anywork` 的桌面端产品状态与 Thread 历史统一保存在：
 
 ```text
-~/.pure/studio/studio.sqlite
+~/.anywork/studio/studio.sqlite
 ```
 
 产品库保存项目、配置缓存与会话关联；Thread 通用事实、input、interaction、资源引用与扩展载荷由 `pl-core` 保存到同目录
@@ -25,7 +27,7 @@ Windows 下对应：
 状态不入库，实时产品流由已提交 Thread journal 投影。core 的 SQLite 后端复用 SeaORM 2.0；产品 schema v20
 仅清理旧会话，不重建项目与配置，详见 `19-studio-storage-and-diagnostics.md` 与
 `25-session-entry-storage.md`。provider/model/role 配置仍只由
-`~/.pure/config.toml` schema 18 表达。用户 Agent Profile 单独保存到 `~/.pure/agents/*.toml`，
+`~/.anywork/config.toml` schema 18 表达。用户 Agent Profile 单独保存到 `~/.anywork/agents/*.toml`，
 一个文件对应一个稳定 Profile ID。
 
 `ConfigRuntime` 在 `startStudioRuntime` 时读取配置；此后普通对话和设置查询只读内存 canonical
@@ -43,11 +45,11 @@ snapshot。当配置文件不存在时设置页展示内存中的默认配置。
 读取、默认 provider 系统凭据读取、备份写入或默认配置原子替换失败不属于配置内容不兼容，必须
 fail closed 并保留原文件；默认配置替换失败时已经完整写入的备份可以保留。
 
-`pure-studio` 的所有 Settings command 必须携带 `expectedSettingsRevision`，成功只返回完整
+`anywork` 的所有 Settings command 必须携带 `expectedSettingsRevision`，成功只返回完整
 `SettingsStateSnapshot`，由 Flutter 原子替换 Settings 领域；不得返回 Studio 聚合状态，也不得
 携带 `configJson`、`generalSettingsJson` 或 raw map。CAS 或校验失败时保留当前 canonical 状态，
 不覆盖新配置。Instructions 文本作为普通设置组展示时，在输入停止后自动写入
-`~/.pure/config.toml`；Provider 新增/编辑等独立页面不自动保存。
+`~/.anywork/config.toml`；Provider 新增/编辑等独立页面不自动保存。
 
 ## 10.2 配置职责
 
@@ -60,9 +62,9 @@ fail closed 并保留原文件；默认配置替换失败时已经完整写入�
 `pl-studio-runtime` 负责：
 
 - `StudioConfig` 与唯一支持的 schema version 18，以及启动期不兼容格式的备份后重建。
-- `~/.pure/config.toml` 路径、serde TOML 解析、原子保存和默认值。
+- `~/.anywork/config.toml` 路径、serde TOML 解析、原子保存和默认值。
 - Studio instructions、skills、MCP、runtime、`disabled_system_agents` 和 UI 配置。
-- `~/.pure/agents/*.toml` 的逐文件解析、诊断与原子创建/保存。
+- `~/.anywork/agents/*.toml` 的逐文件解析、诊断与原子创建/保存。
 - 生成 Thread 首轮固定的 instruction snapshot。
 
 `pl-model` 只消费已经解析好的 provider 和模型信息，不负责文件 IO 或路径定位。
@@ -145,7 +147,7 @@ headers = {}
 enabled = true
 auto_learn = true
 project_dir = ".agents/skills"
-user_dir = "~/.pure/skills"
+user_dir = "~/.anywork/skills"
 external_dirs = []
 disabled = []
 auto_learn_min_tool_calls = 5
@@ -383,7 +385,7 @@ live generation，shutdown 是不可恢复终止态。完整合同见 `20-studio
   Studio 仍可保留已发布 catalog 供设置页只读展示。
 - `auto_learn`：是否在 Studio 主 turn 结束后启动后台 reviewer 自动沉淀项目 skill，默认 `true`。
 - `project_dir`：项目级 skills 目录，相对 `workspace_root` 解析，默认 `.agents/skills`。
-- `user_dir`：用户级只读 skills 目录，默认 `~/.pure/skills`。
+- `user_dir`：用户级只读 skills 目录，默认 `~/.anywork/skills`。
 - `system.enabled`：是否启用内置系统 skills，默认 `true`。
 - `external_dirs`：额外只读 skills 目录列表，默认空。
 - `disabled`：禁用的 skill 名称列表，默认空。
@@ -403,7 +405,7 @@ Studio 系统 skills 来自编译进 `pl-studio-runtime` 的预置资源，并�
 `skills.user_dir` 推导；`system.enabled` 只控制该来源是否参与发现，不控制启动刷新。该目录由
 Pure 管理，用户需要覆盖系统 skill 时应在项目 `.agents/skills/` 目录创建同名 skill。
 
-系统内置 `studio-config` skill 是面向 agent 的 Pure Studio 配置指南，覆盖配置文件位置、当前
+系统内置 `studio-config` skill 是面向 agent 的 anywork 配置指南，覆盖配置文件位置、当前
 schema、常用配置段、凭据处理和安全编辑行为。其 canonical 源文件固定为
 `code/pl-studio-runtime/assets/skills/studio-config/SKILL.md`。任何改变配置路径、schema 版本、配置
 段或字段及其默认值、凭据解析优先级、加载/保存/重载语义或最小有效配置的变更，都必须在同一
@@ -413,7 +415,7 @@ schema、常用配置段、凭据处理和安全编辑行为。其 canonical 源
 
 通用 provider/model 值对象、preset/catalog、动态角色路由和 endpoint 解析属于 `pl-model`；
 配置值对象统一从 `pl_model::config` 导入。`StudioConfig`、schema、默认角色和配置文件 IO
-属于 `pl-studio-runtime`。`pure-studio` 设置页先加载 canonical provider catalog，再构造产品草稿：
+属于 `pl-studio-runtime`。`anywork` 设置页先加载 canonical provider catalog，再构造产品草稿：
 
 - 默认选中 Studio 产品默认 preset，也可选择 catalog 返回的任意 preset 或 Custom provider。
 - 至少配置一个 provider。
@@ -435,9 +437,9 @@ schema、常用配置段、凭据处理和安全编辑行为。其 canonical 源
 - 同一 provider 下模型 slug 不重复。
 - 角色引用的默认模型必须声明 `name = "effort"` 参数且至少一个候选值，用于生成角色 `effort`。
 
-## 10.11 pure-studio 设置页
+## 10.11 anywork 设置页
 
-`pure-studio` 设置页消费 Bridge 返回的 catalog/config projection，保存时由
+`anywork` 设置页消费 Bridge 返回的 catalog/config projection，保存时由
 `pl-studio-runtime` 组合 `StudioConfig` 并统一校验，覆盖：
 
 - catalog 中的全部 preset 与 Custom Responses/Chat provider。
@@ -458,7 +460,7 @@ schema、常用配置段、凭据处理和安全编辑行为。其 canonical 源
 `AgentModelConfig::validate()`）；失败时只在 UI 中展示错误，不写入磁盘。
 
 MCP 标签页使用结构化表单，不展示 raw TOML。新增和编辑用户 server 使用本地草稿；保存成功后
-即时写入 `~/.pure/config.toml`，effective fingerprint 变化时向 MCP owner 提交 incremental
+即时写入 `~/.anywork/config.toml`，effective fingerprint 变化时向 MCP owner 提交 incremental
 reconcile。删除 server 和启用切换同样即时写入。页面“刷新”只读取 owner snapshot；单 server
 “重新连接”调用 reset，“全部重置”经确认调用 All reset。内置 Zhipu Coding Plan MCP server
 不可删除，不允许编辑 server id、transport、endpoint 或运行时注入字段；界面同时显示 desired
@@ -483,11 +485,11 @@ Provider 标签页必须提供结构化编辑能力：
 - Zhipu 请求固定使用流式 `chat/completions`；effort 由模型 `parameters` 声明驱动（见 07-model.md 7.8）。默认模型 effort 候选值为 `enabled` / `none`，直接映射到 `thinking.type`，不发送 wire-level `reasoning_effort`。`glm-5.2` 候选值为 `high` / `max` / `none`，其中 `high` / `max` 会作为 `reasoning_effort` 透传给 API 并设置 `thinking.type = enabled` 与 `clear_thinking = false`，`none` 设置 `thinking.type = disabled` 并移除 `reasoning_effort`。`glm-5.3` 候选值为 `high` / `low` / `max`，三档均作为 `reasoning_effort` 透传并设置 `thinking.type = enabled` 与 `clear_thinking = false`；GLM-5.3 始终思考，不提供禁用思考候选。历史回放仍通过 assistant message 的 `reasoning_content` 字段保留。
 - 写入前由 `pl-studio-runtime` 构造 `StudioConfig` 并执行完整校验；校验失败时只在 UI 中展示错误，不写入磁盘。更新 API key 时，空输入表示保留现有 secret；provider key 重命名必须携带 `originalId`，以便服务端保留 secret、headers、catalog metadata 和模型能力。
 
-Agents 标签页是唯一 Agent 配置中心，展示 `explorer`、`planner`、`executor`、`worktree_executor`、`reviewer` 五个系统 Profile。每个系统卡片将模型与“思考强度”作为两个独立下拉控件展示；模型选项使用 `Provider / Model · Protocol · Connection`，思考强度候选值来自当前模型声明的 `supported_efforts()`。模型改变时，有候选的模型切换为其声明的默认 effort，没有显式默认时使用首个候选；无候选模型保存空选择并禁用强度控件。仅改变思考强度时必须保持当前 provider 和 model 不变。模型、思考强度与启用状态变更都携带 `expectedSettingsRevision` 即时保存，但 Flutter 不进行持久 optimistic 更新，也不保存第二份 selection；成功后以 bridge 返回的完整 typed canonical settings snapshot 原子更新 store，失败时保持原 canonical 状态。`pl-studio-runtime` 统一校验后写入 `~/.pure/config.toml`；不再保留重复 Roles 标签页。
+Agents 标签页是唯一 Agent 配置中心，展示 `explorer`、`planner`、`executor`、`worktree_executor`、`reviewer` 五个系统 Profile。每个系统卡片将模型与“思考强度”作为两个独立下拉控件展示；模型选项使用 `Provider / Model · Protocol · Connection`，思考强度候选值来自当前模型声明的 `supported_efforts()`。模型改变时，有候选的模型切换为其声明的默认 effort，没有显式默认时使用首个候选；无候选模型保存空选择并禁用强度控件。仅改变思考强度时必须保持当前 provider 和 model 不变。模型、思考强度与启用状态变更都携带 `expectedSettingsRevision` 即时保存，但 Flutter 不进行持久 optimistic 更新，也不保存第二份 selection；成功后以 bridge 返回的完整 typed canonical settings snapshot 原子更新 store，失败时保持原 canonical 状态。`pl-studio-runtime` 统一校验后写入 `~/.anywork/config.toml`；不再保留重复 Roles 标签页。
 
-桌面窗口必须支持自由缩放。`pure-studio` 只声明首选窗口尺寸，不把 UI 绑定到固定宽高；设置页内容跟随窗口尺寸自适应。Provider 标签页在常规桌面宽度使用单栏 provider 卡片列表，卡片内部承载摘要、操作和展开编辑内容；在窄窗口下保持单栏滚动并压缩卡片元信息，避免表格和编辑区域被裁剪。聊天状态栏在窄窗口下保留左侧高频控制，并把右侧只读状态按断点收入更多菜单。
+桌面窗口必须支持自由缩放。`anywork` 只声明首选窗口尺寸，不把 UI 绑定到固定宽高；设置页内容跟随窗口尺寸自适应。Provider 标签页在常规桌面宽度使用单栏 provider 卡片列表，卡片内部承载摘要、操作和展开编辑内容；在窄窗口下保持单栏滚动并压缩卡片元信息，避免表格和编辑区域被裁剪。聊天状态栏在窄窗口下保留左侧高频控制，并把右侧只读状态按断点收入更多菜单。
 
-为了支持设计验证，`pure-studio` 应通过 widget test 和 Windows 运行态截图验证设置页 fixture 状态。Provider 设置页的本地验证入口固定为：
+为了支持设计验证，`anywork` 应通过 widget test 和 Windows 运行态截图验证设置页 fixture 状态。Provider 设置页的本地验证入口固定为：
 
 ```powershell
 cargo xtask verify-gui
@@ -511,7 +513,7 @@ typed purpose 与 content 一起持久化并绑定 `studio.plan` Thread 扩展�
 
 ## 10.12 凭据策略
 
-Provider 的 API token 保存到操作系统凭据库，service 固定为 `pure-studio`，account 为 `provider:{provider_id}`；`~/.pure/config.toml` 不保存 token、凭据引用或可逆密文。Provider 仍可保存 `bearer_token_env` 环境变量名。配置加载后，Studio 在 Rust 内存中注入系统凭据；运行时通过 `resolved_bearer_token()` 解析，系统凭据优先，其次读取非空环境变量值，空白值和缺失环境变量都视为无凭据。
+Provider 的 API token 保存到操作系统凭据库，service 固定为 `anywork`，account 为 `provider:{provider_id}`；`~/.anywork/config.toml` 不保存 token、凭据引用或可逆密文。Provider 仍可保存 `bearer_token_env` 环境变量名。配置加载后，Studio 在 Rust 内存中注入系统凭据；运行时通过 `resolved_bearer_token()` 解析，系统凭据优先，其次读取非空环境变量值，空白值和缺失环境变量都视为无凭据。
 
 设置页的 Preserve/Replace/Clear 语义保持不变：Preserve 不改系统凭据，Replace 在配置提交前写入并回读，Clear 删除凭据。凭据操作和 TOML 原子替换作为一个 fail-closed 提交流程；凭据阶段失败时不得覆盖配置文件。启动恢复不得按旧 provider id 读取、迁移或删除凭据；原配置只以逐字备份保留，默认配置仅按当前默认 provider id 注入已有系统凭据。运行期显式重载仍直接返回配置错误并保留原文件。
 

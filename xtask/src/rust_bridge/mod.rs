@@ -7,8 +7,8 @@ use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub(crate) const BRIDGE_LIBRARY_ENV: &str = "PURE_STUDIO_BRIDGE_LIBRARY";
-pub(crate) const BRIDGE_DEBUG_SYMBOLS_ENV: &str = "PURE_STUDIO_BRIDGE_DEBUG_SYMBOLS";
+pub(crate) const BRIDGE_LIBRARY_ENV: &str = "ANYWORK_BRIDGE_LIBRARY";
+pub(crate) const BRIDGE_DEBUG_SYMBOLS_ENV: &str = "ANYWORK_BRIDGE_DEBUG_SYMBOLS";
 
 const BRIDGE_PACKAGE_NAME: &str = "pl-studio-bridge";
 const BRIDGE_TARGET_NAME: &str = "pl_studio_bridge";
@@ -263,7 +263,7 @@ mod tests {
     #[test]
     #[cfg(target_os = "linux")]
     fn cached_cmake_install_observes_current_demo_mode() {
-        let source = include_str!("../../../code/pure-studio/linux/CMakeLists.txt");
+        let source = include_str!("../../../code/anywork/linux/CMakeLists.txt");
         let staging = source
             .split("# Stage the prebuilt Rust bridge")
             .nth(1)
@@ -287,7 +287,7 @@ mod tests {
                 .arg(root.path())
                 .arg("-B")
                 .arg(&build)
-                .env("PURE_STUDIO_DEMO", configure_demo.to_string())
+                .env("ANYWORK_DEMO", configure_demo.to_string())
                 .env(BRIDGE_LIBRARY_ENV, &library)
                 .output()
                 .unwrap();
@@ -295,7 +295,7 @@ mod tests {
             let installed = std::process::Command::new("cmake")
                 .arg("--install")
                 .arg(&build)
-                .env("PURE_STUDIO_DEMO", (!configure_demo).to_string())
+                .env("ANYWORK_DEMO", (!configure_demo).to_string())
                 .env(
                     BRIDGE_LIBRARY_ENV,
                     if configure_demo {

@@ -24,7 +24,7 @@ pub(super) fn run() -> Result<()> {
         fs::create_dir_all(directory)?;
     }
     println!("Workflow live artifacts: {}", artifacts.display());
-    let installed = current_home()?.join(".pure");
+    let installed = current_home()?.join(".anywork");
     let before = user_config_state(&installed)?;
     let mut source: toml::Table = fs::read_to_string(installed.join("config.toml"))?.parse()?;
     upgrade_live_config_copy(&mut source)?;

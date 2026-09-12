@@ -18,7 +18,7 @@ const GENERATED_OUTPUTS: &[GeneratedOutput] = &[
     GeneratedOutput::dart(GeneratedDartPath::FileSuffix(".freezed.dart")),
     GeneratedOutput::dart(GeneratedDartPath::L10n),
     GeneratedOutput::dart(GeneratedDartPath::Directory("src/rust")),
-    GeneratedOutput::other("code/pure-studio/rust/src/frb_generated.rs"),
+    GeneratedOutput::other("code/anywork/rust/src/frb_generated.rs"),
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -423,9 +423,9 @@ mod tests {
 
     #[test]
     fn frb_codegen_uses_windows_verbatim_paths_for_rust_inputs() {
-        let path = Path::new(r"C:\workspace\code\pure-studio\rust");
+        let path = Path::new(r"C:\workspace\code\anywork\rust");
         let expected = if cfg!(windows) {
-            OsString::from(r"\\?\C:\workspace\code\pure-studio\rust")
+            OsString::from(r"\\?\C:\workspace\code\anywork\rust")
         } else {
             path.as_os_str().to_os_string()
         };
@@ -476,7 +476,7 @@ mod tests {
                 GeneratedOutput::dart(GeneratedDartPath::FileSuffix(".freezed.dart")),
                 GeneratedOutput::dart(GeneratedDartPath::L10n),
                 GeneratedOutput::dart(GeneratedDartPath::Directory("src/rust")),
-                GeneratedOutput::other("code/pure-studio/rust/src/frb_generated.rs"),
+                GeneratedOutput::other("code/anywork/rust/src/frb_generated.rs"),
             ]
         );
         assert!(GENERATED_OUTPUTS.iter().any(|output| {
@@ -606,7 +606,7 @@ mod tests {
             "pl-xtask-generated-stability-check-{}-{unique}",
             std::process::id()
         ));
-        let app_dir = root.join("code/pure-studio");
+        let app_dir = root.join("code/anywork");
         let generated = app_dir.join("lib/model.g.dart");
         let ignored_generated = app_dir.join("lib/ignored.freezed.dart");
         let generated_rust = app_dir.join("rust/src/frb_generated.rs");
@@ -626,9 +626,9 @@ mod tests {
         let error = ensure_generated_sources_are_stable(&before, &changed)
             .expect_err("regeneration changes must fail the stability check");
         let message = error.to_string();
-        assert!(message.contains("modified: code/pure-studio/lib/model.g.dart"));
-        assert!(message.contains("removed: code/pure-studio/lib/ignored.freezed.dart"));
-        assert!(message.contains("added: code/pure-studio/lib/new_model.g.dart"));
+        assert!(message.contains("modified: code/anywork/lib/model.g.dart"));
+        assert!(message.contains("removed: code/anywork/lib/ignored.freezed.dart"));
+        assert!(message.contains("added: code/anywork/lib/new_model.g.dart"));
         assert!(!message.contains("commit"));
 
         fs::remove_dir_all(root)?;

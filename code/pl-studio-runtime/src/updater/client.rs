@@ -28,18 +28,18 @@ impl StudioUpdater {
     pub fn new_default() -> Result<Self, StudioUpdateError> {
         let client = Client::builder()
             .redirect(reqwest::redirect::Policy::none())
-            .user_agent(concat!("Pure-Studio/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("anywork/", env!("CARGO_PKG_VERSION")))
             .build()
             .map_err(network_error)?;
         let cache_root = env::var_os("LOCALAPPDATA")
             .map(PathBuf::from)
             .unwrap_or_else(env::temp_dir)
-            .join("Pure Studio")
+            .join("anywork")
             .join("updates");
         Ok(Self {
             client,
             cache_dir: cache_root,
-            public_key: include_str!("pure-studio.pub"),
+            public_key: include_str!("anywork.pub"),
             install_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
     }

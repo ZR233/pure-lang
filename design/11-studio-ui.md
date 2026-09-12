@@ -1,8 +1,12 @@
-# 11 - Pure Studio UI
+# 11 - anywork UI
+
+桌面产品中文名为「糊来帮」，英文及其他语言回退名为 `anywork`。窗口、系统入口和应用界面按各自语言环境显示对应名称。图标以用户提供的猫咪图片为原图，保留完整蓝色圆角主体、移除外围留白并将圆角外设为透明。Flutter 工程和 Dart 包统一名为 `anywork`，Rust crate 继续使用 `pl-*`。
+
+Linux bundle 携带桌面入口与图标，窗口图标内嵌于 runner。用户可显式运行 bundle 中的 `install-desktop-entry.py`，将当前 bundle 的绝对路径登记到 XDG 用户应用目录；构建和运行不自动修改宿主桌面。移动 bundle 后需重新登记，删除对应的 `io.github.zr233.anywork.desktop` 即移除入口，不删除用户数据。
 
 ## 11.1 边界
 
-Pure Studio 是 Flutter 桌面应用，使用 Material 3、Riverpod、`go_router` 与 typed FRB。UI 只能通过
+anywork 是 Flutter 桌面应用，使用 Material 3、Riverpod、`go_router` 与 typed FRB。UI 只能通过
 bridge 访问 StudioRuntime，不读取 SQLite、Agent TOML 或 Skill 文件。Flutter Web 只用于 demo
 integration 验收，不能伪造原生 provider、文件系统或进程能力。
 
@@ -221,7 +225,7 @@ Linux CMake 的 bridge staging 在安装阶段读取当前 demo/native 环境；
 图片展开均按同一可见锚点校正，不根据总滚动高度差猜测。历史浏览只提示新内容，流式末尾跟随
 按帧合并，不反复启动动画。Markdown 展示可按内容版本复用，不改变原始文本。
 
-本地确定性原生验收使用 `python3 code/pure-studio/tool/timeline_native_harness.py --output target/<新的证据目录>`。
+本地确定性原生验收使用 `python3 code/anywork/tool/timeline_native_harness.py --output target/<新的证据目录>`。
 它通过 xtask 启动原生 GUI 与 Flutter Driver，在仓库外临时项目中使用本机可控 SSE provider；
 所有模型请求都留在 loopback，真实 Rust/FRB、journal、agent 切换和双向滚动不使用 demo 替身。
 原始 wire、窗口快照、截图、查询耗时、滚动 trace 与进程回收证据均为内部验收产物。

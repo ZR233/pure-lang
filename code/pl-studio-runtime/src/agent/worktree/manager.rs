@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use super::{WorktreeBackend, WorktreeCreateFailureDisposition, WorktreeError, WorktreeStatus};
 
-const WORKTREE_DIR: &str = ".pure/worktrees";
+const WORKTREE_DIR: &str = ".anywork/worktrees";
 const WORKTREE_BRANCH_PREFIX: &str = "pure-agent-";
 
 #[derive(Debug, Clone, PartialEq, Eq)]

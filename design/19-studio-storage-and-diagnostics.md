@@ -2,7 +2,7 @@
 
 ## 19.1 数据库
 
-Studio 产品数据使用 `~/.pure/studio/studio.sqlite`，会话使用同目录的 `sessions.sqlite`。
+Studio 产品数据使用 `~/.anywork/studio/studio.sqlite`，会话使用同目录的 `sessions.sqlite`。
 拆库升级清空旧会话但保留项目与配置，不允许通过整库重建清理会话。
 统一条目契约见 [25-session-entry-storage.md](./25-session-entry-storage.md)。
 启动前取得 Studio home 的跨进程独占 lock；数据库使用 WAL、foreign
@@ -39,8 +39,8 @@ Thread 冷激活先校验目标及待激活祖先的身份、归属与未归档�
 
 ## 19.3 文件配置
 
-主配置位于 `~/.pure/config.toml`，保存 provider、模型 route 和 `disabled_system_agents`。用户 Agent
-Profile 位于 `~/.pure/agents/*.toml`，一个文件一个稳定 Agent ID；runtime 原子保存单文件并单独报告
+主配置位于 `~/.anywork/config.toml`，保存 provider、模型 route 和 `disabled_system_agents`。用户 Agent
+Profile 位于 `~/.anywork/agents/*.toml`，一个文件一个稳定 Agent ID；runtime 原子保存单文件并单独报告
 解析诊断。系统 Profile 不写 TOML。
 
 Thread Mode 由内存注册表提供，不复制到数据库或用户目录。run 只保存 `ThreadModeId` 与图 hash；

@@ -9,14 +9,14 @@
 *.rc text eol=crlf
 *.iss text eol=crlf
 
-code/pure-studio/*/flutter/generated_plugin_registrant.cc text eol=lf
-code/pure-studio/*/flutter/generated_plugin_registrant.h text eol=lf
-code/pure-studio/*/flutter/generated_plugins.cmake text eol=lf
+code/anywork/*/flutter/generated_plugin_registrant.cc text eol=lf
+code/anywork/*/flutter/generated_plugin_registrant.h text eol=lf
+code/anywork/*/flutter/generated_plugins.cmake text eol=lf
 
 # Canonical Flutter/Rust generator outputs use LF on every platform. Keep them
 # stable on Windows so code generation does not create CRLF-only worktree diffs.
-code/pure-studio/lib/**/*.g.dart text eol=lf
-code/pure-studio/lib/**/*.freezed.dart text eol=lf
-code/pure-studio/lib/src/l10n/app_localizations*.dart text eol=lf
-code/pure-studio/lib/src/rust/** text eol=lf
-code/pure-studio/rust/src/frb_generated.rs text eol=lf
+code/anywork/lib/**/*.g.dart text eol=lf
+code/anywork/lib/**/*.freezed.dart text eol=lf
+code/anywork/lib/src/l10n/app_localizations*.dart text eol=lf
+code/anywork/lib/src/rust/** text eol=lf
+code/anywork/rust/src/frb_generated.rs text eol=lf

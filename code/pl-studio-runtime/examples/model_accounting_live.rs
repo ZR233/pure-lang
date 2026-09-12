@@ -1,5 +1,5 @@
 //! Opt-in live acceptance using existing Studio connection settings without modifying them.
-//! Run with PURE_STUDIO_WIRE_CAPTURE_DIR and an optional report path argument.
+//! Run with ANYWORK_WIRE_CAPTURE_DIR and an optional report path argument.
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -76,7 +76,7 @@ async fn main() -> Result<()> {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("target/model-accounting-live/report.json"));
     let config_path = PathBuf::from(std::env::var_os("HOME").context("HOME is unavailable")?)
-        .join(".pure/config.toml");
+        .join(".anywork/config.toml");
     let config: ExistingConfig = toml::from_str(&tokio::fs::read_to_string(config_path).await?)?;
     let registry = pl_model::config::builtin_provider_catalog();
     let mut observations = Vec::new();
@@ -316,7 +316,7 @@ async fn main() -> Result<()> {
 async fn credential(provider: &str, environment: Option<&str>) -> Option<String> {
     let provider = provider.to_owned();
     let stored = tokio::task::spawn_blocking(move || {
-        keyring::Entry::new("pure-studio", &format!("provider:{provider}"))
+        keyring::Entry::new("anywork", &format!("provider:{provider}"))
             .and_then(|entry| entry.get_password())
     })
     .await

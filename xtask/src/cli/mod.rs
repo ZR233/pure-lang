@@ -20,21 +20,21 @@ struct Cli {
 
 #[derive(Debug, Clone, PartialEq, Eq, Subcommand)]
 pub(crate) enum Command {
-    /// Run Flutter from the Pure Studio app directory.
+    /// Run Flutter from the anywork app directory.
     Flutter(ToolOptions),
-    /// Run Dart from the Pure Studio app directory.
+    /// Run Dart from the anywork app directory.
     Dart(ToolOptions),
     /// Regenerate Riverpod, Freezed, l10n, and FRB bindings.
     GenerateGui,
     /// Regenerate GUI sources and fail when generated files are not committed.
     CheckGuiGenerated,
-    /// Generate, analyze, and test the Pure Studio desktop app.
+    /// Generate, analyze, and test the anywork desktop app.
     VerifyGui(VerifyGuiOptions),
     /// Run the opt-in real-model workflow acceptance harness.
     VerifyWorkflow(VerifyWorkflowOptions),
     /// Run real directory/worktree child Agents through the native GUI.
     VerifySubagents(VerifySubagentsOptions),
-    /// Run the Pure Studio desktop app.
+    /// Run the anywork desktop app.
     RunGui(RunGuiOptions),
     /// Build release artifacts for the current desktop OS.
     BuildGui(BuildGuiOptions),
@@ -112,7 +112,7 @@ pub(crate) struct VerifySubagentsOptions {
 
 #[derive(Debug, Clone, PartialEq, Eq, Args)]
 pub(crate) struct RunGuiOptions {
-    /// Run with PURE_STUDIO_DEMO=true.
+    /// Run with ANYWORK_DEMO=true.
     #[arg(long)]
     pub(crate) demo: bool,
     /// Enable Flutter Driver through test_driver/driver_main.dart.
@@ -149,10 +149,10 @@ impl LogLevel {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Args)]
 pub(crate) struct BuildGuiOptions {
-    /// Build with PURE_STUDIO_DEMO=true.
+    /// Build with ANYWORK_DEMO=true.
     #[arg(long)]
     pub(crate) demo: bool,
-    /// Keep existing files in dist/pure-studio-release.
+    /// Keep existing files in dist/anywork-release.
     #[arg(long)]
     pub(crate) no_clean: bool,
     /// Fail when refreshed generated GUI sources differ from Git.
@@ -164,19 +164,19 @@ pub(crate) struct BuildGuiOptions {
 pub(crate) enum ReleaseGuiOptions {
     /// Prepare a release staging directory.
     Stage {
-        /// Stable SemVer matching code/pure-studio/pubspec.yaml.
+        /// Stable SemVer matching code/anywork/pubspec.yaml.
         #[arg(long)]
         version: String,
     },
     /// Sign and finalize staged release artifacts.
     Finalize {
-        /// Stable SemVer matching code/pure-studio/pubspec.yaml.
+        /// Stable SemVer matching code/anywork/pubspec.yaml.
         #[arg(long)]
         version: String,
     },
     /// Verify finalized release artifacts.
     Verify {
-        /// Stable SemVer matching code/pure-studio/pubspec.yaml.
+        /// Stable SemVer matching code/anywork/pubspec.yaml.
         #[arg(long)]
         version: String,
     },

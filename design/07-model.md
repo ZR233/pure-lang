@@ -236,7 +236,7 @@ URL，本地图片、历史、重试和恢复使用 Data URL。支持的快照�
 产品宿主使用 serde 读取自己的完整配置，调用 `pl-model::config::AgentModelConfig::validate/resolve` 后，
 只把 `ResolvedModelRoute` 交给 `pl-model::runtime::ModelRuntime::from_route` 或
 `pl-model::runtime::ModelTurnClient::from_route`。宿主直接装配 `pl-model` 的模型绑定；`pl-core` 与 `pl-model` 都不读取
-`~/.pure/config.toml`。
+`~/.anywork/config.toml`。
 
 Bundled catalog 只读，配置只能通过 `additional_models` 追加不冲突 slug；完全自定义 provider
 使用 `Explicit { models }`。附加与显式模型都必须声明 transport；模型目录的

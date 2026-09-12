@@ -401,7 +401,7 @@ fn launch_installer(path: &Path) -> Result<(), StudioUpdateError> {
     if !cfg!(target_os = "windows") {
         return Err(StudioUpdateError::new(
             StudioUpdateErrorCode::UnsupportedPlatform,
-            "Pure Studio in-app installation currently supports Windows only",
+            "anywork in-app installation currently supports Windows only",
         ));
     }
     let mut command = Command::new(path);
@@ -504,7 +504,7 @@ mod tests {
     const TEST_SIGNATURE: &str = "untrusted comment: signature from minisign secret key\nRUQf6LRCGA9i559r3g7V1qNyJDApGip8MfqcadIgT9CuhV3EMhHoN1mGTkUidF/z7SrlQgXdy8ofjb7bNJJylDOocrCo8KLzZwo=\ntrusted comment: timestamp:1556193335\tfile:test\ny/rUw2y8/hOUYjZU71eHp/Wo1KZ40fGy2VJEDl34XMJM+TX48Ss/17u3IvIfbVR1FkZZSNCisQbuQY+bHwhEBg==";
 
     fn write_temp(name: &str, content: &str) -> std::path::PathBuf {
-        let path = std::env::temp_dir().join(format!("pure-studio-verify-file-{name}"));
+        let path = std::env::temp_dir().join(format!("anywork-verify-file-{name}"));
         std::fs::write(&path, content).unwrap();
         path
     }

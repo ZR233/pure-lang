@@ -9,7 +9,7 @@ use tracing_subscriber::EnvFilter;
 #[command(
     name = "pl-studio-server",
     version,
-    about = "Pure Studio loopback HTTP API"
+    about = "anywork loopback HTTP API"
 )]
 struct Cli {
     #[arg(long, default_value = DEFAULT_LISTEN)]

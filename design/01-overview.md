@@ -1,6 +1,6 @@
 # 01 - 系统总览
 
-Pure-Lang 是自然语言编译器。Pure Studio 的业务核心为 `pl-studio-runtime::StudioRuntime`，
+Pure-Lang 是自然语言编译器。anywork 的业务核心为 `pl-studio-runtime::StudioRuntime`，
 Flutter/FRB 与独立 HTTP server 是两个 transport，不拥有另一套业务状态。
 
 ## 运行路径

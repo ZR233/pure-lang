@@ -105,7 +105,7 @@ fn validate_asset(
             "installer SHA-256 is not 64 hexadecimal characters",
         ));
     }
-    let expected_name = format!("Pure-Studio-{version}-windows-x86_64-setup.exe");
+    let expected_name = format!("anywork-{version}-windows-x86_64-setup.exe");
     let expected_path = format!("/ZR233/pure-lang/releases/download/v{version}/{expected_name}");
     let url = parse_stable_url(&asset.url)?;
     if url.host_str() != Some("github.com") || url.path() != expected_path {
@@ -200,7 +200,7 @@ mod tests {
 
     #[test]
     fn accepts_newer_stable_release() {
-        let url = "https://github.com/ZR233/pure-lang/releases/download/v1.2.0/Pure-Studio-1.2.0-windows-x86_64-setup.exe";
+        let url = "https://github.com/ZR233/pure-lang/releases/download/v1.2.0/anywork-1.2.0-windows-x86_64-setup.exe";
         let result = evaluate_manifest(
             &manifest("1.2.0", url, &format!("{url}.minisig"), 42),
             "1.1.9",
@@ -211,7 +211,7 @@ mod tests {
 
     #[test]
     fn rejects_unknown_schema_prerelease_and_url_escape() {
-        let url = "https://github.com/ZR233/pure-lang/releases/download/v1.2.0/Pure-Studio-1.2.0-windows-x86_64-setup.exe";
+        let url = "https://github.com/ZR233/pure-lang/releases/download/v1.2.0/anywork-1.2.0-windows-x86_64-setup.exe";
         let future_schema = serde_json::to_vec(&serde_json::json!({
             "schemaVersion": 2,
             "version": "1.2.0",
@@ -229,11 +229,12 @@ mod tests {
         .unwrap();
         assert!(evaluate_manifest(&future_schema, "1.0.0").is_err());
 
-        let url = "https://example.com/releases/download/v1.2.0/Pure-Studio-1.2.0-windows-x86_64-setup.exe";
+        let url =
+            "https://example.com/releases/download/v1.2.0/anywork-1.2.0-windows-x86_64-setup.exe";
         let bytes = manifest("1.2.0", url, &format!("{url}.minisig"), 42);
         assert!(evaluate_manifest(&bytes, "1.0.0").is_err());
 
-        let url = "https://github.com/ZR233/pure-lang/releases/download/v1.2.0-rc.1/Pure-Studio-1.2.0-rc.1-windows-x86_64-setup.exe";
+        let url = "https://github.com/ZR233/pure-lang/releases/download/v1.2.0-rc.1/anywork-1.2.0-rc.1-windows-x86_64-setup.exe";
         assert!(
             evaluate_manifest(
                 &manifest("1.2.0-rc.1", url, &format!("{url}.minisig"), 42),

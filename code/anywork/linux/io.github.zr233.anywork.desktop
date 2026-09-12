@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=anywork
+Name[zh]=糊来帮
+Name[zh_CN]=糊来帮
+Name[zh_TW]=糊来帮
+Exec=anywork
+Icon=io.github.zr233.anywork
+Terminal=false
+Categories=Utility;
+StartupWMClass=io.github.zr233.anywork

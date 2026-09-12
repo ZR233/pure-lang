@@ -73,7 +73,7 @@ pub(super) async fn ssh_command(
             .arg("PubkeyAuthentication=no")
             .env("SSH_ASKPASS", &path)
             .env("SSH_ASKPASS_REQUIRE", "force")
-            .env("DISPLAY", "pure-studio")
+            .env("DISPLAY", "anywork")
             .env("PURE_SSH_PASSWORD", password);
         Some(directory)
     } else {

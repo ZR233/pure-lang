@@ -112,7 +112,7 @@ pub(super) fn verify(workspace_root: &Path, release_dir: &Path, version: &Versio
                 .join("pl-studio-runtime")
                 .join("src")
                 .join("updater")
-                .join("pure-studio.pub")
+                .join("anywork.pub")
         });
     for file in payload_names(version) {
         verify_signature(&public_key, &release_dir.join(file))?;
@@ -260,7 +260,7 @@ fn sign_file(
         OsString::from("-x"),
         signature.as_os_str().to_owned(),
         OsString::from("-t"),
-        OsString::from(format!("Pure Studio {version}")),
+        OsString::from(format!("anywork {version}")),
     ];
     let mut command = Command::new("minisign");
     command.args(args);
@@ -349,7 +349,7 @@ mod tests {
         let manifest = manifest_for(
             &version,
             123,
-            "Pure-Studio-1.2.3-windows-x86_64-setup.exe",
+            "anywork-1.2.3-windows-x86_64-setup.exe",
             456,
             "abcd".to_string(),
         );

@@ -33,7 +33,7 @@ submission 作为 approval/finding 证据，不能把 root 转述、任意 sessi
 
 安全边界按端口-适配器落位：
 
-- `pure-studio`：输入收集、事件展示、命令调用
+- `anywork`：输入收集、事件展示、命令调用
 - `pl-studio-runtime::StudioRuntime` / `StudioHost`：产品策略编译与资源约束
 - `pl-core::thread`：执行策略校验、actor 状态与通用 turn 约束
 - StudioThreadAssembler：配置、资源、生命周期与产品事件装配

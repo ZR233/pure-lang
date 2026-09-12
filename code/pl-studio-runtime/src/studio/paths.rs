@@ -8,7 +8,7 @@ const STUDIO_DIR_NAME: &str = "studio";
 const DATABASE_FILE_NAME: &str = "studio.sqlite";
 const SKILLS_DIR_NAME: &str = "skills";
 const SYSTEM_SKILLS_DIR_NAME: &str = ".system";
-const STUDIO_HOME_ENV: &str = "PURE_STUDIO_HOME";
+const STUDIO_HOME_ENV: &str = "ANYWORK_HOME";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StudioPaths {
@@ -129,9 +129,9 @@ mod tests {
     #[test]
     fn explicit_home_keeps_config_and_runtime_under_one_root() {
         let root = if cfg!(windows) {
-            PathBuf::from(r"C:\isolated\.pure")
+            PathBuf::from(r"C:\isolated\.anywork")
         } else {
-            PathBuf::from("/tmp/isolated/.pure")
+            PathBuf::from("/tmp/isolated/.anywork")
         };
         let paths = StudioPaths::resolve(Some(root.clone())).unwrap();
 

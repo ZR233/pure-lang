@@ -1,4 +1,4 @@
-//! Pure Studio 稳定版更新检查、可信下载与安装边界。
+//! anywork 稳定版更新检查、可信下载与安装边界。
 
 mod client;
 mod error;

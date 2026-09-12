@@ -29,7 +29,7 @@ use crate::sse;
 #[derive(OpenApi)]
 #[openapi(
     info(
-        title = "Pure Studio Runtime API",
+        title = "anywork Runtime API",
         version = "0.1.0",
         description = "Loopback adapter over the canonical StudioRuntime"
     ),
@@ -392,7 +392,7 @@ async fn upload_attachment_drafts(
     mut multipart: Multipart,
 ) -> Result<impl IntoResponse, ApiError> {
     let upload_dir = tempfile::Builder::new()
-        .prefix("pure-studio-http-attachments-")
+        .prefix("anywork-http-attachments-")
         .tempdir()
         .map_err(anyhow::Error::from)
         .map_err(ApiError::from)?;

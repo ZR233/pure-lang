@@ -1,5 +1,9 @@
 # Pure-Lang
 
+桌面应用中文名为 **糊来帮**，英文名为 **anywork**。新版独立安装，使用 `~/.anywork` 和独立凭据，不导入旧版 Pure Studio 数据。旧版因更新文件名校验限制，需要手动下载安装新版。
+
+Linux 构建后可运行 `python3 dist/anywork-release/install-desktop-entry.py` 登记应用菜单图标；移动 bundle 后需重新运行。
+
 自然语言编译器 — 将用户的自然语言需求整理为可执行导向的编译计划、代码生成意图和后续动作建议。
 
 ## 项目概览
@@ -11,7 +15,7 @@ Pure-Lang 是一个**自然语言编译器**：接收用户的自然语言需求
 ## 架构
 
 ```text
-pure_studio → pl-studio-bridge ─┐
+anywork → pl-studio-bridge ─┐
                                ├→ pl-studio-runtime → pl-core
 HTTP → pl-studio-server ───────┘         │              ↑
                                         ├→ pl-model ───┤
@@ -40,8 +44,8 @@ model/tool 实现核心接口且不相互依赖。Studio 拥有配置、项目�
 | `pl-remote-helper` | `code/pl-remote-helper/` | Linux 本地进程监督与 SSH 远端助手，共用物理进程协议 |
 | `pl-studio-runtime` | `code/pl-studio-runtime/` | Studio 产品 SQLite、项目、配置、恢复与产品事件的唯一业务 façade |
 | `pl-studio-server` | `code/pl-studio-server/` | 独立 HTTP/OpenAPI/SSE transport 宿主 |
-| `pl-studio-bridge` | `code/pure-studio/rust/` | Flutter Rust Bridge v2 transport 适配器 |
-| `pure_studio`（非 Cargo 成员） | `code/pure-studio/` | Flutter 桌面应用：Material 3、Riverpod、Thread 事件订阅 |
+| `pl-studio-bridge` | `code/anywork/rust/` | Flutter Rust Bridge v2 transport 适配器 |
+| `anywork`（非 Cargo 成员） | `code/anywork/` | Flutter 桌面应用：Material 3、Riverpod、Thread 事件订阅 |
 | `pl-xtask` | `xtask/` | GUI 生成、验证、运行、构建与发布编排入口 |
 
 ### 依赖规则
@@ -210,7 +214,7 @@ cargo install --path code/pl-remote-helper --locked
 - 若启用安装包代码签名，需要 Windows SDK 的 `signtool.exe`，并设置 `WINDOWS_SIGNTOOL_PATH`、
   `WINDOWS_CERTIFICATE_PATH` 和 `WINDOWS_CERTIFICATE_PASSWORD`。
 
-### 启动 Pure Studio 桌面应用
+### 启动 anywork 桌面应用
 
 ```powershell
 # 当前 Windows/Linux/macOS 桌面目标（Flutter + flutter_rust_bridge v2）
@@ -219,12 +223,12 @@ cargo xtask run-gui
 
 Flutter 端通过 `pl-studio-bridge` 调用同一个 `pl-studio-runtime`。每个打开的 Thread 只订阅自己的高频 Item/Turn/interaction 流；MCP/LSP health、配置和项目列表等低频事件走全局产品流。
 
-首次启动后，在 Pure Studio 设置页面配置 LLM Provider。配置保存在：
+首次启动后，在 anywork 设置页面配置 LLM Provider。配置保存在：
 
 ```text
-~/.pure/config.toml                 # 全局配置（provider、模型、角色）
-~/.pure/studio/studio.sqlite        # Studio 项目、配置关联与产品事实
-~/.pure/studio/sessions.sqlite      # 通用 Thread journal、不可变载荷与资源元数据
+~/.anywork/config.toml                 # 全局配置（provider、模型、角色）
+~/.anywork/studio/studio.sqlite        # Studio 项目、配置关联与产品事实
+~/.anywork/studio/sessions.sqlite      # 通用 Thread journal、不可变载荷与资源元数据
 ```
 
 DeepSeek V4 的 Responses route 支持服务端原生联网搜索；Studio 默认启用
@@ -249,7 +253,7 @@ pure-lang/
 │   ├── pl-remote-helper/     # 本地进程监督与 SSH 远端助手
 │   ├── pl-studio-runtime/    # Studio 业务 runtime
 │   ├── pl-studio-server/     # HTTP/OpenAPI/SSE server
-│   └── pure-studio/          # Flutter 桌面应用与 FRB crate
+│   └── anywork/          # Flutter 桌面应用与 FRB crate
 ├── design/                   # 架构设计文档及原型/视觉资产
 ├── .cargo/config.toml        # Cargo 配置
 ├── xtask/                    # pl-xtask 开发任务入口
@@ -389,7 +393,7 @@ cargo xtask run-gui --demo
 `--web-integration` 只验证纯 Dart demo 的布局、路由、交互与状态投影，不替代桌面 Rust bridge
 或真实 server/model 验收。xtask 自动发现浏览器和 driver、校验主版本、处理 wrapper/sandbox
 封装、选择空闲端口并回收进程树；失败时原始驱动日志保存在
-`code/pure-studio/build/web-integration-artifacts`。Playwright 可作为额外截图或可访问性观察层，
+`code/anywork/build/web-integration-artifacts`。Playwright 可作为额外截图或可访问性观察层，
 但 canonical 交互断言仍使用 Flutter integration test 的稳定 `ValueKey`。
 
 `verify-workflow --live` 会产生真实模型调用和费用，不进入默认 CI，也不会回退到 scripted

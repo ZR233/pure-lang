@@ -2,7 +2,7 @@
 
 ## 目标
 
-Pure Studio 的 LSP 为 agent 提供代码语义查询，并向 Flutter 展示当前 Project 的 last-known
+anywork 的 LSP 为 agent 提供代码语义查询，并向 Flutter 展示当前 Project 的 last-known
 语言服务器状态。LSP runtime 只存在于本地进程，不通过 MCP 暴露。server 定义是数据驱动的
 catalog：内置 catalog 收录已知 server（当前只有 rust-analyzer 一条），用户可在配置中声明
 自定义 server；新增语言支持只需新增 catalog 条目、driver 实现或用户配置，不需要修改
@@ -33,7 +33,7 @@ LSP 位置/URI 转换和 server 专项错误映射。不为私有 helper、薄�
 workspace 检测规则（相对 workspace root 的文件名或单段 glob，空列表表示总是匹配）、
 command 解析（program + args 模板，占位符当前仅支持 `{workspaceRoot}`）与能力集（支持的
 `lsp_query` 操作子集，用于 capabilities 报告与路由校验）。catalog 由内置定义与用户在
-`~/.pure/config.toml` `[lsp.servers.<id>]` 段的声明合并而成（配置面见 `10-config.md`）；
+`~/.anywork/config.toml` `[lsp.servers.<id>]` 段的声明合并而成（配置面见 `10-config.md`）；
 重复 server id 或 language id 冲突在配置解析时以 typed 错误 fail-loud。同一 language id
 被多个 server 声明且都匹配 workspace 时，路由以 typed `LspRoutingError::AmbiguousLanguage`
 拒绝并列出候选，不按注册顺序或名称猜测；零匹配返回列出可用语言的 unknown language 错误。

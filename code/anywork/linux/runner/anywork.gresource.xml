@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <gresource prefix="/io/github/zr233/anywork">
+    <file alias="app-icon.png">anywork-app-icon.png</file>
+  </gresource>
+</gresources>

@@ -240,8 +240,8 @@ fn run_headless(
             "--nocapture",
         ])
         .current_dir(workspace_root)
-        .env("PURE_STUDIO_WORKFLOW_ARTIFACT_DIR", artifact_dir)
-        .env("PURE_STUDIO_WIRE_CAPTURE_DIR", wire_dir);
+        .env("ANYWORK_WORKFLOW_ARTIFACT_DIR", artifact_dir)
+        .env("ANYWORK_WIRE_CAPTURE_DIR", wire_dir);
     let timeout = deadline.saturating_duration_since(Instant::now());
     ensure!(
         !timeout.is_zero(),
@@ -264,7 +264,7 @@ fn run_gui(
     scope: WorkflowAcceptanceScope,
     deadline: Instant,
 ) -> Result<()> {
-    let installed_home = current_home()?.join(".pure");
+    let installed_home = current_home()?.join(".anywork");
     let installed_config = installed_home.join("config.toml");
     let installed_state_before = user_config_state(&installed_home)?;
     fs::write(
@@ -462,7 +462,7 @@ fn run_gui(
         )?;
         ensure!(
             installed_state_before == after,
-            "installed ~/.pure/config.toml or Agent files changed during isolated acceptance"
+            "installed ~/.anywork/config.toml or Agent files changed during isolated acceptance"
         );
         Ok(())
     });
@@ -504,10 +504,10 @@ fn run_gui_attempt(attempt: GuiAttempt<'_>) -> Result<DriverWorkflowIdentity> {
     command
         .args(["xtask", "run-gui", "--driver", "--log-level", "debug"])
         .current_dir(attempt.workspace_root)
-        .env("PURE_STUDIO_HOME", attempt.studio_home)
-        .env("PURE_STUDIO_WIRE_CAPTURE_DIR", attempt.wire_dir)
+        .env("ANYWORK_HOME", attempt.studio_home)
+        .env("ANYWORK_WIRE_CAPTURE_DIR", attempt.wire_dir)
         .env(
-            "PURE_STUDIO_NATIVE_LIFECYCLE_LOG",
+            "ANYWORK_NATIVE_LIFECYCLE_LOG",
             attempt.artifact_dir.join(format!("{prefix}-native.log")),
         );
     let mut gui = resident::ResidentProcess::start(
@@ -670,8 +670,8 @@ fn validate_delivered_fixture(canonical: &Path, workspace: &Path, artifacts: &Pa
         "workflow fixture must not initialize Git"
     );
     ensure!(
-        !workspace.join(".pure").exists(),
-        "workflow fixture must not create .pure state"
+        !workspace.join(".anywork").exists(),
+        "workflow fixture must not create .anywork state"
     );
     fs::write(artifacts.join("workspace-git-check.txt"), "git=false\n")?;
     Ok(())
@@ -706,8 +706,8 @@ fn validate_plan_only_workspace(
         "Plan-only workflow fixture must not initialize Git"
     );
     ensure!(
-        !workspace.join(".pure").exists(),
-        "Plan-only workflow fixture must not create .pure state"
+        !workspace.join(".anywork").exists(),
+        "Plan-only workflow fixture must not create .anywork state"
     );
     fs::write(
         artifacts.join("workspace-check.txt"),

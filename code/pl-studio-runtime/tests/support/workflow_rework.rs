@@ -74,9 +74,9 @@ async fn run_scenario(
     config: &StudioConfig,
     kind: WorkspaceKind,
 ) -> Result<()> {
-    let artifacts = std::env::var_os("PURE_STUDIO_WORKFLOW_ARTIFACT_DIR")
+    let artifacts = std::env::var_os("ANYWORK_WORKFLOW_ARTIFACT_DIR")
         .map(std::path::PathBuf::from)
-        .context("rework live acceptance requires PURE_STUDIO_WORKFLOW_ARTIFACT_DIR")?
+        .context("rework live acceptance requires ANYWORK_WORKFLOW_ARTIFACT_DIR")?
         .join(format!("rework-{}", kind.name()));
     fs::create_dir_all(&artifacts)?;
     let usage_before = usage_captures()?;
@@ -108,7 +108,7 @@ async fn run_scenario(
             "This fixture is a Git repository. Implement in isolated worktrees; only the root integrates commits."
         );
         fs::write(workspace.join("AGENTS.md"), rules)?;
-        fs::write(workspace.join(".gitignore"), "target/\n.pure/\n")?;
+        fs::write(workspace.join(".gitignore"), "target/\n.anywork/\n")?;
         command(&workspace, &artifacts, "git-init", "git", &["init"]).await?;
         command(&workspace, &artifacts, "git-add", "git", &["add", "."]).await?;
         command(
@@ -829,7 +829,7 @@ async fn command(
 }
 
 fn request_capture_count() -> Result<usize> {
-    let directory = std::env::var_os("PURE_STUDIO_WIRE_CAPTURE_DIR")
+    let directory = std::env::var_os("ANYWORK_WIRE_CAPTURE_DIR")
         .context("request budget requires wire capture")?;
     if !Path::new(&directory).exists() {
         return Ok(0);
@@ -845,7 +845,7 @@ fn request_capture_count() -> Result<usize> {
 }
 
 fn usage_captures() -> Result<std::collections::BTreeSet<std::path::PathBuf>> {
-    let Some(directory) = std::env::var_os("PURE_STUDIO_WIRE_CAPTURE_DIR") else {
+    let Some(directory) = std::env::var_os("ANYWORK_WIRE_CAPTURE_DIR") else {
         return Ok(Default::default());
     };
     fs::read_dir(directory)?

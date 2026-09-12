@@ -1,4 +1,4 @@
-//! Pure Studio 产品配置。
+//! anywork 产品配置。
 //!
 //! `pl-model` 定义可 serde 的模型路由值对象；本模块组合 Studio 的运行时、
 //! instructions、skills、MCP 与 UI 配置，并独占文件格式、schema 版本和默认角色。
@@ -46,12 +46,12 @@ pub use runtime::{ConfigRuntime, ConfigRuntimeError, ConfigRuntimeSnapshot, Reso
 pub use store::{ConfigPaths, ConfigRecoveryReport, ConfigStore};
 
 pub const STUDIO_CONFIG_SCHEMA_VERSION: u32 = 18;
-pub const STUDIO_CONFIG_DIR_NAME: &str = ".pure";
+pub const STUDIO_CONFIG_DIR_NAME: &str = ".anywork";
 pub const STUDIO_CONFIG_FILE_NAME: &str = "config.toml";
 
 const DEFAULT_PROVIDER_ID: &str = "deepseek";
 const DEFAULT_MODEL_ID: &str = "deepseek-flash";
-const STUDIO_USER_SKILLS_DIR: &str = "~/.pure/skills";
+const STUDIO_USER_SKILLS_DIR: &str = "~/.anywork/skills";
 const STUDIO_ROLES: [&str; 5] = [
     "explorer",
     "planner",
@@ -185,7 +185,7 @@ impl Default for DeepSeekWebSearchConfig {
     }
 }
 
-/// Pure Studio 的完整配置文档。
+/// anywork 的完整配置文档。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StudioConfig {
     pub schema_version: u32,

@@ -273,7 +273,7 @@ pub trait CommandBackend: std::fmt::Debug + Send + Sync + 'static {
     ) -> impl std::future::Future<Output = std::result::Result<Vec<Value>, Self::Error>> + Send;
 }
 
-/// pure-studio 使用的本地 workspace 命令后端。
+/// anywork 使用的本地 workspace 命令后端。
 #[derive(Debug, Clone)]
 pub struct LocalCommandBackend {
     workspace_root: PathBuf,

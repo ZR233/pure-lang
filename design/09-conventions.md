@@ -3,7 +3,7 @@
 ## 9.1 Crate 命名
 
 - 库 crate 使用 `pl-` 前缀。
-- Flutter bridge crate 使用 `pl-studio-bridge`，Flutter app package 使用 `pure_studio`。
+- Flutter bridge crate 使用 `pl-studio-bridge`，Flutter app package 使用 `anywork`。
 - 产品 wire 放入 `pl-protocol`；core 通用契约在自身领域模块定义。
 
 ## 9.2 依赖方向
@@ -29,7 +29,7 @@ pub trait HealthProbe: Send + Sync {
 
 核心 API 不暴露语义模糊的 `bool` 或 `Option<bool>`。
 
-前端输入应在 `pure-studio` 边界转换为明确类型，例如 `CompileMode`。
+前端输入应在 `anywork` 边界转换为明确类型，例如 `CompileMode`。
 
 工具 schema 必须完整描述影响参数有效性的约束。分页 cursor 只能与生成它的请求投影配套使用；续页必须保留 cursor 所绑定的过滤、路径和匹配参数，工作区发生变更后旧 cursor 失效。
 
@@ -70,7 +70,7 @@ JSON discriminator 生成的 stored column。普通分类、配置、能力、sc
 ## 9.6 文档口径
 
 - 项目名：Pure-Lang。
-- 桌面编译器前端：`pure-studio`。
+- 桌面编译器前端：`anywork`。
 - 核心逻辑层：`pl-core`。
 - LLM provider 层：`pl-model`。
 - 公共协议层：`pl-protocol`。
@@ -111,7 +111,7 @@ JSON discriminator 生成的 stored column。普通分类、配置、能力、sc
 
 ## 9.9 Studio 生成文件约定
 
-- `code/pure-studio/pubspec.lock` 是应用级 canonical 依赖快照，必须由 Git 跟踪且不得被任何仓库
+- `code/anywork/pubspec.lock` 是应用级 canonical 依赖快照，必须由 Git 跟踪且不得被任何仓库
   ignore 规则排除。Flutter 直接依赖允许跨 major 升级，默认采用当前 stable SDK 可解析的稳定版本；
   prerelease 必须有独立需求，或由已选择的稳定直接依赖求解强制要求，并经过完整生成与测试验证。
   当前 `freezed 4.0.0-dev.3` 是后者：稳定的 `build_runner 2.16` 需要 analyzer 13，而最新稳定
@@ -170,7 +170,7 @@ JSON discriminator 生成的 stored column。普通分类、配置、能力、sc
 
 ## 9.7 配置约定
 
-- 配置文件固定为 `~/.pure/config.toml`。
+- 配置文件固定为 `~/.anywork/config.toml`。
 - 本地 TOML 使用 `snake_case`。
 - 不设置 `active_provider`。
 - 固定角色 key：`explorer`、`planner`、`executor`、`worktree_executor`、`reviewer`。

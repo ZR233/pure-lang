@@ -1,27 +1,27 @@
 ---
 name: studio-config
-description: Use when asked where Pure Studio stores its configuration or how to configure providers, model routes, permissions, skills, MCP, LSP, UI, or web search. Covers config file locations, TOML schema, credential handling, and safe manual editing.
+description: Use when asked where anywork stores its configuration or how to configure providers, model routes, permissions, skills, MCP, LSP, UI, or web search. Covers config file locations, TOML schema, credential handling, and safe manual editing.
 metadata:
   category: guides
 ---
 
-# Pure Studio Configuration
+# anywork Configuration
 
-Use this skill when the user asks where Pure Studio keeps its settings or wants to configure something outside the Settings page.
+Use this skill when the user asks where anywork keeps its settings or wants to configure something outside the Settings page.
 
 ## Where Configuration Lives
 
-Pure Studio reads a single user config file:
+anywork reads a single user config file:
 
 ```text
-~/.pure/config.toml          Windows: %USERPROFILE%\.pure\config.toml
+~/.anywork/config.toml          Windows: %USERPROFILE%\.anywork\config.toml
 ```
 
 The home directory can be overridden, in resolution order:
 
 1. `--studio-home <absolute path>` launch argument
-2. `PURE_STUDIO_HOME` environment variable (absolute, non-empty)
-3. default `<user home>/.pure`
+2. `ANYWORK_HOME` environment variable (absolute, non-empty)
+3. default `<user home>/.anywork`
 
 Product state (projects, threads, tasks) lives in `<home>/studio/studio.sqlite`; never edit it by hand.
 
@@ -46,13 +46,13 @@ Product state (projects, threads, tasks) lives in `<home>/studio/studio.sqlite`;
 - `[deepseek_web_search]` — DeepSeek native hosted search toggle. The section and `enabled` field both default to `true`; it deliberately has no OpenAI-specific mode, domain, location, or context options.
 - `[instructions]` — base override, developer/user instructions, project doc limits.
 
-A few sections are omitted when left at defaults (`runtime`, `instructions`, `lsp`, `ui`); a default Studio save still writes `[skills]` with `project_dir = ".agents/skills"` and `user_dir = "~/.pure/skills"`, `[web_search]` with `mode = "cached"`, and `[deepseek_web_search]` with `enabled = true`, so do not delete them assuming they are unused.
+A few sections are omitted when left at defaults (`runtime`, `instructions`, `lsp`, `ui`); a default Studio save still writes `[skills]` with `project_dir = ".agents/skills"` and `user_dir = "~/.anywork/skills"`, `[web_search]` with `mode = "cached"`, and `[deepseek_web_search]` with `enabled = true`, so do not delete them assuming they are unused.
 
 When the current route is an eligible credentialed DeepSeek Responses model, DeepSeek native search takes priority. Disabling it falls back to the separately configured OpenAI search when available. Provider instances that override a preset's canonical base URL do not inherit hosted search capability unless they explicitly declare the matching hosted dialect.
 
 ## Credentials
 
-Tokens never live in `config.toml`. Saving from Settings clears any inline token and stores it in the system credential store (service `pure-studio`, account `provider:<id>`). To use an environment variable instead, set `bearer_token_env`; when both exist, the stored credential takes precedence.
+Tokens never live in `config.toml`. Saving from Settings clears any inline token and stores it in the system credential store (service `anywork`, account `provider:<id>`). To use an environment variable instead, set `bearer_token_env`; when both exist, the stored credential takes precedence.
 
 ## Minimal Working Example
 

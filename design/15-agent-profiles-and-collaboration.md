@@ -17,7 +17,7 @@ Studio 的 child Agent 使用与 root 相同的 Thread/Turn/Tool 框架。Profil
 ## 15.2 用户 Agent 文件
 
 用户 Profile 位于 Studio home 的 `agents/` 目录；默认路径是
-`~/.pure/agents/<agent-id>.toml`。目录只扫描第一层普通 `.toml` 文件，文件名 stem 是稳定 id，
+`~/.anywork/agents/<agent-id>.toml`。目录只扫描第一层普通 `.toml` 文件，文件名 stem 是稳定 id，
 不递归读取临时、隐藏或备份文件。单个文件完整表达一个 Agent：
 
 ```toml
@@ -191,7 +191,7 @@ provider prompt cache 复用机会，缓存命中只按上游实际 usage 报告
 ## 15.6 worktree 生命周期
 
 本地和 SSH 后端都以 spawn 时解析的 `HEAD` 执行 `git worktree add -b`，禁用 hooks 和 credential
-helper，最长 120 秒。路径为 `<repo>/.pure/worktrees/<root-thread-id>/<child-id>`，分支使用 Pure-owned
+helper，最长 120 秒。路径为 `<repo>/.anywork/worktrees/<root-thread-id>/<child-id>`，分支使用 Pure-owned
 `pure-agent-*` 名称。非 Git 项目或无 HEAD 时 typed 失败。
 
 `studio_objects` 保存版本化 lease：`prepared | active | preserved | cleanupRequested | cleaned`，以及

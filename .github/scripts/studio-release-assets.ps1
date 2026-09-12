@@ -36,8 +36,8 @@ function Get-StudioReleaseAssetNames {
         throw "Studio release version must be stable x.y.z SemVer: $Version"
     }
 
-    $setup = "Pure-Studio-$Version-windows-x86_64-setup.exe"
-    $portable = "Pure-Studio-$Version-windows-x86_64-portable.zip"
+    $setup = "anywork-$Version-windows-x86_64-setup.exe"
+    $portable = "anywork-$Version-windows-x86_64-portable.zip"
     return @(
         $setup
         "$setup.minisig"
