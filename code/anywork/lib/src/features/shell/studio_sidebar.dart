@@ -18,42 +18,6 @@ class _Sidebar extends ConsumerWidget {
         color: context.colors.surfaceContainer,
         child: Column(
           children: [
-            SizedBox(
-              height: 52,
-              child: Center(
-                child: compact
-                    ? StudioIconBadge(
-                        tone: StudioTone.brand,
-                        filled: true,
-                        icon: Icons.auto_awesome_motion,
-                        size: 34,
-                      )
-                    : Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        child: Row(
-                          children: [
-                            StudioIconBadge(
-                              filled: true,
-                              icon: Icons.auto_awesome_motion,
-                              size: 34,
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Text(
-                                context.l10n.appTitle,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.titleMedium
-                                    ?.copyWith(
-                                      fontWeight: FontWeight.w700,
-                                      color: context.colors.onSurface,
-                                    ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-              ),
-            ),
             Padding(
               padding: EdgeInsets.symmetric(
                 horizontal: compact ? 8 : 16,

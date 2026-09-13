@@ -377,12 +377,31 @@ void registerShellSettingsTests() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.byKey(StudioDriverKeys.newSession), findsOneWidget);
+    final sidebar = find.byKey(StudioDriverKeys.sidebar);
+    final newSession = find.byKey(StudioDriverKeys.newSession);
+    expect(newSession, findsOneWidget);
     expect(
       find.byKey(StudioDriverKeys.archiveThread('session-1')),
       findsOneWidget,
     );
-    await tester.tap(find.byKey(StudioDriverKeys.newSession));
+    // compact rail 同样移除品牌头，不再渲染应用 logo 或名字。
+    expect(
+      find.descendant(
+        of: sidebar,
+        matching: find.byIcon(Icons.auto_awesome_motion),
+      ),
+      findsNothing,
+    );
+    final localizedTitle = AppLocalizations.of(
+      tester.element(find.byKey(StudioDriverKeys.shell)),
+    ).appTitle;
+    expect(
+      find.descendant(of: sidebar, matching: find.text(localizedTitle)),
+      findsNothing,
+    );
+    // 新建会话仍保留，并紧贴侧栏顶部 12px 起始。
+    expect(tester.getRect(newSession).top - tester.getRect(sidebar).top, 12.0);
+    await tester.tap(newSession);
     await tester.pumpAndSettle();
     expect(api.createdThreadProjectId, isNull);
     expect(find.byKey(StudioDriverKeys.startPage), findsOneWidget);
@@ -770,6 +789,27 @@ void registerShellSettingsTests() {
       expect(find.text('新建会话'), findsOneWidget);
       expect(find.text('打开项目'), findsOneWidget);
       expect(find.text('设置'), findsOneWidget);
+      // 侧栏不再重复系统标题栏的 logo 与 app 名字。
+      expect(
+        find.descendant(
+          of: sidebar,
+          matching: find.byIcon(Icons.auto_awesome_motion),
+        ),
+        findsNothing,
+      );
+      final localizedTitle = AppLocalizations.of(
+        tester.element(find.byKey(StudioDriverKeys.shell)),
+      ).appTitle;
+      expect(
+        find.descendant(of: sidebar, matching: find.text(localizedTitle)),
+        findsNothing,
+      );
+      // 删除品牌头占位后，新建会话紧贴侧栏顶部 12px 起始；侧栏宽度不变。
+      expect(
+        tester.getRect(newSession).top - tester.getRect(sidebar).top,
+        12.0,
+      );
+      expect(tester.getSize(sidebar).width, StudioLayout.sidebarWidth);
       expect(
         tester.getCenter(newSession).dy,
         lessThan(tester.getCenter(openProject).dy),
