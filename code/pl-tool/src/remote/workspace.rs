@@ -61,6 +61,14 @@ impl RemoteWorkspaceFileBackend {
         &self.canonical_path
     }
 
+    /// Whether both workspaces use the same transport and workspace handle.
+    /// Equal paths or workspace IDs alone do not identify a connection.
+    pub fn is_same_binding(&self, other: &Self) -> bool {
+        self.client.is_same_connection(&other.client)
+            && self.workspace_id == other.workspace_id
+            && self.canonical_path == other.canonical_path
+    }
+
     pub(crate) fn client(&self) -> &RemoteClient {
         &self.client
     }
@@ -438,6 +446,35 @@ fn remote_file_error(error: RemoteClientError) -> pl_protocol::PureError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn workspace_identity_does_not_reuse_handles_from_a_replaced_transport() {
+        let (first, first_peer) = tokio::io::duplex(1024);
+        let (second, second_peer) = tokio::io::duplex(1024);
+        let (reader, writer) = tokio::io::split(first);
+        let first = RemoteClient::from_streams(reader, writer);
+        let (reader, writer) = tokio::io::split(second);
+        let second = RemoteClient::from_streams(reader, writer);
+        let previous =
+            RemoteWorkspaceFileBackend::new(first.clone(), "workspace-1".into(), "/project".into());
+        let current = RemoteWorkspaceFileBackend::new(
+            second.clone(),
+            "workspace-1".into(),
+            "/project".into(),
+        );
+        assert!(previous.is_same_binding(&previous.clone()));
+        assert!(!previous.is_same_binding(&current));
+        drop(first_peer);
+        first.wait_disconnected().await;
+        assert!(
+            previous.is_same_binding(&previous.clone()),
+            "identity remains comparable after disconnection"
+        );
+        assert!(!previous.is_same_binding(&current));
+        drop(second_peer);
+        first.close().await.unwrap();
+        second.close().await.unwrap();
+    }
 
     #[test]
     fn remote_paths_are_posix_relative_and_confined() {

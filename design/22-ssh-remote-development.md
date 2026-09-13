@@ -78,7 +78,9 @@ SSH 通道只承载标准输入输出协议，因此固定关闭伪终端（`-T`
 连接状态穷尽为 disconnected、connecting、waiting-for-input、ready、reconnecting 与 failed。
 断线使当前远端 tool 立即以稳定 `remoteDisconnected` 失败，不透明重放写入或 stdin；core 以
 1、2、4、8、15、30 秒退避重连。重连成功后 core 主动重开已知 workspace、重新取得 shell
-descriptor；下一次 Turn
+descriptor；手动及自动重连成功均通知原有 root/child 会话刷新工具绑定，无需新建会话。
+刷新依据连接身份判断租约是否仍有效，不以服务器名称、目录或可重复的 workspace id 判断。
+原工作目录重新打开失败时报告失败，禁止继续使用旧连接或切换到其他目录。下一次 Turn
 重新读取远端 Skills，并在 host identity 变化后重新探测 LSP。
 
 SSH workspace 的 Skill catalog 由一个共享 registry 组合构成：远端 provider 贡献 Project 源，

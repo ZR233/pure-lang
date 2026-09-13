@@ -27,7 +27,69 @@ pub(super) struct ToolBinding {
     pub ssh_profile: Option<pl_tool::remote::SshServerProfile>,
 }
 
+/// Candidate metadata is published only after the Thread accepts its registrations.
+pub(in crate::studio) struct RefreshedToolBinding {
+    previous: std::sync::Arc<()>,
+    binding: ToolBinding,
+}
+
 impl StudioThreadFactory {
+    #[cfg(test)]
+    pub(in crate::studio) fn binding_incarnation_for_test(
+        &self,
+        id: &str,
+    ) -> Option<std::sync::Arc<()>> {
+        self.bindings
+            .lock()
+            .unwrap()
+            .get(id)
+            .map(|binding| binding.incarnation.clone())
+    }
+
+    #[cfg(test)]
+    pub(in crate::studio) fn remote_binding_for_test(
+        &self,
+        id: &str,
+    ) -> Option<pl_tool::remote::RemoteWorkspaceHost> {
+        self.bindings
+            .lock()
+            .unwrap()
+            .get(id)
+            .and_then(|binding| binding.remote.clone())
+    }
+
+    pub(in crate::studio) fn ssh_server_id(&self, id: &str) -> Option<String> {
+        self.bindings
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(id)
+            .and_then(|binding| binding.project.ssh_server_id.clone())
+    }
+
+    pub(in crate::studio) fn commit_refreshed_binding(
+        &self,
+        id: &str,
+        candidate: RefreshedToolBinding,
+    ) -> Result<(), ThreadAssemblyError> {
+        let mut bindings = self
+            .bindings
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let current = bindings
+            .get_mut(id)
+            .ok_or(pl_core::thread::ThreadError::Closed)?;
+        if !std::sync::Arc::ptr_eq(&current.incarnation, &candidate.previous) {
+            return Err(pl_core::thread::ThreadError::Closed.into());
+        }
+        if current.target_invalidated {
+            return Err(ThreadAssemblyError::Identity(
+                "SSH target or credentials changed during tool refresh; reactivate this Thread"
+                    .into(),
+            ));
+        }
+        *current = candidate.binding;
+        Ok(())
+    }
     pub(in crate::studio) fn skill_catalog_fact(
         &self,
         id: &str,
@@ -96,6 +158,7 @@ impl StudioThreadFactory {
         (
             StudioThreadTools,
             crate::thread_assembler::AgentControlExposure,
+            RefreshedToolBinding,
         ),
         ThreadAssemblyError,
     > {
@@ -190,6 +253,36 @@ impl StudioThreadFactory {
                 .attachments_dir()
                 .join("thread-resources"),
         );
+        let remote = match &project.ssh_server_id {
+            Some(server) => {
+                let host = self
+                    .services
+                    .ssh_manager
+                    .open_workspace_host(
+                        server,
+                        binding.workspace.root().to_string_lossy().into_owned(),
+                    )
+                    .await
+                    .map_err(|error| resource_error("reopen Thread remote workspace", error))?;
+                if host.files.canonical_path() != binding.workspace.root().to_string_lossy() {
+                    return Err(ThreadAssemblyError::Identity(
+                        "remote workspace target changed; reactivate this Thread".into(),
+                    ));
+                }
+                Some(host)
+            }
+            None => None,
+        };
+        let same_connection = match (&binding.remote, &remote) {
+            (Some(previous), Some(current)) => previous.files.is_same_binding(&current.files),
+            (None, None) => true,
+            _ => false,
+        };
+        let previous_commands = if same_connection {
+            binding.commands.clone()
+        } else {
+            None
+        };
         let mut prepared = self
             .prepare_thread_tools_with(
                 ThreadToolAssembly {
@@ -205,9 +298,8 @@ impl StudioThreadFactory {
                 CatalogPreparation::Refresh {
                     policy_key: binding.policy_key.clone(),
                     policies: binding.policies.clone(),
-                    remote: binding.remote.clone().map(Box::new),
-                    commands: binding
-                        .commands
+                    remote: remote.map(Box::new),
+                    commands: previous_commands
                         .as_ref()
                         .and_then(WeakCommandProcesses::upgrade),
                 },
@@ -245,22 +337,20 @@ impl StudioThreadFactory {
             .command_processes
             .as_ref()
             .map(|commands| commands.downgrade())
-            .or(binding.commands);
-        if let Some(current) = self
-            .bindings
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get_mut(id)
-        {
-            if !std::sync::Arc::ptr_eq(&current.incarnation, &binding.incarnation) {
-                return Err(pl_core::thread::ThreadError::Closed.into());
-            }
-            current.commands = commands;
-            current.catalog = prepared.catalog.clone();
-            current.policy_key = super::thread_tools::approval_policy_key(&config, &route);
-            current.policies = prepared.tools.approval_policies.clone();
-        }
-        Ok((prepared.tools, exposure))
+            .or(previous_commands);
+        let candidate = RefreshedToolBinding {
+            previous: binding.incarnation.clone(),
+            binding: ToolBinding {
+                incarnation: std::sync::Arc::new(()),
+                commands,
+                remote: prepared.remote.clone(),
+                catalog: prepared.catalog.clone(),
+                policy_key: super::thread_tools::approval_policy_key(&config, &route),
+                policies: prepared.tools.approval_policies.clone(),
+                ..binding
+            },
+        };
+        Ok((prepared.tools, exposure, candidate))
     }
 }
 

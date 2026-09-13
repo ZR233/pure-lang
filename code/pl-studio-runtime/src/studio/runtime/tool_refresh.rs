@@ -10,6 +10,17 @@ use std::collections::BTreeMap;
 #[derive(Default)]
 struct CatalogSources(BTreeMap<String, String>);
 impl CatalogSources {
+    fn for_ssh_server(&self, server: Option<&str>) -> Self {
+        let key = server.map(|server| format!("ssh-ready:{server}"));
+        Self(
+            self.0
+                .iter()
+                .filter(|(name, _)| !name.starts_with("ssh-ready:") || key.as_ref() == Some(name))
+                .map(|(name, value)| (name.clone(), value.clone()))
+                .collect(),
+        )
+    }
+
     fn observe(&mut self, event: StudioProductEventKind) {
         let entry = match event {
             StudioProductEventKind::ProjectDirectoryChanged(value) => {
@@ -62,10 +73,11 @@ impl StudioRuntime {
         let mut settings = self.settings_updates.subscribe();
         let mut mcp = self.external_runtimes.mcp.subscribe();
         let mut events = self.agent_facility.product_events.subscribe();
+        let mut ssh_ready = self.ssh_manager.subscribe_ready();
         let runtime = self.clone();
         *slot = Some(BackgroundTask::new(tokio::spawn(async move {
             let mut sources = CatalogSources::default();
-            let mut installed: BTreeMap<String, (ThreadHandle, String)> = BTreeMap::new();
+            let mut attempted: BTreeMap<String, (ThreadHandle, String)> = BTreeMap::new();
             let mut mcp_changed = true;
             loop {
                 if stopping.is_cancelled() {
@@ -84,8 +96,13 @@ impl StudioRuntime {
                     "settings".into(),
                     settings.borrow_and_update().revision.to_string(),
                 );
+                for (server, revision) in ssh_ready.borrow_and_update().iter() {
+                    sources
+                        .0
+                        .insert(format!("ssh-ready:{server}"), revision.to_string());
+                }
                 runtime
-                    .refresh_tool_catalogs(&sources, &mut installed)
+                    .refresh_tool_catalogs(&sources, &mut attempted)
                     .await;
                 tokio::select! {
                     () = stopping.cancelled() => break,
@@ -94,6 +111,7 @@ impl StudioRuntime {
                         sources.0.insert("ssh".into(), revision.to_string());
                     },
                     changed = settings.changed() => if changed.is_err() { break; },
+                    changed = ssh_ready.changed() => if changed.is_err() { break; },
                     changed = mcp.recv() => {
                         if matches!(changed, Err(tokio::sync::broadcast::error::RecvError::Closed)) { break; }
                         mcp_changed = true;
@@ -111,11 +129,11 @@ impl StudioRuntime {
     async fn refresh_tool_catalogs(
         &self,
         sources: &CatalogSources,
-        installed: &mut BTreeMap<String, (ThreadHandle, String)>,
+        attempted: &mut BTreeMap<String, (ThreadHandle, String)>,
     ) {
         let active = self.threads.observed_threads();
         let ids: std::collections::BTreeSet<_> = active.iter().map(|(id, _)| id.clone()).collect();
-        installed.retain(|id, _| ids.contains(id));
+        attempted.retain(|id, _| ids.contains(id));
         for (id, thread) in active {
             if let Err(error) = self.rejected_tools.retry(Some(&thread)).await {
                 tracing::warn!(thread_id = %id, %error, "candidate cleanup remains pending");
@@ -142,8 +160,10 @@ impl StudioRuntime {
             if snapshot.lifecycle != ThreadLifecycle::Open {
                 continue;
             }
-            let fingerprint = catalog_fingerprint(sources, &snapshot);
-            if installed.get(&id).is_some_and(|(previous, key)| {
+            let server = self.thread_factory.ssh_server_id(&id);
+            let fingerprint =
+                catalog_fingerprint(&sources.for_ssh_server(server.as_deref()), &snapshot);
+            if attempted.get(&id).is_some_and(|(previous, key)| {
                 previous.same_instance(&thread) && key == &fingerprint
             }) {
                 continue;
@@ -171,11 +191,13 @@ impl StudioRuntime {
                 )
             }) {
                 // The stale candidate was closed by the transfer API. Reprepare against the
-                // new producer state; never mark this fingerprint installed or clear its tools.
+                // new producer state; never mark this fingerprint attempted or clear its tools.
                 self.tool_catalog_updates.notify_one();
                 continue;
             }
-            installed.insert(id.clone(), (thread, fingerprint));
+            // Cache attempts, including failures, until an input revision changes.
+            // Recovery issues remain visible; only successful transfer commits a binding.
+            attempted.insert(id.clone(), (thread.clone(), fingerprint));
             let issue_id = format!("tool-refresh:{id}");
             match result {
                 Ok(()) => {
@@ -216,7 +238,7 @@ impl StudioRuntime {
             .thread_factory
             .refresh_thread_tools(id, snapshot, tokio_util::sync::CancellationToken::new())
             .await;
-        let (tools, exposure) = match prepared {
+        let (tools, exposure, binding) = match prepared {
             Ok(prepared) => prepared,
             Err(error) => {
                 thread
@@ -239,6 +261,28 @@ impl StudioRuntime {
         thread
             .register_tools_if_extensions(snapshot.extension_sequence, registrations)
             .await?;
+        self.publish_tool_binding(id, thread, snapshot.extension_sequence, binding)
+            .await
+    }
+
+    // The refresh loop serializes installations. An extension change can still
+    // supersede this catalog, so rollback uses the same producer sequence guard.
+    async fn publish_tool_binding(
+        &self,
+        id: &str,
+        thread: &ThreadHandle,
+        extension_sequence: u64,
+        binding: crate::studio::thread_factory::RefreshedToolBinding,
+    ) -> anyhow::Result<()> {
+        if thread.snapshot().lifecycle != ThreadLifecycle::Open {
+            return Err(pl_core::thread::ThreadError::Closed.into());
+        }
+        if let Err(error) = self.thread_factory.commit_refreshed_binding(id, binding) {
+            thread
+                .register_tools_if_extensions(extension_sequence, Vec::new())
+                .await?;
+            return Err(error.into());
+        }
         Ok(())
     }
 
@@ -276,6 +320,267 @@ fn catalog_fingerprint(
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[ignore = "requires embedded-remote-helpers, PURE_SSH_TEST_SERVER/USERNAME/WORKSPACE and key authentication"]
+    async fn ssh_reconnect_restores_existing_thread_tools() -> anyhow::Result<()> {
+        use pl_core::{context::OpaquePayload, model::*, thread::*};
+        use pl_tool::remote::{SshAuth, SshServerProfile};
+        use tokio_util::sync::CancellationToken;
+
+        #[derive(Clone)]
+        struct Call(ModelToolCall);
+        impl Model for Call {
+            async fn open_session(&self) -> Result<DynModelSession, ModelError> {
+                Ok(DynModelSession::new(self.clone()))
+            }
+        }
+        impl ModelSession for Call {
+            async fn prepare(
+                &mut self,
+                request: ModelRequest,
+            ) -> Result<PreparedModelCall, ModelError> {
+                let call = self.0.clone();
+                Ok(PreparedModelCall::new(async move {
+                    Ok(ModelStepOutput {
+                        attempt_id: request.attempt_id,
+                        base_context_revision: request.context.revision,
+                        content: Vec::new(),
+                        tool_calls: vec![call],
+                        private_context: None,
+                        usage: Default::default(),
+                    })
+                }))
+            }
+            async fn close(&mut self) -> Result<(), ModelError> {
+                Ok(())
+            }
+        }
+        async fn start_call(
+            thread: &ThreadHandle,
+            tool: &str,
+            arguments: serde_json::Value,
+        ) -> anyhow::Result<String> {
+            static CALLS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let call_id = format!(
+                "probe-{}",
+                CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            );
+            thread
+                .replace_model(ModelFactory::new(Call(ModelToolCall {
+                    call_id: call_id.clone(),
+                    tool_id: tool.into(),
+                    arguments: OpaquePayload::new("application/json", 1, arguments.to_string())?,
+                })))
+                .await?;
+            thread.reveal_tools(vec![tool.into()]).await?;
+            thread
+                .step(StepInput {
+                    turn_id: call_id.clone(),
+                    attempt_id: call_id.clone(),
+                    content: Vec::new(),
+                    cancellation: CancellationToken::new(),
+                })
+                .await?;
+            let _ = thread
+                .execute_tool(call_id.clone(), CancellationToken::new())
+                .await?;
+            Ok(call_id)
+        }
+        async fn invoke(
+            thread: &ThreadHandle,
+            tool: &str,
+            arguments: serde_json::Value,
+        ) -> anyhow::Result<ToolDelivery> {
+            let call_id = start_call(thread, tool, arguments).await?;
+            Ok(thread
+                .wait_task(&format!("task:{call_id}"), CancellationToken::new())
+                .await?)
+        }
+        async fn probe(thread: &ThreadHandle) -> anyhow::Result<()> {
+            for (tool, args) in [
+                ("read_file", serde_json::json!({"path": "fixture.txt"})),
+                (
+                    "exec",
+                    serde_json::json!({"command": "cat fixture.txt", "cwd": "."}),
+                ),
+            ] {
+                let delivery = invoke(thread, tool, args).await?;
+                anyhow::ensure!(
+                    matches!(delivery.outcome, ToolOutcome::Succeeded),
+                    "{tool}: {:?}",
+                    delivery.output
+                );
+                anyhow::ensure!(
+                    delivery
+                        .output
+                        .payload()
+                        .content()
+                        .contains("reconnect-fixture"),
+                    "missing fixture: {:?}",
+                    delivery.output
+                );
+            }
+            Ok(())
+        }
+
+        let home = tempfile::tempdir()?;
+        let runtime = StudioRuntime::with_options(crate::StudioRuntimeOptions {
+            studio_home: Some(home.path().to_owned()),
+            host: crate::StudioHostKind::Test,
+        })
+        .await?;
+        let config = runtime.config_runtime.read()?;
+        runtime.config_runtime.update(config.revision, |config| {
+            let mut config = config.clone();
+            config.runtime.permission_mode = crate::approval::PermissionMode::FullAccess;
+            config.runtime.tool_capabilities.skills = false;
+            config.runtime.tool_capabilities.lsp = false;
+            config.runtime.tool_capabilities.mcp = false;
+            Ok(config)
+        })?;
+        runtime.start_runtime().await?;
+        let result = tokio::time::timeout(std::time::Duration::from_secs(120), async {
+            runtime
+                .save_ssh_server(
+                    SshServerProfile {
+                        id: "reconnect".into(),
+                        name: "reconnect".into(),
+                        host: std::env::var("PURE_SSH_TEST_SERVER")?,
+                        port: 22,
+                        username: std::env::var("PURE_SSH_TEST_USERNAME")?,
+                        auth: SshAuth::AgentOrKey {
+                            identity_file: None,
+                        },
+                    },
+                    None,
+                )
+                .await?;
+            let path = std::env::var("PURE_SSH_TEST_WORKSPACE")?;
+            let project = runtime
+                .open_remote_project("reconnect", path.clone())
+                .await?;
+            let record = runtime
+                .create_thread(&project.id, "reconnect regression")
+                .await?;
+            let thread = runtime.ensure_thread_owner(&record.id).await?;
+            runtime.stop_tool_refresh().await?;
+            let child_id = format!("{}-child", record.id);
+            let profile = runtime.config_runtime.resolve_agent_profile("executor")?;
+            let spec = crate::thread_assembler::StudioChildResources::prepare(
+                &runtime.thread_factory,
+                &crate::thread_assembler::ChildThreadRequest {
+                    id: child_id.clone(), caller: record.id.clone(), call_id: "child-fixture".into(),
+                    profile_id: "executor".into(), cancellation: CancellationToken::new(),
+                    writable_paths: None, metadata: OpaquePayload::text("reconnect fixture"),
+                }, &profile,
+            ).await?;
+            let child = runtime.threads.assemble(spec).await?;
+            probe(&thread).await?;
+            probe(&child).await?;
+            let waiting = start_call(&thread, "exec", serde_json::json!({
+                "command": "read value; printf '%s' \"$value\"", "cwd": "."
+            })).await?;
+            runtime.install_refreshed_tools(&record.id, &thread, &thread.snapshot()).await?;
+            invoke(&thread, "write_stdin", serde_json::json!({
+                "taskId": format!("task:{waiting}"), "chars": "preserved-process\n"
+            })).await?;
+            let completed = thread.wait_task(&format!("task:{waiting}"), CancellationToken::new()).await?;
+            anyhow::ensure!(matches!(completed.outcome, ToolOutcome::Succeeded)
+                && completed.output.payload().content().contains("preserved-process"), "catalog refresh interrupted a live command");
+            let initial = thread.snapshot().context.records.to_vec();
+            for automatic in [false, true, false] {
+                let old = runtime
+                    .ssh_manager
+                    .open_workspace_host("reconnect", path.clone())
+                    .await?;
+                let previous = runtime.thread_factory.binding_incarnation_for_test(&record.id).unwrap();
+                runtime.start_tool_refresh().await;
+                // Let the initial catalog pass finish before disconnecting, so only
+                // the Ready notification can trigger the recovery being tested.
+                tokio::time::timeout(std::time::Duration::from_secs(20), async {
+                    while runtime.thread_factory.binding_incarnation_for_test(&record.id)
+                        .is_none_or(|current| std::sync::Arc::ptr_eq(&previous, &current)) {
+                        tokio::task::yield_now().await;
+                    }
+                }).await?;
+                if automatic {
+                    // Kill only this test-owned helper transport, causing the production
+                    // disconnect monitor and backoff loop to establish its replacement.
+                    let interrupted = invoke(
+                        &thread,
+                        "exec",
+                        serde_json::json!({
+                            "command": "kill -KILL \"$(awk '/^PPid:/{print $2}' /proc/$PPID/status)\"", "cwd": "."
+                        }),
+                    )
+                    .await;
+                    match interrupted {
+                        Ok(delivery) => anyhow::ensure!(!matches!(delivery.outcome, ToolOutcome::Succeeded), "lost transport reported success"),
+                        Err(error) => anyhow::ensure!(format!("{error:#}").contains("remoteDisconnected"), "unexpected disconnect error: {error:#}"),
+                    }
+                } else {
+                    runtime.reconnect_ssh_server("reconnect").await?;
+                }
+                // Observe committed binding replacement, not Ready alone. No command
+                // retries or manual refresh may conceal a missing reconnect notification.
+                tokio::time::timeout(std::time::Duration::from_secs(20), async {
+                    while [&record.id, &child_id].iter().any(|id| runtime.thread_factory.remote_binding_for_test(id)
+                        .is_none_or(|host| host.files.is_same_binding(&old.files))) {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .map_err(|_| {
+                    anyhow::anyhow!("Ready did not replace the original Thread binding")
+                })?;
+                runtime.stop_tool_refresh().await?;
+                let current = runtime
+                    .ssh_manager
+                    .open_workspace_host("reconnect", path.clone())
+                    .await?;
+                anyhow::ensure!(
+                    !old.files.is_same_binding(&current.files),
+                    "transport was not replaced"
+                );
+                probe(&thread).await?;
+                probe(&child).await?;
+            }
+            assert_eq!(
+                &thread.snapshot().context.records[..initial.len()],
+                initial.as_slice()
+            );
+            invoke(&thread, "exec", serde_json::json!({"command": "mkdir unavailable; cp fixture.txt unavailable/fixture.txt", "cwd": "."})).await?;
+            let missing_project = runtime.open_remote_project("reconnect", format!("{path}/unavailable")).await?;
+            let missing_record = runtime.create_thread(&missing_project.id, "missing workspace").await?;
+            let missing_thread = runtime.ensure_thread_owner(&missing_record.id).await?;
+            let previous = runtime.thread_factory.binding_incarnation_for_test(&missing_record.id).unwrap();
+            invoke(&thread, "exec", serde_json::json!({"command": "mv unavailable unavailable-moved", "cwd": "."})).await?;
+            runtime.reconnect_ssh_server("reconnect").await?;
+            anyhow::ensure!(runtime.install_refreshed_tools(&missing_record.id, &missing_thread, &missing_thread.snapshot()).await.is_err(), "missing workspace silently recovered");
+            anyhow::ensure!(std::sync::Arc::ptr_eq(&previous, &runtime.thread_factory.binding_incarnation_for_test(&missing_record.id).unwrap()), "failed reopen published a binding");
+            runtime.install_refreshed_tools(&record.id, &thread, &thread.snapshot()).await?;
+            invoke(&thread, "exec", serde_json::json!({"command": "mv unavailable-moved unavailable", "cwd": "."})).await?;
+            runtime.install_refreshed_tools(&missing_record.id, &missing_thread, &missing_thread.snapshot()).await?;
+            probe(&missing_thread).await?;
+            missing_thread.close().await?;
+            anyhow::ensure!(runtime.install_refreshed_tools(&missing_record.id, &missing_thread, &missing_thread.snapshot()).await.is_err(), "closed Thread accepted refreshed tools");
+            let cancelled = CancellationToken::new();
+            cancelled.cancel();
+            anyhow::ensure!(runtime.thread_factory.refresh_thread_tools(&record.id, &thread.snapshot(), cancelled).await.is_err(), "cancelled refresh succeeded");
+            let snapshot = thread.snapshot();
+            let (tools, _, binding) = runtime.thread_factory.refresh_thread_tools(&record.id, &snapshot, CancellationToken::new()).await?;
+            thread.register_tools_if_extensions(snapshot.extension_sequence, tools.into_registrations()).await?;
+            runtime.thread_factory.invalidate_ssh_bindings("reconnect");
+            anyhow::ensure!(runtime.publish_tool_binding(&record.id, &thread, snapshot.extension_sequence, binding).await.is_err(), "changed credentials reused a binding");
+            anyhow::ensure!(thread.reveal_tools(vec!["read_file".into()]).await.is_err(), "invalidated candidate tools remained registered");
+            Ok::<_, anyhow::Error>(())
+        })
+        .await;
+        runtime.shutdown_runtime().await?;
+        result??;
+        Ok(())
+    }
 
     #[tokio::test]
     async fn cold_activation_keeps_tools_and_directory_available_after_restart() {
@@ -355,7 +660,7 @@ mod tests {
             .unwrap();
         let thread = runtime.ensure_thread_owner(&record.id).await.unwrap();
         let frozen = thread.snapshot();
-        let (old, _) = runtime
+        let (old, _, old_binding) = runtime
             .thread_factory
             .refresh_thread_tools(
                 &record.id,
@@ -397,6 +702,13 @@ mod tests {
             .install_refreshed_tools(&record.id, &thread, &thread.snapshot())
             .await
             .unwrap();
+        assert!(
+            runtime
+                .thread_factory
+                .commit_refreshed_binding(&record.id, old_binding)
+                .is_err(),
+            "a rejected candidate cannot overwrite the successfully installed binding"
+        );
         thread
             .reveal_tools(vec![
                 "workflow_transition".into(),
@@ -444,5 +756,21 @@ mod tests {
             },
         ));
         assert_eq!(sources.0, BTreeMap::new());
+    }
+
+    #[test]
+    fn reconnect_invalidates_only_catalogs_bound_to_that_server() {
+        let snapshot = pl_core::thread::ThreadSnapshot::default();
+        let mut sources = CatalogSources::default();
+        sources.0.insert("ssh-ready:a".into(), "1".into());
+        let for_server = |sources: &CatalogSources, server| {
+            catalog_fingerprint(&sources.for_ssh_server(server), &snapshot)
+        };
+        let before = [None, Some("a"), Some("b")].map(|server| for_server(&sources, server));
+        sources.0.insert("ssh-ready:a".into(), "2".into());
+        let after = [None, Some("a"), Some("b")].map(|server| for_server(&sources, server));
+        assert_eq!(before[0], after[0]);
+        assert_ne!(before[1], after[1]);
+        assert_eq!(before[2], after[2]);
     }
 }

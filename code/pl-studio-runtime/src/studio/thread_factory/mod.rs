@@ -7,6 +7,8 @@ mod thread_seed;
 mod thread_tools;
 mod tool_bindings;
 
+pub(in crate::studio) use tool_bindings::RefreshedToolBinding;
+
 use crate::studio::{ProductEventBus, StudioStore};
 use std::sync::Arc;
 

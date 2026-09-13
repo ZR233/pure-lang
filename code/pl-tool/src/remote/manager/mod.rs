@@ -4,7 +4,7 @@ mod asset;
 mod shutdown;
 mod ssh;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -117,6 +117,7 @@ pub struct SshManager {
     workspaces: Arc<Mutex<HashMap<(String, String), RemoteWorkspaceHost>>>,
     workspace_paths: Arc<RwLock<HashMap<String, HashSet<String>>>>,
     states: Arc<RwLock<HashMap<String, watch::Sender<SshConnectionState>>>>,
+    ready_revisions: watch::Sender<BTreeMap<String, u64>>,
     desired_connections: Arc<RwLock<HashSet<String>>>,
     password_leases: Arc<RwLock<HashMap<String, SecretString>>>,
 }
@@ -147,6 +148,7 @@ impl SshManager {
             workspaces: Arc::new(Mutex::new(HashMap::new())),
             workspace_paths: Arc::new(RwLock::new(HashMap::new())),
             states: Arc::new(RwLock::new(HashMap::new())),
+            ready_revisions: watch::channel(BTreeMap::new()).0,
             desired_connections: Arc::new(RwLock::new(HashSet::new())),
             password_leases: Arc::new(RwLock::new(HashMap::new())),
         }
@@ -248,6 +250,15 @@ impl SshManager {
     /// 订阅服务器连接状态；订阅本身不会建立连接。
     pub async fn subscribe_state(&self, server_id: &str) -> watch::Receiver<SshConnectionState> {
         self.ensure_state(server_id).await.subscribe()
+    }
+
+    /// Subscribes to completed connections, including automatic reconnections.
+    ///
+    /// Revisions are local to this manager and retained across disconnects. Consumers
+    /// must compare revisions, since multiple connections can complete between reads.
+    /// Subscribing does not connect and carries no credentials or remote environment.
+    pub fn subscribe_ready(&self) -> watch::Receiver<BTreeMap<String, u64>> {
+        self.ready_revisions.subscribe()
     }
 
     /// 完成架构探测、helper bootstrap 与协议握手。
@@ -382,6 +393,20 @@ impl SshManager {
     ) -> Result<RemoteWorkspaceHost, RemoteClientError> {
         let _operation = self.admit_connection().await?;
         let client = self.client(server_id).await?;
+        let connection_lock = self.connection_lock(server_id).await;
+        let _connection_guard = connection_lock.lock().await;
+        // Keep transport, workspace and environment from one connection, even if
+        // reconnect raced the initial lookup. Never publish a mixed-generation host.
+        let connection = self
+            .connections
+            .lock()
+            .await
+            .get(server_id)
+            .cloned()
+            .filter(|connection| {
+                connection.client.is_same_connection(&client) && !client.is_disconnected()
+            })
+            .ok_or(RemoteClientError::Disconnected)?;
         if let Some(host) = self
             .workspaces
             .lock()
@@ -398,13 +423,7 @@ impl SshManager {
         let canonical_path = files.canonical_path().to_string();
         let commands = RemoteCommandBackend::new(client.clone(), workspace_id.clone());
         let git = RemoteExecutionBackend::new(client, workspace_id, canonical_path);
-        let execution_environment = self
-            .connections
-            .lock()
-            .await
-            .get(server_id)
-            .map(|connection| connection.execution_environment.clone())
-            .ok_or_else(|| RemoteClientError::Protocol("SSH connection disappeared".to_string()))?;
+        let execution_environment = connection.execution_environment.clone();
         let host = RemoteWorkspaceHost {
             files,
             commands,
@@ -556,7 +575,14 @@ impl SshManager {
     }
 
     async fn set_state(&self, server_id: &str, state: SshConnectionState) {
+        let ready = matches!(state, SshConnectionState::Ready { .. });
         self.ensure_state(server_id).await.send_replace(state);
+        if ready {
+            self.ready_revisions.send_modify(|revisions| {
+                let revision = revisions.entry(server_id.to_owned()).or_default();
+                *revision = revision.saturating_add(1);
+            });
+        }
     }
 
     fn spawn_disconnect_monitor(&self, server_id: String, client: RemoteClient) {
@@ -725,6 +751,38 @@ async fn open_workspace(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn ready_subscription_retains_reconnections_between_observations() {
+        let manager = SshManager::new(None, None);
+        let mut ready = manager.subscribe_ready();
+        let connected = SshConnectionState::Ready {
+            helper_version: "test".into(),
+            architecture: "test".into(),
+        };
+        manager.set_state("a", connected.clone()).await;
+        manager
+            .set_state("a", SshConnectionState::Disconnected)
+            .await;
+        manager.set_state("a", connected.clone()).await;
+        manager.set_state("b", connected).await;
+        ready.changed().await.unwrap();
+        assert_eq!(
+            *ready.borrow_and_update(),
+            BTreeMap::from([("a".into(), 2), ("b".into(), 1)])
+        );
+        manager
+            .set_state(
+                "a",
+                SshConnectionState::Failed {
+                    code: "test".into(),
+                    message: "test".into(),
+                },
+            )
+            .await;
+        assert!(!ready.has_changed().unwrap());
+        manager.shutdown().await.unwrap();
+    }
 
     fn profile() -> SshServerProfile {
         SshServerProfile {
