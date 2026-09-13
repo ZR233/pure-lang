@@ -9,6 +9,17 @@
 /code/anywork/.tmp-tests
 /code/anywork/src-tauri/gen
 
+# Build caches left at the former application path.
+/code/pure-studio/.dart_tool/
+/code/pure-studio/.flutter-plugins-dependencies
+/code/pure-studio/.tmp-tests/
+/code/pure-studio/build/
+/code/pure-studio/dist/
+/code/pure-studio/target/
+/code/pure-studio/rust/target/
+/code/pure-studio/windows/flutter/ephemeral/
+/code/pure-studio/linux/flutter/ephemeral/
+
 # IDE
 /.claude/*
 !/.claude/skills/
