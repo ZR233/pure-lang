@@ -85,6 +85,7 @@ impl ProductEventBus {
             .collect::<Vec<_>>();
         let mut merged = merge_page_desc(hot, cold, cursor_key.as_ref());
         let has_more = has_more || merged.len() > limit;
+        merged.retain(|thread| !thread.archived);
         merged.truncate(limit);
         let next_cursor = has_more
             .then(|| {
@@ -106,11 +107,129 @@ impl ProductEventBus {
         })
     }
 
+    /// Searches cold history with canonical hot overrides before pagination.
+    pub async fn query_threads(
+        &self,
+        query: &pl_protocol::studio::ThreadDirectoryQuery,
+        cursor: Option<&str>,
+        limit: usize,
+    ) -> Result<StudioThreadDirectoryPage> {
+        let limit = limit.clamp(1, THREAD_DIRECTORY_PAGE_LIMIT);
+        let decoded = cursor
+            .map(|value| {
+                ThreadDirectoryCursor::decode(value)
+                    .ok_or_else(|| anyhow::anyhow!("invalid directory cursor"))
+            })
+            .transpose()?;
+        let key = decoded.as_ref().map(|c| (c.updated_at, c.id.clone()));
+        let projects = self.project_snapshot().await;
+        let matching_projects = projects
+            .iter()
+            .filter(|project| {
+                query.search.as_ref().is_some_and(|search| {
+                    format!("{} {}", project.name, project.path)
+                        .to_lowercase()
+                        .contains(&search.trim().to_lowercase())
+                })
+            })
+            .map(|project| project.id.clone())
+            .collect::<std::collections::HashSet<_>>();
+        // Capture the owner before cold reads: even a hot row outside this cursor
+        // shadows its older durable version.
+        let (hot, revision, updated_at) = {
+            let index = self
+                .thread_index
+                .lock()
+                .expect("thread index lock poisoned");
+            let (revision, updated_at) = self.revision(&self.revisions.thread);
+            (index.clone(), revision, updated_at)
+        };
+        let mut matches = hot
+            .values()
+            .filter(|thread| {
+                key.as_ref().is_none_or(|key| thread.page_key() < *key)
+                    && query.matches(thread, matching_projects.contains(&thread.project_id))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        matches.sort_by_key(|thread| std::cmp::Reverse(thread.page_key()));
+        matches.truncate(limit + 1);
+        let mut cold_cursor = decoded;
+        loop {
+            let cold = self
+                .store
+                .query_thread_directory_page(cold_cursor.as_ref(), query, 100)
+                .await?;
+            let end = cold.last().map(|thread| ThreadDirectoryCursor {
+                updated_at: thread.updated_at,
+                id: thread.id.clone(),
+            });
+            let exhausted = cold.len() < 100;
+            for thread in cold {
+                if !hot.contains_key(&thread.id)
+                    && query.matches(&thread, matching_projects.contains(&thread.project_id))
+                {
+                    matches.push(thread);
+                }
+            }
+            matches.sort_by_key(|thread| std::cmp::Reverse(thread.page_key()));
+            matches.truncate(limit + 1);
+            let enough = matches.len() > limit
+                && end.as_ref().is_some_and(|end| {
+                    (end.updated_at, end.id.clone()) <= matches[limit].page_key()
+                });
+            if exhausted || enough {
+                break;
+            }
+            cold_cursor = end;
+        }
+        let has_more = matches.len() > limit;
+        matches.truncate(limit);
+        let next_cursor = has_more
+            .then(|| {
+                matches.last().map(|thread| {
+                    ThreadDirectoryCursor {
+                        updated_at: thread.updated_at,
+                        id: thread.id.clone(),
+                    }
+                    .encode()
+                })
+            })
+            .flatten();
+        if self.revision(&self.revisions.thread).0 != revision {
+            return Err(pl_protocol::studio::StudioError::new(
+                pl_protocol::studio::StudioErrorCode::StaleRevision,
+                "Directory changed during search; retry the query",
+                true,
+            )
+            .into());
+        }
+        Ok(StudioThreadDirectoryPage {
+            state: pl_protocol::ObservedResource::ready(
+                revision,
+                updated_at,
+                StudioThreadDirectoryPageData {
+                    threads: matches,
+                    next_cursor,
+                },
+            ),
+        })
+    }
+
     /// 应用一次目录增量并发布 `ThreadDirectoryChanged` 事件（纯内存维护）。
     pub async fn apply_thread_delta(
         &self,
         upserted: Vec<Thread>,
         removed: Vec<String>,
+    ) -> Result<StudioProductEventEnvelope> {
+        self.publish_thread_delta(upserted, removed, Vec::new())
+    }
+
+    fn publish_thread_delta(
+        &self,
+        upserted: Vec<Thread>,
+        removed: Vec<String>,
+        archived: Vec<Thread>,
     ) -> Result<StudioProductEventEnvelope> {
         {
             let mut index = self
@@ -123,8 +242,12 @@ impl ProductEventBus {
             for id in &removed {
                 index.remove(id);
             }
+            for thread in archived {
+                index.insert(thread.id.clone(), thread);
+            }
+            self.bump(&self.revisions.thread);
         }
-        self.bump(&self.revisions.thread);
+        // State and tombstones are visible before observers receive removal.
         let (revision, updated_at) = self.revision(&self.revisions.thread);
         Ok(self.emit(StudioProductEventKind::ThreadDirectoryChanged(
             StudioThreadDirectoryDelta {
@@ -195,6 +318,39 @@ impl ProductEventBus {
         if delta.is_empty() {
             return Err(anyhow::anyhow!("directory delta is empty"));
         }
+        let mut archived = Vec::new();
+        {
+            let mut index = self
+                .thread_index
+                .lock()
+                .expect("thread index lock poisoned");
+            if self.writer.pending_commit_count() == 0 {
+                index.retain(|_, thread| !thread.archived);
+            }
+            let removals = delta
+                .thread_removals
+                .iter()
+                .flat_map(|removal| {
+                    removal
+                        .thread_ids
+                        .iter()
+                        .map(move |id| (id, removal.archived_at))
+                })
+                .chain(delta.project_removals.iter().flat_map(|removal| {
+                    removal
+                        .thread_ids
+                        .iter()
+                        .map(move |id| (id, removal.closed_at))
+                }));
+            for (id, at) in removals {
+                if let Some(thread) = index.get(id) {
+                    let mut thread = thread.clone();
+                    thread.archived = true;
+                    thread.updated_at = at;
+                    archived.push(thread);
+                }
+            }
+        }
         self.writer.record_directory(delta.clone());
         let (thread_upserts, thread_removals): (Vec<Thread>, Vec<String>) = (
             delta.thread_upserts.clone(),
@@ -212,10 +368,8 @@ impl ProductEventBus {
         );
         let mut envelope = None;
         if !thread_upserts.is_empty() || !thread_removals.is_empty() {
-            envelope = Some(
-                self.apply_thread_delta(thread_upserts, thread_removals)
-                    .await?,
-            );
+            envelope =
+                Some(self.publish_thread_delta(thread_upserts, thread_removals, archived)?);
         }
         let project_upserts = delta
             .project_upserts
@@ -243,6 +397,7 @@ impl ProductEventBus {
             .lock()
             .expect("thread index lock poisoned")
             .values()
+            .filter(|thread| !thread.archived)
             .cloned()
             .collect::<Vec<_>>();
         threads.sort_by(|left, right| {
@@ -335,12 +490,115 @@ mod tests {
             store
                 .create_thread(
                     project_id,
-                    &format!("Session {index}"),
+                    &format!("Session {index}."),
                     pl_protocol::ThreadModeId::simple(),
                 )
                 .await
                 .expect("thread");
         }
+    }
+
+    #[tokio::test]
+    async fn directory_search_reaches_cold_history_and_filters_before_pagination() {
+        use pl_protocol::studio::{ThreadDirectoryFilter, ThreadDirectoryQuery};
+        let (store, bus) = memory_bus().await;
+        let project = seed_project(&store).await;
+        seed_cold_threads(&store, &project.id, 105).await;
+        let rows = store.list_thread_directory_page(None, 200).await.unwrap();
+        let oldest = rows.last().unwrap().clone();
+        let query = ThreadDirectoryQuery {
+            project_id: Some(project.id.clone()),
+            search: Some(oldest.title.clone()),
+            ..Default::default()
+        };
+        let page = bus.query_threads(&query, None, 1).await.unwrap();
+        assert_eq!(page.state.value().unwrap().threads[0].id, oldest.id);
+        let mut hot = oldest.clone();
+        hot.title = "需要确认的任务".into();
+        hot.status = pl_protocol::ThreadStatus::WaitingInteraction;
+        bus.apply_thread_delta(vec![hot.clone()], Vec::new())
+            .await
+            .unwrap();
+        let query = ThreadDirectoryQuery {
+            project_id: Some(project.id),
+            search: Some("需要确认".into()),
+            filter: ThreadDirectoryFilter::Attention,
+            ..Default::default()
+        };
+        let page = bus.query_threads(&query, None, 1).await.unwrap();
+        assert_eq!(page.state.value().unwrap().threads, vec![hot]);
+        assert!(page.state.value().unwrap().next_cursor.is_none());
+        let stale = bus
+            .query_threads(
+                &ThreadDirectoryQuery {
+                    search: Some(oldest.title),
+                    ..Default::default()
+                },
+                None,
+                100,
+            )
+            .await
+            .unwrap();
+        assert!(
+            !stale
+                .state
+                .value()
+                .unwrap()
+                .threads
+                .iter()
+                .any(|thread| thread.id == oldest.id)
+        );
+        assert!(
+            bus.query_threads(&query, Some("invalid"), 10)
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn archived_directory_fact_shadows_cold_row_before_flush() {
+        let (store, bus) = memory_bus().await;
+        let project = seed_project(&store).await;
+        let thread = store
+            .create_thread(
+                &project.id,
+                "Archive me",
+                pl_protocol::ThreadModeId::simple(),
+            )
+            .await
+            .unwrap();
+        bus.warm_thread_index(vec![pl_protocol::Thread::from(thread.clone())]);
+        bus.commit_directory(super::DirectoryDelta::archive_threads(vec![
+            thread.id.clone(),
+        ]))
+        .await
+        .unwrap();
+        let active = bus
+            .query_threads(&Default::default(), None, 20)
+            .await
+            .unwrap();
+        assert!(
+            !active
+                .state
+                .value()
+                .unwrap()
+                .threads
+                .iter()
+                .any(|item| item.id == thread.id)
+        );
+        let archived = bus
+            .query_threads(
+                &pl_protocol::studio::ThreadDirectoryQuery {
+                    archived: true,
+                    ..Default::default()
+                },
+                None,
+                20,
+            )
+            .await
+            .unwrap();
+        assert_eq!(archived.state.value().unwrap().threads[0].id, thread.id);
+        bus.writer.flush().await.unwrap();
     }
 
     #[tokio::test]

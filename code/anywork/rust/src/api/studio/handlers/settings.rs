@@ -193,6 +193,9 @@ pub async fn save_general_settings(
                 settings: pl_protocol::studio::StudioGeneralSettings {
                     follow_active_turn: input.follow_active_turn,
                     compact_timeline: input.compact_timeline,
+                    sidebar_width: input.sidebar_width,
+                    pinned_thread_ids: input.pinned_thread_ids.clone(),
+                    pinned_project_ids: input.pinned_project_ids.clone(),
                 },
             })?,
     ))

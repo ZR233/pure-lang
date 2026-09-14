@@ -41,14 +41,28 @@ impl StudioRecoveryRegistry {
             .clone()
     }
 
-    pub(in crate::studio) fn upsert(&self, issue: StudioRecoveryIssue) -> Vec<StudioRecoveryIssue> {
-        let mut inner = self
-            .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        inner.retain(|current| current.id != issue.id);
-        inner.push(issue);
-        inner.clone()
+    /// Apply an asynchronous owner's result only while that incarnation is current.
+    /// Validation shares the registry lock with retirement's removal, so a late
+    /// observer cannot recreate an issue after retirement has cleared it.
+    pub(in crate::studio) fn update_if_current(
+        &self,
+        issue_id: &str,
+        issue: Option<StudioRecoveryIssue>,
+        is_current: impl FnOnce() -> bool,
+        publish: impl FnOnce(Vec<StudioRecoveryIssue>),
+    ) {
+        let mut inner = self.inner.lock().expect("recovery registry mutex poisoned");
+        if !is_current() {
+            return;
+        }
+        if issue.is_none() && !inner.iter().any(|current| current.id == issue_id) {
+            return;
+        }
+        inner.retain(|current| current.id != issue_id);
+        if let Some(issue) = issue {
+            inner.push(issue);
+        }
+        publish(inner.clone());
     }
 
     /// 删除指定 id 的恢复问题，返回剩余问题的快照。

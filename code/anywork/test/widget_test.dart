@@ -45,6 +45,7 @@ part 'widget_test/timeline_scroll_tests.dart';
 part 'widget_test/timeline_selection_tests.dart';
 part 'widget_test/status_accessibility_tests.dart';
 part 'widget_test/shell_settings_tests.dart';
+part 'widget_test/project_sidebar_tests.dart';
 part 'widget_test/interaction_tests.dart';
 part 'widget_test/skills_tests.dart';
 part 'widget_test/fixture_helpers.dart';
@@ -70,6 +71,7 @@ void main() {
   registerTimelineSelectionTests();
   registerStatusAccessibilityTests();
   registerShellSettingsTests();
+  registerProjectSidebarTests();
   registerInteractionTests();
   registerSkillsTests();
   registerStudioUpdateTests();

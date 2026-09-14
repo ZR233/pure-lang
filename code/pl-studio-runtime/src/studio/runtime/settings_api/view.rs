@@ -176,6 +176,9 @@ fn settings_view(
         general: StudioGeneralSettings {
             follow_active_turn: config.ui.follow_active_turn,
             compact_timeline: config.ui.compact_timeline,
+            sidebar_width: config.ui.sidebar_width,
+            pinned_thread_ids: config.ui.pinned_thread_ids.clone(),
+            pinned_project_ids: config.ui.pinned_project_ids.clone(),
         },
         web_search,
         deepseek_web_search,

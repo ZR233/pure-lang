@@ -246,3 +246,42 @@ final class StoppingLspProgress extends StudioShutdownProgress {
 final class StoppedProgress extends StudioShutdownProgress {
   const StoppedProgress();
 }
+
+enum DirectoryFilter { all, running, attention }
+
+class DirectoryQuery {
+  const DirectoryQuery({
+    this.projectId,
+    this.search,
+    this.archived = false,
+    this.filter = DirectoryFilter.all,
+  });
+  final String? projectId;
+  final String? search;
+  final bool archived;
+  final DirectoryFilter filter;
+
+  bool matches(StudioThread thread, List<StudioProject> projects) {
+    if (!thread.isRoot ||
+        thread.archived != archived ||
+        (projectId != null && thread.projectId != projectId)) {
+      return false;
+    }
+    if (filter == DirectoryFilter.running &&
+        (!thread.status.isActive ||
+            thread.status == ThreadStatusView.waitingInteraction)) {
+      return false;
+    }
+    if (filter == DirectoryFilter.attention &&
+        thread.status != ThreadStatusView.waitingInteraction &&
+        thread.status != ThreadStatusView.faulted) {
+      return false;
+    }
+    final term = search?.trim().toLowerCase() ?? '';
+    final project = projects.where((p) => p.id == thread.projectId).firstOrNull;
+    return term.isEmpty ||
+        thread.title.toLowerCase().contains(term) ||
+        (project != null &&
+            '${project.name} ${project.path}'.toLowerCase().contains(term));
+  }
+}

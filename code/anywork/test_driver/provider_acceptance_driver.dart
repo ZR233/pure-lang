@@ -136,6 +136,8 @@ Future<void> main(List<String> arguments) async {
       final workspace = Directory('${artifacts.path}/workspace');
       await workspace.create(recursive: true);
       await driver.tap(find.byValueKey('sidebar-open-project'));
+      await driver.tap(find.byValueKey('add-project-local'));
+      await driver.tap(find.byValueKey('add-project-continue'));
       await driver.tap(find.byValueKey('project-path-input'));
       await driver.enterText(workspace.path);
       await driver.waitUntilNoTransientCallbacks();

@@ -206,6 +206,7 @@ impl StudioStore {
             .await?
             .map(|model| ProjectRow {
                 id: model.id,
+                name: model.name,
                 created_at: model.created_at,
             }))
     }
@@ -223,6 +224,7 @@ impl StudioStore {
 #[derive(Debug, Clone)]
 pub(in crate::studio) struct ProjectRow {
     pub(in crate::studio) id: String,
+    pub(in crate::studio) name: String,
     pub(in crate::studio) created_at: i64,
 }
 

@@ -126,6 +126,12 @@ pub enum StudioMcpServerConfiguration {
 pub struct StudioGeneralSettings {
     pub follow_active_turn: bool,
     pub compact_timeline: bool,
+    #[serde(default)]
+    pub sidebar_width: Option<u16>,
+    #[serde(default)]
+    pub pinned_thread_ids: Vec<String>,
+    #[serde(default)]
+    pub pinned_project_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]

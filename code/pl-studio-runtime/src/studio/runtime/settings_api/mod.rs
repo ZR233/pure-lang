@@ -103,12 +103,25 @@ impl StudioRuntime {
         request: UpdateGeneralSettingsRequest,
     ) -> Result<StudioSettingsSnapshot> {
         let input = request.settings;
+        anyhow::ensure!(
+            input
+                .sidebar_width
+                .is_none_or(|width| (300..=440).contains(&width)),
+            "sidebar width must be between 300 and 440"
+        );
+        anyhow::ensure!(
+            input.pinned_thread_ids.len() <= 64 && input.pinned_project_ids.len() <= 64,
+            "at most 64 pinned projects or sessions are supported"
+        );
         let state = self
             .config_runtime
             .update(request.expected_revision, |config| {
                 let mut config = config.clone();
                 config.ui.follow_active_turn = input.follow_active_turn;
                 config.ui.compact_timeline = input.compact_timeline;
+                config.ui.sidebar_width = input.sidebar_width;
+                config.ui.pinned_thread_ids = input.pinned_thread_ids;
+                config.ui.pinned_project_ids = input.pinned_project_ids;
                 Ok(config)
             })?;
         self.publish_settings_state(state.clone())?;

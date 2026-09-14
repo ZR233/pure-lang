@@ -108,17 +108,28 @@ class BridgeDeepSeekWebSearchSettingsDto {
 class BridgeGeneralSettingsDto {
   final bool followActiveTurn;
   final bool compactTimeline;
+  final int? sidebarWidth;
+  final List<String> pinnedThreadIds;
+  final List<String> pinnedProjectIds;
 
   const BridgeGeneralSettingsDto({
     required this.followActiveTurn,
     required this.compactTimeline,
+    this.sidebarWidth,
+    required this.pinnedThreadIds,
+    required this.pinnedProjectIds,
   });
 
   static Future<BridgeGeneralSettingsDto> default_() => RustLib.instance.api
       .crateApiStudioTypesSettingsBridgeGeneralSettingsDtoDefault();
 
   @override
-  int get hashCode => followActiveTurn.hashCode ^ compactTimeline.hashCode;
+  int get hashCode =>
+      followActiveTurn.hashCode ^
+      compactTimeline.hashCode ^
+      sidebarWidth.hashCode ^
+      pinnedThreadIds.hashCode ^
+      pinnedProjectIds.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -126,7 +137,10 @@ class BridgeGeneralSettingsDto {
       other is BridgeGeneralSettingsDto &&
           runtimeType == other.runtimeType &&
           followActiveTurn == other.followActiveTurn &&
-          compactTimeline == other.compactTimeline;
+          compactTimeline == other.compactTimeline &&
+          sidebarWidth == other.sidebarWidth &&
+          pinnedThreadIds == other.pinnedThreadIds &&
+          pinnedProjectIds == other.pinnedProjectIds;
 }
 
 /// Instructions 页的 canonical 设置。
@@ -998,14 +1012,25 @@ class DeepSeekWebSearchSettingsInput {
 class GeneralSettingsInput {
   final bool followActiveTurn;
   final bool compactTimeline;
+  final int? sidebarWidth;
+  final List<String> pinnedThreadIds;
+  final List<String> pinnedProjectIds;
 
   const GeneralSettingsInput({
     required this.followActiveTurn,
     required this.compactTimeline,
+    this.sidebarWidth,
+    required this.pinnedThreadIds,
+    required this.pinnedProjectIds,
   });
 
   @override
-  int get hashCode => followActiveTurn.hashCode ^ compactTimeline.hashCode;
+  int get hashCode =>
+      followActiveTurn.hashCode ^
+      compactTimeline.hashCode ^
+      sidebarWidth.hashCode ^
+      pinnedThreadIds.hashCode ^
+      pinnedProjectIds.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -1013,7 +1038,10 @@ class GeneralSettingsInput {
       other is GeneralSettingsInput &&
           runtimeType == other.runtimeType &&
           followActiveTurn == other.followActiveTurn &&
-          compactTimeline == other.compactTimeline;
+          compactTimeline == other.compactTimeline &&
+          sidebarWidth == other.sidebarWidth &&
+          pinnedThreadIds == other.pinnedThreadIds &&
+          pinnedProjectIds == other.pinnedProjectIds;
 }
 
 class InstructionsSettingsInput {

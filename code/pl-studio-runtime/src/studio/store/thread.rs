@@ -125,6 +125,24 @@ impl StudioStore {
         Ok(records)
     }
 
+    /// Cold baseline for explicit archive restoration, including archived descendants.
+    pub(in crate::studio) async fn read_directory_tree(
+        &self,
+        root_id: &str,
+    ) -> Result<Vec<ThreadRecord>> {
+        use entities::thread;
+        let rows = thread::Entity::find()
+            .filter(thread::Column::RootThreadId.eq(root_id))
+            .order_by_asc(thread::Column::CreatedAt)
+            .all(&self.db)
+            .await?;
+        let mut records = Vec::with_capacity(rows.len());
+        for row in rows {
+            records.push(self.with_session_status(thread_record(row)?).await?);
+        }
+        Ok(records)
+    }
+
     /// Project 归档 activation 一次性装载其完整 Thread 目录。
     pub async fn list_threads_for_project(&self, project_id: &str) -> Result<Vec<ThreadRecord>> {
         use entities::thread;

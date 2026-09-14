@@ -11,7 +11,7 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
   static const _todoPanelWidth = 304.0;
   static const _planPanelWidth = 424.0;
   static const _minimumTimelineWidth = 560.0;
-  static const _minimumPlanTimelineWidth = 360.0;
+  static const _minimumPlanTimelineWidth = 600.0;
   static const _maximumFooterFraction = 0.5;
 
   final _scaffoldKey = GlobalKey<ScaffoldState>();

@@ -375,6 +375,43 @@ impl ThreadDirectoryCursor {
 }
 
 impl StudioStore {
+    /// Reads a cold root directory page. Live overrides are applied by the owner.
+    pub(in crate::studio) async fn query_thread_directory_page(
+        &self,
+        cursor: Option<&ThreadDirectoryCursor>,
+        query: &pl_protocol::studio::ThreadDirectoryQuery,
+        limit: usize,
+    ) -> Result<Vec<Thread>> {
+        use entities::thread;
+        let mut select = thread::Entity::find()
+            .filter(thread::Column::Archived.eq(i32::from(query.archived)))
+            .filter(thread::Column::ParentThreadId.is_null())
+            .order_by_desc(thread::Column::UpdatedAt)
+            .order_by_desc(thread::Column::Id);
+        if let Some(project_id) = &query.project_id {
+            select = select.filter(thread::Column::ProjectId.eq(project_id));
+        }
+        if let Some(cursor) = cursor {
+            select = select.filter(
+                Condition::any()
+                    .add(thread::Column::UpdatedAt.lt(cursor.updated_at))
+                    .add(
+                        Condition::all()
+                            .add(thread::Column::UpdatedAt.eq(cursor.updated_at))
+                            .add(thread::Column::Id.lt(cursor.id.clone())),
+                    ),
+            );
+        }
+        let rows = select.limit(u64::try_from(limit)?).all(&self.db).await?;
+        let mut threads = Vec::with_capacity(rows.len());
+        for row in rows {
+            threads.push(Thread::from(
+                self.with_session_status(thread_record(row)?).await?,
+            ));
+        }
+        Ok(threads)
+    }
+
     /// 未归档 Thread 的冷分页：按 `(updated_at, id)` 倒序 keyset，
     /// cursor 为闭区间锚点（下一页取严格小于该键的条目）。
     pub(in crate::studio) async fn list_thread_directory_page(

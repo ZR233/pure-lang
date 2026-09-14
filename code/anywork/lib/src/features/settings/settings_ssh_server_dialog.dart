@@ -6,9 +6,11 @@ import '../../shared/studio_driver_keys.dart';
 import 'settings_common.dart';
 
 class SshServerDialog extends StatefulWidget {
-  const SshServerDialog({super.key, this.server});
+  const SshServerDialog({super.key, this.server, this.onSave, this.onBack});
 
   final SshServer? server;
+  final Future<void> Function(SaveSshServerCommand)? onSave;
+  final VoidCallback? onBack;
 
   @override
   State<SshServerDialog> createState() => _SshServerDialogState();
@@ -23,6 +25,7 @@ class _SshServerDialogState extends State<SshServerDialog> {
   late final TextEditingController _password;
   late SshAuthKind _authKind;
   String? _validationError;
+  bool _saving = false;
 
   @override
   void initState() {
@@ -50,175 +53,206 @@ class _SshServerDialogState extends State<SshServerDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return SettingsFormDialog(
-      key: StudioDriverKeys.sshServerDialog,
-      title: Text(
-        widget.server == null
-            ? context.l10n.settingsSshAdd
-            : context.l10n.settingsSshEdit,
-      ),
-      content: SizedBox(
-        width: 480,
-        child: SingleChildScrollView(
-          child: SettingsFieldStack(
-            children: [
-              TextField(
-                key: StudioDriverKeys.sshServerNameInput,
-                controller: _name,
-                decoration: InputDecoration(
-                  labelText: context.l10n.settingsSshName,
-                ),
-              ),
-              TextField(
-                key: StudioDriverKeys.sshServerHostInput,
-                controller: _host,
-                decoration: InputDecoration(
-                  labelText: context.l10n.settingsSshHost,
-                ),
-              ),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      key: StudioDriverKeys.sshServerUsernameInput,
-                      controller: _username,
-                      decoration: InputDecoration(
-                        labelText: context.l10n.settingsSshUsername,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  SizedBox(
-                    width: 100,
-                    child: TextField(
-                      key: StudioDriverKeys.sshServerPortInput,
-                      controller: _port,
-                      keyboardType: TextInputType.number,
-                      decoration: InputDecoration(
-                        labelText: context.l10n.settingsSshPort,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              DropdownButtonFormField<SshAuthKind>(
-                key: StudioDriverKeys.sshServerAuthInput,
-                initialValue: _authKind,
-                decoration: InputDecoration(
-                  labelText: context.l10n.settingsSshAuth,
-                ),
-                items: [
-                  DropdownMenuItem(
-                    value: SshAuthKind.agentOrKey,
-                    child: Text(context.l10n.settingsSshAuthAgentOrKey),
-                  ),
-                  DropdownMenuItem(
-                    value: SshAuthKind.password,
-                    child: Text(context.l10n.settingsSshAuthPassword),
-                  ),
-                ],
-                onChanged: (value) {
-                  if (value != null) setState(() => _authKind = value);
-                },
-              ),
-              if (_authKind == SshAuthKind.agentOrKey)
+    return PopScope(
+      canPop: !_saving,
+      child: SettingsFormDialog(
+        key: StudioDriverKeys.sshServerDialog,
+        title: Text(
+          widget.server == null
+              ? context.l10n.settingsSshAdd
+              : context.l10n.settingsSshEdit,
+        ),
+        content: SizedBox(
+          width: 480,
+          child: SingleChildScrollView(
+            child: SettingsFieldStack(
+              children: [
                 TextField(
-                  key: StudioDriverKeys.sshServerIdentityInput,
-                  controller: _identity,
+                  key: StudioDriverKeys.sshServerNameInput,
+                  controller: _name,
                   decoration: InputDecoration(
-                    labelText: context.l10n.settingsSshIdentityFile,
-                  ),
-                )
-              else
-                TextField(
-                  key: StudioDriverKeys.sshServerPasswordInput,
-                  controller: _password,
-                  obscureText: true,
-                  autocorrect: false,
-                  enableSuggestions: false,
-                  decoration: InputDecoration(
-                    labelText: context.l10n.settingsSshPassword,
-                    helperText: context.l10n.settingsSshPasswordLease,
+                    labelText: context.l10n.settingsSshName,
                   ),
                 ),
-              if (_validationError case final error?)
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: Text(
-                      error,
-                      key: StudioDriverKeys.sshServerValidationError,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.error,
+                TextField(
+                  key: StudioDriverKeys.sshServerHostInput,
+                  controller: _host,
+                  decoration: InputDecoration(
+                    labelText: context.l10n.settingsSshHost,
+                  ),
+                ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        key: StudioDriverKeys.sshServerUsernameInput,
+                        controller: _username,
+                        decoration: InputDecoration(
+                          labelText: context.l10n.settingsSshUsername,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    SizedBox(
+                      width: 100,
+                      child: TextField(
+                        key: StudioDriverKeys.sshServerPortInput,
+                        controller: _port,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: context.l10n.settingsSshPort,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                DropdownButtonFormField<SshAuthKind>(
+                  key: StudioDriverKeys.sshServerAuthInput,
+                  initialValue: _authKind,
+                  decoration: InputDecoration(
+                    labelText: context.l10n.settingsSshAuth,
+                  ),
+                  items: [
+                    DropdownMenuItem(
+                      value: SshAuthKind.agentOrKey,
+                      child: Text(context.l10n.settingsSshAuthAgentOrKey),
+                    ),
+                    DropdownMenuItem(
+                      value: SshAuthKind.password,
+                      child: Text(context.l10n.settingsSshAuthPassword),
+                    ),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) setState(() => _authKind = value);
+                  },
+                ),
+                if (_authKind == SshAuthKind.agentOrKey)
+                  TextField(
+                    key: StudioDriverKeys.sshServerIdentityInput,
+                    controller: _identity,
+                    decoration: InputDecoration(
+                      labelText: context.l10n.settingsSshIdentityFile,
+                    ),
+                  )
+                else
+                  TextField(
+                    key: StudioDriverKeys.sshServerPasswordInput,
+                    controller: _password,
+                    obscureText: true,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    decoration: InputDecoration(
+                      labelText: context.l10n.settingsSshPassword,
+                      helperText: context.l10n.settingsSshPasswordLease,
+                    ),
+                  ),
+                if (_validationError case final error?)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: Text(
+                        error,
+                        key: StudioDriverKeys.sshServerValidationError,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
                       ),
                     ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
+        actions: [
+          TextButton(
+            onPressed: _saving
+                ? null
+                : widget.onBack ?? () => Navigator.pop(context),
+            child: Text(
+              widget.onBack == null
+                  ? context.l10n.settingsCancel
+                  : context.l10n.sidebarBack,
+            ),
+          ),
+          FilledButton(
+            key: StudioDriverKeys.sshServerSave,
+            onPressed: _saving
+                ? null
+                : () async {
+                    final port = int.tryParse(_port.text);
+                    if (_name.text.trim().isEmpty) {
+                      setState(
+                        () => _validationError =
+                            context.l10n.settingsSshNameRequired,
+                      );
+                      return;
+                    }
+                    if (_host.text.trim().isEmpty) {
+                      setState(
+                        () => _validationError =
+                            context.l10n.settingsSshHostRequired,
+                      );
+                      return;
+                    }
+                    if (_username.text.trim().isEmpty) {
+                      setState(
+                        () => _validationError =
+                            context.l10n.settingsSshUsernameRequired,
+                      );
+                      return;
+                    }
+                    if (port == null || port <= 0 || port > 65535) {
+                      setState(
+                        () => _validationError =
+                            context.l10n.settingsSshPortInvalid,
+                      );
+                      return;
+                    }
+                    setState(() => _validationError = null);
+                    final command = SaveSshServerCommand(
+                      id: widget.server?.id,
+                      name: _name.text.trim(),
+                      host: _host.text.trim(),
+                      port: port,
+                      username: _username.text.trim(),
+                      authKind: _authKind,
+                      identityFile:
+                          _authKind == SshAuthKind.agentOrKey &&
+                              _identity.text.trim().isNotEmpty
+                          ? _identity.text.trim()
+                          : null,
+                      password:
+                          _authKind == SshAuthKind.password &&
+                              _password.text.isNotEmpty
+                          ? _password.text
+                          : null,
+                    );
+                    if (widget.onSave == null) {
+                      Navigator.pop(context, command);
+                      return;
+                    }
+                    setState(() => _saving = true);
+                    try {
+                      await widget.onSave!(command);
+                    } catch (error) {
+                      if (mounted) {
+                        setState(() => _validationError = error.toString());
+                      }
+                    } finally {
+                      if (mounted) setState(() => _saving = false);
+                    }
+                  },
+            child: Text(
+              _saving
+                  ? context.l10n.sidebarLoadingMore
+                  : widget.onSave == null
+                  ? context.l10n.settingsSshSave
+                  : context.l10n.sidebarSaveConnect,
+            ),
+          ),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: Text(context.l10n.settingsCancel),
-        ),
-        FilledButton(
-          key: StudioDriverKeys.sshServerSave,
-          onPressed: () {
-            final port = int.tryParse(_port.text);
-            if (_name.text.trim().isEmpty) {
-              setState(
-                () => _validationError = context.l10n.settingsSshNameRequired,
-              );
-              return;
-            }
-            if (_host.text.trim().isEmpty) {
-              setState(
-                () => _validationError = context.l10n.settingsSshHostRequired,
-              );
-              return;
-            }
-            if (_username.text.trim().isEmpty) {
-              setState(
-                () =>
-                    _validationError = context.l10n.settingsSshUsernameRequired,
-              );
-              return;
-            }
-            if (port == null || port <= 0 || port > 65535) {
-              setState(
-                () => _validationError = context.l10n.settingsSshPortInvalid,
-              );
-              return;
-            }
-            setState(() => _validationError = null);
-            Navigator.pop(
-              context,
-              SaveSshServerCommand(
-                id: widget.server?.id,
-                name: _name.text.trim(),
-                host: _host.text.trim(),
-                port: port,
-                username: _username.text.trim(),
-                authKind: _authKind,
-                identityFile:
-                    _authKind == SshAuthKind.agentOrKey &&
-                        _identity.text.trim().isNotEmpty
-                    ? _identity.text.trim()
-                    : null,
-                password:
-                    _authKind == SshAuthKind.password &&
-                        _password.text.isNotEmpty
-                    ? _password.text
-                    : null,
-              ),
-            );
-          },
-          child: Text(context.l10n.settingsSshSave),
-        ),
-      ],
     );
   }
 }

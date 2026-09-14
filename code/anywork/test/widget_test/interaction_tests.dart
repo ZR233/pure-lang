@@ -188,7 +188,7 @@ void registerInteractionTests() {
   testWidgets(
     'Plan confirmation renders a timeline summary, detail panel, and replacement composer',
     (tester) async {
-      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.physicalSize = const Size(1600, 900);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);

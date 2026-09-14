@@ -170,6 +170,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeDirectoryQuery dco_decode_box_autoadd_bridge_directory_query(
+    dynamic raw,
+  );
+
+  @protected
   BridgeDisabledUpdaterState
   dco_decode_box_autoadd_bridge_disabled_updater_state(dynamic raw);
 
@@ -691,6 +696,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeDegradedResource dco_decode_bridge_degraded_resource(dynamic raw);
+
+  @protected
+  BridgeDirectoryFilter dco_decode_bridge_directory_filter(dynamic raw);
+
+  @protected
+  BridgeDirectoryQuery dco_decode_bridge_directory_query(dynamic raw);
 
   @protected
   BridgeDisabledUpdaterState dco_decode_bridge_disabled_updater_state(
@@ -1947,6 +1958,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeDirectoryQuery sse_decode_box_autoadd_bridge_directory_query(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   BridgeDisabledUpdaterState
   sse_decode_box_autoadd_bridge_disabled_updater_state(
     SseDeserializer deserializer,
@@ -2606,6 +2622,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeDegradedResource sse_decode_bridge_degraded_resource(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeDirectoryFilter sse_decode_bridge_directory_filter(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeDirectoryQuery sse_decode_bridge_directory_query(
     SseDeserializer deserializer,
   );
 
@@ -4167,6 +4193,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_box_autoadd_bridge_directory_query(
+    BridgeDirectoryQuery self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_box_autoadd_bridge_disabled_updater_state(
     BridgeDisabledUpdaterState self,
     SseSerializer serializer,
@@ -4925,6 +4957,18 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_degraded_resource(
     BridgeDegradedResource self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_directory_filter(
+    BridgeDirectoryFilter self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_directory_query(
+    BridgeDirectoryQuery self,
     SseSerializer serializer,
   );
 

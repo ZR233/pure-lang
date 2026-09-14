@@ -343,10 +343,21 @@ String _threadSubtitle(
   StudioThread thread,
   String? modeDisplayName,
 ) {
-  final mode = modeDisplayName ?? context.compileModeLabel(thread.mode);
+  final status = switch (thread.status) {
+    ThreadStatusView.idle => context.l10n.settingsLspActivityIdle,
+    ThreadStatusView.queued => context.l10n.agentDetailStatusQueued,
+    ThreadStatusView.running ||
+    ThreadStatusView.waitingTool => context.l10n.sidebarRunning,
+    ThreadStatusView.waitingInteraction => context.l10n.sidebarAttention,
+    ThreadStatusView.cancelling => context.l10n.agentDetailStatusInterrupted,
+    ThreadStatusView.closing => context.l10n.agentDetailStatusClosing,
+    ThreadStatusView.closed => context.l10n.agentDetailStatusShutdown,
+    ThreadStatusView.faulted => context.l10n.agentDetailStatusErrored,
+  };
   final hour = thread.updatedAt.hour.toString().padLeft(2, '0');
   final minute = thread.updatedAt.minute.toString().padLeft(2, '0');
-  return context.l10n.shellSessionUpdated(mode, '$hour:$minute');
+  final date = '${thread.updatedAt.month}/${thread.updatedAt.day}';
+  return '$status · $date $hour:$minute';
 }
 
 class _Footer extends StatelessWidget {

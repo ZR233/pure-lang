@@ -249,11 +249,29 @@
   "agentDetailStatusClosing": "正在关闭",
   "agentDetailStatusCleanupFailed": "清理失败",
   "timelineToolQueued": "{name} 排队中",
-  "@timelineToolQueued": {"placeholders": {"name": {"type": "String"}}},
+  "@timelineToolQueued": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "timelineToolCancelling": "{name} 正在取消",
-  "@timelineToolCancelling": {"placeholders": {"name": {"type": "String"}}},
+  "@timelineToolCancelling": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "timelineToolInterrupted": "{name} 已中断",
-  "@timelineToolInterrupted": {"placeholders": {"name": {"type": "String"}}},
+  "@timelineToolInterrupted": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "timelineAgentSubagent": "子代理",
   "timelineAgentSubagentMessage": "子代理消息",
   "timelineAgentWaiting": "等待子代理",
@@ -688,5 +706,35 @@
   "costPurposeReview": "审查",
   "costPurposeTitle": "标题",
   "costPurposeUnknown": "未知用途",
-  "timelineRawRecord": "原始历史记录"
+  "timelineRawRecord": "原始历史记录",
+  "sidebarSearch": "搜索项目与会话",
+  "sidebarAll": "全部",
+  "sidebarRunning": "进行中",
+  "sidebarAttention": "待处理",
+  "sidebarAddProject": "添加项目",
+  "sidebarLocalProject": "本地项目",
+  "sidebarLocalHint": "选择这台电脑上的文件夹",
+  "sidebarRemoteProject": "远程项目",
+  "sidebarRemoteHint": "通过 SSH 连接远程工作目录",
+  "sidebarContinue": "继续",
+  "sidebarBack": "返回",
+  "sidebarConnect": "连接并选择目录",
+  "sidebarSaveConnect": "保存并连接",
+  "sidebarSearchConnections": "搜索已配置连接",
+  "sidebarNoConnections": "还没有远程配置",
+  "sidebarNewConnection": "新建远程配置",
+  "sidebarNoResults": "没有匹配的项目或会话",
+  "sidebarEmptyProject": "还没有会话，点击项目右侧 ＋ 开始",
+  "sidebarEarlier": "查看更早会话",
+  "sidebarArchived": "已归档",
+  "sidebarRestore": "恢复会话",
+  "sidebarPin": "置顶",
+  "sidebarUnpin": "取消置顶",
+  "sidebarNavigation": "项目导航",
+  "sidebarResize": "调整侧栏宽度；方向键调整，Home 恢复默认",
+  "sidebarLocal": "本地",
+  "sidebarNotChecked": "未检测",
+  "sidebarConnectionSaved": "配置已保存；连接失败，可修改后重试",
+  "sidebarCopyPath": "复制路径",
+  "sidebarRetry": "重试"
 }

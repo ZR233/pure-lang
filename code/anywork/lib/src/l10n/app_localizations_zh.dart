@@ -1863,4 +1863,94 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get timelineRawRecord => '原始历史记录';
+
+  @override
+  String get sidebarSearch => '搜索项目与会话';
+
+  @override
+  String get sidebarAll => '全部';
+
+  @override
+  String get sidebarRunning => '进行中';
+
+  @override
+  String get sidebarAttention => '待处理';
+
+  @override
+  String get sidebarAddProject => '添加项目';
+
+  @override
+  String get sidebarLocalProject => '本地项目';
+
+  @override
+  String get sidebarLocalHint => '选择这台电脑上的文件夹';
+
+  @override
+  String get sidebarRemoteProject => '远程项目';
+
+  @override
+  String get sidebarRemoteHint => '通过 SSH 连接远程工作目录';
+
+  @override
+  String get sidebarContinue => '继续';
+
+  @override
+  String get sidebarBack => '返回';
+
+  @override
+  String get sidebarConnect => '连接并选择目录';
+
+  @override
+  String get sidebarSaveConnect => '保存并连接';
+
+  @override
+  String get sidebarSearchConnections => '搜索已配置连接';
+
+  @override
+  String get sidebarNoConnections => '还没有远程配置';
+
+  @override
+  String get sidebarNewConnection => '新建远程配置';
+
+  @override
+  String get sidebarNoResults => '没有匹配的项目或会话';
+
+  @override
+  String get sidebarEmptyProject => '还没有会话，点击项目右侧 ＋ 开始';
+
+  @override
+  String get sidebarEarlier => '查看更早会话';
+
+  @override
+  String get sidebarArchived => '已归档';
+
+  @override
+  String get sidebarRestore => '恢复会话';
+
+  @override
+  String get sidebarPin => '置顶';
+
+  @override
+  String get sidebarUnpin => '取消置顶';
+
+  @override
+  String get sidebarNavigation => '项目导航';
+
+  @override
+  String get sidebarResize => '调整侧栏宽度；方向键调整，Home 恢复默认';
+
+  @override
+  String get sidebarLocal => '本地';
+
+  @override
+  String get sidebarNotChecked => '未检测';
+
+  @override
+  String get sidebarConnectionSaved => '配置已保存；连接失败，可修改后重试';
+
+  @override
+  String get sidebarCopyPath => '复制路径';
+
+  @override
+  String get sidebarRetry => '重试';
 }

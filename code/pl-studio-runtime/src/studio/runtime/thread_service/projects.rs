@@ -6,22 +6,34 @@ use anyhow::{Result, bail};
 
 use crate::studio::records::{ProjectRecord, ThreadRecord, ThreadVisibility};
 use crate::studio::store::directory::{DirectoryDelta, ProjectDirectoryRecord, ProjectRemoval};
-use pl_tool::workspace::resolve_workspace_root;
 
 use super::super::StudioRuntime;
 use super::super::thread_title::ThreadTitleCancellationCause;
 
 impl StudioRuntime {
     pub async fn open_project(&self, path: impl AsRef<Path>) -> Result<ProjectRecord> {
-        let path = path.as_ref();
-        let _ = resolve_workspace_root(path)?;
+        let canonical = dunce::canonicalize(path.as_ref())?;
+        anyhow::ensure!(canonical.is_dir(), "workspace path is not a directory");
+        let path = canonical.as_path();
+        let _guard = self.lifecycle_lock.lock().await;
         let path_text = path.to_string_lossy().to_string();
+        if let Some(project) = self
+            .agent_facility
+            .product_events
+            .project_snapshot()
+            .await
+            .into_iter()
+            .find(|project| project.path == path_text && project.ssh_server_id.is_none())
+        {
+            return Ok(project);
+        }
         let name = crate::studio::paths::project_name(path);
         let now = crate::studio::unix_seconds();
         // 聚合冷加载：按 path 找到既有行或分配新 id，然后内存先行提交目录 delta。
         let existing = self.store.find_project_by_path(&path_text, None).await?;
         let (record, delta_record) = match existing {
             Some(existing) => {
+                let name = existing.name.clone();
                 let delta_record = ProjectDirectoryRecord {
                     id: existing.id.clone(),
                     name: name.clone(),
@@ -68,6 +80,41 @@ impl StudioRuntime {
             .commit_directory(DirectoryDelta::upsert_project(delta_record))
             .await?;
         Ok(record)
+    }
+
+    /// Renames the project label without changing its filesystem identity.
+    pub async fn rename_project(&self, id: &str, name: &str) -> Result<ProjectRecord> {
+        let _guard = self.lifecycle_lock.lock().await;
+        let name = name.trim();
+        anyhow::ensure!(
+            !name.is_empty() && name.chars().count() <= 80,
+            "project name must contain 1 to 80 characters"
+        );
+        let mut project = self
+            .agent_facility
+            .product_events
+            .project_snapshot()
+            .await
+            .into_iter()
+            .find(|project| project.id == id)
+            .ok_or_else(|| anyhow::anyhow!("Project not found"))?;
+        project.name = name.to_string();
+        let now = crate::studio::unix_seconds();
+        project.updated_at = now;
+        self.agent_facility
+            .product_events
+            .commit_directory(DirectoryDelta::upsert_project(ProjectDirectoryRecord {
+                id: project.id.clone(),
+                name: project.name.clone(),
+                path: project.path.clone(),
+                ssh_server_id: project.ssh_server_id.clone(),
+                created_at: now,
+                updated_at: now,
+                last_opened_at: Some(now),
+                closed: false,
+            }))
+            .await?;
+        Ok(project)
     }
 
     pub async fn list_projects(&self) -> Result<Vec<ProjectRecord>> {

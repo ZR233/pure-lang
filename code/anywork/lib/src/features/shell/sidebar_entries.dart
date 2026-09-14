@@ -3,77 +3,174 @@ part of 'studio_shell.dart';
 class _ProjectTile extends ConsumerWidget {
   const _ProjectTile({
     required this.project,
-    required this.compact,
     required this.selected,
+    required this.expanded,
+    required this.onToggle,
+    this.onNavigate,
     required this.recoveryIssue,
   });
-
   final StudioProject project;
-  final bool compact;
   final bool selected;
+  final bool expanded;
+  final VoidCallback onToggle;
+  final VoidCallback? onNavigate;
   final StudioRecoveryIssue? recoveryIssue;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final colors = Theme.of(context).colorScheme;
     final controller = ref.read(studioControllerProvider.notifier);
-    final issue = recoveryIssue;
-    if (compact) {
-      return KeyedSubtree(
-        key: StudioDriverKeys.projectRow(project.id),
-        child: _CompactSidebarTile(
-          selected: selected,
-          tooltip: issue?.detail ?? project.name,
-          icon: issue != null
-              ? Icons.error_outline
-              : selected
-              ? Icons.folder
-              : Icons.folder_open,
-          iconColor: issue == null ? null : colors.error,
-          onTap: issue == null
-              ? () => controller.selectProject(project.id)
-              : null,
-          actionTooltip: context.l10n.sidebarCloseProject,
-          actionIcon: Icons.close,
-          onAction: issue == null
-              ? () => unawaited(controller.archiveProject(project.id))
-              : null,
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.arrowRight): () {
+          if (!expanded) onToggle();
+        },
+        const SingleActivator(LogicalKeyboardKey.arrowLeft): () {
+          if (expanded) onToggle();
+        },
+      },
+      child: Focus(
+        skipTraversal: true,
+        child: KeyedSubtree(
+          key: StudioDriverKeys.projectRow(project.id),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  IconButton(
+                    key: ValueKey('project-expand-${project.id}'),
+                    tooltip: context.l10n.sidebarProjects,
+                    onPressed: onToggle,
+                    icon: Icon(
+                      expanded ? Icons.expand_more : Icons.chevron_right,
+                      size: 18,
+                    ),
+                  ),
+                  Expanded(
+                    child: Tooltip(
+                      message: recoveryIssue?.detail ?? project.name,
+                      child: InkWell(
+                        onTap: recoveryIssue == null
+                            ? () async {
+                                await controller.selectProject(project.id);
+                                onNavigate?.call();
+                              }
+                            : null,
+                        child: Row(
+                          children: [
+                            Icon(
+                              recoveryIssue == null
+                                  ? Icons.folder_outlined
+                                  : Icons.error_outline,
+                              size: 17,
+                            ),
+                            const SizedBox(width: 6),
+                            Flexible(
+                              child: Text(
+                                project.name,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: context.text.labelLarge?.copyWith(
+                                  fontWeight: selected
+                                      ? FontWeight.w700
+                                      : FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              project.sshServerId == null
+                                  ? context.l10n.sidebarLocal
+                                  : 'SSH',
+                              style: context.text.labelSmall,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    key: selected
+                        ? StudioDriverKeys.newSession
+                        : ValueKey('project-new-session-${project.id}'),
+                    tooltip:
+                        '${context.l10n.sidebarNewSession} · ${project.name}',
+                    onPressed: recoveryIssue == null
+                        ? () async {
+                            await controller.selectProject(project.id);
+                            if (!context.mounted) return;
+                            await controller.beginNewThread();
+                            onNavigate?.call();
+                          }
+                        : null,
+                    icon: const Icon(Icons.add, size: 18),
+                  ),
+                  PopupMenuButton<String>(
+                    key: ValueKey('project-menu-${project.id}'),
+                    tooltip: context.l10n.sidebarProjects,
+                    icon: const Icon(Icons.more_horiz, size: 18),
+                    onSelected: (action) async {
+                      if (action == 'pin') {
+                        await _saveSidebarPreferences(
+                          ref,
+                          projectId: project.id,
+                        );
+                      }
+                      if (action == 'copy') {
+                        await Clipboard.setData(
+                          ClipboardData(text: project.path),
+                        );
+                      }
+                      if (action == 'close') {
+                        await controller.archiveProject(project.id);
+                      }
+                    },
+                    itemBuilder: (_) => [
+                      PopupMenuItem(
+                        value: 'pin',
+                        child: Text(
+                          ref
+                                      .watch(studioControllerProvider)
+                                      .value
+                                      ?.general
+                                      .pinnedProjectIds
+                                      .contains(project.id) ==
+                                  true
+                              ? context.l10n.sidebarUnpin
+                              : context.l10n.sidebarPin,
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: 'copy',
+                        child: Text(context.l10n.sidebarCopyPath),
+                      ),
+                      PopupMenuItem(
+                        key: ValueKey('project-close-${project.id}'),
+                        value: 'close',
+                        child: Text(context.l10n.sidebarCloseProject),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              Padding(
+                padding: const EdgeInsets.only(left: 40, right: 12, bottom: 6),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Tooltip(
+                    message: project.path,
+                    child: Text(
+                      project.path,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: context.text.bodySmall,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
-      );
-    }
-    final tile = _SidebarTile(
-      selected: selected,
-      icon: issue != null
-          ? Icons.error_outline
-          : selected
-          ? Icons.folder
-          : Icons.folder_open,
-      title: project.name,
-      showTitleTooltip: issue == null,
-      subtitle: project.path,
-      dense: true,
-      iconColor: issue != null
-          ? colors.error
-          : selected
-          ? context.colors.onPrimaryContainer
-          : colors.onSurfaceVariant,
-      onTap: issue == null ? () => controller.selectProject(project.id) : null,
-      trailing: IconButton(
-        key: ValueKey('project-close-${project.id}'),
-        tooltip: context.l10n.sidebarCloseProject,
-        style: IconButton.styleFrom(
-          minimumSize: const Size.square(30),
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        ),
-        icon: const Icon(Icons.close, size: 17),
-        onPressed: issue == null
-            ? () => unawaited(controller.archiveProject(project.id))
-            : null,
       ),
-    );
-    return KeyedSubtree(
-      key: StudioDriverKeys.projectRow(project.id),
-      child: issue == null ? tile : Tooltip(message: issue.detail, child: tile),
     );
   }
 }
@@ -83,55 +180,25 @@ class _ThreadTile extends ConsumerWidget {
     required this.thread,
     required this.modeDisplayName,
     required this.selected,
-    required this.compact,
     required this.recoveryIssue,
     required this.canArchive,
+    this.onNavigate,
   });
 
   final StudioThread thread;
   final String? modeDisplayName;
   final bool selected;
-  final bool compact;
   final StudioRecoveryIssue? recoveryIssue;
   final bool canArchive;
+  final VoidCallback? onNavigate;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final modeIcon = thread.mode == ThreadModeId.simple
-        ? Icons.flash_on
-        : Icons.route;
+    final modeIcon = thread.status == ThreadStatusView.waitingInteraction
+        ? Icons.help_outline
+        : Icons.chat_bubble_outline;
     final colors = Theme.of(context).colorScheme;
     final issue = recoveryIssue;
-    if (compact) {
-      return KeyedSubtree(
-        key: StudioDriverKeys.threadRow(thread.id),
-        child: _CompactSidebarTile(
-          selected: selected,
-          tooltip: issue?.detail ?? thread.title,
-          icon: issue == null ? modeIcon : Icons.error_outline,
-          iconColor: issue == null ? null : colors.error,
-          onTap: issue == null
-              ? () => ref
-                    .read(studioControllerProvider.notifier)
-                    .selectThread(thread.id)
-              : null,
-          actionKey: StudioDriverKeys.archiveThread(thread.id),
-          actionTooltip: context.l10n.sidebarArchiveSession,
-          actionIcon: Icons.archive_outlined,
-          onAction: issue == null && canArchive
-              ? () => unawaited(
-                  _archiveThreadFromSidebar(context, ref, thread.id),
-                )
-              : null,
-          secondaryActionKey: StudioDriverKeys.renameThread(thread.id),
-          secondaryActionTooltip: context.l10n.sidebarRenameSession,
-          secondaryActionIcon: Icons.edit_outlined,
-          onSecondaryAction: issue == null
-              ? () => unawaited(_renameThreadFromSidebar(context, ref, thread))
-              : null,
-        ),
-      );
-    }
     final tile = _SidebarTile(
       selected: selected,
       icon: issue == null ? modeIcon : Icons.error_outline,
@@ -144,45 +211,57 @@ class _ThreadTile extends ConsumerWidget {
           : selected
           ? context.colors.onPrimaryContainer
           : colors.onSurfaceVariant,
-      markerColor: issue != null
-          ? null
-          : thread.mode == ThreadModeId.simple
-          ? context.colors.primary
-          : context.colors.onSurfaceVariant,
+      markerColor: null,
       onTap: issue == null
-          ? () => ref
-                .read(studioControllerProvider.notifier)
-                .selectThread(thread.id)
+          ? () async {
+              await ref
+                  .read(studioControllerProvider.notifier)
+                  .selectThread(thread.id);
+              onNavigate?.call();
+            }
           : null,
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          IconButton(
-            key: StudioDriverKeys.renameThread(thread.id),
-            tooltip: context.l10n.sidebarRenameSession,
-            style: IconButton.styleFrom(
-              minimumSize: const Size.square(30),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      trailing: PopupMenuButton<String>(
+        key: ValueKey('thread-menu-${thread.id}'),
+        icon: const Icon(Icons.more_horiz, size: 18),
+        onSelected: (action) async {
+          if (action == 'pin') {
+            await _saveSidebarPreferences(ref, threadId: thread.id);
+          }
+          if (action == 'rename' && context.mounted) {
+            await _renameThreadFromSidebar(context, ref, thread);
+          }
+          if (action == 'archive') {
+            if (context.mounted) {
+              await _archiveThreadFromSidebar(context, ref, thread.id);
+            }
+          }
+        },
+        itemBuilder: (_) => [
+          PopupMenuItem(
+            value: 'pin',
+            child: Text(
+              ref
+                          .watch(studioControllerProvider)
+                          .value
+                          ?.general
+                          .pinnedThreadIds
+                          .contains(thread.id) ==
+                      true
+                  ? context.l10n.sidebarUnpin
+                  : context.l10n.sidebarPin,
             ),
-            icon: const Icon(Icons.edit_outlined, size: 17),
-            onPressed: issue == null
-                ? () =>
-                      unawaited(_renameThreadFromSidebar(context, ref, thread))
-                : null,
           ),
-          IconButton(
+          PopupMenuItem(
+            key: StudioDriverKeys.renameThread(thread.id),
+            value: 'rename',
+            enabled: issue == null,
+            child: Text(context.l10n.sidebarRenameSession),
+          ),
+          PopupMenuItem(
             key: StudioDriverKeys.archiveThread(thread.id),
-            tooltip: context.l10n.sidebarArchiveSession,
-            style: IconButton.styleFrom(
-              minimumSize: const Size.square(30),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            icon: const Icon(Icons.archive_outlined, size: 18),
-            onPressed: issue == null && canArchive
-                ? () => unawaited(
-                    _archiveThreadFromSidebar(context, ref, thread.id),
-                  )
-                : null,
+            value: 'archive',
+            enabled: issue == null && canArchive,
+            child: Text(context.l10n.sidebarArchiveSession),
           ),
         ],
       ),

@@ -92,10 +92,7 @@ void registerShellSettingsTests() {
 
     expect(find.byKey(StudioDriverKeys.threadRow('session-1')), findsOneWidget);
     expect(find.byKey(StudioDriverKeys.newSession), findsOneWidget);
-    expect(
-      find.byKey(StudioDriverKeys.archiveThread('session-1')),
-      findsOneWidget,
-    );
+    expect(find.byKey(const ValueKey('thread-menu-session-1')), findsOneWidget);
 
     await tester.tap(find.byKey(StudioDriverKeys.newSession));
     await tester.pumpAndSettle();
@@ -254,6 +251,8 @@ void registerShellSettingsTests() {
     );
     await tester.pumpAndSettle();
 
+    await tester.tap(find.byKey(ValueKey('thread-menu-${first.id}')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(StudioDriverKeys.archiveThread(first.id)));
     await tester.pumpAndSettle();
 
@@ -281,6 +280,8 @@ void registerShellSettingsTests() {
     );
     await tester.pumpAndSettle();
 
+    await tester.tap(find.byKey(ValueKey('thread-menu-${'session-1'}')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(StudioDriverKeys.archiveThread('session-1')));
     await tester.pumpAndSettle();
 
@@ -309,6 +310,8 @@ void registerShellSettingsTests() {
     );
     await tester.pumpAndSettle();
 
+    await tester.tap(find.byKey(const ValueKey('thread-menu-session-1')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(StudioDriverKeys.renameThread('session-1')));
     await tester.pumpAndSettle();
     expect(
@@ -360,7 +363,7 @@ void registerShellSettingsTests() {
     expect(find.text('Auto title'), findsAtLeastNWidgets(1));
   });
 
-  testWidgets('compact rail keeps new and archive Thread actions', (
+  testWidgets('narrow drawer keeps project new-session and archive actions', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(800, 700);
@@ -376,14 +379,13 @@ void registerShellSettingsTests() {
       ),
     );
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('sidebar-toggle')));
+    await tester.pumpAndSettle();
 
     final sidebar = find.byKey(StudioDriverKeys.sidebar);
     final newSession = find.byKey(StudioDriverKeys.newSession);
     expect(newSession, findsOneWidget);
-    expect(
-      find.byKey(StudioDriverKeys.archiveThread('session-1')),
-      findsOneWidget,
-    );
+    expect(find.byKey(const ValueKey('thread-menu-session-1')), findsOneWidget);
     // compact rail 同样移除品牌头，不再渲染应用 logo 或名字。
     expect(
       find.descendant(
@@ -400,7 +402,7 @@ void registerShellSettingsTests() {
       findsNothing,
     );
     // 新建会话仍保留，并紧贴侧栏顶部 12px 起始。
-    expect(tester.getRect(newSession).top - tester.getRect(sidebar).top, 12.0);
+    expect(newSession.hitTestable(), findsOneWidget);
     await tester.tap(newSession);
     await tester.pumpAndSettle();
     expect(api.createdThreadProjectId, isNull);
@@ -442,7 +444,7 @@ void registerShellSettingsTests() {
         of: projectRow,
         matching: find.byTooltip(_sidebarTooltipProjectPath),
       ),
-      findsNothing,
+      findsOneWidget,
     );
     expect(
       find.descendant(
@@ -515,27 +517,16 @@ void registerShellSettingsTests() {
       titleCountBefore,
       reason: '鼠标移开后会话标题 overlay 应消失',
     );
-    // 尾随按钮 Tooltip 与标题 Tooltip 互不竞争：悬停 close 按钮显示按钮
-    // 自身的操作提示，而不是项目名称。
-    final closeCountBefore = find.text('Close project').evaluate().length;
-    await gesture.moveTo(
-      tester.getCenter(find.byKey(const ValueKey('project-close-project-1'))),
-    );
-    await _pumpTooltipHover(
-      tester,
-      _tooltipHoverWait(tester, find.byTooltip('Close project')),
-    );
-    expect(
-      find.text('Close project').evaluate().length,
-      closeCountBefore + 1,
-      reason: '悬停尾随 close 按钮应显示按钮自身的操作提示',
-    );
-    await gesture.moveTo(const Offset(1, 1));
+    // 项目管理通过更多菜单访问，名称提示不覆盖菜单操作。
+    await tester.tap(find.byKey(const ValueKey('project-menu-project-1')));
+    await tester.pumpAndSettle();
+    expect(find.text('Close project'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     await gesture.removePointer();
   });
 
-  testWidgets('compact rail tooltips identify rows by full names', (
+  testWidgets('narrow drawer tooltips identify rows by full names', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(800, 700);
@@ -550,6 +541,8 @@ void registerShellSettingsTests() {
         child: _localizedApp(home: const StudioShell()),
       ),
     );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('sidebar-toggle')));
     await tester.pumpAndSettle();
 
     final projectRow = find.byKey(StudioDriverKeys.projectRow('project-1'));
@@ -573,7 +566,7 @@ void registerShellSettingsTests() {
         of: projectRow,
         matching: find.byTooltip(_sidebarTooltipProjectPath),
       ),
-      findsNothing,
+      findsOneWidget,
     );
 
     // 说明：紧凑 ListView 内 tile 的 hover overlay 在当前 Flutter master
@@ -709,10 +702,12 @@ void registerShellSettingsTests() {
     );
     await tester.pumpAndSettle();
 
-    final button = tester.widget<IconButton>(
+    await tester.tap(find.byKey(const ValueKey('thread-menu-session-1')));
+    await tester.pumpAndSettle();
+    final action = tester.widget<PopupMenuItem<String>>(
       find.byKey(StudioDriverKeys.archiveThread('session-1')),
     );
-    expect(button.onPressed, isNull);
+    expect(action.enabled, isFalse);
   });
 
   testWidgets('driver project path dialog opens the entered project', (
@@ -739,6 +734,10 @@ void registerShellSettingsTests() {
 
     await tester.tap(find.byKey(StudioDriverKeys.openProject));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('add-project-local')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('add-project-continue')));
+    await tester.pumpAndSettle();
     expect(find.byKey(StudioDriverKeys.projectPathDialog), findsOneWidget);
 
     const path = r'C:\workspace\shooter';
@@ -759,9 +758,9 @@ void registerShellSettingsTests() {
   });
 
   testWidgets(
-    'sidebar exposes labelled actions and keeps new session above the directory',
+    'sidebar exposes add-project above project-owned new-session actions',
     (tester) async {
-      tester.view.physicalSize = const Size(900, 700);
+      tester.view.physicalSize = const Size(1280, 800);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -786,8 +785,11 @@ void registerShellSettingsTests() {
       expect(newSession.hitTestable(), findsOneWidget);
       expect(openProject.hitTestable(), findsOneWidget);
       expect(settings.hitTestable(), findsOneWidget);
-      expect(find.text('新建会话'), findsOneWidget);
-      expect(find.text('打开项目'), findsOneWidget);
+      expect(
+        find.byTooltip('新建会话 · ${_emptyState().projects.first.name}'),
+        findsOneWidget,
+      );
+      expect(find.text('添加项目'), findsOneWidget);
       expect(find.text('设置'), findsOneWidget);
       // 侧栏不再重复系统标题栏的 logo 与 app 名字。
       expect(
@@ -804,15 +806,10 @@ void registerShellSettingsTests() {
         find.descendant(of: sidebar, matching: find.text(localizedTitle)),
         findsNothing,
       );
-      // 删除品牌头占位后，新建会话紧贴侧栏顶部 12px 起始；侧栏宽度不变。
-      expect(
-        tester.getRect(newSession).top - tester.getRect(sidebar).top,
-        12.0,
-      );
       expect(tester.getSize(sidebar).width, StudioLayout.sidebarWidth);
       expect(
-        tester.getCenter(newSession).dy,
-        lessThan(tester.getCenter(openProject).dy),
+        tester.getCenter(openProject).dy,
+        lessThan(tester.getCenter(newSession).dy),
       );
       expect(
         tester.getCenter(openProject).dy,
@@ -851,15 +848,9 @@ void registerShellSettingsTests() {
       await tester.pump();
       await tester.pump();
 
-      final closeProjectButtons = find.widgetWithIcon(IconButton, Icons.close);
-      final closeButtons = tester
-          .widgetList<IconButton>(closeProjectButtons)
-          .toList();
-      expect(closeButtons.length, 2);
-      expect(closeButtons.first.onPressed, isNotNull);
-      expect(closeButtons.last.onPressed, isNotNull);
-
-      await tester.tap(closeProjectButtons.first);
+      await tester.tap(find.byKey(const ValueKey('project-menu-project-a')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('project-close-project-a')));
       await tester.pumpAndSettle();
       expect(api.archivedProjectId, isNull);
       expect(find.textContaining('worktree'), findsNothing);
@@ -1177,44 +1168,47 @@ void registerShellSettingsTests() {
     expect(find.text('Responding'), findsNothing);
   });
 
-  testWidgets('dense shell uses a compact rail without overflow', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(760, 720);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
+  testWidgets(
+    'dense shell uses a readable navigation drawer without overflow',
+    (tester) async {
+      tester.view.physicalSize = const Size(760, 720);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
 
-    final api = _FakeStudioApi(
-      _withSelectedRuntime(
-        _stateWithPlannerModels(),
-        const ThreadRuntimeView(
-          model: 'planner/local',
-          contextTokens: 42000,
-          contextWindow: 100000,
-          totalTokens: 128000,
-          costLabel: '￥12.34',
-          activeSkills: ['flutter-ui'],
-          activeMcpServers: ['dart'],
-          activeLspServers: ['rust-analyzer'],
-          agentCount: 0,
+      final api = _FakeStudioApi(
+        _withSelectedRuntime(
+          _stateWithPlannerModels(),
+          const ThreadRuntimeView(
+            model: 'planner/local',
+            contextTokens: 42000,
+            contextWindow: 100000,
+            totalTokens: 128000,
+            costLabel: '￥12.34',
+            activeSkills: ['flutter-ui'],
+            activeMcpServers: ['dart'],
+            activeLspServers: ['rust-analyzer'],
+            agentCount: 0,
+          ),
         ),
-      ),
-    );
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [studioApiProvider.overrideWithValue(api)],
-        child: _localizedApp(home: const StudioShell()),
-      ),
-    );
-    await tester.pumpAndSettle();
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [studioApiProvider.overrideWithValue(api)],
+          child: _localizedApp(home: const StudioShell()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('sidebar-toggle')));
+      await tester.pumpAndSettle();
 
-    expect(
-      tester.getSize(find.byKey(const ValueKey('studio-sidebar'))).width,
-      StudioLayout.compactRailWidth,
-    );
-    expect(tester.takeException(), isNull);
-  });
+      expect(
+        tester.getSize(find.byKey(const ValueKey('studio-sidebar'))).width,
+        360.0,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('running thread locks the session mode selector', (tester) async {
     tester.view.physicalSize = const Size(760, 720);
@@ -1325,7 +1319,7 @@ void registerShellSettingsTests() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('任务 · 更新于'), findsOneWidget);
+    expect(find.textContaining('空闲 ·'), findsOneWidget);
     expect(find.text('任务'), findsWidgets);
     expect(find.text('完全'), findsOneWidget);
     expect(find.text('Plan'), findsNothing);

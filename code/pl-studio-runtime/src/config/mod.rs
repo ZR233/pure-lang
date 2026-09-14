@@ -151,6 +151,12 @@ pub struct StudioUiConfig {
     pub follow_active_turn: bool,
     #[serde(default)]
     pub compact_timeline: bool,
+    #[serde(default)]
+    pub sidebar_width: Option<u16>,
+    #[serde(default)]
+    pub pinned_thread_ids: Vec<String>,
+    #[serde(default)]
+    pub pinned_project_ids: Vec<String>,
 }
 
 impl Default for StudioUiConfig {
@@ -158,6 +164,9 @@ impl Default for StudioUiConfig {
         Self {
             follow_active_turn: true,
             compact_timeline: false,
+            sidebar_width: None,
+            pinned_thread_ids: Vec::new(),
+            pinned_project_ids: Vec::new(),
         }
     }
 }

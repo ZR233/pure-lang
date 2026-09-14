@@ -228,6 +228,56 @@ impl StudioRuntime {
         }))
     }
 
+    /// Restores an archived root and its descendants without executing historical work.
+    pub async fn restore_thread(&self, thread_id: String) -> Result<ThreadRecord> {
+        let _guard = self.lifecycle_lock.lock().await;
+        let root = self.read_protocol_thread(&thread_id).await?;
+        anyhow::ensure!(
+            root.parent_thread_id.is_none(),
+            "only root Threads can be restored"
+        );
+        let projects = self.agent_facility.product_events.project_snapshot().await;
+        anyhow::ensure!(
+            projects.iter().any(|project| project.id == root.project_id),
+            "open the original Project before restoring its Threads"
+        );
+        if !root.archived {
+            return Ok(ThreadRecord::from_directory_thread(root));
+        }
+        let mut tree = self
+            .store
+            .read_directory_tree(&thread_id)
+            .await?
+            .into_iter()
+            .map(|record| (record.id.clone(), pl_protocol::Thread::from(record)))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        for thread in self
+            .agent_facility
+            .product_events
+            .threads_for_root(&thread_id)
+        {
+            tree.insert(thread.id.clone(), thread);
+        }
+        tree.insert(root.id.clone(), root);
+        let now = crate::studio::unix_seconds();
+        for thread in tree.values_mut() {
+            thread.archived = false;
+            thread.updated_at = now;
+        }
+        let restored = tree
+            .get(&thread_id)
+            .context("root missing from restore tree")?
+            .clone();
+        self.agent_facility
+            .product_events
+            .commit_directory(DirectoryDelta {
+                thread_upserts: tree.into_values().collect(),
+                ..Default::default()
+            })
+            .await?;
+        Ok(ThreadRecord::from_directory_thread(restored))
+    }
+
     async fn compensate_unstarted_thread(&self, thread_id: &str) -> Result<()> {
         self.threads.close(thread_id).await?;
         self.residency.remove(thread_id).await;
@@ -249,6 +299,10 @@ impl StudioRuntime {
         self.close_project_agent_trees(thread_ids).await?;
         for thread_id in thread_ids {
             self.residency.remove(thread_id).await;
+            let issues = self.recovery.remove(&format!("tool-refresh:{thread_id}"));
+            self.agent_facility
+                .product_events
+                .emit_recovery_state(issues);
         }
         Ok(())
     }
@@ -257,7 +311,7 @@ impl StudioRuntime {
         &self,
         root_thread_id: &str,
     ) -> Result<Option<(ThreadRecord, Vec<ThreadRecord>, Vec<ThreadRecord>)>> {
-        let (roots, mut tree) = tokio::try_join!(
+        let (mut roots, mut tree) = tokio::try_join!(
             self.store.list_root_threads_for_activation(root_thread_id),
             self.store.list_threads_for_root(root_thread_id),
         )?;
@@ -277,6 +331,29 @@ impl StudioRuntime {
         else {
             return Ok(None);
         };
+        // A newly created root may not yet be in SQLite. Archive selection must
+        // use the same canonical hot facts as the tree itself.
+        let hot = self
+            .agent_facility
+            .product_events
+            .read_thread_directory()
+            .await?;
+        if let Some(directory) = hot.state.value() {
+            for thread in &directory.threads {
+                if thread.project_id == root.project_id
+                    && thread.parent_thread_id.is_none()
+                    && !thread.archived
+                {
+                    roots.retain(|entry| entry.id != thread.id);
+                    roots.push(ThreadRecord::from_directory_thread(thread.clone()));
+                }
+            }
+        }
+        roots.sort_by(|a, b| {
+            b.updated_at
+                .cmp(&a.updated_at)
+                .then_with(|| b.id.cmp(&a.id))
+        });
         let mut entries = roots
             .iter()
             .chain(tree.iter())
@@ -324,6 +401,73 @@ mod tests {
     use crate::StudioProductEventKind;
     use crate::studio::runtime::thread_title::title_cancellation_channel;
     use crate::{StudioHostKind, StudioRuntimeOptions};
+
+    #[tokio::test]
+    async fn project_alias_reuses_identity_and_preserves_renamed_label() {
+        let (_home, workspace, runtime, id) = runtime_with_thread_without_optional_tools().await;
+        let thread = runtime.read_thread(&id).await.unwrap();
+        let renamed = runtime
+            .rename_project(&thread.project_id, "Readable project")
+            .await
+            .unwrap();
+        let reopened = runtime
+            .open_project(workspace.path().join("."))
+            .await
+            .unwrap();
+        assert_eq!(renamed.id, reopened.id);
+        assert_eq!(reopened.name, "Readable project");
+        assert_eq!(runtime.list_projects().await.unwrap().len(), 1);
+        std::fs::create_dir(workspace.path().join(".git")).unwrap();
+        std::fs::write(workspace.path().join(".git/HEAD"), "ref: refs/heads/main").unwrap();
+        let child_path = workspace.path().join("nested");
+        std::fs::create_dir(&child_path).unwrap();
+        let child = runtime.open_project(&child_path).await.unwrap();
+        assert_ne!(child.id, reopened.id);
+        assert_eq!(
+            child.path,
+            dunce::canonicalize(child_path).unwrap().to_string_lossy()
+        );
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn archived_session_restores_identity_and_can_activate_again() {
+        let (_home, _workspace, runtime, id) = runtime_with_thread_without_optional_tools().await;
+        let original = runtime.read_thread(&id).await.unwrap();
+        let previous_owner = runtime.ensure_thread_owner(&id).await.unwrap();
+        runtime.archive_thread(id.clone()).await.unwrap().unwrap();
+        // Deterministic late completion from the retired tool-refresh owner.
+        runtime.publish_tool_refresh_result(
+            &id,
+            &previous_owner,
+            Some(&anyhow::anyhow!("retired catalog")),
+        );
+        assert!(
+            runtime
+                .recovery_issues()
+                .iter()
+                .all(|issue| issue.id != format!("tool-refresh:{id}"))
+        );
+        assert!(runtime.read_thread(&id).await.unwrap().archived);
+        let restored = runtime.restore_thread(id.clone()).await.unwrap();
+        assert_eq!(restored.id, id);
+        assert_eq!(restored.title, original.title);
+        assert!(!runtime.read_thread(&id).await.unwrap().archived);
+        let owner = runtime
+            .ensure_thread_owner(&id)
+            .await
+            .unwrap_or_else(|error| {
+                panic!(
+                    "restore activation failed: {error:#}; issues: {:?}",
+                    runtime.recovery_issues()
+                )
+            });
+        assert_ne!(
+            owner.snapshot().lifecycle,
+            pl_core::thread::ThreadLifecycle::Closed
+        );
+        runtime.shutdown().await;
+    }
 
     async fn runtime_with_thread() -> (tempfile::TempDir, tempfile::TempDir, StudioRuntime, String)
     {
@@ -484,7 +628,7 @@ mod tests {
                 .title,
             renamed.title
         );
-        runtime.shutdown_runtime().await.unwrap();
+        runtime.shutdown().await;
     }
 
     #[tokio::test]
@@ -513,7 +657,7 @@ mod tests {
             }
         };
         assert_eq!(delta.upserted[0].title, "Manual title");
-        runtime.shutdown_runtime().await.unwrap();
+        runtime.shutdown().await;
         drop(runtime);
 
         let reopened = StudioRuntime::with_options(StudioRuntimeOptions {
@@ -577,7 +721,7 @@ mod tests {
                 .title,
             "Manual title"
         );
-        runtime.shutdown_runtime().await.unwrap();
+        runtime.shutdown().await;
     }
 
     #[tokio::test]
@@ -604,14 +748,23 @@ mod tests {
             )
             .await
             .unwrap();
+        let archived = runtime.read_thread(&thread_id).await.unwrap();
+        assert!(archived.archived);
+        assert_eq!(archived.title, "Old title");
+        let visible = runtime
+            .query_threads(&Default::default(), None, 20)
+            .await
+            .unwrap();
         assert!(
-            runtime
-                .agent_facility
-                .product_events
-                .thread_snapshot(&thread_id)
-                .is_none()
+            !visible
+                .state
+                .value()
+                .unwrap()
+                .threads
+                .iter()
+                .any(|thread| thread.id == thread_id)
         );
-        runtime.shutdown_runtime().await.unwrap();
+        runtime.shutdown().await;
     }
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn worktree_lifecycle_and_new_submissions_do_not_wait_for_sqlite() {

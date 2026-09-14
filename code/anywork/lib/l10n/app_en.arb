@@ -488,11 +488,29 @@
   "agentDetailStatusClosing": "Closing",
   "agentDetailStatusCleanupFailed": "Cleanup failed",
   "timelineToolQueued": "{name} queued",
-  "@timelineToolQueued": {"placeholders": {"name": {"type": "String"}}},
+  "@timelineToolQueued": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "timelineToolCancelling": "{name} cancelling",
-  "@timelineToolCancelling": {"placeholders": {"name": {"type": "String"}}},
+  "@timelineToolCancelling": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "timelineToolInterrupted": "{name} interrupted",
-  "@timelineToolInterrupted": {"placeholders": {"name": {"type": "String"}}},
+  "@timelineToolInterrupted": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "timelineAgentSubagent": "Subagent",
   "timelineAgentSubagentMessage": "Subagent message",
   "timelineAgentWaiting": "Waiting for subagents",
@@ -1051,5 +1069,35 @@
   "costPurposeReview": "Review",
   "costPurposeTitle": "Title",
   "costPurposeUnknown": "Unknown purpose",
-  "timelineRawRecord": "Original history record"
+  "timelineRawRecord": "Original history record",
+  "sidebarSearch": "Search projects and sessions",
+  "sidebarAll": "All",
+  "sidebarRunning": "Running",
+  "sidebarAttention": "Needs attention",
+  "sidebarAddProject": "Add project",
+  "sidebarLocalProject": "Local project",
+  "sidebarLocalHint": "Choose a folder on this computer",
+  "sidebarRemoteProject": "Remote project",
+  "sidebarRemoteHint": "Connect to a remote folder over SSH",
+  "sidebarContinue": "Continue",
+  "sidebarBack": "Back",
+  "sidebarConnect": "Connect and choose folder",
+  "sidebarSaveConnect": "Save and connect",
+  "sidebarSearchConnections": "Search configured connections",
+  "sidebarNoConnections": "No remote connections yet",
+  "sidebarNewConnection": "New remote connection",
+  "sidebarNoResults": "No matching projects or sessions",
+  "sidebarEmptyProject": "No sessions yet. Use + on this project to start",
+  "sidebarEarlier": "Show earlier sessions",
+  "sidebarArchived": "Archived",
+  "sidebarRestore": "Restore session",
+  "sidebarPin": "Pin",
+  "sidebarUnpin": "Unpin",
+  "sidebarNavigation": "Project navigation",
+  "sidebarResize": "Resize sidebar; use arrows, Home to reset",
+  "sidebarLocal": "Local",
+  "sidebarNotChecked": "Not checked",
+  "sidebarConnectionSaved": "Configuration saved; connection failed. Edit or retry",
+  "sidebarCopyPath": "Copy path",
+  "sidebarRetry": "Retry"
 }

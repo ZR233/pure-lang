@@ -18,8 +18,15 @@ abstract class StudioApi {
   });
   Future<StudioState> readStudioState();
   Future<ThreadDirectoryPage> listThreadsPage({String? cursor, int limit = 50});
+  Future<ThreadDirectoryPage> queryThreads(
+    DirectoryQuery query, {
+    String? cursor,
+    int limit = 50,
+  });
+  Future<StudioThread> restoreThread(String threadId);
   Future<void> activateProject(String projectId);
   Future<StudioProject> openProject(String path);
+  Future<StudioProject> renameProject(String projectId, String name);
   Future<List<SshServer>> listSshServers();
   Future<SshServer> saveSshServer(SaveSshServerCommand command);
   Future<void> deleteSshServer(String serverId);
@@ -390,6 +397,50 @@ class FrbStudioApi implements StudioApi {
       ),
     );
     return _threadDirectoryPageFromFrb(page);
+  }
+
+  @override
+  Future<ThreadDirectoryPage> queryThreads(
+    DirectoryQuery query, {
+    String? cursor,
+    int limit = 50,
+  }) async {
+    await _ensureReady();
+    final page = await _bridgeCall(
+      () => frb.queryThreads(
+        request: frb.BridgeDirectoryQuery(
+          projectId: query.projectId,
+          search: query.search,
+          archived: query.archived,
+          filter: switch (query.filter) {
+            DirectoryFilter.all => frb.BridgeDirectoryFilter.all,
+            DirectoryFilter.running => frb.BridgeDirectoryFilter.running,
+            DirectoryFilter.attention => frb.BridgeDirectoryFilter.attention,
+          },
+          cursor: cursor,
+          limit: limit.clamp(1, 100),
+        ),
+      ),
+    );
+    return _threadDirectoryPageFromFrb(page);
+  }
+
+  @override
+  Future<StudioThread> restoreThread(String threadId) async {
+    await _ensureReady();
+    return _threadFromFrb(
+      await _bridgeCall(() => frb.restoreThread(threadId: threadId)),
+    );
+  }
+
+  @override
+  Future<StudioProject> renameProject(String projectId, String name) async {
+    await _ensureReady();
+    return _projectFromFrb(
+      await _bridgeCall(
+        () => frb.renameProject(projectId: projectId, name: name),
+      ),
+    );
   }
 
   @override
@@ -1160,6 +1211,9 @@ class FrbStudioApi implements StudioApi {
           input: frb.GeneralSettingsInput(
             followActiveTurn: command.followActiveTurn,
             compactTimeline: command.compactTimeline,
+            sidebarWidth: command.sidebarWidth,
+            pinnedThreadIds: command.pinnedThreadIds ?? const [],
+            pinnedProjectIds: command.pinnedProjectIds ?? const [],
           ),
         ),
       ),

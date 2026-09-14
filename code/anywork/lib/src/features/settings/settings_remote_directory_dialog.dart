@@ -12,9 +12,16 @@ import '../../shared/studio_driver_keys.dart';
 import 'settings_common.dart';
 
 class RemoteDirectoryDialog extends ConsumerStatefulWidget {
-  const RemoteDirectoryDialog({super.key, required this.server});
+  const RemoteDirectoryDialog({
+    super.key,
+    required this.server,
+    this.onBack,
+    this.active = true,
+  });
 
   final SshServer server;
+  final VoidCallback? onBack;
+  final bool active;
 
   @override
   ConsumerState<RemoteDirectoryDialog> createState() =>
@@ -27,13 +34,16 @@ class _RemoteDirectoryDialogState extends ConsumerState<RemoteDirectoryDialog> {
   String? _error;
   bool _browsing = false;
   bool _opening = false;
+  final _projectName = TextEditingController();
+  bool _nameEdited = false;
 
   bool get _busy => _browsing || _opening;
 
   bool get _canOpen =>
       !_busy &&
       _listing != null &&
-      _pathController.text.trim() == _listing!.path;
+      _pathController.text.trim() == _listing!.path &&
+      (widget.onBack == null || _projectName.text.trim().isNotEmpty);
 
   @override
   void initState() {
@@ -45,6 +55,7 @@ class _RemoteDirectoryDialogState extends ConsumerState<RemoteDirectoryDialog> {
   @override
   void dispose() {
     _pathController.dispose();
+    _projectName.dispose();
     super.dispose();
   }
 
@@ -88,6 +99,14 @@ class _RemoteDirectoryDialogState extends ConsumerState<RemoteDirectoryDialog> {
       }
       setState(() {
         _listing = listing;
+        if (!_nameEdited) {
+          _projectName.text =
+              listing.path
+                  .split('/')
+                  .where((part) => part.isNotEmpty)
+                  .lastOrNull ??
+              'remote-workspace';
+        }
         _browsing = false;
         _pathController.text = listing.path;
       });
@@ -112,7 +131,11 @@ class _RemoteDirectoryDialogState extends ConsumerState<RemoteDirectoryDialog> {
     try {
       opened = await ref
           .read(studioControllerProvider.notifier)
-          .openRemoteProject(widget.server.id, path);
+          .openRemoteProject(
+            widget.server.id,
+            path,
+            name: widget.onBack == null ? null : _projectName.text.trim(),
+          );
     } on Object {
       // Controller failures are normally converted to false; retain the same
       // retryable dialog state if provider access or another boundary fails.
@@ -134,7 +157,11 @@ class _RemoteDirectoryDialogState extends ConsumerState<RemoteDirectoryDialog> {
   /// 都依赖同步字段而非下一次 rebuild。
   void _cancel() {
     if (_opening) return;
-    Navigator.of(context).pop();
+    if (widget.onBack case final back?) {
+      back();
+    } else {
+      Navigator.of(context).pop();
+    }
   }
 
   @override
@@ -142,9 +169,9 @@ class _RemoteDirectoryDialogState extends ConsumerState<RemoteDirectoryDialog> {
     final listing = _listing;
     final busy = _busy;
     return PopScope(
-      canPop: false,
+      canPop: !widget.active,
       onPopInvokedWithResult: (didPop, result) {
-        if (didPop || _opening) return;
+        if (!widget.active || didPop || _opening) return;
         Navigator.of(context).pop();
       },
       child: AlertDialog(
@@ -181,13 +208,30 @@ class _RemoteDirectoryDialogState extends ConsumerState<RemoteDirectoryDialog> {
               _buildCurrentPathRow(context, listing, busy),
               const Divider(),
               _buildListingBody(listing, busy),
+              if (widget.onBack != null) ...[
+                const SizedBox(height: 16),
+                TextField(
+                  key: const ValueKey('add-project-name'),
+                  controller: _projectName,
+                  enabled: !busy,
+                  maxLength: 80,
+                  decoration: InputDecoration(
+                    labelText: context.l10n.settingsSshName,
+                  ),
+                  onChanged: (_) => setState(() => _nameEdited = true),
+                ),
+              ],
             ],
           ),
         ),
         actions: [
           TextButton(
             onPressed: _opening ? null : _cancel,
-            child: Text(context.l10n.settingsCancel),
+            child: Text(
+              widget.onBack == null
+                  ? context.l10n.settingsCancel
+                  : context.l10n.sidebarBack,
+            ),
           ),
           FilledButton.icon(
             key: StudioDriverKeys.sshOpenCurrentDirectory,
@@ -198,7 +242,11 @@ class _RemoteDirectoryDialogState extends ConsumerState<RemoteDirectoryDialog> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.folder_open_outlined, size: 17),
-            label: Text(context.l10n.settingsSshOpenThisDirectory),
+            label: Text(
+              widget.onBack == null
+                  ? context.l10n.settingsSshOpenThisDirectory
+                  : context.l10n.sidebarAddProject,
+            ),
           ),
         ],
       ),
@@ -321,6 +369,18 @@ class _RemoteDirectoryDialogState extends ConsumerState<RemoteDirectoryDialog> {
               ? null
               : () => _load(listing!.parent),
           icon: const Icon(Icons.arrow_upward),
+        ),
+        IconButton(
+          key: const ValueKey('ssh-directory-refresh'),
+          tooltip: context.l10n.sidebarRetry,
+          onPressed: busy
+              ? null
+              : () => _load(
+                  _pathController.text.trim().isEmpty
+                      ? null
+                      : _pathController.text.trim(),
+                ),
+          icon: const Icon(Icons.refresh),
         ),
         const SizedBox(width: 4),
         Expanded(

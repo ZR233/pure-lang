@@ -198,34 +198,43 @@ impl StudioRuntime {
             // Cache attempts, including failures, until an input revision changes.
             // Recovery issues remain visible; only successful transfer commits a binding.
             attempted.insert(id.clone(), (thread.clone(), fingerprint));
-            let issue_id = format!("tool-refresh:{id}");
-            match result {
-                Ok(()) => {
-                    if self
-                        .recovery
-                        .snapshot()
-                        .iter()
-                        .any(|issue| issue.id == issue_id)
-                    {
-                        self.agent_facility
-                            .product_events
-                            .emit_recovery_state(self.recovery.remove(&issue_id));
-                    }
-                }
-                Err(error) => {
-                    let issues = self.recovery.upsert(crate::studio::StudioRecoveryIssue {
-                        id: issue_id, scope: crate::studio::StudioRecoveryIssueScope::Thread,
-                        category: crate::studio::StudioRecoveryIssueCategory::AgentState,
-                        action: crate::studio::StudioRecoveryIssueAction::CleanupThread,
-                        project_id: None, thread_id: Some(id), worktree: None,
-                        message: format!("Tool catalog unavailable; correct configuration or reactivate this Thread: {error}"),
-                    });
-                    self.agent_facility
-                        .product_events
-                        .emit_recovery_state(issues);
-                }
-            }
+            self.publish_tool_refresh_result(&id, &thread, result.as_ref().err());
         }
+    }
+
+    pub(in crate::studio::runtime) fn publish_tool_refresh_result(
+        &self,
+        id: &str,
+        thread: &ThreadHandle,
+        error: Option<&anyhow::Error>,
+    ) {
+        let issue_id = format!("tool-refresh:{id}");
+        let issue = error.map(|error| crate::studio::StudioRecoveryIssue {
+            id: issue_id.clone(),
+            scope: crate::studio::StudioRecoveryIssueScope::Thread,
+            category: crate::studio::StudioRecoveryIssueCategory::AgentState,
+            action: crate::studio::StudioRecoveryIssueAction::CleanupThread,
+            project_id: None,
+            thread_id: Some(id.to_string()),
+            worktree: None,
+            message: format!(
+                "Tool catalog unavailable; correct configuration or reactivate this Thread: {error}"
+            ),
+        });
+        self.recovery.update_if_current(
+            &issue_id,
+            issue,
+            || {
+                self.threads
+                    .thread(id)
+                    .is_some_and(|current| current.same_instance(thread))
+            },
+            |issues| {
+                self.agent_facility
+                    .product_events
+                    .emit_recovery_state(issues);
+            },
+        );
     }
 
     async fn install_refreshed_tools(

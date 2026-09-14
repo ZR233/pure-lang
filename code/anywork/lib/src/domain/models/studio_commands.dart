@@ -290,10 +290,16 @@ class GeneralSettingsCommand {
   const GeneralSettingsCommand({
     required this.followActiveTurn,
     required this.compactTimeline,
+    this.sidebarWidth,
+    this.pinnedThreadIds,
+    this.pinnedProjectIds,
   });
 
   final bool followActiveTurn;
   final bool compactTimeline;
+  final int? sidebarWidth;
+  final List<String>? pinnedThreadIds;
+  final List<String>? pinnedProjectIds;
 }
 
 class WebSearchSettingsCommand {

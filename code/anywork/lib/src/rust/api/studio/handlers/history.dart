@@ -38,3 +38,10 @@ Future<BridgeTimelinePage> listTimelineItems({
 }) => RustLib.instance.api.crateApiStudioHandlersHistoryListTimelineItems(
   request: request,
 );
+
+/// Searches the full project/session directory, including archived history.
+Future<BridgeThreadDirectoryPage> queryThreads({
+  required BridgeDirectoryQuery request,
+}) => RustLib.instance.api.crateApiStudioHandlersHistoryQueryThreads(
+  request: request,
+);

@@ -68,7 +68,10 @@ class TimelinePlanSummaryCard extends StatelessWidget {
                         ),
                       ],
                       const SizedBox(height: 8),
-                      Row(
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 6,
+                        crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
                           StudioPill(
                             tone: StudioTone.warning,
@@ -77,16 +80,13 @@ class TimelinePlanSummaryCard extends StatelessWidget {
                                 .l10n
                                 .interactionPlanAwaitingConfirmation,
                           ),
-                          const Spacer(),
-                          Flexible(
-                            child: Text(
-                              context.l10n.interactionPlanViewDetails,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: context.text.labelMedium?.copyWith(
-                                color: context.colors.onPrimaryContainer,
-                                fontWeight: FontWeight.w600,
-                              ),
+                          Text(
+                            context.l10n.interactionPlanViewDetails,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: context.text.labelMedium?.copyWith(
+                              color: context.colors.onPrimaryContainer,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
                         ],

@@ -3508,6 +3508,186 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Original history record'**
   String get timelineRawRecord;
+
+  /// No description provided for @sidebarSearch.
+  ///
+  /// In en, this message translates to:
+  /// **'Search projects and sessions'**
+  String get sidebarSearch;
+
+  /// No description provided for @sidebarAll.
+  ///
+  /// In en, this message translates to:
+  /// **'All'**
+  String get sidebarAll;
+
+  /// No description provided for @sidebarRunning.
+  ///
+  /// In en, this message translates to:
+  /// **'Running'**
+  String get sidebarRunning;
+
+  /// No description provided for @sidebarAttention.
+  ///
+  /// In en, this message translates to:
+  /// **'Needs attention'**
+  String get sidebarAttention;
+
+  /// No description provided for @sidebarAddProject.
+  ///
+  /// In en, this message translates to:
+  /// **'Add project'**
+  String get sidebarAddProject;
+
+  /// No description provided for @sidebarLocalProject.
+  ///
+  /// In en, this message translates to:
+  /// **'Local project'**
+  String get sidebarLocalProject;
+
+  /// No description provided for @sidebarLocalHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose a folder on this computer'**
+  String get sidebarLocalHint;
+
+  /// No description provided for @sidebarRemoteProject.
+  ///
+  /// In en, this message translates to:
+  /// **'Remote project'**
+  String get sidebarRemoteProject;
+
+  /// No description provided for @sidebarRemoteHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect to a remote folder over SSH'**
+  String get sidebarRemoteHint;
+
+  /// No description provided for @sidebarContinue.
+  ///
+  /// In en, this message translates to:
+  /// **'Continue'**
+  String get sidebarContinue;
+
+  /// No description provided for @sidebarBack.
+  ///
+  /// In en, this message translates to:
+  /// **'Back'**
+  String get sidebarBack;
+
+  /// No description provided for @sidebarConnect.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect and choose folder'**
+  String get sidebarConnect;
+
+  /// No description provided for @sidebarSaveConnect.
+  ///
+  /// In en, this message translates to:
+  /// **'Save and connect'**
+  String get sidebarSaveConnect;
+
+  /// No description provided for @sidebarSearchConnections.
+  ///
+  /// In en, this message translates to:
+  /// **'Search configured connections'**
+  String get sidebarSearchConnections;
+
+  /// No description provided for @sidebarNoConnections.
+  ///
+  /// In en, this message translates to:
+  /// **'No remote connections yet'**
+  String get sidebarNoConnections;
+
+  /// No description provided for @sidebarNewConnection.
+  ///
+  /// In en, this message translates to:
+  /// **'New remote connection'**
+  String get sidebarNewConnection;
+
+  /// No description provided for @sidebarNoResults.
+  ///
+  /// In en, this message translates to:
+  /// **'No matching projects or sessions'**
+  String get sidebarNoResults;
+
+  /// No description provided for @sidebarEmptyProject.
+  ///
+  /// In en, this message translates to:
+  /// **'No sessions yet. Use + on this project to start'**
+  String get sidebarEmptyProject;
+
+  /// No description provided for @sidebarEarlier.
+  ///
+  /// In en, this message translates to:
+  /// **'Show earlier sessions'**
+  String get sidebarEarlier;
+
+  /// No description provided for @sidebarArchived.
+  ///
+  /// In en, this message translates to:
+  /// **'Archived'**
+  String get sidebarArchived;
+
+  /// No description provided for @sidebarRestore.
+  ///
+  /// In en, this message translates to:
+  /// **'Restore session'**
+  String get sidebarRestore;
+
+  /// No description provided for @sidebarPin.
+  ///
+  /// In en, this message translates to:
+  /// **'Pin'**
+  String get sidebarPin;
+
+  /// No description provided for @sidebarUnpin.
+  ///
+  /// In en, this message translates to:
+  /// **'Unpin'**
+  String get sidebarUnpin;
+
+  /// No description provided for @sidebarNavigation.
+  ///
+  /// In en, this message translates to:
+  /// **'Project navigation'**
+  String get sidebarNavigation;
+
+  /// No description provided for @sidebarResize.
+  ///
+  /// In en, this message translates to:
+  /// **'Resize sidebar; use arrows, Home to reset'**
+  String get sidebarResize;
+
+  /// No description provided for @sidebarLocal.
+  ///
+  /// In en, this message translates to:
+  /// **'Local'**
+  String get sidebarLocal;
+
+  /// No description provided for @sidebarNotChecked.
+  ///
+  /// In en, this message translates to:
+  /// **'Not checked'**
+  String get sidebarNotChecked;
+
+  /// No description provided for @sidebarConnectionSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Configuration saved; connection failed. Edit or retry'**
+  String get sidebarConnectionSaved;
+
+  /// No description provided for @sidebarCopyPath.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy path'**
+  String get sidebarCopyPath;
+
+  /// No description provided for @sidebarRetry.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry'**
+  String get sidebarRetry;
 }
 
 class _AppLocalizationsDelegate

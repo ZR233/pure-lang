@@ -30,3 +30,12 @@ Future<ProjectDto?> archiveProject({required String projectId}) => RustLib
     .instance
     .api
     .crateApiStudioHandlersLifecycleArchiveProject(projectId: projectId);
+
+/// Changes a Project display name, preserving its path and connection.
+Future<ProjectDto> renameProject({
+  required String projectId,
+  required String name,
+}) => RustLib.instance.api.crateApiStudioHandlersLifecycleRenameProject(
+  projectId: projectId,
+  name: name,
+);

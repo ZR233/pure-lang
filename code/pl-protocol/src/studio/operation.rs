@@ -9,9 +9,12 @@ use utoipa::ToSchema;
 pub enum StudioOperation {
     ReadState,
     OpenProject,
+    RenameProject,
     ActivateProject,
     ArchiveProject,
     ListThreadsPage,
+    QueryThreads,
+    RestoreThread,
     StartNewThread,
     ReadThread,
     ArchiveThread,
@@ -58,12 +61,15 @@ pub enum StudioOperation {
 }
 
 impl StudioOperation {
-    pub const ALL: [Self; 48] = [
+    pub const ALL: [Self; 51] = [
         Self::ReadState,
         Self::OpenProject,
+        Self::RenameProject,
         Self::ActivateProject,
         Self::ArchiveProject,
         Self::ListThreadsPage,
+        Self::QueryThreads,
+        Self::RestoreThread,
         Self::StartNewThread,
         Self::ReadThread,
         Self::ArchiveThread,
@@ -113,9 +119,12 @@ impl StudioOperation {
         match self {
             Self::ReadState => "studio.readState",
             Self::OpenProject => "project.open",
+            Self::RenameProject => "project.rename",
             Self::ActivateProject => "project.activate",
             Self::ArchiveProject => "project.archive",
             Self::ListThreadsPage => "thread.listPage",
+            Self::QueryThreads => "thread.query",
+            Self::RestoreThread => "thread.restore",
             Self::StartNewThread => "thread.create",
             Self::ReadThread => "thread.read",
             Self::ArchiveThread => "thread.archive",

@@ -17,11 +17,11 @@ final class StudioRadii {
 final class StudioLayout {
   const StudioLayout._();
 
-  static const sidebarWidth = 232.0;
+  static const sidebarWidth = 336.0;
   static const compactRailWidth = 60.0;
   static const conversationWidth = 860.0;
   static const settingsNavigationWidth = 196.0;
-  static const compactBreakpoint = 900.0;
+  static const compactBreakpoint = 960.0;
 }
 
 final class StudioShadows {

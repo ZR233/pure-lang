@@ -122,5 +122,8 @@ GeneralSettingsView _generalSettingsFromFrb(
   return GeneralSettingsView(
     followActiveTurn: value.followActiveTurn,
     compactTimeline: value.compactTimeline,
+    sidebarWidth: value.sidebarWidth ?? 336,
+    pinnedThreadIds: value.pinnedThreadIds,
+    pinnedProjectIds: value.pinnedProjectIds,
   );
 }

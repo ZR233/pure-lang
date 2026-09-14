@@ -2,73 +2,24 @@ part of 'studio_shell.dart';
 
 class _SidebarActions extends ConsumerWidget {
   const _SidebarActions({required this.state, required this.compact});
-
   final SidebarView state;
   final bool compact;
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final horizontalPadding = compact ? 8.0 : 14.0;
     final hasUpdate = ref.watch(
       studioUpdateControllerProvider.select((state) => state.hasUpdate),
     );
     return Padding(
-      padding: EdgeInsets.fromLTRB(
-        horizontalPadding,
-        11,
-        horizontalPadding,
-        12,
+      padding: const EdgeInsets.all(10),
+      child: _SidebarActionButton(
+        showLabel: true,
+        key: StudioDriverKeys.settingsOpen,
+        tooltip: context.l10n.sidebarSettings,
+        icon: Icons.settings_outlined,
+        showIndicator: hasUpdate,
+        onPressed: () => context.go('/settings'),
       ),
-      child: compact
-          ? Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _SidebarActionButton(
-                  key: StudioDriverKeys.openProject,
-                  tooltip: context.l10n.sidebarOpenProject,
-                  icon: Icons.create_new_folder,
-                  onPressed: () => _openProject(context, ref),
-                ),
-                const SizedBox(height: 4),
-                _SidebarActionButton(
-                  key: StudioDriverKeys.settingsOpen,
-                  tooltip: context.l10n.sidebarSettings,
-                  icon: Icons.settings,
-                  showIndicator: hasUpdate,
-                  onPressed: () => context.go('/settings'),
-                ),
-              ],
-            )
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _SidebarActionButton(
-                  showLabel: true,
-                  key: StudioDriverKeys.openProject,
-                  icon: Icons.create_new_folder,
-                  tooltip: context.l10n.sidebarOpenProject,
-                  onPressed: () => _openProject(context, ref),
-                ),
-                const SizedBox(height: 4),
-                _SidebarActionButton(
-                  showLabel: true,
-                  key: StudioDriverKeys.settingsOpen,
-                  tooltip: context.l10n.sidebarSettings,
-                  icon: Icons.settings,
-                  showIndicator: hasUpdate,
-                  onPressed: () => context.go('/settings'),
-                ),
-              ],
-            ),
     );
-  }
-
-  Future<void> _openProject(BuildContext context, WidgetRef ref) async {
-    final path = await ref.read(projectDirectoryPickerProvider)(context);
-    if (path == null || path.isEmpty) {
-      return;
-    }
-    await ref.read(studioControllerProvider.notifier).openProject(path);
   }
 }
 

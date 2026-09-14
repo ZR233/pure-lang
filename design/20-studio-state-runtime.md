@@ -66,3 +66,8 @@ delta 与 `ThreadDirectoryChanged`。手动 rename 先提交 canonical title，�
 title task；同一个 `StudioRuntime` 再次 initialize 后，新任务必须获得新的独立一次性通道，不能继承
 上一次 shutdown 的已取消状态。provider 与 Turn 不持有发送端；发送端被意外释放时接收端继续等待
 provider，只有 owner 显式发送才具有取消语义。
+
+## 20.7 项目侧栏
+
+侧栏按项目展示根 Thread。搜索覆盖持久化目录与尚未保存的内存事实，项目过滤和归档状态在分页前应用；结果不能由当前已加载的首屏推断。归档恢复属于显式生命周期命令，保留原 Thread 身份与历史，不创建副本。
+侧栏宽度、项目置顶与项目内会话置顶属于现有 UI settings，由 ConfigRuntime 持有并通过 Settings CAS 返回 canonical snapshot；搜索词、展开状态和抽屉显隐为临时 UI 状态。

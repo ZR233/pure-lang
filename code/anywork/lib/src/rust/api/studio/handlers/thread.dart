@@ -57,3 +57,9 @@ Future<void> setThreadMode({required String threadId, required String mode}) =>
       threadId: threadId,
       mode: mode,
     );
+
+/// Restores an archived session tree with its original identity and history.
+Future<BridgeThread> restoreThread({required String threadId}) => RustLib
+    .instance
+    .api
+    .crateApiStudioHandlersThreadRestoreThread(threadId: threadId);

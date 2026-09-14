@@ -111,6 +111,9 @@ pub(crate) fn bridge_settings(
         general: BridgeGeneralSettingsDto {
             follow_active_turn: settings.general.follow_active_turn,
             compact_timeline: settings.general.compact_timeline,
+            sidebar_width: settings.general.sidebar_width,
+            pinned_thread_ids: settings.general.pinned_thread_ids.clone(),
+            pinned_project_ids: settings.general.pinned_project_ids.clone(),
         },
         web_search: bridge_web_search_settings(settings.web_search),
         deepseek_web_search: bridge_deepseek_web_search_settings(settings.deepseek_web_search),

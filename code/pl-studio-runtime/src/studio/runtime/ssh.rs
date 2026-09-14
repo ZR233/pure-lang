@@ -88,6 +88,20 @@ impl StudioRuntime {
     ) -> Result<ProjectRecord> {
         let workspace = self.ssh_manager.open_workspace(server_id, path).await?;
         let canonical_path = workspace.canonical_path().to_string();
+        let _guard = self.lifecycle_lock.lock().await;
+        if let Some(project) = self
+            .agent_facility
+            .product_events
+            .project_snapshot()
+            .await
+            .into_iter()
+            .find(|project| {
+                project.path == canonical_path
+                    && project.ssh_server_id.as_deref() == Some(server_id)
+            })
+        {
+            return Ok(project);
+        }
         let name = canonical_path
             .trim_end_matches('/')
             .rsplit('/')
@@ -100,9 +114,9 @@ impl StudioRuntime {
             .store
             .find_project_by_path(&canonical_path, Some(server_id))
             .await?;
-        let (id, created_at) = existing
-            .map(|row| (row.id, row.created_at))
-            .unwrap_or_else(|| (crate::studio::ids::new_id("project"), now));
+        let (id, created_at, name) = existing
+            .map(|row| (row.id, row.created_at, row.name))
+            .unwrap_or_else(|| (crate::studio::ids::new_id("project"), now, name));
         let delta = ProjectDirectoryRecord {
             id: id.clone(),
             name: name.clone(),

@@ -22,6 +22,7 @@ class DemoStudioApi implements StudioApi {
   final Map<String, ThreadModeId> _threadModes = {};
   final Map<String, AttachmentDraftView> _attachmentDrafts = {};
   final Set<String> _archivedProjectIds = {};
+  final Map<String, String> _projectNames = {};
   final Set<String> _archivedThreadIds = {};
   final List<StudioThread> _createdRootThreads = [];
   final List<StudioThread> _pageFillThreads = [];
@@ -186,7 +187,16 @@ class DemoStudioApi implements StudioApi {
         selectedThreadId: null,
       );
     }
-    final projects = [project, ..._openedRemoteProjects];
+    final projects = [project, ..._openedRemoteProjects]
+        .map(
+          (p) => StudioProject(
+            id: p.id,
+            name: _projectNames[p.id] ?? p.name,
+            path: p.path,
+            sshServerId: p.sshServerId,
+          ),
+        )
+        .toList();
     final selectedProjectId = _selectedProjectId ?? project.id;
     final selectedThreadId = selectedProjectId == project.id
         ? threads
@@ -532,6 +542,46 @@ class DemoStudioApi implements StudioApi {
     return threads;
   }
 
+  @override
+  Future<ThreadDirectoryPage> queryThreads(
+    DirectoryQuery query, {
+    String? cursor,
+    int limit = 50,
+  }) async {
+    final state = await readStudioState();
+    final all = <String, StudioThread>{
+      for (final thread in [
+        ..._workspaces.values.map((w) => w.thread),
+        ..._createdRootThreads,
+        ..._pageFillThreads,
+      ])
+        thread.id: thread.copyWith(
+          archived: _archivedThreadIds.contains(thread.effectiveRootThreadId),
+        ),
+    };
+    final rows =
+        all.values
+            .where((thread) => query.matches(thread, state.projects))
+            .toList()
+          ..sort((a, b) {
+            final date = b.updatedAt.compareTo(a.updatedAt);
+            return date != 0 ? date : b.id.compareTo(a.id);
+          });
+    final offset = cursor == null ? 0 : int.parse(cursor);
+    return ThreadDirectoryPage(
+      threads: rows.skip(offset).take(limit).toList(),
+      nextCursor: offset + limit < rows.length ? '${offset + limit}' : null,
+    );
+  }
+
+  @override
+  Future<StudioThread> restoreThread(String threadId) async {
+    _archivedThreadIds.remove(threadId);
+    return (await readStudioState()).threads.firstWhere(
+      (thread) => thread.id == threadId,
+    );
+  }
+
   String _demoDirectoryCursor(int lastIndex) => 'demo:$lastIndex';
 
   @override
@@ -833,6 +883,21 @@ class DemoStudioApi implements StudioApi {
     required String childId,
     required int expectedLeaseRevision,
   }) async {}
+
+  @override
+  Future<StudioProject> renameProject(String projectId, String name) async {
+    final project = (await readStudioState()).projects.firstWhere(
+      (project) => project.id == projectId,
+    );
+    _projectNames[projectId] = name;
+    _projectDirectoryRevision++;
+    return StudioProject(
+      id: project.id,
+      name: name,
+      path: project.path,
+      sshServerId: project.sshServerId,
+    );
+  }
 
   @override
   Future<StudioProject> openProject(String path) async {
@@ -1858,6 +1923,9 @@ class DemoStudioApi implements StudioApi {
     _general = GeneralSettingsView(
       followActiveTurn: command.followActiveTurn,
       compactTimeline: command.compactTimeline,
+      sidebarWidth: command.sidebarWidth ?? _general.sidebarWidth,
+      pinnedThreadIds: command.pinnedThreadIds ?? _general.pinnedThreadIds,
+      pinnedProjectIds: command.pinnedProjectIds ?? _general.pinnedProjectIds,
     );
     _settingsRevision += 1;
     return (await readStudioState()).settingsState;

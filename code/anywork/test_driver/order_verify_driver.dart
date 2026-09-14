@@ -55,6 +55,8 @@ Future<void> _openProject(FlutterDriverClient client, String workspace) async {
     timeout: const Duration(minutes: 2),
   );
   await client.tap(find.byValueKey('sidebar-open-project'));
+  await client.tap(find.byValueKey('add-project-local'));
+  await client.tap(find.byValueKey('add-project-continue'));
   await client.waitFor(find.byValueKey('project-path-dialog'));
   await client.tap(find.byValueKey('project-path-input'));
   await client.enterText(workspace);

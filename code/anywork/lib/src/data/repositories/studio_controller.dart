@@ -103,12 +103,19 @@ class StudioController extends _$StudioController {
   /// 只拥有 Project 目录，不拥有 Flutter 当前选择；选择由显式 intent 在采用时解析。
   /// controller 尚未初始化、打开失败或 snapshot 未包含该 canonical Project 都返回
   /// false。调用方只有收到 true 才应关闭打开窗口；false 时应保留窗口与输入并允许重试。
-  Future<bool> openRemoteProject(String serverId, String path) async {
+  Future<bool> openRemoteProject(
+    String serverId,
+    String path, {
+    String? name,
+  }) async {
     final current = state.value;
     if (!_isInitialized(current)) return false;
-    final StudioProject project;
+    StudioProject project;
     try {
       project = await _api.openRemoteProject(serverId, path);
+      if (name != null && name != project.name) {
+        project = await _api.renameProject(project.id, name);
+      }
       await _api.activateProject(project.id);
     } on Object {
       return false;
@@ -225,6 +232,35 @@ class StudioController extends _$StudioController {
     final current = state.value;
     if (current == null || current.configRecoveryNotice == null) return;
     state = AsyncData(current.copyWith(configRecoveryNotice: null));
+  }
+
+  /// Adds explicitly queried cold directory identities without replacing live facts
+  /// or applying a project-scoped cursor to the global directory window.
+  void includeDirectoryThreads(List<StudioThread> threads) {
+    final current = state.value;
+    if (current == null) return;
+    final known = current.threads.map((thread) => thread.id).toSet();
+    final missing = threads
+        .where((thread) => !thread.archived && known.add(thread.id))
+        .toList();
+    if (missing.isEmpty) return;
+    final directory = [...current.threadDirectory.threads, ...missing]
+      ..sort((a, b) {
+        final date = b.updatedAt.compareTo(a.updatedAt);
+        return date != 0 ? date : b.id.compareTo(a.id);
+      });
+    state = AsyncData(
+      current.copyWith(
+        threadDirectory: current.threadDirectory.copyWith(threads: directory),
+      ),
+    );
+  }
+
+  Future<void> restoreThread(String threadId) async {
+    final thread = await _api.restoreThread(threadId);
+    await _reloadProductState(
+      selection: _ProjectDefaultSelection(thread.projectId),
+    );
   }
 
   Future<void> archiveThread(String threadId) async {
@@ -344,7 +380,12 @@ class StudioController extends _$StudioController {
     }
     state = AsyncData(
       _withWorkspaceUi(
-        current.copyWith(selectedThreadId: threadId),
+        current.copyWith(
+          selectedThreadId: threadId,
+          selectedProjectId: current.threads
+              .firstWhere((thread) => thread.id == threadId)
+              .projectId,
+        ),
         threadId,
         (ui) => ui.copyWith(syncState: AgentWorkspaceSyncState.loading),
       ),
@@ -1093,9 +1134,20 @@ class StudioController extends _$StudioController {
   }
 
   Future<void> saveGeneralSettings(GeneralSettingsCommand command) async {
-    await _saveConfigSettings(
-      (revision) => _api.saveGeneralSettings(revision, command),
-    );
+    await _saveConfigSettings((revision) {
+      final general = state.requireValue.general;
+      return _api.saveGeneralSettings(
+        revision,
+        GeneralSettingsCommand(
+          followActiveTurn: command.followActiveTurn,
+          compactTimeline: command.compactTimeline,
+          sidebarWidth: command.sidebarWidth ?? general.sidebarWidth,
+          pinnedThreadIds: command.pinnedThreadIds ?? general.pinnedThreadIds,
+          pinnedProjectIds:
+              command.pinnedProjectIds ?? general.pinnedProjectIds,
+        ),
+      );
+    });
   }
 
   Future<void> saveWebSearchSettings(WebSearchSettingsCommand command) async {

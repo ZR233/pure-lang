@@ -192,6 +192,8 @@ Future<Map<String, dynamic>?> _startNewWorkflow(
     timeout: const Duration(minutes: 2),
   );
   await session.tap(find.byValueKey('sidebar-open-project'));
+  await session.tap(find.byValueKey('add-project-local'));
+  await session.tap(find.byValueKey('add-project-continue'));
   await session.waitFor(find.byValueKey('project-path-dialog'));
   await session.tap(find.byValueKey('project-path-input'));
   await session.enterText(options.workspace!);
@@ -390,6 +392,7 @@ Future<Map<String, dynamic>> _verifyAndRenameThreadTitle(
       '$generatedTitles vs $generatedTitle',
     );
   }
+  await session.tap(find.byValueKey('thread-menu-$threadId'));
   await session.tap(find.byValueKey('thread-rename-$threadId'));
   await session.waitFor(find.byValueKey('thread-rename-dialog-$threadId'));
   await session.tap(find.byValueKey('thread-rename-input-$threadId'));

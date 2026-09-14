@@ -88,3 +88,11 @@ pub async fn set_thread_mode(thread_id: String, mode: String) -> Result<(), Brid
         .await?;
     Ok(())
 }
+
+/// Restores an archived session tree with its original identity and history.
+pub async fn restore_thread(thread_id: String) -> Result<BridgeThread, BridgeError> {
+    let bridge = active_bridge().await?;
+    Ok(bridge_thread(thread_from_record(
+        bridge.studio.restore_thread(thread_id).await?,
+    )))
+}

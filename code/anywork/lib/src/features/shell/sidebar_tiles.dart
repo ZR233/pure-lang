@@ -1,123 +1,5 @@
 part of 'studio_shell.dart';
 
-class _CompactSidebarTile extends StatefulWidget {
-  const _CompactSidebarTile({
-    required this.selected,
-    required this.tooltip,
-    required this.icon,
-    required this.onTap,
-    required this.actionTooltip,
-    required this.actionIcon,
-    required this.onAction,
-    this.iconColor,
-    this.actionKey,
-    this.secondaryActionKey,
-    this.secondaryActionTooltip,
-    this.secondaryActionIcon,
-    this.onSecondaryAction,
-  });
-
-  final bool selected;
-  final String tooltip;
-  final IconData icon;
-  final Color? iconColor;
-  final VoidCallback? onTap;
-  final String actionTooltip;
-  final IconData actionIcon;
-  final VoidCallback? onAction;
-  final Key? actionKey;
-  final Key? secondaryActionKey;
-  final String? secondaryActionTooltip;
-  final IconData? secondaryActionIcon;
-  final VoidCallback? onSecondaryAction;
-
-  @override
-  State<_CompactSidebarTile> createState() => _CompactSidebarTileState();
-}
-
-class _CompactSidebarTileState extends State<_CompactSidebarTile> {
-  bool _hovering = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final actionVisible =
-        widget.onAction != null && (widget.selected || _hovering);
-    final secondaryActionVisible =
-        widget.onSecondaryAction != null && (widget.selected || _hovering);
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovering = true),
-      onExit: (_) => setState(() => _hovering = false),
-      child: SizedBox(
-        width: 44,
-        height: 44,
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: Tooltip(
-                message: widget.tooltip,
-                child: IconButton(
-                  isSelected: widget.selected,
-                  icon: Icon(widget.icon, color: widget.iconColor),
-                  onPressed: widget.onTap,
-                ),
-              ),
-            ),
-            if (widget.onAction != null)
-              Positioned(
-                right: 0,
-                bottom: 0,
-                child: IgnorePointer(
-                  ignoring: !actionVisible,
-                  child: AnimatedOpacity(
-                    opacity: actionVisible ? 1 : 0,
-                    duration: const Duration(milliseconds: 120),
-                    child: IconButton(
-                      key: widget.actionKey,
-                      tooltip: widget.actionTooltip,
-                      style: IconButton.styleFrom(
-                        minimumSize: const Size.square(20),
-                        maximumSize: const Size.square(20),
-                        padding: EdgeInsets.zero,
-                        backgroundColor: context.colors.surface,
-                      ),
-                      icon: Icon(widget.actionIcon, size: 12),
-                      onPressed: widget.onAction,
-                    ),
-                  ),
-                ),
-              ),
-            if (widget.onSecondaryAction != null &&
-                widget.secondaryActionIcon != null)
-              Positioned(
-                right: 0,
-                top: 0,
-                child: IgnorePointer(
-                  ignoring: !secondaryActionVisible,
-                  child: AnimatedOpacity(
-                    opacity: secondaryActionVisible ? 1 : 0,
-                    duration: const Duration(milliseconds: 120),
-                    child: IconButton(
-                      key: widget.secondaryActionKey,
-                      tooltip: widget.secondaryActionTooltip,
-                      style: IconButton.styleFrom(
-                        minimumSize: const Size.square(20),
-                        maximumSize: const Size.square(20),
-                        padding: EdgeInsets.zero,
-                        backgroundColor: context.colors.surface,
-                      ),
-                      icon: Icon(widget.secondaryActionIcon, size: 12),
-                      onPressed: widget.onSecondaryAction,
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _SidebarTile extends StatefulWidget {
   const _SidebarTile({
     required this.selected,
@@ -164,7 +46,7 @@ class _SidebarTileState extends State<_SidebarTile> {
         widget.markerColor == null || widget.selected || _hovering || _focused;
     final titleText = Text(
       widget.title,
-      maxLines: 1,
+      maxLines: 2,
       overflow: TextOverflow.ellipsis,
       style: context.text.labelLarge?.copyWith(
         color: foreground,
@@ -240,13 +122,18 @@ class _SidebarTileState extends State<_SidebarTile> {
                         ],
                       ),
                     ),
-                    if (trailingVisible)
-                      IconTheme.merge(
+                    Visibility(
+                      visible: trailingVisible,
+                      maintainSize: true,
+                      maintainAnimation: true,
+                      maintainState: true,
+                      child: IconTheme.merge(
                         data: IconThemeData(
                           color: context.colors.onSurfaceVariant,
                         ),
                         child: widget.trailing,
                       ),
+                    ),
                   ],
                 ),
               ),

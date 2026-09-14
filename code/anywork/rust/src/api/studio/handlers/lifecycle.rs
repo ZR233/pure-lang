@@ -94,6 +94,16 @@ pub async fn archive_project(project_id: String) -> Result<Option<ProjectDto>, B
     Ok(Some(archived.into()))
 }
 
+/// Changes a Project display name, preserving its path and connection.
+pub async fn rename_project(project_id: String, name: String) -> Result<ProjectDto, BridgeError> {
+    let bridge = super::super::bridge_runtime::active_bridge().await?;
+    Ok(bridge
+        .studio
+        .rename_project(&project_id, &name)
+        .await?
+        .into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -117,10 +117,13 @@ pub(crate) fn api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(open_project))
         .routes(routes!(activate_project))
         .routes(routes!(archive_project))
+        .routes(routes!(rename_project))
         .routes(routes!(list_threads))
         .routes(routes!(create_thread))
         .routes(routes!(read_thread))
         .routes(routes!(archive_thread))
+        .routes(routes!(query_threads))
+        .routes(routes!(restore_thread))
         .routes(routes!(rename_thread))
         .routes(routes!(set_thread_mode))
         .routes(routes!(list_thread_turns))
@@ -218,6 +221,21 @@ async fn archive_project(
     Ok(Json(project))
 }
 
+#[utoipa::path(put, path = "/api/v1/projects/{project_id}/name", operation_id = "project.rename", params(("project_id" = String, Path)), request_body = pl_protocol::studio::RenameProjectRequest, responses(StudioApiErrors, (status = 200)))]
+async fn rename_project(
+    State(state): State<AppState>,
+    Path(project_id): Path<String>,
+    ApiJson(request): ApiJson<pl_protocol::studio::RenameProjectRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(
+        state
+            .runtime
+            .rename_project(&project_id, &request.name)
+            .await
+            .map_err(ApiError::from)?,
+    ))
+}
+
 #[utoipa::path(get, path = "/api/v1/threads", operation_id = "thread.listPage", params(("cursor" = Option<String>, Query), ("limit" = Option<u32>, Query)), responses(StudioApiErrors, (status = 200)))]
 async fn list_threads(
     State(state): State<AppState>,
@@ -227,6 +245,35 @@ async fn list_threads(
         state
             .runtime
             .list_threads_page(query.cursor.as_deref(), query.limit())
+            .await
+            .map_err(ApiError::from)?,
+    ))
+}
+
+#[utoipa::path(post, path = "/api/v1/threads/query", operation_id = "thread.query", params(("cursor" = Option<String>, Query), ("limit" = Option<u32>, Query)), request_body = pl_protocol::studio::ThreadDirectoryQuery, responses(StudioApiErrors, (status = 200)))]
+async fn query_threads(
+    State(state): State<AppState>,
+    ApiQuery(page): ApiQuery<ThreadPageQuery>,
+    ApiJson(query): ApiJson<pl_protocol::studio::ThreadDirectoryQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(
+        state
+            .runtime
+            .query_threads(&query, page.cursor.as_deref(), page.limit())
+            .await
+            .map_err(ApiError::from)?,
+    ))
+}
+
+#[utoipa::path(post, path = "/api/v1/threads/{thread_id}/restore", operation_id = "thread.restore", params(("thread_id" = String, Path)), responses(StudioApiErrors, (status = 200)))]
+async fn restore_thread(
+    State(state): State<AppState>,
+    Path(thread_id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(
+        state
+            .runtime
+            .restore_thread(thread_id)
             .await
             .map_err(ApiError::from)?,
     ))

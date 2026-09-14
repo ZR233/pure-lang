@@ -39,6 +39,7 @@ class _FakeStudioApi implements StudioApi {
   SaveSshServerCommand? savedSshServer;
   String? deletedSshServerId;
   String? testedSshServerId;
+  Object? testSshConnectionError;
   String? reconnectedSshServerId;
   final List<String> reconnectSshCalls = [];
   Future<SshConnectionView> Function(String)? reconnectSshHandler;
@@ -268,6 +269,29 @@ class _FakeStudioApi implements StudioApi {
   }
 
   @override
+  Future<StudioProject> renameProject(String projectId, String name) async {
+    final source = selectProjectStates[projectId] ?? _currentState;
+    final project = source.projects.firstWhere(
+      (project) => project.id == projectId,
+    );
+    final renamed = StudioProject(
+      id: project.id,
+      name: name,
+      path: project.path,
+      sshServerId: project.sshServerId,
+    );
+    selectProjectStates[projectId] = source.copyWith(
+      projectDirectory: ProjectDirectoryState.fromState(
+        state: _testReady([
+          for (final p in source.projects)
+            if (p.id == projectId) renamed else p,
+        ]),
+      ),
+    );
+    return renamed;
+  }
+
+  @override
   Future<StudioProject> openProject(String path) async {
     openedProjectPath = path;
     return _currentState.projects.first;
@@ -308,6 +332,7 @@ class _FakeStudioApi implements StudioApi {
   @override
   Future<SshConnectionView> testSshConnection(String serverId) async {
     testedSshServerId = serverId;
+    if (testSshConnectionError case final error?) throw error;
     return SshConnectionView(
       serverId: serverId,
       state: 'ready',
@@ -653,6 +678,36 @@ class _FakeStudioApi implements StudioApi {
         _currentState.workspacesByThread[threadId] ??
         (throw StateError('unknown fake Thread workspace $threadId'));
     return (workspace: workspace, historyCursor: null);
+  }
+
+  @override
+  Future<ThreadDirectoryPage> queryThreads(
+    DirectoryQuery query, {
+    String? cursor,
+    int limit = 50,
+  }) async {
+    final all = <String, StudioThread>{
+      for (final thread in [
+        ..._currentState.threads,
+        ...directoryPages.values.expand((p) => p.threads),
+      ])
+        thread.id: thread,
+    };
+    final rows = all.values
+        .where((thread) => query.matches(thread, _currentState.projects))
+        .toList();
+    final offset = cursor == null ? 0 : int.parse(cursor);
+    return ThreadDirectoryPage(
+      threads: rows.skip(offset).take(limit).toList(),
+      nextCursor: offset + limit < rows.length ? '${offset + limit}' : null,
+    );
+  }
+
+  @override
+  Future<StudioThread> restoreThread(String threadId) async {
+    return _currentState.threads
+        .firstWhere((thread) => thread.id == threadId)
+        .copyWith(archived: false);
   }
 
   @override
@@ -1081,6 +1136,9 @@ class _FakeStudioApi implements StudioApi {
       general: GeneralSettingsView(
         followActiveTurn: settings['followActiveTurn'] as bool? ?? true,
         compactTimeline: settings['compactTimeline'] as bool? ?? false,
+        sidebarWidth: command.sidebarWidth ?? 336,
+        pinnedThreadIds: command.pinnedThreadIds ?? const [],
+        pinnedProjectIds: command.pinnedProjectIds ?? const [],
       ),
     );
     _currentState = _currentState.copyWith(settingsState: snapshot);

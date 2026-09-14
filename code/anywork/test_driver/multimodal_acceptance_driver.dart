@@ -92,6 +92,8 @@ Future<void> _openWorkspace(
       session.tap(find.byValueKey('sidebar-open-project')),
       'open project',
     );
+    await session.tap(find.byValueKey('add-project-local'));
+    await session.tap(find.byValueKey('add-project-continue'));
     await _command(
       session.waitFor(
         find.byValueKey('project-path-dialog'),

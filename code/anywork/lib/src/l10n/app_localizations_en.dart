@@ -1931,4 +1931,96 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get timelineRawRecord => 'Original history record';
+
+  @override
+  String get sidebarSearch => 'Search projects and sessions';
+
+  @override
+  String get sidebarAll => 'All';
+
+  @override
+  String get sidebarRunning => 'Running';
+
+  @override
+  String get sidebarAttention => 'Needs attention';
+
+  @override
+  String get sidebarAddProject => 'Add project';
+
+  @override
+  String get sidebarLocalProject => 'Local project';
+
+  @override
+  String get sidebarLocalHint => 'Choose a folder on this computer';
+
+  @override
+  String get sidebarRemoteProject => 'Remote project';
+
+  @override
+  String get sidebarRemoteHint => 'Connect to a remote folder over SSH';
+
+  @override
+  String get sidebarContinue => 'Continue';
+
+  @override
+  String get sidebarBack => 'Back';
+
+  @override
+  String get sidebarConnect => 'Connect and choose folder';
+
+  @override
+  String get sidebarSaveConnect => 'Save and connect';
+
+  @override
+  String get sidebarSearchConnections => 'Search configured connections';
+
+  @override
+  String get sidebarNoConnections => 'No remote connections yet';
+
+  @override
+  String get sidebarNewConnection => 'New remote connection';
+
+  @override
+  String get sidebarNoResults => 'No matching projects or sessions';
+
+  @override
+  String get sidebarEmptyProject =>
+      'No sessions yet. Use + on this project to start';
+
+  @override
+  String get sidebarEarlier => 'Show earlier sessions';
+
+  @override
+  String get sidebarArchived => 'Archived';
+
+  @override
+  String get sidebarRestore => 'Restore session';
+
+  @override
+  String get sidebarPin => 'Pin';
+
+  @override
+  String get sidebarUnpin => 'Unpin';
+
+  @override
+  String get sidebarNavigation => 'Project navigation';
+
+  @override
+  String get sidebarResize => 'Resize sidebar; use arrows, Home to reset';
+
+  @override
+  String get sidebarLocal => 'Local';
+
+  @override
+  String get sidebarNotChecked => 'Not checked';
+
+  @override
+  String get sidebarConnectionSaved =>
+      'Configuration saved; connection failed. Edit or retry';
+
+  @override
+  String get sidebarCopyPath => 'Copy path';
+
+  @override
+  String get sidebarRetry => 'Retry';
 }

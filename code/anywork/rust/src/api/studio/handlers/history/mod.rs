@@ -124,3 +124,35 @@ pub async fn list_timeline_items(
             .collect(),
     })
 }
+
+/// Searches the full project/session directory, including archived history.
+pub async fn query_threads(
+    request: crate::api::studio::types::BridgeDirectoryQuery,
+) -> Result<BridgeThreadDirectoryPage, BridgeError> {
+    let bridge = active_bridge().await?;
+    let filter = match request.filter {
+        crate::api::studio::types::BridgeDirectoryFilter::All => {
+            pl_protocol::studio::ThreadDirectoryFilter::All
+        }
+        crate::api::studio::types::BridgeDirectoryFilter::Running => {
+            pl_protocol::studio::ThreadDirectoryFilter::Running
+        }
+        crate::api::studio::types::BridgeDirectoryFilter::Attention => {
+            pl_protocol::studio::ThreadDirectoryFilter::Attention
+        }
+    };
+    let page = bridge
+        .studio
+        .query_threads(
+            &pl_protocol::studio::ThreadDirectoryQuery {
+                project_id: request.project_id,
+                search: request.search,
+                archived: request.archived,
+                filter,
+            },
+            request.cursor.as_deref(),
+            request.limit as usize,
+        )
+        .await?;
+    Ok(bridge_thread_directory_page(page.state))
+}

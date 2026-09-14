@@ -162,9 +162,10 @@ Future<Map<String, dynamic>> _archiveSelected(
   String stage,
 ) async {
   await session.waitFor(
-    find.byValueKey('thread-archive-$threadId'),
+    find.byValueKey('thread-menu-$threadId'),
     timeout: const Duration(seconds: 30),
   );
+  await session.tap(find.byValueKey('thread-menu-$threadId'));
   await session.tap(find.byValueKey('thread-archive-$threadId'));
   return _waitForSnapshot(
     session,

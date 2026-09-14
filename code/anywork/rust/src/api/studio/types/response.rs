@@ -632,3 +632,22 @@ pub enum SkillResourceBaseDto {
     Url { url: String },
     Opaque { description: String },
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BridgeDirectoryQuery {
+    pub project_id: Option<String>,
+    pub search: Option<String>,
+    pub archived: bool,
+    pub filter: BridgeDirectoryFilter,
+    pub cursor: Option<String>,
+    pub limit: u32,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum BridgeDirectoryFilter {
+    All,
+    Running,
+    Attention,
+}

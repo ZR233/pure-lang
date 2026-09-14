@@ -363,6 +363,8 @@ Future<void> _openProjectAndSubmit(
   if (options.ssh == null) {
     await session.waitFor(find.byValueKey('sidebar-open-project'));
     await session.tap(find.byValueKey('sidebar-open-project'));
+    await session.tap(find.byValueKey('add-project-local'));
+    await session.tap(find.byValueKey('add-project-continue'));
     await session.waitFor(find.byValueKey('project-path-dialog'));
     await session.tap(find.byValueKey('project-path-input'));
     await session.enterText(options.workspace);

@@ -153,18 +153,30 @@ class GeneralSettingsView {
   const GeneralSettingsView({
     this.followActiveTurn = true,
     this.compactTimeline = false,
+    this.sidebarWidth = 336,
+    this.pinnedThreadIds = const [],
+    this.pinnedProjectIds = const [],
   });
 
   final bool followActiveTurn;
   final bool compactTimeline;
+  final int sidebarWidth;
+  final List<String> pinnedThreadIds;
+  final List<String> pinnedProjectIds;
 
   GeneralSettingsView copyWith({
     bool? followActiveTurn,
     bool? compactTimeline,
+    int? sidebarWidth,
+    List<String>? pinnedThreadIds,
+    List<String>? pinnedProjectIds,
   }) {
     return GeneralSettingsView(
       followActiveTurn: followActiveTurn ?? this.followActiveTurn,
       compactTimeline: compactTimeline ?? this.compactTimeline,
+      sidebarWidth: sidebarWidth ?? this.sidebarWidth,
+      pinnedThreadIds: pinnedThreadIds ?? this.pinnedThreadIds,
+      pinnedProjectIds: pinnedProjectIds ?? this.pinnedProjectIds,
     );
   }
 }

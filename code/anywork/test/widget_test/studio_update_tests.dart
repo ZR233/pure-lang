@@ -260,6 +260,8 @@ void registerStudioUpdateTests() {
       ),
     );
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('sidebar-toggle')));
+    await tester.pumpAndSettle();
 
     expect(
       find.byKey(const ValueKey('studio-update-indicator')),
