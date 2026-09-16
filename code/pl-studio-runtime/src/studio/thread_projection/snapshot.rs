@@ -250,7 +250,9 @@ mod tests {
             .run_next_input(QueuedTurn {
                 turn_id: "turn".into(),
                 attempt_prefix: "request".into(),
-                max_model_steps: std::num::NonZeroU32::new(2).unwrap(),
+                max_model_steps: pl_core::thread::ModelStepLimit::Limited(
+                    std::num::NonZeroU32::new(2).unwrap(),
+                ),
                 cancellation: Default::default(),
             })
             .await

@@ -3,6 +3,7 @@ use super::*;
 
 #[derive(Debug)]
 pub(super) enum MailboxCommand {
+    QueueRuntimeFacts(Vec<RuntimeFact>, oneshot::Sender<Result<(), ThreadError>>),
     ToolProgress {
         caller: String,
         executor: crate::tool::opaque::ExecutionAuthority,
@@ -82,6 +83,9 @@ pub(super) enum MailboxCommand {
 impl Owner {
     pub(super) fn process_mailbox(&mut self, command: MailboxCommand) {
         match command {
+            MailboxCommand::QueueRuntimeFacts(facts, reply) => {
+                let _ = reply.send(self.queue_runtime_facts(facts));
+            }
             MailboxCommand::ToolProgress {
                 caller,
                 executor,

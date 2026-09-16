@@ -209,6 +209,7 @@ impl Owner {
             })
         });
         if retry_of.is_none() || correcting {
+            self.apply_pending_runtime_facts()?;
             self.prepare_context(&input, tools.clone()).await?;
             self.ensure_model_admission()?;
         }

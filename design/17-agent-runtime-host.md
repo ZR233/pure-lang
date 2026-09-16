@@ -40,6 +40,9 @@ Mode 切换使用 idle reconfigure：核对水位并拒绝活动 Turn/任务/输
 SQLite writer 的失败与未保存事实必须可观察；目录 writer 只保存产品关联，不代理 Thread commit。
 
 执行预算、步骤限制和取消属于通用类型化执行政策；Profile、角色和父子生命周期的决定属于宿主。
+步骤策略明确区分 Unlimited 与 Limited。Studio 主会话的新建、恢复和所有续接均使用 Unlimited，
+不因累计模型调用次数或活动总时长停止；子会话保留 64 步上限。用户停止、关闭、交互、真实错误
+与单次外部操作超时独立生效。旧 stepLimit 历史保持原样，不自动重启已经停止的任务。
 不得通过产品 JSON 字段改变 core 控制行为。详见 [27](./27-core-boundaries-and-replay.md)。
 
 ## Timeline 分页

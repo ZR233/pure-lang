@@ -84,7 +84,7 @@ async fn live_deepseek_applies_patch_with_prompt() {
         content: vec![ContextContent::Text {
             text: live_prompt().into(),
         }],
-        max_model_steps: 20.try_into().unwrap(),
+        max_model_steps: pl_core::thread::ModelStepLimit::Limited(20.try_into().unwrap()),
         cancellation: cancellation.clone(),
     });
     let result = match tokio::time::timeout(Duration::from_secs(180), execution).await {

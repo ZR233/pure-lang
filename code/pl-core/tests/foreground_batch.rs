@@ -141,7 +141,9 @@ fn input(cancellation: CancellationToken) -> TurnInput {
         turn_id: "turn".into(),
         attempt_prefix: "attempt".into(),
         content: vec![],
-        max_model_steps: std::num::NonZeroU32::new(2).unwrap(),
+        max_model_steps: pl_core::thread::ModelStepLimit::Limited(
+            std::num::NonZeroU32::new(2).unwrap(),
+        ),
         cancellation,
     }
 }
@@ -196,7 +198,9 @@ async fn coexisting_foreground_does_not_weaken_control_solo_admission() {
     assert!(matches!(
         thread
             .run_turn(TurnInput {
-                max_model_steps: std::num::NonZeroU32::new(1).unwrap(),
+                max_model_steps: pl_core::thread::ModelStepLimit::Limited(
+                    std::num::NonZeroU32::new(1).unwrap()
+                ),
                 ..input(CancellationToken::new())
             })
             .await,

@@ -289,7 +289,10 @@ impl SshManager {
         let profile = self.profile(server_id).await?;
         self.set_state(server_id, SshConnectionState::Connecting)
             .await;
-        let result = self.connect(&profile).await;
+        let result = tokio::select! {
+            () = self.closing.cancelled() => Err(RemoteClientError::ManagerClosing),
+            result = self.connect(&profile) => result,
+        };
         match result {
             Ok((connection, hello)) => {
                 let client = connection.client.clone();
@@ -533,6 +536,35 @@ impl SshManager {
                 hello.protocol_version, REMOTE_PROTOCOL_VERSION
             )));
         }
+        if let Some(mut stderr) = child.stderr.take() {
+            let client = client.clone();
+            let closing = self.closing.clone();
+            let server_id = profile.id.clone();
+            let secret = password.map(str::to_owned);
+            self.operations.spawn(async move {
+                use tokio::io::AsyncReadExt;
+                let mut retained = Vec::new();
+                let mut buffer = [0; 1024];
+                loop {
+                    tokio::select! {
+                        () = closing.cancelled() => break,
+                        () = client.wait_disconnected() => break,
+                        read = stderr.read(&mut buffer) => match read {
+                            Ok(0) | Err(_) => break,
+                            Ok(count) => {
+                                retained.extend_from_slice(&buffer[..count]);
+                                if retained.len() > 4096 { retained.drain(..retained.len() - 4096); }
+                            }
+                        }
+                    }
+                }
+                if !retained.is_empty() {
+                    let mut diagnostic = String::from_utf8_lossy(&retained).into_owned();
+                    if let Some(secret) = secret.filter(|value| !value.is_empty()) { diagnostic = diagnostic.replace(&secret, "[redacted]"); }
+                    tracing::warn!(%server_id, %diagnostic, "SSH process diagnostic");
+                }
+            });
+        }
         Ok((
             SshConnection {
                 client,
@@ -594,6 +626,7 @@ impl SshManager {
                 _ = manager.closing.cancelled() => return,
                 _ = client.wait_disconnected() => {},
             }
+            tracing::warn!(%server_id, reason = ?client.disconnect_reason(), "SSH transport disconnected");
             if !manager
                 .desired_connections
                 .read()
@@ -677,7 +710,12 @@ impl SshManager {
             .cloned()
             .unwrap_or_default();
         for path in paths {
-            let Ok(files) = open_workspace(client, path.clone()).await else {
+            let Ok(Ok(files)) = tokio::time::timeout(
+                std::time::Duration::from_secs(15),
+                open_workspace(client, path.clone()),
+            )
+            .await
+            else {
                 continue;
             };
             let workspace_id = files.workspace_id().to_string();
@@ -730,9 +768,12 @@ async fn open_workspace(
     client: &RemoteClient,
     path: String,
 ) -> Result<RemoteWorkspaceFileBackend, RemoteClientError> {
-    let reply = client
-        .request(RemoteRequest::OpenWorkspace { path }, &[])
-        .await?;
+    let reply = tokio::time::timeout(
+        std::time::Duration::from_secs(15),
+        client.request(RemoteRequest::OpenWorkspace { path }, &[]),
+    )
+    .await
+    .map_err(|_| RemoteClientError::Protocol("SSH workspace open timed out".into()))??;
     match reply.response {
         RemoteResponse::WorkspaceOpened(RemoteWorkspaceOpened {
             workspace_id,

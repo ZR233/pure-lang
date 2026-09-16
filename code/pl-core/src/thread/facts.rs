@@ -3,6 +3,35 @@ use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 impl Owner {
+    pub(super) fn queue_runtime_facts(
+        &mut self,
+        facts: Vec<RuntimeFact>,
+    ) -> Result<(), ThreadError> {
+        if self.state.lifecycle != ThreadLifecycle::Open || self.interrupt.is_closing() {
+            return Err(ThreadError::Closed);
+        }
+        let mut sources = BTreeSet::new();
+        if facts
+            .iter()
+            .any(|fact| fact.source_id.is_empty() || !sources.insert(&fact.source_id))
+        {
+            return Err(ThreadError::InvalidContext);
+        }
+        for fact in facts {
+            self.pending_runtime_facts
+                .insert(fact.source_id.clone(), fact);
+        }
+        Ok(())
+    }
+
+    pub(super) fn apply_pending_runtime_facts(&mut self) -> Result<(), ThreadError> {
+        if !self.pending_runtime_facts.is_empty() {
+            self.patch_runtime_facts(self.pending_runtime_facts.values().cloned().collect())?;
+            self.pending_runtime_facts.clear();
+        }
+        Ok(())
+    }
+
     pub(super) fn patch_runtime_facts(
         &mut self,
         facts: Vec<RuntimeFact>,

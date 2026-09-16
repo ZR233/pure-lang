@@ -327,7 +327,9 @@ mod tests {
                     turn_id: "actual".into(),
                     attempt_prefix: "attempt".into(),
                     content: Vec::new(),
-                    max_model_steps: std::num::NonZeroU32::new(2).unwrap(),
+                    max_model_steps: crate::thread::ModelStepLimit::Limited(
+                        std::num::NonZeroU32::new(2).unwrap(),
+                    ),
                     cancellation: CancellationToken::new(),
                 })
                 .await
@@ -870,7 +872,9 @@ mod tests {
                 turn_id: "turn".into(),
                 attempt_prefix: "attempt".into(),
                 content: Vec::new(),
-                max_model_steps: std::num::NonZeroU32::new(3).unwrap(),
+                max_model_steps: crate::thread::ModelStepLimit::Limited(
+                    std::num::NonZeroU32::new(3).unwrap(),
+                ),
                 cancellation: CancellationToken::new(),
             })
             .await
@@ -927,7 +931,9 @@ mod tests {
                     turn_id: "turn".into(),
                     attempt_prefix: "attempt".into(),
                     content: Vec::new(),
-                    max_model_steps: std::num::NonZeroU32::new(3).unwrap(),
+                    max_model_steps: crate::thread::ModelStepLimit::Limited(
+                        std::num::NonZeroU32::new(3).unwrap(),
+                    ),
                     cancellation: CancellationToken::new(),
                 })
                 .await
@@ -999,7 +1005,9 @@ mod tests {
                 turn_id: "origin".into(),
                 attempt_prefix: "origin".into(),
                 content: Vec::new(),
-                max_model_steps: std::num::NonZeroU32::new(3).unwrap(),
+                max_model_steps: crate::thread::ModelStepLimit::Limited(
+                    std::num::NonZeroU32::new(3).unwrap(),
+                ),
                 cancellation: origin.clone(),
             })
             .await
@@ -1081,7 +1089,9 @@ mod tests {
                     turn_id: "turn".into(),
                     attempt_prefix: "attempt".into(),
                     content: Vec::new(),
-                    max_model_steps: std::num::NonZeroU32::new(3).unwrap(),
+                    max_model_steps: crate::thread::ModelStepLimit::Limited(
+                        std::num::NonZeroU32::new(3).unwrap(),
+                    ),
                     cancellation: token,
                 })
                 .await
@@ -1294,7 +1304,9 @@ mod tests {
                 content: vec![ContextContent::Text {
                     text: Arc::from("user"),
                 }],
-                max_model_steps: std::num::NonZeroU32::new(3).unwrap(),
+                max_model_steps: crate::thread::ModelStepLimit::Limited(
+                    std::num::NonZeroU32::new(3).unwrap(),
+                ),
                 cancellation: CancellationToken::new(),
             })
             .await
@@ -1839,7 +1851,9 @@ mod tests {
                 turn_id: "turn".into(),
                 attempt_prefix: "attempt".into(),
                 content: Vec::new(),
-                max_model_steps: std::num::NonZeroU32::new(3).unwrap(),
+                max_model_steps: crate::thread::ModelStepLimit::Limited(
+                    std::num::NonZeroU32::new(3).unwrap(),
+                ),
                 cancellation: CancellationToken::new(),
             })
             .await
@@ -2202,7 +2216,9 @@ mod tests {
                 turn_id: "turn".into(),
                 attempt_prefix: "attempt".into(),
                 content: Vec::new(),
-                max_model_steps: std::num::NonZeroU32::new(3).unwrap(),
+                max_model_steps: crate::thread::ModelStepLimit::Limited(
+                    std::num::NonZeroU32::new(3).unwrap(),
+                ),
                 cancellation: CancellationToken::new(),
             })
             .await
@@ -2589,7 +2605,9 @@ mod tests {
                 turn_id: "turn".into(),
                 attempt_prefix: "attempt".into(),
                 content: Vec::new(),
-                max_model_steps: std::num::NonZeroU32::new(3).unwrap(),
+                max_model_steps: crate::thread::ModelStepLimit::Limited(
+                    std::num::NonZeroU32::new(3).unwrap(),
+                ),
                 cancellation: CancellationToken::new(),
             })
             .await
@@ -2783,7 +2801,9 @@ mod tests {
             }],
         };
         let options = input::InputDriverOptions {
-            max_model_steps: std::num::NonZeroU32::new(3).unwrap(),
+            max_model_steps: crate::thread::ModelStepLimit::Limited(
+                std::num::NonZeroU32::new(3).unwrap(),
+            ),
         };
         let mut subscription = thread.subscribe();
         let sequence = thread
@@ -3254,7 +3274,9 @@ mod tests {
             .submit_input_and_run(
                 input("original"),
                 input::InputDriverOptions {
-                    max_model_steps: std::num::NonZeroU32::new(4).unwrap(),
+                    max_model_steps: crate::thread::ModelStepLimit::Limited(
+                        std::num::NonZeroU32::new(4).unwrap(),
+                    ),
                 },
             )
             .await

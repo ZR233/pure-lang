@@ -13,6 +13,7 @@ pub(super) struct PendingCall {
 pub(super) struct Owner {
     pub(super) model_identity: Option<String>,
     pub(super) pending_model_update: Option<super::model_update::ModelUpdate>,
+    pub(super) pending_runtime_facts: std::collections::BTreeMap<String, RuntimeFact>,
     pub(super) context_preparation: Option<context_preparation::ContextPreparer>,
     pub(super) model_progress: Option<(String, watch::Receiver<crate::model::ModelProgress>)>,
     pub(super) permission_leases:

@@ -612,7 +612,9 @@ mod tests {
                     context_preparation: None,
                     agent_controls: super::super::AgentControlExposure::Disabled,
                     execution: pl_core::thread::input::InputDriverOptions {
-                        max_model_steps: std::num::NonZeroU32::new(64).unwrap(),
+                        max_model_steps: pl_core::thread::ModelStepLimit::Limited(
+                            std::num::NonZeroU32::new(64).unwrap(),
+                        ),
                     },
                     hosted_tools: Vec::new(),
                     id: "standard".into(),

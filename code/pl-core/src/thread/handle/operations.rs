@@ -70,6 +70,7 @@ impl ThreadHandle {
         let mut owner = Owner {
             model_identity: None,
             pending_model_update: None,
+            pending_runtime_facts: Default::default(),
             context_preparation: None,
             model_progress: None,
             history: history.clone(),
@@ -540,6 +541,23 @@ impl ThreadHandle {
         let (reply, response) = oneshot::channel();
         self.commands
             .send(Command::Execute(call_id, cancellation, reply))
+            .await
+            .map_err(|_| ThreadError::Closed)?;
+        response.await.map_err(|_| ThreadError::Closed)?
+    }
+
+    /// Queues the latest facts per source for the next model preparation boundary.
+    /// Acceptance never mutates an already admitted model input or waits for the Turn to end.
+    /// Pending facts are ephemeral; the host must resupply them after cold activation.
+    ///
+    /// # Errors
+    /// Rejects empty or duplicate source identities and a closing owner.
+    pub async fn queue_runtime_facts(&self, facts: Vec<RuntimeFact>) -> Result<(), ThreadError> {
+        let (reply, response) = oneshot::channel();
+        self.mailbox
+            .send(super::mailbox::MailboxCommand::QueueRuntimeFacts(
+                facts, reply,
+            ))
             .await
             .map_err(|_| ThreadError::Closed)?;
         response.await.map_err(|_| ThreadError::Closed)?

@@ -44,13 +44,10 @@ Turn、Item 与 Interaction 的通知 payload 都携带 canonical tagged state�
 取消原因和预算 rollover 结果位于对应终态 payload。Item terminal error、tool result、denial与
 完成时间同样只存在于适用的 state variant。
 
-单轮预算只强制活动 wall-clock 上限；model step、tool call 与 wait call 继续作为 typed usage 观测，
-不引入隐式迭代次数限制。宿主可按会话用途在 TurnFactory 边界冻结不同上限，但不得自行生成
-`BudgetLimited`、rollover 或另一套用量投影。外层产品 watchdog 只能负责资源收束，并应给 PL 的预算
-终态与持久化预留余量，不能先于同一 wall-clock 上限取消 Turn。
-child Turn 命中预算后必须直接进入带 `budgetPause` 的 idle 状态，不再执行 rollover 压缩或启动 pending
-输入；只有父 Agent 后续提交显式输入才能原子清除暂停并开始新 Turn。root Turn 继续保留现有 rollover
-行为，预算检查前由上下文压力触发的正常压缩也不受影响。
+执行步数策略由宿主在 Turn 开始时冻结，明确区分无限制与有限步数。Studio 主会话不设置
+累计调用次数或总时长预算；子会话达到 64 步后以 stepLimit 暂停，等待显式续接。
+模型与工具调用计量继续保留，用户停止、关闭、交互和实际失败独立生效。历史预算终态保持可读，
+不自动续跑已停止的 Turn。上下文压力触发的正常压缩不属于停止预算。
 
 Item delta 只携带 threadId、turnId、itemId、field、revision、delta 和可选 chunkIndex。field
 固定为 agent message text、reasoning summary/content、plan text、tool arguments/output。

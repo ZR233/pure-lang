@@ -177,8 +177,13 @@ impl StudioRuntime {
                 },
                 policy: options.turn_policy,
                 drive: Some(pl_core::thread::input::InputDriverOptions {
-                    max_model_steps: std::num::NonZeroU32::new(64)
-                        .expect("fixed positive model step limit"),
+                    max_model_steps: if thread_record.parent_thread_id.is_none() {
+                        pl_core::thread::ModelStepLimit::Unlimited
+                    } else {
+                        pl_core::thread::ModelStepLimit::Limited(
+                            std::num::NonZeroU32::new(64).expect("positive child step limit"),
+                        )
+                    },
                 }),
             })
             .await?;

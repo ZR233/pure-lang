@@ -155,6 +155,7 @@ impl Owner {
         let mut corrections = 0_u8;
         let mut correction_source = None;
         loop {
+            let completed = step.checked_add(1).ok_or(ThreadError::RevisionExhausted)?;
             let step_input = StepInput {
                 turn_id: input.turn_id.clone(),
                 attempt_id: format!("{}:{step}", input.attempt_prefix),
@@ -167,7 +168,7 @@ impl Owner {
             };
             let output = match result {
                 Err(ThreadError::ModelOutput(ModelOutputViolation::SoloBatch { ref tool_ids }))
-                    if corrections < 2 && step + 1 < input.max_model_steps.get() =>
+                    if corrections < 2 && !input.max_model_steps.reached(completed) =>
                 {
                     if input.cancellation.is_cancelled() || self.interrupt.is_closing() {
                         return Err(ThreadError::Cancelled);
@@ -179,14 +180,14 @@ impl Owner {
                     }];
                     correction_source = Some(format!("{}:{step}", input.attempt_prefix));
                     corrections += 1;
-                    step += 1;
+                    step = step.checked_add(1).ok_or(ThreadError::RevisionExhausted)?;
                     continue;
                 }
                 other => other?,
             };
             if output.tool_calls.is_empty() {
                 return Ok(TurnCompletion {
-                    model_steps: step + 1,
+                    model_steps: completed,
                     outcome: TurnOutcome::Completed,
                     last_output: output,
                 });
@@ -200,7 +201,7 @@ impl Owner {
                         if result.control() == crate::tool::ToolControl::EndTurn =>
                     {
                         return Ok(TurnCompletion {
-                            model_steps: step + 1,
+                            model_steps: completed,
                             outcome: TurnOutcome::ToolCompleted,
                             last_output: output,
                         });
@@ -209,7 +210,7 @@ impl Owner {
                         if result.control() == crate::tool::ToolControl::AwaitInteraction =>
                     {
                         return Ok(TurnCompletion {
-                            model_steps: step + 1,
+                            model_steps: completed,
                             outcome: TurnOutcome::WaitingInteraction,
                             last_output: output,
                         });
@@ -219,15 +220,15 @@ impl Owner {
                     Err(error) => return Err(error),
                 }
             }
-            if step + 1 == input.max_model_steps.get() {
+            if input.max_model_steps.reached(completed) {
                 return Ok(TurnCompletion {
-                    model_steps: step + 1,
+                    model_steps: completed,
                     outcome: TurnOutcome::StepLimit,
                     last_output: output,
                 });
             }
             content = Vec::new();
-            step += 1;
+            step = step.checked_add(1).ok_or(ThreadError::RevisionExhausted)?;
         }
     }
 }
@@ -238,6 +239,119 @@ mod tests {
     use crate::model::{ModelError, ModelRequest, ModelSession, ModelToolCall, PreparedModelCall};
     use crate::tool::opaque::{CallContext, Registration, Tool, ToolError};
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct RepeatedCalls {
+        calls: u32,
+        cancel_at: Option<u32>,
+    }
+    impl ModelSession for RepeatedCalls {
+        async fn prepare(
+            &mut self,
+            request: ModelRequest,
+        ) -> Result<PreparedModelCall, ModelError> {
+            self.calls += 1;
+            let count = self.calls;
+            if self.cancel_at == Some(count) {
+                request.cancellation.cancel();
+            }
+            Ok(PreparedModelCall::new(async move {
+                Ok(ModelStepOutput {
+                    attempt_id: request.attempt_id,
+                    base_context_revision: request.context.revision,
+                    content: Vec::new(),
+                    tool_calls: if count <= 70 {
+                        vec![ModelToolCall {
+                            call_id: format!("call-{count}"),
+                            tool_id: "continue".into(),
+                            arguments: OpaquePayload::text("input"),
+                        }]
+                    } else {
+                        Vec::new()
+                    },
+                    private_context: None,
+                    usage: Default::default(),
+                })
+            }))
+        }
+        async fn close(&mut self) -> Result<(), ModelError> {
+            Ok(())
+        }
+    }
+    #[derive(Debug)]
+    struct ContinueTool;
+    impl Tool for ContinueTool {
+        async fn execute(
+            &self,
+            _: OpaquePayload,
+            _: CallContext,
+        ) -> Result<crate::tool::ToolOutput, ToolError> {
+            Ok(crate::tool::ToolOutput::new(
+                OpaquePayload::text("done"),
+                Vec::new(),
+            ))
+        }
+    }
+    #[tokio::test]
+    async fn unlimited_turn_passes_64_steps_and_remains_cancellable_while_limited_turn_pauses() {
+        for (limit, cancel, expected) in [
+            (
+                ModelStepLimit::Unlimited,
+                None,
+                Some(TurnOutcome::Completed),
+            ),
+            (ModelStepLimit::Unlimited, Some(66), None),
+            (
+                ModelStepLimit::Limited(std::num::NonZeroU32::new(64).unwrap()),
+                None,
+                Some(TurnOutcome::StepLimit),
+            ),
+        ] {
+            let thread = ThreadHandle::start(
+                "long-turn".into(),
+                DynModelSession::new(RepeatedCalls {
+                    calls: 0,
+                    cancel_at: cancel,
+                }),
+            )
+            .unwrap();
+            thread
+                .register_tools(vec![
+                    Registration::new(
+                        "continue".into(),
+                        OpaquePayload::text("continue"),
+                        ContinueTool,
+                    )
+                    .unwrap(),
+                ])
+                .await
+                .unwrap();
+            let result = thread
+                .run_turn(TurnInput {
+                    turn_id: "turn".into(),
+                    attempt_prefix: "step".into(),
+                    content: Vec::new(),
+                    max_model_steps: limit,
+                    cancellation: CancellationToken::new(),
+                })
+                .await;
+            match expected {
+                Some(outcome) => {
+                    let result = result.unwrap();
+                    assert_eq!(result.outcome, outcome);
+                    assert_eq!(
+                        result.model_steps,
+                        if outcome == TurnOutcome::Completed {
+                            71
+                        } else {
+                            64
+                        }
+                    );
+                }
+                None => assert!(matches!(result, Err(ThreadError::Cancelled))),
+            }
+            thread.close().await.unwrap();
+        }
+    }
 
     struct MixedThenSolo {
         requests: usize,
@@ -350,7 +464,9 @@ mod tests {
                 turn_id: "turn".into(),
                 attempt_prefix: "attempt".into(),
                 content: Vec::new(),
-                max_model_steps: std::num::NonZeroU32::new(8).unwrap(),
+                max_model_steps: crate::thread::ModelStepLimit::Limited(
+                    std::num::NonZeroU32::new(8).unwrap(),
+                ),
                 cancellation: CancellationToken::new(),
             })
             .await;
@@ -409,7 +525,9 @@ mod tests {
                     turn_id: "turn".into(),
                     attempt_prefix: "attempt".into(),
                     content: Vec::new(),
-                    max_model_steps: std::num::NonZeroU32::new(budget).unwrap(),
+                    max_model_steps: crate::thread::ModelStepLimit::Limited(
+                        std::num::NonZeroU32::new(budget).unwrap(),
+                    ),
                     cancellation: CancellationToken::new(),
                 })
                 .await;
@@ -461,7 +579,9 @@ mod tests {
                 turn_id: "turn".into(),
                 attempt_prefix: "attempt".into(),
                 content: Vec::new(),
-                max_model_steps: std::num::NonZeroU32::new(8).unwrap(),
+                max_model_steps: crate::thread::ModelStepLimit::Limited(
+                    std::num::NonZeroU32::new(8).unwrap(),
+                ),
                 cancellation: CancellationToken::new(),
             })
             .await;
@@ -539,7 +659,9 @@ mod tests {
                     turn_id: "turn".into(),
                     attempt_prefix: "attempt".into(),
                     content: Vec::new(),
-                    max_model_steps: std::num::NonZeroU32::new(8).unwrap(),
+                    max_model_steps: crate::thread::ModelStepLimit::Limited(
+                        std::num::NonZeroU32::new(8).unwrap(),
+                    ),
                     cancellation: CancellationToken::new(),
                 })
                 .await

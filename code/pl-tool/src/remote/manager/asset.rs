@@ -6,7 +6,6 @@ use std::process::Stdio;
 use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
-use tokio::io::AsyncWriteExt;
 
 use super::SshServerProfile;
 use super::ssh::{posix_remote_command, run_ssh_capture, ssh_command};
@@ -161,19 +160,13 @@ pub(super) async fn upload_helper(
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
-    let mut child = prepared.command.spawn().map_err(|error| {
-        RemoteClientError::Protocol(format!("failed to start ssh upload: {error}"))
-    })?;
-    let mut stdin = child.stdin.take().ok_or_else(|| {
-        RemoteClientError::Protocol("ssh upload process has no stdin".to_string())
-    })?;
-    stdin.write_all(bytes).await.map_err(|error| {
-        RemoteClientError::Protocol(format!("failed to upload helper: {error}"))
-    })?;
-    drop(stdin);
-    let output = child.wait_with_output().await.map_err(|error| {
-        RemoteClientError::Protocol(format!("failed to wait for helper upload: {error}"))
-    })?;
+    let output = super::ssh::run_bounded_ssh(
+        &mut prepared.command,
+        Some(bytes),
+        "helper upload",
+        std::time::Duration::from_secs(120),
+    )
+    .await?;
     if !output.status.success() {
         return Err(RemoteClientError::Protocol(format!(
             "helper upload failed: {}",

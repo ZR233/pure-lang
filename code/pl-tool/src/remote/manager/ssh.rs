@@ -45,6 +45,14 @@ pub(super) async fn ssh_command(
         // SSH 进程只承载 stdio 协议，不需要 X11；显式关闭可避免用户 ssh
         // 配置中的 ForwardX11 设置向远端注入图形会话并产生 xauth 警告。
         .arg("-x")
+        .args([
+            "-o",
+            "ConnectTimeout=15",
+            "-o",
+            "ServerAliveInterval=15",
+            "-o",
+            "ServerAliveCountMax=3",
+        ])
         .arg("-p")
         .arg(profile.port.to_string())
         .arg("-l")
@@ -130,12 +138,14 @@ pub(super) async fn run_ssh_capture(
     remote_command: &str,
 ) -> Result<String, RemoteClientError> {
     let mut prepared = ssh_command(profile, password).await?;
-    let output = prepared
-        .command
-        .arg(posix_remote_command(remote_command))
-        .output()
-        .await
-        .map_err(|error| RemoteClientError::Protocol(format!("failed to start ssh: {error}")))?;
+    prepared.command.arg(posix_remote_command(remote_command));
+    let output = run_bounded_ssh(
+        &mut prepared.command,
+        None,
+        "probe",
+        std::time::Duration::from_secs(30),
+    )
+    .await?;
     if !output.status.success() {
         return Err(RemoteClientError::Protocol(format!(
             "ssh command failed: {}",
@@ -144,6 +154,87 @@ pub(super) async fn run_ssh_capture(
     }
     String::from_utf8(output.stdout)
         .map_err(|error| RemoteClientError::Protocol(format!("ssh output is not UTF-8: {error}")))
+}
+
+/// Owns the child through timeout cleanup. Dropping the caller also kills the child,
+/// with Tokio retaining responsibility for reaping it.
+pub(super) async fn run_bounded_ssh(
+    command: &mut Command,
+    input: Option<&[u8]>,
+    stage: &'static str,
+    timeout: std::time::Duration,
+) -> Result<std::process::Output, RemoteClientError> {
+    use tokio::io::AsyncWriteExt;
+    command
+        .stdin(if input.is_some() {
+            std::process::Stdio::piped()
+        } else {
+            std::process::Stdio::null()
+        })
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+    let mut child = command.spawn().map_err(|error| {
+        RemoteClientError::Protocol(format!("SSH {stage} spawn failed: {error}"))
+    })?;
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    let stdin = child.stdin.take();
+    let operation = async {
+        let write = async {
+            if let (Some(mut stdin), Some(bytes)) = (stdin, input) {
+                stdin.write_all(bytes).await?;
+                stdin.shutdown().await?;
+            }
+            Ok::<_, std::io::Error>(())
+        };
+        let (status, stdout, stderr, ()) = tokio::try_join!(
+            child.wait(),
+            capture_bounded(stdout, 65536),
+            capture_bounded(stderr, 4096),
+            write
+        )?;
+        Ok::<_, std::io::Error>(std::process::Output {
+            status,
+            stdout,
+            stderr,
+        })
+    };
+    match tokio::time::timeout(timeout, operation).await {
+        Ok(Ok(output)) => Ok(output),
+        result => {
+            let reason = match result {
+                Ok(Err(error)) => error.to_string(),
+                Err(_) => "timed out".into(),
+                Ok(Ok(_)) => unreachable!(),
+            };
+            child.kill().await.map_err(|error| {
+                RemoteClientError::Protocol(format!(
+                    "SSH {stage} cleanup failed after {reason}: {error}"
+                ))
+            })?;
+            Err(RemoteClientError::Protocol(format!("SSH {stage} {reason}")))
+        }
+    }
+}
+
+async fn capture_bounded<R: tokio::io::AsyncRead + Unpin>(
+    reader: Option<R>,
+    limit: usize,
+) -> std::io::Result<Vec<u8>> {
+    use tokio::io::AsyncReadExt;
+    let Some(mut reader) = reader else {
+        return Ok(Vec::new());
+    };
+    let mut retained = Vec::new();
+    let mut buffer = [0; 4096];
+    loop {
+        let count = reader.read(&mut buffer).await?;
+        if count == 0 {
+            return Ok(retained);
+        }
+        retained.extend_from_slice(&buffer[..count.min(limit.saturating_sub(retained.len()))]);
+    }
 }
 
 pub(super) async fn initialization_diagnostic(
@@ -161,6 +252,41 @@ pub(super) async fn initialization_diagnostic(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bounded_ssh_child_fixture() {
+        if std::env::var_os("PURE_SSH_TIMEOUT_FIXTURE").is_some() {
+            std::thread::park();
+        }
+    }
+
+    #[tokio::test]
+    async fn stalled_probe_is_reaped_and_a_following_probe_can_complete() {
+        let mut stalled = Command::new(std::env::current_exe().unwrap());
+        stalled
+            .args([
+                "--exact",
+                "remote::manager::ssh::tests::bounded_ssh_child_fixture",
+            ])
+            .env("PURE_SSH_TIMEOUT_FIXTURE", "1");
+        let result = run_bounded_ssh(
+            &mut stalled,
+            None,
+            "probe",
+            std::time::Duration::from_millis(200),
+        )
+        .await;
+        assert!(result.unwrap_err().to_string().contains("probe timed out"));
+        let mut next = Command::new(std::env::current_exe().unwrap());
+        next.args([
+            "--exact",
+            "remote::manager::ssh::tests::bounded_ssh_child_fixture",
+        ]);
+        let output = run_bounded_ssh(&mut next, None, "probe", std::time::Duration::from_secs(10))
+            .await
+            .unwrap();
+        assert!(output.status.success());
+    }
 
     fn profile() -> SshServerProfile {
         SshServerProfile {
@@ -200,7 +326,22 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             args,
-            vec!["-T", "-x", "-p", "2222", "-l", "dev", "--", "example.test"]
+            vec![
+                "-T",
+                "-x",
+                "-o",
+                "ConnectTimeout=15",
+                "-o",
+                "ServerAliveInterval=15",
+                "-o",
+                "ServerAliveCountMax=3",
+                "-p",
+                "2222",
+                "-l",
+                "dev",
+                "--",
+                "example.test"
+            ]
         );
     }
 

@@ -78,7 +78,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             content: vec![ContextContent::Text {
                 text: Arc::from("Please call echo."),
             }],
-            max_model_steps: NonZeroU32::new(4).ok_or("invalid step limit")?,
+            max_model_steps: pl_core::thread::ModelStepLimit::Limited(
+                NonZeroU32::new(4).ok_or("invalid step limit")?,
+            ),
             cancellation: CancellationToken::new(),
         })
         .await?;

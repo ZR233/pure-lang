@@ -97,6 +97,7 @@ struct RemoteClientInner {
     next_request_id: AtomicU64,
     last_output_sequence: AtomicU64,
     disconnected: CancellationToken,
+    disconnect_reason: std::sync::Mutex<Option<String>>,
 }
 
 impl std::fmt::Debug for RemoteClientInner {
@@ -145,6 +146,7 @@ impl RemoteClient {
             next_request_id: AtomicU64::new(0),
             last_output_sequence: AtomicU64::new(0),
             disconnected: CancellationToken::new(),
+            disconnect_reason: Default::default(),
         });
         let read = tokio::spawn(read_loop(reader, inner.clone()));
         let write = tokio::spawn(write_loop(writer, receiver, inner.clone()));
@@ -301,6 +303,15 @@ impl RemoteClient {
         })
     }
 
+    /// First transport failure, excluding request contents and credentials.
+    pub fn disconnect_reason(&self) -> Option<String> {
+        self.inner
+            .disconnect_reason
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
     pub(crate) fn is_same_connection(&self, other: &Self) -> bool {
         Arc::ptr_eq(&self.inner, &other.inner)
     }
@@ -362,7 +373,8 @@ async fn write_loop<W>(
         _ = inner.disconnected.cancelled() => {},
         _ = async {
             while let Some(frame) = frames.recv().await {
-                if frame.write(&mut writer).await.is_err() {
+                if let Err(error) = frame.write(&mut writer).await {
+                    retain_disconnect_reason(&inner, format!("write transport: {}", error.kind()));
                     break;
                 }
             }
@@ -382,20 +394,28 @@ where
     tokio::select! {
         biased;
         _ = inner.disconnected.cancelled() => {},
-        _ = read_frames(reader, &inner) => {},
+        result = read_frames(reader, &inner) => {
+            retain_disconnect_reason(&inner, match result {
+                Ok(()) => "read transport: EOF".into(),
+                Err(error) => format!("read transport: {error}"),
+            });
+        },
     }
     mark_disconnected(&inner).await;
 }
 
-async fn read_frames<R>(mut reader: R, inner: &RemoteClientInner)
+async fn read_frames<R>(mut reader: R, inner: &RemoteClientInner) -> io::Result<()>
 where
     R: AsyncRead + Unpin,
 {
-    while let Ok(Some(frame)) = read_frame(&mut reader).await {
+    while let Some(frame) = read_frame(&mut reader).await? {
         match frame.message {
             RemoteMessage::Response(response) => {
                 let Some(request_id) = frame.request_id else {
-                    break;
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "response missing request identity",
+                    ));
                 };
                 let result = match response {
                     RemoteResponse::Error(RemoteError { code, message }) => {
@@ -411,12 +431,26 @@ where
                 }
             }
             RemoteMessage::Event(event) => {
-                if handle_event(inner, event, frame.body).await.is_err() {
-                    break;
-                }
+                handle_event(inner, event, frame.body).await?;
             }
-            RemoteMessage::Request(_) => break,
+            RemoteMessage::Request(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "unexpected helper request",
+                ));
+            }
         }
+    }
+    Ok(())
+}
+
+fn retain_disconnect_reason(inner: &RemoteClientInner, reason: String) {
+    let mut stored = inner
+        .disconnect_reason
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if stored.is_none() {
+        *stored = Some(reason.chars().take(512).collect());
     }
 }
 
@@ -448,7 +482,10 @@ async fn handle_event(
                 RemoteOutputStream::Stdout => &mut channels.stdout,
                 RemoteOutputStream::Stderr => &mut channels.stderr,
             };
-            writer.write_all(&body).await
+            match writer.write_all(&body).await {
+                Err(error) if error.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+                result => result,
+            }
         }
         RemoteEvent::ProcessExit(exit) => {
             if let Some(mut channels) = inner.processes.lock().await.remove(&exit.process_id)
@@ -488,5 +525,82 @@ pub(super) fn expect_ack(reply: RemoteReply) -> Result<(), RemoteClientError> {
         response => Err(RemoteClientError::Protocol(format!(
             "expected ack, received {response:?}"
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn closed_process_output_does_not_disconnect_other_requests_and_protocol_failure_has_reason()
+     {
+        let (transport, mut peer) = tokio::io::duplex(8192);
+        let (reader, writer) = tokio::io::split(transport);
+        let client = RemoteClient::from_streams(reader, writer);
+        let (stdout, consumed) = tokio::io::duplex(64);
+        let (stderr, _stderr_consumer) = tokio::io::duplex(64);
+        let (exit, _exit_receiver) = oneshot::channel();
+        client.inner.processes.lock().await.insert(
+            "retired".into(),
+            RemoteProcessChannels {
+                stdout,
+                stderr,
+                exit: Some(exit),
+            },
+        );
+        drop(consumed);
+        let peer_task = tokio::spawn(async move {
+            encode_frame(
+                None,
+                RemoteMessage::Event(RemoteEvent::ProcessOutput(
+                    pl_protocol::remote::RemoteProcessOutput {
+                        process_id: "retired".into(),
+                        sequence: 1,
+                        stream: RemoteOutputStream::Stdout,
+                    },
+                )),
+                b"late output",
+            )
+            .unwrap()
+            .write(&mut peer)
+            .await
+            .unwrap();
+            let request = read_frame(&mut peer).await.unwrap().unwrap();
+            encode_frame(
+                request.request_id,
+                RemoteMessage::Response(RemoteResponse::Ack),
+                &[],
+            )
+            .unwrap()
+            .write(&mut peer)
+            .await
+            .unwrap();
+            peer.write_u32(0).await.unwrap();
+        });
+        let reply = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            client.request(
+                RemoteRequest::CloseStdin {
+                    process_id: "other".into(),
+                },
+                &[],
+            ),
+        )
+        .await
+        .unwrap();
+        assert!(
+            reply.is_ok(),
+            "a retired output consumer disconnected the shared transport: {reply:?}"
+        );
+        peer_task.await.unwrap();
+        client.wait_disconnected().await;
+        assert!(
+            client
+                .disconnect_reason()
+                .unwrap()
+                .contains("header length 0")
+        );
+        client.close().await.unwrap();
     }
 }

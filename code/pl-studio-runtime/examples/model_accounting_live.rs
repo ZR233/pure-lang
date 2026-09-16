@@ -422,7 +422,7 @@ async fn tool_task(
         )?])
         .await?;
     let cancellation = tokio_util::sync::CancellationToken::new();
-    let operation = thread.run_turn(TurnInput { turn_id: "live-turn".into(), attempt_prefix: "live-attempt".into(), content: vec![ContextContent::Text { text: "You must first call verify_double with value 21, then reply with its result. Do not calculate it yourself.".into() }], max_model_steps: std::num::NonZeroU32::new(8).expect("positive step bound"), cancellation: cancellation.clone() });
+    let operation = thread.run_turn(TurnInput { turn_id: "live-turn".into(), attempt_prefix: "live-attempt".into(), content: vec![ContextContent::Text { text: "You must first call verify_double with value 21, then reply with its result. Do not calculate it yourself.".into() }], max_model_steps: pl_core::thread::ModelStepLimit::Limited(std::num::NonZeroU32::new(8).expect("positive step bound")), cancellation: cancellation.clone() });
     tokio::pin!(operation);
     let result = match tokio::time::timeout(Duration::from_secs(75), &mut operation).await {
         Ok(result) => result,

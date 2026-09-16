@@ -172,8 +172,7 @@ impl StudioThreadFactory {
                 crate::thread_assembler::AgentControlExposure::Enabled
             },
             execution: pl_core::thread::input::InputDriverOptions {
-                max_model_steps: std::num::NonZeroU32::new(64)
-                    .expect("fixed positive model step limit"),
+                max_model_steps: pl_core::thread::ModelStepLimit::Unlimited,
             },
             id: id.into(),
             parent_id: None,

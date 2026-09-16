@@ -162,7 +162,9 @@ async fn facade_supports_route_two_turns_snapshots_thread_and_web_search() {
             content: vec![ContextContent::Text {
                 text: "engine prompt".into(),
             }],
-            max_model_steps: std::num::NonZeroU32::new(4).unwrap(),
+            max_model_steps: pl_core::thread::ModelStepLimit::Limited(
+                std::num::NonZeroU32::new(4).unwrap(),
+            ),
             cancellation: Default::default(),
         })
         .await

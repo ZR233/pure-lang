@@ -222,13 +222,28 @@ pub struct StepInput {
     pub cancellation: CancellationToken,
 }
 
-/// A bounded Turn executed by the same owner that holds model and tool instances.
+/// Host-selected model step policy; usage remains observable without a stopping budget.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelStepLimit {
+    Unlimited,
+    Limited(std::num::NonZeroU32),
+}
+impl ModelStepLimit {
+    pub(super) fn reached(self, completed: u32) -> bool {
+        match self {
+            Self::Unlimited => false,
+            Self::Limited(limit) => completed >= limit.get(),
+        }
+    }
+}
+
+/// A Turn executed by the same owner that holds model and tool instances.
 #[derive(Debug)]
 pub struct TurnInput {
     pub turn_id: String,
     pub attempt_prefix: String,
     pub content: Vec<ContextContent>,
-    pub max_model_steps: std::num::NonZeroU32,
+    pub max_model_steps: crate::thread::ModelStepLimit,
     pub cancellation: CancellationToken,
 }
 

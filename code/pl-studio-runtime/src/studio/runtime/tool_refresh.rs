@@ -7,7 +7,7 @@ use crate::protocol::StudioProductEventKind;
 use pl_core::thread::{ThreadHandle, ThreadLifecycle, ToolOutcome};
 use std::collections::BTreeMap;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct CatalogSources(BTreeMap<String, String>);
 impl CatalogSources {
     fn for_ssh_server(&self, server: Option<&str>) -> Self {
@@ -77,7 +77,11 @@ impl StudioRuntime {
         let runtime = self.clone();
         *slot = Some(BackgroundTask::new(tokio::spawn(async move {
             let mut sources = CatalogSources::default();
-            let mut attempted: BTreeMap<String, (ThreadHandle, String)> = BTreeMap::new();
+            let mut workers: BTreeMap<
+                String,
+                (ThreadHandle, tokio::sync::watch::Sender<CatalogSources>),
+            > = BTreeMap::new();
+            let mut tasks = tokio::task::JoinSet::new();
             let mut mcp_changed = true;
             loop {
                 if stopping.is_cancelled() {
@@ -101,11 +105,50 @@ impl StudioRuntime {
                         .0
                         .insert(format!("ssh-ready:{server}"), revision.to_string());
                 }
-                runtime
-                    .refresh_tool_catalogs(&sources, &mut attempted)
-                    .await;
+                let active = runtime.threads.observed_threads();
+                workers.retain(|id, (owner, _)| {
+                    active.iter().any(|(current_id, current)| {
+                        current_id == id && current.same_instance(owner)
+                    })
+                });
+                for (id, thread) in active {
+                    let server = runtime.thread_factory.ssh_server_id(&id);
+                    let selected = sources.for_ssh_server(server.as_deref());
+                    if let Some((_, updates)) = workers.get(&id) {
+                        updates.send_replace(selected);
+                        continue;
+                    }
+                    let (updates, mut receiver) = tokio::sync::watch::channel(selected);
+                    workers.insert(id.clone(), (thread.clone(), updates));
+                    let runtime = runtime.clone();
+                    let stopping = stopping.clone();
+                    tasks.spawn(async move {
+                        let mut attempted = BTreeMap::new();
+                        loop {
+                            if stopping.is_cancelled() {
+                                break;
+                            }
+                            let sources = receiver.borrow_and_update().clone();
+                            runtime
+                                .refresh_selected_catalogs(
+                                    &sources,
+                                    &mut attempted,
+                                    vec![(id.clone(), thread.clone())],
+                                )
+                                .await;
+                            tokio::select! {
+                                () = stopping.cancelled() => break,
+                                changed = receiver.changed() => if changed.is_err() { break; },
+                            }
+                        }
+                    });
+                }
                 tokio::select! {
                     () = stopping.cancelled() => break,
+                    finished = tasks.join_next(), if !tasks.is_empty() => {
+                        if let Some(Err(error)) = finished { tracing::error!(%error, "tool refresh worker failed"); }
+                        workers.retain(|_, (_, updates)| !updates.is_closed());
+                    },
                     () = runtime.tool_catalog_updates.notified() => {
                         let revision = sources.0.get("ssh").and_then(|value| value.parse::<u64>().ok()).unwrap_or_default().saturating_add(1);
                         sources.0.insert("ssh".into(), revision.to_string());
@@ -123,39 +166,49 @@ impl StudioRuntime {
                     },
                 }
             }
+            drop(workers);
+            while let Some(result) = tasks.join_next().await {
+                if let Err(error) = result {
+                    tracing::error!(%error, "tool refresh worker failed during shutdown");
+                }
+            }
         })));
     }
 
+    #[cfg(test)]
     async fn refresh_tool_catalogs(
         &self,
         sources: &CatalogSources,
         attempted: &mut BTreeMap<String, (ThreadHandle, String)>,
     ) {
-        let active = self.threads.observed_threads();
+        self.refresh_selected_catalogs(sources, attempted, self.threads.observed_threads())
+            .await;
+    }
+
+    async fn refresh_selected_catalogs(
+        &self,
+        sources: &CatalogSources,
+        attempted: &mut BTreeMap<String, (ThreadHandle, String)>,
+        active: Vec<(String, ThreadHandle)>,
+    ) {
         let ids: std::collections::BTreeSet<_> = active.iter().map(|(id, _)| id.clone()).collect();
         attempted.retain(|id, _| ids.contains(id));
         for (id, thread) in active {
-            if let Err(error) = self.rejected_tools.retry(Some(&thread)).await {
-                tracing::warn!(thread_id = %id, %error, "candidate cleanup remains pending");
+            let cleanup = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                self.rejected_tools.retry(Some(&thread)),
+            )
+            .await;
+            if !matches!(cleanup, Ok(Ok(()))) {
+                tracing::warn!(thread_id = %id, error = ?cleanup, "candidate cleanup remains pending");
                 continue;
             }
             let snapshot = thread.snapshot();
-            if !snapshot
-                .attempts
-                .iter()
-                .any(|attempt| matches!(attempt.outcome, pl_core::thread::AttemptOutcome::Running))
-                && let Some(fact) = self.thread_factory.skill_catalog_fact(&id, &snapshot)
+            if let Some(fact) = self.thread_factory.skill_catalog_fact(&id, &snapshot)
+                && let Err(error) = thread.queue_runtime_facts(vec![fact]).await
+                && !matches!(error, pl_core::thread::ThreadError::Closed)
             {
-                match thread.patch_runtime_facts(vec![fact]).await {
-                    Ok(_)
-                    | Err(
-                        pl_core::thread::ThreadError::PendingTools
-                        | pl_core::thread::ThreadError::Closed,
-                    ) => {}
-                    Err(error) => {
-                        tracing::warn!(thread_id = %id, %error, "could not append refreshed Skill catalog facts")
-                    }
-                }
+                tracing::warn!(thread_id = %id, %error, "could not queue refreshed Skill catalog facts");
             }
             if snapshot.lifecycle != ThreadLifecycle::Open {
                 continue;
@@ -271,7 +324,14 @@ impl StudioRuntime {
             .register_tools_if_extensions(snapshot.extension_sequence, registrations)
             .await?;
         self.publish_tool_binding(id, thread, snapshot.extension_sequence, binding)
-            .await
+            .await?;
+        if let Some(fact) = self
+            .thread_factory
+            .skill_catalog_fact(id, &thread.snapshot())
+        {
+            thread.queue_runtime_facts(vec![fact]).await?;
+        }
+        Ok(())
     }
 
     // The refresh loop serializes installations. An extension change can still
@@ -330,6 +390,109 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
 
+    #[tokio::test]
+    async fn blocked_candidate_cleanup_does_not_block_another_thread_refresh() -> anyhow::Result<()>
+    {
+        use pl_core::{
+            context::OpaquePayload,
+            tool::opaque::{CallContext, Registration, Tool, ToolError},
+        };
+        use std::sync::{
+            Arc,
+            atomic::{AtomicU8, Ordering},
+        };
+        #[derive(Debug)]
+        struct Cleanup {
+            phase: AtomicU8,
+            entered: tokio::sync::Notify,
+            release: tokio::sync::Notify,
+        }
+        #[derive(Debug)]
+        struct Candidate(Arc<Cleanup>);
+        impl Tool for Candidate {
+            async fn execute(
+                &self,
+                _: OpaquePayload,
+                _: CallContext,
+            ) -> Result<pl_core::tool::ToolOutput, ToolError> {
+                unreachable!()
+            }
+            async fn close(&self) -> Result<(), ToolError> {
+                match self.0.phase.load(Ordering::SeqCst) {
+                    0 => Err(ToolError::new(std::io::Error::other("retain candidate"))),
+                    1 => {
+                        self.0.entered.notify_one();
+                        self.0.release.notified().await;
+                        Ok(())
+                    }
+                    _ => Ok(()),
+                }
+            }
+        }
+        let home = tempfile::tempdir()?;
+        let workspace = tempfile::tempdir()?;
+        let runtime = StudioRuntime::with_options(crate::StudioRuntimeOptions {
+            studio_home: Some(home.path().into()),
+            host: crate::StudioHostKind::Test,
+        })
+        .await?;
+        runtime.start_runtime().await?;
+        runtime.stop_tool_refresh().await?;
+        let project = runtime.open_project(workspace.path()).await?;
+        let blocked_record = runtime
+            .create_thread(&project.id, "blocked cleanup")
+            .await?;
+        let blocked = runtime.ensure_thread_owner(&blocked_record.id).await?;
+        let other_record = runtime
+            .create_thread(&project.id, "independent refresh")
+            .await?;
+        let other = runtime.ensure_thread_owner(&other_record.id).await?;
+        let cleanup = Arc::new(Cleanup {
+            phase: AtomicU8::new(0),
+            entered: Default::default(),
+            release: Default::default(),
+        });
+        let error = blocked
+            .register_tools_if_extensions(
+                u64::MAX,
+                vec![Registration::new(
+                    "duplicate".into(),
+                    OpaquePayload::text("candidate"),
+                    Candidate(cleanup.clone()),
+                )?],
+            )
+            .await
+            .unwrap_err();
+        let pl_core::thread::ThreadError::RejectedTools(resources) = error else {
+            panic!("missing rejected cleanup ownership: {error}");
+        };
+        runtime.rejected_tools.retain(blocked, resources);
+        cleanup.phase.store(1, Ordering::SeqCst);
+        let previous = runtime
+            .thread_factory
+            .binding_incarnation_for_test(&other_record.id)
+            .unwrap();
+        runtime.start_tool_refresh().await;
+        let result = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            cleanup.entered.notified().await;
+            while runtime
+                .thread_factory
+                .binding_incarnation_for_test(&other_record.id)
+                .is_none_or(|current| Arc::ptr_eq(&previous, &current))
+            {
+                tokio::task::yield_now().await;
+            }
+            other.reveal_tools(vec!["read_file".into()]).await
+        })
+        .await;
+        cleanup.phase.store(2, Ordering::SeqCst);
+        cleanup.release.notify_one();
+        runtime.stop_tool_refresh().await?;
+        runtime.shutdown_runtime().await?;
+        result??;
+        Ok(())
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     #[ignore = "requires embedded-remote-helpers, PURE_SSH_TEST_SERVER/USERNAME/WORKSPACE and key authentication"]
     async fn ssh_reconnect_restores_existing_thread_tools() -> anyhow::Result<()> {
@@ -365,6 +528,65 @@ mod tests {
                 Ok(())
             }
         }
+        #[derive(Clone)]
+        struct ReconnectingTurn {
+            step: usize,
+            entered: std::sync::Arc<tokio::sync::Notify>,
+            release: std::sync::Arc<tokio::sync::Notify>,
+        }
+        impl Model for ReconnectingTurn {
+            async fn open_session(&self) -> Result<DynModelSession, ModelError> {
+                Ok(DynModelSession::new(self.clone()))
+            }
+        }
+        impl ModelSession for ReconnectingTurn {
+            async fn prepare(
+                &mut self,
+                request: ModelRequest,
+            ) -> Result<PreparedModelCall, ModelError> {
+                let step = self.step;
+                self.step += 1;
+                let entered = self.entered.clone();
+                let release = self.release.clone();
+                Ok(PreparedModelCall::new(async move {
+                    if step == 0 {
+                        entered.notify_one();
+                        release.notified().await;
+                    }
+                    let tool_calls = if step < 2 {
+                        [
+                            ("read_file", serde_json::json!({"path":"fixture.txt"})),
+                            (
+                                "exec",
+                                serde_json::json!({"command":"cat fixture.txt","cwd":"."}),
+                            ),
+                        ]
+                        .into_iter()
+                        .map(|(tool, args)| ModelToolCall {
+                            call_id: format!("running-reconnect-{step}-{tool}"),
+                            tool_id: tool.into(),
+                            arguments: OpaquePayload::new("application/json", 1, args.to_string())
+                                .unwrap(),
+                        })
+                        .collect()
+                    } else {
+                        Vec::new()
+                    };
+                    Ok(ModelStepOutput {
+                        attempt_id: request.attempt_id,
+                        base_context_revision: request.context.revision,
+                        content: Vec::new(),
+                        tool_calls,
+                        private_context: None,
+                        usage: Default::default(),
+                    })
+                }))
+            }
+            async fn close(&mut self) -> Result<(), ModelError> {
+                Ok(())
+            }
+        }
+
         async fn start_call(
             thread: &ThreadHandle,
             tool: &str,
@@ -555,6 +777,34 @@ mod tests {
                 probe(&thread).await?;
                 probe(&child).await?;
             }
+            // A whole Turn stays active across reconnect; admitted old calls fail, the
+            // following request binds fresh tools without waiting for Turn completion.
+            let entered = std::sync::Arc::new(tokio::sync::Notify::new());
+            let release = std::sync::Arc::new(tokio::sync::Notify::new());
+            thread.replace_model(ModelFactory::new(ReconnectingTurn { step: 0, entered: entered.clone(), release: release.clone() })).await?;
+            thread.reveal_tools(vec!["read_file".into(), "exec".into()]).await?;
+            let active_owner = thread.clone();
+            let running = tokio::spawn(async move { active_owner.run_turn(TurnInput {
+                turn_id: "running-reconnect".into(), attempt_prefix: "running-reconnect".into(), content: Vec::new(),
+                max_model_steps: ModelStepLimit::Unlimited, cancellation: CancellationToken::new(),
+            }).await });
+            entered.notified().await;
+            thread.queue_runtime_facts(vec![RuntimeFact { source_id: "regression.skills".into(), content: vec![pl_core::context::ContextContent::Text { text: "updated skills".into() }] }]).await?;
+            let old = runtime.thread_factory.remote_binding_for_test(&record.id).unwrap();
+            runtime.start_tool_refresh().await;
+            runtime.reconnect_ssh_server("reconnect").await?;
+            tokio::time::timeout(std::time::Duration::from_secs(20), async {
+                while runtime.thread_factory.remote_binding_for_test(&record.id).is_none_or(|current| current.files.is_same_binding(&old.files)) { tokio::task::yield_now().await; }
+            }).await?;
+            release.notify_one();
+            let completed = running.await??;
+            anyhow::ensure!(completed.outcome == TurnOutcome::Completed, "running Turn did not recover");
+            for tool in ["read_file", "exec"] {
+                let snapshot = thread.snapshot();
+                let delivery = snapshot.deliveries.iter().find(|delivery| delivery.call_id == format!("running-reconnect-1-{tool}")).unwrap();
+                anyhow::ensure!(matches!(delivery.outcome, ToolOutcome::Succeeded) && delivery.output.payload().content().contains("reconnect-fixture"), "running Turn failed to restore {tool}: {delivery:?}");
+            }
+            runtime.stop_tool_refresh().await?;
             assert_eq!(
                 &thread.snapshot().context.records[..initial.len()],
                 initial.as_slice()

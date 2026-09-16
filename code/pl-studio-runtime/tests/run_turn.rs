@@ -187,7 +187,9 @@ fn input(turn: &str) -> TurnInput {
         content: vec![ContextContent::Text {
             text: "Use the counter then answer".into(),
         }],
-        max_model_steps: std::num::NonZeroU32::new(4).unwrap(),
+        max_model_steps: pl_core::thread::ModelStepLimit::Limited(
+            std::num::NonZeroU32::new(4).unwrap(),
+        ),
         cancellation: Default::default(),
     }
 }

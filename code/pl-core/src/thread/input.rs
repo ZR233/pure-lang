@@ -119,14 +119,14 @@ pub enum InputChange {
 pub struct QueuedTurn {
     pub turn_id: String,
     pub attempt_prefix: String,
-    pub max_model_steps: std::num::NonZeroU32,
+    pub max_model_steps: crate::thread::ModelStepLimit,
     pub cancellation: CancellationToken,
 }
 
 /// Host-selected bounds for serial queue execution, frozen separately for each Turn.
 #[derive(Debug, Clone, Copy)]
 pub struct InputDriverOptions {
-    pub max_model_steps: std::num::NonZeroU32,
+    pub max_model_steps: crate::thread::ModelStepLimit,
 }
 
 /// Live execution observation. Restored history always begins paused.
@@ -696,7 +696,9 @@ mod tests {
         QueuedTurn {
             turn_id: turn_id.into(),
             attempt_prefix: format!("{turn_id}-attempt"),
-            max_model_steps: std::num::NonZeroU32::new(3).unwrap(),
+            max_model_steps: crate::thread::ModelStepLimit::Limited(
+                std::num::NonZeroU32::new(3).unwrap(),
+            ),
             cancellation,
         }
     }
@@ -736,7 +738,9 @@ mod tests {
         );
         thread
             .resume_inputs(InputDriverOptions {
-                max_model_steps: std::num::NonZeroU32::new(3).unwrap(),
+                max_model_steps: crate::thread::ModelStepLimit::Limited(
+                    std::num::NonZeroU32::new(3).unwrap(),
+                ),
             })
             .await
             .unwrap();
@@ -946,7 +950,9 @@ mod tests {
         thread.submit_input(submitted("first")).await.unwrap();
         thread.submit_input(submitted("second")).await.unwrap();
         let options = InputDriverOptions {
-            max_model_steps: std::num::NonZeroU32::new(3).unwrap(),
+            max_model_steps: crate::thread::ModelStepLimit::Limited(
+                std::num::NonZeroU32::new(3).unwrap(),
+            ),
         };
         let mut subscription = thread.subscribe();
         thread.resume_inputs(options).await.unwrap();

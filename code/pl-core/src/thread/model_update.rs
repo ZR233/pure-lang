@@ -107,9 +107,73 @@ mod tests {
             content: vec![ContextContent::Text {
                 text: "input".into(),
             }],
-            max_model_steps: std::num::NonZeroU32::new(1).unwrap(),
+            max_model_steps: crate::thread::ModelStepLimit::Limited(
+                std::num::NonZeroU32::new(1).unwrap(),
+            ),
             cancellation: Default::default(),
         }
+    }
+
+    #[tokio::test]
+    async fn runtime_facts_acknowledge_during_model_execution_without_changing_admitted_input() {
+        let started = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let thread = ThreadHandle::start(
+            "facts".into(),
+            DynModelSession::new(Session {
+                label: "old",
+                gate: Some((started.clone(), release.clone())),
+            }),
+        )
+        .unwrap();
+        let owner = thread.clone();
+        let first = tokio::spawn(async move { owner.run_turn(input("first")).await });
+        started.notified().await;
+        let admitted = thread.snapshot().context;
+        let fact = RuntimeFact {
+            source_id: "skills".into(),
+            content: vec![ContextContent::Text {
+                text: "updated".into(),
+            }],
+        };
+        let queued = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            thread.queue_runtime_facts(vec![fact.clone()]),
+        )
+        .await;
+        assert!(
+            queued.is_ok(),
+            "runtime fact refresh blocked behind the running Turn"
+        );
+        queued.unwrap().unwrap();
+        let latest = RuntimeFact {
+            source_id: "skills".into(),
+            content: vec![ContextContent::Text {
+                text: "latest".into(),
+            }],
+        };
+        thread
+            .queue_runtime_facts(vec![latest.clone()])
+            .await
+            .unwrap();
+        assert!(matches!(
+            thread.queue_runtime_facts(vec![fact.clone(), fact]).await,
+            Err(ThreadError::InvalidContext)
+        ));
+        assert_eq!(thread.snapshot().context, admitted);
+        release.notify_one();
+        first.await.unwrap().unwrap();
+        release.notify_one();
+        thread.run_turn(input("second")).await.unwrap();
+        assert_eq!(
+            thread.snapshot().runtime_facts.as_ref(),
+            std::slice::from_ref(&latest)
+        );
+        thread.close().await.unwrap();
+        assert!(matches!(
+            thread.queue_runtime_facts(vec![latest]).await,
+            Err(ThreadError::Closed)
+        ));
     }
 
     #[tokio::test]
@@ -214,7 +278,9 @@ mod tests {
                 turn_id: "turn".into(),
                 attempt_prefix: "attempt".into(),
                 content: Vec::new(),
-                max_model_steps: std::num::NonZeroU32::new(1).unwrap(),
+                max_model_steps: crate::thread::ModelStepLimit::Limited(
+                    std::num::NonZeroU32::new(1).unwrap(),
+                ),
                 cancellation: Default::default(),
             })
             .await

@@ -21,17 +21,28 @@ impl SshManager {
         let connection = self.connections.lock().await.get(server_id).cloned();
         if let Some(connection) = connection {
             connection.client.close().await?;
-            connection
-                .process
-                .lock()
+            let mut process = connection.process.lock().await;
+            if tokio::time::timeout(std::time::Duration::from_secs(5), process.wait())
                 .await
-                .wait()
+                .is_err()
+            {
+                process.start_kill().map_err(|error| {
+                    RemoteClientError::Protocol(format!(
+                        "failed to terminate SSH for {server_id}: {error}"
+                    ))
+                })?;
+            }
+            tokio::time::timeout(std::time::Duration::from_secs(5), process.wait())
                 .await
+                .map_err(|_| {
+                    RemoteClientError::Protocol(format!("SSH cleanup timed out for {server_id}"))
+                })?
                 .map_err(|error| {
                     RemoteClientError::Protocol(format!(
                         "failed to reap SSH for {server_id}: {error}"
                     ))
                 })?;
+            drop(process);
             let removed = self.connections.lock().await.remove(server_id);
             drop(removed);
         }

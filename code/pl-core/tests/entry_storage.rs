@@ -214,7 +214,9 @@ async fn thread_journal_reopens_and_continues_without_replaying_model_work() {
         .run_next_input(pl_core::thread::input::QueuedTurn {
             turn_id: "turn-2".into(),
             attempt_prefix: "attempt-2".into(),
-            max_model_steps: std::num::NonZeroU32::new(2).unwrap(),
+            max_model_steps: pl_core::thread::ModelStepLimit::Limited(
+                std::num::NonZeroU32::new(2).unwrap(),
+            ),
             cancellation: CancellationToken::new(),
         })
         .await
