@@ -12,6 +12,9 @@ import tempfile
 import shutil
 import threading
 import time
+import shlex
+import struct
+import zlib
 
 
 class Provider(http.server.BaseHTTPRequestHandler):
@@ -19,12 +22,24 @@ class Provider(http.server.BaseHTTPRequestHandler):
     output = None
     sequence = 0
     lock = threading.Lock()
+    image_source = None
+    image_ssh = None
 
     def log_message(self, *args):
         pass
 
     def do_GET(self):
-        if self.path == '/release':
+        if self.path == '/delete-image' and self.image_source is not None:
+            if self.image_ssh:
+                subprocess.run(['ssh', '-o', 'BatchMode=yes', self.image_ssh,
+                                'rm -- ' + shlex.quote(str(self.image_source))],
+                               check=True, timeout=30)
+            else:
+                self.image_source.unlink()
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'deleted')
+        elif self.path == '/release':
             self.release.set()
             self.send_response(200)
             self.end_headers()
@@ -69,7 +84,24 @@ class Provider(http.server.BaseHTTPRequestHandler):
                 event({'type': 'response.completed', 'response': {'id': f'fixture-{seq}', 'usage': {'input_tokens': 5, 'output_tokens': 3, 'total_tokens': 8}}})
 
         try:
-            if not body.get('tools'):
+            if self.image_source is not None and body.get('tools'):
+                completed = {m.get('call_id') for m in messages
+                             if m.get('type') == 'function_call_output'}
+                if 'image-read-call' in completed:
+                    # Prove the real model adapter materialized the archived image.
+                    if not any('input_image' in json.dumps(m) for m in messages):
+                        raise RuntimeError('tool image absent from model replay')
+                    send({'content': 'IMAGE_READ_COMPLETE'})
+                else:
+                    name = 'view_image' if 'image-discover-call' in completed else 'discover_tools'
+                    call_id = 'image-read-call' if name == 'view_image' else 'image-discover-call'
+                    arguments = {'path': 'fixture.png'} if name == 'view_image' else {'query': 'view_image'}
+                    send({'tool_calls': [{'index': 0, 'id': call_id, 'type': 'function',
+                          'function': {'name': name, 'arguments': json.dumps(arguments)}}]})
+                    send({}, 'tool_calls')
+                    self.wfile.write(b'data: [DONE]\n\n')
+                    return
+            elif not body.get('tools'):
                 send({'content': 'Timeline fixture'})
             elif 'timeline-create-child' in prompt and not any(m.get('role') == 'tool' or m.get('type') == 'function_call_output' for m in messages):
                 send({'tool_calls': [{'index': 0, 'id': 'timeline-child-call', 'type': 'function', 'function': {'name': 'spawn_agent', 'arguments': json.dumps({'profileId': 'explorer', 'message': 'timeline-child', 'forkTurns': 'none'})}}]})
@@ -103,12 +135,45 @@ class Provider(http.server.BaseHTTPRequestHandler):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output', required=True)
+    parser.add_argument('--image', action='store_true', help='exercise real tool images and inline expansion')
+    parser.add_argument('--ssh', help='optional user@host for --image; uses existing OpenSSH credentials')
     args = parser.parse_args()
+    if args.ssh and not args.image:
+        parser.error('--ssh requires --image')
+    if args.ssh and not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_.-]*@[A-Za-z0-9][A-Za-z0-9.:-]*', args.ssh):
+        parser.error('--ssh must be user@host, without SSH options')
     root = Path(__file__).resolve().parents[3]
     output = Path(args.output).resolve()
     output.mkdir(parents=True, exist_ok=False)
     home = output / 'studio-home'
     workspace = Path(tempfile.mkdtemp(prefix='pure-timeline-native-workspace-'))
+    remote_workspace = None
+    if args.image:
+        def chunk(kind, data):
+            return struct.pack('!I', len(data)) + kind + data + struct.pack('!I', zlib.crc32(kind + data))
+        pixels = b''.join(b'\0' + bytes([30, 160, 220, 240, 180, 30]) * 128 for _ in range(192))
+        png = (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('!2I5B', 256, 192, 8, 2, 0, 0, 0))
+               + chunk(b'IDAT', zlib.compress(pixels)) + chunk(b'IEND', b''))
+        (workspace / 'fixture.png').write_bytes(png)
+        if args.ssh:
+            try:
+                candidate = subprocess.check_output(
+                    ['ssh', '-o', 'BatchMode=yes', args.ssh, 'mktemp -d /tmp/pure-image-acceptance-XXXXXX'],
+                    text=True, timeout=30).strip()
+                if not re.fullmatch(r'/tmp/pure-image-acceptance-[A-Za-z0-9]+', candidate):
+                    raise RuntimeError('unexpected remote fixture path')
+                remote_workspace = candidate
+                subprocess.run(['ssh', '-o', 'BatchMode=yes', args.ssh,
+                                'cat > ' + shlex.quote(remote_workspace + '/fixture.png')],
+                               input=png, check=True, timeout=30)
+            except BaseException:
+                shutil.rmtree(workspace)
+                if remote_workspace:
+                    subprocess.run(['ssh', '-o', 'BatchMode=yes', args.ssh,
+                                    'rm -rf -- ' + shlex.quote(remote_workspace)], check=True, timeout=30)
+                raise
+        Provider.image_source = Path(remote_workspace or workspace) / 'fixture.png'
+        Provider.image_ssh = args.ssh
     home.mkdir()
     (output / 'fixture.json').write_text(json.dumps({'workspace': str(workspace)}))
     Provider.output = output
@@ -142,7 +207,11 @@ def main():
             if vm is None:
                 raise TimeoutError('native GUI did not publish VM service')
             with (output / 'driver.log').open('w') as driver_log:
-                subprocess.run(['cargo', 'dart', 'run', 'test_driver/timeline_acceptance_driver.dart', vm, str(output), url, str(workspace)], cwd=root, env=env, stdout=driver_log, stderr=subprocess.STDOUT, check=True, timeout=600)
+                driver = 'image_timeline_acceptance_driver.dart' if args.image else 'timeline_acceptance_driver.dart'
+                command = ['cargo', 'dart', 'run', 'test_driver/' + driver, vm, str(output), url, remote_workspace or str(workspace)]
+                if args.image:
+                    command.append(args.ssh or '')
+                subprocess.run(command, cwd=root, env=env, stdout=driver_log, stderr=subprocess.STDOUT, check=True, timeout=600)
     finally:
         Provider.release.set()
         try:
@@ -178,6 +247,9 @@ def main():
             server.server_close()
             serving.join(timeout=5)
             shutil.rmtree(workspace)
+            if remote_workspace:
+                subprocess.run(['ssh', '-o', 'BatchMode=yes', args.ssh,
+                                'rm -rf -- ' + shlex.quote(remote_workspace)], check=True, timeout=30)
 
 
 if __name__ == '__main__':

@@ -235,7 +235,7 @@
   "timelineParentAgent": "主代理",
   "timelineSkillUserActivated": "用户激活 Skill · {name}",
   "timelineAgentFallback": "Agent",
-  "timelineViewImageRead": "已阅读图片",
+  "timelineViewImageRead": "已读取图片",
   "timelineViewImageReading": "正在读取图片",
   "timelineViewImageFailed": "读取图片失败",
   "timelineToolCompleted": "{name} 已完成",

@@ -73,6 +73,31 @@ pub fn attachment_content(
     Ok(ContextContent::Opaque { payload })
 }
 
+/// Host-owned media identity and modality that a model request consumes as one attachment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolAttachment {
+    pub reference: ResourceReference,
+    pub modality: AttachmentModality,
+}
+
+/// Decodes a versioned attachment projection produced by [`attachment_content`].
+///
+/// Returns `Ok(None)` for another producer's payload so callers can inspect mixed context
+/// without treating unrelated opaque content as a media projection.
+///
+/// # Errors
+/// Rejects malformed projection content, an unsupported version, or invalid reference metadata.
+pub fn decode_attachment(payload: &OpaquePayload) -> Result<Option<ToolAttachment>, ModelError> {
+    if payload.format() != FORMAT {
+        return Ok(None);
+    }
+    let attachment = decode(payload)?;
+    Ok(Some(ToolAttachment {
+        reference: attachment.reference,
+        modality: attachment.modality,
+    }))
+}
+
 pub(super) fn decode(payload: &OpaquePayload) -> Result<Attachment, ModelError> {
     if payload.format() != FORMAT || payload.version() != 1 {
         return Err(invalid("unknown attachment projection"));

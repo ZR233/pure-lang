@@ -164,7 +164,7 @@ fn terminal(delivery: &ToolDelivery, at: i64) -> Result<ThreadToolState, Project
     }
     let output = ThreadToolOutput::new(
         text_content(&delivery.delivered_context),
-        Vec::new(),
+        super::delivery_attachments(delivery)?,
         resources,
         command_exit_code(delivery),
     );
@@ -219,10 +219,62 @@ fn command_exit_code(delivery: &ToolDelivery) -> Option<i32> {
 mod tests {
     use super::*;
     use pl_core::{
-        context::{ContextContent, OpaquePayload},
+        context::{ContextContent, OpaquePayload, ResourceReference},
         tool::ToolOutput,
     };
     use pretty_assertions::assert_eq;
+
+    fn reference(seed: char, media_type: &str, byte_len: u64) -> ResourceReference {
+        let hex = seed.to_string().repeat(64);
+        ResourceReference::new(
+            format!("pl.studio.resource:{hex}"),
+            format!("sha256:{hex}"),
+            byte_len,
+            media_type.into(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn terminal_projects_archived_tool_media_from_the_delivered_context() {
+        let original = reference('b', "image/png", 40);
+        let variant = reference('a', "image/jpeg", 12);
+        let context =
+            pl_model::runtime::attachment_content(variant, pl_protocol::AttachmentModality::Image)
+                .unwrap();
+        let receipt = OpaquePayload::new(
+            "pl.tool.image",
+            1,
+            serde_json::to_string(&serde_json::json!({
+                "path": "photo.png",
+                "original": original,
+                "modelWidth": 40,
+                "modelHeight": 30,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let output = ToolOutput::new(receipt, vec![context.clone()]);
+        let delivery = ToolDelivery {
+            target: Default::default(),
+            call_id: "call".into(),
+            tool_id: "view_image".into(),
+            delivered_context: output.context().to_vec(),
+            output,
+            outcome: ToolOutcome::Succeeded,
+        };
+        let ThreadToolState::Succeeded(state) = terminal(&delivery, 1).unwrap() else {
+            panic!("expected committed success")
+        };
+        let attachments = state.output().attachments();
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(attachments[0].id, reference('a', "image/jpeg", 12).id());
+        assert_eq!(attachments[0].media_type, "image/jpeg");
+        assert_eq!(attachments[0].filename.as_deref(), Some("photo.png"));
+        // The v1 receipt has no exact variant binding, so no size is claimed for it.
+        assert_eq!((attachments[0].width, attachments[0].height), (None, None));
+        assert_eq!(attachments[0].byte_size, 12);
+    }
 
     #[test]
     fn command_receipt_projects_exit_code_without_overriding_core_outcome() {

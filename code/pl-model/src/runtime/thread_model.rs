@@ -22,7 +22,7 @@ mod codec;
 mod media;
 pub(crate) mod progress;
 mod receipt;
-pub use media::attachment_content;
+pub use media::{ToolAttachment, attachment_content, decode_attachment};
 pub use receipt::{
     ModelCallBinding, ModelFailureReceipt, ModelRequestReceipt, ModelResponseReceipt,
     model_failure_receipt, model_request_receipt, model_response_receipt,

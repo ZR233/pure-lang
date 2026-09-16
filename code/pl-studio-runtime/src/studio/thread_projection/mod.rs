@@ -6,6 +6,8 @@ mod runtime;
 mod snapshot;
 pub(in crate::studio) use snapshot::{project_snapshot, saved_mode, status};
 mod order;
+mod tool_media;
+pub(crate) use tool_media::{delivery_attachments, read_persisted_media};
 mod tools;
 pub(in crate::studio) use tools::project_tools;
 mod responses;
@@ -21,6 +23,8 @@ pub(crate) enum ProjectionError {
     Product(#[from] pl_protocol::PureError),
     #[error("saved workflow state cannot be projected")]
     Workflow(#[from] pl_core::tool::opaque::ToolError),
+    #[error("saved tool media receipt cannot be decoded")]
+    ToolMedia(pl_core::tool::opaque::ToolError),
     #[error("projection journal is incomplete or mixes Thread identities")]
     JournalOrder,
     #[error("timeline item {0} has no unique admission position")]

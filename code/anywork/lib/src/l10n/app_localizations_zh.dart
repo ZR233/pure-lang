@@ -711,7 +711,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get timelineAgentFallback => 'Agent';
 
   @override
-  String get timelineViewImageRead => '已阅读图片';
+  String get timelineViewImageRead => '已读取图片';
 
   @override
   String get timelineViewImageReading => '正在读取图片';

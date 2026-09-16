@@ -15,6 +15,57 @@ use pl_core::{
 };
 use std::sync::Arc;
 
+/// Versioned receipt format emitted for one archived `view_image` result.
+pub const VIEW_IMAGE_RECEIPT_FORMAT: &str = "pl.tool.image";
+/// Receipt layout version; changes require an explicit decoder update.
+pub const VIEW_IMAGE_RECEIPT_VERSION: u32 = 1;
+
+/// Tool-owned receipt binding the frozen source path to the resource it archived.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ViewImageReceipt {
+    /// Caller-supplied workspace path, retained verbatim for display only.
+    pub path: String,
+    /// Raw source bytes that were archived alongside the model projection.
+    pub original: pl_core::context::ResourceReference,
+    /// Width of the exact model-visible variant recorded by this receipt.
+    pub model_width: u32,
+    /// Height of the exact model-visible variant recorded by this receipt.
+    pub model_height: u32,
+}
+
+/// Decodes the tool-owned receipt, or returns `None` for another producer's payload.
+///
+/// Owning the format means every version of it must be understood: a payload that claims
+/// `VIEW_IMAGE_RECEIPT_FORMAT` but an unknown version is rejected instead of being silently
+/// skipped, so an unreadable receipt never degrades into a guessed projection.
+///
+/// # Errors
+/// Rejects an unsupported receipt version, a zero model dimension, malformed receipt content,
+/// or invalid retained reference metadata.
+pub fn saved_view_image_receipt(
+    payload: &OpaquePayload,
+) -> Result<Option<ViewImageReceipt>, ToolError> {
+    if payload.format() != VIEW_IMAGE_RECEIPT_FORMAT {
+        return Ok(None);
+    }
+    if payload.version() != VIEW_IMAGE_RECEIPT_VERSION {
+        return Err(ToolError::new(std::io::Error::other(format!(
+            "unsupported {VIEW_IMAGE_RECEIPT_FORMAT} receipt version {}",
+            payload.version()
+        ))));
+    }
+    let receipt: ViewImageReceipt =
+        serde_json::from_str(payload.content()).map_err(ToolError::new)?;
+    receipt.original.validate().map_err(ToolError::new)?;
+    if receipt.model_width == 0 || receipt.model_height == 0 {
+        return Err(ToolError::new(std::io::Error::other(
+            "view_image receipt records a zero model dimension",
+        )));
+    }
+    Ok(Some(receipt))
+}
+
 /// A Thread-local reader over its configured backend and persistent resource host.
 #[derive(Debug)]
 pub struct ThreadViewImageTool<B, H> {
@@ -124,18 +175,10 @@ impl<B: WorkspaceFileBackend + 'static, H: ToolMediaHost> Tool for ThreadViewIma
             })
             .await?;
         retained.reference.verify(&bytes).map_err(ToolError::new)?;
-        #[derive(serde::Serialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Receipt {
-            path: String,
-            original: pl_core::context::ResourceReference,
-            model_width: u32,
-            model_height: u32,
-        }
         let payload = OpaquePayload::new(
-            "pl.tool.image",
-            1,
-            serde_json::to_string(&Receipt {
+            VIEW_IMAGE_RECEIPT_FORMAT,
+            VIEW_IMAGE_RECEIPT_VERSION,
+            serde_json::to_string(&ViewImageReceipt {
                 path: input.path,
                 original: retained.reference,
                 model_width: dimensions.0,
@@ -180,6 +223,55 @@ mod tests {
             .unwrap(),
         );
         context
+    }
+
+    fn receipt_payload(version: u32, width: u32, height: u32) -> OpaquePayload {
+        let hex = "a".repeat(64);
+        let receipt = ViewImageReceipt {
+            path: "photo.png".into(),
+            original: pl_core::context::ResourceReference::new(
+                format!("pl.studio.resource:{hex}"),
+                format!("sha256:{hex}"),
+                4,
+                "image/png".into(),
+            )
+            .unwrap(),
+            model_width: width,
+            model_height: height,
+        };
+        OpaquePayload::new(
+            VIEW_IMAGE_RECEIPT_FORMAT,
+            version,
+            serde_json::to_string(&receipt).unwrap(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn receipt_decoding_rejects_unknown_versions_and_zero_dimensions() {
+        // Another producer's format is not ours and stays unclaimed.
+        assert!(
+            saved_view_image_receipt(&OpaquePayload::new("other.receipt", 1, "{}").unwrap())
+                .unwrap()
+                .is_none()
+        );
+        let receipt =
+            saved_view_image_receipt(&receipt_payload(VIEW_IMAGE_RECEIPT_VERSION, 40, 30))
+                .unwrap()
+                .expect("valid receipt");
+        assert_eq!((receipt.model_width, receipt.model_height), (40, 30));
+        // An unknown version of our own format cannot be interpreted and must fail loudly.
+        assert!(
+            saved_view_image_receipt(&receipt_payload(VIEW_IMAGE_RECEIPT_VERSION + 1, 40, 30))
+                .is_err()
+        );
+        // A zero model dimension is not a real variant and must never project as a size.
+        assert!(
+            saved_view_image_receipt(&receipt_payload(VIEW_IMAGE_RECEIPT_VERSION, 0, 30)).is_err()
+        );
+        assert!(
+            saved_view_image_receipt(&receipt_payload(VIEW_IMAGE_RECEIPT_VERSION, 40, 0)).is_err()
+        );
     }
 
     #[tokio::test]

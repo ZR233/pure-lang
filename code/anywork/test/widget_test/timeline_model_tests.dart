@@ -98,7 +98,7 @@ void registerTimelineModelTests() {
   });
 
   testWidgets(
-    'view_image is visible in the collapsed tool gallery and opens its authorized thumbnail',
+    'view_image shows a clickable read label and only loads bytes after inline expansion',
     (tester) async {
       const attachment = ThreadAttachmentView(
         id: 'tool-image-1',
@@ -138,7 +138,14 @@ void registerTimelineModelTests() {
       );
       await tester.pumpAndSettle();
 
+      final entryId = StudioDriverKeys.toolImageEntryId(
+        'call-1',
+        'tool-image-1',
+      );
+
+      // 默认只显示可点击的「已读取图片」+ 文件名/路径，不预加载图片字节。
       expect(find.text('Image read'), findsOneWidget);
+      expect(find.text('Image read · PURE-7429.png'), findsOneWidget);
       expect(
         find.byKey(
           StudioDriverKeys.timelineToolGroupSummary(
@@ -148,28 +155,26 @@ void registerTimelineModelTests() {
         findsOneWidget,
       );
       expect(
-        find.byKey(StudioDriverKeys.viewImageThumbnail('tool-image-1')),
+        find.byKey(StudioDriverKeys.viewImageToggle(entryId)),
         findsOneWidget,
+      );
+      expect(
+        find.byKey(StudioDriverKeys.viewImageThumbnail(entryId)),
+        findsNothing,
       );
       expect(
         find.byKey(StudioDriverKeys.historyAttachment('tool-image-1')),
         findsNothing,
       );
+      expect(api.readThreadAttachmentRequests, isEmpty);
 
-      expect(api.readThreadAttachmentRequests, [
-        (threadId: 'thread-1', attachmentId: 'tool-image-1'),
-      ]);
-
+      // 普通工具详情仍可在同一工具组内展开。
       await tester.tap(
         find.byKey(const ValueKey('timeline-tool-group-summary')),
       );
       await tester.pumpAndSettle();
       expect(
         find.byKey(StudioDriverKeys.viewImageTool('call-1')),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(StudioDriverKeys.viewImageThumbnail('tool-image-1')),
         findsOneWidget,
       );
       expect(
@@ -180,23 +185,55 @@ void registerTimelineModelTests() {
         ),
         findsOneWidget,
       );
+      expect(
+        find.byKey(StudioDriverKeys.viewImageToggle(entryId)),
+        findsOneWidget,
+      );
+      expect(api.readThreadAttachmentRequests, isEmpty);
+
+      // 第一次展开才读取归档附件。
+      await tester.tap(find.byKey(StudioDriverKeys.viewImageToggle(entryId)));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(StudioDriverKeys.viewImageThumbnail(entryId)),
+        findsOneWidget,
+      );
       expect(api.readThreadAttachmentRequests, [
         (threadId: 'thread-1', attachmentId: 'tool-image-1'),
       ]);
 
+      // 再次点击收起，复用缓存不再读取。
+      await tester.tap(find.byKey(StudioDriverKeys.viewImageToggle(entryId)));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(StudioDriverKeys.viewImageThumbnail(entryId)),
+        findsNothing,
+      );
+      expect(api.readThreadAttachmentRequests, [
+        (threadId: 'thread-1', attachmentId: 'tool-image-1'),
+      ]);
+
+      // 重新展开仍复用缓存。
+      await tester.tap(find.byKey(StudioDriverKeys.viewImageToggle(entryId)));
+      await tester.pumpAndSettle();
+      expect(api.readThreadAttachmentRequests, [
+        (threadId: 'thread-1', attachmentId: 'tool-image-1'),
+      ]);
+
+      // 展开后可进一步放大弹窗。
       await tester.tap(
-        find.byKey(StudioDriverKeys.viewImageThumbnail('tool-image-1')),
+        find.byKey(StudioDriverKeys.viewImageThumbnail(entryId)),
       );
       await tester.pumpAndSettle();
       expect(
-        find.byKey(StudioDriverKeys.viewImageDialog('tool-image-1')),
+        find.byKey(StudioDriverKeys.viewImageDialog(entryId)),
         findsOneWidget,
       );
       expect(find.byType(InteractiveViewer), findsOneWidget);
       await tester.tap(find.byKey(StudioDriverKeys.timelineImageClose));
       await tester.pumpAndSettle();
       expect(
-        find.byKey(StudioDriverKeys.viewImageDialog('tool-image-1')),
+        find.byKey(StudioDriverKeys.viewImageDialog(entryId)),
         findsNothing,
       );
     },
@@ -242,14 +279,34 @@ void registerTimelineModelTests() {
     );
     await tester.pumpAndSettle();
 
-    expect(
-      find.byKey(const ValueKey('attachment-load-failed-tool-image-failed')),
-      findsOneWidget,
+    final entryId = StudioDriverKeys.toolImageEntryId(
+      'call-failed',
+      'tool-image-failed',
     );
+
+    // 默认折叠不加载图片字节，也不冒充成功。
     expect(
-      find.byKey(StudioDriverKeys.viewImageDialog('tool-image-failed')),
+      find.byKey(StudioDriverKeys.viewImageThumbnail(entryId)),
       findsNothing,
     );
+    expect(api.readThreadAttachmentRequests, isEmpty);
+
+    // 第一次展开才读取，失败以显式状态呈现。
+    await tester.tap(find.byKey(StudioDriverKeys.viewImageToggle(entryId)));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(ValueKey('attachment-load-failed-$entryId')),
+      findsOneWidget,
+    );
+    // 失败态不挂载已加载图片 key，Driver 无法把失败误判为已读取。
+    expect(
+      find.byKey(StudioDriverKeys.viewImageThumbnail(entryId)),
+      findsNothing,
+    );
+    expect(find.byKey(StudioDriverKeys.viewImageDialog(entryId)), findsNothing);
+    expect(api.readThreadAttachmentRequests, [
+      (threadId: 'thread-1', attachmentId: 'tool-image-failed'),
+    ]);
 
     api.threadAttachmentErrors.clear();
     api.threadAttachmentBytes[(
@@ -258,85 +315,409 @@ void registerTimelineModelTests() {
     )] = base64Decode(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
     );
-    await tester.tap(
-      find.byKey(StudioDriverKeys.timelineImageRetry('tool-image-failed')),
-    );
+    await tester.tap(find.byKey(StudioDriverKeys.timelineImageRetry(entryId)));
     await tester.pumpAndSettle();
     expect(api.readThreadAttachmentRequests, [
       (threadId: 'thread-1', attachmentId: 'tool-image-failed'),
       (threadId: 'thread-1', attachmentId: 'tool-image-failed'),
     ]);
-  });
-
-  testWidgets('multiple tool images use compact tiles and share one loader', (
-    tester,
-  ) async {
-    const attachments = [
-      ThreadAttachmentView(
-        id: 'tool-image-a',
-        modality: AttachmentModalityView.image,
-        mediaType: 'image/png',
-        filename: 'a.png',
-        byteSize: 68,
-        width: 1,
-        height: 1,
-      ),
-      ThreadAttachmentView(
-        id: 'tool-image-b',
-        modality: AttachmentModalityView.image,
-        mediaType: 'image/png',
-        filename: 'b.png',
-        byteSize: 68,
-        width: 1,
-        height: 1,
-      ),
-    ];
-    final item = _threadItemFixture(
-      id: 'image-tool-item',
-      threadId: 'thread-1',
-      turnId: 'turn-1',
-      ordinal: 1,
-      kind: ThreadItemKind.toolCall,
-      status: 'succeeded',
-      tool: const TimelineToolPart(
-        toolCallId: 'tool-call-images',
-        name: 'mcp__images__generate',
-        attachments: attachments,
-      ),
-    );
-    final bytes = base64Decode(
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
-    );
-    final api = _FakeStudioApi(_emptyState());
-    for (final attachment in attachments) {
-      api.threadAttachmentBytes[(
-            threadId: 'thread-1',
-            attachmentId: attachment.id,
-          )] =
-          bytes;
-    }
-
-    await tester.pumpWidget(
-      _timelineHarness(threadId: 'thread-1', items: [item], api: api),
-    );
-    await tester.pumpAndSettle();
-
-    for (final attachment in attachments) {
-      expect(
-        tester.getSize(
-          find.byKey(StudioDriverKeys.viewImageThumbnail(attachment.id)),
-        ),
-        const Size.square(64),
-      );
-    }
-    await tester.tap(find.byKey(const ValueKey('timeline-tool-group-summary')));
-    await tester.pumpAndSettle();
     expect(
-      find.byKey(StudioDriverKeys.viewImageThumbnail('tool-image-a')),
+      find.byKey(StudioDriverKeys.viewImageThumbnail(entryId)),
       findsOneWidget,
     );
-    expect(api.readThreadAttachmentRequests.length, 2);
   });
+
+  testWidgets(
+    'multiple tool images expand independently and share one loader',
+    (tester) async {
+      const attachments = [
+        ThreadAttachmentView(
+          id: 'tool-image-a',
+          modality: AttachmentModalityView.image,
+          mediaType: 'image/png',
+          filename: 'a.png',
+          byteSize: 68,
+          width: 1,
+          height: 1,
+        ),
+        ThreadAttachmentView(
+          id: 'tool-image-b',
+          modality: AttachmentModalityView.image,
+          mediaType: 'image/png',
+          filename: 'b.png',
+          byteSize: 68,
+          width: 1,
+          height: 1,
+        ),
+      ];
+      final item = _threadItemFixture(
+        id: 'image-tool-item',
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        ordinal: 1,
+        kind: ThreadItemKind.toolCall,
+        status: 'succeeded',
+        tool: const TimelineToolPart(
+          toolCallId: 'tool-call-images',
+          name: 'mcp__images__generate',
+          attachments: attachments,
+        ),
+      );
+      final bytes = base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      );
+      final api = _FakeStudioApi(_emptyState());
+      for (final attachment in attachments) {
+        api.threadAttachmentBytes[(
+              threadId: 'thread-1',
+              attachmentId: attachment.id,
+            )] =
+            bytes;
+      }
+
+      await tester.pumpWidget(
+        _timelineHarness(threadId: 'thread-1', items: [item], api: api),
+      );
+      await tester.pumpAndSettle();
+
+      final entryA = StudioDriverKeys.toolImageEntryId(
+        'tool-call-images',
+        'tool-image-a',
+      );
+      final entryB = StudioDriverKeys.toolImageEntryId(
+        'tool-call-images',
+        'tool-image-b',
+      );
+
+      // 默认两个可点击文字入口，均未加载图片字节。
+      expect(find.text('a.png'), findsOneWidget);
+      expect(find.text('b.png'), findsOneWidget);
+      expect(
+        find.byKey(StudioDriverKeys.viewImageToggle(entryA)),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(StudioDriverKeys.viewImageToggle(entryB)),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(StudioDriverKeys.viewImageThumbnail(entryA)),
+        findsNothing,
+      );
+      expect(
+        find.byKey(StudioDriverKeys.viewImageThumbnail(entryB)),
+        findsNothing,
+      );
+      expect(api.readThreadAttachmentRequests, isEmpty);
+
+      Future<void> tapToggle(String entryId) async {
+        await tester.tap(find.byKey(StudioDriverKeys.viewImageToggle(entryId)));
+        await tester.pumpAndSettle();
+      }
+
+      // 独立展开 a：只加载 a，b 保持折叠。
+      await tapToggle(entryA);
+      expect(
+        find.byKey(StudioDriverKeys.viewImageThumbnail(entryA)),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(StudioDriverKeys.viewImageThumbnail(entryB)),
+        findsNothing,
+      );
+      expect(api.readThreadAttachmentRequests, [
+        (threadId: 'thread-1', attachmentId: 'tool-image-a'),
+      ]);
+
+      // 收起 a，不再重复读取。
+      await tapToggle(entryA);
+      expect(
+        find.byKey(StudioDriverKeys.viewImageThumbnail(entryA)),
+        findsNothing,
+      );
+      expect(api.readThreadAttachmentRequests, [
+        (threadId: 'thread-1', attachmentId: 'tool-image-a'),
+      ]);
+
+      // 重新展开 a，复用同一 loader 缓存不再读取。
+      await tapToggle(entryA);
+      expect(
+        find.byKey(StudioDriverKeys.viewImageThumbnail(entryA)),
+        findsOneWidget,
+      );
+      expect(api.readThreadAttachmentRequests.length, 1);
+
+      // 再展开 b，a 保持展开，多图互不影响。
+      await tapToggle(entryB);
+      expect(
+        find.byKey(StudioDriverKeys.viewImageThumbnail(entryA)),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(StudioDriverKeys.viewImageThumbnail(entryB)),
+        findsOneWidget,
+      );
+      expect(api.readThreadAttachmentRequests, [
+        (threadId: 'thread-1', attachmentId: 'tool-image-a'),
+        (threadId: 'thread-1', attachmentId: 'tool-image-b'),
+      ]);
+    },
+  );
+
+  testWidgets(
+    'two view_image calls reading the same resource keep independent entries and share bytes',
+    (tester) async {
+      const attachment = ThreadAttachmentView(
+        id: 'shared-image',
+        modality: AttachmentModalityView.image,
+        mediaType: 'image/png',
+        filename: 'shared.png',
+        byteSize: 68,
+        width: 1,
+        height: 1,
+      );
+      final first = _threadItemFixture(
+        id: 'view-image-first',
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        ordinal: 1,
+        kind: ThreadItemKind.toolCall,
+        status: 'succeeded',
+        channel: null,
+        tool: const TimelineToolPart(
+          toolCallId: 'tool-call-first',
+          callId: 'call-first',
+          name: 'view_image',
+          attachments: [attachment],
+        ),
+      );
+      final second = _threadItemFixture(
+        id: 'view-image-second',
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        ordinal: 2,
+        kind: ThreadItemKind.toolCall,
+        status: 'succeeded',
+        channel: null,
+        tool: const TimelineToolPart(
+          toolCallId: 'tool-call-second',
+          callId: 'call-second',
+          name: 'view_image',
+          attachments: [attachment],
+        ),
+      );
+      final api = _FakeStudioApi(_emptyState())
+        ..threadAttachmentBytes[(
+          threadId: 'thread-1',
+          attachmentId: 'shared-image',
+        )] = base64Decode(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+        );
+
+      await tester.pumpWidget(
+        _timelineHarness(
+          threadId: 'thread-1',
+          items: [first, second],
+          api: api,
+          height: 1000,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final entryFirst = StudioDriverKeys.toolImageEntryId(
+        'call-first',
+        'shared-image',
+      );
+      final entrySecond = StudioDriverKeys.toolImageEntryId(
+        'call-second',
+        'shared-image',
+      );
+      final toggleFirst = find.byKey(
+        StudioDriverKeys.viewImageToggle(entryFirst),
+      );
+      final toggleSecond = find.byKey(
+        StudioDriverKeys.viewImageToggle(entrySecond),
+      );
+
+      // 同一资源在两个调用下各自保留独立文字入口，不静默合并、不重复 key。
+      expect(find.text('Image read · shared.png'), findsNWidgets(2));
+      expect(toggleFirst, findsOneWidget);
+      expect(toggleSecond, findsOneWidget);
+      expect(
+        find.byKey(StudioDriverKeys.viewImageThumbnail(entryFirst)),
+        findsNothing,
+      );
+      expect(
+        find.byKey(StudioDriverKeys.viewImageThumbnail(entrySecond)),
+        findsNothing,
+      );
+
+      // 展开第一个调用：仅该条目展开，图片锚定在自身文字入口下方。
+      await tester.tap(toggleFirst);
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(StudioDriverKeys.viewImageThumbnail(entryFirst)),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(StudioDriverKeys.viewImageThumbnail(entrySecond)),
+        findsNothing,
+      );
+      expect(
+        tester
+            .getTopLeft(
+              find.byKey(StudioDriverKeys.viewImageThumbnail(entryFirst)),
+            )
+            .dy,
+        lessThan(tester.getTopLeft(toggleSecond).dy),
+      );
+
+      // 展开第二个调用：第一个保持展开，展开态彼此独立。
+      await tester.tap(toggleSecond);
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(StudioDriverKeys.viewImageThumbnail(entryFirst)),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(StudioDriverKeys.viewImageThumbnail(entrySecond)),
+        findsOneWidget,
+      );
+
+      // 字节按 threadId + attachmentId 去重：两个条目共享一次读取。
+      expect(api.readThreadAttachmentRequests, [
+        (threadId: 'thread-1', attachmentId: 'shared-image'),
+      ]);
+    },
+  );
+
+  testWidgets(
+    'two view_image calls reading the same failed resource retry independently',
+    (tester) async {
+      const attachment = ThreadAttachmentView(
+        id: 'shared-image',
+        modality: AttachmentModalityView.image,
+        mediaType: 'image/png',
+        filename: 'shared.png',
+        byteSize: 68,
+        width: 1,
+        height: 1,
+      );
+      final first = _threadItemFixture(
+        id: 'view-image-first',
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        ordinal: 1,
+        kind: ThreadItemKind.toolCall,
+        status: 'succeeded',
+        channel: null,
+        tool: const TimelineToolPart(
+          toolCallId: 'tool-call-first',
+          callId: 'call-first',
+          name: 'view_image',
+          attachments: [attachment],
+        ),
+      );
+      final second = _threadItemFixture(
+        id: 'view-image-second',
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        ordinal: 2,
+        kind: ThreadItemKind.toolCall,
+        status: 'succeeded',
+        channel: null,
+        tool: const TimelineToolPart(
+          toolCallId: 'tool-call-second',
+          callId: 'call-second',
+          name: 'view_image',
+          attachments: [attachment],
+        ),
+      );
+      final api = _FakeStudioApi(_emptyState())
+        ..threadAttachmentErrors[(
+          threadId: 'thread-1',
+          attachmentId: 'shared-image',
+        )] = StateError(
+          'attachment lease expired',
+        );
+
+      await tester.pumpWidget(
+        _timelineHarness(
+          threadId: 'thread-1',
+          items: [first, second],
+          api: api,
+          height: 1000,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final entryFirst = StudioDriverKeys.toolImageEntryId(
+        'call-first',
+        'shared-image',
+      );
+      final entrySecond = StudioDriverKeys.toolImageEntryId(
+        'call-second',
+        'shared-image',
+      );
+
+      await tester.tap(
+        find.byKey(StudioDriverKeys.viewImageToggle(entryFirst)),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(StudioDriverKeys.viewImageToggle(entrySecond)),
+      );
+      await tester.pumpAndSettle();
+
+      // 同一资源在两个调用下各自失败：失败与重试 key 必须叠加 entryId，
+      // 不能共用附件 id，否则全树出现重复 ValueKey、Driver 无法唯一定位。
+      expect(
+        find.byKey(ValueKey('attachment-load-failed-$entryFirst')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(ValueKey('attachment-load-failed-$entrySecond')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(StudioDriverKeys.timelineImageRetry(entryFirst)),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(StudioDriverKeys.timelineImageRetry(entrySecond)),
+        findsOneWidget,
+      );
+      // 失败按 threadId + attachmentId 共享：两个条目共用一次读取。
+      expect(api.readThreadAttachmentRequests, [
+        (threadId: 'thread-1', attachmentId: 'shared-image'),
+      ]);
+
+      // 修复共享资源后只重试第一个条目：它转为已读取，另一个仍保留自身失败态。
+      api.threadAttachmentErrors.clear();
+      api.threadAttachmentBytes[(
+        threadId: 'thread-1',
+        attachmentId: 'shared-image',
+      )] = base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      );
+      await tester.tap(
+        find.byKey(StudioDriverKeys.timelineImageRetry(entryFirst)),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(StudioDriverKeys.viewImageThumbnail(entryFirst)),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(ValueKey('attachment-load-failed-$entrySecond')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(StudioDriverKeys.viewImageThumbnail(entrySecond)),
+        findsNothing,
+      );
+    },
+  );
 
   testWidgets(
     'assistant HTTPS markdown image waits for click while local and user images stay inert',

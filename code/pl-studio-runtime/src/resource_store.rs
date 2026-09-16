@@ -15,6 +15,9 @@ use tokio_util::sync::CancellationToken;
 
 const ID_PREFIX: &str = "pl.studio.resource:";
 
+/// Identity prefix owned by this store; the only producer of durable tool media references.
+pub const RESOURCE_ID_PREFIX: &str = ID_PREFIX;
+
 /// Content-addressed resource service rooted in a host-selected persistent directory.
 /// Clones share immutable objects; closing a Thread never deletes another Thread's bytes.
 #[derive(Debug, Clone)]

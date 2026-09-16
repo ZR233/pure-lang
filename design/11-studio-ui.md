@@ -206,6 +206,16 @@ Dart 设置页按领域单独组织，不再以 system_tabs/tabs 聚合无关业
 有界区域内滚动并支持选择，不以省略号替代唯一的结果入口。成功的普通工具仍保留完整结果；
 workflow 成功 mutation 的内部 snapshot 继续隐藏。工具目标只从已有参数提取展示，不改变协议。
 
+工具读取图片成功后，Timeline 默认只显示可点击的「已读取图片」及文件名或调用路径，
+不预加载图片字节。点击文字在该条目内展开归档图片，再次点击收起；多图独立展开。
+展开后可继续放大查看，加载失败提供显式重试，折叠与重开复用当前 Thread 的附件缓存。
+读取中和失败使用各自状态文案，不因工具名为 `view_image` 就宣称已读取成功；普通工具详情
+与用户上传附件的展示不受此约定影响。展开与收起遵守 11.12 的可见锚点规则。
+
+图片入口消费 canonical 工具输出中的 typed attachment，不由 Flutter 解析 opaque 工具载荷。
+实时、历史分页和会话恢复使用同一份媒体投影；字节通过 Thread 附件读取接口加载。
+本地与 SSH 项目共用此路径，不把远端路径交给本地文件系统或浏览器读取。
+
 Turn 的失败、取消与预算限制从历史中持久化的 typed Turn item 派生，在该轮内容末尾显示终态
 提示；不能因 activeTurn 清空而丢失，也不能依赖仅供 Driver 的最后状态缓存。
 
@@ -237,6 +247,8 @@ Linux CMake 的 bridge staging 在安装阶段读取当前 demo/native 环境；
 
 本地确定性原生验收使用 `python3 code/anywork/tool/timeline_native_harness.py --output target/<新的证据目录>`。
 它通过 xtask 启动原生 GUI 与 Flutter Driver，在仓库外临时项目中使用本机可控 SSE provider；
+同一入口的 `--image` 场景验证真实工具图片的文字入口、行内展开、放大及源文件删除后的历史
+查看；加 `--ssh user@host` 在独立远端临时目录验证相同链路，复用宿主 OpenSSH 凭据。
 所有模型请求都留在 loopback，真实 Rust/FRB、journal、agent 切换和双向滚动不使用 demo 替身。
 原始 wire、窗口快照、截图、查询耗时、滚动 trace 与进程回收证据均为内部验收产物。
 整 Turn 查询与条目索引查询的耗时对比只说明查询路径，不能冒充旧版本完整 GUI 的性能基线。

@@ -350,15 +350,18 @@ Future<Map<String, String>> _captureViewImageUi(
   final groupId = receipt['groupId']!;
   final callId = receipt['callId']!;
   final attachmentId = receipt['attachmentId']!;
+  // 条目身份 = owning 调用 callId + 附件 id；资源内容寻址，同一图片可能被多个调用
+  // 读取，必须叠加调用身份才能唯一定位本调用的文字入口/图片/弹窗。
+  final entryId = '$callId:$attachmentId';
   final summary = find.byValueKey('timeline-tool-group-summary-$groupId');
   await _command(
     session.waitFor(summary, timeout: const Duration(seconds: 30)),
     'view_image tool group summary',
   );
-  final thumbnail = find.byValueKey('view-image-thumbnail-$attachmentId');
+  final toggle = find.byValueKey('view-image-toggle-$entryId');
   await _command(
-    session.waitFor(thumbnail, timeout: const Duration(seconds: 30)),
-    'collapsed view_image thumbnail',
+    session.waitFor(toggle, timeout: const Duration(seconds: 30)),
+    'collapsed view_image read label',
   );
   await File(options.previewScreenshotOutput)
       .writeAsBytes(await session.screenshot(), flush: true);
@@ -370,10 +373,16 @@ Future<Map<String, String>> _captureViewImageUi(
     ),
     'expanded view_image tool row',
   );
+  await _command(session.tap(toggle), 'expand view_image inline preview');
+  final thumbnail = find.byValueKey('view-image-thumbnail-$entryId');
+  await _command(
+    session.waitFor(thumbnail, timeout: const Duration(seconds: 30)),
+    'inline view_image thumbnail',
+  );
   await _command(session.tap(thumbnail), 'open view_image preview');
   await _command(
     session.waitFor(
-      find.byValueKey('view-image-dialog-$attachmentId'),
+      find.byValueKey('view-image-dialog-$entryId'),
       timeout: const Duration(seconds: 30),
     ),
     'view_image preview dialog',

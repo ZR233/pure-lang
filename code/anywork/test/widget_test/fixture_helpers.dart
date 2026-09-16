@@ -12,6 +12,7 @@ Widget _timelineHarness({
   bool isLoadingOlder = false,
   StudioApi? api,
   TimelineRemoteImageProviderFactory? remoteImageProviderFactory,
+  double height = 520,
 }) {
   return _timelineApp(
     api: api,
@@ -19,7 +20,7 @@ Widget _timelineHarness({
     home: Scaffold(
       body: SizedBox(
         width: 980,
-        height: 520,
+        height: height,
         child: TimelineView(
           threadId: threadId,
           rows: timelineRowsFromThreadItems(items),

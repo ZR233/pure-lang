@@ -60,6 +60,10 @@ bootstrap、握手 shell descriptor、连接状态与自动重连，并返回带
 模型不得看到 `remote_read`、`remote_exec` 等环境专用名字。
 
 文件、Git/worktree、Skills、workspace instructions、图片与 LSP 的环境无关逻辑留在本地。
+工具读取的远端图片由本地媒体宿主归档；Timeline 的文字入口与行内展开只读取该 Thread
+持久化引用的归档资源，不在展开时重新连接 SSH 或读取原始远端文件。源文件变更、删除或
+SSH 断线不改变已归档图片；未知或未被该 Thread 引用的资源必须拒绝，不能仅凭资源 ID
+或 Thread 可访问性授予读取权限。
 `apply_patch` 在本地匹配并通过远端原子写提交；Git/worktree 在本地编排命令；LSP client 留在
 本地，language server 作为远端可观察进程运行。
 workspace instructions 由远端 file backend 读取后以已加载文档集合交给指令组装器，保留远端

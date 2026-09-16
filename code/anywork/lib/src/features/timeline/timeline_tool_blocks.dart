@@ -26,14 +26,7 @@ class _ToolGroupPartState extends State<_ToolGroupPart> {
   @override
   Widget build(BuildContext context) {
     final group = widget.group;
-    final imageAttachments = group.items
-        .expand(
-          (item) => item.tool?.attachments ?? const <ThreadAttachmentView>[],
-        )
-        .where(
-          (attachment) => attachment.modality == AttachmentModalityView.image,
-        )
-        .toList(growable: false);
+    final imageEntries = _toolImageEntries(group.items);
     final activityLabel = _toolGroupActivityLabel(
       context,
       group,
@@ -69,11 +62,11 @@ class _ToolGroupPartState extends State<_ToolGroupPart> {
             ),
           ),
         ),
-        if (imageAttachments.isNotEmpty) ...[
+        if (imageEntries.isNotEmpty) ...[
           const SizedBox(height: 8),
           _ThreadImageGallery(
             threadId: widget.threadId,
-            attachments: imageAttachments,
+            entries: imageEntries,
             groupId: group.id,
           ),
         ],

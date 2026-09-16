@@ -207,12 +207,13 @@ user multipart，并按「标签文本、图片」顺序发送。这样 Chat 的
 两种协议复用同一份 durable history。图片 bytes 仍由宿主 attachment loader 在请求期 materialize，
 同 Turn 后续 inference、失败重试和恢复不得读取原始 workspace 路径。
 
-`AttachmentRuntime` 是 core 与宿主之间唯一的附件运行时边界：batch writer 在工具结果进入 history
-前原子提交同一结果中的全部规范化图片并返回有序 opaque metadata，单图写入只是该边界的便利入口；
-loader 按 attachment id 批量返回受限的
-`MaterializedAttachment`。没有完整 image capability、快照 replay profile、writer 或 loader 时
-不得注册 `view_image`，stale 调用也必须在文件 IO 前拒绝。工具图片、对应 tool results 与前导
-assistant tool calls 在 compaction、rewind 和恢复校验中是一个不可拆分单元。
+工具媒体宿主边界由 `pl-tool::media::ToolMediaHost` 拥有，Studio 提供持久化实现，model
+拥有媒体上下文的版本化编码与 typed 解码；core 只保留通用上下文和资源引用，不恢复旧的
+`AttachmentRuntime` 产品接口。模型请求通过资源读取端口 materialize 已归档媒体，不重读源路径。
+实际模型图片能力使用 prepared call 冻结的投影材料，不根据当前目录重建历史能力，具体准入
+与资源投影约定见 27 章。工具图片、对应 tool results 与前导 assistant tool calls 在历史中保持关联。
+Studio 的工具 Timeline 附件由同一持久化媒体事实生成，不伪造用户消息；GUI 读取同时校验
+Thread 访问权与资源引用归属，显示与重放均不因本地/SSH 环境而分叉。
 
 MCP image content 在持久化前必须先检查编码长度、严格 Base64 解码、校验声明 MIME 与真实文件头，
 再复用 `view_image` 的格式、解码、尺寸和模型限制。一个 MCP result 的图片批次任一项无效或写入

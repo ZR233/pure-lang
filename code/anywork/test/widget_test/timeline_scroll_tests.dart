@@ -462,6 +462,105 @@ void registerTimelineScrollTests() {
     expect(loadCount, 1);
     expect(tester.getTopLeft(anchor).dy, closeTo(anchorTopBeforeLoad, 1));
   });
+
+  testWidgets(
+    'expanding and collapsing an inline tool image keeps the reading anchor',
+    (tester) async {
+      _configureResponsiveView(tester, const Size(980, 520));
+      const threadId = 'session-image-anchor';
+      const attachment = ThreadAttachmentView(
+        id: 'anchor-image',
+        modality: AttachmentModalityView.image,
+        mediaType: 'image/png',
+        filename: 'anchor.png',
+        byteSize: 68,
+        width: 320,
+        height: 240,
+      );
+      final imageItem = _threadItemFixture(
+        id: '$threadId-image-row',
+        threadId: threadId,
+        turnId: '$threadId-turn',
+        ordinal: 0,
+        kind: ThreadItemKind.toolCall,
+        status: 'succeeded',
+        tool: const TimelineToolPart(
+          toolCallId: 'anchor-image-call',
+          callId: 'anchor-image-call',
+          name: 'view_image',
+          attachments: [attachment],
+        ),
+      );
+      final api = _FakeStudioApi(_emptyState())
+        ..threadAttachmentBytes[(
+          threadId: threadId,
+          attachmentId: 'anchor-image',
+        )] = base64Decode(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+        );
+
+      await tester.pumpWidget(
+        _timelineHarness(
+          threadId: threadId,
+          items: [imageItem, ..._scrollItems(threadId, 16, startIndex: 1)],
+          api: api,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // 离开末尾、回读最旧条目：图片行成为视口顶部的可见阅读锚点。
+      await tester.drag(
+        find.byKey(StudioDriverKeys.timeline),
+        const Offset(0, 2000),
+      );
+      await tester.pumpAndSettle();
+
+      // 工具调用投影为 tool-group 行，行 id 为 `tool-group:<turnId>:<itemId>`。
+      final imageRowId = 'tool-group:${imageItem.turnId}:${imageItem.id}';
+      final imageBlock = StudioDriverKeys.timelineBlock(imageRowId);
+      expect(find.byKey(imageBlock), findsOneWidget);
+      final anchorBefore = _visibleTimelineAnchor(tester);
+      expect(anchorBefore.key, imageBlock);
+      final anchorHeightBefore = tester.getSize(find.byKey(imageBlock)).height;
+
+      final entryId = StudioDriverKeys.toolImageEntryId(
+        'anchor-image-call',
+        'anchor-image',
+      );
+
+      // 第一次展开：行内新增图片高度，可见锚点行自身位置必须保持。
+      await tester.tap(find.byKey(StudioDriverKeys.viewImageToggle(entryId)));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(StudioDriverKeys.viewImageThumbnail(entryId)),
+        findsOneWidget,
+      );
+      expect(
+        tester.getSize(find.byKey(imageBlock)).height,
+        greaterThan(anchorHeightBefore),
+      );
+      expect(
+        tester.getTopLeft(find.byKey(anchorBefore.key)).dy,
+        closeTo(anchorBefore.top, 1),
+      );
+
+      // 收起回退高度同样不移动可见锚点，阅读位置保持稳定。
+      await tester.tap(find.byKey(StudioDriverKeys.viewImageToggle(entryId)));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(StudioDriverKeys.viewImageThumbnail(entryId)),
+        findsNothing,
+      );
+      expect(
+        tester.getSize(find.byKey(imageBlock)).height,
+        closeTo(anchorHeightBefore, 1),
+      );
+      expect(
+        tester.getTopLeft(find.byKey(anchorBefore.key)).dy,
+        closeTo(anchorBefore.top, 1),
+      );
+    },
+  );
 }
 
 ({Key key, double top}) _visibleTimelineAnchor(WidgetTester tester) {

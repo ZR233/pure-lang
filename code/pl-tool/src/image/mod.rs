@@ -3,7 +3,10 @@
 mod normalize;
 mod thread;
 mod view;
-pub use thread::ThreadViewImageTool;
+pub use thread::{
+    ThreadViewImageTool, VIEW_IMAGE_RECEIPT_FORMAT, VIEW_IMAGE_RECEIPT_VERSION, ViewImageReceipt,
+    saved_view_image_receipt,
+};
 
 pub(crate) use normalize::*;
 pub use view::{TOOL_VIEW_IMAGE, ViewImageInput};

@@ -95,7 +95,7 @@ class _ThreadAttachmentCardState extends ConsumerState<_ThreadAttachmentCard> {
               dimension: 54,
               child: attachment.modality == AttachmentModalityView.image
                   ? _ThreadImageFuture(
-                      attachmentId: attachment.id,
+                      presentationId: attachment.id,
                       image: _image!,
                       fit: BoxFit.cover,
                       onRetry: _retry,
@@ -152,68 +152,112 @@ class _ThreadAttachmentCardState extends ConsumerState<_ThreadAttachmentCard> {
   }
 }
 
+/// 一个工具图片条目的稳定身份。
+///
+/// 资源 id 内容寻址：同一工具组内不同调用读取同一图片会得到相同的附件 id，因此
+/// 条目身份必须叠加 owning 调用身份，不能仅用附件 id。`entryId` 由 owning 调用的
+/// `callId`（缺失时回退该调用的 `toolCallId`）与附件 id 组合而成，并在同一调用结果
+/// 内出现相同资源时追加稳定序号；该序号只取决于同一调用自身的附件列表，不随其它
+/// 调用流式新增而变化。
+typedef _ToolImageEntryRef = ({
+  TimelineToolGroupItem item,
+  ThreadAttachmentView attachment,
+  String entryId,
+});
+
+/// 按 owning 调用身份 + 附件 id 构造工具组内每个图片条目的唯一身份。
+///
+/// 不按资源去重、不丢弃调用：同一调用重复引用同一资源时追加 `#<序号>`；跨调用同一
+/// 资源仍各自保留独立条目与展开状态。字节读取仍由 Thread 附件缓存按
+/// `threadId + attachmentId` 去重。
+List<_ToolImageEntryRef> _toolImageEntries(List<TimelineToolGroupItem> items) {
+  final entries = <_ToolImageEntryRef>[];
+  final occurrences = <String, int>{};
+  for (final item in items) {
+    final tool = item.tool;
+    if (tool == null) continue;
+    final callKey = tool.callId ?? tool.toolCallId;
+    for (final attachment in tool.attachments) {
+      if (attachment.modality != AttachmentModalityView.image) continue;
+      final base = '$callKey:${attachment.id}';
+      final index = occurrences[base] ?? 0;
+      occurrences[base] = index + 1;
+      entries.add((
+        item: item,
+        attachment: attachment,
+        entryId: index == 0 ? base : '$base#$index',
+      ));
+    }
+  }
+  return entries;
+}
+
+/// 工具读取图片的默认入口。
+///
+/// 默认只显示可点击的文字标签（例如「已读取图片」与文件名/调用路径），不预加载
+/// 图片字节；点击文字在该条目内展开归档图片，再次点击收起，多图彼此独立。第一次
+/// 展开才通过 Thread 附件读取接口加载字节，折叠与重开复用当前 Thread 的附件缓存。
 class _ThreadImageGallery extends StatelessWidget {
   const _ThreadImageGallery({
     required this.threadId,
-    required this.attachments,
+    required this.entries,
     required this.groupId,
   });
 
   final String threadId;
-  final List<ThreadAttachmentView> attachments;
+  final List<_ToolImageEntryRef> entries;
   final String groupId;
 
   @override
   Widget build(BuildContext context) {
-    final images = attachments
-        .where(
-          (attachment) => attachment.modality == AttachmentModalityView.image,
-        )
-        .toList(growable: false);
-    if (images.isEmpty) return const SizedBox.shrink();
-    final multiple = images.length > 1;
-    return Wrap(
+    if (entries.isEmpty) return const SizedBox.shrink();
+    return Column(
       key: StudioDriverKeys.toolImageGallery(groupId),
-      spacing: 8,
-      runSpacing: 8,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (final attachment in images)
-          _ThreadImageThumbnail(
-            key: ValueKey('tool-image:${attachment.id}'),
+        for (final entry in entries)
+          _ThreadToolImageEntry(
+            key: ValueKey('tool-image:${entry.entryId}'),
             threadId: threadId,
-            attachment: attachment,
-            compact: multiple,
+            item: entry.item,
+            attachment: entry.attachment,
+            entryId: entry.entryId,
           ),
       ],
     );
   }
 }
 
-class _ThreadImageThumbnail extends ConsumerStatefulWidget {
-  const _ThreadImageThumbnail({
+class _ThreadToolImageEntry extends ConsumerStatefulWidget {
+  const _ThreadToolImageEntry({
     required this.threadId,
+    required this.item,
     required this.attachment,
-    required this.compact,
+    required this.entryId,
     super.key,
   });
 
   final String threadId;
+  final TimelineToolGroupItem item;
   final ThreadAttachmentView attachment;
-  final bool compact;
+  final String entryId;
 
   @override
-  ConsumerState<_ThreadImageThumbnail> createState() =>
-      _ThreadImageThumbnailState();
+  ConsumerState<_ThreadToolImageEntry> createState() =>
+      _ThreadToolImageEntryState();
 }
 
-class _ThreadImageThumbnailState extends ConsumerState<_ThreadImageThumbnail> {
+class _ThreadToolImageEntryState extends ConsumerState<_ThreadToolImageEntry> {
+  bool _expanded = false;
   Future<Uint8List>? _image;
 
   @override
-  void didUpdateWidget(covariant _ThreadImageThumbnail oldWidget) {
+  void didUpdateWidget(covariant _ThreadToolImageEntry oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.threadId != oldWidget.threadId ||
+        widget.entryId != oldWidget.entryId ||
         widget.attachment.id != oldWidget.attachment.id) {
+      _expanded = false;
       _image = null;
     }
   }
@@ -226,32 +270,91 @@ class _ThreadImageThumbnailState extends ConsumerState<_ThreadImageThumbnail> {
         .readThreadAttachment(widget.threadId, widget.attachment.id),
   );
 
+  void _toggle() {
+    setState(() => _expanded = !_expanded);
+  }
+
   @override
   Widget build(BuildContext context) {
-    _image ??= _loadImage();
-    final size = _toolImagePreviewSize(widget.attachment, widget.compact);
-    return Tooltip(
-      message: _attachmentDescription(widget.attachment),
-      child: InkWell(
-        key: StudioDriverKeys.viewImageThumbnail(widget.attachment.id),
-        borderRadius: BorderRadius.circular(10),
-        onTap: _showImage,
-        child: Container(
-          width: size.width,
-          height: size.height,
-          clipBehavior: Clip.antiAlias,
-          decoration: BoxDecoration(
-            color: context.colors.surface,
-            border: Border.all(color: context.colors.outlineVariant),
-            borderRadius: BorderRadius.circular(10),
+    final attachment = widget.attachment;
+    final label = _threadImageEntryLabel(context, widget.item, attachment);
+    final size = _toolImagePreviewSize(attachment, false);
+    if (_expanded) {
+      // 在 build 内创建 future，确保同一帧内交给 FutureBuilder 订阅，避免失败
+      // 读取在订阅前完成而被视为未处理异步错误。
+      _image ??= _loadImage();
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 3),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            key: StudioDriverKeys.viewImageToggle(widget.entryId),
+            borderRadius: BorderRadius.circular(StudioRadii.xs),
+            onTap: _toggle,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 5),
+              child: Row(
+                children: [
+                  Icon(
+                    _expanded
+                        ? Icons.keyboard_arrow_up_rounded
+                        : Icons.keyboard_arrow_down_rounded,
+                    size: 17,
+                    color: context.colors.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(
+                    Icons.image_outlined,
+                    size: 16,
+                    color: context.colors.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: context.text.bodySmall?.copyWith(
+                        color: context.colors.onSurface,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
-          child: _ThreadImageFuture(
-            attachmentId: widget.attachment.id,
-            image: _image!,
-            fit: widget.compact ? BoxFit.cover : BoxFit.scaleDown,
-            onRetry: _retry,
-          ),
-        ),
+          if (_expanded)
+            Padding(
+              padding: const EdgeInsets.only(left: 4, top: 6, bottom: 4),
+              child: Tooltip(
+                message: _attachmentDescription(attachment),
+                child: Container(
+                  width: size.width,
+                  height: size.height,
+                  clipBehavior: Clip.antiAlias,
+                  decoration: BoxDecoration(
+                    color: context.colors.surface,
+                    border: Border.all(color: context.colors.outlineVariant),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: _ThreadImageFuture(
+                    presentationId: widget.entryId,
+                    image: _image!,
+                    fit: BoxFit.scaleDown,
+                    onRetry: _retry,
+                    // 成功加载后才挂载 key 与点击放大，使 Driver 的
+                    // `view-image-thumbnail` 等待真正证明图片字节已读取。
+                    loadedKey: StudioDriverKeys.viewImageThumbnail(
+                      widget.entryId,
+                    ),
+                    onTap: _showImage,
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -266,34 +369,73 @@ class _ThreadImageThumbnailState extends ConsumerState<_ThreadImageThumbnail> {
   }
 
   Future<void> _showImage() async {
-    Uint8List? image;
+    final image = _image;
+    if (image == null) return;
+    Uint8List bytes;
     try {
-      image = await _image;
+      bytes = await image;
     } on Object {
       return;
     }
-    if (!mounted || image == null) return;
+    if (!mounted) return;
     await _showStudioImageDialog(
       context,
-      MemoryImage(image),
-      dialogKey: StudioDriverKeys.viewImageDialog(widget.attachment.id),
+      MemoryImage(bytes),
+      dialogKey: StudioDriverKeys.viewImageDialog(widget.entryId),
       label: widget.attachment.filename,
     );
   }
 }
 
+/// 工具图片文字入口的默认文案。
+///
+/// `view_image` 复用与工具状态一致的成功/读取中/失败标签，并附带文件名或调用路径，
+/// 读取中或失败不得冒充已读取成功；其余产出图片的工具直接展示文件名。
+String _threadImageEntryLabel(
+  BuildContext context,
+  TimelineToolGroupItem item,
+  ThreadAttachmentView attachment,
+) {
+  if (item.name == 'view_image') {
+    final label = _toolTitle(context, item);
+    final filename = attachment.filename?.trim();
+    final detail = filename != null && filename.isNotEmpty
+        ? filename
+        : _toolTarget(item);
+    return detail == null || detail.isEmpty ? label : '$label · $detail';
+  }
+  final filename = attachment.filename?.trim();
+  return filename != null && filename.isNotEmpty
+      ? filename
+      : context.l10n.timelineAttachment;
+}
+
 class _ThreadImageFuture extends StatelessWidget {
   const _ThreadImageFuture({
-    required this.attachmentId,
+    required this.presentationId,
     required this.image,
     required this.fit,
     required this.onRetry,
+    this.loadedKey,
+    this.onTap,
   });
 
-  final String attachmentId;
+  /// 失败与重试 key 使用的展示身份。
+  ///
+  /// 资源 id 内容寻址：不同调用读取同一图片会得到相同附件 id，若用附件 id 生成 key，
+  /// 两个条目同时失败会挂载重复的全树 ValueKey，Driver 无法唯一定位。工具图片条目
+  /// 传入 owning 调用身份叠加附件 id 的 `entryId`；用户上传附件仍传附件 id，key 不变。
+  /// 字节读取与缓存不经过此字段，始终按真实 `threadId + attachmentId` 去重。
+  final String presentationId;
   final Future<Uint8List> image;
   final BoxFit fit;
   final VoidCallback onRetry;
+
+  /// 仅在字节成功加载后挂载的 key，用于让 Driver 以 key 存在证明图片已读取。
+  final Key? loadedKey;
+
+  /// 成功加载后的放大回调；与 [loadedKey] 同时给出。
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -304,11 +446,11 @@ class _ThreadImageFuture extends StatelessWidget {
           return Tooltip(
             message: context.l10n.timelineImageLoadFailed,
             child: IconButton(
-              key: StudioDriverKeys.timelineImageRetry(attachmentId),
+              key: StudioDriverKeys.timelineImageRetry(presentationId),
               onPressed: onRetry,
               icon: Icon(
                 Icons.refresh,
-                key: ValueKey('attachment-load-failed-$attachmentId'),
+                key: ValueKey('attachment-load-failed-$presentationId'),
               ),
             ),
           );
@@ -321,7 +463,15 @@ class _ThreadImageFuture extends StatelessWidget {
             ),
           );
         }
-        return Image.memory(snapshot.data!, fit: fit);
+        final loaded = Image.memory(snapshot.data!, fit: fit);
+        if (loadedKey == null && onTap == null) {
+          return loaded;
+        }
+        return InkWell(
+          key: loadedKey,
+          onTap: onTap,
+          child: SizedBox.expand(child: loaded),
+        );
       },
     );
   }

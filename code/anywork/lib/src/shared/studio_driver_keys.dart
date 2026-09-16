@@ -228,6 +228,18 @@ abstract final class StudioDriverKeys {
   static ValueKey<String> viewImageTool(String callId) =>
       ValueKey<String>('view-image-tool-$callId');
 
+  /// 工具图片条目的稳定唯一身份：owning 调用 id + 附件 id。
+  ///
+  /// 资源 id 内容寻址，同一工具组内不同调用读取同一图片会得到相同附件 id，因此条目
+  /// 的 toggle/thumbnail/dialog key 必须叠加调用身份。Driver 与 Widget 均使用该公式，
+  /// 保证两侧选中的是同一条目。调用 id 取工具 callId（缺失时实现回退 toolCallId）；
+  /// 同一调用结果内重复引用同一资源时实现会追加 `#<序号>`。
+  static String toolImageEntryId(String callId, String attachmentId) =>
+      '$callId:$attachmentId';
+
+  static ValueKey<String> viewImageToggle(String id) =>
+      ValueKey<String>('view-image-toggle-$id');
+
   static ValueKey<String> viewImageThumbnail(String id) =>
       ValueKey<String>('view-image-thumbnail-$id');
 
