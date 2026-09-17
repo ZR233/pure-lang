@@ -29,7 +29,12 @@ class _WorktreeRecoverySectionState
       key: ValueKey('worktree-recovery-${worktree.childId}'),
       title: worktree.branch,
       icon: Icons.account_tree_outlined,
-      status: Text([worktree.state, if (worktree.dirty) 'dirty'].join(' · ')),
+      status: Text(
+        [
+          context.worktreeStateLabel(worktree.state),
+          if (worktree.dirty) context.l10n.settingsWorktreeDirty,
+        ].join(' · '),
+      ),
       actions: [
         TextButton.icon(
           key: ValueKey('worktree-cleanup-${worktree.childId}'),

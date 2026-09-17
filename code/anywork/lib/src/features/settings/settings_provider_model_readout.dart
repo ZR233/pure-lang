@@ -5,7 +5,6 @@ import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_chrome.dart';
 import '../../shared/studio_driver_keys.dart';
-import 'settings_model_labels.dart';
 import 'settings_provider_drafts.dart';
 
 class ProviderModelReadout extends StatelessWidget {
@@ -64,7 +63,7 @@ class ProviderModelReadout extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  '${modelProtocolLabel(model.wireProtocol)} · ${modelConnectionLabel(model.connectionMode)}',
+                  '${context.modelProtocolLabel(model.wireProtocol)} · ${context.modelConnectionLabel(model.connectionMode)}',
                   style: context.text.labelSmall?.copyWith(
                     color: context.colors.onSurfaceVariant,
                   ),
@@ -107,7 +106,7 @@ class ProviderModelReadout extends StatelessWidget {
               message: model.priceTiers
                   .map(
                     (tier) =>
-                        '${tier.label}\n${model.currency}/1M · ${context.l10n.settingsPriceInput}: ${tier.input} · ${context.l10n.settingsPriceOutput}: ${tier.output} · ${context.l10n.settingsPriceCacheRead}: ${tier.cacheRead ?? "—"} · ${context.l10n.settingsPriceCacheWrite}: ${tier.cacheWrite ?? "—"}',
+                        '${tier.label}\n${context.l10n.settingsPriceTierUnit(model.currency)} · ${context.l10n.settingsPriceInput}: ${tier.input} · ${context.l10n.settingsPriceOutput}: ${tier.output} · ${context.l10n.settingsPriceCacheRead}: ${tier.cacheRead ?? "—"} · ${context.l10n.settingsPriceCacheWrite}: ${tier.cacheWrite ?? "—"}',
                   )
                   .join('\n\n'),
               child: Text(
@@ -145,7 +144,7 @@ class ProviderModelReadout extends StatelessWidget {
                           model.slug,
                           mode,
                         ),
-                        child: Text(modelConnectionLabel(mode)),
+                        child: Text(context.modelConnectionLabel(mode)),
                       ),
                     ),
                 ],

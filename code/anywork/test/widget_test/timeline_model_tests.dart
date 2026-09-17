@@ -239,6 +239,64 @@ void registerTimelineModelTests() {
     },
   );
 
+  testWidgets(
+    'image attachment without a filename uses the localized attachment fallback',
+    (tester) async {
+      const attachment = ThreadAttachmentView(
+        id: 'tool-image-noname',
+        modality: AttachmentModalityView.image,
+        mediaType: 'image/png',
+        byteSize: 68,
+      );
+      final item = _threadItemFixture(
+        id: 'view-image-noname-item',
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        ordinal: 1,
+        kind: ThreadItemKind.toolCall,
+        status: 'succeeded',
+        channel: null,
+        tool: const TimelineToolPart(
+          toolCallId: 'tool-call-noname',
+          callId: 'call-noname',
+          name: 'view_image',
+          result: '{"viewedImage":true}',
+          attachments: [attachment],
+        ),
+      );
+      final api = _FakeStudioApi(_emptyState())
+        ..threadAttachmentBytes[(
+          threadId: 'thread-1',
+          attachmentId: 'tool-image-noname',
+        )] = base64Decode(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+        );
+
+      await tester.pumpWidget(
+        _timelineHarness(
+          threadId: 'thread-1',
+          items: [item],
+          api: api,
+          locale: const Locale.fromSubtags(
+            languageCode: 'zh',
+            scriptCode: 'Hans',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(
+          StudioDriverKeys.viewImageToggle('call-noname:tool-image-noname'),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byTooltip('附件 · 68 B'), findsOneWidget);
+      expect(find.byTooltip('Image · 68 B'), findsNothing);
+    },
+  );
+
   testWidgets('view_image reports an authorized attachment load failure', (
     tester,
   ) async {

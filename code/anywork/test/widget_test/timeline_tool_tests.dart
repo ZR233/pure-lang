@@ -240,6 +240,108 @@ void registerTimelineToolTests() {
     expect(find.text('https://example.com/result'), findsOneWidget);
   });
 
+  testWidgets('tool without a name renders the localized tool fallback', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(720, 480);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final part = _toolTimelinePart(
+      id: 'unnamed-tool',
+      groupId: 'unnamed-tool-group',
+      turnId: 'turn-unnamed-tool',
+      name: '',
+      status: 'succeeded',
+    );
+
+    await tester.pumpWidget(
+      _timelineApp(
+        locale: const Locale.fromSubtags(
+          languageCode: 'zh',
+          scriptCode: 'Hans',
+        ),
+        home: Scaffold(
+          body: SizedBox(
+            width: 720,
+            height: 480,
+            child: TimelineView(
+              threadId: 'session-1',
+              turn: null,
+              rows: timelineRowsFromFixtureParts([part]),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('工具 已完成'), findsOneWidget);
+    expect(find.text('Tool 已完成'), findsNothing);
+  });
+
+  testWidgets('tool with an unknown status keeps its raw status', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(720, 600);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    // 直接构造 tool group 行，绕过 fixture 对已知状态的校验，模拟运行时带来的
+    // 未知状态字符串。
+    TimelineRow unknownStatusRow(String id, String name) {
+      final entry = TimelineEntry(
+        id: id,
+        groupId: '$id-group',
+        threadId: 'session-1',
+        turnId: 'turn-unknown-status',
+        type: TimelineEntryType.tool,
+        text: '',
+        status: 'pausedForInput',
+        tool: TimelineToolPart(toolCallId: id, name: name, arguments: '{}'),
+      );
+      return TimelineRow.toolGroup(
+        TimelineToolGroup(
+          id: '$id-group',
+          threadId: 'session-1',
+          groupId: '$id-group',
+          turnId: 'turn-unknown-status',
+          items: [TimelineToolGroupItem(part: entry)],
+        ),
+      );
+    }
+
+    await tester.pumpWidget(
+      _timelineApp(
+        locale: const Locale.fromSubtags(
+          languageCode: 'zh',
+          scriptCode: 'Hans',
+        ),
+        home: Scaffold(
+          body: SizedBox(
+            width: 720,
+            height: 600,
+            child: TimelineView(
+              threadId: 'session-1',
+              turn: null,
+              rows: [
+                unknownStatusRow('unknown-status-tool', 'read_file'),
+                unknownStatusRow('unknown-status-image', 'view_image'),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    // 未知状态显示原始值，不伪装成“已完成”或“正在读取图片”。
+    expect(find.text('read_file · pausedForInput'), findsOneWidget);
+    expect(find.text('view_image · pausedForInput'), findsOneWidget);
+    expect(find.text('read_file 已完成'), findsNothing);
+    expect(find.text('正在读取图片'), findsNothing);
+  });
+
   testWidgets('lsp tool items use parameterized titles with argument summary', (
     tester,
   ) async {
@@ -347,6 +449,331 @@ void registerTimelineToolTests() {
     expect(find.byIcon(Icons.radio_button_unchecked), findsOneWidget);
     expect(find.textContaining('focused Rust and Flutter'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('todo panel keeps an unknown status raw and neutral', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 620);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    const todo = TimelineTodoListUpdate(
+      callId: 'panel-unknown',
+      items: [
+        TimelineTodoItem(step: 'Blocked step', status: 'blocked'),
+        TimelineTodoItem(step: 'Pending step', status: 'pending'),
+      ],
+    );
+
+    await tester.pumpWidget(
+      _timelineApp(
+        locale: const Locale.fromSubtags(
+          languageCode: 'zh',
+          scriptCode: 'Hans',
+        ),
+        home: Scaffold(
+          body: SizedBox(
+            width: 304,
+            height: 480,
+            child: const TodoPanel(todo: todo),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    // 未知状态显示原始值并使用中性图标，与 timeline todo 约定一致。
+    expect(find.text('blocked'), findsOneWidget);
+    expect(find.byIcon(Icons.help_outline), findsOneWidget);
+    expect(find.byIcon(Icons.radio_button_unchecked), findsOneWidget);
+    expect(find.text('待处理'), findsOneWidget);
+  });
+
+  testWidgets('todo item with an unknown status shows the raw status', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 620);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final event = TimelineAgentEvent(
+      eventId: 'agent-todo-event',
+      threadId: 'session-1',
+      sequence: 1,
+      payload: const TimelineTodoListUpdate(
+        callId: 'todo-unknown',
+        explanation: 'Checklist',
+        items: [
+          TimelineTodoItem(step: 'Resolve blocker', status: 'blocked'),
+          TimelineTodoItem(step: 'Still pending', status: 'pending'),
+        ],
+      ),
+      createdAt: DateTime.fromMillisecondsSinceEpoch(1000),
+    );
+
+    await tester.pumpWidget(
+      _timelineApp(
+        locale: const Locale.fromSubtags(
+          languageCode: 'zh',
+          scriptCode: 'Hans',
+        ),
+        home: Scaffold(
+          body: SizedBox(
+            width: 720,
+            height: 480,
+            child: TimelineView(
+              threadId: 'session-1',
+              turn: null,
+              rows: [TimelineRow.agentActivity(event)],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    // 未知状态显示原始值，并使用中性图标而不是伪装成“待处理”。
+    expect(find.text('blocked'), findsOneWidget);
+    expect(find.byIcon(Icons.help_outline), findsOneWidget);
+    expect(find.byIcon(Icons.radio_button_unchecked), findsOneWidget);
+    expect(find.text('待处理'), findsWidgets);
+    expect(find.text('Resolve blocker'), findsOneWidget);
+  });
+
+  test('todo list aggregate keeps unknown statuses out of pending', () {
+    const allUnknown = TimelineTodoListUpdate(
+      callId: 'aggregate-unknown',
+      items: [
+        TimelineTodoItem(step: 'a', status: 'blocked'),
+        TimelineTodoItem(step: 'b', status: 'skipped'),
+      ],
+    );
+    const mixed = TimelineTodoListUpdate(
+      callId: 'aggregate-mixed',
+      items: [
+        TimelineTodoItem(step: 'a', status: 'pending'),
+        TimelineTodoItem(step: 'b', status: 'blocked'),
+      ],
+    );
+    const pendingOnly = TimelineTodoListUpdate(
+      callId: 'aggregate-pending',
+      items: [TimelineTodoItem(step: 'a', status: 'pending')],
+    );
+    const completedOnly = TimelineTodoListUpdate(
+      callId: 'aggregate-completed',
+      items: [TimelineTodoItem(step: 'a', status: 'completed')],
+    );
+    const running = TimelineTodoListUpdate(
+      callId: 'aggregate-running',
+      items: [
+        TimelineTodoItem(step: 'a', status: 'completed'),
+        TimelineTodoItem(step: 'b', status: 'inProgress'),
+      ],
+    );
+    const inProgressWithUnknown = TimelineTodoListUpdate(
+      callId: 'aggregate-inprogress-unknown',
+      items: [
+        TimelineTodoItem(step: 'a', status: 'inProgress'),
+        TimelineTodoItem(step: 'b', status: 'blocked'),
+      ],
+    );
+    const empty = TimelineTodoListUpdate(callId: 'aggregate-empty', items: []);
+    expect(allUnknown.status, 'unknown');
+    expect(mixed.status, 'unknown');
+    expect(pendingOnly.status, 'pending');
+    expect(completedOnly.status, 'completed');
+    expect(running.status, 'running');
+    // 未知优先：任何含未知 status 的集合都不是 running/pending。
+    expect(inProgressWithUnknown.status, 'unknown');
+    // 空集合明确为 unknown，避免 every 空真。
+    expect(empty.status, 'unknown');
+  });
+
+  testWidgets('todo list summary keeps an unknown aggregate neutral', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 620);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final event = TimelineAgentEvent(
+      eventId: 'agent-todo-unknown',
+      threadId: 'session-1',
+      sequence: 1,
+      payload: const TimelineTodoListUpdate(
+        callId: 'todo-all-unknown',
+        items: [
+          TimelineTodoItem(step: 'Blocked step', status: 'blocked'),
+          TimelineTodoItem(step: 'Skipped step', status: 'skipped'),
+        ],
+      ),
+      createdAt: DateTime.fromMillisecondsSinceEpoch(1000),
+    );
+
+    await tester.pumpWidget(
+      _timelineApp(
+        locale: const Locale.fromSubtags(
+          languageCode: 'zh',
+          scriptCode: 'Hans',
+        ),
+        home: Scaffold(
+          body: SizedBox(
+            width: 720,
+            height: 480,
+            child: TimelineView(
+              threadId: 'session-1',
+              turn: null,
+              rows: [TimelineRow.agentActivity(event)],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    // 汇总不显示“待处理”，未知聚合使用中性本地化标签。
+    expect(find.text('未知'), findsOneWidget);
+    expect(find.text('待处理'), findsNothing);
+    expect(find.text('blocked'), findsOneWidget);
+  });
+
+  testWidgets('todo list summary localizes the running aggregate', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 620);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final event = TimelineAgentEvent(
+      eventId: 'agent-todo-running',
+      threadId: 'session-1',
+      sequence: 1,
+      payload: const TimelineTodoListUpdate(
+        callId: 'todo-running',
+        items: [TimelineTodoItem(step: 'Working step', status: 'inProgress')],
+      ),
+      createdAt: DateTime.fromMillisecondsSinceEpoch(1000),
+    );
+    Widget buildHarness(Locale locale) => _timelineApp(
+      locale: locale,
+      home: Scaffold(
+        body: SizedBox(
+          width: 720,
+          height: 480,
+          child: TimelineView(
+            threadId: 'session-1',
+            turn: null,
+            rows: [TimelineRow.agentActivity(event)],
+          ),
+        ),
+      ),
+    );
+
+    // 聚合 'running' 徽标本地化，不显示 canonical 值。
+    await tester.pumpWidget(buildHarness(const Locale('en')));
+    await tester.pump();
+    expect(find.text('In progress'), findsWidgets);
+    expect(find.text('running'), findsNothing);
+
+    await tester.pumpWidget(
+      buildHarness(
+        const Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('进行中'), findsWidgets);
+    expect(find.text('running'), findsNothing);
+  });
+
+  testWidgets('unknown subagent activity kind uses a localized fallback', (
+    tester,
+  ) async {
+    final event = TimelineAgentEvent(
+      eventId: 'agent-unknown-kind',
+      threadId: 'session-1',
+      sequence: 1,
+      payload: const TimelineSubAgentActivity(
+        callId: 'subagent-unknown',
+        kind: 'futureKind',
+        timedOut: false,
+      ),
+      createdAt: DateTime.fromMillisecondsSinceEpoch(1000),
+    );
+    Widget buildHarness(Locale locale) => _timelineApp(
+      locale: locale,
+      home: Scaffold(
+        body: SizedBox(
+          width: 720,
+          height: 480,
+          child: TimelineView(
+            threadId: 'session-1',
+            turn: null,
+            rows: [TimelineRow.agentActivity(event)],
+          ),
+        ),
+      ),
+    );
+
+    // 未知 kind 在英文下使用本地化 fallback，不泄漏内部 marker。
+    await tester.pumpWidget(buildHarness(const Locale('en')));
+    await tester.pump();
+    expect(find.text('Agent'), findsOneWidget);
+    expect(find.textContaining('agentTimeline'), findsNothing);
+
+    // 中文同样使用本地化 fallback。
+    await tester.pumpWidget(
+      buildHarness(
+        const Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('智能体'), findsOneWidget);
+    expect(find.textContaining('agentTimeline'), findsNothing);
+  });
+
+  testWidgets('subagent timeout uses a localized marker', (tester) async {
+    final event = TimelineAgentEvent(
+      eventId: 'agent-timeout',
+      threadId: 'session-1',
+      sequence: 1,
+      payload: const TimelineSubAgentActivity(
+        callId: 'subagent-timeout',
+        kind: 'waitCompleted',
+        timedOut: true,
+        path: 'root/reviewer',
+      ),
+      createdAt: DateTime.fromMillisecondsSinceEpoch(1000),
+    );
+    Widget buildHarness(Locale locale) => _timelineApp(
+      locale: locale,
+      home: Scaffold(
+        body: SizedBox(
+          width: 720,
+          height: 480,
+          child: TimelineView(
+            threadId: 'session-1',
+            turn: null,
+            rows: [TimelineRow.agentActivity(event)],
+          ),
+        ),
+      ),
+    );
+
+    // 超时标记按 locale 本地化；中文不得泄漏英文 "timed out"。
+    await tester.pumpWidget(buildHarness(const Locale('en')));
+    await tester.pump();
+    expect(find.textContaining('timed out'), findsOneWidget);
+    expect(find.textContaining('已超时'), findsNothing);
+
+    await tester.pumpWidget(
+      buildHarness(
+        const Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
+      ),
+    );
+    await tester.pump();
+    expect(find.textContaining('已超时'), findsOneWidget);
+    expect(find.textContaining('timed out'), findsNothing);
   });
 
   testWidgets('timeline tool group defaults collapsed and expands details', (

@@ -14,9 +14,19 @@ class _AgentPart extends StatelessWidget {
       child: _TimelineMetaRow(
         icon: Icons.account_tree_outlined,
         title: _agentTitle(context, event.title),
-        subtitle: event.text,
+        subtitle: _agentSubtitle(context, event),
       ),
     );
+  }
+
+  /// 子智能体副标题：超时状态由展示层按 locale 追加，领域层不写死文案。
+  String _agentSubtitle(BuildContext context, TimelineAgentEvent event) {
+    final payload = event.payload;
+    if (payload is TimelineSubAgentActivity && payload.timedOut) {
+      final timeout = context.l10n.timelineAgentTimedOut;
+      return event.text.isEmpty ? timeout : '${event.text}\n$timeout';
+    }
+    return event.text;
   }
 
   String _agentTitle(BuildContext context, String title) {
@@ -25,8 +35,9 @@ class _AgentPart extends StatelessWidget {
       'agentTimeline.message' => context.l10n.timelineAgentSubagentMessage,
       'agentTimeline.waiting' => context.l10n.timelineAgentWaiting,
       'agentTimeline.close' => context.l10n.timelineAgentClose,
-      'agentTimeline.agent' => context.l10n.timelineAgentFallback,
-      _ => title,
+      // 已知 agent marker 与未知 kind（'agentTimeline.activity'）统一使用
+      // 本地化 fallback，绝不把内部 marker 泄漏到界面。
+      _ => context.l10n.timelineAgentFallback,
     };
   }
 }
@@ -59,7 +70,7 @@ class _TodoListPart extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                _StatusPill(label: update.status),
+                _StatusPill(label: _todoAggregateLabel(context, update.status)),
               ],
             ),
             const SizedBox(height: 10),
@@ -69,6 +80,16 @@ class _TodoListPart extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 汇总状态标签：未知/混合聚合使用中性本地化标签，其余沿用状态映射。
+String _todoAggregateLabel(BuildContext context, String status) {
+  return switch (status) {
+    'unknown' => context.l10n.timelineTodoStatusUnknown,
+    // 聚合 'running' 复用进行中文案，避免徽标原样显示 canonical 值。
+    'running' => context.l10n.timelineTodoInProgress,
+    _ => context.todoStatusLabel(status),
+  };
 }
 
 class _TodoItemRow extends StatelessWidget {
@@ -82,21 +103,23 @@ class _TodoItemRow extends StatelessWidget {
     final status = item.status;
     final completed = status == 'completed';
     final inProgress = status == 'inProgress';
+    final pending = status == 'pending';
+    final unknown = !completed && !inProgress && !pending;
     final icon = completed
         ? Icons.check_circle_outline
         : inProgress
         ? Icons.radio_button_checked
+        : unknown
+        ? Icons.help_outline
         : Icons.radio_button_unchecked;
     final color = completed
         ? colors.onSurfaceVariant
         : inProgress
         ? colors.primary
+        : unknown
+        ? colors.onSurfaceVariant
         : colors.outline;
-    final label = switch (status) {
-      'completed' => context.l10n.timelineTodoCompleted,
-      'inProgress' => context.l10n.timelineTodoInProgress,
-      _ => context.l10n.timelineTodoPending,
-    };
+    final label = context.todoStatusLabel(status);
     final textStyle = Theme.of(context).textTheme.bodyMedium?.copyWith(
       color: completed ? colors.onSurfaceVariant : colors.onSurface,
       fontWeight: inProgress ? FontWeight.w600 : FontWeight.w400,

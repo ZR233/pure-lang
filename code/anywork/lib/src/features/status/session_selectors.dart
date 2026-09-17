@@ -150,7 +150,7 @@ class ModelRoleSelector extends ConsumerWidget {
   }
 }
 
-/// 当前模式对应 role 模型的思考等级选择器；写 role 级 Settings 配置。
+/// 当前模式对应 role 模型的思考强度选择器；写 role 级 Settings 配置。
 class ReasoningEffortSelector extends ConsumerWidget {
   const ReasoningEffortSelector({
     required this.providers,

@@ -4,7 +4,6 @@ import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_driver_keys.dart';
 import 'settings_common.dart';
-import 'settings_model_labels.dart';
 import 'settings_provider_model_readout.dart';
 import 'settings_provider_usage.dart';
 
@@ -81,11 +80,16 @@ class ProviderDetails extends StatelessWidget {
           spacing: 8,
           runSpacing: 8,
           children: [
-            SettingsInfoPill(icon: Icons.key_outlined, label: provider.status),
+            SettingsInfoPill(
+              icon: Icons.key_outlined,
+              label: context.providerStatusLabel(provider.status),
+            ),
             SettingsInfoPill(
               icon: Icons.hub_outlined,
               label: provider.allModels
-                  .map((model) => modelProtocolLabel(model.wireProtocol))
+                  .map(
+                    (model) => context.modelProtocolLabel(model.wireProtocol),
+                  )
                   .toSet()
                   .join(' / '),
             ),

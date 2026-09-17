@@ -34,7 +34,7 @@ void main() {
     expect(context.roleLabel('planner'), '计划者');
     expect(context.roleLabel('executor'), '执行者');
     expect(context.roleLabel('reviewer'), '审查者');
-    expect(context.roleLabel(''), '代理');
+    expect(context.roleLabel(''), '智能体');
     expect(context.roleLabel('custom-role'), 'custom-role');
     expect(context.roleLabel('explorer '), '探索者');
 

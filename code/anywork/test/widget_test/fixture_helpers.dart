@@ -8,6 +8,7 @@ Widget _timelineHarness({
     completedAt: 2,
     completion: StudioTurnCompletion.normal,
   ),
+  Locale locale = const Locale('en'),
   VoidCallback? onLoadOlder,
   bool isLoadingOlder = false,
   StudioApi? api,
@@ -16,6 +17,7 @@ Widget _timelineHarness({
 }) {
   return _timelineApp(
     api: api,
+    locale: locale,
     remoteImageProviderFactory: remoteImageProviderFactory,
     home: Scaffold(
       body: SizedBox(

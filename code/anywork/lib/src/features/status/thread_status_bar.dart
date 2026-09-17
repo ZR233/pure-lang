@@ -98,7 +98,8 @@ class ThreadStatusBar extends ConsumerWidget {
                     _StatusReadout(
                       icon: Icons.account_tree_outlined,
                       label: context.roleLabel(thread.role),
-                      tooltip: '${thread.title} · ${thread.status.name}',
+                      tooltip:
+                          '${thread.title} · ${context.threadStatusLabel(thread.status)}',
                       maxWidth: 96,
                     ),
                     if (showModel && thread.isAgent && runtime.model.isNotEmpty)
@@ -114,7 +115,9 @@ class ThreadStatusBar extends ConsumerWidget {
                     _StatusReadout(
                       key: StudioDriverKeys.threadThroughput,
                       icon: Icons.speed_outlined,
-                      label: runtime.turnThroughputLabel,
+                      label: context.tokenThroughputLabel(
+                        runtime.turnTokensPerSecond,
+                      ),
                       tooltip: context.l10n.statusCurrentAgentTokenSpeed,
                       maxWidth: 84,
                     ),
@@ -210,7 +213,7 @@ String _lspActivityLabel(BuildContext context, LspActivity activity) {
   return switch (activity) {
     LspIndexingActivity() => context.l10n.statusLspIndexing,
     LspBusyActivity() => context.l10n.statusLspBusy,
-    LspIdleActivity() => 'idle',
+    LspIdleActivity() => context.l10n.settingsLspActivityIdle,
   };
 }
 
@@ -277,8 +280,9 @@ class _WorkflowRuntimeReadout extends StatelessWidget {
       child: _StatusReadout(
         key: ValueKey('workflow-state-${run.currentStateId}'),
         icon: run.terminal ? Icons.check_circle_outline : Icons.route_outlined,
-        label: run.currentStateId,
-        tooltip: '${run.modeId} · ${run.currentStateId}',
+        label: context.workflowStateLabel(run.currentStateId),
+        tooltip:
+            '${context.workflowModeLabel(run.modeId)} · ${context.workflowStateLabel(run.currentStateId)}',
         maxWidth: 140,
       ),
     );

@@ -106,7 +106,9 @@ class ProviderEditor extends StatelessWidget {
                     key: StudioDriverKeys.providerApiKey,
                     label: provider.hasBearerToken
                         ? context.l10n.settingsApiKeyKeepCurrent
-                        : provider.credentialLabel,
+                        : provider.credentialRequired
+                        ? context.l10n.settingsApiKey
+                        : context.l10n.settingsApiKeyOptional,
                     value: provider.bearerToken,
                     enabled: !saving,
                     obscureText: true,
@@ -123,16 +125,29 @@ class ProviderEditor extends StatelessWidget {
                   const SizedBox(height: 10),
                   DropdownButtonFormField<String>(
                     isExpanded: true,
-                    initialValue:
-                        models.any(
-                          (model) => model.slug == provider.defaultModel,
-                        )
+                    initialValue: provider.defaultModel.isNotEmpty
                         ? provider.defaultModel
                         : models.firstOrNull?.slug,
                     decoration: InputDecoration(
                       labelText: context.l10n.settingsDefaultModel,
                     ),
                     items: [
+                      // canonical default model 不在当前列表时保留原 slug 并
+                      // 标注 unavailable，不静默回退到 models.first。
+                      if (provider.defaultModel.isNotEmpty &&
+                          !models.any(
+                            (model) => model.slug == provider.defaultModel,
+                          ))
+                        DropdownMenuItem(
+                          value: provider.defaultModel,
+                          child: Text(
+                            context.l10n.settingsAgentRouteUnavailable(
+                              provider.defaultModel,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
                       for (final model in models)
                         DropdownMenuItem(
                           value: model.slug,
@@ -314,14 +329,16 @@ class _CustomModelEditor extends StatelessWidget {
                 decoration: InputDecoration(
                   labelText: context.l10n.settingsProtocolType,
                 ),
-                items: const [
+                items: [
                   DropdownMenuItem(
                     value: 'chat_completions',
-                    child: Text('Chat Completions (HTTP)'),
+                    child: Text(
+                      context.l10n.settingsProtocolChatCompletionsHttp,
+                    ),
                   ),
                   DropdownMenuItem(
                     value: 'responses',
-                    child: Text('Responses (HTTP)'),
+                    child: Text(context.l10n.settingsProtocolResponsesHttp),
                   ),
                 ],
                 onChanged: enabled

@@ -7,6 +7,14 @@ import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
 import 'settings_common.dart';
 
+/// Canonical web-search modes the settings card can edit. Any other runtime
+/// value is shown raw and never silently coerced into a known mode.
+const _knownWebSearchModes = ['disabled', 'cached', 'indexed', 'live'];
+
+/// Canonical context-size values; an empty selection means the service
+/// default. Any other runtime value is shown raw.
+const _knownWebSearchContextSizes = ['low', 'medium', 'high'];
+
 class WebSearchSettingsCard extends ConsumerStatefulWidget {
   const WebSearchSettingsCard({super.key, required this.settings});
 
@@ -70,6 +78,9 @@ class WebSearchSettingsCardState extends ConsumerState<WebSearchSettingsCard> {
   @override
   Widget build(BuildContext context) {
     final settings = widget.settings;
+    final sizeValue = _contextSize ?? '';
+    final contextSizeIsKnown =
+        sizeValue.isEmpty || _knownWebSearchContextSizes.contains(sizeValue);
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -154,17 +165,17 @@ class WebSearchSettingsCardState extends ConsumerState<WebSearchSettingsCard> {
                   SizedBox(
                     width: fieldWidth,
                     child: DropdownButtonFormField<String>(
-                      initialValue: _mode,
+                      initialValue: _knownWebSearchModes.contains(_mode)
+                          ? _mode
+                          : null,
+                      hint: _knownWebSearchModes.contains(_mode)
+                          ? null
+                          : Text(_modeLabel(context, _mode)),
                       decoration: InputDecoration(
                         labelText: context.l10n.settingsWebSearchMode,
                       ),
                       items: [
-                        for (final mode in const [
-                          'disabled',
-                          'cached',
-                          'indexed',
-                          'live',
-                        ])
+                        for (final mode in _knownWebSearchModes)
                           DropdownMenuItem(
                             value: mode,
                             child: Text(_modeLabel(context, mode)),
@@ -178,7 +189,10 @@ class WebSearchSettingsCardState extends ConsumerState<WebSearchSettingsCard> {
                   SizedBox(
                     width: fieldWidth,
                     child: DropdownButtonFormField<String>(
-                      initialValue: _contextSize ?? '',
+                      initialValue: contextSizeIsKnown ? sizeValue : null,
+                      hint: contextSizeIsKnown
+                          ? null
+                          : Text(_contextSizeLabel(context, sizeValue)),
                       decoration: InputDecoration(
                         labelText: context.l10n.settingsWebSearchContextSize,
                       ),
@@ -187,7 +201,7 @@ class WebSearchSettingsCardState extends ConsumerState<WebSearchSettingsCard> {
                           value: '',
                           child: Text(context.l10n.settingsServiceDefault),
                         ),
-                        for (final size in const ['low', 'medium', 'high'])
+                        for (final size in _knownWebSearchContextSizes)
                           DropdownMenuItem(
                             value: size,
                             child: Text(_contextSizeLabel(context, size)),
@@ -477,17 +491,19 @@ class _DeepSeekWebSearchSettingsCardState
 String _modeLabel(BuildContext context, String mode) {
   return switch (mode) {
     'disabled' => context.l10n.settingsWebSearchModeDisabled,
+    'cached' => context.l10n.settingsWebSearchModeCached,
     'indexed' => context.l10n.settingsWebSearchModeIndexed,
     'live' => context.l10n.settingsWebSearchModeLive,
-    _ => context.l10n.settingsWebSearchModeCached,
+    _ => mode,
   };
 }
 
 String _contextSizeLabel(BuildContext context, String size) {
   return switch (size) {
     'low' => context.l10n.settingsWebSearchContextLow,
+    'medium' => context.l10n.settingsWebSearchContextMedium,
     'high' => context.l10n.settingsWebSearchContextHigh,
-    _ => context.l10n.settingsWebSearchContextMedium,
+    _ => size,
   };
 }
 
@@ -514,7 +530,8 @@ String _availabilityLabelForValue(
     'disabled' => context.l10n.settingsWebSearchDisabled,
     'providerUnsupported' => context.l10n.settingsWebSearchUnsupportedProvider,
     'modelUnsupported' => context.l10n.settingsWebSearchUnsupportedModel,
-    _ => context.l10n.settingsWebSearchMissingCredential,
+    'missingCredential' => context.l10n.settingsWebSearchMissingCredential,
+    _ => availability,
   };
 }
 
@@ -523,7 +540,9 @@ String _availabilityReason(BuildContext context, String availability) {
     'providerUnsupported' =>
       context.l10n.settingsWebSearchUnsupportedProviderReason,
     'modelUnsupported' => context.l10n.settingsWebSearchUnsupportedModelReason,
-    _ => context.l10n.settingsWebSearchMissingCredentialReason,
+    'missingCredential' =>
+      context.l10n.settingsWebSearchMissingCredentialReason,
+    _ => availability,
   };
 }
 

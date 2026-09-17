@@ -5,7 +5,6 @@ import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_driver_keys.dart';
-import 'settings_model_labels.dart';
 
 class _AgentRouteConfiguration {
   const _AgentRouteConfiguration({
@@ -17,21 +16,50 @@ class _AgentRouteConfiguration {
   final List<RoleSettingsView> roles;
 
   Widget _buildRoleRow(
+    BuildContext context,
     WidgetRef ref,
     String role,
     List<_RoleModelOption> options,
   ) {
-    final selectedModel = _selectedRoleModelKey(role, options);
-    final selectedOption = options
-        .where((option) => option.key == selectedModel)
-        .firstOrNull;
-    final option = selectedOption ?? const _RoleModelOption.defaultOption();
     final configuredRole = roles
         .where((candidate) => candidate.key == role)
         .firstOrNull;
+    final configuredKey = _roleSelectionKey(role);
+    final configuredResolvable =
+        configuredKey == null ||
+        options.any((option) => option.key == configuredKey);
+    final entries = <_RoleModelOption>[
+      // canonical route 非空但当前 catalog 无法解析时，展示原始值并标记
+      // unavailable，而不是退化为 options.first。
+      if (configuredKey != null && !configuredResolvable)
+        _RoleModelOption.unavailable(
+          providerId: configuredRole?.providerId ?? '',
+          model: configuredRole?.model ?? '',
+          label: context.l10n.settingsAgentRouteUnavailable(
+            [
+              configuredRole?.providerId ?? '',
+              configuredRole?.model ?? '',
+            ].where((part) => part.isNotEmpty).join(' / '),
+          ),
+        ),
+      ...options,
+    ];
+    final selectedModel =
+        configuredKey ??
+        (options.isEmpty ? 'default::default' : options.first.key);
+    final selectedOption = entries
+        .where((option) => option.key == selectedModel)
+        .firstOrNull;
+    final option =
+        selectedOption ??
+        (entries.isEmpty
+            ? const _RoleModelOption.defaultOption()
+            : entries.first);
     final canonicalEffort = configuredRole?.effort;
     final selectedEffort =
-        option.key == _roleSelectionKey(role) &&
+        configuredKey != null &&
+            option.key == configuredKey &&
+            canonicalEffort != null &&
             option.efforts.contains(canonicalEffort)
         ? canonicalEffort
         : option.defaultEffort;
@@ -40,10 +68,12 @@ class _AgentRouteConfiguration {
       role: role,
       selectedModel: selectedModel,
       selectedEffort: selectedEffort,
-      options: options,
+      options: entries,
       efforts: option.efforts,
       onModelChanged: (value) {
-        final selected = options.firstWhere(
+        // 重选当前值（含 unavailable 哨兵项）不产生任何变更。
+        if (value == selectedModel) return;
+        final selected = entries.firstWhere(
           (candidate) => candidate.key == value,
         );
         ref
@@ -70,19 +100,10 @@ class _AgentRouteConfiguration {
 
   String? _roleSelectionKey(String roleKey) {
     final role = roles.where((role) => role.key == roleKey).firstOrNull;
-    if (role == null || role.providerId.isEmpty || role.model.isEmpty) {
+    if (role == null || (role.providerId.isEmpty && role.model.isEmpty)) {
       return null;
     }
     return '${role.providerId}::${role.model}';
-  }
-
-  String _selectedRoleModelKey(String role, List<_RoleModelOption> options) {
-    final configured = _roleSelectionKey(role);
-    if (configured != null &&
-        options.any((option) => option.key == configured)) {
-      return configured;
-    }
-    return options.isEmpty ? 'default::default' : options.first.key;
   }
 
   List<_RoleModelOption> _roleModelOptions(
@@ -114,8 +135,8 @@ class _AgentRouteConfiguration {
             label: [
               '${provider.name} / ${model.displayName.isEmpty ? model.slug : model.displayName}',
               if (modalities.isNotEmpty) modalities,
-              modelProtocolLabel(model.wireProtocol),
-              modelConnectionLabel(model.connectionMode),
+              context.modelProtocolLabel(model.wireProtocol),
+              context.modelConnectionLabel(model.connectionMode),
             ].join(' · '),
             efforts: model.reasoningEfforts,
             defaultEffort: model.defaultReasoningEffort.isNotEmpty
@@ -149,7 +170,7 @@ class AgentRouteControls extends ConsumerWidget {
       roles: roles,
     );
     final options = section._roleModelOptions(context, providers);
-    return section._buildRoleRow(ref, role, options);
+    return section._buildRoleRow(context, ref, role, options);
   }
 }
 
@@ -190,7 +211,9 @@ class _RoleSettingsRow extends StatelessWidget {
               option.model,
             ),
             value: option.key,
-            label: option.label,
+            label: option.isFallback
+                ? context.l10n.settingsDefaultModel
+                : option.label,
           ),
       ],
       onChanged: options.isEmpty ? null : onModelChanged,
@@ -323,6 +346,20 @@ class _RoleModelOption {
       efforts = const [],
       defaultEffort = null;
 
+  /// canonical route 无法解析时的展示项：保留原始 provider/model 与
+  /// `key`，不提供任何 effort 候选，因此只改 effort 不会改写 provider/model。
+  const _RoleModelOption.unavailable({
+    required String providerId,
+    required String model,
+    required String label,
+  }) : this(
+         providerId: providerId,
+         model: model,
+         label: label,
+         efforts: const [],
+         defaultEffort: null,
+       );
+
   final String providerId;
   final String model;
   final String label;
@@ -330,4 +367,7 @@ class _RoleModelOption {
   final String? defaultEffort;
 
   String get key => '$providerId::$model';
+
+  /// 无可用 provider/model 时的哨兵项；canonical key 仍是 `default::default`。
+  bool get isFallback => key == 'default::default';
 }

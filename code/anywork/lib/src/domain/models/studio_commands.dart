@@ -191,10 +191,11 @@ abstract final class ProviderSettingsCommandBuilder {
     final models = provider.allModels
         .where((model) => model.slug.trim().isNotEmpty)
         .toList();
-    final defaultModel =
-        models.any((model) => model.slug == provider.defaultModel)
+    // canonical defaultModel 非空时始终保留（含当前无法解析的 slug），只有
+    // 空值才回退到首个模型；仅用户显式选择才替换。
+    final defaultModel = provider.defaultModel.isNotEmpty
         ? provider.defaultModel
-        : models.firstOrNull?.slug ?? provider.defaultModel;
+        : models.firstOrNull?.slug ?? '';
     return provider.copyWith(
       id: provider.id.trim(),
       name: provider.name.trim(),

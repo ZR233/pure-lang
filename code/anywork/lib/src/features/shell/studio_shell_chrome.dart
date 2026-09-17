@@ -205,7 +205,7 @@ class _AgentSwitcherState extends ConsumerState<_AgentSwitcher> {
                   const SizedBox(width: 12),
                   Text(
                     _agentForThread(widget.state, thread.id)?.error ??
-                        _agentShortStatus(thread),
+                        _agentShortStatus(context, thread),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.labelSmall
@@ -323,9 +323,8 @@ bool _isRunningAgentStatus(ThreadStatusView status) => status.isActive;
 bool _isFaultedAgentStatus(ThreadStatusView status) =>
     status == ThreadStatusView.faulted;
 
-String _agentShortStatus(StudioThread thread) {
-  return thread.status.name;
-}
+String _agentShortStatus(BuildContext context, StudioThread thread) =>
+    context.threadStatusLabel(thread.status);
 
 String _agentDisplayName(BuildContext context, StudioThread thread) {
   if (!thread.isRoot && thread.title.trim().isNotEmpty) {

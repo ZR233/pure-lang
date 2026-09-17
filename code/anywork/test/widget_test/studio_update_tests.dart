@@ -300,12 +300,12 @@ void registerStudioUpdateTests() {
     await tester.pumpAndSettle();
 
     await tester.scrollUntilVisible(
-      find.text('糊来帮 更新'),
+      find.text('糊来帮更新'),
       300,
       scrollable: _settingsPaneScrollable(),
     );
     await tester.pumpAndSettle();
-    expect(find.text('糊来帮 更新'), findsOneWidget);
+    expect(find.text('糊来帮更新'), findsOneWidget);
     expect(find.text('下载并安装'), findsOneWidget);
     expect(find.text('发行说明'), findsOneWidget);
   });

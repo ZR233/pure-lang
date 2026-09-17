@@ -3014,7 +3014,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsAgentsSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'System profiles have a fixed purpose and workspace mode; enablement and model routing stay configurable. Directory only constrains anywork\'s built-in file-write tools — shell, Git, and MCP can bypass it.'**
+  /// **'System agent profiles have a fixed purpose and workspace mode; enablement and model routing stay configurable. Directory mode limits built-in file writes to the project only; shell, Git, and MCP can still bypass it.'**
   String get settingsAgentsSubtitle;
 
   /// No description provided for @settingsAgentsAddUserProfile.
@@ -3146,7 +3146,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsAgentProfileWorkspaceDirectoryHint.
   ///
   /// In en, this message translates to:
-  /// **'Directory is a cooperative file-tool boundary, not an OS sandbox; shell, Git, and MCP can bypass it.'**
+  /// **'Directory mode limits built-in file writes to the project only; it is not an OS sandbox, and shell, Git, and MCP can still bypass it.'**
   String get settingsAgentProfileWorkspaceDirectoryHint;
 
   /// No description provided for @settingsAgentProfileEnabledTitle.
@@ -3688,6 +3688,288 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Retry'**
   String get sidebarRetry;
+
+  /// No description provided for @settingsSshRemoteHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'helper'**
+  String get settingsSshRemoteHelper;
+
+  /// No description provided for @statusThroughputValue.
+  ///
+  /// In en, this message translates to:
+  /// **'{value} t/s'**
+  String statusThroughputValue(String value);
+
+  /// No description provided for @statusThroughputUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'- t/s'**
+  String get statusThroughputUnavailable;
+
+  /// No description provided for @workflowStatePlanning.
+  ///
+  /// In en, this message translates to:
+  /// **'Planning'**
+  String get workflowStatePlanning;
+
+  /// No description provided for @workflowStateEditingDocuments.
+  ///
+  /// In en, this message translates to:
+  /// **'Editing docs'**
+  String get workflowStateEditingDocuments;
+
+  /// No description provided for @workflowStateWorking.
+  ///
+  /// In en, this message translates to:
+  /// **'Working'**
+  String get workflowStateWorking;
+
+  /// No description provided for @workflowStateIntegrating.
+  ///
+  /// In en, this message translates to:
+  /// **'Integrating'**
+  String get workflowStateIntegrating;
+
+  /// No description provided for @workflowStateReviewing.
+  ///
+  /// In en, this message translates to:
+  /// **'Reviewing'**
+  String get workflowStateReviewing;
+
+  /// No description provided for @workflowStateCompleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Completed'**
+  String get workflowStateCompleted;
+
+  /// No description provided for @workflowStateStopped.
+  ///
+  /// In en, this message translates to:
+  /// **'Stopped'**
+  String get workflowStateStopped;
+
+  /// No description provided for @workflowModeSimple.
+  ///
+  /// In en, this message translates to:
+  /// **'Simple'**
+  String get workflowModeSimple;
+
+  /// No description provided for @workflowModeTask.
+  ///
+  /// In en, this message translates to:
+  /// **'Task'**
+  String get workflowModeTask;
+
+  /// No description provided for @attachmentFallback.
+  ///
+  /// In en, this message translates to:
+  /// **'Attachment'**
+  String get attachmentFallback;
+
+  /// No description provided for @timelineAgentTimedOut.
+  ///
+  /// In en, this message translates to:
+  /// **'timed out'**
+  String get timelineAgentTimedOut;
+
+  /// No description provided for @timelineToolUnknownStatus.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} · {status}'**
+  String timelineToolUnknownStatus(String name, String status);
+
+  /// No description provided for @timelineTodoStatusUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'Unknown'**
+  String get timelineTodoStatusUnknown;
+
+  /// No description provided for @settingsApiKeyOptional.
+  ///
+  /// In en, this message translates to:
+  /// **'API key (optional)'**
+  String get settingsApiKeyOptional;
+
+  /// No description provided for @modelProtocolResponses.
+  ///
+  /// In en, this message translates to:
+  /// **'Responses'**
+  String get modelProtocolResponses;
+
+  /// No description provided for @modelProtocolChatCompletions.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat Completions'**
+  String get modelProtocolChatCompletions;
+
+  /// No description provided for @modelConnectionWebSocket.
+  ///
+  /// In en, this message translates to:
+  /// **'WS'**
+  String get modelConnectionWebSocket;
+
+  /// No description provided for @modelConnectionHttp.
+  ///
+  /// In en, this message translates to:
+  /// **'HTTP'**
+  String get modelConnectionHttp;
+
+  /// No description provided for @settingsProtocolChatCompletionsHttp.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat Completions (HTTP)'**
+  String get settingsProtocolChatCompletionsHttp;
+
+  /// No description provided for @settingsProtocolResponsesHttp.
+  ///
+  /// In en, this message translates to:
+  /// **'Responses (HTTP)'**
+  String get settingsProtocolResponsesHttp;
+
+  /// No description provided for @settingsAgentRouteUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'{route} (unavailable)'**
+  String settingsAgentRouteUnavailable(String route);
+
+  /// No description provided for @settingsPriceTierUnit.
+  ///
+  /// In en, this message translates to:
+  /// **'{currency} per 1M tokens'**
+  String settingsPriceTierUnit(String currency);
+
+  /// No description provided for @threadStatusIdle.
+  ///
+  /// In en, this message translates to:
+  /// **'Idle'**
+  String get threadStatusIdle;
+
+  /// No description provided for @threadStatusCancelling.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancelling'**
+  String get threadStatusCancelling;
+
+  /// No description provided for @threadStatusClosed.
+  ///
+  /// In en, this message translates to:
+  /// **'Closed'**
+  String get threadStatusClosed;
+
+  /// No description provided for @toolStatusAwaitingApproval.
+  ///
+  /// In en, this message translates to:
+  /// **'Awaiting approval'**
+  String get toolStatusAwaitingApproval;
+
+  /// No description provided for @toolStatusFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed'**
+  String get toolStatusFailed;
+
+  /// No description provided for @toolStatusDenied.
+  ///
+  /// In en, this message translates to:
+  /// **'Denied'**
+  String get toolStatusDenied;
+
+  /// No description provided for @toolStatusCancelled.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancelled'**
+  String get toolStatusCancelled;
+
+  /// No description provided for @toolStatusCancelling.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancelling'**
+  String get toolStatusCancelling;
+
+  /// No description provided for @settingsProviderCatalogUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Provider catalog is unavailable.'**
+  String get settingsProviderCatalogUnavailable;
+
+  /// No description provided for @settingsProviderPresetUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Provider preset is unavailable.'**
+  String get settingsProviderPresetUnavailable;
+
+  /// No description provided for @settingsProviderMissingCredential.
+  ///
+  /// In en, this message translates to:
+  /// **'Missing credential'**
+  String get settingsProviderMissingCredential;
+
+  /// No description provided for @settingsSshStateDisconnected.
+  ///
+  /// In en, this message translates to:
+  /// **'Disconnected'**
+  String get settingsSshStateDisconnected;
+
+  /// No description provided for @settingsSshStateConnecting.
+  ///
+  /// In en, this message translates to:
+  /// **'Connecting'**
+  String get settingsSshStateConnecting;
+
+  /// No description provided for @settingsSshStateWaitingForInput.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for input'**
+  String get settingsSshStateWaitingForInput;
+
+  /// No description provided for @settingsSshStateReconnecting.
+  ///
+  /// In en, this message translates to:
+  /// **'Reconnecting'**
+  String get settingsSshStateReconnecting;
+
+  /// No description provided for @settingsSshStateFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed'**
+  String get settingsSshStateFailed;
+
+  /// No description provided for @settingsWorktreeStatePrepared.
+  ///
+  /// In en, this message translates to:
+  /// **'Prepared'**
+  String get settingsWorktreeStatePrepared;
+
+  /// No description provided for @settingsWorktreeStateActive.
+  ///
+  /// In en, this message translates to:
+  /// **'Active'**
+  String get settingsWorktreeStateActive;
+
+  /// No description provided for @settingsWorktreeStatePreserved.
+  ///
+  /// In en, this message translates to:
+  /// **'Preserved'**
+  String get settingsWorktreeStatePreserved;
+
+  /// No description provided for @settingsWorktreeStateCleanupRequested.
+  ///
+  /// In en, this message translates to:
+  /// **'Cleanup requested'**
+  String get settingsWorktreeStateCleanupRequested;
+
+  /// No description provided for @settingsWorktreeStateCleaned.
+  ///
+  /// In en, this message translates to:
+  /// **'Cleaned'**
+  String get settingsWorktreeStateCleaned;
+
+  /// No description provided for @settingsWorktreeDirty.
+  ///
+  /// In en, this message translates to:
+  /// **'dirty'**
+  String get settingsWorktreeDirty;
 }
 
 class _AppLocalizationsDelegate

@@ -73,13 +73,9 @@ class TimelineSubAgentActivity extends TimelineAgentEventPayload {
   String get status => statusValue ?? (error == null ? 'completed' : 'errored');
 
   @override
-  String get activityText => _agentActivityText([
-    path,
-    parentPath,
-    message,
-    timedOut ? 'timed out' : null,
-    error,
-  ]);
+  /// 不含 timedOut 文案：超时状态由展示层按 locale 追加，避免中文泄漏英文。
+  String get activityText =>
+      _agentActivityText([path, parentPath, message, error]);
 }
 
 class TimelineTodoListUpdate extends TimelineAgentEventPayload {
@@ -100,12 +96,21 @@ class TimelineTodoListUpdate extends TimelineAgentEventPayload {
   final String? explanation;
   final List<TimelineTodoItem> items;
 
+  /// 已知待办状态集合；任何不在此集合内的 status 都视为未知。
+  static const _knownStatuses = {'completed', 'inProgress', 'pending'};
+
   @override
   String get status {
+    // 先识别未知：空集合或任何含未知 status 的集合一律为中性 unknown，
+    // 只有全部属于已知集合时才应用已知聚合规则。
+    if (items.isEmpty ||
+        items.any((item) => !_knownStatuses.contains(item.status))) {
+      return 'unknown';
+    }
     if (items.any((item) => item.status == 'inProgress')) {
       return 'running';
     }
-    if (items.isNotEmpty && items.every((item) => item.status == 'completed')) {
+    if (items.every((item) => item.status == 'completed')) {
       return 'completed';
     }
     return 'pending';
@@ -171,6 +176,7 @@ int _timelineAgentEventRenderVersion(TimelineAgentEvent event) {
     event.text,
     event.status,
     event.payload.runtimeType,
+    if (event.payload case TimelineSubAgentActivity(:final timedOut)) timedOut,
     if (event.payload case TimelineTodoListUpdate(:final items))
       for (final item in items) ...[item.step, item.status],
     event.createdAt.millisecondsSinceEpoch,

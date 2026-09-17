@@ -37,18 +37,18 @@ class _AgentProfileDialogState extends State<AgentProfileDialog> {
     _description = TextEditingController(text: profile?.description);
     _whenToUse = TextEditingController(text: profile?.whenToUse);
     _instructions = TextEditingController(text: profile?.systemInstructions);
-    _providerId =
-        widget.providers
-            .where((provider) => provider.id == profile?.providerId)
-            .map((provider) => provider.id)
-            .firstOrNull ??
-        widget.providers.firstOrNull?.id ??
-        '';
-    final models = _modelsFor(_providerId);
-    _model = models.any((model) => model.slug == profile?.model)
-        ? profile!.model
-        : models.firstOrNull?.slug ?? '';
-    _effort = _canonicalEffort(profile?.effort);
+    if (profile == null) {
+      _providerId = widget.providers.firstOrNull?.id ?? '';
+      _model = _modelsFor(_providerId).firstOrNull?.slug ?? '';
+      _effort = _canonicalEffort(null);
+    } else {
+      // 保留 canonical provider/model/effort；不可解析时只在展示层标记
+      // unavailable，不静默改为 options.first 或模型默认 effort，也不阻断
+      // 其他字段的保存。
+      _providerId = profile.providerId;
+      _model = profile.model;
+      _effort = profile.effort;
+    }
     _enabled = profile?.enabled ?? true;
     _workspaceMode = profile?.workspaceMode ?? AgentWorkspaceMode.directory;
   }
@@ -103,14 +103,20 @@ class _AgentProfileDialogState extends State<AgentProfileDialog> {
                   decoration: InputDecoration(
                     labelText: l10n.settingsAgentProfileProviderField,
                   ),
-                  items: widget.providers
-                      .map(
-                        (provider) => DropdownMenuItem(
-                          value: provider.id,
-                          child: Text(provider.name),
+                  items: [
+                    if (_providerUnavailable)
+                      DropdownMenuItem(
+                        value: _providerId,
+                        child: Text(
+                          l10n.settingsAgentRouteUnavailable(_providerId),
                         ),
-                      )
-                      .toList(growable: false),
+                      ),
+                    for (final provider in widget.providers)
+                      DropdownMenuItem(
+                        value: provider.id,
+                        child: Text(provider.name),
+                      ),
+                  ],
                   onChanged: (providerId) {
                     if (providerId == null) return;
                     setState(() {
@@ -129,18 +135,22 @@ class _AgentProfileDialogState extends State<AgentProfileDialog> {
                   decoration: InputDecoration(
                     labelText: l10n.settingsModelField,
                   ),
-                  items: _modelsFor(_providerId)
-                      .map(
-                        (model) => DropdownMenuItem(
-                          value: model.slug,
-                          child: Text(
-                            model.displayName.isEmpty
-                                ? model.slug
-                                : model.displayName,
-                          ),
+                  items: [
+                    if (_modelUnavailable)
+                      DropdownMenuItem(
+                        value: _model,
+                        child: Text(l10n.settingsAgentRouteUnavailable(_model)),
+                      ),
+                    for (final model in _modelsFor(_providerId))
+                      DropdownMenuItem(
+                        value: model.slug,
+                        child: Text(
+                          model.displayName.isEmpty
+                              ? model.slug
+                              : model.displayName,
                         ),
-                      )
-                      .toList(growable: false),
+                      ),
+                  ],
                   onChanged: (model) {
                     if (model == null) return;
                     setState(() {
@@ -163,6 +173,11 @@ class _AgentProfileDialogState extends State<AgentProfileDialog> {
                       value: null,
                       child: Text(l10n.settingsAgentProfileEffortDefault),
                     ),
+                    if (_effortUnavailable)
+                      DropdownMenuItem<String?>(
+                        value: _effort,
+                        child: Text(_effort!),
+                      ),
                     for (final effort in _efforts)
                       DropdownMenuItem<String?>(
                         value: effort,
@@ -279,6 +294,15 @@ class _AgentProfileDialogState extends State<AgentProfileDialog> {
           .firstOrNull;
 
   List<String> get _efforts => _selectedModel?.reasoningEfforts ?? const [];
+
+  /// canonical 值与当前 catalog 脱节时仅在展示层标记 unavailable。
+  bool get _providerUnavailable =>
+      _providerId.isNotEmpty &&
+      !widget.providers.any((provider) => provider.id == _providerId);
+
+  bool get _modelUnavailable => _model.isNotEmpty && _selectedModel == null;
+
+  bool get _effortUnavailable => _effort != null && !_efforts.contains(_effort);
 
   String? _canonicalEffort(String? candidate) {
     final model = _selectedModel;

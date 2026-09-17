@@ -25,7 +25,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get sidebarLoadError => '会话目录分页加载失败';
 
   @override
-  String get shutdownTitle => '正在安全关机';
+  String get shutdownTitle => '正在安全退出';
 
   @override
   String get shutdownPhaseStoppingSubscriptions => '正在停止订阅';
@@ -37,7 +37,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get shutdownPhaseFlushingPersistence => '正在保存会话';
 
   @override
-  String get shutdownPhaseStoppingAgents => '正在停止协作 Agent';
+  String get shutdownPhaseStoppingAgents => '正在停止协作智能体';
 
   @override
   String get shutdownPhaseStoppingMcp => '正在关闭 MCP';
@@ -46,11 +46,11 @@ class AppLocalizationsZh extends AppLocalizations {
   String get shutdownPhaseStoppingLsp => '正在关闭语言服务';
 
   @override
-  String get shutdownPhaseStopped => '关机完成';
+  String get shutdownPhaseStopped => '退出流程已完成';
 
   @override
   String shutdownPendingCommits(int count) {
-    return '剩余 $count 项待落库';
+    return '仍有 $count 项更改未保存';
   }
 
   @override
@@ -96,7 +96,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get sidebarSettings => '设置';
 
   @override
-  String get runtimeFatalTitle => '糊来帮 无法启动';
+  String get runtimeFatalTitle => '糊来帮无法启动';
 
   @override
   String get runtimeFatalRetry => '重试';
@@ -114,17 +114,17 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String persistenceDegraded(int count) {
-    return '保存暂时不可用，$count 项内存更新正在等待落库；可以继续会话。';
+    return '保存暂时不可用，尚有 $count 项更改未保存；可以继续会话。';
   }
 
   @override
   String persistenceRecovering(int count) {
-    return '存储已恢复，正在保存 $count 项积压更新；可以继续会话。';
+    return '保存已恢复，正在补存此前未保存的 $count 项更改；可以继续会话。';
   }
 
   @override
   String persistenceBlocked(int count) {
-    return '保存已阻塞，仍有 $count 项内存更新等待处理；可以继续会话。';
+    return '保存已阻塞，仍有 $count 项更改未保存，需要处理；可以继续会话。';
   }
 
   @override
@@ -176,7 +176,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsSystemGroup => '系统';
 
   @override
-  String get settingsProvidersTab => '服务';
+  String get settingsProvidersTab => '模型服务商';
 
   @override
   String get settingsInstructionsTab => '指令';
@@ -185,7 +185,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsSkillsTab => '技能';
 
   @override
-  String get settingsAgentsTab => '代理';
+  String get settingsAgentsTab => '智能体';
 
   @override
   String get settingsMcpTab => 'MCP';
@@ -209,7 +209,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsSshTitle => '远程开发';
 
   @override
-  String get settingsSshSubtitle => '管理 SSH 工作区；连接与 helper 生命周期均由本地 core 负责。';
+  String get settingsSshSubtitle => '管理 SSH 工作区；连接与轻量远程助手由本机统一管理。';
 
   @override
   String get settingsSshAdd => '添加服务器';
@@ -218,7 +218,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsSshEmpty => '尚未配置 SSH 服务器。';
 
   @override
-  String get settingsSshManagedByCore => 'OpenSSH 与最小远程 helper 由本地统一管理。';
+  String get settingsSshManagedByCore => 'OpenSSH 与轻量远程助手由本机统一管理。';
 
   @override
   String get settingsSshTest => '测试连接';
@@ -265,7 +265,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsSshAuth => '认证方式';
 
   @override
-  String get settingsSshAuthAgentOrKey => 'SSH agent 或私钥';
+  String get settingsSshAuthAgentOrKey => 'ssh-agent 或私钥';
 
   @override
   String get settingsSshAuthPassword => '密码';
@@ -277,7 +277,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsSshPassword => '密码';
 
   @override
-  String get settingsSshPasswordLease => '仅在本次应用会话保留于 core 内存。';
+  String get settingsSshPasswordLease => '密码仅在本次应用会话期间保存在本机内存中。';
 
   @override
   String get settingsSshSave => '保存';
@@ -313,7 +313,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsSshPathRequired => '请输入远端目录路径';
 
   @override
-  String get settingsSshPathAbsolute => '路径必须是绝对 POSIX 路径，以 / 开头';
+  String get settingsSshPathAbsolute => '远端路径必须以 / 开头，且必须是绝对路径';
 
   @override
   String get settingsSshDirectoryEmpty => '此目录为空';
@@ -328,7 +328,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsSshOpenFailed => '无法打开该目录，请检查服务器后重试。';
 
   @override
-  String get composerHint => '描述你的需求...';
+  String get composerHint => '描述你的需求…';
 
   @override
   String get composerSend => '发送';
@@ -346,25 +346,25 @@ class AppLocalizationsZh extends AppLocalizations {
   String get compileModeTask => '任务';
 
   @override
-  String get permissionModeRequestApproval => '请求';
+  String get permissionModeRequestApproval => '请求授权';
 
   @override
-  String get permissionModeAutoReview => '审查';
+  String get permissionModeAutoReview => '自动审查';
 
   @override
-  String get permissionModeFullAccess => '完全';
+  String get permissionModeFullAccess => '完全访问';
 
   @override
   String get statusCost => '费用';
 
   @override
-  String get statusTotalTokensLabel => '总 token';
+  String get statusTotalTokensLabel => '总词元数';
 
   @override
   String get statusModelLabel => '模型';
 
   @override
-  String get statusCapabilitiesTitle => '活动能力';
+  String get statusCapabilitiesTitle => '当前启用项';
 
   @override
   String get statusSessionMode => '会话模式';
@@ -373,13 +373,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statusSessionModeLocked => '会话运行或工作流活动期间无法切换会话模式';
 
   @override
-  String get statusPlannerModel => 'Planner 模型';
+  String get statusPlannerModel => '计划者模型';
 
   @override
-  String get statusExecutorModel => 'Executor 模型';
+  String get statusExecutorModel => '执行者模型';
 
   @override
-  String get statusReasoningEffort => '思考等级';
+  String get statusReasoningEffort => '思考强度';
 
   @override
   String get statusContextLabel => '上下文';
@@ -397,7 +397,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statusCacheWriteTokensLabel => '缓存写入';
 
   @override
-  String get statusReasoningTokensLabel => '推理 token';
+  String get statusReasoningTokensLabel => '推理词元数';
 
   @override
   String get statusInferenceCountLabel => '推理次数';
@@ -406,19 +406,19 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statusCacheSavingsLabel => '缓存节省';
 
   @override
-  String get statusUnpricedUsageLabel => '部分费用未定价';
+  String get statusUnpricedUsageLabel => '部分用量未计入费用估算';
 
   @override
-  String get sessionAllAgentsCostTooltip => '会话全部代理费用';
+  String get sessionAllAgentsCostTooltip => '会话全部智能体费用';
 
   @override
-  String get statusCurrentAgentTokenSpeed => '当前代理 token 速度';
+  String get statusCurrentAgentTokenSpeed => '当前智能体词元速度';
 
   @override
   String get settingsStatisticsTitle => '统计';
 
   @override
-  String get settingsStatisticsSubtitle => '按 Provider 实例、实际模型与思考强度汇总最近成功调用。';
+  String get settingsStatisticsSubtitle => '按模型服务商实例、实际模型与思考强度汇总最近成功调用。';
 
   @override
   String get settingsStatisticsSummaryTitle => '模型性能';
@@ -433,7 +433,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsStatisticsEmpty => '暂无完整性能样本。';
 
   @override
-  String get statisticsModel => 'Provider / 模型';
+  String get statisticsModel => '模型服务商 / 模型';
 
   @override
   String get statisticsReasoningEffort => '思考强度';
@@ -448,7 +448,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statisticsSamples => '样本数';
 
   @override
-  String get statisticsOutputTokens => '输出 token';
+  String get statisticsOutputTokens => '输出词元数';
 
   @override
   String get statisticsAverageTtft => '平均 TTFT';
@@ -503,7 +503,7 @@ class AppLocalizationsZh extends AppLocalizations {
     int totalTokens,
     String model,
   ) {
-    return '上下文：$contextTokens/$contextWindow（$percent%）\n\n总 token：$totalTokens\n\n模型：$model';
+    return '上下文：$contextTokens/$contextWindow（$percent%）\n\n总词元数：$totalTokens\n\n模型：$model';
   }
 
   @override
@@ -513,22 +513,22 @@ class AppLocalizationsZh extends AppLocalizations {
     int percent,
     int totalTokens,
   ) {
-    return '上下文：$contextTokens/$contextWindow（$percent%）\n\n总 token：$totalTokens';
+    return '上下文：$contextTokens/$contextWindow（$percent%）\n\n总词元数：$totalTokens';
   }
 
   @override
   String statusSkillsCount(int count) {
-    return '$count 个 skill';
+    return '$count 个技能';
   }
 
   @override
   String statusMcpCount(int count) {
-    return '$count 个 MCP';
+    return '$count 个 MCP 服务器';
   }
 
   @override
   String statusLspCount(int count) {
-    return '$count 个 LSP';
+    return '$count 个语言服务器';
   }
 
   @override
@@ -544,14 +544,14 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String statusAgentsCount(int count) {
-    return '$count 个 agent';
+    return '$count 个智能体';
   }
 
   @override
-  String get composerAgentRuntimeDriven => '此 Agent 会话由运行时驱动';
+  String get composerAgentRuntimeDriven => '此智能体会话由运行时驱动';
 
   @override
-  String get statusSkillsSection => 'Skills';
+  String get statusSkillsSection => '技能';
 
   @override
   String get statusMcpSection => 'MCP';
@@ -560,21 +560,21 @@ class AppLocalizationsZh extends AppLocalizations {
   String get statusLspSection => 'LSP';
 
   @override
-  String get statusSubagentsSection => 'Subagents';
+  String get statusSubagentsSection => '子智能体';
 
   @override
-  String get statusAgentChipTooltip => '子代理状态';
+  String get statusAgentChipTooltip => '子智能体状态';
 
   @override
-  String get agentDetailTitle => '子代理';
+  String get agentDetailTitle => '子智能体';
 
   @override
   String agentDetailSummary(int count, int running) {
-    return '$count 个 · $running 运行中';
+    return '共 $count 个，$running 个运行中';
   }
 
   @override
-  String get agentDetailEmpty => '暂无子代理';
+  String get agentDetailEmpty => '暂无子智能体';
 
   @override
   String get agentDetailStatusQueued => '排队中';
@@ -616,7 +616,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get timelineEmptyTitle => '还没有消息';
 
   @override
-  String get timelineEmptyMessage => '打开项目或开始会话后继续。';
+  String get timelineEmptyMessage => '打开项目或开始会话后即可开始。';
 
   @override
   String get timelineExternalLinkOpenFailed => '无法打开此链接。';
@@ -660,7 +660,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get timelineReasoningEmpty => '没有可展示的思考内容。';
 
   @override
-  String get timelineToolFallback => 'Tool';
+  String get timelineToolFallback => '工具';
 
   @override
   String get timelineToolGroupTitle => '工具活动';
@@ -691,24 +691,24 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String timelineSkillActivated(String name) {
-    return '已激活 Skill · $name';
+    return '已激活技能 · $name';
   }
 
   @override
   String timelineSkillAgentActivated(String name) {
-    return '代理激活 Skill · $name';
+    return '智能体已激活技能 · $name';
   }
 
   @override
-  String get timelineParentAgent => '主代理';
+  String get timelineParentAgent => '主智能体';
 
   @override
   String timelineSkillUserActivated(String name) {
-    return '用户激活 Skill · $name';
+    return '用户激活技能 · $name';
   }
 
   @override
-  String get timelineAgentFallback => 'Agent';
+  String get timelineAgentFallback => '智能体';
 
   @override
   String get timelineViewImageRead => '已读取图片';
@@ -779,16 +779,16 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get timelineAgentSubagent => '子代理';
+  String get timelineAgentSubagent => '子智能体';
 
   @override
-  String get timelineAgentSubagentMessage => '子代理消息';
+  String get timelineAgentSubagentMessage => '子智能体消息';
 
   @override
-  String get timelineAgentWaiting => '等待子代理';
+  String get timelineAgentWaiting => '等待子智能体';
 
   @override
-  String get timelineAgentClose => '关闭子代理';
+  String get timelineAgentClose => '关闭子智能体';
 
   @override
   String get timelineTodoListFallback => '待办列表';
@@ -815,7 +815,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get timelineRolledBack => '已从有效上下文回退';
 
   @override
-  String get interactionSubmitEmptyAnswersHint => '提交后未答问题保留空数组。';
+  String get interactionSubmitEmptyAnswersHint => '未作答的问题将留空提交。';
 
   @override
   String interactionAnsweredPendingHint(int answeredCount, int pendingCount) {
@@ -835,7 +835,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get interactionNeedInputTitle => '需要你的输入';
 
   @override
-  String get interactionAnswerHint => '糊来帮 会把这条回答作为当前问题的答案继续执行。';
+  String get interactionAnswerHint => '糊来帮会把这条回答作为当前问题的答案继续执行。';
 
   @override
   String get interactionAnswerButton => '回答';
@@ -845,12 +845,12 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String interactionQuestionProgress(int current, int total) {
-    return '问题 $current / $total';
+    return '问题 $current/$total';
   }
 
   @override
   String interactionAnsweredCount(int count) {
-    return '$count 已答';
+    return '已答 $count 题';
   }
 
   @override
@@ -862,23 +862,22 @@ class AppLocalizationsZh extends AppLocalizations {
   String get interactionQuestionFallback => '问题';
 
   @override
-  String get interactionOtherLabel => '其它';
+  String get interactionOtherLabel => '其他';
 
   @override
-  String get interactionSecretHint => '输入秘密答案';
+  String get interactionSecretHint => '输入敏感信息';
 
   @override
-  String get interactionTextHint => '输入你的回答...';
+  String get interactionTextHint => '输入你的回答…';
 
   @override
   String get interactionPermissionTitle => '需要权限';
 
   @override
-  String get interactionPermissionSubtitle => '糊来帮 想运行一个工具调用';
+  String get interactionPermissionSubtitle => '糊来帮希望调用以下工具';
 
   @override
-  String get interactionPermissionFooterHint =>
-      '工具将在当前工作目录执行；可在 composer 中调整权限模式。';
+  String get interactionPermissionFooterHint => '工具将在当前工作目录执行；可在输入区调整权限模式。';
 
   @override
   String get interactionReject => '拒绝';
@@ -916,19 +915,19 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get interactionPlanAdjust => '告诉 糊来帮 如何调整';
+  String get interactionPlanAdjust => '告诉糊来帮如何调整';
 
   @override
   String get interactionPlanConfirmAction => '确认并执行';
 
   @override
-  String get interactionPlanAdjustHint => '输入要调整的要求...';
+  String get interactionPlanAdjustHint => '输入要调整的要求…';
 
   @override
   String get interactionPlanAdjustSubmit => '提交修改';
 
   @override
-  String get settingsProvidersTitle => '服务';
+  String get settingsProvidersTitle => '模型服务商';
 
   @override
   String get settingsProvidersSubtitle => '模型服务、凭据、模型和用量';
@@ -937,25 +936,25 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsRefreshUsage => '刷新用量';
 
   @override
-  String get settingsAddProvider => '添加 provider';
+  String get settingsAddProvider => '添加模型服务商';
 
   @override
-  String get settingsSearchProviders => '搜索 providers';
+  String get settingsSearchProviders => '搜索模型服务商';
 
   @override
-  String get settingsNoProvidersMatchTitle => '没有匹配的 providers';
+  String get settingsNoProvidersMatchTitle => '没有匹配的模型服务商';
 
   @override
-  String get settingsNoProvidersMatchMessage => '清空搜索以查看所有已配置 providers。';
+  String get settingsNoProvidersMatchMessage => '清空搜索以查看所有已配置的模型服务商。';
 
   @override
-  String get settingsNoProvidersTitle => '没有 providers';
+  String get settingsNoProvidersTitle => '没有模型服务商';
 
   @override
-  String get settingsNoProvidersMessage => '添加 provider 后配置凭据和 models。';
+  String get settingsNoProvidersMessage => '添加模型服务商后可配置凭据和模型。';
 
   @override
-  String get settingsDefaultProvider => '默认 provider';
+  String get settingsDefaultProvider => '默认模型服务商';
 
   @override
   String get settingsSetAsDefaultProvider => '设为默认';
@@ -964,19 +963,19 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsOpenDetails => '打开详情';
 
   @override
-  String get settingsProviderActions => 'Provider 操作';
+  String get settingsProviderActions => '模型服务商操作';
 
   @override
-  String get settingsEditProvider => '编辑 provider';
+  String get settingsEditProvider => '编辑模型服务商';
 
   @override
-  String get settingsDeleteProvider => '删除 provider';
+  String get settingsDeleteProvider => '删除模型服务商';
 
   @override
-  String get settingsNoProviderSelected => '未选择 provider';
+  String get settingsNoProviderSelected => '未选择模型服务商';
 
   @override
-  String get settingsProviderTitle => 'Provider 信息';
+  String get settingsProviderTitle => '模型服务商信息';
 
   @override
   String get settingsProviderModelsTitle => '模型';
@@ -985,31 +984,31 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsProviderConnectionTitle => '连接';
 
   @override
-  String get settingsProviderDefaultModelsTitle => '默认 models';
+  String get settingsProviderDefaultModelsTitle => '默认模型';
 
   @override
-  String get settingsProviderCustomModelsTitle => '自定义 models';
+  String get settingsProviderCustomModelsTitle => '自定义模型';
 
   @override
-  String get settingsNewProvider => '新建 provider';
+  String get settingsNewProvider => '新建模型服务商';
 
   @override
-  String get settingsProviderKey => 'Provider key';
+  String get settingsProviderKey => '服务商标识';
 
   @override
-  String get settingsTemplate => 'Template';
+  String get settingsTemplate => '模板';
 
   @override
-  String get settingsCustomProvider => '自定义 Provider';
+  String get settingsCustomProvider => '自定义模型服务商';
 
   @override
-  String get settingsDefaultModel => 'Default model';
+  String get settingsDefaultModel => '默认模型';
 
   @override
-  String get settingsApiKey => 'API key';
+  String get settingsApiKey => 'API 密钥';
 
   @override
-  String get settingsApiKeyKeepCurrent => 'API key（留空以保留当前值）';
+  String get settingsApiKeyKeepCurrent => 'API 密钥（留空以保留当前值）';
 
   @override
   String get settingsConfigured => '已配置';
@@ -1018,19 +1017,19 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsMissing => '缺失';
 
   @override
-  String get settingsDisplayName => 'Display name';
+  String get settingsDisplayName => '显示名称';
 
   @override
-  String get settingsProtocolType => 'Protocol type';
+  String get settingsProtocolType => '协议类型';
 
   @override
-  String get settingsBaseUrl => 'Base URL';
+  String get settingsBaseUrl => '基础 URL';
 
   @override
-  String get settingsModelSlug => 'Model slug';
+  String get settingsModelSlug => '模型标识';
 
   @override
-  String get settingsReasoningEfforts => 'Reasoning efforts';
+  String get settingsReasoningEfforts => '思考强度';
 
   @override
   String get settingsEdit => '编辑';
@@ -1042,27 +1041,27 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsSave => '保存';
 
   @override
-  String get settingsAddModel => '添加 model';
+  String get settingsAddModel => '添加模型';
 
   @override
-  String get settingsRemoveModel => '移除 model';
+  String get settingsRemoveModel => '移除模型';
 
   @override
-  String get settingsNoCustomModels => '没有自定义 models';
+  String get settingsNoCustomModels => '没有自定义模型';
 
   @override
   String settingsBundledModels(int count) {
-    return '$count 个内置';
+    return '$count 个内置模型';
   }
 
   @override
-  String get settingsDefaultBadge => 'default';
+  String get settingsDefaultBadge => '默认';
 
   @override
-  String get settingsReadyBadge => 'ready';
+  String get settingsReadyBadge => '就绪';
 
   @override
-  String get settingsSetupBadge => 'setup';
+  String get settingsSetupBadge => '待配置';
 
   @override
   String get settingsUsageTitle => '用量';
@@ -1089,10 +1088,10 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get settingsUsageRefreshing => '正在刷新用量...';
+  String get settingsUsageRefreshing => '正在刷新用量…';
 
   @override
-  String get settingsUsageChecking => '正在检查用量...';
+  String get settingsUsageChecking => '正在检查用量…';
 
   @override
   String get settingsUsageCheckingShort => '正在检查用量';
@@ -1107,7 +1106,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsUsageNotSupported => '不支持用量查询';
 
   @override
-  String get settingsUsageMissingKey => '缺少 key';
+  String get settingsUsageMissingKey => '缺少密钥';
 
   @override
   String get settingsUsageFailed => '用量查询失败';
@@ -1116,7 +1115,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsUsageQueryFailed => '用量查询失败';
 
   @override
-  String get settingsUsageApiKeyMissing => '未配置 provider API key';
+  String get settingsUsageApiKeyMissing => '未配置模型服务商 API 密钥';
 
   @override
   String settingsUsageUnsupportedForProvider(String providerName) {
@@ -1136,10 +1135,10 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsUsageNoQuota => '没有返回额度详情。';
 
   @override
-  String get settingsUsageTools => 'Tools';
+  String get settingsUsageTools => '工具';
 
   @override
-  String get settingsUsageToken => 'Token 用量';
+  String get settingsUsageToken => '词元用量';
 
   @override
   String get settingsUsageSpend => '花费';
@@ -1179,7 +1178,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String settingsUsageReset(String time) {
-    return '$time 重置';
+    return '将于 $time 重置';
   }
 
   @override
@@ -1189,13 +1188,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsInstructionsSubtitle => '注入到每轮对话；停止输入后自动保存。';
 
   @override
-  String get settingsBaseInstructions => 'Base instructions';
+  String get settingsBaseInstructions => '基础指令';
 
   @override
-  String get settingsDeveloperInstructions => 'Developer instructions';
+  String get settingsDeveloperInstructions => '开发者指令';
 
   @override
-  String get settingsUserContext => 'User context';
+  String get settingsUserContext => '用户上下文';
 
   @override
   String get settingsInstructionHint => '在这里添加项目指导';
@@ -1204,63 +1203,62 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsSkillsTitle => '技能';
 
   @override
-  String get settingsSkillsSubtitle => '禁用过于嘈杂的 skills，或发现项目/用户/系统 skill 目录。';
+  String get settingsSkillsSubtitle => '禁用干扰较多的技能，或发现项目、用户与系统技能目录。';
 
   @override
   String get settingsDiscover => '发现';
 
   @override
-  String get settingsDiscovering => '发现中';
+  String get settingsDiscovering => '正在发现';
 
   @override
-  String get settingsFilterSkills => '过滤 skills';
+  String get settingsFilterSkills => '过滤技能';
 
   @override
-  String get settingsOpenProjectToDiscoverSkills => '打开项目以发现 skills';
+  String get settingsOpenProjectToDiscoverSkills => '打开项目以发现技能';
 
   @override
-  String get settingsNoSkillsMatchFilter => '没有匹配的 skills';
+  String get settingsNoSkillsMatchFilter => '没有匹配的技能';
 
   @override
-  String get settingsSkillsDiscoverySources =>
-      'Skills 会从当前工作区以及已配置的用户/系统来源中发现。';
+  String get settingsSkillsDiscoverySources => '技能会从当前工作区以及已配置的用户/系统来源中发现。';
 
   @override
-  String get settingsClearSearchOrDiscoverAgain => '清空搜索，或重新运行发现。';
+  String get settingsClearSearchOrDiscoverAgain => '清空搜索，或重新发现技能。';
 
   @override
-  String get settingsNoSkillsTitle => '没有找到 skills';
+  String get settingsNoSkillsTitle => '没有找到技能';
 
   @override
-  String get settingsNoSkillsMessage => '换个过滤条件，或发现当前项目的 skills。';
+  String get settingsNoSkillsMessage => '换个过滤条件，或重新发现技能。';
 
   @override
   String get settingsRoleExplorerDescription => '探索代码并收集上下文。';
 
   @override
-  String get settingsRolePlannerDescription => '起草计划并组织意图。';
+  String get settingsRolePlannerDescription => '拟定计划并梳理任务意图。';
 
   @override
-  String get settingsRoleExecutorDescription => '应用编辑并运行工具。';
+  String get settingsRoleExecutorDescription => '落实修改并运行工具。';
 
   @override
   String get settingsRoleWorktreeExecutorDescription =>
-      '在隔离的 Git worktree 中应用编辑并运行工具。';
+      '在隔离的 Git 工作树中落实修改并运行工具。';
 
   @override
   String get settingsRoleReviewerDescription => '审查结果并验证风险。';
 
   @override
-  String get settingsRoleFallbackDescription => 'Studio role';
+  String get settingsRoleFallbackDescription => '智能体角色';
 
   @override
-  String get settingsModelField => 'Model';
+  String get settingsModelField => '模型';
 
   @override
   String get settingsMcpTitle => 'MCP';
 
   @override
-  String get settingsMcpSubtitle => 'Model Context Protocol servers 和内联端点。';
+  String get settingsMcpSubtitle => 'MCP 服务器与内联端点。';
 
   @override
   String get settingsMcpRefresh => '刷新';
@@ -1272,29 +1270,29 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsMcpResetAll => '全部重置';
 
   @override
-  String get settingsMcpResetConfirmTitle => '重置全部 MCP server？';
+  String get settingsMcpResetConfirmTitle => '重置全部 MCP 服务器？';
 
   @override
   String get settingsMcpResetConfirmBody =>
-      '将重新构建所有已配置的 MCP 连接。活动 Turn 继续使用当前租约 generation。';
+      '将重新构建所有已配置的 MCP 连接；当前进行中的任务继续使用重置前的连接。';
 
   @override
   String get settingsMcpResetConfirmAction => '全部重置';
 
   @override
-  String get settingsEndpoint => 'Endpoint';
+  String get settingsEndpoint => '端点';
 
   @override
-  String get settingsMcpEmptyTitle => '没有 MCP servers';
+  String get settingsMcpEmptyTitle => '没有 MCP 服务器';
 
   @override
-  String get settingsMcpEmptyMessage => '已配置的 MCP servers 会显示在这里。';
+  String get settingsMcpEmptyMessage => '已配置的 MCP 服务器会显示在这里。';
 
   @override
   String get settingsLspTitle => '语言服务器';
 
   @override
-  String get settingsLspSubtitle => '显示 Project 最近一次语言服务器状态，并提供明确的生命周期命令。';
+  String get settingsLspSubtitle => '显示项目最近一次语言服务器状态，可刷新、探测、修复或重置。';
 
   @override
   String get settingsLspRefresh => '刷新';
@@ -1321,7 +1319,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsLspEmptyTitle => '没有语言服务器';
 
   @override
-  String get settingsLspEmptyMessage => '激活受支持的 Project 后会创建语言服务器 membership。';
+  String get settingsLspEmptyMessage => '打开受支持的项目后，系统会自动关联相应的语言服务器。';
 
   @override
   String get settingsSecurityTitle => '安全';
@@ -1344,27 +1342,25 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsGeneralTitle => '通用';
 
   @override
-  String get settingsGeneralSubtitle => '界面偏好保存到 Studio store。';
+  String get settingsGeneralSubtitle => '界面偏好保存到本地设置存储。';
 
   @override
-  String get settingsFollowActiveTurn => '跟随当前 turn';
+  String get settingsFollowActiveTurn => '跟随当前轮次';
 
   @override
-  String get settingsFollowActiveTurnSubtitle =>
-      '让新的 timeline 输出保持 pinned 到最新 turn。';
+  String get settingsFollowActiveTurnSubtitle => '让新的时间线输出始终停留在最新轮次。';
 
   @override
-  String get settingsCompactTimeline => 'Compact timeline';
+  String get settingsCompactTimeline => '紧凑时间线';
 
   @override
   String get settingsCompactTimelineSubtitle => '减少消息间距，适合更密集阅读。';
 
   @override
-  String get settingsWebSearchTitle => 'Web 搜索';
+  String get settingsWebSearchTitle => '网页搜索';
 
   @override
-  String get settingsWebSearchSubtitle =>
-      '通过符合条件的 OpenAI 账户执行搜索；修改从下一次 turn 起生效。';
+  String get settingsWebSearchSubtitle => '通过符合条件的 OpenAI 账户执行搜索；修改从下一轮次起生效。';
 
   @override
   String get settingsWebSearchConfiguredMode => '已配置模式';
@@ -1373,7 +1369,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsWebSearchEffectiveMode => '有效模式';
 
   @override
-  String get settingsWebSearchProvider => 'OpenAI Provider';
+  String get settingsWebSearchProvider => 'OpenAI 模型服务商';
 
   @override
   String get settingsWebSearchModel => '搜索模型';
@@ -1439,35 +1435,34 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsWebSearchMissingCredential => '缺少凭证';
 
   @override
-  String get settingsWebSearchUnsupportedProvider => 'Provider 不支持';
+  String get settingsWebSearchUnsupportedProvider => '模型服务商不支持';
 
   @override
   String get settingsWebSearchUnsupportedModel => '模型不支持';
 
   @override
   String get settingsWebSearchMissingCredentialReason =>
-      '没有源自 OpenAI preset 且凭证有效的 Provider，远程 Web 搜索已完全禁用。';
+      '没有从 OpenAI 预设创建且凭证有效的模型服务商，远程网页搜索已完全禁用。';
 
   @override
   String get settingsWebSearchUnsupportedProviderReason =>
-      '当前 Provider 未提供这一路 Web 搜索后端。';
+      '当前模型服务商未提供这一路网页搜索后端。';
 
   @override
-  String get settingsWebSearchUnsupportedModelReason =>
-      '当前路由无法暴露函数工具或 hosted Web 搜索。';
+  String get settingsWebSearchUnsupportedModelReason => '当前路由无法提供函数工具或托管网页搜索。';
 
   @override
   String get settingsNotAvailable => '不可用';
 
   @override
-  String get settingsSaveWebSearch => '保存 Web 搜索';
+  String get settingsSaveWebSearch => '保存网页搜索';
 
   @override
   String get settingsDeepSeekWebSearchTitle => 'DeepSeek 原生联网搜索';
 
   @override
   String get settingsDeepSeekWebSearchSubtitle =>
-      '允许当前符合条件的 DeepSeek Responses 模型联网搜索，并优先于 OpenAI 回退路径。';
+      '使用当前符合条件的 DeepSeek 接口执行联网搜索；当该接口不可用时，将回退到 OpenAI。';
 
   @override
   String get settingsDeepSeekWebSearchConfigured => '已配置';
@@ -1479,7 +1474,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsDeepSeekWebSearchEnabled => '已启用';
 
   @override
-  String get settingsStudioUpdateTitle => '糊来帮 更新';
+  String get settingsStudioUpdateTitle => '糊来帮更新';
 
   @override
   String settingsStudioUpdateDisabled(String version) {
@@ -1527,7 +1522,7 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get settingsStudioUpdateBusy => '请先等待当前 turn 或 task 结束，再安装更新。';
+  String get settingsStudioUpdateBusy => '请先等待当前轮次或任务结束，再安装更新。';
 
   @override
   String get settingsStudioUpdateCheck => '检查更新';
@@ -1539,7 +1534,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsStudioUpdateReleaseNotes => '发行说明';
 
   @override
-  String get timelineWebSearchTitle => 'Web 搜索';
+  String get timelineWebSearchTitle => '网页搜索';
 
   @override
   String get timelineWebSearchSearching => '正在搜索网页';
@@ -1603,14 +1598,14 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get settingsAgentsTitle => 'Agent Profiles';
+  String get settingsAgentsTitle => '智能体配置';
 
   @override
   String get settingsAgentsSubtitle =>
-      '系统 Profile 的用途与工作区模式固定；可统一配置启用状态和模型。Directory 只约束 糊来帮 内置文件写工具，shell、Git、MCP 可绕过。';
+      '系统智能体的用途与工作区模式固定；其启用状态和模型路由可统一配置。目录模式只约束项目内由内置工具执行的文件写入；命令行操作、Git 和 MCP 仍可能绕过此限制。';
 
   @override
-  String get settingsAgentsAddUserProfile => '添加用户 Profile';
+  String get settingsAgentsAddUserProfile => '添加用户智能体配置';
 
   @override
   String get settingsAgentsEditTooltip => '编辑';
@@ -1620,16 +1615,16 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String settingsWorktreeBase(String commit) {
-    return 'base $commit';
+    return '基线提交 $commit';
   }
 
   @override
   String settingsWorktreeHead(String commit) {
-    return 'head $commit';
+    return '当前提交 $commit';
   }
 
   @override
-  String get settingsWorktreeHeadUnavailable => 'head 暂不可用';
+  String get settingsWorktreeHeadUnavailable => '当前提交暂不可用';
 
   @override
   String settingsWorktreeChangedFiles(String files) {
@@ -1637,16 +1632,16 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get settingsWorktreeCleanup => '显式清理 worktree 与分支';
+  String get settingsWorktreeCleanup => '显式清理工作树与分支';
 
   @override
-  String get settingsAgentProfileAddTitle => '添加用户 Agent Profile';
+  String get settingsAgentProfileAddTitle => '添加用户智能体配置';
 
   @override
-  String get settingsAgentProfileEditTitle => '编辑用户 Agent Profile';
+  String get settingsAgentProfileEditTitle => '编辑用户智能体配置';
 
   @override
-  String get settingsAgentProfileIdField => 'Agent ID';
+  String get settingsAgentProfileIdField => '智能体 ID';
 
   @override
   String get settingsAgentProfileDisplayNameField => '显示名称';
@@ -1661,7 +1656,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsAgentProfileInstructionsField => '系统指令';
 
   @override
-  String get settingsAgentProfileProviderField => 'Provider';
+  String get settingsAgentProfileProviderField => '模型服务商';
 
   @override
   String get settingsAgentProfileEffortDefault => '使用模型默认值';
@@ -1676,18 +1671,18 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsAgentWorkspaceModeDirectory => '目录';
 
   @override
-  String get settingsAgentWorkspaceModeWorktree => 'Worktree';
+  String get settingsAgentWorkspaceModeWorktree => '工作树';
 
   @override
   String get settingsAgentProfileWorkspaceDirectoryHint =>
-      'Directory 是合作式文件工具边界，不是 OS 沙箱；shell、Git 和 MCP 可能绕过。';
+      '目录模式只约束项目内由内置工具执行的文件写入，并非操作系统级沙箱；命令行操作、Git 和 MCP 仍可能绕过此限制。';
 
   @override
   String get settingsAgentProfileEnabledTitle => '启用';
 
   @override
   String get settingsAgentProfileEnabledSubtitle =>
-      '禁用后仍保留 TOML，但不会出现在 Agent 工具目录。';
+      '禁用后仍保留 TOML 文件，但不会出现在智能体工具目录中。';
 
   @override
   String get settingsAgentProfileSave => '原子保存 TOML';
@@ -1708,17 +1703,16 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsCapabilitySourceExplicit => '显式覆盖';
 
   @override
-  String get settingsHostedWebSearchField => 'Hosted Web Search';
+  String get settingsHostedWebSearchField => '托管网页搜索';
 
   @override
-  String get settingsHostedWebSearchDialectField => 'Hosted Web Search 方言';
+  String get settingsHostedWebSearchDialectField => '托管网页搜索方言';
 
   @override
-  String get settingsStandaloneWebSearchField => 'Standalone Web Search';
+  String get settingsStandaloneWebSearchField => '独立网页搜索';
 
   @override
-  String get settingsProgrammaticToolCallingField =>
-      'Programmatic Tool Calling';
+  String get settingsProgrammaticToolCallingField => '程序化工具调用';
 
   @override
   String get settingsCapabilityEnabled => '已启用';
@@ -1736,7 +1730,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsSupportedConnectionsLabel => '支持的连接';
 
   @override
-  String get settingsAgentRoutesTitle => '系统 Agent 模型路由';
+  String get settingsAgentRoutesTitle => '系统智能体模型路由';
 
   @override
   String get settingsStateChecking => '检查中';
@@ -1766,28 +1760,28 @@ class AppLocalizationsZh extends AppLocalizations {
   String get roleExecutor => '执行者';
 
   @override
-  String get roleWorktreeExecutor => 'Worktree 执行者';
+  String get roleWorktreeExecutor => '工作树执行者';
 
   @override
   String get roleReviewer => '审查者';
 
   @override
-  String get roleEmpty => '代理';
+  String get roleEmpty => '智能体';
 
   @override
-  String get settingsPricingEnabled => '计价';
+  String get settingsPricingEnabled => '估算词元费用';
 
   @override
-  String get settingsPricingHelp => '仅控制应用内费用估算，Token 与缓存统计照常。套餐默认关闭。';
+  String get settingsPricingHelp => '仅控制应用内费用估算，词元与缓存统计照常。费用估算默认关闭。';
 
   @override
   String get settingsModelAdvanced => '模型可选设置';
 
   @override
-  String get settingsContextBudget => '上下文预算（Token）';
+  String get settingsContextBudget => '上下文预算（词元）';
 
   @override
-  String get settingsOutputBudget => '最大输出（Token）';
+  String get settingsOutputBudget => '最大输出（词元）';
 
   @override
   String get settingsPriceInput => '输入';
@@ -1802,13 +1796,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsPriceCacheWrite => '缓存写入';
 
   @override
-  String get statusReportedUsageOnly => '已报告';
+  String get statusReportedUsageOnly => '仅显示已报告用量';
 
   @override
-  String get settingsSystemAgentsGroup => '系统代理';
+  String get settingsSystemAgentsGroup => '系统智能体';
 
   @override
-  String get settingsUserAgentsGroup => '用户代理';
+  String get settingsUserAgentsGroup => '用户智能体';
 
   @override
   String get settingsAppearanceGroup => '界面与会话';
@@ -1820,7 +1814,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsUpdatesGroup => '应用更新';
 
   @override
-  String get settingsModelsGroup => '模型与代理';
+  String get settingsModelsGroup => '模型与智能体';
 
   @override
   String get settingsExtensionsGroup => '工具与服务';
@@ -1829,7 +1823,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsPreferencesGroup => '偏好设置';
 
   @override
-  String get settingsFilterAgents => '筛选代理';
+  String get settingsFilterAgents => '筛选智能体';
 
   @override
   String get settingsPermissionRequestDescription => '工具操作需要授权时请求确认。';
@@ -1847,7 +1841,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get timelineToolOutput => '输出';
 
   @override
-  String get costPurposeMain => '主循环';
+  String get costPurposeMain => '主对话';
 
   @override
   String get costPurposeSummary => '摘要';
@@ -1953,4 +1947,154 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get sidebarRetry => '重试';
+
+  @override
+  String get settingsSshRemoteHelper => '远程助手';
+
+  @override
+  String statusThroughputValue(String value) {
+    return '$value 词元/秒';
+  }
+
+  @override
+  String get statusThroughputUnavailable => '—';
+
+  @override
+  String get workflowStatePlanning => '规划';
+
+  @override
+  String get workflowStateEditingDocuments => '编辑文档';
+
+  @override
+  String get workflowStateWorking => '实施';
+
+  @override
+  String get workflowStateIntegrating => '集成';
+
+  @override
+  String get workflowStateReviewing => '审查';
+
+  @override
+  String get workflowStateCompleted => '已完成';
+
+  @override
+  String get workflowStateStopped => '已停止';
+
+  @override
+  String get workflowModeSimple => '简洁';
+
+  @override
+  String get workflowModeTask => '任务';
+
+  @override
+  String get attachmentFallback => '附件';
+
+  @override
+  String get timelineAgentTimedOut => '已超时';
+
+  @override
+  String timelineToolUnknownStatus(String name, String status) {
+    return '$name · $status';
+  }
+
+  @override
+  String get timelineTodoStatusUnknown => '未知';
+
+  @override
+  String get settingsApiKeyOptional => 'API 密钥（可选）';
+
+  @override
+  String get modelProtocolResponses => 'Responses（响应式接口）';
+
+  @override
+  String get modelProtocolChatCompletions => 'Chat Completions（对话补全）';
+
+  @override
+  String get modelConnectionWebSocket => 'WS（WebSocket 长连接）';
+
+  @override
+  String get modelConnectionHttp => 'HTTP';
+
+  @override
+  String get settingsProtocolChatCompletionsHttp =>
+      'Chat Completions（对话补全，HTTP）';
+
+  @override
+  String get settingsProtocolResponsesHttp => 'Responses（响应式接口，HTTP）';
+
+  @override
+  String settingsAgentRouteUnavailable(String route) {
+    return '$route（不可用）';
+  }
+
+  @override
+  String settingsPriceTierUnit(String currency) {
+    return '每 100 万词元 $currency';
+  }
+
+  @override
+  String get threadStatusIdle => '空闲';
+
+  @override
+  String get threadStatusCancelling => '正在取消';
+
+  @override
+  String get threadStatusClosed => '已关闭';
+
+  @override
+  String get toolStatusAwaitingApproval => '等待授权';
+
+  @override
+  String get toolStatusFailed => '失败';
+
+  @override
+  String get toolStatusDenied => '已拒绝';
+
+  @override
+  String get toolStatusCancelled => '已取消';
+
+  @override
+  String get toolStatusCancelling => '正在取消';
+
+  @override
+  String get settingsProviderCatalogUnavailable => '无法获取模型服务商目录。';
+
+  @override
+  String get settingsProviderPresetUnavailable => '无法获取模型服务商预设。';
+
+  @override
+  String get settingsProviderMissingCredential => '缺少凭据';
+
+  @override
+  String get settingsSshStateDisconnected => '未连接';
+
+  @override
+  String get settingsSshStateConnecting => '连接中';
+
+  @override
+  String get settingsSshStateWaitingForInput => '等待输入';
+
+  @override
+  String get settingsSshStateReconnecting => '重新连接中';
+
+  @override
+  String get settingsSshStateFailed => '连接失败';
+
+  @override
+  String get settingsWorktreeStatePrepared => '已准备';
+
+  @override
+  String get settingsWorktreeStateActive => '使用中';
+
+  @override
+  String get settingsWorktreeStatePreserved => '已保留';
+
+  @override
+  String get settingsWorktreeStateCleanupRequested => '已请求清理';
+
+  @override
+  String get settingsWorktreeStateCleaned => '已清理';
+
+  @override
+  String get settingsWorktreeDirty => '有改动';
 }

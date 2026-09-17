@@ -1122,6 +1122,107 @@ void registerShellSettingsTests() {
     expect(find.text('- t/s'), findsOneWidget);
   });
 
+  testWidgets('zh status bar localizes the throughput unit', (tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final base = _rootAndChildState();
+    final rootWorkspace = base.workspacesByThread['session-1']!;
+    final state = base.copyWith(
+      workspacesByThread: {
+        ...base.workspacesByThread,
+        'session-1': rootWorkspace.copyWith(
+          runtime: rootWorkspace.runtime.copyWith(
+            turnCompletionTokens: 150,
+            turnDecodeMillis: 1000,
+          ),
+        ),
+      },
+    );
+    final api = _FakeStudioApi(state);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(
+          locale: const Locale.fromSubtags(
+            languageCode: 'zh',
+            scriptCode: 'Hans',
+          ),
+          home: const StudioShell(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 中文展示“词元/秒”，不出现未解释的 t/s。
+    expect(find.text('150 词元/秒'), findsOneWidget);
+    expect(find.text('150 t/s'), findsNothing);
+  });
+
+  testWidgets('zh provider model readout localizes the price tier unit', (
+    tester,
+  ) async {
+    _configureSettingsTestView(tester);
+    final base = _withSettingsFixture(
+      _stateWithPlannerModels(),
+      providers: const [
+        ProviderSettingsView(
+          id: 'deepseek',
+          templateKind: 'custom-test',
+          name: 'DeepSeek',
+          baseUrl: 'https://api.deepseek.com',
+          defaultModel: 'priced-model',
+          models: [],
+          customModels: [
+            ProviderModelView(
+              slug: 'priced-model',
+              displayName: 'Priced Model',
+              reasoningEfforts: [],
+              currency: 'CNY',
+              priceTiers: [
+                ProviderPriceTierView(
+                  label: 'Standard',
+                  input: 0.14,
+                  output: 0.28,
+                ),
+              ],
+            ),
+          ],
+          status: 'ready',
+          usageLabel: '',
+        ),
+      ],
+    );
+    final api = _FakeStudioApi(
+      base.copyWith(providerCatalog: _testProviderCatalog),
+      providerCatalog: _testProviderCatalog,
+    );
+    await _pumpSettingsPage(
+      tester,
+      api,
+      locale: const Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
+    );
+    await tester.tap(find.byKey(StudioDriverKeys.providerRow('deepseek')));
+    await tester.pumpAndSettle();
+
+    // 价格单位本地化为“每 100 万词元”，不出现未解释的 /1M。
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is Tooltip && (widget.message ?? '').contains('每 100 万词元'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.byWidgetPredicate(
+        (widget) => widget is Tooltip && (widget.message ?? '').contains('/1M'),
+      ),
+      findsNothing,
+    );
+  });
+
   testWidgets('status bar omits turn and interaction activity readouts', (
     tester,
   ) async {
@@ -1281,7 +1382,7 @@ void registerShellSettingsTests() {
       find.byKey(const ValueKey('workflow-state-planning')),
       findsOneWidget,
     );
-    expect(find.text('planning'), findsOneWidget);
+    expect(find.text('Planning'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -1321,15 +1422,15 @@ void registerShellSettingsTests() {
 
     expect(find.textContaining('空闲 ·'), findsOneWidget);
     expect(find.text('任务'), findsWidgets);
-    expect(find.text('完全'), findsOneWidget);
+    expect(find.text('完全访问'), findsOneWidget);
     expect(find.text('Plan'), findsNothing);
     expect(find.text('Full'), findsNothing);
 
     await tester.tap(find.byTooltip('权限模式'));
     await tester.pumpAndSettle();
-    expect(find.text('请求'), findsOneWidget);
-    expect(find.text('审查'), findsOneWidget);
-    expect(find.text('完全'), findsWidgets);
+    expect(find.text('请求授权'), findsOneWidget);
+    expect(find.text('自动审查'), findsOneWidget);
+    expect(find.text('完全访问'), findsWidgets);
 
     await tester.pumpWidget(
       ProviderScope(
@@ -1654,6 +1755,35 @@ void registerShellSettingsTests() {
     await tester.tap(find.text('Open this directory'));
     await tester.pumpAndSettle();
     expect(api.openedRemoteProject, (serverId: server.id, path: '/workspace'));
+  });
+
+  testWidgets('zh SSH ready row localizes the remote helper label', (
+    tester,
+  ) async {
+    _configureSettingsTestView(tester);
+    const server = SshServer(
+      id: 'ssh-arm',
+      name: 'ARM dev',
+      host: '192.168.100.12',
+      port: 22,
+      username: 'root',
+      authKind: SshAuthKind.agentOrKey,
+    );
+    final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
+    await _pumpSettingsPage(
+      tester,
+      api,
+      locale: const Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
+    );
+
+    await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(StudioDriverKeys.sshTest(server.id)));
+    await tester.pumpAndSettle();
+
+    // helper 固定词本地化为“远程助手”，architecture/helperVersion 保持原值。
+    expect(find.text('aarch64 · 远程助手 0.1.0'), findsOneWidget);
+    expect(find.text('aarch64 · helper 0.1.0'), findsNothing);
   });
 
   testWidgets('SSH server dialog validates and saves a complete profile', (
@@ -3483,6 +3613,62 @@ void registerShellSettingsTests() {
     },
   );
 
+  testWidgets(
+    'provider editor keeps an unresolvable canonical default model on save',
+    (tester) async {
+      _configureSettingsTestView(tester);
+      final base = _withSettingsFixture(
+        _stateWithPlannerModels(),
+        providers: const [
+          ProviderSettingsView(
+            id: 'deepseek',
+            templateKind: 'deepseek',
+            name: 'DeepSeek',
+            baseUrl: 'https://api.deepseek.com',
+            defaultModel: 'ghost-model',
+            models: [
+              ProviderModelView(
+                slug: 'deepseek-flash',
+                displayName: 'DeepSeek V4.1 Flash',
+                reasoningEfforts: [],
+              ),
+            ],
+            status: 'ready',
+            usageLabel: '',
+          ),
+        ],
+      );
+      final api = _FakeStudioApi(
+        base.copyWith(providerCatalog: _testProviderCatalog),
+        providerCatalog: _testProviderCatalog,
+      );
+      await _pumpSettingsPage(tester, api);
+      await tester.tap(find.byKey(StudioDriverKeys.providerRow('deepseek')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(StudioDriverKeys.providerEdit));
+      await tester.pumpAndSettle();
+
+      // canonical default model 不可解析：显示原 slug 并标注 unavailable，
+      // 不回退到 models.first。
+      expect(find.text('ghost-model (unavailable)'), findsOneWidget);
+
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Display name'),
+        'Renamed',
+      );
+      await tester.tap(find.byKey(StudioDriverKeys.providerSave));
+      await tester.pumpAndSettle();
+
+      final providers =
+          api.savedProviderSettings?['providers'] as List<Object?>;
+      final saved = providers.cast<Map<String, Object?>>().singleWhere(
+        (item) => item['id'] == 'deepseek',
+      );
+      expect(saved['name'], 'Renamed');
+      expect(saved['defaultModel'], 'ghost-model');
+    },
+  );
+
   testWidgets('web search settings show gating and save typed values', (
     tester,
   ) async {
@@ -3549,6 +3735,39 @@ void registerShellSettingsTests() {
     expect(api.savedDeepSeekWebSearchSettings?.enabled, isFalse);
   });
 
+  testWidgets('web search shows unknown runtime values instead of guessing', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final api = _FakeStudioApi(
+      _withSettingsFixture(
+        _stateWithPlannerModels(),
+        webSearch: const WebSearchSettingsView(
+          configuredMode: 'turbo',
+          effectiveMode: 'turbo',
+          availability: 'providerDegraded',
+          contextSize: 'extreme',
+        ),
+      ),
+    );
+    await _pumpSettingsPage(tester, api);
+    await tester.tap(find.text('General'));
+    await tester.pumpAndSettle();
+
+    // 未知 mode / context size / availability / reason 展示原始值，
+    // 不得分别伪装成 cached / medium / missing credential。
+    expect(find.text('turbo'), findsWidgets);
+    expect(find.text('extreme'), findsWidgets);
+    expect(find.text('providerDegraded'), findsWidgets);
+    expect(find.text('Cached'), findsNothing);
+    expect(find.text('Medium'), findsNothing);
+    expect(find.text('Missing credential'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'zh Hans locale localizes shell while config names pass through',
     (tester) async {
@@ -3572,8 +3791,8 @@ void registerShellSettingsTests() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('服务'), findsWidgets);
-      expect(find.text('添加 provider'), findsOneWidget);
+      expect(find.text('模型服务商'), findsWidgets);
+      expect(find.text('添加模型服务商'), findsOneWidget);
       expect(find.text('DeepSeek'), findsOneWidget);
       await tester.tap(find.byKey(StudioDriverKeys.providerRow('deepseek')));
       await tester.pumpAndSettle();
@@ -3597,9 +3816,45 @@ void registerShellSettingsTests() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('描述你的需求...'), findsOneWidget);
+      expect(find.text('描述你的需求…'), findsOneWidget);
       expect(find.text('deepseek-flash'), findsOneWidget);
       expect(find.text('high'), findsOneWidget);
+    },
+  );
+  testWidgets(
+    'zh provider editor localizes the key label instead of the catalog credential label',
+    (tester) async {
+      _configureSettingsTestView(tester);
+      final api = _FakeStudioApi(
+        _stateWithPlannerModels(),
+        providerCatalog: _testProviderCatalog,
+      );
+      await _pumpSettingsPage(
+        tester,
+        api,
+        locale: const Locale.fromSubtags(
+          languageCode: 'zh',
+          scriptCode: 'Hans',
+        ),
+      );
+
+      await tester.tap(find.byKey(StudioDriverKeys.providerAdd));
+      await tester.pumpAndSettle();
+
+      // 默认预设（DeepSeek）需要凭据：展示本地化的必填标签，而不是
+      // catalog 原始值 "API Key"。
+      expect(find.text('API 密钥'), findsOneWidget);
+      expect(find.text('API Key'), findsNothing);
+
+      await tester.tap(find.byKey(StudioDriverKeys.providerPreset));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('OpenAI API 兼容').last);
+      await tester.pumpAndSettle();
+
+      // 可选凭据：使用专用本地化标签，而不是 catalog 原始值
+      // "API Key (optional)"。
+      expect(find.text('API 密钥（可选）'), findsOneWidget);
+      expect(find.text('API Key (optional)'), findsNothing);
     },
   );
   testWidgets(
@@ -3650,8 +3905,9 @@ void registerShellSettingsTests() {
       expect(_dialogText('Enabled'), findsOneWidget);
       expect(
         _dialogText(
-          'Directory is a cooperative file-tool boundary, not an OS '
-          'sandbox; shell, Git, and MCP can bypass it.',
+          'Directory mode limits built-in file writes to the project only; '
+          'it is not an OS sandbox, and shell, Git, and MCP can still '
+          'bypass it.',
         ),
         findsOneWidget,
       );
@@ -3813,14 +4069,14 @@ void registerShellSettingsTests() {
         ),
       );
 
-      await tester.tap(find.text('代理'));
+      await tester.tap(find.text('智能体'));
       await tester.pumpAndSettle();
 
       const zhCardCopy = <(String, String, String)>[
         ('explorer', '探索者', '探索代码并收集上下文'),
-        ('planner', '计划者', '起草计划并组织意图'),
-        ('executor', '执行者', '应用编辑并运行工具'),
-        ('worktree_executor', 'Worktree 执行者', '在隔离的 Git worktree 中应用编辑并运行工具'),
+        ('planner', '计划者', '拟定计划并梳理任务意图'),
+        ('executor', '执行者', '落实修改并运行工具'),
+        ('worktree_executor', '工作树执行者', '在隔离的 Git 工作树中落实修改并运行工具'),
         ('reviewer', '审查者', '审查结果并验证风险'),
       ];
       const runtimeChineseDescriptions = [
@@ -3973,29 +4229,29 @@ void registerShellSettingsTests() {
       locale: const Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
     );
 
-    await tester.tap(find.text('代理'));
+    await tester.tap(find.text('智能体'));
     await tester.pumpAndSettle();
-    expect(find.text('Agent Profiles'), findsOneWidget);
-    expect(find.text('添加用户 Profile'), findsOneWidget);
+    expect(find.text('智能体配置'), findsOneWidget);
+    expect(find.text('添加用户智能体配置'), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey('agent-profile-add')));
     await tester.pumpAndSettle();
-    expect(_dialogText('添加用户 Agent Profile'), findsOneWidget);
-    expect(_dialogText('Agent ID'), findsOneWidget);
+    expect(_dialogText('添加用户智能体配置'), findsOneWidget);
+    expect(_dialogText('智能体 ID'), findsOneWidget);
     expect(_dialogText('显示名称'), findsOneWidget);
     expect(_dialogText('介绍'), findsOneWidget);
     expect(_dialogText('适用任务'), findsOneWidget);
     expect(_dialogText('系统指令'), findsOneWidget);
-    expect(_dialogText('Provider'), findsOneWidget);
-    expect(_dialogText('Model'), findsOneWidget);
-    expect(_dialogText('思考等级'), findsOneWidget);
+    expect(_dialogText('模型服务商'), findsOneWidget);
+    expect(_dialogText('模型'), findsOneWidget);
+    expect(_dialogText('思考强度'), findsOneWidget);
     expect(_dialogText('工作区模式'), findsOneWidget);
     expect(
-      _dialogText('Directory 是合作式文件工具边界，不是 OS 沙箱；shell、Git 和 MCP 可能绕过。'),
+      _dialogText('目录模式只约束项目内由内置工具执行的文件写入，并非操作系统级沙箱；命令行操作、Git 和 MCP 仍可能绕过此限制。'),
       findsOneWidget,
     );
     expect(_dialogText('启用'), findsOneWidget);
-    expect(_dialogText('禁用后仍保留 TOML，但不会出现在 Agent 工具目录。'), findsOneWidget);
+    expect(_dialogText('禁用后仍保留 TOML 文件，但不会出现在智能体工具目录中。'), findsOneWidget);
     expect(_dialogText('取消'), findsOneWidget);
     expect(_dialogText('原子保存 TOML'), findsOneWidget);
 
@@ -4015,6 +4271,45 @@ void registerShellSettingsTests() {
     expect(find.byKey(const ValueKey('agent-profile-save')), findsNothing);
   });
 
+  testWidgets(
+    'zh agent route selector localizes its empty default instead of showing default',
+    (tester) async {
+      _configureSettingsTestView(tester);
+      final api = _FakeStudioApi(
+        _withSettingsFixture(
+          _stateWithPlannerModels(),
+          providers: const [],
+          roles: const [],
+        ),
+      );
+      await _pumpSettingsPage(
+        tester,
+        api,
+        locale: const Locale.fromSubtags(
+          languageCode: 'zh',
+          scriptCode: 'Hans',
+        ),
+      );
+
+      await tester.tap(find.text('智能体'));
+      await tester.pumpAndSettle();
+
+      final modelSelector = find.byKey(
+        StudioDriverKeys.settingsRoleModel('explorer'),
+      );
+      await tester.scrollUntilVisible(
+        modelSelector,
+        300,
+        scrollable: _settingsPaneScrollable(),
+      );
+      expect(
+        find.descendant(of: modelSelector, matching: find.text('默认模型')),
+        findsOneWidget,
+      );
+      expect(find.text('default'), findsNothing);
+    },
+  );
+
   testWidgets('zh Hans recovery card keeps canonical worktree data', (
     tester,
   ) async {
@@ -4030,18 +4325,18 @@ void registerShellSettingsTests() {
       locale: const Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
     );
 
-    await tester.tap(find.text('代理'));
+    await tester.tap(find.text('智能体'));
     await tester.pumpAndSettle();
     expect(find.text('恢复'), findsOneWidget);
     expect(find.text('pure-agent-child-1'), findsOneWidget);
-    expect(find.text('preserved · dirty'), findsOneWidget);
-    expect(find.textContaining('base base-commit'), findsOneWidget);
+    expect(find.text('已保留 · 有改动'), findsOneWidget);
+    expect(find.textContaining('基线提交 base-commit'), findsOneWidget);
     expect(
       find.textContaining('/repo/.anywork/worktrees/thread-1/child-1'),
       findsOneWidget,
     );
     expect(find.text('变更文件：src/agent.rs'), findsOneWidget);
-    expect(find.text('显式清理 worktree 与分支'), findsOneWidget);
+    expect(find.text('显式清理工作树与分支'), findsOneWidget);
   });
 
   testWidgets('en agents model selector localizes modality labels', (
@@ -4106,7 +4401,7 @@ void registerShellSettingsTests() {
       locale: const Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
     );
 
-    await tester.tap(find.text('代理'));
+    await tester.tap(find.text('智能体'));
     await tester.pumpAndSettle();
 
     final selector = StudioDriverKeys.settingsRoleModel('executor');
@@ -4119,7 +4414,7 @@ void registerShellSettingsTests() {
       find.descendant(
         of: find.byKey(selector),
         matching: find.text(
-          'DeepSeek / DeepSeek V4.1 Flash · 文本/视觉 · Responses · HTTP',
+          'DeepSeek / DeepSeek V4.1 Flash · 文本/视觉 · Responses（响应式接口） · HTTP',
         ),
       ),
       findsOneWidget,
@@ -4139,7 +4434,7 @@ void registerShellSettingsTests() {
           ),
         ),
         matching: find.text(
-          'DeepSeek / DeepSeek V4.1 Flash · 文本/视觉 · Responses · HTTP',
+          'DeepSeek / DeepSeek V4.1 Flash · 文本/视觉 · Responses（响应式接口） · HTTP',
         ),
       ),
       findsOneWidget,
@@ -4201,12 +4496,12 @@ void registerShellSettingsTests() {
         ),
       );
 
-      await tester.tap(find.text('代理'));
+      await tester.tap(find.text('智能体'));
       await tester.pumpAndSettle();
 
       await tester.tap(find.byKey(const ValueKey('agent-profile-add')));
       await tester.pumpAndSettle();
-      expect(_dialogText('添加用户 Agent Profile'), findsOneWidget);
+      expect(_dialogText('添加用户智能体配置'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('agent-profile-save')));
       await tester.pumpAndSettle();
       expect(_dialogText('必填'), findsNWidgets(5));
@@ -4220,9 +4515,115 @@ void registerShellSettingsTests() {
       await _dragUntilBuilt(tester, editButton);
       await tester.tap(editButton);
       await tester.pumpAndSettle();
-      expect(_dialogText('编辑用户 Agent Profile'), findsOneWidget);
+      expect(_dialogText('编辑用户智能体配置'), findsOneWidget);
       await tester.tap(_dialogText('取消'));
       await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets(
+    'editing a user profile keeps an unresolvable canonical route on save',
+    (tester) async {
+      _configureSettingsTestView(tester);
+      final api = _FakeStudioApi(_stateWithPlannerModels())
+        ..userAgentProfiles = [_danglingUserAgentProfile];
+      await _pumpSettingsPage(tester, api);
+
+      await tester.tap(find.text('Agents'));
+      await tester.pumpAndSettle();
+
+      final editButton = find.byKey(
+        const ValueKey('agent-profile-edit-user-ghost'),
+      );
+      await _dragUntilBuilt(tester, editButton);
+      await tester.tap(editButton);
+      await tester.pumpAndSettle();
+
+      // canonical provider/model 不可解析：标记 unavailable，而不是改成
+      // options.first 或模型默认 effort。
+      expect(_dialogText('ghost-provider (unavailable)'), findsOneWidget);
+      expect(_dialogText('ghost-model (unavailable)'), findsOneWidget);
+
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Description'),
+        'Updated description',
+      );
+      await tester.tap(find.byKey(const ValueKey('agent-profile-save')));
+      await tester.pumpAndSettle();
+
+      final saved = api.savedUserAgentProfileDraft!;
+      expect(saved.description, 'Updated description');
+      expect(saved.providerId, 'ghost-provider');
+      expect(saved.model, 'ghost-model');
+      expect(saved.effort, 'high');
+    },
+  );
+
+  testWidgets(
+    'zh system agent route shows an unresolvable canonical route as unavailable',
+    (tester) async {
+      _configureSettingsTestView(tester);
+      final api = _FakeStudioApi(
+        _withSettingsFixture(
+          _stateWithPlannerModels(),
+          roles: const [
+            RoleSettingsView(
+              key: 'planner',
+              providerId: 'ghost',
+              model: 'ghost-model',
+              effort: 'high',
+            ),
+          ],
+        ),
+      );
+      await _pumpSettingsPage(
+        tester,
+        api,
+        locale: const Locale.fromSubtags(
+          languageCode: 'zh',
+          scriptCode: 'Hans',
+        ),
+      );
+
+      await tester.tap(find.text('智能体'));
+      await tester.pumpAndSettle();
+
+      final modelSelector = find.byKey(
+        StudioDriverKeys.settingsRoleModel('planner'),
+      );
+      await tester.scrollUntilVisible(
+        modelSelector,
+        300,
+        scrollable: _settingsPaneScrollable(),
+      );
+      expect(
+        find.descendant(
+          of: modelSelector,
+          matching: find.text('ghost / ghost-model（不可用）'),
+        ),
+        findsOneWidget,
+      );
+      // 不得显示 options.first（deepseek）。
+      expect(
+        find.descendant(
+          of: modelSelector,
+          matching: find.textContaining('DeepSeek'),
+        ),
+        findsNothing,
+      );
+      // 未知模型无法提供 effort：控件不可用，不会改写 provider/model。
+      expect(
+        tester
+            .widget<InputDecorator>(
+              find.descendant(
+                of: find.byKey(StudioDriverKeys.settingsRoleEffort('planner')),
+                matching: find.byType(InputDecorator),
+              ),
+            )
+            .decoration
+            .enabled,
+        isFalse,
+      );
     },
   );
 
@@ -4268,12 +4669,12 @@ void registerShellSettingsTests() {
         ),
       );
 
-      await tester.tap(find.text('代理'));
+      await tester.tap(find.text('智能体'));
       await tester.pumpAndSettle();
       expect(find.text('恢复'), findsOneWidget);
       expect(find.text('pure-agent-child-2'), findsOneWidget);
-      expect(find.textContaining('base base-commit'), findsOneWidget);
-      expect(find.textContaining('head 暂不可用'), findsOneWidget);
+      expect(find.textContaining('基线提交 base-commit'), findsOneWidget);
+      expect(find.textContaining('当前提交暂不可用'), findsOneWidget);
       expect(find.textContaining('变更文件'), findsNothing);
     },
   );
@@ -4972,6 +5373,25 @@ const _userAgentProfile = AgentProfileView(
   source: 'user-toml',
   revision: 'user-v1',
   contentHash: 'user-helper-hash',
+  system: false,
+  enabled: true,
+  workspaceMode: AgentWorkspaceMode.directory,
+);
+
+/// 用户 Profile fixture：canonical provider/model 当前不可解析，用于验证
+/// 编辑保存不会静默改写路由。
+const _danglingUserAgentProfile = AgentProfileView(
+  id: 'user-ghost',
+  displayName: 'Ghost helper',
+  description: 'Profile with an unresolvable route',
+  whenToUse: 'Use when a helper is needed',
+  systemInstructions: 'Follow the user instructions.',
+  providerId: 'ghost-provider',
+  model: 'ghost-model',
+  effort: 'high',
+  source: 'user-toml',
+  revision: 'user-v2',
+  contentHash: 'user-ghost-hash',
   system: false,
   enabled: true,
   workspaceMode: AgentWorkspaceMode.directory,

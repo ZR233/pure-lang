@@ -249,7 +249,7 @@ class _WebSearchToolCard extends StatelessWidget {
                   key: ValueKey('timeline-tool-item-pulse:${item.id}'),
                 ),
               ],
-              _StatusPill(label: item.status),
+              _StatusPill(label: context.toolStatusLabel(item.status)),
             ],
           ),
           if (data.details.isNotEmpty) ...[
@@ -474,7 +474,7 @@ class _ToolGroupItemRow extends StatelessWidget {
               tool?.denialReason,
               item.part.error,
               _resultDetail(item, tool),
-              _attachmentDetail(tool),
+              _attachmentDetail(context, tool),
             ]
             .whereType<String>()
             .where((value) => value.trim().isNotEmpty)
@@ -579,10 +579,12 @@ class _ToolGroupItemRow extends StatelessWidget {
     }
   }
 
-  String? _attachmentDetail(TimelineToolPart? tool) {
+  String? _attachmentDetail(BuildContext context, TimelineToolPart? tool) {
     final attachments = tool?.attachments ?? const <ThreadAttachmentView>[];
     if (attachments.isEmpty) return null;
-    return attachments.map(_attachmentDescription).join('\n');
+    return attachments
+        .map((attachment) => _attachmentDescription(context, attachment))
+        .join('\n');
   }
 }
 
@@ -611,6 +613,7 @@ String _prettyToolPayload(String value) {
 }
 
 String _toolTitle(BuildContext context, TimelineToolGroupItem item) {
+  final label = _toolDisplayName(context, item);
   if (item.name == 'view_image') {
     return switch (item.status) {
       'succeeded' => context.l10n.timelineViewImageRead,
@@ -618,10 +621,14 @@ String _toolTitle(BuildContext context, TimelineToolGroupItem item) {
       'denied' ||
       'cancelled' ||
       'interrupted' => context.l10n.timelineViewImageFailed,
-      _ => context.l10n.timelineViewImageReading,
+      'queued' ||
+      'running' ||
+      'streaming' ||
+      'approved' ||
+      'started' => context.l10n.timelineViewImageReading,
+      _ => _unknownToolStatusLabel(context, label, item.status),
     };
   }
-  final label = _toolDisplayName(context, item);
   return switch (item.status) {
     'queued' => context.l10n.timelineToolQueued(label),
     'cancelling' => context.l10n.timelineToolCancelling(label),
@@ -635,8 +642,24 @@ String _toolTitle(BuildContext context, TimelineToolGroupItem item) {
     'streaming' ||
     'approved' ||
     'started' => context.l10n.timelineToolRunning(label),
-    _ => label,
+    _ => _unknownToolStatusLabel(context, label, item.status),
   };
+}
+
+/// 未知工具状态保留原始值，并让缺失的工具名回退到统一 fallback；不把未知
+/// 状态伪装成某个已知阶段。
+String _unknownToolStatusLabel(
+  BuildContext context,
+  String name,
+  String status,
+) {
+  final resolvedName = name.trim().isEmpty
+      ? context.l10n.timelineToolFallback
+      : name;
+  if (status.trim().isEmpty) {
+    return resolvedName;
+  }
+  return context.l10n.timelineToolUnknownStatus(resolvedName, status);
 }
 
 /// 工具的展示名；LSP 工具使用本地化标题并附带参数摘要，其余保持原始领域名。
@@ -650,6 +673,9 @@ String _toolDisplayName(BuildContext context, TimelineToolGroupItem item) {
   }
   if (name == 'lsp_capabilities') {
     return context.l10n.timelineLspCapabilitiesTitle;
+  }
+  if (name.isEmpty || name == 'Tool') {
+    return context.l10n.timelineToolFallback;
   }
   return name;
 }

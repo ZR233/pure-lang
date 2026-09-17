@@ -78,12 +78,17 @@ class _TodoStepTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final completed = item.status == 'completed';
-    final inProgress = item.status == 'inProgress';
+    final status = item.status;
+    final completed = status == 'completed';
+    final inProgress = status == 'inProgress';
+    final pending = status == 'pending';
+    final unknown = !completed && !inProgress && !pending;
     final icon = completed
         ? Icons.check_circle_outline
         : inProgress
         ? Icons.radio_button_checked
+        : unknown
+        ? Icons.help_outline
         : Icons.radio_button_unchecked;
     final color = completed
         ? context.statusColors.success
@@ -105,6 +110,11 @@ class _TodoStepTile extends StatelessWidget {
           decoration: completed ? TextDecoration.lineThrough : null,
           decorationColor: context.colors.onSurfaceVariant,
         ),
+      ),
+      // 未知状态保留原始值，并使用中性样式，而不是伪装成“待处理”。
+      trailing: Text(
+        context.todoStatusLabel(status),
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(color: color),
       ),
     );
   }

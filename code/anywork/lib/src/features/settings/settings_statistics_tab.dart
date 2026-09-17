@@ -154,7 +154,9 @@ class _SummarySection extends StatelessWidget {
                         ),
                       ),
                       DataCell(
-                        Text(formatTokenThroughput(summary.tokensPerSecond)),
+                        Text(
+                          context.tokenThroughputLabel(summary.tokensPerSecond),
+                        ),
                       ),
                       DataCell(Text('${summary.sampleCount}')),
                       DataCell(Text('${summary.completionTokens}')),
@@ -197,7 +199,7 @@ class _CompactSummaryCard extends StatelessWidget {
           ),
           SettingsMetric(
             context.l10n.statisticsSpeed,
-            formatTokenThroughput(summary.tokensPerSecond),
+            context.tokenThroughputLabel(summary.tokensPerSecond),
           ),
           SettingsMetric(
             context.l10n.statisticsSamples,
@@ -344,7 +346,7 @@ class _WideHistoryRow extends StatelessWidget {
         _formatMillis(sample.ttftMillis.toDouble()),
         _formatMillis(sample.decodeMillis.toDouble()),
         _formatMillis(sample.totalResponseMillis.toDouble()),
-        formatTokenThroughput(sample.tokensPerSecond),
+        context.tokenThroughputLabel(sample.tokensPerSecond),
       ],
     );
   }
@@ -413,7 +415,7 @@ class _CompactHistoryCard extends StatelessWidget {
           ),
           SettingsMetric(
             context.l10n.statisticsSpeed,
-            formatTokenThroughput(sample.tokensPerSecond),
+            context.tokenThroughputLabel(sample.tokensPerSecond),
           ),
           SettingsMetric(
             context.l10n.statisticsOutputTokens,

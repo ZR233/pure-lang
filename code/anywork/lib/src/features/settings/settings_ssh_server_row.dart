@@ -54,7 +54,7 @@ class SshServerRow extends StatelessWidget {
         const SizedBox(height: 6),
         Text(
           ready
-              ? '${connection!.architecture} · helper ${connection!.helperVersion}'
+              ? '${connection!.architecture} · ${context.l10n.settingsSshRemoteHelper} ${connection!.helperVersion}'
               : context.l10n.settingsSshManagedByCore,
           style: context.text.bodySmall?.copyWith(
             color: context.colors.onSurfaceVariant,
@@ -126,7 +126,7 @@ class _ConnectionChip extends StatelessWidget {
     final ready = state == 'ready';
     return SettingsMiniMeta(
       icon: ready ? Icons.check_circle_outline : Icons.circle_outlined,
-      label: ready ? context.l10n.settingsSshReady : state,
+      label: context.sshConnectionStateLabel(state),
     );
   }
 }

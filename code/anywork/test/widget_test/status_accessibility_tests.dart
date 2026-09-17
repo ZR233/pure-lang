@@ -250,7 +250,7 @@ void registerStatusAccessibilityTests() {
         find.byKey(const ValueKey('workflow-state-planning')),
         findsOneWidget,
       );
-      expect(find.text('planning'), findsOneWidget);
+      expect(find.text('Planning'), findsOneWidget);
       expect(
         find.byTooltip(
           'Session mode cannot change while the session is running or a workflow is active',
@@ -259,6 +259,35 @@ void registerStatusAccessibilityTests() {
       );
       _expectNoWorkflowInspectorOrMutationUi();
     });
+
+    testWidgets(
+      'status bar keeps canonical ids for an unknown workflow state and mode',
+      (tester) async {
+        final base = _emptyState();
+        final state = _withSelectedRuntime(
+          base,
+          base.runtime.copyWith(
+            workflow: _workflowRuntime(
+              stateId: 'awaiting_future_phase',
+              terminal: false,
+              modeId: 'mode.future',
+            ),
+          ),
+        );
+        await _pumpThreadStatusBar(tester, state);
+
+        expect(
+          find.byKey(const ValueKey('workflow-state-awaiting_future_phase')),
+          findsOneWidget,
+        );
+        expect(find.text('awaiting_future_phase'), findsOneWidget);
+        expect(
+          find.byTooltip('mode.future · awaiting_future_phase'),
+          findsOneWidget,
+        );
+        _expectNoWorkflowInspectorOrMutationUi();
+      },
+    );
 
     testWidgets('status bar shows the canonical terminal workflow state', (
       tester,
@@ -762,12 +791,13 @@ Future<_FakeStudioApi> _pumpThreadStatusBar(
 WorkflowRuntimeView _workflowRuntime({
   required String stateId,
   required bool terminal,
+  String modeId = 'mode.task',
 }) => WorkflowRuntimeView(
   revision: terminal ? 8 : 2,
   currentRun: WorkflowRunView(
     lineageId: 'lineage-1',
     runId: 'run-1',
-    modeId: ThreadModeId.task.id,
+    modeId: modeId,
     graphRevision: 1,
     graphHash: 'graph-hash',
     currentStateId: stateId,

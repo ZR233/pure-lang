@@ -329,7 +329,7 @@ class _ThreadToolImageEntryState extends ConsumerState<_ThreadToolImageEntry> {
             Padding(
               padding: const EdgeInsets.only(left: 4, top: 6, bottom: 4),
               child: Tooltip(
-                message: _attachmentDescription(attachment),
+                message: _attachmentDescription(context, attachment),
                 child: Container(
                   width: size.width,
                   height: size.height,
@@ -488,11 +488,15 @@ Size _toolImagePreviewSize(ThreadAttachmentView attachment, bool compact) {
   return Size(math.max(64, 240 * ratio), 240);
 }
 
-String _attachmentDescription(ThreadAttachmentView attachment) {
+String _attachmentDescription(
+  BuildContext context,
+  ThreadAttachmentView attachment,
+) {
   final dimensions = attachment.width != null && attachment.height != null
       ? ' · ${attachment.width}×${attachment.height}'
       : '';
-  return '${attachment.filename ?? "Image"}$dimensions · ${_formatBytes(attachment.byteSize)}';
+  final label = attachment.filename ?? context.l10n.attachmentFallback;
+  return '$label$dimensions · ${_formatBytes(attachment.byteSize)}';
 }
 
 Future<void> _showStudioImageDialog(

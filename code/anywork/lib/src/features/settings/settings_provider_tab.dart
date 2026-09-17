@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
+import '../../l10n/studio_l10n.dart';
 import 'provider_usage_controller.dart';
 import 'settings_provider_details.dart';
 import 'settings_provider_drafts.dart';
@@ -179,7 +180,9 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
         .providerCatalog;
     final template = catalog?.presets.firstOrNull;
     if (catalog == null || template == null) {
-      setState(() => _draftError = 'Provider catalog is unavailable.');
+      setState(
+        () => _draftError = context.l10n.settingsProviderCatalogUnavailable,
+      );
       return;
     }
     final id = _suggestProviderId(template.id);
@@ -189,7 +192,9 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
       providerId: id,
     );
     if (draft == null) {
-      setState(() => _draftError = 'Provider preset is unavailable.');
+      setState(
+        () => _draftError = context.l10n.settingsProviderPresetUnavailable,
+      );
       return;
     }
     setState(() {
@@ -291,12 +296,15 @@ class _ProvidersTabState extends ConsumerState<ProvidersTab> {
 
   void _removeCustomModel(int index) {
     _updateDraft((provider) {
-      final custom = [...provider.customModels]..removeAt(index);
+      final custom = [...provider.customModels];
+      final removedSlug = custom[index].slug;
+      custom.removeAt(index);
       final models = [...provider.defaultModels, ...custom];
-      final defaultModel =
-          models.any((model) => model.slug == provider.defaultModel)
-          ? provider.defaultModel
-          : models.firstOrNull?.slug ?? '';
+      // 仅当被移除的模型正是当前默认模型时才改写，避免覆盖无法解析的
+      // canonical defaultModel。
+      final defaultModel = provider.defaultModel == removedSlug
+          ? models.firstOrNull?.slug ?? ''
+          : provider.defaultModel;
       return provider.copyWith(
         customModels: custom,
         models: models,

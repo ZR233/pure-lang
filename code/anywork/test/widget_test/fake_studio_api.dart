@@ -143,6 +143,7 @@ class _FakeStudioApi implements StudioApi {
   Object? retryPersistenceError;
   PersistenceStateSnapshot? retryPersistenceState;
   ({String childId, int expectedLeaseRevision})? cleanedWorktree;
+  AgentProfileDraft? savedUserAgentProfileDraft;
 
   void emitGlobal(StudioBridgeEvent event) => _global.add(event);
 
@@ -238,6 +239,7 @@ class _FakeStudioApi implements StudioApi {
     int expectedSettingsRevision,
     AgentProfileDraft draft,
   ) async {
+    savedUserAgentProfileDraft = draft;
     final snapshot = _settingsSnapshot(
       _currentState.settingsState,
       revision: expectedSettingsRevision + 1,

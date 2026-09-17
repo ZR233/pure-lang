@@ -966,7 +966,7 @@
     }
   },
   "settingsAgentsTitle": "Agent Profiles",
-  "settingsAgentsSubtitle": "System profiles have a fixed purpose and workspace mode; enablement and model routing stay configurable. Directory only constrains anywork's built-in file-write tools — shell, Git, and MCP can bypass it.",
+  "settingsAgentsSubtitle": "System agent profiles have a fixed purpose and workspace mode; enablement and model routing stay configurable. Directory mode limits built-in file writes to the project only; shell, Git, and MCP can still bypass it.",
   "settingsAgentsAddUserProfile": "Add user profile",
   "settingsAgentsEditTooltip": "Edit",
   "settingsAgentsRecoveryTitle": "Recovery",
@@ -1009,7 +1009,7 @@
   "settingsAgentWorkspaceModeUnrestricted": "Unrestricted",
   "settingsAgentWorkspaceModeDirectory": "Directory",
   "settingsAgentWorkspaceModeWorktree": "Worktree",
-  "settingsAgentProfileWorkspaceDirectoryHint": "Directory is a cooperative file-tool boundary, not an OS sandbox; shell, Git, and MCP can bypass it.",
+  "settingsAgentProfileWorkspaceDirectoryHint": "Directory mode limits built-in file writes to the project only; it is not an OS sandbox, and shell, Git, and MCP can still bypass it.",
   "settingsAgentProfileEnabledTitle": "Enabled",
   "settingsAgentProfileEnabledSubtitle": "Disabled profiles keep their TOML file but no longer appear in the agent tool catalog.",
   "settingsAgentProfileSave": "Save TOML atomically",
@@ -1099,5 +1099,83 @@
   "sidebarNotChecked": "Not checked",
   "sidebarConnectionSaved": "Configuration saved; connection failed. Edit or retry",
   "sidebarCopyPath": "Copy path",
-  "sidebarRetry": "Retry"
+  "sidebarRetry": "Retry",
+  "settingsSshRemoteHelper": "helper",
+  "statusThroughputValue": "{value} t/s",
+  "@statusThroughputValue": {
+    "placeholders": {
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "statusThroughputUnavailable": "- t/s",
+  "workflowStatePlanning": "Planning",
+  "workflowStateEditingDocuments": "Editing docs",
+  "workflowStateWorking": "Working",
+  "workflowStateIntegrating": "Integrating",
+  "workflowStateReviewing": "Reviewing",
+  "workflowStateCompleted": "Completed",
+  "workflowStateStopped": "Stopped",
+  "workflowModeSimple": "Simple",
+  "workflowModeTask": "Task",
+  "attachmentFallback": "Attachment",
+  "timelineAgentTimedOut": "timed out",
+  "timelineToolUnknownStatus": "{name} · {status}",
+  "@timelineToolUnknownStatus": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "status": {
+        "type": "String"
+      }
+    }
+  },
+  "timelineTodoStatusUnknown": "Unknown",
+  "settingsApiKeyOptional": "API key (optional)",
+  "modelProtocolResponses": "Responses",
+  "modelProtocolChatCompletions": "Chat Completions",
+  "modelConnectionWebSocket": "WS",
+  "modelConnectionHttp": "HTTP",
+  "settingsProtocolChatCompletionsHttp": "Chat Completions (HTTP)",
+  "settingsProtocolResponsesHttp": "Responses (HTTP)",
+  "settingsAgentRouteUnavailable": "{route} (unavailable)",
+  "@settingsAgentRouteUnavailable": {
+    "placeholders": {
+      "route": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsPriceTierUnit": "{currency} per 1M tokens",
+  "@settingsPriceTierUnit": {
+    "placeholders": {
+      "currency": {
+        "type": "String"
+      }
+    }
+  },
+  "threadStatusIdle": "Idle",
+  "threadStatusCancelling": "Cancelling",
+  "threadStatusClosed": "Closed",
+  "toolStatusAwaitingApproval": "Awaiting approval",
+  "toolStatusFailed": "Failed",
+  "toolStatusDenied": "Denied",
+  "toolStatusCancelled": "Cancelled",
+  "toolStatusCancelling": "Cancelling",
+  "settingsProviderCatalogUnavailable": "Provider catalog is unavailable.",
+  "settingsProviderPresetUnavailable": "Provider preset is unavailable.",
+  "settingsProviderMissingCredential": "Missing credential",
+  "settingsSshStateDisconnected": "Disconnected",
+  "settingsSshStateConnecting": "Connecting",
+  "settingsSshStateWaitingForInput": "Waiting for input",
+  "settingsSshStateReconnecting": "Reconnecting",
+  "settingsSshStateFailed": "Failed",
+  "settingsWorktreeStatePrepared": "Prepared",
+  "settingsWorktreeStateActive": "Active",
+  "settingsWorktreeStatePreserved": "Preserved",
+  "settingsWorktreeStateCleanupRequested": "Cleanup requested",
+  "settingsWorktreeStateCleaned": "Cleaned",
+  "settingsWorktreeDirty": "dirty"
 }

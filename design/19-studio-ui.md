@@ -57,6 +57,12 @@ Agents 导航、配置页、preserved worktree recovery 和用户 Profile 详情
 workspace mode 的持久化值，以及分支、路径、commit、worktree 状态和诊断数据保持 canonical
 原值；本地化只影响展示标签、说明、操作和校验反馈，不得改写配置或运行时数据。
 
+中文界面的产品语义统一使用“智能体”，`subagent` 显示为“子智能体”，不得混用“代理”、
+`Agent` 或 `Subagent`；`ssh-agent` 等同名系统技术概念不适用该译法。固定界面文案采用正式、
+简明的现代汉语，普通概念不夹用英文；MCP、LSP、SSH、HTTP、URL、API、Git、OpenAI、
+DeepSeek、TOML 等标准缩写、产品名和协议名可以保留。界面展示 canonical 枚举或状态时，
+只在展示层映射为本地化标签，底层值保持不变。
+
 ## 19.5 联网搜索设置
 
 General 页把 OpenAI Web Search 与 DeepSeek 原生联网搜索显示为两张独立卡片。OpenAI 卡片

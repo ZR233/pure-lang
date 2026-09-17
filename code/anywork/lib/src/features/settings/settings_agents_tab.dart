@@ -37,9 +37,9 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
         .read(studioControllerProvider.notifier)
         .setSystemAgentEnabled(profileId: profile.id, enabled: enabled);
     if (mounted) {
-      setState(
-        () => _profiles = ref.read(studioApiProvider).readAgentProfiles(),
-      );
+      setState(() {
+        _profiles = ref.read(studioApiProvider).readAgentProfiles();
+      });
     }
   }
 
@@ -54,9 +54,9 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
         .read(studioControllerProvider.notifier)
         .saveUserAgentProfile(draft);
     if (mounted) {
-      setState(
-        () => _profiles = ref.read(studioApiProvider).readAgentProfiles(),
-      );
+      setState(() {
+        _profiles = ref.read(studioApiProvider).readAgentProfiles();
+      });
     }
   }
 

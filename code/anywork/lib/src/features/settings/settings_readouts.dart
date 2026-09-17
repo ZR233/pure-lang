@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme/studio_tokens.dart';
 import '../../domain/models/studio_models.dart';
+import '../../l10n/studio_l10n.dart';
 import '../../shared/studio_chrome.dart';
 
 class SettingsReadout extends StatelessWidget {
@@ -44,7 +45,7 @@ class SettingsProviderStatusChip extends StatelessWidget {
     final ready = provider.status == 'ready';
     return StudioPill(
       icon: ready ? Icons.check_circle_outline : Icons.error_outline,
-      label: ready ? 'ready' : 'setup',
+      label: context.providerStatusLabel(provider.status),
       tone: ready ? StudioTone.success : StudioTone.warning,
     );
   }

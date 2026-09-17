@@ -1671,7 +1671,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsAgentsSubtitle =>
-      'System profiles have a fixed purpose and workspace mode; enablement and model routing stay configurable. Directory only constrains anywork\'s built-in file-write tools — shell, Git, and MCP can bypass it.';
+      'System agent profiles have a fixed purpose and workspace mode; enablement and model routing stay configurable. Directory mode limits built-in file writes to the project only; shell, Git, and MCP can still bypass it.';
 
   @override
   String get settingsAgentsAddUserProfile => 'Add user profile';
@@ -1744,7 +1744,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsAgentProfileWorkspaceDirectoryHint =>
-      'Directory is a cooperative file-tool boundary, not an OS sandbox; shell, Git, and MCP can bypass it.';
+      'Directory mode limits built-in file writes to the project only; it is not an OS sandbox, and shell, Git, and MCP can still bypass it.';
 
   @override
   String get settingsAgentProfileEnabledTitle => 'Enabled';
@@ -2023,4 +2023,155 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get sidebarRetry => 'Retry';
+
+  @override
+  String get settingsSshRemoteHelper => 'helper';
+
+  @override
+  String statusThroughputValue(String value) {
+    return '$value t/s';
+  }
+
+  @override
+  String get statusThroughputUnavailable => '- t/s';
+
+  @override
+  String get workflowStatePlanning => 'Planning';
+
+  @override
+  String get workflowStateEditingDocuments => 'Editing docs';
+
+  @override
+  String get workflowStateWorking => 'Working';
+
+  @override
+  String get workflowStateIntegrating => 'Integrating';
+
+  @override
+  String get workflowStateReviewing => 'Reviewing';
+
+  @override
+  String get workflowStateCompleted => 'Completed';
+
+  @override
+  String get workflowStateStopped => 'Stopped';
+
+  @override
+  String get workflowModeSimple => 'Simple';
+
+  @override
+  String get workflowModeTask => 'Task';
+
+  @override
+  String get attachmentFallback => 'Attachment';
+
+  @override
+  String get timelineAgentTimedOut => 'timed out';
+
+  @override
+  String timelineToolUnknownStatus(String name, String status) {
+    return '$name · $status';
+  }
+
+  @override
+  String get timelineTodoStatusUnknown => 'Unknown';
+
+  @override
+  String get settingsApiKeyOptional => 'API key (optional)';
+
+  @override
+  String get modelProtocolResponses => 'Responses';
+
+  @override
+  String get modelProtocolChatCompletions => 'Chat Completions';
+
+  @override
+  String get modelConnectionWebSocket => 'WS';
+
+  @override
+  String get modelConnectionHttp => 'HTTP';
+
+  @override
+  String get settingsProtocolChatCompletionsHttp => 'Chat Completions (HTTP)';
+
+  @override
+  String get settingsProtocolResponsesHttp => 'Responses (HTTP)';
+
+  @override
+  String settingsAgentRouteUnavailable(String route) {
+    return '$route (unavailable)';
+  }
+
+  @override
+  String settingsPriceTierUnit(String currency) {
+    return '$currency per 1M tokens';
+  }
+
+  @override
+  String get threadStatusIdle => 'Idle';
+
+  @override
+  String get threadStatusCancelling => 'Cancelling';
+
+  @override
+  String get threadStatusClosed => 'Closed';
+
+  @override
+  String get toolStatusAwaitingApproval => 'Awaiting approval';
+
+  @override
+  String get toolStatusFailed => 'Failed';
+
+  @override
+  String get toolStatusDenied => 'Denied';
+
+  @override
+  String get toolStatusCancelled => 'Cancelled';
+
+  @override
+  String get toolStatusCancelling => 'Cancelling';
+
+  @override
+  String get settingsProviderCatalogUnavailable =>
+      'Provider catalog is unavailable.';
+
+  @override
+  String get settingsProviderPresetUnavailable =>
+      'Provider preset is unavailable.';
+
+  @override
+  String get settingsProviderMissingCredential => 'Missing credential';
+
+  @override
+  String get settingsSshStateDisconnected => 'Disconnected';
+
+  @override
+  String get settingsSshStateConnecting => 'Connecting';
+
+  @override
+  String get settingsSshStateWaitingForInput => 'Waiting for input';
+
+  @override
+  String get settingsSshStateReconnecting => 'Reconnecting';
+
+  @override
+  String get settingsSshStateFailed => 'Failed';
+
+  @override
+  String get settingsWorktreeStatePrepared => 'Prepared';
+
+  @override
+  String get settingsWorktreeStateActive => 'Active';
+
+  @override
+  String get settingsWorktreeStatePreserved => 'Preserved';
+
+  @override
+  String get settingsWorktreeStateCleanupRequested => 'Cleanup requested';
+
+  @override
+  String get settingsWorktreeStateCleaned => 'Cleaned';
+
+  @override
+  String get settingsWorktreeDirty => 'dirty';
 }

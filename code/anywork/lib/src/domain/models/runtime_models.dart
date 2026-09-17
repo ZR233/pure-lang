@@ -42,12 +42,12 @@ String formatRuntimeCosts(Iterable<RuntimeCostView> costs) {
       .join(' + ');
 }
 
-String formatTokenThroughput(double? tokensPerSecond) {
-  if (tokensPerSecond == null || !tokensPerSecond.isFinite) return '- t/s';
-  final value = tokensPerSecond >= 10
+/// 只格式化吞吐数值；单位由展示层按 locale 追加，避免在领域模型内写死文案。
+String? formatTokenThroughputValue(double? tokensPerSecond) {
+  if (tokensPerSecond == null || !tokensPerSecond.isFinite) return null;
+  return tokensPerSecond >= 10
       ? tokensPerSecond.round().toString()
       : tokensPerSecond.toStringAsFixed(1);
-  return '$value t/s';
 }
 
 class PurposeCostView {
@@ -237,7 +237,6 @@ class ThreadRuntimeView {
   double? get turnTokensPerSecond => turnDecodeMillis > 0
       ? turnCompletionTokens * 1000 / turnDecodeMillis
       : null;
-  String get turnThroughputLabel => formatTokenThroughput(turnTokensPerSecond);
 
   double? get effectiveCacheHitRate =>
       hasUsage && !hasIncompleteUsage ? cacheHitRate : null;
