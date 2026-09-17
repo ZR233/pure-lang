@@ -1,7 +1,7 @@
 //! Thread/Project 目录事实：内存目录 owner 提交的 delta、write-behind 落库
 //! applier 与 SQLite 冷分页查询。
 //!
-//! 目录 mutation 一律"内存先行 + delta 异步落库"（见 design/19 §19.2）；本模块
+//! 目录 mutation 一律"内存先行 + delta 异步落库"（见 design/17 §17.2）；本模块
 //! 只承载已经由 owner 决定的事实，不做业务校验或状态转换。
 
 use anyhow::{Result, bail};

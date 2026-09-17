@@ -65,7 +65,7 @@ impl StudioRuntime {
         let (delta, thread) =
             DirectoryDelta::register_root_thread(&request.project_id, &provisional, request.mode);
         // 目录事实内存先行；SQLite 失败进入持久化降级而不是命令失败
-        // （design/20 §20.4）。
+        // （design/18 §18.2）。
         self.agent_facility
             .product_events
             .commit_directory(delta)
@@ -377,7 +377,7 @@ impl StudioRuntime {
     }
 
     /// 未驻留即不 busy：钉住集合恢复保证有 pending 工作的 Thread 会被恢复，
-    /// LRU 只淘汰空闲且已耐久化的 actor（design/19 §19.6）。
+    /// LRU 只淘汰空闲且已耐久化的 actor（design/17 §17.5）。
     pub(in crate::studio::runtime) async fn thread_is_busy(&self, thread_id: &str) -> Result<bool> {
         let (snapshot, _) = self.read_thread_facts(thread_id).await?;
         Ok(snapshot

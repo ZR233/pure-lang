@@ -23,7 +23,7 @@ factory dispatch 或兼容 wrapper。
 4. 确定模型目录：slug、能力、价格、上下文、request profile、参数 wire 和基础指令。
 5. 确定是否只是新增 preset。共享同一 endpoint 形态和 catalog 的产品套餐通常只需新 preset。
 6. 只有现有 OpenAI-compatible codec 无法表达 wire 时，才设计第二种 typed codec；先同步
-   `design/07-model.md` 与 `design/10-config.md`。
+   `design/06-model.md` 与 `design/20-config.md`。
 
 ## 修改清单
 

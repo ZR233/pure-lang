@@ -1,6 +1,6 @@
 //! 模型家族预设，封装同 provider 模型共享的元数据。
 //!
-//! 参见 design/07-model.md 7.9 节。同 provider 的模型共享 capabilities、
+//! 参见 design/06-model.md 6.9 节。同 provider 的模型共享 capabilities、
 //! truncation_policy、effort 参数声明和 base body。具体模型实例通过差异字段
 //! （slug、display_name、context_window 等）从 family 派生，避免在
 //! `default_models` 中为每个模型重复构造完整 `ModelInfo`。

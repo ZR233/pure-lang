@@ -1,7 +1,7 @@
 //! Thread 目录记录的冷读取入口。
 //!
 //! 目录 mutation 已统一走 `store::directory::DirectoryDelta` 的 write-behind
-//! 通道（design/19 §19.2）；本文件只保留命令路径允许的聚合冷加载与分页查询。
+//! 通道（design/17 §17.2）；本文件只保留命令路径允许的聚合冷加载与分页查询。
 
 use anyhow::Result;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder};

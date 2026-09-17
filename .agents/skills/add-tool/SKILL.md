@@ -6,8 +6,8 @@ description: Use when implementing, registering, or testing a Pure-Lang tool thr
 # 添加或迁移工具
 
 具体工具归 `pl-tool`，Plan/workflow 等产品工具归 Studio。core 只定义通用契约与 Thread 执行机制，
-不依赖工具实现、pl-model 或 pl-protocol。先阅读 `design/27-core-boundaries-and-replay.md`、
-`design/28-tool-thread-boundary.md` 和同类现役工具，再沿以下边界修改。
+不依赖工具实现、pl-model 或 pl-protocol。先阅读 `design/16-core-contracts.md`、
+`design/09-tool-runtime.md` 和同类现役工具，再沿以下边界修改。
 
 ## 实现与注册
 

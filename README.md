@@ -321,7 +321,7 @@ Studio 用同一装配入口创建 root、child 和恢复 Thread，显式组合 
 
 普通工具超过交付窗口后转为 Thread 后台任务，结果与消息一起提交，下一模型请求准入时消费。
 历史使用当时保存的实际模型正文；资源关闭失败或保存失败保留 owner 和重试入口。
-详见[工具边界](./design/28-tool-thread-boundary.md)和[任务交付](./design/26-session-tool-runtime.md)。
+详见[工具运行时](./design/09-tool-runtime.md)和[后台任务交付](./design/14-runtime-host.md)。
 
 ## 开发
 
@@ -407,7 +407,8 @@ render tree 和 Driver 日志保存在 `target/workflow-live-artifacts/`。
 
 ## 设计文档
 
-项目完整的架构决策和设计说明收录在 [`design/`](./design/) 目录：
+项目完整的架构决策和设计说明收录在 [`design/`](./design/) 目录，分组索引与阅读顺序见
+[design/README.md](./design/README.md)：
 
 | 文档 | 内容 |
 |------|------|
@@ -415,31 +416,25 @@ render tree 和 Driver 日志保存在 `target/workflow-live-artifacts/`。
 | [02-crates.md](./design/02-crates.md) | Crate 设计与端口-适配器架构 |
 | [03-pipeline.md](./design/03-pipeline.md) | Thread / Turn / Item 流程 |
 | [04-security.md](./design/04-security.md) | 安全与权限模型 |
-| [05-extension.md](./design/05-extension.md) | 扩展机制 |
-| [06-phases.md](./design/06-phases.md) | 实施阶段 |
-| [07-model.md](./design/07-model.md) | 模型与 Provider 设计 |
-| [08-streaming.md](./design/08-streaming.md) | Thread 实时流 |
-| [09-conventions.md](./design/09-conventions.md) | 编码约定 |
-| [10-config.md](./design/10-config.md) | 配置系统 |
-| [11-studio-ui.md](./design/11-studio-ui.md) | Studio UI 设计 |
-| [12-unified-workflow-implementation-spec.md](./design/12-unified-workflow-implementation-spec.md) | 统一模式与工作流实施规约 |
-| [13-skills.md](./design/13-skills.md) | 技能系统设计 |
-| [13-tool-calling-runtime.md](./design/13-tool-calling-runtime.md) | 工具调用运行时 |
-| [14-lsp-runtime.md](./design/14-lsp-runtime.md) | LSP 运行时 |
-| [15-agent-profiles-and-collaboration.md](./design/15-agent-profiles-and-collaboration.md) | Agent Profile 与统一协作 |
-| [16-task-orchestration.md](./design/16-task-orchestration.md) | Thread Mode 与预注册工作流 |
-| [17-agent-runtime-host.md](./design/17-agent-runtime-host.md) | Agent runtime 与宿主边界 |
-| [18-studio-release-update.md](./design/18-studio-release-update.md) | Studio 发布与更新 |
-| [19-studio-storage-and-diagnostics.md](./design/19-studio-storage-and-diagnostics.md) | Studio 存储与诊断 |
-| [20-studio-state-runtime.md](./design/20-studio-state-runtime.md) | Studio 状态查询与领域生命周期 |
-| [21-session-activation-and-persistence.md](./design/21-session-activation-and-persistence.md) | 会话激活、唯一热状态与异步持久化 |
-| [22-ssh-remote-development.md](./design/22-ssh-remote-development.md) | SSH 远程开发与宿主能力 |
-| [23-thread-mode.md](./design/23-thread-mode.md) | Thread Mode 注册、图生命周期与工具合同 |
-| [24-agent-session-plan.md](./design/24-agent-session-plan.md) | Thread 内的产品 Plan 状态机与通用隐藏 continuation |
-| [25-session-entry-storage.md](./design/25-session-entry-storage.md) | 统一会话条目与独立存储 |
-| [26-session-tool-runtime.md](./design/26-session-tool-runtime.md) | 会话工具任务与统一唤醒 |
-| [27-core-boundaries-and-replay.md](./design/27-core-boundaries-and-replay.md) | 极简核心、动态载荷与重放合同 |
-| [28-tool-thread-boundary.md](./design/28-tool-thread-boundary.md) | 工具实例、参数、结果与 Thread 边界 |
+| [05-conventions.md](./design/05-conventions.md) | 通用约定 |
+| [06-model.md](./design/06-model.md) | 模型与 Provider 设计 |
+| [07-streaming.md](./design/07-streaming.md) | Thread 实时流 |
+| [08-extension.md](./design/08-extension.md) | 扩展点索引 |
+| [09-tool-runtime.md](./design/09-tool-runtime.md) | 工具调用运行时与 Thread 边界 |
+| [10-skills.md](./design/10-skills.md) | 技能系统设计 |
+| [11-thread-mode.md](./design/11-thread-mode.md) | Thread Mode 与预设工作流 |
+| [12-collaboration.md](./design/12-collaboration.md) | Agent Profile 与协作编排 |
+| [13-plan.md](./design/13-plan.md) | Thread 内的 Plan 状态机 |
+| [14-runtime-host.md](./design/14-runtime-host.md) | Thread Runtime 宿主与后台任务 |
+| [15-session-storage.md](./design/15-session-storage.md) | 会话条目存储与无副作用重放 |
+| [16-core-contracts.md](./design/16-core-contracts.md) | Core 内核契约 |
+| [17-studio-storage.md](./design/17-studio-storage.md) | Studio 存储与诊断 |
+| [18-studio-state.md](./design/18-studio-state.md) | Studio 状态查询与领域生命周期 |
+| [19-studio-ui.md](./design/19-studio-ui.md) | Studio UI 设计 |
+| [20-config.md](./design/20-config.md) | 配置系统 |
+| [21-lsp.md](./design/21-lsp.md) | LSP 运行时 |
+| [22-ssh-remote.md](./design/22-ssh-remote.md) | SSH 远程开发与宿主能力 |
+| [23-release-update.md](./design/23-release-update.md) | 发布与应用内升级 |
 
 ## 项目规范
 

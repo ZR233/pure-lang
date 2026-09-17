@@ -277,7 +277,7 @@ class _ContextUsagePainter extends CustomPainter {
 /// Placeholder shown when the runtime reports no known context capacity.
 ///
 /// Unknown or non-positive capacity must not masquerade as a `0` / `0%`
-/// reading; see `design/11-studio-ui.md`.
+/// reading; see `design/19-studio-ui.md`.
 const _unknownCapacityPlaceholder = '—';
 
 /// Percentage label for the context ring.

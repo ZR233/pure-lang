@@ -74,7 +74,7 @@ impl ThreadResidency {
         inactive.into_iter().take(excess).collect()
     }
 
-    /// 订阅 pin：有活跃订阅的线程不参与 LRU 淘汰（design/17 空闲判定）。
+    /// 订阅 pin：有活跃订阅的线程不参与 LRU 淘汰（design/17 §17.5）。
     pub(in crate::studio) fn pin(&self, thread_id: &str) {
         let mut pinned = self.pinned.lock().expect("residency pinned lock poisoned");
         *pinned.entry(thread_id.to_owned()).or_default() += 1;

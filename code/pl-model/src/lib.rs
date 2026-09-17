@@ -1,6 +1,6 @@
 //! 模型目录、provider endpoint、canonical completion 与单模型运行时。
 //!
-//! 公开 API 按稳定域模块组织（见 design/07-model.md 7.2 节）：
+//! 公开 API 按稳定域模块组织（见 design/06-model.md 6.2 节）：
 //!
 //! - [`completion`]：canonical 请求/响应、工具调用、用量与流语义。
 //! - [`config`]：产品无关的 provider 配置与路由值对象。

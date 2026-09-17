@@ -20,8 +20,8 @@ metadata:
 - `design/02-crates.md`：crate 职责和依赖方向。
 - 根 `Cargo.toml`：当前 workspace members 的唯一事实来源。
 
-按问题补充 `design/03-pipeline.md`、`design/06-phases.md`、
-`design/13-tool-calling-runtime.md` 及相关专题设计。架构文档属于判断地基，必须由主代理亲自完整
+按问题补充 `design/03-pipeline.md`、`design/09-tool-runtime.md` 及
+`design/README.md` 索引中的相关专题设计。架构文档属于判断地基，必须由主代理亲自完整
 阅读，不能交给子代理摘要代替。
 
 ## 当前稳定边界

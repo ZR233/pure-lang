@@ -1,6 +1,6 @@
 //! 默认模型目录，按 provider 家族文件组织，用 `ModelFamily` 预设复用共享元数据。
 //!
-//! 参见 design/07-model.md 7.8 / 7.9 节。同 provider 的模型共享 capabilities、
+//! 参见 design/06-model.md 6.8 / 6.9 节。同 provider 的模型共享 capabilities、
 //! truncation_policy、effort 参数声明（`ModelParameter`）和 base body，具体模型
 //! 仅以 [`ModelInstanceSpec`] 差异字段从 family 派生。各 provider 的家族预设、
 //! 实例数据与能力矩阵放在对应的 `deepseek` / `openai` / `mimo` / `zhipu` 子文件，
