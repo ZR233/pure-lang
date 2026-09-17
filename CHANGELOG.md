@@ -5,6 +5,68 @@ anywork release notes are generated from Conventional Commits by Release Please.
 以下已发布记录保留当时的名称与行为，不作为当前工程规范；当前架构演进规则见
 [AGENTS.md](AGENTS.md)，数据迁移契约及实现缺口见[存储设计](design/17-studio-storage.md)。
 
+## [4.0.0](https://github.com/ZR233/pure-lang/compare/v3.0.0...v4.0.0) (2026-09-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* **studio:** Studio startTurn/steerTurn 替换为 submitPrompt；HTTP 使用 POST /api/v1/threads/{thread_id}/prompts，输入需提供稳定 inputId。
+* **studio:** anywork installs independently and uses a new data root and credential service. Pure Studio users must install manually; existing settings and history are not migrated.
+* **studio:** 统一暹罗浅色主题并移除系统主题偏好
+* **studio:** pl.core.thread-commit 升级到 v2；保留旧 v1 数据，读取明确返回不支持版本，不提供旧格式双读。
+* **core:** 移除旧 AgentRuntime 与产品协议门面；消费者改用 pl-core Thread 端口、pl-model/pl-tool 适配及 Studio 统一装配。
+
+### Features
+
+* **studio:** rename desktop app to anywork ([6404728](https://github.com/ZR233/pure-lang/commit/6404728fa13da6fb763e64136d1681a3e3ded2fd))
+* **studio:** 增强子智能体任务概要与会话可见性 ([718c105](https://github.com/ZR233/pure-lang/commit/718c10535c9021df9ce013f12214821579778036))
+* **studio:** 统一运行中消息插入与子代理续跑 ([3a575c2](https://github.com/ZR233/pure-lang/commit/3a575c2727f6817b5169dce3dca72f5ccad282b6))
+* **studio:** 重构项目会话侧栏并完善项目添加流程 ([dc6f788](https://github.com/ZR233/pure-lang/commit/dc6f788116fdbad30f183dddf2e281e05ea58bef))
+
+
+### Bug Fixes
+
+* **model:** 更新 DeepSeek 模型目录与人民币定价 ([62a101a](https://github.com/ZR233/pure-lang/commit/62a101ace2e7d71451cddf5a41e649de2a98ad0a))
+* **ssh:** 继承远程用户环境并完善设置重连 ([be4d5dd](https://github.com/ZR233/pure-lang/commit/be4d5ddb20292bed23be926f8036aef307e41eda))
+* **studio:** warm thread directory before publishing cold activation ([e7c196f](https://github.com/ZR233/pure-lang/commit/e7c196ff89354819bfa8c5f7cc38c4015c9729d7))
+* **studio:** 优化侧栏底部操作区布局 ([a299f48](https://github.com/ZR233/pure-lang/commit/a299f48d2833fe5e02a21094bcf2aa623458f42c))
+* **studio:** 修复 agent 切换与 timeline 连续分页 ([4cfda01](https://github.com/ZR233/pure-lang/commit/4cfda010641bc4cdf894662f3ea620213cd126e0))
+* **studio:** 修复 DeepSeek 上下文容量显示为零 ([2ac66ae](https://github.com/ZR233/pure-lang/commit/2ac66ae198376eceeb1d741cdf3e74629baabdd9))
+* **studio:** 修复 Windows CI 会话备份与线程测试 ([8b75ee1](https://github.com/ZR233/pure-lang/commit/8b75ee1c0d96cb8d95ca8f8cbe9b6547539185d5))
+* **studio:** 修复任务模式恢复与 GUI 验收链路 ([e9d7664](https://github.com/ZR233/pure-lang/commit/e9d766423d92e46202f1d7fa0ecc709803daddf4))
+* **studio:** 修复聊天输入误显示为原始记录 ([bb93f17](https://github.com/ZR233/pure-lang/commit/bb93f17d03d7a52dc854bc659d3a6acbb425fd83))
+* **studio:** 修复远程恢复阻塞并取消主会话步数限制 ([713009a](https://github.com/ZR233/pure-lang/commit/713009a86d9d21a390313a9c3d0af2e45cce16a8))
+* **studio:** 修复远程重连后的会话工具绑定 ([7474e4d](https://github.com/ZR233/pure-lang/commit/7474e4d7e2ce94e3bdbd6862c716042a090d0688))
+* **studio:** 在时间线按需展开已读取图片 ([1cb0da1](https://github.com/ZR233/pure-lang/commit/1cb0da11e98f83e1ba0577a09119fc9aa9c1d115))
+* **studio:** 完善 GUI 中文本地化 ([1e35733](https://github.com/ZR233/pure-lang/commit/1e357333766c3769dee059bd70fdcae50be3d81d))
+* **studio:** 技能列表副标题改为技能描述 ([#63](https://github.com/ZR233/pure-lang/issues/63)) ([e8b6c68](https://github.com/ZR233/pure-lang/commit/e8b6c685060f30489282405ffaad655870915184))
+* **studio:** 移除侧栏重复的应用名称和标志 ([3b89bf2](https://github.com/ZR233/pure-lang/commit/3b89bf2dbb2283d677f270c162d34eea6ae0d750))
+* **studio:** 缩减线程恢复回归测试运行时 ([30452a9](https://github.com/ZR233/pure-lang/commit/30452a9f85fd203201741b3014c8610abec267a0))
+* **studio:** 隔离线程恢复测试的非相关工具发现 ([a5f8235](https://github.com/ZR233/pure-lang/commit/a5f8235fe31ab39239515d6a95f4cadd6e1ca8f9))
+
+
+### Performance
+
+* **studio:** 加速启动并提供分区域加载反馈 ([82c7b6b](https://github.com/ZR233/pure-lang/commit/82c7b6b199cee10b9056dff2e912d616bfed758c))
+
+
+### Refactoring
+
+* **core:** 分离通用 Thread 内核与 Studio 产品运行时 ([7c69236](https://github.com/ZR233/pure-lang/commit/7c692367dadf486f91eaf04438df30a43f831368))
+* **studio:** 统一暹罗浅色主题并移除系统主题偏好 ([669d096](https://github.com/ZR233/pure-lang/commit/669d096cc62d04fdb0b99f7c3dcf3e2a1599c9b1))
+
+
+### Documentation
+
+* **design:** 重构设计文档为纯架构描述并重排编号 ([30ebc22](https://github.com/ZR233/pure-lang/commit/30ebc22d26c5edda6e5ea0f156d66ba1365eb37b))
+* **skills:** 迁移通用质量技能并收敛项目协作规范 ([fa70542](https://github.com/ZR233/pure-lang/commit/fa70542a5dd4d45d37a12f0abb8600c0ebc1e5aa))
+* 统一 anywork 架构演进与数据迁移规范 ([f7bf01d](https://github.com/ZR233/pure-lang/commit/f7bf01d114cb905d739a85b92c04a38bbf83c172))
+
+
+### Maintenance
+
+* **git:** 忽略旧应用构建缓存 ([91e977d](https://github.com/ZR233/pure-lang/commit/91e977dc23ddfdccde246af18c6a945e21a7df70))
+
 ## [3.0.0](https://github.com/ZR233/pure-lang/compare/v2.0.0...v3.0.0) (2026-09-08)
 
 
