@@ -28,6 +28,9 @@ struct Prompt {
     text: String,
     presentation: MessagePresentation,
     attachments: Vec<crate::studio::AttachmentRecord>,
+    // Admission metadata is validated but does not replace the saved display content.
+    #[serde(rename = "request")]
+    _request: Option<pl_protocol::studio::StudioPromptInput>,
 }
 
 #[derive(Deserialize)]
@@ -145,5 +148,33 @@ mod tests {
         let unknown = input(OpaquePayload::new("future.input", 8, "unknown\n").unwrap());
         assert!(input_content(&unknown).is_err());
         assert_eq!(unknown.input.payload.content(), "unknown\n");
+    }
+
+    #[test]
+    fn saved_prompt_request_metadata_does_not_replace_display_text() {
+        let payload = OpaquePayload::new(
+            "pl.studio.prompt",
+            1,
+            serde_json::json!({
+                "text": "  displayed\r\n",
+                "request": {
+                    "inputId": "input",
+                    "text": "original request",
+                    "attachmentDraftIds": []
+                },
+                "presentation": "visible",
+                "attachments": []
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let projected = input_content(&input(payload.clone())).unwrap();
+        assert_eq!(projected.text, "  displayed\r\n");
+        assert_eq!(projected.presentation, MessagePresentation::Visible);
+        assert_eq!(projected.original, payload);
+        let mut malformed: serde_json::Value = serde_json::from_str(payload.content()).unwrap();
+        malformed["request"] = serde_json::json!("not a prompt request");
+        let malformed = OpaquePayload::new("pl.studio.prompt", 1, malformed.to_string()).unwrap();
+        assert!(input_content(&input(malformed)).is_err());
     }
 }

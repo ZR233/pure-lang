@@ -37,12 +37,23 @@ void main() {
       tester,
       find.byKey(const ValueKey('agent-profile-add')),
     );
+    // Both routes expose the status banner while navigation is animating. The
+    // recovery spinner stays active, so wait for the route rather than all frames.
+    await _pumpUntilFound(
+      tester,
+      find.byElementPredicate(
+        (element) =>
+            element.widget.key == StudioDriverKeys.settingsPage &&
+            ModalRoute.of(element)?.animation?.isCompleted == true,
+      ),
+    );
     expect(find.byKey(const ValueKey('recovery-check-status')), findsOneWidget);
     api.fail();
     await _pumpUntilFound(
       tester,
       find.byKey(const ValueKey('recovery-check-retry')),
     );
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('recovery-check-retry')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('recovery-check-status')), findsNothing);
