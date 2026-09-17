@@ -25,10 +25,22 @@ impl StudioRuntime {
     pub async fn with_options(
         options: crate::StudioRuntimeOptions,
     ) -> pl_protocol::studio::StudioResult<Self> {
+        Self::with_startup_observer(options, std::sync::Arc::new(|_| {})).await
+    }
+
+    /// Creates a runtime with a nonblocking observer for pre-publication startup phases.
+    /// The observer must not call back into the runtime. It owns no startup resources.
+    pub async fn with_startup_observer(
+        options: crate::StudioRuntimeOptions,
+        observer: std::sync::Arc<dyn Fn(crate::StudioStartupStage) + Send + Sync>,
+    ) -> pl_protocol::studio::StudioResult<Self> {
+        let _timing = crate::startup_timing::Stage::new("construct_runtime");
+        observer(crate::StudioStartupStage::OpeningStorage);
         let resolved = options.resolve()?;
         let lock_path = resolved.paths.runtime_lock();
         let system_skills_dir = resolved.paths.system_skills_dir();
         let host = resolved.host;
+        let lock_timing = crate::startup_timing::Stage::new("acquire_runtime_lock");
         let instance_lock =
             tokio::task::spawn_blocking(move || RuntimeLock::acquire(&lock_path, host))
                 .await
@@ -36,9 +48,11 @@ impl StudioRuntime {
                     tracing::error!(error = %error, "Studio runtime lock task failed");
                     pl_protocol::studio::StudioError::internal()
                 })??;
+        drop(lock_timing);
         let reset_path = resolved.paths.database();
         // Once reset starts, its task retains the exclusive owner through every backup/marker IO.
         // Dropping the startup waiter must not release the lock while blocking filesystem work runs.
+        let reset_timing = crate::startup_timing::Stage::new("inspect_storage_versions");
         let instance_lock = tokio::spawn(async move {
             crate::studio::session_reset::prepare(&reset_path, &instance_lock).await?;
             Ok::<_, anyhow::Error>(instance_lock)
@@ -52,12 +66,16 @@ impl StudioRuntime {
             tracing::error!(error = %error, "failed to coordinate session storage recovery");
             pl_protocol::studio::StudioError::storage()
         })?;
+        drop(reset_timing);
+        let database_timing = crate::startup_timing::Stage::new("open_database");
         let store = StudioStore::open(resolved.paths.database())
             .await
             .map_err(|error| {
                 tracing::error!(error = %error, "failed to open Studio storage");
                 pl_protocol::studio::StudioError::storage()
             })?;
+        drop(database_timing);
+        observer(crate::StudioStartupStage::LoadingConfiguration);
         let config_store = match host {
             crate::StudioHostKind::Test => ConfigStore::new(ConfigPaths::from_config_dir(
                 resolved.paths.home().to_path_buf(),
@@ -72,6 +90,7 @@ impl StudioRuntime {
             StudioRuntimeState::new(),
             Some(instance_lock),
             Some(system_skills_dir),
+            observer,
         )
         .map_err(|error| {
             tracing::error!(error = %error, "failed to initialize Studio runtime");
@@ -90,8 +109,11 @@ impl StudioRuntime {
         runtime_state: StudioRuntimeState,
         instance_lock: Option<RuntimeLock>,
         system_skills_dir: Option<std::path::PathBuf>,
+        startup_observer: std::sync::Arc<dyn Fn(crate::StudioStartupStage) + Send + Sync>,
     ) -> Result<Self> {
+        let config_timing = crate::startup_timing::Stage::new("load_configuration");
         let config_runtime = ConfigRuntime::initialize(config_store)?;
+        drop(config_timing);
         let (settings_updates, _) = tokio::sync::watch::channel(config_runtime.read()?);
         // 进程级共享 writer 先于所有 owner 构造：ProductEventBus 与
         // ThreadRepository 共用同一 write-behind 队列。
@@ -155,6 +177,7 @@ impl StudioRuntime {
         );
         thread_observations.install(thread_factory.clone())?;
         Ok(Self {
+            startup_observer,
             thread_observations,
             settings_updates,
             settings_refresh: Default::default(),
@@ -184,6 +207,9 @@ impl StudioRuntime {
             },
             runtime_state,
             recovery: crate::studio::StudioRecoveryRegistry::new(),
+            recovery_task: Default::default(),
+            #[cfg(test)]
+            recovery_gate: Default::default(),
             skills,
             thread_modes,
             provider_usage,

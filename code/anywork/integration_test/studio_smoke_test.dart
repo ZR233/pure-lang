@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -11,6 +13,47 @@ import 'package:anywork/src/shared/studio_driver_keys.dart';
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+
+  testWidgets('background checks keep navigation usable and expose retry', (
+    tester,
+  ) async {
+    final api = _RecoveryLoadingDemo();
+    addTearDown(api.events.close);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          studioApiProvider.overrideWithValue(api),
+          studioUpdateEnabledProvider.overrideWithValue(false),
+        ],
+        child: const AnyworkApp(),
+      ),
+    );
+    await _pumpUntilFound(tester, find.byKey(StudioDriverKeys.shell));
+    expect(find.byKey(const ValueKey('recovery-check-status')), findsOneWidget);
+    await tester.tap(find.byKey(StudioDriverKeys.settingsOpen));
+    await _pumpUntilFound(tester, find.byKey(StudioDriverKeys.settingsPage));
+    await tester.tap(find.byKey(StudioDriverKeys.settingsTab('agents')));
+    await _pumpUntilFound(
+      tester,
+      find.byKey(const ValueKey('agent-profile-add')),
+    );
+    expect(find.byKey(const ValueKey('recovery-check-status')), findsOneWidget);
+    api.fail();
+    await _pumpUntilFound(
+      tester,
+      find.byKey(const ValueKey('recovery-check-retry')),
+    );
+    await tester.tap(find.byKey(const ValueKey('recovery-check-retry')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('recovery-check-status')), findsNothing);
+    expect(find.byKey(const ValueKey('agent-profile-add')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.byKey(StudioDriverKeys.settingsBack));
+    await tester.pumpAndSettle();
+    expect(find.byKey(StudioDriverKeys.shell), findsOneWidget);
+    await api.shutdownRuntime();
+    await tester.pumpWidget(const SizedBox());
+  });
 
   testWidgets('demo Studio smoke flow remains driver-addressable', (
     tester,
@@ -431,5 +474,50 @@ Future<void> _pumpUntilFound(
   }
   if (finder.evaluate().isEmpty) {
     throw TestFailure('Timed out waiting for $finder');
+  }
+}
+
+class _RecoveryLoadingDemo extends DemoStudioApi {
+  Future<void>? _shutdown;
+  @override
+  Future<void> shutdownRuntime() => _shutdown ??= super.shutdownRuntime();
+  final events = StreamController<Object>.broadcast();
+  RecoveryStateSnapshot recovery = const RecoveryStateSnapshot.fromState(
+    state: RefreshingObservedResource<List<StudioRecoveryIssue>>(
+      revision: 100,
+      operation: 'check',
+      operationId: 'integration-recovery',
+      startedAt: 0,
+      lastCheckedAt: null,
+      value: [],
+    ),
+  );
+  @override
+  Future<StudioState> readStudioState() async =>
+      (await super.readStudioState()).copyWith(recoveryState: recovery);
+  @override
+  Stream<Object> subscribeProductEvents() => events.stream;
+  void fail() {
+    recovery = const RecoveryStateSnapshot.fromState(
+      state: FailedObservedResource<List<StudioRecoveryIssue>>(
+        revision: 101,
+        failedAt: 1,
+        operation: 'check',
+        error: ObservedResourceError(
+          code: 'unavailable',
+          message: 'Workspace unavailable',
+          retryable: true,
+        ),
+      ),
+    );
+    events.add(
+      StudioBridgeEvent(payload: RecoveryStateChangedPayload(recovery)),
+    );
+  }
+
+  @override
+  Future<RecoveryStateSnapshot> retryRecovery() async {
+    recovery = RecoveryStateSnapshot(revision: 102);
+    return recovery;
   }
 }

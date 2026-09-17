@@ -52,7 +52,6 @@ struct ProductStateRevisions {
     project: DomainRevision,
     thread: DomainRevision,
     agent: DomainRevision,
-    recovery: DomainRevision,
 }
 
 #[derive(Default)]

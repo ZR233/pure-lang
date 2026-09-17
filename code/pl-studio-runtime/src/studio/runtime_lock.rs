@@ -120,10 +120,12 @@ impl RuntimeLock {
             tracing::error!(error = %error, "failed to encode Studio runtime lock metadata");
             StudioError::internal()
         })?;
+        // The OS lock is the exclusive-owner authority. These bytes only describe the
+        // live holder; they must be visible to local readers, not durable after a crash.
+        // Forcing this diagnostic write to disk stalls startup behind unrelated IO.
         file.set_len(0)
             .and_then(|()| file.seek(SeekFrom::Start(0)))
             .and_then(|_| file.write_all(&encoded))
-            .and_then(|()| file.sync_data())
             .map_err(|error| {
                 tracing::error!(error = %error, "failed to write Studio runtime lock metadata");
                 StudioError::storage()
@@ -244,6 +246,8 @@ mod tests {
     fn lock_owner_releases_across_all_clones() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("studio/runtime.lock");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"incomplete metadata left by a terminated process").unwrap();
         let owner = RuntimeLockOwner::new(Some(
             RuntimeLock::acquire(&path, StudioHostKind::Test).unwrap(),
         ));

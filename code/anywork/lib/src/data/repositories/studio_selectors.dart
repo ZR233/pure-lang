@@ -9,6 +9,7 @@ part 'studio_selectors.g.dart';
 typedef WorkspaceLayoutView = ({
   String threadId,
   bool isLoading,
+  String? loadError,
   TimelineTodoListUpdate? todo,
   PlanConfirmationView? planConfirmation,
 });
@@ -90,6 +91,7 @@ AsyncValue<WorkspaceLayoutView?> selectedWorkspaceLayout(Ref ref) {
         return (
           threadId: workspace.threadId,
           isLoading: workspace.isLoading,
+          loadError: workspace.loadError,
           todo: workspace.todo,
           planConfirmation: workspace.activeInteraction?.planConfirmation,
         );

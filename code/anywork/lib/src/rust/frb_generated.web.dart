@@ -1049,6 +1049,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BridgeStaleResource dco_decode_bridge_stale_resource(dynamic raw);
 
   @protected
+  BridgeStartupStage dco_decode_bridge_startup_stage(dynamic raw);
+
+  @protected
   BridgeStateError dco_decode_bridge_state_error(dynamic raw);
 
   @protected
@@ -3072,6 +3075,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeStaleResource sse_decode_bridge_stale_resource(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeStartupStage sse_decode_bridge_startup_stage(
     SseDeserializer deserializer,
   );
 
@@ -5500,6 +5508,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_stale_resource(
     BridgeStaleResource self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_startup_stage(
+    BridgeStartupStage self,
     SseSerializer serializer,
   );
 

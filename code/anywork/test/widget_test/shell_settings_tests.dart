@@ -1,6 +1,104 @@
 part of '../widget_test.dart';
 
 void registerShellSettingsTests() {
+  testWidgets(
+    'failed history load preserves content and retries the subscription',
+    (tester) async {
+      _configureResponsiveView(tester, const Size(1280, 800));
+      final api = _FakeStudioApi(_stateWithPlannerModels())
+        ..publishSnapshotOnSubscribe = true;
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [studioApiProvider.overrideWithValue(api)],
+          child: _localizedApp(home: const StudioShell()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      api._thread.addError(StateError('history unavailable'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('history unavailable'), findsOneWidget);
+      expect(find.byKey(StudioDriverKeys.sidebar), findsOneWidget);
+      final before = api.threadSubscriptions.length;
+      await tester.tap(find.text('Retry'));
+      await tester.pumpAndSettle();
+      expect(api.threadSubscriptions.length, before + 1);
+      expect(find.textContaining('history unavailable'), findsNothing);
+      expect(
+        find.byKey(const ValueKey('agent-workspace-loading')),
+        findsNothing,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'recovery scan keeps known worktrees visible and retries failed checks',
+    (tester) async {
+      _configureSettingsTestView(tester);
+      final initial = _stateWithPlannerModels().copyWith(
+        recoveryState: _worktreeRecoverySnapshot(),
+      );
+      final api = _FakeStudioApi(initial);
+      await _pumpSettingsPage(tester, api);
+      await tester.tap(find.text('Agents'));
+      await tester.pumpAndSettle();
+      final checking = RecoveryStateSnapshot.fromState(
+        state: RefreshingObservedResource<List<StudioRecoveryIssue>>(
+          revision: 100,
+          operation: 'check',
+          operationId: 'recovery',
+          startedAt: 1,
+          lastCheckedAt: null,
+          value: initial.recoveryIssues,
+        ),
+      );
+      api._global.add(
+        StudioBridgeEvent(payload: RecoveryStateChangedPayload(checking)),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(
+        find.text('Checking conversation history and workspaces…'),
+        findsOneWidget,
+      );
+      expect(find.text('pure-agent-child-1'), findsOneWidget);
+      api._global.add(
+        StudioBridgeEvent(
+          payload: RecoveryStateChangedPayload(
+            RecoveryStateSnapshot.fromState(
+              state: DegradedObservedResource<List<StudioRecoveryIssue>>(
+                revision: 101,
+                failedAt: 2,
+                lastCheckedAt: null,
+                operation: 'check',
+                error: const ObservedResourceError(
+                  code: 'failed',
+                  message: 'disk unavailable',
+                  retryable: true,
+                ),
+                value: initial.recoveryIssues,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.textContaining('disk unavailable'), findsOneWidget);
+      expect(find.text('pure-agent-child-1'), findsOneWidget);
+      api._currentState = initial.copyWith(
+        recoveryState: RecoveryStateSnapshot(
+          values: initial.recoveryIssues,
+          revision: 102,
+        ),
+      );
+      await tester.tap(find.byKey(const ValueKey('recovery-check-retry')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('recovery-check-status')), findsNothing);
+      expect(find.text('pure-agent-child-1'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('Studio stays light when the system appearance changes', (
     tester,
   ) async {
@@ -185,6 +283,7 @@ void registerShellSettingsTests() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     final api = _FakeStudioApi(_stateWithPlannerModels());
+    api.publishSnapshotOnSubscribe = true;
     await tester.pumpWidget(
       ProviderScope(
         overrides: [studioApiProvider.overrideWithValue(api)],
@@ -242,7 +341,12 @@ void registerShellSettingsTests() {
       ..archiveThreadState = state.copyWith(
         threadDirectory: ThreadDirectoryWindow(threads: [second]),
         selectedThreadId: second.id,
+        workspacesByThread: {
+          ...state.workspacesByThread,
+          second.id: state.selectedWorkspace!.copyWith(thread: second),
+        },
       );
+    api.publishSnapshotOnSubscribe = true;
     await tester.pumpWidget(
       ProviderScope(
         overrides: [studioApiProvider.overrideWithValue(api)],
@@ -1020,6 +1124,7 @@ void registerShellSettingsTests() {
       },
     );
     final api = _FakeStudioApi(state);
+    api.publishSnapshotOnSubscribe = true;
     await tester.pumpWidget(
       ProviderScope(
         overrides: [studioApiProvider.overrideWithValue(api)],
@@ -1080,11 +1185,10 @@ void registerShellSettingsTests() {
           ],
         ),
       );
+      final api = _FakeStudioApi(state)..publishSnapshotOnSubscribe = true;
       await tester.pumpWidget(
         ProviderScope(
-          overrides: [
-            studioApiProvider.overrideWithValue(_FakeStudioApi(state)),
-          ],
+          overrides: [studioApiProvider.overrideWithValue(api)],
           child: _localizedApp(home: const StudioShell()),
         ),
       );

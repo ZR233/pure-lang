@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
@@ -8,6 +8,10 @@ use pl_tool::workspace::path_safety::{
     metadata_if_real, remove_dir_all_no_follow, validate_existing_path,
 };
 use rust_embed::Embed;
+use serde::{Deserialize, Serialize};
+
+const BUNDLE_FINGERPRINT: &str =
+    include_str!(concat!(env!("OUT_DIR"), "/system_skills_fingerprint"));
 
 const LEGACY_SYSTEM_MARKER_FILE_NAME: &str = ".pl-system-skills.marker";
 const EXPECTED_SYSTEM_SKILLS: [&str; 9] = [
@@ -34,11 +38,106 @@ struct BundledAsset {
 }
 
 pub(super) fn refresh_system_skills(system_dir: &Path, config: &SkillsConfig) -> Result<()> {
+    prepare_skills_parent(system_dir)?;
+    if cache_matches(system_dir)? {
+        tracing::info!(cache_hit = true, "system Skills prepared");
+        return Ok(());
+    }
+    tracing::info!(cache_hit = false, "system Skills prepared");
     let assets = validated_bundled_assets()?;
     replace_system_skills_dir(system_dir, &assets)?;
+    write_cache_manifest(system_dir)?;
     if let Err(error) = clean_legacy_system_skills(system_dir, config) {
         tracing::warn!(%error, "failed to clean legacy system Skills cache");
     }
+    Ok(())
+}
+
+// This derived cache is only an optimization. Bundle identity comes from the
+// build input; a missing or changed file inventory conservatively rebuilds it.
+#[derive(Serialize, Deserialize, PartialEq, Eq)]
+struct CacheManifest {
+    version: u32,
+    bundle: String,
+    files: BTreeMap<PathBuf, FileStamp>,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq)]
+struct FileStamp {
+    length: u64,
+    modified: std::time::SystemTime,
+}
+
+fn manifest_path(root: &Path) -> Result<PathBuf> {
+    Ok(root
+        .parent()
+        .context("system Skills parent")?
+        .join(".system-cache.json"))
+}
+
+fn file_inventory(root: &Path) -> Result<BTreeMap<PathBuf, FileStamp>> {
+    fn collect(
+        root: &Path,
+        directory: &Path,
+        files: &mut BTreeMap<PathBuf, FileStamp>,
+    ) -> Result<()> {
+        validate_existing_path(root, directory)?;
+        for entry in fs::read_dir(directory)? {
+            let entry = entry?;
+            let path = entry.path();
+            validate_existing_path(root, &path)?;
+            let metadata = fs::symlink_metadata(&path)?;
+            if metadata.is_dir() {
+                collect(root, &path, files)?;
+            } else if metadata.is_file() {
+                files.insert(
+                    path.strip_prefix(root)?.to_path_buf(),
+                    FileStamp {
+                        length: metadata.len(),
+                        modified: metadata.modified()?,
+                    },
+                );
+            } else {
+                bail!("unexpected system Skill filesystem entry");
+            }
+        }
+        Ok(())
+    }
+    validate_existing_path(root.parent().context("system Skills parent")?, root)?;
+    let mut files = BTreeMap::new();
+    collect(root, root, &mut files)?;
+    Ok(files)
+}
+
+fn cache_matches(root: &Path) -> Result<bool> {
+    let path = manifest_path(root)?;
+    if metadata_if_real(&path)?.is_none() || metadata_if_real(root)?.is_none() {
+        return Ok(false);
+    }
+    let Ok(manifest) = serde_json::from_slice::<CacheManifest>(&fs::read(path)?) else {
+        return Ok(false);
+    };
+    Ok(manifest.version == 1
+        && manifest.bundle == BUNDLE_FINGERPRINT
+        && manifest.files == file_inventory(root)?)
+}
+
+fn write_cache_manifest(root: &Path) -> Result<()> {
+    use std::io::Write;
+    let parent = root.parent().context("system Skills parent")?;
+    let path = manifest_path(root)?;
+    // Validate even on a cache miss before replacing a stale cache file.
+    if fs::symlink_metadata(&path).is_ok() {
+        validate_existing_path(parent, &path)?;
+    }
+    let manifest = CacheManifest {
+        version: 1,
+        bundle: BUNDLE_FINGERPRINT.to_owned(),
+        files: file_inventory(root)?,
+    };
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+    temporary.write_all(&serde_json::to_vec(&manifest)?)?;
+    temporary.persist(path)?;
     Ok(())
 }
 
@@ -116,7 +215,6 @@ fn is_main_skill_document(path: &Path) -> bool {
 
 fn replace_system_skills_dir(system_dir: &Path, assets: &[BundledAsset]) -> Result<()> {
     let skills_dir = prepare_skills_parent(system_dir)?;
-    remove_current_system_dir(&skills_dir, system_dir)?;
     let staging = tempfile::Builder::new()
         .prefix(".system-staging-")
         .tempdir_in(&skills_dir)
@@ -127,13 +225,29 @@ fn replace_system_skills_dir(system_dir: &Path, assets: &[BundledAsset]) -> Resu
             )
         })?;
     write_assets(staging.path(), assets)?;
-    fs::rename(staging.path(), system_dir).with_context(|| {
-        format!(
-            "failed to publish system Skills staging directory '{}' as '{}'",
-            staging.path().display(),
-            system_dir.display()
-        )
-    })?;
+    // Prepare the complete candidate before touching the currently usable bundle.
+    let previous = tempfile::Builder::new()
+        .prefix(".system-previous-")
+        .tempdir_in(&skills_dir)?;
+    let previous_path = previous.path().join("bundle");
+    let had_previous = fs::symlink_metadata(system_dir).is_ok();
+    if had_previous {
+        validate_existing_path(&skills_dir, system_dir)?;
+        anyhow::ensure!(
+            system_dir.is_dir(),
+            "failed to remove system Skills: target is not a directory"
+        );
+        fs::rename(system_dir, &previous_path)?;
+    }
+    if let Err(error) = fs::rename(staging.path(), system_dir) {
+        if had_previous {
+            fs::rename(&previous_path, system_dir).context("restore previous system Skills")?;
+        }
+        return Err(error).context("publish system Skills");
+    }
+    if had_previous {
+        remove_current_system_dir(previous.path(), &previous_path)?;
+    }
     Ok(())
 }
 
@@ -318,13 +432,22 @@ mod tests {
     }
 
     #[test]
-    fn refresh_rebuilds_every_time_and_restores_all_embedded_bytes() {
+    fn refresh_reuses_unchanged_tree_and_repairs_changed_assets() {
         let home = tempfile::tempdir().unwrap();
         let system_dir = target(home.path());
         let config = SkillsConfig::default();
 
         refresh_system_skills(&system_dir, &config).unwrap();
         let first = materialized_files(&system_dir);
+        let original_metadata = fs::metadata(system_dir.join("skill-creator/SKILL.md")).unwrap();
+        refresh_system_skills(&system_dir, &config).unwrap();
+        assert_eq!(
+            fs::metadata(system_dir.join("skill-creator/SKILL.md"))
+                .unwrap()
+                .modified()
+                .unwrap(),
+            original_metadata.modified().unwrap()
+        );
         fs::write(system_dir.join("stale.txt"), b"stale").unwrap();
         fs::remove_file(system_dir.join("skill-creator").join("SKILL.md")).unwrap();
 
@@ -337,6 +460,16 @@ mod tests {
             .map(|asset| (asset.path, asset.contents))
             .collect::<BTreeMap<_, _>>();
         assert_eq!(first, expected);
+        for marker in [
+            b"broken".as_slice(),
+            br#"{"version":0,"bundle":"old","files":{}}"#,
+        ] {
+            fs::write(manifest_path(&system_dir).unwrap(), marker).unwrap();
+            assert!(!cache_matches(&system_dir).unwrap());
+            refresh_system_skills(&system_dir, &config).unwrap();
+            assert!(cache_matches(&system_dir).unwrap());
+            assert_eq!(materialized_files(&system_dir), expected);
+        }
     }
 
     #[test]
@@ -424,7 +557,10 @@ mod tests {
         ];
 
         assert!(replace_system_skills_dir(&system_dir, &assets).is_err());
-        assert!(!system_dir.exists());
+        assert_eq!(
+            fs::read_to_string(system_dir.join("stale")).unwrap(),
+            "remove"
+        );
         assert!(
             fs::read_dir(system_dir.parent().unwrap())
                 .unwrap()

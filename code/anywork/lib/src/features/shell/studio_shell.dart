@@ -7,6 +7,9 @@ import 'package:flutter/widget_previews.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../data/frb/studio_api.dart' show FrbStudioApi;
+import '../../shared/studio_loading.dart';
+import '../../shared/recovery_check_status.dart';
 import '../../app/theme/material3_theme.dart';
 import '../../app/theme/studio_tokens.dart';
 import '../../data/repositories/studio_repository.dart';
@@ -31,6 +34,7 @@ part 'sidebar_tiles.dart';
 part 'sidebar_actions.dart';
 part 'runtime_banners.dart';
 part 'studio_shell_chrome.dart';
+part 'studio_startup.dart';
 part 'agent_workspace_pane.dart';
 part 'agent_workspace_preview.dart';
 
@@ -60,6 +64,8 @@ class StudioShell extends ConsumerStatefulWidget {
 class _StudioShellState extends ConsumerState<StudioShell> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   final _sidebarKey = GlobalKey<_SidebarState>();
+  final _startupClock = Stopwatch()..start();
+  bool _reportedReady = false;
   double? _sidebarWidth;
   bool _sidebarHidden = false;
 
@@ -117,17 +123,24 @@ class _StudioShellState extends ConsumerState<StudioShell> {
         const SingleActivator(LogicalKeyboardKey.keyN, meta: true): _newSession,
       },
       child: asyncChrome.when(
-        loading: () =>
-            const Scaffold(body: Center(child: CircularProgressIndicator())),
+        loading: () => const _StudioStartup(),
         error: (error, stackTrace) => _StudioFatalError(error: error),
         data: (chrome) {
           final sidebar = asyncSidebar.value;
           final header = asyncHeader.value;
           StudioDriverState.publishProject(header?.selectedProject);
           if (sidebar == null || header == null) {
-            return const Scaffold(
-              body: Center(child: CircularProgressIndicator()),
-            );
+            return const _StudioStartup();
+          }
+          if (!_reportedReady) {
+            _reportedReady = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) {
+                debugPrint(
+                  'startup_stage=first_usable_frame elapsed_ms=${_startupClock.elapsedMilliseconds}',
+                );
+              }
+            });
           }
           return LayoutBuilder(
             builder: (context, constraints) {
@@ -265,6 +278,7 @@ class _StudioShellState extends ConsumerState<StudioShell> {
                                 _ApplicationRecoveryBanner(
                                   issues: chrome.applicationRecoveryIssues,
                                 ),
+                              const RecoveryCheckStatus(),
                               const Divider(height: 1),
                               const Expanded(child: AgentWorkspacePane()),
                             ],

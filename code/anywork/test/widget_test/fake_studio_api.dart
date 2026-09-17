@@ -1,6 +1,10 @@
 part of '../widget_test.dart';
 
 class _FakeStudioApi implements StudioApi {
+  @override
+  Future<RecoveryStateSnapshot> retryRecovery() async =>
+      (await readStudioState()).recoveryState;
+
   _FakeStudioApi(
     this.initialState, {
     List<ProviderUsageView>? providerUsages,
@@ -19,6 +23,7 @@ class _FakeStudioApi implements StudioApi {
   final Map<String, StudioState> selectProjectStates = {};
   final Map<String, StudioState> archiveProjectStates = {};
   Completer<void>? blockedStudioStateLoad;
+  bool publishSnapshotOnSubscribe = false;
   final List<String> loadedSessionIds = [];
   final List<String> threadSubscriptions = [];
   final List<({String threadId, String? cursor})> historyRequests = [];
@@ -652,7 +657,7 @@ class _FakeStudioApi implements StudioApi {
   Stream<ThreadStreamFrame> subscribeThread(String threadId) {
     threadSubscriptions.add(threadId);
     final blockedCancellation = blockedThreadCancellation;
-    if (blockedCancellation == null) {
+    if (blockedCancellation == null && !publishSnapshotOnSubscribe) {
       return _thread.stream;
     }
     late final StreamController<ThreadStreamFrame> controller;
@@ -664,10 +669,18 @@ class _FakeStudioApi implements StudioApi {
           onError: controller.addError,
           onDone: controller.close,
         );
+        if (publishSnapshotOnSubscribe) {
+          controller.add(
+            ThreadSnapshotFrame(
+              workspace: _currentState.workspacesByThread[threadId]!,
+              historyCursor: null,
+            ),
+          );
+        }
       },
       onCancel: () async {
         await forwarding?.cancel();
-        await blockedCancellation.future;
+        await blockedCancellation?.future;
       },
     );
     return controller.stream;

@@ -10,7 +10,7 @@ import '../types/runtime.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `bridge_config_recovery`, `shutdown_runtime_for_update`
+// These functions are ignored because they are not marked as `pub`: `bridge_config_recovery`, `publish_startup_stage`, `shutdown_runtime_for_update`
 
 Future<BridgeStudioStartupResult> startStudioRuntime() =>
     RustLib.instance.api.crateApiStudioHandlersLifecycleStartStudioRuntime();
@@ -39,3 +39,12 @@ Future<ProjectDto> renameProject({
   projectId: projectId,
   name: name,
 );
+
+BridgeStartupStage readStartupStage() =>
+    RustLib.instance.api.crateApiStudioHandlersLifecycleReadStartupStage();
+
+Future<BridgeRecoveryStateSnapshot> readRecoveryState() =>
+    RustLib.instance.api.crateApiStudioHandlersLifecycleReadRecoveryState();
+
+Future<BridgeRecoveryStateSnapshot> retryRecovery() =>
+    RustLib.instance.api.crateApiStudioHandlersLifecycleRetryRecovery();

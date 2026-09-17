@@ -19,7 +19,14 @@ pub fn init_app() {
 }
 
 pub async fn start_studio_runtime() -> Result<BridgeStudioStartupResult, BridgeError> {
-    let bridge = install_bridge_runtime().await?;
+    publish_startup_stage(pl_studio_runtime::StudioStartupStage::OpeningStorage);
+    let bridge = match install_bridge_runtime().await {
+        Ok(bridge) => bridge,
+        Err(error) => {
+            publish_startup_stage(pl_studio_runtime::StudioStartupStage::Failed);
+            return Err(error.into());
+        }
+    };
     let runtime = runtime_snapshot(bridge.studio.start_runtime().await?);
     let recovery = bridge.studio.startup_config_recovery();
     let config_recovery =
@@ -117,4 +124,44 @@ mod tests {
         assert_eq!(mapped.backup_path, backup_path.display().to_string());
         assert_eq!(bridge_config_recovery(None), None);
     }
+}
+
+static STARTUP: std::sync::LazyLock<
+    tokio::sync::watch::Sender<super::super::types::BridgeStartupStage>,
+> = std::sync::LazyLock::new(|| {
+    tokio::sync::watch::channel(super::super::types::BridgeStartupStage::OpeningStorage).0
+});
+
+pub(crate) fn publish_startup_stage(stage: pl_studio_runtime::StudioStartupStage) {
+    use super::super::types::BridgeStartupStage as Target;
+    use pl_studio_runtime::StudioStartupStage as Source;
+    STARTUP.send_replace(match stage {
+        Source::OpeningStorage => Target::OpeningStorage,
+        Source::LoadingConfiguration => Target::LoadingConfiguration,
+        Source::ReadingProjects => Target::ReadingProjects,
+        Source::PreparingResources => Target::PreparingResources,
+        Source::Ready => Target::Ready,
+        Source::Failed => Target::Failed,
+    });
+}
+
+#[frb(sync)]
+pub fn read_startup_stage() -> super::super::types::BridgeStartupStage {
+    *STARTUP.borrow()
+}
+
+pub async fn read_recovery_state()
+-> Result<super::super::types::BridgeRecoveryStateSnapshot, BridgeError> {
+    let bridge = active_bridge().await?;
+    Ok(super::super::convert::runtime::bridge_recovery_state(
+        bridge.studio.read_recovery_state().state,
+    ))
+}
+
+pub async fn retry_recovery()
+-> Result<super::super::types::BridgeRecoveryStateSnapshot, BridgeError> {
+    let bridge = active_bridge().await?;
+    Ok(super::super::convert::runtime::bridge_recovery_state(
+        bridge.studio.retry_recovery().await?.state,
+    ))
 }

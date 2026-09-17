@@ -123,6 +123,7 @@ pub struct StudioResolveInteractionResponse {
 
 #[derive(Clone)]
 pub struct StudioRuntime {
+    startup_observer: std::sync::Arc<dyn Fn(crate::StudioStartupStage) + Send + Sync>,
     thread_observations: thread_observation::ThreadObservations,
     settings_updates: tokio::sync::watch::Sender<crate::config::ConfigRuntimeSnapshot>,
     settings_refresh: background_task::BackgroundTaskSlot,
@@ -140,6 +141,9 @@ pub struct StudioRuntime {
     shutdown_progress: ShutdownProgressBus,
     runtime_state: StudioRuntimeState,
     recovery: crate::studio::StudioRecoveryRegistry,
+    recovery_task: background_task::BackgroundTaskSlot,
+    #[cfg(test)]
+    recovery_gate: std::sync::Arc<tokio::sync::Mutex<()>>,
     skills: SkillCatalogRuntime,
     thread_modes: crate::mode::ThreadModeManager,
     provider_usage: ProviderUsageRuntime,

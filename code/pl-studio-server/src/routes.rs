@@ -148,6 +148,7 @@ pub(crate) fn api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(save_model_role))
         .routes(routes!(read_provider_usage))
         .routes(routes!(check_provider_usage))
+        .routes(routes!(read_recovery, retry_recovery))
         .routes(routes!(retry_persistence))
         .routes(routes!(read_skills))
         .routes(routes!(discover_skills))
@@ -914,4 +915,20 @@ fn parse_mode(mode: &str) -> Result<ThreadModeId, ApiError> {
             mode.trim()
         )))
     })
+}
+
+#[utoipa::path(get, path = "/api/v1/runtime/recovery", operation_id = "recovery.read", responses(StudioApiErrors, (status = 200)))]
+async fn read_recovery(State(state): State<AppState>) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(state.runtime.read_recovery_state()))
+}
+
+#[utoipa::path(post, path = "/api/v1/runtime/recovery/retry", operation_id = "recovery.retry", responses(StudioApiErrors, (status = 200)))]
+async fn retry_recovery(State(state): State<AppState>) -> Result<impl IntoResponse, ApiError> {
+    Ok(Json(
+        state
+            .runtime
+            .retry_recovery()
+            .await
+            .map_err(ApiError::from)?,
+    ))
 }

@@ -54,13 +54,15 @@ pub enum StudioOperation {
     ResetLsp,
     ReadUpdate,
     CheckUpdate,
+    ReadRecovery,
+    RetryRecovery,
     RetryPersistence,
     SubscribeProduct,
     SubscribeThread,
 }
 
 impl StudioOperation {
-    pub const ALL: [Self; 50] = [
+    pub const ALL: [Self; 52] = [
         Self::ReadState,
         Self::OpenProject,
         Self::RenameProject,
@@ -108,6 +110,8 @@ impl StudioOperation {
         Self::ResetLsp,
         Self::ReadUpdate,
         Self::CheckUpdate,
+        Self::ReadRecovery,
+        Self::RetryRecovery,
         Self::RetryPersistence,
         Self::SubscribeProduct,
         Self::SubscribeThread,
@@ -162,6 +166,8 @@ impl StudioOperation {
             Self::ResetLsp => "lsp.reset",
             Self::ReadUpdate => "update.read",
             Self::CheckUpdate => "update.check",
+            Self::ReadRecovery => "recovery.read",
+            Self::RetryRecovery => "recovery.retry",
             Self::RetryPersistence => "persistence.retry",
             Self::SubscribeProduct => "studio.subscribeProduct",
             Self::SubscribeThread => "thread.subscribe",

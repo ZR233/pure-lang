@@ -406,10 +406,20 @@ pub(crate) fn run_gui(options: RunGuiOptions) -> Result<()> {
     let app_version = studio_version::read(&app_dir)?;
     let version_define = format!("--dart-define=ANYWORK_VERSION={app_version}");
     print_context(&workspace_root, &app_dir);
+    let preflight_started = std::time::Instant::now();
     ensure_desktop_build_environment(target)?;
     ensure_flutter_dependencies(&workspace_root, &app_dir)?;
     GeneratedSourcesPolicy::UseCurrent.prepare(&workspace_root, &app_dir)?;
+    println!(
+        "startup_stage=development_preflight elapsed_ms={}",
+        preflight_started.elapsed().as_millis()
+    );
+    let helper_started = std::time::Instant::now();
     remote_helper::prepare_for_embedding(&workspace_root)?;
+    println!(
+        "startup_stage=build_remote_helpers elapsed_ms={}",
+        helper_started.elapsed().as_millis()
+    );
 
     let demo_mode = if options.demo {
         DemoMode::Demo
@@ -693,7 +703,14 @@ fn prepare_bridge_artifacts(
     configuration: BridgeConfiguration,
 ) -> Result<Option<RustBridgeArtifacts>> {
     if needs_bridge_artifacts(target, demo_mode) {
-        return rust_bridge::build_workspace_artifacts(workspace_root, configuration).map(Some);
+        let started = std::time::Instant::now();
+        let result =
+            rust_bridge::build_workspace_artifacts(workspace_root, configuration).map(Some);
+        println!(
+            "startup_stage=build_bridge elapsed_ms={}",
+            started.elapsed().as_millis()
+        );
+        return result;
     }
     Ok(None)
 }

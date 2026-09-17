@@ -26,15 +26,6 @@ impl ProductEventBus {
         }
     }
 
-    pub fn recovery_state(
-        &self,
-        issues: Vec<crate::StudioRecoveryIssue>,
-    ) -> StudioRecoveryStateSnapshot {
-        StudioRecoveryStateSnapshot {
-            state: self.resource(&self.revisions.recovery, issues),
-        }
-    }
-
     pub fn emit_agent_directory(
         &self,
         state: StudioAgentDirectoryState,
@@ -62,11 +53,10 @@ impl ProductEventBus {
 
     pub fn emit_recovery_state(
         &self,
-        issues: Vec<crate::StudioRecoveryIssue>,
+        state: pl_protocol::ObservedResource<Vec<crate::StudioRecoveryIssue>>,
     ) -> StudioProductEventEnvelope {
-        self.bump(&self.revisions.recovery);
         self.emit(StudioProductEventKind::RecoveryStateChanged(
-            self.recovery_state(issues),
+            StudioRecoveryStateSnapshot { state },
         ))
     }
 

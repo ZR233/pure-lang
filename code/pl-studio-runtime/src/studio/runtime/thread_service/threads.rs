@@ -299,7 +299,7 @@ impl StudioRuntime {
         self.close_project_agent_trees(thread_ids).await?;
         for thread_id in thread_ids {
             self.residency.remove(thread_id).await;
-            let issues = self.recovery.remove(&format!("tool-refresh:{thread_id}"));
+            let issues = self.recovery.retire_thread(thread_id);
             self.agent_facility
                 .product_events
                 .emit_recovery_state(issues);

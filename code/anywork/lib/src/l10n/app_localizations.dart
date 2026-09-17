@@ -3988,6 +3988,60 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'dirty'**
   String get settingsWorktreeDirty;
+
+  /// No description provided for @startupPreparing.
+  ///
+  /// In en, this message translates to:
+  /// **'Preparing application…'**
+  String get startupPreparing;
+
+  /// No description provided for @startupStorage.
+  ///
+  /// In en, this message translates to:
+  /// **'Opening local data…'**
+  String get startupStorage;
+
+  /// No description provided for @startupConfiguration.
+  ///
+  /// In en, this message translates to:
+  /// **'Loading configuration…'**
+  String get startupConfiguration;
+
+  /// No description provided for @startupProjects.
+  ///
+  /// In en, this message translates to:
+  /// **'Loading projects…'**
+  String get startupProjects;
+
+  /// No description provided for @startupResources.
+  ///
+  /// In en, this message translates to:
+  /// **'Preparing skill resources…'**
+  String get startupResources;
+
+  /// No description provided for @startupState.
+  ///
+  /// In en, this message translates to:
+  /// **'Loading workspace…'**
+  String get startupState;
+
+  /// No description provided for @workspaceLoading.
+  ///
+  /// In en, this message translates to:
+  /// **'Loading conversation history…'**
+  String get workspaceLoading;
+
+  /// No description provided for @recoveryChecking.
+  ///
+  /// In en, this message translates to:
+  /// **'Checking conversation history and workspaces…'**
+  String get recoveryChecking;
+
+  /// No description provided for @recoveryCheckFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Conversation and workspace check did not complete'**
+  String get recoveryCheckFailed;
 }
 
 class _AppLocalizationsDelegate

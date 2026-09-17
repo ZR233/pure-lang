@@ -8,3 +8,8 @@ mod types;
 
 pub(super) use discovery::skills_fingerprint;
 pub use types::{SkillCatalogRuntime, SkillSearchResult, SkillsStateData, SkillsStateSnapshot};
+
+#[cfg(test)]
+pub(in crate::studio::runtime) fn prepare_benchmark_cache(path: &std::path::Path) {
+    system::refresh_system_skills(path, &pl_tool::skill::SkillsConfig::default()).unwrap();
+}

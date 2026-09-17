@@ -1,80 +1,242 @@
-//! 恢复问题的独立注册表。
-//!
-//! 此前 [`StudioRuntimeStateInner`] 同时持有服务生命周期状态（status/error）和
-//! 恢复问题列表（recovery_issues），两者变化原因完全不同：status 在每次生命周期
-//! 转换时变，recovery_issues 只在启动恢复或用户清理后变。混在同一把锁里会让
-//! recovery 的读取/清理阻塞 status 的快速转换，反之亦然。
-//!
-//! 拆出独立 registry 后，恢复问题拥有自己的锁和快照，调用方按需访问。
+//! Recovery issues and scan lifecycle share one owner and revision.
+use crate::studio::{StudioRecoveryIssue, ids::unix_seconds};
+use pl_protocol::{ObservedResource, ObservedResourceCommand, StateError, StateOperation};
+use std::{
+    collections::BTreeSet,
+    sync::{Arc, Mutex},
+};
 
-use std::sync::{Arc, Mutex};
-
-use crate::studio::StudioRecoveryIssue;
-
-/// 启动恢复与用户清理期间累积的可操作恢复问题。
 #[derive(Debug, Clone)]
-pub struct StudioRecoveryRegistry {
-    inner: Arc<Mutex<Vec<StudioRecoveryIssue>>>,
+enum ScanState {
+    Idle,
+    Stopped,
+    Checking,
+    Failed(StateError),
 }
-
-impl StudioRecoveryRegistry {
-    /// 创建空的恢复注册表。
-    pub fn new() -> Self {
-        Self {
-            inner: Arc::new(Mutex::new(Vec::new())),
+#[derive(Debug)]
+struct State {
+    issues: Vec<StudioRecoveryIssue>,
+    removed: BTreeSet<String>,
+    retired_threads: BTreeSet<String>,
+    scan: ScanState,
+    revision: u64,
+    updated_at: i64,
+}
+impl State {
+    fn touch(&mut self) {
+        self.revision = self.revision.saturating_add(3);
+        self.updated_at = unix_seconds();
+    }
+    fn snapshot(&self) -> ObservedResource<Vec<StudioRecoveryIssue>> {
+        let base = ObservedResource::ready(self.revision, self.updated_at, self.issues.clone());
+        if matches!(self.scan, ScanState::Idle) {
+            return base;
+        }
+        if matches!(self.scan, ScanState::Stopped) {
+            return base
+                .decide(ObservedResourceCommand::Stop {
+                    expected_revision: self.revision,
+                    stopped_at: self.updated_at,
+                })
+                .expect("Ready accepts Stop")
+                .next_state;
+        }
+        // These local transitions are valid by construction. Reserve two revisions for
+        // projecting checking/failure so every mutation remains newer than its predecessor.
+        let checking = base
+            .decide(ObservedResourceCommand::Begin {
+                expected_revision: self.revision,
+                operation: StateOperation::Check,
+                operation_id: "startup-recovery".into(),
+                started_at: self.updated_at,
+            })
+            .expect("Ready accepts Begin")
+            .next_state;
+        match &self.scan {
+            ScanState::Failed(error) => {
+                checking
+                    .decide(ObservedResourceCommand::Fail {
+                        expected_revision: checking.revision(),
+                        failed_at: self.updated_at,
+                        error: error.clone(),
+                    })
+                    .expect("Refreshing accepts Fail")
+                    .next_state
+            }
+            ScanState::Idle | ScanState::Stopped | ScanState::Checking => checking,
         }
     }
+}
 
-    /// 用给定问题列表整体替换当前内容。
-    ///
-    /// 典型调用点是 `initialize_runtime` 完成恢复扫描后的汇总写入。
-    pub fn replace(&self, issues: Vec<StudioRecoveryIssue>) {
-        let mut inner = self.inner.lock().expect("recovery registry mutex poisoned");
-        *inner = issues;
+#[derive(Debug, Clone)]
+pub struct StudioRecoveryRegistry {
+    inner: Arc<Mutex<State>>,
+}
+impl StudioRecoveryRegistry {
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(State {
+                issues: Vec::new(),
+                removed: BTreeSet::new(),
+                retired_threads: BTreeSet::new(),
+                scan: ScanState::Idle,
+                revision: 0,
+                updated_at: unix_seconds(),
+            })),
+        }
     }
-
-    /// 返回当前所有恢复问题的快照。
     pub fn snapshot(&self) -> Vec<StudioRecoveryIssue> {
         self.inner
             .lock()
-            .expect("recovery registry mutex poisoned")
+            .expect("recovery lock poisoned")
+            .issues
             .clone()
     }
-
-    /// Apply an asynchronous owner's result only while that incarnation is current.
-    /// Validation shares the registry lock with retirement's removal, so a late
-    /// observer cannot recreate an issue after retirement has cleared it.
+    pub(crate) fn state(&self) -> ObservedResource<Vec<StudioRecoveryIssue>> {
+        self.inner
+            .lock()
+            .expect("recovery lock poisoned")
+            .snapshot()
+    }
+    pub(crate) fn begin(&self) {
+        let mut inner = self.inner.lock().expect("recovery lock poisoned");
+        inner.removed.clear();
+        inner.retired_threads.clear();
+        inner.scan = ScanState::Checking;
+        inner.touch();
+    }
+    pub(crate) fn stop(&self) {
+        let mut inner = self.inner.lock().expect("recovery lock poisoned");
+        inner.scan = ScanState::Stopped;
+        inner.touch();
+    }
+    pub(crate) fn fail(&self, error: StateError) {
+        let mut inner = self.inner.lock().expect("recovery lock poisoned");
+        inner.scan = ScanState::Failed(error);
+        inner.touch();
+    }
+    pub fn replace(&self, issues: Vec<StudioRecoveryIssue>) {
+        let mut inner = self.inner.lock().expect("recovery lock poisoned");
+        // Keep observer-owned issues; merge only the audit's categories and never resurrect
+        // a result removed by a user or retired owner while this scan was in flight.
+        inner
+            .issues
+            .retain(|issue| issue.id.starts_with("tool-refresh:"));
+        for issue in issues {
+            if !inner.removed.contains(&issue.id)
+                && !issue
+                    .thread_id
+                    .as_ref()
+                    .is_some_and(|id| inner.retired_threads.contains(id))
+            {
+                inner.issues.push(issue);
+            }
+        }
+        inner.scan = ScanState::Idle;
+        inner.touch();
+    }
     pub(in crate::studio) fn update_if_current(
         &self,
         issue_id: &str,
         issue: Option<StudioRecoveryIssue>,
         is_current: impl FnOnce() -> bool,
-        publish: impl FnOnce(Vec<StudioRecoveryIssue>),
+        publish: impl FnOnce(ObservedResource<Vec<StudioRecoveryIssue>>),
     ) {
-        let mut inner = self.inner.lock().expect("recovery registry mutex poisoned");
+        let mut inner = self.inner.lock().expect("recovery lock poisoned");
         if !is_current() {
             return;
         }
-        if issue.is_none() && !inner.iter().any(|current| current.id == issue_id) {
+        if issue.is_none() && !inner.issues.iter().any(|current| current.id == issue_id) {
             return;
         }
-        inner.retain(|current| current.id != issue_id);
+        inner.issues.retain(|current| current.id != issue_id);
         if let Some(issue) = issue {
-            inner.push(issue);
+            inner.issues.push(issue);
         }
-        publish(inner.clone());
+        inner.touch();
+        publish(inner.snapshot());
     }
-
-    /// 删除指定 id 的恢复问题，返回剩余问题的快照。
-    pub fn remove(&self, issue_id: &str) -> Vec<StudioRecoveryIssue> {
-        let mut inner = self.inner.lock().expect("recovery registry mutex poisoned");
-        inner.retain(|issue| issue.id != issue_id);
-        inner.clone()
+    pub(crate) fn retire_thread(
+        &self,
+        thread_id: &str,
+    ) -> ObservedResource<Vec<StudioRecoveryIssue>> {
+        let mut inner = self.inner.lock().expect("recovery lock poisoned");
+        inner.retired_threads.insert(thread_id.into());
+        inner
+            .issues
+            .retain(|issue| issue.thread_id.as_deref() != Some(thread_id));
+        inner.touch();
+        inner.snapshot()
+    }
+    pub fn remove(&self, issue_id: &str) -> ObservedResource<Vec<StudioRecoveryIssue>> {
+        let mut inner = self.inner.lock().expect("recovery lock poisoned");
+        inner.removed.insert(issue_id.into());
+        inner.issues.retain(|current| current.id != issue_id);
+        inner.touch();
+        inner.snapshot()
     }
 }
-
 impl Default for StudioRecoveryRegistry {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn issue() -> StudioRecoveryIssue {
+        StudioRecoveryIssue {
+            id: "audit-thread".into(),
+            scope: crate::StudioRecoveryIssueScope::Thread,
+            category: crate::StudioRecoveryIssueCategory::AgentState,
+            action: crate::StudioRecoveryIssueAction::CleanupThread,
+            project_id: Some("project".into()),
+            thread_id: Some("thread".into()),
+            message: "invalid history".into(),
+            worktree: None,
+        }
+    }
+    #[test]
+    fn late_scan_cannot_resurrect_retired_or_cleaned_issues() {
+        for retired in [false, true] {
+            let registry = StudioRecoveryRegistry::new();
+            registry.begin();
+            let checking = registry.state();
+            if retired {
+                registry.retire_thread("thread");
+            } else {
+                registry.remove("audit-thread");
+            }
+            registry.replace(vec![issue()]);
+            assert!(registry.snapshot().is_empty());
+            assert!(registry.state().revision() > checking.revision());
+        }
+    }
+    #[test]
+    fn retry_preserves_known_issues_and_exposes_checking_then_failure() {
+        let registry = StudioRecoveryRegistry::new();
+        registry.replace(vec![issue()]);
+        registry.begin();
+        assert_eq!(
+            registry.state().kind(),
+            pl_protocol::ObservedResourceKind::Refreshing
+        );
+        registry.fail(StateError {
+            code: "failed".into(),
+            message: "storage unavailable".into(),
+            retryable: true,
+        });
+        let failure = registry.state();
+        assert_eq!(failure.kind(), pl_protocol::ObservedResourceKind::Degraded);
+        assert_eq!(failure.value().unwrap().len(), 1);
+        registry.begin();
+        assert!(registry.state().revision() > failure.revision());
+        registry.replace(Vec::new());
+        assert_eq!(
+            registry.state().kind(),
+            pl_protocol::ObservedResourceKind::Ready
+        );
+        assert!(registry.snapshot().is_empty());
     }
 }

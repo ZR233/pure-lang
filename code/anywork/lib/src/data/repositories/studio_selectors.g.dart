@@ -295,7 +295,7 @@ final class SelectedWorkspaceLayoutProvider
 }
 
 String _$selectedWorkspaceLayoutHash() =>
-    r'f426d6d0c8e9c737244964698e898f8781ddaa52';
+    r'01a8db528c297982bfb0b1ad1bd2eaf5a42e9086';
 
 @ProviderFor(selectedWorkspaceControls)
 final selectedWorkspaceControlsProvider = SelectedWorkspaceControlsProvider._();

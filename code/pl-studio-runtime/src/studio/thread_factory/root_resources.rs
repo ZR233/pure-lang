@@ -28,13 +28,9 @@ impl StudioThreadFactory {
         let route = config
             .models
             .resolve(&crate::config::StudioRole::Planner.id())?;
-        let history = self
-            .services
-            .store
-            .sessions()
-            .read_thread_journal(id)
+        let history = super::recovery::recover_journal(&self.services.store, id)
             .await
-            .map_err(|error| resource_error("read Thread journal", error))?;
+            .map_err(|error| resource_error("recover Thread journal", error))?;
         let saved = pl_core::thread::journal::replay(&history)?;
         let selected_mode = crate::studio::thread_projection::saved_mode(&saved)
             .map_err(|error| resource_error("read saved Mode", error))?

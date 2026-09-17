@@ -21,13 +21,9 @@ impl StudioThreadFactory {
             return Err(ThreadAssemblyError::Identity(id.clone()));
         }
         let project = self.project_record(&thread.project_id).await?;
-        let history = self
-            .services
-            .store
-            .sessions()
-            .read_thread_journal(id)
+        let history = super::recovery::recover_journal(&self.services.store, id)
             .await
-            .map_err(|error| resource_error("read child journal", error))?;
+            .map_err(|error| resource_error("recover Thread journal", error))?;
         if history.is_empty() {
             return Err(ThreadAssemblyError::Identity(format!(
                 "child {id} has no saved journal"

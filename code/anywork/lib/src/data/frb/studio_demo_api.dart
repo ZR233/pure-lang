@@ -1,6 +1,10 @@
 part of 'studio_api.dart';
 
 class DemoStudioApi implements StudioApi {
+  @override
+  Future<RecoveryStateSnapshot> retryRecovery() async =>
+      (await readStudioState()).recoveryState;
+
   DemoStudioApi({
     this.lspActivityLoop = false,
     this._providerCatalog = demoProviderCatalogFixture,

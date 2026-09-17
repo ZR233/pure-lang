@@ -952,24 +952,32 @@ class WorkspaceUiState {
   const WorkspaceUiState({
     this.composer = const ComposerThreadState.idle(),
     this.syncState = AgentWorkspaceSyncState.loading,
+    this.loadError,
     this.subscriptionGeneration = 0,
     this.history = const ThreadHistoryWindow(),
   });
 
   final ComposerThreadState composer;
   final AgentWorkspaceSyncState syncState;
+  final String? loadError;
   final int subscriptionGeneration;
   final ThreadHistoryWindow history;
 
   WorkspaceUiState copyWith({
     ComposerThreadState? composer,
     AgentWorkspaceSyncState? syncState,
+    String? loadError,
     int? subscriptionGeneration,
     ThreadHistoryWindow? history,
   }) {
     return WorkspaceUiState(
       composer: composer ?? this.composer,
       syncState: syncState ?? this.syncState,
+      loadError:
+          syncState == AgentWorkspaceSyncState.loading ||
+              syncState == AgentWorkspaceSyncState.ready
+          ? null
+          : loadError ?? this.loadError,
       subscriptionGeneration:
           subscriptionGeneration ?? this.subscriptionGeneration,
       history: history ?? this.history,

@@ -533,7 +533,11 @@ void registerControllerStreamTests() {
     final cancellation = Completer<void>();
     final api = _FakeStudioApi(_emptyState())
       ..blockedThreadCancellation = cancellation;
-    final coordinator = ThreadStreamCoordinator(api, (_, _, _) {}, (_, _) {});
+    final coordinator = ThreadStreamCoordinator(
+      api,
+      (_, _, _) {},
+      (_, _, _) {},
+    );
     addTearDown(() async {
       if (!cancellation.isCompleted) cancellation.complete();
       await coordinator.dispose();

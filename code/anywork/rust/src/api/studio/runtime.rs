@@ -17,7 +17,11 @@ pub(crate) struct BridgeRuntime {
 impl BridgeRuntime {
     async fn new() -> Result<Self> {
         Ok(Self {
-            studio: StudioRuntime::default_app().await?,
+            studio: StudioRuntime::with_startup_observer(
+                pl_studio_runtime::StudioRuntimeOptions::desktop(),
+                std::sync::Arc::new(super::handlers::lifecycle::publish_startup_stage),
+            )
+            .await?,
             subscriptions: BridgeTaskRegistry::new(),
             shutdown: CancellationToken::new(),
         })

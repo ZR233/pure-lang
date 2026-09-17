@@ -2106,4 +2106,31 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get settingsWorktreeDirty => '有改动';
+
+  @override
+  String get startupPreparing => '正在准备应用…';
+
+  @override
+  String get startupStorage => '正在打开本地数据…';
+
+  @override
+  String get startupConfiguration => '正在读取配置…';
+
+  @override
+  String get startupProjects => '正在读取项目…';
+
+  @override
+  String get startupResources => '正在准备技能资源…';
+
+  @override
+  String get startupState => '正在加载工作区…';
+
+  @override
+  String get workspaceLoading => '正在加载会话历史…';
+
+  @override
+  String get recoveryChecking => '正在检查历史会话和工作区…';
+
+  @override
+  String get recoveryCheckFailed => '历史会话和工作区检查未完成';
 }

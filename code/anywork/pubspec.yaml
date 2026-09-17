@@ -41,6 +41,8 @@ dev_dependencies:
 flutter:
   generate: true
   uses-material-design: true
+  assets:
+    - assets/branding/anywork-app-icon.png
 
 flutter_rust_bridge:
   rust_root: rust/

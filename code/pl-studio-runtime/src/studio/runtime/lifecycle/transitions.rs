@@ -7,6 +7,7 @@ use super::super::StudioRuntime;
 
 impl StudioRuntime {
     pub async fn initialize_runtime(&self) -> Result<StudioRuntimeSnapshot> {
+        let _timing = crate::startup_timing::Stage::new("initialize_runtime");
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
         let current = self.runtime_snapshot().await?;
         if current.state.is_ready() {
@@ -23,6 +24,7 @@ impl StudioRuntime {
                 .config_runtime
                 .read()
                 .map_err(|error| startup_failure("read_configuration", error))?;
+            let cache_timing = crate::startup_timing::Stage::new("load_cached_observations");
             self.provider_usage
                 .load_cache()
                 .await
@@ -35,21 +37,18 @@ impl StudioRuntime {
                 .load_cache()
                 .await
                 .map_err(|error| startup_failure("load_update_cache", error))?;
+            drop(cache_timing);
+            (self.startup_observer)(crate::StudioStartupStage::ReadingProjects);
+            let directory_timing = crate::startup_timing::Stage::new("read_project_directory");
             self.agent_facility
                 .product_events
                 .initialize_directories()
                 .await
                 .map_err(|error| startup_failure("initialize_product_directories", error))?;
-            let mut recovery_issues = Vec::new();
-            self.append_session_recovery_issues(&mut recovery_issues)
-                .await
-                .map_err(|error| startup_failure("recover_sessions", error))?;
-            self.append_worktree_recovery_issues(&mut recovery_issues)
-                .await
-                .map_err(|error| startup_failure("recover_worktrees", error))?;
-            self.append_unavailable_project_recovery_issues(&mut recovery_issues)
-                .await
-                .map_err(|error| startup_failure("recover_unavailable_projects", error))?;
+            self.agent_facility.worktrees.restore(
+                crate::studio::agent_host::worktree_lease::load_leases(&self.store).await?,
+            );
+            drop(directory_timing);
             self.start_model_refresh().await;
             self.start_tool_refresh().await;
             self.start_mcp_health_watcher().await;
@@ -57,30 +56,32 @@ impl StudioRuntime {
             self.start_mcp_reconcile_background()
                 .await
                 .map_err(|error| startup_failure("start_mcp_reconcile", error))?;
+            (self.startup_observer)(crate::StudioStartupStage::PreparingResources);
+            let skills_timing = crate::startup_timing::Stage::new("prepare_system_skills");
             self.skills
                 .refresh_system_skills(&settings.config.skills)
                 .await
                 .map_err(|error| startup_failure("refresh_system_skills", error))?;
+            drop(skills_timing);
             self.publish_settings_state(settings)
                 .map_err(|error| startup_failure("publish_settings", error))?;
-            Ok::<_, anyhow::Error>(recovery_issues)
+            Ok::<_, anyhow::Error>(())
         }
         .await;
         match initialization {
-            Ok(recovery_issues) => {
-                self.recovery.replace(recovery_issues);
-                self.agent_facility
-                    .product_events
-                    .emit_recovery_state(self.recovery.snapshot());
+            Ok(()) => {
                 let _ = self
                     .runtime_state
                     .apply(StudioRuntimeCommand::FinishInitialize {
                         expected_revision: self.runtime_state.snapshot().revision,
                         at: unix_seconds(),
                     })?;
+                self.start_recovery_scan().await;
+                (self.startup_observer)(crate::StudioStartupStage::Ready);
                 self.runtime_snapshot().await
             }
             Err(error) => {
+                (self.startup_observer)(crate::StudioStartupStage::Failed);
                 let _ = self
                     .runtime_state
                     .apply(StudioRuntimeCommand::FailInitialize {
@@ -145,6 +146,7 @@ impl StudioRuntime {
                 ));
             // 标题任务使用同一 runtime 生命周期；先取消并等待，避免关机后
             // 陈旧 Explorer 结果再次修改目录事实。
+            self.stop_recovery_scan().await?;
             self.stop_tool_refresh().await?;
             self.stop_model_refresh().await?;
             self.title_tasks.cancel_and_wait().await;

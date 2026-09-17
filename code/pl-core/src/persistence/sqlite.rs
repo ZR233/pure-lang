@@ -143,6 +143,9 @@ async fn initialize(db: &DatabaseConnection) -> Result<(), SessionStoreError> {
         "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000;",
     )
     .await?;
+    if version == super::SESSION_SCHEMA_VERSION {
+        return Ok(());
+    }
     db.execute_unprepared(
         "CREATE TABLE IF NOT EXISTS session_entries (
             session_id TEXT NOT NULL, id TEXT NOT NULL, type_id TEXT NOT NULL,

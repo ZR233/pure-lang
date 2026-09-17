@@ -13,7 +13,7 @@ import 'turn_models.dart';
 
 part 'agent_workspace_view.freezed.dart';
 
-enum AgentWorkspaceSyncState { loading, ready, reconnecting, stale }
+enum AgentWorkspaceSyncState { loading, ready, reconnecting, stale, failed }
 
 enum AgentComposerMode { editable, runtimeDriven }
 
@@ -25,6 +25,7 @@ abstract class AgentWorkspaceView with _$AgentWorkspaceView {
     required StudioThread thread,
     required StudioThread rootThread,
     required AgentWorkspaceSyncState syncState,
+    String? loadError,
     required List<TimelineRow> timelineRows,
     required TimelineTodoListUpdate? todo,
     required ThreadRuntimeView runtime,
@@ -43,7 +44,9 @@ abstract class AgentWorkspaceView with _$AgentWorkspaceView {
 
   bool get isRoot => thread.isRoot;
 
-  bool get isLoading => syncState == AgentWorkspaceSyncState.loading;
+  bool get isLoading =>
+      syncState == AgentWorkspaceSyncState.loading ||
+      syncState == AgentWorkspaceSyncState.reconnecting;
 
   bool get isBusy => turn?.state.isBusy ?? false;
 }

@@ -14,6 +14,7 @@ mod external_state;
 mod framework;
 mod project;
 mod recovery;
+mod recovery_task;
 mod snapshot;
 mod thread_activation;
 mod transitions;

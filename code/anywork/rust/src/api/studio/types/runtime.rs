@@ -371,3 +371,14 @@ pub enum BridgeLspActivity {
         percentage: Option<u32>,
     },
 }
+
+/// Startup state can be observed before a Studio runtime has been installed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BridgeStartupStage {
+    OpeningStorage,
+    LoadingConfiguration,
+    ReadingProjects,
+    PreparingResources,
+    Ready,
+    Failed,
+}

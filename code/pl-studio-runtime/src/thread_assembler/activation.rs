@@ -28,6 +28,33 @@ pub trait StudioActivationFactory: std::fmt::Debug + Send + Sync + 'static {
 }
 
 impl StudioThreadAssembler {
+    /// Reserves cold history against activation. Existing owners, including closing owners,
+    /// are never recovered by the background auditor. Dropping the guard wakes activation.
+    pub(crate) fn reserve_recovery(
+        &self,
+        identity: &ThreadActivation,
+    ) -> Result<Option<super::Reservation>, ThreadAssemblyError> {
+        let mut state = self.0.state();
+        if state.closing {
+            return Err(ThreadAssemblyError::Closed);
+        }
+        if state.entries.contains_key(&identity.id) || state.creating.contains_key(&identity.id) {
+            return Ok(None);
+        }
+        state.creating.insert(
+            identity.id.clone(),
+            Preparation {
+                parent_id: identity.parent_id.clone(),
+                cancellation: Default::default(),
+                result: None,
+            },
+        );
+        Ok(Some(super::Reservation {
+            registry: self.0.clone(),
+            id: identity.id.clone(),
+        }))
+    }
+
     /// Coalesces concurrent activation and owns preparation even if a waiting client disconnects.
     ///
     /// # Errors
@@ -185,6 +212,31 @@ mod tests {
             id: "root".into(),
             parent_id: None,
         }
+    }
+
+    #[tokio::test]
+    async fn recovery_reservation_excludes_activation_and_live_or_closing_owners() {
+        let directory = tempfile::tempdir().unwrap();
+        let owner = StudioThreadAssembler::default();
+        let recovery = owner.reserve_recovery(&identity()).unwrap().unwrap();
+        let factory = factory(directory.path());
+        let mut activation = Box::pin({
+            let owner = owner.clone();
+            let factory = factory.clone();
+            async move { owner.activate(identity(), factory).await }
+        });
+        assert!(futures::poll!(&mut activation).is_pending());
+        assert_eq!(factory.calls.load(Ordering::SeqCst), 0);
+        drop(recovery);
+        let activation = tokio::spawn(activation);
+        factory.started.notified().await;
+        // Preparing owners are protected even before thread() can return them.
+        assert!(owner.reserve_recovery(&identity()).unwrap().is_none());
+        factory.release.notify_one();
+        activation.await.unwrap().unwrap();
+        assert!(owner.reserve_recovery(&identity()).unwrap().is_none());
+        assert!(owner.close_all().await.is_empty());
+        assert!(owner.reserve_recovery(&identity()).is_err());
     }
 
     #[tokio::test]

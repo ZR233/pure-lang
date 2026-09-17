@@ -20,7 +20,6 @@ impl ProductEventBus {
         self.initialize_revision(&self.revisions.project);
         self.initialize_revision(&self.revisions.thread);
         self.initialize_revision(&self.revisions.agent);
-        self.initialize_revision(&self.revisions.recovery);
         let durable_projects = self.store.list_projects().await?;
         let mut projects = self.project_snapshot.lock().await;
         for project in durable_projects {

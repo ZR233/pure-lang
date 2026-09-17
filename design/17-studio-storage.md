@@ -10,7 +10,8 @@ Studio 产品数据使用 `~/.anywork/studio/studio.sqlite`，会话使用同目
 与版本化 Studio object；通用 Thread journal、输入、交互、工具交付、扩展及资源元数据保存
 在独立会话库，Item 由日志投影。拆库或结构升级遵循 17.4 的迁移契约，不能通过清空会话
 完成升级。启动前取得 Studio home 的跨进程独占 lock；数据库使用 WAL、foreign keys、busy
-timeout 与串行 write-behind transaction。
+timeout 与串行 write-behind transaction。运行锁文件中的 PID/宿主/启动时间仅用于诊断，
+独占权由操作系统文件锁决定；诊断元数据不强制刷盘，数据库的持久化策略不受影响。
 
 Workflow 是 Studio 编码的 `studio.workflow` Thread 扩展，不新增 workflow 阶段/边/转换业务
 表。历史结构仅在迁移边界转换为当前事实，不恢复旧任务运行入口。worktree lease 复用
@@ -65,6 +66,12 @@ lease。worktree 部分缺失或身份不匹配时保留现场并发布带 revis
 dirty/changed-files 的 Recovery preview；显式 cleanup 才能删除。启动逐 Thread 恢复审计先
 读取纯目录关联，再独立解码各自 journal；单条日志损坏产生该 Thread 的清理提示，不提前
 阻断同项目其他日志的恢复收束。
+
+逐 Thread 恢复审计在首屏可用后执行，不作为全应用启动屏障；执行所需恢复仍在目标
+Thread activation 前完成。当前 schema 的重复启动不重新执行建表和版本写入；完整性与
+版本检查、WAL 和同步持久化保证保持不变。预置技能以构建期内容指纹及文件清单（长度、
+修改时间）复用本地资源；派生清单位于资源目录外，原子替换，不作为安全授权依据。
+缓存缺失或文件元数据改变时通过 staging 准备后替换，失败保留可重试状态。
 
 以下为 anywork 版本演进必须满足的迁移契约；当前实现尚未全部满足，缺口见 17.6。
 

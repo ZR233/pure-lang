@@ -83,9 +83,9 @@ impl StudioStore {
         let initialization = async {
             if created {
                 initialize_studio_schema(&db).await?;
-            } else {
-                crate::studio::store_support::upgrade_session_storage(&db).await?;
             }
+            // ExistingDatabaseState::Current was already verified before opening writable.
+            // Session upgrades belong to the locked pre-publication coordinator.
             validate_database(&db).await
         }
         .await;

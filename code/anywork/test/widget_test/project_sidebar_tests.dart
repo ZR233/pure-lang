@@ -203,7 +203,12 @@ void registerProjectSidebarTests() {
         find.byKey(StudioDriverKeys.threadRow('old-session')),
       );
       await tester.tap(find.byKey(StudioDriverKeys.threadRow('old-session')));
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('agent-workspace-loading')),
+        findsOneWidget,
+      );
       final selected = container.read(studioControllerProvider).requireValue;
       expect(selected.selectedThreadId, 'old-session');
       expect(selected.selectedProjectId, 'project-b');

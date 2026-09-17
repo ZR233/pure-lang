@@ -1180,5 +1180,14 @@
   "settingsWorktreeStatePreserved": "Preserved",
   "settingsWorktreeStateCleanupRequested": "Cleanup requested",
   "settingsWorktreeStateCleaned": "Cleaned",
-  "settingsWorktreeDirty": "dirty"
+  "settingsWorktreeDirty": "dirty",
+  "startupPreparing": "Preparing application…",
+  "startupStorage": "Opening local data…",
+  "startupConfiguration": "Loading configuration…",
+  "startupProjects": "Loading projects…",
+  "startupResources": "Preparing skill resources…",
+  "startupState": "Loading workspace…",
+  "workspaceLoading": "Loading conversation history…",
+  "recoveryChecking": "Checking conversation history and workspaces…",
+  "recoveryCheckFailed": "Conversation and workspace check did not complete"
 }

@@ -1,6 +1,7 @@
 part of 'studio_api.dart';
 
 abstract class StudioApi {
+  Future<RecoveryStateSnapshot> retryRecovery();
   Future<ProviderCatalogView> loadProviderCatalog();
   Future<List<AgentProfileView>> readAgentProfiles();
   Future<SettingsStateSnapshot> setSystemAgentEnabled({
@@ -177,6 +178,31 @@ AttachmentDraftView _attachmentDraftFromFrb(
 }
 
 class FrbStudioApi implements StudioApi {
+  static final startupProgress = ValueNotifier(
+    StudioStartupPhase.loadingBridge,
+  );
+
+  @override
+  Future<RecoveryStateSnapshot> retryRecovery() async {
+    await _ensureReady();
+    return _recoveryStateFromFrb(await _bridgeCall(frb.retryRecovery));
+  }
+
+  static void _readStartupPhase() {
+    startupProgress.value = switch (frb.readStartupStage()) {
+      frb.BridgeStartupStage.openingStorage =>
+        StudioStartupPhase.openingStorage,
+      frb.BridgeStartupStage.loadingConfiguration =>
+        StudioStartupPhase.loadingConfiguration,
+      frb.BridgeStartupStage.readingProjects =>
+        StudioStartupPhase.readingProjects,
+      frb.BridgeStartupStage.preparingResources =>
+        StudioStartupPhase.preparingResources,
+      frb.BridgeStartupStage.ready => StudioStartupPhase.readingState,
+      frb.BridgeStartupStage.failed => StudioStartupPhase.failed,
+    };
+  }
+
   static Future<void>? _initFuture;
   static Future<void>? _shutdownFuture;
   static Future<void> Function()? _initializationOverrideForTesting;
@@ -213,9 +239,26 @@ class FrbStudioApi implements StudioApi {
         if (initializationOverride != null) {
           await initializationOverride();
         } else {
-          await RustLib.init();
-          _rustInitialized = true;
-          final startup = await frb.startStudioRuntime();
+          if (!_rustInitialized) {
+            startupProgress.value = StudioStartupPhase.loadingBridge;
+            final bridgeWatch = Stopwatch()..start();
+            await RustLib.init();
+            _rustInitialized = true;
+            debugPrint(
+              'startup_stage=load_bridge elapsed_ms=${bridgeWatch.elapsedMilliseconds}',
+            );
+          }
+          final progress = Timer.periodic(
+            const Duration(milliseconds: 100),
+            (_) => _readStartupPhase(),
+          );
+          final frb.BridgeStudioStartupResult startup;
+          try {
+            startup = await frb.startStudioRuntime();
+            _readStartupPhase();
+          } finally {
+            progress.cancel();
+          }
           final recovery = startup.configRecovery;
           _pendingConfigRecoveryNotice = recovery == null
               ? null
@@ -225,6 +268,7 @@ class FrbStudioApi implements StudioApi {
         if (identical(_initFuture, attempt)) {
           _initFuture = null;
         }
+        startupProgress.value = StudioStartupPhase.failed;
         Error.throwWithStackTrace(_studioFailure(error), stackTrace);
       }
     }();
@@ -371,9 +415,14 @@ class FrbStudioApi implements StudioApi {
   @override
   Future<StudioState> readStudioState() async {
     await _ensureReady();
+    final watch = Stopwatch()..start();
     final state = studioStateFromFrbSnapshot(
       await _bridgeCall(frb.readStudioState),
     );
+    debugPrint(
+      'startup_stage=read_state elapsed_ms=${watch.elapsedMilliseconds}',
+    );
+    startupProgress.value = StudioStartupPhase.ready;
     final recovery = _pendingConfigRecoveryNotice;
     _pendingConfigRecoveryNotice = null;
     return state.copyWith(configRecoveryNotice: recovery);
@@ -776,6 +825,15 @@ class FrbStudioApi implements StudioApi {
           return;
         }
         handle = created;
+        final recovery = await _bridgeCall(frb.readRecoveryState);
+        if (cancelled) return;
+        controller.add(
+          StudioBridgeEvent(
+            payload: RecoveryStateChangedPayload(
+              _recoveryStateFromFrb(recovery),
+            ),
+          ),
+        );
         subscription = created.productStream().listen(
           (envelope) => envelope.when(
             data: (event) =>

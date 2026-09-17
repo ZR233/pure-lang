@@ -1,6 +1,7 @@
 //! Product configuration and shared service leases used to construct core Threads.
 mod child_resources;
 mod errors;
+pub(in crate::studio) mod recovery;
 mod restore_child;
 mod root_resources;
 mod thread_seed;

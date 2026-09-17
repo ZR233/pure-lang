@@ -59,3 +59,15 @@ pub struct StudioLspServer {
     pub language_ids: Vec<String>,
     pub state: crate::StudioLspServerState,
 }
+
+/// Observable startup milestones before the normal product stream is available.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StudioStartupStage {
+    OpeningStorage,
+    LoadingConfiguration,
+    ReadingProjects,
+    PreparingResources,
+    Ready,
+    Failed,
+}

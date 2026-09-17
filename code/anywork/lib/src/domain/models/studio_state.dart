@@ -253,6 +253,7 @@ class StudioState {
       thread: thread,
       rootThread: root,
       syncState: selectedWorkspaceUi.syncState,
+      loadError: selectedWorkspaceUi.loadError,
       timelineRows: selectedTimelineRows,
       todo: selectedTodoList,
       runtime: runtime,

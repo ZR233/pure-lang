@@ -26,7 +26,8 @@ class ThreadStreamCoordinator {
   final StudioApi _api;
   final void Function(ThreadStreamFrame frame, String threadId, int generation)
   _onFrame;
-  final void Function(String threadId, int generation) _onDisconnected;
+  final void Function(String threadId, int generation, Object? error)
+  _onDisconnected;
 
   StreamSubscription<ThreadStreamFrame>? _subscription;
   Timer? _resubscribeTimer;
@@ -49,8 +50,9 @@ class ThreadStreamCoordinator {
           .subscribeThread(threadId)
           .listen(
             (frame) => _onFrame(frame, threadId, generation),
-            onError: (_, _) => _onDisconnected(threadId, generation),
-            onDone: () => _onDisconnected(threadId, generation),
+            onError: (Object error, StackTrace _) =>
+                _onDisconnected(threadId, generation, error),
+            onDone: () => _onDisconnected(threadId, generation, null),
           );
     });
     _switchBarrier = operation.then<void>((_) {}, onError: (_, _) {});

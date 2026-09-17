@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:flutter/foundation.dart' show visibleForTesting, debugPrint;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../domain/models/studio_models.dart';
@@ -39,6 +39,7 @@ class StudioController extends _$StudioController {
       unawaited(_productCoordinator.dispose());
       unawaited(_threadCoordinator.dispose());
     });
+    final startupWatch = Stopwatch()..start();
     final catalog = await _api.loadProviderCatalog();
     final snapshot = await _api.readStudioState();
     final bootstrapped = _resolveSelection(
@@ -56,6 +57,9 @@ class StudioController extends _$StudioController {
       ),
     );
     _activateStartupProject(bootstrapped);
+    debugPrint(
+      'startup_stage=controller_ready elapsed_ms=${startupWatch.elapsedMilliseconds}',
+    );
     return bootstrapped;
   }
 
@@ -386,6 +390,19 @@ class StudioController extends _$StudioController {
               .firstWhere((thread) => thread.id == threadId)
               .projectId,
         ),
+        threadId,
+        (ui) => ui.copyWith(syncState: AgentWorkspaceSyncState.loading),
+      ),
+    );
+    await _subscribeThread(threadId);
+  }
+
+  Future<void> retryThreadLoad(String threadId) async {
+    final current = state.value;
+    if (current == null || current.selectedThreadId != threadId) return;
+    state = AsyncData(
+      _withWorkspaceUi(
+        current,
         threadId,
         (ui) => ui.copyWith(syncState: AgentWorkspaceSyncState.loading),
       ),
@@ -1178,6 +1195,12 @@ class StudioController extends _$StudioController {
     );
   }
 
+  Future<void> retryRecovery() async {
+    final next = await _api.retryRecovery();
+    final current = state.value;
+    if (current != null) state = AsyncData(applyRecoveryState(current, next));
+  }
+
   Future<void> cleanupPreservedWorktree(WorktreeRecoveryPreview worktree) =>
       _api.cleanupPreservedWorktree(
         childId: worktree.childId,
@@ -1458,20 +1481,35 @@ class StudioController extends _$StudioController {
     await _subscribeThread(threadId);
   }
 
-  void _markThreadDisconnected(String threadId, int generation) {
+  void _markThreadDisconnected(
+    String threadId,
+    int generation, [
+    Object? error,
+  ]) {
     final current = state.value;
     if (current == null ||
         generation != _threadCoordinator.generation ||
         current.selectedThreadId != threadId) {
       return;
     }
+    if (_workspaceUi(current, threadId).syncState ==
+            AgentWorkspaceSyncState.failed &&
+        error == null) {
+      return;
+    }
     state = AsyncData(
       _withWorkspaceUi(
         current,
         threadId,
-        (ui) => ui.copyWith(syncState: AgentWorkspaceSyncState.reconnecting),
+        (ui) => ui.copyWith(
+          syncState: error == null
+              ? AgentWorkspaceSyncState.reconnecting
+              : AgentWorkspaceSyncState.failed,
+          loadError: error?.toString(),
+        ),
       ),
     );
+    if (error != null) return;
     _threadCoordinator.scheduleResubscribe(
       threadId: threadId,
       generation: generation,

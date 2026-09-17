@@ -190,7 +190,7 @@ impl Registry {
 #[derive(Debug, Clone, Default)]
 pub struct StudioThreadAssembler(Arc<Registry>);
 
-struct Reservation {
+pub(crate) struct Reservation {
     registry: Arc<Registry>,
     id: String,
 }

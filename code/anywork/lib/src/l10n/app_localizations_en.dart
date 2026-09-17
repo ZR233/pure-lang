@@ -2184,4 +2184,33 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsWorktreeDirty => 'dirty';
+
+  @override
+  String get startupPreparing => 'Preparing application…';
+
+  @override
+  String get startupStorage => 'Opening local data…';
+
+  @override
+  String get startupConfiguration => 'Loading configuration…';
+
+  @override
+  String get startupProjects => 'Loading projects…';
+
+  @override
+  String get startupResources => 'Preparing skill resources…';
+
+  @override
+  String get startupState => 'Loading workspace…';
+
+  @override
+  String get workspaceLoading => 'Loading conversation history…';
+
+  @override
+  String get recoveryChecking =>
+      'Checking conversation history and workspaces…';
+
+  @override
+  String get recoveryCheckFailed =>
+      'Conversation and workspace check did not complete';
 }

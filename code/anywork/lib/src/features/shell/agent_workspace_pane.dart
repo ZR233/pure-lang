@@ -24,16 +24,16 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
     final asyncLayout = ref.watch(selectedWorkspaceLayoutProvider);
     final asyncStartPage = ref.watch(startPageProvider);
     return asyncLayout.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
+      loading: () => const StudioWorkspaceLoading(),
       error: (error, stackTrace) => Center(child: Text(error.toString())),
       data: (layout) {
         if (layout == null) {
           return asyncStartPage.when(
-            loading: () => const Center(child: CircularProgressIndicator()),
+            loading: () => const StudioWorkspaceLoading(),
             error: (error, stackTrace) => Center(child: Text(error.toString())),
             data: (startPage) => startPage.isStartPage
                 ? _StudioStartPage(view: startPage)
-                : const Center(child: CircularProgressIndicator()),
+                : const StudioWorkspaceLoading(),
           );
         }
         return LayoutBuilder(
@@ -119,13 +119,62 @@ class _AgentWorkspacePaneState extends ConsumerState<AgentWorkspacePane> {
                                                     ),
                                             ),
                                           ),
+                                          if (layout.loadError
+                                              case final error?)
+                                            Positioned(
+                                              top: 0,
+                                              left: 0,
+                                              right: 0,
+                                              child: Material(
+                                                color: context
+                                                    .colors
+                                                    .errorContainer,
+                                                child: Padding(
+                                                  padding: const EdgeInsets.all(
+                                                    16,
+                                                  ),
+                                                  child: Row(
+                                                    children: [
+                                                      Expanded(
+                                                        child: Text(error),
+                                                      ),
+                                                      TextButton(
+                                                        onPressed: () => ref
+                                                            .read(
+                                                              studioControllerProvider
+                                                                  .notifier,
+                                                            )
+                                                            .retryThreadLoad(
+                                                              threadId,
+                                                            ),
+                                                        child: Text(
+                                                          context
+                                                              .l10n
+                                                              .runtimeFatalRetry,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
                                           if (layout.isLoading)
-                                            const Positioned.fill(
-                                              child: ColoredBox(
-                                                key: ValueKey(
+                                            Positioned.fill(
+                                              child: StudioWorkspaceLoading(
+                                                key: const ValueKey(
                                                   'agent-workspace-loading',
                                                 ),
-                                                color: Colors.transparent,
+                                                hasContent:
+                                                    ref
+                                                        .watch(
+                                                          agentTimelineProvider(
+                                                            threadId,
+                                                          ),
+                                                        )
+                                                        .value
+                                                        ?.rows
+                                                        .isNotEmpty ??
+                                                    false,
                                               ),
                                             ),
                                           if (planOverlaysTimeline &&

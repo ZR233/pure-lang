@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/theme/studio_tokens.dart';
+import '../../shared/recovery_check_status.dart';
 import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
 import '../../l10n/studio_l10n.dart';
@@ -108,6 +109,7 @@ class _AgentsTabState extends ConsumerState<AgentsTab> {
           child: ListView(
             key: const ValueKey('settings-pane-scroll'),
             children: [
+              const RecoveryCheckStatus(),
               if (worktreeIssues.isNotEmpty)
                 SettingsSectionPanel(
                   title: context.l10n.settingsAgentsRecoveryTitle,

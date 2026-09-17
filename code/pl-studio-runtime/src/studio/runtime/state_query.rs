@@ -29,10 +29,9 @@ impl StudioRuntime {
             .read_agent_directory()
             .await;
         let settings = self.read_settings()?;
-        let recovery = self
-            .agent_facility
-            .product_events
-            .recovery_state(self.recovery_issues());
+        let recovery = crate::StudioRecoveryStateSnapshot {
+            state: self.recovery.state(),
+        };
         let mcp = self.read_mcp_state().await?;
         let lsp = self.read_lsp_state().await;
         let mut skills_by_project = Vec::new();

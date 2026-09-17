@@ -78,3 +78,6 @@ required-features = ["live-tests"]
 name = "prompt_cache_live"
 path = "tests/prompt_cache_live.rs"
 required-features = ["live-tests"]
+
+[build-dependencies]
+sha2 = { workspace = true }

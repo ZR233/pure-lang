@@ -28,6 +28,15 @@ directory command 发布 canonical delta。
 
 ## 18.3 Activation
 
+启动只等待数据库、配置、项目目录和本地预置资源就绪。历史会话与 worktree 审计由 runtime
+持有的后台任务完成，Recovery 使用现有 ObservedResource 发布 loading、ready 和失败状态，
+显式 `recovery.retry` 重新发起审计，`recovery.read` 只读取当前状态。关闭先停止并等待审计，
+再关闭会话与持久化。启动阶段通过 typed snapshot 向 bridge 提供存储打开、配置读取、
+目录读取、资源准备及终态，不依赖普通产品订阅已经建立。
+后台会话恢复与前台 activation 共用 assembler 的逐 Thread preparation reservation；已有
+活动、正在准备或关闭的 owner 不接受后台恢复写入。冷激活在发布 owner 前完成 durable
+settlement。审计结果按当前 lease revision 和已清理问题过滤，不能覆盖后续用户操作。
+
 选择冷 Thread、提交输入或后台 child 继续时显式 activation。runtime 在一致读视图中校验
 并加载 Thread、working state、transcript window 与 pending Interaction，全部成功后一次
 安装 owner。Mode snapshot 和 workflow projection 与 session 同时恢复，不存在独立任务

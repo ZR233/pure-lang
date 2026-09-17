@@ -53,7 +53,7 @@ pub use protocol::{
     StudioProductEventKind, StudioProjectDirectoryData, StudioProjectDirectoryState,
     StudioPurposeCostSnapshot, StudioRecoveryStateSnapshot, StudioSessionCostSnapshot,
     StudioSettingsStateSnapshot, StudioShutdownProgress, StudioSkillsStateSnapshot,
-    StudioStateSnapshot, StudioThreadDirectoryData, StudioThreadDirectoryDelta,
+    StudioStartupStage, StudioStateSnapshot, StudioThreadDirectoryData, StudioThreadDirectoryDelta,
     StudioThreadDirectoryPage, StudioThreadDirectoryPageData, StudioThreadDirectoryState,
 };
 pub use provider_usage::{
@@ -97,3 +97,5 @@ pub mod workflow_tool;
 pub mod mode;
 
 mod tool_review;
+
+mod startup_timing;

@@ -8,7 +8,7 @@ use anyhow::Result;
 use crate::agent::worktree::{
     LocalWorktreeBackend, RemoteWorktreeBackend, WorktreeBackend, WorktreeHandle, WorktreeManager,
 };
-use crate::studio::agent_host::worktree_lease::{WorktreeLease, WorktreeLeaseState, load_leases};
+use crate::studio::agent_host::worktree_lease::{WorktreeLease, WorktreeLeaseState};
 use crate::studio::{
     StudioRecoveryIssue, StudioRecoveryIssueAction, StudioRecoveryIssueCategory,
     StudioRecoveryIssueScope,
@@ -22,9 +22,6 @@ impl StudioRuntime {
         &self,
         recovery_issues: &mut Vec<StudioRecoveryIssue>,
     ) -> Result<()> {
-        self.agent_facility
-            .worktrees
-            .restore(load_leases(&self.store).await?);
         for lease in self.agent_facility.worktrees.snapshot() {
             if lease.state == WorktreeLeaseState::Cleaned {
                 continue;
@@ -55,6 +52,7 @@ impl StudioRuntime {
             }
             let project_path = PathBuf::from(&project.path);
             let root = tokio::process::Command::new("git")
+                .kill_on_drop(true)
                 .args(["rev-parse", "--show-toplevel"])
                 .current_dir(&project_path)
                 .output()
@@ -80,6 +78,7 @@ impl StudioRuntime {
                 }
             }
             let registered = tokio::process::Command::new("git")
+                .kill_on_drop(true)
                 .args(["worktree", "list", "--porcelain", "-z"])
                 .current_dir(&root)
                 .output()
@@ -243,23 +242,25 @@ impl StudioRuntime {
         &self,
         recovery_issues: &mut Vec<StudioRecoveryIssue>,
     ) -> Result<()> {
-        use pl_core::thread::cold::ColdStore;
         for project in self.agent_facility.product_events.project_snapshot().await {
             for thread_id in self.store.list_project_thread_ids(&project.id).await? {
                 let Some(thread) = self.store.read_thread_association(&thread_id).await? else {
                     continue;
                 };
-                let result = self.store.sessions().read_thread_journal(&thread.id).await;
+                let identity = crate::thread_assembler::ThreadActivation {
+                    id: thread.id.clone(),
+                    parent_id: thread.parent_thread_id.clone(),
+                };
+                let Some(_reservation) = self.threads.reserve_recovery(&identity)? else {
+                    continue;
+                };
+                let result = crate::studio::thread_factory::recovery::recover_journal(
+                    &self.store,
+                    &thread.id,
+                )
+                .await;
                 match result {
-                    Ok(journal) => {
-                        if let Some(commit) = pl_core::thread::journal::recovery_commit(&journal)? {
-                            self.store.sessions().admit(
-                                &thread.id,
-                                commit.sequence,
-                                commit.encode()?,
-                            )?;
-                        }
-                    }
+                    Ok(_) => {}
                     Err(error) => recovery_issues.push(StudioRecoveryIssue {
                         id: format!("session-context-{}", thread.id),
                         scope: StudioRecoveryIssueScope::Thread,
@@ -273,7 +274,6 @@ impl StudioRuntime {
                 }
             }
         }
-        self.store.sessions().flush().await?;
         Ok(())
     }
 }
@@ -416,5 +416,133 @@ mod tests {
             pl_core::thread::TurnState::Interrupted
         );
         runtime.shutdown_runtime().await.unwrap();
+    }
+    #[tokio::test]
+    #[ignore = "local startup timing experiment; no external services"]
+    async fn startup_timing_with_cold_history() {
+        if std::env::var_os("ANYWORK_STARTUP_TRACE").is_some() {
+            let _ = tracing_subscriber::fmt()
+                .with_env_filter("pl_studio_runtime::startup_timing=info,pl_studio_runtime::studio::runtime::skill_catalog=info")
+                .with_ansi(false)
+                .try_init();
+        }
+        fn copy_tree(from: &Path, to: &Path) {
+            std::fs::create_dir_all(to).unwrap();
+            for entry in std::fs::read_dir(from).unwrap() {
+                let entry = entry.unwrap();
+                if entry.file_type().unwrap().is_dir() {
+                    copy_tree(&entry.path(), &to.join(entry.file_name()));
+                } else {
+                    std::fs::copy(entry.path(), to.join(entry.file_name())).unwrap();
+                }
+            }
+        }
+        let seed_directory = tempfile::tempdir().unwrap();
+        let supplied_seed = std::env::var_os("ANYWORK_STARTUP_FIXTURE").map(PathBuf::from);
+        let seed = supplied_seed.as_deref().unwrap_or(seed_directory.path());
+        let workspace = tempfile::tempdir().unwrap();
+        let options = |home: &Path| crate::StudioRuntimeOptions {
+            studio_home: Some(home.into()),
+            host: crate::StudioHostKind::Test,
+        };
+        if supplied_seed.is_none() {
+            let runtime = StudioRuntime::with_options(options(seed)).await.unwrap();
+            runtime.start_runtime().await.unwrap();
+            super::super::super::background_task::finish(&runtime.recovery_task)
+                .await
+                .unwrap();
+            let project = runtime.open_project(workspace.path()).await.unwrap();
+            runtime
+                .persistence_repository()
+                .await
+                .unwrap()
+                .flush()
+                .await
+                .unwrap();
+            for n in 0..80 {
+                let record = runtime
+                    .store
+                    .create_thread(
+                        &project.id,
+                        &format!("history {n}"),
+                        pl_protocol::ThreadModeId::simple(),
+                    )
+                    .await
+                    .unwrap();
+                let handle =
+                    ThreadHandle::start(record.id.clone(), DynModelSession::new(NoModel)).unwrap();
+                for input in 0..12 {
+                    handle
+                        .submit_input(ThreadInput {
+                            id: format!("input-{input}"),
+                            payload: OpaquePayload::text(
+                                "synthetic history for startup measurement",
+                            ),
+                            context: Vec::new(),
+                        })
+                        .await
+                        .unwrap();
+                }
+                for commit in handle.journal().await.unwrap() {
+                    runtime
+                        .store
+                        .sessions()
+                        .admit(&record.id, commit.sequence, commit.encode().unwrap())
+                        .unwrap();
+                }
+                handle.close().await.unwrap();
+            }
+            runtime.shutdown_runtime().await.unwrap();
+            if let Some(export) = std::env::var_os("ANYWORK_STARTUP_EXPORT") {
+                let export = PathBuf::from(export);
+                assert!(
+                    !export.exists(),
+                    "benchmark export must not replace an existing fixture"
+                );
+                copy_tree(seed, &export);
+                let kept_workspace = workspace.keep();
+                std::fs::write(
+                    export.join("fixture-workspace.path"),
+                    kept_workspace.to_str().unwrap(),
+                )
+                .unwrap();
+            }
+        }
+
+        for cold_resources in [true, false] {
+            for sample in 0..3 {
+                let home = tempfile::tempdir().unwrap();
+                copy_tree(seed, home.path());
+                if cold_resources {
+                    std::fs::remove_dir_all(home.path().join("studio/skills/.system")).unwrap();
+                } else {
+                    // Copying changes mtimes. Prepare the derived resource cache
+                    // outside the timer without opening or mutating either DB.
+                    super::super::super::skill_catalog::prepare_benchmark_cache(
+                        &home.path().join("studio/skills/.system"),
+                    );
+                }
+                let watch = std::time::Instant::now();
+                let runtime = StudioRuntime::with_options(options(home.path()))
+                    .await
+                    .unwrap();
+                runtime.start_runtime().await.unwrap();
+                let state = runtime.read_state().await.unwrap();
+                assert!(state.runtime.state.is_ready());
+                let first_snapshot_ms = watch.elapsed().as_secs_f64() * 1000.;
+                super::super::super::background_task::finish(&runtime.recovery_task)
+                    .await
+                    .unwrap();
+                let all_checks_ms = watch.elapsed().as_secs_f64() * 1000.;
+                assert_eq!(
+                    runtime.read_recovery_state().state.kind(),
+                    pl_protocol::ObservedResourceKind::Ready
+                );
+                println!(
+                    "STARTUP_TIMING cold_resources={cold_resources} sample={sample} threads=80 inputs_per_thread=12 first_snapshot_ms={first_snapshot_ms:.2} all_checks_ms={all_checks_ms:.2}"
+                );
+                runtime.shutdown_runtime().await.unwrap();
+            }
+        }
     }
 }
