@@ -703,6 +703,7 @@ mod tests {
                 &crate::thread_assembler::ChildThreadRequest {
                     id: child_id.clone(), caller: record.id.clone(), call_id: "child-fixture".into(),
                     profile_id: "executor".into(), cancellation: CancellationToken::new(),
+                    task_summary: String::from("Reconnect fixture").try_into()?,
                     writable_paths: None, metadata: OpaquePayload::text("reconnect fixture"),
                 }, &profile,
             ).await?;
@@ -843,6 +844,9 @@ mod tests {
 
     #[tokio::test]
     async fn cold_activation_keeps_tools_and_directory_available_after_restart() {
+        use pl_core::context::OpaquePayload;
+        use tokio_util::sync::CancellationToken;
+
         let home = tempfile::tempdir().unwrap();
         let workspace = tempfile::tempdir().unwrap();
         let options = || crate::StudioRuntimeOptions {
@@ -857,6 +861,43 @@ mod tests {
             .create_thread(&project.id, "cold tools")
             .await
             .unwrap();
+        let profile = runtime
+            .config_runtime
+            .resolve_agent_profile("explorer")
+            .unwrap();
+        let child_id = format!("{}-child", record.id);
+        let child_spec = crate::thread_assembler::StudioChildResources::prepare(
+            &runtime.thread_factory,
+            &crate::thread_assembler::ChildThreadRequest {
+                id: child_id.clone(),
+                caller: record.id.clone(),
+                call_id: "cold-child".into(),
+                profile_id: "explorer".into(),
+                cancellation: CancellationToken::new(),
+                task_summary: String::from("  核对\n 消息恢复  ").try_into().unwrap(),
+                writable_paths: None,
+                metadata: OpaquePayload::text("cold child fixture"),
+            },
+            &profile,
+        )
+        .await
+        .unwrap();
+        let child = runtime.threads.assemble(child_spec).await.unwrap();
+        for (id, text) in [("initial", "初始任务"), ("followup", "后续补充")] {
+            child
+                .send_message(pl_core::thread::inbox::ThreadMessage {
+                    id: id.into(),
+                    source_id: format!("agent:{}", record.id),
+                    payload: OpaquePayload::text(text),
+                    context: vec![pl_core::context::ContextContent::Text { text: text.into() }],
+                })
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            runtime.read_owned_thread(&child_id).await.unwrap().title,
+            "核对 消息恢复"
+        );
         runtime.shutdown_runtime().await.unwrap();
         drop(runtime);
 
@@ -896,6 +937,22 @@ mod tests {
         assert_eq!(directory.status, pl_protocol::ThreadStatus::Idle);
         assert_eq!(directory.title, record.title);
         reopened.read_owned_thread(&record.id).await.unwrap();
+        assert_eq!(
+            reopened.read_owned_thread(&child_id).await.unwrap().title,
+            "核对 消息恢复"
+        );
+        let page = reopened
+            .list_timeline_items(&child_id, pl_protocol::TimelineQuery::Latest, 100)
+            .await
+            .unwrap();
+        let messages = page
+            .items
+            .iter()
+            .filter_map(|item| item.text())
+            .filter(|text| text.channel() == pl_protocol::ThreadTextChannel::ParentAgent)
+            .map(|text| text.text())
+            .collect::<Vec<_>>();
+        assert_eq!(messages, ["初始任务", "后续补充"]);
         reopened.shutdown_runtime().await.unwrap();
     }
 

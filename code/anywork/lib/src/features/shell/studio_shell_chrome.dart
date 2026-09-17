@@ -184,10 +184,14 @@ class _AgentSwitcherState extends ConsumerState<_AgentSwitcher> {
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          _agentDisplayName(context, thread),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                        Tooltip(
+                          message: _agentDisplayName(context, thread),
+                          child: Text(
+                            _agentDisplayName(context, thread),
+                            key: StudioDriverKeys.agentTaskSummary(thread.id),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                         if (thread.role.trim().isNotEmpty)
                           Text(

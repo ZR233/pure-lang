@@ -7,6 +7,7 @@ import 'dart:io';
 import 'package:flutter_driver/flutter_driver.dart';
 
 import 'flutter_driver_session.dart';
+import 'subagents_visibility.dart';
 
 Future<void> main(List<String> arguments) async {
   final options = _Options.parse(arguments);
@@ -364,8 +365,12 @@ Future<void> _openProjectAndSubmit(
     await session.waitFor(find.byValueKey('sidebar-open-project'));
     await session.tap(find.byValueKey('sidebar-open-project'));
     await session.tap(find.byValueKey('add-project-local'));
+    await session.waitForNoPendingFrame(timeout: const Duration(seconds: 10));
     await session.tap(find.byValueKey('add-project-continue'));
-    await session.waitFor(find.byValueKey('project-path-dialog'));
+    await session.waitFor(
+      find.byValueKey('project-path-dialog'),
+      timeout: const Duration(seconds: 30),
+    );
     await session.tap(find.byValueKey('project-path-input'));
     await session.enterText(options.workspace);
     await session.sendTextInputAction(
@@ -431,10 +436,12 @@ Future<Map<String, dynamic>> _waitForCompletion(
   var revisionRequested = false;
   var revisedPlanApproved = false;
   final handledInteractionIds = <Object?>{};
+  final visibility = SubagentsVisibilityEvidence(options.finalScreenshot);
   Map<String, dynamic>? last;
   while (DateTime.now().isBefore(deadline)) {
     last = await session.readSnapshot();
     evidence.observe(last);
+    await visibility.observe(session, last);
     final workspace = last['workspace'] as Map?;
     final current = jsonEncode({
       'turn': workspace?['turn'],
@@ -513,7 +520,10 @@ Future<Map<String, dynamic>> _waitForCompletion(
         );
       }
     }
-    if (subagentsAcceptanceCompleted(last)) return last;
+    if (subagentsAcceptanceCompleted(last)) {
+      visibility.validate();
+      return last;
+    }
     await Future<void>.delayed(const Duration(milliseconds: 300));
   }
   throw StateError('subagents acceptance timed out; last=$last');

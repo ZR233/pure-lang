@@ -42,6 +42,12 @@ pub struct ModelInvocationContext {
 }
 
 impl ModelInvocationContext {
+    /// Binds core request identities for wire diagnostics without a parallel event sink.
+    pub(super) fn with_trace_metadata(mut self, trace: CompletionTraceContext) -> Self {
+        self.trace = Some(trace);
+        self
+    }
+
     pub(super) fn with_progress(
         mut self,
         progress: Option<pl_core::model::ModelProgressSender>,

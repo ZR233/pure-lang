@@ -75,6 +75,12 @@ Settings CAS revision，并以返回的完整 canonical snapshot 原子更新 UI
 
 ## 19.6 Thread title 展示
 
+子智能体创建时以调用者提供的 `taskSummary` 作为初始标题。标题区智能体切换列表直接
+显示概要（最多两行，完整文本 Tooltip），角色与运行状态独立显示；详情列表同样不把任务
+概要藏在折叠区域。前端沿用 canonical Thread title，不从消息正文生成标题，也不使用进度
+摘要替换标题。子会话 Timeline 展示主智能体初始任务、补充消息与子智能体阶段性回复；
+切换与重开会话后保持相同正文和来源标签。
+
 新会话首条 prompt 提交后，侧栏和会话页眉立即显示 prompt 摘要；Explorer model 生成的最终
 title 通过 `ThreadDirectoryChanged` 更新，两处始终从同一个 StudioState projection 渲染。UI
 不显示独立的"正在命名"状态，也不在本地维护第二份 title（生成与提交流程见
@@ -195,7 +201,7 @@ Skill/MCP/LSP 默认只显示数量，悬浮、点击或键盘聚焦时展示当
 `n agents` 菜单表达。状态栏响应式按聊天 footer 自身宽度折叠低频读数，并保证详情弹层
 不被状态栏滚动容器或窗口边界裁剪。聊天界面的 agent 目录属于 root Thread 的轻量产品
 状态，信息来自 Thread directory 的 product stream；`n agents` 菜单只展示 owner、父子
-关系、角色和状态，不携带 timeline、Todo、interaction 或 context；选择条目后再订阅对应
+关系、任务概要、角色和状态，不携带 timeline、Todo、interaction 或 context；选择条目后再订阅对应
 Thread，底部状态栏不维护第二套 agent 活动面板。
 
 桌面窗口必须支持自由缩放：anywork 只声明首选窗口尺寸，不把 UI 绑定到固定宽高；设置页

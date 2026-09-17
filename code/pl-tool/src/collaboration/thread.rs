@@ -21,6 +21,8 @@ pub struct AgentMessage {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AgentSpawn {
     pub profile_id: String,
+    /// Brief task description shown in the child list; required, nonempty, at most 80 Unicode characters.
+    pub task_summary: AgentTaskSummary,
     pub message: String,
     /// Inherits conversation records only; the child receives its own Profile instructions.
     #[serde(default)]
@@ -30,6 +32,41 @@ pub struct AgentSpawn {
     /// Product-owned creation metadata; never interpreted as framework permissions.
     #[serde(default)]
     pub metadata: serde_json::Value,
+}
+
+/// Validated single-line task title, supplied by the caller before child resources are allocated.
+#[derive(Debug, Clone, serde::Deserialize, schemars::JsonSchema)]
+#[serde(try_from = "String")]
+#[schemars(with = "String", extend("minLength" = 1, "maxLength" = 80))]
+pub struct AgentTaskSummary(String);
+
+#[derive(Debug, thiserror::Error)]
+pub enum AgentTaskSummaryError {
+    #[error("taskSummary cannot be empty")]
+    Empty,
+    #[error("taskSummary exceeds 80 Unicode characters")]
+    TooLong,
+}
+
+impl TryFrom<String> for AgentTaskSummary {
+    type Error = AgentTaskSummaryError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
+        if normalized.is_empty() {
+            return Err(AgentTaskSummaryError::Empty);
+        }
+        if normalized.chars().count() > 80 {
+            return Err(AgentTaskSummaryError::TooLong);
+        }
+        Ok(Self(normalized))
+    }
+}
+
+impl AgentTaskSummary {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 /// Product tool syntax for selecting a core conversation window.
@@ -144,7 +181,7 @@ impl AgentControlKind {
         match self {
             Self::Spawn => pl_protocol::ToolSpec::function(
                 "spawn_agent",
-                "Create a child using an authorized profile and optional recent conversation history. The host validates permissions and limits.",
+                "Create a child using an authorized profile and optional recent conversation history. Provide taskSummary: a brief task description (1–80 Unicode characters) shown in the child list, and message: the complete instructions. The host validates permissions and limits.",
                 schemars::schema_for!(AgentSpawn).to_value(),
             ),
             Self::Send => pl_protocol::ToolSpec::function(
@@ -433,6 +470,52 @@ mod tests {
                 r#"{"target":"child","workspaceDisposition":"forceDelete"}"#
             )
             .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn invalid_spawn_summary_is_rejected_before_host_allocation() {
+        // QueryHost panics on spawn, so an invalid request must never reach resource preparation.
+        let tool = ThreadAgentControl::new(Arc::new(QueryHost), AgentControlKind::Spawn);
+        for summary in [
+            None,
+            Some(serde_json::json!(" \n\t ")),
+            Some(serde_json::json!("界".repeat(81))),
+        ] {
+            let mut input = serde_json::json!({"profileId":"explorer", "message":"Inspect source"});
+            if let Some(summary) = summary {
+                input["taskSummary"] = summary;
+            }
+            let error = tool
+                .execute(
+                    crate::test_support::input(input),
+                    crate::test_support::thread_context(),
+                )
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains("taskSummary"), "{error}");
+        }
+    }
+
+    #[test]
+    fn spawn_schema_and_decoding_require_a_normalized_unicode_task_title() {
+        let schema = schemars::schema_for!(AgentSpawn).to_value();
+        assert!(
+            schema["required"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("taskSummary"))
+        );
+        let input: AgentSpawn = serde_json::from_value(serde_json::json!({
+            "profileId":"explorer", "taskSummary": "  定位\n 消息丢失  ", "message":"Full instructions"
+        })).unwrap();
+        assert_eq!(input.task_summary.as_str(), "定位 消息丢失");
+        let boundary = "界".repeat(80);
+        assert_eq!(
+            AgentTaskSummary::try_from(boundary.clone())
+                .unwrap()
+                .as_str(),
+            boundary
         );
     }
 }

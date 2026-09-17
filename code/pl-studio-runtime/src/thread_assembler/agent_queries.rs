@@ -271,8 +271,13 @@ fn session_page(
         history.truncate(usize::try_from(cursor.through)?);
     }
     let snapshot = pl_core::thread::journal::replay(&history)?;
-    let mut items =
-        crate::studio::thread_projection::project_items(&input.target, &snapshot, &history)?;
+    let parent_id = path.iter().rev().nth(1).map(|id| id.as_str());
+    let mut items = crate::studio::thread_projection::project_items(
+        &input.target,
+        parent_id,
+        &snapshot,
+        &history,
+    )?;
     if input.detail == Detail::Text {
         items.retain(|item| item.text().is_some());
     }

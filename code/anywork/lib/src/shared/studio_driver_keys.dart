@@ -7,6 +7,10 @@ abstract final class StudioDriverKeys {
   static const startPage = ValueKey<String>('studio-start-page');
   static const sidebar = ValueKey<String>('studio-sidebar');
   static const timeline = ValueKey<String>('timeline-scrollable');
+  static ValueKey<String> timelineRow(String id) =>
+      ValueKey<String>('timeline-row-$id');
+  static ValueKey<String> parentAgentLabel(String id) =>
+      ValueKey<String>('timeline-parent-agent-label-$id');
   static const workspaceFooterScroll = ValueKey<String>(
     'workspace-footer-scrollable',
   );
@@ -317,6 +321,9 @@ abstract final class StudioDriverKeys {
 
   static ValueKey<String> agentRow(String id) =>
       ValueKey<String>('agent-thread-$id');
+
+  static ValueKey<String> agentTaskSummary(String id) =>
+      ValueKey<String>('agent-task-summary-$id');
 
   static ValueKey<String> providerRow(String id) =>
       ValueKey<String>('provider-row-$id');

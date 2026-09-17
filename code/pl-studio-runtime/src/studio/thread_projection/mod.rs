@@ -13,6 +13,7 @@ pub(in crate::studio) use tools::project_tools;
 mod responses;
 pub(in crate::studio) use responses::project_responses;
 mod inputs;
+mod messages;
 pub(in crate::studio) use inputs::project_inputs;
 mod turns;
 pub(in crate::studio) use turns::project_turns;
@@ -43,6 +44,8 @@ pub(crate) enum ProjectionError {
     UnsupportedOutput(String),
     #[error("missing committed metadata for input {0}")]
     MissingInput(String),
+    #[error("missing committed consumption for parent message {0}")]
+    MissingMessage(String),
     #[error("missing committed metadata for Turn {0}")]
     MissingTurn(String),
     #[error("timeline count exceeds the product representation")]
@@ -54,11 +57,18 @@ pub(crate) enum ProjectionError {
 /// Combines product projections with one order derived from their original admission facts.
 pub(crate) fn project_items(
     thread_id: &str,
+    parent_id: Option<&str>,
     snapshot: &pl_core::thread::ThreadSnapshot,
     journal: &[std::sync::Arc<pl_core::thread::journal::ThreadCommit>],
 ) -> Result<Vec<pl_protocol::ThreadItem>, ProjectionError> {
     let positions = order::positions(journal, snapshot.commit_sequence)?;
     let mut items = project_inputs(thread_id, snapshot, journal)?;
+    items.extend(messages::project_messages(
+        thread_id,
+        parent_id,
+        journal,
+        snapshot.commit_sequence,
+    )?);
     items.extend(project_responses(thread_id, snapshot, journal)?);
     items.extend(project_tools(thread_id, snapshot, journal)?);
     items.extend(completions::project_completions(

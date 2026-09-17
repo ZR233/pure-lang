@@ -12,11 +12,16 @@ impl StudioRuntime {
         cursor: Option<&str>,
         limit: usize,
     ) -> Result<ThreadTurnPage> {
+        let thread = self.read_owned_thread(thread_id).await?;
         let (snapshot, journal) = self.read_thread_facts(thread_id).await?;
         let turns =
             crate::studio::thread_projection::project_turns(thread_id, &snapshot, &journal)?;
-        let items =
-            crate::studio::thread_projection::project_items(thread_id, &snapshot, &journal)?;
+        let items = crate::studio::thread_projection::project_items(
+            thread_id,
+            thread.parent_thread_id.as_deref(),
+            &snapshot,
+            &journal,
+        )?;
         let mut by_turn = BTreeMap::<_, Vec<_>>::new();
         for item in items {
             by_turn.entry(item.turn_id.clone()).or_default().push(item);

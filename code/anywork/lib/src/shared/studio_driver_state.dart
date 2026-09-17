@@ -187,6 +187,7 @@ abstract final class StudioDriverState {
           ? null
           : {
               'threadId': workspace.thread.id,
+              'syncState': workspace.syncState.name,
               'title': workspace.rootThread.title,
               'projectId': workspace.thread.projectId,
               'rootThreadId': workspace.rootThread.id,

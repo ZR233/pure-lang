@@ -11,7 +11,12 @@ pub(in crate::studio) fn project_snapshot(
     state: &ThreadSnapshot,
     journal: &[Arc<ThreadCommit>],
 ) -> Result<pl_protocol::ThreadSnapshot, ProjectionError> {
-    let mut items = project_items(&thread.id, state, journal)?;
+    let mut items = project_items(
+        &thread.id,
+        thread.parent_thread_id.as_deref(),
+        state,
+        journal,
+    )?;
     let turns = project_turns(&thread.id, state, journal)?;
     let active_turn = turns.into_iter().rev().find(|turn| {
         state
@@ -298,6 +303,156 @@ mod tests {
         assert_eq!(closed.thread.status, ThreadStatus::Closed);
         assert_eq!(closed.items, product.items);
     }
+    #[tokio::test]
+    async fn parent_inbox_messages_remain_visible_before_consumption_and_after_replay() {
+        use pl_core::thread::{TurnInput, inbox::ThreadMessage};
+        use pl_protocol::{ThreadItemState, ThreadTextChannel};
+        use tokio::sync::Semaphore;
+
+        struct GatedReply {
+            entered: Arc<Semaphore>,
+            release: Arc<Semaphore>,
+        }
+        impl ModelSession for GatedReply {
+            async fn prepare(
+                &mut self,
+                request: ModelRequest,
+            ) -> Result<PreparedModelCall, ModelError> {
+                let reply = Reply.prepare(request).await?;
+                let entered = self.entered.clone();
+                let release = self.release.clone();
+                Ok(PreparedModelCall::new(async move {
+                    entered.add_permits(1);
+                    release.acquire().await.unwrap().forget();
+                    reply.execute().await
+                }))
+            }
+            async fn close(&mut self) -> Result<(), ModelError> {
+                Ok(())
+            }
+        }
+        async fn product(handle: &ThreadHandle) -> pl_protocol::ThreadSnapshot {
+            let mut thread = Thread::placeholder("child");
+            thread.parent_thread_id = Some("parent".into());
+            project_snapshot(thread, &handle.snapshot(), &handle.journal().await.unwrap()).unwrap()
+        }
+        fn messages(snapshot: &pl_protocol::ThreadSnapshot) -> Vec<pl_protocol::ThreadItem> {
+            snapshot.items.iter().filter(|item| matches!(item.state(),
+                ThreadItemState::Text(text) if text.channel() == ThreadTextChannel::ParentAgent
+            )).cloned().collect()
+        }
+        let entered = Arc::new(Semaphore::new(0));
+        let release = Arc::new(Semaphore::new(0));
+        let handle = ThreadHandle::start(
+            "child".into(),
+            DynModelSession::new(GatedReply {
+                entered: entered.clone(),
+                release: release.clone(),
+            }),
+        )
+        .unwrap();
+        let message = |id: &str, source: &str, text: &str| ThreadMessage {
+            id: id.into(),
+            source_id: source.into(),
+            payload: OpaquePayload::text(text),
+            context: vec![ContextContent::Text {
+                text: Arc::from(text),
+            }],
+        };
+        let initial = message("initial", "agent:parent", "  初始任务\r\n完整正文  ");
+        let sequence = handle.send_message(initial.clone()).await.unwrap();
+        assert_eq!(handle.send_message(initial).await.unwrap(), sequence);
+        for (id, source) in [("notice", "studio.notification"), ("other", "agent:other")] {
+            handle
+                .send_message(message(id, source, "内部消息"))
+                .await
+                .unwrap();
+        }
+        let pending = messages(&product(&handle).await);
+        assert_eq!(
+            pending.len(),
+            1,
+            "accepted parent message must be visible before any Turn"
+        );
+        assert_eq!(
+            pending[0].text().map(|text| text.text()),
+            Some("  初始任务\r\n完整正文  ")
+        );
+        assert_eq!(pending[0].turn_id, "");
+
+        for index in 0..3 {
+            let running = handle.clone();
+            let turn_id = format!("turn-{index}");
+            let expected_turn = turn_id.clone();
+            let task = tokio::spawn(async move {
+                running
+                    .run_turn(TurnInput {
+                        turn_id,
+                        attempt_prefix: format!("attempt-{index}"),
+                        content: Vec::new(),
+                        max_model_steps: pl_core::thread::ModelStepLimit::Unlimited,
+                        cancellation: Default::default(),
+                    })
+                    .await
+                    .unwrap()
+            });
+            tokio::time::timeout(std::time::Duration::from_secs(5), entered.acquire())
+                .await
+                .unwrap()
+                .unwrap()
+                .forget();
+            let consumed = messages(&product(&handle).await);
+            assert_eq!(consumed[index].turn_id, expected_turn);
+            if index == 0 {
+                assert_eq!(consumed[0].id, pending[0].id);
+                assert_eq!(consumed[0].ordinal, pending[0].ordinal);
+                assert_eq!(consumed[0].created_at, pending[0].created_at);
+                handle
+                    .send_message(message("steer", "agent:parent", "运行中补充"))
+                    .await
+                    .unwrap();
+                let current = messages(&product(&handle).await);
+                assert_eq!(current.len(), 2);
+                assert_eq!(current[1].turn_id, "");
+            }
+            release.add_permits(1);
+            task.await.unwrap();
+            if index == 1 {
+                handle
+                    .send_message(message("resume", "agent:parent", "完成后续接"))
+                    .await
+                    .unwrap();
+                assert_eq!(messages(&product(&handle).await).len(), 3);
+            }
+        }
+        handle.close().await.unwrap();
+        let live = product(&handle).await;
+        let visible = messages(&live);
+        assert_eq!(
+            visible
+                .iter()
+                .map(|item| item.text().unwrap().text())
+                .collect::<Vec<_>>(),
+            ["  初始任务\r\n完整正文  ", "运行中补充", "完成后续接"]
+        );
+        assert!(
+            visible
+                .windows(2)
+                .all(|pair| pair[0].ordinal < pair[1].ordinal)
+        );
+        let journal = handle.journal().await.unwrap();
+        let replayed = pl_core::thread::journal::replay(&journal).unwrap();
+        assert_eq!(
+            project_snapshot(live.thread.clone(), &replayed, &journal).unwrap(),
+            live
+        );
+        let root = project_snapshot(Thread::placeholder("child"), &replayed, &journal).unwrap();
+        assert!(
+            messages(&root).is_empty(),
+            "a root cannot have parent dialogue"
+        );
+    }
+
     #[tokio::test]
     async fn unknown_input_codec_remains_exactly_readable_after_cold_replay() {
         let handle =

@@ -145,7 +145,7 @@ impl StudioChildResources for StudioThreadFactory {
                 project_id: parent.project_id,
                 mode: parent.mode,
                 role: profile.profile.profile_id.clone(),
-                title: profile.profile.display_name.clone(),
+                title: request.task_summary.as_str().to_owned(),
             })
             .await
             .map_err(|error| resource_error("register child product association", error))?;

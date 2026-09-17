@@ -40,7 +40,7 @@ wave 的全部 durable verdict 都为 `REVIEWER_READ_ONLY_APPROVED`，root 才�
 
 ## Spawn 与交付合同
 
-每次 `spawn_agent` 都在顶层显式传 `"forkTurns":"none"`。两个 directory executor 分别传：
+每次 `spawn_agent` 必须提供不同的简短 `taskSummary`，准确描述该 child 的任务，供 GUI 列表识别。主代理和每个 child 必须在首次工具前及重要发现后输出可见 commentary，不能只有最终回复。每次 `spawn_agent` 都在顶层显式传 `"forkTurns":"none"`。两个 directory executor 分别传：
 
 - `"writablePaths":["allowed/normalize"]`
 - `"writablePaths":["allowed/validate"]`
@@ -68,6 +68,8 @@ explorer、executor、worktree_executor 在 final reply 前调用 `report_progre
 `closed`、`lastTurnOutcome` 为 completed。若 receipt 是 `reason:"progress"`，即使 message 已含
 `CHILD_DELIVERY_READY`，也只能说明 durable delivery 已发布，必须继续 wait 该 agent。每个调度 wave
 都必须先取得所有 pending agent 的 terminal receipt，才能读取该 wave 的 submissions。
+
+两个 planning explorer 首轮完成后，root 必须通过 `send_message` 给 fixture-source explorer 发送包含 `PARENT_FOLLOWUP_VISIBILITY` 的补充任务，要求它再用文件读取工具核对 `src/lib.rs`，先输出 commentary，完成后正常交付。等待此轮真实完成与新提交后再继续；概要保持初建值。
 
 ## Planning 事实目标
 

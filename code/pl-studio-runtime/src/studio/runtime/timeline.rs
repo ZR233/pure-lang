@@ -136,7 +136,7 @@ impl StudioRuntime {
         query: TimelineQuery,
         limit: usize,
     ) -> Result<TimelinePage> {
-        self.read_owned_thread(thread_id).await?;
+        let thread = self.read_owned_thread(thread_id).await?;
         let hot = self
             .threads
             .observed_threads()
@@ -154,7 +154,12 @@ impl StudioRuntime {
             }
         }
         let (state, journal) = self.read_thread_facts(thread_id).await?;
-        let items = crate::studio::thread_projection::project_items(thread_id, &state, &journal)?;
+        let items = crate::studio::thread_projection::project_items(
+            thread_id,
+            thread.parent_thread_id.as_deref(),
+            &state,
+            &journal,
+        )?;
         self.index_timeline(thread_id, &state, &items).await;
         let mut indexes = self.residency.timelines.lock().await;
         if hot.is_none() && !self.residency.is_pinned(thread_id) {

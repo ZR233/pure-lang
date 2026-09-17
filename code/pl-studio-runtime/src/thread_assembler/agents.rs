@@ -161,6 +161,7 @@ impl AgentControlHost for AgentHost {
                 caller: context.thread_id.clone(),
                 call_id: context.call_id.clone(),
                 profile_id: request.profile_id.clone(),
+                task_summary: request.task_summary,
                 writable_paths: request.writable_paths,
                 metadata: OpaquePayload::new(
                     "pl.studio.agent-metadata",
@@ -619,6 +620,7 @@ mod tests {
                 context,
                 AgentSpawn {
                     profile_id: "forbidden".into(),
+                    task_summary: String::from("Check rejected profile").try_into().unwrap(),
                     message: "task".into(),
                     fork_turns: pl_tool::collaboration::thread::AgentHistory::None,
                     writable_paths: None,

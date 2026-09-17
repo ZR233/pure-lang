@@ -178,33 +178,28 @@ class _AgentTreeCardState extends State<AgentTreeCard> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                children: [
-                  Flexible(
-                    child: Text(
-                      agent.role.isNotEmpty
-                          ? context.roleLabel(agent.role)
-                          : agent.id,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: context.text.labelLarge?.copyWith(
-                        color: context.colors.onSurface,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
+              Text(
+                agent.role.isNotEmpty
+                    ? context.roleLabel(agent.role)
+                    : agent.id,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: context.text.labelLarge?.copyWith(
+                  color: context.colors.onSurface,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Tooltip(
+                message: agent.task,
+                child: Text(
+                  agent.task,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: context.text.bodySmall?.copyWith(
+                    color: context.colors.onSurfaceVariant,
                   ),
-                  const SizedBox(width: 8),
-                  Flexible(
-                    child: Text(
-                      agent.task,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: context.text.bodySmall?.copyWith(
-                        color: context.colors.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                ],
+                ),
               ),
             ],
           ),

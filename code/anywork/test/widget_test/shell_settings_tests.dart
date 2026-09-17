@@ -1060,6 +1060,63 @@ void registerShellSettingsTests() {
     expect(find.text('150 t/s'), findsNothing);
   });
 
+  testWidgets(
+    'child switcher shows the canonical task summary and full tooltip',
+    (tester) async {
+      tester.view.physicalSize = const Size(1047, 741);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final base = _rootAndChildState();
+      const summary = '核对父智能体初始任务与后续补充消息的完整投递、持久化恢复和界面展示';
+      final state = base.copyWith(
+        threadDirectory: ThreadDirectoryWindow(
+          threads: [
+            for (final thread in base.threadDirectory.threads)
+              if (thread.id == 'child-1')
+                thread.copyWith(title: summary)
+              else
+                thread,
+          ],
+        ),
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            studioApiProvider.overrideWithValue(_FakeStudioApi(state)),
+          ],
+          child: _localizedApp(home: const StudioShell()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(StudioDriverKeys.agentSwitcher));
+      await tester.pumpAndSettle();
+      final summaryFinder = find.byKey(
+        StudioDriverKeys.agentTaskSummary('child-1'),
+      );
+      expect(summaryFinder, findsOneWidget);
+      final text = tester.widget<Text>(summaryFinder);
+      expect(text.data, summary);
+      expect(text.maxLines, 2);
+      final tooltip = tester.widget<Tooltip>(
+        find.ancestor(of: summaryFinder, matching: find.byType(Tooltip)).first,
+      );
+      expect(tooltip.message, summary);
+      final row = find.byKey(StudioDriverKeys.agentRow('child-1'));
+      expect(
+        find.descendant(of: row, matching: find.text('Reviewer')),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.tap(row);
+      await tester.pumpAndSettle();
+      expect(find.text('child timeline'), findsOneWidget);
+      await tester.tap(find.byKey(StudioDriverKeys.agentSwitcher));
+      await tester.pumpAndSettle();
+      expect(tester.widget<Text>(summaryFinder).data, summary);
+    },
+  );
+
   testWidgets('header shows a dash when the session has no priced costs', (
     tester,
   ) async {

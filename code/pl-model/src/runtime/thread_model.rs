@@ -166,6 +166,11 @@ impl CoreModelSession for ThreadModelSession {
             .map_err(|error| failure(ModelFailureKind::InvalidResponse, error))?;
         let cache_key = cache::key(&runtime, &encoded)?;
         let invocation = ModelInvocationContext::new(self.physical.clone())
+            .with_trace_metadata(crate::completion::CompletionTraceContext {
+                session_id: request.thread_id.clone(),
+                turn_id: request.turn_id.clone(),
+                inference_id: request.attempt_id.clone(),
+            })
             .with_cancellation(Some(request.cancellation.clone()))
             .with_progress(request.progress.clone())
             .with_prompt_cache_key(cache_key);

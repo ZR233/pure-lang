@@ -60,6 +60,11 @@ terminal Item 携带完整 authoritative payload 并清除 UI overlay。文本 I
 `user`、`parentAgent`、`commentary` 与 `final`；`parentAgent` 只由 runtime 冻结的 mailbox 来源
 产生，所有 transport 和 Flutter reducer 都机械透传，不在客户端推导。
 
+直接父代理的初始任务与后续 inbox 消息均参与同一 Timeline 投影。消息准入后即使尚未消费
+也可见；持久消息身份用于去重，准入事实确定时间和稳定顺序，消费事实将消息关联到实际
+Turn，关联更新不改变 Item 身份。实时、历史分页与冷恢复共用此规则；内部通知和非直接
+父代理来源不会显示为 `parentAgent` 对话。消息正文保持原样，不从当前模型上下文重建。
+
 ## 7.3 背压
 
 每个订阅使用有界 mpsc：

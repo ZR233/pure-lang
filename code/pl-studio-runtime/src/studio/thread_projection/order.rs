@@ -16,6 +16,9 @@ pub(super) fn compaction_id(id: &str) -> String {
 pub(super) fn turn_id(id: &str) -> String {
     format!("turn:{}:{id}", id.len())
 }
+pub(super) fn message_id(id: &str) -> String {
+    format!("message:{}:{id}", id.len())
+}
 pub(super) fn skill_id(id: &str) -> String {
     format!("skill:{}:{id}", id.len())
 }
@@ -60,6 +63,9 @@ pub(super) fn positions(
             if let InputChange::Accepted(record) = input {
                 insert(record.input.id.clone())?;
             }
+        }
+        for record in commit.inbox.iter() {
+            insert(message_id(&record.message.id))?;
         }
         if let Some(turn) = &commit.turn {
             insert(turn_id(&turn.turn_id))?;

@@ -13,6 +13,7 @@ pub struct ChildThreadRequest {
     pub caller: String,
     pub call_id: String,
     pub profile_id: String,
+    pub task_summary: pl_tool::collaboration::thread::AgentTaskSummary,
     pub writable_paths: Option<Vec<String>>,
     pub metadata: pl_core::context::OpaquePayload,
 }

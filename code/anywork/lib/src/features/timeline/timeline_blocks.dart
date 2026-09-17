@@ -222,6 +222,7 @@ class _TimelineRowBlock extends StatelessWidget {
         row.type == TimelineRowType.toolGroup ||
         row.type == TimelineRowType.skillActivation;
     return Padding(
+      key: StudioDriverKeys.timelineRow(row.id),
       padding: EdgeInsets.only(bottom: isCompactActivity ? 12 : 24),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -242,7 +243,7 @@ class _TimelineRowBlock extends StatelessWidget {
                       padding: const EdgeInsets.only(bottom: 6),
                       child: Text(
                         context.l10n.timelineParentAgent,
-                        key: const ValueKey('timeline-parent-agent-label'),
+                        key: StudioDriverKeys.parentAgentLabel(row.id),
                         style: Theme.of(context).textTheme.labelSmall
                             ?.copyWith(color: context.colors.onSurfaceVariant),
                       ),

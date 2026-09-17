@@ -18,10 +18,12 @@ boundary. Disabled or unavailable profiles cannot be spawned.
 
 Use the tool schema's camelCase names on the first call. Canonical shapes are:
 
-- unrestricted explorer/planner/reviewer: `{"profileId":"explorer","forkTurns":"none","message":"..."}`
+- unrestricted explorer/planner/reviewer: `{"profileId":"explorer","forkTurns":"none","taskSummary":"Inspect the assigned component","message":"..."}`
   （按角色替换 `profileId`）；
-- directory executor: `{"profileId":"executor","forkTurns":"none","writablePaths":["src/module"],"message":"..."}`;
-- worktree executor: `{"profileId":"worktree_executor","forkTurns":"none","message":"..."}`.
+- directory executor: `{"profileId":"executor","forkTurns":"none","writablePaths":["src/module"],"taskSummary":"Implement the assigned module","message":"..."}`;
+- worktree executor: `{"profileId":"worktree_executor","forkTurns":"none","taskSummary":"Inspect the assigned component","message":"..."}`.
+
+Every spawn requires a concise `taskSummary` (1–80 Unicode characters after whitespace normalization) for the GUI child list; `message` contains the full instructions. Root and children provide 1–3 sentence commentary at meaningful checkpoints, including before the first tool, important findings, transitions, waits and blockers.
 
 Never send `profile_id`, `fork_turns`, or `writable_paths`. Only a directory Profile accepts
 `writablePaths`; do not send it to unrestricted or worktree Profiles. Validate the intended Profile,

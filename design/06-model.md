@@ -166,6 +166,11 @@ previous response、trace 或 transport session。runtime 固定使用流式请�
 pl-trace 类型。模型会话在相同连接和 fingerprint 下由上次完整请求前缀计算增量，仅 WebSocket 帧
 设置 `previous_response_id`；Responses HTTP/SSE 和 Chat Completions 始终发送完整历史。
 
+Thread model adapter 将 core 请求的 `thread_id`、`turn_id`、`attempt_id` 绑定到本次调用的
+wire 诊断身份（`sessionId`、`turnId`、`inferenceId`）。这些身份只进入本地诊断元数据，不进入
+provider body，也不要求安装第二套 trace event sink。辅助标题调用没有 Thread 执行身份，
+保持未绑定；验收可据此关联主、子代理的真实请求。
+
 完成请求中的 system 角色表示本轮临时前置指令或开发者上下文：Responses endpoint 序列化为
 input message role `developer`，避免发送不被部分 Responses 兼容服务接受的 `system` role；
 Chat Completions 仍序列化为 `system`。

@@ -1066,6 +1066,12 @@ void registerTimelineModelTests() {
       ]) {
         expect(find.text(text), findsOneWidget);
       }
+      for (final item in items) {
+        expect(
+          find.byKey(StudioDriverKeys.timelineRow(item.id)),
+          findsOneWidget,
+        );
+      }
     },
   );
 
@@ -1088,6 +1094,10 @@ void registerTimelineModelTests() {
     await tester.pumpAndSettle();
 
     expect(find.text('Main agent'), findsOneWidget);
+    expect(
+      find.byKey(StudioDriverKeys.parentAgentLabel(item.id)),
+      findsOneWidget,
+    );
     expect(find.text('Check the latest result.'), findsOneWidget);
     expect(find.byIcon(Icons.account_tree_outlined), findsOneWidget);
     expect(find.byIcon(Icons.person_outline), findsNothing);
