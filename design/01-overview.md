@@ -45,9 +45,9 @@ source，遗漏 source 保持不变；两者都在 owner 串行边界执行，�
 并取消当前代次，收束结果与交互，再关闭模型/工具并保存最终 commit；失败保留 owner 与重试入口，
 归档等待整棵 Thread 树关闭成功。
 
-不兼容的旧会话格式由 Studio 在独占启动锁下先备份再协调重建；core 独立打开时只报错并保留原库。
-配置、凭据、工作区与无法确认所有权的资源不参与会话重建。完整存储与重放合同见
-[15](./15-session-storage.md) 与 [16](./16-core-contracts.md)。
+anywork 数据格式演进由 Studio 在正常运行前协调迁移，契约与当前实现缺口见
+[17](./17-studio-storage.md)；配置与凭据关联迁移见 [20](./20-config.md)。
+通用存储与无副作用重放合同见 [15](./15-session-storage.md) 与 [16](./16-core-contracts.md)。
 
 ## 1.5 工具目录的条件发布
 

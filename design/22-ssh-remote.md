@@ -137,7 +137,7 @@ server、同 canonical path 的 Project，并由显式 selection intent 采用�
 Studio schema 引入非敏感的 `ssh_servers` 表与可空的 `projects.ssh_server_id`：本地项目
 按 `path` 唯一，远端项目按 `(ssh_server_id, path)` 唯一，远端 path 保存 canonical POSIX
 path。Session、Turn、Item、Interaction、working state 与 tool record 的 wire 语义不因
-远程 host 改变；数据库版本演进遵循统一破坏性重建合同（见 [17](./17-studio-storage.md)）。
+远程 host 改变；数据库版本演进遵循统一迁移契约（见 [17](./17-studio-storage.md)）。
 远端项目启动时不做本地 canonicalize，服务器离线是连接状态，不是项目损坏。
 
 ## 22.5 helper 资产与嵌入

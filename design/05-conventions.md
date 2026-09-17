@@ -5,6 +5,7 @@ AGENTS.md 与相应技能统一规定，本文不重复；事实源归属如下�
 
 | 主题 | 事实源 |
 | --- | --- |
+| 架构演进、接口替换与数据迁移原则 | [AGENTS.md](../AGENTS.md) |
 | crate 划分与依赖方向 | [02](./02-crates.md) |
 | 异步 trait 写法、生成文件、测试与 CI 门禁 | AGENTS.md |
 | 测试设计方法 | test-quality 技能 |

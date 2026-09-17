@@ -64,7 +64,8 @@ SSH 远端 backend 始终拒绝 workspace 越界与符号链接入口，full-acc
 
 ## 4.4 凭据暴露面
 
-- `config.toml` 是本地凭据来源；UI 默认不回显完整 token，日志与事件 payload 不输出 token，错误
+- provider API token 保存在系统凭据库，配置只声明非敏感参数与环境变量名（见 [20](./20-config.md)）；
+  UI 默认不回显完整 token，日志与事件 payload 不输出 token，错误
   信息禁止拼接敏感字段。
 - SSH password 与 Askpass 回答只存在于系统凭据库或当前进程 secret lease，不进入 SQLite、
   transport DTO、日志、helper argv/env 或远端协议；Askpass secret 只进入本地 OpenSSH 子进程
@@ -90,14 +91,10 @@ HTTP 与 FRB 统一返回脱敏错误信封：稳定错误码、可读消息、�
 
 ## 4.7 数据切换安全
 
-Studio 运行期只读写 `studio.sqlite`；配置只接受当前 schema，provider API token 保存在系统凭据库。
-启动发现不兼容配置时不迁移、不导入其中的凭据，先逐字备份到配置目录中的唯一
-`.rejected.<时间戳>.bak` 文件，再原子替换为当前初始配置；系统凭据库保持独立，替换后只按初始
-provider id 注入已有凭据。配置文件、备份或凭据库 IO 失败不得触发替换，运行期显式重载也不得
-自动恢复。
+数据与配置升级分别遵循 [17](./17-studio-storage.md) 与 [20](./20-config.md)，当前实现缺口
+集中记录在 [17.6](./17-studio-storage.md#176-迁移契约的实现缺口)。迁移失败不能授权清空数据库、
+删除附件或替换为默认配置；备份与迁移产物具有与原数据相同的私密性，诊断不得泄露凭据。
 
-数据库版本、结构 fingerprint 或完整性不兼容时，不迁移、不归档、不导入：关闭检查连接后只删除精确
-canonical 数据库及其 WAL/SHM 边车文件，再创建空库；删除或重建失败必须停止启动；不得扫描或修改
-用户 workspace、Git repository 或配置目录中的其他数据。破坏性升级可以删除精确 canonical 数据库
-及 Studio 自有 `attachments/`，但必须拒绝符号链接 / reparse point 且不得跟随到目录外。完整存储
-合同见 [17](./17-studio-storage.md)。
+迁移只操作已确认归属的 anywork 数据，拒绝符号链接 / reparse point 越界，不扫描或修改用户
+workspace、Git repository 与无法确认归属的资源。迁移需要保留附件内容、资源引用与凭据关联；
+更改存储位置不授予执行历史工具或删除外部资源的权限。

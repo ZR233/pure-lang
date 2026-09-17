@@ -23,15 +23,15 @@ The home directory can be overridden, in resolution order:
 2. `ANYWORK_HOME` environment variable (absolute, non-empty)
 3. default `<user home>/.anywork`
 
-Product state (projects, threads, tasks) lives in `<home>/studio/studio.sqlite`; never edit it by hand.
+Product metadata lives in `<home>/studio/studio.sqlite`; Thread history lives in `<home>/studio/sessions.sqlite`. Never edit either database by hand.
 
 ## Format Rules
 
-- TOML with snake_case keys; only `schema_version = 18` is accepted; incompatible configurations are backed up and reset during startup.
+- TOML with snake_case keys; the current runtime accepts `schema_version = 18`. Changing the version number alone does not migrate a configuration.
 - A missing file means in-memory defaults shown in Settings; nothing is written until you save.
-- At startup, incompatible old, unparsable, invalid, inline-credential, or unknown-schema files are backed up byte-for-byte to `config.toml.rejected.<timestamp>.bak` and reset to current defaults. A failed backup or replacement keeps startup closed and preserves the original file.
+- Version upgrades must preserve anywork user settings and credential associations through migration; backup followed by a reset is not a migration. Implementation is incomplete: the current startup path still backs up incompatible files and replaces them with defaults. Do not rely on restart to migrate an old or invalid file; preserve the original and report the gap instead.
 - Explicit reload while Studio is running remains strict: it reports the invalid file instead of replacing it.
-- Saving from Settings writes atomically. External file edits are not picked up automatically; restart Studio after editing config.toml by hand.
+- Saving from Settings writes atomically. External file edits are not picked up automatically; use explicit reload after editing a valid current-schema file.
 
 ## Common Sections
 
@@ -102,4 +102,4 @@ model = "deepseek-flash"
 3. Keep `schema_version` and all five role routes valid.
 4. Reference tokens via `bearer_token_env`; never paste raw tokens.
 5. Add providers from Settings or a preset (`deepseek`, `openai`, `zhipu`, ...) rather than hand-writing catalog metadata.
-6. After external edits, restart Studio and confirm the change took effect.
+6. After external edits, use explicit reload and confirm the canonical settings reflect the change. If validation fails, preserve the original settings and report the error; do not restart as a repair step.

@@ -7,8 +7,8 @@ UI 见 [19](./19-studio-ui.md)，Agent Profile 体系见 [12](./12-collaboration
 ## 20.1 配置位置与产品身份
 
 anywork 使用独立产品身份，默认仅访问 `~/.anywork`，凭据服务名为 `anywork`，产品环境变量
-前缀为 `ANYWORK_`。不自动读取、迁移或删除旧版 Pure Studio 的数据、凭据和日志；新旧应用
-可以并存。显式指定的数据根目录仍遵循既有参数优先级。
+前缀为 `ANYWORK_`。产品与用户数据的版本演进以 anywork 为起点；显式指定的数据根目录
+仍遵循既有参数优先级。
 
 配置文件固定为 `~/.anywork/config.toml`（Windows 下 `%USERPROFILE%\.anywork\config.toml`）。
 桌面产品状态保存在 `~/.anywork/studio/studio.sqlite`，Thread 通用事实由 core 保存到同目录
@@ -20,14 +20,23 @@ Agent Profile 单独保存到 `~/.anywork/agents/*.toml`。schema 版本以代�
 普通设置项在用户修改后即时写入配置；独立新增/编辑页面保留本地草稿，必须点击页面内保存
 按钮才写入，取消则丢弃草稿。
 
-启动时，旧 schema、未知版本、无法解析、含内联 provider 凭据或无法校验的配置均视为内容
-不兼容：不迁移、不导入旧字段或旧 provider 凭据，先把原始字节备份到同目录唯一的带时间戳
-rejected 备份文件（路径冲突时递增后缀且不得覆盖已有备份），再原子替换为当前默认配置并
-继续启动；仅按默认 provider id 注入已有系统凭据。启动成功后桌面宿主返回一次性恢复报告，
-GUI 展示备份路径；其他宿主至少记录脱敏诊断日志。运行期显式重载仍严格校验，不自动备份
-或替换。仅配置文件不存在时使用内存默认配置且不产生恢复报告；文件读取、默认凭据读取、
-备份写入或默认配置原子替换失败不属于内容不兼容，必须 fail closed 并保留原文件（安全面
-见 [04](./04-security.md)）。
+配置版本演进必须满足以下迁移契约；当前实现缺口集中见
+[17.6](./17-studio-storage.md#176-迁移契约的实现缺口)，不能据此假定已实现自动迁移。
+
+- 启动时在产品发布前识别配置版本，使用明确的版本转换路径将 anywork 历史配置与用户
+  Agent Profile 转为当前结构，支持跨版本升级；保留用户选择、provider 身份与凭据关联。
+- 转换前备份原始文件且不覆盖已有备份，转换后执行完整校验，通过原子替换或可恢复步骤
+  提交。涉及多个配置
+  文件、数据库关联或凭据时由 Studio 协调，不能发布新旧结构混合的 canonical snapshot。
+- 新增字段只能使用该版本迁移明确规定的默认值；旧字段在迁移边界转换，不能用重建整份
+  默认配置、猜测模型路由或运行时兼容补齐代替迁移。正常读写只使用当前 schema。
+- 未来或未知版本、无法解析、无效引用、缺失迁移路径、凭据或 IO 失败时，保留原文件与
+  关联凭据并报告原因，不自动恢复默认值。只有配置文件不存在时才采用内存默认配置。
+- 中断后可安全重试或恢复一致状态；运行期显式重载只接受当前有效结构，失败保留已有
+  canonical snapshot，不在查询或重载中隐式迁移。迁移结果与失败通过脱敏诊断报告。
+
+迁移验证应覆盖版本跳跃、字段重命名、路由与 Profile 关联、凭据标识变化、未知版本、
+损坏配置、备份或提交失败及重启恢复，证明用户选择与凭据可用性得到保留。
 
 所有 Settings command 必须携带 `expectedSettingsRevision`，成功只返回完整设置状态快照，
 由 Flutter 原子替换 Settings 领域；不得返回聚合状态、raw JSON 或 raw map。CAS 或校验失败
@@ -37,7 +46,7 @@ GUI 展示备份路径；其他宿主至少记录脱敏诊断日志。运行期�
 
 pl-model 拥有产品无关的模型配置值对象：角色路由配置（provider/model/effort 校验与解析）、
 provider 配置与模型路由配置，负责把路由解析为运行时 endpoint 和唯一选中的不可变模型信息。
-pl-studio-runtime 拥有：Studio 配置 schema 与启动期不兼容格式的备份后重建、配置文件路径、
+pl-studio-runtime 拥有：Studio 配置 schema 与启动期版本迁移、配置文件路径、
 TOML 解析、原子保存和默认值、instructions/skills/MCP/runtime/disabled_system_agents 与
 UI 配置、Agent Profile 文件的逐文件解析与原子保存，以及 Thread 首轮固定 instruction
 snapshot 的生成。pl-model 只消费已经解析好的 provider 和模型信息，不负责文件 IO 或路径
@@ -71,8 +80,8 @@ catalog，被禁用的用户 Profile 仍可编辑并重新启用。
 对应模型 parameters 中 `name = "effort"` 参数的候选值：模型声明非空候选时，角色必须选择
 一个合法候选；模型没有声明该参数时，角色必须省略 `effort`。候选、默认值和 wire 规则只
 来自模型目录（见 [06](./06-model.md)），角色配置不保存第二份候选或默认值。provider 不
-保存 `default_model`，模型选择只由路由决定；旧版本、缺失必需路由或无效引用触发 Studio
-配置重建，不进行兼容补齐。
+保存 `default_model`，模型选择只由路由决定；历史结构按 20.1 转换，缺失必需路由或无效
+引用明确报错，不能静默重置用户选择。
 
 ## 20.4 TOML 示例
 
@@ -281,7 +290,10 @@ Provider 的 API token 保存到操作系统凭据库，service 固定为 `anywo
 
 设置页的 Preserve/Replace/Clear 语义保持不变：Preserve 不改系统凭据，Replace 在配置提交
 前写入并回读，Clear 删除凭据。凭据操作和 TOML 原子替换作为一个 fail-closed 提交流程；
-凭据阶段失败时不得覆盖配置文件。启动恢复不按旧 provider id 读取、迁移或删除凭据。
+凭据阶段失败时不得覆盖配置文件。版本迁移需要改变 provider 标识时，须按明确映射保留
+凭据关联：目标凭据写入并回读验证后才提交配置引用，旧关联在整个迁移成功前保持可恢复，
+不能仅按默认 provider id 加载凭据。历史内联凭据仅能在迁移边界转入系统凭据库，不进入
+当前配置、日志或 UI；包含敏感内容的原始备份必须受保护。安全边界见 [04](./04-security.md)。
 
 MCP stdio server 的 `env` 按配置原样传给子进程，可能包含明文凭据。Streamable HTTP 的
 `bearer_token_env_var` 只保存环境变量名，运行时从 Pure 进程环境读取对应 token 并构造
@@ -328,7 +340,7 @@ extensions = [".purelang"]
 ```
 
 该段与 pl-lsp 内置 catalog 合并；重复 server id 或 language id 与内置/其他自定义 server
-冲突时，配置校验以类型化错误 fail-loud，并按 20.1 的不兼容配置合同处理。自定义 server
+冲突时，配置校验以类型化错误 fail-loud，保留原配置，版本处理遵循 20.1。自定义 server
 使用通用命令 driver（`<command> --version` 探测，无 repair 语义），运行行为与路由合同
 见 [21](./21-lsp.md)。Studio 项目激活时把该段应用进 LSP registry catalog，并纳入激活
 fingerprint。

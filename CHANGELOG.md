@@ -1,9 +1,9 @@
 # Changelog
 
-Pure Studio release notes are generated from Conventional Commits by Release Please.
+anywork release notes are generated from Conventional Commits by Release Please.
 
-> 从采用 `pure_studio.exe` 的版本开始，请先手动卸载旧版 Pure Studio，再安装新版。
-> 安装器允许直接覆盖，但不会检测或删除旧程序文件；跳过卸载可能留下旧文件。
+以下已发布记录保留当时的名称与行为，不作为当前工程规范；当前架构演进规则见
+[AGENTS.md](AGENTS.md)，数据迁移契约及实现缺口见[存储设计](design/17-studio-storage.md)。
 
 ## [3.0.0](https://github.com/ZR233/pure-lang/compare/v2.0.0...v3.0.0) (2026-09-08)
 

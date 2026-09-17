@@ -81,5 +81,6 @@ owner。共享 SQLite store 在全部 Thread 关闭后排空 writer、join、关
 
 会话库 schema 版本与 Thread commit 冷编码格式版本以代码常量为准，冷编码是版本化不透明
 信封，嵌套模型/工具 payload 保留各自 format/version/content。core 打开不兼容库返回类型化
-的不支持错误并保留字节，不自动重置，也不双读旧版本。Studio 侧的旧格式协调重置流程见
-[17](./17-studio-storage.md)。
+的不支持错误并保留字节，不自动重置，也不在正常读写路径双读旧版本。Studio 按
+[17](./17-studio-storage.md) 协调升级；各格式所有者提供迁移转换，core 只负责自身通用格式，
+不解码产品或 provider 内容。迁移完成后交给当前存储和重放入口。

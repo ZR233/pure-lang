@@ -12,7 +12,9 @@ pl-tool → pl-core
 pl-trace → pl-core
 ```
 
-model 与 tool 不相互依赖；core 不反向依赖实现或产品协议，包括测试依赖。完整成员清单以根
+model 与 tool 不相互依赖；core 不依赖 pl-protocol、pl-model、pl-tool、pl-trace、pl-output
+或 Studio，包括测试依赖。新增概念先确认是否属于通用 Thread 编排；provider、工具和产品
+专属概念分别归对应适配层，不借 core 门面镜像。完整成员清单以根
 Cargo.toml 为准；Flutter 应用目录本身不是 workspace 成员，其 Rust 桥接 crate 单独纳入成员。
 
 ## 2.2 稳定职责
@@ -29,7 +31,7 @@ Cargo.toml 为准；Flutter 应用目录本身不是 workspace 成员，其 Rust
 | pl-lsp | 语言服务连接、探测和协议 |
 | pl-output / pl-patch / pl-skill-core | 输出算法、patch 规则、Skill 元数据与路径规则 |
 | pl-remote-helper | 本地进程监督、SSH 远端文件/进程协议及统一进程创建策略 |
-| pl-studio-runtime | 配置文件、项目、Profile、Mode/workflow/Plan、协调、资源租约与唯一 Thread 装配 |
+| pl-studio-runtime | 配置持久化、项目、Profile、Mode/workflow/Plan、子代理协调、资源租约与 root/child/恢复的唯一 Thread 装配 |
 | pl-studio-bridge / pl-studio-server | 同一 Studio 运行时的 FRB / HTTP 适配 |
 
 core 不提供默认工具安装、provider 配置、MCP 目录、产品 working set 或旧引擎门面。工具实例通过

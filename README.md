@@ -1,6 +1,6 @@
 # Pure-Lang
 
-桌面应用中文名为 **糊来帮**，英文名为 **anywork**。新版独立安装，使用 `~/.anywork` 和独立凭据，不导入旧版 Pure Studio 数据。旧版因更新文件名校验限制，需要手动下载安装新版。
+桌面应用中文名为 **糊来帮**，英文名为 **anywork**，使用 `~/.anywork` 保存用户数据，API token 保存在系统凭据库。
 
 Linux 构建后可运行 `python3 dist/anywork-release/install-desktop-entry.py` 登记应用菜单图标；移动 bundle 后需重新运行。
 

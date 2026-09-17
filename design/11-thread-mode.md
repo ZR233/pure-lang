@@ -77,9 +77,9 @@ Prompt 变化时继续当前 run 并使用最新 Prompt。所选 ID 不再可用
 Mode 不可用错误，不得静默回退。
 
 模型输入注入 `<preloaded_thread_mode_prompt>` 与由注册图和 run 派生的精简当前状态；完整图
-按需通过工具读取。Prompt 不进入 Studio 数据库或 workflow working state。旧 schema 继续按
-统一数据库不兼容规则重建（见 [17](./17-studio-storage.md)），不维护 Mode、Workflow 或旧
-Skill 形状的迁移与双读。
+按需通过工具读取。Prompt 不进入 Studio 数据库或 workflow working state。持久化结构变化
+遵循 [17](./17-studio-storage.md) 的迁移契约；Mode/Workflow 历史形状在迁移边界转换，
+运行时只使用当前结构。
 
 ## 11.4 持久化与上下文投影
 
