@@ -229,10 +229,11 @@ impl<B: CommandBackend, A: CommandOutputArchive> Tool for ThreadExecTool<B, A> {
         }
         match snapshot.state.final_result() {
             Some(CommandProcessFinalResult::Succeeded { .. }) => Ok(output),
+            Some(CommandProcessFinalResult::Cancelled) => {
+                Err(ToolError::new(pl_core::thread::ThreadError::Cancelled).with_output(output))
+            }
             Some(
-                CommandProcessFinalResult::Failed { .. }
-                | CommandProcessFinalResult::TimedOut
-                | CommandProcessFinalResult::Cancelled,
+                CommandProcessFinalResult::Failed { .. } | CommandProcessFinalResult::TimedOut,
             )
             | None => {
                 Err(ToolError::new(ExecFailure::Process(snapshot.message)).with_output(output))
@@ -311,6 +312,154 @@ fn projection(
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn redirected_prompt_waits_for_real_command_descendants_to_exit() {
+        use pl_core::{model::*, thread::*};
+        struct Commands {
+            root: std::path::PathBuf,
+            emitted: bool,
+        }
+        impl ModelSession for Commands {
+            async fn prepare(
+                &mut self,
+                request: ModelRequest,
+            ) -> Result<PreparedModelCall, ModelError> {
+                let redirected = request.context.records.iter().flat_map(|record| &record.content)
+                    .any(|content| matches!(content, ContextContent::Text { text } if text.as_ref() == "redirect"));
+                if redirected {
+                    let pid = tokio::fs::read_to_string(self.root.join("child.pid"))
+                        .await
+                        .unwrap();
+                    assert!(
+                        !std::path::Path::new(&format!("/proc/{}", pid.trim())).exists(),
+                        "new model request raced live command child {pid}"
+                    );
+                } else if self.emitted {
+                    request.cancellation.cancelled().await;
+                    return Err(ModelError {
+                        kind: ModelFailureKind::Cancelled,
+                        details: None,
+                        usage: Default::default(),
+                        source: None,
+                    });
+                }
+                let calls = if self.emitted {
+                    vec![]
+                } else {
+                    vec![ModelToolCall {
+                        call_id: "blocking-command".into(),
+                        tool_id: "exec".into(),
+                        arguments: crate::test_support::input(serde_json::json!({
+                            "command": "sleep 60 & child=$!; printf '%s' \"$child\" > child.pid; printf READY; wait \"$child\"",
+                            "timeoutSeconds": 60,
+                        })),
+                    }]
+                };
+                self.emitted = true;
+                Ok(PreparedModelCall::new(async move {
+                    Ok(ModelStepOutput {
+                        attempt_id: request.attempt_id,
+                        base_context_revision: request.context.revision,
+                        content: vec![],
+                        tool_calls: calls,
+                        private_context: None,
+                        usage: Default::default(),
+                    })
+                }))
+            }
+            async fn close(&mut self) -> Result<(), ModelError> {
+                Ok(())
+            }
+        }
+        #[derive(Debug)]
+        struct Archive;
+        impl CommandOutputArchive for Archive {
+            async fn retain(
+                &self,
+                _: &str,
+                snapshot: &CommandOutputSnapshot,
+            ) -> Result<ResourceReference, ToolError> {
+                let bytes = tokio::fs::read(&snapshot.capture_file)
+                    .await
+                    .map_err(ToolError::new)?;
+                ResourceReference::new(
+                    "cancelled-command".into(),
+                    format!("sha256:{:x}", Sha256::digest(&bytes)),
+                    bytes.len() as u64,
+                    "text/plain".into(),
+                )
+                .map_err(ToolError::new)
+            }
+        }
+        let root = tempfile::tempdir().unwrap();
+        let thread = ThreadHandle::start(
+            "command-redirect".into(),
+            DynModelSession::new(Commands {
+                root: root.path().into(),
+                emitted: false,
+            }),
+        )
+        .unwrap();
+        let tool = ThreadExecTool::new(
+            Arc::new(crate::command::LocalCommandBackend::new(root.path())),
+            Arc::new(Archive),
+            CommandAccess::WorkspaceOnly,
+        );
+        thread
+            .register_tools(vec![
+                tool.registration(OpaquePayload::text("exec")).unwrap(),
+            ])
+            .await
+            .unwrap();
+        let input = |id: &str| input::ThreadInput {
+            id: id.into(),
+            payload: OpaquePayload::text(id),
+            context: vec![ContextContent::Text { text: id.into() }],
+        };
+        let options = input::InputDriverOptions {
+            max_model_steps: ModelStepLimit::Unlimited,
+        };
+        thread
+            .submit_input_and_continue(input("initial"), options)
+            .await
+            .unwrap();
+        let mut updates = thread.subscribe();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let state = updates.next().await.unwrap();
+                assert!(!matches!(state.input_execution, input::InputExecution::Failed { .. }), "{:#?}", state.input_execution);
+                if state.tool_progress.values().flatten().any(|content| matches!(content, ContextContent::Text { text } if text.contains("READY"))) { break; }
+            }
+        }).await.unwrap();
+        thread
+            .submit_input_and_continue(input("redirect"), options)
+            .await
+            .unwrap();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let state = updates.next().await.unwrap();
+                assert!(
+                    !matches!(state.input_execution, input::InputExecution::Failed { .. }),
+                    "{:#?}",
+                    state.input_execution
+                );
+                if state.turns.len() == 2
+                    && state.turns[1].state == TurnState::Finished(TurnOutcome::Completed)
+                {
+                    break;
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            thread.snapshot().tasks["task:blocking-command"].status,
+            task::TaskStatus::Cancelled
+        );
+        thread.close().await.unwrap();
+    }
 
     #[cfg(unix)]
     #[tokio::test]

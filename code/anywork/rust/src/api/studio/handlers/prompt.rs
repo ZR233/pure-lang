@@ -2,7 +2,7 @@ use crate::api::studio::bridge_runtime::active_bridge;
 use crate::api::studio::convert::thread_stream::bridge_interaction;
 use crate::api::studio::types::{
     BridgeError, BridgeInteractionRequest, BridgeInteractionResolution, BridgeStudioPromptInput,
-    BridgeToolApprovalResolution, InterruptTurnResponse, StartTurnResponse, SteerTurnResponse,
+    BridgeToolApprovalResolution, InterruptTurnResponse, SubmitPromptResponse,
 };
 use pl_protocol::{
     InteractionResolution, ToolApprovalResolution, ToolApprovalResolutionPayload, UserInputAnswer,
@@ -11,42 +11,21 @@ use pl_protocol::{
 use std::collections::HashMap;
 // ── Prompt / Interaction ──
 
-pub async fn start_turn(
+pub async fn submit_prompt(
     thread_id: String,
     input: BridgeStudioPromptInput,
-) -> Result<StartTurnResponse, BridgeError> {
+) -> Result<SubmitPromptResponse, BridgeError> {
     let bridge = active_bridge().await?;
     let response = bridge
         .studio
-        .start_turn(
+        .submit_prompt_command(
             thread_id,
-            pl_protocol::studio::StartTurnRequest {
+            pl_protocol::studio::SubmitPromptRequest {
                 input: input.into(),
             },
         )
         .await?;
-    Ok(StartTurnResponse {
-        thread_id: response.thread_id,
-        input_id: response.input_id,
-        revision: response.cursor,
-    })
-}
-
-pub async fn steer_turn(
-    thread_id: String,
-    input: BridgeStudioPromptInput,
-) -> Result<SteerTurnResponse, BridgeError> {
-    let bridge = active_bridge().await?;
-    let response = bridge
-        .studio
-        .steer_turn(
-            thread_id,
-            pl_protocol::studio::SteerTurnRequest {
-                input: input.into(),
-            },
-        )
-        .await?;
-    Ok(SteerTurnResponse {
+    Ok(SubmitPromptResponse {
         thread_id: response.thread_id,
         input_id: response.input_id,
         revision: response.cursor,

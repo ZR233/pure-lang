@@ -1,5 +1,6 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BridgeStudioPromptInput {
+    pub input_id: String,
     pub text: String,
     pub attachment_draft_ids: Vec<String>,
 }
@@ -7,6 +8,7 @@ pub struct BridgeStudioPromptInput {
 impl From<BridgeStudioPromptInput> for pl_protocol::studio::StudioPromptInput {
     fn from(value: BridgeStudioPromptInput) -> Self {
         Self {
+            input_id: value.input_id,
             text: value.text,
             attachment_draft_ids: value.attachment_draft_ids,
         }

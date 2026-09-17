@@ -1,4 +1,7 @@
 {
+  "promptAccepted": "Accepted",
+  "composerInterruptHint": "Send to interrupt and continue · Esc to stop",
+  "composerSendAndContinue": "Send and continue",
   "appTitle": "anywork",
   "sidebarProjects": "Projects",
   "sidebarSessions": "Sessions",
@@ -1157,7 +1160,7 @@
     }
   },
   "threadStatusIdle": "Idle",
-  "threadStatusCancelling": "Cancelling",
+  "threadStatusCancelling": "Stopping current execution",
   "threadStatusClosed": "Closed",
   "toolStatusAwaitingApproval": "Awaiting approval",
   "toolStatusFailed": "Failed",

@@ -83,10 +83,12 @@ class AttachmentDraftView {
 
 class StudioPromptInput {
   const StudioPromptInput({
+    required this.inputId,
     required this.text,
     required this.attachmentDraftIds,
   });
 
+  final String inputId;
   final String text;
   final List<String> attachmentDraftIds;
 }

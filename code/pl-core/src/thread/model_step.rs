@@ -279,7 +279,15 @@ impl Owner {
         let prepared = self.await_with_mailbox(model.prepare(request)).await;
         self.model = Some(model);
         self.publish_snapshot();
-        let prepared = prepared.map_err(|error| ThreadError::Model(Arc::new(error)))?;
+        let prepared = match prepared {
+            Err(error)
+                if input.cancellation.is_cancelled()
+                    && error.kind == crate::model::ModelFailureKind::Cancelled =>
+            {
+                return Err(ThreadError::Cancelled);
+            }
+            other => other.map_err(|error| ThreadError::Model(Arc::new(error)))?,
+        };
         if input.cancellation.is_cancelled() {
             return Err(ThreadError::Cancelled);
         }
@@ -311,23 +319,30 @@ impl Owner {
         self.state.consumed_messages = consumed_messages;
         self.state.attempts = attempts.clone().into();
         self.publish();
-        let result = self.await_with_mailbox(prepared.execute()).await;
+        let result = self
+            .await_with_mailbox(prepared.execute())
+            .await
+            .map_err(Arc::new);
+        if input.cancellation.is_cancelled()
+            && self.interrupted_turn.as_deref() == Some(&input.turn_id)
+            && let Err(error) = &result
+            && error.kind != crate::model::ModelFailureKind::Cancelled
+        {
+            self.input_driver
+                .fail(Arc::new(ThreadError::Model(error.clone())));
+            self.pause_inputs();
+        }
         let (outcome, result) = if input.cancellation.is_cancelled() {
             (
-                AttemptOutcome::Cancelled {
-                    result: result.map_err(Arc::new),
-                },
+                AttemptOutcome::Cancelled { result },
                 Err(ThreadError::Cancelled),
             )
         } else {
             match result {
-                Err(error) => {
-                    let error = Arc::new(error);
-                    (
-                        AttemptOutcome::Failed(error.clone()),
-                        Err(ThreadError::Model(error)),
-                    )
-                }
+                Err(error) => (
+                    AttemptOutcome::Failed(error.clone()),
+                    Err(ThreadError::Model(error)),
+                ),
                 Ok(output)
                     if self
                         .output_violation(&input.attempt_id, input_revision, &plan, &output)

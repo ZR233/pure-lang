@@ -21,8 +21,7 @@ pub enum StudioOperation {
     RenameThread,
     SetThreadMode,
     ListThreadTurns,
-    StartTurn,
-    SteerTurn,
+    SubmitPrompt,
     InterruptTurn,
     AdmitAttachmentDrafts,
     UploadAttachmentDrafts,
@@ -61,7 +60,7 @@ pub enum StudioOperation {
 }
 
 impl StudioOperation {
-    pub const ALL: [Self; 51] = [
+    pub const ALL: [Self; 50] = [
         Self::ReadState,
         Self::OpenProject,
         Self::RenameProject,
@@ -76,8 +75,7 @@ impl StudioOperation {
         Self::RenameThread,
         Self::SetThreadMode,
         Self::ListThreadTurns,
-        Self::StartTurn,
-        Self::SteerTurn,
+        Self::SubmitPrompt,
         Self::InterruptTurn,
         Self::AdmitAttachmentDrafts,
         Self::UploadAttachmentDrafts,
@@ -131,8 +129,7 @@ impl StudioOperation {
             Self::RenameThread => "thread.rename",
             Self::SetThreadMode => "thread.setMode",
             Self::ListThreadTurns => "thread.listTurns",
-            Self::StartTurn => "turn.start",
-            Self::SteerTurn => "turn.steer",
+            Self::SubmitPrompt => "prompt.submit",
             Self::InterruptTurn => "turn.interrupt",
             Self::AdmitAttachmentDrafts => "attachment.admit",
             Self::UploadAttachmentDrafts => "attachment.upload",

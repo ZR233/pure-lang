@@ -131,10 +131,11 @@ async fn run_live_flow(installed: &InstalledConfigGuard, root: &Path) -> Result<
 
 async fn run_prompt_and_assert(runtime: &StudioRuntime, thread_id: &str) -> Result<()> {
     let submitted = runtime
-        .start_turn(
+        .submit_prompt_command(
             thread_id.to_string(),
-            pl_protocol::studio::StartTurnRequest {
+            pl_protocol::studio::SubmitPromptRequest {
                 input: pl_protocol::studio::StudioPromptInput {
+                    input_id: uuid::Uuid::new_v4().to_string(),
                     text: live_prompt().to_string(),
                     attachment_draft_ids: Vec::new(),
                 },

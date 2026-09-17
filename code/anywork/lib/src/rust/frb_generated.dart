@@ -94,7 +94,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => 1130680118;
+  int get rustContentHash => -1499313007;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -442,12 +442,7 @@ abstract class RustLibApi extends BaseApi {
   Future<BridgeStudioStartupResult>
   crateApiStudioHandlersLifecycleStartStudioRuntime();
 
-  Future<StartTurnResponse> crateApiStudioHandlersPromptStartTurn({
-    required String threadId,
-    required BridgeStudioPromptInput input,
-  });
-
-  Future<SteerTurnResponse> crateApiStudioHandlersPromptSteerTurn({
+  Future<SubmitPromptResponse> crateApiStudioHandlersPromptSubmitPrompt({
     required String threadId,
     required BridgeStudioPromptInput input,
   });
@@ -3115,7 +3110,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(debugName: "start_studio_runtime", argNames: []);
 
   @override
-  Future<StartTurnResponse> crateApiStudioHandlersPromptStartTurn({
+  Future<SubmitPromptResponse> crateApiStudioHandlersPromptSubmitPrompt({
     required String threadId,
     required BridgeStudioPromptInput input,
   }) {
@@ -3133,54 +3128,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           );
         },
         codec: SseCodec(
-          decodeSuccessData: sse_decode_start_turn_response,
+          decodeSuccessData: sse_decode_submit_prompt_response,
           decodeErrorData: sse_decode_bridge_error,
         ),
-        constMeta: kCrateApiStudioHandlersPromptStartTurnConstMeta,
+        constMeta: kCrateApiStudioHandlersPromptSubmitPromptConstMeta,
         argValues: [threadId, input],
         apiImpl: this,
       ),
     );
   }
 
-  TaskConstMeta get kCrateApiStudioHandlersPromptStartTurnConstMeta =>
+  TaskConstMeta get kCrateApiStudioHandlersPromptSubmitPromptConstMeta =>
       const TaskConstMeta(
-        debugName: "start_turn",
-        argNames: ["threadId", "input"],
-      );
-
-  @override
-  Future<SteerTurnResponse> crateApiStudioHandlersPromptSteerTurn({
-    required String threadId,
-    required BridgeStudioPromptInput input,
-  }) {
-    return handler.executeNormal(
-      NormalTask(
-        callFfi: (port_) {
-          final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_String(threadId, serializer);
-          sse_encode_box_autoadd_bridge_studio_prompt_input(input, serializer);
-          pdeCallFfi(
-            generalizedFrbRustBinding,
-            serializer,
-            funcId: 77,
-            port: port_,
-          );
-        },
-        codec: SseCodec(
-          decodeSuccessData: sse_decode_steer_turn_response,
-          decodeErrorData: sse_decode_bridge_error,
-        ),
-        constMeta: kCrateApiStudioHandlersPromptSteerTurnConstMeta,
-        argValues: [threadId, input],
-        apiImpl: this,
-      ),
-    );
-  }
-
-  TaskConstMeta get kCrateApiStudioHandlersPromptSteerTurnConstMeta =>
-      const TaskConstMeta(
-        debugName: "steer_turn",
+        debugName: "submit_prompt",
         argNames: ["threadId", "input"],
       );
 
@@ -3194,7 +3154,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 78,
+            funcId: 77,
             port: port_,
           );
         },
@@ -3230,7 +3190,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 79,
+            funcId: 78,
             port: port_,
           );
         },
@@ -3264,7 +3224,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
-            funcId: 80,
+            funcId: 79,
             port: port_,
           );
         },
@@ -6419,11 +6379,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeStudioPromptInput dco_decode_bridge_studio_prompt_input(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 2)
-      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
     return BridgeStudioPromptInput(
-      text: dco_decode_String(arr[0]),
-      attachmentDraftIds: dco_decode_list_String(arr[1]),
+      inputId: dco_decode_String(arr[0]),
+      text: dco_decode_String(arr[1]),
+      attachmentDraftIds: dco_decode_list_String(arr[2]),
     );
   }
 
@@ -9050,30 +9011,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
     return StartNewThreadResponse(
       thread: dco_decode_bridge_thread(arr[0]),
-      receipt: dco_decode_start_turn_response(arr[1]),
+      receipt: dco_decode_submit_prompt_response(arr[1]),
     );
   }
 
   @protected
-  StartTurnResponse dco_decode_start_turn_response(dynamic raw) {
+  SubmitPromptResponse dco_decode_submit_prompt_response(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
     if (arr.length != 3)
       throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
-    return StartTurnResponse(
-      threadId: dco_decode_String(arr[0]),
-      inputId: dco_decode_String(arr[1]),
-      revision: dco_decode_u_64(arr[2]),
-    );
-  }
-
-  @protected
-  SteerTurnResponse dco_decode_steer_turn_response(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 3)
-      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
-    return SteerTurnResponse(
+    return SubmitPromptResponse(
       threadId: dco_decode_String(arr[0]),
       inputId: dco_decode_String(arr[1]),
       revision: dco_decode_u_64(arr[2]),
@@ -13043,9 +12991,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     SseDeserializer deserializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_inputId = sse_decode_String(deserializer);
     var var_text = sse_decode_String(deserializer);
     var var_attachmentDraftIds = sse_decode_list_String(deserializer);
     return BridgeStudioPromptInput(
+      inputId: var_inputId,
       text: var_text,
       attachmentDraftIds: var_attachmentDraftIds,
     );
@@ -16629,34 +16579,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_thread = sse_decode_bridge_thread(deserializer);
-    var var_receipt = sse_decode_start_turn_response(deserializer);
+    var var_receipt = sse_decode_submit_prompt_response(deserializer);
     return StartNewThreadResponse(thread: var_thread, receipt: var_receipt);
   }
 
   @protected
-  StartTurnResponse sse_decode_start_turn_response(
+  SubmitPromptResponse sse_decode_submit_prompt_response(
     SseDeserializer deserializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var var_threadId = sse_decode_String(deserializer);
     var var_inputId = sse_decode_String(deserializer);
     var var_revision = sse_decode_u_64(deserializer);
-    return StartTurnResponse(
-      threadId: var_threadId,
-      inputId: var_inputId,
-      revision: var_revision,
-    );
-  }
-
-  @protected
-  SteerTurnResponse sse_decode_steer_turn_response(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_threadId = sse_decode_String(deserializer);
-    var var_inputId = sse_decode_String(deserializer);
-    var var_revision = sse_decode_u_64(deserializer);
-    return SteerTurnResponse(
+    return SubmitPromptResponse(
       threadId: var_threadId,
       inputId: var_inputId,
       revision: var_revision,
@@ -20100,6 +20035,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.inputId, serializer);
     sse_encode_String(self.text, serializer);
     sse_encode_list_String(self.attachmentDraftIds, serializer);
   }
@@ -23038,23 +22974,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_bridge_thread(self.thread, serializer);
-    sse_encode_start_turn_response(self.receipt, serializer);
+    sse_encode_submit_prompt_response(self.receipt, serializer);
   }
 
   @protected
-  void sse_encode_start_turn_response(
-    StartTurnResponse self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.threadId, serializer);
-    sse_encode_String(self.inputId, serializer);
-    sse_encode_u_64(self.revision, serializer);
-  }
-
-  @protected
-  void sse_encode_steer_turn_response(
-    SteerTurnResponse self,
+  void sse_encode_submit_prompt_response(
+    SubmitPromptResponse self,
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs

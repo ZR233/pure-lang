@@ -102,64 +102,132 @@ void registerDemoProjectTests() {
     },
   );
 
-  test('Demo startTurn publishes typed Turn and Item notifications', () async {
-    final api = DemoStudioApi();
-    final frames = <ThreadStreamFrame>[];
-    final subscription = api.subscribeThread('thread-main').listen(frames.add);
-    addTearDown(subscription.cancel);
-    await pumpEventQueue();
+  test(
+    'Demo submitPrompt publishes typed Turn and Item notifications',
+    () async {
+      final api = DemoStudioApi();
+      final frames = <ThreadStreamFrame>[];
+      final subscription = api
+          .subscribeThread('thread-main')
+          .listen(frames.add);
+      addTearDown(subscription.cancel);
+      await pumpEventQueue();
 
-    final receipt = await api.startTurn(
-      'thread-main',
-      const StudioPromptInput(text: 'hello demo', attachmentDraftIds: []),
-    );
+      final receipt = await api.submitPrompt(
+        'thread-main',
+        StudioPromptInput(
+          inputId: newPromptInputId(),
+          text: 'hello demo',
+          attachmentDraftIds: [],
+        ),
+      );
 
-    expect(receipt.threadId, 'thread-main');
-    expect(frames.first, isA<ThreadSnapshotFrame>());
-    final deadline = DateTime.now().add(const Duration(seconds: 5));
-    while (DateTime.now().isBefore(deadline) &&
-        !frames.whereType<ThreadNotificationFrame>().any((frame) {
-          final update = frame.update;
-          return update is ThreadTurnUpdate &&
-              update.turn.state is CompletedStudioTurnState;
-        })) {
-      await Future<void>.delayed(const Duration(milliseconds: 25));
-    }
-    expect(
-      frames.whereType<ThreadNotificationFrame>().map((frame) => frame.update),
-      containsAll([
-        isA<ThreadTurnUpdate>(),
-        isA<ThreadItemUpsert>(),
-        isA<ThreadItemDeltaUpdate>(),
-      ]),
-    );
-    final deltaTypes = frames
-        .whereType<ThreadNotificationFrame>()
-        .map((frame) => frame.update)
-        .whereType<ThreadItemDeltaUpdate>()
-        .map((update) => update.delta.state.runtimeType)
-        .toSet();
-    expect(
-      deltaTypes,
-      containsAll(<Type>[
-        ThreadTextDeltaView,
-        ThreadThinkingSummaryDeltaView,
-        ThreadThinkingContentDeltaView,
-        ThreadToolArgumentsDeltaView,
-        ThreadToolResultDeltaView,
-      ]),
-    );
-    final snapshot =
-        await api.subscribeThread('thread-main').first as ThreadSnapshotFrame;
-    final submitted = snapshot.workspace.items.firstWhere(
-      (item) => item.id == receipt.inputId,
-    );
-    final turnItems = snapshot.workspace.items.where(
-      (item) => item.turnId == submitted.turnId,
-    );
-    expect(turnItems, isNotEmpty);
-    expect(turnItems.every(_demoItemIsTerminal), isTrue);
-  });
+      expect(receipt.threadId, 'thread-main');
+      expect(frames.first, isA<ThreadSnapshotFrame>());
+      final deadline = DateTime.now().add(const Duration(seconds: 5));
+      while (DateTime.now().isBefore(deadline) &&
+          !frames.whereType<ThreadNotificationFrame>().any((frame) {
+            final update = frame.update;
+            return update is ThreadTurnUpdate &&
+                update.turn.state is CompletedStudioTurnState;
+          })) {
+        await Future<void>.delayed(const Duration(milliseconds: 25));
+      }
+      expect(
+        frames.whereType<ThreadNotificationFrame>().map(
+          (frame) => frame.update,
+        ),
+        containsAll([
+          isA<ThreadTurnUpdate>(),
+          isA<ThreadItemUpsert>(),
+          isA<ThreadItemDeltaUpdate>(),
+        ]),
+      );
+      final deltaTypes = frames
+          .whereType<ThreadNotificationFrame>()
+          .map((frame) => frame.update)
+          .whereType<ThreadItemDeltaUpdate>()
+          .map((update) => update.delta.state.runtimeType)
+          .toSet();
+      expect(
+        deltaTypes,
+        containsAll(<Type>[
+          ThreadTextDeltaView,
+          ThreadThinkingSummaryDeltaView,
+          ThreadThinkingContentDeltaView,
+          ThreadToolArgumentsDeltaView,
+          ThreadToolResultDeltaView,
+        ]),
+      );
+      final snapshot =
+          await api.subscribeThread('thread-main').first as ThreadSnapshotFrame;
+      final submitted = snapshot.workspace.items.firstWhere(
+        (item) => item.id == receipt.inputId,
+      );
+      final turnItems = snapshot.workspace.items.where(
+        (item) => item.turnId == submitted.turnId,
+      );
+      expect(turnItems, isNotEmpty);
+      expect(turnItems.every(_demoItemIsTerminal), isTrue);
+    },
+  );
+
+  test(
+    'Demo redirects use ordered Turn revisions and preserve cancelled history',
+    () async {
+      final api = DemoStudioApi();
+      await api.readStudioState();
+      final frames = <ThreadStreamFrame>[];
+      final subscription = api
+          .subscribeThread('thread-main')
+          .listen(frames.add);
+      addTearDown(subscription.cancel);
+      await pumpEventQueue();
+      await api.submitPrompt(
+        'thread-main',
+        const StudioPromptInput(
+          inputId: 'first-redirect-test',
+          text: 'first',
+          attachmentDraftIds: [],
+        ),
+      );
+      await api.submitPrompt(
+        'thread-main',
+        const StudioPromptInput(
+          inputId: 'second-redirect-test',
+          text: 'second',
+          attachmentDraftIds: [],
+        ),
+      );
+      await pumpEventQueue();
+      final turns = frames
+          .whereType<ThreadNotificationFrame>()
+          .map((frame) => frame.update)
+          .whereType<ThreadTurnUpdate>()
+          .map((update) => update.turn)
+          .toList();
+      expect(turns.map((turn) => turn.state.status), [
+        StudioTurnStatus.running,
+        StudioTurnStatus.cancelled,
+        StudioTurnStatus.running,
+      ]);
+      for (var index = 1; index < turns.length; index++) {
+        expect(turns[index].revision, greaterThan(turns[index - 1].revision));
+      }
+      await api.interruptTurn('thread-main', turns.last.turnId);
+      final snapshot =
+          await api.subscribeThread('thread-main').first as ThreadSnapshotFrame;
+      expect(
+        snapshot.workspace.items.where(
+          (item) =>
+              item.state is ThreadTurnItemStateView &&
+              (item.state as ThreadTurnItemStateView).state
+                  is CancelledStudioTurnState,
+        ),
+        hasLength(2),
+      );
+    },
+  );
 
   test(
     'Demo new Thread shows provisional then generated title event',
@@ -181,7 +249,8 @@ void registerDemoProjectTests() {
 
       final result = await api.startNewThread(
         'project-local',
-        const StudioPromptInput(
+        StudioPromptInput(
+          inputId: newPromptInputId(),
           text: 'Review the session title lifecycle',
           attachmentDraftIds: [],
         ),

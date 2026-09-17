@@ -137,7 +137,7 @@ async fn run_http_acceptance(base_url: &str, workspace: &Path) -> Result<()> {
         &serde_json::json!({
             "title": "Scripted Skill discovery",
             "mode": "mode.simple",
-            "input": {
+            "input": {"inputId": "skill-discovery-input",
                 "text": "A Rust release Cargo profile fails during final linking with unresolved symbols. Diagnose it using the single most relevant installed skill.",
                 "attachmentDraftIds": []
             }

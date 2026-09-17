@@ -102,6 +102,7 @@ integrate every accepted commit before issuing the first cleanup; cleanup also r
 approval and validation. Only then close executors and clean and verify each child workspace. Never interleave one child's integration and cleanup while another accepted sibling
 commit is still pending integration.
 
+`send_message` interrupts a running child and continues it after cleanup; an idle child starts immediately. Its receipt proves admission only. Use `interrupt_agent` to stop without continuing.
 Keep a task-scope-to-original-agentId ownership map. Route code findings back with `send_message`
 to the original executor, preserving its AgentSession and context. Include the finding evidence,
 current integrated baseline, owned repair scope, and existing verification records. Spawn a replacement

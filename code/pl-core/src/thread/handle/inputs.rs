@@ -2,6 +2,25 @@
 use super::*;
 
 impl ThreadHandle {
+    /// Accepts an input and continues execution, interrupting the current Turn when necessary.
+    ///
+    /// # Errors
+    /// Rejects conflicting input identities or unavailable admission without interrupting work.
+    pub async fn submit_input_and_continue(
+        &self,
+        input: input::ThreadInput,
+        options: input::InputDriverOptions,
+    ) -> Result<input::InputRecord, ThreadError> {
+        let (reply, response) = oneshot::channel();
+        self.mailbox
+            .send(crate::thread::mailbox::MailboxCommand::ContinueInput(
+                input, options, reply,
+            ))
+            .await
+            .map_err(|_| ThreadError::Closed)?;
+        response.await.map_err(|_| ThreadError::Closed)?
+    }
+
     /// Enables actor-owned serial execution of queued inputs. Recovery leaves this disabled.
     /// Failures and interaction/step-limit stops pause execution until explicitly resumed.
     ///

@@ -28,6 +28,7 @@ pub struct CreateThreadRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StudioPromptInput {
+    pub input_id: String,
     pub text: String,
     pub attachment_draft_ids: Vec<String>,
 }
@@ -46,13 +47,7 @@ pub struct RenameThreadRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct StartTurnRequest {
-    pub input: StudioPromptInput,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct SteerTurnRequest {
+pub struct SubmitPromptRequest {
     pub input: StudioPromptInput,
 }
 
@@ -120,8 +115,8 @@ mod tests {
 
     #[test]
     fn request_bodies_reject_unknown_fields() {
-        let error = serde_json::from_value::<StartTurnRequest>(serde_json::json!({
-            "input": {"text": "hello", "attachmentDraftIds": []},
+        let error = serde_json::from_value::<SubmitPromptRequest>(serde_json::json!({
+            "input": {"inputId": "request-1", "text": "hello", "attachmentDraftIds": []},
             "unknown": true,
         }))
         .unwrap_err();
@@ -131,7 +126,7 @@ mod tests {
     #[test]
     fn create_thread_title_is_optional_and_accepts_explicit_title() {
         let missing = serde_json::from_value::<CreateThreadRequest>(serde_json::json!({
-            "input": {"text": "hello", "attachmentDraftIds": []},
+            "input": {"inputId": "request-1", "text": "hello", "attachmentDraftIds": []},
             "mode": "mode.simple",
         }))
         .unwrap();
@@ -139,7 +134,7 @@ mod tests {
 
         let explicit = serde_json::from_value::<CreateThreadRequest>(serde_json::json!({
             "title": "Explicit title",
-            "input": {"text": "hello", "attachmentDraftIds": []},
+            "input": {"inputId": "request-1", "text": "hello", "attachmentDraftIds": []},
             "mode": "mode.simple",
         }))
         .unwrap();

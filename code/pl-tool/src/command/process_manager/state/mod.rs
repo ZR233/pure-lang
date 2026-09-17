@@ -208,11 +208,8 @@ impl CommandProcessState {
             }
             CommandProcessTransition::ProcessWaitFailed { error } => {
                 let result = match &self.lifecycle {
-                    CommandProcessLifecycle::Terminating(state) => match state.reason() {
-                        CommandTerminationReason::TimedOut => CommandProcessFinalResult::TimedOut,
-                        CommandTerminationReason::Cancelled => CommandProcessFinalResult::Cancelled,
-                    },
-                    CommandProcessLifecycle::Running(_) => CommandProcessFinalResult::Failed {
+                    CommandProcessLifecycle::Terminating(_)
+                    | CommandProcessLifecycle::Running(_) => CommandProcessFinalResult::Failed {
                         failure: CommandProcessFailure::Wait { message: error },
                     },
                     CommandProcessLifecycle::Draining(_) | CommandProcessLifecycle::Final(_) => {
@@ -264,6 +261,23 @@ mod tests {
 
     fn running_state() -> CommandProcessState {
         CommandProcessState::new(true, true)
+    }
+
+    #[test]
+    fn failed_process_cleanup_is_not_reported_as_successful_cancellation() {
+        let mut state = CommandProcessState::new(false, false);
+        state.apply_transition(CommandProcessTransition::Cancel);
+        state.apply_transition(CommandProcessTransition::ProcessWaitFailed {
+            error: "reap failed".into(),
+        });
+        assert_eq!(
+            state.lifecycle.final_result(),
+            Some(&CommandProcessFinalResult::Failed {
+                failure: CommandProcessFailure::Wait {
+                    message: "reap failed".into()
+                },
+            })
+        );
     }
 
     #[test]

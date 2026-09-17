@@ -194,48 +194,85 @@ void registerControllerStreamTests() {
     },
   );
 
-  test('idle composer starts a Turn and busy composer steers it', () async {
-    final initial = _stateWithPlannerModels();
-    final api = _FakeStudioApi(initial);
+  test(
+    'idle and running composers submit through the same prompt command',
+    () async {
+      final initial = _stateWithPlannerModels();
+      final api = _FakeStudioApi(initial);
+      final container = ProviderContainer(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+      final controller = container.read(studioControllerProvider.notifier);
+
+      await container.read(studioControllerProvider.future);
+      await pumpEventQueue();
+      controller.updateComposer('session-1', 'first');
+      await controller.submitComposer('session-1');
+      expect(api.submittedPrompts.single.prompt, 'first');
+
+      api.emitThreadFrame(
+        ThreadSnapshotFrame(
+          workspace: initial.selectedWorkspace!.copyWith(
+            revision: 1,
+            items: [
+              _submittedInputItem(
+                threadId: 'session-1',
+                turnId: api.submitTurnId,
+                inputId: api.submitInputId,
+              ),
+            ],
+            activeTurn: _testTurn(
+              threadId: 'session-1',
+              state: const RunningStudioTurnState(
+                startedAt: 1,
+                activity: StudioTurnActivity.thinking,
+              ),
+              turnId: api.submitTurnId,
+            ),
+          ),
+        ),
+      );
+      await pumpEventQueue();
+      controller.updateComposer('session-1', 'steer');
+      await controller.submitComposer('session-1');
+      expect(api.submittedPrompts.last.prompt, 'steer');
+      expect(api.submitPromptCount, 2);
+    },
+  );
+
+  test('failed prompt retry retains its identity and accepted input unlocks the next draft', () async {
+    final api = _FakeStudioApi(_emptyState())
+      ..submitPromptError = Exception('connection lost');
     final container = ProviderContainer(
       overrides: [studioApiProvider.overrideWithValue(api)],
     );
     addTearDown(container.dispose);
-    final controller = container.read(studioControllerProvider.notifier);
-
     await container.read(studioControllerProvider.future);
     await pumpEventQueue();
-    controller.updateComposer('session-1', 'first');
+    final controller = container.read(studioControllerProvider.notifier);
+    controller.updateComposer('session-1', 'same request');
     await controller.submitComposer('session-1');
-    expect(api.submittedPrompts.single.prompt, 'first');
-
-    api.emitThreadFrame(
-      ThreadSnapshotFrame(
-        workspace: initial.selectedWorkspace!.copyWith(
-          revision: 1,
-          items: [
-            _submittedInputItem(
-              threadId: 'session-1',
-              turnId: api.submitTurnId,
-              inputId: api.submitInputId,
-            ),
-          ],
-          activeTurn: _testTurn(
-            threadId: 'session-1',
-            state: const RunningStudioTurnState(
-              startedAt: 1,
-              activity: StudioTurnActivity.thinking,
-            ),
-            turnId: api.submitTurnId,
-          ),
-        ),
-      ),
+    final firstId = api.submittedInputs.last.input.inputId;
+    expect(
+      container.read(studioControllerProvider).requireValue.composer.draft,
+      'same request',
     );
-    await pumpEventQueue();
-    controller.updateComposer('session-1', 'steer');
+    api.submitPromptError = null;
     await controller.submitComposer('session-1');
-    expect(api.submittedPrompts.last.prompt, 'steer');
-    expect(api.submitPromptCount, 2);
+    expect(api.submittedInputs.last.input.inputId, firstId);
+    expect(
+      container
+          .read(studioControllerProvider)
+          .requireValue
+          .composer
+          .isSubmissionPending,
+      isFalse,
+    );
+    controller.updateComposer('session-1', 'next request');
+    await controller.submitComposer('session-1');
+    expect(api.submittedInputs.last.input.inputId, isNot(firstId));
+    expect(api.submittedInputs.last.input.text, 'next request');
   });
 
   test('terminal reconnect snapshot releases pending submission and allows another send', () async {
@@ -296,14 +333,14 @@ void registerControllerStreamTests() {
         .requireValue
         .composer;
     expect(composer.isSubmissionPending, isFalse);
-    expect(composer.error, 'Invalid event revision');
+    expect(composer.error, isNull);
     controller.updateComposer('session-1', 'second');
     await controller.submitComposer('session-1');
     expect(api.submitPromptCount, 2);
     expect(api.submittedPrompts.last.prompt, 'second');
   });
 
-  test('TurnStarted clears the matching pending composer submission', () async {
+  test('admission clears the composer before TurnStarted', () async {
     final initial = _emptyState();
     final api = _FakeStudioApi(initial);
     final container = ProviderContainer(
@@ -318,7 +355,7 @@ void registerControllerStreamTests() {
     await controller.submitComposer('session-1');
     expect(
       container.read(studioControllerProvider).requireValue.composer,
-      isA<PendingStartComposerThreadState>(),
+      isA<IdleComposerThreadState>(),
     );
 
     api.emitThreadFrame(
@@ -351,76 +388,79 @@ void registerControllerStreamTests() {
     );
   });
 
-  test('TurnStarted clears composer correlation and later failure stays in timeline', () async {
-    final initial = _emptyState();
-    final api = _FakeStudioApi(initial);
-    final container = ProviderContainer(
-      overrides: [studioApiProvider.overrideWithValue(api)],
-    );
-    addTearDown(container.dispose);
-    final controller = container.read(studioControllerProvider.notifier);
+  test(
+    'accepted input failures stay in timeline without locking the composer',
+    () async {
+      final initial = _emptyState();
+      final api = _FakeStudioApi(initial);
+      final container = ProviderContainer(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+      final controller = container.read(studioControllerProvider.notifier);
 
-    await container.read(studioControllerProvider.future);
-    await pumpEventQueue();
-    controller.updateComposer('session-1', 'hello');
-    await controller.submitComposer('session-1');
-    api.emitThreadFrame(
-      _threadItemFrame(
-        threadId: 'session-1',
-        workspaceRevision: 1,
-        item: _submittedInputItem(
+      await container.read(studioControllerProvider.future);
+      await pumpEventQueue();
+      controller.updateComposer('session-1', 'hello');
+      await controller.submitComposer('session-1');
+      api.emitThreadFrame(
+        _threadItemFrame(
           threadId: 'session-1',
-          turnId: api.submitTurnId,
-          inputId: api.submitInputId,
-        ),
-      ),
-    );
-    api.emitThreadFrame(
-      _threadTurnFrame(
-        threadId: 'session-1',
-        workspaceRevision: 2,
-        state: const RunningStudioTurnState(
-          startedAt: 1,
-          activity: StudioTurnActivity.preparing,
-        ),
-        turnId: api.submitTurnId,
-      ),
-    );
-    await pumpEventQueue();
-    expect(
-      container.read(studioControllerProvider).requireValue.composer,
-      isA<IdleComposerThreadState>(),
-    );
-
-    api.emitThreadFrame(
-      _threadTurnFrame(
-        threadId: 'session-1',
-        workspaceRevision: 3,
-        state: const FailedStudioTurnState(
-          startedAt: 1,
-          completedAt: 2,
-          failure: StudioTurnFailureView(
-            category: 'provider',
-            providerKind: 'openaiCompatible',
-            code: 'invalid_request_error',
-            httpStatus: 400,
-            message: 'Invalid schema for function skill_manage',
-            retryable: false,
-            retryAfterMs: null,
+          workspaceRevision: 1,
+          item: _submittedInputItem(
+            threadId: 'session-1',
+            turnId: api.submitTurnId,
+            inputId: api.submitInputId,
           ),
         ),
-        turnId: api.submitTurnId,
-      ),
-    );
-    await pumpEventQueue();
+      );
+      api.emitThreadFrame(
+        _threadTurnFrame(
+          threadId: 'session-1',
+          workspaceRevision: 2,
+          state: const RunningStudioTurnState(
+            startedAt: 1,
+            activity: StudioTurnActivity.preparing,
+          ),
+          turnId: api.submitTurnId,
+        ),
+      );
+      await pumpEventQueue();
+      expect(
+        container.read(studioControllerProvider).requireValue.composer,
+        isA<IdleComposerThreadState>(),
+      );
 
-    final composer = container
-        .read(studioControllerProvider)
-        .requireValue
-        .composer;
-    expect(composer, isA<IdleComposerThreadState>());
-    expect(composer.error, isNull);
-  });
+      api.emitThreadFrame(
+        _threadTurnFrame(
+          threadId: 'session-1',
+          workspaceRevision: 3,
+          state: const FailedStudioTurnState(
+            startedAt: 1,
+            completedAt: 2,
+            failure: StudioTurnFailureView(
+              category: 'provider',
+              providerKind: 'openaiCompatible',
+              code: 'invalid_request_error',
+              httpStatus: 400,
+              message: 'Invalid schema for function skill_manage',
+              retryable: false,
+              retryAfterMs: null,
+            ),
+          ),
+          turnId: api.submitTurnId,
+        ),
+      );
+      await pumpEventQueue();
+
+      final composer = container
+          .read(studioControllerProvider)
+          .requireValue
+          .composer;
+      expect(composer, isA<IdleComposerThreadState>());
+      expect(composer.error, isNull);
+    },
+  );
 
   test('interrupt uses the exact active Turn identity', () async {
     final initial = _emptyState();
@@ -911,7 +951,7 @@ void registerControllerStreamTests() {
       expect(after.threads.map((thread) => thread.id), contains(created.id));
       expect(
         after.workspaceUiByThread[created.id]?.composer,
-        isA<PendingStartComposerThreadState>(),
+        isA<IdleComposerThreadState>(),
       );
       expect(api.threadSubscriptions.last, created.id);
     },

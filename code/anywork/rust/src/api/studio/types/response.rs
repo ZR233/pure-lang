@@ -471,7 +471,7 @@ pub struct ProjectDto {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct StartTurnResponse {
+pub struct SubmitPromptResponse {
     pub thread_id: String,
     pub input_id: String,
     pub revision: u64,
@@ -481,7 +481,7 @@ pub struct StartTurnResponse {
 #[serde(rename_all = "camelCase")]
 pub struct StartNewThreadResponse {
     pub thread: BridgeThread,
-    pub receipt: StartTurnResponse,
+    pub receipt: SubmitPromptResponse,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -498,14 +498,6 @@ pub struct InterruptTurnResponse {
     pub thread_id: String,
     pub turn_id: String,
     pub interrupted: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct SteerTurnResponse {
-    pub thread_id: String,
-    pub input_id: String,
-    pub revision: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

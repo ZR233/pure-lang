@@ -135,6 +135,9 @@ pub enum InputExecution {
     #[default]
     Paused,
     Ready,
+    Interrupting {
+        turn_id: String,
+    },
     Failed {
         error: Arc<ThreadError>,
     },
@@ -143,19 +146,62 @@ pub enum InputExecution {
     },
 }
 
+/// Execution authorization is independent from physical cancellation and pending input facts.
+/// Notifications may wake a dormant driver, but only explicit continuation can leave a pause.
+#[derive(Debug)]
+pub(super) enum InputDriver {
+    Dormant,
+    Enabled(InputDriverOptions),
+    Paused,
+    Failed(Arc<ThreadError>),
+}
+
+impl InputDriver {
+    pub(super) fn options(&self) -> Option<InputDriverOptions> {
+        match self {
+            Self::Enabled(options) => Some(*options),
+            _ => None,
+        }
+    }
+    pub(super) fn error(&self) -> Option<&Arc<ThreadError>> {
+        match self {
+            Self::Failed(error) => Some(error),
+            _ => None,
+        }
+    }
+    pub(super) fn enable(&mut self, options: InputDriverOptions) {
+        *self = Self::Enabled(options);
+    }
+    pub(super) fn wake(&mut self, options: InputDriverOptions) {
+        match self {
+            Self::Dormant | Self::Enabled(_) => self.enable(options),
+            Self::Paused | Self::Failed(_) => {}
+        }
+    }
+    pub(super) fn pause(&mut self) {
+        if !matches!(self, Self::Failed(_)) {
+            *self = Self::Paused;
+        }
+    }
+    pub(super) fn fail(&mut self, error: Arc<ThreadError>) {
+        if !matches!(self, Self::Failed(_)) {
+            *self = Self::Failed(error);
+        }
+    }
+}
+
 impl Owner {
     pub(super) fn resume_inputs(&mut self, options: InputDriverOptions) -> Result<(), ThreadError> {
         if self.state.lifecycle != ThreadLifecycle::Open || self.interrupt.is_closing() {
             return Err(ThreadError::Closed);
         }
-        self.input_driver = Some(options);
-        self.input_driver_error = None;
+        self.input_driver.enable(options);
         self.publish_snapshot();
         Ok(())
     }
 
     pub(super) fn pause_inputs(&mut self) {
-        self.input_driver = None;
+        self.input_driver.pause();
         self.publish_snapshot();
     }
 
@@ -163,7 +209,10 @@ impl Owner {
         if self.state.lifecycle != ThreadLifecycle::Open || self.interrupt.is_closing() {
             return false;
         }
-        let Some(options) = self.input_driver else {
+        if !self.continuation_ready() {
+            return false;
+        }
+        let Some(options) = self.input_driver.options() else {
             return false;
         };
         let pending_input = self
@@ -196,7 +245,8 @@ impl Owner {
                 break candidate;
             }
             let Some(next) = suffix.checked_add(1) else {
-                self.input_driver_error = Some(Arc::new(ThreadError::RevisionExhausted));
+                self.input_driver
+                    .fail(Arc::new(ThreadError::RevisionExhausted));
                 self.pause_inputs();
                 return false;
             };
@@ -232,8 +282,13 @@ impl Owner {
                 ..
             }))
             | Ok(None) => self.pause_inputs(),
+            Err(ThreadError::Cancelled)
+                if self.interrupted_turn.is_some()
+                    && self.input_driver.options().is_some()
+                    && !self.interrupt.is_closing() => {}
+            Err(ThreadError::Cancelled) => self.pause_inputs(),
             Err(error) => {
-                self.input_driver_error = Some(Arc::new(error));
+                self.input_driver.fail(Arc::new(error));
                 self.pause_inputs();
             }
         }
@@ -321,7 +376,7 @@ impl Owner {
             InputState::Consumed { .. } => return Err(ThreadError::InputConsumed),
             InputState::Pending => {}
         }
-        if self.active_input.as_deref() == Some(id) {
+        if self.active_inputs.iter().any(|active| active == id) {
             return Err(ThreadError::InputInUse);
         }
         let record = self.change_input(id, InputState::Discarded)?;
@@ -342,18 +397,30 @@ impl Owner {
         else {
             return Ok(None);
         };
-        self.active_input = Some(record.input.id);
+        let through = self.input_batch_through.take().unwrap_or(record.ordinal);
+        let batch: Vec<_> = self
+            .state
+            .inputs
+            .iter()
+            .filter(|input| input.state == InputState::Pending && input.ordinal <= through)
+            .cloned()
+            .collect();
+        self.active_inputs = batch.iter().map(|input| input.input.id.clone()).collect();
+        let content = batch
+            .into_iter()
+            .flat_map(|input| input.input.context)
+            .collect();
         let active = self.interrupt.activate(&request.cancellation);
         let result = self
             .run_turn(TurnInput {
                 turn_id: request.turn_id,
                 attempt_prefix: request.attempt_prefix,
-                content: record.input.context,
+                content,
                 max_model_steps: request.max_model_steps,
                 cancellation: active.token.clone(),
             })
             .await;
-        self.active_input = None;
+        self.active_inputs.clear();
         self.publish_snapshot();
         result.map(Some)
     }
@@ -364,7 +431,7 @@ impl Owner {
         let mut ids = Vec::new();
         for input in self.state.inputs.iter().filter(|input| input.state == InputState::Pending
             && matches!(&input.delivery, InputDelivery::CurrentTurn { turn_id: target } if target == turn_id)
-            && self.active_input.as_deref() != Some(input.input.id.as_str())) {
+            && !self.active_inputs.contains(&input.input.id)) {
             ids.push(input.input.id.clone());
             if !input.input.context.is_empty() {
                 records.push(ContextRecord { id: steering_record_id(turn_id, &input.input.id), turn_id: Some(turn_id.into()),
@@ -410,31 +477,30 @@ impl Owner {
         turn_id: &str,
         attempt_id: &str,
     ) -> Result<(), ThreadError> {
-        let Some(id) = self.active_input.as_ref().cloned() else {
-            return Ok(());
-        };
-        let previous = self
-            .state
-            .inputs
-            .iter()
-            .find(|record| record.input.id == id)
-            .ok_or(ThreadError::InvalidIdentity)?;
-        match &previous.state {
-            InputState::Pending => {
-                self.change_input(
-                    &id,
-                    InputState::Consumed {
-                        turn_id: turn_id.to_owned(),
-                        attempt_id: attempt_id.to_owned(),
-                    },
-                )?;
-            }
-            InputState::Consumed {
-                turn_id: consumed_turn,
-                ..
-            } if consumed_turn == turn_id => {}
-            InputState::Consumed { .. } | InputState::Discarded => {
-                return Err(ThreadError::InputConsumed);
+        for id in self.active_inputs.clone() {
+            let previous = self
+                .state
+                .inputs
+                .iter()
+                .find(|record| record.input.id == id)
+                .ok_or(ThreadError::InvalidIdentity)?;
+            match &previous.state {
+                InputState::Pending => {
+                    self.change_input(
+                        &id,
+                        InputState::Consumed {
+                            turn_id: turn_id.into(),
+                            attempt_id: attempt_id.into(),
+                        },
+                    )?;
+                }
+                InputState::Consumed {
+                    turn_id: consumed_turn,
+                    ..
+                } if consumed_turn == turn_id => {}
+                InputState::Consumed { .. } | InputState::Discarded => {
+                    return Err(ThreadError::InputConsumed);
+                }
             }
         }
         Ok(())
@@ -476,7 +542,8 @@ pub(super) fn replay(
     let mut inputs = state.inputs.to_vec();
     let mut changes = state.input_changes.to_vec();
     let mut identities = std::collections::BTreeSet::new();
-    let mut consumed_input = None;
+    let mut consumed_context = Vec::new();
+    let mut consumed_request = None;
     for change in commit.inputs.iter() {
         let record = match change {
             InputChange::Accepted(record) => {
@@ -530,8 +597,9 @@ pub(super) fn replay(
         } = &record.state
         {
             let steering = matches!(&record.delivery, InputDelivery::CurrentTurn { turn_id: target } if target == turn_id);
-            if !steering && consumed_input.replace(record.ordinal).is_some() {
-                return Err(ThreadError::InvalidOutput);
+            if !steering {
+                consumed_context.extend(record.input.context.clone());
+                consumed_request = Some((turn_id.clone(), attempt_id.clone()));
             }
             let attempt = commit
                 .attempt
@@ -547,7 +615,7 @@ pub(super) fn replay(
                 .iter()
                 .find(|item| item.attempt_id == attempt.attempt_id)
                 .ok_or(ThreadError::InvalidOutput)?;
-            if !record.input.context.is_empty() {
+            if steering && !record.input.context.is_empty() {
                 let user = admitted
                     .input
                     .records
@@ -569,6 +637,26 @@ pub(super) fn replay(
             }
         }
         changes.push(change.clone());
+    }
+    if let Some((turn_id, attempt_id)) = consumed_request {
+        let admitted = state
+            .attempts
+            .iter()
+            .find(|attempt| attempt.attempt_id == attempt_id)
+            .ok_or(ThreadError::InvalidOutput)?;
+        let user = admitted
+            .input
+            .records
+            .iter()
+            .find(|record| record.id == format!("{attempt_id}:input"));
+        match user {
+            Some(record)
+                if record.source == ContextSource::User
+                    && record.turn_id.as_ref() == Some(&turn_id)
+                    && record.content == consumed_context => {}
+            None if consumed_context.is_empty() => {}
+            _ => return Err(ThreadError::InvalidOutput),
+        }
     }
     state.inputs = inputs.into();
     state.input_changes = changes.into();
@@ -993,6 +1081,140 @@ mod tests {
         .expect("explicit resume drives one new request then pauses again");
         assert_eq!(calls.load(Ordering::SeqCst), 2);
         assert_eq!(thread.snapshot().inputs[2].state, InputState::Pending);
+        thread.close().await.unwrap();
+    }
+    struct RedirectProbe {
+        started: Arc<Notify>,
+        cleanup: Arc<Notify>,
+        token: Arc<std::sync::Mutex<Option<CancellationToken>>>,
+        requests: Arc<std::sync::Mutex<Vec<ContextSnapshot>>>,
+    }
+
+    impl ModelSession for RedirectProbe {
+        async fn prepare(
+            &mut self,
+            request: ModelRequest,
+        ) -> Result<PreparedModelCall, ModelError> {
+            let first = self.requests.lock().unwrap().is_empty();
+            self.requests.lock().unwrap().push(request.context.clone());
+            if first {
+                *self.token.lock().unwrap() = Some(request.cancellation.clone());
+                self.started.notify_one();
+                request.cancellation.cancelled().await;
+                self.cleanup.notified().await;
+            }
+            Ok(PreparedModelCall::new(async move {
+                Ok(ModelStepOutput {
+                    attempt_id: request.attempt_id,
+                    base_context_revision: request.context.revision,
+                    content: vec![],
+                    tool_calls: vec![],
+                    private_context: None,
+                    usage: Default::default(),
+                })
+            }))
+        }
+        async fn close(&mut self) -> Result<(), ModelError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn continue_interrupts_preparation_and_batches_pending_inputs_without_replaying_them() {
+        let started = Arc::new(Notify::new());
+        let cleanup = Arc::new(Notify::new());
+        let token = Arc::new(std::sync::Mutex::new(None));
+        let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let thread = ThreadHandle::start(
+            "redirect".into(),
+            DynModelSession::new(RedirectProbe {
+                started: started.clone(),
+                cleanup: cleanup.clone(),
+                token: token.clone(),
+                requests: requests.clone(),
+            }),
+        )
+        .unwrap();
+        let options = InputDriverOptions {
+            max_model_steps: ModelStepLimit::Unlimited,
+        };
+        thread
+            .submit_input_and_continue(submitted("first"), options)
+            .await
+            .unwrap();
+        started.notified().await;
+        let mut conflict = submitted("first");
+        conflict.context = submitted("changed").context;
+        assert!(matches!(
+            thread.submit_input_and_continue(conflict, options).await,
+            Err(ThreadError::InvalidIdentity)
+        ));
+        assert!(!token.lock().unwrap().as_ref().unwrap().is_cancelled());
+        let receipt = thread
+            .submit_input_and_continue(submitted("second"), options)
+            .await
+            .unwrap();
+        assert!(
+            token.lock().unwrap().as_ref().unwrap().is_cancelled(),
+            "accepted redirect cancels current generation before returning"
+        );
+        thread
+            .submit_input_and_continue(submitted("third"), options)
+            .await
+            .unwrap();
+        assert_eq!(
+            thread
+                .submit_input_and_continue(submitted("second"), options)
+                .await
+                .unwrap(),
+            receipt
+        );
+        assert_eq!(
+            requests.lock().unwrap().len(),
+            1,
+            "cleanup must finish before the next request"
+        );
+        cleanup.notify_one();
+        let mut updates = thread.subscribe();
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                let state = updates.next().await.unwrap();
+                if state
+                    .turns
+                    .last()
+                    .is_some_and(|turn| turn.state == TurnState::Finished(TurnOutcome::Completed))
+                {
+                    break;
+                }
+            }
+        })
+        .await
+        .unwrap();
+        let state = thread.snapshot();
+        assert_eq!(state.turns.len(), 2);
+        assert_eq!(state.turns[0].state, TurnState::Cancelled);
+        assert!(state.inputs.iter().all(|input| matches!(&input.state, InputState::Consumed { turn_id, .. } if turn_id == &state.turns[1].turn_id)));
+        assert_eq!(requests.lock().unwrap().len(), 2);
+        assert_eq!(
+            requests.lock().unwrap()[1]
+                .records
+                .iter()
+                .flat_map(|record| record.content.clone())
+                .collect::<Vec<_>>(),
+            [
+                submitted("first").context,
+                submitted("second").context,
+                submitted("third").context
+            ]
+            .concat()
+        );
+        let history = thread.journal().await.unwrap();
+        assert_eq!(journal::replay(&history).unwrap().inputs, state.inputs);
+        thread
+            .submit_input_and_continue(submitted("second"), options)
+            .await
+            .unwrap();
+        assert_eq!(thread.snapshot().turns.len(), 2);
         thread.close().await.unwrap();
     }
 }

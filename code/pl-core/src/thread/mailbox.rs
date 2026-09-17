@@ -3,6 +3,16 @@ use super::*;
 
 #[derive(Debug)]
 pub(super) enum MailboxCommand {
+    ContinueInput(
+        input::ThreadInput,
+        input::InputDriverOptions,
+        oneshot::Sender<Result<input::InputRecord, ThreadError>>,
+    ),
+    ContinueMessage(
+        inbox::ThreadMessage,
+        input::InputDriverOptions,
+        oneshot::Sender<Result<u64, ThreadError>>,
+    ),
     QueueRuntimeFacts(Vec<RuntimeFact>, oneshot::Sender<Result<(), ThreadError>>),
     ToolProgress {
         caller: String,
@@ -83,6 +93,12 @@ pub(super) enum MailboxCommand {
 impl Owner {
     pub(super) fn process_mailbox(&mut self, command: MailboxCommand) {
         match command {
+            MailboxCommand::ContinueInput(input, options, reply) => {
+                let _ = reply.send(self.continue_input(input, options));
+            }
+            MailboxCommand::ContinueMessage(message, options, reply) => {
+                let _ = reply.send(self.continue_message(message, options));
+            }
             MailboxCommand::QueueRuntimeFacts(facts, reply) => {
                 let _ = reply.send(self.queue_runtime_facts(facts));
             }
@@ -117,7 +133,7 @@ impl Owner {
                 let _ = reply.send(result);
             }
             MailboxCommand::BeginIdleClose(reply) => {
-                let idle = self.active_input.is_none()
+                let idle = self.active_inputs.is_empty()
                     && !self
                         .state
                         .turns
@@ -172,18 +188,25 @@ impl Owner {
                     .turns
                     .iter()
                     .rev()
-                    .find(|turn| turn.state == TurnState::Running);
+                    .find(|turn| turn.state == TurnState::Running)
+                    .map(|turn| turn.turn_id.clone())
+                    .or_else(|| self.interrupted_turn.clone());
                 let result = match active {
-                    Some(turn) if expected.as_ref().is_some_and(|id| id != &turn.turn_id) => {
+                    Some(turn_id) if expected.as_ref().is_some_and(|id| id != &turn_id) => {
                         Err(ThreadError::InvalidIdentity)
                     }
-                    Some(_) => {
-                        self.input_driver = None;
+                    Some(turn_id) => {
+                        self.interrupted_turn = Some(turn_id.clone());
+                        self.pause_inputs();
+                        let result = self.cancel_turn_tasks(&turn_id);
                         let interrupted = self.interrupt.interrupt();
                         self.publish_snapshot();
-                        Ok(interrupted)
+                        result.map(|()| interrupted)
                     }
-                    None => Ok(false),
+                    None => {
+                        self.pause_inputs();
+                        Ok(false)
+                    }
                 };
                 let _ = reply.send(result);
             }
@@ -196,7 +219,7 @@ impl Owner {
                     && let Some(options) = submission.drive
                     && let Err(error) = self.resume_inputs(options)
                 {
-                    self.input_driver_error = Some(Arc::new(error));
+                    self.input_driver.fail(Arc::new(error));
                     self.publish_snapshot();
                 }
                 let _ = reply.send(result);
@@ -255,7 +278,7 @@ impl Owner {
                     && let Err(error) = self.resume_inputs(options)
                 {
                     // Admission is already committed: report its receipt even if close raced the drive request.
-                    self.input_driver_error = Some(Arc::new(error));
+                    self.input_driver.fail(Arc::new(error));
                     self.publish_snapshot();
                 }
                 let _ = reply.send(result);

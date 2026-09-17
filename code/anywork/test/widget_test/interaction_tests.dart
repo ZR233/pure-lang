@@ -1,6 +1,72 @@
 part of '../widget_test.dart';
 
 void registerInteractionTests() {
+  testWidgets('running root can send and stop while keeping the next draft', (
+    tester,
+  ) async {
+    final initial = _emptyState();
+    final workspace = initial.selectedWorkspace!;
+    final api = _FakeStudioApi(
+      initial.copyWith(
+        workspacesByThread: {
+          ...initial.workspacesByThread,
+          workspace.thread.id: workspace.copyWith(
+            activeTurn: _testTurn(
+              threadId: workspace.thread.id,
+              turnId: 'running-turn',
+              state: const RunningStudioTurnState(
+                startedAt: 1,
+                activity: StudioTurnActivity.thinking,
+              ),
+            ),
+          ),
+        },
+      ),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.enterText(
+      find.byKey(StudioDriverKeys.composerInput),
+      'change direction',
+    );
+    await tester.pump();
+    expect(find.byKey(StudioDriverKeys.composerStop), findsNothing);
+    final send = tester.widget<IconButton>(
+      find.byKey(StudioDriverKeys.composerSubmit),
+    );
+    expect(send.onPressed, isNotNull);
+    expect(send.tooltip, 'Send and continue');
+    await tester.tap(find.byKey(StudioDriverKeys.composerSubmit));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(api.submittedInputs.single.input.text, 'change direction');
+    await tester.enterText(
+      find.byKey(StudioDriverKeys.composerInput),
+      'next draft',
+    );
+    await tester.pump();
+    expect(
+      tester
+          .widget<TextField>(find.byKey(StudioDriverKeys.composerInput))
+          .controller!
+          .text,
+      'next draft',
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    expect(api.interruptedTurn, (
+      threadId: 'session-1',
+      turnId: 'running-turn',
+    ));
+    expect(api.submitPromptCount, 1);
+  });
+
   testWidgets('Plan summary remains scrollable across short viewport heights', (
     tester,
   ) async {

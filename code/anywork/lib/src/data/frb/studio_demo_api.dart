@@ -1307,13 +1307,7 @@ class DemoStudioApi implements StudioApi {
   }
 
   @override
-  Future<SubmitPromptReceipt> startTurn(
-    String threadId,
-    StudioPromptInput input,
-  ) => _submitPrompt(threadId, input);
-
-  @override
-  Future<SubmitPromptReceipt> steerTurn(
+  Future<SubmitPromptReceipt> submitPrompt(
     String threadId,
     StudioPromptInput input,
   ) => _submitPrompt(threadId, input);
@@ -1360,6 +1354,10 @@ class DemoStudioApi implements StudioApi {
     }
     final workspace = _workspaces[threadId];
     if (workspace == null) throw StateError('unknown demo thread $threadId');
+    final activeTurn = workspace.activeTurn;
+    if (activeTurn != null && activeTurn.state.isBusy) {
+      await interruptTurn(threadId, activeTurn.turnId);
+    }
     final settings = await readStudioState();
     final route = settings.roles
         .where((role) => role.key == workspace.thread.role)
@@ -1382,14 +1380,14 @@ class DemoStudioApi implements StudioApi {
     final now = DateTime.now();
     final receipt = SubmitPromptReceipt(
       threadId: threadId,
-      inputId: '$turnId:user',
+      inputId: input.inputId,
       cursor: workspace.revision + 1,
     );
     _emitThreadUpdate(
       threadId,
       ThreadItemUpsert(
         _messageItem(
-          id: '$turnId:user',
+          id: input.inputId,
           threadId: threadId,
           turnId: turnId,
           ordinal: _nextOrdinal(threadId),
@@ -1417,6 +1415,7 @@ class DemoStudioApi implements StudioApi {
       ThreadTurnUpdate(
         StudioTurnView(
           turnId: turnId,
+          inputId: input.inputId,
           threadId: threadId,
           revision: 0,
           state: RunningStudioTurnState(
@@ -2118,6 +2117,19 @@ class DemoStudioApi implements StudioApi {
     final workspace = _workspaces[threadId];
     if (workspace == null) return;
     final revision = workspace.revision + 1;
+    // Turn revisions share the Thread event sequence, just like the native projector.
+    if (update case ThreadTurnUpdate(:final turn)) {
+      update = ThreadTurnUpdate(
+        StudioTurnView(
+          turnId: turn.turnId,
+          inputId: turn.inputId ?? workspace.activeTurn?.inputId,
+          threadId: threadId,
+          revision: revision,
+          state: turn.state,
+          updatedAt: turn.updatedAt,
+        ),
+      );
+    }
     final updated = switch (update) {
       ThreadTurnUpdate(:final turn) => workspace.copyWith(
         revision: revision,
@@ -2149,6 +2161,27 @@ class DemoStudioApi implements StudioApi {
         update: update,
       ),
     );
+    if (update case ThreadTurnUpdate(:final turn)) {
+      final id = 'turn:${turn.turnId.length}:${turn.turnId}';
+      final previous = workspace.items
+          .where((item) => item.id == id)
+          .firstOrNull;
+      _emitThreadUpdate(
+        threadId,
+        ThreadItemUpsert(
+          ThreadItemView(
+            id: id,
+            threadId: threadId,
+            turnId: turn.turnId,
+            ordinal: previous?.ordinal ?? _nextOrdinal(threadId),
+            revision: turn.revision,
+            createdAt: previous?.createdAt ?? turn.updatedAt,
+            updatedAt: turn.updatedAt,
+            state: ThreadTurnItemStateView(turn.state, inputId: turn.inputId),
+          ),
+        ),
+      );
+    }
   }
 
   int _nextOrdinal(String threadId) {

@@ -771,13 +771,7 @@ class _FakeStudioApi implements StudioApi {
   }
 
   @override
-  Future<SubmitPromptReceipt> startTurn(
-    String threadId,
-    StudioPromptInput input,
-  ) => _submitTurn(threadId, input);
-
-  @override
-  Future<SubmitPromptReceipt> steerTurn(
+  Future<SubmitPromptReceipt> submitPrompt(
     String threadId,
     StudioPromptInput input,
   ) => _submitTurn(threadId, input);

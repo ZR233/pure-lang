@@ -238,6 +238,14 @@ class _TimelineRowBlock extends StatelessWidget {
                     ? CrossAxisAlignment.end
                     : CrossAxisAlignment.start,
                 children: [
+                  if (isPrompt && row.turnId?.isEmpty == true)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Text(
+                        context.l10n.promptAccepted,
+                        style: Theme.of(context).textTheme.labelSmall,
+                      ),
+                    ),
                   if (isParentAgent)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 6),

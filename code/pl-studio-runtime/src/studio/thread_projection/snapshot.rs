@@ -155,6 +155,18 @@ pub(in crate::studio) fn status(state: &ThreadSnapshot) -> ThreadStatus {
         ThreadLifecycle::Closing => ThreadStatus::Closing,
         ThreadLifecycle::Closed => ThreadStatus::Closed,
         ThreadLifecycle::Open => {
+            if matches!(
+                state.input_execution,
+                pl_core::thread::input::InputExecution::Interrupting { .. }
+            ) {
+                return ThreadStatus::Cancelling;
+            }
+            if matches!(
+                state.input_execution,
+                pl_core::thread::input::InputExecution::Failed { .. }
+            ) {
+                return ThreadStatus::Faulted;
+            }
             if state.interactions.values().any(|record| {
                 record.state == pl_core::thread::interactions::InteractionState::Pending
             }) || state.permissions.values().any(|record| {

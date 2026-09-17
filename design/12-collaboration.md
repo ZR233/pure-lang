@@ -68,7 +68,8 @@ Plan 属于各自的 Thread，不随 Profile、消息 fork 或 workspace assignm
 child 的 `plan_*` 工具只操作自己的 session，不能查询 root Plan。配置冻结与 Plan session
 隔离是两条独立边界。`spawn_agent.message` 和 root 后续通过 `send_message` 发送的补充输入
 都在 child Timeline 中显示为 `parentAgent` 文本消息，并由 Studio 标记为"主智能体 / Main
-agent"；它们对 provider 仍是普通 user role，不得改变 fork、Plan 隔离、预算刷新或
+agent"；`send_message` 对运行中 child 请求打断并在清理后携带新内容自动继续，对空闲 child 启动执行。
+它复用用户 prompt 的 owner 控制入口，`interrupt_agent` 则仅停止，不自动续跑。消息收据只表示受理。它们对 provider 仍是普通 user role，不得改变 fork、Plan 隔离、预算刷新或
 parent→direct-child 授权语义。
 
 ## 12.3 spawn 与目录写策略

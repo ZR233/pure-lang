@@ -67,8 +67,7 @@ impl Owner {
             && let Some(options) = drive
         {
             self.state.wake_messages_through = self.state.wake_messages_through.max(sequence);
-            self.input_driver = Some(options);
-            self.input_driver_error = None;
+            self.input_driver.wake(options);
         }
     }
 

@@ -47,8 +47,49 @@ void main() {
     await _pumpUntilFound(tester, find.byKey(StudioDriverKeys.composerStop));
     expect(find.byKey(StudioDriverKeys.composerStop), findsOneWidget);
 
+    expect(find.byKey(StudioDriverKeys.composerSubmit), findsNothing);
+    // TurnStarted can arrive before the submission receipt. Only the receipt unlocks
+    // the next draft; observing the stop button alone does not prove admission returned.
+    await _pumpUntilFound(
+      tester,
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is TextField &&
+            widget.key == StudioDriverKeys.composerInput &&
+            widget.enabled == true &&
+            widget.controller?.text.isEmpty == true,
+      ),
+    );
+    // Submission temporarily disables the field and closes its native input connection.
+    // Refocus as a user would before entering another prompt on the same EditableText.
+    await tester.tap(find.byKey(StudioDriverKeys.composerInput));
+    await tester.pump();
+    await tester.enterText(
+      find.byKey(StudioDriverKeys.composerInput),
+      'redirect integration smoke',
+    );
+    expect(
+      ProviderScope.containerOf(
+        tester.element(find.byKey(StudioDriverKeys.composerInput)),
+      ).read(studioControllerProvider).value!.composer.draft,
+      'redirect integration smoke',
+    );
+    await _pumpUntilFound(
+      tester,
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is IconButton &&
+            widget.key == StudioDriverKeys.composerSubmit &&
+            widget.onPressed != null,
+      ),
+    );
+    expect(find.byKey(StudioDriverKeys.composerStop), findsNothing);
+    await tester.tap(find.byKey(StudioDriverKeys.composerSubmit));
+    await _pumpUntilFound(tester, find.text('redirect integration smoke'));
+    await _pumpUntilFound(tester, find.byKey(StudioDriverKeys.composerStop));
     await tester.tap(find.byKey(StudioDriverKeys.composerStop));
-    await _pumpUntilFound(tester, find.byKey(StudioDriverKeys.composerSubmit));
+    await tester.pumpAndSettle();
+    expect(find.byKey(StudioDriverKeys.composerStop), findsNothing);
     expect(find.byKey(StudioDriverKeys.composerSubmit), findsOneWidget);
     expect(find.text('integration smoke'), findsWidgets);
   });

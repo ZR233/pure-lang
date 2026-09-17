@@ -6,9 +6,11 @@
 
 ## 3.1 输入与 Turn
 
-输入受理只在目标 Thread 空闲时创建排队 Turn；活动 Turn 的补充输入走 steer 通道；稳定输入 ID 保证
-重复提交幂等。提交事务原子写入输入、Turn 与 user Item，成功后更新 owner snapshot 并广播 typed
-notification；只有 presentation 为 visible 的输入生成 user Item。
+Studio 用户输入统一提交：空闲时启动，运行时先受理输入，再取消当前执行并在清理完成后启动新 Turn。
+父 Agent 的补充消息复用同一执行控制。Core 仍提供独立的普通 steer 与排队能力；稳定输入 ID 保证
+重复提交只返回原收据，不重复打断或启动。受理提交保存输入并更新 owner snapshot；产品从 canonical
+输入事实投影 user Item，实际 Turn 和模型上下文在执行准入时关联。只有 presentation 为 visible 的
+输入生成 user Item，受理不表示模型已开始执行。
 
 MessagePresentation（visible / hidden）是所有消息共用的协议属性，不属于 Plan、Interaction 或
 mailbox 特例：visible 是省省略时的默认值；hidden 消息仍是 canonical Thread 上下文，必须持久化并

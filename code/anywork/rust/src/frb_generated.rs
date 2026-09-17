@@ -40,7 +40,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1130680118;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1499313007;
 
 // Section: executor
 
@@ -2873,7 +2873,7 @@ fn wire__crate__api__studio__handlers__lifecycle__start_studio_runtime_impl(
         },
     )
 }
-fn wire__crate__api__studio__handlers__prompt__start_turn_impl(
+fn wire__crate__api__studio__handlers__prompt__submit_prompt_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -2881,7 +2881,7 @@ fn wire__crate__api__studio__handlers__prompt__start_turn_impl(
 ) {
     FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
         flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "start_turn",
+            debug_name: "submit_prompt",
             port: Some(port_),
             mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
         },
@@ -2904,51 +2904,7 @@ fn wire__crate__api__studio__handlers__prompt__start_turn_impl(
             move |context| async move {
                 transform_result_sse::<_, crate::api::studio::types::error::BridgeError>(
                     (move || async move {
-                        let output_ok = crate::api::studio::handlers::prompt::start_turn(
-                            api_thread_id,
-                            api_input,
-                        )
-                        .await?;
-                        Ok(output_ok)
-                    })()
-                    .await,
-                )
-            }
-        },
-    )
-}
-fn wire__crate__api__studio__handlers__prompt__steer_turn_impl(
-    port_: flutter_rust_bridge::for_generated::MessagePort,
-    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
-    rust_vec_len_: i32,
-    data_len_: i32,
-) {
-    FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec, _, _, _>(
-        flutter_rust_bridge::for_generated::TaskInfo {
-            debug_name: "steer_turn",
-            port: Some(port_),
-            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
-        },
-        move || {
-            let message = unsafe {
-                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
-                    ptr_,
-                    rust_vec_len_,
-                    data_len_,
-                )
-            };
-            let mut deserializer =
-                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_thread_id = <String>::sse_decode(&mut deserializer);
-            let api_input =
-                <crate::api::studio::types::attachment::BridgeStudioPromptInput>::sse_decode(
-                    &mut deserializer,
-                );
-            deserializer.end();
-            move |context| async move {
-                transform_result_sse::<_, crate::api::studio::types::error::BridgeError>(
-                    (move || async move {
-                        let output_ok = crate::api::studio::handlers::prompt::steer_turn(
+                        let output_ok = crate::api::studio::handlers::prompt::submit_prompt(
                             api_thread_id,
                             api_input,
                         )
@@ -6426,9 +6382,11 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeStoppedResource {
 impl SseDecode for crate::api::studio::types::attachment::BridgeStudioPromptInput {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_inputId = <String>::sse_decode(deserializer);
         let mut var_text = <String>::sse_decode(deserializer);
         let mut var_attachmentDraftIds = <Vec<String>>::sse_decode(deserializer);
         return crate::api::studio::types::attachment::BridgeStudioPromptInput {
+            input_id: var_inputId,
             text: var_text,
             attachment_draft_ids: var_attachmentDraftIds,
         };
@@ -10249,7 +10207,7 @@ impl SseDecode for crate::api::studio::types::response::StartNewThreadResponse {
         let mut var_thread =
             <crate::api::studio::types::thread_stream::BridgeThread>::sse_decode(deserializer);
         let mut var_receipt =
-            <crate::api::studio::types::response::StartTurnResponse>::sse_decode(deserializer);
+            <crate::api::studio::types::response::SubmitPromptResponse>::sse_decode(deserializer);
         return crate::api::studio::types::response::StartNewThreadResponse {
             thread: var_thread,
             receipt: var_receipt,
@@ -10257,27 +10215,13 @@ impl SseDecode for crate::api::studio::types::response::StartNewThreadResponse {
     }
 }
 
-impl SseDecode for crate::api::studio::types::response::StartTurnResponse {
+impl SseDecode for crate::api::studio::types::response::SubmitPromptResponse {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_threadId = <String>::sse_decode(deserializer);
         let mut var_inputId = <String>::sse_decode(deserializer);
         let mut var_revision = <u64>::sse_decode(deserializer);
-        return crate::api::studio::types::response::StartTurnResponse {
-            thread_id: var_threadId,
-            input_id: var_inputId,
-            revision: var_revision,
-        };
-    }
-}
-
-impl SseDecode for crate::api::studio::types::response::SteerTurnResponse {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_threadId = <String>::sse_decode(deserializer);
-        let mut var_inputId = <String>::sse_decode(deserializer);
-        let mut var_revision = <u64>::sse_decode(deserializer);
-        return crate::api::studio::types::response::SteerTurnResponse {
+        return crate::api::studio::types::response::SubmitPromptResponse {
             thread_id: var_threadId,
             input_id: var_inputId,
             revision: var_revision,
@@ -10488,11 +10432,10 @@ fn pde_ffi_dispatcher_primary_impl(
 73 => wire__crate__api__studio__handlers__lifecycle__shutdown_runtime_impl(port, ptr, rust_vec_len, data_len),
 74 => wire__crate__api__studio__handlers__thread__start_new_thread_impl(port, ptr, rust_vec_len, data_len),
 75 => wire__crate__api__studio__handlers__lifecycle__start_studio_runtime_impl(port, ptr, rust_vec_len, data_len),
-76 => wire__crate__api__studio__handlers__prompt__start_turn_impl(port, ptr, rust_vec_len, data_len),
-77 => wire__crate__api__studio__handlers__prompt__steer_turn_impl(port, ptr, rust_vec_len, data_len),
-78 => wire__crate__api__studio__subscription__subscribe_shutdown_progress_impl(port, ptr, rust_vec_len, data_len),
-79 => wire__crate__api__studio__subscription__subscribe_thread_impl(port, ptr, rust_vec_len, data_len),
-80 => wire__crate__api__studio__handlers__ssh__test_ssh_connection_impl(port, ptr, rust_vec_len, data_len),
+76 => wire__crate__api__studio__handlers__prompt__submit_prompt_impl(port, ptr, rust_vec_len, data_len),
+77 => wire__crate__api__studio__subscription__subscribe_shutdown_progress_impl(port, ptr, rust_vec_len, data_len),
+78 => wire__crate__api__studio__subscription__subscribe_thread_impl(port, ptr, rust_vec_len, data_len),
+79 => wire__crate__api__studio__handlers__ssh__test_ssh_connection_impl(port, ptr, rust_vec_len, data_len),
                         _ => unreachable!(),
                     }
 }
@@ -14148,6 +14091,7 @@ impl flutter_rust_bridge::IntoDart
 {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
+            self.input_id.into_into_dart().into_dart(),
             self.text.into_into_dart().into_dart(),
             self.attachment_draft_ids.into_into_dart().into_dart(),
         ]
@@ -17355,7 +17299,7 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::response::Star
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
-impl flutter_rust_bridge::IntoDart for crate::api::studio::types::response::StartTurnResponse {
+impl flutter_rust_bridge::IntoDart for crate::api::studio::types::response::SubmitPromptResponse {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
             self.thread_id.into_into_dart().into_dart(),
@@ -17366,35 +17310,13 @@ impl flutter_rust_bridge::IntoDart for crate::api::studio::types::response::Star
     }
 }
 impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
-    for crate::api::studio::types::response::StartTurnResponse
+    for crate::api::studio::types::response::SubmitPromptResponse
 {
 }
-impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::response::StartTurnResponse>
-    for crate::api::studio::types::response::StartTurnResponse
+impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::response::SubmitPromptResponse>
+    for crate::api::studio::types::response::SubmitPromptResponse
 {
-    fn into_into_dart(self) -> crate::api::studio::types::response::StartTurnResponse {
-        self
-    }
-}
-// Codec=Dco (DartCObject based), see doc to use other codecs
-impl flutter_rust_bridge::IntoDart for crate::api::studio::types::response::SteerTurnResponse {
-    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
-        [
-            self.thread_id.into_into_dart().into_dart(),
-            self.input_id.into_into_dart().into_dart(),
-            self.revision.into_into_dart().into_dart(),
-        ]
-        .into_dart()
-    }
-}
-impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
-    for crate::api::studio::types::response::SteerTurnResponse
-{
-}
-impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::response::SteerTurnResponse>
-    for crate::api::studio::types::response::SteerTurnResponse
-{
-    fn into_into_dart(self) -> crate::api::studio::types::response::SteerTurnResponse {
+    fn into_into_dart(self) -> crate::api::studio::types::response::SubmitPromptResponse {
         self
     }
 }
@@ -20078,6 +20000,7 @@ impl SseEncode for crate::api::studio::types::runtime::BridgeStoppedResource {
 impl SseEncode for crate::api::studio::types::attachment::BridgeStudioPromptInput {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.input_id, serializer);
         <String>::sse_encode(self.text, serializer);
         <Vec<String>>::sse_encode(self.attachment_draft_ids, serializer);
     }
@@ -22877,23 +22800,14 @@ impl SseEncode for crate::api::studio::types::response::StartNewThreadResponse {
             self.thread,
             serializer,
         );
-        <crate::api::studio::types::response::StartTurnResponse>::sse_encode(
+        <crate::api::studio::types::response::SubmitPromptResponse>::sse_encode(
             self.receipt,
             serializer,
         );
     }
 }
 
-impl SseEncode for crate::api::studio::types::response::StartTurnResponse {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <String>::sse_encode(self.thread_id, serializer);
-        <String>::sse_encode(self.input_id, serializer);
-        <u64>::sse_encode(self.revision, serializer);
-    }
-}
-
-impl SseEncode for crate::api::studio::types::response::SteerTurnResponse {
+impl SseEncode for crate::api::studio::types::response::SubmitPromptResponse {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.thread_id, serializer);

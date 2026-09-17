@@ -10,6 +10,16 @@ class AppLocalizationsEn extends AppLocalizations {
   AppLocalizationsEn([String locale = 'en']) : super(locale);
 
   @override
+  String get promptAccepted => 'Accepted';
+
+  @override
+  String get composerInterruptHint =>
+      'Send to interrupt and continue · Esc to stop';
+
+  @override
+  String get composerSendAndContinue => 'Send and continue';
+
+  @override
   String get appTitle => 'anywork';
 
   @override
@@ -2111,7 +2121,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get threadStatusIdle => 'Idle';
 
   @override
-  String get threadStatusCancelling => 'Cancelling';
+  String get threadStatusCancelling => 'Stopping current execution';
 
   @override
   String get threadStatusClosed => 'Closed';

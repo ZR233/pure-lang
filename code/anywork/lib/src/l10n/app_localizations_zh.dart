@@ -10,6 +10,15 @@ class AppLocalizationsZh extends AppLocalizations {
   AppLocalizationsZh([String locale = 'zh']) : super(locale);
 
   @override
+  String get promptAccepted => '已受理';
+
+  @override
+  String get composerInterruptHint => '发送将打断并继续 · Esc 停止';
+
+  @override
+  String get composerSendAndContinue => '发送并继续';
+
+  @override
   String get appTitle => '糊来帮';
 
   @override
@@ -2036,7 +2045,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get threadStatusIdle => '空闲';
 
   @override
-  String get threadStatusCancelling => '正在取消';
+  String get threadStatusCancelling => '正在停止当前执行';
 
   @override
   String get threadStatusClosed => '已关闭';

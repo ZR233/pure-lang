@@ -1785,10 +1785,7 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   StartNewThreadResponse dco_decode_start_new_thread_response(dynamic raw);
 
   @protected
-  StartTurnResponse dco_decode_start_turn_response(dynamic raw);
-
-  @protected
-  SteerTurnResponse dco_decode_steer_turn_response(dynamic raw);
+  SubmitPromptResponse dco_decode_submit_prompt_response(dynamic raw);
 
   @protected
   int dco_decode_u_16(dynamic raw);
@@ -3991,12 +3988,7 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  StartTurnResponse sse_decode_start_turn_response(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  SteerTurnResponse sse_decode_steer_turn_response(
+  SubmitPromptResponse sse_decode_submit_prompt_response(
     SseDeserializer deserializer,
   );
 
@@ -6628,14 +6620,8 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  void sse_encode_start_turn_response(
-    StartTurnResponse self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_steer_turn_response(
-    SteerTurnResponse self,
+  void sse_encode_submit_prompt_response(
+    SubmitPromptResponse self,
     SseSerializer serializer,
   );
 

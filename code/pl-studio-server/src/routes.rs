@@ -12,8 +12,8 @@ use pl_protocol::studio::{
     AdmitAttachmentDraftsRequest, AdmitAttachmentDraftsResponse, CreateThreadRequest,
     ExpectedRevisionRequest, HealthResponse, LspResetRequest, McpResetRequest, OpenProjectRequest,
     RenameThreadRequest, ResolveInteractionRequest, SearchSkillsRequest, SetModelRoleRequest,
-    SetThreadModeRequest, StartTurnRequest, SteerTurnRequest, StudioAttachmentAdmissionContext,
-    StudioAttachmentDraftSource, StudioError, StudioSettingsSnapshot, ThreadPageQuery,
+    SetThreadModeRequest, StudioAttachmentAdmissionContext, StudioAttachmentDraftSource,
+    StudioError, StudioSettingsSnapshot, SubmitPromptRequest, ThreadPageQuery,
     UpdateDeepSeekWebSearchSettingsRequest, UpdateGeneralSettingsRequest,
     UpdateInstructionsSettingsRequest, UpdateMcpSettingsRequest, UpdatePermissionSettingsRequest,
     UpdateProviderSettingsRequest, UpdateSkillsSettingsRequest, UpdateWebSearchSettingsRequest,
@@ -127,8 +127,7 @@ pub(crate) fn api_router() -> OpenApiRouter<AppState> {
         .routes(routes!(rename_thread))
         .routes(routes!(set_thread_mode))
         .routes(routes!(list_thread_turns))
-        .routes(routes!(start_turn))
-        .routes(routes!(steer_turn))
+        .routes(routes!(submit_prompt))
         .routes(routes!(interrupt_turn))
         .routes(routes!(admit_attachment_drafts))
         .routes(routes!(remove_attachment_draft))
@@ -366,31 +365,16 @@ async fn list_thread_turns(
     ))
 }
 
-#[utoipa::path(post, path = "/api/v1/threads/{thread_id}/turns", operation_id = "turn.start", params(("thread_id" = String, Path)), request_body = StartTurnRequest, responses(StudioApiErrors, (status = 200)))]
-async fn start_turn(
+#[utoipa::path(post, path = "/api/v1/threads/{thread_id}/prompts", operation_id = "prompt.submit", params(("thread_id" = String, Path)), request_body = SubmitPromptRequest, responses(StudioApiErrors, (status = 200)))]
+async fn submit_prompt(
     State(state): State<AppState>,
     Path(thread_id): Path<String>,
-    ApiJson(request): ApiJson<StartTurnRequest>,
+    ApiJson(request): ApiJson<SubmitPromptRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     Ok(Json(
         state
             .runtime
-            .start_turn(thread_id, request)
-            .await
-            .map_err(ApiError::from)?,
-    ))
-}
-
-#[utoipa::path(post, path = "/api/v1/threads/{thread_id}/active-turn/steer", operation_id = "turn.steer", params(("thread_id" = String, Path)), request_body = SteerTurnRequest, responses(StudioApiErrors, (status = 200)))]
-async fn steer_turn(
-    State(state): State<AppState>,
-    Path(thread_id): Path<String>,
-    ApiJson(request): ApiJson<SteerTurnRequest>,
-) -> Result<impl IntoResponse, ApiError> {
-    Ok(Json(
-        state
-            .runtime
-            .steer_turn(thread_id, request)
+            .submit_prompt_command(thread_id, request)
             .await
             .map_err(ApiError::from)?,
     ))

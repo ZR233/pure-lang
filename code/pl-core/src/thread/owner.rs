@@ -18,9 +18,10 @@ pub(super) struct Owner {
     pub(super) model_progress: Option<(String, watch::Receiver<crate::model::ModelProgress>)>,
     pub(super) permission_leases:
         std::collections::BTreeMap<String, crate::tool::opaque::ExecutionAuthority>,
-    pub(super) active_input: Option<String>,
-    pub(super) input_driver: Option<input::InputDriverOptions>,
-    pub(super) input_driver_error: Option<Arc<ThreadError>>,
+    pub(super) active_inputs: Vec<String>,
+    pub(super) input_batch_through: Option<u64>,
+    pub(super) interrupted_turn: Option<String>,
+    pub(super) input_driver: input::InputDriver,
     pub(super) uncommitted_tools:
         std::collections::BTreeMap<String, super::tool_execution::ToolExecutionCompletion>,
     pub(super) task_commands: mpsc::WeakSender<mailbox::MailboxCommand>,
@@ -54,6 +55,13 @@ impl Owner {
                 futures::FutureExt::now_or_never(futures::StreamExt::next(&mut self.background))
             {
                 self.finish_background(completion);
+            }
+            // Service the admitted mailbox batch before another paid request. Bound the batch
+            // so a continuous notification producer cannot starve close or other owner commands.
+            for _ in 0..self.mailbox.len() {
+                if let Ok(message) = self.mailbox.try_recv() {
+                    self.process_mailbox(message);
+                }
             }
             let command = match commands.try_recv() {
                 Ok(command) => command,
@@ -318,15 +326,19 @@ impl Owner {
                 attempt_id: id.clone(),
                 progress: receiver.borrow().clone(),
             });
-        snapshot.input_execution = if let Some(input_id) = &self.active_input {
-            input::InputExecution::Running {
-                input_id: input_id.clone(),
-            }
-        } else if let Some(error) = &self.input_driver_error {
+        snapshot.input_execution = if let Some(error) = self.input_driver.error() {
             input::InputExecution::Failed {
                 error: error.clone(),
             }
-        } else if self.input_driver.is_some()
+        } else if let Some(turn_id) = &self.interrupted_turn {
+            input::InputExecution::Interrupting {
+                turn_id: turn_id.clone(),
+            }
+        } else if let Some(input_id) = self.active_inputs.first() {
+            input::InputExecution::Running {
+                input_id: input_id.clone(),
+            }
+        } else if self.input_driver.options().is_some()
             && self.state.lifecycle == ThreadLifecycle::Open
             && !self.interrupt.is_closing()
         {

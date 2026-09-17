@@ -22,28 +22,36 @@ impl Owner {
         if input.cancellation.is_cancelled() {
             return Err(ThreadError::Cancelled);
         }
-        self.apply_model_update().await?;
-        if input.cancellation.is_cancelled() || self.interrupt.is_closing() {
-            return Err(ThreadError::Cancelled);
-        }
         let started = tokio::time::Instant::now();
         let turn_id = input.turn_id.clone();
         let mut turns = self.state.turns.to_vec();
         turns.push(TurnRecord {
             elapsed_ms: None,
-            input_id: self.active_input.clone(),
+            input_id: self.active_inputs.first().cloned(),
             turn_id: turn_id.clone(),
             state: TurnState::Running,
             model_steps: 0,
         });
         self.state.turns = turns.clone().into();
         self.publish();
-        let mut result = self.execute_turn_loop(input).await;
+        // Publish the generation before any asynchronous preparation: input received while a
+        // model is being opened must redirect this Turn, not silently queue behind it.
+        let mut result = async {
+            self.apply_model_update().await?;
+            if input.cancellation.is_cancelled() || self.interrupt.is_closing() {
+                return Err(ThreadError::Cancelled);
+            }
+            self.execute_turn_loop(input).await
+        }
+        .await;
         if matches!(result, Err(ThreadError::Closed)) && self.interrupt.is_closing() {
             result = Err(ThreadError::Cancelled);
         }
         if matches!(result, Err(ThreadError::Cancelled)) {
             self.cancel_pending_calls(Some(&turn_id))?;
+            if self.interrupted_turn.as_deref() == Some(&turn_id) {
+                self.settle_turn_cancellation(&turn_id).await;
+            }
         }
         if let Some(turn) = turns.last_mut() {
             turn.elapsed_ms = Some(
@@ -63,7 +71,12 @@ impl Owner {
                 .map_err(|_| ThreadError::RevisionExhausted)?;
             turn.state = match &result {
                 Ok(completed) => TurnState::Finished(completed.outcome),
-                Err(ThreadError::Cancelled) => TurnState::Cancelled,
+                Err(ThreadError::Cancelled) => match self.input_driver.error() {
+                    Some(error) => TurnState::Failed {
+                        description: error.to_string(),
+                    },
+                    None => TurnState::Cancelled,
+                },
                 Err(error) => TurnState::Failed {
                     description: error.to_string(),
                 },

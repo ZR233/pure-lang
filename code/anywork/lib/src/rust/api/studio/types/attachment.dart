@@ -82,22 +82,26 @@ sealed class BridgeAttachmentDraftSource with _$BridgeAttachmentDraftSource {
 enum BridgeAttachmentModality { image, video, file }
 
 class BridgeStudioPromptInput {
+  final String inputId;
   final String text;
   final List<String> attachmentDraftIds;
 
   const BridgeStudioPromptInput({
+    required this.inputId,
     required this.text,
     required this.attachmentDraftIds,
   });
 
   @override
-  int get hashCode => text.hashCode ^ attachmentDraftIds.hashCode;
+  int get hashCode =>
+      inputId.hashCode ^ text.hashCode ^ attachmentDraftIds.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is BridgeStudioPromptInput &&
           runtimeType == other.runtimeType &&
+          inputId == other.inputId &&
           text == other.text &&
           attachmentDraftIds == other.attachmentDraftIds;
 }

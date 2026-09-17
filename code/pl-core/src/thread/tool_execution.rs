@@ -150,6 +150,18 @@ impl Owner {
         &mut self,
         completion: ToolExecutionCompletion,
     ) -> Result<crate::tool::ToolOutput, ThreadError> {
+        if completion.cancellation.is_cancelled()
+            && self.interrupted_turn.as_deref() == Some(completion.call.turn_id.as_str())
+            && let Err(error) = &completion.output
+            && !matches!(
+                error.source.downcast_ref::<ThreadError>(),
+                Some(ThreadError::Cancelled)
+            )
+        {
+            self.input_driver
+                .fail(Arc::new(ThreadError::Tool(error.clone())));
+            self.pause_inputs();
+        }
         let ToolExecutionCompletion {
             call,
             output,

@@ -98,6 +98,24 @@ abstract class AppLocalizations {
     Locale('zh'),
   ];
 
+  /// No description provided for @promptAccepted.
+  ///
+  /// In en, this message translates to:
+  /// **'Accepted'**
+  String get promptAccepted;
+
+  /// No description provided for @composerInterruptHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Send to interrupt and continue · Esc to stop'**
+  String get composerInterruptHint;
+
+  /// No description provided for @composerSendAndContinue.
+  ///
+  /// In en, this message translates to:
+  /// **'Send and continue'**
+  String get composerSendAndContinue;
+
   /// No description provided for @appTitle.
   ///
   /// In en, this message translates to:
@@ -3848,7 +3866,7 @@ abstract class AppLocalizations {
   /// No description provided for @threadStatusCancelling.
   ///
   /// In en, this message translates to:
-  /// **'Cancelling'**
+  /// **'Stopping current execution'**
   String get threadStatusCancelling;
 
   /// No description provided for @threadStatusClosed.

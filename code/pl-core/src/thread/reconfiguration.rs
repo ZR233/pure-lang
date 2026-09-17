@@ -26,7 +26,7 @@ impl Owner {
                 actual: self.state.commit_sequence,
             });
         }
-        if self.active_input.is_some()
+        if !self.active_inputs.is_empty()
             || self
                 .state
                 .turns

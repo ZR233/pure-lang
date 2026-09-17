@@ -802,6 +802,7 @@ class StudioController extends _$StudioController {
       result = await _api.startNewThread(
         projectId,
         StudioPromptInput(
+          inputId: submitting.inputId!,
           text: prompt,
           attachmentDraftIds: [
             for (final attachment in composer.attachments) attachment.id,
@@ -911,22 +912,16 @@ class StudioController extends _$StudioController {
         composer.isSubmissionPending) {
       return;
     }
-    final workspace = current.workspacesByThread[threadId];
+    final submitting = composer.beginSubmission();
     final input = StudioPromptInput(
+      inputId: submitting.inputId!,
       text: prompt,
       attachmentDraftIds: [
         for (final attachment in composer.attachments) attachment.id,
       ],
     );
-    final submit = workspace?.activeTurn?.state.isBusy == true
-        ? () => _api.steerTurn(threadId, input)
-        : () => _api.startTurn(threadId, input);
-    await _submitThreadInput(
-      current,
-      threadId,
-      composer.beginSubmission(),
-      submit,
-    );
+    Future<SubmitPromptReceipt> submit() => _api.submitPrompt(threadId, input);
+    await _submitThreadInput(current, threadId, submitting, submit);
   }
 
   Future<void> _submitThreadInput(
@@ -990,7 +985,7 @@ class StudioController extends _$StudioController {
       threadId,
       (ui) => ui.copyWith(composer: accepted),
     );
-    state = AsyncData(_reconcileComposer(next, threadId));
+    state = AsyncData(next);
   }
 
   Future<void> stop(String threadId) async {
@@ -1413,9 +1408,10 @@ class StudioController extends _$StudioController {
     }
     switch (frame) {
       case ThreadSnapshotFrame(:final workspace, :final historyCursor):
-        final next = _reconcileComposer(
-          applyThreadSnapshot(current, workspace, historyCursor: historyCursor),
-          threadId,
+        final next = applyThreadSnapshot(
+          current,
+          workspace,
+          historyCursor: historyCursor,
         );
         state = AsyncData(next);
         final history = _workspaceUi(next, threadId).history;
@@ -1445,17 +1441,7 @@ class StudioController extends _$StudioController {
           unawaited(_resyncThread(threadId, generation));
           return;
         }
-        final observedTurn = switch (update) {
-          ThreadTurnUpdate(:final turn) => turn,
-          _ => null,
-        };
-        state = AsyncData(
-          _reconcileComposer(
-            reduced.state,
-            threadId,
-            observedTurn: observedTurn,
-          ),
-        );
+        state = AsyncData(reduced.state);
       case ThreadResyncRequiredFrame():
         unawaited(_resyncThread(threadId, generation));
     }
@@ -1532,70 +1518,6 @@ StudioState _mergeProductSnapshots(StudioState current, StudioState incoming) {
     next = applySkillsState(next, snapshot);
   }
   return next;
-}
-
-StudioState _reconcileComposer(
-  StudioState state,
-  String threadId, {
-  StudioTurnView? observedTurn,
-}) {
-  final workspace = state.workspacesByThread[threadId];
-  if (workspace == null) return state;
-  final composer = _workspaceUi(state, threadId).composer;
-  String? observedInputId;
-  if (composer case PendingStartComposerThreadState(:final acceptedInputId)) {
-    final candidate = observedTurn ?? workspace.activeTurn;
-    if (candidate?.inputId == acceptedInputId) {
-      observedInputId = acceptedInputId;
-      observedTurn = candidate;
-    }
-    for (final item in workspace.items.reversed) {
-      if (item.state case ThreadTurnItemStateView(:final state, :final inputId)
-          when inputId == acceptedInputId) {
-        observedInputId = acceptedInputId;
-        observedTurn = StudioTurnView(
-          inputId: inputId,
-          turnId: item.turnId,
-          threadId: threadId,
-          revision: item.revision,
-          state: state,
-          updatedAt: item.updatedAt,
-        );
-        break;
-      }
-    }
-    final input = workspace.items
-        .where((item) => item.id == acceptedInputId)
-        .firstOrNull;
-    if (input != null) {
-      observedInputId = input.id;
-      if (observedTurn?.turnId != input.turnId) observedTurn = null;
-      for (final item in workspace.items) {
-        if (item.state case ThreadTurnItemStateView(:final state)
-            when item.turnId == input.turnId) {
-          observedTurn = StudioTurnView(
-            turnId: input.turnId,
-            threadId: threadId,
-            revision: item.revision,
-            state: state,
-            updatedAt: item.updatedAt,
-          );
-          break;
-        }
-      }
-      if (observedTurn == null &&
-          workspace.activeTurn?.turnId == input.turnId) {
-        observedTurn = workspace.activeTurn;
-      }
-    }
-  }
-  return _withWorkspaceUi(
-    state,
-    threadId,
-    (ui) => ui.copyWith(
-      composer: ui.composer.observeInput(observedInputId, observedTurn),
-    ),
-  );
 }
 
 WorkspaceUiState _workspaceUi(StudioState state, String threadId) {

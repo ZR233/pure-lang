@@ -186,7 +186,7 @@ impl AgentControlKind {
             ),
             Self::Send => pl_protocol::ToolSpec::function(
                 "send_message",
-                "Send a runtime message to a direct child and wake it if that message remains unconsumed.",
+                "Send a prompt to a direct child. Interrupt its active turn and continue with this message after tool cleanup; start it if idle. The receipt confirms acceptance, not completion.",
                 schemars::schema_for!(SendInput).to_value(),
             ),
             Self::List => pl_protocol::ToolSpec::function(

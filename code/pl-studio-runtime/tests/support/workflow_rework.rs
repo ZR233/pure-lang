@@ -154,10 +154,11 @@ async fn run_scenario(
             .await?;
         let observer = observe_turns(&runtime, &thread.id).await?;
         runtime
-            .start_turn(
+            .submit_prompt_command(
                 thread.id.clone(),
-                pl_protocol::studio::StartTurnRequest {
+                pl_protocol::studio::SubmitPromptRequest {
                     input: pl_protocol::studio::StudioPromptInput {
+                        input_id: uuid::Uuid::new_v4().to_string(),
                         text: prompt,
                         attachment_draft_ids: Vec::new(),
                     },

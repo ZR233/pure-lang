@@ -13,18 +13,10 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `interaction_resolution`
 
-Future<StartTurnResponse> startTurn({
+Future<SubmitPromptResponse> submitPrompt({
   required String threadId,
   required BridgeStudioPromptInput input,
-}) => RustLib.instance.api.crateApiStudioHandlersPromptStartTurn(
-  threadId: threadId,
-  input: input,
-);
-
-Future<SteerTurnResponse> steerTurn({
-  required String threadId,
-  required BridgeStudioPromptInput input,
-}) => RustLib.instance.api.crateApiStudioHandlersPromptSteerTurn(
+}) => RustLib.instance.api.crateApiStudioHandlersPromptSubmitPrompt(
   threadId: threadId,
   input: input,
 );

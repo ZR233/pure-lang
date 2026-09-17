@@ -228,7 +228,7 @@ impl AgentControlHost for AgentHost {
             return Err(cleanup_spawn_failure(&owner, &id, error).await);
         }
         let delivery = child
-            .send_message_and_resume(
+            .send_message_and_continue(
                 pl_core::thread::inbox::ThreadMessage {
                     id: format!("initial:{}:{}", context.thread_id.len(), context.call_id),
                     source_id: format!("agent:{}", context.thread_id),
@@ -279,7 +279,7 @@ impl AgentControlHost for AgentHost {
             (entry.thread.clone(), entry.execution)
         };
         let sequence = target
-            .send_message_and_resume(
+            .send_message_and_continue(
                 pl_core::thread::inbox::ThreadMessage {
                     id: message.id.clone(),
                     source_id: format!("agent:{caller}"),
@@ -343,8 +343,7 @@ impl AgentControlHost for AgentHost {
                 .thread
                 .clone()
         };
-        thread.pause_inputs().await.map_err(ToolError::new)?;
-        let interrupted = thread.interrupt();
+        let interrupted = thread.interrupt_turn(None).await.map_err(ToolError::new)?;
         output(serde_json::json!({"target":target,"interrupted":interrupted}))
     }
 
@@ -492,6 +491,150 @@ mod tests {
         );
         assert!(owner.close_all().await.is_empty());
     }
+    #[tokio::test]
+    async fn parent_message_redirects_the_live_child_through_the_shared_owner() {
+        use pl_core::model::{
+            DynModelSession, Model, ModelError, ModelFactory, ModelRequest, ModelSession,
+            ModelStepOutput, PreparedModelCall,
+        };
+        use std::sync::Mutex;
+        use tokio::sync::Notify;
+        use tokio_util::sync::CancellationToken;
+        struct Probe {
+            started: Arc<Notify>,
+            cleanup: Arc<Notify>,
+            token: Arc<Mutex<Option<CancellationToken>>>,
+            contexts: Arc<Mutex<Vec<pl_core::context::ContextSnapshot>>>,
+        }
+        impl ModelSession for Probe {
+            async fn prepare(
+                &mut self,
+                request: ModelRequest,
+            ) -> Result<PreparedModelCall, ModelError> {
+                let first = self.contexts.lock().unwrap().is_empty();
+                self.contexts.lock().unwrap().push(request.context.clone());
+                let started = self.started.clone();
+                let cleanup = self.cleanup.clone();
+                let token = self.token.clone();
+                Ok(PreparedModelCall::new(async move {
+                    if first {
+                        *token.lock().unwrap() = Some(request.cancellation.clone());
+                        started.notify_one();
+                        request.cancellation.cancelled().await;
+                        cleanup.notified().await;
+                    }
+                    Ok(ModelStepOutput {
+                        attempt_id: request.attempt_id,
+                        base_context_revision: request.context.revision,
+                        content: vec![],
+                        tool_calls: vec![],
+                        private_context: None,
+                        usage: Default::default(),
+                    })
+                }))
+            }
+            async fn close(&mut self) -> Result<(), ModelError> {
+                Ok(())
+            }
+        }
+        struct Factory(Mutex<Option<Probe>>);
+        impl Model for Factory {
+            async fn open_session(&self) -> Result<DynModelSession, ModelError> {
+                Ok(DynModelSession::new(self.0.lock().unwrap().take().unwrap()))
+            }
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let owner = StudioThreadAssembler::default();
+        owner
+            .assemble(spec("root", None, directory.path()))
+            .await
+            .unwrap();
+        let child = owner
+            .assemble(spec("child", Some("root"), directory.path()))
+            .await
+            .unwrap();
+        let started = Arc::new(Notify::new());
+        let cleanup = Arc::new(Notify::new());
+        let token = Arc::new(Mutex::new(None));
+        let contexts = Arc::new(Mutex::new(Vec::new()));
+        child
+            .replace_model(ModelFactory::new(Factory(Mutex::new(Some(Probe {
+                started: started.clone(),
+                cleanup: cleanup.clone(),
+                token: token.clone(),
+                contexts: contexts.clone(),
+            })))))
+            .await
+            .unwrap();
+        let host = AgentHost(Arc::downgrade(&owner.0));
+        let message = |id: &str| AgentMessage {
+            id: id.into(),
+            target: "child".into(),
+            message: id.into(),
+        };
+        host.send("root", message("initial")).await.unwrap();
+        started.notified().await;
+        assert!(host.send("outsider", message("forbidden")).await.is_err());
+        assert!(!token.lock().unwrap().as_ref().unwrap().is_cancelled());
+        let receipt = host.send("root", message("redirect")).await.unwrap();
+        assert!(token.lock().unwrap().as_ref().unwrap().is_cancelled());
+        assert_eq!(
+            host.send("root", message("redirect"))
+                .await
+                .unwrap()
+                .payload(),
+            receipt.payload()
+        );
+        cleanup.notify_one();
+        let mut updates = child.subscribe();
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                let snapshot = updates.next().await.unwrap();
+                if snapshot.turns.len() == 2
+                    && snapshot.turns[1].state
+                        == pl_core::thread::TurnState::Finished(
+                            pl_core::thread::TurnOutcome::Completed,
+                        )
+                {
+                    break;
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(contexts.lock().unwrap().len(), 2);
+        assert_eq!(child.snapshot().consumed_messages, 2);
+        assert!(
+            child
+                .snapshot()
+                .inbox
+                .iter()
+                .all(|record| record.message.source_id == "agent:root")
+        );
+        assert_eq!(
+            child.snapshot().turns[0].state,
+            pl_core::thread::TurnState::Cancelled
+        );
+        host.send("root", message("idle-followup")).await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                let snapshot = updates.next().await.unwrap();
+                if snapshot.turns.len() == 3
+                    && snapshot.turns[2].state
+                        == pl_core::thread::TurnState::Finished(
+                            pl_core::thread::TurnOutcome::Completed,
+                        )
+                {
+                    break;
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(contexts.lock().unwrap().len(), 3);
+        assert!(owner.close_all().await.is_empty());
+    }
+
     #[test]
     fn spawn_receipt_retains_resolved_profile_for_parent_coordination_and_evidence() {
         for sequence in [None, Some(3)] {

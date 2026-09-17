@@ -1,6 +1,7 @@
 import 'attachment_models.dart';
 import 'thread_directory_models.dart';
-import 'turn_models.dart';
+
+import 'dart:math';
 
 class SubmitPromptReceipt {
   const SubmitPromptReceipt({
@@ -33,56 +34,43 @@ class ArchiveThreadResult {
   final StudioThread? nextRoot;
 }
 
+// An identity belongs to one immutable submission; unchanged failed drafts reuse it.
+String newPromptInputId() {
+  final random = Random.secure();
+  return 'input-${List.generate(16, (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0')).join()}';
+}
+
 sealed class ComposerThreadState {
   const ComposerThreadState();
-
   const factory ComposerThreadState.idle({
     String draft,
     List<AttachmentDraftView> attachments,
     int submissionRevision,
   }) = IdleComposerThreadState;
-
   const factory ComposerThreadState.failure({
     required String error,
     String draft,
     List<AttachmentDraftView> attachments,
     int submissionRevision,
+    String? inputId,
   }) = FailedComposerThreadState;
 
-  String get draft => switch (this) {
-    IdleComposerThreadState(:final draft) ||
-    SubmittingComposerThreadState(:final draft) ||
-    FailedComposerThreadState(:final draft) => draft,
-    PendingStartComposerThreadState() => '',
+  String get draft;
+  List<AttachmentDraftView> get attachments;
+  int get submissionRevision;
+  String? get inputId => switch (this) {
+    SubmittingComposerThreadState(:final inputId) => inputId,
+    FailedComposerThreadState(:final inputId) => inputId,
+    IdleComposerThreadState() => null,
   };
-
-  List<AttachmentDraftView> get attachments => switch (this) {
-    IdleComposerThreadState(:final attachments) ||
-    SubmittingComposerThreadState(:final attachments) ||
-    FailedComposerThreadState(:final attachments) => attachments,
-    PendingStartComposerThreadState() => const [],
-  };
-
-  int get submissionRevision => switch (this) {
-    IdleComposerThreadState(:final submissionRevision) ||
-    SubmittingComposerThreadState(:final submissionRevision) ||
-    PendingStartComposerThreadState(:final submissionRevision) ||
-    FailedComposerThreadState(:final submissionRevision) => submissionRevision,
-  };
-
   String? get error => switch (this) {
     FailedComposerThreadState(:final error) => error,
-    IdleComposerThreadState() ||
-    SubmittingComposerThreadState() ||
-    PendingStartComposerThreadState() => null,
+    _ => null,
   };
-
-  bool get isSubmissionPending =>
-      this is SubmittingComposerThreadState ||
-      this is PendingStartComposerThreadState;
+  bool get isSubmissionPending => this is SubmittingComposerThreadState;
 
   ComposerThreadState updateDraft(String value) {
-    if (isSubmissionPending) return this;
+    if (isSubmissionPending || value == draft) return this;
     return IdleComposerThreadState(
       draft: value,
       attachments: attachments,
@@ -106,6 +94,7 @@ sealed class ComposerThreadState {
       attachments: attachments,
       error: error.toString(),
       submissionRevision: submissionRevision,
+      inputId: inputId,
     );
   }
 
@@ -116,15 +105,13 @@ sealed class ComposerThreadState {
     return _startSubmission();
   }
 
-  ComposerThreadState beginCommandSubmission() {
-    if (isSubmissionPending) return this;
-    return _startSubmission();
-  }
-
+  ComposerThreadState beginCommandSubmission() =>
+      isSubmissionPending ? this : _startSubmission();
   ComposerThreadState _startSubmission() => SubmittingComposerThreadState(
     draft: draft,
     attachments: attachments,
     submissionRevision: submissionRevision + 1,
+    inputId: inputId ?? newPromptInputId(),
   );
 
   ComposerThreadState accept(
@@ -132,10 +119,7 @@ sealed class ComposerThreadState {
     required int submissionRevision,
   }) {
     if (!_matchesSubmittingRevision(submissionRevision)) return this;
-    return PendingStartComposerThreadState(
-      submissionRevision: this.submissionRevision,
-      acceptedInputId: receipt.inputId,
-    );
+    return IdleComposerThreadState(submissionRevision: this.submissionRevision);
   }
 
   ComposerThreadState fail(Object error, {required int submissionRevision}) {
@@ -145,34 +129,8 @@ sealed class ComposerThreadState {
       attachments: attachments,
       error: error.toString(),
       submissionRevision: this.submissionRevision,
+      inputId: inputId,
     );
-  }
-
-  ComposerThreadState observeInput(String? inputId, StudioTurnView? turn) {
-    final acceptedInputId = switch (this) {
-      PendingStartComposerThreadState(:final acceptedInputId) =>
-        acceptedInputId,
-      IdleComposerThreadState() ||
-      SubmittingComposerThreadState() ||
-      FailedComposerThreadState() => null,
-    };
-    if (acceptedInputId == null || turn == null || inputId != acceptedInputId) {
-      return this;
-    }
-    if (turn.state.status == StudioTurnStatus.failed) {
-      final message = turn.failure?.message.trim();
-      final reason = turn.state.reason?.trim();
-      return FailedComposerThreadState(
-        draft: draft,
-        error: message?.isNotEmpty == true
-            ? message!
-            : reason?.isNotEmpty == true
-            ? reason!
-            : 'Turn failed',
-        submissionRevision: submissionRevision,
-      );
-    }
-    return IdleComposerThreadState(submissionRevision: submissionRevision);
   }
 
   bool _matchesSubmittingRevision(int revision) =>
@@ -185,7 +143,6 @@ final class IdleComposerThreadState extends ComposerThreadState {
     this.attachments = const [],
     this.submissionRevision = 0,
   });
-
   @override
   final String draft;
   @override
@@ -199,25 +156,16 @@ final class SubmittingComposerThreadState extends ComposerThreadState {
     required this.draft,
     required this.attachments,
     required this.submissionRevision,
+    required this.inputId,
   });
-
   @override
   final String draft;
   @override
   final List<AttachmentDraftView> attachments;
   @override
   final int submissionRevision;
-}
-
-final class PendingStartComposerThreadState extends ComposerThreadState {
-  const PendingStartComposerThreadState({
-    required this.submissionRevision,
-    required this.acceptedInputId,
-  });
-
   @override
-  final int submissionRevision;
-  final String acceptedInputId;
+  final String inputId;
 }
 
 final class FailedComposerThreadState extends ComposerThreadState {
@@ -226,8 +174,8 @@ final class FailedComposerThreadState extends ComposerThreadState {
     this.draft = '',
     this.attachments = const [],
     this.submissionRevision = 0,
+    this.inputId,
   });
-
   @override
   final String error;
   @override
@@ -236,4 +184,6 @@ final class FailedComposerThreadState extends ComposerThreadState {
   final List<AttachmentDraftView> attachments;
   @override
   final int submissionRevision;
+  @override
+  final String? inputId;
 }

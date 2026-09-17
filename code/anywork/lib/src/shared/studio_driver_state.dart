@@ -119,7 +119,6 @@ abstract final class StudioDriverState {
           'phase': switch (_newThreadComposer) {
             IdleComposerThreadState() => 'idle',
             SubmittingComposerThreadState() => 'submitting',
-            PendingStartComposerThreadState() => 'pendingStart',
             FailedComposerThreadState() => 'failed',
           },
           'submissionRevision': _newThreadComposer.submissionRevision,
@@ -205,6 +204,8 @@ abstract final class StudioDriverState {
               'modelProvider': _modelProvider(workspace),
               'composer': {
                 'mode': workspace.composerMode.name,
+                'draft': workspace.composer.draft,
+                'submissionPending': workspace.composer.isSubmissionPending,
                 'lockedByInteraction': workspace.activeInteraction != null,
                 'attachments': [
                   for (final attachment in workspace.composer.attachments)

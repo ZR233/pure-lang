@@ -9,36 +9,16 @@ use super::super::{
 };
 
 impl StudioRuntime {
-    /// Accepts input that requires a new Turn.
-    pub async fn start_turn(
+    /// Atomically starts or interrupts and continues the canonical Thread.
+    pub async fn submit_prompt_command(
         &self,
         thread_id: String,
-        request: pl_protocol::studio::StartTurnRequest,
+        request: pl_protocol::studio::SubmitPromptRequest,
     ) -> Result<StudioSubmitPromptResponse> {
         self.submit_prompt(StudioSubmitPromptRequest {
             thread_id,
             input: request.input,
-            options: StudioSubmitPromptOptions {
-                turn_policy: pl_core::thread::input::InputPolicy::StartOnly,
-                ..StudioSubmitPromptOptions::default()
-            },
-        })
-        .await
-    }
-
-    /// Accepts steering input for the currently running Turn.
-    pub async fn steer_turn(
-        &self,
-        thread_id: String,
-        request: pl_protocol::studio::SteerTurnRequest,
-    ) -> Result<StudioSubmitPromptResponse> {
-        self.submit_prompt(StudioSubmitPromptRequest {
-            thread_id,
-            input: request.input,
-            options: StudioSubmitPromptOptions {
-                turn_policy: pl_core::thread::input::InputPolicy::SteerOnly,
-                ..StudioSubmitPromptOptions::default()
-            },
+            options: StudioSubmitPromptOptions::default(),
         })
         .await
     }
@@ -77,7 +57,33 @@ impl StudioRuntime {
             thread_record.visibility == crate::studio::ThreadVisibility::Active,
             "archived Thread cannot accept input"
         );
+        let thread = self.ensure_thread_owner(&thread_id).await?;
+        // Look up the canonical receipt before resolving drafts, which admission may already have consumed.
+        if let Some(previous) = thread
+            .snapshot()
+            .inputs
+            .iter()
+            .find(|record| record.input.id == input.input_id)
+        {
+            #[derive(serde::Deserialize)]
+            struct AcceptedPrompt {
+                request: pl_protocol::studio::StudioPromptInput,
+                presentation: pl_protocol::MessagePresentation,
+            }
+            let accepted: AcceptedPrompt = serde_json::from_str(previous.input.payload.content())?;
+            anyhow::ensure!(
+                accepted.request == input && accepted.presentation == options.presentation,
+                "input identity conflicts with an accepted prompt"
+            );
+            return Ok(StudioSubmitPromptResponse {
+                thread_id,
+                input_id: previous.input.id.clone(),
+                cursor: previous.accepted_sequence,
+            });
+        }
+        let original_request = input.clone();
         let pl_protocol::studio::StudioPromptInput {
+            input_id,
             text: prompt,
             attachment_draft_ids,
         } = input;
@@ -141,20 +147,20 @@ impl StudioRuntime {
         #[serde(rename_all = "camelCase")]
         struct PromptPayload<'a> {
             text: &'a str,
+            request: &'a pl_protocol::studio::StudioPromptInput,
             presentation: pl_protocol::MessagePresentation,
             attachments: &'a [crate::studio::AttachmentRecord],
         }
-        let input_id = crate::studio::new_id("input");
         let payload = pl_core::context::OpaquePayload::new(
             "pl.studio.prompt",
             1,
             serde_json::to_string(&PromptPayload {
                 text: &prompt,
+                request: &original_request,
                 presentation: options.presentation,
                 attachments: &attachments,
             })?,
         )?;
-        let thread = self.ensure_thread_owner(&thread_id).await?;
         self.queue_thread_model(&thread, &route, &config).await?;
         if let Some(suggestions) =
             self.thread_factory
@@ -169,14 +175,13 @@ impl StudioRuntime {
             .product_events
             .record_attachments(attachments.clone())?;
         let accepted = thread
-            .submit_input_with_policy(pl_core::thread::input::InputSubmission {
-                input: pl_core::thread::input::ThreadInput {
+            .submit_input_and_continue(
+                pl_core::thread::input::ThreadInput {
                     id: input_id,
                     payload,
                     context,
                 },
-                policy: options.turn_policy,
-                drive: Some(pl_core::thread::input::InputDriverOptions {
+                pl_core::thread::input::InputDriverOptions {
                     max_model_steps: if thread_record.parent_thread_id.is_none() {
                         pl_core::thread::ModelStepLimit::Unlimited
                     } else {
@@ -184,8 +189,8 @@ impl StudioRuntime {
                             std::num::NonZeroU32::new(64).expect("positive child step limit"),
                         )
                     },
-                }),
-            })
+                },
+            )
             .await?;
         self.attachment_drafts.commit(&attachment_draft_ids).await;
         self.residency.touch(&thread_id).await;
@@ -207,6 +212,7 @@ impl StudioRuntime {
 pub(in crate::studio::runtime) fn validate_prompt_content(
     input: &pl_protocol::studio::StudioPromptInput,
 ) -> Result<()> {
+    anyhow::ensure!(!input.input_id.trim().is_empty(), "inputId is empty");
     if input.text.trim().is_empty() && input.attachment_draft_ids.is_empty() {
         bail!("prompt is empty");
     }

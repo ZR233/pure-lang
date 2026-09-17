@@ -24,10 +24,7 @@ impl StudioRuntime {
             title: request.title,
             input: request.input,
             mode,
-            options: super::StudioSubmitPromptOptions {
-                turn_policy: pl_core::thread::input::InputPolicy::StartOnly,
-                ..super::StudioSubmitPromptOptions::default()
-            },
+            options: super::StudioSubmitPromptOptions::default(),
         })
         .await
     }

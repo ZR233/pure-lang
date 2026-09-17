@@ -79,11 +79,7 @@ abstract class StudioApi {
     String? cursor,
     int limit = 50,
   });
-  Future<SubmitPromptReceipt> startTurn(
-    String threadId,
-    StudioPromptInput input,
-  );
-  Future<SubmitPromptReceipt> steerTurn(
+  Future<SubmitPromptReceipt> submitPrompt(
     String threadId,
     StudioPromptInput input,
   );
@@ -153,6 +149,7 @@ frb_attachment_types.BridgeStudioPromptInput _bridgePromptInput(
   StudioPromptInput input,
 ) {
   return frb_attachment_types.BridgeStudioPromptInput(
+    inputId: input.inputId,
     text: input.text,
     attachmentDraftIds: input.attachmentDraftIds,
   );
@@ -944,29 +941,16 @@ class FrbStudioApi implements StudioApi {
   }
 
   @override
-  Future<SubmitPromptReceipt> startTurn(
+  Future<SubmitPromptReceipt> submitPrompt(
     String threadId,
     StudioPromptInput input,
   ) async {
     await _ensureReady();
     final response = await _bridgeCall(
-      () => frb.startTurn(threadId: threadId, input: _bridgePromptInput(input)),
-    );
-    return SubmitPromptReceipt(
-      threadId: response.threadId,
-      inputId: response.inputId,
-      cursor: response.revision.toInt(),
-    );
-  }
-
-  @override
-  Future<SubmitPromptReceipt> steerTurn(
-    String threadId,
-    StudioPromptInput input,
-  ) async {
-    await _ensureReady();
-    final response = await _bridgeCall(
-      () => frb.steerTurn(threadId: threadId, input: _bridgePromptInput(input)),
+      () => frb.submitPrompt(
+        threadId: threadId,
+        input: _bridgePromptInput(input),
+      ),
     );
     return SubmitPromptReceipt(
       threadId: response.threadId,

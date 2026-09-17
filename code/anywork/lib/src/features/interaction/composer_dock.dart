@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:desktop_drop/desktop_drop.dart';
@@ -283,11 +284,12 @@ class _PromptComposerPanelState extends State<_PromptComposerPanel> {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final composer = widget.composer;
+    final hasContent =
+        composer.draft.trim().isNotEmpty || composer.attachments.isNotEmpty;
+    final showStop =
+        widget.isBusy && !hasContent && !composer.isSubmissionPending;
     final canSubmit =
-        widget.enabled &&
-        (composer.draft.trim().isNotEmpty || composer.attachments.isNotEmpty) &&
-        !widget.isBusy &&
-        !composer.isSubmissionPending;
+        widget.enabled && hasContent && !composer.isSubmissionPending;
     final localCapabilities = widget.inputCapabilities
         .where(
           (capability) =>
@@ -302,8 +304,7 @@ class _PromptComposerPanelState extends State<_PromptComposerPanel> {
               capability.supportsSource(ModelInputSourceView.remoteUrl),
         )
         .toList();
-    final attachmentEnabled =
-        widget.enabled && !composer.isSubmissionPending && !widget.isBusy;
+    final attachmentEnabled = widget.enabled && !composer.isSubmissionPending;
     final panel = StudioPanel(
       backgroundColor: colors.surfaceContainerLowest,
       borderColor: _dragging
@@ -344,6 +345,14 @@ class _PromptComposerPanelState extends State<_PromptComposerPanel> {
               }
             },
           ),
+          if (widget.isBusy)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                context.l10n.composerInterruptHint,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
           if (composer.error case final error?)
             Align(
               alignment: Alignment.centerLeft,
@@ -380,49 +389,77 @@ class _PromptComposerPanelState extends State<_PromptComposerPanel> {
                 ),
               ),
               const SizedBox(width: 8),
-              if (widget.isBusy)
-                IconButton.filledTonal(
-                  key: StudioDriverKeys.composerStop,
-                  tooltip: context.l10n.composerStop,
-                  icon: const Icon(Icons.stop),
-                  onPressed: widget.onStop,
-                )
-              else
-                IconButton.filled(
-                  key: StudioDriverKeys.composerSubmit,
-                  tooltip: context.l10n.composerSend,
-                  icon: composer.isSubmissionPending
-                      ? const SizedBox.square(
-                          key: StudioDriverKeys.composerPending,
-                          dimension: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.arrow_upward),
-                  onPressed: canSubmit ? widget.onSubmit : null,
+              IconButton.filled(
+                key: showStop
+                    ? StudioDriverKeys.composerStop
+                    : StudioDriverKeys.composerSubmit,
+                tooltip: showStop
+                    ? context.l10n.composerStop
+                    : widget.isBusy
+                    ? context.l10n.composerSendAndContinue
+                    : context.l10n.composerSend,
+                style: IconButton.styleFrom(
+                  fixedSize: const Size.square(40),
+                  shape: const CircleBorder(),
+                  backgroundColor: showStop
+                      ? colors.surfaceContainerHighest
+                      : colors.primary,
+                  foregroundColor: showStop
+                      ? colors.onSurface
+                      : colors.onPrimary,
+                  disabledBackgroundColor: colors.surfaceContainerHighest,
+                  disabledForegroundColor: colors.onSurface.withValues(
+                    alpha: 0.32,
+                  ),
                 ),
+                icon: composer.isSubmissionPending
+                    ? const SizedBox.square(
+                        key: StudioDriverKeys.composerPending,
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Icon(
+                        showStop
+                            ? Icons.stop_rounded
+                            : Icons.arrow_upward_rounded,
+                      ),
+                onPressed: showStop
+                    ? widget.onStop
+                    : canSubmit
+                    ? widget.onSubmit
+                    : null,
+              ),
             ],
           ),
         ],
       ),
     );
-    return DropTarget(
-      onDragEntered: attachmentEnabled && localCapabilities.isNotEmpty
-          ? (_) => setState(() => _dragging = true)
-          : null,
-      onDragExited: (_) {
-        if (_dragging) setState(() => _dragging = false);
+    return CallbackShortcuts(
+      bindings: {
+        if (widget.isBusy &&
+            !composer.isSubmissionPending &&
+            widget.onStop != null)
+          const SingleActivator(LogicalKeyboardKey.escape): widget.onStop!,
       },
-      onDragDone: attachmentEnabled && localCapabilities.isNotEmpty
-          ? (event) {
-              setState(() => _dragging = false);
-              final paths = event.files
-                  .map((file) => file.path)
-                  .where((path) => path.isNotEmpty)
-                  .toList();
-              if (paths.isNotEmpty) unawaited(widget.onAddLocal(paths));
-            }
-          : null,
-      child: panel,
+      child: DropTarget(
+        onDragEntered: attachmentEnabled && localCapabilities.isNotEmpty
+            ? (_) => setState(() => _dragging = true)
+            : null,
+        onDragExited: (_) {
+          if (_dragging) setState(() => _dragging = false);
+        },
+        onDragDone: attachmentEnabled && localCapabilities.isNotEmpty
+            ? (event) {
+                setState(() => _dragging = false);
+                final paths = event.files
+                    .map((file) => file.path)
+                    .where((path) => path.isNotEmpty)
+                    .toList();
+                if (paths.isNotEmpty) unawaited(widget.onAddLocal(paths));
+              }
+            : null,
+        child: panel,
+      ),
     );
   }
 

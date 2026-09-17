@@ -20,7 +20,8 @@ Future<String> _timelineNativeFixture(String request) async {
     final project = await api.openProject(command['path']! as String);
     final root = await api.startNewThread(
       project.id,
-      const StudioPromptInput(
+      StudioPromptInput(
+        inputId: newPromptInputId(),
         text: 'timeline-create-child',
         attachmentDraftIds: [],
       ),
@@ -28,9 +29,10 @@ Future<String> _timelineNativeFixture(String request) async {
     );
     await _waitTimelineTurn(api, root.thread.id, root.receipt.inputId);
     for (var index = 0; index < 160; index++) {
-      final receipt = await api.startTurn(
+      final receipt = await api.submitPrompt(
         root.thread.id,
         StudioPromptInput(
+          inputId: newPromptInputId(),
           text: 'timeline-seed-$index',
           attachmentDraftIds: const [],
         ),
@@ -66,9 +68,10 @@ Future<String> _timelineNativeFixture(String request) async {
   }
   if (action == 'start') {
     final threadId = command['threadId']! as String;
-    final receipt = await api.startTurn(
+    final receipt = await api.submitPrompt(
       threadId,
       StudioPromptInput(
+        inputId: newPromptInputId(),
         text:
             'timeline-stream${command['ending'] == null ? '' : '-${command['ending']}'}',
         attachmentDraftIds: const [],

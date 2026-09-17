@@ -75,9 +75,14 @@ impl ThreadHandle {
             model_progress: None,
             history: history.clone(),
             permission_leases: Default::default(),
-            active_input: None,
-            input_driver: None,
-            input_driver_error: None,
+            active_inputs: Vec::new(),
+            input_batch_through: None,
+            interrupted_turn: None,
+            input_driver: if journal.is_empty() {
+                input::InputDriver::Dormant
+            } else {
+                input::InputDriver::Paused
+            },
             interrupt: interrupt.clone(),
             mailbox: mailbox_receiver,
             task_commands: mailbox.downgrade(),
@@ -300,6 +305,26 @@ impl ThreadHandle {
                 message,
                 Some(options),
                 reply,
+            ))
+            .await
+            .map_err(|_| ThreadError::Closed)?;
+        response.await.map_err(|_| ThreadError::Closed)?
+    }
+
+    /// Accepts a parent-authored message, interrupts active work and continues after cleanup.
+    /// Duplicate identities return the original receipt without restarting execution.
+    ///
+    /// # Errors
+    /// Rejects conflicting identities, pending interactions and unavailable admission.
+    pub async fn send_message_and_continue(
+        &self,
+        message: inbox::ThreadMessage,
+        options: input::InputDriverOptions,
+    ) -> Result<u64, ThreadError> {
+        let (reply, response) = oneshot::channel();
+        self.mailbox
+            .send(super::mailbox::MailboxCommand::ContinueMessage(
+                message, options, reply,
             ))
             .await
             .map_err(|_| ThreadError::Closed)?;

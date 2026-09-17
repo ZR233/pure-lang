@@ -197,7 +197,7 @@ async fn run_case(
         &serde_json::json!({
             "title": format!("Skill discovery live {case}"),
             "mode": "mode.simple",
-            "input": {"text": prompt, "attachmentDraftIds": []},
+            "input": {"inputId": "skill-discovery-input","text": prompt, "attachmentDraftIds": []},
         }),
     )
     .await?;

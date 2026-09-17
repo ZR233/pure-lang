@@ -212,10 +212,11 @@ async fn run_live_mode(
         .set_thread_mode(&thread.id, ThreadModeId::new(mode_id)?)
         .await?;
     let submitted = runtime
-        .start_turn(
+        .submit_prompt_command(
             thread.id.clone(),
-            pl_protocol::studio::StartTurnRequest {
+            pl_protocol::studio::SubmitPromptRequest {
                 input: pl_protocol::studio::StudioPromptInput {
+                    input_id: uuid::Uuid::new_v4().to_string(),
                     text: prompt.trim().to_string(),
                     attachment_draft_ids: Vec::new(),
                 },

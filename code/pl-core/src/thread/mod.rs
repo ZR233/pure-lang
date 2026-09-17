@@ -6,6 +6,7 @@ mod background;
 mod cancellation;
 pub mod cold;
 pub mod context_preparation;
+mod continuation;
 pub mod extensions;
 mod facts;
 pub mod inbox;

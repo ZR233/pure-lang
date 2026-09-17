@@ -68,7 +68,6 @@ pub struct StudioStartNewThreadRequest {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StudioSubmitPromptOptions {
     pub presentation: pl_protocol::MessagePresentation,
-    pub turn_policy: pl_core::thread::input::InputPolicy,
 }
 
 /// Studio 输入受理回执；实际 Turn 关联由 Thread 事实流提供。

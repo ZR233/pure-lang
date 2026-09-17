@@ -5,7 +5,7 @@ use crate::api::studio::convert::records::thread_from_record;
 use crate::api::studio::convert::thread_stream::bridge_thread;
 use crate::api::studio::types::{
     ArchiveThreadResult, BridgeError, BridgeStudioPromptInput, BridgeThread,
-    StartNewThreadResponse, StartTurnResponse,
+    StartNewThreadResponse, SubmitPromptResponse,
 };
 use pl_studio_runtime::ThreadModeId;
 
@@ -38,7 +38,7 @@ pub async fn start_new_thread(
         .await?;
     Ok(StartNewThreadResponse {
         thread: bridge_thread(thread_from_record(response.thread)),
-        receipt: StartTurnResponse {
+        receipt: SubmitPromptResponse {
             thread_id: response.submission.thread_id,
             input_id: response.submission.input_id,
             revision: response.submission.cursor,

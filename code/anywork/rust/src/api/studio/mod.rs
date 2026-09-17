@@ -21,8 +21,8 @@ pub use self::handlers::{
     save_instructions_settings, save_mcp_settings, save_provider_settings,
     save_runtime_permission_mode, save_skills_settings, save_ssh_server, save_user_agent_profile,
     save_web_search_settings, search_skills, set_model_role, set_system_agent_enabled,
-    set_thread_mode, shutdown_runtime, start_new_thread, start_studio_runtime, start_turn,
-    steer_turn, test_ssh_connection,
+    set_thread_mode, shutdown_runtime, start_new_thread, start_studio_runtime, submit_prompt,
+    test_ssh_connection,
 };
 pub use self::subscription::{
     BridgeEventSubscription, BridgeProductStreamEnvelope, BridgeThreadStreamEnvelope,
@@ -64,8 +64,7 @@ mod tests {
             RenameThread => rename_thread,
             SetThreadMode => set_thread_mode,
             ListThreadTurns => list_thread_turns,
-            StartTurn => start_turn,
-            SteerTurn => steer_turn,
+            SubmitPrompt => submit_prompt,
             InterruptTurn => interrupt_turn,
             AdmitAttachmentDrafts => admit_attachment_drafts,
             UploadAttachmentDrafts => admit_attachment_drafts,
