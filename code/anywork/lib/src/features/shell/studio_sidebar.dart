@@ -336,23 +336,13 @@ class _SidebarState extends ConsumerState<_Sidebar> {
                 ),
               ),
             ),
-            const Divider(height: 1),
-            TextButton.icon(
-              key: const ValueKey('sidebar-archived'),
-              icon: Icon(
-                _archived ? Icons.folder_open_outlined : Icons.archive_outlined,
-              ),
-              onPressed: () {
+            _SidebarActions(
+              archived: _archived,
+              onToggleArchived: () {
                 _archived = !_archived;
                 _changeQuery();
               },
-              label: Text(
-                _archived
-                    ? context.l10n.sidebarProjects
-                    : context.l10n.sidebarArchived,
-              ),
             ),
-            _SidebarActions(state: widget.state, compact: false),
           ],
         ),
       ),

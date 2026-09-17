@@ -1,23 +1,46 @@
 part of 'studio_shell.dart';
 
 class _SidebarActions extends ConsumerWidget {
-  const _SidebarActions({required this.state, required this.compact});
-  final SidebarView state;
-  final bool compact;
+  const _SidebarActions({
+    required this.archived,
+    required this.onToggleArchived,
+  });
+  final bool archived;
+  final VoidCallback onToggleArchived;
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final hasUpdate = ref.watch(
       studioUpdateControllerProvider.select((state) => state.hasUpdate),
     );
     return Padding(
-      padding: const EdgeInsets.all(10),
-      child: _SidebarActionButton(
-        showLabel: true,
-        key: StudioDriverKeys.settingsOpen,
-        tooltip: context.l10n.sidebarSettings,
-        icon: Icons.settings_outlined,
-        showIndicator: hasUpdate,
-        onPressed: () => context.go('/settings'),
+      padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 10),
+            child: Divider(height: 17),
+          ),
+          _SidebarActionButton(
+            key: const ValueKey('sidebar-archived'),
+            tooltip: archived
+                ? context.l10n.sidebarProjects
+                : context.l10n.sidebarArchived,
+            icon: archived
+                ? Icons.folder_open_outlined
+                : Icons.archive_outlined,
+            selected: archived,
+            onPressed: onToggleArchived,
+          ),
+          const SizedBox(height: 4),
+          _SidebarActionButton(
+            key: StudioDriverKeys.settingsOpen,
+            tooltip: context.l10n.sidebarSettings,
+            icon: Icons.settings_outlined,
+            showIndicator: hasUpdate,
+            onPressed: () => context.go('/settings'),
+          ),
+        ],
       ),
     );
   }
@@ -85,7 +108,7 @@ class _SidebarActionButton extends StatelessWidget {
     required this.tooltip,
     required this.onPressed,
     this.showIndicator = false,
-    this.showLabel = false,
+    this.selected = false,
     super.key,
   });
 
@@ -93,7 +116,7 @@ class _SidebarActionButton extends StatelessWidget {
   final String tooltip;
   final VoidCallback? onPressed;
   final bool showIndicator;
-  final bool showLabel;
+  final bool selected;
 
   @override
   Widget build(BuildContext context) {
@@ -101,7 +124,7 @@ class _SidebarActionButton extends StatelessWidget {
     final iconWidget = Stack(
       clipBehavior: Clip.none,
       children: [
-        Icon(icon),
+        Icon(icon, size: 18),
         if (showIndicator)
           Positioned(
             key: const ValueKey('studio-update-indicator'),
@@ -118,36 +141,33 @@ class _SidebarActionButton extends StatelessWidget {
           ),
       ],
     );
-    if (showLabel) {
-      return TextButton.icon(
+    return Semantics(
+      selected: selected,
+      child: TextButton(
         onPressed: onPressed,
-        icon: iconWidget,
-        label: Text(tooltip),
         style: TextButton.styleFrom(
           alignment: Alignment.centerLeft,
-          foregroundColor: colors.onSurfaceVariant,
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 14),
+          foregroundColor: selected
+              ? colors.onSurface
+              : colors.onSurfaceVariant,
+          backgroundColor: selected ? colors.surfaceContainerHigh : null,
+          minimumSize: const Size(0, 44),
+          visualDensity: VisualDensity.standard,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+          textStyle: context.text.labelLarge,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(StudioRadii.sm),
+          ),
         ),
-      );
-    }
-    return IconButton(
-      tooltip: tooltip,
-      icon: iconWidget,
-      style: IconButton.styleFrom(
-        fixedSize: const Size.square(40),
-        iconSize: 18,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        foregroundColor: colors.onSurfaceVariant,
-        disabledForegroundColor: colors.onSurfaceVariant.withValues(
-          alpha: 0.38,
-        ),
-        hoverColor: context.colors.surface.withValues(alpha: 0.76),
-        focusColor: context.colors.surface.withValues(alpha: 0.76),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(StudioRadii.sm),
+        child: Row(
+          children: [
+            iconWidget,
+            const SizedBox(width: 10),
+            Expanded(child: Text(tooltip)),
+          ],
         ),
       ),
-      onPressed: onPressed,
     );
   }
 }
