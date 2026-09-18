@@ -9,7 +9,7 @@ mod interaction;
 pub(in crate::studio) mod object;
 mod project;
 pub(in crate::studio) mod settings;
-mod ssh_server;
+pub(in crate::studio) mod ssh_migration;
 mod thread;
 
 #[derive(Clone)]

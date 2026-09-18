@@ -485,7 +485,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsSshSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Manage SSH workspaces. Connections and helper lifecycle are owned by the local core.'**
+  /// **'Servers come from your ~/.ssh/config; anywork manages only its own marked blocks.'**
   String get settingsSshSubtitle;
 
   /// No description provided for @settingsSshAdd.
@@ -560,11 +560,17 @@ abstract class AppLocalizations {
   /// **'Delete {name}? Projects using this server must be removed first.'**
   String settingsSshDeleteBody(String name);
 
-  /// No description provided for @settingsSshName.
+  /// No description provided for @settingsSshAlias.
   ///
   /// In en, this message translates to:
-  /// **'Name'**
-  String get settingsSshName;
+  /// **'Alias (Host)'**
+  String get settingsSshAlias;
+
+  /// No description provided for @settingsSshProjectName.
+  ///
+  /// In en, this message translates to:
+  /// **'Project name'**
+  String get settingsSshProjectName;
 
   /// No description provided for @settingsSshHost.
   ///
@@ -584,41 +590,23 @@ abstract class AppLocalizations {
   /// **'Port'**
   String get settingsSshPort;
 
-  /// No description provided for @settingsSshAuth.
-  ///
-  /// In en, this message translates to:
-  /// **'Authentication'**
-  String get settingsSshAuth;
-
-  /// No description provided for @settingsSshAuthAgentOrKey.
-  ///
-  /// In en, this message translates to:
-  /// **'SSH agent or key'**
-  String get settingsSshAuthAgentOrKey;
-
-  /// No description provided for @settingsSshAuthPassword.
-  ///
-  /// In en, this message translates to:
-  /// **'Password'**
-  String get settingsSshAuthPassword;
-
   /// No description provided for @settingsSshIdentityFile.
   ///
   /// In en, this message translates to:
   /// **'Identity file (optional)'**
   String get settingsSshIdentityFile;
 
-  /// No description provided for @settingsSshPassword.
+  /// No description provided for @settingsSshIdentityHelper.
   ///
   /// In en, this message translates to:
-  /// **'Password'**
-  String get settingsSshPassword;
+  /// **'Uses the ssh agent when left empty.'**
+  String get settingsSshIdentityHelper;
 
-  /// No description provided for @settingsSshPasswordLease.
+  /// No description provided for @settingsSshReadOnlyEntry.
   ///
   /// In en, this message translates to:
-  /// **'Kept in core memory for this app session only.'**
-  String get settingsSshPasswordLease;
+  /// **'Hand-written entry — edit it in ~/.ssh/config.'**
+  String get settingsSshReadOnlyEntry;
 
   /// No description provided for @settingsSshSave.
   ///
@@ -626,11 +614,23 @@ abstract class AppLocalizations {
   /// **'Save'**
   String get settingsSshSave;
 
-  /// No description provided for @settingsSshNameRequired.
+  /// No description provided for @settingsSshAliasRequired.
   ///
   /// In en, this message translates to:
-  /// **'Enter a server name'**
-  String get settingsSshNameRequired;
+  /// **'Enter an alias'**
+  String get settingsSshAliasRequired;
+
+  /// No description provided for @settingsSshAliasInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Alias must be a single token without spaces or wildcards'**
+  String get settingsSshAliasInvalid;
+
+  /// No description provided for @settingsSshAliasHelper.
+  ///
+  /// In en, this message translates to:
+  /// **'Stored as a Host entry in ~/.ssh/config; cannot be renamed later.'**
+  String get settingsSshAliasHelper;
 
   /// No description provided for @settingsSshHostRequired.
   ///
@@ -883,6 +883,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Cost for all agents in this session'**
   String get sessionAllAgentsCostTooltip;
+
+  /// No description provided for @sessionMoreActionsTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'More actions'**
+  String get sessionMoreActionsTooltip;
+
+  /// No description provided for @sessionOpenInVsCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Open in VS Code'**
+  String get sessionOpenInVsCode;
+
+  /// No description provided for @sessionVsCodeOpenFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed to open VS Code'**
+  String get sessionVsCodeOpenFailed;
+
+  /// No description provided for @sessionVsCodeServerMissing.
+  ///
+  /// In en, this message translates to:
+  /// **'The SSH alias for this project is no longer in ~/.ssh/config'**
+  String get sessionVsCodeServerMissing;
 
   /// No description provided for @statusCurrentAgentTokenSpeed.
   ///

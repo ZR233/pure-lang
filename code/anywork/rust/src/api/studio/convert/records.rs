@@ -6,7 +6,7 @@ impl From<pl_studio_runtime::ProjectRecord> for ProjectDto {
             id: project.id,
             name: project.name,
             path: project.path,
-            ssh_server_id: project.ssh_server_id,
+            ssh_alias: project.ssh_alias,
             updated_at: project.updated_at,
         }
     }

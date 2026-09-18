@@ -5,7 +5,8 @@
 Pure 的 SSH 远程开发是本地 runtime 的宿主能力，不是第二套远端 runtime。Flutter 只调用
 typed Studio 功能并展示 canonical snapshot；SSH 服务器管理、连接状态机、helper 安装、
 协议、重连和远端工具 backend 位于 pl-tool；pl-studio-runtime 只实现 SQLite、可选系统
-凭据库与 helper 嵌入资产 adapter，当前密码也可只保存在 core 进程的 secret lease 中。
+凭据库与 helper 嵌入资产 adapter。SSH 服务器配置不是产品数据，唯一事实源是用户
+`~/.ssh/config`（Windows 为 `%USERPROFILE%\.ssh\config`）。
 
 远端 helper 是随 SSH stdio channel 生存的能力代理，只维护 workspace handle 与进程 handle。
 它不包含 Thread/Turn、Tool schema、权限、Git/worktree、Skills、LSP 协议、模型、数据库、
@@ -52,10 +53,20 @@ record、Timeline、artifact 与最终 JSON。不提供 PTY、终端面板、端
 
 ## 22.3 本地工具与 SSH 管理
 
-pl-tool 的 SSH 管理器负责服务器校验、系统 OpenSSH/Askpass、架构探测、内嵌 helper
+pl-tool 的 SSH 管理器负责服务器校验、系统 OpenSSH、架构探测、内嵌 helper
 bootstrap、握手 shell descriptor、连接状态与自动重连，并返回带执行环境的远端 workspace
 host；host 实现或组合现有文件、命令、Git、worktree、Skill 与 LSP backend，再经统一安装
 入口注册现有工具。模型不得看到 `remote_read`、`remote_exec` 等环境专用名字。
+
+SSH 服务器列表读取解析 `~/.ssh/config`，保存与删除以带标记的 anywork 管理块原子写回该
+文件，未触及内容逐字节保留（含行尾风格）。管理块使用
+`# BEGIN anywork server: <alias>` / `# END anywork server: <alias>` 包裹
+Host/HostName/Port/User/IdentityFile；Host 别名即服务器身份，创建后不可改名，别名必须是
+非空单 token 且不含通配或否定字符。解析遵循 ssh 的首次匹配语义（每个关键字取块内首次
+出现值，HostName 缺省回退别名），含通配、多模式或 Include 的条目不进入可选列表；用户
+手写条目只读展示，编辑与删除仅对管理块开放。新建别名与文件中既有 Host 冲突时分配不冲突
+后缀；同别名管理块与待写内容一致时视为同一事实，重试安全。内部 ssh 调用只传 Host 别名，
+端口、用户、私钥与代理全部由 ssh config 解析，运行时不维护第二份连接参数。
 
 文件、Git/worktree、Skills、workspace instructions、图片与 LSP 的环境无关逻辑留在本地。
 工具读取的远端图片由本地媒体宿主归档；Timeline 的文字入口与行内展开只读取该 Thread
@@ -73,10 +84,10 @@ developer 内容及其 prompt cache generation。
 
 SSH 连接、平台探测、helper 上传和协议握手都通过统一后台进程工厂启动系统 OpenSSH：Windows
 不弹出额外命令行窗口；Unix 使用独立进程组并在丢弃时回收进程。SSH 通道只承载标准输入
-输出协议，因此固定关闭伪终端与 X11 转发，不打开交互式终端或图形会话。
+输出协议，因此固定关闭伪终端与 X11 转发，不打开交互式终端或图形会话；SSH 以 BatchMode
+运行，只接受 ssh-agent 与密钥等非交互认证，不注入密码或 askpass。
 
-连接状态穷尽为 disconnected、connecting、waiting-for-input、ready、reconnecting 与
-failed。SSH 建连超时为 15 秒，存活探测每 15 秒一次、连续三次无响应后断开；平台与资产
+连接状态穷尽为 disconnected、connecting、ready、reconnecting 与 failed。SSH 建连超时为 15 秒，存活探测每 15 秒一次、连续三次无响应后断开；平台与资产
 探测最多等待 30 秒，资产上传最多等待 120 秒，helper 握手最多等待 25 秒，目录重开最多
 等待 15 秒。超时关闭并回收所属 SSH 进程；关闭旧连接先等待 5 秒、再终止并最多等待 5
 秒；失败保留回收责任。传输保存首次失败阶段与有界诊断，持续排空进程错误输出，密码不
@@ -100,13 +111,11 @@ Project 源，默认项目目录为远端 workspace 下的 `.agents/skills`；�
 ## 22.4 凭据、路径与持久化
 
 Pure 调用 PATH 中的系统 OpenSSH，复用 ssh config、known_hosts、ProxyJump、ssh-agent 和
-用户显式配置的 agent forwarding。Askpass prompt 由本地 core 分类并经宿主 prompt 端口
-显示；密码只存在于系统凭据库或当前进程 secret lease。凭据不得进入 SQLite、DTO、日志、
-helper 参数、helper 环境或远端协议；Askpass secret 只注入本地 OpenSSH 子进程环境。
-Askpass 脚本位于私有临时目录，Unix 由隔离写入子进程创建并在启动 OpenSSH 前等待其退出；
-多线程宿主从不持有脚本的可写句柄，避免并发 fork 继承句柄导致 Text file busy；目录
-lease 覆盖整个 OpenSSH 子进程生命周期。provider token 不得转发；远端 Git 只使用服务器
-原生配置与凭据。shell descriptor 不是 login shell 配置，也不携带完整环境变量。
+用户显式配置的 agent forwarding。认证仅支持 ssh-agent 与密钥；凭据不得进入 SQLite、DTO、
+日志、helper 参数、helper 环境或远端协议，也不维护进程内密码 lease 或 askpass 注入。
+首次主机身份核验沿用用户 ssh 的 known_hosts 语义，不自动信任新主机或已变更的主机密钥。
+provider token 不得转发；远端 Git 只使用服务器原生配置与凭据。shell descriptor 不是
+login shell 配置，也不携带完整环境变量。
 
 远端文件 backend 与 `exec.cwd` 始终 confined，`full-access` 不放宽该 backend（见
 [04](./04-security.md)）。冻结为 directory Profile 的 `writablePaths` 也独立于权限模式：
@@ -119,14 +128,14 @@ workspace-relative POSIX 路径，根目录使用 `.`，不得传远端 canonica
 约束仍是 Pure 策略而非 OS shell 沙箱，命令正文拥有 SSH 用户本身的系统权限。GUI 目录
 浏览是独立宿主功能，不注册为模型工具。
 
-Studio 的"打开远程项目"窗口绑定一个已保存的 SSH 服务器，并同时提供目录浏览与路径输入；
-输入只接受该服务器上的绝对 POSIX 目录路径，不解析 `~`、相对路径、`ssh://` URI 或
-`user@host:path`，也不隐式创建服务器配置。初次进入浏览远端默认目录，之后的向上导航、
+Studio 的"打开远程项目"窗口绑定 `~/.ssh/config` 中的一个 Host 别名，并同时提供目录浏览与
+路径输入；输入只接受该服务器上的绝对 POSIX 目录路径，不解析 `~`、相对路径、`ssh://` URI
+或 `user@host:path`，也不隐式创建服务器配置。初次进入浏览远端默认目录，之后的向上导航、
 子目录导航和手工路径都先通过 Studio 的 `browseRemoteDirectories` 取得 canonical listing；
 只有与当前输入一致、已经验证的 canonical path 才能提交给 `openRemoteProject`，再由远端
 协议的 `openWorkspace` 打开。后端 product snapshot 只拥有 canonical Project 目录，不拥有
 Flutter 当前选择；Studio controller 只有在重新读取的目录中找到与打开结果同 id、同 SSH
-server、同 canonical path 的 Project，并由显式 selection intent 采用它之后才报告成功；
+别名、同 canonical path 的 Project，并由显式 selection intent 采用它之后才报告成功；
 拒绝新工作或 canonical Project 身份未被采用都不是成功，窗口不得因此关闭。浏览与打开
 操作必须串行化：pending 期间所有调用入口都拒绝重复或冲突请求，不能只依赖下一帧的按钮
 禁用状态；打开期间窗口不可通过取消、遮罩或系统返回动作关闭；浏览或打开失败必须保留
@@ -134,11 +143,15 @@ server、同 canonical path 的 Project，并由显式 selection intent 采用�
 允许打开已验证的当前目录。窗口在窄视口与放大文本下仍须保持路径输入和主要操作可达；
 图标导航必须提供可本地化的可访问名称。
 
-Studio schema 引入非敏感的 `ssh_servers` 表与可空的 `projects.ssh_server_id`：本地项目
-按 `path` 唯一，远端项目按 `(ssh_server_id, path)` 唯一，远端 path 保存 canonical POSIX
-path。Session、Turn、Item、Interaction、working state 与 tool record 的 wire 语义不因
-远程 host 改变；数据库版本演进遵循统一迁移契约（见 [17](./17-studio-storage.md)）。
-远端项目启动时不做本地 canonicalize，服务器离线是连接状态，不是项目损坏。
+Studio schema 不保存 SSH 服务器表；远端项目以可空 `projects.ssh_alias` 引用
+`~/.ssh/config` 的 Host 别名：本地项目按 `path` 唯一，远端项目按 `(ssh_alias, path)`
+唯一，远端 path 保存 canonical POSIX path。数据库版本演进遵循统一迁移契约（见
+[17](./17-studio-storage.md)）：v20 及更早的 `ssh_servers` 行在升级为 v21 时由启动
+协调器先备份产品库，再把每行迁移为 `~/.ssh/config` 管理块（别名取原 name，冲突时分配
+后缀；密码认证行不携带 IdentityFile，迁移后需用户自行补充密钥或 agent），同一事务内把
+`projects.ssh_server_id` 重写为最终别名并删除旧表；文件写入与别名分配幂等，中断后可安全
+重试。Session、Turn、Item、Interaction、working state 与 tool record 的 wire 语义不因
+远程 host 改变。远端项目启动时不做本地 canonicalize，服务器离线是连接状态，不是项目损坏。
 
 ## 22.5 helper 资产与嵌入
 

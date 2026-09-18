@@ -10,6 +10,7 @@ mod lsp;
 mod manager;
 pub(crate) mod path;
 mod skill;
+mod ssh_config;
 mod tools;
 mod workspace;
 
@@ -17,10 +18,13 @@ pub use client::{RemoteClient, RemoteClientError, RemoteReply};
 pub use command::RemoteCommandBackend;
 pub use execution::RemoteExecutionBackend;
 pub use manager::{
-    RemoteHelperAssets, RemoteHelperTarget, SshAuth, SshConnectionSnapshot, SshConnectionState,
-    SshManager, SshServerProfile,
+    RemoteHelperAssets, RemoteHelperTarget, SshConnectionSnapshot, SshConnectionState, SshManager,
+    SshServerProfile,
 };
 pub use skill::RemoteSkillProvider;
+pub use ssh_config::{
+    SshConfigEntry, SshConfigFile, allocate_alias, sanitize_alias_base, validate_alias,
+};
 pub use tools::{RemoteMutationKind, RemoteWorkspaceMutationTool};
 pub use workspace::{
     RemoteDownloadError, RemoteWorkspaceFileBackend, load_remote_workspace_instructions,

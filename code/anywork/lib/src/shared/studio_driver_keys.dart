@@ -36,18 +36,14 @@ abstract final class StudioDriverKeys {
   static const lspResetWorkspace = ValueKey<String>('lsp-reset-workspace');
   static const sshAddServer = ValueKey<String>('ssh-add-server');
   static const sshServerDialog = ValueKey<String>('ssh-server-dialog');
-  static const sshServerNameInput = ValueKey<String>('ssh-server-name-input');
+  static const sshServerAliasInput = ValueKey<String>('ssh-server-alias-input');
   static const sshServerHostInput = ValueKey<String>('ssh-server-host-input');
   static const sshServerUsernameInput = ValueKey<String>(
     'ssh-server-username-input',
   );
   static const sshServerPortInput = ValueKey<String>('ssh-server-port-input');
-  static const sshServerAuthInput = ValueKey<String>('ssh-server-auth-input');
   static const sshServerIdentityInput = ValueKey<String>(
     'ssh-server-identity-input',
-  );
-  static const sshServerPasswordInput = ValueKey<String>(
-    'ssh-server-password-input',
   );
   static const sshServerValidationError = ValueKey<String>(
     'ssh-server-validation-error',
@@ -79,6 +75,8 @@ abstract final class StudioDriverKeys {
   static const attachmentDraftRail = ValueKey<String>('attachment-draft-rail');
   static const agentSwitcher = ValueKey<String>('agent-switcher');
   static const sessionCost = ValueKey<String>('session-cost');
+  static const sessionOverflow = ValueKey<String>('session-overflow');
+  static const sessionOpenInVsCode = ValueKey<String>('session-open-in-vscode');
   static const threadThroughput = ValueKey<String>('thread-throughput');
   static const statisticsSummary = ValueKey<String>('statistics-summary');
   static const statisticsHistory = ValueKey<String>('statistics-history');

@@ -67,7 +67,7 @@ Future<void> main(List<String> args) async {
       await session.tap(find.byValueKey('settings-open'));
       await session.tap(find.byValueKey('settings-tab-ssh'));
       await session.tap(find.byValueKey('ssh-add-server'));
-      await enter('ssh-server-name-input', 'Image acceptance');
+      await enter('ssh-server-alias-input', 'image-acceptance');
       await enter('ssh-server-host-input', split[1]);
       await enter('ssh-server-username-input', split[0]);
       await session.tap(find.byValueKey('ssh-server-save'));
@@ -76,9 +76,9 @@ Future<void> main(List<String> args) async {
       final saveDeadline = DateTime.now().add(const Duration(seconds: 30));
       while (DateTime.now().isBefore(saveDeadline)) {
         final reply = jsonDecode(
-          await session.requestData('ssh-server-id:Image acceptance'),
+          await session.requestData('ssh-server-alias:image-acceptance'),
         ) as Map;
-        if (reply['serverId'] case final String id) {
+        if (reply['alias'] case final String id) {
           serverId = id;
           break;
         }

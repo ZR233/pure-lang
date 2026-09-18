@@ -42,7 +42,7 @@ impl StudioThreadFactory {
             decode(&saved_project.payload, "pl.studio.project")?;
         if previous.id != project.id
             || previous.path != project.path
-            || previous.ssh_server_id != project.ssh_server_id
+            || previous.ssh_alias != project.ssh_alias
         {
             return Err(ThreadAssemblyError::Identity(
                 "child project target changed".into(),

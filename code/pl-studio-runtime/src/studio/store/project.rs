@@ -148,7 +148,7 @@ impl StudioStore {
         let name = project_name(path);
         if let Some(existing) = project::Entity::find()
             .filter(project::Column::Path.eq(path_text.clone()))
-            .filter(project::Column::SshServerId.is_null())
+            .filter(project::Column::SshAlias.is_null())
             .one(&self.db)
             .await?
         {
@@ -165,7 +165,7 @@ impl StudioStore {
             id: Set(new_id("project")),
             name: Set(name),
             path: Set(path_text),
-            ssh_server_id: Set(None),
+            ssh_alias: Set(None),
             created_at: Set(now),
             updated_at: Set(now),
             last_opened_at: Set(Some(now)),
@@ -192,12 +192,12 @@ impl StudioStore {
     pub(in crate::studio) async fn find_project_by_path(
         &self,
         path: &str,
-        ssh_server_id: Option<&str>,
+        ssh_alias: Option<&str>,
     ) -> Result<Option<ProjectRow>> {
         use entities::project;
-        let server_filter = match ssh_server_id {
-            Some(server_id) => project::Column::SshServerId.eq(server_id.to_string()),
-            None => project::Column::SshServerId.is_null(),
+        let server_filter = match ssh_alias {
+            Some(server_id) => project::Column::SshAlias.eq(server_id.to_string()),
+            None => project::Column::SshAlias.is_null(),
         };
         Ok(project::Entity::find()
             .filter(project::Column::Path.eq(path.to_string()))
@@ -270,7 +270,7 @@ async fn inspect_database(path: &Path) -> Result<ExistingDatabaseState> {
         Ok(STUDIO_DATABASE_SCHEMA_VERSION) => validate_database(&database)
             .await
             .map(|()| ExistingDatabaseState::Current),
-        Ok(19) => Err(StudioDatabaseError::SessionResetRequired.into()),
+        Ok(19 | 20) => Err(StudioDatabaseError::StorageMigrationRequired.into()),
         Ok(found) => Err(StudioDatabaseError::UnsupportedSchema {
             found,
             supported: STUDIO_DATABASE_SCHEMA_VERSION,

@@ -79,7 +79,7 @@ pub(in crate::studio) async fn prepare_workspace(
         AgentWorkspaceMode::Worktree => {
             let backend = backend_for(
                 ssh_manager,
-                request.project.ssh_server_id.as_deref(),
+                request.project.ssh_alias.as_deref(),
                 &project_root,
             );
             let repository_root =
@@ -100,7 +100,7 @@ pub(in crate::studio) async fn prepare_workspace(
                 child_id: child_id.clone(),
                 root_thread_id: request.root_thread_id.to_owned(),
                 project_id: request.project.id.clone(),
-                ssh_server_id: request.project.ssh_server_id.clone(),
+                ssh_alias: request.project.ssh_alias.clone(),
                 repository_root: repository_root.to_string_lossy().into_owned(),
                 path: path.to_string_lossy().into_owned(),
                 branch: branch.clone(),
@@ -149,10 +149,10 @@ pub(in crate::studio) async fn prepare_workspace(
 
 pub(in crate::studio) fn backend_for(
     ssh_manager: &Arc<pl_tool::remote::SshManager>,
-    ssh_server_id: Option<&str>,
+    ssh_alias: Option<&str>,
     project_root: &Path,
 ) -> Arc<dyn WorktreeBackend> {
-    match ssh_server_id {
+    match ssh_alias {
         Some(server_id) => Arc::new(RemoteWorktreeBackend::new(
             ssh_manager.clone(),
             server_id,
@@ -169,11 +169,7 @@ pub(in crate::studio) fn manager_from_lease(
     let repository_root = PathBuf::from(&lease.repository_root);
     WorktreeManager::new(
         repository_root.clone(),
-        backend_for(
-            ssh_manager,
-            lease.ssh_server_id.as_deref(),
-            &repository_root,
-        ),
+        backend_for(ssh_manager, lease.ssh_alias.as_deref(), &repository_root),
     )
 }
 
@@ -200,7 +196,7 @@ async fn settle_failed_create(
 }
 
 pub(in crate::studio) fn resolved_project_root(project: &ProjectRecord) -> Result<PathBuf> {
-    if project.ssh_server_id.is_some() {
+    if project.ssh_alias.is_some() {
         let value = project.path.trim().replace('\\', "/");
         if value.is_empty() || value == "/" || value.split('/').any(|part| part == "..") {
             return Err(lifecycle_error(format!(

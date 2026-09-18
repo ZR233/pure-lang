@@ -25,7 +25,9 @@ mod updater;
 mod worker_assets;
 
 // Data types needed to call Studio's SSH API; transport consumers do not depend on tool runtimes.
-pub use pl_tool::remote::{SshAuth, SshConnectionSnapshot, SshConnectionState, SshServerProfile};
+pub use pl_tool::remote::{
+    SshConfigEntry, SshConfigFile, SshConnectionSnapshot, SshConnectionState, SshServerProfile,
+};
 
 pub use pl_tool::skill::{SkillCatalog, SkillMetadata, SkillResourceBase, SkillSourceKind};
 

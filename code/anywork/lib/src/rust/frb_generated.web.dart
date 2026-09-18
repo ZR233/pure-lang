@@ -1776,9 +1776,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   SkillsSettingsInput dco_decode_skills_settings_input(dynamic raw);
 
   @protected
-  SshAuthKindDto dco_decode_ssh_auth_kind_dto(dynamic raw);
-
-  @protected
   SshConnectionSnapshotDto dco_decode_ssh_connection_snapshot_dto(dynamic raw);
 
   @protected
@@ -3978,9 +3975,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   SkillsSettingsInput sse_decode_skills_settings_input(
     SseDeserializer deserializer,
   );
-
-  @protected
-  SshAuthKindDto sse_decode_ssh_auth_kind_dto(SseDeserializer deserializer);
 
   @protected
   SshConnectionSnapshotDto sse_decode_ssh_connection_snapshot_dto(
@@ -6609,12 +6603,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_skills_settings_input(
     SkillsSettingsInput self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_ssh_auth_kind_dto(
-    SshAuthKindDto self,
     SseSerializer serializer,
   );
 

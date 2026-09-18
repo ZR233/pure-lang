@@ -1165,14 +1165,14 @@ class ProjectDto {
   final String id;
   final String name;
   final String path;
-  final String? sshServerId;
+  final String? sshAlias;
   final PlatformInt64 updatedAt;
 
   const ProjectDto({
     required this.id,
     required this.name,
     required this.path,
-    this.sshServerId,
+    this.sshAlias,
     required this.updatedAt,
   });
 
@@ -1181,7 +1181,7 @@ class ProjectDto {
       id.hashCode ^
       name.hashCode ^
       path.hashCode ^
-      sshServerId.hashCode ^
+      sshAlias.hashCode ^
       updatedAt.hashCode;
 
   @override
@@ -1192,7 +1192,7 @@ class ProjectDto {
           id == other.id &&
           name == other.name &&
           path == other.path &&
-          sshServerId == other.sshServerId &&
+          sshAlias == other.sshAlias &&
           updatedAt == other.updatedAt;
 }
 

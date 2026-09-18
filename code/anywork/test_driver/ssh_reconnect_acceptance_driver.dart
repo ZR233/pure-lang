@@ -18,7 +18,7 @@ Future<void> main(List<String> args) async {
     await session.tap(find.byValueKey('settings-tab-ssh'));
     await session.tap(find.byValueKey('ssh-add-server'));
     for (final field in [
-      ('ssh-server-name-input', 'SSH environment acceptance'),
+      ('ssh-server-alias-input', 'environment-acceptance'),
       ('ssh-server-host-input', args[1]),
       ('ssh-server-username-input', args[2]),
     ]) {
@@ -28,9 +28,9 @@ Future<void> main(List<String> args) async {
     await session.tap(find.byValueKey('ssh-server-save'));
     await session.waitForAbsent(find.byValueKey('ssh-server-dialog'));
     final reply = jsonDecode(
-      await session.requestData('ssh-server-id:SSH environment acceptance'),
+      await session.requestData('ssh-server-alias:environment-acceptance'),
     ) as Map<String, dynamic>;
-    final id = reply['serverId'] as String;
+    final id = reply['alias'] as String;
     // No connection test is needed before the reconnect action can be used.
     await session.tap(find.byValueKey('ssh-reconnect-$id'));
     await session.waitFor(

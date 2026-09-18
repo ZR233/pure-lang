@@ -59,14 +59,15 @@ impl StudioThreadFactory {
             workspace: assembly.workspace.clone(),
             commands: None,
             remote: None,
-            ssh_profile: match &assembly.project.ssh_server_id {
-                Some(id) => self
+            ssh_profile: match &assembly.project.ssh_alias {
+                Some(alias) => self
                     .services
                     .ssh_manager
                     .list_servers()
                     .await
                     .into_iter()
-                    .find(|profile| &profile.id == id),
+                    .find(|entry| &entry.profile.alias == alias)
+                    .map(|entry| entry.profile),
                 None => None,
             },
         };
@@ -127,7 +128,7 @@ impl StudioThreadFactory {
         let root = workspace.root().to_owned();
         let remote = match &preparation {
             CatalogPreparation::Refresh { remote, .. } => remote.as_deref().cloned(),
-            CatalogPreparation::Initial => match &project.ssh_server_id {
+            CatalogPreparation::Initial => match &project.ssh_alias {
                 Some(server) => Some(
                     self.services
                         .ssh_manager

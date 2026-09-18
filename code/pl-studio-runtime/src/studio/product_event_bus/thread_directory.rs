@@ -378,7 +378,7 @@ impl ProductEventBus {
                 id: project.id.clone(),
                 name: project.name.clone(),
                 path: project.path.clone(),
-                ssh_server_id: project.ssh_server_id.clone(),
+                ssh_alias: project.ssh_alias.clone(),
                 updated_at: project.updated_at,
             })
             .collect::<Vec<_>>();

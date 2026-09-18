@@ -135,7 +135,7 @@ pub(super) async fn load_helper(
 
 pub(super) async fn upload_helper(
     profile: &SshServerProfile,
-    password: Option<&str>,
+    ssh_config: &super::super::ssh_config::SshConfigFile,
     bytes: &[u8],
 ) -> Result<String, RemoteClientError> {
     let digest = format!("{:x}", Sha256::digest(bytes));
@@ -146,14 +146,14 @@ pub(super) async fn upload_helper(
     );
     let path = format!("{directory}/{HELPER_NAME}");
     let probe = format!("if test -x {path}; then printf present; fi");
-    if run_ssh_capture(profile, password, &probe).await?.trim() == "present" {
+    if run_ssh_capture(profile, ssh_config, &probe).await?.trim() == "present" {
         return Ok(path);
     }
     let temporary = format!("{path}.tmp");
     let script = format!(
         "umask 077; mkdir -p {directory} && cat > {temporary} && chmod 700 {temporary} && mv -f {temporary} {path}"
     );
-    let mut prepared = ssh_command(profile, password).await?;
+    let mut prepared = ssh_command(profile, ssh_config).await?;
     prepared
         .command
         .arg(posix_remote_command(&script))

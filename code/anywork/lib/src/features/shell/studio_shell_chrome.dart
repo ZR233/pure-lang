@@ -48,6 +48,8 @@ class _Header extends StatelessWidget {
               _AgentSwitcher(state: state),
               const SizedBox(width: 8),
               _SessionCostChip(cost: state.sessionCost),
+              const SizedBox(width: 8),
+              _SessionOverflowMenu(state: state),
             ],
           );
           if (constraints.maxWidth < 520) {
@@ -102,6 +104,93 @@ String _purposeLabel(BuildContext context, String? purpose) =>
       null => context.l10n.costPurposeUnknown,
       String value => value,
     };
+
+/// 会话顶栏「...」更多菜单；当前唯一动作是「在 VS Code 中打开工作区」。
+///
+/// 未探测到 VS Code 安装或当前无所属项目时整个入口不渲染（菜单保持为空，
+/// 不显示空占位）。远端项目经 Remote-SSH 打开，连接参数由 `~/.ssh/config`
+/// 的 Host 别名解析。
+class _SessionOverflowMenu extends ConsumerWidget {
+  const _SessionOverflowMenu({required this.state});
+
+  final HeaderView state;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final project = state.selectedProject;
+    final availability = ref.watch(vsCodeAvailabilityProvider);
+    if (project == null ||
+        !availability.hasValue ||
+        availability.value != true) {
+      return const SizedBox.shrink();
+    }
+    final controller = MenuController();
+    return MenuAnchor(
+      controller: controller,
+      alignmentOffset: const Offset(0, 6),
+      menuChildren: [
+        MenuItemButton(
+          key: StudioDriverKeys.sessionOpenInVsCode,
+          leadingIcon: const Icon(Icons.code_outlined, size: 18),
+          onPressed: () {
+            controller.close();
+            _openInVsCode(context, ref, project);
+          },
+          child: Text(context.l10n.sessionOpenInVsCode),
+        ),
+      ],
+      builder: (context, controller, child) => IconButton(
+        key: StudioDriverKeys.sessionOverflow,
+        tooltip: context.l10n.sessionMoreActionsTooltip,
+        icon: const Icon(Icons.more_horiz, size: 20),
+        onPressed: () =>
+            controller.isOpen ? controller.close() : controller.open(),
+      ),
+    );
+  }
+
+  Future<void> _openInVsCode(
+    BuildContext context,
+    WidgetRef ref,
+    StudioProject project,
+  ) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final l10n = context.l10n;
+    String? uri;
+    String? failure;
+    if (project.sshAlias case final alias?) {
+      try {
+        final servers = await ref.read(studioApiProvider).listSshServers();
+        final server = servers
+            .where((server) => server.alias == alias)
+            .firstOrNull;
+        if (server == null) {
+          failure = l10n.sessionVsCodeServerMissing;
+        } else {
+          uri = buildRemoteVsCodeFolderUri(
+            alias: server.alias,
+            remotePath: project.path,
+          );
+        }
+      } on Object {
+        failure = l10n.sessionVsCodeOpenFailed;
+      }
+    } else {
+      uri = buildLocalVsCodeFolderUri(project.path);
+    }
+    if (uri != null) {
+      final launcher = ref.read(vsCodeLauncherProvider);
+      try {
+        await launcher(uri);
+      } on Object {
+        failure = l10n.sessionVsCodeOpenFailed;
+      }
+    }
+    if (failure != null && messenger != null) {
+      messenger.showSnackBar(SnackBar(content: Text(failure)));
+    }
+  }
+}
 
 class _AgentSwitcher extends ConsumerStatefulWidget {
   const _AgentSwitcher({required this.state});

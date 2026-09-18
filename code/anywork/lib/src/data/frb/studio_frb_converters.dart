@@ -116,22 +116,18 @@ StudioProject _projectFromFrb(frb.ProjectDto project) {
     id: project.id,
     name: project.name,
     path: project.path,
-    sshServerId: project.sshServerId,
+    sshAlias: project.sshAlias,
   );
 }
 
 SshServer _sshServerFromFrb(frb_ssh_types.SshServerDto server) {
   return SshServer(
-    id: server.id,
-    name: server.name,
-    host: server.host,
+    alias: server.alias,
+    hostName: server.hostName,
     port: server.port,
     username: server.username,
-    authKind: switch (server.authKind) {
-      frb_ssh_types.SshAuthKindDto.agentOrKey => SshAuthKind.agentOrKey,
-      frb_ssh_types.SshAuthKindDto.password => SshAuthKind.password,
-    },
     identityFile: server.identityFile,
+    managed: server.managed,
   );
 }
 

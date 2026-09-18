@@ -13,7 +13,6 @@ use pl_protocol::remote::{
     REMOTE_PROTOCOL_VERSION, RemoteDirectoryListing, RemoteHello, RemoteRequest, RemoteResponse,
     RemoteWorkspaceOpened,
 };
-use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use tokio::process::Child;
 use tokio::sync::{Mutex, RwLock, watch};
@@ -30,36 +29,24 @@ use pl_protocol::remote::RemoteShellDialect;
 pub use self::asset::{RemoteHelperAssets, RemoteHelperTarget};
 use self::asset::{file_helper_assets, load_helper, upload_helper};
 use self::ssh::{run_ssh_capture, ssh_command, validate_profile};
+use super::ssh_config::{SshConfigEntry, SshConfigFile};
 
-/// 不含 secret 的 SSH 服务器配置。
+/// 不含 secret 的 SSH 服务器配置；别名即身份，对应 `~/.ssh/config` 的 Host。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SshServerProfile {
-    pub id: String,
-    pub name: String,
-    pub host: String,
+    pub alias: String,
+    pub host_name: String,
     pub port: u16,
     pub username: String,
-    pub auth: SshAuth,
-}
-
-/// SSH 认证来源；密码值始终由独立的进程内 lease 提供。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(
-    tag = "kind",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-pub enum SshAuth {
-    AgentOrKey { identity_file: Option<String> },
-    Password,
+    pub identity_file: Option<String>,
 }
 
 /// 单个 SSH 服务器的 canonical 连接快照。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SshConnectionSnapshot {
-    pub server_id: String,
+    pub alias: String,
     pub state: SshConnectionState,
 }
 
@@ -73,7 +60,6 @@ pub struct SshConnectionSnapshot {
 pub enum SshConnectionState {
     Disconnected,
     Connecting,
-    WaitingForInput,
     Ready {
         helper_version: String,
         architecture: String,
@@ -91,7 +77,6 @@ pub enum SshConnectionState {
 struct SshConnection {
     client: RemoteClient,
     process: Arc<Mutex<Child>>,
-    _askpass: Option<tempfile::TempDir>,
     execution_environment: ExecutionEnvironment,
 }
 
@@ -107,7 +92,8 @@ impl std::fmt::Debug for SshConnection {
 /// 系统 OpenSSH、helper bootstrap、远端 workspace 与自动重连的本地 owner。
 #[derive(Debug, Clone)]
 pub struct SshManager {
-    servers: Arc<RwLock<HashMap<String, SshServerProfile>>>,
+    servers: Arc<RwLock<HashMap<String, SshConfigEntry>>>,
+    ssh_config: SshConfigFile,
     helper_assets: Option<Arc<dyn RemoteHelperAssets>>,
     connections: Arc<Mutex<HashMap<String, Arc<SshConnection>>>>,
     admission: Arc<Mutex<bool>>,
@@ -119,7 +105,6 @@ pub struct SshManager {
     states: Arc<RwLock<HashMap<String, watch::Sender<SshConnectionState>>>>,
     ready_revisions: watch::Sender<BTreeMap<String, u64>>,
     desired_connections: Arc<RwLock<HashSet<String>>>,
-    password_leases: Arc<RwLock<HashMap<String, SecretString>>>,
 }
 
 impl SshManager {
@@ -136,9 +121,21 @@ impl SshManager {
         Self::with_optional_helper_assets(Some(helper_assets))
     }
 
+    /// 显式指定 ssh config 文件；默认使用用户 `~/.ssh/config`。
+    ///
+    /// 测试与启动协调器用它隔离或收敛配置写入范围。
+    pub fn with_ssh_config(mut self, ssh_config: SshConfigFile) -> Self {
+        self.ssh_config = ssh_config;
+        self
+    }
+
     fn with_optional_helper_assets(helper_assets: Option<Arc<dyn RemoteHelperAssets>>) -> Self {
         Self {
             servers: Arc::new(RwLock::new(HashMap::new())),
+            ssh_config: SshConfigFile::user_default().unwrap_or_else(|error| {
+                tracing::warn!(%error, "falling back to the default ssh config location");
+                SshConfigFile::default_location(".ssh/config")
+            }),
             helper_assets,
             connections: Arc::new(Mutex::new(HashMap::new())),
             admission: Arc::new(Mutex::new(true)),
@@ -150,12 +147,22 @@ impl SshManager {
             states: Arc::new(RwLock::new(HashMap::new())),
             ready_revisions: watch::channel(BTreeMap::new()).0,
             desired_connections: Arc::new(RwLock::new(HashSet::new())),
-            password_leases: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
-    /// 返回按名称和 id 稳定排序的服务器配置。
-    pub async fn list_servers(&self) -> Vec<SshServerProfile> {
+    /// 从 ssh config 文件重新加载服务器集合；文件是该数据的唯一事实源。
+    pub async fn reload_servers(&self) -> Result<(), RemoteClientError> {
+        let entries = self.ssh_config.read().await?;
+        let mut servers = self.servers.write().await;
+        servers.clear();
+        for entry in entries {
+            servers.insert(entry.profile.alias.clone(), entry);
+        }
+        Ok(())
+    }
+
+    /// 返回按别名稳定排序的服务器条目（含是否为 anywork 管理块）。
+    pub async fn list_servers(&self) -> Vec<SshConfigEntry> {
         let mut servers = self
             .servers
             .read()
@@ -163,67 +170,46 @@ impl SshManager {
             .values()
             .cloned()
             .collect::<Vec<_>>();
-        servers.sort_by(|left, right| left.name.cmp(&right.name).then(left.id.cmp(&right.id)));
+        servers.sort_by(|left, right| left.profile.alias.cmp(&right.profile.alias));
         servers
     }
 
-    /// 校验并保存不含 secret 的服务器配置。
+    /// 校验并把服务器配置写入 ssh config 管理块。
+    ///
+    /// 别名被手写条目占用、或文件写入失败时返回错误且不改变内存集合。
     pub async fn save_server(
         &self,
         profile: SshServerProfile,
     ) -> Result<SshServerProfile, RemoteClientError> {
         validate_profile(&profile)?;
-        let changed = self
+        let previous = self
             .servers
             .read()
             .await
-            .get(&profile.id)
-            .is_some_and(|existing| existing != &profile);
-        if changed {
-            self.disconnect_server(&profile.id).await?;
+            .get(&profile.alias)
+            .map(|entry| entry.profile.clone());
+        self.ssh_config
+            .upsert_managed(std::slice::from_ref(&profile))
+            .await?;
+        if previous.as_ref() != Some(&profile) {
+            self.disconnect_server(&profile.alias).await?;
         }
-        self.ensure_state(&profile.id).await;
-        self.servers
-            .write()
-            .await
-            .insert(profile.id.clone(), profile.clone());
+        self.ensure_state(&profile.alias).await;
+        self.servers.write().await.insert(
+            profile.alias.clone(),
+            SshConfigEntry {
+                profile: profile.clone(),
+                managed: true,
+            },
+        );
         Ok(profile)
     }
 
-    /// 在 core 内存中更新一次 SSH 密码 lease；密码不会进入 profile 或持久化层。
-    ///
-    /// # Errors
-    /// Returns the existing connection's cleanup error or sealed-admission error.
-    pub async fn lease_password(
-        &self,
-        server_id: &str,
-        password: String,
-    ) -> Result<(), RemoteClientError> {
-        let changed = self
-            .password_leases
-            .read()
-            .await
-            .get(server_id)
-            .is_none_or(|current| current.expose_secret() != password);
-        if password.is_empty() {
-            self.password_leases.write().await.remove(server_id);
-        } else {
-            self.password_leases
-                .write()
-                .await
-                .insert(server_id.to_string(), SecretString::from(password));
-        }
-        if changed {
-            self.disconnect_server(server_id).await?;
-        }
-        Ok(())
-    }
-
-    /// 删除服务器配置、secret lease、连接与 workspace cache。
+    /// 删除服务器配置、连接与 workspace cache；仅 anywork 管理块可删除。
     pub async fn delete_server(&self, server_id: &str) -> Result<(), RemoteClientError> {
+        self.ssh_config.remove_managed(server_id).await?;
         self.disconnect_server(server_id).await?;
         self.servers.write().await.remove(server_id);
-        self.password_leases.write().await.remove(server_id);
         self.states.write().await.remove(server_id);
         self.connection_locks.lock().await.remove(server_id);
         self.workspaces
@@ -242,7 +228,7 @@ impl SshManager {
         let sender = self.ensure_state(server_id).await;
         let state = sender.borrow().clone();
         Ok(SshConnectionSnapshot {
-            server_id: server_id.to_string(),
+            alias: server_id.to_string(),
             state,
         })
     }
@@ -315,15 +301,14 @@ impl SshManager {
                 Ok(())
             }
             Err(error) => {
-                let state = if matches!(error, RemoteClientError::CredentialRequired) {
-                    SshConnectionState::WaitingForInput
-                } else {
+                self.set_state(
+                    server_id,
                     SshConnectionState::Failed {
                         code: "sshConnectionFailed".to_string(),
                         message: error.to_string(),
-                    }
-                };
-                self.set_state(server_id, state).await;
+                    },
+                )
+                .await;
                 Err(error)
             }
         }
@@ -451,19 +436,7 @@ impl SshManager {
         &self,
         profile: &SshServerProfile,
     ) -> Result<(SshConnection, RemoteHello), RemoteClientError> {
-        let password = match profile.auth {
-            SshAuth::Password => Some(
-                self.password_leases
-                    .read()
-                    .await
-                    .get(&profile.id)
-                    .cloned()
-                    .ok_or(RemoteClientError::CredentialRequired)?,
-            ),
-            SshAuth::AgentOrKey { .. } => None,
-        };
-        let password = password.as_ref().map(|secret| secret.expose_secret());
-        let platform = run_ssh_capture(profile, password, "uname -s; uname -m").await?;
+        let platform = run_ssh_capture(profile, &self.ssh_config, "uname -s; uname -m").await?;
         let target = RemoteHelperTarget::from_uname(&platform)?;
         let assets = self.helper_assets.clone().ok_or_else(|| {
             RemoteClientError::Protocol(format!(
@@ -472,8 +445,8 @@ impl SshManager {
             ))
         })?;
         let helper = load_helper(assets, target).await?;
-        let remote_path = upload_helper(profile, password, &helper).await?;
-        let mut prepared = ssh_command(profile, password).await?;
+        let remote_path = upload_helper(profile, &self.ssh_config, &helper).await?;
+        let mut prepared = ssh_command(profile, &self.ssh_config).await?;
         prepared
             .command
             .arg(ssh::posix_remote_command(&format!("exec {remote_path}")))
@@ -539,8 +512,7 @@ impl SshManager {
         if let Some(mut stderr) = child.stderr.take() {
             let client = client.clone();
             let closing = self.closing.clone();
-            let server_id = profile.id.clone();
-            let secret = password.map(str::to_owned);
+            let server_id = profile.alias.clone();
             self.operations.spawn(async move {
                 use tokio::io::AsyncReadExt;
                 let mut retained = Vec::new();
@@ -559,8 +531,7 @@ impl SshManager {
                     }
                 }
                 if !retained.is_empty() {
-                    let mut diagnostic = String::from_utf8_lossy(&retained).into_owned();
-                    if let Some(secret) = secret.filter(|value| !value.is_empty()) { diagnostic = diagnostic.replace(&secret, "[redacted]"); }
+                    let diagnostic = String::from_utf8_lossy(&retained).into_owned();
                     tracing::warn!(%server_id, %diagnostic, "SSH process diagnostic");
                 }
             });
@@ -569,7 +540,6 @@ impl SshManager {
             SshConnection {
                 client,
                 process: Arc::new(Mutex::new(child)),
-                _askpass: prepared.askpass,
                 execution_environment: execution_environment_from_hello(&hello)?,
             },
             hello,
@@ -591,7 +561,7 @@ impl SshManager {
             .read()
             .await
             .get(server_id)
-            .cloned()
+            .map(|entry| entry.profile.clone())
             .ok_or_else(|| RemoteClientError::Protocol(format!("unknown SSH server '{server_id}'")))
     }
 
@@ -688,9 +658,7 @@ impl SshManager {
             }
             match self.connect_server(&server_id).await {
                 Ok(()) => return,
-                Err(RemoteClientError::CredentialRequired | RemoteClientError::ManagerClosing) => {
-                    return;
-                }
+                Err(RemoteClientError::ManagerClosing) => return,
                 Err(_) => {}
             }
         }
@@ -827,28 +795,59 @@ mod tests {
 
     fn profile() -> SshServerProfile {
         SshServerProfile {
-            id: "server-1".to_string(),
-            name: "Development".to_string(),
-            host: "example.test".to_string(),
+            alias: "server-1".to_string(),
+            host_name: "example.test".to_string(),
             port: 22,
             username: "dev".to_string(),
-            auth: SshAuth::AgentOrKey {
-                identity_file: None,
-            },
+            identity_file: None,
         }
     }
 
     #[tokio::test]
-    async fn server_crud_is_canonical_and_sorted() {
-        let manager = SshManager::new(None, None);
+    async fn server_crud_round_trips_through_ssh_config_file() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let manager = SshManager::new(None, None)
+            .with_ssh_config(SshConfigFile::at(directory.path().join("config")));
         let mut later = profile();
-        later.id = "later".to_string();
-        later.name = "Zed".to_string();
+        later.alias = "zed".to_string();
         manager.save_server(later).await.expect("save later");
         manager.save_server(profile()).await.expect("save profile");
 
         let servers = manager.list_servers().await;
-        assert_eq!(servers[0].name, "Development");
-        assert_eq!(servers[1].name, "Zed");
+        assert_eq!(servers[0].profile.alias, "server-1");
+        assert_eq!(servers[1].profile.alias, "zed");
+        assert!(servers.iter().all(|entry| entry.managed));
+
+        // 重新加载以文件为事实源，覆盖进程内编辑。
+        let reloaded = SshManager::new(None, None)
+            .with_ssh_config(SshConfigFile::at(directory.path().join("config")));
+        reloaded.reload_servers().await.expect("reload");
+        assert_eq!(reloaded.list_servers().await.len(), 2);
+
+        manager.delete_server("server-1").await.expect("delete");
+        assert_eq!(manager.list_servers().await.len(), 1);
+        assert!(manager.delete_server("zed").await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn save_rejects_alias_owned_by_hand_written_entry() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let config = directory.path().join("config");
+        std::fs::write(&config, "Host manual\n    HostName example.test\n").unwrap();
+        let manager =
+            SshManager::new(None, None).with_ssh_config(SshConfigFile::at(config.clone()));
+        manager.reload_servers().await.expect("reload");
+
+        let mut manual = profile();
+        manual.alias = "manual".to_string();
+        let error = manager.save_server(manual).await.unwrap_err();
+        assert!(error.to_string().contains("hand-written"));
+        let entries = manager.list_servers().await;
+        assert_eq!(entries.len(), 1);
+        assert!(!entries[0].managed);
+        assert_eq!(
+            std::fs::read_to_string(&config).unwrap(),
+            "Host manual\n    HostName example.test\n"
+        );
     }
 }

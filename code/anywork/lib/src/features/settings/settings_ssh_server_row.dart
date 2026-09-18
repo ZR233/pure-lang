@@ -37,15 +37,15 @@ class SshServerRow extends StatelessWidget {
     final ready = connection?.state == 'ready';
     final busy = operation != null;
     return SettingsResourceRow(
-      title: server.name,
+      title: server.alias,
       icon: Icons.dns_outlined,
       status: _ConnectionChip(
-        key: ready ? StudioDriverKeys.sshReady(server.id) : null,
+        key: ready ? StudioDriverKeys.sshReady(server.alias) : null,
         connection: connection,
       ),
       children: [
         Text(
-          '${server.username}@${server.host}:${server.port}',
+          '${server.username}@${server.hostName}:${server.port}',
           style: context.text.bodyMedium?.copyWith(
             color: context.colors.onSurface,
             fontFamily: 'monospace',
@@ -60,6 +60,15 @@ class SshServerRow extends StatelessWidget {
             color: context.colors.onSurfaceVariant,
           ),
         ),
+        if (!server.managed) ...[
+          const SizedBox(height: 6),
+          Text(
+            context.l10n.settingsSshReadOnlyEntry,
+            style: context.text.bodySmall?.copyWith(
+              color: context.colors.onSurfaceVariant,
+            ),
+          ),
+        ],
         const SizedBox(height: 6),
         Text(
           context.l10n.settingsSshReconnectHint,
@@ -73,7 +82,7 @@ class SshServerRow extends StatelessWidget {
           runSpacing: 8,
           children: [
             TextButton.icon(
-              key: StudioDriverKeys.sshTest(server.id),
+              key: StudioDriverKeys.sshTest(server.alias),
               onPressed: busy ? null : onTest,
               icon: operation == SshServerOperation.test
                   ? const SizedBox.square(
@@ -84,13 +93,13 @@ class SshServerRow extends StatelessWidget {
               label: Text(context.l10n.settingsSshTest),
             ),
             TextButton.icon(
-              key: StudioDriverKeys.sshOpen(server.id),
+              key: StudioDriverKeys.sshOpen(server.alias),
               onPressed: busy ? null : onOpen,
               icon: const Icon(Icons.folder_open_outlined, size: 17),
               label: Text(context.l10n.settingsSshOpenProject),
             ),
             TextButton.icon(
-              key: StudioDriverKeys.sshReconnect(server.id),
+              key: StudioDriverKeys.sshReconnect(server.alias),
               onPressed: busy ? null : onReconnect,
               icon: operation == SshServerOperation.reconnect
                   ? const SizedBox.square(
@@ -100,14 +109,16 @@ class SshServerRow extends StatelessWidget {
                   : const Icon(Icons.refresh, size: 17),
               label: Text(context.l10n.settingsSshReconnect),
             ),
-            TextButton(
-              onPressed: busy ? null : onEdit,
-              child: Text(context.l10n.settingsSshEdit),
-            ),
-            TextButton(
-              onPressed: busy ? null : onDelete,
-              child: Text(context.l10n.settingsSshDelete),
-            ),
+            if (server.managed) ...[
+              TextButton(
+                onPressed: busy ? null : onEdit,
+                child: Text(context.l10n.settingsSshEdit),
+              ),
+              TextButton(
+                onPressed: busy ? null : onDelete,
+                child: Text(context.l10n.settingsSshDelete),
+              ),
+            ],
           ],
         ),
       ],

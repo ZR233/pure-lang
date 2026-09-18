@@ -23,7 +23,7 @@ impl StudioRuntime {
             .project_snapshot()
             .await
             .into_iter()
-            .find(|project| project.path == path_text && project.ssh_server_id.is_none())
+            .find(|project| project.path == path_text && project.ssh_alias.is_none())
         {
             return Ok(project);
         }
@@ -38,7 +38,7 @@ impl StudioRuntime {
                     id: existing.id.clone(),
                     name: name.clone(),
                     path: path_text.clone(),
-                    ssh_server_id: None,
+                    ssh_alias: None,
                     created_at: existing.created_at,
                     updated_at: now,
                     last_opened_at: Some(now),
@@ -48,7 +48,7 @@ impl StudioRuntime {
                     id: existing.id.clone(),
                     name,
                     path: path_text,
-                    ssh_server_id: None,
+                    ssh_alias: None,
                     updated_at: now,
                 };
                 (public, delta_record)
@@ -59,7 +59,7 @@ impl StudioRuntime {
                     id: id.clone(),
                     name: name.clone(),
                     path: path_text.clone(),
-                    ssh_server_id: None,
+                    ssh_alias: None,
                     created_at: now,
                     updated_at: now,
                     last_opened_at: Some(now),
@@ -69,7 +69,7 @@ impl StudioRuntime {
                     id,
                     name,
                     path: path_text,
-                    ssh_server_id: None,
+                    ssh_alias: None,
                     updated_at: now,
                 };
                 (public, delta_record)
@@ -107,7 +107,7 @@ impl StudioRuntime {
                 id: project.id.clone(),
                 name: project.name.clone(),
                 path: project.path.clone(),
-                ssh_server_id: project.ssh_server_id.clone(),
+                ssh_alias: project.ssh_alias.clone(),
                 created_at: now,
                 updated_at: now,
                 last_opened_at: Some(now),

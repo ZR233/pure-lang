@@ -32,12 +32,18 @@ class DemoStudioApi implements StudioApi {
   final List<StudioThread> _pageFillThreads = [];
   final List<SshServer> _sshServers = [
     const SshServer(
-      id: 'demo-ssh',
-      name: 'ARM development',
-      host: '192.168.100.12',
+      alias: 'arm-dev',
+      hostName: '192.168.100.12',
       port: 22,
       username: 'root',
-      authKind: SshAuthKind.agentOrKey,
+      managed: true,
+    ),
+    const SshServer(
+      alias: 'handwritten',
+      hostName: '203.0.113.10',
+      port: 2222,
+      username: 'deploy',
+      managed: false,
     ),
   ];
 
@@ -197,7 +203,7 @@ class DemoStudioApi implements StudioApi {
             id: p.id,
             name: _projectNames[p.id] ?? p.name,
             path: p.path,
-            sshServerId: p.sshServerId,
+            sshAlias: p.sshAlias,
           ),
         )
         .toList();
@@ -899,7 +905,7 @@ class DemoStudioApi implements StudioApi {
       id: project.id,
       name: name,
       path: project.path,
-      sshServerId: project.sshServerId,
+      sshAlias: project.sshAlias,
     );
   }
 
@@ -917,28 +923,27 @@ class DemoStudioApi implements StudioApi {
   @override
   Future<SshServer> saveSshServer(SaveSshServerCommand command) async {
     final server = SshServer(
-      id: command.id ?? 'demo-ssh-${_sshServers.length + 1}',
-      name: command.name,
-      host: command.host,
+      alias: command.alias,
+      hostName: command.hostName,
       port: command.port,
       username: command.username,
-      authKind: command.authKind,
       identityFile: command.identityFile,
+      managed: true,
     );
-    _sshServers.removeWhere((item) => item.id == server.id);
+    _sshServers.removeWhere((item) => item.alias == server.alias);
     _sshServers.add(server);
     return server;
   }
 
   @override
-  Future<void> deleteSshServer(String serverId) async {
-    _sshServers.removeWhere((server) => server.id == serverId);
+  Future<void> deleteSshServer(String alias) async {
+    _sshServers.removeWhere((server) => server.alias == alias);
   }
 
   @override
-  Future<SshConnectionView> testSshConnection(String serverId) async {
+  Future<SshConnectionView> testSshConnection(String alias) async {
     return SshConnectionView(
-      serverId: serverId,
+      alias: alias,
       state: 'ready',
       helperVersion: '0.1.0',
       architecture: 'aarch64',
@@ -946,12 +951,12 @@ class DemoStudioApi implements StudioApi {
   }
 
   @override
-  Future<SshConnectionView> reconnectSshServer(String serverId) =>
-      testSshConnection(serverId);
+  Future<SshConnectionView> reconnectSshServer(String alias) =>
+      testSshConnection(alias);
 
   @override
   Future<RemoteDirectoryListing> browseRemoteDirectories(
-    String serverId, {
+    String alias, {
     String? path,
   }) async {
     final current = path ?? '/home';
@@ -966,12 +971,12 @@ class DemoStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioProject> openRemoteProject(String serverId, String path) async {
+  Future<StudioProject> openRemoteProject(String alias, String path) async {
     final project = StudioProject(
       id: 'project-remote',
       name: path.split('/').last,
       path: path,
-      sshServerId: serverId,
+      sshAlias: alias,
     );
     final existingIndex = _openedRemoteProjects.indexWhere(
       (candidate) => candidate.id == project.id,
@@ -983,7 +988,7 @@ class DemoStudioApi implements StudioApi {
       final existing = _openedRemoteProjects[existingIndex];
       if (existing.name != project.name ||
           existing.path != project.path ||
-          existing.sshServerId != project.sshServerId) {
+          existing.sshAlias != project.sshAlias) {
         _openedRemoteProjects[existingIndex] = project;
         _projectDirectoryRevision += 1;
       }

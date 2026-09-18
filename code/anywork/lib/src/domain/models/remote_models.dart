@@ -1,50 +1,43 @@
-enum SshAuthKind { agentOrKey, password }
-
+/// `~/.ssh/config` 中的一个 Host 条目；别名即服务器身份。
 class SshServer {
   const SshServer({
-    required this.id,
-    required this.name,
-    required this.host,
+    required this.alias,
+    required this.hostName,
     required this.port,
     required this.username,
-    required this.authKind,
+    required this.managed,
     this.identityFile,
   });
 
-  final String id;
-  final String name;
-  final String host;
+  final String alias;
+  final String hostName;
   final int port;
   final String username;
-  final SshAuthKind authKind;
   final String? identityFile;
+
+  /// 是否为 anywork 管理块；用户手写条目只读，不可编辑或删除。
+  final bool managed;
 }
 
 class SaveSshServerCommand {
   const SaveSshServerCommand({
-    this.id,
-    required this.name,
-    required this.host,
+    required this.alias,
+    required this.hostName,
     required this.port,
     required this.username,
-    required this.authKind,
     this.identityFile,
-    this.password,
   });
 
-  final String? id;
-  final String name;
-  final String host;
+  final String alias;
+  final String hostName;
   final int port;
   final String username;
-  final SshAuthKind authKind;
   final String? identityFile;
-  final String? password;
 }
 
 class SshConnectionView {
   const SshConnectionView({
-    required this.serverId,
+    required this.alias,
     required this.state,
     this.helperVersion,
     this.architecture,
@@ -54,7 +47,7 @@ class SshConnectionView {
     this.errorMessage,
   });
 
-  final String serverId;
+  final String alias;
   final String state;
   final String? helperVersion;
   final String? architecture;
@@ -78,7 +71,6 @@ class RemoteDirectoryListing {
 
 class RemoteDirectoryEntry {
   const RemoteDirectoryEntry({required this.name, required this.path});
-
   final String name;
   final String path;
 }

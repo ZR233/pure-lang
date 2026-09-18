@@ -1,26 +1,27 @@
-//! OpenSSH argv、Askpass lease 与一次性命令边界。
+//! OpenSSH argv 与一次性命令边界。
+//!
+//! 连接参数（端口、用户、私钥、代理）由 `~/.ssh/config` 的 Host 别名解析，
+//! 这里只传别名本身；BatchMode 固定关闭交互认证与提示。
 
 use tokio::process::Command;
 
-use super::{SshAuth, SshServerProfile};
+use super::SshServerProfile;
 use crate::remote::RemoteClientError;
 use pl_remote_helper::process::configure_background_command;
 
 pub(super) struct PreparedSshCommand {
     pub(super) command: Command,
-    pub(super) askpass: Option<tempfile::TempDir>,
 }
 
 pub(super) fn validate_profile(profile: &SshServerProfile) -> Result<(), RemoteClientError> {
+    super::super::ssh_config::validate_alias(&profile.alias)?;
     for (field, value) in [
-        ("id", profile.id.as_str()),
-        ("name", profile.name.as_str()),
-        ("host", profile.host.as_str()),
+        ("hostName", profile.host_name.as_str()),
         ("username", profile.username.as_str()),
     ] {
         if value.trim().is_empty()
             || value.chars().any(char::is_control)
-            || (matches!(field, "host" | "username") && value.starts_with('-'))
+            || (matches!(field, "hostName" | "username") && value.starts_with('-'))
         {
             return Err(RemoteClientError::Protocol(format!(
                 "SSH server {field} is invalid"
@@ -37,7 +38,7 @@ pub(super) fn validate_profile(profile: &SshServerProfile) -> Result<(), RemoteC
 
 pub(super) async fn ssh_command(
     profile: &SshServerProfile,
-    password: Option<&str>,
+    ssh_config: &super::super::ssh_config::SshConfigFile,
 ) -> Result<PreparedSshCommand, RemoteClientError> {
     let mut command = Command::new("ssh");
     command
@@ -52,79 +53,15 @@ pub(super) async fn ssh_command(
             "ServerAliveInterval=15",
             "-o",
             "ServerAliveCountMax=3",
-        ])
-        .arg("-p")
-        .arg(profile.port.to_string())
-        .arg("-l")
-        .arg(&profile.username);
-    if let SshAuth::AgentOrKey {
-        identity_file: Some(identity_file),
-    } = &profile.auth
-    {
-        command.arg("-i").arg(identity_file);
+            "-o",
+            "BatchMode=yes",
+        ]);
+    if ssh_config.is_explicit() {
+        command.arg("-F").arg(ssh_config.path());
     }
-    let askpass = if let Some(password) = password {
-        let directory = tempfile::Builder::new()
-            .prefix("pl-ssh-askpass-")
-            .tempdir()
-            .map_err(|error| {
-                RemoteClientError::Protocol(format!(
-                    "failed to create SSH askpass directory: {error}"
-                ))
-            })?;
-        let path = directory.path().join("askpass");
-        write_askpass(&path).await?;
-        command
-            .arg("-o")
-            .arg("NumberOfPasswordPrompts=1")
-            .arg("-o")
-            .arg("PubkeyAuthentication=no")
-            .env("SSH_ASKPASS", &path)
-            .env("SSH_ASKPASS_REQUIRE", "force")
-            .env("DISPLAY", "anywork")
-            .env("PURE_SSH_PASSWORD", password);
-        Some(directory)
-    } else {
-        None
-    };
-    command.arg("--").arg(&profile.host);
+    command.arg("--").arg(&profile.alias);
     configure_background_command(&mut command);
-    Ok(PreparedSshCommand { command, askpass })
-}
-
-async fn write_askpass(path: &std::path::Path) -> Result<(), RemoteClientError> {
-    const SCRIPT: &str = "#!/bin/sh\nprintf '%s\\n' \"$PURE_SSH_PASSWORD\"\n";
-    #[cfg(unix)]
-    {
-        // A writable fd in this multithreaded process could be inherited by an unrelated
-        // concurrent fork, even with CLOEXEC. The isolated writer owns every writable fd
-        // and is reaped before the script can be executed. No secret is passed to it.
-        let mut writer = Command::new("/bin/sh");
-        writer
-            .args([
-                "-c",
-                "umask 077; printf '%s' \"$2\" > \"$1\" && chmod 700 \"$1\"",
-                "askpass-writer",
-            ])
-            .arg(path)
-            .arg(SCRIPT)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::piped());
-        configure_background_command(&mut writer);
-        let output = writer.output().await.map_err(|error| {
-            RemoteClientError::Protocol(format!("failed to write SSH askpass: {error}"))
-        })?;
-        if !output.status.success() {
-            return Err(RemoteClientError::Protocol(format!(
-                "SSH askpass writer failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            )));
-        }
-    }
-    #[cfg(not(unix))]
-    tokio::fs::write(path, SCRIPT).await?;
-    Ok(())
+    Ok(PreparedSshCommand { command })
 }
 
 /// OpenSSH invokes the account shell; all bootstrap syntax belongs to POSIX sh.
@@ -134,10 +71,10 @@ pub(super) fn posix_remote_command(script: &str) -> String {
 
 pub(super) async fn run_ssh_capture(
     profile: &SshServerProfile,
-    password: Option<&str>,
+    ssh_config: &super::super::ssh_config::SshConfigFile,
     remote_command: &str,
 ) -> Result<String, RemoteClientError> {
-    let mut prepared = ssh_command(profile, password).await?;
+    let mut prepared = ssh_command(profile, ssh_config).await?;
     prepared.command.arg(posix_remote_command(remote_command));
     let output = run_bounded_ssh(
         &mut prepared.command,
@@ -290,14 +227,11 @@ mod tests {
 
     fn profile() -> SshServerProfile {
         SshServerProfile {
-            id: "server-1".to_string(),
-            name: "Development".to_string(),
-            host: "example.test".to_string(),
+            alias: "server-1".to_string(),
+            host_name: "example.test".to_string(),
             port: 2222,
             username: "dev".to_string(),
-            auth: SshAuth::AgentOrKey {
-                identity_file: None,
-            },
+            identity_file: None,
         }
     }
 
@@ -313,9 +247,13 @@ mod tests {
         assert_eq!(output.stdout, b"a'b \"c\"");
     }
 
+    fn config(path: &str) -> crate::remote::ssh_config::SshConfigFile {
+        crate::remote::ssh_config::SshConfigFile::at(path)
+    }
+
     #[tokio::test]
-    async fn command_uses_stdio_only_transport() {
-        let prepared = ssh_command(&profile(), None)
+    async fn command_resolves_everything_through_the_host_alias() {
+        let prepared = ssh_command(&profile(), &config("/custom/ssh-config"))
             .await
             .expect("valid SSH profile");
         let args = prepared
@@ -335,30 +273,30 @@ mod tests {
                 "ServerAliveInterval=15",
                 "-o",
                 "ServerAliveCountMax=3",
-                "-p",
-                "2222",
-                "-l",
-                "dev",
+                "-o",
+                "BatchMode=yes",
+                "-F",
+                "/custom/ssh-config",
                 "--",
-                "example.test"
+                "server-1"
             ]
         );
     }
 
-    #[cfg(unix)]
     #[tokio::test]
-    async fn password_askpass_is_executable_after_preparation() {
-        let prepared = ssh_command(&profile(), Some("leased-secret"))
+    async fn user_default_config_does_not_pass_dash_f() {
+        let ssh_config =
+            crate::remote::ssh_config::SshConfigFile::user_default().expect("user ssh config path");
+        let prepared = ssh_command(&profile(), &ssh_config)
             .await
-            .expect("SSH command");
-        let askpass = prepared.askpass.expect("askpass lease");
-        let output = std::process::Command::new(askpass.path().join("askpass"))
-            .env("PURE_SSH_PASSWORD", "leased-secret")
-            .output()
-            .expect("execute askpass");
-
-        assert!(output.status.success());
-        assert_eq!(output.stdout, b"leased-secret\n");
-        assert!(output.stderr.is_empty());
+            .expect("valid SSH profile");
+        let args = prepared
+            .command
+            .as_std()
+            .get_args()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert!(!args.contains(&"-F".to_string()));
+        assert_eq!(args.last().map(String::as_str), Some("server-1"));
     }
 }

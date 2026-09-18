@@ -1,42 +1,32 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum SshAuthKindDto {
-    AgentOrKey,
-    Password,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveSshServerRequest {
-    pub id: Option<String>,
-    pub name: String,
-    pub host: String,
+    /// Host 别名即服务器身份；创建后不可改名，编辑时必须与现有别名一致。
+    pub alias: String,
+    pub host_name: String,
     pub port: u16,
     pub username: String,
-    pub auth_kind: SshAuthKindDto,
     pub identity_file: Option<String>,
-    /// 仅用于更新 core 内存 secret lease，不会进入返回 DTO 或 SQLite。
-    pub password: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SshServerDto {
-    pub id: String,
-    pub name: String,
-    pub host: String,
+    pub alias: String,
+    pub host_name: String,
     pub port: u16,
     pub username: String,
-    pub auth_kind: SshAuthKindDto,
     pub identity_file: Option<String>,
+    /// 是否为 anywork 管理块；手写条目只读，不可编辑或删除。
+    pub managed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SshConnectionSnapshotDto {
-    pub server_id: String,
+    pub alias: String,
     pub state: String,
     pub helper_version: Option<String>,
     pub architecture: Option<String>,

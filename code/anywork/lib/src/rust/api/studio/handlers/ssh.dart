@@ -10,7 +10,7 @@ import '../types/ssh.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `connection_dto`, `server_dto`
+// These functions are ignored because they are not marked as `pub`: `connection_dto`, `managed_server_dto`, `server_dto`
 
 Future<List<SshServerDto>> listSshServers() =>
     RustLib.instance.api.crateApiStudioHandlersSshListSshServers();
@@ -20,33 +20,31 @@ Future<SshServerDto> saveSshServer({required SaveSshServerRequest request}) =>
       request: request,
     );
 
-Future<void> deleteSshServer({required String serverId}) => RustLib.instance.api
-    .crateApiStudioHandlersSshDeleteSshServer(serverId: serverId);
+Future<void> deleteSshServer({required String alias}) =>
+    RustLib.instance.api.crateApiStudioHandlersSshDeleteSshServer(alias: alias);
 
-Future<SshConnectionSnapshotDto> testSshConnection({
-  required String serverId,
-}) => RustLib.instance.api.crateApiStudioHandlersSshTestSshConnection(
-  serverId: serverId,
-);
+Future<SshConnectionSnapshotDto> testSshConnection({required String alias}) =>
+    RustLib.instance.api.crateApiStudioHandlersSshTestSshConnection(
+      alias: alias,
+    );
 
-Future<SshConnectionSnapshotDto> reconnectSshServer({
-  required String serverId,
-}) => RustLib.instance.api.crateApiStudioHandlersSshReconnectSshServer(
-  serverId: serverId,
-);
+Future<SshConnectionSnapshotDto> reconnectSshServer({required String alias}) =>
+    RustLib.instance.api.crateApiStudioHandlersSshReconnectSshServer(
+      alias: alias,
+    );
 
 Future<RemoteDirectoryListingDto> browseRemoteDirectories({
-  required String serverId,
+  required String alias,
   String? path,
 }) => RustLib.instance.api.crateApiStudioHandlersSshBrowseRemoteDirectories(
-  serverId: serverId,
+  alias: alias,
   path: path,
 );
 
 Future<ProjectDto> openRemoteProject({
-  required String serverId,
+  required String alias,
   required String path,
 }) => RustLib.instance.api.crateApiStudioHandlersSshOpenRemoteProject(
-  serverId: serverId,
+  alias: alias,
   path: path,
 );

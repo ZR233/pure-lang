@@ -341,13 +341,13 @@ StudioState _stateWithPlannerModels() {
 StudioState _remoteProjectAdoptedState({
   String projectId = 'remote-project',
   String path = '/workspace',
-  String? serverId = 'ssh-arm',
+  String? sshAlias = 'ssh-arm',
 }) {
   final remote = StudioProject(
     id: projectId,
     name: 'project',
     path: path,
-    sshServerId: serverId,
+    sshAlias: sshAlias,
   );
   return _emptyState().copyWith(
     projectDirectory: ProjectDirectoryState.fromState(

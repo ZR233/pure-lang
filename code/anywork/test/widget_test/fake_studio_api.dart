@@ -42,14 +42,14 @@ class _FakeStudioApi implements StudioApi {
   String? openedProjectPath;
   List<SshServer> sshServers = const [];
   SaveSshServerCommand? savedSshServer;
-  String? deletedSshServerId;
-  String? testedSshServerId;
+  String? deletedSshServerAlias;
+  String? testedSshServerAlias;
   Object? testSshConnectionError;
-  String? reconnectedSshServerId;
+  String? reconnectedSshServerAlias;
   final List<String> reconnectSshCalls = [];
   Future<SshConnectionView> Function(String)? reconnectSshHandler;
-  ({String serverId, String? path})? browsedRemoteDirectory;
-  ({String serverId, String path})? openedRemoteProject;
+  ({String alias, String? path})? browsedRemoteDirectory;
+  ({String alias, String path})? openedRemoteProject;
   Object? browseRemoteError;
   Object? openRemoteProjectError;
   Map<String, RemoteDirectoryListing> remoteDirListings = {};
@@ -285,7 +285,7 @@ class _FakeStudioApi implements StudioApi {
       id: project.id,
       name: name,
       path: project.path,
-      sshServerId: project.sshServerId,
+      sshAlias: project.sshAlias,
     );
     selectProjectStates[projectId] = source.copyWith(
       projectDirectory: ProjectDirectoryState.fromState(
@@ -311,37 +311,36 @@ class _FakeStudioApi implements StudioApi {
   Future<SshServer> saveSshServer(SaveSshServerCommand command) async {
     savedSshServer = command;
     final server = SshServer(
-      id: command.id ?? 'ssh-created',
-      name: command.name,
-      host: command.host,
+      alias: command.alias,
+      hostName: command.hostName,
       port: command.port,
       username: command.username,
-      authKind: command.authKind,
       identityFile: command.identityFile,
+      managed: true,
     );
     sshServers = [
       for (final current in sshServers)
-        if (current.id != server.id) current,
+        if (current.alias != server.alias) current,
       server,
     ];
     return server;
   }
 
   @override
-  Future<void> deleteSshServer(String serverId) async {
-    deletedSshServerId = serverId;
+  Future<void> deleteSshServer(String alias) async {
+    deletedSshServerAlias = alias;
     sshServers = [
       for (final server in sshServers)
-        if (server.id != serverId) server,
+        if (server.alias != alias) server,
     ];
   }
 
   @override
-  Future<SshConnectionView> testSshConnection(String serverId) async {
-    testedSshServerId = serverId;
+  Future<SshConnectionView> testSshConnection(String alias) async {
+    testedSshServerAlias = alias;
     if (testSshConnectionError case final error?) throw error;
     return SshConnectionView(
-      serverId: serverId,
+      alias: alias,
       state: 'ready',
       helperVersion: '0.1.0',
       architecture: 'aarch64',
@@ -349,12 +348,12 @@ class _FakeStudioApi implements StudioApi {
   }
 
   @override
-  Future<SshConnectionView> reconnectSshServer(String serverId) async {
-    reconnectedSshServerId = serverId;
-    reconnectSshCalls.add(serverId);
-    if (reconnectSshHandler case final handler?) return handler(serverId);
+  Future<SshConnectionView> reconnectSshServer(String alias) async {
+    reconnectedSshServerAlias = alias;
+    reconnectSshCalls.add(alias);
+    if (reconnectSshHandler case final handler?) return handler(alias);
     return SshConnectionView(
-      serverId: serverId,
+      alias: alias,
       state: 'ready',
       helperVersion: '0.1.0',
       architecture: 'aarch64',
@@ -363,11 +362,11 @@ class _FakeStudioApi implements StudioApi {
 
   @override
   Future<RemoteDirectoryListing> browseRemoteDirectories(
-    String serverId, {
+    String alias, {
     String? path,
   }) async {
     browseRemoteCallCount += 1;
-    browsedRemoteDirectory = (serverId: serverId, path: path);
+    browsedRemoteDirectory = (alias: alias, path: path);
     if (browseRemoteError case final error?) throw error;
     final blocked = blockedBrowseRemote;
     if (blocked != null) await blocked.future;
@@ -383,9 +382,9 @@ class _FakeStudioApi implements StudioApi {
   }
 
   @override
-  Future<StudioProject> openRemoteProject(String serverId, String path) async {
+  Future<StudioProject> openRemoteProject(String alias, String path) async {
     openRemoteProjectCallCount += 1;
-    openedRemoteProject = (serverId: serverId, path: path);
+    openedRemoteProject = (alias: alias, path: path);
     if (openRemoteProjectError case final error?) throw error;
     final blocked = blockedOpenRemoteProject;
     if (blocked != null) await blocked.future;
@@ -393,7 +392,7 @@ class _FakeStudioApi implements StudioApi {
       id: 'remote-project',
       name: 'project',
       path: path,
-      sshServerId: serverId,
+      sshAlias: alias,
     );
   }
 

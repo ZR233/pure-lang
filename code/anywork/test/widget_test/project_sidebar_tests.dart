@@ -8,7 +8,7 @@ void registerProjectSidebarTests() {
       final api = _FakeStudioApi(_emptyState())
         ..testSshConnectionError = StateError('offline');
       api.selectProjectStates['remote-project'] = _remoteProjectAdoptedState(
-        serverId: 'ssh-created',
+        sshAlias: 'workstation',
       );
       await tester.pumpWidget(
         ProviderScope(
@@ -28,8 +28,8 @@ void registerProjectSidebarTests() {
       );
       await tester.pumpAndSettle();
       await tester.enterText(
-        find.byKey(StudioDriverKeys.sshServerNameInput),
-        'Workstation',
+        find.byKey(StudioDriverKeys.sshServerAliasInput),
+        'workstation',
       );
       await tester.enterText(
         find.byKey(StudioDriverKeys.sshServerHostInput),
@@ -53,7 +53,7 @@ void registerProjectSidebarTests() {
       api.testSshConnectionError = null;
       await tester.tap(find.byKey(StudioDriverKeys.sshServerSave));
       await tester.pumpAndSettle();
-      expect(api.savedSshServer!.id, 'ssh-created');
+      expect(api.savedSshServer!.alias, isNotEmpty);
       expect(api.sshServers, hasLength(1));
       await tester.enterText(
         find.byKey(const ValueKey('add-project-name')),
@@ -223,12 +223,11 @@ void registerProjectSidebarTests() {
         ..browseRemoteError = StateError('permission denied');
       api.sshServers = [
         const SshServer(
-          id: 'dev',
-          name: 'Dev host',
-          host: 'dev.test',
+          alias: 'dev',
+          hostName: 'dev.test',
           port: 22,
           username: 'rui',
-          authKind: SshAuthKind.agentOrKey,
+          managed: true,
         ),
       ];
       await tester.pumpWidget(
@@ -250,7 +249,7 @@ void registerProjectSidebarTests() {
       await tester.pump();
       await tester.tap(find.byKey(const ValueKey('add-project-continue')));
       await tester.pumpAndSettle();
-      expect(api.testedSshServerId, 'dev');
+      expect(api.testedSshServerAlias, 'dev');
       expect(find.textContaining('permission denied'), findsOneWidget);
       expect(api.openRemoteProjectCallCount, 0);
       api.browseRemoteError = null;

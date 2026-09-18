@@ -218,7 +218,8 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsSshTitle => '远程开发';
 
   @override
-  String get settingsSshSubtitle => '管理 SSH 工作区；连接与轻量远程助手由本机统一管理。';
+  String get settingsSshSubtitle =>
+      '服务器列表来自你的 ~/.ssh/config；anywork 只管理自己写入的标记块。';
 
   @override
   String get settingsSshAdd => '添加服务器';
@@ -259,7 +260,10 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get settingsSshName => '名称';
+  String get settingsSshAlias => '别名（Host）';
+
+  @override
+  String get settingsSshProjectName => '项目名称';
 
   @override
   String get settingsSshHost => '主机';
@@ -271,28 +275,25 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsSshPort => '端口';
 
   @override
-  String get settingsSshAuth => '认证方式';
-
-  @override
-  String get settingsSshAuthAgentOrKey => 'ssh-agent 或私钥';
-
-  @override
-  String get settingsSshAuthPassword => '密码';
-
-  @override
   String get settingsSshIdentityFile => '私钥文件（可选）';
 
   @override
-  String get settingsSshPassword => '密码';
+  String get settingsSshIdentityHelper => '留空时使用 ssh-agent。';
 
   @override
-  String get settingsSshPasswordLease => '密码仅在本次应用会话期间保存在本机内存中。';
+  String get settingsSshReadOnlyEntry => '手写条目——请直接编辑 ~/.ssh/config。';
 
   @override
   String get settingsSshSave => '保存';
 
   @override
-  String get settingsSshNameRequired => '请输入服务器名称';
+  String get settingsSshAliasRequired => '请输入别名';
+
+  @override
+  String get settingsSshAliasInvalid => '别名必须是单个词，不能含空格或通配字符';
+
+  @override
+  String get settingsSshAliasHelper => '写入 ~/.ssh/config 的 Host 条目；创建后不可改名。';
 
   @override
   String get settingsSshHostRequired => '请输入主机地址';
@@ -419,6 +420,18 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get sessionAllAgentsCostTooltip => '会话全部智能体费用';
+
+  @override
+  String get sessionMoreActionsTooltip => '更多操作';
+
+  @override
+  String get sessionOpenInVsCode => '在 VS Code 中打开';
+
+  @override
+  String get sessionVsCodeOpenFailed => '打开 VS Code 失败';
+
+  @override
+  String get sessionVsCodeServerMissing => '该项目的 SSH 别名已不在 ~/.ssh/config 中';
 
   @override
   String get statusCurrentAgentTokenSpeed => '当前智能体词元速度';

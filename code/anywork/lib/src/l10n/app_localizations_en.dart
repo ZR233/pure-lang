@@ -225,7 +225,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsSshSubtitle =>
-      'Manage SSH workspaces. Connections and helper lifecycle are owned by the local core.';
+      'Servers come from your ~/.ssh/config; anywork manages only its own marked blocks.';
 
   @override
   String get settingsSshAdd => 'Add server';
@@ -268,7 +268,10 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get settingsSshName => 'Name';
+  String get settingsSshAlias => 'Alias (Host)';
+
+  @override
+  String get settingsSshProjectName => 'Project name';
 
   @override
   String get settingsSshHost => 'Host';
@@ -280,29 +283,28 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsSshPort => 'Port';
 
   @override
-  String get settingsSshAuth => 'Authentication';
-
-  @override
-  String get settingsSshAuthAgentOrKey => 'SSH agent or key';
-
-  @override
-  String get settingsSshAuthPassword => 'Password';
-
-  @override
   String get settingsSshIdentityFile => 'Identity file (optional)';
 
   @override
-  String get settingsSshPassword => 'Password';
+  String get settingsSshIdentityHelper => 'Uses the ssh agent when left empty.';
 
   @override
-  String get settingsSshPasswordLease =>
-      'Kept in core memory for this app session only.';
+  String get settingsSshReadOnlyEntry =>
+      'Hand-written entry — edit it in ~/.ssh/config.';
 
   @override
   String get settingsSshSave => 'Save';
 
   @override
-  String get settingsSshNameRequired => 'Enter a server name';
+  String get settingsSshAliasRequired => 'Enter an alias';
+
+  @override
+  String get settingsSshAliasInvalid =>
+      'Alias must be a single token without spaces or wildcards';
+
+  @override
+  String get settingsSshAliasHelper =>
+      'Stored as a Host entry in ~/.ssh/config; cannot be renamed later.';
 
   @override
   String get settingsSshHostRequired => 'Enter a host address';
@@ -434,6 +436,19 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get sessionAllAgentsCostTooltip =>
       'Cost for all agents in this session';
+
+  @override
+  String get sessionMoreActionsTooltip => 'More actions';
+
+  @override
+  String get sessionOpenInVsCode => 'Open in VS Code';
+
+  @override
+  String get sessionVsCodeOpenFailed => 'Failed to open VS Code';
+
+  @override
+  String get sessionVsCodeServerMissing =>
+      'The SSH alias for this project is no longer in ~/.ssh/config';
 
   @override
   String get statusCurrentAgentTokenSpeed => 'Current agent token speed';

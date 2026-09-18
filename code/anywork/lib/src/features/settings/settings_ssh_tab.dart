@@ -73,9 +73,9 @@ class _SshTabState extends ConsumerState<SshTab> {
           for (final server in servers) ...[
             SshServerRow(
               server: server,
-              connection: _connections[server.id],
-              operation: _operations[server.id],
-              error: _serverErrors[server.id],
+              connection: _connections[server.alias],
+              operation: _operations[server.alias],
+              error: _serverErrors[server.alias],
               onTest: () => _test(server),
               onReconnect: () => _reconnect(server),
               onOpen: () => _openWorkspace(server),
@@ -98,36 +98,38 @@ class _SshTabState extends ConsumerState<SshTab> {
     Future<void> Function() action,
   ) async {
     // Reserve synchronously: callbacks from the current frame can still be invoked twice.
-    if (_operations.containsKey(server.id)) return;
+    if (_operations.containsKey(server.alias)) return;
     setState(() {
-      _operations[server.id] = operation;
-      _serverErrors.remove(server.id);
+      _operations[server.alias] = operation;
+      _serverErrors.remove(server.alias);
     });
     try {
       await action();
     } catch (error) {
-      if (mounted) setState(() => _serverErrors[server.id] = error.toString());
+      if (mounted) {
+        setState(() => _serverErrors[server.alias] = error.toString());
+      }
     } finally {
-      if (mounted) setState(() => _operations.remove(server.id));
+      if (mounted) setState(() => _operations.remove(server.alias));
     }
   }
 
   Future<void> _test(SshServer server) =>
       _runServerOperation(server, SshServerOperation.test, () async {
-        setState(() => _connections.remove(server.id));
+        setState(() => _connections.remove(server.alias));
         final snapshot = await ref
             .read(studioApiProvider)
-            .testSshConnection(server.id);
-        if (mounted) setState(() => _connections[server.id] = snapshot);
+            .testSshConnection(server.alias);
+        if (mounted) setState(() => _connections[server.alias] = snapshot);
       });
 
   Future<void> _reconnect(SshServer server) =>
       _runServerOperation(server, SshServerOperation.reconnect, () async {
-        setState(() => _connections.remove(server.id));
+        setState(() => _connections.remove(server.alias));
         final snapshot = await ref
             .read(studioApiProvider)
-            .reconnectSshServer(server.id);
-        if (mounted) setState(() => _connections[server.id] = snapshot);
+            .reconnectSshServer(server.alias);
+        if (mounted) setState(() => _connections[server.alias] = snapshot);
       });
 
   Future<void> _editServer([SshServer? server]) async {
@@ -140,7 +142,7 @@ class _SshTabState extends ConsumerState<SshTab> {
     try {
       await ref.read(studioApiProvider).saveSshServer(command);
       if (server != null && mounted) {
-        setState(() => _connections.remove(server.id));
+        setState(() => _connections.remove(server.alias));
       }
       await _reload();
     } catch (error) {
@@ -154,7 +156,7 @@ class _SshTabState extends ConsumerState<SshTab> {
           context: context,
           builder: (context) => AlertDialog(
             title: Text(context.l10n.settingsSshDeleteTitle),
-            content: Text(context.l10n.settingsSshDeleteBody(server.name)),
+            content: Text(context.l10n.settingsSshDeleteBody(server.alias)),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context, false),
@@ -168,8 +170,8 @@ class _SshTabState extends ConsumerState<SshTab> {
           ),
         );
         if (confirmed != true || !mounted) return;
-        await ref.read(studioApiProvider).deleteSshServer(server.id);
-        if (mounted) setState(() => _connections.remove(server.id));
+        await ref.read(studioApiProvider).deleteSshServer(server.alias);
+        if (mounted) setState(() => _connections.remove(server.alias));
         await _reload();
       });
 

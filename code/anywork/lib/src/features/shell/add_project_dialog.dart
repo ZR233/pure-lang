@@ -79,7 +79,7 @@ class _AddProjectDialogState extends ConsumerState<_AddProjectDialog> {
   Future<void> _connect(SshServer server) async {
     final connection = await ref
         .read(studioApiProvider)
-        .testSshConnection(server.id);
+        .testSshConnection(server.alias);
     if (connection.state != 'ready') {
       throw StateError(connection.errorMessage ?? connection.state);
     }
@@ -112,14 +112,11 @@ class _AddProjectDialogState extends ConsumerState<_AddProjectDialog> {
         .read(studioApiProvider)
         .saveSshServer(
           SaveSshServerCommand(
-            id: _saved?.id ?? command.id,
-            name: command.name,
-            host: command.host,
+            alias: _saved?.alias ?? command.alias,
+            hostName: command.hostName,
             port: command.port,
             username: command.username,
-            authKind: command.authKind,
             identityFile: command.identityFile,
-            password: command.password,
           ),
         );
     if (!mounted) return;
@@ -127,7 +124,7 @@ class _AddProjectDialogState extends ConsumerState<_AddProjectDialog> {
     _selected = saved;
     _servers = [
       for (final server in _servers ?? <SshServer>[])
-        if (server.id != saved.id) server,
+        if (server.alias != saved.alias) server,
       saved,
     ];
     try {
@@ -158,7 +155,7 @@ class _AddProjectDialogState extends ConsumerState<_AddProjectDialog> {
           Offstage(
             offstage: _step != _AddProjectStep.directory,
             child: RemoteDirectoryDialog(
-              key: ValueKey(_directoryServer!.id),
+              key: ValueKey(_directoryServer!.alias),
               server: _directoryServer!,
               active: _step == _AddProjectStep.directory,
               onBack: () => setState(() => _step = _AddProjectStep.connections),
@@ -228,20 +225,20 @@ class _AddProjectDialogState extends ConsumerState<_AddProjectDialog> {
                 if (_servers?.isEmpty ?? false)
                   Text(context.l10n.sidebarNoConnections),
                 for (final server in _servers ?? <SshServer>[])
-                  if ('${server.name} ${server.username}@${server.host}'
+                  if ('${server.alias} ${server.username}@${server.hostName}'
                       .toLowerCase()
                       .contains(_search.text.toLowerCase()))
                     ListTile(
-                      key: ValueKey('add-project-connection-${server.id}'),
-                      selected: _selected?.id == server.id,
+                      key: ValueKey('add-project-connection-${server.alias}'),
+                      selected: _selected?.alias == server.alias,
                       leading: Icon(
-                        _selected?.id == server.id
+                        _selected?.alias == server.alias
                             ? Icons.radio_button_checked
                             : Icons.radio_button_unchecked,
                       ),
-                      title: Text(server.name),
+                      title: Text(server.alias),
                       subtitle: Text(
-                        '${server.username}@${server.host}:${server.port}',
+                        '${server.username}@${server.hostName}:${server.port}',
                       ),
                       onTap: _busy
                           ? null
@@ -268,7 +265,7 @@ class _AddProjectDialogState extends ConsumerState<_AddProjectDialog> {
                     onPressed: _busy
                         ? null
                         : () => setState(() {
-                            if (_saved?.id != _selected?.id ||
+                            if (_saved?.alias != _selected?.alias ||
                                 !_configurationVisited) {
                               _formGeneration++;
                             }

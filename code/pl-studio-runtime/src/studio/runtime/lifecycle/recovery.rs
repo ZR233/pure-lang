@@ -47,7 +47,7 @@ impl StudioRuntime {
             .map(|lease| normalized_local_path(Path::new(&lease.path)))
             .collect::<BTreeSet<_>>();
         for project in self.agent_facility.product_events.project_snapshot().await {
-            if project.ssh_server_id.is_some() {
+            if project.ssh_alias.is_some() {
                 continue;
             }
             let project_path = PathBuf::from(&project.path);
@@ -196,7 +196,7 @@ impl StudioRuntime {
 
     fn worktree_manager(&self, lease: &WorktreeLease) -> WorktreeManager {
         let repository_root = PathBuf::from(&lease.repository_root);
-        let backend: Arc<dyn WorktreeBackend> = match lease.ssh_server_id.as_deref() {
+        let backend: Arc<dyn WorktreeBackend> = match lease.ssh_alias.as_deref() {
             Some(server_id) => Arc::new(RemoteWorktreeBackend::new(
                 self.ssh_manager.clone(),
                 server_id,
@@ -212,7 +212,7 @@ impl StudioRuntime {
         recovery_issues: &mut Vec<StudioRecoveryIssue>,
     ) -> Result<()> {
         for project in self.store.list_projects().await? {
-            if project.ssh_server_id.is_some() {
+            if project.ssh_alias.is_some() {
                 continue;
             }
             let Err(error) = resolve_workspace_root(Path::new(&project.path)) else {

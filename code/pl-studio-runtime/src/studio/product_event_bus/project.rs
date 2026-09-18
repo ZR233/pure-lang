@@ -163,7 +163,7 @@ mod tests {
             id: "project-only".to_string(),
             name: "Project only".to_string(),
             path: "/tmp/project-only".to_string(),
-            ssh_server_id: None,
+            ssh_alias: None,
             created_at: now,
             updated_at: now,
             last_opened_at: Some(now),

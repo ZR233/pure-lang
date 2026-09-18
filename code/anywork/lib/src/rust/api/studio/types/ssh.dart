@@ -7,7 +7,7 @@ import '../../../frb_generated.dart';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `eq`, `eq`, `eq`, `eq`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 
 class RemoteDirectoryEntryDto {
   final String name;
@@ -58,58 +58,43 @@ class RemoteDirectoryListingDto {
 }
 
 class SaveSshServerRequest {
-  final String? id;
-  final String name;
-  final String host;
+  /// Host 别名即服务器身份；创建后不可改名，编辑时必须与现有别名一致。
+  final String alias;
+  final String hostName;
   final int port;
   final String username;
-  final SshAuthKindDto authKind;
   final String? identityFile;
 
-  /// 仅用于更新 core 内存 secret lease，不会进入返回 DTO 或 SQLite。
-  final String? password;
-
   const SaveSshServerRequest({
-    this.id,
-    required this.name,
-    required this.host,
+    required this.alias,
+    required this.hostName,
     required this.port,
     required this.username,
-    required this.authKind,
     this.identityFile,
-    this.password,
   });
 
   @override
   int get hashCode =>
-      id.hashCode ^
-      name.hashCode ^
-      host.hashCode ^
+      alias.hashCode ^
+      hostName.hashCode ^
       port.hashCode ^
       username.hashCode ^
-      authKind.hashCode ^
-      identityFile.hashCode ^
-      password.hashCode;
+      identityFile.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is SaveSshServerRequest &&
           runtimeType == other.runtimeType &&
-          id == other.id &&
-          name == other.name &&
-          host == other.host &&
+          alias == other.alias &&
+          hostName == other.hostName &&
           port == other.port &&
           username == other.username &&
-          authKind == other.authKind &&
-          identityFile == other.identityFile &&
-          password == other.password;
+          identityFile == other.identityFile;
 }
 
-enum SshAuthKindDto { agentOrKey, password }
-
 class SshConnectionSnapshotDto {
-  final String serverId;
+  final String alias;
   final String state;
   final String? helperVersion;
   final String? architecture;
@@ -119,7 +104,7 @@ class SshConnectionSnapshotDto {
   final String? errorMessage;
 
   const SshConnectionSnapshotDto({
-    required this.serverId,
+    required this.alias,
     required this.state,
     this.helperVersion,
     this.architecture,
@@ -131,7 +116,7 @@ class SshConnectionSnapshotDto {
 
   @override
   int get hashCode =>
-      serverId.hashCode ^
+      alias.hashCode ^
       state.hashCode ^
       helperVersion.hashCode ^
       architecture.hashCode ^
@@ -145,7 +130,7 @@ class SshConnectionSnapshotDto {
       identical(this, other) ||
       other is SshConnectionSnapshotDto &&
           runtimeType == other.runtimeType &&
-          serverId == other.serverId &&
+          alias == other.alias &&
           state == other.state &&
           helperVersion == other.helperVersion &&
           architecture == other.architecture &&
@@ -156,44 +141,42 @@ class SshConnectionSnapshotDto {
 }
 
 class SshServerDto {
-  final String id;
-  final String name;
-  final String host;
+  final String alias;
+  final String hostName;
   final int port;
   final String username;
-  final SshAuthKindDto authKind;
   final String? identityFile;
 
+  /// 是否为 anywork 管理块；手写条目只读，不可编辑或删除。
+  final bool managed;
+
   const SshServerDto({
-    required this.id,
-    required this.name,
-    required this.host,
+    required this.alias,
+    required this.hostName,
     required this.port,
     required this.username,
-    required this.authKind,
     this.identityFile,
+    required this.managed,
   });
 
   @override
   int get hashCode =>
-      id.hashCode ^
-      name.hashCode ^
-      host.hashCode ^
+      alias.hashCode ^
+      hostName.hashCode ^
       port.hashCode ^
       username.hashCode ^
-      authKind.hashCode ^
-      identityFile.hashCode;
+      identityFile.hashCode ^
+      managed.hashCode;
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       other is SshServerDto &&
           runtimeType == other.runtimeType &&
-          id == other.id &&
-          name == other.name &&
-          host == other.host &&
+          alias == other.alias &&
+          hostName == other.hostName &&
           port == other.port &&
           username == other.username &&
-          authKind == other.authKind &&
-          identityFile == other.identityFile;
+          identityFile == other.identityFile &&
+          managed == other.managed;
 }

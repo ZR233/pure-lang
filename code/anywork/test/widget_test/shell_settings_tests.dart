@@ -1727,24 +1727,22 @@ void registerShellSettingsTests() {
     (tester) async {
       _configureSettingsTestView(tester);
       const first = SshServer(
-        id: 'first',
-        name: 'First',
-        host: 'host-one',
+        alias: 'first',
+        hostName: 'host-one',
         port: 22,
         username: 'runner',
-        authKind: SshAuthKind.agentOrKey,
+        managed: true,
       );
       const second = SshServer(
-        id: 'second',
-        name: 'Second',
-        host: 'host-two',
+        alias: 'second',
+        hostName: 'host-two',
         port: 22,
         username: 'runner',
-        authKind: SshAuthKind.agentOrKey,
+        managed: true,
       );
       final gates = <String, Completer<SshConnectionView>>{
-        first.id: Completer<SshConnectionView>(),
-        second.id: Completer<SshConnectionView>(),
+        first.alias: Completer<SshConnectionView>(),
+        second.alias: Completer<SshConnectionView>(),
       };
       final api = _FakeStudioApi(_emptyState())
         ..sshServers = const [first, second]
@@ -1754,41 +1752,43 @@ void registerShellSettingsTests() {
       await tester.pumpAndSettle();
 
       final firstButton = tester.widget<TextButton>(
-        find.byKey(StudioDriverKeys.sshReconnect(first.id)),
+        find.byKey(StudioDriverKeys.sshReconnect(first.alias)),
       );
       final firstTest = tester.widget<TextButton>(
-        find.byKey(StudioDriverKeys.sshTest(first.id)),
+        find.byKey(StudioDriverKeys.sshTest(first.alias)),
       );
       firstButton.onPressed!();
       firstButton.onPressed!();
       firstTest.onPressed!();
       await tester.pump();
-      expect(api.reconnectSshCalls, [first.id]);
-      expect(api.testedSshServerId, isNull);
+      expect(api.reconnectSshCalls, [first.alias]);
+      expect(api.testedSshServerAlias, isNull);
       expect(
         tester
             .widget<TextButton>(
-              find.byKey(StudioDriverKeys.sshReconnect(first.id)),
+              find.byKey(StudioDriverKeys.sshReconnect(first.alias)),
             )
             .onPressed,
         isNull,
       );
       expect(
         tester
-            .widget<TextButton>(find.byKey(StudioDriverKeys.sshOpen(first.id)))
+            .widget<TextButton>(
+              find.byKey(StudioDriverKeys.sshOpen(first.alias)),
+            )
             .onPressed,
         isNull,
       );
       expect(
         find.descendant(
-          of: find.byKey(StudioDriverKeys.sshReconnect(first.id)),
+          of: find.byKey(StudioDriverKeys.sshReconnect(first.alias)),
           matching: find.byType(CircularProgressIndicator),
         ),
         findsOneWidget,
       );
       expect(
         find.descendant(
-          of: find.byKey(StudioDriverKeys.sshTest(first.id)),
+          of: find.byKey(StudioDriverKeys.sshTest(first.alias)),
           matching: find.byType(CircularProgressIndicator),
         ),
         findsNothing,
@@ -1796,14 +1796,14 @@ void registerShellSettingsTests() {
 
       tester
           .widget<TextButton>(
-            find.byKey(StudioDriverKeys.sshReconnect(second.id)),
+            find.byKey(StudioDriverKeys.sshReconnect(second.alias)),
           )
           .onPressed!();
       await tester.pump();
-      expect(api.reconnectSshCalls, [first.id, second.id]);
-      gates[first.id]!.complete(
+      expect(api.reconnectSshCalls, [first.alias, second.alias]);
+      gates[first.alias]!.complete(
         const SshConnectionView(
-          serverId: 'first',
+          alias: 'first',
           state: 'ready',
           helperVersion: 'new-helper',
           architecture: 'x86_64',
@@ -1814,19 +1814,19 @@ void registerShellSettingsTests() {
       expect(
         tester
             .widget<TextButton>(
-              find.byKey(StudioDriverKeys.sshReconnect(second.id)),
+              find.byKey(StudioDriverKeys.sshReconnect(second.alias)),
             )
             .onPressed,
         isNull,
       );
 
-      gates[first.id] = Completer<SshConnectionView>();
+      gates[first.alias] = Completer<SshConnectionView>();
       tester
           .widget<TextButton>(
-            find.byKey(StudioDriverKeys.sshReconnect(first.id)),
+            find.byKey(StudioDriverKeys.sshReconnect(first.alias)),
           )
           .onPressed!();
-      gates[first.id]!.completeError(
+      gates[first.alias]!.completeError(
         StateError('environment initialization failed'),
       );
       await tester.pump();
@@ -1838,29 +1838,29 @@ void registerShellSettingsTests() {
       expect(
         tester
             .widget<TextButton>(
-              find.byKey(StudioDriverKeys.sshReconnect(first.id)),
+              find.byKey(StudioDriverKeys.sshReconnect(first.alias)),
             )
             .onPressed,
         isNotNull,
       );
 
-      gates[first.id] = Completer<SshConnectionView>();
+      gates[first.alias] = Completer<SshConnectionView>();
       tester
           .widget<TextButton>(
-            find.byKey(StudioDriverKeys.sshReconnect(first.id)),
+            find.byKey(StudioDriverKeys.sshReconnect(first.alias)),
           )
           .onPressed!();
-      gates[first.id]!.complete(
+      gates[first.alias]!.complete(
         const SshConnectionView(
-          serverId: 'first',
+          alias: 'first',
           state: 'ready',
           helperVersion: 'refreshed',
           architecture: 'x86_64',
         ),
       );
-      gates[second.id]!.complete(
+      gates[second.alias]!.complete(
         const SshConnectionView(
-          serverId: 'second',
+          alias: 'second',
           state: 'ready',
           helperVersion: 'second-helper',
           architecture: 'aarch64',
@@ -1881,12 +1881,11 @@ void registerShellSettingsTests() {
   ) async {
     _configureSettingsTestView(tester);
     const server = SshServer(
-      id: 'ssh-arm',
-      name: 'ARM dev',
-      host: '192.168.100.12',
+      alias: 'ssh-arm',
+      hostName: '192.168.100.12',
       port: 22,
       username: 'root',
-      authKind: SshAuthKind.agentOrKey,
+      managed: true,
     );
     final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
     api.selectProjectStates['remote-project'] = _remoteProjectAdoptedState();
@@ -1896,26 +1895,26 @@ void registerShellSettingsTests() {
     await tester.pumpAndSettle();
     expect(find.text('root@192.168.100.12:22'), findsOneWidget);
     expect(
-      find.byKey(StudioDriverKeys.sshReconnect(server.id)),
+      find.byKey(StudioDriverKeys.sshReconnect(server.alias)),
       findsOneWidget,
     );
 
-    await tester.tap(find.byKey(StudioDriverKeys.sshTest(server.id)));
+    await tester.tap(find.byKey(StudioDriverKeys.sshTest(server.alias)));
     await tester.pumpAndSettle();
-    expect(api.testedSshServerId, server.id);
+    expect(api.testedSshServerAlias, server.alias);
     expect(find.text('aarch64 · helper 0.1.0'), findsOneWidget);
 
-    await tester.tap(find.byKey(StudioDriverKeys.sshReconnect(server.id)));
+    await tester.tap(find.byKey(StudioDriverKeys.sshReconnect(server.alias)));
     await tester.pumpAndSettle();
-    expect(api.reconnectedSshServerId, server.id);
+    expect(api.reconnectedSshServerAlias, server.alias);
 
-    await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.id)));
+    await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.alias)));
     await tester.pumpAndSettle();
     expect(find.byKey(StudioDriverKeys.sshDirectoryDialog), findsOneWidget);
-    expect(api.browsedRemoteDirectory?.serverId, server.id);
+    expect(api.browsedRemoteDirectory?.alias, server.alias);
     await tester.tap(find.text('Open this directory'));
     await tester.pumpAndSettle();
-    expect(api.openedRemoteProject, (serverId: server.id, path: '/workspace'));
+    expect(api.openedRemoteProject, (alias: server.alias, path: '/workspace'));
   });
 
   testWidgets('zh SSH ready row localizes the remote helper label', (
@@ -1923,12 +1922,11 @@ void registerShellSettingsTests() {
   ) async {
     _configureSettingsTestView(tester);
     const server = SshServer(
-      id: 'ssh-arm',
-      name: 'ARM dev',
-      host: '192.168.100.12',
+      alias: 'ssh-arm',
+      hostName: '192.168.100.12',
       port: 22,
       username: 'root',
-      authKind: SshAuthKind.agentOrKey,
+      managed: true,
     );
     final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
     await _pumpSettingsPage(
@@ -1939,7 +1937,7 @@ void registerShellSettingsTests() {
 
     await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(StudioDriverKeys.sshTest(server.id)));
+    await tester.tap(find.byKey(StudioDriverKeys.sshTest(server.alias)));
     await tester.pumpAndSettle();
 
     // helper 固定词本地化为“远程助手”，architecture/helperVersion 保持原值。
@@ -1965,10 +1963,10 @@ void registerShellSettingsTests() {
       find.byKey(StudioDriverKeys.sshServerValidationError),
       findsOneWidget,
     );
-    expect(find.text('Enter a server name'), findsOneWidget);
+    expect(find.text('Enter an alias'), findsOneWidget);
 
     await tester.enterText(
-      find.byKey(StudioDriverKeys.sshServerNameInput),
+      find.byKey(StudioDriverKeys.sshServerAliasInput),
       'qcl-server',
     );
     await tester.enterText(
@@ -1986,8 +1984,8 @@ void registerShellSettingsTests() {
     await tester.tap(find.byKey(StudioDriverKeys.sshServerSave));
     await tester.pumpAndSettle();
 
-    expect(api.savedSshServer?.name, 'qcl-server');
-    expect(api.savedSshServer?.host, '10.3.10.9');
+    expect(api.savedSshServer?.alias, 'qcl-server');
+    expect(api.savedSshServer?.hostName, '10.3.10.9');
     expect(api.savedSshServer?.username, 'zhourui');
     expect(api.savedSshServer?.port, 22);
     expect(find.text('zhourui@10.3.10.9:22'), findsOneWidget);
@@ -1998,12 +1996,11 @@ void registerShellSettingsTests() {
     (tester) async {
       _configureSettingsTestView(tester);
       const server = SshServer(
-        id: 'ssh-arm',
-        name: 'ARM dev',
-        host: '192.168.100.12',
+        alias: 'ssh-arm',
+        hostName: '192.168.100.12',
         port: 22,
         username: 'root',
-        authKind: SshAuthKind.agentOrKey,
+        managed: true,
       );
       final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
       api.selectProjectStates['remote-project'] = _remoteProjectAdoptedState(
@@ -2013,7 +2010,7 @@ void registerShellSettingsTests() {
 
       await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.id)));
+      await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.alias)));
       await tester.pumpAndSettle();
 
       expect(
@@ -2030,7 +2027,7 @@ void registerShellSettingsTests() {
       await tester.pumpAndSettle();
 
       expect(api.browsedRemoteDirectory, (
-        serverId: server.id,
+        alias: server.alias,
         path: '/workspace/project',
       ));
       expect(
@@ -2041,7 +2038,7 @@ void registerShellSettingsTests() {
       await tester.tap(find.text('Open this directory'));
       await tester.pumpAndSettle();
       expect(api.openedRemoteProject, (
-        serverId: server.id,
+        alias: server.alias,
         path: '/workspace/project',
       ));
     },
@@ -2052,19 +2049,18 @@ void registerShellSettingsTests() {
   ) async {
     _configureSettingsTestView(tester);
     const server = SshServer(
-      id: 'ssh-arm',
-      name: 'ARM dev',
-      host: '192.168.100.12',
+      alias: 'ssh-arm',
+      hostName: '192.168.100.12',
       port: 22,
       username: 'root',
-      authKind: SshAuthKind.agentOrKey,
+      managed: true,
     );
     final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
     await _pumpSettingsPage(tester, api);
 
     await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.id)));
+    await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.alias)));
     await tester.pumpAndSettle();
 
     await tester.enterText(
@@ -2081,7 +2077,7 @@ void registerShellSettingsTests() {
     await tester.pumpAndSettle();
 
     expect(api.browsedRemoteDirectory, (
-      serverId: server.id,
+      alias: server.alias,
       path: '/workspace/project',
     ));
   });
@@ -2091,19 +2087,18 @@ void registerShellSettingsTests() {
     (tester) async {
       _configureSettingsTestView(tester);
       const server = SshServer(
-        id: 'ssh-arm',
-        name: 'ARM dev',
-        host: '192.168.100.12',
+        alias: 'ssh-arm',
+        hostName: '192.168.100.12',
         port: 22,
         username: 'root',
-        authKind: SshAuthKind.agentOrKey,
+        managed: true,
       );
       final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
       await _pumpSettingsPage(tester, api);
 
       await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.id)));
+      await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.alias)));
       await tester.pumpAndSettle();
 
       await tester.enterText(
@@ -2114,7 +2109,7 @@ void registerShellSettingsTests() {
       await tester.pump();
       expect(find.byKey(StudioDriverKeys.sshDirectoryError), findsOneWidget);
       expect(find.text('Enter a remote directory path'), findsOneWidget);
-      expect(api.browsedRemoteDirectory, (serverId: server.id, path: null));
+      expect(api.browsedRemoteDirectory, (alias: server.alias, path: null));
 
       await tester.enterText(
         find.byKey(StudioDriverKeys.sshDirectoryPathInput),
@@ -2126,7 +2121,7 @@ void registerShellSettingsTests() {
         find.text('Path must be an absolute POSIX path starting with /'),
         findsOneWidget,
       );
-      expect(api.browsedRemoteDirectory, (serverId: server.id, path: null));
+      expect(api.browsedRemoteDirectory, (alias: server.alias, path: null));
 
       for (final invalid in const [
         '~',
@@ -2153,19 +2148,18 @@ void registerShellSettingsTests() {
     (tester) async {
       _configureSettingsTestView(tester);
       const server = SshServer(
-        id: 'ssh-arm',
-        name: 'ARM dev',
-        host: '192.168.100.12',
+        alias: 'ssh-arm',
+        hostName: '192.168.100.12',
         port: 22,
         username: 'root',
-        authKind: SshAuthKind.agentOrKey,
+        managed: true,
       );
       final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
       await _pumpSettingsPage(tester, api);
 
       await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.id)));
+      await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.alias)));
       await tester.pumpAndSettle();
 
       final openButton = find.byKey(StudioDriverKeys.sshOpenCurrentDirectory);
@@ -2185,12 +2179,11 @@ void registerShellSettingsTests() {
     (tester) async {
       _configureSettingsTestView(tester);
       const server = SshServer(
-        id: 'ssh-arm',
-        name: 'ARM dev',
-        host: '192.168.100.12',
+        alias: 'ssh-arm',
+        hostName: '192.168.100.12',
         port: 22,
         username: 'root',
-        authKind: SshAuthKind.agentOrKey,
+        managed: true,
       );
       final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
       api.remoteDirListings['/workspace'] = const RemoteDirectoryListing(
@@ -2212,7 +2205,7 @@ void registerShellSettingsTests() {
 
       await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.id)));
+      await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.alias)));
       await tester.pumpAndSettle();
 
       expect(
@@ -2225,7 +2218,7 @@ void registerShellSettingsTests() {
       );
       await tester.pumpAndSettle();
       expect(api.browsedRemoteDirectory, (
-        serverId: server.id,
+        alias: server.alias,
         path: '/workspace/project',
       ));
       expect(
@@ -2236,7 +2229,7 @@ void registerShellSettingsTests() {
       await tester.tap(find.byKey(StudioDriverKeys.sshDirectoryUp));
       await tester.pumpAndSettle();
       expect(api.browsedRemoteDirectory, (
-        serverId: server.id,
+        alias: server.alias,
         path: '/workspace',
       ));
       expect(
@@ -2251,12 +2244,11 @@ void registerShellSettingsTests() {
   ) async {
     _configureSettingsTestView(tester);
     const server = SshServer(
-      id: 'ssh-arm',
-      name: 'ARM dev',
-      host: '192.168.100.12',
+      alias: 'ssh-arm',
+      hostName: '192.168.100.12',
       port: 22,
       username: 'root',
-      authKind: SshAuthKind.agentOrKey,
+      managed: true,
     );
     final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
     api.remoteDirListings['/workspace'] = const RemoteDirectoryListing(
@@ -2268,7 +2260,7 @@ void registerShellSettingsTests() {
 
     await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.id)));
+    await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.alias)));
     await tester.pumpAndSettle();
 
     expect(find.byKey(StudioDriverKeys.sshDirectoryEmpty), findsOneWidget);
@@ -2288,12 +2280,11 @@ void registerShellSettingsTests() {
   ) async {
     _configureSettingsTestView(tester);
     const server = SshServer(
-      id: 'ssh-arm',
-      name: 'ARM dev',
-      host: '192.168.100.12',
+      alias: 'ssh-arm',
+      hostName: '192.168.100.12',
       port: 22,
       username: 'root',
-      authKind: SshAuthKind.agentOrKey,
+      managed: true,
     );
     final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
     api.browseRemoteError = StateError('unreachable');
@@ -2301,7 +2292,7 @@ void registerShellSettingsTests() {
 
     await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.id)));
+    await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.alias)));
     await tester.pumpAndSettle();
 
     expect(find.byKey(StudioDriverKeys.sshDirectoryError), findsOneWidget);
@@ -2318,7 +2309,7 @@ void registerShellSettingsTests() {
     expect(find.byKey(StudioDriverKeys.sshDirectoryError), findsNothing);
     expect(find.byKey(StudioDriverKeys.sshDirectoryList), findsOneWidget);
     expect(api.browsedRemoteDirectory, (
-      serverId: server.id,
+      alias: server.alias,
       path: '/workspace',
     ));
 
@@ -2356,12 +2347,11 @@ void registerShellSettingsTests() {
   ) async {
     _configureSettingsTestView(tester);
     const server = SshServer(
-      id: 'ssh-arm',
-      name: 'ARM dev',
-      host: '192.168.100.12',
+      alias: 'ssh-arm',
+      hostName: '192.168.100.12',
       port: 22,
       username: 'root',
-      authKind: SshAuthKind.agentOrKey,
+      managed: true,
     );
     final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
     api.openRemoteProjectError = StateError('remote open failed');
@@ -2369,7 +2359,7 @@ void registerShellSettingsTests() {
 
     await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.id)));
+    await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.alias)));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Open this directory'));
@@ -2377,7 +2367,7 @@ void registerShellSettingsTests() {
 
     expect(find.byKey(StudioDriverKeys.sshDirectoryDialog), findsOneWidget);
     expect(find.byKey(StudioDriverKeys.sshDirectoryError), findsOneWidget);
-    expect(api.openedRemoteProject, (serverId: server.id, path: '/workspace'));
+    expect(api.openedRemoteProject, (alias: server.alias, path: '/workspace'));
     final pathController = tester
         .widget<TextField>(find.byKey(StudioDriverKeys.sshDirectoryPathInput))
         .controller;
@@ -4845,12 +4835,11 @@ void registerShellSettingsTests() {
     (tester) async {
       _configureSettingsTestView(tester);
       const server = SshServer(
-        id: 'ssh-arm',
-        name: 'ARM dev',
-        host: '192.168.100.12',
+        alias: 'ssh-arm',
+        hostName: '192.168.100.12',
         port: 22,
         username: 'root',
-        authKind: SshAuthKind.agentOrKey,
+        managed: true,
       );
       final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
       api.remoteDirListings['/workspace'] = const RemoteDirectoryListing(
@@ -4863,7 +4852,7 @@ void registerShellSettingsTests() {
       await _pumpSettingsPage(tester, api);
       await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.id)));
+      await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.alias)));
       await tester.pumpAndSettle();
       expect(api.browseRemoteCallCount, 1);
 
@@ -4896,12 +4885,11 @@ void registerShellSettingsTests() {
     (tester) async {
       _configureSettingsTestView(tester);
       const server = SshServer(
-        id: 'ssh-arm',
-        name: 'ARM dev',
-        host: '192.168.100.12',
+        alias: 'ssh-arm',
+        hostName: '192.168.100.12',
         port: 22,
         username: 'root',
-        authKind: SshAuthKind.agentOrKey,
+        managed: true,
       );
       final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
       api.selectProjectStates['remote-project'] = _remoteProjectAdoptedState(
@@ -4917,7 +4905,7 @@ void registerShellSettingsTests() {
       await _pumpSettingsPage(tester, api);
       await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.id)));
+      await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.alias)));
       await tester.pumpAndSettle();
 
       await tester.enterText(
@@ -4934,7 +4922,7 @@ void registerShellSettingsTests() {
       await tester.tap(find.text('Open this directory'));
       await tester.pumpAndSettle();
       expect(api.openedRemoteProject, (
-        serverId: server.id,
+        alias: server.alias,
         path: '/workspace/project',
       ));
     },
@@ -4945,19 +4933,18 @@ void registerShellSettingsTests() {
     (tester) async {
       _configureSettingsTestView(tester);
       const server = SshServer(
-        id: 'ssh-arm',
-        name: 'ARM dev',
-        host: '192.168.100.12',
+        alias: 'ssh-arm',
+        hostName: '192.168.100.12',
         port: 22,
         username: 'root',
-        authKind: SshAuthKind.agentOrKey,
+        managed: true,
       );
       // 没有让 canonical 采用远端项目：controller 静默返回 false。
       final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
       await _pumpSettingsPage(tester, api);
       await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.id)));
+      await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.alias)));
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Open this directory'));
@@ -4980,19 +4967,18 @@ void registerShellSettingsTests() {
     (tester) async {
       _configureSettingsTestView(tester);
       const server = SshServer(
-        id: 'ssh-arm',
-        name: 'ARM dev',
-        host: '192.168.100.12',
+        alias: 'ssh-arm',
+        hostName: '192.168.100.12',
         port: 22,
         username: 'root',
-        authKind: SshAuthKind.agentOrKey,
+        managed: true,
       );
       final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
       api.selectProjectStates['remote-project'] = _remoteProjectAdoptedState();
       await _pumpSettingsPage(tester, api);
       await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.id)));
+      await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.alias)));
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Open this directory'));
@@ -5001,7 +4987,7 @@ void registerShellSettingsTests() {
       expect(find.byKey(StudioDriverKeys.sshDirectoryDialog), findsNothing);
       expect(api.openRemoteProjectCallCount, 1);
       expect(api.openedRemoteProject, (
-        serverId: server.id,
+        alias: server.alias,
         path: '/workspace',
       ));
     },
@@ -5012,12 +4998,11 @@ void registerShellSettingsTests() {
   ) async {
     _configureSettingsTestView(tester);
     const server = SshServer(
-      id: 'ssh-arm',
-      name: 'ARM dev',
-      host: '192.168.100.12',
+      alias: 'ssh-arm',
+      hostName: '192.168.100.12',
       port: 22,
       username: 'root',
-      authKind: SshAuthKind.agentOrKey,
+      managed: true,
     );
     final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
     api.selectProjectStates['remote-project'] = _remoteProjectAdoptedState();
@@ -5026,7 +5011,7 @@ void registerShellSettingsTests() {
     await _pumpSettingsPage(tester, api);
     await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.id)));
+    await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.alias)));
     await tester.pumpAndSettle();
 
     // 正常态 Cancel 可关闭。
@@ -5175,18 +5160,17 @@ void registerShellSettingsTests() {
     (tester) async {
       _configureSettingsTestView(tester);
       const server = SshServer(
-        id: 'ssh-arm',
-        name: 'ARM dev',
-        host: '192.168.100.12',
+        alias: 'ssh-arm',
+        hostName: '192.168.100.12',
         port: 22,
         username: 'root',
-        authKind: SshAuthKind.agentOrKey,
+        managed: true,
       );
       final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
       await _pumpSettingsPage(tester, api);
       await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.id)));
+      await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.alias)));
       await tester.pumpAndSettle();
 
       expect(find.byTooltip('Parent directory'), findsOneWidget);
@@ -5203,12 +5187,11 @@ void registerShellSettingsTests() {
       addTearDown(tester.view.resetDevicePixelRatio);
       addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
       const server = SshServer(
-        id: 'ssh-arm',
-        name: 'ARM dev',
-        host: '192.168.100.12',
+        alias: 'ssh-arm',
+        hostName: '192.168.100.12',
         port: 22,
         username: 'root',
-        authKind: SshAuthKind.agentOrKey,
+        managed: true,
       );
       final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
       api.selectProjectStates['remote-project'] = _remoteProjectAdoptedState(
@@ -5230,7 +5213,7 @@ void registerShellSettingsTests() {
             ],
           );
       await _pumpSshTab(tester, api);
-      final open = find.byKey(StudioDriverKeys.sshOpen(server.id));
+      final open = find.byKey(StudioDriverKeys.sshOpen(server.alias));
       await _dragUntilBuilt(tester, open);
       await tester.tap(open);
       await tester.pumpAndSettle();
@@ -5277,7 +5260,7 @@ void registerShellSettingsTests() {
         findsOneWidget,
       );
       expect(api.browsedRemoteDirectory, (
-        serverId: server.id,
+        alias: server.alias,
         path: '/workspace/project',
       ));
 
@@ -5310,7 +5293,7 @@ void registerShellSettingsTests() {
       expect(api.openRemoteProjectCallCount, 1);
       expect(find.byKey(StudioDriverKeys.sshDirectoryDialog), findsNothing);
       expect(api.openedRemoteProject, (
-        serverId: server.id,
+        alias: server.alias,
         path: '/workspace/project',
       ));
       expect(tester.takeException(), isNull);
@@ -5438,12 +5421,11 @@ Future<_FakeStudioApi> _openSshDirectoryDialog(
   bool adoptProject = false,
 }) async {
   const server = SshServer(
-    id: 'ssh-arm',
-    name: 'ARM dev',
-    host: '192.168.100.12',
+    alias: 'ssh-arm',
+    hostName: '192.168.100.12',
     port: 22,
     username: 'root',
-    authKind: SshAuthKind.agentOrKey,
+    managed: true,
   );
   final api = _FakeStudioApi(_emptyState())..sshServers = const [server];
   if (adoptProject) {
@@ -5452,7 +5434,7 @@ Future<_FakeStudioApi> _openSshDirectoryDialog(
   await _pumpSettingsPage(tester, api);
   await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
   await tester.pumpAndSettle();
-  await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.id)));
+  await tester.tap(find.byKey(StudioDriverKeys.sshOpen(server.alias)));
   await tester.pumpAndSettle();
   return api;
 }

@@ -296,16 +296,16 @@ void main() {
 
     await tester.tap(find.byKey(StudioDriverKeys.settingsTab('ssh')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(StudioDriverKeys.sshTest('demo-ssh')));
+    await tester.tap(find.byKey(StudioDriverKeys.sshTest('arm-dev')));
     await tester.pumpAndSettle();
-    expect(api.testedServerId, 'demo-ssh');
-    await tester.tap(find.byKey(StudioDriverKeys.sshReconnect('demo-ssh')));
+    expect(api.testedServerAlias, 'arm-dev');
+    await tester.tap(find.byKey(StudioDriverKeys.sshReconnect('arm-dev')));
     await tester.pumpAndSettle();
-    expect(api.reconnectedServerId, 'demo-ssh');
-    await tester.tap(find.byKey(StudioDriverKeys.sshOpen('demo-ssh')));
+    expect(api.reconnectedServerAlias, 'arm-dev');
+    await tester.tap(find.byKey(StudioDriverKeys.sshOpen('arm-dev')));
     await tester.pumpAndSettle();
     expect(find.byKey(StudioDriverKeys.sshDirectoryDialog), findsOneWidget);
-    expect(api.browsedServerId, 'demo-ssh');
+    expect(api.browsedServerAlias, 'arm-dev');
     await tester.enterText(
       find.byKey(StudioDriverKeys.sshDirectoryPathInput),
       '/home/projects',
@@ -318,7 +318,7 @@ void main() {
     );
     await tester.tap(find.byKey(StudioDriverKeys.sshOpenCurrentDirectory));
     await tester.pumpAndSettle();
-    expect(api.openedRemoteProject, ('demo-ssh', '/home/projects'));
+    expect(api.openedRemoteProject, ('arm-dev', '/home/projects'));
     expect(api.activatedProjectId, 'project-remote');
     // 打开成功且 canonical snapshot 采用远端项目后，目录对话框关闭。
     expect(find.byKey(StudioDriverKeys.sshDirectoryDialog), findsNothing);
@@ -433,37 +433,37 @@ void main() {
 }
 
 class _RemoteDriverDemoStudioApi extends DriverDemoStudioApi {
-  String? testedServerId;
-  String? reconnectedServerId;
-  String? browsedServerId;
+  String? testedServerAlias;
+  String? reconnectedServerAlias;
+  String? browsedServerAlias;
   (String, String)? openedRemoteProject;
   String? activatedProjectId;
 
   @override
-  Future<SshConnectionView> testSshConnection(String serverId) async {
-    testedServerId = serverId;
-    return super.testSshConnection(serverId);
+  Future<SshConnectionView> testSshConnection(String alias) async {
+    testedServerAlias = alias;
+    return super.testSshConnection(alias);
   }
 
   @override
-  Future<SshConnectionView> reconnectSshServer(String serverId) async {
-    reconnectedServerId = serverId;
-    return super.reconnectSshServer(serverId);
+  Future<SshConnectionView> reconnectSshServer(String alias) async {
+    reconnectedServerAlias = alias;
+    return super.reconnectSshServer(alias);
   }
 
   @override
   Future<RemoteDirectoryListing> browseRemoteDirectories(
-    String serverId, {
+    String alias, {
     String? path,
   }) async {
-    browsedServerId = serverId;
-    return super.browseRemoteDirectories(serverId, path: path);
+    browsedServerAlias = alias;
+    return super.browseRemoteDirectories(alias, path: path);
   }
 
   @override
-  Future<StudioProject> openRemoteProject(String serverId, String path) async {
-    openedRemoteProject = (serverId, path);
-    return super.openRemoteProject(serverId, path);
+  Future<StudioProject> openRemoteProject(String alias, String path) async {
+    openedRemoteProject = (alias, path);
+    return super.openRemoteProject(alias, path);
   }
 
   @override

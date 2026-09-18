@@ -81,7 +81,7 @@ Future<void> _configureSshProject(
   await session.tap(find.byValueKey('ssh-add-server'));
   await session.waitFor(find.byValueKey('ssh-server-dialog'));
   for (final field in [
-    ('ssh-server-name-input', _SshOptions.name),
+    ('ssh-server-alias-input', _SshOptions.alias),
     ('ssh-server-host-input', ssh.host),
     ('ssh-server-username-input', ssh.username),
     ('ssh-server-port-input', '${ssh.port}'),
@@ -89,26 +89,20 @@ Future<void> _configureSshProject(
     await session.tap(find.byValueKey(field.$1));
     await session.enterText(field.$2);
   }
-  await session.tap(find.byValueKey('ssh-server-auth-input'));
-  await session.waitFor(find.text('Password'));
-  await session.tap(find.text('Password'));
-  await session.waitFor(find.byValueKey('ssh-server-password-input'));
-  await session.tap(find.byValueKey('ssh-server-password-input'));
-  await session.enterText(ssh.password);
   await session.tap(find.byValueKey('ssh-server-save'));
   await session.waitForAbsent(
     find.byValueKey('ssh-server-dialog'),
     timeout: const Duration(seconds: 30),
   );
 
-  final serverId = await _waitForSshServerId(session, _SshOptions.name);
-  await session.waitFor(find.byValueKey('ssh-test-$serverId'));
-  await session.tap(find.byValueKey('ssh-test-$serverId'));
+  final serverAlias = await _waitForSshServerAlias(session, _SshOptions.alias);
+  await session.waitFor(find.byValueKey('ssh-test-$serverAlias'));
+  await session.tap(find.byValueKey('ssh-test-$serverAlias'));
   await session.waitFor(
-    find.byValueKey('ssh-ready-$serverId'),
+    find.byValueKey('ssh-ready-$serverAlias'),
     timeout: const Duration(minutes: 3),
   );
-  await session.tap(find.byValueKey('ssh-open-$serverId'));
+  await session.tap(find.byValueKey('ssh-open-$serverAlias'));
   await session.waitFor(
     find.byValueKey('ssh-directory-dialog'),
     timeout: const Duration(minutes: 2),
@@ -144,18 +138,18 @@ Future<void> _configureSshProject(
   );
 }
 
-Future<String> _waitForSshServerId(
+Future<String> _waitForSshServerAlias(
   FlutterDriverSession session,
-  String name,
+  String alias,
 ) async {
   final deadline = DateTime.now().add(const Duration(seconds: 30));
   Object? last;
   while (DateTime.now().isBefore(deadline)) {
-    final response = await session.requestData('ssh-server-id:$name');
+    final response = await session.requestData('ssh-server-alias:$alias');
     final decoded = jsonDecode(response);
     last = decoded;
-    if (decoded is Map && decoded['serverId'] is String) {
-      return decoded['serverId'] as String;
+    if (decoded is Map && decoded['alias'] is String) {
+      return decoded['alias'] as String;
     }
     await Future<void>.delayed(const Duration(milliseconds: 250));
   }
@@ -933,15 +927,13 @@ class _SshOptions {
   const _SshOptions({
     required this.host,
     required this.username,
-    required this.password,
     required this.port,
     required this.workspace,
   });
 
-  static const name = 'Pure SSH Acceptance';
+  static const alias = 'pure-ssh-acceptance';
   final String host;
   final String username;
-  final String password;
   final int port;
   final String workspace;
 }
@@ -1021,16 +1013,9 @@ class _Options {
       ].any((value) => value == null)) {
         throw ArgumentError('all SSH acceptance arguments are required');
       }
-      final password = Platform.environment['PURE_SUBAGENTS_SSH_PASSWORD'];
-      if (password == null || password.isEmpty) {
-        throw ArgumentError(
-          'PURE_SUBAGENTS_SSH_PASSWORD is required in the Driver environment',
-        );
-      }
       ssh = _SshOptions(
         host: sshHost!,
         username: sshUsername!,
-        password: password,
         port: int.parse(sshPort!),
         workspace: sshWorkspace!,
       );

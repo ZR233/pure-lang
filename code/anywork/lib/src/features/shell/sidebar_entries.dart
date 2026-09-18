@@ -78,7 +78,7 @@ class _ProjectTile extends ConsumerWidget {
                             ),
                             const SizedBox(width: 6),
                             Text(
-                              project.sshServerId == null
+                              project.sshAlias == null
                                   ? context.l10n.sidebarLocal
                                   : 'SSH',
                               style: context.text.labelSmall,

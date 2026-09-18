@@ -7,13 +7,12 @@ use sea_orm::{ConnectionTrait, DatabaseConnection};
 
 use crate::studio::entity;
 
-pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 20;
+pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 21;
 
 pub(super) async fn initialize_studio_schema(db: &DatabaseConnection) -> Result<()> {
     create_thread_lifecycle_tables(db).await?;
     db.get_schema_builder()
         .register(entity::app_setting::Entity)
-        .register(entity::ssh_server::Entity)
         .register(entity::project::Entity)
         .register(entity::studio_object::Entity)
         .apply(db)
@@ -118,9 +117,9 @@ async fn create_project_indexes(db: &impl ConnectionTrait) -> Result<()> {
     db.execute(&recent).await?;
     db.execute_unprepared(
         "CREATE UNIQUE INDEX idx_projects_local_path
-         ON projects(path) WHERE ssh_server_id IS NULL;
+         ON projects(path) WHERE ssh_alias IS NULL;
          CREATE UNIQUE INDEX idx_projects_remote_path
-         ON projects(ssh_server_id, path) WHERE ssh_server_id IS NOT NULL;",
+         ON projects(ssh_alias, path) WHERE ssh_alias IS NOT NULL;",
     )
     .await?;
     Ok(())
@@ -143,7 +142,7 @@ pub(super) async fn upgrade_session_storage(db: &DatabaseConnection) -> Result<(
         .await?
         .ok_or_else(|| anyhow::anyhow!("missing Studio schema version"))?;
     match row.try_get::<i64>("", "user_version")? {
-        20 => {}
+        20 | 21 => {}
         19 => {
             tx.execute_unprepared("DROP TABLE IF EXISTS attachments;
                 DROP TABLE IF EXISTS thread_inputs;

@@ -16,6 +16,7 @@ import '../../data/repositories/studio_repository.dart';
 import '../../domain/models/studio_models.dart';
 import '../../l10n/app_localizations.dart';
 import '../../l10n/studio_l10n.dart';
+import '../../platform/vscode_launcher.dart';
 import '../../shared/studio_chrome.dart';
 import '../../shared/studio_driver_keys.dart';
 import '../../shared/studio_driver_state.dart';

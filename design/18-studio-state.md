@@ -146,3 +146,20 @@ commit 的投影、目录保存及计费保存完成。观察者更新产品目�
 资源属于该 Thread 的持久化工具媒体引用——仅有资源 ID 前缀、摘要或一个可访问 Thread
 都不足以授权，客户端路径不能成为文件读取入口；未引用、损坏或丢失资源显式失败，不得
 用原始 workspace 文件补回。
+
+## 18.9 顶栏操作与 VS Code 打开
+
+会话顶栏 actions 区（与智能体切换器、费用 chip 同级）提供「...」更多菜单。菜单项当前
+只有「在 VS Code 中打开工作区」：本地项目打开本机目录，远端项目经 Remote-SSH 打开远端
+canonical 目录，菜单项辅助行展示打开目标。入口仅在探测到 VS Code 安装且当前会话存在
+所属项目时渲染；探测失败或无项目时菜单为空，整个「...」入口不出现，不显示空占位。
+
+打开通过系统 URL 协议完成，不派生 `code` CLI 子进程：本地使用
+`vscode://file/<绝对路径>/`（尾斜杠表示文件夹，Windows 盘符形如 `vscode://file/c:/x/y/`，
+路径按 URI 规则百分号编码），远端使用
+`vscode://vscode-remote/ssh-remote+<别名>/<远端路径>`；Remote-SSH 的 URI 不携带端口与
+密钥，连接参数由 `~/.ssh/config` 的 Host 别名解析（见 [22](./22-ssh-remote.md)）。URI
+构建与协议白名单校验是纯函数；实际打开复用外部 URL 启动器，仅放行上述两种 vscode URI
+形态，http/https 白名单不变。启动失败以界面提示回报，不自动重试。VS Code 探测在宿主
+平台层完成：Windows 检查 PATH 与已知安装位置，Linux 检查 PATH 与
+`x-scheme-handler/vscode` 处理器；结果缓存于进程内 provider，demo 与测试可覆写。

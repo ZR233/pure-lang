@@ -44,17 +44,17 @@ Future<String> _handleDriverData(String? message) async {
           .loadMoreThreads();
       _publishSidebarDirectory();
       return jsonEncode({'loaded': true});
-    case final String lookup when lookup.startsWith('ssh-server-id:'):
-      final name = lookup.substring('ssh-server-id:'.length);
+    case final String lookup when lookup.startsWith('ssh-server-alias:'):
+      final name = lookup.substring('ssh-server-alias:'.length);
       final servers = await _container.read(studioApiProvider).listSshServers();
-      final matches = servers.where((server) => server.name == name).toList();
+      final matches = servers.where((server) => server.alias == name).toList();
       if (matches.length != 1) {
         return jsonEncode({
           'error': 'expected exactly one SSH server named $name',
           'count': matches.length,
         });
       }
-      return jsonEncode({'serverId': matches.single.id});
+      return jsonEncode({'alias': matches.single.alias});
     case 'prepare-theme-interactions-demo' || 'prepare-theme-plan-demo':
       final api = _container.read(studioApiProvider);
       if (api is! DriverDemoStudioApi) {

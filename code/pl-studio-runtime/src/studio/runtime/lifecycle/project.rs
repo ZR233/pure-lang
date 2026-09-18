@@ -18,7 +18,7 @@ impl StudioRuntime {
             anyhow::bail!("selected project is blocked by a recovery issue");
         }
         let project = self.project_record(project_id).await?;
-        if let Some(server_id) = &project.ssh_server_id {
+        if let Some(server_id) = &project.ssh_alias {
             let host = self
                 .ssh_manager
                 .open_workspace_host(server_id, project.path.clone())
@@ -139,7 +139,7 @@ impl StudioRuntime {
 
     pub async fn discover_skills(&self, project_id: &str) -> Result<SkillsStateSnapshot> {
         let project = self.project_record(project_id).await?;
-        if let Some(server_id) = &project.ssh_server_id {
+        if let Some(server_id) = &project.ssh_alias {
             let host = self
                 .ssh_manager
                 .open_workspace_host(server_id, project.path.clone())
@@ -269,7 +269,7 @@ impl StudioRuntime {
 
     async fn project_workspace_root(&self, project_id: &str) -> Result<std::path::PathBuf> {
         let project = self.project_record(project_id).await?;
-        if project.ssh_server_id.is_some() {
+        if project.ssh_alias.is_some() {
             Ok(std::path::PathBuf::from(project.path))
         } else {
             Ok(resolve_workspace_root(Path::new(&project.path))?)

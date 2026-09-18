@@ -58,12 +58,12 @@ impl StudioThreadFactory {
             .and_then(|binding| binding.remote.clone())
     }
 
-    pub(in crate::studio) fn ssh_server_id(&self, id: &str) -> Option<String> {
+    pub(in crate::studio) fn ssh_alias(&self, id: &str) -> Option<String> {
         self.bindings
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(id)
-            .and_then(|binding| binding.project.ssh_server_id.clone())
+            .and_then(|binding| binding.project.ssh_alias.clone())
     }
 
     pub(in crate::studio) fn commit_refreshed_binding(
@@ -137,7 +137,7 @@ impl StudioThreadFactory {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .values_mut()
         {
-            if binding.project.ssh_server_id.as_deref() == Some(server_id) {
+            if binding.project.ssh_alias.as_deref() == Some(server_id) {
                 binding.target_invalidated = true;
             }
         }
@@ -204,7 +204,8 @@ impl StudioThreadFactory {
                 .list_servers()
                 .await
                 .into_iter()
-                .find(|profile| profile.id == previous.id);
+                .find(|entry| entry.profile.alias == previous.alias)
+                .map(|entry| entry.profile);
             if current.as_ref() != Some(previous) {
                 return Err(ThreadAssemblyError::Identity(
                     "SSH target configuration changed; reactivate this Thread".into(),
@@ -253,7 +254,7 @@ impl StudioThreadFactory {
                 .attachments_dir()
                 .join("thread-resources"),
         );
-        let remote = match &project.ssh_server_id {
+        let remote = match &project.ssh_alias {
             Some(server) => {
                 let host = self
                     .services
@@ -385,7 +386,7 @@ fn ensure_same_target(
 ) -> Result<(), ThreadAssemblyError> {
     if previous.id != current.id
         || previous.path != current.path
-        || previous.ssh_server_id != current.ssh_server_id
+        || previous.ssh_alias != current.ssh_alias
     {
         return Err(ThreadAssemblyError::Identity("physical workspace target changed; reactivate this Thread before accessing the new target".into()));
     }
@@ -457,7 +458,7 @@ mod tests {
             id: "p".into(),
             name: "workspace".into(),
             path: "/frozen".into(),
-            ssh_server_id: None,
+            ssh_alias: None,
             updated_at: 1,
         };
         let mut renamed = original.clone();
@@ -468,7 +469,7 @@ mod tests {
         moved.path = "/other".into();
         assert!(ensure_same_target(&original, &moved).is_err());
         let mut remote = original.clone();
-        remote.ssh_server_id = Some("server".into());
+        remote.ssh_alias = Some("server".into());
         assert!(ensure_same_target(&original, &remote).is_err());
     }
 }

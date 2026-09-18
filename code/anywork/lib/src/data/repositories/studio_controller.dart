@@ -102,13 +102,13 @@ class StudioController extends _$StudioController {
   /// 打开远端项目的结果合同。
   ///
   /// 返回 true 仅当请求真正执行、同步后的 canonical project snapshot 成功采用，
-  /// 且 adopted 状态中被选中的项目正是刚打开的项目：其 id 匹配、`sshServerId`
-  /// 等于请求的 server、path 与后端返回的 canonical 项目路径一致。后端 snapshot
+  /// 且 adopted 状态中被选中的项目正是刚打开的项目：其 id 匹配、`sshAlias`
+  /// 等于请求的别名、path 与后端返回的 canonical 项目路径一致。后端 snapshot
   /// 只拥有 Project 目录，不拥有 Flutter 当前选择；选择由显式 intent 在采用时解析。
   /// controller 尚未初始化、打开失败或 snapshot 未包含该 canonical Project 都返回
   /// false。调用方只有收到 true 才应关闭打开窗口；false 时应保留窗口与输入并允许重试。
   Future<bool> openRemoteProject(
-    String serverId,
+    String alias,
     String path, {
     String? name,
   }) async {
@@ -116,7 +116,7 @@ class StudioController extends _$StudioController {
     if (!_isInitialized(current)) return false;
     StudioProject project;
     try {
-      project = await _api.openRemoteProject(serverId, path);
+      project = await _api.openRemoteProject(alias, path);
       if (name != null && name != project.name) {
         project = await _api.renameProject(project.id, name);
       }
@@ -127,7 +127,7 @@ class StudioController extends _$StudioController {
     if (!ref.mounted) return false;
     return _adoptSelectedProject(
       expectedId: project.id,
-      expectedServerId: serverId,
+      expectedAlias: alias,
       expectedPath: project.path,
     );
   }
@@ -136,14 +136,14 @@ class StudioController extends _$StudioController {
   ///
   /// 后端 snapshot 不携带 Flutter selection；`_resolveSelection` 只会在 canonical
   /// Project 目录中存在 [expectedId] 时采用该项目。采用完成后从 [state.value] 读取
-  /// 实际被选中的项目，并验证其 id、`sshServerId` 与请求 server 一致、path 与后端
+  /// 实际被选中的项目，并验证其 id、`sshAlias` 与请求别名一致、path 与后端
   /// 返回的 canonical 路径一致。
   ///
   /// 返回 false 表示 snapshot 读取/采用失败，或 adopted state 中不存在与请求身份
   /// 完全一致的选中项目。
   Future<bool> _adoptSelectedProject({
     required String expectedId,
-    required String expectedServerId,
+    required String expectedAlias,
     required String expectedPath,
   }) async {
     final current = state.value;
@@ -170,7 +170,7 @@ class StudioController extends _$StudioController {
         .firstOrNull;
     return selectedProject != null &&
         selectedProject.id == expectedId &&
-        selectedProject.sshServerId == expectedServerId &&
+        selectedProject.sshAlias == expectedAlias &&
         selectedProject.path == expectedPath;
   }
 

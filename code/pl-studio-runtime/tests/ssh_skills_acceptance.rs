@@ -9,7 +9,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use pl_studio_runtime::{StudioHostKind, StudioRuntime, StudioRuntimeOptions};
-use pl_tool::remote::{SshAuth, SshServerProfile};
+use pl_tool::remote::SshServerProfile;
 
 fn remote_workspace() -> PathBuf {
     let dir = std::env::temp_dir().join("pure-ssh-skills-acceptance");
@@ -38,23 +38,17 @@ async fn ssh_project_skills_catalog_reaches_settings() -> anyhow::Result<()> {
 
     let identity = format!("{}/.ssh/id_ed25519", std::env::var("HOME")?);
     let profile = runtime
-        .save_ssh_server(
-            SshServerProfile {
-                id: "accept-ssh".to_string(),
-                name: "accept-ssh".to_string(),
-                host: "localhost".to_string(),
-                port: 22,
-                username: whoami(),
-                auth: SshAuth::AgentOrKey {
-                    identity_file: Some(identity),
-                },
-            },
-            None,
-        )
+        .save_ssh_server(SshServerProfile {
+            alias: "accept-ssh".to_string(),
+            host_name: "localhost".to_string(),
+            port: 22,
+            username: whoami(),
+            identity_file: Some(identity),
+        })
         .await?;
 
     let project = runtime
-        .open_remote_project(&profile.id, workspace.to_string_lossy().into_owned())
+        .open_remote_project(&profile.alias, workspace.to_string_lossy().into_owned())
         .await?;
     println!("ACCEPT remote project: {} -> {}", project.id, project.path);
 

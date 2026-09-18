@@ -14,9 +14,7 @@ use pl_tool::workspace_file::{
     WorkspaceFileReadRequest, WorkspaceFileStatRequest, WorkspaceFileWriteRequest,
 };
 
-use pl_tool::remote::{
-    RemoteSkillProvider, SshAuth, SshConnectionState, SshManager, SshServerProfile,
-};
+use pl_tool::remote::{RemoteSkillProvider, SshConnectionState, SshManager, SshServerProfile};
 
 use pl_lsp::catalog::{LspCatalogServer, LspCommandSpec, LspServerCatalog, LspServerDefinition};
 use pl_lsp::driver::{LspProbeOutcome, LspRepairError, LspResolvedCommand, LspServerDriver};
@@ -37,14 +35,11 @@ async fn main() -> anyhow::Result<()> {
     );
     let manager = SshManager::new(aarch64, x86_64);
     let profile = SshServerProfile {
-        id: "validation".to_string(),
-        name: "SSH validation".to_string(),
-        host,
+        alias: "validation".to_string(),
+        host_name: host,
         port: 22,
         username: std::env::var("PURE_SSH_TEST_USERNAME").unwrap_or_else(|_| "root".to_string()),
-        auth: SshAuth::AgentOrKey {
-            identity_file: None,
-        },
+        identity_file: None,
     };
     manager.save_server(profile).await?;
     let snapshot = manager.test_connection("validation").await?;

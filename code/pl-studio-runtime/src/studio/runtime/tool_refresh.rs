@@ -112,7 +112,7 @@ impl StudioRuntime {
                     })
                 });
                 for (id, thread) in active {
-                    let server = runtime.thread_factory.ssh_server_id(&id);
+                    let server = runtime.thread_factory.ssh_alias(&id);
                     let selected = sources.for_ssh_server(server.as_deref());
                     if let Some((_, updates)) = workers.get(&id) {
                         updates.send_replace(selected);
@@ -213,7 +213,7 @@ impl StudioRuntime {
             if snapshot.lifecycle != ThreadLifecycle::Open {
                 continue;
             }
-            let server = self.thread_factory.ssh_server_id(&id);
+            let server = self.thread_factory.ssh_alias(&id);
             let fingerprint =
                 catalog_fingerprint(&sources.for_ssh_server(server.as_deref()), &snapshot);
             if attempted.get(&id).is_some_and(|(previous, key)| {
@@ -497,7 +497,7 @@ mod tests {
     #[ignore = "requires embedded-remote-helpers, PURE_SSH_TEST_SERVER/USERNAME/WORKSPACE and key authentication"]
     async fn ssh_reconnect_restores_existing_thread_tools() -> anyhow::Result<()> {
         use pl_core::{context::OpaquePayload, model::*, thread::*};
-        use pl_tool::remote::{SshAuth, SshServerProfile};
+        use pl_tool::remote::SshServerProfile;
         use tokio_util::sync::CancellationToken;
 
         #[derive(Clone)]
@@ -673,19 +673,13 @@ mod tests {
         runtime.start_runtime().await?;
         let result = tokio::time::timeout(std::time::Duration::from_secs(120), async {
             runtime
-                .save_ssh_server(
-                    SshServerProfile {
-                        id: "reconnect".into(),
-                        name: "reconnect".into(),
-                        host: std::env::var("PURE_SSH_TEST_SERVER")?,
-                        port: 22,
-                        username: std::env::var("PURE_SSH_TEST_USERNAME")?,
-                        auth: SshAuth::AgentOrKey {
-                            identity_file: None,
-                        },
-                    },
-                    None,
-                )
+                .save_ssh_server(SshServerProfile {
+                    alias: "reconnect".into(),
+                    host_name: std::env::var("PURE_SSH_TEST_SERVER")?,
+                    port: 22,
+                    username: std::env::var("PURE_SSH_TEST_USERNAME")?,
+                    identity_file: None,
+                })
                 .await?;
             let path = std::env::var("PURE_SSH_TEST_WORKSPACE")?;
             let project = runtime

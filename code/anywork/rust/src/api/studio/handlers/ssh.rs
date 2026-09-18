@@ -1,9 +1,11 @@
-use pl_studio_runtime::{SshAuth, SshConnectionSnapshot, SshConnectionState, SshServerProfile};
+use pl_studio_runtime::{
+    SshConfigEntry, SshConnectionSnapshot, SshConnectionState, SshServerProfile,
+};
 
 use crate::api::studio::bridge_runtime::active_bridge;
 use crate::api::studio::types::{
     BridgeError, ProjectDto, RemoteDirectoryEntryDto, RemoteDirectoryListingDto,
-    SaveSshServerRequest, SshAuthKindDto, SshConnectionSnapshotDto, SshServerDto,
+    SaveSshServerRequest, SshConnectionSnapshotDto, SshServerDto,
 };
 
 pub async fn list_ssh_servers() -> Result<Vec<SshServerDto>, BridgeError> {
@@ -18,69 +20,55 @@ pub async fn list_ssh_servers() -> Result<Vec<SshServerDto>, BridgeError> {
 }
 
 pub async fn save_ssh_server(request: SaveSshServerRequest) -> Result<SshServerDto, BridgeError> {
-    let bridge = active_bridge().await?;
-    let auth = match request.auth_kind {
-        SshAuthKindDto::AgentOrKey => SshAuth::AgentOrKey {
-            identity_file: request.identity_file.filter(|path| !path.trim().is_empty()),
-        },
-        SshAuthKindDto::Password => SshAuth::Password,
-    };
-    let profile = bridge
+    let profile = active_bridge()
+        .await?
         .studio
-        .save_ssh_server(
-            SshServerProfile {
-                id: request.id.unwrap_or_default(),
-                name: request.name,
-                host: request.host,
-                port: request.port,
-                username: request.username,
-                auth,
-            },
-            request.password,
-        )
+        .save_ssh_server(SshServerProfile {
+            alias: request.alias,
+            host_name: request.host_name,
+            port: request.port,
+            username: request.username,
+            identity_file: request.identity_file.filter(|path| !path.trim().is_empty()),
+        })
         .await?;
-    Ok(server_dto(profile))
+    Ok(managed_server_dto(profile))
 }
 
-pub async fn delete_ssh_server(server_id: String) -> Result<(), BridgeError> {
+pub async fn delete_ssh_server(alias: String) -> Result<(), BridgeError> {
     active_bridge()
         .await?
         .studio
-        .delete_ssh_server(&server_id)
+        .delete_ssh_server(&alias)
         .await?;
     Ok(())
 }
 
-pub async fn test_ssh_connection(
-    server_id: String,
-) -> Result<SshConnectionSnapshotDto, BridgeError> {
+pub async fn test_ssh_connection(alias: String) -> Result<SshConnectionSnapshotDto, BridgeError> {
     let snapshot = active_bridge()
         .await?
         .studio
-        .test_ssh_connection(&server_id)
+        .test_ssh_connection(&alias)
         .await?;
     Ok(connection_dto(snapshot))
 }
 
-pub async fn reconnect_ssh_server(
-    server_id: String,
-) -> Result<SshConnectionSnapshotDto, BridgeError> {
+pub async fn reconnect_ssh_server(alias: String) -> Result<SshConnectionSnapshotDto, BridgeError> {
     let snapshot = active_bridge()
         .await?
         .studio
-        .reconnect_ssh_server(&server_id)
+        .reconnect_ssh_server(&alias)
         .await?;
     Ok(connection_dto(snapshot))
 }
 
 pub async fn browse_remote_directories(
-    server_id: String,
+    alias: String,
     path: Option<String>,
 ) -> Result<RemoteDirectoryListingDto, BridgeError> {
     let listing = active_bridge()
         .await?
         .studio
-        .browse_remote_directories(&server_id, path)
+        .browse_remote_directories(&alias, path)
         .await?;
     Ok(RemoteDirectoryListingDto {
         path: listing.path,
@@ -98,37 +86,40 @@ pub async fn browse_remote_directories(
     })
 }
 
-pub async fn open_remote_project(
-    server_id: String,
-    path: String,
-) -> Result<ProjectDto, BridgeError> {
+pub async fn open_remote_project(alias: String, path: String) -> Result<ProjectDto, BridgeError> {
     Ok(active_bridge()
         .await?
         .studio
-        .open_remote_project(&server_id, path)
+        .open_remote_project(&alias, path)
         .await?
         .into())
 }
 
-fn server_dto(profile: SshServerProfile) -> SshServerDto {
-    let (auth_kind, identity_file) = match profile.auth {
-        SshAuth::AgentOrKey { identity_file } => (SshAuthKindDto::AgentOrKey, identity_file),
-        SshAuth::Password => (SshAuthKindDto::Password, None),
-    };
+fn server_dto(entry: SshConfigEntry) -> SshServerDto {
     SshServerDto {
-        id: profile.id,
-        name: profile.name,
-        host: profile.host,
+        alias: entry.profile.alias,
+        host_name: entry.profile.host_name,
+        port: entry.profile.port,
+        username: entry.profile.username,
+        identity_file: entry.profile.identity_file,
+        managed: entry.managed,
+    }
+}
+
+fn managed_server_dto(profile: SshServerProfile) -> SshServerDto {
+    SshServerDto {
+        alias: profile.alias,
+        host_name: profile.host_name,
         port: profile.port,
         username: profile.username,
-        auth_kind,
-        identity_file,
+        identity_file: profile.identity_file,
+        managed: true,
     }
 }
 
 fn connection_dto(snapshot: SshConnectionSnapshot) -> SshConnectionSnapshotDto {
     let mut dto = SshConnectionSnapshotDto {
-        server_id: snapshot.server_id,
+        alias: snapshot.alias,
         state: String::new(),
         helper_version: None,
         architecture: None,
@@ -140,7 +131,6 @@ fn connection_dto(snapshot: SshConnectionSnapshot) -> SshConnectionSnapshotDto {
     match snapshot.state {
         SshConnectionState::Disconnected => dto.state = "disconnected".to_string(),
         SshConnectionState::Connecting => dto.state = "connecting".to_string(),
-        SshConnectionState::WaitingForInput => dto.state = "waitingForInput".to_string(),
         SshConnectionState::Ready {
             helper_version,
             architecture,

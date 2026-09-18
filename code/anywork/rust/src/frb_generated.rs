@@ -559,7 +559,7 @@ fn wire__crate__api__studio__handlers__ssh__browse_remote_directories_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_server_id = <String>::sse_decode(&mut deserializer);
+            let api_alias = <String>::sse_decode(&mut deserializer);
             let api_path = <Option<String>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
@@ -567,8 +567,7 @@ fn wire__crate__api__studio__handlers__ssh__browse_remote_directories_impl(
                     (move || async move {
                         let output_ok =
                             crate::api::studio::handlers::ssh::browse_remote_directories(
-                                api_server_id,
-                                api_path,
+                                api_alias, api_path,
                             )
                             .await?;
                         Ok(output_ok)
@@ -725,14 +724,13 @@ fn wire__crate__api__studio__handlers__ssh__delete_ssh_server_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_server_id = <String>::sse_decode(&mut deserializer);
+            let api_alias = <String>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, crate::api::studio::types::error::BridgeError>(
                     (move || async move {
                         let output_ok =
-                            crate::api::studio::handlers::ssh::delete_ssh_server(api_server_id)
-                                .await?;
+                            crate::api::studio::handlers::ssh::delete_ssh_server(api_alias).await?;
                         Ok(output_ok)
                     })()
                     .await,
@@ -1150,15 +1148,14 @@ fn wire__crate__api__studio__handlers__ssh__open_remote_project_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_server_id = <String>::sse_decode(&mut deserializer);
+            let api_alias = <String>::sse_decode(&mut deserializer);
             let api_path = <String>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, crate::api::studio::types::error::BridgeError>(
                     (move || async move {
                         let output_ok = crate::api::studio::handlers::ssh::open_remote_project(
-                            api_server_id,
-                            api_path,
+                            api_alias, api_path,
                         )
                         .await?;
                         Ok(output_ok)
@@ -1805,13 +1802,13 @@ fn wire__crate__api__studio__handlers__ssh__reconnect_ssh_server_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_server_id = <String>::sse_decode(&mut deserializer);
+            let api_alias = <String>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, crate::api::studio::types::error::BridgeError>(
                     (move || async move {
                         let output_ok =
-                            crate::api::studio::handlers::ssh::reconnect_ssh_server(api_server_id)
+                            crate::api::studio::handlers::ssh::reconnect_ssh_server(api_alias)
                                 .await?;
                         Ok(output_ok)
                     })()
@@ -3116,13 +3113,13 @@ fn wire__crate__api__studio__handlers__ssh__test_ssh_connection_impl(
             };
             let mut deserializer =
                 flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_server_id = <String>::sse_decode(&mut deserializer);
+            let api_alias = <String>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, crate::api::studio::types::error::BridgeError>(
                     (move || async move {
                         let output_ok =
-                            crate::api::studio::handlers::ssh::test_ssh_connection(api_server_id)
+                            crate::api::studio::handlers::ssh::test_ssh_connection(api_alias)
                                 .await?;
                         Ok(output_ok)
                     })()
@@ -9944,13 +9941,13 @@ impl SseDecode for crate::api::studio::types::response::ProjectDto {
         let mut var_id = <String>::sse_decode(deserializer);
         let mut var_name = <String>::sse_decode(deserializer);
         let mut var_path = <String>::sse_decode(deserializer);
-        let mut var_sshServerId = <Option<String>>::sse_decode(deserializer);
+        let mut var_sshAlias = <Option<String>>::sse_decode(deserializer);
         let mut var_updatedAt = <i64>::sse_decode(deserializer);
         return crate::api::studio::types::response::ProjectDto {
             id: var_id,
             name: var_name,
             path: var_path,
-            ssh_server_id: var_sshServerId,
+            ssh_alias: var_sshAlias,
             updated_at: var_updatedAt,
         };
     }
@@ -10145,24 +10142,17 @@ impl SseDecode for crate::api::studio::types::runtime::RuntimeSnapshot {
 impl SseDecode for crate::api::studio::types::ssh::SaveSshServerRequest {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_id = <Option<String>>::sse_decode(deserializer);
-        let mut var_name = <String>::sse_decode(deserializer);
-        let mut var_host = <String>::sse_decode(deserializer);
+        let mut var_alias = <String>::sse_decode(deserializer);
+        let mut var_hostName = <String>::sse_decode(deserializer);
         let mut var_port = <u16>::sse_decode(deserializer);
         let mut var_username = <String>::sse_decode(deserializer);
-        let mut var_authKind =
-            <crate::api::studio::types::ssh::SshAuthKindDto>::sse_decode(deserializer);
         let mut var_identityFile = <Option<String>>::sse_decode(deserializer);
-        let mut var_password = <Option<String>>::sse_decode(deserializer);
         return crate::api::studio::types::ssh::SaveSshServerRequest {
-            id: var_id,
-            name: var_name,
-            host: var_host,
+            alias: var_alias,
+            host_name: var_hostName,
             port: var_port,
             username: var_username,
-            auth_kind: var_authKind,
             identity_file: var_identityFile,
-            password: var_password,
         };
     }
 }
@@ -10261,22 +10251,10 @@ impl SseDecode for crate::api::studio::types::settings::SkillsSettingsInput {
     }
 }
 
-impl SseDecode for crate::api::studio::types::ssh::SshAuthKindDto {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut inner = <i32>::sse_decode(deserializer);
-        return match inner {
-            0 => crate::api::studio::types::ssh::SshAuthKindDto::AgentOrKey,
-            1 => crate::api::studio::types::ssh::SshAuthKindDto::Password,
-            _ => unreachable!("Invalid variant for SshAuthKindDto: {}", inner),
-        };
-    }
-}
-
 impl SseDecode for crate::api::studio::types::ssh::SshConnectionSnapshotDto {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_serverId = <String>::sse_decode(deserializer);
+        let mut var_alias = <String>::sse_decode(deserializer);
         let mut var_state = <String>::sse_decode(deserializer);
         let mut var_helperVersion = <Option<String>>::sse_decode(deserializer);
         let mut var_architecture = <Option<String>>::sse_decode(deserializer);
@@ -10285,7 +10263,7 @@ impl SseDecode for crate::api::studio::types::ssh::SshConnectionSnapshotDto {
         let mut var_errorCode = <Option<String>>::sse_decode(deserializer);
         let mut var_errorMessage = <Option<String>>::sse_decode(deserializer);
         return crate::api::studio::types::ssh::SshConnectionSnapshotDto {
-            server_id: var_serverId,
+            alias: var_alias,
             state: var_state,
             helper_version: var_helperVersion,
             architecture: var_architecture,
@@ -10300,22 +10278,19 @@ impl SseDecode for crate::api::studio::types::ssh::SshConnectionSnapshotDto {
 impl SseDecode for crate::api::studio::types::ssh::SshServerDto {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_id = <String>::sse_decode(deserializer);
-        let mut var_name = <String>::sse_decode(deserializer);
-        let mut var_host = <String>::sse_decode(deserializer);
+        let mut var_alias = <String>::sse_decode(deserializer);
+        let mut var_hostName = <String>::sse_decode(deserializer);
         let mut var_port = <u16>::sse_decode(deserializer);
         let mut var_username = <String>::sse_decode(deserializer);
-        let mut var_authKind =
-            <crate::api::studio::types::ssh::SshAuthKindDto>::sse_decode(deserializer);
         let mut var_identityFile = <Option<String>>::sse_decode(deserializer);
+        let mut var_managed = <bool>::sse_decode(deserializer);
         return crate::api::studio::types::ssh::SshServerDto {
-            id: var_id,
-            name: var_name,
-            host: var_host,
+            alias: var_alias,
+            host_name: var_hostName,
             port: var_port,
             username: var_username,
-            auth_kind: var_authKind,
             identity_file: var_identityFile,
+            managed: var_managed,
         };
     }
 }
@@ -16960,7 +16935,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::studio::types::response::Proj
             self.id.into_into_dart().into_dart(),
             self.name.into_into_dart().into_dart(),
             self.path.into_into_dart().into_dart(),
-            self.ssh_server_id.into_into_dart().into_dart(),
+            self.ssh_alias.into_into_dart().into_dart(),
             self.updated_at.into_into_dart().into_dart(),
         ]
         .into_dart()
@@ -17223,14 +17198,11 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::runtime::Runti
 impl flutter_rust_bridge::IntoDart for crate::api::studio::types::ssh::SaveSshServerRequest {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
-            self.id.into_into_dart().into_dart(),
-            self.name.into_into_dart().into_dart(),
-            self.host.into_into_dart().into_dart(),
+            self.alias.into_into_dart().into_dart(),
+            self.host_name.into_into_dart().into_dart(),
             self.port.into_into_dart().into_dart(),
             self.username.into_into_dart().into_dart(),
-            self.auth_kind.into_into_dart().into_dart(),
             self.identity_file.into_into_dart().into_dart(),
-            self.password.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -17355,31 +17327,10 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::settings::Skil
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
-impl flutter_rust_bridge::IntoDart for crate::api::studio::types::ssh::SshAuthKindDto {
-    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
-        match self {
-            Self::AgentOrKey => 0.into_dart(),
-            Self::Password => 1.into_dart(),
-            _ => unreachable!(),
-        }
-    }
-}
-impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
-    for crate::api::studio::types::ssh::SshAuthKindDto
-{
-}
-impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::ssh::SshAuthKindDto>
-    for crate::api::studio::types::ssh::SshAuthKindDto
-{
-    fn into_into_dart(self) -> crate::api::studio::types::ssh::SshAuthKindDto {
-        self
-    }
-}
-// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart for crate::api::studio::types::ssh::SshConnectionSnapshotDto {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
-            self.server_id.into_into_dart().into_dart(),
+            self.alias.into_into_dart().into_dart(),
             self.state.into_into_dart().into_dart(),
             self.helper_version.into_into_dart().into_dart(),
             self.architecture.into_into_dart().into_dart(),
@@ -17406,13 +17357,12 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::ssh::SshConnec
 impl flutter_rust_bridge::IntoDart for crate::api::studio::types::ssh::SshServerDto {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
-            self.id.into_into_dart().into_dart(),
-            self.name.into_into_dart().into_dart(),
-            self.host.into_into_dart().into_dart(),
+            self.alias.into_into_dart().into_dart(),
+            self.host_name.into_into_dart().into_dart(),
             self.port.into_into_dart().into_dart(),
             self.username.into_into_dart().into_dart(),
-            self.auth_kind.into_into_dart().into_dart(),
             self.identity_file.into_into_dart().into_dart(),
+            self.managed.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -22703,7 +22653,7 @@ impl SseEncode for crate::api::studio::types::response::ProjectDto {
         <String>::sse_encode(self.id, serializer);
         <String>::sse_encode(self.name, serializer);
         <String>::sse_encode(self.path, serializer);
-        <Option<String>>::sse_encode(self.ssh_server_id, serializer);
+        <Option<String>>::sse_encode(self.ssh_alias, serializer);
         <i64>::sse_encode(self.updated_at, serializer);
     }
 }
@@ -22845,14 +22795,11 @@ impl SseEncode for crate::api::studio::types::runtime::RuntimeSnapshot {
 impl SseEncode for crate::api::studio::types::ssh::SaveSshServerRequest {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <Option<String>>::sse_encode(self.id, serializer);
-        <String>::sse_encode(self.name, serializer);
-        <String>::sse_encode(self.host, serializer);
+        <String>::sse_encode(self.alias, serializer);
+        <String>::sse_encode(self.host_name, serializer);
         <u16>::sse_encode(self.port, serializer);
         <String>::sse_encode(self.username, serializer);
-        <crate::api::studio::types::ssh::SshAuthKindDto>::sse_encode(self.auth_kind, serializer);
         <Option<String>>::sse_encode(self.identity_file, serializer);
-        <Option<String>>::sse_encode(self.password, serializer);
     }
 }
 
@@ -22921,26 +22868,10 @@ impl SseEncode for crate::api::studio::types::settings::SkillsSettingsInput {
     }
 }
 
-impl SseEncode for crate::api::studio::types::ssh::SshAuthKindDto {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <i32>::sse_encode(
-            match self {
-                crate::api::studio::types::ssh::SshAuthKindDto::AgentOrKey => 0,
-                crate::api::studio::types::ssh::SshAuthKindDto::Password => 1,
-                _ => {
-                    unimplemented!("");
-                }
-            },
-            serializer,
-        );
-    }
-}
-
 impl SseEncode for crate::api::studio::types::ssh::SshConnectionSnapshotDto {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <String>::sse_encode(self.server_id, serializer);
+        <String>::sse_encode(self.alias, serializer);
         <String>::sse_encode(self.state, serializer);
         <Option<String>>::sse_encode(self.helper_version, serializer);
         <Option<String>>::sse_encode(self.architecture, serializer);
@@ -22954,13 +22885,12 @@ impl SseEncode for crate::api::studio::types::ssh::SshConnectionSnapshotDto {
 impl SseEncode for crate::api::studio::types::ssh::SshServerDto {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <String>::sse_encode(self.id, serializer);
-        <String>::sse_encode(self.name, serializer);
-        <String>::sse_encode(self.host, serializer);
+        <String>::sse_encode(self.alias, serializer);
+        <String>::sse_encode(self.host_name, serializer);
         <u16>::sse_encode(self.port, serializer);
         <String>::sse_encode(self.username, serializer);
-        <crate::api::studio::types::ssh::SshAuthKindDto>::sse_encode(self.auth_kind, serializer);
         <Option<String>>::sse_encode(self.identity_file, serializer);
+        <bool>::sse_encode(self.managed, serializer);
     }
 }
 

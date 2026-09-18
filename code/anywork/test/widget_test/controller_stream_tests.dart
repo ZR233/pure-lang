@@ -1438,7 +1438,7 @@ void registerControllerStreamTests() {
       final selected = adopted.projects.firstWhere(
         (project) => project.id == 'remote-project',
       );
-      expect(selected.sshServerId, 'ssh-arm');
+      expect(selected.sshAlias, 'ssh-arm');
       expect(selected.path, '/workspace');
     },
   );
@@ -1457,11 +1457,11 @@ void registerControllerStreamTests() {
           .openRemoteProject('ssh-arm', '/workspace');
     }
 
-    // 同 id 但 local（无 sshServerId）→ 拒绝。
-    expect(await openWith(_remoteProjectAdoptedState(serverId: null)), isFalse);
+    // 同 id 但 local（无 sshAlias）→ 拒绝。
+    expect(await openWith(_remoteProjectAdoptedState(sshAlias: null)), isFalse);
     // 同 id 但归属另一台 server → 拒绝。
     expect(
-      await openWith(_remoteProjectAdoptedState(serverId: 'other-server')),
+      await openWith(_remoteProjectAdoptedState(sshAlias: 'other-server')),
       isFalse,
     );
   });

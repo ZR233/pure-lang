@@ -60,7 +60,7 @@ pub(super) async fn prepare(product: &Path, _owner: &RuntimeLock) -> Result<()> 
         let session_version = inspect(&sessions).await?;
         if let Some(version) = product_version {
             ensure!(
-                matches!(version, 19 | 20),
+                matches!(version, 19..=21),
                 "unsupported Studio schema {version}; existing data preserved"
             );
         }
@@ -70,7 +70,17 @@ pub(super) async fn prepare(product: &Path, _owner: &RuntimeLock) -> Result<()> 
                 "unsupported session schema {version}; existing data preserved"
             );
         }
+        if product_version == Some(20) {
+            // v20→v21 是产品数据在位迁移（SSH 服务器迁往用户 ssh config），不重置会话。
+            if session_version
+                .is_none_or(|version| version == pl_core::persistence::SESSION_SCHEMA_VERSION)
+            {
+                migrate_product(product, parent).await?;
+                return Ok(());
+            }
+        }
         if product_version != Some(19)
+            && product_version != Some(20)
             && session_version
                 .is_none_or(|version| version == pl_core::persistence::SESSION_SCHEMA_VERSION)
         {
@@ -317,8 +327,35 @@ async fn reset_product(path: &Path) -> Result<()> {
         let transaction = db.begin().await?;
         transaction.execute_unprepared("DELETE FROM studio_objects WHERE object_kind IN ('agentWorkingState','commitReceipt','modelPerformance'); DELETE FROM threads;").await?;
         transaction.commit().await?;
+        // 会话重置路径的产品库可能仍是 v20；在同一协调流末尾推进到 v21，
+        // 避免迁移关闭外键影响上面的目录清理事务。
+        super::store::ssh_migration::migrate_ssh_servers_to_user_config(
+            &db,
+            &pl_tool::remote::SshConfigFile::user_default()?,
+        )
+        .await?;
         Ok(())
     }.await;
+    finish_connection(db, result).await
+}
+
+/// v20→v21 产品迁移：先备份产品库，再执行幂等的 SSH 服务器迁出。
+async fn migrate_product(product: &Path, parent: &Path) -> Result<()> {
+    let backup_parent = parent.to_path_buf();
+    let backup = tokio::task::spawn_blocking(move || {
+        tempfile::Builder::new()
+            .prefix("product-backup-")
+            .tempdir_in(backup_parent)
+            .map(tempfile::TempDir::keep)
+    })
+    .await??;
+    backup_database(product, &backup.join("product.sqlite")).await?;
+    let db = connect(product, DatabaseAccess::ReadWrite).await?;
+    let result = super::store::ssh_migration::migrate_ssh_servers_to_user_config(
+        &db,
+        &pl_tool::remote::SshConfigFile::user_default()?,
+    )
+    .await;
     finish_connection(db, result).await
 }
 

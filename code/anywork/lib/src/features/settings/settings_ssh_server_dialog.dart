@@ -17,13 +17,11 @@ class SshServerDialog extends StatefulWidget {
 }
 
 class _SshServerDialogState extends State<SshServerDialog> {
-  late final TextEditingController _name;
+  late final TextEditingController _alias;
   late final TextEditingController _host;
   late final TextEditingController _port;
   late final TextEditingController _username;
   late final TextEditingController _identity;
-  late final TextEditingController _password;
-  late SshAuthKind _authKind;
   String? _validationError;
   bool _saving = false;
 
@@ -31,36 +29,32 @@ class _SshServerDialogState extends State<SshServerDialog> {
   void initState() {
     super.initState();
     final server = widget.server;
-    _name = TextEditingController(text: server?.name ?? '');
-    _host = TextEditingController(text: server?.host ?? '');
+    _alias = TextEditingController(text: server?.alias ?? '');
+    _host = TextEditingController(text: server?.hostName ?? '');
     _port = TextEditingController(text: '${server?.port ?? 22}');
     _username = TextEditingController(text: server?.username ?? '');
     _identity = TextEditingController(text: server?.identityFile ?? '');
-    _password = TextEditingController();
-    _authKind = server?.authKind ?? SshAuthKind.agentOrKey;
   }
 
   @override
   void dispose() {
-    _name.dispose();
+    _alias.dispose();
     _host.dispose();
     _port.dispose();
     _username.dispose();
     _identity.dispose();
-    _password.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final editing = widget.server != null;
     return PopScope(
       canPop: !_saving,
       child: SettingsFormDialog(
         key: StudioDriverKeys.sshServerDialog,
         title: Text(
-          widget.server == null
-              ? context.l10n.settingsSshAdd
-              : context.l10n.settingsSshEdit,
+          editing ? context.l10n.settingsSshEdit : context.l10n.settingsSshAdd,
         ),
         content: SizedBox(
           width: 480,
@@ -68,10 +62,12 @@ class _SshServerDialogState extends State<SshServerDialog> {
             child: SettingsFieldStack(
               children: [
                 TextField(
-                  key: StudioDriverKeys.sshServerNameInput,
-                  controller: _name,
+                  key: StudioDriverKeys.sshServerAliasInput,
+                  controller: _alias,
+                  enabled: !editing,
                   decoration: InputDecoration(
-                    labelText: context.l10n.settingsSshName,
+                    labelText: context.l10n.settingsSshAlias,
+                    helperText: context.l10n.settingsSshAliasHelper,
                   ),
                 ),
                 TextField(
@@ -106,46 +102,14 @@ class _SshServerDialogState extends State<SshServerDialog> {
                     ),
                   ],
                 ),
-                DropdownButtonFormField<SshAuthKind>(
-                  key: StudioDriverKeys.sshServerAuthInput,
-                  initialValue: _authKind,
+                TextField(
+                  key: StudioDriverKeys.sshServerIdentityInput,
+                  controller: _identity,
                   decoration: InputDecoration(
-                    labelText: context.l10n.settingsSshAuth,
+                    labelText: context.l10n.settingsSshIdentityFile,
+                    helperText: context.l10n.settingsSshIdentityHelper,
                   ),
-                  items: [
-                    DropdownMenuItem(
-                      value: SshAuthKind.agentOrKey,
-                      child: Text(context.l10n.settingsSshAuthAgentOrKey),
-                    ),
-                    DropdownMenuItem(
-                      value: SshAuthKind.password,
-                      child: Text(context.l10n.settingsSshAuthPassword),
-                    ),
-                  ],
-                  onChanged: (value) {
-                    if (value != null) setState(() => _authKind = value);
-                  },
                 ),
-                if (_authKind == SshAuthKind.agentOrKey)
-                  TextField(
-                    key: StudioDriverKeys.sshServerIdentityInput,
-                    controller: _identity,
-                    decoration: InputDecoration(
-                      labelText: context.l10n.settingsSshIdentityFile,
-                    ),
-                  )
-                else
-                  TextField(
-                    key: StudioDriverKeys.sshServerPasswordInput,
-                    controller: _password,
-                    obscureText: true,
-                    autocorrect: false,
-                    enableSuggestions: false,
-                    decoration: InputDecoration(
-                      labelText: context.l10n.settingsSshPassword,
-                      helperText: context.l10n.settingsSshPasswordLease,
-                    ),
-                  ),
                 if (_validationError case final error?)
                   Align(
                     alignment: Alignment.centerLeft,
@@ -181,10 +145,19 @@ class _SshServerDialogState extends State<SshServerDialog> {
                 ? null
                 : () async {
                     final port = int.tryParse(_port.text);
-                    if (_name.text.trim().isEmpty) {
+                    final alias = _alias.text.trim();
+                    if (alias.isEmpty) {
                       setState(
                         () => _validationError =
-                            context.l10n.settingsSshNameRequired,
+                            context.l10n.settingsSshAliasRequired,
+                      );
+                      return;
+                    }
+                    if (alias.contains(RegExp("[\\s*?\\[\\]!#\"'\\\\]")) ||
+                        alias.startsWith('-')) {
+                      setState(
+                        () => _validationError =
+                            context.l10n.settingsSshAliasInvalid,
                       );
                       return;
                     }
@@ -211,22 +184,13 @@ class _SshServerDialogState extends State<SshServerDialog> {
                     }
                     setState(() => _validationError = null);
                     final command = SaveSshServerCommand(
-                      id: widget.server?.id,
-                      name: _name.text.trim(),
-                      host: _host.text.trim(),
+                      alias: alias,
+                      hostName: _host.text.trim(),
                       port: port,
                       username: _username.text.trim(),
-                      authKind: _authKind,
-                      identityFile:
-                          _authKind == SshAuthKind.agentOrKey &&
-                              _identity.text.trim().isNotEmpty
-                          ? _identity.text.trim()
-                          : null,
-                      password:
-                          _authKind == SshAuthKind.password &&
-                              _password.text.isNotEmpty
-                          ? _password.text
-                          : null,
+                      identityFile: _identity.text.trim().isEmpty
+                          ? null
+                          : _identity.text.trim(),
                     );
                     if (widget.onSave == null) {
                       Navigator.pop(context, command);

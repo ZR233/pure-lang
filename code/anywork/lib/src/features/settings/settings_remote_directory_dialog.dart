@@ -88,7 +88,7 @@ class _RemoteDirectoryDialogState extends ConsumerState<RemoteDirectoryDialog> {
     try {
       final listing = await ref
           .read(studioApiProvider)
-          .browseRemoteDirectories(widget.server.id, path: path);
+          .browseRemoteDirectories(widget.server.alias, path: path);
       if (!mounted) return;
       if (!listing.path.startsWith('/')) {
         setState(() {
@@ -132,7 +132,7 @@ class _RemoteDirectoryDialogState extends ConsumerState<RemoteDirectoryDialog> {
       opened = await ref
           .read(studioControllerProvider.notifier)
           .openRemoteProject(
-            widget.server.id,
+            widget.server.alias,
             path,
             name: widget.onBack == null ? null : _projectName.text.trim(),
           );
@@ -183,7 +183,7 @@ class _RemoteDirectoryDialogState extends ConsumerState<RemoteDirectoryDialog> {
             Text(context.l10n.settingsSshChooseDirectory),
             const SizedBox(height: 4),
             Text(
-              '${widget.server.username}@${widget.server.host}:${widget.server.port}',
+              '${widget.server.username}@${widget.server.hostName}:${widget.server.port}',
               style: context.text.bodySmall?.copyWith(
                 color: context.colors.onSurfaceVariant,
                 fontFamily: 'monospace',
@@ -216,7 +216,7 @@ class _RemoteDirectoryDialogState extends ConsumerState<RemoteDirectoryDialog> {
                   enabled: !busy,
                   maxLength: 80,
                   decoration: InputDecoration(
-                    labelText: context.l10n.settingsSshName,
+                    labelText: context.l10n.settingsSshProjectName,
                   ),
                   onChanged: (_) => setState(() => _nameEdited = true),
                 ),

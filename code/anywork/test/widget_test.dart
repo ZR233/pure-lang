@@ -20,6 +20,11 @@ import 'package:anywork/src/features/settings/settings_page.dart';
 import 'package:anywork/src/features/settings/settings_ssh_tab.dart';
 import 'package:anywork/src/features/settings/settings_statistics_tab.dart';
 import 'package:anywork/src/features/interaction/composer_dock.dart';
+
+import 'dart:io' show Platform;
+
+import 'package:anywork/src/platform/vscode_detection.dart';
+import 'package:anywork/src/platform/vscode_launcher.dart';
 import 'package:anywork/src/features/shell/studio_shell.dart';
 import 'package:anywork/src/features/status/status_bar_item.dart';
 import 'package:anywork/src/features/status/status_detail_popover.dart';
@@ -57,6 +62,7 @@ part 'widget_test/settings_helpers.dart';
 part 'widget_test/studio_update_tests.dart';
 part 'widget_test/app_lifecycle_tests.dart';
 part 'widget_test/history_window_tests.dart';
+part 'widget_test/vscode_launcher_tests.dart';
 
 void main() {
   registerControllerStreamTests();
@@ -77,4 +83,5 @@ void main() {
   registerStudioUpdateTests();
   registerAppLifecycleTests();
   registerHistoryWindowTests();
+  registerVsCodeLauncherTests();
 }

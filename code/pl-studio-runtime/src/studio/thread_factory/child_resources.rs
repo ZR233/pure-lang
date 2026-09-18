@@ -370,7 +370,7 @@ mod tests {
             child_id: "child".into(),
             root_thread_id: "root".into(),
             project_id: "project".into(),
-            ssh_server_id: None,
+            ssh_alias: None,
             repository_root: root.to_string_lossy().into_owned(),
             path: handle.path.to_string_lossy().into_owned(),
             branch: handle.branch.clone(),

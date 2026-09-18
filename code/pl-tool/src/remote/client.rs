@@ -47,8 +47,6 @@ pub enum RemoteClientError {
     /// The host has sealed SSH connection admission for shutdown.
     #[error("SSH manager is closing")]
     ManagerClosing,
-    #[error("SSH password is required")]
-    CredentialRequired,
     #[error("remoteDisconnected")]
     Disconnected,
     /// The bounded transport request capacity is exhausted; no frame was admitted.
