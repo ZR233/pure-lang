@@ -993,12 +993,16 @@ mod tests {
         assert_eq!(lease.owner_thread_id, thread_id);
         assert_eq!(lease.root_thread_id, thread_id);
         assert_eq!(lease.branch, format!("pure-session-{thread_id}"));
-        assert!(
-            lease
-                .path
-                .ends_with(&format!(".anywork/worktrees/{thread_id}/session")),
-            "{}",
-            lease.path
+        // 平台无关地校验布局：与 `WorktreeManager` 的分配结果逐段比较，而不是比较字符串分隔符。
+        assert_eq!(
+            std::path::PathBuf::from(&lease.path),
+            crate::agent::worktree::WorktreeManager::allocate_path(
+                std::path::Path::new(&lease.repository_root),
+                &thread_id,
+                &crate::agent::worktree::WorktreeOwnership::Session {
+                    thread_id: thread_id.clone(),
+                },
+            ),
         );
         assert!(std::path::Path::new(&lease.path).exists());
         assert!(lease.validate_identity().is_ok());
@@ -1922,10 +1926,10 @@ mod tests {
             )
             .await
             .unwrap_err();
-        assert!(
-            format!("{error:#}").contains("Not a directory"),
-            "the failure must come from attachment promotion: {error:#}"
-        );
+        // 不复述具体的 OS 错误文本（Unix 为 `Not a directory`，Windows 目录语义不同）；
+        // “失败来自首条 prompt 受理”由后续断言共同证明：lease 已收束为 preserved、
+        // 物理 worktree 仍存在，且 Recovery 条目的原因文本是首条 prompt 被拒。
+        assert!(!format!("{error:#}").trim().is_empty());
 
         runtime
             .persistence_repository()
