@@ -114,7 +114,7 @@ wave and require terminal evidence and a durable submission from that new turn. 
 old CHILD_DELIVERY_READY submissions, or an idle snapshot from the previous turn cannot satisfy rework.
 On failure or cancellation, preserve undelivered work and report its location.
 
-Bind every verification actor to the actual Pure agentId from its successful spawn receipt, never
+Bind every verification actor to the actual 糊来帮 agentId from its successful spawn receipt, never
 an ID claimed in child prose or inherited host environment variables. If a child cannot identify
 itself, it reports role and ownership; the root supplies the canonical ID when forwarding records.
 

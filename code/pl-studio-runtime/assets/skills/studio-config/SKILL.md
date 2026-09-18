@@ -38,7 +38,7 @@ Product metadata lives in `<home>/studio/studio.sqlite`; Thread history lives in
 - `[models.providers.<id>]` — provider endpoint, preset, credential reference, model catalog.
 - `[models.routes.<role>]` — model route per role: `explorer`, `planner`, `executor`, `worktree_executor`, `reviewer`. All five must resolve.
 - `[runtime]` — `permission_mode` (`request-approval` | `auto-review` | `full-access`), tool capabilities, active skills and MCP servers.
-- `[skills]` — enable/disable, auto-learn, project/user/external skill directories, disabled skills. The default writable project directory is `.agents/skills`; explicit `project_dir` values remain unchanged. In addition to configured `user_dir`, Pure always discovers the read-only user compatibility directory at `$HOME/.agents/skills` on Linux and `%USERPROFILE%\.agents\skills` on Windows.
+- `[skills]` — enable/disable, auto-learn, project/user/external skill directories, disabled skills. The default writable project directory is `.agents/skills`; explicit `project_dir` values remain unchanged. In addition to configured `user_dir`, 糊来帮 always discovers the read-only user compatibility directory at `$HOME/.agents/skills` on Linux and `%USERPROFILE%\.agents\skills` on Windows.
 - `[mcp]` — custom servers under `[mcp.servers.<id>]` plus builtin server states.
 - `[lsp.servers.<id>]` — command-based LSP servers outside the bundled catalog.
 - `[ui]` — `follow_active_turn`, `compact_timeline`. Studio always uses its fixed light theme. The obsolete `follow_system_theme` key is ignored when reading existing schema 18 files and omitted on the next normal save; no configuration reset is needed.

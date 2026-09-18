@@ -49,7 +49,8 @@ decision；状态模块是纯领域代码，不执行 IO、等待、加锁或外
 
 ## 5.4 命名口径
 
-- 项目名：Pure-Lang；桌面应用：anywork（糊来帮）。
+- 产品名：「糊来帮」（英文 `anywork`）；面向用户与 Agent 系统提示词统一使用该口径，仓库与技术
+  标识仍为 `pure-lang`。
 - 库 crate 统一 `pl-` 前缀；Flutter package 名为 `anywork`。
 - 产品 wire 放入 pl-protocol；core 通用契约在自身领域模块定义。
 

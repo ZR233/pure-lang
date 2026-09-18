@@ -1,6 +1,6 @@
 ---
 name: add-tool
-description: Use when implementing, registering, or testing a Pure-Lang tool through the Thread-owned opaque Tool interface.
+description: Use when implementing, registering, or testing a 糊来帮 tool through the Thread-owned opaque Tool interface.
 ---
 
 # 添加或迁移工具

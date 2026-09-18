@@ -163,7 +163,7 @@ Rust 断言优先以 `pretty_assertions::assert_eq!` 比较完整可观察对象
 | 数据库访问层 | 领域规则、权限、错误映射和状态变化 | 生产同类数据库的迁移、约束、事务、并发和回滚 | 模拟整条对象关系映射调用链后只验证 `save()` 次数 |
 | HTTP 服务 | 参数规则、业务错误和状态转换 | 路由、中间件、序列化、认证、契约、真实数据库或外部服务 | 通过浏览器穷举本可在组件层证明的所有非法参数 |
 
-Pure-Lang 的分层按实际边界选择：领域与 reducer 规则用低成本组件测试；Rust protocol／FRB DTO／Dart model 的映射验证项目契约；数据库、helper、MCP/LSP 和原生 bridge 的装配使用真实集成；GUI/Driver 只保留布局、交互与关键用户旅程。Web demo 可以证明纯 Dart 布局和交互，不能替代原生 bridge、进程、文件系统或真实 provider 验收。
+糊来帮的分层按实际边界选择：领域与 reducer 规则用低成本组件测试；Rust protocol／FRB DTO／Dart model 的映射验证项目契约；数据库、helper、MCP/LSP 和原生 bridge 的装配使用真实集成；GUI/Driver 只保留布局、交互与关键用户旅程。Web demo 可以证明纯 Dart 布局和交互，不能替代原生 bridge、进程、文件系统或真实 provider 验收。
 
 实时 provider、压力和统计用例保持显式 opt-in，与确定性提交门禁区分；不能因为降低用例数量而撤销必要平台或生命周期证据。运行器要区分测试失败、取消、预算耗尽和等待用户交互；最终展示成功不能掩盖缺失的实际执行与交付证据。
 

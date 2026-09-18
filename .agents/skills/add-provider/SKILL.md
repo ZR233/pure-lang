@@ -1,6 +1,6 @@
 ---
 name: add-provider
-description: Use when adding an LLM provider or preset to Pure-Lang's single route, catalog, and ModelRuntime architecture.
+description: Use when adding an LLM provider or preset to the 糊来帮 single route, catalog, and ModelRuntime architecture.
 metadata:
   category: guides
   platforms: ["windows", "linux", "macos"]
@@ -8,7 +8,7 @@ metadata:
 
 # Add an LLM Provider or Preset
 
-Pure-Lang 当前只有一条模型执行路径：`ResolvedModelRoute -> ModelRuntime`。新增兼容供应商时通过
+糊来帮当前只有一条模型执行路径：`ResolvedModelRoute -> ModelRuntime`。新增兼容供应商时通过
 endpoint、catalog、model profile 和 preset 数据表达差异，不新增 provider class、runtime trait、
 factory dispatch 或兼容 wrapper。
 

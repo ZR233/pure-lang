@@ -25,7 +25,7 @@ assignment 的任务。不继承根 Agent 的 workflow 状态。
   验证记录，再完成修复与必要回归。每次续跑都发布本轮新的 durable delivery，旧交付不能代替。
 - 首次交付不意味着应关闭；最终审查和验证通过前保留 worktree。返工前按父 Agent 协调同步
   canonical 基线，不丢弃其他修改；只提交本轮新增修复并报告基线与新增 commit，避免重复整合旧提交。
-- Pure agentId 只使用 Pure 运行时或父 Agent 明确提供的身份，不从环境变量、进程 ID 或外层宿主
+- 糊来帮 agentId 只使用糊来帮运行时或父 Agent 明确提供的身份，不从环境变量、进程 ID 或外层宿主
   的 task/thread ID 推断。无法确认自身 agentId 时报告角色与负责范围，并写“agentId 由父 Agent
   按 spawn 回执绑定”；不得猜测或借用其他系统的标识。
 - 命令、结果、内容哈希和日志路径必须来自对应的实际工具输出；不能猜测路径、把另一条命令的日志

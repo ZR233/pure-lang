@@ -5,7 +5,7 @@ description: 设计、修改或审查 Rust 公共与共享接口、类型化错�
 
 # Rust 公共接口设计
 
-公共接口不仅是 `pub`，还包括跨组件约定、配置格式、工具输入输出和测试运行器输入。在 Pure-Lang 中，provider 协议、FRB DTO、Dart model 和持久化格式也属于共享契约。
+公共接口不仅是 `pub`，还包括跨组件约定、配置格式、工具输入输出和测试运行器输入。在糊来帮中，provider 协议、FRB DTO、Dart model 和持久化格式也属于共享契约。
 
 ## 设计顺序
 

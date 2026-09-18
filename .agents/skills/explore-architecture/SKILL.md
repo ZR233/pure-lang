@@ -1,14 +1,14 @@
 ---
 name: explore-architecture
-description: Use when asked to understand, document, or summarize the Pure-Lang architecture across its crates, Studio products, and runtime boundaries.
+description: Use when asked to understand, document, or summarize the 糊来帮 architecture across its crates, Studio products, and runtime boundaries.
 metadata:
   category: guides
   platforms: ["windows", "linux", "macos"]
 ---
 
-# 探索 Pure-Lang 架构
+# 探索糊来帮架构
 
-全面理解 Pure-Lang 架构时，先以设计文档建立边界，再按相互独立的模块分派只读子代理，最后沿
+全面理解糊来帮架构时，先以设计文档建立边界，再按相互独立的模块分派只读子代理，最后沿
 `file:line` 小范围复核并汇总。不要用过时的固定目录清单替代当前仓库事实。
 
 ## 建立全局视角

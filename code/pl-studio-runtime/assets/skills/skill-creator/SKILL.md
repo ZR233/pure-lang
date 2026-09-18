@@ -1,12 +1,12 @@
 ---
 name: skill-creator
-description: Use when creating or updating Pure project skills. Guides SKILL.md structure, frontmatter, support directories, project-level writes, and self-learning boundaries.
+description: Use when creating or updating 糊来帮 project skills. Guides SKILL.md structure, frontmatter, support directories, project-level writes, and self-learning boundaries.
 category: skills
 ---
 
-# Pure Skill Creator
+# 糊来帮 Skill Creator
 
-Use this skill when the user asks to create, update, review, or improve a Pure skill.
+Use this skill when the user asks to create, update, review, or improve a 糊来帮 skill.
 
 ## Skill Shape
 
@@ -27,7 +27,7 @@ platforms: ["windows", "linux", "macos"]
 
 ## Project Writes
 
-Pure self-learning and `skill_manage` write only to the current project skills directory:
+糊来帮 self-learning and `skill_manage` write only to the current project skills directory:
 
 ```text
 <workspace_root>/.agents/skills/

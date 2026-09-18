@@ -1,6 +1,6 @@
 ---
 name: subagent-workflow
-description: Use when a task benefits from Pure subagents, multi-agent exploration, implementation, or validation through configured Agent Profiles.
+description: Use when a task benefits from 糊来帮 subagents, multi-agent exploration, implementation, or validation through configured Agent Profiles.
 category: agents
 ---
 
@@ -125,7 +125,7 @@ for the required durable submission.
 The root Agent owns coordination, reconciles conflicting findings, integrates changes, performs
 final verification, and advances the workflow state. For a single bounded implementation or mutually
 exclusive directories use `executor` with the narrowest non-overlapping `writablePaths`; directory
-restrictions apply only to Pure built-in mutation and shell/Git/MCP can bypass them, so children must
+restrictions apply only to 糊来帮 built-in mutation and shell/Git/MCP can bypass them, so children must
 not use that to cross scope or stage/commit/reset. Shared interfaces, manifests, lockfiles, generated
 files, whole-tree formatting, or high-risk Git state use `worktree_executor`; it must commit in its
 isolated worktree and root explicitly adopts then cleans up. Worktrees isolate the scene, not semantic
@@ -144,7 +144,7 @@ require the successful close result's `lifecycle.kind:"closed"` and selected `wo
 A child lifecycle notification can precede physical cleanup and cannot replace this successful receipt.
 A pending tool-task acknowledgement
 is not completed cleanup: wait for that exact task's final result when needed. A failed closure
-retains recoverable resources and must be retried explicitly. Verify that each Pure-owned worktree
+retains recoverable resources and must be retried explicitly. Verify that each 糊来帮-owned worktree
 and branch is gone. Omitted `workspaceDisposition` means `preserve`, not cleanup; no
 `agentChanged` event is part of this tool contract. Never interleave one child's integration and cleanup
 while another accepted sibling commit is still pending integration.

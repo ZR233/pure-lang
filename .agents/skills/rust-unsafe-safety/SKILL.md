@@ -1,6 +1,6 @@
 ---
 name: rust-unsafe-safety
-description: 编写、修改、封装或审查 Rust unsafe、unsafe trait/impl、裸指针、FFI、手工布局及外部资源句柄时使用。在 Pure-Lang 中包括 FRB、系统 API、C 字符串、缓冲区和回调上下文的安全边界。
+description: 编写、修改、封装或审查 Rust unsafe、unsafe trait/impl、裸指针、FFI、手工布局及外部资源句柄时使用。在糊来帮中包括 FRB、系统 API、C 字符串、缓冲区和回调上下文的安全边界。
 ---
 
 # Rust 非安全代码健全性
