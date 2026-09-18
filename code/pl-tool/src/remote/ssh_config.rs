@@ -531,6 +531,8 @@ fn remove_bytes(bytes: &[u8], alias: &str) -> Result<Vec<u8>, RemoteClientError>
 
 fn write_atomic(path: &Path, contents: &[u8]) -> std::io::Result<()> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    // 仅本次创建目录时收紧权限，不改动已存在的用户目录；Windows 无此语义。
+    #[cfg(unix)]
     let parent_created = !parent.exists();
     std::fs::create_dir_all(parent)?;
     #[cfg(unix)]
