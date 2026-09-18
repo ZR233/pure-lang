@@ -395,9 +395,6 @@ class AppLocalizationsZh extends AppLocalizations {
   String get composerWorkspaceModeWorktree => '新建工作树';
 
   @override
-  String get composerWorkspaceModeSshDisabled => '远端项目不提供工作树会话';
-
-  @override
   String get statusPlannerModel => '计划者模型';
 
   @override

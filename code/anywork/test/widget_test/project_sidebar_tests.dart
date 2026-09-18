@@ -383,47 +383,66 @@ void registerProjectSidebarTests() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('remote Project disables the worktree option on the start page', (
-    tester,
-  ) async {
-    _configureResponsiveView(tester, const Size(1440, 900));
-    final api = _FakeStudioApi(_remoteProjectAdoptedState(sshAlias: 'ssh-arm'));
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [studioApiProvider.overrideWithValue(api)],
-        child: _localizedApp(home: const StudioShell()),
-      ),
-    );
-    await tester.pumpAndSettle();
+  testWidgets(
+    'remote Project offers the worktree option and forwards it on submit',
+    (tester) async {
+      _configureResponsiveView(tester, const Size(1440, 900));
+      final api = _FakeStudioApi(
+        _remoteProjectAdoptedState(sshAlias: 'ssh-arm'),
+      );
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [studioApiProvider.overrideWithValue(api)],
+          child: _localizedApp(home: const StudioShell()),
+        ),
+      );
+      await tester.pumpAndSettle();
 
-    final selector = find.byKey(StudioDriverKeys.sessionWorkspaceMode);
-    expect(selector, findsOneWidget);
-    await tester.tap(selector);
-    await tester.pumpAndSettle();
+      final selector = find.byKey(StudioDriverKeys.sessionWorkspaceMode);
+      expect(selector, findsOneWidget);
+      expect(
+        find.descendant(of: selector, matching: find.text('Local directory')),
+        findsOneWidget,
+        reason: 'the start page must default to the local workspace',
+      );
+      await tester.tap(selector);
+      await tester.pumpAndSettle();
 
-    final worktreeOption = find.byKey(
-      StudioDriverKeys.sessionWorkspaceModeOption(
-        ThreadWorkspaceMode.worktree.id,
-      ),
-    );
-    expect(worktreeOption, findsOneWidget);
-    expect(
-      tester.widget<PopupMenuItem<ThreadWorkspaceMode>>(worktreeOption).enabled,
-      isFalse,
-    );
-    expect(
-      find.text('Worktree sessions are unavailable for remote projects'),
-      findsWidgets,
-    );
-    expect(
-      ProviderScope.containerOf(tester.element(find.byType(StudioShell)))
-          .read(studioControllerProvider)
-          .requireValue
-          .newThreadWorkspaceMode,
-      ThreadWorkspaceMode.local,
-    );
-    expect(tester.takeException(), isNull);
-  });
+      final worktreeOption = find.byKey(
+        StudioDriverKeys.sessionWorkspaceModeOption(
+          ThreadWorkspaceMode.worktree.id,
+        ),
+      );
+      expect(worktreeOption, findsOneWidget);
+      expect(
+        tester
+            .widget<PopupMenuItem<ThreadWorkspaceMode>>(worktreeOption)
+            .enabled,
+        isTrue,
+        reason:
+            'remote Projects must expose the worktree option like local ones',
+      );
+      await tester.tap(worktreeOption);
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(of: selector, matching: find.text('New worktree')),
+        findsOneWidget,
+      );
+
+      await tester.enterText(
+        find.byKey(StudioDriverKeys.composerInput),
+        'remote worktree session',
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(StudioDriverKeys.composerSubmit));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(api.createdThreadProjectId, 'remote-project');
+      expect(api.createdThreadWorkspaceMode, 'worktree');
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('sidebar marks only worktree sessions without rewriting them', (
     tester,

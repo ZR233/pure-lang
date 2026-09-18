@@ -18,7 +18,9 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 /// # Errors
 ///
 /// Returns an error when the Project does not exist, the prompt is empty, the requested
-/// workspace mode is unknown or unavailable for a remote Project, or the Turn is rejected.
+/// workspace mode is unknown, the requested session worktree cannot be created (including
+/// a remote Project whose repository root or `HEAD` cannot be resolved), or the Turn is
+/// rejected.
 Future<StartNewThreadResponse> startNewThread({
   required String projectId,
   required BridgeStudioPromptInput input,

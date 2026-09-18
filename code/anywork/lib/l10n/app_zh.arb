@@ -135,7 +135,6 @@
   "composerWorkspaceModeLabel": "会话工作区",
   "composerWorkspaceModeLocal": "本地目录",
   "composerWorkspaceModeWorktree": "新建工作树",
-  "composerWorkspaceModeSshDisabled": "远端项目不提供工作树会话",
   "statusPlannerModel": "计划者模型",
   "statusExecutorModel": "执行者模型",
   "statusReasoningEffort": "思考强度",

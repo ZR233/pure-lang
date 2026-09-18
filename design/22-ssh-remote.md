@@ -77,6 +77,17 @@ server 作为远端可观察进程运行。workspace instructions 由远端 file
 文档集合交给指令组装器，保留远端来源路径；远程路径不得再次交给本地文件系统做目录或
 文件检查。
 
+SSH 项目与本地项目一样提供会话工作区模式：`local` 使用远端 canonical Project 目录，
+`worktree` 在远端仓库按创建时解析的 `HEAD` 创建
+`<repo>/.anywork/worktrees/<root-thread-id>/session`，lease 记录 `ssh_alias`，激活时按
+identity 匹配的 `active` lease 把该远端路径绑定为会话工作区根。远端 workspace handle 根即
+会话工作区根，工具层接受会话工作区根与 canonical Project 目录分离，并按 workspace-relative
+POSIX 路径执行同一内置目录写策略。远端 worktree backend 以解析出的仓库根为基准，Project
+目录是仓库子目录时同样成立。远端 worktree 的恢复、preview 与显式清理走同一 lease 状态机，
+连接可用时经远端 backend；SSH 离线时按既有语义保留现场并给出诊断，不推断 ownership。启动期
+「未注册 worktree」审计只覆盖本地文件系统与本地 git，不为远端项目打开 SSH 连接；远端资源由
+durable lease 覆盖。
+
 本地与远端 prompt 使用同一份执行环境：Platform developer 段声明 transport、目标 OS、
 shell dialect 和路径，并按该 dialect 生成命令语法。shell descriptor 只缓存在当前连接和
 workspace host；断线自动重连完成新的 hello 后替换旧 descriptor；环境变化会改变动态

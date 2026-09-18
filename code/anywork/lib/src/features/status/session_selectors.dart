@@ -73,29 +73,25 @@ class SessionModeSelector extends ConsumerWidget {
 /// 起始页会话工作区选择器：`local` 使用 Project 目录，`worktree` 新建 Git 工作树。
 ///
 /// 选择属于当前项目的输入草稿，只通过创建命令传给运行时；已有的 Thread 工作区模式
-/// 只读来自 canonical 目录事实，因此该控件不出现在已建会话的 composer 中。远端项目
-/// 不提供 `worktree`，禁用该选项并说明原因。
+/// 只读来自 canonical 目录事实，因此该控件不出现在已建会话的 composer 中。本地与 SSH
+/// 项目都提供 `worktree`：非 Git 项目、无 `HEAD` 或远端当前不可用在提交时以类型化错误
+/// 就地反馈，GUI 不做可用性推断。
 class SessionWorkspaceModeSelector extends ConsumerWidget {
   const SessionWorkspaceModeSelector({
     required this.mode,
-    required this.worktreeAvailable,
     required this.onSelected,
     super.key,
   });
 
   final ThreadWorkspaceMode mode;
-  final bool worktreeAvailable;
   final ValueChanged<ThreadWorkspaceMode> onSelected;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = context.l10n;
-    final disabledReason = l10n.composerWorkspaceModeSshDisabled;
     return UpwardPopupMenu<ThreadWorkspaceMode>(
       key: StudioDriverKeys.sessionWorkspaceMode,
-      tooltip: worktreeAvailable
-          ? l10n.composerWorkspaceModeLabel
-          : disabledReason,
+      tooltip: l10n.composerWorkspaceModeLabel,
       initialValue: mode,
       onSelected: onSelected,
       itemBuilder: (context) => [
@@ -114,11 +110,9 @@ class SessionWorkspaceModeSelector extends ConsumerWidget {
             ThreadWorkspaceMode.worktree.id,
           ),
           value: ThreadWorkspaceMode.worktree,
-          enabled: worktreeAvailable,
           child: _WorkspaceModeItem(
             icon: Icons.account_tree_outlined,
             label: l10n.composerWorkspaceModeWorktree,
-            hint: worktreeAvailable ? null : disabledReason,
           ),
         ),
       ],
@@ -132,15 +126,10 @@ class SessionWorkspaceModeSelector extends ConsumerWidget {
 }
 
 class _WorkspaceModeItem extends StatelessWidget {
-  const _WorkspaceModeItem({
-    required this.icon,
-    required this.label,
-    this.hint,
-  });
+  const _WorkspaceModeItem({required this.icon, required this.label});
 
   final IconData icon;
   final String label;
-  final String? hint;
 
   @override
   Widget build(BuildContext context) {
@@ -153,15 +142,7 @@ class _WorkspaceModeItem extends StatelessWidget {
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label, overflow: TextOverflow.ellipsis),
-                if (hint case final reason?)
-                  Text(
-                    reason,
-                    style: Theme.of(context).textTheme.labelSmall,
-                    maxLines: 2,
-                  ),
-              ],
+              children: [Text(label, overflow: TextOverflow.ellipsis)],
             ),
           ),
         ],

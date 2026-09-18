@@ -1039,15 +1039,6 @@ class DemoStudioApi implements StudioApi {
         'must be local or worktree',
       ),
     };
-    if (requestedWorkspaceMode.isWorktree &&
-        current.projects
-                .firstWhere((project) => project.id == projectId)
-                .sshAlias !=
-            null) {
-      throw StateError(
-        'workspaceMode worktree is unavailable for a remote project',
-      );
-    }
     final now = DateTime.now();
     final provisionalTitle = _demoProvisionalThreadTitle(input.text);
     final thread = StudioThread(

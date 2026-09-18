@@ -830,12 +830,6 @@ abstract class AppLocalizations {
   /// **'New worktree'**
   String get composerWorkspaceModeWorktree;
 
-  /// No description provided for @composerWorkspaceModeSshDisabled.
-  ///
-  /// In en, this message translates to:
-  /// **'Worktree sessions are unavailable for remote projects'**
-  String get composerWorkspaceModeSshDisabled;
-
   /// No description provided for @statusPlannerModel.
   ///
   /// In en, this message translates to:

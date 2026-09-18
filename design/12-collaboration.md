@@ -269,17 +269,23 @@ usage 报告，不承诺固定收益。阶段完成标准消费可复用的验�
 ## 12.5 worktree 生命周期
 
 本地和 SSH 后端都以创建时解析的 `HEAD` 执行 `git worktree add -b`，禁用 hooks 和
-credential helper，最长 120 秒。lease 记录归属：child 智能体使用
+credential helper，最长 120 秒。两者都以本次解析出的仓库根作为 worktree backend 根：远端
+项目的 workspace handle 根、Git 工作目录与相对路径基准都取自该仓库根，而不是配置的 Project
+目录，因此 Project 目录是仓库子目录时同样成立；远端 Git 与目录操作仍由本地编排，经远端进程
+面与文件面在远端执行，helper 内不实现 Git/worktree。创建路径与恢复、preview 和清理共用该
+约定。lease 记录归属：child 智能体使用
 `<repo>/.anywork/worktrees/<root-thread-id>/<child-id>` 与 Pure-owned `pure-agent-*` 分支；
 根会话自身工作区使用 `<repo>/.anywork/worktrees/<root-thread-id>/session` 与 Pure-owned
 `pure-session-*` 分支。身份校验按归属校验期望 leaf 与期望分支，仍拒绝任何非 Pure 分支。
 非 Git 项目或无 HEAD 时类型化失败。
 
-根会话 worktree 在创建会话的命令内建立：先按 `HEAD` 解析仓库与 base、记录 `prepared` lease，
-再创建物理 worktree，随后转为 `active`，然后发布含 `workspaceMode` 的 Thread 目录事实，最后
-激活 owner 并把该路径绑定为会话工作区根。任一阶段失败都让命令失败、不发布 Thread，并按
-`NoSideEffects | MayHaveCreated` 收束；已创建资源保留现场，不用 `--force` 绕过 Git 锁或注册
-身份。崩溃可能留下已落库 lease 而没有 Thread 记录，启动对账把这类 lease 作为诊断保留。
+根会话 worktree 对本地与 SSH 项目都可用，并在创建会话的命令内建立：先按 `HEAD` 解析仓库与
+base、记录含 `ssh_alias` 的 `prepared` lease，再创建物理 worktree，随后转为 `active`，然后
+发布含 `workspaceMode` 的 Thread 目录事实，最后激活 owner 并把该路径绑定为会话工作区根。
+远端会话的工作区根与 canonical Project 目录分离，工具层按会话工作区根打开远端 workspace
+handle。任一阶段失败都让命令失败、不发布 Thread，并按 `NoSideEffects | MayHaveCreated`
+收束；已创建资源保留现场，不用 `--force` 绕过 Git 锁或注册身份。崩溃可能留下已落库 lease
+而没有 Thread 记录，启动对账把这类 lease 作为诊断保留。
 
 根会话激活只按 Thread 的 `workspaceMode` 与 durable lease 解析工作区：`local` 使用 Project
 根目录；`worktree` 必须存在 identity 匹配的 `active` lease，缺失、身份不符或已经清理都返回
@@ -302,9 +308,12 @@ owner Thread 记录尚未发布）；进程重启后标记消失，遗留 lease 
 `studio_objects` 保存版本化 lease：归属类型、owner Thread id、
 `prepared | active | preserved | cleanupRequested | cleaned`，以及 repo、path、branch、base
 与 revision。spawn 或创建会话的任一阶段失败都按
-`NoSideEffects | MayHaveCreated` 分类补偿 Thread、热资源、worktree 与 branch。启动恢复只按
-durable lease 对账；资源部分缺失或身份不匹配时保留现场并发布 Recovery issue，不盲删目录或
-非 Pure 分支。
+`NoSideEffects | MayHaveCreated` 分类补偿 Thread、热资源、worktree 与 branch。启动恢复按
+durable lease 对账，本地与远端 lease 同样处理：远端 lease 的预览与显式清理在连接可用时经
+远端 backend，SSH 离线时保留现场并给出诊断。除 lease 外，启动期只对本地项目额外扫描文件
+系统中的未注册 Pure-owned worktree，不为远端项目打开 SSH 连接，远端资源完全由 durable
+lease 覆盖。资源部分缺失或身份不匹配时保留现场并发布 Recovery issue，不盲删目录或非 Pure
+分支。
 
 `close_agent` 对 worktree child 接受 `workspaceDisposition = preserve | cleanup`，默认
 preserve。关闭工具等待子孙 Thread、订阅与所选宿主资源处置完成，成功结果包含目标及

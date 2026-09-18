@@ -2048,7 +2048,8 @@ mod tests {
         );
         assert!(!workspace.path().join(".anywork").exists());
 
-        // 远程项目在创建任何资源之前就被拒绝（非目标：本次不实现远程 worktree）。
+        // 远程项目不再被 local-only 硬拒绝：解析仓库根经远端 backend，未配置的 alias
+        // 在创建任何资源之前返回类型化失败。
         let remote = crate::studio::ProjectRecord {
             id: "project-remote".into(),
             name: "remote".into(),
@@ -2064,11 +2065,20 @@ mod tests {
         )
         .await
         .unwrap_err();
+        let error_text = format!("{error:#}");
         assert!(
-            error
-                .to_string()
-                .contains("only available for local projects"),
-            "{error}"
+            !error_text.contains("only available for local projects"),
+            "远程项目不得再被 local-only 拒绝：{error_text}"
+        );
+        assert!(
+            error_text.contains("studio_workspace"),
+            "远端仓库解析失败必须是类型化的会话工作区错误：{error_text}"
+        );
+        // 未配置的 alias 在创建任何资源之前就按别名解析失败，不进入真实网络等待；
+        // 该消息同时证明远程创建路径确实经远端 backend 解析仓库根。
+        assert!(
+            error_text.contains("unknown SSH server 'ssh-1'"),
+            "未配置的别名必须快速类型化失败：{error_text}"
         );
         assert!(
             runtime
@@ -2078,6 +2088,16 @@ mod tests {
                 .iter()
                 .all(|lease| lease.owner_thread_id != "thread-remote"),
             "远程拒绝不得留下 lease"
+        );
+        assert_eq!(
+            runtime
+                .store
+                .list_root_threads(&project_id)
+                .await
+                .unwrap()
+                .len(),
+            before,
+            "远程失败不得发布 Thread"
         );
 
         // local 模式不受影响。

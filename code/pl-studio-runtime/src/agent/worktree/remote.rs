@@ -383,9 +383,13 @@ mod tests {
     }
 
     fn backend(transport: Arc<RecordingTransport>) -> RemoteWorktreeBackend {
+        backend_at(transport, "/repo")
+    }
+
+    fn backend_at(transport: Arc<RecordingTransport>, repo_root: &str) -> RemoteWorktreeBackend {
         RemoteWorktreeBackend {
             transport,
-            repo_root: PathBuf::from("/repo"),
+            repo_root: PathBuf::from(repo_root),
             policy: GitPolicy::default(),
         }
     }
@@ -467,5 +471,41 @@ mod tests {
             "-D".into(),
             "pure-agent-child".into(),
         ]));
+    }
+
+    /// Project 目录是仓库子目录时，backend 必须以创建时解析出的仓库根为基准：只有以仓库根
+    /// 构造的 backend 才能把 Pure-owned worktree 路径表达成 workspace-relative 形式，
+    /// 以 Project 目录为基准会判为 "outside"。创建路径与恢复、preview、清理共用该约定。
+    #[tokio::test]
+    async fn ssh_backend_uses_the_resolved_repository_root_as_its_relative_base() {
+        let transport = Arc::new(RecordingTransport::default());
+        let repository_root = Path::new("/repo");
+        let project_root = Path::new("/repo/packages/app");
+        let target = repository_root.join(".anywork/worktrees/root/session");
+        let backend = backend_at(transport.clone(), "/repo");
+
+        backend
+            .create_parent(repository_root, &target)
+            .await
+            .unwrap();
+        backend.remove_leaf(repository_root, &target).await.unwrap();
+
+        assert_eq!(
+            transport.directories.lock().unwrap().as_slice(),
+            [".anywork/worktrees/root"]
+        );
+        assert_eq!(
+            transport.removals.lock().unwrap().as_slice(),
+            [".anywork/worktrees/root/session"]
+        );
+
+        // 反例：以 Project 目录为基准的 backend 无法表达同一路径，必须显式失败而不是
+        // 把目录操作重定向到错误的相对路径。
+        let project_root_backend = backend_at(transport, "/repo/packages/app");
+        let error = project_root_backend
+            .create_parent(project_root, &target)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("outside"), "{error}");
     }
 }

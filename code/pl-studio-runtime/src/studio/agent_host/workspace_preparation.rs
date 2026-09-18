@@ -85,16 +85,12 @@ pub(in crate::studio) async fn prepare_workspace(
             )
         }
         AgentWorkspaceMode::Worktree => {
-            let backend = backend_for(
+            let (repository_root, manager) = repository_manager(
                 ssh_manager,
                 request.project.ssh_alias.as_deref(),
                 &project_root,
-            );
-            let repository_root =
-                WorktreeManager::resolve_repository_root(backend.as_ref(), &project_root)
-                    .await
-                    .map_err(|error| lifecycle_error(error.to_string()))?;
-            let manager = WorktreeManager::new(repository_root.clone(), backend);
+            )
+            .await?;
             let base_commit = manager
                 .resolve_head(&repository_root)
                 .await
@@ -188,30 +184,46 @@ pub(in crate::studio) fn manager_from_lease(
     )
 }
 
+/// Resolves a Project's repository root and returns the backend and manager anchored on
+/// that resolved root.
+///
+/// 本地和 SSH 项目都以创建时解析出的仓库根作为 worktree backend 根：远端项目的
+/// workspace handle 根、Git 工作目录与相对路径基准都取自该仓库根，而不是配置的 Project
+/// 目录，因此 Project 目录是仓库子目录时同样成立。解析本身在 Project 目录上执行，返回的
+/// manager 与 `manager_from_lease` 使用同一约定，创建路径因此与恢复、preview 和清理一致。
+async fn repository_manager(
+    ssh_manager: &Arc<pl_tool::remote::SshManager>,
+    ssh_alias: Option<&str>,
+    project_root: &Path,
+) -> Result<(PathBuf, WorktreeManager)> {
+    let resolver = backend_for(ssh_manager, ssh_alias, project_root);
+    let repository_root = WorktreeManager::resolve_repository_root(resolver.as_ref(), project_root)
+        .await
+        .map_err(|error| lifecycle_error(error.to_string()))?;
+    let backend = backend_for(ssh_manager, ssh_alias, &repository_root);
+    Ok((
+        repository_root.clone(),
+        WorktreeManager::new(repository_root, backend),
+    ))
+}
+
 /// Creates the physical worktree of a root session and records its `prepared` lease.
 ///
-/// Preflight (local Project, repository root and `HEAD` resolution) runs before any
-/// resource exists. A failed physical create settles the durable lease through the
-/// existing `WorktreeCreateFailureDisposition` and never bypasses a Git lock or a
-/// registered worktree identity.
+/// Preflight (repository root and `HEAD` resolution over the Project's own backend) runs
+/// before any resource exists; the physical create then runs on the backend rooted at that
+/// repository root, so local and SSH Projects share one convention. A failed physical
+/// create settles the durable lease through the existing
+/// `WorktreeCreateFailureDisposition` and never bypasses a Git lock or a registered
+/// worktree identity.
 pub(in crate::studio) async fn create_root_session_worktree(
     worktrees: &WorktreeLeaseOwner,
     ssh_manager: &Arc<pl_tool::remote::SshManager>,
     project: &ProjectRecord,
     thread_id: &str,
 ) -> Result<WorktreeLease> {
-    if project.ssh_alias.is_some() {
-        return Err(lifecycle_error(format!(
-            "worktree sessions are only available for local projects; Project {} is remote",
-            project.id
-        )));
-    }
     let project_root = resolved_project_root(project)?;
-    let backend = backend_for(ssh_manager, None, &project_root);
-    let repository_root = WorktreeManager::resolve_repository_root(backend.as_ref(), &project_root)
-        .await
-        .map_err(|error| lifecycle_error(error.to_string()))?;
-    let manager = WorktreeManager::new(repository_root.clone(), backend);
+    let (repository_root, manager) =
+        repository_manager(ssh_manager, project.ssh_alias.as_deref(), &project_root).await?;
     let base_commit = manager
         .resolve_head(&repository_root)
         .await
@@ -228,7 +240,7 @@ pub(in crate::studio) async fn create_root_session_worktree(
         owner_thread_id: thread_id.to_owned(),
         root_thread_id: thread_id.to_owned(),
         project_id: project.id.clone(),
-        ssh_alias: None,
+        ssh_alias: project.ssh_alias.clone(),
         repository_root: repository_root.to_string_lossy().into_owned(),
         path: path.to_string_lossy().into_owned(),
         branch,

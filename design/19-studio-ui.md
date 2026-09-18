@@ -31,8 +31,8 @@ snapshot 恢复 UI。Thread Mode 不出现在普通 Skills 设置和按需调用
 
 起始页 composer 另外提供会话工作区选择：`local`（默认，使用 Project 目录）或 `worktree`
 （从 Project 的 Git 仓库 `HEAD` 新建独立工作树）。该选择属于所在项目的输入草稿，按项目隔离
-保存，并随首个 prompt 提交给创建命令。`worktree` 只在本地项目可用：SSH 项目禁用该选项并
-说明原因，本地非 Git 项目或无 `HEAD` 由提交时的类型化错误就地反馈，草稿与错误状态不清除。
+保存，并随首个 prompt 提交给创建命令。本地与 SSH 项目都提供 `worktree`：非 Git 项目、
+无 `HEAD` 或远端当前不可用由提交时的类型化错误就地反馈，草稿与错误状态不清除。
 已建会话的工作区模式只读来自 canonical 目录事实，GUI 不推导、不本地改写，也不把选择当作
 第二份持久状态。
 

@@ -410,10 +410,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get composerWorkspaceModeWorktree => 'New worktree';
 
   @override
-  String get composerWorkspaceModeSshDisabled =>
-      'Worktree sessions are unavailable for remote projects';
-
-  @override
   String get statusPlannerModel => 'Planner model';
 
   @override

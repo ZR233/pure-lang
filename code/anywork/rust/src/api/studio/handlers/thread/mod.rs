@@ -18,7 +18,9 @@ fn thread_mode(mode: String) -> Result<ThreadModeId, BridgeError> {
 /// # Errors
 ///
 /// Returns an error when the Project does not exist, the prompt is empty, the requested
-/// workspace mode is unknown or unavailable for a remote Project, or the Turn is rejected.
+/// workspace mode is unknown, the requested session worktree cannot be created (including
+/// a remote Project whose repository root or `HEAD` cannot be resolved), or the Turn is
+/// rejected.
 pub async fn start_new_thread(
     project_id: String,
     input: BridgeStudioPromptInput,

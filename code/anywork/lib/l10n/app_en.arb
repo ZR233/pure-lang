@@ -187,7 +187,6 @@
   "composerWorkspaceModeLabel": "Session workspace",
   "composerWorkspaceModeLocal": "Local directory",
   "composerWorkspaceModeWorktree": "New worktree",
-  "composerWorkspaceModeSshDisabled": "Worktree sessions are unavailable for remote projects",
   "statusPlannerModel": "Planner model",
   "statusExecutorModel": "Executor model",
   "statusReasoningEffort": "Reasoning effort",

@@ -100,7 +100,6 @@ class StartPageComposerDock extends ConsumerWidget {
                   ),
                   SessionWorkspaceModeSelector(
                     mode: view.workspaceMode,
-                    worktreeAvailable: view.worktreeAvailable,
                     onSelected: controller.setNewThreadWorkspaceMode,
                   ),
                   ModelRoleSelector(
