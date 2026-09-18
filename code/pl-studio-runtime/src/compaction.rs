@@ -298,6 +298,83 @@ mod tests {
         thread.close().await.unwrap();
         server.await.unwrap();
     }
+
+    #[tokio::test]
+    async fn native_checkpoint_history_fails_chat_completions_estimation_with_a_visible_reason() {
+        // A session compacted by a Responses-protocol model keeps an encrypted checkpoint;
+        // switching that session to a Chat Completions model (e.g. GLM) must fail preparation
+        // with the protocol incompatibility and an actionable message instead of a bare kind.
+        let mut info = pl_model::model::default_models()
+            .into_iter()
+            .find(|model| model.slug == "glm-5.3")
+            .expect("bundled GLM catalog model exists");
+        info.auto_compact_token_limit = Some(1);
+        let route = ResolvedModelRoute {
+            pricing_mode: pl_protocol::PricingMode::Disabled,
+            role: pl_protocol::AgentRoleId::new("test").unwrap(),
+            provider_id: pl_model::config::ProviderId::new("fixture").unwrap(),
+            endpoint: pl_model::provider::ProviderEndpoint::zhipu_coding_plan(Some(
+                "http://127.0.0.1:1".into(),
+            )),
+            model: info,
+            effort: None,
+        };
+        let model = ThreadModel::new(ModelRuntime::from_route(&route).unwrap(), None);
+        let thread =
+            ThreadHandle::start("glm-session".into(), model.open_session().await.unwrap()).unwrap();
+        let checkpoint = ContextRecord {
+            id: "compaction:old".into(),
+            turn_id: None,
+            source: ContextSource::Runtime {
+                source_id: "model.compaction".into(),
+            },
+            content: vec![ContextContent::Opaque {
+                payload: pl_core::context::OpaquePayload::new(
+                    "pl.model.compaction",
+                    1,
+                    serde_json::to_string(&serde_json::json!({
+                        "type": "compaction",
+                        "encryptedContent": "encrypted"
+                    }))
+                    .unwrap(),
+                )
+                .unwrap(),
+            }],
+            tool_calls: vec![],
+        };
+        thread
+            .replace_context(ReplaceContext {
+                expected_revision: 0,
+                reason: ContextReplacementReason::Rebuild,
+                records: vec![checkpoint],
+            })
+            .await
+            .unwrap();
+        thread
+            .set_context_preparation(preparer(&route, OpenAiCompactionMode::RemoteV2).unwrap())
+            .await
+            .unwrap();
+        let error = thread
+            .step(StepInput {
+                turn_id: "turn".into(),
+                attempt_id: "attempt".into(),
+                content: vec![ContextContent::Text {
+                    text: "followup".into(),
+                }],
+                cancellation: Default::default(),
+            })
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("native Responses context"),
+            "the turn failure must explain the incompatible history: {error}"
+        );
+        assert!(
+            !error.to_string().contains("UnsupportedContent"),
+            "protocol incompatibility is not unsupported content: {error}"
+        );
+        thread.close().await.unwrap();
+    }
     async fn request_body(socket: &mut tokio::net::TcpStream) -> serde_json::Value {
         let mut bytes = Vec::new();
         let mut chunk = [0; 4096];

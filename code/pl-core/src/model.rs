@@ -171,18 +171,32 @@ pub enum ModelFailureKind {
 }
 
 /// Invocation failure with usage observed before termination.
-#[derive(Debug, thiserror::Error, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[error("model call failed: {kind:?}")]
 pub struct ModelError {
     /// Producer-owned facts observed on failure, including optional accounting or protocol material.
     #[serde(default)]
     pub details: Option<Box<OpaquePayload>>,
     pub kind: ModelFailureKind,
     pub usage: ModelUsage,
-    #[source]
     #[serde(with = "crate::error_record::optional")]
     pub source: Option<Box<dyn std::error::Error + Send + Sync>>,
+}
+
+impl std::fmt::Display for ModelError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "model call failed: {:?}", self.kind)?;
+        if let Some(source) = &self.source {
+            write!(formatter, ": {source}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for ModelError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.source.as_deref().map(|error| error as _)
+    }
 }
 
 impl ModelError {

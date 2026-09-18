@@ -47,6 +47,9 @@ impl ThreadModel {
         request: &ModelRequest,
     ) -> Result<Option<pl_core::model::TokenEstimate>, ModelError> {
         let mut encoded = codec::request(request)?;
+        self.runtime
+            .validate_context(&encoded.input)
+            .map_err(|error| failure(ModelFailureKind::IncompatibleContext, error))?;
         encoded.reasoning = self.reasoning.clone();
         encoded.parallel_tool_calls = request.tool_call_mode
             == pl_core::model::ToolCallMode::Parallel
@@ -401,6 +404,58 @@ mod tests {
         assert_eq!(
             decode(&record).unwrap_err().kind,
             ModelFailureKind::IncompatibleContext
+        );
+    }
+
+    #[tokio::test]
+    async fn estimate_rejects_native_responses_history_like_a_prepared_call() {
+        let payload = OpaquePayload::new(
+            FORMAT,
+            1,
+            serde_json::to_string(&ModelContextItem::Compaction {
+                encrypted_content: "encrypted".into(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let records = vec![ContextRecord {
+            id: "checkpoint".into(),
+            turn_id: None,
+            source: ContextSource::Runtime {
+                source_id: "model.compaction".into(),
+            },
+            content: vec![ContextContent::Opaque { payload }],
+            tool_calls: vec![],
+        }];
+        let request = ModelRequest {
+            tool_call_mode: pl_core::model::ToolCallMode::Parallel,
+            solo_tool_ids: Vec::new().into(),
+            thread_id: "thread".into(),
+            turn_id: "turn".into(),
+            attempt_id: "estimate".into(),
+            context: pl_core::context::ContextSnapshot {
+                revision: 1,
+                records: records.into(),
+            },
+            tools: [].into(),
+            committed_private_context: None,
+            resources: None,
+            cancellation: Default::default(),
+            progress: None,
+        };
+        let model = ThreadModel::new(
+            crate::runtime::ModelRuntime::new(
+                crate::provider::ProviderEndpoint::deepseek(None),
+                crate::model::ModelInfo::compatible("chat-completions-fixture"),
+            )
+            .unwrap(),
+            None,
+        );
+        let error = model.estimate_input(&request).await.unwrap_err();
+        assert_eq!(error.kind, ModelFailureKind::IncompatibleContext);
+        assert!(
+            error.to_string().contains("native Responses context"),
+            "the rejection reason must stay visible in the error display: {error}"
         );
     }
 }

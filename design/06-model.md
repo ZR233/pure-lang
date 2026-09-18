@@ -334,7 +334,10 @@ schema 的变化仍单独记录（完整依赖倒置与 prepared-call 契约见 
 
 上下文压缩采用 Codex 风格的版本化 replacement：采样前估算完整物化请求，达到 90% 自动阈值时
 replace transcript，再把当前 working context 注入新窗口一次；provider 报告 token 达到阈值时，
-下一次采样前执行同样 replacement。压缩不得丢失 tool call/output 配对或当前用户任务。
+下一次采样前执行同样 replacement。压缩不得丢失 tool call/output 配对或当前用户任务。估算与
+请求准备共享同一协议入口校验：历史含原生 Responses 物料（如加密 checkpoint）而当前模型使用
+Chat Completions 时，估算与准备都以 IncompatibleContext 拒绝并保留原始原因，不得改判为内容
+不支持。
 
 每个指令层分别计算内容 hash；基础、模式角色、Skill、可见工具组说明、Workspace、wire 工具
 前缀、provider、model 或 compaction 变化都给出类型化的前缀变化原因并提升 generation。工具与

@@ -33,7 +33,10 @@ pub(super) fn validate(protocol: ProviderWireProtocol, items: &[ModelContextItem
         match item {
             ModelContextItem::Compaction { .. } | ModelContextItem::Responses { .. } => {
                 return Err(PureError::ConfigError(
-                    "Native Responses context requires a compatible Responses model binding".into(),
+                    "session history contains native Responses context (for example an encrypted \
+                     compaction checkpoint) that a Chat Completions model cannot consume; use a \
+                     Responses-protocol model for this session or start a new session"
+                        .into(),
                 ));
             }
             ModelContextItem::Message { .. }
