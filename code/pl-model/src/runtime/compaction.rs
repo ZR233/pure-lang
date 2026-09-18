@@ -89,6 +89,7 @@ pub(super) async fn compact_context(
     .map_err(|source| CompletionFailure {
         source,
         accounting: Box::new(accounting.clone()),
+        cancelled: false,
     })?;
     Ok(ModelCompactionResponse {
         input: vec![replacement],

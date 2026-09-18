@@ -83,16 +83,18 @@ impl WorktreeLease {
 
     /// 按归属校验期望 leaf 与期望 branch，仍拒绝任何非 Pure 分支。
     pub(in crate::studio) fn validate_identity(&self) -> Result<()> {
-        use crate::agent::worktree::WorktreeManager;
+        use crate::agent::worktree::{WorktreeManager, remote_path_text};
         let repository_root = std::path::Path::new(&self.repository_root);
         let ownership = self.ownership();
+        // 两侧统一按跨端 POSIX 形式比较：远端远端 lease 记录 POSIX，而 `allocate_path` 在
+        // Windows 宿主会注入 `\`；本地项目两侧都保留宿主形态，归一化后仍相等。
+        let expected = remote_path_text(&WorktreeManager::allocate_path(
+            repository_root,
+            &self.root_thread_id,
+            &ownership,
+        ));
         anyhow::ensure!(
-            std::path::Path::new(&self.path)
-                == WorktreeManager::allocate_path(
-                    repository_root,
-                    &self.root_thread_id,
-                    &ownership
-                ),
+            remote_path_text(std::path::Path::new(&self.path)) == expected,
             "worktree cleanup refused a mismatched Pure-owned leaf"
         );
         anyhow::ensure!(

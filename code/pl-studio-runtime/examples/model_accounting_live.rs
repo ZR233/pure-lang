@@ -377,17 +377,17 @@ async fn invoke(
     };
     match (result, session.close().await) {
         (result, Ok(())) => result,
-        (Ok(response), Err(source)) => Err(CompletionFailure {
+        (Ok(response), Err(source)) => Err(CompletionFailure::new(
             source,
-            accounting: Box::new(response.accounting),
-        }),
-        (Err(failure), Err(cleanup)) => Err(CompletionFailure {
-            source: pl_protocol::PureError::Io(std::io::Error::other(AcceptanceCleanupFailure {
+            Box::new(response.accounting),
+        )),
+        (Err(failure), Err(cleanup)) => Err(CompletionFailure::new(
+            pl_protocol::PureError::Io(std::io::Error::other(AcceptanceCleanupFailure {
                 primary: failure.source,
                 cleanup,
             })),
-            accounting: failure.accounting,
-        }),
+            failure.accounting,
+        )),
     }
 }
 

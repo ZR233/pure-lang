@@ -505,6 +505,125 @@ void registerInteractionTests() {
     );
     expect(api.resolveInteractionCount, 1);
   });
+
+  testWidgets('composer submits the current draft on Enter like the button', (
+    tester,
+  ) async {
+    _configureResponsiveView(tester, const Size(1280, 800));
+
+    final api = _FakeStudioApi(_emptyState());
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(StudioDriverKeys.composerInput),
+      'Enter submits this draft',
+    );
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+
+    expect(api.submitPromptCount, 1);
+    expect(api.submittedInputs.single.threadId, 'session-1');
+    expect(api.submittedInputs.single.input.text, 'Enter submits this draft');
+  });
+
+  testWidgets('composer keeps Shift+Enter as a newline without submitting', (
+    tester,
+  ) async {
+    _configureResponsiveView(tester, const Size(1280, 800));
+
+    final api = _FakeStudioApi(_emptyState());
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(StudioDriverKeys.composerInput),
+      'line one',
+    );
+    await tester.pump();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.pump();
+
+    expect(api.submitPromptCount, 0);
+    expect(
+      tester
+          .widget<TextField>(find.byKey(StudioDriverKeys.composerInput))
+          .controller!
+          .text,
+      'line one',
+    );
+  });
+
+  testWidgets('composer ignores Enter when the draft is empty', (tester) async {
+    _configureResponsiveView(tester, const Size(1280, 800));
+
+    final api = _FakeStudioApi(_emptyState());
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.showKeyboard(find.byKey(StudioDriverKeys.composerInput));
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+
+    expect(api.submitPromptCount, 0);
+  });
+
+  testWidgets('composer does not resubmit while a submission is pending', (
+    tester,
+  ) async {
+    _configureResponsiveView(tester, const Size(1280, 800));
+
+    final gate = Completer<SubmitPromptReceipt>();
+    final api = _FakeStudioApi(_emptyState())..blockedPromptSubmit = gate;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(StudioDriverKeys.composerInput),
+      'blocked draft',
+    );
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(api.submitPromptCount, 1);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(api.submitPromptCount, 1);
+
+    gate.complete(
+      const SubmitPromptReceipt(
+        threadId: 'session-1',
+        inputId: 'input-blocked',
+        cursor: 1,
+      ),
+    );
+    await tester.pumpAndSettle();
+  });
 }
 
 const _planMarkdown = '''

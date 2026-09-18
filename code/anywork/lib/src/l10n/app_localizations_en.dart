@@ -74,6 +74,16 @@ class AppLocalizationsEn extends AppLocalizations {
       'Could not archive this session. It may still be running.';
 
   @override
+  String get sidebarArchiveSessionConfirmTitle => 'Archive session';
+
+  @override
+  String get sidebarArchiveSessionConfirmBody =>
+      'Archiving ends any running work and moves this session out of the list. Continue?';
+
+  @override
+  String get sidebarArchiveSessionConfirmAction => 'Archive';
+
+  @override
   String get sidebarRenameSession => 'Rename session';
 
   @override

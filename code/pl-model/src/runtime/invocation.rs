@@ -358,7 +358,10 @@ impl InvocationRunner {
         let _session_lease = if let Some(cancellation) = &context.cancellation {
             tokio::select! {
                 biased;
-                _ = cancellation.cancelled() => return Err(PureError::LlmError("model invocation cancelled before admission".into()).into()),
+                _ = cancellation.cancelled() => return Err(CompletionFailure::cancelled(
+                    PureError::LlmError("model invocation cancelled before admission".into()),
+                    Box::default(),
+                )),
                 lease = context.session.admit() => lease?,
             }
         } else {
@@ -381,7 +384,10 @@ impl InvocationRunner {
                 .as_ref()
                 .is_some_and(|token| token.is_cancelled())
             {
-                return Err(PureError::LlmError("model invocation cancelled".into()).into());
+                return Err(CompletionFailure::cancelled(
+                    PureError::LlmError("model invocation cancelled".into()),
+                    Box::default(),
+                ));
             }
             let transport = self.active_transport(&context.session);
             let max_retries = MODEL_MAX_RETRIES;
@@ -509,10 +515,10 @@ impl InvocationRunner {
             if let Some(token) = &context.cancellation {
                 tokio::select! {
                     _ = tokio::time::sleep(delay) => {},
-                    _ = token.cancelled() => return Err(CompletionFailure {
-                        source: PureError::LlmError("model invocation cancelled".into()),
-                        accounting: error.accounting,
-                    }),
+                    _ = token.cancelled() => return Err(CompletionFailure::cancelled(
+                        PureError::LlmError("model invocation cancelled".into()),
+                        error.accounting,
+                    )),
                 }
             } else {
                 tokio::time::sleep(delay).await;
@@ -549,7 +555,10 @@ impl InvocationRunner {
         let opened = match context.cancellation.as_ref() {
             Some(token) => tokio::select! {
                 result = &mut opening => result,
-                _ = token.cancelled() => return (Err(PureError::LlmError("model invocation cancelled".into()).into()), false),
+                _ = token.cancelled() => return (Err(CompletionFailure::cancelled(
+                    PureError::LlmError("model invocation cancelled".into()),
+                    Box::default(),
+                )), false),
             },
             None => opening.await,
         };

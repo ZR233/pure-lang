@@ -210,6 +210,8 @@ impl StudioRuntime {
             recovery_task: Default::default(),
             #[cfg(test)]
             recovery_gate: Default::default(),
+            #[cfg(test)]
+            archive_settle_timeout: super::super::ARCHIVE_TREE_SETTLE_TIMEOUT,
             skills,
             thread_modes,
             provider_usage,

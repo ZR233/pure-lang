@@ -183,14 +183,22 @@ impl ModelTurnClient {
             (Ok(response), Err(source)) => Err(crate::completion::CompletionFailure {
                 source,
                 accounting: Box::new(response.accounting),
+                cancelled: false,
             }),
-            (Err(failure), Err(cleanup)) => Err(crate::completion::CompletionFailure {
-                source: pl_protocol::PureError::Io(std::io::Error::other(HostCallCleanupFailure {
-                    primary: failure.source,
-                    cleanup,
-                })),
-                accounting: failure.accounting,
-            }),
+            (Err(failure), Err(cleanup)) => {
+                // Folding a separate cleanup failure in does not erase the primary call's fact.
+                let cancelled = failure.is_cancelled();
+                Err(crate::completion::CompletionFailure {
+                    source: pl_protocol::PureError::Io(std::io::Error::other(
+                        HostCallCleanupFailure {
+                            primary: failure.source,
+                            cleanup,
+                        },
+                    )),
+                    accounting: failure.accounting,
+                    cancelled,
+                })
+            }
         }
     }
 }

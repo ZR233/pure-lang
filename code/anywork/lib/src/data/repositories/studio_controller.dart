@@ -301,8 +301,7 @@ class StudioController extends _$StudioController {
               scope: RecoveryIssueScope.thread,
               threadId: threadId,
             ) !=
-            null ||
-        (current.isBusy && current.selectedRootThread?.id == threadId)) {
+            null) {
       return;
     }
     if (!_archivingThreadIds.add(threadId)) return;

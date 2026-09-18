@@ -155,6 +155,7 @@ impl RemoteCompaction<'_> {
                 CompletionFailure {
                     source,
                     accounting: Box::new(response.accounting.clone()),
+                    cancelled: false,
                 }
             })?;
         Ok(NativeCompactionCheckpoint {

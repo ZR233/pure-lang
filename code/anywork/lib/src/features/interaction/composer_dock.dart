@@ -284,16 +284,40 @@ class _PromptComposerPanelState extends State<_PromptComposerPanel> {
     super.dispose();
   }
 
+  /// 主按钮与回车提交共享同一前置条件：启用、有内容且不在提交中。
+  bool get _hasContent =>
+      widget.composer.draft.trim().isNotEmpty ||
+      widget.composer.attachments.isNotEmpty;
+
+  bool get _canSubmit =>
+      widget.enabled && _hasContent && !widget.composer.isSubmissionPending;
+
+  /// 回车提交当前草稿，语义与主按钮一致。
+  ///
+  /// Shift+Enter 与输入法组字过程保持原生行为（插入换行）；未满足提交前置条件
+  /// 时不消费按键。返回 [KeyEventResult.handled] 让引擎不再把它当作文本输入。
+  KeyEventResult _handleComposerKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+    if (key != LogicalKeyboardKey.enter &&
+        key != LogicalKeyboardKey.numpadEnter) {
+      return KeyEventResult.ignored;
+    }
+    if (HardwareKeyboard.instance.isShiftPressed ||
+        _controller.value.composing.isValid) {
+      return KeyEventResult.ignored;
+    }
+    if (!_canSubmit) return KeyEventResult.ignored;
+    widget.onSubmit();
+    return KeyEventResult.handled;
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final composer = widget.composer;
-    final hasContent =
-        composer.draft.trim().isNotEmpty || composer.attachments.isNotEmpty;
     final showStop =
-        widget.isBusy && !hasContent && !composer.isSubmissionPending;
-    final canSubmit =
-        widget.enabled && hasContent && !composer.isSubmissionPending;
+        widget.isBusy && !_hasContent && !composer.isSubmissionPending;
     final localCapabilities = widget.inputCapabilities
         .where(
           (capability) =>
@@ -326,28 +350,33 @@ class _PromptComposerPanelState extends State<_PromptComposerPanel> {
               enabled: attachmentEnabled,
               onRemove: (id) => unawaited(widget.onRemoveAttachment(id)),
             ),
-          TextField(
-            key: StudioDriverKeys.composerInput,
-            controller: _controller,
-            enabled: widget.enabled && !composer.isSubmissionPending,
-            minLines: 3,
-            maxLines: 8,
-            decoration: InputDecoration(
-              hintText: context.l10n.composerHint,
-              hintStyle: TextStyle(color: colors.onSurfaceVariant),
-              isDense: true,
-              filled: false,
-              border: InputBorder.none,
-              enabledBorder: InputBorder.none,
-              focusedBorder: InputBorder.none,
-              contentPadding: const EdgeInsets.symmetric(vertical: 8),
+          Focus(
+            canRequestFocus: false,
+            skipTraversal: true,
+            onKeyEvent: _handleComposerKey,
+            child: TextField(
+              key: StudioDriverKeys.composerInput,
+              controller: _controller,
+              enabled: widget.enabled && !composer.isSubmissionPending,
+              minLines: 3,
+              maxLines: 8,
+              decoration: InputDecoration(
+                hintText: context.l10n.composerHint,
+                hintStyle: TextStyle(color: colors.onSurfaceVariant),
+                isDense: true,
+                filled: false,
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(vertical: 8),
+              ),
+              onChanged: widget.onChanged,
+              onSubmitted: (_) {
+                if (_canSubmit) {
+                  widget.onSubmit();
+                }
+              },
             ),
-            onChanged: widget.onChanged,
-            onSubmitted: (_) {
-              if (canSubmit) {
-                widget.onSubmit();
-              }
-            },
           ),
           if (widget.isBusy)
             Align(
@@ -429,7 +458,7 @@ class _PromptComposerPanelState extends State<_PromptComposerPanel> {
                       ),
                 onPressed: showStop
                     ? widget.onStop
-                    : canSubmit
+                    : _canSubmit
                     ? widget.onSubmit
                     : null,
               ),

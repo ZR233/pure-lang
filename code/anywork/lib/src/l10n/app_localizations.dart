@@ -218,6 +218,24 @@ abstract class AppLocalizations {
   /// **'Could not archive this session. It may still be running.'**
   String get sidebarArchiveSessionFailed;
 
+  /// No description provided for @sidebarArchiveSessionConfirmTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Archive session'**
+  String get sidebarArchiveSessionConfirmTitle;
+
+  /// No description provided for @sidebarArchiveSessionConfirmBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Archiving ends any running work and moves this session out of the list. Continue?'**
+  String get sidebarArchiveSessionConfirmBody;
+
+  /// No description provided for @sidebarArchiveSessionConfirmAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Archive'**
+  String get sidebarArchiveSessionConfirmAction;
+
   /// No description provided for @sidebarRenameSession.
   ///
   /// In en, this message translates to:

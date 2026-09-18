@@ -73,7 +73,10 @@ pub(crate) async fn collect_completion_event_stream_with_idle_timeout(
                     event = next_event => event,
                     _ = token.cancelled() => {
                         accumulator.cancel_attempt("model invocation cancelled", event_tx);
-                        return Err(crate::completion::CompletionFailure { source: PureError::LlmError("model invocation cancelled".to_string()), accounting: Box::new(accumulator.accounting()) });
+                        return Err(crate::completion::CompletionFailure::cancelled(
+                            PureError::LlmError("model invocation cancelled".to_string()),
+                            Box::new(accumulator.accounting()),
+                        ));
                     }
                 }
             }
@@ -90,6 +93,7 @@ pub(crate) async fn collect_completion_event_stream_with_idle_timeout(
                 return Err(crate::completion::CompletionFailure {
                     source: error,
                     accounting: Box::new(accumulator.accounting()),
+                    cancelled: false,
                 });
             }
         };
@@ -100,6 +104,7 @@ pub(crate) async fn collect_completion_event_stream_with_idle_timeout(
                 return Err(crate::completion::CompletionFailure {
                     source: error,
                     accounting: Box::new(accumulator.accounting()),
+                    cancelled: false,
                 });
             }
         };
@@ -108,6 +113,7 @@ pub(crate) async fn collect_completion_event_stream_with_idle_timeout(
             return Err(crate::completion::CompletionFailure {
                 source: error,
                 accounting: Box::new(accumulator.accounting()),
+                cancelled: false,
             });
         }
     }
@@ -118,6 +124,7 @@ pub(crate) async fn collect_completion_event_stream_with_idle_timeout(
         .map_err(|source| crate::completion::CompletionFailure {
             source,
             accounting: Box::new(accounting),
+            cancelled: false,
         })
 }
 
@@ -160,6 +167,43 @@ mod tests {
             "stream error: idle timeout waiting for provider event"
         );
         assert!(error.is_transient_model_transport());
+    }
+
+    #[tokio::test]
+    async fn collect_completion_event_stream_marks_targeted_cancellation_as_a_typed_fact() {
+        let stream: CompletionEventStream =
+            futures::stream::pending::<Result<ModelStreamEvent>>().boxed();
+        let (event_tx, _) = tokio::sync::broadcast::channel(1);
+        let token = tokio_util::sync::CancellationToken::new();
+        // Cancelling before collection still unwinds through the cancellation branch because the
+        // pending stream never becomes ready, so this isolates the call's own cancellation fact.
+        token.cancel();
+
+        let failure = collect_completion_event_stream_with_idle_timeout(
+            stream,
+            StreamCollectContext {
+                event_tx: &event_tx,
+                trace: None,
+                trace_sink: None,
+                cancellation: Some(token),
+            },
+            std::time::Duration::from_secs(3600),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(
+            failure.is_cancelled(),
+            "the call's own cancellation is reported as a typed fact"
+        );
+        assert_eq!(
+            failure.to_string(),
+            "LLM provider error: model invocation cancelled"
+        );
+        assert!(
+            failure.provider_failure_ref().is_none(),
+            "cancellation is not a provider failure"
+        );
     }
 }
 

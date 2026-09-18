@@ -38,6 +38,7 @@ pub(in crate::studio) async fn prepare_workspace(
     let session_root = request.session_root;
     let child_id = request.child_id.to_owned();
     let mode = request.mode;
+    let remote = request.project.ssh_alias.is_some();
     if mode != AgentWorkspaceMode::Directory && request.writable_paths.is_some() {
         return Err(lifecycle_error(
             "only directory Profiles accept writablePaths",
@@ -104,6 +105,9 @@ pub(in crate::studio) async fn prepare_workspace(
                 &ownership,
             );
             let branch = WorktreeManager::branch_for(&ownership);
+            // 远端 lease 的仓库根与 worktree 路径必须记录为 POSIX：会话工作区根、workspace
+            // 打开参数与 git 路径参数都从该记录派生，宿主分隔符不得进入 durable 事实。
+            let repository_root_text = workspace_path_text(&repository_root, remote);
             let mut durable = WorktreeLease {
                 revision: 1,
                 state: WorktreeLeaseState::Prepared,
@@ -112,8 +116,8 @@ pub(in crate::studio) async fn prepare_workspace(
                 root_thread_id: request.root_thread_id.to_owned(),
                 project_id: request.project.id.clone(),
                 ssh_alias: request.project.ssh_alias.clone(),
-                repository_root: repository_root.to_string_lossy().into_owned(),
-                path: path.to_string_lossy().into_owned(),
+                repository_root: repository_root_text.clone(),
+                path: workspace_path_text(&path, remote),
                 branch: branch.clone(),
                 base_commit: base_commit.clone(),
             };
@@ -135,17 +139,18 @@ pub(in crate::studio) async fn prepare_workspace(
                     return Err(lifecycle_error(error.to_string()));
                 }
             };
-            durable.path = handle.path.to_string_lossy().into_owned();
+            let handle_path_text = workspace_path_text(&handle.path, remote);
+            durable.path = handle_path_text.clone();
             durable.branch = handle.branch.clone();
             (
                 AgentWorkspaceAssignmentSnapshot {
                     mode,
                     project_root: project_root.to_string_lossy().into_owned(),
-                    root: handle.path.to_string_lossy().into_owned(),
+                    root: handle_path_text.clone(),
                     writable_paths: None,
                     worktree: Some(AgentWorktreeSnapshot {
-                        repository_root: repository_root.to_string_lossy().into_owned(),
-                        path: handle.path.to_string_lossy().into_owned(),
+                        repository_root: repository_root_text,
+                        path: handle_path_text,
                         branch: handle.branch.clone(),
                         base_commit,
                     }),
@@ -233,6 +238,8 @@ pub(in crate::studio) async fn create_root_session_worktree(
     };
     let path = WorktreeManager::allocate_path(&repository_root, thread_id, &ownership);
     let branch = WorktreeManager::branch_for(&ownership);
+    // 远端项目的 durable lease 记录 POSIX 形式；本地项目保留宿主形态。
+    let remote = project.ssh_alias.is_some();
     let durable = WorktreeLease {
         revision: 1,
         state: WorktreeLeaseState::Prepared,
@@ -241,8 +248,8 @@ pub(in crate::studio) async fn create_root_session_worktree(
         root_thread_id: thread_id.to_owned(),
         project_id: project.id.clone(),
         ssh_alias: project.ssh_alias.clone(),
-        repository_root: repository_root.to_string_lossy().into_owned(),
-        path: path.to_string_lossy().into_owned(),
+        repository_root: workspace_path_text(&repository_root, remote),
+        path: workspace_path_text(&path, remote),
         branch,
         base_commit: base_commit.clone(),
     };
@@ -362,6 +369,19 @@ pub(in crate::studio) fn resolved_project_root(project: &ProjectRecord) -> Resul
     } else {
         pl_tool::workspace::resolve_workspace_root(&PathBuf::from(&project.path))
             .map_err(|error| lifecycle_error(error.to_string()))
+    }
+}
+
+/// 远端项目的跨端路径文本统一为 POSIX；本地项目保留宿主形态。
+///
+/// 归一化表达本身收敛在 [`crate::agent::worktree::remote_path_text`]，这里只负责按项目
+/// 形态选择：远端 lease、会话工作区根与 workspace 打开参数必须以同一 POSIX 结果记录，
+/// 本地项目不得被改写为 POSIX。
+fn workspace_path_text(path: &Path, remote: bool) -> String {
+    if remote {
+        crate::agent::worktree::remote_path_text(path)
+    } else {
+        path.to_string_lossy().into_owned()
     }
 }
 

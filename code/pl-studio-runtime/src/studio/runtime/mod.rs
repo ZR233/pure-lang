@@ -122,6 +122,14 @@ pub struct StudioResolveInteractionResponse {
     pub interaction: InteractionRequest,
 }
 
+/// 归档前「结束会话树活动工作」的有界等待上界。
+///
+/// 中断当前 Turn 与丢弃未消费输入只需取消进程内取消令牌；运行中任务的收束需要等其
+/// 拥有的资源（例如工具进程树）终止，因此上界留出余量；但仍必须有限：超过上界仍未
+/// 收束说明现场无法安全结束，归档必须显式失败并保留会话（design/01 §1.4）。
+pub(in crate::studio::runtime) const ARCHIVE_TREE_SETTLE_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(10);
+
 #[derive(Clone)]
 pub struct StudioRuntime {
     startup_observer: std::sync::Arc<dyn Fn(crate::StudioStartupStage) + Send + Sync>,
@@ -145,6 +153,9 @@ pub struct StudioRuntime {
     recovery_task: background_task::BackgroundTaskSlot,
     #[cfg(test)]
     recovery_gate: std::sync::Arc<tokio::sync::Mutex<()>>,
+    /// 测试可注入的归档收束窗口；生产固定使用 `ARCHIVE_TREE_SETTLE_TIMEOUT`。
+    #[cfg(test)]
+    archive_settle_timeout: std::time::Duration,
     skills: SkillCatalogRuntime,
     thread_modes: crate::mode::ThreadModeManager,
     provider_usage: ProviderUsageRuntime,
@@ -191,6 +202,18 @@ struct ProjectActivation {
 }
 
 impl StudioRuntime {
+    /// 归档前结束会话树活动工作的有界等待上界；测试可注入更短的窗口。
+    fn archive_settle_timeout(&self) -> std::time::Duration {
+        #[cfg(test)]
+        {
+            self.archive_settle_timeout
+        }
+        #[cfg(not(test))]
+        {
+            ARCHIVE_TREE_SETTLE_TIMEOUT
+        }
+    }
+
     /// 返回当前配置目录中可用的 Agent Profile 快照。
     pub fn read_agent_profiles(&self) -> Result<crate::config::AgentProfileCatalog> {
         Ok(self.config_runtime.agent_profiles_for_settings()?)

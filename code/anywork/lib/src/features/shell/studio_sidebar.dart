@@ -417,10 +417,6 @@ class _SidebarState extends ConsumerState<_Sidebar> {
                       onNavigate: widget.onNavigate,
                       recoveryIssue:
                           widget.state.threadRecoveryIssues[thread.id],
-                      canArchive:
-                          !thread.status.isActive &&
-                          (thread.id != widget.state.selectedRootThreadId ||
-                              !widget.state.isBusy),
                     ),
             ),
           ),

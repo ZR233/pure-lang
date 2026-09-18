@@ -279,6 +279,10 @@ credential helper，最长 120 秒。两者都以本次解析出的仓库根作�
 `pure-session-*` 分支。身份校验按归属校验期望 leaf 与期望分支，仍拒绝任何非 Pure 分支。
 非 Git 项目或无 HEAD 时类型化失败。
 
+远端后端的 `git worktree add`/`remove` 路径参数、workspace 打开参数与 lease 记录使用同一
+POSIX 形式：客户端宿主形态（含 Windows 路径分隔符）不得跨端，否则物理 worktree 会落在与
+lease 记录不一致的位置（跨端路径约定见 [22](./22-ssh-remote.md) §22.3）。
+
 根会话 worktree 对本地与 SSH 项目都可用，并在创建会话的命令内建立：先按 `HEAD` 解析仓库与
 base、记录含 `ssh_alias` 的 `prepared` lease，再创建物理 worktree，随后转为 `active`，然后
 发布含 `workspaceMode` 的 Thread 目录事实，最后激活 owner 并把该路径绑定为会话工作区根。

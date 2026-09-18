@@ -1125,9 +1125,10 @@ class DemoStudioApi implements StudioApi {
     if (thread == null || !thread.isRoot) {
       throw StateError('only a root Thread can be archived');
     }
-    final workspace = current.workspacesByThread[threadId];
-    if (workspace?.activeTurn?.state.isBusy ?? false) {
-      throw StateError('thread tree has an active turn or pending input');
+    // 归档前先结束会话树的活动工作：中断正在运行的 Turn，再归档。
+    final activeTurn = current.workspacesByThread[threadId]?.activeTurn;
+    if (activeTurn != null && activeTurn.state.isBusy) {
+      await interruptTurn(threadId, activeTurn.turnId);
     }
     final roots = _sortedDirectoryThreads()
         .where((candidate) => candidate.isRoot)

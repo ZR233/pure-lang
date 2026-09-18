@@ -89,6 +89,13 @@ pub(super) fn failure_error(
     binding: ModelCallBinding,
     failure: crate::completion::CompletionFailure,
 ) -> ModelError {
+    // The invocation's own cancellation fact, recorded at the observation point, decides the
+    // class. Provider failures, timeouts and transport errors keep the previous classification.
+    let kind = if failure.is_cancelled() {
+        pl_core::model::ModelFailureKind::Cancelled
+    } else {
+        pl_core::model::ModelFailureKind::Unavailable
+    };
     let usage = super::usage(&failure.accounting.usage);
     let receipt = ModelFailureReceipt {
         provider_failure: failure.source.provider_failure_ref().cloned(),
@@ -109,7 +116,7 @@ pub(super) fn failure_error(
         .expect("static format and version are valid"),
     };
     ModelError {
-        kind: pl_core::model::ModelFailureKind::Unavailable,
+        kind,
         details: Some(Box::new(details)),
         usage,
         source: Some(Box::new(failure)),
@@ -295,6 +302,7 @@ mod tests {
             crate::completion::CompletionFailure {
                 source: pl_protocol::PureError::LlmError("stream interrupted".into()),
                 accounting: Box::new(accounting),
+                cancelled: false,
             },
         );
         let encoded = serde_json::to_string(&error).unwrap();
@@ -305,5 +313,90 @@ mod tests {
         assert_eq!(receipt.binding.purpose, "review");
         assert_eq!(receipt.binding.provider_instance_id, "original-provider");
         assert_eq!(receipt.binding.context_window, Some(1_000_000));
+    }
+
+    #[tokio::test]
+    async fn targeted_cancellation_maps_to_cancelled_while_provider_failures_stay_unavailable() {
+        use crate::completion::stream::event::ModelStreamEvent;
+        use crate::completion::stream::{
+            CompletionEventStream, StreamCollectContext,
+            collect_completion_event_stream_with_idle_timeout,
+        };
+        use futures::StreamExt;
+
+        let runtime = catalog_runtime("deepseek-flash");
+        let binding = ModelCallBinding::capture(&runtime, "turn");
+
+        // A cancellation observed by the invocation itself becomes `Cancelled`, not a provider
+        // fault, so the host can settle the Turn as cancelled instead of pausing the driver.
+        let token = tokio_util::sync::CancellationToken::new();
+        token.cancel();
+        let (event_tx, _) = tokio::sync::broadcast::channel(1);
+        let stream: CompletionEventStream =
+            futures::stream::pending::<pl_protocol::Result<ModelStreamEvent>>().boxed();
+        let failure = collect_completion_event_stream_with_idle_timeout(
+            stream,
+            StreamCollectContext {
+                event_tx: &event_tx,
+                trace: None,
+                trace_sink: None,
+                cancellation: Some(token),
+            },
+            std::time::Duration::from_secs(3600),
+        )
+        .await
+        .unwrap_err();
+        let error = failure_error(binding.clone(), failure);
+        assert_eq!(error.kind, pl_core::model::ModelFailureKind::Cancelled);
+        assert_eq!(
+            model_failure_receipt(&error)
+                .unwrap()
+                .unwrap()
+                .provider_failure,
+            None,
+            "a cancelled invocation carries no provider failure"
+        );
+
+        // A real transport failure keeps the previous classification and receipt shape.
+        let (event_tx, _) = tokio::sync::broadcast::channel(1);
+        let stream: CompletionEventStream = futures::stream::iter([Err(
+            pl_protocol::PureError::transient_model_transport("stream broke"),
+        )])
+        .boxed();
+        let failure = collect_completion_event_stream_with_idle_timeout(
+            stream,
+            StreamCollectContext {
+                event_tx: &event_tx,
+                trace: None,
+                trace_sink: None,
+                cancellation: None,
+            },
+            std::time::Duration::from_secs(3600),
+        )
+        .await
+        .unwrap_err();
+        assert!(!failure.is_cancelled());
+        let error = failure_error(binding, failure);
+        assert_eq!(error.kind, pl_core::model::ModelFailureKind::Unavailable);
+        assert_eq!(
+            model_failure_receipt(&error)
+                .unwrap()
+                .unwrap()
+                .binding
+                .purpose,
+            "turn"
+        );
+    }
+
+    #[test]
+    fn public_non_cancelled_constructor_never_claims_cancellation() {
+        let failure = crate::completion::CompletionFailure::new(
+            pl_protocol::PureError::LlmError("session close failed".into()),
+            Box::default(),
+        );
+        assert!(!failure.is_cancelled());
+        let runtime = catalog_runtime("deepseek-flash");
+        let error = failure_error(ModelCallBinding::capture(&runtime, "turn"), failure);
+        assert_eq!(error.kind, pl_core::model::ModelFailureKind::Unavailable);
     }
 }

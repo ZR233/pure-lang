@@ -15,6 +15,9 @@ use super::super::{
     StudioSubmitPromptRequest,
 };
 
+/// 归档收束轮询间隔：既避免忙等，又让正常收束延迟保持在可忽略范围。
+const ARCHIVE_TREE_SETTLE_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(25);
+
 impl StudioRuntime {
     pub async fn create_thread(&self, project_id: &str, title: &str) -> Result<ThreadRecord> {
         let (delta, thread) = DirectoryDelta::register_root_thread(
@@ -275,16 +278,14 @@ impl StudioRuntime {
             .get(root_index + 1)
             .or_else(|| root_index.checked_sub(1).and_then(|index| roots.get(index)))
             .cloned();
-        for candidate in &thread_tree {
-            if self.thread_is_busy(&candidate.id).await? {
-                bail!("thread tree has an active turn or pending input");
-            }
-        }
         let removed_thread_ids = thread_tree
             .iter()
             .map(|candidate| candidate.id.clone())
             .chain(std::iter::once(thread.id.clone()))
             .collect::<Vec<_>>();
+        // 归档先结束整棵树的活动工作（design/01 §1.4）：中断当前 Turn、丢弃未消费输入，
+        // 再有界等待收束；无法结束时返回类型化失败并保留会话现场。
+        self.end_thread_tree_work(&removed_thread_ids).await?;
         self.retire_archived_thread_tree(&removed_thread_ids)
             .await?;
         self.agent_facility
@@ -528,6 +529,84 @@ impl StudioRuntime {
                 .values()
                 .any(|task| task.status == pl_core::thread::task::TaskStatus::Running))
     }
+
+    /// 结束会话树的活动工作并有界等待收束，供 `archive_thread` 在 `lifecycle_lock` 下调用。
+    ///
+    /// 只复用既有能力：`ThreadHandle::interrupt_turn(None)` 停止当前正在执行的那个 Turn
+    /// （不指定预期身份），`ThreadHandle::discard_input(id)` 逐条丢弃尚未消费的输入。
+    /// 等待期间以 `thread_is_busy` 为唯一判定，不引入第二份并发状态；不得无限自旋，也
+    /// 不得在仍 busy 时继续归档。
+    ///
+    /// 并发契约：`archive_thread` 与所有输入提交入口（`prompt_runner/submit.rs` 的
+    /// `submit_prompt*`、`threads.rs` 的 `start_new_thread`）都在同一把 `lifecycle_lock`
+    /// 下进入 owner mailbox，因此归档期间不会有并发新输入落入这棵树。
+    async fn end_thread_tree_work(&self, thread_ids: &[String]) -> Result<()> {
+        for thread_id in thread_ids {
+            let Some(thread) = self.threads.thread(thread_id) else {
+                // 未被激活的成员不可能在运行工作，与 `thread_is_busy` 的冷读语义一致。
+                continue;
+            };
+            match thread.interrupt_turn(None).await {
+                // owner 已关闭表示它不再运行新工作，按非 busy 处理而非失败。
+                Ok(_) | Err(pl_core::thread::ThreadError::Closed) => {}
+                Err(error) => return Err(anyhow::Error::new(error)),
+            }
+        }
+        let deadline = tokio::time::Instant::now() + self.archive_settle_timeout();
+        loop {
+            let mut still_busy = None;
+            for thread_id in thread_ids {
+                self.discard_pending_inputs(thread_id).await?;
+                if still_busy.is_none() && self.thread_is_busy(thread_id).await? {
+                    still_busy = Some(thread_id.clone());
+                }
+            }
+            let Some(thread_id) = still_busy else {
+                return Ok(());
+            };
+            if tokio::time::Instant::now() >= deadline {
+                return Err(anyhow::Error::new(
+                    pl_protocol::studio::StudioError::new(
+                        pl_protocol::studio::StudioErrorCode::Busy,
+                        "The session could not be ended before archiving",
+                        true,
+                    )
+                    .with_details(serde_json::json!({ "threadId": thread_id })),
+                ));
+            }
+            tokio::time::sleep(ARCHIVE_TREE_SETTLE_POLL_INTERVAL).await;
+        }
+    }
+
+    /// 丢弃该 Thread 当前 canonical 快照里仍未消费的输入，不改写已消费/已丢弃的记录。
+    async fn discard_pending_inputs(&self, thread_id: &str) -> Result<()> {
+        let Some(thread) = self.threads.thread(thread_id) else {
+            return Ok(());
+        };
+        let (snapshot, _) = self.read_thread_facts(thread_id).await?;
+        let pending = snapshot
+            .inputs
+            .iter()
+            .filter(|record| record.state == pl_core::thread::input::InputState::Pending)
+            .map(|record| record.input.id.clone())
+            .collect::<Vec<_>>();
+        for input_id in pending {
+            match thread.discard_input(input_id).await {
+                // 已消费：保持原样；正在被驱动：交由中断收束后的下一轮重试。
+                Ok(_)
+                | Err(pl_core::thread::ThreadError::InputConsumed)
+                | Err(pl_core::thread::ThreadError::InputInUse)
+                | Err(pl_core::thread::ThreadError::Closed) => {}
+                Err(error) => return Err(anyhow::Error::new(error)),
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn set_archive_settle_timeout(&mut self, timeout: std::time::Duration) {
+        self.archive_settle_timeout = timeout;
+    }
 }
 
 #[cfg(test)]
@@ -536,6 +615,288 @@ mod tests {
     use crate::StudioProductEventKind;
     use crate::studio::runtime::thread_title::title_cancellation_channel;
     use crate::{StudioHostKind, StudioRuntimeOptions};
+    use pl_core::context::OpaquePayload;
+    use pl_core::model::{
+        DynModelSession, Model, ModelError, ModelFactory, ModelFailureKind, ModelRequest,
+        ModelSession, PreparedModelCall,
+    };
+    use pl_core::thread::input::{InputDriverOptions, InputState, ThreadInput};
+    use pl_core::thread::{ThreadHandle, ThreadLifecycle, TurnState};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    /// 协作式模型替身：只有被取消时才返回，用来制造一个可被中断收束的运行中 Turn。
+    #[derive(Clone)]
+    struct CooperativeCancelModel;
+
+    impl Model for CooperativeCancelModel {
+        async fn open_session(&self) -> Result<DynModelSession, ModelError> {
+            Ok(DynModelSession::new(CooperativeCancelSession))
+        }
+    }
+
+    struct CooperativeCancelSession;
+
+    impl ModelSession for CooperativeCancelSession {
+        async fn prepare(
+            &mut self,
+            request: ModelRequest,
+        ) -> Result<PreparedModelCall, ModelError> {
+            let cancellation = request.cancellation.clone();
+            Ok(PreparedModelCall::new(async move {
+                cancellation.cancelled().await;
+                Err(cancelled_model_error())
+            }))
+        }
+        async fn close(&mut self) -> Result<(), ModelError> {
+            Ok(())
+        }
+    }
+
+    /// 不返回的模型替身：忽略取消令牌，直到测试显式释放；模拟无法在有界时间内结束的现场。
+    #[derive(Clone)]
+    struct StuckModel {
+        entered: Arc<tokio::sync::Notify>,
+        release: Arc<tokio::sync::Notify>,
+    }
+
+    impl Model for StuckModel {
+        async fn open_session(&self) -> Result<DynModelSession, ModelError> {
+            Ok(DynModelSession::new(StuckSession(self.clone())))
+        }
+    }
+
+    struct StuckSession(StuckModel);
+
+    impl ModelSession for StuckSession {
+        async fn prepare(
+            &mut self,
+            _request: ModelRequest,
+        ) -> Result<PreparedModelCall, ModelError> {
+            let entered = self.0.entered.clone();
+            let release = self.0.release.clone();
+            Ok(PreparedModelCall::new(async move {
+                entered.notify_one();
+                // 故意不观察取消：即使 `interrupt_turn` 已经触发也不会结束。
+                release.notified().await;
+                Err(cancelled_model_error())
+            }))
+        }
+        async fn close(&mut self) -> Result<(), ModelError> {
+            Ok(())
+        }
+    }
+
+    fn cancelled_model_error() -> ModelError {
+        ModelError {
+            details: None,
+            kind: ModelFailureKind::Cancelled,
+            usage: Default::default(),
+            source: None,
+        }
+    }
+
+    fn n3_input(id: &str) -> ThreadInput {
+        ThreadInput {
+            id: id.to_string(),
+            payload: OpaquePayload::text("N3 archive prompt"),
+            context: Vec::new(),
+        }
+    }
+
+    fn drive_options() -> InputDriverOptions {
+        InputDriverOptions {
+            max_model_steps: pl_core::thread::ModelStepLimit::Unlimited,
+        }
+    }
+
+    async fn wait_until_turn_running(thread: &ThreadHandle) {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if thread
+                    .snapshot()
+                    .turns
+                    .iter()
+                    .any(|turn| turn.state == TurnState::Running)
+                {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the submitted Turn must start running");
+    }
+
+    async fn wait_until_idle(runtime: &StudioRuntime, thread_id: &str) {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if !runtime.thread_is_busy(thread_id).await.unwrap() {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the session must settle to idle");
+    }
+
+    /// 运行中的会话可以直接结束并归档：中断当前 Turn 后收束为取消终态，而不是失败。
+    #[tokio::test]
+    async fn archiving_a_running_session_ends_the_turn_then_archives() {
+        let (_home, _workspace, runtime, id) = runtime_with_thread_without_optional_tools().await;
+        let thread = runtime.ensure_thread_owner(&id).await.unwrap();
+        thread
+            .replace_model(ModelFactory::new(CooperativeCancelModel))
+            .await
+            .unwrap();
+        thread
+            .submit_input_and_run(n3_input("n3-running-input"), drive_options())
+            .await
+            .unwrap();
+        wait_until_turn_running(&thread).await;
+        // 修复前该现场会被 `thread tree has an active turn or pending input` 拒绝。
+        assert!(runtime.thread_is_busy(&id).await.unwrap());
+
+        let archived = runtime.archive_thread(id.clone()).await.unwrap().unwrap();
+        assert_eq!(archived.archived_root_id, id);
+        assert!(archived.removed_thread_ids.contains(&id));
+
+        let turns = thread.snapshot().turns;
+        let last = turns.last().expect("the interrupted Turn is recorded");
+        assert_eq!(last.state, TurnState::Cancelled);
+        assert!(runtime.read_thread(&id).await.unwrap().archived);
+        let visible = runtime
+            .query_threads(&Default::default(), None, 20)
+            .await
+            .unwrap();
+        assert!(
+            !visible
+                .state
+                .value()
+                .unwrap()
+                .threads
+                .iter()
+                .any(|thread| thread.id == id)
+        );
+        runtime.shutdown().await;
+    }
+
+    /// 未消费输入在归档时被丢弃，既不被消费也不会注入新的 Turn。
+    #[tokio::test]
+    async fn archiving_discards_pending_input_without_starting_a_turn() {
+        let (_home, _workspace, runtime, id) = runtime_with_thread_without_optional_tools().await;
+        let thread = runtime.ensure_thread_owner(&id).await.unwrap();
+        // 只受理不驱动：输入停留在 Pending，构成修复前会阻断归档的现场。
+        thread
+            .submit_input(n3_input("n3-pending-input"))
+            .await
+            .unwrap();
+        assert!(runtime.thread_is_busy(&id).await.unwrap());
+
+        runtime.archive_thread(id.clone()).await.unwrap().unwrap();
+
+        let snapshot = thread.snapshot();
+        let record = snapshot
+            .inputs
+            .iter()
+            .find(|record| record.input.id == "n3-pending-input")
+            .expect("the admitted input is recorded");
+        assert_eq!(record.state, InputState::Discarded);
+        assert!(
+            snapshot.turns.is_empty(),
+            "discarding a pending input must not start a Turn"
+        );
+        assert!(runtime.read_thread(&id).await.unwrap().archived);
+        runtime.shutdown().await;
+    }
+
+    /// 归档语义未被破坏：运行中会话归档后仍可按既有语义恢复并重新激活。
+    #[tokio::test]
+    async fn archiving_a_running_session_preserves_identity_and_restores() {
+        let (_home, _workspace, runtime, id) = runtime_with_thread_without_optional_tools().await;
+        let original = runtime.read_thread(&id).await.unwrap();
+        let thread = runtime.ensure_thread_owner(&id).await.unwrap();
+        thread
+            .replace_model(ModelFactory::new(CooperativeCancelModel))
+            .await
+            .unwrap();
+        thread
+            .submit_input_and_run(n3_input("n3-restore-input"), drive_options())
+            .await
+            .unwrap();
+        wait_until_turn_running(&thread).await;
+
+        runtime.archive_thread(id.clone()).await.unwrap().unwrap();
+        assert!(runtime.read_thread(&id).await.unwrap().archived);
+
+        let restored = runtime.restore_thread(id.clone()).await.unwrap();
+        assert_eq!(restored.id, id);
+        assert_eq!(restored.title, original.title);
+        assert!(!runtime.read_thread(&id).await.unwrap().archived);
+        let owner = runtime
+            .ensure_thread_owner(&id)
+            .await
+            .unwrap_or_else(|error| {
+                panic!(
+                    "restore activation failed: {error:#}; issues: {:?}",
+                    runtime.recovery_issues()
+                )
+            });
+        assert_ne!(owner.snapshot().lifecycle, ThreadLifecycle::Closed);
+        runtime.shutdown().await;
+    }
+
+    /// 无法在有界时间内结束时返回类型化失败且不归档：会话与现场都保留。
+    #[tokio::test]
+    async fn archiving_reports_typed_failure_and_preserves_the_session_when_work_cannot_end() {
+        let (_home, _workspace, mut runtime, id) =
+            runtime_with_thread_without_optional_tools().await;
+        runtime.set_archive_settle_timeout(Duration::from_millis(200));
+        let thread = runtime.ensure_thread_owner(&id).await.unwrap();
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        thread
+            .replace_model(ModelFactory::new(StuckModel {
+                entered: entered.clone(),
+                release: release.clone(),
+            }))
+            .await
+            .unwrap();
+        thread
+            .submit_input_and_run(n3_input("n3-stuck-input"), drive_options())
+            .await
+            .unwrap();
+        // 等到模型调用真正在执行，确保中断不能收束这个 Turn。
+        tokio::time::timeout(Duration::from_secs(10), entered.notified())
+            .await
+            .expect("the stuck model call must be entered");
+
+        let error = runtime.archive_thread(id.clone()).await.unwrap_err();
+        let studio_error = error
+            .downcast_ref::<pl_protocol::studio::StudioError>()
+            .expect("archive failure must be a typed Studio error");
+        assert_eq!(
+            studio_error.code,
+            pl_protocol::studio::StudioErrorCode::Busy
+        );
+
+        // 现场保留：未归档、owner 仍在、运行中的 Turn 仍是运行态。
+        assert!(!runtime.read_thread(&id).await.unwrap().archived);
+        assert!(runtime.threads.thread(&id).is_some());
+        assert!(
+            thread
+                .snapshot()
+                .turns
+                .last()
+                .is_some_and(|turn| turn.state == TurnState::Running)
+        );
+
+        // 释放替身以便本测试收尾（归档失败本身不触碰现场）。
+        release.notify_one();
+        wait_until_idle(&runtime, &id).await;
+        runtime.shutdown().await;
+    }
 
     #[tokio::test]
     async fn project_alias_reuses_identity_and_preserves_renamed_label() {

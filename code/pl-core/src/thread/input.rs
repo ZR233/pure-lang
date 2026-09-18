@@ -1217,4 +1217,151 @@ mod tests {
         assert_eq!(thread.snapshot().turns.len(), 2);
         thread.close().await.unwrap();
     }
+
+    struct ExecuteCancellationProbe {
+        executing: Arc<Notify>,
+        requests: Arc<std::sync::Mutex<Vec<ContextSnapshot>>>,
+    }
+
+    impl ModelSession for ExecuteCancellationProbe {
+        async fn prepare(
+            &mut self,
+            request: ModelRequest,
+        ) -> Result<PreparedModelCall, ModelError> {
+            let first = self.requests.lock().unwrap().is_empty();
+            self.requests.lock().unwrap().push(request.context.clone());
+            if !first {
+                return Ok(PreparedModelCall::new(async move {
+                    Ok(ModelStepOutput {
+                        attempt_id: request.attempt_id,
+                        base_context_revision: request.context.revision,
+                        content: vec![ContextContent::Text {
+                            text: Arc::from("reply"),
+                        }],
+                        tool_calls: Vec::new(),
+                        private_context: None,
+                        usage: Default::default(),
+                    })
+                }));
+            }
+            let cancellation = request.cancellation.clone();
+            let executing = self.executing.clone();
+            Ok(PreparedModelCall::new(async move {
+                executing.notify_one();
+                // Wait until the runtime targets this Turn's generation, then report the
+                // interruption through the new contract: the call observed its own
+                // cancellation, so it must not be classified as a provider fault.
+                cancellation.cancelled().await;
+                Err(ModelError {
+                    details: None,
+                    kind: crate::model::ModelFailureKind::Cancelled,
+                    usage: Default::default(),
+                    source: Some(Box::new(std::io::Error::other(
+                        "model invocation cancelled",
+                    ))),
+                })
+            }))
+        }
+
+        async fn close(&mut self) -> Result<(), ModelError> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn continue_interrupts_execution_and_settles_the_turn_as_cancelled() {
+        let executing = Arc::new(Notify::new());
+        let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let thread = ThreadHandle::start(
+            "redirect-execute".into(),
+            DynModelSession::new(ExecuteCancellationProbe {
+                executing: executing.clone(),
+                requests: requests.clone(),
+            }),
+        )
+        .unwrap();
+        let options = InputDriverOptions {
+            max_model_steps: ModelStepLimit::Unlimited,
+        };
+        thread
+            .submit_input_and_continue(submitted("first"), options)
+            .await
+            .unwrap();
+        executing.notified().await;
+        thread
+            .submit_input_and_continue(submitted("second"), options)
+            .await
+            .unwrap();
+        let mut updates = thread.subscribe();
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                let state = updates.next().await.unwrap();
+                if state
+                    .turns
+                    .last()
+                    .is_some_and(|turn| turn.state == TurnState::Finished(TurnOutcome::Completed))
+                {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("a cancelled execution must not fault the input driver");
+        let state = thread.snapshot();
+        assert_eq!(
+            state.turns.len(),
+            2,
+            "the interrupted Turn must not stop the driver"
+        );
+        assert_eq!(
+            state.turns[0].state,
+            TurnState::Cancelled,
+            "a targeted execution interrupt settles the Turn as cancelled"
+        );
+        assert!(
+            !matches!(state.turns[0].state, TurnState::Failed { .. }),
+            "the interruption must not surface as a model failure description"
+        );
+        assert_eq!(
+            state.turns[1].state,
+            TurnState::Finished(TurnOutcome::Completed)
+        );
+        assert!(
+            state
+                .inputs
+                .iter()
+                .all(|input| !matches!(&input.state, InputState::Pending)),
+            "the inserted input must be consumed by the next Turn"
+        );
+        let consumed_turn = |id: &str| {
+            state
+                .inputs
+                .iter()
+                .find(|record| record.input.id == id)
+                .and_then(|record| match &record.state {
+                    InputState::Consumed { turn_id, .. } => Some(turn_id.as_str()),
+                    _ => None,
+                })
+        };
+        assert_eq!(
+            consumed_turn("first"),
+            Some(state.turns[0].turn_id.as_str()),
+            "the already-consumed input stays bound to the interrupted Turn"
+        );
+        assert_eq!(
+            consumed_turn("second"),
+            Some(state.turns[1].turn_id.as_str()),
+            "the inserted input advances to the next Turn"
+        );
+        assert_eq!(requests.lock().unwrap().len(), 2);
+        assert_eq!(
+            requests.lock().unwrap()[1]
+                .records
+                .iter()
+                .flat_map(|record| record.content.clone())
+                .collect::<Vec<_>>(),
+            [submitted("first").context, submitted("second").context].concat()
+        );
+        thread.close().await.unwrap();
+    }
 }

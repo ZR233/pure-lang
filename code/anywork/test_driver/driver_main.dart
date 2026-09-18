@@ -10,6 +10,8 @@ import 'package:anywork/src/data/frb/studio_api.dart';
 import 'package:anywork/src/data/repositories/studio_repository.dart';
 import 'package:anywork/src/shared/studio_driver_state.dart';
 
+import 'raw_tap_extension.dart';
+
 part 'timeline_native_fixture.dart';
 
 /// Starts anywork with the Flutter Driver extension enabled.
@@ -20,7 +22,10 @@ void main() {
   if (const bool.fromEnvironment('dart.vm.product')) {
     throw StateError('Flutter Driver mode is unavailable in product builds');
   }
-  enableFlutterDriverExtension(handler: _handleDriverData);
+  enableFlutterDriverExtension(
+    handler: _handleDriverData,
+    commands: <CommandExtension>[RawTapCommandExtension()],
+  );
   _container = ProviderContainer();
   studio.bootstrapStudio(container: _container);
 }
@@ -101,6 +106,22 @@ Future<String> _handleDriverData(String? message) async {
       } on Object catch (error) {
         return jsonEncode({'shutdown': 'failed', 'error': error.toString()});
       }
+    case final String mode
+        when mode.startsWith('set-new-thread-workspace-mode:'):
+      // Acceptance-only entry: the start-page workspace-mode popup menu is
+      // covered by the native integration test
+      // (`remote Project start page offers worktree and drives a worktree
+      // marker`). When the popup item cannot be activated through the driver
+      // transport, this command sets the same canonical draft fact so the
+      // following real remote worktree creation and prompt stay observable.
+      final requested = ThreadWorkspaceMode.fromId(
+        mode.substring('set-new-thread-workspace-mode:'.length),
+      );
+      _container
+          .read(studioControllerProvider.notifier)
+          .setNewThreadWorkspaceMode(requested);
+      _publishSidebarDirectory();
+      return jsonEncode({'newThreadWorkspaceMode': requested.id});
     case final String seed when seed.startsWith('seed-threads:'):
       // Fixture 只属于专用 Driver demo harness，不穿过生产 FRB API。
       final count = int.tryParse(seed.substring('seed-threads:'.length)) ?? 0;

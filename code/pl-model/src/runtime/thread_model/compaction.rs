@@ -155,6 +155,7 @@ impl ThreadModel {
                         crate::completion::CompletionFailure {
                             source,
                             accounting: Box::new(result.2),
+                            cancelled: false,
                         },
                     ));
                 }

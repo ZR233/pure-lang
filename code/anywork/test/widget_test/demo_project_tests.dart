@@ -330,6 +330,44 @@ void registerDemoProjectTests() {
     final revisions = states.map((state) => state.revision).toList();
     expect(revisions.toSet().length, revisions.length);
   });
+
+  test('Demo archive ends the running Turn before archiving', () async {
+    final api = _SlowPromptDemoApi();
+    await api.readStudioState();
+    await api.submitPrompt(
+      'thread-main',
+      const StudioPromptInput(
+        inputId: 'demo-archive-running',
+        text: 'keep running',
+        attachmentDraftIds: [],
+      ),
+    );
+    final running =
+        (await api.readStudioState()).workspacesByThread['thread-main'];
+    expect(running!.activeTurn?.state.isBusy, isTrue);
+
+    final result = await api.archiveThread('thread-main');
+
+    expect(result.archivedRootId, 'thread-main');
+    expect(result.removedThreadIds, contains('thread-main'));
+    final after = await api.readStudioState();
+    expect(after.threads.any((thread) => thread.id == 'thread-main'), isFalse);
+  });
+
+  test('Demo archive still rejects a non-root Thread', () async {
+    final api = DemoStudioApi();
+
+    await expectLater(
+      api.archiveThread('thread-reviewer'),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          'only a root Thread can be archived',
+        ),
+      ),
+    );
+  });
 }
 
 bool _demoItemIsTerminal(ThreadItemView item) => switch (item.state) {
@@ -344,4 +382,10 @@ class _FastLspDemoApi extends DemoStudioApi {
 
   @override
   Duration get lspActivityStepDelay => const Duration(milliseconds: 40);
+}
+
+/// 保持 Turn 长期运行，用于验收“归档先结束活动工作”。
+class _SlowPromptDemoApi extends DemoStudioApi {
+  @override
+  Duration get promptStartDelay => const Duration(hours: 1);
 }

@@ -72,6 +72,16 @@ class AppLocalizationsZh extends AppLocalizations {
   String get sidebarArchiveSessionFailed => '无法归档该会话，它可能仍在运行。';
 
   @override
+  String get sidebarArchiveSessionConfirmTitle => '归档会话';
+
+  @override
+  String get sidebarArchiveSessionConfirmBody =>
+      '归档会先结束该会话正在运行的工作，并将其从列表中移除。是否继续？';
+
+  @override
+  String get sidebarArchiveSessionConfirmAction => '归档';
+
+  @override
   String get sidebarRenameSession => '重命名会话';
 
   @override

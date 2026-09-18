@@ -359,6 +359,8 @@ void registerShellSettingsTests() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(StudioDriverKeys.archiveThread(first.id)));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(StudioDriverKeys.archiveThreadConfirm));
+    await tester.pumpAndSettle();
 
     expect(api.archivedThreadId, first.id);
     expect(find.byKey(StudioDriverKeys.threadRow(first.id)), findsNothing);
@@ -387,6 +389,8 @@ void registerShellSettingsTests() {
     await tester.tap(find.byKey(ValueKey('thread-menu-${'session-1'}')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(StudioDriverKeys.archiveThread('session-1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(StudioDriverKeys.archiveThreadConfirm));
     await tester.pumpAndSettle();
 
     expect(api.archiveThreadCallCount, 1);
@@ -778,7 +782,9 @@ void registerShellSettingsTests() {
     await gesture.removePointer();
   });
 
-  testWidgets('selected busy root Thread cannot be archived', (tester) async {
+  testWidgets('selected busy root Thread can be archived after confirmation', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(1280, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -811,7 +817,51 @@ void registerShellSettingsTests() {
     final action = tester.widget<PopupMenuItem<String>>(
       find.byKey(StudioDriverKeys.archiveThread('session-1')),
     );
-    expect(action.enabled, isFalse);
+    expect(action.enabled, isTrue);
+
+    await tester.tap(find.byKey(StudioDriverKeys.archiveThread('session-1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(StudioDriverKeys.archiveThreadConfirm));
+    await tester.pumpAndSettle();
+
+    expect(api.archiveThreadCallCount, 1);
+    expect(api.archivedThreadId, 'session-1');
+  });
+
+  testWidgets('sidebar archive confirmation cancels without archiving', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeStudioApi(_emptyState());
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('thread-menu-session-1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(StudioDriverKeys.archiveThread('session-1')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(StudioDriverKeys.archiveThreadConfirm), findsOneWidget);
+
+    await tester.tap(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.text('Cancel'),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(api.archiveThreadCallCount, 0);
+    expect(find.byKey(StudioDriverKeys.archiveThreadConfirm), findsNothing);
+    expect(find.byKey(StudioDriverKeys.threadRow('session-1')), findsOneWidget);
   });
 
   testWidgets('driver project path dialog opens the entered project', (

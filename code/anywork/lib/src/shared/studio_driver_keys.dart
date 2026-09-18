@@ -165,6 +165,10 @@ abstract final class StudioDriverKeys {
   static ValueKey<String> archiveThread(String id) =>
       ValueKey<String>('thread-archive-$id');
 
+  static const archiveThreadConfirm = ValueKey<String>(
+    'thread-archive-confirm',
+  );
+
   static ValueKey<String> renameThread(String id) =>
       ValueKey<String>('thread-rename-$id');
 

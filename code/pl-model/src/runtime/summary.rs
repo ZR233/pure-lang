@@ -63,16 +63,20 @@ impl ModelRuntime {
                 return Err(CompletionFailure {
                     source,
                     accounting: Box::new(response.accounting),
+                    cancelled: false,
                 });
             }
             (Err(failure), Ok(())) => return Err(failure),
             (Err(failure), Err(cleanup)) => {
+                // Folding a separate cleanup failure in does not erase the primary call's fact.
+                let cancelled = failure.is_cancelled();
                 return Err(CompletionFailure {
                     source: PureError::Io(std::io::Error::other(SummaryCleanupFailure {
                         primary: failure.source,
                         cleanup,
                     })),
                     accounting: failure.accounting,
+                    cancelled,
                 });
             }
         };
@@ -80,6 +84,7 @@ impl ModelRuntime {
             return Err(CompletionFailure {
                 source: PureError::LlmError(request.empty_summary_error.to_owned()),
                 accounting: Box::new(response.accounting),
+                cancelled: false,
             });
         };
         Ok(TextSummary {

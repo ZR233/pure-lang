@@ -34,12 +34,54 @@ pub struct CompletionTraceContext {
 }
 
 /// Invocation failure retaining all service-reported usage received before failure.
+///
+/// `cancelled` carries the implementation's own observation that this invocation was
+/// targeted by a runtime interrupt and unwound through its cancellation branch. It is
+/// set only at the observation point that produced the failure; it is never inferred
+/// from error text, nor from another signal that merely coincides with the failure.
 #[derive(Debug, thiserror::Error)]
 #[error("{source}")]
 pub struct CompletionFailure {
     #[source]
     pub source: PureError,
     pub accounting: Box<InferenceAccounting>,
+    pub(crate) cancelled: bool,
+}
+
+impl CompletionFailure {
+    /// Builds a failure that is explicitly **not** the invocation's own cancellation.
+    ///
+    /// Use this to preserve the observed accounting when folding a secondary cause (for
+    /// example a session-close error) into a failure that was already produced elsewhere.
+    /// The cancellation fact cannot be forged here: `new(..).is_cancelled()` is always
+    /// `false`, and only pl-model's own cancellation branch may produce a cancelled failure.
+    pub fn new(source: PureError, accounting: Box<InferenceAccounting>) -> Self {
+        Self {
+            source,
+            accounting,
+            cancelled: false,
+        }
+    }
+
+    /// Whether this invocation itself terminated because it observed a targeting cancellation.
+    ///
+    /// Provider failures, timeouts and transport errors keep this `false`, even when a
+    /// cancellation happens to arrive around the same time.
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled
+    }
+
+    /// Builds the failure produced by the invocation's own cancellation branch.
+    ///
+    /// Only the code that drove the call and matched its cancellation branch may use this;
+    /// a caller outside pl-model cannot fabricate the cancellation fact.
+    pub(crate) fn cancelled(source: PureError, accounting: Box<InferenceAccounting>) -> Self {
+        Self {
+            source,
+            accounting,
+            cancelled: true,
+        }
+    }
 }
 
 impl From<PureError> for CompletionFailure {
@@ -47,6 +89,7 @@ impl From<PureError> for CompletionFailure {
         Self {
             source,
             accounting: Box::default(),
+            cancelled: false,
         }
     }
 }

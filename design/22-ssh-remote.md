@@ -88,6 +88,12 @@ POSIX 路径执行同一内置目录写策略。远端 worktree backend 以解�
 「未注册 worktree」审计只覆盖本地文件系统与本地 git，不为远端项目打开 SSH 连接；远端资源由
 durable lease 覆盖。
 
+远端路径在任何跨端边界上都是 POSIX 字符串：远端 lease 的 `repository_root` 与 `path`、会话
+工作区根、workspace 打开参数与身份比较，以及传给远端 git/helper 的路径参数都以 POSIX 形式
+表示。客户端宿主形态（包括 Windows 的路径分隔符与驱动器前缀）只在本地文件系统上使用，不得
+跨端出现；跨端前统一归一化，并保证同一个远端路径在目录写操作与 git 路径参数上使用同一结果，
+避免物理 worktree 落在与 lease 记录不一致的位置。
+
 本地与远端 prompt 使用同一份执行环境：Platform developer 段声明 transport、目标 OS、
 shell dialect 和路径，并按该 dialect 生成命令语法。shell descriptor 只缓存在当前连接和
 workspace host；断线自动重连完成新的 hello 后替换旧 descriptor；环境变化会改变动态

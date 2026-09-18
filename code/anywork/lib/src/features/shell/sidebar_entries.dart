@@ -181,7 +181,6 @@ class _ThreadTile extends ConsumerWidget {
     required this.modeDisplayName,
     required this.selected,
     required this.recoveryIssue,
-    required this.canArchive,
     this.onNavigate,
   });
 
@@ -189,7 +188,6 @@ class _ThreadTile extends ConsumerWidget {
   final String? modeDisplayName;
   final bool selected;
   final StudioRecoveryIssue? recoveryIssue;
-  final bool canArchive;
   final VoidCallback? onNavigate;
 
   @override
@@ -274,7 +272,7 @@ class _ThreadTile extends ConsumerWidget {
           PopupMenuItem(
             key: StudioDriverKeys.archiveThread(thread.id),
             value: 'archive',
-            enabled: issue == null && canArchive,
+            enabled: issue == null,
             child: Text(context.l10n.sidebarArchiveSession),
           ),
         ],
@@ -292,6 +290,26 @@ Future<void> _archiveThreadFromSidebar(
   WidgetRef ref,
   String threadId,
 ) async {
+  // 归档是破坏性动作：确认对话框是唯一入口，取消不产生任何副作用。
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(context.l10n.sidebarArchiveSessionConfirmTitle),
+      content: Text(context.l10n.sidebarArchiveSessionConfirmBody),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: Text(context.l10n.commonCancel),
+        ),
+        FilledButton(
+          key: StudioDriverKeys.archiveThreadConfirm,
+          onPressed: () => Navigator.of(context).pop(true),
+          child: Text(context.l10n.sidebarArchiveSessionConfirmAction),
+        ),
+      ],
+    ),
+  );
+  if (confirmed != true || !context.mounted) return;
   try {
     await ref.read(studioControllerProvider.notifier).archiveThread(threadId);
   } on Object {
