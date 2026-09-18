@@ -1251,7 +1251,7 @@ void registerShellSettingsTests() {
       expect(summaryFinder, findsOneWidget);
       final text = tester.widget<Text>(summaryFinder);
       expect(text.data, summary);
-      expect(text.maxLines, 2);
+      expect(text.maxLines, 1);
       final tooltip = tester.widget<Tooltip>(
         find.ancestor(of: summaryFinder, matching: find.byType(Tooltip)).first,
       );
@@ -1270,6 +1270,100 @@ void registerShellSettingsTests() {
       expect(tester.widget<Text>(summaryFinder).data, summary);
     },
   );
+
+  testWidgets('agent switcher groups rows by status and scrolls the overflow', (
+    tester,
+  ) async {
+    _configureResponsiveView(tester, const Size(1280, 800));
+    const statuses = <String, ThreadStatusView>{
+      'child-running': ThreadStatusView.running,
+      'child-idle': ThreadStatusView.idle,
+      'child-closed': ThreadStatusView.closed,
+      'child-faulted': ThreadStatusView.faulted,
+      'child-queued': ThreadStatusView.queued,
+      'child-waiting': ThreadStatusView.waitingTool,
+      'child-idle-2': ThreadStatusView.idle,
+      'child-closing': ThreadStatusView.closing,
+      'child-closed-2': ThreadStatusView.closed,
+      'child-cancelling': ThreadStatusView.cancelling,
+    };
+    final base = _rootAndChildState();
+    final root = base.threads.firstWhere((thread) => thread.id == 'session-1');
+    final ids = statuses.keys.toList();
+    final children = [
+      for (final id in ids)
+        StudioThread(
+          id: id,
+          projectId: root.projectId,
+          title: id,
+          mode: ThreadModeId.task,
+          createdAt: _fixtureDate(100 + ids.indexOf(id)),
+          updatedAt: _fixtureDate(100),
+          parentThreadId: root.id,
+          rootThreadId: root.id,
+          agentPath: 'root/$id',
+          role: 'reviewer',
+          status: statuses[id]!,
+        ),
+    ];
+    final state = base.copyWith(
+      threadDirectory: ThreadDirectoryWindow(threads: [root, ...children]),
+    );
+    final api = _FakeStudioApi(state)..publishSnapshotOnSubscribe = true;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(StudioDriverKeys.agentSwitcher));
+    await tester.pumpAndSettle();
+
+    const expectedOrder = [
+      // 执行中
+      'child-running',
+      'child-queued',
+      'child-waiting',
+      'child-cancelling',
+      // 失败
+      'child-faulted',
+      // 空闲，owner 保持同组内的原始顺序
+      'session-1',
+      'child-idle',
+      'child-idle-2',
+      // 关闭中或已关闭
+      'child-closed',
+      'child-closing',
+      'child-closed-2',
+    ];
+    final tops = [
+      for (final id in expectedOrder)
+        tester.getTopLeft(find.byKey(StudioDriverKeys.agentRow(id))).dy,
+    ];
+    expect(tops, orderedEquals([...tops]..sort()));
+
+    final menuScrollable = find
+        .ancestor(
+          of: find.byKey(StudioDriverKeys.agentRow(expectedOrder.last)),
+          matching: find.byType(Scrollable),
+        )
+        .first;
+    expect(
+      find.ancestor(of: menuScrollable, matching: find.byType(Scrollbar)),
+      findsWidgets,
+    );
+    expect(tester.getSize(menuScrollable).height, lessThanOrEqualTo(320));
+    expect(
+      tester
+          .widget<Scrollable>(menuScrollable)
+          .controller!
+          .position
+          .maxScrollExtent,
+      greaterThan(0),
+    );
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('header shows a dash when the session has no priced costs', (
     tester,

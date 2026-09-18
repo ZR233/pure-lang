@@ -213,7 +213,7 @@ class _AgentSwitcherState extends ConsumerState<_AgentSwitcher> {
 
   @override
   Widget build(BuildContext context) {
-    final threads = widget.state.workspaceThreads;
+    final threads = _orderedAgentThreads(widget.state.workspaceThreads);
     final aggregateColor = _aggregateAgentColor(context, widget.state, threads);
     final viewport = MediaQuery.sizeOf(context);
     final availableWidth = (viewport.width - 24)
@@ -225,8 +225,9 @@ class _AgentSwitcherState extends ConsumerState<_AgentSwitcher> {
         .toDouble();
     // Reserve the compact header and overlay insets so a long menu can stay
     // below its anchor and scroll instead of being flipped over the header.
+    // 高度上限让菜单只占用有限纵向空间，其余条目滚动查看。
     final menuHeight = (viewport.height - 96)
-        .clamp(0.0, double.infinity)
+        .clamp(0.0, _agentMenuMaxHeight)
         .toDouble();
     final contentWidth = (menuWidth - 116).clamp(140.0, 244.0).toDouble();
     return MenuAnchor(
@@ -278,7 +279,7 @@ class _AgentSwitcherState extends ConsumerState<_AgentSwitcher> {
                           child: Text(
                             _agentDisplayName(context, thread),
                             key: StudioDriverKeys.agentTaskSummary(thread.id),
-                            maxLines: 2,
+                            maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
@@ -296,13 +297,19 @@ class _AgentSwitcherState extends ConsumerState<_AgentSwitcher> {
                     ),
                   ),
                   const SizedBox(width: 12),
-                  Text(
-                    _agentForThread(widget.state, thread.id)?.error ??
-                        _agentShortStatus(context, thread),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.labelSmall
-                        ?.copyWith(color: context.colors.onSurfaceVariant),
+                  ConstrainedBox(
+                    // 长状态或错误文本必须行内省略，不能撑破固定宽度的菜单行。
+                    constraints: BoxConstraints(
+                      maxWidth: contentWidth * _agentStatusWidthFraction,
+                    ),
+                    child: Text(
+                      _agentForThread(widget.state, thread.id)?.error ??
+                          _agentShortStatus(context, thread),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelSmall
+                          ?.copyWith(color: context.colors.onSurfaceVariant),
+                    ),
                   ),
                 ],
               ),
@@ -347,6 +354,39 @@ class _AgentSwitcherState extends ConsumerState<_AgentSwitcher> {
       },
     );
   }
+}
+
+/// `n agents` 菜单最多占用的高度，超出部分滚动查看。
+const double _agentMenuMaxHeight = 320;
+
+/// 菜单行内状态标签最多占用的行宽比例，超出部分行内省略。
+const double _agentStatusWidthFraction = 0.45;
+
+/// 运行状态展示分组：执行中、失败、空闲、关闭中或已关闭。
+int _agentStatusPriority(ThreadStatusView status) => switch (status) {
+  // 执行中，与 ThreadStatusView.isActive 保持一致。
+  ThreadStatusView.queued ||
+  ThreadStatusView.running ||
+  ThreadStatusView.waitingTool ||
+  ThreadStatusView.waitingInteraction ||
+  ThreadStatusView.cancelling => 0,
+  ThreadStatusView.faulted => 1,
+  ThreadStatusView.idle => 2,
+  ThreadStatusView.closing || ThreadStatusView.closed => 3,
+};
+
+/// 按运行状态分组稳定排序，同组内保持 canonical 的 owner/父子顺序。
+List<StudioThread> _orderedAgentThreads(List<StudioThread> threads) {
+  final indexed = [
+    for (var index = 0; index < threads.length; index++)
+      (index, threads[index]),
+  ];
+  indexed.sort((left, right) {
+    final byStatus = _agentStatusPriority(left.$2.status)
+        .compareTo(_agentStatusPriority(right.$2.status));
+    return byStatus != 0 ? byStatus : left.$1.compareTo(right.$1);
+  });
+  return [for (final entry in indexed) entry.$2];
 }
 
 StudioAgentView? _agentForThread(HeaderView state, String threadId) {
