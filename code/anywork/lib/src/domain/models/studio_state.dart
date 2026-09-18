@@ -56,6 +56,7 @@ class StudioState {
     this.workspaceUiByThread = const {},
     this.newThreadComposerByProject = const {},
     this.newThreadModeByProject = const {},
+    this.newThreadWorkspaceModeByProject = const {},
     this.providerCatalog = const ProviderCatalogView.empty(),
     required this.selectedProjectId,
     required this.selectedThreadId,
@@ -65,6 +66,9 @@ class StudioState {
   final Map<String, WorkspaceUiState> workspaceUiByThread;
   final Map<String, ComposerThreadState> newThreadComposerByProject;
   final Map<String, ThreadModeId> newThreadModeByProject;
+
+  /// 按项目隔离的起始页工作区模式草稿；提交后仍保留，供同一项目再次创建会话。
+  final Map<String, ThreadWorkspaceMode> newThreadWorkspaceModeByProject;
   final ProviderCatalogView providerCatalog;
   final String? selectedProjectId;
   final String? selectedThreadId;
@@ -142,6 +146,15 @@ class StudioState {
     return projectId == null
         ? ThreadModeId.simple
         : newThreadModeByProject[projectId] ?? ThreadModeId.simple;
+  }
+
+  /// 当前项目的会话工作区模式草稿；默认 `local`。
+  ThreadWorkspaceMode get newThreadWorkspaceMode {
+    final projectId = selectedProjectId;
+    return projectId == null
+        ? ThreadWorkspaceMode.local
+        : newThreadWorkspaceModeByProject[projectId] ??
+              ThreadWorkspaceMode.local;
   }
 
   List<StudioThread> get rootThreads =>
@@ -302,6 +315,7 @@ class StudioState {
     Map<String, WorkspaceUiState>? workspaceUiByThread,
     Map<String, ComposerThreadState>? newThreadComposerByProject,
     Map<String, ThreadModeId>? newThreadModeByProject,
+    Map<String, ThreadWorkspaceMode>? newThreadWorkspaceModeByProject,
     ProviderCatalogView? providerCatalog,
     Object? selectedProjectId = _studioStateUnset,
     Object? selectedThreadId = _studioStateUnset,
@@ -327,6 +341,9 @@ class StudioState {
           newThreadComposerByProject ?? this.newThreadComposerByProject,
       newThreadModeByProject:
           newThreadModeByProject ?? this.newThreadModeByProject,
+      newThreadWorkspaceModeByProject:
+          newThreadWorkspaceModeByProject ??
+          this.newThreadWorkspaceModeByProject,
       providerCatalog: providerCatalog ?? this.providerCatalog,
       selectedProjectId: identical(selectedProjectId, _studioStateUnset)
           ? this.selectedProjectId

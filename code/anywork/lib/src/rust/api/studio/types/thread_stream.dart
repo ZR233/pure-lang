@@ -162,6 +162,9 @@ class BridgeThread {
 
   /// 完整 Thread Mode ID，例如 `mode.simple` 或 `mode.release`。
   final String mode;
+
+  /// Canonical 会话工作区模式：`local` 或 `worktree`。
+  final String workspaceMode;
   final String rootThreadId;
   final String? parentThreadId;
   final String role;
@@ -176,6 +179,7 @@ class BridgeThread {
     required this.projectId,
     required this.title,
     required this.mode,
+    required this.workspaceMode,
     required this.rootThreadId,
     this.parentThreadId,
     required this.role,
@@ -192,6 +196,7 @@ class BridgeThread {
       projectId.hashCode ^
       title.hashCode ^
       mode.hashCode ^
+      workspaceMode.hashCode ^
       rootThreadId.hashCode ^
       parentThreadId.hashCode ^
       role.hashCode ^
@@ -210,6 +215,7 @@ class BridgeThread {
           projectId == other.projectId &&
           title == other.title &&
           mode == other.mode &&
+          workspaceMode == other.workspaceMode &&
           rootThreadId == other.rootThreadId &&
           parentThreadId == other.parentThreadId &&
           role == other.role &&

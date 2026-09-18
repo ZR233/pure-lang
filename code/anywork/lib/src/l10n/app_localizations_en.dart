@@ -102,6 +102,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get sidebarNewSession => 'New session';
 
   @override
+  String get sidebarSessionWorktree => 'Session worktree';
+
+  @override
   String get sidebarOpenProject => 'Open project';
 
   @override
@@ -396,6 +399,19 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get statusSessionModeLocked =>
       'Session mode cannot change while the session is running or a workflow is active';
+
+  @override
+  String get composerWorkspaceModeLabel => 'Session workspace';
+
+  @override
+  String get composerWorkspaceModeLocal => 'Local directory';
+
+  @override
+  String get composerWorkspaceModeWorktree => 'New worktree';
+
+  @override
+  String get composerWorkspaceModeSshDisabled =>
+      'Worktree sessions are unavailable for remote projects';
 
   @override
   String get statusPlannerModel => 'Planner model';
@@ -1727,6 +1743,12 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsWorktreeCleanup => 'Clean up worktree and branch';
+
+  @override
+  String get settingsWorktreeOwnerSession => 'Session worktree';
+
+  @override
+  String get settingsWorktreeOwnerChild => 'Child agent worktree';
 
   @override
   String get settingsAgentProfileAddTitle => 'Add user agent profile';

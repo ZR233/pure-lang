@@ -23,6 +23,9 @@ pub struct CreateThreadRequest {
     pub title: Option<String>,
     pub input: StudioPromptInput,
     pub mode: String,
+    /// 会话工作区模式；省略时按 `local` 解释。
+    #[serde(default)]
+    pub workspace_mode: crate::ThreadWorkspaceMode,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -130,6 +133,7 @@ mod tests {
             "mode": "mode.simple",
         }))
         .unwrap();
+        assert_eq!(missing.workspace_mode, crate::ThreadWorkspaceMode::Local);
         assert_eq!(missing.title, None);
 
         let explicit = serde_json::from_value::<CreateThreadRequest>(serde_json::json!({
@@ -139,5 +143,28 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(explicit.title.as_deref(), Some("Explicit title"));
+    }
+
+    #[test]
+    fn create_thread_workspace_mode_is_camel_case_and_defaults_to_local() {
+        let worktree = serde_json::from_value::<CreateThreadRequest>(serde_json::json!({
+            "input": {"inputId": "request-1", "text": "hello", "attachmentDraftIds": []},
+            "mode": "mode.simple",
+            "workspaceMode": "worktree",
+        }))
+        .unwrap();
+        assert_eq!(
+            worktree.workspace_mode,
+            crate::ThreadWorkspaceMode::Worktree
+        );
+        let encoded = serde_json::to_value(&worktree).unwrap();
+        assert_eq!(encoded["workspaceMode"], serde_json::json!("worktree"));
+
+        let local = serde_json::from_value::<CreateThreadRequest>(serde_json::json!({
+            "input": {"inputId": "request-1", "text": "hello", "attachmentDraftIds": []},
+            "mode": "mode.simple",
+        }))
+        .unwrap();
+        assert_eq!(local.workspace_mode, crate::ThreadWorkspaceMode::Local);
     }
 }

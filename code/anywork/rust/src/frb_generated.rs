@@ -659,10 +659,11 @@ fn wire__crate__api__studio__handlers__agent_profiles__cleanup_preserved_worktre
     FLUTTER_RUST_BRIDGE_HANDLER.wrap_async::<flutter_rust_bridge::for_generated::SseCodec,_,_,_>(flutter_rust_bridge::for_generated::TaskInfo{ debug_name: "cleanup_preserved_worktree", port: Some(port_), mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal }, move || {
             let message = unsafe { flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(ptr_, rust_vec_len_, data_len_) };
             let mut deserializer = flutter_rust_bridge::for_generated::SseDeserializer::new(message);
-            let api_child_id = <String>::sse_decode(&mut deserializer);
+            let api_owner_kind = <String>::sse_decode(&mut deserializer);
+let api_owner_thread_id = <String>::sse_decode(&mut deserializer);
 let api_expected_lease_revision = <u64>::sse_decode(&mut deserializer);deserializer.end(); move |context| async move {
                     transform_result_sse::<_, crate::api::studio::types::error::BridgeError>((move || async move {
-                         let output_ok = crate::api::studio::handlers::agent_profiles::cleanup_preserved_worktree(api_child_id, api_expected_lease_revision).await?;   Ok(output_ok)
+                         let output_ok = crate::api::studio::handlers::agent_profiles::cleanup_preserved_worktree(api_owner_kind, api_owner_thread_id, api_expected_lease_revision).await?;   Ok(output_ok)
                     })().await)
                 } })
 }
@@ -2919,6 +2920,7 @@ fn wire__crate__api__studio__handlers__thread__start_new_thread_impl(
                     &mut deserializer,
                 );
             let api_mode = <String>::sse_decode(&mut deserializer);
+            let api_workspace_mode = <Option<String>>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| async move {
                 transform_result_sse::<_, crate::api::studio::types::error::BridgeError>(
@@ -2927,6 +2929,7 @@ fn wire__crate__api__studio__handlers__thread__start_new_thread_impl(
                             api_project_id,
                             api_input,
                             api_mode,
+                            api_workspace_mode,
                         )
                         .await?;
                         Ok(output_ok)
@@ -6687,6 +6690,7 @@ impl SseDecode for crate::api::studio::types::thread_stream::BridgeThread {
         let mut var_projectId = <String>::sse_decode(deserializer);
         let mut var_title = <String>::sse_decode(deserializer);
         let mut var_mode = <String>::sse_decode(deserializer);
+        let mut var_workspaceMode = <String>::sse_decode(deserializer);
         let mut var_rootThreadId = <String>::sse_decode(deserializer);
         let mut var_parentThreadId = <Option<String>>::sse_decode(deserializer);
         let mut var_role = <String>::sse_decode(deserializer);
@@ -6703,6 +6707,7 @@ impl SseDecode for crate::api::studio::types::thread_stream::BridgeThread {
             project_id: var_projectId,
             title: var_title,
             mode: var_mode,
+            workspace_mode: var_workspaceMode,
             root_thread_id: var_rootThreadId,
             parent_thread_id: var_parentThreadId,
             role: var_role,
@@ -8537,10 +8542,24 @@ impl SseDecode for crate::api::studio::types::thread_stream::BridgeWorkflowRunti
     }
 }
 
+impl SseDecode for crate::api::studio::types::runtime::BridgeWorktreeOwner {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut inner = <i32>::sse_decode(deserializer);
+        return match inner {
+            0 => crate::api::studio::types::runtime::BridgeWorktreeOwner::Session,
+            1 => crate::api::studio::types::runtime::BridgeWorktreeOwner::Child,
+            _ => unreachable!("Invalid variant for BridgeWorktreeOwner: {}", inner),
+        };
+    }
+}
+
 impl SseDecode for crate::api::studio::types::runtime::BridgeWorktreeRecoveryPreviewDto {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_childId = <String>::sse_decode(deserializer);
+        let mut var_ownerKind =
+            <crate::api::studio::types::runtime::BridgeWorktreeOwner>::sse_decode(deserializer);
+        let mut var_ownerThreadId = <String>::sse_decode(deserializer);
         let mut var_leaseRevision = <u64>::sse_decode(deserializer);
         let mut var_state = <String>::sse_decode(deserializer);
         let mut var_repositoryRoot = <String>::sse_decode(deserializer);
@@ -8551,7 +8570,8 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeWorktreeRecoveryPre
         let mut var_dirty = <bool>::sse_decode(deserializer);
         let mut var_changedFiles = <Vec<String>>::sse_decode(deserializer);
         return crate::api::studio::types::runtime::BridgeWorktreeRecoveryPreviewDto {
-            child_id: var_childId,
+            owner_kind: var_ownerKind,
+            owner_thread_id: var_ownerThreadId,
             lease_revision: var_leaseRevision,
             state: var_state,
             repository_root: var_repositoryRoot,
@@ -14369,6 +14389,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::studio::types::thread_stream:
             self.project_id.into_into_dart().into_dart(),
             self.title.into_into_dart().into_dart(),
             self.mode.into_into_dart().into_dart(),
+            self.workspace_mode.into_into_dart().into_dart(),
             self.root_thread_id.into_into_dart().into_dart(),
             self.parent_thread_id.into_into_dart().into_dart(),
             self.role.into_into_dart().into_dart(),
@@ -16608,12 +16629,34 @@ impl
     }
 }
 // Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::studio::types::runtime::BridgeWorktreeOwner {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        match self {
+            Self::Session => 0.into_dart(),
+            Self::Child => 1.into_dart(),
+            _ => unreachable!(),
+        }
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::studio::types::runtime::BridgeWorktreeOwner
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::runtime::BridgeWorktreeOwner>
+    for crate::api::studio::types::runtime::BridgeWorktreeOwner
+{
+    fn into_into_dart(self) -> crate::api::studio::types::runtime::BridgeWorktreeOwner {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
 impl flutter_rust_bridge::IntoDart
     for crate::api::studio::types::runtime::BridgeWorktreeRecoveryPreviewDto
 {
     fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
         [
-            self.child_id.into_into_dart().into_dart(),
+            self.owner_kind.into_into_dart().into_dart(),
+            self.owner_thread_id.into_into_dart().into_dart(),
             self.lease_revision.into_into_dart().into_dart(),
             self.state.into_into_dart().into_dart(),
             self.repository_root.into_into_dart().into_dart(),
@@ -20266,6 +20309,7 @@ impl SseEncode for crate::api::studio::types::thread_stream::BridgeThread {
         <String>::sse_encode(self.project_id, serializer);
         <String>::sse_encode(self.title, serializer);
         <String>::sse_encode(self.mode, serializer);
+        <String>::sse_encode(self.workspace_mode, serializer);
         <String>::sse_encode(self.root_thread_id, serializer);
         <Option<String>>::sse_encode(self.parent_thread_id, serializer);
         <String>::sse_encode(self.role, serializer);
@@ -21561,10 +21605,30 @@ impl SseEncode for crate::api::studio::types::thread_stream::BridgeWorkflowRunti
     }
 }
 
+impl SseEncode for crate::api::studio::types::runtime::BridgeWorktreeOwner {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <i32>::sse_encode(
+            match self {
+                crate::api::studio::types::runtime::BridgeWorktreeOwner::Session => 0,
+                crate::api::studio::types::runtime::BridgeWorktreeOwner::Child => 1,
+                _ => {
+                    unimplemented!("");
+                }
+            },
+            serializer,
+        );
+    }
+}
+
 impl SseEncode for crate::api::studio::types::runtime::BridgeWorktreeRecoveryPreviewDto {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <String>::sse_encode(self.child_id, serializer);
+        <crate::api::studio::types::runtime::BridgeWorktreeOwner>::sse_encode(
+            self.owner_kind,
+            serializer,
+        );
+        <String>::sse_encode(self.owner_thread_id, serializer);
         <u64>::sse_encode(self.lease_revision, serializer);
         <String>::sse_encode(self.state, serializer);
         <String>::sse_encode(self.repository_root, serializer);

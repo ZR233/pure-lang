@@ -23,11 +23,14 @@ pub(super) async fn apply_batch(
             StudioDirectoryMutation::Delta(delta) => apply_directory_delta(&tx, delta)
                 .await
                 .map_err(|error| classify_store_error(store_error(error)))?,
-            StudioDirectoryMutation::WorktreeLease(lease) => {
-                put_object(&tx, &lease.child_id, lease, crate::studio::unix_seconds())
-                    .await
-                    .map_err(|error| classify_store_error(store_error(error)))?
-            }
+            StudioDirectoryMutation::WorktreeLease(lease) => put_object(
+                &tx,
+                &lease.owner_thread_id,
+                lease,
+                crate::studio::unix_seconds(),
+            )
+            .await
+            .map_err(|error| classify_store_error(store_error(error)))?,
             StudioDirectoryMutation::ModelPerformance(commit) => put_object(
                 &tx,
                 MODEL_PERFORMANCE_OWNER_ID,

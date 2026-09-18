@@ -35,6 +35,8 @@ pub mod thread {
         pub created_at: i64,
         pub updated_at: i64,
         pub archived: i32,
+        /// 会话工作区模式；canonical 值为 `local | worktree`，既有行解释为 `local`。
+        pub workspace_mode: String,
     }
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

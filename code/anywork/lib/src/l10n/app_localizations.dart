@@ -272,6 +272,12 @@ abstract class AppLocalizations {
   /// **'New session'**
   String get sidebarNewSession;
 
+  /// No description provided for @sidebarSessionWorktree.
+  ///
+  /// In en, this message translates to:
+  /// **'Session worktree'**
+  String get sidebarSessionWorktree;
+
   /// No description provided for @sidebarOpenProject.
   ///
   /// In en, this message translates to:
@@ -805,6 +811,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Session mode cannot change while the session is running or a workflow is active'**
   String get statusSessionModeLocked;
+
+  /// No description provided for @composerWorkspaceModeLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Session workspace'**
+  String get composerWorkspaceModeLabel;
+
+  /// No description provided for @composerWorkspaceModeLocal.
+  ///
+  /// In en, this message translates to:
+  /// **'Local directory'**
+  String get composerWorkspaceModeLocal;
+
+  /// No description provided for @composerWorkspaceModeWorktree.
+  ///
+  /// In en, this message translates to:
+  /// **'New worktree'**
+  String get composerWorkspaceModeWorktree;
+
+  /// No description provided for @composerWorkspaceModeSshDisabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Worktree sessions are unavailable for remote projects'**
+  String get composerWorkspaceModeSshDisabled;
 
   /// No description provided for @statusPlannerModel.
   ///
@@ -3106,6 +3136,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Clean up worktree and branch'**
   String get settingsWorktreeCleanup;
+
+  /// No description provided for @settingsWorktreeOwnerSession.
+  ///
+  /// In en, this message translates to:
+  /// **'Session worktree'**
+  String get settingsWorktreeOwnerSession;
+
+  /// No description provided for @settingsWorktreeOwnerChild.
+  ///
+  /// In en, this message translates to:
+  /// **'Child agent worktree'**
+  String get settingsWorktreeOwnerChild;
 
   /// No description provided for @settingsAgentProfileAddTitle.
   ///

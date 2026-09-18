@@ -1,6 +1,7 @@
 pub mod mode;
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 use crate::{
     InteractionRequest, McpHealthSnapshot, RuntimeCostAmount, ThreadItem, ThreadItemDelta,
@@ -8,6 +9,40 @@ use crate::{
 };
 
 pub const THREAD_SCHEMA_VERSION: u32 = 12;
+
+/// 会话级工作区模式：Project 根目录，或从 Project Git 仓库 `HEAD` 派生的独立 checkout。
+///
+/// 它是 Thread 的 canonical 产品事实，在创建会话时确定；与 Profile 的
+/// [`crate::AgentWorkspaceMode`] 是两条语义轴：本模式决定会话工作区在哪里，
+/// Profile 模式决定 child 相对会话工作区的隔离方式。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum ThreadWorkspaceMode {
+    /// 使用 Project 根目录（默认）。
+    #[default]
+    Local,
+    /// 从 Project 的 Git 仓库 `HEAD` 派生独立 worktree 并在其中工作。
+    Worktree,
+}
+
+impl ThreadWorkspaceMode {
+    /// Canonical 稳定标签，也是 `threads.workspace_mode` 的持久化值。
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Worktree => "worktree",
+        }
+    }
+
+    /// 解析 canonical 标签；未知标签明确失败，不默认为 `local`。
+    pub fn from_label(label: &str) -> Result<Self, crate::UnknownLabelError> {
+        match label {
+            "local" => Ok(Self::Local),
+            "worktree" => Ok(Self::Worktree),
+            other => Err(crate::UnknownLabelError::new("ThreadWorkspaceMode", other)),
+        }
+    }
+}
 
 /// 一个 agent 独占的对话和执行队列。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -17,6 +52,9 @@ pub struct Thread {
     pub project_id: String,
     pub title: String,
     pub mode: ThreadModeId,
+    /// 会话工作区模式；缺失的旧编码按默认 `local` 解码。
+    #[serde(default)]
+    pub workspace_mode: ThreadWorkspaceMode,
     pub root_thread_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_thread_id: Option<String>,
@@ -36,6 +74,7 @@ impl Thread {
             project_id: String::new(),
             title: String::new(),
             mode: ThreadModeId::simple(),
+            workspace_mode: ThreadWorkspaceMode::Local,
             root_thread_id: id.clone(),
             parent_thread_id: None,
             role: String::new(),

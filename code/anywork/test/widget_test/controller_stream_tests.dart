@@ -1021,6 +1021,112 @@ void registerControllerStreamTests() {
     expect(after.newThreadComposerByProject['project-b']?.draft, 'draft B');
   });
 
+  test(
+    'new Thread workspace mode defaults to local and stays isolated by Project',
+    () async {
+      final initial = _twoProjectState(selectedProjectId: 'project-a');
+      final api = _FakeStudioApi(initial);
+      api.selectProjectStates['project-b'] = _twoProjectState(
+        selectedProjectId: 'project-b',
+      );
+      final container = ProviderContainer(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+      await container.read(studioControllerProvider.future);
+      final controller = container.read(studioControllerProvider.notifier);
+
+      await controller.beginNewThread();
+      expect(
+        container
+            .read(studioControllerProvider)
+            .requireValue
+            .newThreadWorkspaceMode,
+        ThreadWorkspaceMode.local,
+        reason: 'the start page must default to the local workspace',
+      );
+
+      controller.setNewThreadWorkspaceMode(ThreadWorkspaceMode.worktree);
+      expect(
+        container
+            .read(studioControllerProvider)
+            .requireValue
+            .newThreadWorkspaceMode,
+        ThreadWorkspaceMode.worktree,
+      );
+
+      await controller.selectProject('project-b');
+      await controller.beginNewThread();
+      final other = container.read(studioControllerProvider).requireValue;
+      expect(other.selectedProjectId, 'project-b');
+      expect(
+        other.newThreadWorkspaceMode,
+        ThreadWorkspaceMode.local,
+        reason: 'each Project keeps its own workspace-mode draft',
+      );
+
+      await controller.selectProject('project-a');
+      await controller.beginNewThread();
+      final restored = container.read(studioControllerProvider).requireValue;
+      expect(restored.selectedProjectId, 'project-a');
+      expect(
+        restored.newThreadWorkspaceMode,
+        ThreadWorkspaceMode.worktree,
+        reason: 'the first Project keeps the draft it was given',
+      );
+    },
+  );
+
+  test(
+    'first send forwards the selected workspace mode to the command',
+    () async {
+      final initial = _emptyState();
+      final api = _FakeStudioApi(initial);
+      final container = ProviderContainer(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+      await container.read(studioControllerProvider.future);
+      final controller = container.read(studioControllerProvider.notifier);
+
+      await controller.beginNewThread();
+      controller.setNewThreadWorkspaceMode(ThreadWorkspaceMode.worktree);
+      controller.updateNewThreadComposer('worktree session');
+      await controller.submitNewThreadComposer();
+
+      expect(api.createdThreadProjectId, 'project-1');
+      expect(api.createdThreadWorkspaceMode, 'worktree');
+    },
+  );
+
+  test(
+    'a rejected first send keeps the workspace mode draft and error',
+    () async {
+      final api = _FakeStudioApi(_emptyState())
+        ..submitPromptError = Exception('worktree creation rejected');
+      final container = ProviderContainer(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+      );
+      addTearDown(container.dispose);
+      await container.read(studioControllerProvider.future);
+      final controller = container.read(studioControllerProvider.notifier);
+
+      await controller.beginNewThread();
+      controller.setNewThreadWorkspaceMode(ThreadWorkspaceMode.worktree);
+      controller.updateNewThreadComposer('keep this worktree draft');
+      await controller.submitNewThreadComposer();
+
+      final after = container.read(studioControllerProvider).requireValue;
+      expect(after.selectedThreadId, isNull);
+      expect(after.newThreadWorkspaceMode, ThreadWorkspaceMode.worktree);
+      expect(after.newThreadComposer.draft, 'keep this worktree draft');
+      expect(
+        after.newThreadComposer.error,
+        contains('worktree creation rejected'),
+      );
+    },
+  );
+
   test('a late first-send response never exits a reset start page', () async {
     final initial = _emptyState();
     final created = StudioThread(

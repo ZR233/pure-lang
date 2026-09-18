@@ -499,6 +499,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn thread_directory_projection_exposes_the_session_workspace_mode() {
+        use crate::studio::store::directory::DirectoryDelta;
+        use pl_protocol::ThreadWorkspaceMode;
+        let (store, bus) = memory_bus().await;
+        let project = seed_project(&store).await;
+
+        // 冷行：既有 Thread 解释为 local，且分页回源仍可读。
+        let existing = store
+            .create_thread(&project.id, "Existing", pl_protocol::ThreadModeId::simple())
+            .await
+            .expect("thread");
+        let cold = store.list_thread_directory_page(None, 10).await.unwrap();
+        let cold_entry = cold
+            .iter()
+            .find(|thread| thread.id == existing.id)
+            .expect("cold row");
+        assert_eq!(cold_entry.workspace_mode, ThreadWorkspaceMode::Local);
+
+        // 热事实：worktree 会话经目录投影与分页都可读。
+        let (delta, thread) = DirectoryDelta::register_root_thread(
+            crate::studio::ids::new_id("thread"),
+            &project.id,
+            "Worktree session",
+            pl_protocol::ThreadModeId::simple(),
+            ThreadWorkspaceMode::Worktree,
+        );
+        bus.commit_directory(delta).await.unwrap();
+        assert_eq!(
+            bus.thread_snapshot(&thread.id).unwrap().workspace_mode,
+            ThreadWorkspaceMode::Worktree
+        );
+        let page = bus.read_thread_directory_page(None, 10).await.unwrap();
+        let state = page.state;
+        let entry = state
+            .value()
+            .expect("ready page")
+            .threads
+            .iter()
+            .find(|candidate| candidate.id == thread.id)
+            .expect("hot row");
+        assert_eq!(entry.workspace_mode, ThreadWorkspaceMode::Worktree);
+    }
+
+    #[tokio::test]
     async fn directory_search_reaches_cold_history_and_filters_before_pagination() {
         use pl_protocol::studio::{ThreadDirectoryFilter, ThreadDirectoryQuery};
         let (store, bus) = memory_bus().await;

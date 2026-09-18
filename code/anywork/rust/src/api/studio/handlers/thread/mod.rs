@@ -17,13 +17,25 @@ fn thread_mode(mode: String) -> Result<ThreadModeId, BridgeError> {
 ///
 /// # Errors
 ///
-/// Returns an error when the Project does not exist, the prompt is empty, or the Turn is rejected.
+/// Returns an error when the Project does not exist, the prompt is empty, the requested
+/// workspace mode is unknown or unavailable for a remote Project, or the Turn is rejected.
 pub async fn start_new_thread(
     project_id: String,
     input: BridgeStudioPromptInput,
     mode: String,
+    workspace_mode: Option<String>,
 ) -> Result<StartNewThreadResponse, BridgeError> {
     let mode = thread_mode(mode)?;
+    let workspace_mode = match workspace_mode.as_deref().map(str::trim) {
+        None | Some("") | Some("local") => pl_protocol::ThreadWorkspaceMode::Local,
+        Some("worktree") => pl_protocol::ThreadWorkspaceMode::Worktree,
+        Some(other) => {
+            return Err(anyhow::anyhow!(
+                "workspaceMode must be local or worktree, received {other:?}"
+            )
+            .into());
+        }
+    };
     let bridge = active_bridge().await?;
     let response = bridge
         .studio
@@ -33,6 +45,7 @@ pub async fn start_new_thread(
                 title: None,
                 input: input.into(),
                 mode: mode.label().to_string(),
+                workspace_mode,
             },
         )
         .await?;

@@ -119,6 +119,8 @@ pub enum ThreadAssemblyError {
     InitialContextOnRecovery,
     #[error("Thread identity is already owned or has an invalid parent: {0}")]
     Identity(String),
+    #[error("Thread {thread_id} workspace is unavailable: {reason}")]
+    Workspace { thread_id: String, reason: String },
     #[error("Thread is still being assembled: {0}")]
     Preparing(String),
     #[error("Thread {0} workspace close disposition is already frozen")]

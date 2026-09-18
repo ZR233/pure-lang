@@ -52,6 +52,7 @@ impl StudioStore {
             project_id: Set(project_id.to_string()),
             title: Set(non_empty_title(title)),
             mode: Set(mode.label().to_string()),
+            workspace_mode: Set(pl_protocol::ThreadWorkspaceMode::Local.label().to_string()),
             root_thread_id: Set(id.clone()),
             parent_thread_id: Set(None),
             role: Set(crate::config::StudioRole::Planner.key().to_string()),

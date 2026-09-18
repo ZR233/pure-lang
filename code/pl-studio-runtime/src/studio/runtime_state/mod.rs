@@ -58,10 +58,38 @@ pub enum StudioRecoveryIssueAction {
     CleanupWorktree,
 }
 
+/// Recovery 中 worktree 的归属来源；使会话自身 worktree 与 child worktree 可区分。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum StudioRecoveryWorktreeOwner {
+    Session,
+    Child,
+}
+
+impl StudioRecoveryWorktreeOwner {
+    /// Canonical 归属标签；也是显式清理入口接受的唯一字符串口径。
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Session => "session",
+            Self::Child => "child",
+        }
+    }
+
+    /// 解析归属标签；未知标签明确失败，不默认为 child 或 session。
+    pub fn from_label(label: &str) -> Option<Self> {
+        match label {
+            "session" => Some(Self::Session),
+            "child" => Some(Self::Child),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StudioWorktreeRecoveryPreview {
-    pub child_id: String,
+    pub owner_kind: StudioRecoveryWorktreeOwner,
+    pub owner_thread_id: String,
     pub lease_revision: u64,
     pub state: String,
     pub repository_root: String,

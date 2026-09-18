@@ -4,7 +4,10 @@ use std::sync::Arc;
 use super::{WorktreeBackend, WorktreeCreateFailureDisposition, WorktreeError, WorktreeStatus};
 
 const WORKTREE_DIR: &str = ".anywork/worktrees";
-const WORKTREE_BRANCH_PREFIX: &str = "pure-agent-";
+const CHILD_BRANCH_PREFIX: &str = "pure-agent-";
+const SESSION_BRANCH_PREFIX: &str = "pure-session-";
+/// 根会话自身工作区使用的受控 leaf 名称。
+pub const SESSION_WORKTREE_LEAF: &str = "session";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorktreeHandle {
@@ -13,11 +16,54 @@ pub struct WorktreeHandle {
     pub base_commit: String,
 }
 
+/// Pure-owned worktree 归属；路径 leaf 与分支名都由归属派生，不接受外部指定。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorktreeOwnership {
+    /// 根会话自身工作区：`<repo>/.anywork/worktrees/<root-thread-id>/session` 与
+    /// `pure-session-<thread-id>`。
+    Session { thread_id: String },
+    /// 子智能体工作区：`<repo>/.anywork/worktrees/<root-thread-id>/<child-id>` 与
+    /// `pure-agent-<child-id>`。
+    Child { child_id: String },
+}
+
+impl WorktreeOwnership {
+    pub fn leaf(&self) -> &str {
+        match self {
+            Self::Session { .. } => SESSION_WORKTREE_LEAF,
+            Self::Child { child_id } => child_id,
+        }
+    }
+
+    pub fn owner_id(&self) -> &str {
+        match self {
+            Self::Session { thread_id } => thread_id,
+            Self::Child { child_id } => child_id,
+        }
+    }
+
+    pub fn branch(&self) -> String {
+        match self {
+            Self::Session { thread_id } => {
+                format!("{SESSION_BRANCH_PREFIX}{}", safe_component(thread_id))
+            }
+            Self::Child { child_id } => {
+                format!("{CHILD_BRANCH_PREFIX}{}", safe_component(child_id))
+            }
+        }
+    }
+}
+
+/// Rejects any branch that is not a Pure-owned registration identity.
+pub fn is_pure_branch(branch: &str) -> bool {
+    branch.starts_with(CHILD_BRANCH_PREFIX) || branch.starts_with(SESSION_BRANCH_PREFIX)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorktreeCreateSpec {
     pub repo_root: PathBuf,
     pub root_thread_id: String,
-    pub child_id: String,
+    pub ownership: WorktreeOwnership,
     pub base_commit: String,
 }
 
@@ -39,15 +85,19 @@ impl WorktreeManager {
         backend.resolve_repo_root(project_path).await
     }
 
-    pub fn allocate_path(repo_root: &Path, root_thread_id: &str, child_id: &str) -> PathBuf {
+    pub fn allocate_path(
+        repo_root: &Path,
+        root_thread_id: &str,
+        ownership: &WorktreeOwnership,
+    ) -> PathBuf {
         repo_root
             .join(WORKTREE_DIR)
             .join(safe_component(root_thread_id))
-            .join(safe_component(child_id))
+            .join(safe_component(ownership.leaf()))
     }
 
-    pub fn branch_for(child_id: &str) -> String {
-        format!("{WORKTREE_BRANCH_PREFIX}{}", safe_component(child_id))
+    pub fn branch_for(ownership: &WorktreeOwnership) -> String {
+        ownership.branch()
     }
 
     pub async fn resolve_head(&self, path: &Path) -> Result<String, WorktreeError> {
@@ -81,8 +131,8 @@ impl WorktreeManager {
                 "worktree spawn spec has mismatched repository or empty base".to_string(),
             ));
         }
-        let path = Self::allocate_path(&self.repo_root, &spec.root_thread_id, &spec.child_id);
-        let branch = Self::branch_for(&spec.child_id);
+        let path = Self::allocate_path(&self.repo_root, &spec.root_thread_id, &spec.ownership);
+        let branch = Self::branch_for(&spec.ownership);
         let expected_parent = self
             .repo_root
             .join(WORKTREE_DIR)
@@ -155,7 +205,7 @@ impl WorktreeManager {
         let expected_root = self.repo_root.join(WORKTREE_DIR);
         if !handle.path.starts_with(&expected_root)
             || handle.path.components().count() != expected_root.components().count() + 2
-            || !handle.branch.starts_with(WORKTREE_BRANCH_PREFIX)
+            || !is_pure_branch(&handle.branch)
         {
             return Err(WorktreeError::InvalidResource(
                 "cleanup refused a non-Pure or non-leaf worktree identity".to_string(),
@@ -285,7 +335,9 @@ mod tests {
             .create(WorktreeCreateSpec {
                 repo_root: root.clone(),
                 root_thread_id: "root-thread".to_string(),
-                child_id: "child-agent".to_string(),
+                ownership: WorktreeOwnership::Child {
+                    child_id: "child-agent".to_string(),
+                },
                 base_commit: base.clone(),
             })
             .await
@@ -420,15 +472,25 @@ mod tests {
                 }),
             );
             let handle = WorktreeHandle {
-                path: WorktreeManager::allocate_path(&root, "root", "child"),
-                branch: WorktreeManager::branch_for("child"),
+                path: WorktreeManager::allocate_path(
+                    &root,
+                    "root",
+                    &WorktreeOwnership::Child {
+                        child_id: "child".into(),
+                    },
+                ),
+                branch: WorktreeManager::branch_for(&WorktreeOwnership::Child {
+                    child_id: "child".into(),
+                }),
                 base_commit: base.clone(),
             };
             let failure = manager
                 .create(WorktreeCreateSpec {
                     repo_root: root.clone(),
                     root_thread_id: "root".into(),
-                    child_id: "child".into(),
+                    ownership: WorktreeOwnership::Child {
+                        child_id: "child".into(),
+                    },
                     base_commit: base,
                 })
                 .await

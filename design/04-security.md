@@ -19,8 +19,10 @@ execution profile 的工具 effect 白名单优先于权限模式。Studio root 
 effect，再由权限模式、workspace assignment 与各工具 schema 共同约束实际调用。Task Mode 中
 "root 只亲自修改设计与整合代码"、explorer/reviewer 只读等属于 Mode/Profile 提示词的合作式角色
 合同，不是按 workflow 状态动态切换的硬权限，也不能对抗 shell、Git 或 MCP 的命令正文。directory
-child 的 writablePaths 只约束内置 mutation 工具；worktree child 的 confined 边界始终不能被权限
-模式放宽。GUI、工具描述与固定上下文必须如实区分这两类边界。
+child 的 writablePaths 只约束内置 mutation 工具；worktree child 与会话自身 worktree
+（`ThreadWorkspaceMode = worktree`）的 confined 边界始终不能被权限模式放宽，`full-access`
+也不会为该会话放开 worktree 之外的 host 路径或命令 cwd。GUI、工具描述与固定上下文必须
+如实区分这些边界。
 
 只读 reviewer 可以调用 `report_progress` 追加协作层的结构化审查报告；这不修改项目 workspace、Git
 或外部系统，不属于实现写入。验收与 root 编排只能把绑定到 reviewer agentId 的 canonical

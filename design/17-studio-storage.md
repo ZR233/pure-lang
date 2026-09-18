@@ -19,6 +19,11 @@ Workflow 是 Studio 编码的 `studio.workflow` Thread 扩展，不新增 workfl
 `prepared | active | preserved | cleanupRequested | cleaned`、repo/path/branch/base 和
 revision，仅表达物理资源 ownership（生命周期合同见 [12](./12-collaboration.md)）。
 
+lease 载荷还记录归属类型（`session` 会话自身工作区 | `child` 子智能体工作区）与 owner
+Thread id，两类归属共用同一状态机、存储与显式清理入口。Thread 目录事实另外保存会话级
+`workspace_mode`（`local | worktree`）：它是产品事实，lease 是物理资源 ownership，两者职责
+不同；没有 lease 不代表会话回到 `local`，也不允许由 GUI 或目录查询推导。
+
 ## 17.2 checkpoint 与分页
 
 活动 Thread owner 是唯一事实源。write-behind queue 接收已冻结编码的不可变 commit；worker
@@ -63,7 +68,14 @@ Thread 冷激活先校验目标及待激活祖先的身份、归属与未归档�
 
 启动恢复处理进程 lease、Agent session snapshot、不可用项目路径和 durable worktree
 lease。worktree 部分缺失或身份不匹配时保留现场并发布带 revision、branch/base/head、
-dirty/changed-files 的 Recovery preview；显式 cleanup 才能删除。启动逐 Thread 恢复审计先
+dirty/changed-files 的 Recovery preview；显式 cleanup 才能删除。preview 与显式 cleanup 只
+面向需要人工处置的 lease：`preserved`、没有已注册 Thread 的孤儿 lease、Thread 已归档后仍
+持有的 lease，或身份与物理资源缺失、不匹配的现场；由活动（未归档）Thread 持有的 `active`
+lease 不是清理候选，cleanup 命令在服务端复合同一前置条件后才执行删除。运行期收束为
+`preserved` 的会话 worktree 与启动审计使用同一发布与清理路径，不要求等到下次启动才可见。
+运行期仍处于创建中的 lease 由进程内标记豁免发布与清理；崩溃遗留（标记随进程消失）仍按需要
+人工处置处理。任何把会话 worktree 收束为 `preserved` 的运行期路径都要在返回错误前完成发布。
+启动逐 Thread 恢复审计先
 读取纯目录关联，再独立解码各自 journal；单条日志损坏产生该 Thread 的清理提示，不提前
 阻断同项目其他日志的恢复收束。
 
@@ -89,10 +101,13 @@ Thread activation 前完成。当前 schema 的重复启动不重新执行建表
 - 未知未来版本、损坏数据、不明 WAL、缺失迁移路径或转换失败均明确失败并保留原数据与
   恢复材料；不能默认为初始状态，也不自动删除用户数据。独立打开存储不隐式执行产品迁移。
 
-首个在位产品迁移为 v20→v21：`ssh_servers` 行迁出产品库成为 `~/.ssh/config` 管理块，
-`projects.ssh_server_id` 重写为 `ssh_alias` 并删除旧表；迁移经启动协调器备份产品库后
-执行，文件写入与别名分配幂等可重试，提交前执行外键与指纹校验（契约明细见
-[22](./22-ssh-remote.md)）。
+v20→v21 是在位产品迁移，在持有数据根独占运行锁的启动协调器内、备份产品库之后完成两件事：
+一是为 `threads` 增加 `workspace_mode` 列并把 worktree lease 载荷由版本 1 的 `childId` 转换
+为版本 2 的 `ownerKind` + `ownerThreadId`，既有行解释为 `local`，不删除 Thread 行或会话关联
+事实；二是把 `ssh_servers` 行迁出产品库成为 `~/.ssh/config` 管理块，`projects.ssh_server_id`
+重写为 `ssh_alias` 并删除旧表（契约明细见 [22](./22-ssh-remote.md)）。两步都幂等可重试，
+文件写入与别名分配在提交前执行外键与指纹校验；旧 lease 解码器只服务这次迁移，不成为运行时
+兼容入口，会话工作区模式不参与会话库升级，也不因 schema 变化被清空。
 
 迁移验证覆盖相邻及跨版本升级、拆库、引用与附件保全、重复启动、中途失败和重启恢复，
 以及未来版本、损坏输入、缺失转换、备份或提交失败时原数据保持可恢复。配置和凭据关联

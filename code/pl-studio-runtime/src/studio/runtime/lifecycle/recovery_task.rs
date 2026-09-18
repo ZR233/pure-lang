@@ -51,7 +51,7 @@ impl StudioRuntime {
             match result {
                 Ok(()) => {
                     issues.retain(|issue| issue.worktree.as_ref().is_none_or(|preview| {
-                        runtime.agent_facility.worktrees.get(&preview.child_id)
+                        runtime.agent_facility.worktrees.get(&preview.owner_thread_id)
                             .is_some_and(|lease| lease.revision == preview.lease_revision
                                 && lease.state != crate::studio::agent_host::worktree_lease::WorktreeLeaseState::Cleaned)
                     }));

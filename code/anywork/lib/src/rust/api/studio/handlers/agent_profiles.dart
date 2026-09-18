@@ -58,11 +58,16 @@ Future<BridgeSettingsStateSnapshot> saveUserAgentProfile({
     );
 
 /// Explicitly removes one revision-matched preserved Pure worktree and branch.
+///
+/// `owner_kind` must match the durable lease ownership (`session` or `child`); a mismatch
+/// is rejected instead of falling back to the other source.
 Future<void> cleanupPreservedWorktree({
-  required String childId,
+  required String ownerKind,
+  required String ownerThreadId,
   required BigInt expectedLeaseRevision,
 }) => RustLib.instance.api
     .crateApiStudioHandlersAgentProfilesCleanupPreservedWorktree(
-      childId: childId,
+      ownerKind: ownerKind,
+      ownerThreadId: ownerThreadId,
       expectedLeaseRevision: expectedLeaseRevision,
     );

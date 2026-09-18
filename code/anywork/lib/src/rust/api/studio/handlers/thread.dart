@@ -17,15 +17,18 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 ///
 /// # Errors
 ///
-/// Returns an error when the Project does not exist, the prompt is empty, or the Turn is rejected.
+/// Returns an error when the Project does not exist, the prompt is empty, the requested
+/// workspace mode is unknown or unavailable for a remote Project, or the Turn is rejected.
 Future<StartNewThreadResponse> startNewThread({
   required String projectId,
   required BridgeStudioPromptInput input,
   required String mode,
+  String? workspaceMode,
 }) => RustLib.instance.api.crateApiStudioHandlersThreadStartNewThread(
   projectId: projectId,
   input: input,
   mode: mode,
+  workspaceMode: workspaceMode,
 );
 
 /// Renames a root Thread and returns its canonical directory record.

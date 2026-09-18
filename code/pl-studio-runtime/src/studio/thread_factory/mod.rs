@@ -33,12 +33,17 @@ pub(in crate::studio) struct StudioThreadServices {
 pub(in crate::studio) struct StudioThreadFactory {
     services: StudioThreadServices,
     bindings: Arc<std::sync::Mutex<std::collections::BTreeMap<String, tool_bindings::ToolBinding>>>,
+    /// 测试探针：activation 实际解析出的会话工作区根。
+    #[cfg(test)]
+    session_roots: Arc<std::sync::Mutex<std::collections::BTreeMap<String, std::path::PathBuf>>>,
 }
 impl StudioThreadFactory {
     pub(in crate::studio) fn new(services: StudioThreadServices) -> Self {
         Self {
             services,
             bindings: Default::default(),
+            #[cfg(test)]
+            session_roots: Default::default(),
         }
     }
 }

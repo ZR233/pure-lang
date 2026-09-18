@@ -7,6 +7,7 @@ class _SidebarTile extends StatefulWidget {
     required this.iconColor,
     required this.title,
     this.showTitleTooltip = true,
+    this.titleIcon,
     required this.subtitle,
     required this.dense,
     required this.onTap,
@@ -22,6 +23,9 @@ class _SidebarTile extends StatefulWidget {
   /// 是否在标题文本上提供完整名称 Tooltip；存在 recovery issue 时由
   /// 整行诊断 Tooltip 接管，避免名称提示覆盖诊断。
   final bool showTitleTooltip;
+
+  /// 标题旁的只读标识（例如会话工作树图标）；不承载可交互状态。
+  final Widget? titleIcon;
 
   final String subtitle;
   final bool dense;
@@ -53,6 +57,16 @@ class _SidebarTileState extends State<_SidebarTile> {
         fontWeight: widget.selected ? FontWeight.w600 : FontWeight.w500,
       ),
     );
+    final titleContent = widget.titleIcon == null
+        ? titleText
+        : Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Flexible(child: titleText),
+              const SizedBox(width: 4),
+              widget.titleIcon!,
+            ],
+          );
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: MouseRegion(
@@ -104,8 +118,11 @@ class _SidebarTileState extends State<_SidebarTile> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           widget.showTitleTooltip
-                              ? Tooltip(message: widget.title, child: titleText)
-                              : titleText,
+                              ? Tooltip(
+                                  message: widget.title,
+                                  child: titleContent,
+                                )
+                              : titleContent,
                           if (widget.subtitle.isNotEmpty) ...[
                             const SizedBox(height: 1),
                             Text(

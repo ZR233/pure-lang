@@ -161,7 +161,9 @@ pub enum BridgeRecoveryIssueAction {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BridgeWorktreeRecoveryPreviewDto {
-    pub child_id: String,
+    /// Worktree 归属来源：`session` 为会话自身工作区，`child` 为子智能体工作区。
+    pub owner_kind: BridgeWorktreeOwner,
+    pub owner_thread_id: String,
     pub lease_revision: u64,
     pub state: String,
     pub repository_root: String,
@@ -171,6 +173,14 @@ pub struct BridgeWorktreeRecoveryPreviewDto {
     pub head_commit: Option<String>,
     pub dirty: bool,
     pub changed_files: Vec<String>,
+}
+
+/// Worktree lease 的归属来源；显式清理必须与 durable lease 的归属一致。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum BridgeWorktreeOwner {
+    Session,
+    Child,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

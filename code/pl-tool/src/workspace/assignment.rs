@@ -41,13 +41,7 @@ pub struct AgentWorkspace {
 impl AgentWorkspace {
     pub fn local(root: impl Into<PathBuf>) -> Self {
         let root = root.into();
-        Self {
-            project_root: root.clone(),
-            root,
-            boundary: WorkspaceBoundary::HostPermitted,
-            mutability: WorkspaceMutability::ReadWrite,
-            project_writable_paths: None,
-        }
+        Self::host_permitted(root.clone(), root, None)
     }
 
     /// 构造仅由 Pure 内置文件 mutation 工具实施目录写策略的 workspace。
@@ -58,9 +52,23 @@ impl AgentWorkspace {
         writable_paths: Option<Vec<PathBuf>>,
     ) -> Self {
         let project_root = project_root.into();
+        Self::host_permitted(project_root.clone(), project_root, writable_paths)
+    }
+
+    /// 构造 root 与 canonical Project 路径分离的 host-permitted workspace。
+    ///
+    /// 会话工作区根（例如 `ThreadWorkspaceMode = worktree` 的会话自身 worktree）可能位于
+    /// canonical Project 路径之内：命令 cwd、Git 与 LSP 消费 `root`，而项目相对写策略与
+    /// 授权身份继续以 canonical `project_root` 为基准。`Confined` 边界仍只能用
+    /// [`Self::worktree`] 表达。
+    pub fn host_permitted(
+        project_root: impl Into<PathBuf>,
+        root: impl Into<PathBuf>,
+        writable_paths: Option<Vec<PathBuf>>,
+    ) -> Self {
         Self {
-            root: project_root.clone(),
-            project_root,
+            root: root.into(),
+            project_root: project_root.into(),
             boundary: WorkspaceBoundary::HostPermitted,
             mutability: WorkspaceMutability::ReadWrite,
             project_writable_paths: writable_paths,

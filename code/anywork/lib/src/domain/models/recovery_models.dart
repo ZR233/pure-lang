@@ -15,9 +15,21 @@ enum RecoveryIssueAction {
   cleanupWorktree,
 }
 
+/// Worktree lease 归属来源；显式清理必须与 durable lease 的归属一致。
+enum WorktreeOwnerKind {
+  session,
+  child;
+
+  /// Canonical wire 值：`session` | `child`。
+  String get id => name;
+
+  bool get isSession => this == WorktreeOwnerKind.session;
+}
+
 class WorktreeRecoveryPreview {
   const WorktreeRecoveryPreview({
-    required this.childId,
+    required this.ownerKind,
+    required this.ownerThreadId,
     required this.leaseRevision,
     required this.state,
     required this.repositoryRoot,
@@ -29,7 +41,8 @@ class WorktreeRecoveryPreview {
     required this.changedFiles,
   });
 
-  final String childId;
+  final WorktreeOwnerKind ownerKind;
+  final String ownerThreadId;
   final int leaseRevision;
   final String state;
   final String repositoryRoot;

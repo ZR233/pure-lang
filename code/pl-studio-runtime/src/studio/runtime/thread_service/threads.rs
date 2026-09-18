@@ -18,9 +18,11 @@ use super::super::{
 impl StudioRuntime {
     pub async fn create_thread(&self, project_id: &str, title: &str) -> Result<ThreadRecord> {
         let (delta, thread) = DirectoryDelta::register_root_thread(
+            crate::studio::ids::new_id("thread"),
             project_id,
             title,
             pl_protocol::ThreadModeId::simple(),
+            pl_protocol::ThreadWorkspaceMode::Local,
         );
         self.agent_facility
             .product_events
@@ -54,24 +56,95 @@ impl StudioRuntime {
             .validate_for_model(&route.model, &drafts)?;
         // 校验走内存目录 owner：open_project 的落库是异步跟随的。
         let projects = self.agent_facility.product_events.project_snapshot().await;
-        anyhow::ensure!(
-            projects
-                .iter()
-                .any(|project| project.id == request.project_id),
-            "selected Project not found"
-        );
+        let project = projects
+            .iter()
+            .find(|project| project.id == request.project_id)
+            .cloned()
+            .context("selected Project not found")?;
         self.ensure_mode_available(&request.mode)?;
 
-        let (delta, thread) =
-            DirectoryDelta::register_root_thread(&request.project_id, &provisional, request.mode);
+        // D4：会话工作区在发布 Thread 之前就已确定。`worktree` 先做前置校验与物理创建，
+        // 再记录 `active` lease；任一阶段失败都让命令失败且不留下已发布 Thread。
+        let thread_id = crate::studio::ids::new_id("thread");
+        let mut session_lease = None;
+        if request.workspace_mode == pl_protocol::ThreadWorkspaceMode::Worktree {
+            // 创建窗口内的 lease 由进程内「创建中」标记保护：在记录 `prepared` 之前设置，
+            // 直到 owner Thread 目录事实提交（或失败 settle 并发布）之后才清除。
+            self.agent_facility.worktrees.mark_creating(&thread_id);
+            let created =
+                crate::studio::agent_host::workspace_preparation::create_root_session_worktree(
+                    &self.agent_facility.worktrees,
+                    &self.ssh_manager,
+                    &project,
+                    &thread_id,
+                )
+                .await;
+            let mut lease = match created {
+                Ok(lease) => lease,
+                Err(error) => {
+                    self.settle_session_worktree_failure(
+                        &thread_id,
+                        Some("the session worktree could not be created"),
+                    )
+                    .await;
+                    return Err(error.into());
+                }
+            };
+            lease.transition(crate::studio::agent_host::worktree_lease::WorktreeLeaseState::Active);
+            if let Err(error) = self.agent_facility.worktrees.record(lease.clone()) {
+                self.agent_facility.worktrees.clear_creating(&thread_id);
+                self.preserve_session_worktree(
+                    Some(lease),
+                    Some("the session worktree lease could not be activated"),
+                )
+                .await;
+                return Err(error);
+            }
+            session_lease = Some(lease);
+        }
+
+        let (delta, thread) = DirectoryDelta::register_root_thread(
+            thread_id,
+            &request.project_id,
+            &provisional,
+            request.mode,
+            request.workspace_mode,
+        );
         // 目录事实内存先行；SQLite 失败进入持久化降级而不是命令失败
         // （design/18 §18.2）。
-        self.agent_facility
+        if let Err(error) = self
+            .agent_facility
             .product_events
             .commit_directory(delta)
-            .await?;
+            .await
+        {
+            self.clear_creating_session_worktree(&session_lease);
+            self.preserve_session_worktree(
+                session_lease.take(),
+                Some("the new session Thread was not published"),
+            )
+            .await;
+            return Err(error);
+        }
+        // 目录事实已提交：owner Thread 行已存在，创建窗口收束。
+        self.clear_creating_session_worktree(&session_lease);
         let thread = ThreadRecord::from_directory_thread(thread);
-        self.register_new_thread(thread.clone()).await?;
+        if let Err(error) = self.register_new_thread(thread.clone()).await {
+            // 目录事实已发布：必须先按未启动会话补偿（关闭并归档），不能留下无法激活的
+            // 已发布会话；会话自身 worktree 仍按 D6 只收束为 `preserved`。
+            self.preserve_session_worktree(
+                session_lease.take(),
+                Some("the new session Thread could not be activated"),
+            )
+            .await;
+            if let Err(cleanup_error) = self.compensate_unstarted_thread(&thread.id).await {
+                return Err(error.context(format!(
+                    "failed to compensate new Thread {}: {cleanup_error:#}",
+                    thread.id
+                )));
+            }
+            return Err(error);
+        }
         let submission = self
             .submit_prompt_for_owned_thread_with_lifecycle_lock(
                 StudioSubmitPromptRequest {
@@ -85,6 +158,12 @@ impl StudioRuntime {
         let submission = match submission {
             Ok(submission) => submission,
             Err(error) => {
+                // 已发布 Thread 的补偿归档后，会话自身 worktree 仍按 D6 保留现场等待显式清理。
+                self.preserve_session_worktree(
+                    session_lease.take(),
+                    Some("the first prompt of the new session was rejected"),
+                )
+                .await;
                 if let Err(cleanup_error) = self.compensate_unstarted_thread(&thread.id).await {
                     return Err(error.context(format!(
                         "failed to compensate new Thread {}: {cleanup_error:#}",
@@ -293,6 +372,62 @@ impl StudioRuntime {
             .await;
         self.model_performance.remove_session(thread_id).await?;
         Ok(())
+    }
+
+    /// 会话自身 worktree 从不随 Thread 生命周期删除：失败路径只把它收束为 `preserved`，
+    /// 由 Recovery 显式清理（design/12 §12.5）。
+    ///
+    /// 收束成功后**立即**基于当前 durable lease 发布/刷新 Recovery 条目（含 preview），
+    /// 不依赖下一次启动审计；发布失败只记日志，不改变已经失败的创建命令结果。
+    async fn preserve_session_worktree(
+        &self,
+        lease: Option<crate::studio::agent_host::worktree_lease::WorktreeLease>,
+        reason: Option<&str>,
+    ) {
+        use crate::studio::agent_host::worktree_lease::WorktreeLeaseState;
+        let Some(mut lease) = lease else {
+            return;
+        };
+        if lease.state != WorktreeLeaseState::Preserved {
+            lease.transition(WorktreeLeaseState::Preserved);
+            if let Err(error) = self.agent_facility.worktrees.record(lease.clone()) {
+                tracing::error!(
+                    error = %error,
+                    "failed to preserve the session worktree lease after a failed creation"
+                );
+                return;
+            }
+        }
+        self.publish_worktree_recovery(reason, &lease).await;
+    }
+
+    /// 创建阶段失败的统一收束出口：清除创建中标记，并在现场被保留为 `preserved` 时立即
+    /// 发布带 preview 的 Recovery（同一 issue id upsert）。
+    ///
+    /// 顺序固定为「调用方已完成 settle → 清除标记 → 发布」：清除标记使并发的周期审计也能
+    /// 把该资源算作需要人工处置，避免审计的 `replace` 与本次显式发布互相覆盖导致条目丢失。
+    async fn settle_session_worktree_failure(&self, thread_id: &str, reason: Option<&str>) {
+        use crate::studio::agent_host::worktree_lease::WorktreeLeaseState;
+        self.agent_facility.worktrees.clear_creating(thread_id);
+        let Some(lease) = self.agent_facility.worktrees.get(thread_id) else {
+            return;
+        };
+        if lease.state != WorktreeLeaseState::Preserved {
+            return;
+        }
+        self.publish_worktree_recovery(reason, &lease).await;
+    }
+
+    /// 会话 worktree 的创建窗口结束：owner Thread 目录事实已提交（或失败路径已自行清除）。
+    fn clear_creating_session_worktree(
+        &self,
+        lease: &Option<crate::studio::agent_host::worktree_lease::WorktreeLease>,
+    ) {
+        if let Some(lease) = lease {
+            self.agent_facility
+                .worktrees
+                .clear_creating(&lease.owner_thread_id);
+        }
     }
 
     pub(super) async fn retire_archived_thread_tree(&self, thread_ids: &[String]) -> Result<()> {
@@ -766,6 +901,1369 @@ mod tests {
         );
         runtime.shutdown().await;
     }
+
+    async fn git_command(root: &std::path::Path, args: &[&str]) {
+        let output = tokio::process::Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .output()
+            .await
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    async fn commit_git_fixture(root: &std::path::Path) {
+        git_command(root, &["init"]).await;
+        git_command(
+            root,
+            &[
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "fixture",
+            ],
+        )
+        .await;
+    }
+
+    fn worktree_request(text: &str) -> pl_protocol::studio::CreateThreadRequest {
+        pl_protocol::studio::CreateThreadRequest {
+            title: None,
+            input: pl_protocol::studio::StudioPromptInput {
+                input_id: "request-1".into(),
+                text: text.into(),
+                attachment_draft_ids: Vec::new(),
+            },
+            mode: pl_protocol::ThreadModeId::simple().label().to_string(),
+            workspace_mode: pl_protocol::ThreadWorkspaceMode::Worktree,
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn root_session_worktree_is_created_bound_and_rebound_from_its_durable_lease() {
+        use crate::studio::agent_host::worktree_lease::{
+            WorktreeLeaseOwnerKind, WorktreeLeaseState,
+        };
+        use pl_protocol::{ThreadModeId, ThreadWorkspaceMode};
+        let home = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let options = || StudioRuntimeOptions {
+            studio_home: Some(home.path().to_path_buf()),
+            host: StudioHostKind::Test,
+        };
+        let runtime = StudioRuntime::with_options(options()).await.unwrap();
+        runtime
+            .config_runtime
+            .update(runtime.config_runtime.read().unwrap().revision, |config| {
+                let mut next = config.clone();
+                next.runtime.tool_capabilities.exec = false;
+                next.runtime.tool_capabilities.workspace_files = false;
+                next.skills.enabled = false;
+                next.runtime.tool_capabilities.skills = false;
+                next.runtime.tool_capabilities.mcp = false;
+                next.runtime.tool_capabilities.lsp = false;
+                next.runtime.tool_capabilities.ask_user = false;
+                Ok(next)
+            })
+            .unwrap();
+        runtime.start_runtime().await.unwrap();
+        let project = runtime.open_project(workspace.path()).await.unwrap();
+        commit_git_fixture(workspace.path()).await;
+
+        let thread_id = crate::studio::ids::new_id("thread");
+        let mut lease =
+            crate::studio::agent_host::workspace_preparation::create_root_session_worktree(
+                &runtime.agent_facility.worktrees,
+                &runtime.ssh_manager,
+                &project,
+                &thread_id,
+            )
+            .await
+            .unwrap();
+        assert_eq!(lease.state, WorktreeLeaseState::Prepared);
+        assert_eq!(lease.owner_kind, WorktreeLeaseOwnerKind::Session);
+        assert_eq!(lease.owner_thread_id, thread_id);
+        assert_eq!(lease.root_thread_id, thread_id);
+        assert_eq!(lease.branch, format!("pure-session-{thread_id}"));
+        assert!(
+            lease
+                .path
+                .ends_with(&format!(".anywork/worktrees/{thread_id}/session")),
+            "{}",
+            lease.path
+        );
+        assert!(std::path::Path::new(&lease.path).exists());
+        assert!(lease.validate_identity().is_ok());
+        lease.transition(WorktreeLeaseState::Active);
+        runtime
+            .agent_facility
+            .worktrees
+            .record(lease.clone())
+            .unwrap();
+
+        let (delta, thread) = DirectoryDelta::register_root_thread(
+            thread_id.clone(),
+            &project.id,
+            "worktree session",
+            ThreadModeId::simple(),
+            ThreadWorkspaceMode::Worktree,
+        );
+        runtime
+            .agent_facility
+            .product_events
+            .commit_directory(delta)
+            .await
+            .unwrap();
+        assert_eq!(thread.workspace_mode, ThreadWorkspaceMode::Worktree);
+
+        let owner = runtime.ensure_thread_owner(&thread.id).await.unwrap();
+        assert_ne!(
+            owner.snapshot().lifecycle,
+            pl_core::thread::ThreadLifecycle::Closed
+        );
+        let bound = std::path::PathBuf::from(&lease.path);
+        assert_eq!(
+            runtime
+                .thread_factory
+                .session_workspace_root_for_test(&thread.id),
+            Some(bound.clone()),
+            "worktree 会话的工作区根必须是其自身 worktree"
+        );
+        assert_ne!(
+            runtime
+                .thread_factory
+                .session_workspace_root_for_test(&thread.id),
+            Some(dunce::simplified(workspace.path()).to_path_buf()),
+            "worktree 会话不得绑定到 Project 主目录"
+        );
+
+        let writer = runtime.persistence_repository().await.unwrap();
+        writer.flush().await.unwrap();
+        runtime.shutdown_runtime().await.unwrap();
+        drop(runtime);
+
+        // 冷启动：只按 durable lease 恢复绑定。
+        let reopened = StudioRuntime::with_options(options()).await.unwrap();
+        reopened.start_runtime().await.unwrap();
+        let restored = reopened.ensure_thread_owner(&thread.id).await.unwrap();
+        assert_ne!(
+            restored.snapshot().lifecycle,
+            pl_core::thread::ThreadLifecycle::Closed
+        );
+        assert_eq!(
+            reopened
+                .thread_factory
+                .session_workspace_root_for_test(&thread.id),
+            Some(bound)
+        );
+        assert_eq!(
+            reopened.agent_facility.worktrees.get(&thread_id).unwrap(),
+            lease
+        );
+        reopened.shutdown_runtime().await.unwrap();
+    }
+
+    async fn worktree_runtime(
+        home: &tempfile::TempDir,
+        workspace: &tempfile::TempDir,
+    ) -> (StudioRuntime, crate::studio::ProjectRecord) {
+        let runtime = StudioRuntime::with_options(StudioRuntimeOptions {
+            studio_home: Some(home.path().to_path_buf()),
+            host: StudioHostKind::Test,
+        })
+        .await
+        .unwrap();
+        runtime
+            .config_runtime
+            .update(runtime.config_runtime.read().unwrap().revision, |config| {
+                let mut next = config.clone();
+                next.runtime.tool_capabilities.exec = false;
+                next.runtime.tool_capabilities.workspace_files = false;
+                next.skills.enabled = false;
+                next.runtime.tool_capabilities.skills = false;
+                next.runtime.tool_capabilities.mcp = false;
+                next.runtime.tool_capabilities.lsp = false;
+                next.runtime.tool_capabilities.ask_user = false;
+                Ok(next)
+            })
+            .unwrap();
+        runtime.start_runtime().await.unwrap();
+        let project = runtime.open_project(workspace.path()).await.unwrap();
+        commit_git_fixture(workspace.path()).await;
+        (runtime, project)
+    }
+
+    /// 只有需要人工处置的资源才能进入 worktree 清理入口；在用 lease 既不上报也不可清理。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn session_worktree_recovery_only_targets_released_resources() {
+        use crate::studio::agent_host::worktree_lease::{
+            WorktreeLease, WorktreeLeaseOwnerKind, WorktreeLeaseState,
+        };
+        use pl_protocol::{ThreadModeId, ThreadWorkspaceMode};
+        let home = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let (runtime, project) = worktree_runtime(&home, &workspace).await;
+        let register = |thread_id: &str| {
+            DirectoryDelta::register_root_thread(
+                thread_id.to_string(),
+                &project.id,
+                "worktree session",
+                ThreadModeId::simple(),
+                ThreadWorkspaceMode::Worktree,
+            )
+        };
+        let issues = async || {
+            let mut issues = Vec::new();
+            runtime
+                .append_worktree_recovery_issues(&mut issues)
+                .await
+                .unwrap();
+            issues
+        };
+
+        // (1) 健康 active 会话 lease：Thread 已注册 → 不发布、不可清理。
+        let live = crate::studio::ids::new_id("thread");
+        let mut lease =
+            crate::studio::agent_host::workspace_preparation::create_root_session_worktree(
+                &runtime.agent_facility.worktrees,
+                &runtime.ssh_manager,
+                &project,
+                &live,
+            )
+            .await
+            .unwrap();
+        lease.transition(WorktreeLeaseState::Active);
+        runtime
+            .agent_facility
+            .worktrees
+            .record(lease.clone())
+            .unwrap();
+        let (delta, _) = register(&live);
+        runtime
+            .agent_facility
+            .product_events
+            .commit_directory(delta)
+            .await
+            .unwrap();
+        let live_path = std::path::PathBuf::from(&lease.path);
+        assert!(live_path.exists());
+        assert!(
+            issues()
+                .await
+                .iter()
+                .all(|issue| issue.id != format!("worktree-lease-{live}")),
+            "a healthy active lease must never enter the cleanup entry"
+        );
+        let error = runtime
+            .cleanup_preserved_worktree(
+                crate::StudioRecoveryWorktreeOwner::Session,
+                &live,
+                lease.revision,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("still owned by a live Thread"),
+            "{error}"
+        );
+        assert_eq!(
+            runtime.agent_facility.worktrees.get(&live).unwrap().state,
+            WorktreeLeaseState::Active
+        );
+        assert!(
+            live_path.exists(),
+            "a rejected cleanup must not touch the live worktree"
+        );
+
+        // (2) preserved 会话 lease：发布 preview 且可显式清理。
+        lease.transition(WorktreeLeaseState::Preserved);
+        runtime
+            .agent_facility
+            .worktrees
+            .record(lease.clone())
+            .unwrap();
+        let published = issues().await;
+        let issue = published
+            .iter()
+            .find(|issue| issue.id == format!("worktree-lease-{live}"))
+            .unwrap_or_else(|| panic!("preserved lease must publish recovery: {published:?}"));
+        assert_eq!(issue.thread_id.as_deref(), Some(live.as_str()));
+        let preview = issue.worktree.as_ref().expect("worktree preview");
+        assert_eq!(
+            preview.owner_kind,
+            crate::StudioRecoveryWorktreeOwner::Session
+        );
+        assert_eq!(preview.owner_thread_id, live);
+        assert_eq!(preview.lease_revision, lease.revision);
+        assert_eq!(preview.branch, format!("pure-session-{live}"));
+
+        // 顺带补覆盖缺口：陈旧 revision 必须被服务端 CAS 拒绝，且不触碰物理资源。
+        let stale = runtime
+            .cleanup_preserved_worktree(
+                crate::StudioRecoveryWorktreeOwner::Session,
+                &live,
+                lease.revision.saturating_sub(1),
+            )
+            .await
+            .unwrap_err();
+        assert!(stale.to_string().contains("revision conflict"), "{stale}");
+        assert!(live_path.exists());
+
+        runtime
+            .cleanup_preserved_worktree(
+                crate::StudioRecoveryWorktreeOwner::Session,
+                &live,
+                lease.revision,
+            )
+            .await
+            .unwrap();
+        assert!(!live_path.exists());
+        assert_eq!(
+            runtime.agent_facility.worktrees.get(&live).unwrap().state,
+            WorktreeLeaseState::Cleaned
+        );
+
+        // (3) 孤儿 lease（无注册 Thread）：保留诊断且可清理。
+        let orphan = crate::studio::ids::new_id("thread");
+        let mut lease =
+            crate::studio::agent_host::workspace_preparation::create_root_session_worktree(
+                &runtime.agent_facility.worktrees,
+                &runtime.ssh_manager,
+                &project,
+                &orphan,
+            )
+            .await
+            .unwrap();
+        lease.transition(WorktreeLeaseState::Active);
+        runtime
+            .agent_facility
+            .worktrees
+            .record(lease.clone())
+            .unwrap();
+        let orphan_path = std::path::PathBuf::from(&lease.path);
+        let published = issues().await;
+        let issue = published
+            .iter()
+            .find(|issue| issue.id == format!("worktree-lease-{orphan}"))
+            .unwrap_or_else(|| panic!("orphan lease must publish recovery: {published:?}"));
+        assert!(
+            issue.message.contains("no published Thread remains"),
+            "{}",
+            issue.message
+        );
+        runtime
+            .cleanup_preserved_worktree(
+                crate::StudioRecoveryWorktreeOwner::Session,
+                &orphan,
+                lease.revision,
+            )
+            .await
+            .unwrap();
+        assert!(!orphan_path.exists());
+
+        // (4) 身份不匹配与物理资源缺失的现场仍然发布。
+        let repository_root = dunce::simplified(workspace.path())
+            .to_string_lossy()
+            .into_owned();
+        let mismatched = crate::studio::ids::new_id("thread");
+        let (delta, _) = register(&mismatched);
+        runtime
+            .agent_facility
+            .product_events
+            .commit_directory(delta)
+            .await
+            .unwrap();
+        let mut bad = WorktreeLease {
+            revision: 1,
+            state: WorktreeLeaseState::Prepared,
+            owner_kind: WorktreeLeaseOwnerKind::Session,
+            owner_thread_id: mismatched.clone(),
+            root_thread_id: mismatched.clone(),
+            project_id: project.id.clone(),
+            ssh_alias: None,
+            repository_root: repository_root.clone(),
+            path: format!("{repository_root}/.anywork/worktrees/{mismatched}/session"),
+            branch: format!("pure-agent-{mismatched}"),
+            base_commit: "base".into(),
+        };
+        runtime
+            .agent_facility
+            .worktrees
+            .record(bad.clone())
+            .unwrap();
+        bad.transition(WorktreeLeaseState::Active);
+        runtime
+            .agent_facility
+            .worktrees
+            .record(bad.clone())
+            .unwrap();
+        let published = issues().await;
+        let issue = published
+            .iter()
+            .find(|issue| issue.id == format!("worktree-lease-{mismatched}"))
+            .unwrap_or_else(|| panic!("identity mismatch must publish: {published:?}"));
+        assert!(
+            issue.message.contains("mismatched Pure-owned branch"),
+            "{}",
+            issue.message
+        );
+        assert!(
+            runtime
+                .cleanup_preserved_worktree(
+                    crate::StudioRecoveryWorktreeOwner::Session,
+                    &mismatched,
+                    bad.revision,
+                )
+                .await
+                .is_err()
+        );
+
+        let missing = crate::studio::ids::new_id("thread");
+        let (delta, _) = register(&missing);
+        runtime
+            .agent_facility
+            .product_events
+            .commit_directory(delta)
+            .await
+            .unwrap();
+        let mut gone = WorktreeLease {
+            revision: 1,
+            state: WorktreeLeaseState::Prepared,
+            owner_kind: WorktreeLeaseOwnerKind::Session,
+            owner_thread_id: missing.clone(),
+            root_thread_id: missing.clone(),
+            project_id: project.id.clone(),
+            ssh_alias: None,
+            repository_root,
+            path: format!(
+                "{}/.anywork/worktrees/{missing}/session",
+                dunce::simplified(workspace.path()).to_string_lossy()
+            ),
+            branch: format!("pure-session-{missing}"),
+            base_commit: "base".into(),
+        };
+        runtime
+            .agent_facility
+            .worktrees
+            .record(gone.clone())
+            .unwrap();
+        gone.transition(WorktreeLeaseState::Active);
+        runtime
+            .agent_facility
+            .worktrees
+            .record(gone.clone())
+            .unwrap();
+        let published = issues().await;
+        let issue = published
+            .iter()
+            .find(|issue| issue.id == format!("worktree-lease-{missing}"))
+            .unwrap_or_else(|| panic!("missing physical resource must publish: {published:?}"));
+        assert!(
+            issue.message.contains("worktree preview failed"),
+            "{}",
+            issue.message
+        );
+        runtime.shutdown().await;
+    }
+
+    /// 未启动会话的补偿：目录事实已发布但激活失败时不得留下已发布（可激活）的会话。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn failed_activation_archives_the_session_and_preserves_its_worktree() {
+        use crate::studio::agent_host::worktree_lease::WorktreeLeaseState;
+        let home = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let (runtime, project) = worktree_runtime(&home, &workspace).await;
+        // 封闭 Thread 装配：新 owner 的激活必然失败，且发生在目录事实发布之后。
+        assert!(runtime.threads.close_all().await.is_empty());
+
+        let error = runtime
+            .create_thread_command(project.id.clone(), worktree_request("hello"))
+            .await
+            .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("Thread assembly is closed"),
+            "{error:#}"
+        );
+
+        runtime
+            .persistence_repository()
+            .await
+            .unwrap()
+            .flush()
+            .await
+            .unwrap();
+        assert!(
+            runtime
+                .store
+                .list_root_threads(&project.id)
+                .await
+                .unwrap()
+                .is_empty(),
+            "a failed activation must not leave a published Thread"
+        );
+        let all = runtime
+            .store
+            .list_threads_for_project(&project.id)
+            .await
+            .unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].visibility, crate::studio::ThreadVisibility::Archived);
+        assert_eq!(
+            all[0].workspace_mode,
+            pl_protocol::ThreadWorkspaceMode::Worktree
+        );
+        let leases = runtime.agent_facility.worktrees.snapshot();
+        assert_eq!(leases.len(), 1);
+        assert_eq!(leases[0].state, WorktreeLeaseState::Preserved);
+        assert!(
+            std::path::Path::new(&leases[0].path).exists(),
+            "compensation must keep the physical session worktree for explicit cleanup"
+        );
+
+        // F2：失败当场收束为 `preserved` 后必须立即可见且可清理（不依赖下次启动审计）。
+        let owner_thread_id = leases[0].owner_thread_id.clone();
+        let lease_revision = leases[0].revision;
+        let issues = runtime.recovery_issues();
+        let issue = issues
+            .iter()
+            .find(|issue| issue.id == format!("worktree-lease-{owner_thread_id}"))
+            .unwrap_or_else(|| panic!("compensated session must publish recovery: {issues:?}"));
+        let preview = issue
+            .worktree
+            .as_ref()
+            .expect("compensated session worktree must publish a preview");
+        assert_eq!(
+            preview.owner_kind,
+            crate::StudioRecoveryWorktreeOwner::Session
+        );
+        assert_eq!(preview.owner_thread_id, owner_thread_id);
+        assert_eq!(preview.state, "preserved");
+        assert_eq!(preview.branch, format!("pure-session-{owner_thread_id}"));
+        assert_eq!(preview.lease_revision, lease_revision);
+        assert_eq!(issue.thread_id.as_deref(), Some(owner_thread_id.as_str()));
+        assert!(issue.message.contains("is preserved"), "{}", issue.message);
+        assert_eq!(
+            issues
+                .iter()
+                .filter(|issue| issue.id == format!("worktree-lease-{owner_thread_id}"))
+                .count(),
+            1,
+            "the earlier activation diagnostic must be replaced, not duplicated"
+        );
+
+        let worktree_path = std::path::PathBuf::from(&leases[0].path);
+        runtime
+            .cleanup_preserved_worktree(
+                crate::StudioRecoveryWorktreeOwner::Session,
+                &owner_thread_id,
+                lease_revision,
+            )
+            .await
+            .unwrap();
+        assert!(!worktree_path.exists());
+        assert_eq!(
+            runtime
+                .agent_facility
+                .worktrees
+                .get(&owner_thread_id)
+                .unwrap()
+                .state,
+            WorktreeLeaseState::Cleaned
+        );
+        assert!(
+            runtime
+                .recovery_issues()
+                .iter()
+                .all(|issue| issue.id != format!("worktree-lease-{owner_thread_id}"))
+        );
+        runtime.shutdown().await;
+    }
+
+    /// F3/R1：创建窗口内由进程内标记保护；收束失败后必须立即发布并可显式清理。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn creating_session_worktree_is_neither_published_nor_cleanable_until_it_converges() {
+        use crate::studio::agent_host::worktree_lease::WorktreeLeaseState;
+        let home = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let (runtime, project) = worktree_runtime(&home, &workspace).await;
+        let thread_id = crate::studio::ids::new_id("thread");
+
+        // R1：创建中标记早于 `prepared` 记录设置，此时 owner Thread 行尚未发布。
+        runtime.agent_facility.worktrees.mark_creating(&thread_id);
+        let mut lease =
+            crate::studio::agent_host::workspace_preparation::create_root_session_worktree(
+                &runtime.agent_facility.worktrees,
+                &runtime.ssh_manager,
+                &project,
+                &thread_id,
+            )
+            .await
+            .unwrap();
+        assert_eq!(lease.state, WorktreeLeaseState::Prepared);
+        let worktree_path = std::path::PathBuf::from(&lease.path);
+        assert!(worktree_path.exists());
+
+        let mut issues = Vec::new();
+        runtime
+            .append_worktree_recovery_issues(&mut issues)
+            .await
+            .unwrap();
+        assert!(
+            issues
+                .iter()
+                .all(|issue| issue.id != format!("worktree-lease-{thread_id}")),
+            "an in-creation lease must not enter the cleanup entry: {issues:?}"
+        );
+        let error = runtime
+            .cleanup_preserved_worktree(
+                crate::StudioRecoveryWorktreeOwner::Session,
+                &thread_id,
+                lease.revision,
+            )
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("still being created"), "{error}");
+        assert!(worktree_path.exists());
+
+        // 失败收束：settle 为 preserved + 清除标记 + 立即发布（F3）。
+        lease.transition(WorktreeLeaseState::Preserved);
+        runtime
+            .agent_facility
+            .worktrees
+            .record(lease.clone())
+            .unwrap();
+        assert!(
+            runtime.agent_facility.worktrees.is_creating(&thread_id),
+            "settle alone must not clear the creating mark before publication"
+        );
+        runtime
+            .settle_session_worktree_failure(
+                &thread_id,
+                Some("the session worktree could not be created"),
+            )
+            .await;
+        assert!(!runtime.agent_facility.worktrees.is_creating(&thread_id));
+        let issues = runtime.recovery_issues();
+        let issue = issues
+            .iter()
+            .find(|issue| issue.id == format!("worktree-lease-{thread_id}"))
+            .unwrap_or_else(|| panic!("a settled creation must publish recovery: {issues:?}"));
+        let preview = issue
+            .worktree
+            .as_ref()
+            .expect("a settled creation must publish a preview");
+        assert_eq!(
+            preview.owner_kind,
+            crate::StudioRecoveryWorktreeOwner::Session
+        );
+        assert_eq!(preview.state, "preserved");
+        assert_eq!(preview.branch, format!("pure-session-{thread_id}"));
+        assert_eq!(preview.lease_revision, lease.revision);
+        assert!(
+            issue
+                .message
+                .contains("the session worktree could not be created"),
+            "{}",
+            issue.message
+        );
+        runtime
+            .cleanup_preserved_worktree(
+                crate::StudioRecoveryWorktreeOwner::Session,
+                &thread_id,
+                lease.revision,
+            )
+            .await
+            .unwrap();
+        assert!(!worktree_path.exists());
+        runtime.shutdown().await;
+    }
+
+    /// child worktree 的创建窗口同样受进程内标记保护，收束后恢复常规判定。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn creating_child_worktree_is_neither_published_nor_cleanable_until_it_converges() {
+        use crate::studio::agent_host::worktree_lease::WorktreeLeaseState;
+        use pl_protocol::AgentWorkspaceMode;
+        let home = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let (runtime, project) = worktree_runtime(&home, &workspace).await;
+        let root_thread_id = crate::studio::ids::new_id("thread");
+        let child_id = crate::studio::ids::new_id("thread");
+
+        // 与 `child_resources.rs` 相同的创建窗口：标记先于 `prepared` 记录设置，child 产品行
+        // 尚未提交。
+        let guard = runtime.agent_facility.worktrees.creation_guard(&child_id);
+        let (_, worktree) = crate::studio::agent_host::workspace_preparation::prepare_workspace(
+            &runtime.agent_facility.worktrees,
+            &runtime.ssh_manager,
+            crate::studio::agent_host::workspace_preparation::WorkspacePreparation {
+                project: &project,
+                root_thread_id: &root_thread_id,
+                child_id: &child_id,
+                mode: AgentWorkspaceMode::Worktree,
+                writable_paths: None,
+                session_root: project.path.clone().into(),
+            },
+        )
+        .await
+        .unwrap();
+        let mut lease = worktree.unwrap().lease;
+        assert_eq!(lease.state, WorktreeLeaseState::Prepared);
+        let child_path = std::path::PathBuf::from(&lease.path);
+        assert!(child_path.exists());
+
+        let mut issues = Vec::new();
+        runtime
+            .append_worktree_recovery_issues(&mut issues)
+            .await
+            .unwrap();
+        assert!(
+            issues
+                .iter()
+                .all(|issue| issue.id != format!("worktree-lease-{child_id}")),
+            "an in-creation child lease must not enter the cleanup entry: {issues:?}"
+        );
+        let error = runtime
+            .cleanup_preserved_worktree(
+                crate::StudioRecoveryWorktreeOwner::Child,
+                &child_id,
+                lease.revision,
+            )
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("still being created"), "{error}");
+        assert!(child_path.exists());
+
+        // 创建收束：记录 `active` 后离开创建窗口，豁免随之消失。
+        lease.transition(WorktreeLeaseState::Active);
+        runtime
+            .agent_facility
+            .worktrees
+            .record(lease.clone())
+            .unwrap();
+        drop(guard);
+        assert!(!runtime.agent_facility.worktrees.is_creating(&child_id));
+        let mut issues = Vec::new();
+        runtime
+            .append_worktree_recovery_issues(&mut issues)
+            .await
+            .unwrap();
+        let issue = issues
+            .iter()
+            .find(|issue| issue.id == format!("worktree-lease-{child_id}"))
+            .unwrap_or_else(|| {
+                panic!("a converged child lease without its Thread row must publish: {issues:?}")
+            });
+        assert_eq!(
+            issue.worktree.as_ref().unwrap().owner_kind,
+            crate::StudioRecoveryWorktreeOwner::Child
+        );
+        runtime
+            .cleanup_preserved_worktree(
+                crate::StudioRecoveryWorktreeOwner::Child,
+                &child_id,
+                lease.revision,
+            )
+            .await
+            .unwrap();
+        assert!(!child_path.exists());
+        runtime.shutdown().await;
+    }
+
+    /// 清理失败回落后卡片必须携带回落后的 canonical revision，解除阻塞后可直接重试成功。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cleanup_failure_refreshes_the_recovery_card_revision() {
+        use crate::studio::agent_host::worktree_lease::WorktreeLeaseState;
+        use pl_protocol::AgentWorkspaceMode;
+        let home = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let (runtime, project) = worktree_runtime(&home, &workspace).await;
+        let root_thread_id = crate::studio::ids::new_id("thread");
+        let child_id = crate::studio::ids::new_id("thread");
+        let (_, worktree) = crate::studio::agent_host::workspace_preparation::prepare_workspace(
+            &runtime.agent_facility.worktrees,
+            &runtime.ssh_manager,
+            crate::studio::agent_host::workspace_preparation::WorkspacePreparation {
+                project: &project,
+                root_thread_id: &root_thread_id,
+                child_id: &child_id,
+                mode: AgentWorkspaceMode::Worktree,
+                writable_paths: None,
+                session_root: project.path.clone().into(),
+            },
+        )
+        .await
+        .unwrap();
+        let mut lease = worktree.unwrap().lease;
+        lease.transition(WorktreeLeaseState::Preserved);
+        runtime
+            .agent_facility
+            .worktrees
+            .record(lease.clone())
+            .unwrap();
+        let lease_revision = lease.revision;
+        let card_revision = |runtime: &StudioRuntime| {
+            runtime
+                .recovery_issues()
+                .into_iter()
+                .find(|issue| issue.id == format!("worktree-lease-{child_id}"))
+                .and_then(|issue| issue.worktree.map(|preview| preview.lease_revision))
+        };
+
+        // 让 discard 失败：锁住 worktree 后清理会被 Git 拒绝并回落到 `preserved`。
+        git_command(workspace.path(), &["worktree", "lock", &lease.path]).await;
+        let error = runtime
+            .cleanup_preserved_worktree(
+                crate::StudioRecoveryWorktreeOwner::Child,
+                &child_id,
+                lease_revision,
+            )
+            .await
+            .unwrap_err();
+        let rolled_back = runtime.agent_facility.worktrees.get(&child_id).unwrap();
+        assert_eq!(rolled_back.state, WorktreeLeaseState::Preserved);
+        assert!(rolled_back.revision > lease_revision);
+        assert!(
+            error.to_string().contains(&lease.path) || error.to_string().contains("cleanup"),
+            "{error}"
+        );
+        assert_eq!(
+            card_revision(&runtime),
+            Some(rolled_back.revision),
+            "the recovery card must carry the rolled-back revision"
+        );
+        assert!(
+            runtime
+                .cleanup_preserved_worktree(
+                    crate::StudioRecoveryWorktreeOwner::Child,
+                    &child_id,
+                    lease_revision,
+                )
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("revision conflict"),
+            "the stale card revision must be rejected"
+        );
+
+        // 解除阻塞后用卡片 revision 重试成功。
+        git_command(workspace.path(), &["worktree", "unlock", &lease.path]).await;
+        runtime
+            .cleanup_preserved_worktree(
+                crate::StudioRecoveryWorktreeOwner::Child,
+                &child_id,
+                rolled_back.revision,
+            )
+            .await
+            .unwrap();
+        assert!(!std::path::Path::new(&lease.path).exists());
+        assert!(card_revision(&runtime).is_none());
+        runtime.shutdown().await;
+    }
+
+    /// R2：owner 存在 Child lease 时激活失败的发布必须带该 lease 的完整 preview。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn activation_failure_publishes_the_child_lease_preview_when_no_session_lease_exists() {
+        use crate::studio::agent_host::worktree_lease::{
+            WorktreeLease, WorktreeLeaseOwnerKind, WorktreeLeaseState,
+        };
+        use pl_protocol::{ThreadModeId, ThreadWorkspaceMode};
+        let home = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let (runtime, project) = worktree_runtime(&home, &workspace).await;
+        let thread_id = crate::studio::ids::new_id("thread");
+        let (delta, thread) = DirectoryDelta::register_root_thread(
+            thread_id.clone(),
+            &project.id,
+            "worktree session",
+            ThreadModeId::simple(),
+            ThreadWorkspaceMode::Worktree,
+        );
+        runtime
+            .agent_facility
+            .product_events
+            .commit_directory(delta)
+            .await
+            .unwrap();
+
+        // 同一 owner id 上只有 Child 归属 lease（模拟 worktree child 激活失败的现场）。
+        let repository_root = dunce::simplified(workspace.path()).to_path_buf();
+        let ownership = crate::agent::worktree::WorktreeOwnership::Child {
+            child_id: thread_id.clone(),
+        };
+        let manager = crate::agent::worktree::WorktreeManager::new(
+            repository_root.clone(),
+            std::sync::Arc::new(crate::agent::worktree::LocalWorktreeBackend::default()),
+        );
+        let handle = manager
+            .create(crate::agent::worktree::WorktreeCreateSpec {
+                repo_root: repository_root.clone(),
+                root_thread_id: thread_id.clone(),
+                ownership,
+                base_commit: manager.resolve_head(&repository_root).await.unwrap(),
+            })
+            .await
+            .unwrap();
+        let mut child_lease = WorktreeLease {
+            revision: 1,
+            state: WorktreeLeaseState::Prepared,
+            owner_kind: WorktreeLeaseOwnerKind::Child,
+            owner_thread_id: thread_id.clone(),
+            root_thread_id: thread_id.clone(),
+            project_id: project.id.clone(),
+            ssh_alias: None,
+            repository_root: repository_root.to_string_lossy().into_owned(),
+            path: handle.path.to_string_lossy().into_owned(),
+            branch: handle.branch.clone(),
+            base_commit: handle.base_commit.clone(),
+        };
+        runtime
+            .agent_facility
+            .worktrees
+            .record(child_lease.clone())
+            .unwrap();
+        child_lease.transition(WorktreeLeaseState::Active);
+        runtime
+            .agent_facility
+            .worktrees
+            .record(child_lease.clone())
+            .unwrap();
+
+        // 没有 Session lease → 激活类型化失败，但发布必须带 Child lease 的 preview。
+        let error = runtime.ensure_thread_owner(&thread.id).await.unwrap_err();
+        assert!(
+            format!("{error:#}").contains("workspace is unavailable"),
+            "{error:#}"
+        );
+        let issues = runtime.recovery_issues();
+        let issue = issues
+            .iter()
+            .find(|issue| issue.id == format!("worktree-lease-{thread_id}"))
+            .unwrap_or_else(|| panic!("activation failure must publish recovery: {issues:?}"));
+        let preview = issue
+            .worktree
+            .as_ref()
+            .expect("a durable lease must always publish a preview");
+        assert_eq!(
+            preview.owner_kind,
+            crate::StudioRecoveryWorktreeOwner::Child
+        );
+        assert_eq!(preview.lease_revision, child_lease.revision);
+        assert_eq!(preview.branch, handle.branch);
+        assert_eq!(preview.path, handle.path.to_string_lossy());
+        assert!(
+            issue.message.contains("cannot use its saved workspace"),
+            "{}",
+            issue.message
+        );
+        runtime.shutdown().await;
+    }
+
+    /// 首条 prompt 提交失败的收束同样必须立即发布带 preview 且可清理的 Recovery。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn rejected_first_prompt_publishes_a_cleanable_session_worktree() {
+        use crate::studio::agent_host::worktree_lease::WorktreeLeaseState;
+        use pl_protocol::studio::{
+            AdmitAttachmentDraftsRequest, StudioAttachmentAdmissionContext,
+            StudioAttachmentDraftSource,
+        };
+        let home = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let (runtime, project) = worktree_runtime(&home, &workspace).await;
+        // 准入一个真实图片草稿（默认 Planner 路由支持 image/png）；随后把 attachment
+        // objects 目录替换成普通文件，使升级阶段（激活之后的 `promote_attachment_drafts`）
+        // 确定性失败。
+        const ONE_PIXEL_PNG: &[u8] = &[
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+            0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78,
+            0xda, 0x63, 0xf8, 0xcf, 0xc0, 0xf0, 0x1f, 0x00, 0x05, 0x00, 0x01, 0xff, 0x56, 0xc7,
+            0x2f, 0x0d, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+        ];
+        let source = workspace.path().join("pixel.png");
+        tokio::fs::write(&source, ONE_PIXEL_PNG).await.unwrap();
+        let admitted = runtime
+            .admit_attachment_drafts(AdmitAttachmentDraftsRequest {
+                context: StudioAttachmentAdmissionContext::NewThread {
+                    mode: pl_protocol::ThreadModeId::simple().label().to_string(),
+                },
+                sources: vec![StudioAttachmentDraftSource::LocalFile {
+                    path: source.to_string_lossy().into_owned(),
+                }],
+            })
+            .await
+            .unwrap();
+        let draft_id = admitted.drafts.first().unwrap().draft_id.clone();
+        let objects = runtime.store.attachments_dir().join("objects");
+        tokio::fs::write(&objects, b"not a directory")
+            .await
+            .unwrap();
+
+        let error = runtime
+            .create_thread_command(
+                project.id.clone(),
+                pl_protocol::studio::CreateThreadRequest {
+                    title: None,
+                    input: pl_protocol::studio::StudioPromptInput {
+                        input_id: "request-1".into(),
+                        text: "hello".into(),
+                        attachment_draft_ids: vec![draft_id],
+                    },
+                    mode: pl_protocol::ThreadModeId::simple().label().to_string(),
+                    workspace_mode: pl_protocol::ThreadWorkspaceMode::Worktree,
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("Not a directory"),
+            "the failure must come from attachment promotion: {error:#}"
+        );
+
+        runtime
+            .persistence_repository()
+            .await
+            .unwrap()
+            .flush()
+            .await
+            .unwrap();
+        assert!(
+            runtime
+                .store
+                .list_root_threads(&project.id)
+                .await
+                .unwrap()
+                .is_empty(),
+            "a rejected first prompt must not leave a published Thread"
+        );
+        let leases = runtime.agent_facility.worktrees.snapshot();
+        assert_eq!(leases.len(), 1);
+        assert_eq!(leases[0].state, WorktreeLeaseState::Preserved);
+        let owner_thread_id = leases[0].owner_thread_id.clone();
+        let worktree_path = std::path::PathBuf::from(&leases[0].path);
+        assert!(worktree_path.exists());
+
+        let issues = runtime.recovery_issues();
+        let issue = issues
+            .iter()
+            .find(|issue| issue.id == format!("worktree-lease-{owner_thread_id}"))
+            .unwrap_or_else(|| panic!("a rejected first prompt must publish recovery: {issues:?}"));
+        assert!(issue.worktree.is_some(), "preview must be filled");
+        assert!(
+            issue
+                .message
+                .contains("the first prompt of the new session was rejected"),
+            "{}",
+            issue.message
+        );
+        assert!(issue.message.contains("is preserved"), "{}", issue.message);
+        runtime
+            .cleanup_preserved_worktree(
+                crate::StudioRecoveryWorktreeOwner::Session,
+                &owner_thread_id,
+                leases[0].revision,
+            )
+            .await
+            .unwrap();
+        assert!(!worktree_path.exists());
+        assert_eq!(
+            runtime
+                .agent_facility
+                .worktrees
+                .get(&owner_thread_id)
+                .unwrap()
+                .state,
+            WorktreeLeaseState::Cleaned
+        );
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn worktree_creation_failures_publish_no_thread_and_leave_no_artifact() {
+        use pl_protocol::ThreadWorkspaceMode;
+        let (_home, workspace, runtime, existing_id) =
+            runtime_with_thread_without_optional_tools().await;
+        let project_id = runtime
+            .read_owned_thread(&existing_id)
+            .await
+            .unwrap()
+            .project_id;
+        let before = runtime
+            .store
+            .list_root_threads(&project_id)
+            .await
+            .unwrap()
+            .len();
+
+        // 非 Git 项目：前置校验即失败，未记录 lease，也没有任何物理残留。
+        let error = runtime
+            .create_thread_command(project_id.clone(), worktree_request("hello"))
+            .await
+            .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("studio_workspace"),
+            "非 Git 项目必须类型化拒绝：{error:#}"
+        );
+        assert_eq!(
+            runtime
+                .store
+                .list_root_threads(&project_id)
+                .await
+                .unwrap()
+                .len(),
+            before,
+            "失败命令不得发布 Thread"
+        );
+        assert!(!workspace.path().join(".anywork").exists());
+
+        // Git 仓库但没有 HEAD：同样类型化失败且无残留。
+        git_command(workspace.path(), &["init"]).await;
+        let error = runtime
+            .create_thread_command(project_id.clone(), worktree_request("hello"))
+            .await
+            .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("studio_workspace"),
+            "无 HEAD 的仓库必须类型化拒绝：{error:#}"
+        );
+        assert_eq!(
+            runtime
+                .store
+                .list_root_threads(&project_id)
+                .await
+                .unwrap()
+                .len(),
+            before
+        );
+        assert!(!workspace.path().join(".anywork").exists());
+
+        // 远程项目在创建任何资源之前就被拒绝（非目标：本次不实现远程 worktree）。
+        let remote = crate::studio::ProjectRecord {
+            id: "project-remote".into(),
+            name: "remote".into(),
+            path: "/srv/repo".into(),
+            ssh_alias: Some("ssh-1".into()),
+            updated_at: 0,
+        };
+        let error = crate::studio::agent_host::workspace_preparation::create_root_session_worktree(
+            &runtime.agent_facility.worktrees,
+            &runtime.ssh_manager,
+            &remote,
+            "thread-remote",
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("only available for local projects"),
+            "{error}"
+        );
+        assert!(
+            runtime
+                .agent_facility
+                .worktrees
+                .snapshot()
+                .iter()
+                .all(|lease| lease.owner_thread_id != "thread-remote"),
+            "远程拒绝不得留下 lease"
+        );
+
+        // local 模式不受影响。
+        let created = runtime
+            .create_thread_command(
+                project_id.clone(),
+                pl_protocol::studio::CreateThreadRequest {
+                    title: None,
+                    input: pl_protocol::studio::StudioPromptInput {
+                        input_id: "request-2".into(),
+                        text: "local".into(),
+                        attachment_draft_ids: Vec::new(),
+                    },
+                    mode: pl_protocol::ThreadModeId::simple().label().to_string(),
+                    workspace_mode: ThreadWorkspaceMode::Local,
+                },
+            )
+            .await;
+        if let Ok(created) = created {
+            assert_eq!(created.thread.workspace_mode, ThreadWorkspaceMode::Local);
+        }
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn worktree_session_without_a_usable_lease_fails_explicitly_with_recovery() {
+        use crate::studio::agent_host::worktree_lease::{
+            WorktreeLease, WorktreeLeaseOwnerKind, WorktreeLeaseState,
+        };
+        use pl_protocol::{ThreadModeId, ThreadWorkspaceMode};
+        let (_home, workspace, runtime, _existing) =
+            runtime_with_thread_without_optional_tools().await;
+        let project_id = runtime
+            .read_owned_thread(&_existing)
+            .await
+            .unwrap()
+            .project_id;
+        let repository_root = dunce::simplified(workspace.path())
+            .to_string_lossy()
+            .into_owned();
+
+        let register = |thread_id: &str| {
+            DirectoryDelta::register_root_thread(
+                thread_id.to_string(),
+                &project_id,
+                "worktree session",
+                ThreadModeId::simple(),
+                ThreadWorkspaceMode::Worktree,
+            )
+        };
+
+        // (a) 完全没有 lease。
+        let missing = crate::studio::ids::new_id("thread");
+        let (delta, _) = register(&missing);
+        runtime
+            .agent_facility
+            .product_events
+            .commit_directory(delta)
+            .await
+            .unwrap();
+        let error = runtime.ensure_thread_owner(&missing).await.unwrap_err();
+        assert!(
+            format!("{error:#}").contains("workspace is unavailable"),
+            "{error:#}"
+        );
+        assert!(
+            runtime
+                .thread_factory
+                .session_workspace_root_for_test(&missing)
+                .is_none(),
+            "缺失 lease 时不得回落到 Project 主目录"
+        );
+        let issues = runtime.recovery_issues();
+        let issue = issues
+            .iter()
+            .find(|issue| issue.id == format!("worktree-lease-{missing}"))
+            .unwrap_or_else(|| panic!("missing lease must publish Recovery: {issues:?}"));
+        assert_eq!(issue.thread_id.as_deref(), Some(missing.as_str()));
+
+        // (b) lease 身份不符：分支不是 Pure-owned 会话分支。
+        let mismatched = crate::studio::ids::new_id("thread");
+        let (delta, _) = register(&mismatched);
+        runtime
+            .agent_facility
+            .product_events
+            .commit_directory(delta)
+            .await
+            .unwrap();
+        let mut lease = WorktreeLease {
+            revision: 1,
+            state: WorktreeLeaseState::Prepared,
+            owner_kind: WorktreeLeaseOwnerKind::Session,
+            owner_thread_id: mismatched.clone(),
+            root_thread_id: mismatched.clone(),
+            project_id: project_id.clone(),
+            ssh_alias: None,
+            repository_root: repository_root.clone(),
+            path: format!("{repository_root}/.anywork/worktrees/{mismatched}/session"),
+            branch: format!("pure-agent-{mismatched}"),
+            base_commit: "base".into(),
+        };
+        runtime
+            .agent_facility
+            .worktrees
+            .record(lease.clone())
+            .unwrap();
+        lease.transition(WorktreeLeaseState::Active);
+        runtime
+            .agent_facility
+            .worktrees
+            .record(lease.clone())
+            .unwrap();
+        let error = runtime.ensure_thread_owner(&mismatched).await.unwrap_err();
+        assert!(
+            format!("{error:#}").contains("workspace is unavailable"),
+            "{error:#}"
+        );
+        assert!(
+            runtime
+                .agent_facility
+                .worktrees
+                .get(&mismatched)
+                .unwrap()
+                .validate_identity()
+                .is_err()
+        );
+        assert!(
+            runtime
+                .thread_factory
+                .session_workspace_root_for_test(&mismatched)
+                .is_none()
+        );
+
+        // (c) lease 已被清理。
+        let cleaned = crate::studio::ids::new_id("thread");
+        let (delta, _) = register(&cleaned);
+        runtime
+            .agent_facility
+            .product_events
+            .commit_directory(delta)
+            .await
+            .unwrap();
+        let mut lease = WorktreeLease {
+            revision: 1,
+            state: WorktreeLeaseState::Prepared,
+            owner_kind: WorktreeLeaseOwnerKind::Session,
+            owner_thread_id: cleaned.clone(),
+            root_thread_id: cleaned.clone(),
+            project_id: project_id.clone(),
+            ssh_alias: None,
+            repository_root,
+            path: format!(
+                "{}/.anywork/worktrees/{cleaned}/session",
+                dunce::simplified(workspace.path()).to_string_lossy()
+            ),
+            branch: format!("pure-session-{cleaned}"),
+            base_commit: "base".into(),
+        };
+        runtime
+            .agent_facility
+            .worktrees
+            .record(lease.clone())
+            .unwrap();
+        for state in [
+            WorktreeLeaseState::Active,
+            WorktreeLeaseState::Preserved,
+            WorktreeLeaseState::CleanupRequested,
+            WorktreeLeaseState::Cleaned,
+        ] {
+            lease.transition(state);
+            runtime
+                .agent_facility
+                .worktrees
+                .record(lease.clone())
+                .unwrap();
+        }
+        let error = runtime.ensure_thread_owner(&cleaned).await.unwrap_err();
+        assert!(
+            format!("{error:#}").contains("workspace is unavailable"),
+            "{error:#}"
+        );
+        assert!(
+            runtime
+                .thread_factory
+                .session_workspace_root_for_test(&cleaned)
+                .is_none()
+        );
+        runtime.shutdown().await;
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn worktree_lifecycle_and_new_submissions_do_not_wait_for_sqlite() {
         use crate::studio::agent_host::worktree_lease::WorktreeLeaseState;
@@ -826,12 +2324,13 @@ mod tests {
                         child_id: "memory-worktree-child",
                         mode: AgentWorkspaceMode::Worktree,
                         writable_paths: None,
+                        session_root: std::path::PathBuf::from(&project.path),
                     },
                 )
                 .await
                 .unwrap();
             let mut lease = worktree.unwrap().lease;
-            let child = lease.child_id.clone();
+            let child = lease.owner_thread_id.clone();
             let path = std::path::PathBuf::from(&lease.path);
             assert!(path.exists());
             lease.transition(WorktreeLeaseState::Preserved);
@@ -866,7 +2365,11 @@ mod tests {
             assert!(locked.status.success());
             assert!(
                 runtime
-                    .cleanup_preserved_worktree(&child, lease.revision)
+                    .cleanup_preserved_worktree(
+                        crate::StudioRecoveryWorktreeOwner::Child,
+                        &child,
+                        lease.revision,
+                    )
                     .await
                     .is_err()
             );
@@ -890,7 +2393,11 @@ mod tests {
             tokio::fs::write(&branch_lock, "held").await.unwrap();
             assert!(
                 runtime
-                    .cleanup_preserved_worktree(&child, failed.revision)
+                    .cleanup_preserved_worktree(
+                        crate::StudioRecoveryWorktreeOwner::Child,
+                        &child,
+                        failed.revision,
+                    )
                     .await
                     .is_err()
             );
@@ -902,7 +2409,11 @@ mod tests {
             assert_eq!(partial.state, WorktreeLeaseState::Preserved);
             tokio::fs::remove_file(branch_lock).await.unwrap();
             runtime
-                .cleanup_preserved_worktree(&child, partial.revision)
+                .cleanup_preserved_worktree(
+                    crate::StudioRecoveryWorktreeOwner::Child,
+                    &child,
+                    partial.revision,
+                )
                 .await
                 .unwrap();
             assert!(!path.exists());
@@ -910,7 +2421,11 @@ mod tests {
             assert_eq!(lease.state, WorktreeLeaseState::Cleaned);
             assert!(
                 runtime
-                    .cleanup_preserved_worktree(&child, lease.revision)
+                    .cleanup_preserved_worktree(
+                        crate::StudioRecoveryWorktreeOwner::Child,
+                        &child,
+                        lease.revision,
+                    )
                     .await
                     .is_err(),
                 "cleaned leases cannot be cleaned twice"
@@ -923,10 +2438,12 @@ mod tests {
         blocked.rollback().await.unwrap();
         writer.retry_now();
         writer.flush().await.unwrap();
-        let durable =
-            crate::studio::agent_host::worktree_lease::load_lease(&runtime.store, &lease.child_id)
-                .await
-                .unwrap();
+        let durable = crate::studio::agent_host::worktree_lease::load_lease(
+            &runtime.store,
+            &lease.owner_thread_id,
+        )
+        .await
+        .unwrap();
         assert_eq!(durable, Some(lease));
         let orphan_root = dunce::simplified(workspace.path());
         #[cfg(windows)]

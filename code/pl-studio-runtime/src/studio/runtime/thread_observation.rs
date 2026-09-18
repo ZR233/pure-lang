@@ -420,9 +420,11 @@ mod tests {
         let workspace = tempfile::tempdir().unwrap();
         let project = store.upsert_project(workspace.path()).await.unwrap();
         let (_, product) = crate::studio::store::directory::DirectoryDelta::register_root_thread(
+            crate::studio::ids::new_id("thread"),
             &project.id,
             "task",
             pl_protocol::ThreadModeId::simple(),
+            pl_protocol::ThreadWorkspaceMode::Local,
         );
         let calls = Arc::new(AtomicUsize::new(0));
         let thread = ThreadHandle::start(

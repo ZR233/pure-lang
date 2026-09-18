@@ -430,6 +430,69 @@ void main() {
       findsNothing,
     );
   });
+
+  testWidgets(
+    'start page workspace mode selector drives a worktree sidebar marker',
+    (tester) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            studioApiProvider.overrideWithValue(DemoStudioApi()),
+            studioUpdateEnabledProvider.overrideWithValue(false),
+          ],
+          child: const AnyworkApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(StudioDriverKeys.newSession));
+      await tester.pumpAndSettle();
+
+      final selector = find.byKey(StudioDriverKeys.sessionWorkspaceMode);
+      expect(selector, findsOneWidget);
+      final container = ProviderScope.containerOf(tester.element(selector));
+      String? draftMode() => container
+          .read(studioControllerProvider)
+          .value
+          ?.newThreadWorkspaceMode
+          .id;
+      expect(draftMode(), 'local');
+
+      await tester.tap(selector);
+      await tester.pumpAndSettle();
+      final worktreeOption = find.byKey(
+        StudioDriverKeys.sessionWorkspaceModeOption('worktree'),
+      );
+      expect(worktreeOption, findsOneWidget);
+      await tester.tap(worktreeOption);
+      await tester.pumpAndSettle();
+      expect(draftMode(), 'worktree');
+
+      await tester.enterText(
+        find.byKey(StudioDriverKeys.composerInput),
+        'integration worktree session',
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(StudioDriverKeys.composerSubmit));
+      await _pumpUntilFound(tester, find.byKey(StudioDriverKeys.composerStop));
+
+      final selectedThreadId = container
+          .read(studioControllerProvider)
+          .requireValue
+          .selectedThreadId;
+      expect(selectedThreadId, isNotNull);
+      expect(
+        find.byKey(StudioDriverKeys.threadWorkspaceMode(selectedThreadId!)),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(StudioDriverKeys.threadWorkspaceMode('thread-main')),
+        findsNothing,
+        reason: 'the local fixture session must not carry a worktree marker',
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
 }
 
 class _RemoteDriverDemoStudioApi extends DriverDemoStudioApi {

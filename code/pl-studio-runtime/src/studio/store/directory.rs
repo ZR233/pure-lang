@@ -5,14 +5,14 @@
 //! 只承载已经由 owner 决定的事实，不做业务校验或状态转换。
 
 use anyhow::{Result, bail};
-use pl_protocol::{Thread, ThreadModeId};
+use pl_protocol::{Thread, ThreadModeId, ThreadWorkspaceMode};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, EntityTrait, QueryFilter,
     QueryOrder, QuerySelect,
 };
 
 use crate::studio::entity as entities;
-use crate::studio::ids::{new_id, unix_seconds};
+use crate::studio::ids::unix_seconds;
 use crate::studio::mappers::thread_record;
 use crate::studio::store::StudioStore;
 use crate::studio::store_support::non_empty_title;
@@ -50,12 +50,13 @@ impl DirectoryDelta {
     }
 
     pub(in crate::studio) fn register_root_thread(
+        id: String,
         project_id: &str,
         title: &str,
         mode: ThreadModeId,
+        workspace_mode: ThreadWorkspaceMode,
     ) -> (Self, Thread) {
         let now = unix_seconds();
-        let id = new_id("thread");
         let thread = Thread {
             root_thread_id: id.clone(),
             agent_path: id.clone(),
@@ -63,6 +64,7 @@ impl DirectoryDelta {
             project_id: project_id.to_string(),
             title: non_empty_title(title),
             mode: mode.clone(),
+            workspace_mode,
             parent_thread_id: None,
             role: crate::config::StudioRole::Planner.key().to_string(),
             status: pl_protocol::ThreadStatus::Idle,
@@ -89,6 +91,7 @@ impl DirectoryDelta {
                 project_id: spec.project_id,
                 title: non_empty_title(&spec.title),
                 mode: spec.mode,
+                workspace_mode: spec.workspace_mode,
                 root_thread_id: spec.root_thread_id,
                 parent_thread_id: Some(spec.parent_thread_id),
                 role: spec.role,
@@ -129,6 +132,7 @@ pub(in crate::studio) struct RegisteredChildThread {
     pub(in crate::studio) project_id: String,
     pub(in crate::studio) root_thread_id: String,
     pub(in crate::studio) mode: ThreadModeId,
+    pub(in crate::studio) workspace_mode: ThreadWorkspaceMode,
     pub(in crate::studio) role: String,
     pub(in crate::studio) title: String,
 }
@@ -219,6 +223,7 @@ async fn upsert_thread_directory_row(
             project_id: Set(thread.project_id.clone()),
             title: Set(thread.title.clone()),
             mode: Set(thread.mode.label().to_string()),
+            workspace_mode: Set(thread.workspace_mode.label().to_string()),
             root_thread_id: Set(thread.root_thread_id.clone()),
             parent_thread_id: Set(thread.parent_thread_id.clone()),
             role: Set(thread.role.clone()),
@@ -248,6 +253,7 @@ async fn upsert_thread_directory_row(
     if existing.project_id != thread.project_id
         || existing.root_thread_id != thread.root_thread_id
         || existing.parent_thread_id != thread.parent_thread_id
+        || existing.workspace_mode != thread.workspace_mode.label()
     {
         bail!(
             "Thread {} directory identity changed: persisted {:?} vs delta {:?}",
@@ -255,12 +261,14 @@ async fn upsert_thread_directory_row(
             (
                 existing.project_id.as_str(),
                 existing.root_thread_id.as_str(),
-                existing.parent_thread_id.as_deref()
+                existing.parent_thread_id.as_deref(),
+                existing.workspace_mode.as_str(),
             ),
             (
                 thread.project_id.as_str(),
                 thread.root_thread_id.as_str(),
-                thread.parent_thread_id.as_deref()
+                thread.parent_thread_id.as_deref(),
+                thread.workspace_mode.label(),
             )
         );
     }

@@ -266,4 +266,232 @@ void registerProjectSidebarTests() {
       expect(tester.takeException(), isNull);
     },
   );
+
+  testWidgets(
+    'start page workspace selector defaults to local and forwards worktree',
+    (tester) async {
+      _configureResponsiveView(tester, const Size(1440, 900));
+      final api = _FakeStudioApi(_stateWithPlannerModels());
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [studioApiProvider.overrideWithValue(api)],
+          child: _localizedApp(home: const StudioShell()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(StudioDriverKeys.newSession));
+      await tester.pumpAndSettle();
+
+      final selector = find.byKey(StudioDriverKeys.sessionWorkspaceMode);
+      expect(selector, findsOneWidget);
+      expect(
+        find.descendant(of: selector, matching: find.text('Local directory')),
+        findsOneWidget,
+        reason: 'the start page must default to the local workspace',
+      );
+
+      await tester.tap(selector);
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(
+          StudioDriverKeys.sessionWorkspaceModeOption(
+            ThreadWorkspaceMode.worktree.id,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(of: selector, matching: find.text('New worktree')),
+        findsOneWidget,
+      );
+
+      await tester.enterText(
+        find.byKey(StudioDriverKeys.composerInput),
+        'worktree session',
+      );
+      await tester.pump();
+      await tester.tap(find.byKey(StudioDriverKeys.composerSubmit));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(api.createdThreadProjectId, 'project-1');
+      expect(api.createdThreadWorkspaceMode, 'worktree');
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('start page keeps the workspace mode draft per Project', (
+    tester,
+  ) async {
+    _configureResponsiveView(tester, const Size(1440, 900));
+    final api = _FakeStudioApi(
+      _twoProjectState(selectedProjectId: 'project-a'),
+    );
+    api.selectProjectStates['project-b'] = _twoProjectState(
+      selectedProjectId: 'project-b',
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // project-a is already selected, so its row exposes the selected-project key.
+    await tester.tap(find.byKey(StudioDriverKeys.newSession));
+    await tester.pumpAndSettle();
+    final selector = find.byKey(StudioDriverKeys.sessionWorkspaceMode);
+    expect(
+      find.descendant(of: selector, matching: find.text('Local directory')),
+      findsOneWidget,
+    );
+    await tester.tap(selector);
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.byKey(
+        StudioDriverKeys.sessionWorkspaceModeOption(
+          ThreadWorkspaceMode.worktree.id,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(of: selector, matching: find.text('New worktree')),
+      findsOneWidget,
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey('project-new-session-project-b')),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(of: selector, matching: find.text('Local directory')),
+      findsOneWidget,
+      reason: 'each Project keeps its own draft',
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey('project-new-session-project-a')),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(of: selector, matching: find.text('New worktree')),
+      findsOneWidget,
+      reason: 'the first Project keeps the draft it was given',
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('remote Project disables the worktree option on the start page', (
+    tester,
+  ) async {
+    _configureResponsiveView(tester, const Size(1440, 900));
+    final api = _FakeStudioApi(_remoteProjectAdoptedState(sshAlias: 'ssh-arm'));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final selector = find.byKey(StudioDriverKeys.sessionWorkspaceMode);
+    expect(selector, findsOneWidget);
+    await tester.tap(selector);
+    await tester.pumpAndSettle();
+
+    final worktreeOption = find.byKey(
+      StudioDriverKeys.sessionWorkspaceModeOption(
+        ThreadWorkspaceMode.worktree.id,
+      ),
+    );
+    expect(worktreeOption, findsOneWidget);
+    expect(
+      tester.widget<PopupMenuItem<ThreadWorkspaceMode>>(worktreeOption).enabled,
+      isFalse,
+    );
+    expect(
+      find.text('Worktree sessions are unavailable for remote projects'),
+      findsWidgets,
+    );
+    expect(
+      ProviderScope.containerOf(tester.element(find.byType(StudioShell)))
+          .read(studioControllerProvider)
+          .requireValue
+          .newThreadWorkspaceMode,
+      ThreadWorkspaceMode.local,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('sidebar marks only worktree sessions without rewriting them', (
+    tester,
+  ) async {
+    _configureResponsiveView(tester, const Size(1440, 900));
+    final state = _workspaceModeState();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(_FakeStudioApi(state))],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(StudioDriverKeys.threadWorkspaceMode('session-worktree')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(StudioDriverKeys.threadWorkspaceMode('session-local')),
+      findsNothing,
+      reason: 'local sessions must not carry the worktree marker',
+    );
+    expect(find.byTooltip('Session worktree'), findsOneWidget);
+
+    final threads = ProviderScope.containerOf(
+      tester.element(find.byType(StudioShell)),
+    ).read(studioControllerProvider).requireValue.threads;
+    expect(
+      threads
+          .firstWhere((thread) => thread.id == 'session-worktree')
+          .workspaceMode,
+      ThreadWorkspaceMode.worktree,
+    );
+    expect(
+      threads
+          .firstWhere((thread) => thread.id == 'session-local')
+          .workspaceMode,
+      ThreadWorkspaceMode.local,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('sidebar worktree marker copy follows the Studio locale', (
+    tester,
+  ) async {
+    _configureResponsiveView(tester, const Size(1440, 900));
+    final state = _workspaceModeState();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(_FakeStudioApi(state))],
+        child: _localizedApp(
+          home: const StudioShell(),
+          locale: const Locale.fromSubtags(
+            languageCode: 'zh',
+            scriptCode: 'Hans',
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(StudioDriverKeys.threadWorkspaceMode('session-worktree')),
+      findsOneWidget,
+    );
+    expect(find.byTooltip('会话工作树'), findsOneWidget);
+    expect(find.byTooltip('Session worktree'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 }

@@ -16,7 +16,9 @@ owner。进程运行期间 Project、Thread、Agent、Workflow、Recovery 和服
 
 StudioState 聚合 projectDirectory、threadDirectory、agentDirectory、modeCatalog、settings、
 recovery、MCP/LSP、provider usage 与 updater。Thread workspace 单独包含 timeline、pending
-Interaction、ThreadRuntimeView 和 workflow 投影；不存在 taskDirectory。
+Interaction、ThreadRuntimeView 和 workflow 投影；不存在 taskDirectory。Thread 目录条目携带
+会话工作区模式（`local | worktree`），只读投影为侧栏与会话展示的 canonical 事实，GUI 不推导
+也不本地改写。
 
 Product event 携带完整领域 snapshot 或明确 revision：ProjectDirectoryChanged、
 ThreadDirectoryChanged、AgentDirectoryChanged、ModeCatalogChanged、ThreadRuntimeChanged
@@ -41,6 +43,13 @@ settlement。审计结果按当前 lease revision 和已清理问题过滤，不
 并加载 Thread、working state、transcript window 与 pending Interaction，全部成功后一次
 安装 owner。Mode snapshot 和 workflow projection 与 session 同时恢复，不存在独立任务
 runtime 恢复扫描。冷读取仅重放 journal；产品交互回答前按保存的父子顺序激活所需 Thread。
+
+创建根会话是可失败的类型化命令，请求同时携带 Mode 与会话工作区模式。`worktree` 模式在发布
+Thread 之前完成仓库解析、worktree 创建与 lease 落库；任一阶段失败都让命令失败、不留下已发布
+Thread，GUI 保留输入草稿并显示失败原因。激活时工作区资源缺失或身份不符只显式失败并发布该
+Thread 的 Recovery，不静默回落到 Project 根目录，也不在内存中改写已保存的工作区模式。
+Thread 目录事实已经发布而后续步骤失败时，必须先按未启动会话补偿（关闭并归档）再返回类型化
+错误，不能留下无法激活的已发布会话。
 
 ## 18.4 配置目录
 

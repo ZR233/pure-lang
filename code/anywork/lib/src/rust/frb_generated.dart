@@ -181,7 +181,8 @@ abstract class RustLibApi extends BaseApi {
   crateApiStudioHandlersUpdaterCheckStudioUpdate();
 
   Future<void> crateApiStudioHandlersAgentProfilesCleanupPreservedWorktree({
-    required String childId,
+    required String ownerKind,
+    required String ownerThreadId,
     required BigInt expectedLeaseRevision,
   });
 
@@ -445,6 +446,7 @@ abstract class RustLibApi extends BaseApi {
     required String projectId,
     required BridgeStudioPromptInput input,
     required String mode,
+    String? workspaceMode,
   });
 
   Future<BridgeStudioStartupResult>
@@ -1152,14 +1154,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @override
   Future<void> crateApiStudioHandlersAgentProfilesCleanupPreservedWorktree({
-    required String childId,
+    required String ownerKind,
+    required String ownerThreadId,
     required BigInt expectedLeaseRevision,
   }) {
     return handler.executeNormal(
       NormalTask(
         callFfi: (port_) {
           final serializer = SseSerializer(generalizedFrbRustBinding);
-          sse_encode_String(childId, serializer);
+          sse_encode_String(ownerKind, serializer);
+          sse_encode_String(ownerThreadId, serializer);
           sse_encode_u_64(expectedLeaseRevision, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
@@ -1174,7 +1178,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         ),
         constMeta:
             kCrateApiStudioHandlersAgentProfilesCleanupPreservedWorktreeConstMeta,
-        argValues: [childId, expectedLeaseRevision],
+        argValues: [ownerKind, ownerThreadId, expectedLeaseRevision],
         apiImpl: this,
       ),
     );
@@ -1184,7 +1188,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   get kCrateApiStudioHandlersAgentProfilesCleanupPreservedWorktreeConstMeta =>
       const TaskConstMeta(
         debugName: "cleanup_preserved_worktree",
-        argNames: ["childId", "expectedLeaseRevision"],
+        argNames: ["ownerKind", "ownerThreadId", "expectedLeaseRevision"],
       );
 
   @override
@@ -3132,6 +3136,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     required String projectId,
     required BridgeStudioPromptInput input,
     required String mode,
+    String? workspaceMode,
   }) {
     return handler.executeNormal(
       NormalTask(
@@ -3140,6 +3145,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           sse_encode_String(projectId, serializer);
           sse_encode_box_autoadd_bridge_studio_prompt_input(input, serializer);
           sse_encode_String(mode, serializer);
+          sse_encode_opt_String(workspaceMode, serializer);
           pdeCallFfi(
             generalizedFrbRustBinding,
             serializer,
@@ -3152,7 +3158,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           decodeErrorData: sse_decode_bridge_error,
         ),
         constMeta: kCrateApiStudioHandlersThreadStartNewThreadConstMeta,
-        argValues: [projectId, input, mode],
+        argValues: [projectId, input, mode, workspaceMode],
         apiImpl: this,
       ),
     );
@@ -3161,7 +3167,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiStudioHandlersThreadStartNewThreadConstMeta =>
       const TaskConstMeta(
         debugName: "start_new_thread",
-        argNames: ["projectId", "input", "mode"],
+        argNames: ["projectId", "input", "mode", "workspaceMode"],
       );
 
   @override
@@ -6568,21 +6574,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeThread dco_decode_bridge_thread(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 12)
-      throw Exception('unexpected arr length: expect 12 but see ${arr.length}');
+    if (arr.length != 13)
+      throw Exception('unexpected arr length: expect 13 but see ${arr.length}');
     return BridgeThread(
       id: dco_decode_String(arr[0]),
       projectId: dco_decode_String(arr[1]),
       title: dco_decode_String(arr[2]),
       mode: dco_decode_String(arr[3]),
-      rootThreadId: dco_decode_String(arr[4]),
-      parentThreadId: dco_decode_opt_String(arr[5]),
-      role: dco_decode_String(arr[6]),
-      agentPath: dco_decode_String(arr[7]),
-      status: dco_decode_bridge_thread_status(arr[8]),
-      createdAt: dco_decode_i_64(arr[9]),
-      updatedAt: dco_decode_i_64(arr[10]),
-      archived: dco_decode_bool(arr[11]),
+      workspaceMode: dco_decode_String(arr[4]),
+      rootThreadId: dco_decode_String(arr[5]),
+      parentThreadId: dco_decode_opt_String(arr[6]),
+      role: dco_decode_String(arr[7]),
+      agentPath: dco_decode_String(arr[8]),
+      status: dco_decode_bridge_thread_status(arr[9]),
+      createdAt: dco_decode_i_64(arr[10]),
+      updatedAt: dco_decode_i_64(arr[11]),
+      archived: dco_decode_bool(arr[12]),
     );
   }
 
@@ -7951,23 +7958,30 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeWorktreeOwner dco_decode_bridge_worktree_owner(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return BridgeWorktreeOwner.values[raw as int];
+  }
+
+  @protected
   BridgeWorktreeRecoveryPreviewDto
   dco_decode_bridge_worktree_recovery_preview_dto(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 10)
-      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
+    if (arr.length != 11)
+      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
     return BridgeWorktreeRecoveryPreviewDto(
-      childId: dco_decode_String(arr[0]),
-      leaseRevision: dco_decode_u_64(arr[1]),
-      state: dco_decode_String(arr[2]),
-      repositoryRoot: dco_decode_String(arr[3]),
-      path: dco_decode_String(arr[4]),
-      branch: dco_decode_String(arr[5]),
-      baseCommit: dco_decode_String(arr[6]),
-      headCommit: dco_decode_opt_String(arr[7]),
-      dirty: dco_decode_bool(arr[8]),
-      changedFiles: dco_decode_list_String(arr[9]),
+      ownerKind: dco_decode_bridge_worktree_owner(arr[0]),
+      ownerThreadId: dco_decode_String(arr[1]),
+      leaseRevision: dco_decode_u_64(arr[2]),
+      state: dco_decode_String(arr[3]),
+      repositoryRoot: dco_decode_String(arr[4]),
+      path: dco_decode_String(arr[5]),
+      branch: dco_decode_String(arr[6]),
+      baseCommit: dco_decode_String(arr[7]),
+      headCommit: dco_decode_opt_String(arr[8]),
+      dirty: dco_decode_bool(arr[9]),
+      changedFiles: dco_decode_list_String(arr[10]),
     );
   }
 
@@ -13230,6 +13244,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_projectId = sse_decode_String(deserializer);
     var var_title = sse_decode_String(deserializer);
     var var_mode = sse_decode_String(deserializer);
+    var var_workspaceMode = sse_decode_String(deserializer);
     var var_rootThreadId = sse_decode_String(deserializer);
     var var_parentThreadId = sse_decode_opt_String(deserializer);
     var var_role = sse_decode_String(deserializer);
@@ -13243,6 +13258,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       projectId: var_projectId,
       title: var_title,
       mode: var_mode,
+      workspaceMode: var_workspaceMode,
       rootThreadId: var_rootThreadId,
       parentThreadId: var_parentThreadId,
       role: var_role,
@@ -14984,12 +15000,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeWorktreeOwner sse_decode_bridge_worktree_owner(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var inner = sse_decode_i_32(deserializer);
+    return BridgeWorktreeOwner.values[inner];
+  }
+
+  @protected
   BridgeWorktreeRecoveryPreviewDto
   sse_decode_bridge_worktree_recovery_preview_dto(
     SseDeserializer deserializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_childId = sse_decode_String(deserializer);
+    var var_ownerKind = sse_decode_bridge_worktree_owner(deserializer);
+    var var_ownerThreadId = sse_decode_String(deserializer);
     var var_leaseRevision = sse_decode_u_64(deserializer);
     var var_state = sse_decode_String(deserializer);
     var var_repositoryRoot = sse_decode_String(deserializer);
@@ -15000,7 +15026,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_dirty = sse_decode_bool(deserializer);
     var var_changedFiles = sse_decode_list_String(deserializer);
     return BridgeWorktreeRecoveryPreviewDto(
-      childId: var_childId,
+      ownerKind: var_ownerKind,
+      ownerThreadId: var_ownerThreadId,
       leaseRevision: var_leaseRevision,
       state: var_state,
       repositoryRoot: var_repositoryRoot,
@@ -20223,6 +20250,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.projectId, serializer);
     sse_encode_String(self.title, serializer);
     sse_encode_String(self.mode, serializer);
+    sse_encode_String(self.workspaceMode, serializer);
     sse_encode_String(self.rootThreadId, serializer);
     sse_encode_opt_String(self.parentThreadId, serializer);
     sse_encode_String(self.role, serializer);
@@ -21647,12 +21675,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_bridge_worktree_owner(
+    BridgeWorktreeOwner self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.index, serializer);
+  }
+
+  @protected
   void sse_encode_bridge_worktree_recovery_preview_dto(
     BridgeWorktreeRecoveryPreviewDto self,
     SseSerializer serializer,
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.childId, serializer);
+    sse_encode_bridge_worktree_owner(self.ownerKind, serializer);
+    sse_encode_String(self.ownerThreadId, serializer);
     sse_encode_u_64(self.leaseRevision, serializer);
     sse_encode_String(self.state, serializer);
     sse_encode_String(self.repositoryRoot, serializer);

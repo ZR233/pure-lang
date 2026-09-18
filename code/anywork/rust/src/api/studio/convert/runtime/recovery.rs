@@ -44,7 +44,15 @@ pub(crate) fn bridge_recovery_issue(issue: StudioRecoveryIssue) -> BridgeStudioR
         worktree: issue
             .worktree
             .map(|worktree| BridgeWorktreeRecoveryPreviewDto {
-                child_id: worktree.child_id,
+                owner_kind: match worktree.owner_kind {
+                    pl_studio_runtime::StudioRecoveryWorktreeOwner::Session => {
+                        BridgeWorktreeOwner::Session
+                    }
+                    pl_studio_runtime::StudioRecoveryWorktreeOwner::Child => {
+                        BridgeWorktreeOwner::Child
+                    }
+                },
+                owner_thread_id: worktree.owner_thread_id,
                 lease_revision: worktree.lease_revision,
                 state: worktree.state,
                 repository_root: worktree.repository_root,

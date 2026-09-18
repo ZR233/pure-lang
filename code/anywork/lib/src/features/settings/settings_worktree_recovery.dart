@@ -25,9 +25,14 @@ class _WorktreeRecoverySectionState
     final worktree = widget.issue.worktree!;
     final l10n = context.l10n;
     final head = worktree.headCommit;
+    final owner = worktree.ownerKind.isSession
+        ? l10n.settingsWorktreeOwnerSession
+        : l10n.settingsWorktreeOwnerChild;
+    final identity = '${worktree.ownerKind.id}-${worktree.ownerThreadId}';
     return SettingsResourceRow(
-      key: ValueKey('worktree-recovery-${worktree.childId}'),
+      key: ValueKey('worktree-recovery-$identity'),
       title: worktree.branch,
+      subtitle: owner,
       icon: Icons.account_tree_outlined,
       status: Text(
         [
@@ -37,7 +42,7 @@ class _WorktreeRecoverySectionState
       ),
       actions: [
         TextButton.icon(
-          key: ValueKey('worktree-cleanup-${worktree.childId}'),
+          key: ValueKey('worktree-cleanup-$identity'),
           onPressed: _cleaning ? null : () => _cleanup(worktree),
           icon: _cleaning
               ? const SizedBox.square(

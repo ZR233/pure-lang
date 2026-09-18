@@ -58,6 +58,31 @@ impl StudioThreadFactory {
             .and_then(|binding| binding.remote.clone())
     }
 
+    /// 测试探针：activation 为某个 Thread 解析出的会话工作区根。
+    #[cfg(test)]
+    pub(in crate::studio) fn session_workspace_root_for_test(
+        &self,
+        id: &str,
+    ) -> Option<std::path::PathBuf> {
+        self.session_roots
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(id)
+            .cloned()
+    }
+
+    #[cfg(test)]
+    pub(in crate::studio) fn record_session_workspace_root_for_test(
+        &self,
+        id: &str,
+        root: std::path::PathBuf,
+    ) {
+        self.session_roots
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(id.to_string(), root);
+    }
+
     pub(in crate::studio) fn ssh_alias(&self, id: &str) -> Option<String> {
         self.bindings
             .lock()

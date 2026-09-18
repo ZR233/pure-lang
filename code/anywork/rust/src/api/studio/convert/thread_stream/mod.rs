@@ -172,6 +172,7 @@ pub(crate) fn bridge_thread(value: Thread) -> BridgeThread {
         project_id: value.project_id,
         title: value.title,
         mode: value.mode.as_str().to_string(),
+        workspace_mode: value.workspace_mode.label().to_string(),
         root_thread_id: value.root_thread_id,
         parent_thread_id: value.parent_thread_id,
         role: value.role,

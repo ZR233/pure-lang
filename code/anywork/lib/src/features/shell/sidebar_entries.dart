@@ -199,11 +199,25 @@ class _ThreadTile extends ConsumerWidget {
         : Icons.chat_bubble_outline;
     final colors = Theme.of(context).colorScheme;
     final issue = recoveryIssue;
+    // 只读消费 Thread 的 canonical 工作区模式：worktree 会话显示工作树标识，
+    // local 会话不显示。标识不改变会话或项目配置。
+    final worktreeMarker = thread.workspaceMode.isWorktree
+        ? Tooltip(
+            message: context.l10n.sidebarSessionWorktree,
+            child: Icon(
+              Icons.account_tree_outlined,
+              key: StudioDriverKeys.threadWorkspaceMode(thread.id),
+              size: 14,
+              color: colors.onSurfaceVariant,
+            ),
+          )
+        : null;
     final tile = _SidebarTile(
       selected: selected,
       icon: issue == null ? modeIcon : Icons.error_outline,
       title: thread.title,
       showTitleTooltip: issue == null,
+      titleIcon: worktreeMarker,
       subtitle: _threadSubtitle(context, thread, modeDisplayName),
       dense: true,
       iconColor: issue != null

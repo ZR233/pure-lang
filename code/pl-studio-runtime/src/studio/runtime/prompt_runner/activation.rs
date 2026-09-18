@@ -47,6 +47,7 @@ impl StudioRuntime {
             project_id: thread.project_id,
             title: thread.title,
             mode: thread.mode,
+            workspace_mode: thread.workspace_mode,
             created_at: thread.created_at,
             updated_at: thread.updated_at,
             visibility: if thread.archived {

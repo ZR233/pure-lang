@@ -292,6 +292,48 @@ StudioTurnView _testTurn({
   );
 }
 
+/// 会话工作区模式 fixture：一个 `worktree` 会话与一个 `local` 会话，两者都带 ready
+/// workspace，避免 bootstrap 选中缺 workspace 的 Thread 而停在 loading 面板。
+StudioState _workspaceModeState() {
+  final base = _emptyState();
+  final worktree = StudioThread(
+    id: 'session-worktree',
+    projectId: 'project-1',
+    title: 'Worktree session',
+    mode: ThreadModeId.simple,
+    updatedAt: DateTime.fromMillisecondsSinceEpoch(2),
+    workspaceMode: ThreadWorkspaceMode.worktree,
+  );
+  final local = StudioThread(
+    id: 'session-local',
+    projectId: 'project-1',
+    title: 'Local session',
+    mode: ThreadModeId.simple,
+    updatedAt: DateTime.fromMillisecondsSinceEpoch(1),
+  );
+  ThreadWorkspace workspace(StudioThread thread) => ThreadWorkspace(
+    thread: thread,
+    revision: 0,
+    items: const [],
+    interactions: const [],
+    runtime: _testRuntime(),
+  );
+  return base.copyWith(
+    threadDirectory: ThreadDirectoryWindow(threads: [worktree, local]),
+    workspacesByThread: {
+      worktree.id: workspace(worktree),
+      local.id: workspace(local),
+    },
+    workspaceUiByThread: {
+      for (final thread in [worktree, local])
+        thread.id: const WorkspaceUiState(
+          syncState: AgentWorkspaceSyncState.ready,
+        ),
+    },
+    selectedThreadId: worktree.id,
+  );
+}
+
 StudioState _stateWithPlannerModels() {
   final state = _emptyState();
   return state.copyWith(

@@ -795,7 +795,11 @@ StudioRecoveryIssue _recoveryIssueFromFrb(
     worktree: issue.worktree == null
         ? null
         : WorktreeRecoveryPreview(
-            childId: issue.worktree!.childId,
+            ownerKind: switch (issue.worktree!.ownerKind) {
+              frb.BridgeWorktreeOwner.session => WorktreeOwnerKind.session,
+              frb.BridgeWorktreeOwner.child => WorktreeOwnerKind.child,
+            },
+            ownerThreadId: issue.worktree!.ownerThreadId,
             leaseRevision: issue.worktree!.leaseRevision.toInt(),
             state: issue.worktree!.state,
             repositoryRoot: issue.worktree!.repositoryRoot,

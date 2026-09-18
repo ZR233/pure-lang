@@ -49,6 +49,7 @@ class StudioThread {
     this.role = 'planner',
     this.status = ThreadStatusView.idle,
     this.archived = false,
+    this.workspaceMode = ThreadWorkspaceMode.local,
   });
 
   final String id;
@@ -63,6 +64,9 @@ class StudioThread {
   final String role;
   final ThreadStatusView status;
   final bool archived;
+
+  /// Canonical 会话工作区模式，只读来自 Thread 目录事实。
+  final ThreadWorkspaceMode workspaceMode;
 
   bool get isRoot => parentThreadId == null;
 
@@ -83,6 +87,7 @@ class StudioThread {
     String? role,
     ThreadStatusView? status,
     bool? archived,
+    ThreadWorkspaceMode? workspaceMode,
   }) {
     return StudioThread(
       id: id,
@@ -97,6 +102,7 @@ class StudioThread {
       role: role ?? this.role,
       status: status ?? this.status,
       archived: archived ?? this.archived,
+      workspaceMode: workspaceMode ?? this.workspaceMode,
     );
   }
 }

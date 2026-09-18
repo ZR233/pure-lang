@@ -70,6 +70,106 @@ class SessionModeSelector extends ConsumerWidget {
   }
 }
 
+/// 起始页会话工作区选择器：`local` 使用 Project 目录，`worktree` 新建 Git 工作树。
+///
+/// 选择属于当前项目的输入草稿，只通过创建命令传给运行时；已有的 Thread 工作区模式
+/// 只读来自 canonical 目录事实，因此该控件不出现在已建会话的 composer 中。远端项目
+/// 不提供 `worktree`，禁用该选项并说明原因。
+class SessionWorkspaceModeSelector extends ConsumerWidget {
+  const SessionWorkspaceModeSelector({
+    required this.mode,
+    required this.worktreeAvailable,
+    required this.onSelected,
+    super.key,
+  });
+
+  final ThreadWorkspaceMode mode;
+  final bool worktreeAvailable;
+  final ValueChanged<ThreadWorkspaceMode> onSelected;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = context.l10n;
+    final disabledReason = l10n.composerWorkspaceModeSshDisabled;
+    return UpwardPopupMenu<ThreadWorkspaceMode>(
+      key: StudioDriverKeys.sessionWorkspaceMode,
+      tooltip: worktreeAvailable
+          ? l10n.composerWorkspaceModeLabel
+          : disabledReason,
+      initialValue: mode,
+      onSelected: onSelected,
+      itemBuilder: (context) => [
+        PopupMenuItem<ThreadWorkspaceMode>(
+          key: StudioDriverKeys.sessionWorkspaceModeOption(
+            ThreadWorkspaceMode.local.id,
+          ),
+          value: ThreadWorkspaceMode.local,
+          child: _WorkspaceModeItem(
+            icon: Icons.folder_outlined,
+            label: l10n.composerWorkspaceModeLocal,
+          ),
+        ),
+        PopupMenuItem<ThreadWorkspaceMode>(
+          key: StudioDriverKeys.sessionWorkspaceModeOption(
+            ThreadWorkspaceMode.worktree.id,
+          ),
+          value: ThreadWorkspaceMode.worktree,
+          enabled: worktreeAvailable,
+          child: _WorkspaceModeItem(
+            icon: Icons.account_tree_outlined,
+            label: l10n.composerWorkspaceModeWorktree,
+            hint: worktreeAvailable ? null : disabledReason,
+          ),
+        ),
+      ],
+      child: StudioMenuLabel(label: _label(context), maxWidth: 96),
+    );
+  }
+
+  String _label(BuildContext context) => mode.isWorktree
+      ? context.l10n.composerWorkspaceModeWorktree
+      : context.l10n.composerWorkspaceModeLocal;
+}
+
+class _WorkspaceModeItem extends StatelessWidget {
+  const _WorkspaceModeItem({
+    required this.icon,
+    required this.label,
+    this.hint,
+  });
+
+  final IconData icon;
+  final String label;
+  final String? hint;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 260,
+      child: Row(
+        children: [
+          Icon(icon, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, overflow: TextOverflow.ellipsis),
+                if (hint case final reason?)
+                  Text(
+                    reason,
+                    style: Theme.of(context).textTheme.labelSmall,
+                    maxLines: 2,
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// 所有根模式统一使用 planner 路由；模式差异由已注册的 Thread Mode prompt 提供。
 class ModelRoleSelector extends ConsumerWidget {
   const ModelRoleSelector({

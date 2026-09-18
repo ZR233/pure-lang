@@ -48,9 +48,25 @@ impl StudioThreadFactory {
                 "child project target changed".into(),
             ));
         }
+        // 非 worktree child 的工作区根跟随其根会话；`worktree` child 仍以 Project 仓库
+        // `HEAD` 为 base。
+        let workspace_mode = thread.workspace_mode;
+        let root_thread_id = thread.root_thread_id.clone();
         let project_copy = project.clone();
-        let root = tokio::task::spawn_blocking(move || {
-            crate::studio::agent_host::workspace_preparation::resolved_project_root(&project_copy)
+        let worktrees = self.services.worktrees.clone();
+        let (root, session_root) = tokio::task::spawn_blocking(move || {
+            let project_root =
+                crate::studio::agent_host::workspace_preparation::resolved_project_root(
+                    &project_copy,
+                )?;
+            let session_root =
+                crate::studio::agent_host::workspace_preparation::root_session_workspace_root(
+                    &worktrees,
+                    workspace_mode,
+                    &root_thread_id,
+                    &project_copy,
+                )?;
+            Ok::<_, crate::PureError>((project_root, session_root))
         })
         .await??;
         if std::path::Path::new(&assignment.project_root) != root {
@@ -58,19 +74,22 @@ impl StudioThreadFactory {
                 "saved child workspace has a different project root".into(),
             ));
         }
+        #[cfg(test)]
+        self.record_session_workspace_root_for_test(id, session_root.clone());
         let workspace = match assignment.mode {
             pl_protocol::AgentWorkspaceMode::Unrestricted
-                if std::path::Path::new(&assignment.root) == root
+                if std::path::Path::new(&assignment.root) == session_root
                     && assignment.worktree.is_none() =>
             {
-                AgentWorkspace::local(root)
+                AgentWorkspace::host_permitted(root, session_root, None)
             }
             pl_protocol::AgentWorkspaceMode::Directory
-                if std::path::Path::new(&assignment.root) == root
+                if std::path::Path::new(&assignment.root) == session_root
                     && assignment.worktree.is_none() =>
             {
-                AgentWorkspace::directory(
+                AgentWorkspace::host_permitted(
                     root,
+                    session_root,
                     assignment
                         .writable_paths
                         .as_ref()

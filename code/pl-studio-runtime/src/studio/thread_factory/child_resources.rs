@@ -33,6 +33,19 @@ impl StudioChildResources for StudioThreadFactory {
             .into_iter()
             .find(|project| project.id == parent.project_id)
             .ok_or_else(|| ThreadAssemblyError::Identity(parent.project_id.clone()))?;
+        let root_thread = self.thread_record(&parent.root_thread_id).await?;
+        let session_root =
+            crate::studio::agent_host::workspace_preparation::root_session_workspace_root(
+                &self.services.worktrees,
+                root_thread.workspace_mode,
+                &parent.root_thread_id,
+                &project,
+            )
+            .map_err(|error| resource_error("resolve session workspace root", error))?;
+        // child 的创建窗口与 root 会话一样由进程内 creating 标记保护：标记在记录 `prepared`
+        // 之前设置，离开本函数（成功、失败、取消或展开）时由守卫清除。标记键是 child_id，
+        // 不会影响会话路径的判定。
+        let _creation = self.services.worktrees.creation_guard(&request.id);
         let (assignment, worktree) =
             crate::studio::agent_host::workspace_preparation::prepare_workspace(
                 &self.services.worktrees,
@@ -43,6 +56,7 @@ impl StudioChildResources for StudioThreadFactory {
                     child_id: &request.id,
                     mode: profile.profile.workspace_mode,
                     writable_paths: request.writable_paths.clone(),
+                    session_root,
                 },
             )
             .await
@@ -50,9 +64,10 @@ impl StudioChildResources for StudioThreadFactory {
         check_cancelled(request)?;
         let workspace = ToolWorkspace::new(match assignment.mode {
             pl_protocol::AgentWorkspaceMode::Unrestricted => {
-                AgentWorkspace::local(&assignment.root)
+                AgentWorkspace::host_permitted(&assignment.project_root, &assignment.root, None)
             }
-            pl_protocol::AgentWorkspaceMode::Directory => AgentWorkspace::directory(
+            pl_protocol::AgentWorkspaceMode::Directory => AgentWorkspace::host_permitted(
+                &assignment.project_root,
                 &assignment.root,
                 assignment
                     .writable_paths
@@ -144,6 +159,7 @@ impl StudioChildResources for StudioThreadFactory {
                 agent_path: request.id.clone(),
                 project_id: parent.project_id,
                 mode: parent.mode,
+                workspace_mode: parent.workspace_mode,
                 role: profile.profile.profile_id.clone(),
                 title: request.task_summary.as_str().to_owned(),
             })
@@ -199,6 +215,12 @@ impl StudioChildResources for StudioThreadFactory {
         let Some(lease) = self.services.worktrees.get(id) else {
             return Ok(());
         };
+        // 会话自身 worktree 只由显式 Recovery 清理，不随 Thread 关闭删除。
+        if lease.owner_kind
+            != crate::studio::agent_host::worktree_lease::WorktreeLeaseOwnerKind::Child
+        {
+            return Ok(());
+        }
         let manager = crate::studio::agent_host::workspace_preparation::manager_from_lease(
             &self.services.ssh_manager,
             &lease,
@@ -211,7 +233,9 @@ impl StudioChildResources for StudioThreadFactory {
     async fn discard_unpublished(&self, id: &str) -> Result<(), ThreadAssemblyError> {
         if let Some(mut lease) = self.services.worktrees.get(id) {
             use crate::studio::agent_host::worktree_lease::WorktreeLeaseState;
-            if lease.state != WorktreeLeaseState::Cleaned {
+            let unpublished_child = lease.owner_kind
+                == crate::studio::agent_host::worktree_lease::WorktreeLeaseOwnerKind::Child;
+            if unpublished_child && lease.state != WorktreeLeaseState::Cleaned {
                 let manager = crate::studio::agent_host::workspace_preparation::manager_from_lease(
                     &self.services.ssh_manager,
                     &lease,
@@ -273,19 +297,7 @@ async fn close_workspace(
         AgentWorkspaceDisposition::Preserve => return Ok(()),
         AgentWorkspaceDisposition::Cleanup => {}
     }
-    let expected = crate::agent::worktree::WorktreeManager::allocate_path(
-        std::path::Path::new(&lease.repository_root),
-        &lease.root_thread_id,
-        &lease.child_id,
-    );
-    anyhow::ensure!(
-        std::path::Path::new(&lease.path) == expected,
-        "worktree cleanup refused a mismatched Pure-owned leaf"
-    );
-    anyhow::ensure!(
-        lease.branch == crate::agent::worktree::WorktreeManager::branch_for(&lease.child_id),
-        "worktree cleanup refused a mismatched Pure-owned branch"
-    );
+    lease.validate_identity()?;
     let handle = crate::agent::worktree::WorktreeHandle {
         path: PathBuf::from(&lease.path),
         branch: lease.branch.clone(),
@@ -310,7 +322,9 @@ mod tests {
     use crate::agent::worktree::{LocalWorktreeBackend, WorktreeCreateSpec, WorktreeManager};
     use crate::studio::agent_host::{
         ThreadWriteBehindWriter,
-        worktree_lease::{WorktreeLease, WorktreeLeaseOwner, WorktreeLeaseState},
+        worktree_lease::{
+            WorktreeLease, WorktreeLeaseOwner, WorktreeLeaseOwnerKind, WorktreeLeaseState,
+        },
     };
     use pl_tool::collaboration::thread::AgentWorkspaceDisposition;
     use pretty_assertions::assert_eq;
@@ -356,7 +370,9 @@ mod tests {
             .create(WorktreeCreateSpec {
                 repo_root: root.clone(),
                 root_thread_id: "root".into(),
-                child_id: "child".into(),
+                ownership: crate::agent::worktree::WorktreeOwnership::Child {
+                    child_id: "child".into(),
+                },
                 base_commit: manager.resolve_head(&root).await.unwrap(),
             })
             .await
@@ -367,7 +383,8 @@ mod tests {
         let mut lease = WorktreeLease {
             revision: 1,
             state: WorktreeLeaseState::Prepared,
-            child_id: "child".into(),
+            owner_kind: WorktreeLeaseOwnerKind::Child,
+            owner_thread_id: "child".into(),
             root_thread_id: "root".into(),
             project_id: "project".into(),
             ssh_alias: None,

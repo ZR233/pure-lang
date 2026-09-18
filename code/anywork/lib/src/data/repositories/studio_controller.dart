@@ -232,6 +232,28 @@ class StudioController extends _$StudioController {
     );
   }
 
+  /// Saves the root session workspace-mode choice as the selected Project's input
+  /// draft. The choice is not a second source of truth: it is only forwarded to
+  /// `startNewThread` and never rewrites an existing Thread's canonical mode.
+  void setNewThreadWorkspaceMode(ThreadWorkspaceMode mode) {
+    final current = state.value;
+    final projectId = current?.selectedProjectId;
+    if (current == null ||
+        projectId == null ||
+        current.selectedThreadId != null ||
+        current.newThreadWorkspaceMode == mode) {
+      return;
+    }
+    state = AsyncData(
+      current.copyWith(
+        newThreadWorkspaceModeByProject: {
+          ...current.newThreadWorkspaceModeByProject,
+          projectId: mode,
+        },
+      ),
+    );
+  }
+
   void dismissConfigRecoveryNotice() {
     final current = state.value;
     if (current == null || current.configRecoveryNotice == null) return;
@@ -826,6 +848,7 @@ class StudioController extends _$StudioController {
           ],
         ),
         current.newThreadMode,
+        workspaceMode: current.newThreadWorkspaceMode.id,
       );
     } catch (error) {
       if (!ref.mounted) return;
@@ -1203,7 +1226,8 @@ class StudioController extends _$StudioController {
 
   Future<void> cleanupPreservedWorktree(WorktreeRecoveryPreview worktree) =>
       _api.cleanupPreservedWorktree(
-        childId: worktree.childId,
+        ownerKind: worktree.ownerKind.id,
+        ownerThreadId: worktree.ownerThreadId,
         expectedLeaseRevision: worktree.leaseRevision,
       );
 

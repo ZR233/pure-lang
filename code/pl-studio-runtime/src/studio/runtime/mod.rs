@@ -61,6 +61,7 @@ pub struct StudioStartNewThreadRequest {
     pub title: Option<String>,
     pub input: StudioPromptInput,
     pub mode: pl_protocol::ThreadModeId,
+    pub workspace_mode: pl_protocol::ThreadWorkspaceMode,
     pub options: StudioSubmitPromptOptions,
 }
 

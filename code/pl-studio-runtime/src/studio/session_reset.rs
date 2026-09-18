@@ -71,7 +71,8 @@ pub(super) async fn prepare(product: &Path, _owner: &RuntimeLock) -> Result<()> 
             );
         }
         if product_version == Some(20) {
-            // v20→v21 是产品数据在位迁移（SSH 服务器迁往用户 ssh config），不重置会话。
+            // v20→v21 是产品数据在位迁移（会话工作区模式列 + worktree lease 载荷，
+            // 以及 SSH 服务器迁往用户 ssh config），不重置会话。
             if session_version
                 .is_none_or(|version| version == pl_core::persistence::SESSION_SCHEMA_VERSION)
             {
@@ -339,7 +340,7 @@ async fn reset_product(path: &Path) -> Result<()> {
     finish_connection(db, result).await
 }
 
-/// v20→v21 产品迁移：先备份产品库，再执行幂等的 SSH 服务器迁出。
+/// v20→v21 产品迁移：先备份产品库，再依次执行幂等的会话工作区模式升级与 SSH 服务器迁出。
 async fn migrate_product(product: &Path, parent: &Path) -> Result<()> {
     let backup_parent = parent.to_path_buf();
     let backup = tokio::task::spawn_blocking(move || {
@@ -351,10 +352,17 @@ async fn migrate_product(product: &Path, parent: &Path) -> Result<()> {
     .await??;
     backup_database(product, &backup.join("product.sqlite")).await?;
     let db = connect(product, DatabaseAccess::ReadWrite).await?;
-    let result = super::store::ssh_migration::migrate_ssh_servers_to_user_config(
-        &db,
-        &pl_tool::remote::SshConfigFile::user_default()?,
-    )
+    let result = async {
+        // 顺序固定：先做版本门控的 `threads.workspace_mode` 加列与 worktree lease 载荷转换
+        // （必须仍处于 v20），再执行按 `ssh_servers` 表存在判定的 SSH 迁出。两者都幂等，
+        // 崩溃后可按同一协调流重启续跑。
+        store_support::upgrade_product_schema(&db).await?;
+        super::store::ssh_migration::migrate_ssh_servers_to_user_config(
+            &db,
+            &pl_tool::remote::SshConfigFile::user_default()?,
+        )
+        .await
+    }
     .await;
     finish_connection(db, result).await
 }

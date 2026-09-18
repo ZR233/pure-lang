@@ -14,7 +14,8 @@ abstract class StudioApi {
     AgentProfileDraft draft,
   );
   Future<void> cleanupPreservedWorktree({
-    required String childId,
+    required String ownerKind,
+    required String ownerThreadId,
     required int expectedLeaseRevision,
   });
   Future<StudioState> readStudioState();
@@ -41,8 +42,9 @@ abstract class StudioApi {
   Future<StartNewThreadResult> startNewThread(
     String projectId,
     StudioPromptInput input,
-    ThreadModeId mode,
-  );
+    ThreadModeId mode, {
+    String? workspaceMode,
+  });
   Future<StudioThread> renameThread(String threadId, String title);
   Future<ArchiveThreadResult> archiveThread(String threadId);
   Future<void> archiveProject(String projectId);
@@ -400,13 +402,15 @@ class FrbStudioApi implements StudioApi {
 
   @override
   Future<void> cleanupPreservedWorktree({
-    required String childId,
+    required String ownerKind,
+    required String ownerThreadId,
     required int expectedLeaseRevision,
   }) async {
     await _ensureReady();
     await _bridgeCall(
       () => frb.cleanupPreservedWorktree(
-        childId: childId,
+        ownerKind: ownerKind,
+        ownerThreadId: ownerThreadId,
         expectedLeaseRevision: BigInt.from(expectedLeaseRevision),
       ),
     );
@@ -603,14 +607,16 @@ class FrbStudioApi implements StudioApi {
   Future<StartNewThreadResult> startNewThread(
     String projectId,
     StudioPromptInput input,
-    ThreadModeId mode,
-  ) async {
+    ThreadModeId mode, {
+    String? workspaceMode,
+  }) async {
     await _ensureReady();
     final response = await _bridgeCall(
       () => frb.startNewThread(
         projectId: projectId,
         input: _bridgePromptInput(input),
         mode: mode.id,
+        workspaceMode: workspaceMode,
       ),
     );
     return StartNewThreadResult(

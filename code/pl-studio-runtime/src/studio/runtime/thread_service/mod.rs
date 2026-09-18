@@ -24,6 +24,7 @@ impl StudioRuntime {
             title: request.title,
             input: request.input,
             mode,
+            workspace_mode: request.workspace_mode,
             options: super::StudioSubmitPromptOptions::default(),
         })
         .await

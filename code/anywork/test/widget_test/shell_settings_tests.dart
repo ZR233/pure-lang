@@ -4357,13 +4357,19 @@ void registerShellSettingsTests() {
       expect(find.textContaining('src/agent.rs'), findsOneWidget);
       expect(find.text('Changed files: src/agent.rs'), findsOneWidget);
       final cleanup = find.byKey(const ValueKey('worktree-cleanup-child-1'));
+      final childCleanup = find.byKey(
+        const ValueKey('worktree-cleanup-child-child-1'),
+      );
       expect(find.text('Clean up worktree and branch'), findsOneWidget);
-      await tester.ensureVisible(cleanup);
-      await tester.tap(cleanup);
+      expect(find.text('Child agent worktree'), findsOneWidget);
+      expect(cleanup, findsNothing);
+      await tester.ensureVisible(childCleanup);
+      await tester.tap(childCleanup);
       await tester.pump();
 
       expect(api.cleanedWorktree, (
-        childId: 'child-1',
+        ownerKind: 'child',
+        ownerThreadId: 'child-1',
         expectedLeaseRevision: 9,
       ));
     },
@@ -4824,6 +4830,7 @@ void registerShellSettingsTests() {
       await tester.pumpAndSettle();
       expect(find.text('恢复'), findsOneWidget);
       expect(find.text('pure-agent-child-2'), findsOneWidget);
+      expect(find.text('子智能体工作树'), findsOneWidget);
       expect(find.textContaining('基线提交 base-commit'), findsOneWidget);
       expect(find.textContaining('当前提交暂不可用'), findsOneWidget);
       expect(find.textContaining('变更文件'), findsNothing);
@@ -5457,7 +5464,8 @@ RecoveryStateSnapshot _worktreeRecoverySnapshot() {
         projectId: 'project-1',
         threadId: 'thread-1',
         worktree: WorktreeRecoveryPreview(
-          childId: 'child-1',
+          ownerKind: WorktreeOwnerKind.child,
+          ownerThreadId: 'child-1',
           leaseRevision: 9,
           state: 'preserved',
           repositoryRoot: '/repo',
@@ -5487,7 +5495,8 @@ RecoveryStateSnapshot _worktreeRecoverySnapshotWithoutHead() {
         projectId: 'project-1',
         threadId: 'thread-1',
         worktree: WorktreeRecoveryPreview(
-          childId: 'child-2',
+          ownerKind: WorktreeOwnerKind.child,
+          ownerThreadId: 'child-2',
           leaseRevision: 11,
           state: 'preserved',
           repositoryRoot: '/repo',

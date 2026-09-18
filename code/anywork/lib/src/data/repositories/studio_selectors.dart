@@ -30,6 +30,8 @@ typedef StartPageView = ({
   PermissionMode permissionMode,
   bool canSubmit,
   ThreadModeId mode,
+  ThreadWorkspaceMode workspaceMode,
+  bool worktreeAvailable,
   List<ProviderSettingsView> providers,
   List<RoleSettingsView> roles,
 });
@@ -137,6 +139,8 @@ AsyncValue<StartPageView> startPage(Ref ref) {
           permissionMode: state.permissionMode,
           canSubmit: healthy,
           mode: state.newThreadMode,
+          workspaceMode: state.newThreadWorkspaceMode,
+          worktreeAvailable: project?.sshAlias == null,
           providers: state.providers,
           roles: state.roles,
         );

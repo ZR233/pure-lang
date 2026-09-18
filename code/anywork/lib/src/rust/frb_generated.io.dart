@@ -1358,6 +1358,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  BridgeWorktreeOwner dco_decode_bridge_worktree_owner(dynamic raw);
+
+  @protected
   BridgeWorktreeRecoveryPreviewDto
   dco_decode_bridge_worktree_recovery_preview_dto(dynamic raw);
 
@@ -3453,6 +3456,11 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeWorkflowRuntimeSnapshot sse_decode_bridge_workflow_runtime_snapshot(
+    SseDeserializer deserializer,
+  );
+
+  @protected
+  BridgeWorktreeOwner sse_decode_bridge_worktree_owner(
     SseDeserializer deserializer,
   );
 
@@ -5974,6 +5982,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_workflow_runtime_snapshot(
     BridgeWorkflowRuntimeSnapshot self,
+    SseSerializer serializer,
+  );
+
+  @protected
+  void sse_encode_bridge_worktree_owner(
+    BridgeWorktreeOwner self,
     SseSerializer serializer,
   );
 

@@ -10,15 +10,22 @@ Studio 的 child Agent 使用与 root 相同的 Thread/Turn/Tool 框架。Profil
 模式；父 Agent 负责拆分工作、避免冲突、审查成果，并用普通 Git 显式整合 worktree child 的
 commit，不存在自动 merge 或 delivery gate。
 
-工作区有三种模式：
+根会话拥有会话级工作区模式 `ThreadWorkspaceMode`：`local`（默认）使用 Project 根目录，
+`worktree` 从 Project 的 Git 仓库 `HEAD` 派生独立 checkout 并在其中工作。它是 Thread 的
+canonical 产品事实，在创建会话时确定，之后不随配置或运行状态变化。它与 Profile 的 workspace
+mode 是两条语义轴：会话模式决定工作区在哪里，Profile 模式决定 child 相对会话工作区的隔离
+方式。根会话 worktree 的创建、绑定、恢复与清理见 12.5。
 
-- `unrestricted`：Profile 不增加额外项目隔离，root 是 Project root；项目内外仍遵循会话
-  Permission Mode。
-- `directory`：root 仍是 Project root；`writablePaths` 只限制 Pure 内置文件 mutation 工具在
-  项目内的写入。它不是 OS 沙箱，shell、Git 与 MCP 可以绕过，工具描述、child 固定上下文和
+child Profile 的工作区有三种模式，其中的 root 指该 child 所属根会话的工作区根：
+
+- `unrestricted`：Profile 不增加额外项目隔离，root 就是会话工作区根（根会话为 `worktree`
+  时即在该 worktree 内）；项目内外仍遵循会话 Permission Mode。
+- `directory`：root 仍是会话工作区根；`writablePaths` 只限制 Pure 内置文件 mutation 工具在
+  其中的写入。它不是 OS 沙箱，shell、Git 与 MCP 可以绕过，工具描述、child 固定上下文和
   GUI 必须共同提示该边界。
-- `worktree`：root 是独立 Git worktree，boundary 为 Confined，worktree 内全可写；主工作区
-  未提交内容不复制过去，成果不会自动合并。
+- `worktree`：root 是独立 Git worktree，boundary 为 Confined，worktree 内全可写；base 仍是
+  Project 仓库的 `HEAD`，不是父会话 worktree；主工作区未提交内容不复制过去，成果不会自动
+  合并。
 
 ## 12.2 用户 Profile 与系统预设
 
@@ -261,12 +268,40 @@ usage 报告，不承诺固定收益。阶段完成标准消费可复用的验�
 
 ## 12.5 worktree 生命周期
 
-本地和 SSH 后端都以 spawn 时解析的 `HEAD` 执行 `git worktree add -b`，禁用 hooks 和
-credential helper，最长 120 秒。路径为 `<repo>/.anywork/worktrees/<root-thread-id>/<child-id>`，
-分支使用 Pure-owned `pure-agent-*` 名称。非 Git 项目或无 HEAD 时类型化失败。
+本地和 SSH 后端都以创建时解析的 `HEAD` 执行 `git worktree add -b`，禁用 hooks 和
+credential helper，最长 120 秒。lease 记录归属：child 智能体使用
+`<repo>/.anywork/worktrees/<root-thread-id>/<child-id>` 与 Pure-owned `pure-agent-*` 分支；
+根会话自身工作区使用 `<repo>/.anywork/worktrees/<root-thread-id>/session` 与 Pure-owned
+`pure-session-*` 分支。身份校验按归属校验期望 leaf 与期望分支，仍拒绝任何非 Pure 分支。
+非 Git 项目或无 HEAD 时类型化失败。
 
-`studio_objects` 保存版本化 lease：`prepared | active | preserved | cleanupRequested |
-cleaned`，以及 repo、path、branch、base 与 revision。spawn 任一阶段失败都按
+根会话 worktree 在创建会话的命令内建立：先按 `HEAD` 解析仓库与 base、记录 `prepared` lease，
+再创建物理 worktree，随后转为 `active`，然后发布含 `workspaceMode` 的 Thread 目录事实，最后
+激活 owner 并把该路径绑定为会话工作区根。任一阶段失败都让命令失败、不发布 Thread，并按
+`NoSideEffects | MayHaveCreated` 收束；已创建资源保留现场，不用 `--force` 绕过 Git 锁或注册
+身份。崩溃可能留下已落库 lease 而没有 Thread 记录，启动对账把这类 lease 作为诊断保留。
+
+根会话激活只按 Thread 的 `workspaceMode` 与 durable lease 解析工作区：`local` 使用 Project
+根目录；`worktree` 必须存在 identity 匹配的 `active` lease，缺失、身份不符或已经清理都返回
+类型化失败并发布带 revision、branch/base/head 与 path 的 Recovery，不静默回落到主工作区。
+归档与关闭都不删除根会话 worktree。
+
+Recovery 的 worktree preview 与显式清理只作用于不再由活动 owner 使用的资源：保留
+（`preserved`）的 lease、没有已注册 Thread 的孤儿 lease、Thread 已归档后仍持有的 lease，以及
+身份或物理资源缺失、不匹配的现场。健康 `active`（以及创建中的 `prepared`）lease 不进入清理
+入口，也不显示为待清理项；显式清理命令必须在服务端复核同一前置条件，陈旧 GUI 卡片不能删除
+在用 worktree。创建会话失败当场收束为 `preserved` 的会话 worktree 必须立即发布带归属、状态、
+revision 与 preview 的 Recovery 条目，不依赖下次启动审计才可见；该条目覆盖同一 Thread 的旧
+诊断，不留下来源已保留却无处清理的资源。
+
+「创建中」与「崩溃遗留」以进程内显式标记区分：标记存续期间该 lease 既不发布也不可清理（即使
+owner Thread 记录尚未发布）；进程重启后标记消失，遗留 lease 按需要人工处置的资源处理。所有
+运行期把会话 worktree 收束为 `preserved` 的路径，包括创建阶段的失败收束与身份不符收束，都
+必须在返回错误前完成发布。
+
+`studio_objects` 保存版本化 lease：归属类型、owner Thread id、
+`prepared | active | preserved | cleanupRequested | cleaned`，以及 repo、path、branch、base
+与 revision。spawn 或创建会话的任一阶段失败都按
 `NoSideEffects | MayHaveCreated` 分类补偿 Thread、热资源、worktree 与 branch。启动恢复只按
 durable lease 对账；资源部分缺失或身份不匹配时保留现场并发布 Recovery issue，不盲删目录或
 非 Pure 分支。
@@ -278,9 +313,10 @@ preserve。关闭工具等待子孙 Thread、订阅与所选宿主资源处置�
 路径/分支复核。若工具执行仍是 pending task acknowledgement，须等待该任务的最终结果。清理
 失败保留关闭状态、所选 disposition 与可恢复错误，显式重试不能使已取消的会话重新执行。
 关闭不自动 commit、merge、cherry-pick 或修改主分支；父 Agent 应先审查 child commit、用
-普通 Git 显式整合，最终审查与验证通过后再请求 cleanup。已经 preserved 的 lease 在
-Agents/Recovery 中显示 revision、branch、base/head、dirty 与 changed-files 预览，并提供
-显式清理。物理 worktree 清理尊重 Git 锁与注册身份拒绝：注销失败且目录仍存在时，不继续
+普通 Git 显式整合，最终审查与验证通过后再请求 cleanup。已经 preserved 的 lease，不论归属
+child 智能体还是根会话，都在 Agents/Recovery 中显示 revision、branch、base/head、dirty 与
+changed-files 预览，并提供显式清理；两种归属共用同一清理入口，按归属标识区分。物理
+worktree 清理尊重 Git 锁与注册身份拒绝：注销失败且目录仍存在时，不继续
 绕过 Git 删除目录或分支；保留现场并返回实际错误，显式解除原因后可重试。
 
 ## 12.6 GUI

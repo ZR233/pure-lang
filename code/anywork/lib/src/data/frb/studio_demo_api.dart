@@ -890,9 +890,19 @@ class DemoStudioApi implements StudioApi {
 
   @override
   Future<void> cleanupPreservedWorktree({
-    required String childId,
+    required String ownerKind,
+    required String ownerThreadId,
     required int expectedLeaseRevision,
-  }) async {}
+  }) async {
+    if (ownerKind != WorktreeOwnerKind.session.id &&
+        ownerKind != WorktreeOwnerKind.child.id) {
+      throw ArgumentError.value(
+        ownerKind,
+        'ownerKind',
+        'must be session or child',
+      );
+    }
+  }
 
   @override
   Future<StudioProject> renameProject(String projectId, String name) async {
@@ -1010,14 +1020,33 @@ class DemoStudioApi implements StudioApi {
   Future<StartNewThreadResult> startNewThread(
     String projectId,
     StudioPromptInput input,
-    ThreadModeId mode,
-  ) async {
+    ThreadModeId mode, {
+    String? workspaceMode,
+  }) async {
     final current = await readStudioState();
     if (!current.projects.any((project) => project.id == projectId)) {
       throw StateError('unknown demo project $projectId');
     }
     if (input.text.trim().isEmpty && input.attachmentDraftIds.isEmpty) {
       throw ArgumentError.value(input.text, 'text', 'empty');
+    }
+    final requestedWorkspaceMode = switch (workspaceMode?.trim()) {
+      null || '' || 'local' => ThreadWorkspaceMode.local,
+      'worktree' => ThreadWorkspaceMode.worktree,
+      final other => throw ArgumentError.value(
+        other,
+        'workspaceMode',
+        'must be local or worktree',
+      ),
+    };
+    if (requestedWorkspaceMode.isWorktree &&
+        current.projects
+                .firstWhere((project) => project.id == projectId)
+                .sshAlias !=
+            null) {
+      throw StateError(
+        'workspaceMode worktree is unavailable for a remote project',
+      );
     }
     final now = DateTime.now();
     final provisionalTitle = _demoProvisionalThreadTitle(input.text);
@@ -1029,6 +1058,7 @@ class DemoStudioApi implements StudioApi {
       role: 'planner',
       createdAt: now,
       updatedAt: now,
+      workspaceMode: requestedWorkspaceMode,
     );
     _createdRootThreads.add(thread);
     _ensureWorkspaceFixture();

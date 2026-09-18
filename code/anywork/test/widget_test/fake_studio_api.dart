@@ -62,6 +62,7 @@ class _FakeStudioApi implements StudioApi {
   String? activatedProjectId;
   String? createdThreadProjectId;
   ThreadModeId? createdThreadMode;
+  String? createdThreadWorkspaceMode;
   String? newThreadPrompt;
   String? archivedThreadId;
   String? renamedThreadId;
@@ -147,7 +148,8 @@ class _FakeStudioApi implements StudioApi {
   int retryPersistenceCallCount = 0;
   Object? retryPersistenceError;
   PersistenceStateSnapshot? retryPersistenceState;
-  ({String childId, int expectedLeaseRevision})? cleanedWorktree;
+  ({String ownerKind, String ownerThreadId, int expectedLeaseRevision})?
+  cleanedWorktree;
   AgentProfileDraft? savedUserAgentProfileDraft;
 
   void emitGlobal(StudioBridgeEvent event) => _global.add(event);
@@ -255,11 +257,13 @@ class _FakeStudioApi implements StudioApi {
 
   @override
   Future<void> cleanupPreservedWorktree({
-    required String childId,
+    required String ownerKind,
+    required String ownerThreadId,
     required int expectedLeaseRevision,
   }) async {
     cleanedWorktree = (
-      childId: childId,
+      ownerKind: ownerKind,
+      ownerThreadId: ownerThreadId,
       expectedLeaseRevision: expectedLeaseRevision,
     );
   }
@@ -410,10 +414,12 @@ class _FakeStudioApi implements StudioApi {
   Future<StartNewThreadResult> startNewThread(
     String projectId,
     StudioPromptInput input,
-    ThreadModeId mode,
-  ) async {
+    ThreadModeId mode, {
+    String? workspaceMode,
+  }) async {
     createdThreadProjectId = projectId;
     createdThreadMode = mode;
+    createdThreadWorkspaceMode = workspaceMode;
     newThreadPrompt = input.text;
     submitPromptCount += 1;
     submittedPrompts.add((threadId: '<new>', prompt: input.text));
@@ -445,6 +451,7 @@ class _FakeStudioApi implements StudioApi {
         role: 'planner',
         createdAt: now,
         updatedAt: now,
+        workspaceMode: ThreadWorkspaceMode.fromId(workspaceMode ?? ''),
       );
       _currentState = _currentState.copyWith(
         threadDirectory: _currentState.threadDirectory.copyWith(

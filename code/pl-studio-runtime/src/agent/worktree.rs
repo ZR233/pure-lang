@@ -8,5 +8,7 @@ pub use backend::{
     LocalWorktreeBackend, WorktreeBackend, WorktreeCreateFailure, WorktreeCreateFailureDisposition,
     WorktreeError, WorktreeStatus,
 };
-pub use manager::{WorktreeCreateSpec, WorktreeHandle, WorktreeManager};
+pub use manager::{
+    WorktreeCreateSpec, WorktreeHandle, WorktreeManager, WorktreeOwnership, is_pure_branch,
+};
 pub use remote::RemoteWorktreeBackend;

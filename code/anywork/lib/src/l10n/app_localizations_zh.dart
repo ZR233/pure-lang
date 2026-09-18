@@ -99,6 +99,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get sidebarNewSession => '新建会话';
 
   @override
+  String get sidebarSessionWorktree => '会话工作树';
+
+  @override
   String get sidebarOpenProject => '打开项目';
 
   @override
@@ -381,6 +384,18 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get statusSessionModeLocked => '会话运行或工作流活动期间无法切换会话模式';
+
+  @override
+  String get composerWorkspaceModeLabel => '会话工作区';
+
+  @override
+  String get composerWorkspaceModeLocal => '本地目录';
+
+  @override
+  String get composerWorkspaceModeWorktree => '新建工作树';
+
+  @override
+  String get composerWorkspaceModeSshDisabled => '远端项目不提供工作树会话';
 
   @override
   String get statusPlannerModel => '计划者模型';
@@ -1655,6 +1670,12 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get settingsWorktreeCleanup => '显式清理工作树与分支';
+
+  @override
+  String get settingsWorktreeOwnerSession => '会话工作树';
+
+  @override
+  String get settingsWorktreeOwnerChild => '子智能体工作树';
 
   @override
   String get settingsAgentProfileAddTitle => '添加用户智能体配置';

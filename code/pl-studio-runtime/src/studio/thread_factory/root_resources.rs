@@ -42,13 +42,40 @@ impl StudioThreadFactory {
             .mode(&selected_mode)
             .ok_or_else(|| ThreadAssemblyError::Identity(thread.mode.to_string()))?;
         crate::mode::validate_thread_mode_model(Some(&mode), &route.model)?;
-        let project_path = project.clone();
-        let root = tokio::task::spawn_blocking(move || {
-            crate::studio::agent_host::workspace_preparation::resolved_project_root(&project_path)
+        // 会话工作区只能由 canonical workspace_mode 与 durable lease 解析；
+        // `worktree` 缺失、身份不符或已清理都显式失败，绝不回落到主工作区。
+        let workspace_mode = thread.workspace_mode;
+        let workspace_root_id = thread.root_thread_id.clone();
+        let project_copy = project.clone();
+        let worktrees = self.services.worktrees.clone();
+        let (root, canonical_project_root) = tokio::task::spawn_blocking(move || {
+            let session_root =
+                crate::studio::agent_host::workspace_preparation::root_session_workspace_root(
+                    &worktrees,
+                    workspace_mode,
+                    &workspace_root_id,
+                    &project_copy,
+                )?;
+            let project_root =
+                crate::studio::agent_host::workspace_preparation::resolved_project_root(
+                    &project_copy,
+                )?;
+            Ok::<_, crate::PureError>((session_root, project_root))
         })
-        .await??;
-        let workspace = ToolWorkspace::new(AgentWorkspace::local(&root))
-            .with_lsp_runtime(Some(self.services.lsp_runtime.clone()));
+        .await?
+        .map_err(|error| ThreadAssemblyError::Workspace {
+            thread_id: id.to_owned(),
+            reason: error.to_string(),
+        })?;
+        #[cfg(test)]
+        self.record_session_workspace_root_for_test(id, root.clone());
+        let workspace = ToolWorkspace::new(match workspace_mode {
+            pl_protocol::ThreadWorkspaceMode::Local => AgentWorkspace::local(&root),
+            pl_protocol::ThreadWorkspaceMode::Worktree => {
+                AgentWorkspace::worktree(&canonical_project_root, &root)
+            }
+        })
+        .with_lsp_runtime(Some(self.services.lsp_runtime.clone()));
         let store = FileResourceStore::new(
             self.services
                 .store

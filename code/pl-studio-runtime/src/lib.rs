@@ -69,8 +69,8 @@ pub use studio::{
     AttachmentRecord, PersistenceState, PersistenceStateSnapshot, ProductEventBus, ProjectRecord,
     ProviderUsageStateData, ProviderUsageStateSnapshot, SkillSearchResult, SkillsStateSnapshot,
     StudioDatabaseError, StudioHostKind, StudioRecoveryIssue, StudioRecoveryIssueAction,
-    StudioRecoveryIssueCategory, StudioRecoveryIssueScope, StudioRuntime,
-    StudioRuntimeLifecycleState, StudioRuntimeOptions, StudioRuntimeSnapshot,
+    StudioRecoveryIssueCategory, StudioRecoveryIssueScope, StudioRecoveryWorktreeOwner,
+    StudioRuntime, StudioRuntimeLifecycleState, StudioRuntimeOptions, StudioRuntimeSnapshot,
     StudioRuntimeStateKind, StudioStartNewThreadResponse, StudioStore, StudioThreadSubscription,
     StudioUpdateStateSnapshot, StudioWorktreeRecoveryPreview, ThreadRecord,
 };

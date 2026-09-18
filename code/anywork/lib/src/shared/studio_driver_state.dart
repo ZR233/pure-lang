@@ -15,6 +15,8 @@ abstract final class StudioDriverState {
   static String? _selectedProjectId;
   static String? _selectedThreadId;
   static ThreadModeId _newThreadMode = ThreadModeId.simple;
+  static ThreadWorkspaceMode _newThreadWorkspaceMode =
+      ThreadWorkspaceMode.local;
   static ComposerThreadState _newThreadComposer =
       const ComposerThreadState.idle();
   static int _settingsRevision = 0;
@@ -30,6 +32,7 @@ abstract final class StudioDriverState {
     _selectedThreadId = state.selectedThreadId;
     _currentRootThreads = List.unmodifiable(state.rootThreads);
     _newThreadMode = state.newThreadMode;
+    _newThreadWorkspaceMode = state.newThreadWorkspaceMode;
     _newThreadComposer = state.newThreadComposer;
     _settingsRevision = state.settingsRevision;
     _providers = List.unmodifiable(state.providers);
@@ -108,12 +111,17 @@ abstract final class StudioDriverState {
         'titles': {
           for (final thread in _currentRootThreads) thread.id: thread.title,
         },
+        'workspaceModes': {
+          for (final thread in _currentRootThreads)
+            thread.id: thread.workspaceMode.id,
+        },
       },
       'navigation': {
         'selectedProjectId': _selectedProjectId,
         'selectedThreadId': _selectedThreadId,
         'isStartPage': _selectedThreadId == null,
         'newThreadMode': _newThreadMode.name,
+        'newThreadWorkspaceMode': _newThreadWorkspaceMode.id,
         'newThreadComposer': {
           'draft': _newThreadComposer.draft,
           'phase': switch (_newThreadComposer) {

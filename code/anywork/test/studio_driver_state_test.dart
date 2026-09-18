@@ -37,19 +37,63 @@ void main() {
     });
     expect(snapshot['persistence'], containsPair('revision', 0));
   });
+
+  test('snapshot publishes the workspace-mode draft and per-thread modes', () {
+    StudioDriverState.publishState(
+      _studioState(
+        settingsRevision: 1,
+        projectId: 'project-1',
+        threads: [
+          StudioThread(
+            id: 'session-worktree',
+            projectId: 'project-1',
+            title: 'Worktree session',
+            mode: ThreadModeId.simple,
+            updatedAt: DateTime.fromMillisecondsSinceEpoch(1),
+            workspaceMode: ThreadWorkspaceMode.worktree,
+          ),
+          StudioThread(
+            id: 'session-local',
+            projectId: 'project-1',
+            title: 'Local session',
+            mode: ThreadModeId.simple,
+            updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+          ),
+        ],
+        workspaceModeDraft: ThreadWorkspaceMode.worktree,
+      ),
+    );
+
+    final snapshot =
+        jsonDecode(StudioDriverState.snapshotJson()) as Map<String, dynamic>;
+
+    final navigation = snapshot['navigation'] as Map<String, dynamic>;
+    expect(navigation['newThreadWorkspaceMode'], 'worktree');
+    final directory = snapshot['sidebarDirectory'] as Map<String, dynamic>;
+    expect(directory['workspaceModes'], {
+      'session-worktree': 'worktree',
+      'session-local': 'local',
+    });
+  });
 }
 
 StudioState _studioState({
   required int settingsRevision,
   List<RoleSettingsView> roles = const [],
+  String? projectId,
+  List<StudioThread> threads = const [],
+  ThreadWorkspaceMode workspaceModeDraft = ThreadWorkspaceMode.local,
 }) => StudioState(
   projectDirectory: ProjectDirectoryState(),
-  threadDirectory: const ThreadDirectoryWindow(),
+  threadDirectory: ThreadDirectoryWindow(threads: threads),
   agentDirectory: AgentDirectoryState(),
   settingsState: SettingsStateSnapshot(
     revision: settingsRevision,
     roles: roles,
   ),
+  newThreadWorkspaceModeByProject: projectId == null
+      ? const {}
+      : {projectId: workspaceModeDraft},
   recoveryState: RecoveryStateSnapshot(),
   mcpState: McpStateSnapshot(),
   lspState: LspStateSnapshot(),
@@ -59,6 +103,6 @@ StudioState _studioState({
     revision: 0,
     updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
   ),
-  selectedProjectId: null,
+  selectedProjectId: projectId,
   selectedThreadId: null,
 );

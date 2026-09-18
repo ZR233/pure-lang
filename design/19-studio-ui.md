@@ -29,6 +29,13 @@ idle、无 pending interaction 时可用；旧活动 run 由 runtime 归档，�
 snapshot 恢复 UI。Thread Mode 不出现在普通 Skills 设置和按需调用列表；两个内置模式不可
 删除或覆盖（Mode 体系见 [11](./11-thread-mode.md)）。
 
+起始页 composer 另外提供会话工作区选择：`local`（默认，使用 Project 目录）或 `worktree`
+（从 Project 的 Git 仓库 `HEAD` 新建独立工作树）。该选择属于所在项目的输入草稿，按项目隔离
+保存，并随首个 prompt 提交给创建命令。`worktree` 只在本地项目可用：SSH 项目禁用该选项并
+说明原因，本地非 Git 项目或无 `HEAD` 由提交时的类型化错误就地反馈，草稿与错误状态不清除。
+已建会话的工作区模式只读来自 canonical 目录事实，GUI 不推导、不本地改写，也不把选择当作
+第二份持久状态。
+
 Thread runtime 只向 GUI 暴露状态栏需要的通用 workflow 投影：mode、run、revision、lifecycle
 与当前阶段。未开始的图模式显示"未开始"；Simple 只显示 Mode。GUI 不提供完整 graph、
 history、展开详情或人工 transition，也不根据阶段 ID 推演动作；状态变更只来自 bridge
@@ -91,6 +98,10 @@ Thread tile 在悬停或键盘聚焦时提供 rename action，保存对话框提
 Thread 标题在悬停或键盘聚焦时显示 canonical name/title 的完整文本；截断只影响行内渲染，
 不改变提示内容。项目路径仍只作为展开布局的辅助信息；项目或 Thread 存在 recovery issue
 时，诊断详情优先于名称提示。
+
+侧栏会话行只读消费 Thread 的工作区模式：`worktree` 会话在标题旁显示工作树图标并提供跟随
+Studio locale 的说明文案，`local` 会话不显示该图标。图标只表达会话工作区种类，不承载第二份
+状态；分支、路径等物理细节仍在 recovery preview 与 Agents 预览中呈现。
 
 ## 19.7 视觉主题与布局
 

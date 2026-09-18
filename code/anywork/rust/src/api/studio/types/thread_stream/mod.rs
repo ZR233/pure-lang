@@ -87,6 +87,8 @@ pub struct BridgeThread {
     pub title: String,
     /// 完整 Thread Mode ID，例如 `mode.simple` 或 `mode.release`。
     pub mode: String,
+    /// Canonical 会话工作区模式：`local` 或 `worktree`。
+    pub workspace_mode: String,
     pub root_thread_id: String,
     pub parent_thread_id: Option<String>,
     pub role: String,

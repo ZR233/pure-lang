@@ -87,14 +87,28 @@ pub async fn save_user_agent_profile(
 }
 
 /// Explicitly removes one revision-matched preserved Pure worktree and branch.
+///
+/// `owner_kind` must match the durable lease ownership (`session` or `child`); a mismatch
+/// is rejected instead of falling back to the other source.
 pub async fn cleanup_preserved_worktree(
-    child_id: String,
+    owner_kind: String,
+    owner_thread_id: String,
     expected_lease_revision: u64,
 ) -> Result<(), BridgeError> {
     let bridge = active_bridge().await?;
+    let owner_kind =
+        match pl_studio_runtime::StudioRecoveryWorktreeOwner::from_label(owner_kind.trim()) {
+            Some(owner_kind) => owner_kind,
+            None => {
+                return Err(anyhow::anyhow!(
+                    "worktree cleanup requires ownerKind session or child, received {owner_kind:?}"
+                )
+                .into());
+            }
+        };
     bridge
         .studio
-        .cleanup_preserved_worktree(&child_id, expected_lease_revision)
+        .cleanup_preserved_worktree(owner_kind, &owner_thread_id, expected_lease_revision)
         .await?;
     Ok(())
 }
