@@ -155,8 +155,9 @@ OpenAI endpoint 默认开启 Responses hosted tools；覆盖自定义 `base_url`
 显式配置才能重新开启。产品 UI 从 catalog 的无密钥 descriptor 渲染预设和模型选项，不识别
 具体厂商 id。OpenAI、MiMo API、MiMo Token Plan、DeepSeek、Zhipu 与 Zhipu Coding Plan 都
 只是 catalog preset；显式 adapter 身份装配具体供应商客户端，两个 MiMo preset 共享同一
-catalog。当前不保留 Anthropic 占位：只有实现第二种协议族的 typed codec、能力模型与测试
-后，才可写入配置或 catalog。
+catalog，而 Zhipu（通用 Chat API）与 Zhipu Coding Plan（官方 OpenAI Response 协议端点）
+各引用与端点形态匹配的目录。当前不保留 Anthropic 占位：只有实现第二种协议族的
+typed codec、能力模型与测试后，才可写入配置或 catalog。
 
 canonical catalog 与自定义/附加模型使用同一个模型信息结构：slug、display_name、
 description、context_window、max_context_window、auto_compact_token_limit、

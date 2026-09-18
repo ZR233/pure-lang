@@ -4,6 +4,7 @@ use pl_model::completion::{
     CompletionRequest, CompletionResponse, CompletionTraceContext, ReasoningConfig,
     ReasoningSummary,
 };
+use pl_model::config::{ModelCatalogId, builtin_model_catalog};
 use pl_model::model::{default_models, zhipu_default_model_slugs};
 use pl_model::provider::ProviderEndpoint;
 use pl_model::runtime::{ModelInvocationContext, ModelRuntime, ModelSession};
@@ -153,4 +154,79 @@ async fn zhipu_streams_thinking_mode() {
         "enabled thinking should return reasoning_content"
     );
     assert!(counts.text > 0, "enabled stream should emit text deltas");
+}
+
+/// Coding Plan 的 OpenAI Response 协议端点冒烟：真实注册目录 + `reasoning.effort` wire。
+#[tokio::test]
+async fn zhipu_coding_plan_responses_smoke() {
+    let api_key = live_api_key();
+
+    let mut endpoint = ProviderEndpoint::zhipu_coding_plan(None);
+    endpoint.bearer_token = Some(api_key);
+    let model = builtin_model_catalog(&ModelCatalogId::new("zhipu-responses").unwrap())
+        .expect("registered coding plan catalog")
+        .models
+        .into_iter()
+        .find(|model| model.slug == "glm-5.3")
+        .expect("coding plan catalog contains glm-5.3");
+    assert_eq!(
+        model.binding.transport.protocol,
+        pl_model::provider::ProviderWireProtocol::Responses
+    );
+    let runtime = ModelRuntime::new(endpoint, model).unwrap();
+    let request = CompletionRequest::builder()
+        .instructions("请用简短中文回答。")
+        .messages(vec![user_message("请回答：3 + 4 等于几？")])
+        .tools(vec![pl_protocol::ToolSpec::function(
+            "add",
+            "计算两个整数的和",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "left": {"type": "integer"},
+                    "right": {"type": "integer"}
+                },
+                "required": ["left", "right"]
+            }),
+        )])
+        .max_tokens(256)
+        .reasoning(Some(ReasoningConfig {
+            effort: Some("low".to_string()),
+            summary: Some(ReasoningSummary::Disabled),
+        }))
+        .build();
+    let (event_tx, event_rx) = tokio::sync::broadcast::channel(4096);
+    let counter = tokio::spawn(collect_trace_delta_counts(event_rx));
+    let trace_sink = std::sync::Arc::new(pl_protocol::trace::InMemoryTraceEventSink::new(
+        "zhipu-live-session",
+        0,
+    ));
+    let response = runtime
+        .complete(
+            request,
+            ModelInvocationContext::new(ModelSession::default())
+                .with_events(event_tx)
+                .with_trace(
+                    CompletionTraceContext {
+                        session_id: "zhipu-live-session".to_string(),
+                        turn_id: "zhipu-live-turn".to_string(),
+                        inference_id: "zhipu-live-inference".to_string(),
+                    },
+                    trace_sink,
+                ),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("live coding plan Responses request failed: {error}"));
+    let counts = counter.await.unwrap();
+
+    let content = response.content.unwrap_or_default();
+    let called_add = response.tool_calls.iter().any(|call| call.name == "add");
+    assert!(
+        content.contains('7') || called_add,
+        "the answer must solve the prompt directly or through the add tool: {content:?} calls={}",
+        response.tool_calls.len()
+    );
+    if !called_add {
+        assert!(counts.text > 0, "responses stream should emit text deltas");
+    }
 }

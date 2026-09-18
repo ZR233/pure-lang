@@ -19,7 +19,7 @@ use crate::runtime::transport_policy::RESPONSES_WEBSOCKET_PROFILE_REVISION;
 // pl-protocol 类型在此精确重导出，消费方只需依赖 pl-model。
 pub use pl_protocol::HostedWebSearchDialect;
 
-pub const ZHIPU_CODING_PLAN_BASE_URL: &str = "https://open.bigmodel.cn/api/coding/paas/v4";
+pub const ZHIPU_CODING_PLAN_BASE_URL: &str = "https://open.bigmodel.cn/api/v1";
 pub(crate) const RESPONSES_WEBSOCKET_DIALECT: &str = "responses_websockets=2026-02-06";
 
 /// Provider 可提供的独立 Web Search 协议。

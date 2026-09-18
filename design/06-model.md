@@ -100,8 +100,10 @@ provider 配置解析（bundled catalog 加追加/显式模型），不从全局
 OpenAI-compatible 自定义模型必须显式提供完整 transport profile：Chat 模型只能声明
 ChatCompletions + HTTP；Responses 模型可以声明 Responses + HTTP，或同时支持 HTTP/WS 并指定默认
 模式。具体 base URL、headers、tool wire policy 与 endpoint 能力由 provider 提供。Zhipu Coding
-Plan 是 catalog preset，默认指向官方 coding 计划 endpoint 并引用智谱模型目录，不新增 runtime
-变体；MiMo API 与 Token Plan 同为两个 preset，共同引用一个 MiMo catalog。
+Plan 是 catalog preset，默认指向官方 Coding Plan 的 OpenAI Response 协议 endpoint
+（`https://open.bigmodel.cn/api/v1`）并引用独立的智谱 Responses 目录（GLM-5.3 与
+GLM-5.3-Flash），不新增 runtime 变体；通用 Zhipu preset 保持通用 API 的 Chat Completions
+endpoint 与目录。MiMo API 与 Token Plan 同为两个 preset，共同引用一个 MiMo catalog。
 
 ## 6.5 协议与 Transport
 
@@ -291,12 +293,14 @@ set 列表（嵌套 dot 路径 + 透传字符串值，如 `reasoning.effort`、`
 | DeepSeek | `low` / `high` / `max` | `reasoning_effort` = 值（`thinking.type = enabled` 作为 base body） | — |
 | 智谱普通 | `none` / `enabled` | `thinking.type` = 值 | — |
 | GLM-5.2 | `none` / `high` / `max` | `high`/`max`：`reasoning_effort` + `thinking.type = enabled` + `thinking.clear_thinking = false`；`none`：`thinking.type = disabled` | `none` 移除 `reasoning_effort` |
-| GLM-5.3 / GLM-5.3-Flash | `low` / `high` / `max` | 三档均为 `reasoning_effort` + `thinking.type = enabled` + `thinking.clear_thinking = false` | — |
+| GLM-5.3 / GLM-5.3-Flash（通用 Chat API） | `low` / `high` / `max` | 三档均为 `reasoning_effort` + `thinking.type = enabled` + `thinking.clear_thinking = false` | — |
+| GLM-5.3 / GLM-5.3-Flash（Coding Plan Responses） | `low` / `high` / `max` | `reasoning.effort` = 值 | — |
 | MiMo | `disabled` / `enabled` | `thinking.type` = 值 | — |
 
 GLM-5.2 的"一个选择联动多个字段"和"none 时移除字段"由 wire 的多条 set 与 remove 完整表达，
-无需协议层特判。GLM-5.3 系列始终启用思考，不提供禁用思考的 `none` 候选；effort 选择只改变
-`reasoning_effort` 值。
+无需协议层特判。GLM-5.3 系列始终启用思考，不提供禁用思考的 `none` 候选；通用 Chat API 的
+effort 选择只改变 `reasoning_effort` 值，Coding Plan 的 OpenAI Response 协议端点按官方映射只
+接受 `reasoning.effort`，不携带 thinking 字段。
 
 所有模型的候选必须按思考强度从弱到强声明，因此首项是该模型可用的最弱强度。内部摘要类请求
 （例如 Thread 自动命名）沿用 Explorer 路由的模型，并选择该数组首项，不复制 provider/model 或
@@ -310,13 +314,16 @@ GLM-5.2 的"一个选择联动多个字段"和"none 时移除字段"由 wire 的
 未知价格或包含长度分档、时段倍率及来源的费率定义，具体结构以公开 Rust 类型为准。
 
 内建家族预设按供应商与模型线划分（OpenAI 各线、DeepSeek 主线与 Flash 线、MiMo、智谱文本与
-各 GLM 线、智谱 vision），共享能力矩阵由各供应商能力构造复用；家族之间的差异集中在 effort
-候选值域、request profile 与 typed input capabilities。DeepSeek V4.1 Flash 使用经过官方文档
-确认的 Responses image profile，V4 Pro 只声明 text；两者共享 effort、thinking、上下文和
-Responses HTTP 规则，但计费独立保存在各自模型实例。GLM-5.3 与 GLM-5.2 复用同一条"启用思考"
-wire 组合，差异只在候选值域：GLM-5.3 为 `high` / `low` / `max`，且不提供禁用思考候选；
-GLM-5.3-Flash 复用 GLM-5.3 的始终思考 wire 与候选值域，并声明 image 的 local/data-url 与
-remote-url/snapshot 路线，不得从相邻视觉模型推断 video/file 能力。
+各 GLM 线、智谱 vision，以及 Coding Plan 的 GLM Responses 线），共享能力矩阵由各供应商能力
+构造复用；家族之间的差异集中在 effort 候选值域、request profile 与 typed input
+capabilities。DeepSeek V4.1 Flash 使用经过官方文档确认的 Responses image profile，V4 Pro 只
+声明 text；两者共享 effort、thinking、上下文和 Responses HTTP 规则，但计费独立保存在各自
+模型实例。通用 Chat API 的 GLM-5.3 与 GLM-5.2 复用同一条"启用思考" wire 组合，差异只在
+候选值域：GLM-5.3 为 `high` / `low` / `max`，且不提供禁用思考候选；GLM-5.3-Flash 复用
+GLM-5.3 的始终思考 wire 与候选值域，并声明 image 的 local/data-url 与 remote-url/snapshot
+路线，不得从相邻视觉模型推断 video/file 能力。Coding Plan 的 GLM Responses 家族与通用家族
+分开声明：transport 走 Responses HTTP，effort 只写 `reasoning.effort`，不携带 thinking
+base body；GLM-5.3-Flash 的 image 使用 Responses 的 `input_image` 路线。
 
 ## 6.10 Prompt 缓存
 

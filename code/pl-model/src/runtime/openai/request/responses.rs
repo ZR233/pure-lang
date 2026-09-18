@@ -492,6 +492,22 @@ mod tests {
     }
 
     #[test]
+    fn coding_plan_glm_responses_models_write_reasoning_effort() {
+        // Coding Plan 的 GLM 目录按官方 Responses 端点声明 transport；effort 透传
+        // `reasoning.effort`，与通用 Chat 目录的 thinking wire 不同。
+        for slug in ["glm-5.3", "glm-5.3-flash"] {
+            let model = crate::model::zhipu_responses_models()
+                .into_iter()
+                .find(|model| model.slug == slug)
+                .unwrap_or_else(|| panic!("coding plan catalog model missing: {slug}"));
+            let body = OpenAiProtocol::responses()
+                .build_request_body_with_model(&request_with_effort("max"), &model);
+            assert_eq!(body["model"], serde_json::json!(slug));
+            assert_eq!(body["reasoning"]["effort"], serde_json::json!("max"));
+        }
+    }
+
+    #[test]
     fn responses_body_maps_enabled_reasoning_summary_to_auto() {
         let model = bundled_model("gpt-5.5");
         let mut request = request_with_effort("medium");

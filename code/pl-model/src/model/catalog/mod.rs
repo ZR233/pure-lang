@@ -22,7 +22,9 @@ use crate::model::parameter::{ParameterWire, WireAssignment};
 pub use deepseek::deepseek_default_model_slugs;
 pub use mimo::mimo_default_model_slugs;
 pub use openai::openai_default_model_slugs;
-pub use zhipu::zhipu_default_model_slugs;
+pub use zhipu::{zhipu_default_model_slugs, zhipu_responses_default_model_slugs};
+
+pub(crate) use zhipu::responses_models as zhipu_responses_models;
 
 /// 内建默认模型目录；顺序固定为 DeepSeek → OpenAI → MiMo → Zhipu。
 pub fn default_models() -> Vec<ModelInfo> {

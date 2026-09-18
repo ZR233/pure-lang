@@ -13,6 +13,7 @@ use super::{ModelCatalogId, ProviderConfig, ProviderPresetId};
 use crate::model::{
     ModelInfo, ModelModality, deepseek_default_model_slugs, default_models,
     mimo_default_model_slugs, openai_default_model_slugs, zhipu_default_model_slugs,
+    zhipu_responses_default_model_slugs, zhipu_responses_models,
 };
 use crate::provider::{
     ProviderConnectionMode, ProviderEndpoint, ProviderServiceCapabilities, ProviderWireProtocol,
@@ -58,6 +59,7 @@ impl ProviderCatalogRegistry {
             model_catalog("openai", openai_default_model_slugs()),
             model_catalog("deepseek", deepseek_default_model_slugs()),
             model_catalog("zhipu", zhipu_default_model_slugs()),
+            zhipu_responses_catalog(),
             model_catalog("mimo", mimo_default_model_slugs()),
             model_catalog("openai-compatible", &[]),
         ]
@@ -97,9 +99,9 @@ impl ProviderCatalogRegistry {
                 "zhipu-coding-plan",
                 ProviderEndpoint::zhipu_coding_plan(None),
                 "glm-5.3",
-                "zhipu",
+                "zhipu-responses",
                 "ZAI_API_KEY",
-                "Zhipu Coding Plan endpoint.",
+                "Zhipu Coding Plan Responses API.",
                 "zhipu",
             ),
             preset(
@@ -258,6 +260,19 @@ fn model_catalog(id: &str, slugs: &[&str]) -> ModelCatalog {
         .collect();
     ModelCatalog {
         id: ModelCatalogId::new(id).expect("static model catalog id is valid"),
+        models,
+    }
+}
+
+/// Coding Plan 的 Responses 目录与通用 Chat 目录共用模型 slug，因此独立构造而不是按 slug 过滤。
+fn zhipu_responses_catalog() -> ModelCatalog {
+    let slugs = zhipu_responses_default_model_slugs();
+    let models = zhipu_responses_models()
+        .into_iter()
+        .filter(|model| slugs.contains(&model.slug.as_str()))
+        .collect();
+    ModelCatalog {
+        id: ModelCatalogId::new("zhipu-responses").expect("static model catalog id is valid"),
         models,
     }
 }
@@ -521,6 +536,53 @@ mod tests {
             deepseek.service_capabilities.web_search.hosted_dialect,
             "deepseek_responses"
         );
+    }
+
+    #[test]
+    fn coding_plan_preset_binds_the_responses_catalog_and_endpoint() {
+        let registry = ProviderCatalogRegistry::builtin();
+        registry.validate().unwrap();
+        let preset = registry
+            .presets
+            .iter()
+            .find(|preset| preset.id.as_str() == "zhipu-coding-plan")
+            .unwrap();
+        assert_eq!(
+            preset.provider.base_url,
+            crate::provider::ZHIPU_CODING_PLAN_BASE_URL
+        );
+        let catalog = registry
+            .model_catalog(&preset.model_catalog)
+            .unwrap()
+            .models
+            .iter()
+            .map(|model| (model.slug.as_str(), model.binding.transport.protocol))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            catalog,
+            vec![
+                ("glm-5.3", crate::provider::ProviderWireProtocol::Responses),
+                (
+                    "glm-5.3-flash",
+                    crate::provider::ProviderWireProtocol::Responses
+                ),
+            ]
+        );
+        // 通用 zhipu preset 保持 Chat Completions 目录，两种端点形态并存。
+        let chat = registry
+            .model_catalog(
+                &registry
+                    .presets
+                    .iter()
+                    .find(|preset| preset.id.as_str() == "zhipu")
+                    .unwrap()
+                    .model_catalog,
+            )
+            .unwrap();
+        assert!(chat.models.iter().all(|model| {
+            model.binding.transport.protocol
+                == crate::provider::ProviderWireProtocol::ChatCompletions
+        }));
     }
 
     #[test]

@@ -13,9 +13,10 @@ pub use capabilities::{
     PromptCacheModelCapabilities, ReasoningInterleaved, ReasoningInterleavedField,
     ToolCapabilities,
 };
+pub(crate) use catalog::zhipu_responses_models;
 pub use catalog::{
     deepseek_default_model_slugs, default_models, mimo_default_model_slugs,
-    openai_default_model_slugs, zhipu_default_model_slugs,
+    openai_default_model_slugs, zhipu_default_model_slugs, zhipu_responses_default_model_slugs,
 };
 pub use family::ModelFamily;
 pub use info::{

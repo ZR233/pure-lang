@@ -1,4 +1,5 @@
-//! Zhipu GLM 内建模型目录（Chat Completions HTTP，effort 联动 thinking wire）。
+//! Zhipu GLM 内建模型目录：通用 API 走 Chat Completions HTTP（effort 联动 thinking wire），
+//! Coding Plan 的 OpenAI Response 协议端点走 Responses HTTP（effort 透传 `reasoning.effort`）。
 
 use crate::model::pricing::{ModelPricing, TokenPriceTier};
 use std::collections::BTreeMap;
@@ -29,6 +30,12 @@ const ZHIPU_GLM_DEFAULT_MODEL_SLUGS: &[&str] = &[
 
 pub fn zhipu_default_model_slugs() -> &'static [&'static str] {
     ZHIPU_GLM_DEFAULT_MODEL_SLUGS
+}
+
+const ZHIPU_GLM_RESPONSES_DEFAULT_MODEL_SLUGS: &[&str] = &["glm-5.3", "glm-5.3-flash"];
+
+pub fn zhipu_responses_default_model_slugs() -> &'static [&'static str] {
+    ZHIPU_GLM_RESPONSES_DEFAULT_MODEL_SLUGS
 }
 
 pub(super) fn models() -> Vec<ModelInfo> {
@@ -516,5 +523,92 @@ fn zhipu_capabilities(input: Vec<ModelInputCapability>) -> ModelCapabilities {
             field: ReasoningInterleavedField::ReasoningContent,
         }),
         prompt_cache: PromptCacheModelCapabilities::default(),
+    }
+}
+
+// ---- Coding Plan Responses 目录 ----
+
+/// Coding Plan 的 OpenAI Response 协议端点当前按官方文档只承载 GLM-5.3 与 GLM-5.3-Flash。
+pub(crate) fn responses_models() -> Vec<ModelInfo> {
+    let glm53 = zhipu_responses_text_family();
+    let glm53_flash = zhipu_responses_flash_family();
+    vec![
+        glm53.instantiate(ModelInstanceSpec {
+            slug: "glm-5.3",
+            display_name: "GLM-5.3",
+            description:
+                "Zhipu flagship model for complex coding and agent work with always-on thinking.",
+            context_window: 1_000_000,
+            max_context_window: 1_000_000,
+            max_output_tokens: Some(128_000),
+            pricing: zhipu_pricing("glm-5.3"),
+        }),
+        glm53_flash.instantiate(ModelInstanceSpec {
+            slug: "glm-5.3-flash",
+            display_name: "GLM-5.3-Flash",
+            description:
+                "Zhipu native multimodal coding model with always-on thinking and image input.",
+            context_window: 1_000_000,
+            max_context_window: 1_000_000,
+            max_output_tokens: Some(128_000),
+            pricing: zhipu_pricing("glm-5.3-flash"),
+        }),
+    ]
+}
+
+fn zhipu_responses_text_family() -> ModelFamily {
+    zhipu_responses_family("zhipu-glm53-responses", zhipu_text_capabilities(), false)
+}
+
+fn zhipu_responses_flash_family() -> ModelFamily {
+    zhipu_responses_family(
+        "zhipu-glm53-flash-responses",
+        zhipu_vision_capabilities(),
+        true,
+    )
+}
+
+/// Coding Plan Responses 家族骨架：Responses HTTP + `reasoning.effort` wire。
+fn zhipu_responses_family(
+    id: &'static str,
+    capabilities: ModelCapabilities,
+    image: bool,
+) -> ModelFamily {
+    let mut capabilities = capabilities;
+    capabilities.interleaved = None;
+    let mut request_profile = ModelRequestProfile::responses();
+    if image {
+        request_profile = request_profile.with_image_media(
+            MediaWireFormat::ResponsesInputImage,
+            super::MediaSendOrder::RemoteUrlFirst,
+        );
+    }
+    ModelFamily {
+        id,
+        capabilities,
+        truncation_mode: TruncationMode::Tokens,
+        truncation_limit: 10_000,
+        parameters: vec![zhipu_responses_effort_parameter()],
+        transport: ModelTransportProfile::responses_http(),
+        request_profile,
+        base_instructions: String::new(),
+    }
+}
+
+/// Responses 形态 effort：候选值按弱到强 low/high/max，透传到 `reasoning.effort`。
+fn zhipu_responses_effort_parameter() -> ModelParameter {
+    ModelParameter {
+        name: "effort".to_string(),
+        label: None,
+        candidates: vec!["low".to_string(), "high".to_string(), "max".to_string()],
+        wire: ["low", "high", "max"]
+            .into_iter()
+            .map(|value| {
+                (
+                    value.to_string(),
+                    super::wire_set_one("reasoning.effort", value),
+                )
+            })
+            .collect(),
     }
 }
