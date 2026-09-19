@@ -82,7 +82,7 @@ void registerVsCodeLauncherTests() {
   }
 
   /// 构造一个已选中根会话的 shell 状态；会话工作区地址独立于项目路径传入。
-  StudioState _vscodeState({
+  StudioState vscodeState({
     required StudioProject project,
     required String workspacePath,
     ThreadWorkspaceMode workspaceMode = ThreadWorkspaceMode.local,
@@ -99,7 +99,7 @@ void registerVsCodeLauncherTests() {
     return _emptyState().copyWith(
       projectDirectory: ProjectDirectoryState.fromState(
         state: _testReady([project]),
-          ),
+      ),
       threadDirectory: ThreadDirectoryWindow(threads: [thread]),
       workspacesByThread: {
         thread.id: ThreadWorkspace(
@@ -108,7 +108,7 @@ void registerVsCodeLauncherTests() {
           items: const [],
           interactions: const [],
           runtime: _testRuntime(),
-      ),
+        ),
       },
       workspaceUiByThread: {
         thread.id: const WorkspaceUiState(
@@ -121,9 +121,9 @@ void registerVsCodeLauncherTests() {
   }
 
   testWidgets('session overflow opens a local workspace in VS Code', (
-      tester,
+    tester,
   ) async {
-    final state = _vscodeState(
+    final state = vscodeState(
       project: const StudioProject(
         id: 'project-1',
         name: 'project',
@@ -153,7 +153,7 @@ void registerVsCodeLauncherTests() {
   testWidgets(
     'session overflow opens the worktree address, not the project path',
     (tester) async {
-      final state = _vscodeState(
+      final state = vscodeState(
         project: const StudioProject(
           id: 'project-1',
           name: 'project',
@@ -181,7 +181,7 @@ void registerVsCodeLauncherTests() {
   testWidgets('session overflow opens a remote workspace through the alias', (
     tester,
   ) async {
-    final state = _vscodeState(
+    final state = vscodeState(
       project: const StudioProject(
         id: 'project-1',
         name: 'project',
@@ -219,7 +219,7 @@ void registerVsCodeLauncherTests() {
   testWidgets(
     'session overflow opens a remote worktree address through the alias',
     (tester) async {
-      final state = _vscodeState(
+      final state = vscodeState(
         project: const StudioProject(
           id: 'project-1',
           name: 'project',
@@ -259,7 +259,7 @@ void registerVsCodeLauncherTests() {
   );
 
   testWidgets('session overflow reports a missing ssh alias', (tester) async {
-    final state = _vscodeState(
+    final state = vscodeState(
       project: const StudioProject(
         id: 'project-1',
         name: 'project',

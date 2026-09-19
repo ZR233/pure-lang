@@ -79,7 +79,7 @@ void main() {
     expect(directory['workspacePaths'], {
       'session-worktree': 'worktrees/session-worktree',
       'session-local': '.',
-  });
+    });
   });
 }
 

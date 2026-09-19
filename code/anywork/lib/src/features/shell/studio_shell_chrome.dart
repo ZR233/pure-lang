@@ -141,8 +141,8 @@ class _SessionOverflowMenu extends ConsumerWidget {
           child: _SessionOpenTarget(
             label: context.l10n.sessionOpenInVsCode,
             target: thread.workspacePath,
+          ),
         ),
-      ),
       ],
       builder: (context, controller, child) => IconButton(
         key: StudioDriverKeys.sessionOverflow,
@@ -198,9 +198,9 @@ class _SessionOverflowMenu extends ConsumerWidget {
   }
 }
 
-/// 会话「在 VS Code 中打开工作区」菜单项：主标签下定以辅助行展示打开目标
-/// （会话工作区地址）。长路径截断为单行，完整内容保留给悬停与读屏，辅助行不
-/// 改变打开目标语义。
+/// 会话「在 VS Code 中打开工作区」菜单项：主标签下方以辅助行展示打开目标
+/// （会话工作区地址）。长路径截断为单行，完整内容可由悬停与读屏获取，辅助行
+/// 不改变打开目标语义。
 class _SessionOpenTarget extends StatelessWidget {
   const _SessionOpenTarget({required this.label, required this.target});
 

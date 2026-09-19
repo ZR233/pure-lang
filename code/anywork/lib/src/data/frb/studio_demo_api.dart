@@ -509,7 +509,11 @@ class DemoStudioApi implements StudioApi {
   }
 
   /// Driver 模式的历史会话填充：保证触底分页有足够数据。
-  void _ensurePageFillThreads(String projectId, String projectPath, DateTime now) {
+  void _ensurePageFillThreads(
+    String projectId,
+    String projectPath,
+    DateTime now,
+  ) {
     if (directoryPageFillCount <= 0 || _pageFillThreads.isNotEmpty) {
       return;
     }
@@ -1058,8 +1062,7 @@ class DemoStudioApi implements StudioApi {
       createdAt: now,
       updatedAt: now,
       workspaceMode: requestedWorkspaceMode,
-      workspacePath:
-          requestedWorkspaceMode == ThreadWorkspaceMode.worktree
+      workspacePath: requestedWorkspaceMode == ThreadWorkspaceMode.worktree
           ? _demoWorktreePath(projectPath, threadId)
           : projectPath,
     );

@@ -118,7 +118,7 @@ abstract final class StudioDriverState {
         'workspacePaths': {
           for (final thread in _currentRootThreads)
             thread.id: thread.workspacePath,
-      },
+        },
       },
       'navigation': {
         'selectedProjectId': _selectedProjectId,
