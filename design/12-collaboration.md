@@ -314,6 +314,11 @@ handle。任一阶段失败都让命令失败、不发布 Thread，并按 `NoSid
 运行期不再存在「Thread 已归档后仍长期持有 worktree」的状态，只在清理失败时保留 `preserved`
 现场。
 
+恢复必须让 worktree 会话重新落到可用状态，不能只翻转归档标记后留下无法激活的会话：已清理或
+缺失的 lease 在原路径重建；归档清理失败留下的 `preserved` 现场在身份匹配且物理工作树仍然
+存在时重新绑定为 `active`（并退掉对应的 Recovery 条目），否则同样在原路径重建；两条路都失败
+时返回类型化失败并保留现场。恢复完成后该会话的 lease 必须是 `active`，否则恢复本身失败。
+
 Recovery 的 worktree preview 与显式清理只作用于不再由活动 owner 使用的资源：保留
 （`preserved`）的 lease、没有已注册 Thread 的孤儿 lease、归档清理失败而保留的现场，以及
 身份或物理资源缺失、不匹配的现场。健康 `active`（以及创建中的 `prepared`）lease 不进入清理
