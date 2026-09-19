@@ -351,16 +351,40 @@ impl StudioRuntime {
         // 行为不变。
         if root.workspace_mode == pl_protocol::ThreadWorkspaceMode::Worktree {
             use crate::studio::agent_host::worktree_lease::WorktreeLeaseState;
-            let needs_rebuild = match self.agent_facility.worktrees.get(&thread_id) {
-                Some(lease) => lease.state == WorktreeLeaseState::Cleaned,
-                None => true,
-            };
-            if needs_rebuild {
                 let project = projects
                     .iter()
                     .find(|project| project.id == root.project_id)
                     .cloned()
                     .context("selected Project not found")?;
+            let existing = self.agent_facility.worktrees.get(&thread_id);
+            // `preserved` 是归档清理失败的现场：物理工作树仍在且身份匹配时重新绑定为
+            // `active` 并退掉该 Thread 对应的 Recovery 条目；否则按同一确定性路径重建
+            // （design/12 §12.5）。
+            let rebindable = match &existing {
+                Some(lease) if lease.state == WorktreeLeaseState::Preserved => {
+                    let manager =
+                        crate::studio::agent_host::workspace_preparation::manager_from_lease(
+                            &self.ssh_manager,
+                            lease,
+                        );
+                    let handle = crate::agent::worktree::WorktreeHandle {
+                        path: std::path::PathBuf::from(&lease.path),
+                        branch: lease.branch.clone(),
+                        base_commit: lease.base_commit.clone(),
+                    };
+                    lease.validate_identity().is_ok()
+                        && matches!(manager.preview_existing(&handle).await, Ok(Some(_)))
+                }
+                _ => false,
+            };
+            if rebindable {
+                let mut lease = existing.context("preserved session worktree lease disappeared")?;
+                lease.transition(WorktreeLeaseState::Active);
+                self.agent_facility
+                    .worktrees
+                    .record(lease)
+                    .map_err(|error| error.context("rebind the preserved session worktree as active"))?;
+            } else if !matches!(&existing, Some(lease) if lease.state == WorktreeLeaseState::Active) {
                 self.agent_facility.worktrees.mark_creating(&thread_id);
                 let created =
                     crate::studio::agent_host::workspace_preparation::create_root_session_worktree(
@@ -394,6 +418,18 @@ impl StudioRuntime {
                 }
                 self.agent_facility.worktrees.clear_creating(&thread_id);
             }
+            // 恢复结束时 worktree 会话必须落到可激活的 `active` lease，否则恢复失败并保留现场。
+            anyhow::ensure!(
+                self.agent_facility
+                    .worktrees
+                    .get(&thread_id)
+                    .is_some_and(|lease| lease.state == WorktreeLeaseState::Active),
+                "restored session worktree lease is not active"
+            );
+            // 会话工作区已落到可用状态：退掉该 Thread 的 Recovery 条目，否则后续激活会被
+            // 已归档遗留的阻断项拒绝（复用既有退订入口）。
+            let issues = self.recovery.retire_thread(&thread_id);
+            self.agent_facility.product_events.emit_recovery_state(issues);
         }
         let mut tree = self
             .store
@@ -1834,6 +1870,168 @@ mod tests {
             &["worktree", "unlock", path.to_str().unwrap()],
         )
         .await;
+        runtime.shutdown().await;
+    }
+
+    /// 归档清理失败（`worktree lock`）留下 `preserved` 现场后，恢复必须重新绑定为 `active`、
+    /// 退掉 Recovery 条目，并让会话重新可激活（审查复现链的回归用例）。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn restoring_after_a_failed_archive_cleanup_rebinds_the_preserved_worktree() {
+        use crate::studio::agent_host::worktree_lease::WorktreeLeaseState;
+        let home = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let (runtime, project) = worktree_runtime(&home, &workspace).await;
+        let (thread_id, path) = seeded_worktree_session(&runtime, &project).await;
+        git_command(
+            workspace.path(),
+            &["worktree", "lock", path.to_str().unwrap()],
+        )
+        .await;
+
+        runtime
+            .archive_thread(thread_id.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            runtime.agent_facility.worktrees.get(&thread_id).unwrap().state,
+            WorktreeLeaseState::Preserved
+        );
+        assert!(
+            runtime
+                .recovery_issues()
+                .iter()
+                .any(|issue| issue.worktree.is_some())
+        );
+
+        // 修复前该路径会成功返回却留下不可激活的会话；修复后必须落到 `active`。
+        let restored = runtime.restore_thread(thread_id.clone()).await.unwrap();
+        assert_eq!(restored.workspace_path, path.to_string_lossy());
+        assert_eq!(
+            runtime.agent_facility.worktrees.get(&thread_id).unwrap().state,
+            WorktreeLeaseState::Active
+        );
+        assert!(
+            runtime
+                .recovery_issues()
+                .iter()
+                .all(|issue| !(issue.worktree.is_some()
+                    && issue.thread_id.as_deref() == Some(thread_id.as_str()))),
+            "恢复必须退掉该 Thread 的 worktree Recovery 条目"
+        );
+        let owner = runtime.ensure_thread_owner(&thread_id).await.unwrap();
+        assert_ne!(
+            owner.snapshot().lifecycle,
+            pl_core::thread::ThreadLifecycle::Closed
+        );
+        git_command(
+            workspace.path(),
+            &["worktree", "unlock", path.to_str().unwrap()],
+        )
+        .await;
+        runtime.shutdown().await;
+    }
+
+    /// `preserved` 但物理工作树已缺失：恢复在原确定性路径重建并激活。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn restoring_a_preserved_worktree_with_missing_path_rebuilds_at_the_same_path() {
+        use crate::studio::agent_host::worktree_lease::WorktreeLeaseState;
+        let home = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let (runtime, project) = worktree_runtime(&home, &workspace).await;
+        let (thread_id, path) = seeded_worktree_session(&runtime, &project).await;
+        git_command(
+            workspace.path(),
+            &["worktree", "lock", path.to_str().unwrap()],
+        )
+        .await;
+        runtime
+            .archive_thread(thread_id.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            runtime.agent_facility.worktrees.get(&thread_id).unwrap().state,
+            WorktreeLeaseState::Preserved
+        );
+        // 清掉物理现场与 Pure-owned 分支，但保留 durable `preserved` lease。
+        git_command(
+            workspace.path(),
+            &["worktree", "unlock", path.to_str().unwrap()],
+        )
+        .await;
+        git_command(
+            workspace.path(),
+            &["worktree", "remove", "--force", path.to_str().unwrap()],
+        )
+        .await;
+        git_command(
+            workspace.path(),
+            &["branch", "-D", &format!("pure-session-{thread_id}")],
+        )
+        .await;
+        assert!(!path.exists());
+
+        let restored = runtime.restore_thread(thread_id.clone()).await.unwrap();
+        assert_eq!(restored.workspace_path, path.to_string_lossy());
+        assert_eq!(
+            runtime.agent_facility.worktrees.get(&thread_id).unwrap().state,
+            WorktreeLeaseState::Active
+        );
+        assert!(path.exists(), "恢复必须在原确定性路径重建工作树");
+        let owner = runtime.ensure_thread_owner(&thread_id).await.unwrap();
+        assert_ne!(
+            owner.snapshot().lifecycle,
+            pl_core::thread::ThreadLifecycle::Closed
+        );
+        runtime.shutdown().await;
+    }
+
+    /// 恢复无法把 `preserved` 现场落到 `active`（身份/物理与仓库都不可用）时返回类型化失败，
+    /// 保留 `preserved` 现场，不静默留下不可激活的会话。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn restoring_an_unrebindable_preserved_worktree_fails_and_keeps_the_scene() {
+        use crate::studio::agent_host::worktree_lease::WorktreeLeaseState;
+        let home = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let (runtime, project) = worktree_runtime(&home, &workspace).await;
+        let (thread_id, path) = seeded_worktree_session(&runtime, &project).await;
+        git_command(
+            workspace.path(),
+            &["worktree", "lock", path.to_str().unwrap()],
+        )
+        .await;
+        runtime
+            .archive_thread(thread_id.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            runtime.agent_facility.worktrees.get(&thread_id).unwrap().state,
+            WorktreeLeaseState::Preserved
+        );
+        // 物理现场缺失（无法重新绑定），同时破坏仓库解析（无法重建）。
+        git_command(
+            workspace.path(),
+            &["worktree", "unlock", path.to_str().unwrap()],
+        )
+        .await;
+        git_command(
+            workspace.path(),
+            &["worktree", "remove", "--force", path.to_str().unwrap()],
+        )
+        .await;
+        std::fs::remove_dir_all(workspace.path().join(".git")).unwrap();
+
+        assert!(
+            runtime.restore_thread(thread_id.clone()).await.is_err(),
+            "无法落到 active 时必须返回类型化失败"
+        );
+        assert_eq!(
+            runtime.agent_facility.worktrees.get(&thread_id).unwrap().state,
+            WorktreeLeaseState::Preserved,
+            "失败必须保留 preserved 现场"
+        );
         runtime.shutdown().await;
     }
 
