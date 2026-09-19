@@ -25,7 +25,15 @@
   },
   "sidebarCloseProject": "Close project",
   "sidebarArchiveSession": "Archive session",
-  "sidebarArchiveSessionFailed": "Could not archive this session. It may still be running.",
+  "sidebarArchiveSessionFailed": "Could not archive this session.",
+  "sidebarArchiveSessionBusy": "Could not archive this session. It may still be running.",
+  "sidebarArchiveSessionFailedReason": "Could not archive this session: {reason} (diagnostic ID: {correlationId})",
+  "@sidebarArchiveSessionFailedReason": {
+    "placeholders": {
+      "reason": {"type": "String"},
+      "correlationId": {"type": "String"}
+    }
+  },
   "sidebarArchiveSessionConfirmTitle": "Archive session",
   "sidebarArchiveSessionConfirmBody": "Archiving ends any running work, deletes this session tree's worktree along with any uncommitted or unmerged content, then moves the session out of the list. Continue?",
   "sidebarArchiveSessionConfirmAction": "Archive",

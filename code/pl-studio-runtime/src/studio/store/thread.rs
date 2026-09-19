@@ -94,8 +94,8 @@ impl StudioStore {
         Ok(records)
     }
 
-    /// Thread 树 activation 同批装载相邻 root，用于归档后的选择回退。
-    pub async fn list_root_threads_for_activation(
+    /// Archive selection reads only directory facts, not historical journals.
+    pub async fn list_root_threads_for_archive(
         &self,
         root_thread_id: &str,
     ) -> Result<Vec<ThreadRecord>> {
@@ -106,11 +106,22 @@ impl StudioStore {
         else {
             return Ok(Vec::new());
         };
-        self.list_root_threads(&root.project_id).await
+        let roots = thread::Entity::find()
+            .filter(thread::Column::ProjectId.eq(root.project_id))
+            .filter(thread::Column::Archived.eq(0))
+            .filter(thread::Column::ParentThreadId.is_null())
+            .order_by_desc(thread::Column::UpdatedAt)
+            .order_by_desc(thread::Column::Id)
+            .all(&self.db)
+            .await?;
+        roots.into_iter().map(thread_record).collect()
     }
 
-    /// 一棵 Thread 树的全部未归档成员（按 root_thread_id 直查，不扫全项目）。
-    pub async fn list_threads_for_root(&self, root_thread_id: &str) -> Result<Vec<ThreadRecord>> {
+    /// Archive scope includes every active descendant without replaying its journal.
+    pub async fn list_threads_for_archive(
+        &self,
+        root_thread_id: &str,
+    ) -> Result<Vec<ThreadRecord>> {
         use entities::thread;
         let threads = thread::Entity::find()
             .filter(thread::Column::RootThreadId.eq(root_thread_id))
@@ -119,9 +130,15 @@ impl StudioStore {
             .order_by_asc(thread::Column::Id)
             .all(&self.db)
             .await?;
+        threads.into_iter().map(thread_record).collect()
+    }
+
+    /// Runtime observation needs replayed status; archiving uses the directory-only variant.
+    pub async fn list_threads_for_root(&self, root_thread_id: &str) -> Result<Vec<ThreadRecord>> {
+        let threads = self.list_threads_for_archive(root_thread_id).await?;
         let mut records = Vec::with_capacity(threads.len());
         for thread in threads {
-            records.push(self.with_session_status(thread_record(thread)?).await?);
+            records.push(self.with_session_status(thread).await?);
         }
         Ok(records)
     }

@@ -283,9 +283,6 @@ impl StudioRuntime {
         let _pins = self
             .residency
             .pin_many(thread_tree.iter().map(|thread| thread.id.clone()));
-        for candidate in &thread_tree {
-            let _ = self.ensure_thread_owner(&candidate.id).await?;
-        }
         let root_index = roots
             .iter()
             .position(|candidate| candidate.id == thread_id)
@@ -615,8 +612,8 @@ impl StudioRuntime {
         root_thread_id: &str,
     ) -> Result<Option<(ThreadRecord, Vec<ThreadRecord>, Vec<ThreadRecord>)>> {
         let (mut roots, mut tree) = tokio::try_join!(
-            self.store.list_root_threads_for_activation(root_thread_id),
-            self.store.list_threads_for_root(root_thread_id),
+            self.store.list_root_threads_for_archive(root_thread_id),
+            self.store.list_threads_for_archive(root_thread_id),
         )?;
         for hot in self
             .agent_facility
@@ -710,7 +707,7 @@ impl StudioRuntime {
     async fn end_thread_tree_work(&self, thread_ids: &[String]) -> Result<()> {
         for thread_id in thread_ids {
             let Some(thread) = self.threads.thread(thread_id) else {
-                // 未被激活的成员不可能在运行工作，与 `thread_is_busy` 的冷读语义一致。
+                // Cold history has no active work and must not be activated for archiving.
                 continue;
             };
             match thread.interrupt_turn(None).await {
@@ -723,6 +720,9 @@ impl StudioRuntime {
         loop {
             let mut still_busy = None;
             for thread_id in thread_ids {
+                if self.threads.thread(thread_id).is_none() {
+                    continue;
+                }
                 self.discard_pending_inputs(thread_id).await?;
                 if still_busy.is_none() && self.thread_is_busy(thread_id).await? {
                     still_busy = Some(thread_id.clone());
@@ -788,7 +788,7 @@ mod tests {
         ModelSession, PreparedModelCall,
     };
     use pl_core::thread::input::{InputDriverOptions, InputState, ThreadInput};
-    use pl_core::thread::{ThreadHandle, ThreadLifecycle, TurnState};
+    use pl_core::thread::{ThreadHandle, ThreadLifecycle, TurnState, cold::ColdStoreHandle};
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -906,6 +906,81 @@ mod tests {
         })
         .await
         .expect("the session must settle to idle");
+    }
+
+    #[tokio::test]
+    async fn archiving_cold_history_does_not_require_child_activation() {
+        use crate::studio::store::directory::RegisteredChildThread;
+        let (_home, _workspace, runtime, root_id) =
+            runtime_with_thread_without_optional_tools().await;
+        let root = runtime.read_owned_thread(&root_id).await.unwrap();
+        let child_id = format!("{root_id}-historical-child");
+        runtime
+            .agent_facility
+            .product_events
+            .register_child_thread(RegisteredChildThread {
+                id: child_id.clone(),
+                parent_thread_id: root_id.clone(),
+                root_thread_id: root_id.clone(),
+                agent_path: child_id.clone(),
+                project_id: root.project_id,
+                mode: root.mode,
+                workspace_mode: root.workspace_mode,
+                workspace_path: root.workspace_path,
+                role: "retired-profile".into(),
+                title: "Historical child".into(),
+            })
+            .await
+            .unwrap();
+        let historical = ThreadHandle::start(
+            child_id.clone(),
+            DynModelSession::new(CooperativeCancelSession),
+        )
+        .unwrap();
+        historical
+            .attach_storage(ColdStoreHandle::new(runtime.store.sessions().clone()))
+            .await
+            .unwrap();
+        historical.close().await.unwrap();
+        let original_history = runtime
+            .store
+            .sessions()
+            .read_thread_journal(&child_id)
+            .await
+            .unwrap()
+            .iter()
+            .map(|commit| commit.encode().unwrap())
+            .collect::<Vec<_>>();
+        assert!(!original_history.is_empty());
+        let writer = runtime.persistence_repository().await.unwrap();
+        writer.flush().await.unwrap();
+        assert!(runtime.threads.thread(&child_id).is_none());
+
+        let archived = runtime
+            .archive_thread(root_id.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(archived.removed_thread_ids.contains(&child_id));
+        assert!(runtime.read_thread(&root_id).await.unwrap().archived);
+        assert!(runtime.read_thread(&child_id).await.unwrap().archived);
+        assert_eq!(
+            runtime
+                .store
+                .sessions()
+                .read_thread_journal(&child_id)
+                .await
+                .unwrap()
+                .iter()
+                .map(|commit| commit.encode().unwrap())
+                .collect::<Vec<_>>(),
+            original_history
+        );
+
+        let restored = runtime.restore_thread(root_id.clone()).await.unwrap();
+        assert_eq!(restored.id, root_id);
+        assert!(!runtime.read_thread(&child_id).await.unwrap().archived);
+        runtime.shutdown().await;
     }
 
     /// 运行中的会话可以直接结束并归档：中断当前 Turn 后收束为取消终态，而不是失败。

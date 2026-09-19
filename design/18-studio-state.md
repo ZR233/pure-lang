@@ -25,7 +25,8 @@ ThreadDirectoryChanged、AgentDirectoryChanged、ModeCatalogChanged、ThreadRunt
 等。Dart reducer 拒绝旧 revision，并可用一次全量 snapshot 从 stream lag 恢复；它不自行
 推导 workflow transition。一次目录命令可以同时改变 Project 与 Thread，但每个实际变化的
 领域最多发布一次事件；空 delta 不得提升 revision 或发布空事件。冷记录进入驻留/归档命令
-的内存索引属于 owner 准备步骤，不单独形成产品事实或广播，最终业务 mutation 才通过
+的内存索引属于 owner 准备步骤，不单独形成产品事实或广播。归档只装载目录，不重放冷历史
+或激活冷 owner；最终业务 mutation 才通过
 directory command 发布 canonical delta。
 
 ## 18.3 Activation

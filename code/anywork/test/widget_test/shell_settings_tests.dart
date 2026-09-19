@@ -382,7 +382,12 @@ void registerShellSettingsTests() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     final api = _FakeStudioApi(_emptyState())
-      ..archiveThreadError = StateError('Thread became busy');
+      ..archiveThreadError = const StudioFailure(
+        code: StudioFailureCode.busy,
+        message: 'The session could not be ended before archiving',
+        retryable: true,
+        correlationId: 'busy-1',
+      );
     await tester.pumpWidget(
       ProviderScope(
         overrides: [studioApiProvider.overrideWithValue(api)],
@@ -401,6 +406,47 @@ void registerShellSettingsTests() {
     expect(api.archiveThreadCallCount, 1);
     expect(
       find.text('Could not archive this session. It may still be running.'),
+      findsOneWidget,
+    );
+    expect(find.byKey(StudioDriverKeys.threadRow('session-1')), findsOneWidget);
+  });
+
+  testWidgets('sidebar archive shows a redacted failure and diagnostic ID', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final api = _FakeStudioApi(_emptyState())
+      ..archiveThreadError = const StudioFailure(
+        code: StudioFailureCode.internal,
+        message: 'An internal Studio error occurred',
+        retryable: false,
+        correlationId: 'studio-123',
+      );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [studioApiProvider.overrideWithValue(api)],
+        child: _localizedApp(home: const StudioShell()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('thread-menu-session-1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(StudioDriverKeys.archiveThread('session-1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(StudioDriverKeys.archiveThreadConfirm));
+    await tester.pumpAndSettle();
+
+    expect(api.archiveThreadCallCount, 1);
+    expect(
+      find.text(
+        'Could not archive this session: An internal Studio error occurred '
+        '(diagnostic ID: studio-123)',
+      ),
       findsOneWidget,
     );
     expect(find.byKey(StudioDriverKeys.threadRow('session-1')), findsOneWidget);

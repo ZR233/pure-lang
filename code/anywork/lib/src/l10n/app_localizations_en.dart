@@ -70,8 +70,19 @@ class AppLocalizationsEn extends AppLocalizations {
   String get sidebarArchiveSession => 'Archive session';
 
   @override
-  String get sidebarArchiveSessionFailed =>
+  String get sidebarArchiveSessionFailed => 'Could not archive this session.';
+
+  @override
+  String get sidebarArchiveSessionBusy =>
       'Could not archive this session. It may still be running.';
+
+  @override
+  String sidebarArchiveSessionFailedReason(
+    String reason,
+    String correlationId,
+  ) {
+    return 'Could not archive this session: $reason (diagnostic ID: $correlationId)';
+  }
 
   @override
   String get sidebarArchiveSessionConfirmTitle => 'Archive session';

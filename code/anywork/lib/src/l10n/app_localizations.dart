@@ -215,8 +215,20 @@ abstract class AppLocalizations {
   /// No description provided for @sidebarArchiveSessionFailed.
   ///
   /// In en, this message translates to:
-  /// **'Could not archive this session. It may still be running.'**
+  /// **'Could not archive this session.'**
   String get sidebarArchiveSessionFailed;
+
+  /// No description provided for @sidebarArchiveSessionBusy.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not archive this session. It may still be running.'**
+  String get sidebarArchiveSessionBusy;
+
+  /// No description provided for @sidebarArchiveSessionFailedReason.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not archive this session: {reason} (diagnostic ID: {correlationId})'**
+  String sidebarArchiveSessionFailedReason(String reason, String correlationId);
 
   /// No description provided for @sidebarArchiveSessionConfirmTitle.
   ///

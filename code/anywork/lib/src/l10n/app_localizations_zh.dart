@@ -69,7 +69,18 @@ class AppLocalizationsZh extends AppLocalizations {
   String get sidebarArchiveSession => '归档会话';
 
   @override
-  String get sidebarArchiveSessionFailed => '无法归档该会话，它可能仍在运行。';
+  String get sidebarArchiveSessionFailed => '无法归档该会话。';
+
+  @override
+  String get sidebarArchiveSessionBusy => '无法归档该会话，它可能仍在运行。';
+
+  @override
+  String sidebarArchiveSessionFailedReason(
+    String reason,
+    String correlationId,
+  ) {
+    return '无法归档该会话：$reason（诊断编号：$correlationId）';
+  }
 
   @override
   String get sidebarArchiveSessionConfirmTitle => '归档会话';

@@ -312,11 +312,17 @@ Future<void> _archiveThreadFromSidebar(
   if (confirmed != true || !context.mounted) return;
   try {
     await ref.read(studioControllerProvider.notifier).archiveThread(threadId);
-  } on Object {
+  } on Object catch (error) {
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(context.l10n.sidebarArchiveSessionFailed)),
-    );
+    final message = switch (error) {
+      StudioFailure(code: StudioFailureCode.busy) =>
+        context.l10n.sidebarArchiveSessionBusy,
+      StudioFailure(:final message, :final correlationId) =>
+        context.l10n.sidebarArchiveSessionFailedReason(message, correlationId),
+      _ => context.l10n.sidebarArchiveSessionFailed,
+    };
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 }
 
