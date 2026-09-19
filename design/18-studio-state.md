@@ -17,8 +17,8 @@ owner。进程运行期间 Project、Thread、Agent、Workflow、Recovery 和服
 StudioState 聚合 projectDirectory、threadDirectory、agentDirectory、modeCatalog、settings、
 recovery、MCP/LSP、provider usage 与 updater。Thread workspace 单独包含 timeline、pending
 Interaction、ThreadRuntimeView 和 workflow 投影；不存在 taskDirectory。Thread 目录条目携带
-会话工作区模式（`local | worktree`），只读投影为侧栏与会话展示的 canonical 事实，GUI 不推导
-也不本地改写。
+会话工作区模式（`local | worktree`）与会话工作区地址 `workspacePath`，只读投影为侧栏与会话
+展示的 canonical 事实，GUI 不推导、不本地改写，也不按模式分别取 Project 路径或工作树路径。
 
 Product event 携带完整领域 snapshot 或明确 revision：ProjectDirectoryChanged、
 ThreadDirectoryChanged、AgentDirectoryChanged、ModeCatalogChanged、ThreadRuntimeChanged
@@ -159,9 +159,11 @@ commit 的投影、目录保存及计费保存完成。观察者更新产品目�
 ## 18.9 顶栏操作与 VS Code 打开
 
 会话顶栏 actions 区（与智能体切换器、费用 chip 同级）提供「...」更多菜单。菜单项当前
-只有「在 VS Code 中打开工作区」：本地项目打开本机目录，远端项目经 Remote-SSH 打开远端
-canonical 目录，菜单项辅助行展示打开目标。入口仅在探测到 VS Code 安装且当前会话存在
-所属项目时渲染；探测失败或无项目时菜单为空，整个「...」入口不出现，不显示空占位。
+只有「在 VS Code 中打开工作区」：本地打开该会话的工作区地址，远端项目经 Remote-SSH 打开
+同一地址的远端形态，菜单项辅助行展示打开目标。打开目标只由会话工作区地址决定，不按
+`workspace_mode` 分别取 Project 路径或工作树路径，GUI 不推导工作树布局。入口仅在探测到
+VS Code 安装且当前会话存在所属项目时渲染；探测失败或无项目时菜单为空，整个「...」入口
+不出现，不显示空占位。
 
 打开通过系统 URL 协议完成，不派生 `code` CLI 子进程：本地使用
 `vscode://file/<绝对路径>/`（尾斜杠表示文件夹，Windows 盘符形如 `vscode://file/c:/x/y/`，

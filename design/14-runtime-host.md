@@ -137,7 +137,8 @@ commit，准备失败或准入前取消不消费。明确输入、后台消息�
 旧 executor 或自动重放副作用。
 
 订阅使用同一快照水位和只读日志句柄；执行 owner 关闭后仍可读取最终事实。归档等待整棵
-Thread 树关闭和保存成功。SQLite writer 的失败与未保存事实必须可观察；目录 writer 只保存
+Thread 树关闭、保存成功与工作树清理收束（成功，或回落 `preserved` 并发布诊断）。SQLite
+writer 的失败与未保存事实必须可观察；目录 writer 只保存
 产品关联，不代理 Thread commit。
 
 ## 14.7 交互与业务状态的宿主侧

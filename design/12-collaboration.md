@@ -16,6 +16,13 @@ canonical 产品事实，在创建会话时确定，之后不随配置或运行�
 mode 是两条语义轴：会话模式决定工作区在哪里，Profile 模式决定 child 相对会话工作区的隔离
 方式。根会话 worktree 的创建、绑定、恢复与清理见 12.5。
 
+会话对外只有一个 canonical 工作区地址 `workspace_path`，与 `workspace_mode` 同层、在创建
+会话时写定、之后只读：`local` 会话的地址是 canonical Project 目录，`worktree` 会话的地址
+是该会话的工作树路径。`workspace_mode` 只是地址的类型标记；侧栏、会话顶栏与 GUI 状态不按
+模式分别取路径，也不自行推导或拼接工作树布局。子线程继承所属根会话的地址与模式。地址与
+durable lease 的职责边界见 12.5，产品投影见 [18](./18-studio-state.md) §18.2，持久化与迁移
+见 [17](./17-studio-storage.md) §17.1。
+
 child Profile 的工作区有三种模式，其中的 root 指该 child 所属根会话的工作区根：
 
 - `unrestricted`：Profile 不增加额外项目隔离，root 就是会话工作区根（根会话为 `worktree`
@@ -294,10 +301,21 @@ handle。任一阶段失败都让命令失败、不发布 Thread，并按 `NoSid
 根会话激活只按 Thread 的 `workspaceMode` 与 durable lease 解析工作区：`local` 使用 Project
 根目录；`worktree` 必须存在 identity 匹配的 `active` lease，缺失、身份不符或已经清理都返回
 类型化失败并发布带 revision、branch/base/head 与 path 的 Recovery，不静默回落到主工作区。
-归档与关闭都不删除根会话 worktree。
+归档清理该会话树在 worktree 模式下拥有的物理工作树：会话自身 lease 与树内 child lease 都按
+`cleanupRequested → discard → cleaned` 收束，Pure-owned 分支一并删除，身份校验规则不变；
+任一步失败回落 `preserved` 并发布 Recovery，归档本身仍完成，不静默留下既不确定又无处处置
+的资源。归档因此是破坏性动作：工作树中未提交的改动与未整合的提交一并删除，确认入口见
+[concepts/project-sidebar.md](./concepts/project-sidebar.md)。
+
+非归档的关闭路径不删除会话自身 worktree；child worktree 仍按关闭路径的 disposition 处置。
+
+归档不改变 Thread 身份：恢复把 `archived` 翻转回去，并在原路径重建已清理的工作树——会话自身
+与树内 child 各按同一归属重新派生路径并准备 lease——使会话地址在归档与恢复之间保持稳定。
+运行期不再存在「Thread 已归档后仍长期持有 worktree」的状态，只在清理失败时保留 `preserved`
+现场。
 
 Recovery 的 worktree preview 与显式清理只作用于不再由活动 owner 使用的资源：保留
-（`preserved`）的 lease、没有已注册 Thread 的孤儿 lease、Thread 已归档后仍持有的 lease，以及
+（`preserved`）的 lease、没有已注册 Thread 的孤儿 lease、归档清理失败而保留的现场，以及
 身份或物理资源缺失、不匹配的现场。健康 `active`（以及创建中的 `prepared`）lease 不进入清理
 入口，也不显示为待清理项；显式清理命令必须在服务端复核同一前置条件，陈旧 GUI 卡片不能删除
 在用 worktree。创建会话失败当场收束为 `preserved` 的会话 worktree 必须立即发布带归属、状态、

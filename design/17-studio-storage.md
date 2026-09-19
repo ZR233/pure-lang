@@ -24,6 +24,12 @@ Thread id，两类归属共用同一状态机、存储与显式清理入口。Th
 `workspace_mode`（`local | worktree`）：它是产品事实，lease 是物理资源 ownership，两者职责
 不同；没有 lease 不代表会话回到 `local`，也不允许由 GUI 或目录查询推导。
 
+Thread 目录事实还保存会话级工作区地址 `workspace_path`：`local` 行是 canonical Project
+目录，`worktree` 行是该会话工作树路径；它在创建会话时写定、之后只读，子线程继承所属根会话
+的地址。地址是投影给 GUI 的会话事实，不是第二份 ownership：`worktree` 行的地址由同一归属
+派生（见 [12](./12-collaboration.md) §12.5），物理创建、身份校验与清理仍只消费 durable
+lease。
+
 ## 17.2 checkpoint 与分页
 
 活动 Thread owner 是唯一事实源。write-behind queue 接收已冻结编码的不可变 commit；worker
@@ -69,8 +75,8 @@ Thread 冷激活先校验目标及待激活祖先的身份、归属与未归档�
 启动恢复处理进程 lease、Agent session snapshot、不可用项目路径和 durable worktree
 lease。worktree 部分缺失或身份不匹配时保留现场并发布带 revision、branch/base/head、
 dirty/changed-files 的 Recovery preview；显式 cleanup 才能删除。preview 与显式 cleanup 只
-面向需要人工处置的 lease：`preserved`、没有已注册 Thread 的孤儿 lease、Thread 已归档后仍
-持有的 lease，或身份与物理资源缺失、不匹配的现场；由活动（未归档）Thread 持有的 `active`
+面向需要人工处置的 lease：`preserved`、没有已注册 Thread 的孤儿 lease、归档清理失败而保留
+的现场，或身份与物理资源缺失、不匹配的现场；由活动（未归档）Thread 持有的 `active`
 lease 不是清理候选，cleanup 命令在服务端复合同一前置条件后才执行删除。运行期收束为
 `preserved` 的会话 worktree 与启动审计使用同一发布与清理路径，不要求等到下次启动才可见。
 运行期仍处于创建中的 lease 由进程内标记豁免发布与清理；崩溃遗留（标记随进程消失）仍按需要
@@ -108,6 +114,11 @@ v20→v21 是在位产品迁移，在持有数据根独占运行锁的启动协�
 重写为 `ssh_alias` 并删除旧表（契约明细见 [22](./22-ssh-remote.md)）。两步都幂等可重试，
 文件写入与别名分配在提交前执行外键与指纹校验；旧 lease 解码器只服务这次迁移，不成为运行时
 兼容入口，会话工作区模式不参与会话库升级，也不因 schema 变化被清空。
+
+v21→v22 是同一在位迁移路径：为 `threads` 增加 `workspace_path` 列并回填既有行——`local` 行
+取所属 project 的 `path`，`worktree` 行取该 root thread durable lease 的 `path`，lease 缺失
+时回退所属 project 的 `path`；不以默认值或清空代替转换，迁移幂等可重试，不删除 Thread 行、
+会话关联事实或 lease。
 
 迁移验证覆盖相邻及跨版本升级、拆库、引用与附件保全、重复启动、中途失败和重启恢复，
 以及未来版本、损坏输入、缺失转换、备份或提交失败时原数据保持可恢复。配置和凭据关联
