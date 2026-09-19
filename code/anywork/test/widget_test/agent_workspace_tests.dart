@@ -200,6 +200,7 @@ StudioState _rootAndChildState() {
     agentPath: 'root/reviewer',
     role: 'reviewer',
     status: ThreadStatusView.running,
+    workspacePath: root.workspacePath,
   );
   final rootWorkspace = ThreadWorkspace(
     thread: root,

@@ -222,6 +222,7 @@ StudioThread _threadFromFrb(frb.BridgeThread value) {
     title: value.title,
     mode: ThreadModeId.fromId(value.mode),
     workspaceMode: ThreadWorkspaceMode.fromId(value.workspaceMode),
+    workspacePath: value.workspacePath,
     createdAt: _dateFromUnix(value.createdAt),
     updatedAt: _dateFromUnix(value.updatedAt),
     parentThreadId: value.parentThreadId,

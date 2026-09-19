@@ -89,6 +89,8 @@ pub struct BridgeThread {
     pub mode: String,
     /// Canonical 会话工作区模式：`local` 或 `worktree`。
     pub workspace_mode: String,
+    /// Canonical 会话工作区地址；`local` 为 Project 目录，`worktree` 为工作树路径。
+    pub workspace_path: String,
     pub root_thread_id: String,
     pub parent_thread_id: Option<String>,
     pub role: String,

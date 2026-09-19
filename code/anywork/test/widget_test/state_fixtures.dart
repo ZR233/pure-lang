@@ -195,6 +195,7 @@ StudioState _emptyState() {
     title: 'Session',
     mode: ThreadModeId.simple,
     updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+    workspacePath: project.path,
   );
   return _studioStateFixture(
     projects: const [project],
@@ -226,6 +227,9 @@ StudioState _twoProjectState({
   ],
   StudioTurnState? turnState,
 }) {
+  final projectPaths = {
+    for (final project in projects) project.id: project.path,
+  };
   final threads = [
     if (projects.any((project) => project.id == 'project-a'))
       StudioThread(
@@ -234,6 +238,7 @@ StudioState _twoProjectState({
         title: 'Session A',
         mode: ThreadModeId.simple,
         updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+        workspacePath: projectPaths['project-a'] ?? '',
       ),
     if (projects.any((project) => project.id == 'project-b'))
       StudioThread(
@@ -242,6 +247,7 @@ StudioState _twoProjectState({
         title: 'Session B',
         mode: ThreadModeId.task,
         updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+        workspacePath: projectPaths['project-b'] ?? '',
       ),
   ];
   final selectedThreadId = selectedProjectId == 'project-b'
@@ -303,6 +309,7 @@ StudioState _workspaceModeState() {
     mode: ThreadModeId.simple,
     updatedAt: DateTime.fromMillisecondsSinceEpoch(2),
     workspaceMode: ThreadWorkspaceMode.worktree,
+    workspacePath: 'worktrees/session-worktree',
   );
   final local = StudioThread(
     id: 'session-local',
@@ -310,6 +317,7 @@ StudioState _workspaceModeState() {
     title: 'Local session',
     mode: ThreadModeId.simple,
     updatedAt: DateTime.fromMillisecondsSinceEpoch(1),
+    workspacePath: '.',
   );
   ThreadWorkspace workspace(StudioThread thread) => ThreadWorkspace(
     thread: thread,

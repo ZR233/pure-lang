@@ -78,7 +78,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get sidebarArchiveSessionConfirmBody =>
-      'Archiving ends any running work and moves this session out of the list. Continue?';
+      'Archiving ends any running work, deletes this session tree\'s worktree along with any uncommitted or unmerged content, then moves the session out of the list. Continue?';
 
   @override
   String get sidebarArchiveSessionConfirmAction => 'Archive';

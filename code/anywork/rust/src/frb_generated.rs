@@ -6691,6 +6691,7 @@ impl SseDecode for crate::api::studio::types::thread_stream::BridgeThread {
         let mut var_title = <String>::sse_decode(deserializer);
         let mut var_mode = <String>::sse_decode(deserializer);
         let mut var_workspaceMode = <String>::sse_decode(deserializer);
+        let mut var_workspacePath = <String>::sse_decode(deserializer);
         let mut var_rootThreadId = <String>::sse_decode(deserializer);
         let mut var_parentThreadId = <Option<String>>::sse_decode(deserializer);
         let mut var_role = <String>::sse_decode(deserializer);
@@ -6708,6 +6709,7 @@ impl SseDecode for crate::api::studio::types::thread_stream::BridgeThread {
             title: var_title,
             mode: var_mode,
             workspace_mode: var_workspaceMode,
+            workspace_path: var_workspacePath,
             root_thread_id: var_rootThreadId,
             parent_thread_id: var_parentThreadId,
             role: var_role,
@@ -14390,6 +14392,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::studio::types::thread_stream:
             self.title.into_into_dart().into_dart(),
             self.mode.into_into_dart().into_dart(),
             self.workspace_mode.into_into_dart().into_dart(),
+            self.workspace_path.into_into_dart().into_dart(),
             self.root_thread_id.into_into_dart().into_dart(),
             self.parent_thread_id.into_into_dart().into_dart(),
             self.role.into_into_dart().into_dart(),
@@ -20310,6 +20313,7 @@ impl SseEncode for crate::api::studio::types::thread_stream::BridgeThread {
         <String>::sse_encode(self.title, serializer);
         <String>::sse_encode(self.mode, serializer);
         <String>::sse_encode(self.workspace_mode, serializer);
+        <String>::sse_encode(self.workspace_path, serializer);
         <String>::sse_encode(self.root_thread_id, serializer);
         <Option<String>>::sse_encode(self.parent_thread_id, serializer);
         <String>::sse_encode(self.role, serializer);

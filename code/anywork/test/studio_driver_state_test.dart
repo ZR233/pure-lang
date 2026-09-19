@@ -51,6 +51,7 @@ void main() {
             mode: ThreadModeId.simple,
             updatedAt: DateTime.fromMillisecondsSinceEpoch(1),
             workspaceMode: ThreadWorkspaceMode.worktree,
+            workspacePath: 'worktrees/session-worktree',
           ),
           StudioThread(
             id: 'session-local',
@@ -58,6 +59,7 @@ void main() {
             title: 'Local session',
             mode: ThreadModeId.simple,
             updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+            workspacePath: '.',
           ),
         ],
         workspaceModeDraft: ThreadWorkspaceMode.worktree,
@@ -74,6 +76,10 @@ void main() {
       'session-worktree': 'worktree',
       'session-local': 'local',
     });
+    expect(directory['workspacePaths'], {
+      'session-worktree': 'worktrees/session-worktree',
+      'session-local': '.',
+  });
   });
 }
 

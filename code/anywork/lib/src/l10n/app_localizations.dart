@@ -227,7 +227,7 @@ abstract class AppLocalizations {
   /// No description provided for @sidebarArchiveSessionConfirmBody.
   ///
   /// In en, this message translates to:
-  /// **'Archiving ends any running work and moves this session out of the list. Continue?'**
+  /// **'Archiving ends any running work, deletes this session tree\'s worktree along with any uncommitted or unmerged content, then moves the session out of the list. Continue?'**
   String get sidebarArchiveSessionConfirmBody;
 
   /// No description provided for @sidebarArchiveSessionConfirmAction.

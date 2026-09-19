@@ -27,7 +27,7 @@
   "sidebarArchiveSession": "归档会话",
   "sidebarArchiveSessionFailed": "无法归档该会话，它可能仍在运行。",
   "sidebarArchiveSessionConfirmTitle": "归档会话",
-  "sidebarArchiveSessionConfirmBody": "归档会先结束该会话正在运行的工作，并将其从列表中移除。是否继续？",
+  "sidebarArchiveSessionConfirmBody": "归档会先结束该会话正在运行的工作，并删除该会话树的工作树及其未提交、未整合的内容，然后将其从列表中移除。是否继续？",
   "sidebarArchiveSessionConfirmAction": "归档",
   "sidebarRenameSession": "重命名会话",
   "sidebarRenameSessionTitle": "重命名会话",

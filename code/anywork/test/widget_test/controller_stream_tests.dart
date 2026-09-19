@@ -667,6 +667,7 @@ void registerControllerStreamTests() {
       title: 'Older session',
       mode: ThreadModeId.simple,
       updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+      workspacePath: '.',
     );
     api.directoryPages['opaque-dir'] = ThreadDirectoryPage(
       threads: [older],
@@ -784,6 +785,7 @@ void registerControllerStreamTests() {
       parentThreadId: 'session-1',
       rootThreadId: 'session-1',
       updatedAt: DateTime.now(),
+      workspacePath: '.',
     );
     api.emitGlobal(
       _threadDirectoryChangedEvent(projectId: 'project-1', threads: [other]),
@@ -843,6 +845,7 @@ void registerControllerStreamTests() {
                 title: 'Other',
                 mode: ThreadModeId.simple,
                 updatedAt: DateTime.now(),
+                workspacePath: '.',
               ),
             ],
           ),
@@ -888,6 +891,7 @@ void registerControllerStreamTests() {
             title: 'Late directory entry',
             mode: ThreadModeId.simple,
             updatedAt: DateTime.now(),
+            workspacePath: '.',
           ),
         ],
       ),
@@ -932,6 +936,7 @@ void registerControllerStreamTests() {
         title: 'New Session',
         mode: ThreadModeId.simple,
         updatedAt: DateTime.now(),
+        workspacePath: '.',
       );
       final api = _FakeStudioApi(initial)
         ..createThreadState = initial.copyWith(
@@ -971,6 +976,7 @@ void registerControllerStreamTests() {
         title: 'Outside page',
         mode: ThreadModeId.simple,
         updatedAt: DateTime.fromMillisecondsSinceEpoch(-1),
+        workspacePath: '.',
       );
       final api = _FakeStudioApi(initial)
         ..archiveThreadResult = ArchiveThreadResult(
@@ -1135,6 +1141,7 @@ void registerControllerStreamTests() {
       title: 'New Session',
       mode: ThreadModeId.simple,
       updatedAt: DateTime.now(),
+      workspacePath: '.',
     );
     final gate = Completer<SubmitPromptReceipt>();
     final api = _FakeStudioApi(initial)
@@ -1181,6 +1188,7 @@ void registerControllerStreamTests() {
         title: 'Second',
         mode: ThreadModeId.simple,
         updatedAt: DateTime.fromMillisecondsSinceEpoch(-1),
+        workspacePath: '.',
       );
       final state = initial.copyWith(
         threadDirectory: ThreadDirectoryWindow(

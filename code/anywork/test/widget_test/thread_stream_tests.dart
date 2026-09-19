@@ -154,6 +154,7 @@ void registerThreadStreamTests() {
             title: 'Thread 1',
             mode: ThreadModeId.simple,
             updatedAt: now,
+            workspacePath: 'one',
           ),
           StudioThread(
             id: 'session-2',
@@ -161,6 +162,7 @@ void registerThreadStreamTests() {
             title: 'Thread 2',
             mode: ThreadModeId.task,
             updatedAt: now,
+            workspacePath: 'two',
           ),
         ],
       ),

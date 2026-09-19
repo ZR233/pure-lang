@@ -80,6 +80,7 @@ abstract final class StudioDriverKeys {
   static const sessionCost = ValueKey<String>('session-cost');
   static const sessionOverflow = ValueKey<String>('session-overflow');
   static const sessionOpenInVsCode = ValueKey<String>('session-open-in-vscode');
+  static const sessionOpenTarget = ValueKey<String>('session-open-target');
   static const threadThroughput = ValueKey<String>('thread-throughput');
   static const statisticsSummary = ValueKey<String>('statistics-summary');
   static const statisticsHistory = ValueKey<String>('statistics-history');

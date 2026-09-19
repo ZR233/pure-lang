@@ -50,6 +50,7 @@ class StudioThread {
     this.status = ThreadStatusView.idle,
     this.archived = false,
     this.workspaceMode = ThreadWorkspaceMode.local,
+    required this.workspacePath,
   });
 
   final String id;
@@ -67,6 +68,11 @@ class StudioThread {
 
   /// Canonical 会话工作区模式，只读来自 Thread 目录事实。
   final ThreadWorkspaceMode workspaceMode;
+
+  /// Canonical 会话工作区地址；`local` 为项目目录，`worktree` 为工作树路径。
+  ///
+  /// 唯一决定会话级「在 VS Code 中打开工作区」的打开目标，GUI 不推导工作树布局。
+  final String workspacePath;
 
   bool get isRoot => parentThreadId == null;
 
@@ -88,6 +94,7 @@ class StudioThread {
     ThreadStatusView? status,
     bool? archived,
     ThreadWorkspaceMode? workspaceMode,
+    String? workspacePath,
   }) {
     return StudioThread(
       id: id,
@@ -103,6 +110,7 @@ class StudioThread {
       status: status ?? this.status,
       archived: archived ?? this.archived,
       workspaceMode: workspaceMode ?? this.workspaceMode,
+      workspacePath: workspacePath ?? this.workspacePath,
     );
   }
 }

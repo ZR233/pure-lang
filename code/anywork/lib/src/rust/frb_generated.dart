@@ -6574,22 +6574,23 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BridgeThread dco_decode_bridge_thread(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 13)
-      throw Exception('unexpected arr length: expect 13 but see ${arr.length}');
+    if (arr.length != 14)
+      throw Exception('unexpected arr length: expect 14 but see ${arr.length}');
     return BridgeThread(
       id: dco_decode_String(arr[0]),
       projectId: dco_decode_String(arr[1]),
       title: dco_decode_String(arr[2]),
       mode: dco_decode_String(arr[3]),
       workspaceMode: dco_decode_String(arr[4]),
-      rootThreadId: dco_decode_String(arr[5]),
-      parentThreadId: dco_decode_opt_String(arr[6]),
-      role: dco_decode_String(arr[7]),
-      agentPath: dco_decode_String(arr[8]),
-      status: dco_decode_bridge_thread_status(arr[9]),
-      createdAt: dco_decode_i_64(arr[10]),
-      updatedAt: dco_decode_i_64(arr[11]),
-      archived: dco_decode_bool(arr[12]),
+      workspacePath: dco_decode_String(arr[5]),
+      rootThreadId: dco_decode_String(arr[6]),
+      parentThreadId: dco_decode_opt_String(arr[7]),
+      role: dco_decode_String(arr[8]),
+      agentPath: dco_decode_String(arr[9]),
+      status: dco_decode_bridge_thread_status(arr[10]),
+      createdAt: dco_decode_i_64(arr[11]),
+      updatedAt: dco_decode_i_64(arr[12]),
+      archived: dco_decode_bool(arr[13]),
     );
   }
 
@@ -13245,6 +13246,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_title = sse_decode_String(deserializer);
     var var_mode = sse_decode_String(deserializer);
     var var_workspaceMode = sse_decode_String(deserializer);
+    var var_workspacePath = sse_decode_String(deserializer);
     var var_rootThreadId = sse_decode_String(deserializer);
     var var_parentThreadId = sse_decode_opt_String(deserializer);
     var var_role = sse_decode_String(deserializer);
@@ -13259,6 +13261,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       title: var_title,
       mode: var_mode,
       workspaceMode: var_workspaceMode,
+      workspacePath: var_workspacePath,
       rootThreadId: var_rootThreadId,
       parentThreadId: var_parentThreadId,
       role: var_role,
@@ -20251,6 +20254,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_String(self.title, serializer);
     sse_encode_String(self.mode, serializer);
     sse_encode_String(self.workspaceMode, serializer);
+    sse_encode_String(self.workspacePath, serializer);
     sse_encode_String(self.rootThreadId, serializer);
     sse_encode_opt_String(self.parentThreadId, serializer);
     sse_encode_String(self.role, serializer);

@@ -333,6 +333,7 @@ void registerShellSettingsTests() {
       title: 'Session 2',
       mode: ThreadModeId.simple,
       updatedAt: DateTime.fromMillisecondsSinceEpoch(1),
+      workspacePath: first.workspacePath,
     );
     final state = initial.copyWith(
       threadDirectory: ThreadDirectoryWindow(threads: [first, second]),
@@ -1129,6 +1130,7 @@ void registerShellSettingsTests() {
             title: 'Session',
             mode: ThreadModeId.task,
             updatedAt: DateTime.fromMillisecondsSinceEpoch(2000),
+            workspacePath: '.',
           ),
         ],
       ),
@@ -1304,6 +1306,7 @@ void registerShellSettingsTests() {
           agentPath: 'root/$id',
           role: 'reviewer',
           status: statuses[id]!,
+          workspacePath: root.workspacePath,
         ),
     ];
     final state = base.copyWith(
@@ -5480,6 +5483,7 @@ StudioState _sidebarTooltipNameState() {
           title: _sidebarTooltipThreadTitle,
           mode: ThreadModeId.simple,
           updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+          workspacePath: '.',
         ),
       ],
     ),

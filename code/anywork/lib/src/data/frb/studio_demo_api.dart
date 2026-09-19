@@ -432,6 +432,7 @@ class DemoStudioApi implements StudioApi {
       createdAt: now.subtract(const Duration(minutes: 10)),
       updatedAt: now,
       agentPath: 'root',
+      workspacePath: project.path,
     );
     final reviewer = StudioThread(
       id: 'thread-reviewer',
@@ -445,6 +446,7 @@ class DemoStudioApi implements StudioApi {
       agentPath: 'root/reviewer',
       role: 'reviewer',
       status: ThreadStatusView.waitingInteraction,
+      workspacePath: project.path,
     );
     final alternate = StudioThread(
       id: 'thread-alt',
@@ -455,6 +457,7 @@ class DemoStudioApi implements StudioApi {
       createdAt: now.subtract(const Duration(minutes: 3)),
       updatedAt: now.subtract(const Duration(minutes: 3)),
       agentPath: 'root-alt',
+      workspacePath: project.path,
     );
     _workspaces.putIfAbsent(root.id, () => _rootWorkspace(root, now));
     _workspaces.putIfAbsent(
@@ -501,12 +504,12 @@ class DemoStudioApi implements StudioApi {
         ),
       );
     }
-    _ensurePageFillThreads(project.id, now);
+    _ensurePageFillThreads(project.id, project.path, now);
     return (project: project, threads: threads);
   }
 
   /// Driver 模式的历史会话填充：保证触底分页有足够数据。
-  void _ensurePageFillThreads(String projectId, DateTime now) {
+  void _ensurePageFillThreads(String projectId, String projectPath, DateTime now) {
     if (directoryPageFillCount <= 0 || _pageFillThreads.isNotEmpty) {
       return;
     }
@@ -521,6 +524,7 @@ class DemoStudioApi implements StudioApi {
         createdAt: updated,
         updatedAt: updated,
         agentPath: 'root-page-$index',
+        workspacePath: projectPath,
       );
       _pageFillThreads.add(thread);
       _workspaces.putIfAbsent(
@@ -1041,8 +1045,12 @@ class DemoStudioApi implements StudioApi {
     };
     final now = DateTime.now();
     final provisionalTitle = _demoProvisionalThreadTitle(input.text);
+    final threadId = 'thread-created-${++_threadSequence}';
+    final projectPath = current.projects
+        .firstWhere((project) => project.id == projectId)
+        .path;
     final thread = StudioThread(
-      id: 'thread-created-${++_threadSequence}',
+      id: threadId,
       projectId: projectId,
       title: provisionalTitle,
       mode: mode,
@@ -1050,6 +1058,10 @@ class DemoStudioApi implements StudioApi {
       createdAt: now,
       updatedAt: now,
       workspaceMode: requestedWorkspaceMode,
+      workspacePath:
+          requestedWorkspaceMode == ThreadWorkspaceMode.worktree
+          ? _demoWorktreePath(projectPath, threadId)
+          : projectPath,
     );
     _createdRootThreads.add(thread);
     _ensureWorkspaceFixture();
@@ -2687,6 +2699,10 @@ String _demoProvisionalThreadTitle(String prompt) {
   if (normalized.isEmpty) return 'New Session';
   return normalized.runes.take(80).map(String.fromCharCode).join();
 }
+
+/// demo `worktree` 会话地址：与项目目录同级的 `worktrees` 目录，仅供 GUI 验收展示。
+String _demoWorktreePath(String projectPath, String threadId) =>
+    '${projectPath.replaceAll('\\', '/')}-worktrees/$threadId';
 
 ObservedResource<T> _demoReadyResource<T>(int revision, T value) {
   return ReadyObservedResource(

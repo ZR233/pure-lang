@@ -76,7 +76,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get sidebarArchiveSessionConfirmBody =>
-      '归档会先结束该会话正在运行的工作，并将其从列表中移除。是否继续？';
+      '归档会先结束该会话正在运行的工作，并删除该会话树的工作树及其未提交、未整合的内容，然后将其从列表中移除。是否继续？';
 
   @override
   String get sidebarArchiveSessionConfirmAction => '归档';

@@ -165,6 +165,9 @@ class BridgeThread {
 
   /// Canonical 会话工作区模式：`local` 或 `worktree`。
   final String workspaceMode;
+
+  /// Canonical 会话工作区地址；`local` 为 Project 目录，`worktree` 为工作树路径。
+  final String workspacePath;
   final String rootThreadId;
   final String? parentThreadId;
   final String role;
@@ -180,6 +183,7 @@ class BridgeThread {
     required this.title,
     required this.mode,
     required this.workspaceMode,
+    required this.workspacePath,
     required this.rootThreadId,
     this.parentThreadId,
     required this.role,
@@ -197,6 +201,7 @@ class BridgeThread {
       title.hashCode ^
       mode.hashCode ^
       workspaceMode.hashCode ^
+      workspacePath.hashCode ^
       rootThreadId.hashCode ^
       parentThreadId.hashCode ^
       role.hashCode ^
@@ -216,6 +221,7 @@ class BridgeThread {
           title == other.title &&
           mode == other.mode &&
           workspaceMode == other.workspaceMode &&
+          workspacePath == other.workspacePath &&
           rootThreadId == other.rootThreadId &&
           parentThreadId == other.parentThreadId &&
           role == other.role &&

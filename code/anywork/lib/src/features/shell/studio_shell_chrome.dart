@@ -118,8 +118,10 @@ class _SessionOverflowMenu extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final project = state.selectedProject;
+    final thread = state.selectedRootThread;
     final availability = ref.watch(vsCodeAvailabilityProvider);
     if (project == null ||
+        thread == null ||
         !availability.hasValue ||
         availability.value != true) {
       return const SizedBox.shrink();
@@ -134,10 +136,13 @@ class _SessionOverflowMenu extends ConsumerWidget {
           leadingIcon: const Icon(Icons.code_outlined, size: 18),
           onPressed: () {
             controller.close();
-            _openInVsCode(context, ref, project);
+            _openInVsCode(context, ref, project, thread);
           },
-          child: Text(context.l10n.sessionOpenInVsCode),
+          child: _SessionOpenTarget(
+            label: context.l10n.sessionOpenInVsCode,
+            target: thread.workspacePath,
         ),
+      ),
       ],
       builder: (context, controller, child) => IconButton(
         key: StudioDriverKeys.sessionOverflow,
@@ -153,6 +158,7 @@ class _SessionOverflowMenu extends ConsumerWidget {
     BuildContext context,
     WidgetRef ref,
     StudioProject project,
+    StudioThread thread,
   ) async {
     final messenger = ScaffoldMessenger.maybeOf(context);
     final l10n = context.l10n;
@@ -169,14 +175,14 @@ class _SessionOverflowMenu extends ConsumerWidget {
         } else {
           uri = buildRemoteVsCodeFolderUri(
             alias: server.alias,
-            remotePath: project.path,
+            remotePath: thread.workspacePath,
           );
         }
       } on Object {
         failure = l10n.sessionVsCodeOpenFailed;
       }
     } else {
-      uri = buildLocalVsCodeFolderUri(project.path);
+      uri = buildLocalVsCodeFolderUri(thread.workspacePath);
     }
     if (uri != null) {
       final launcher = ref.read(vsCodeLauncherProvider);
@@ -189,6 +195,43 @@ class _SessionOverflowMenu extends ConsumerWidget {
     if (failure != null && messenger != null) {
       messenger.showSnackBar(SnackBar(content: Text(failure)));
     }
+  }
+}
+
+/// 会话「在 VS Code 中打开工作区」菜单项：主标签下定以辅助行展示打开目标
+/// （会话工作区地址）。长路径截断为单行，完整内容保留给悬停与读屏，辅助行不
+/// 改变打开目标语义。
+class _SessionOpenTarget extends StatelessWidget {
+  const _SessionOpenTarget({required this.label, required this.target});
+
+  final String label;
+  final String target;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: target,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 280),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(label),
+            const SizedBox(height: 2),
+            Text(
+              target,
+              key: StudioDriverKeys.sessionOpenTarget,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: context.text.bodySmall?.copyWith(
+                color: context.colors.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

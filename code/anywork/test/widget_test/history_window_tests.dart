@@ -357,6 +357,7 @@ StudioState _twoThreadHistoryState() {
     title: id,
     mode: ThreadModeId.simple,
     updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+    workspacePath: project.path,
   );
   ThreadWorkspace emptyWorkspace(StudioThread owner) => ThreadWorkspace(
     thread: owner,
@@ -387,6 +388,7 @@ ThreadWorkspace _workspaceWithItems(
     title: threadId,
     mode: ThreadModeId.simple,
     updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+    workspacePath: '.',
   );
   return ThreadWorkspace(
     thread: thread,

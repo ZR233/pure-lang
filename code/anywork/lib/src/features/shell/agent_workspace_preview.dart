@@ -118,6 +118,7 @@ StudioState _agentWorkspacePreviewState({
     updatedAt: timestamp,
     rootThreadId: 'preview-root',
     role: 'planner',
+    workspacePath: project.path,
   );
   final child = StudioThread(
     id: 'preview-child',
@@ -131,6 +132,7 @@ StudioState _agentWorkspacePreviewState({
     agentPath: 'preview-reviewer',
     role: 'reviewer',
     status: ThreadStatusView.running,
+    workspacePath: project.path,
   );
   final selected = selectChild ? child : root;
   final item = ThreadItemView(

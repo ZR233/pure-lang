@@ -443,6 +443,13 @@ class _FakeStudioApi implements StudioApi {
           next.threads.last;
     } else {
       final now = DateTime.fromMillisecondsSinceEpoch(1);
+      final workspaceModeView = ThreadWorkspaceMode.fromId(workspaceMode ?? '');
+      final projectPath =
+          _currentState.projects
+              .where((project) => project.id == projectId)
+              .map((project) => project.path)
+              .firstOrNull ??
+          '';
       thread = StudioThread(
         id: 'session-created',
         projectId: projectId,
@@ -451,7 +458,10 @@ class _FakeStudioApi implements StudioApi {
         role: 'planner',
         createdAt: now,
         updatedAt: now,
-        workspaceMode: ThreadWorkspaceMode.fromId(workspaceMode ?? ''),
+        workspaceMode: workspaceModeView,
+        workspacePath: workspaceModeView == ThreadWorkspaceMode.worktree
+            ? '$projectPath-worktrees/session-created'
+            : projectPath,
       );
       _currentState = _currentState.copyWith(
         threadDirectory: _currentState.threadDirectory.copyWith(

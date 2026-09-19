@@ -148,6 +148,7 @@ void registerProjectSidebarTests() {
             title: 'Find the ancient session',
             mode: ThreadModeId.simple,
             updatedAt: DateTime(2020),
+            workspacePath: 'b',
           ),
           for (var index = 1; index < 25; index++)
             StudioThread(
@@ -156,6 +157,7 @@ void registerProjectSidebarTests() {
               title: 'Ancient continuation $index',
               mode: ThreadModeId.simple,
               updatedAt: DateTime(2020),
+              workspacePath: 'b',
             ),
         ],
       );
