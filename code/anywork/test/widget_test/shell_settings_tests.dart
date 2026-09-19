@@ -360,6 +360,10 @@ void registerShellSettingsTests() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(StudioDriverKeys.archiveThread(first.id)));
     await tester.pumpAndSettle();
+    expect(
+      find.textContaining('worktree along with any uncommitted'),
+      findsOneWidget,
+    );
     await tester.tap(find.byKey(StudioDriverKeys.archiveThreadConfirm));
     await tester.pumpAndSettle();
 

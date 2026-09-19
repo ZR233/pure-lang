@@ -81,19 +81,55 @@ void registerVsCodeLauncherTests() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('session overflow opens a local workspace in VS Code', (
-    tester,
-  ) async {
-    final state = _emptyState().copyWith(
+  /// 构造一个已选中根会话的 shell 状态；会话工作区地址独立于项目路径传入。
+  StudioState _vscodeState({
+    required StudioProject project,
+    required String workspacePath,
+    ThreadWorkspaceMode workspaceMode = ThreadWorkspaceMode.local,
+  }) {
+    final thread = StudioThread(
+      id: 'session-1',
+      projectId: project.id,
+      title: 'Session',
+      mode: ThreadModeId.simple,
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(0),
+      workspaceMode: workspaceMode,
+      workspacePath: workspacePath,
+    );
+    return _emptyState().copyWith(
       projectDirectory: ProjectDirectoryState.fromState(
-        state: _testReady([
-          const StudioProject(
-            id: 'project-1',
-            name: 'project',
-            path: '/home/dev/project',
+        state: _testReady([project]),
           ),
-        ]),
+      threadDirectory: ThreadDirectoryWindow(threads: [thread]),
+      workspacesByThread: {
+        thread.id: ThreadWorkspace(
+          thread: thread,
+          revision: 0,
+          items: const [],
+          interactions: const [],
+          runtime: _testRuntime(),
       ),
+      },
+      workspaceUiByThread: {
+        thread.id: const WorkspaceUiState(
+          syncState: AgentWorkspaceSyncState.ready,
+        ),
+      },
+      selectedProjectId: project.id,
+      selectedThreadId: thread.id,
+    );
+  }
+
+  testWidgets('session overflow opens a local workspace in VS Code', (
+      tester,
+  ) async {
+    final state = _vscodeState(
+      project: const StudioProject(
+        id: 'project-1',
+        name: 'project',
+        path: '/home/dev/project',
+      ),
+      workspacePath: '/home/dev/project',
     );
     final opened = <String>[];
     await pumpShellWithProject(
@@ -105,25 +141,54 @@ void registerVsCodeLauncherTests() {
 
     await tester.tap(find.byKey(StudioDriverKeys.sessionOverflow));
     await tester.pumpAndSettle();
+    final targetLine = tester.widget<Text>(
+      find.byKey(StudioDriverKeys.sessionOpenTarget),
+    );
+    expect(targetLine.data, '/home/dev/project');
     await tester.tap(find.byKey(StudioDriverKeys.sessionOpenInVsCode));
     await tester.pump();
     expect(opened, ['vscode://file/home/dev/project/']);
   });
 
+  testWidgets(
+    'session overflow opens the worktree address, not the project path',
+    (tester) async {
+      final state = _vscodeState(
+        project: const StudioProject(
+          id: 'project-1',
+          name: 'project',
+          path: '/home/dev/project',
+        ),
+        workspacePath: '/home/dev/project-worktrees/session-1',
+        workspaceMode: ThreadWorkspaceMode.worktree,
+      );
+      final opened = <String>[];
+      await pumpShellWithProject(
+        tester,
+        state: state,
+        opened: opened,
+        vsCodeAvailable: true,
+      );
+
+      await tester.tap(find.byKey(StudioDriverKeys.sessionOverflow));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(StudioDriverKeys.sessionOpenInVsCode));
+      await tester.pump();
+      expect(opened, ['vscode://file/home/dev/project-worktrees/session-1/']);
+    },
+  );
+
   testWidgets('session overflow opens a remote workspace through the alias', (
     tester,
   ) async {
-    final state = _emptyState().copyWith(
-      projectDirectory: ProjectDirectoryState.fromState(
-        state: _testReady([
-          const StudioProject(
-            id: 'project-1',
-            name: 'project',
-            path: '/srv/app',
-            sshAlias: 'arm-dev',
-          ),
-        ]),
+    final state = _vscodeState(
+      project: const StudioProject(
+        id: 'project-1',
+        name: 'project',
+        path: '/srv/app',
+        sshAlias: 'arm-dev',
       ),
+      workspacePath: '/srv/app',
     );
     final api = _FakeStudioApi(state)
       ..sshServers = const [
@@ -151,18 +216,57 @@ void registerVsCodeLauncherTests() {
     expect(opened, ['vscode://vscode-remote/ssh-remote+arm-dev/srv/app']);
   });
 
-  testWidgets('session overflow reports a missing ssh alias', (tester) async {
-    final state = _emptyState().copyWith(
-      projectDirectory: ProjectDirectoryState.fromState(
-        state: _testReady([
-          const StudioProject(
-            id: 'project-1',
-            name: 'project',
-            path: '/srv/app',
-            sshAlias: 'deleted-alias',
+  testWidgets(
+    'session overflow opens a remote worktree address through the alias',
+    (tester) async {
+      final state = _vscodeState(
+        project: const StudioProject(
+          id: 'project-1',
+          name: 'project',
+          path: '/srv/app',
+          sshAlias: 'arm-dev',
+        ),
+        workspacePath: '/srv/app-worktrees/session-1',
+        workspaceMode: ThreadWorkspaceMode.worktree,
+      );
+      final api = _FakeStudioApi(state)
+        ..sshServers = const [
+          SshServer(
+            alias: 'arm-dev',
+            hostName: '192.168.100.12',
+            port: 22,
+            username: 'root',
+            managed: true,
           ),
-        ]),
+        ];
+      final opened = <String>[];
+      await pumpShellWithProject(
+        tester,
+        state: state,
+        opened: opened,
+        vsCodeAvailable: true,
+        api: api,
+      );
+
+      await tester.tap(find.byKey(StudioDriverKeys.sessionOverflow));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(StudioDriverKeys.sessionOpenInVsCode));
+      await tester.pump();
+      expect(opened, [
+        'vscode://vscode-remote/ssh-remote+arm-dev/srv/app-worktrees/session-1',
+      ]);
+    },
+  );
+
+  testWidgets('session overflow reports a missing ssh alias', (tester) async {
+    final state = _vscodeState(
+      project: const StudioProject(
+        id: 'project-1',
+        name: 'project',
+        path: '/srv/app',
+        sshAlias: 'deleted-alias',
       ),
+      workspacePath: '/srv/app',
     );
     final opened = <String>[];
     await pumpShellWithProject(
