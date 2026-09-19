@@ -351,11 +351,11 @@ impl StudioRuntime {
         // 行为不变。
         if root.workspace_mode == pl_protocol::ThreadWorkspaceMode::Worktree {
             use crate::studio::agent_host::worktree_lease::WorktreeLeaseState;
-                let project = projects
-                    .iter()
-                    .find(|project| project.id == root.project_id)
-                    .cloned()
-                    .context("selected Project not found")?;
+            let project = projects
+                .iter()
+                .find(|project| project.id == root.project_id)
+                .cloned()
+                .context("selected Project not found")?;
             let existing = self.agent_facility.worktrees.get(&thread_id);
             // `preserved` 是归档清理失败的现场：物理工作树仍在且身份匹配时重新绑定为
             // `active` 并退掉该 Thread 对应的 Recovery 条目；否则按同一确定性路径重建
@@ -383,8 +383,11 @@ impl StudioRuntime {
                 self.agent_facility
                     .worktrees
                     .record(lease)
-                    .map_err(|error| error.context("rebind the preserved session worktree as active"))?;
-            } else if !matches!(&existing, Some(lease) if lease.state == WorktreeLeaseState::Active) {
+                    .map_err(|error| {
+                        error.context("rebind the preserved session worktree as active")
+                    })?;
+            } else if !matches!(&existing, Some(lease) if lease.state == WorktreeLeaseState::Active)
+            {
                 self.agent_facility.worktrees.mark_creating(&thread_id);
                 let created =
                     crate::studio::agent_host::workspace_preparation::create_root_session_worktree(
@@ -429,7 +432,9 @@ impl StudioRuntime {
             // 会话工作区已落到可用状态：退掉该 Thread 的 Recovery 条目，否则后续激活会被
             // 已归档遗留的阻断项拒绝（复用既有退订入口）。
             let issues = self.recovery.retire_thread(&thread_id);
-            self.agent_facility.product_events.emit_recovery_state(issues);
+            self.agent_facility
+                .product_events
+                .emit_recovery_state(issues);
         }
         let mut tree = self
             .store
@@ -1894,7 +1899,12 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(
-            runtime.agent_facility.worktrees.get(&thread_id).unwrap().state,
+            runtime
+                .agent_facility
+                .worktrees
+                .get(&thread_id)
+                .unwrap()
+                .state,
             WorktreeLeaseState::Preserved
         );
         assert!(
@@ -1908,7 +1918,12 @@ mod tests {
         let restored = runtime.restore_thread(thread_id.clone()).await.unwrap();
         assert_eq!(restored.workspace_path, path.to_string_lossy());
         assert_eq!(
-            runtime.agent_facility.worktrees.get(&thread_id).unwrap().state,
+            runtime
+                .agent_facility
+                .worktrees
+                .get(&thread_id)
+                .unwrap()
+                .state,
             WorktreeLeaseState::Active
         );
         assert!(
@@ -1951,7 +1966,12 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(
-            runtime.agent_facility.worktrees.get(&thread_id).unwrap().state,
+            runtime
+                .agent_facility
+                .worktrees
+                .get(&thread_id)
+                .unwrap()
+                .state,
             WorktreeLeaseState::Preserved
         );
         // 清掉物理现场与 Pure-owned 分支，但保留 durable `preserved` lease。
@@ -1975,7 +1995,12 @@ mod tests {
         let restored = runtime.restore_thread(thread_id.clone()).await.unwrap();
         assert_eq!(restored.workspace_path, path.to_string_lossy());
         assert_eq!(
-            runtime.agent_facility.worktrees.get(&thread_id).unwrap().state,
+            runtime
+                .agent_facility
+                .worktrees
+                .get(&thread_id)
+                .unwrap()
+                .state,
             WorktreeLeaseState::Active
         );
         assert!(path.exists(), "恢复必须在原确定性路径重建工作树");
@@ -2007,7 +2032,12 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(
-            runtime.agent_facility.worktrees.get(&thread_id).unwrap().state,
+            runtime
+                .agent_facility
+                .worktrees
+                .get(&thread_id)
+                .unwrap()
+                .state,
             WorktreeLeaseState::Preserved
         );
         // 物理现场缺失（无法重新绑定），同时破坏仓库解析（无法重建）。
@@ -2028,7 +2058,12 @@ mod tests {
             "无法落到 active 时必须返回类型化失败"
         );
         assert_eq!(
-            runtime.agent_facility.worktrees.get(&thread_id).unwrap().state,
+            runtime
+                .agent_facility
+                .worktrees
+                .get(&thread_id)
+                .unwrap()
+                .state,
             WorktreeLeaseState::Preserved,
             "失败必须保留 preserved 现场"
         );
