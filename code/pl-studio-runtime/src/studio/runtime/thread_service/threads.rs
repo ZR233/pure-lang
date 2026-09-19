@@ -20,12 +20,21 @@ const ARCHIVE_TREE_SETTLE_POLL_INTERVAL: std::time::Duration = std::time::Durati
 
 impl StudioRuntime {
     pub async fn create_thread(&self, project_id: &str, title: &str) -> Result<ThreadRecord> {
+        let project = self
+            .agent_facility
+            .product_events
+            .project_snapshot()
+            .await
+            .into_iter()
+            .find(|project| project.id == project_id)
+            .context("selected Project not found")?;
         let (delta, thread) = DirectoryDelta::register_root_thread(
             crate::studio::ids::new_id("thread"),
             project_id,
             title,
             pl_protocol::ThreadModeId::simple(),
             pl_protocol::ThreadWorkspaceMode::Local,
+            project.path,
         );
         self.agent_facility
             .product_events
@@ -106,12 +115,19 @@ impl StudioRuntime {
             session_lease = Some(lease);
         }
 
+        // 会话对外只有一个 canonical 工作区地址：`local` 取 canonical Project 目录，
+        // `worktree` 取该会话工作树路径；写定后只读（design/12 §12.1）。
+        let workspace_path = match &session_lease {
+            Some(lease) => lease.path.clone(),
+            None => project.path.clone(),
+        };
         let (delta, thread) = DirectoryDelta::register_root_thread(
             thread_id,
             &request.project_id,
             &provisional,
             request.mode,
             request.workspace_mode,
+            workspace_path,
         );
         // 目录事实内存先行；SQLite 失败进入持久化降级而不是命令失败
         // （design/18 §18.2）。
@@ -286,8 +302,14 @@ impl StudioRuntime {
         // 归档先结束整棵树的活动工作（design/01 §1.4）：中断当前 Turn、丢弃未消费输入，
         // 再有界等待收束；无法结束时返回类型化失败并保留会话现场。
         self.end_thread_tree_work(&removed_thread_ids).await?;
+        // 归档是破坏性动作：按 per-cause `Cleanup` 收束该会话树拥有的物理工作树
+        // （会话自身 lease + 树内 child lease），复用唯一 `close_workspace` 状态机；
+        // 任一步失败回落 `preserved` 并发布 Recovery，归档本身仍完成（design/12 §12.5）。
+        self.archive_cleanup_workspaces(&removed_thread_ids).await;
         self.retire_archived_thread_tree(&removed_thread_ids)
             .await?;
+        self.publish_archived_cleanup_recovery(&removed_thread_ids)
+            .await;
         self.agent_facility
             .product_events
             .commit_directory(DirectoryDelta::archive_threads(removed_thread_ids.clone()))
@@ -323,6 +345,55 @@ impl StudioRuntime {
         );
         if !root.archived {
             return Ok(ThreadRecord::from_directory_thread(root));
+        }
+        // 归档清理了该会话树的工作树：`worktree` 会话在恢复时必须在**同一确定性路径**重建，
+        // 使会话对外地址在归档与恢复之间保持稳定（design/12 §12.5）。已有可用 lease 时
+        // 行为不变。
+        if root.workspace_mode == pl_protocol::ThreadWorkspaceMode::Worktree {
+            use crate::studio::agent_host::worktree_lease::WorktreeLeaseState;
+            let needs_rebuild = match self.agent_facility.worktrees.get(&thread_id) {
+                Some(lease) => lease.state == WorktreeLeaseState::Cleaned,
+                None => true,
+            };
+            if needs_rebuild {
+                let project = projects
+                    .iter()
+                    .find(|project| project.id == root.project_id)
+                    .cloned()
+                    .context("selected Project not found")?;
+                self.agent_facility.worktrees.mark_creating(&thread_id);
+                let created =
+                    crate::studio::agent_host::workspace_preparation::create_root_session_worktree(
+                        &self.agent_facility.worktrees,
+                        &self.ssh_manager,
+                        &project,
+                        &thread_id,
+                    )
+                    .await;
+                let mut lease = match created {
+                    Ok(lease) => lease,
+                    Err(error) => {
+                        self.settle_session_worktree_failure(
+                            &thread_id,
+                            Some("the restored session worktree could not be recreated"),
+                        )
+                        .await;
+                        return Err(error.into());
+                    }
+                };
+                // 创建落定后立即激活，后续冷激活按 `Active` lease 解析同一路径。
+                lease.transition(WorktreeLeaseState::Active);
+                if let Err(error) = self.agent_facility.worktrees.record(lease.clone()) {
+                    self.agent_facility.worktrees.clear_creating(&thread_id);
+                    self.preserve_session_worktree(
+                        Some(lease),
+                        Some("the restored session worktree lease could not be activated"),
+                    )
+                    .await;
+                    return Err(error);
+                }
+                self.agent_facility.worktrees.clear_creating(&thread_id);
+            }
         }
         let mut tree = self
             .store
@@ -428,6 +499,61 @@ impl StudioRuntime {
             self.agent_facility
                 .worktrees
                 .clear_creating(&lease.owner_thread_id);
+        }
+    }
+
+    /// 归档清理该会话树拥有的物理工作树：会话自身 `Session` lease 与树内 `Child` lease
+    /// 都按 [`crate::studio::agent_host::workspace_preparation::close_workspace`] 的
+    /// `validate_identity → preview_existing → cleanupRequested → discard → cleaned`
+    /// 顺序收束。任一步失败回落 `preserved` 且不抛错，归档本身仍完成；失败现场由
+    /// [`Self::publish_archived_cleanup_recovery`] 在关闭之后统一发布。
+    async fn archive_cleanup_workspaces(&self, thread_ids: &[String]) {
+        use crate::studio::agent_host::worktree_lease::WorktreeLeaseState;
+        for thread_id in thread_ids {
+            let Some(lease) = self.agent_facility.worktrees.get(thread_id) else {
+                continue;
+            };
+            if lease.state == WorktreeLeaseState::Cleaned {
+                continue;
+            }
+            let manager = crate::studio::agent_host::workspace_preparation::manager_from_lease(
+                &self.ssh_manager,
+                &lease,
+            );
+            if let Err(error) = crate::studio::agent_host::workspace_preparation::close_workspace(
+                &self.agent_facility.worktrees,
+                &manager,
+                lease,
+                pl_tool::collaboration::thread::AgentWorkspaceDisposition::Cleanup,
+            )
+            .await
+            {
+                // `close_workspace` 已把 lease 收束为 `preserved` 并 record；归档继续。
+                tracing::warn!(
+                    %error,
+                    thread_id = %thread_id,
+                    "archived session tree worktree could not be cleaned; the lease was preserved"
+                );
+            }
+        }
+    }
+
+    /// 归档关闭完成之后发布仍为 `preserved` 的会话树工作树 Recovery 卡片，使失败现场
+    /// 立即可见且可处置（同一 issue id upsert），不依赖下一次启动审计。
+    async fn publish_archived_cleanup_recovery(&self, thread_ids: &[String]) {
+        use crate::studio::agent_host::worktree_lease::WorktreeLeaseState;
+        for thread_id in thread_ids {
+            let Some(lease) = self.agent_facility.worktrees.get(thread_id) else {
+                continue;
+            };
+            if lease.state != WorktreeLeaseState::Preserved {
+                continue;
+            }
+            self.publish_worktree_recovery(
+                Some("the archived session worktree could not be cleaned"),
+                &lease,
+            )
+            .await;
         }
     }
 
@@ -1380,6 +1506,7 @@ mod tests {
             "worktree session",
             ThreadModeId::simple(),
             ThreadWorkspaceMode::Worktree,
+            lease.path.clone(),
         );
         runtime
             .agent_facility
@@ -1436,6 +1563,280 @@ mod tests {
         reopened.shutdown_runtime().await.unwrap();
     }
 
+    /// 构造一个 directory 事实与 `active` lease 都就绪的 worktree 会话，返回会话 id 与其
+    /// 工作树路径。
+    async fn seeded_worktree_session(
+        runtime: &StudioRuntime,
+        project: &crate::studio::ProjectRecord,
+    ) -> (String, std::path::PathBuf) {
+        use crate::studio::agent_host::worktree_lease::WorktreeLeaseState;
+        use pl_protocol::{ThreadModeId, ThreadWorkspaceMode};
+        let thread_id = crate::studio::ids::new_id("thread");
+        let mut lease =
+            crate::studio::agent_host::workspace_preparation::create_root_session_worktree(
+                &runtime.agent_facility.worktrees,
+                &runtime.ssh_manager,
+                project,
+                &thread_id,
+            )
+            .await
+            .unwrap();
+        lease.transition(WorktreeLeaseState::Active);
+        runtime
+            .agent_facility
+            .worktrees
+            .record(lease.clone())
+            .unwrap();
+        let (delta, _thread) = DirectoryDelta::register_root_thread(
+            thread_id.clone(),
+            &project.id,
+            "worktree session",
+            ThreadModeId::simple(),
+            ThreadWorkspaceMode::Worktree,
+            lease.path.clone(),
+        );
+        runtime
+            .agent_facility
+            .product_events
+            .commit_directory(delta)
+            .await
+            .unwrap();
+        (thread_id, std::path::PathBuf::from(&lease.path))
+    }
+
+    /// 会话对外只有一个 canonical 工作区地址：`local` 取 canonical Project 目录、
+    /// `worktree` 取会话工作树路径，且目录更新（改名）不覆写地址。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn sessions_persist_a_single_canonical_workspace_address() {
+        let (_home, _workspace, runtime, id) = runtime_with_thread_without_optional_tools().await;
+        let project = runtime
+            .list_projects()
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        let local = runtime.read_thread(&id).await.unwrap();
+        assert_eq!(
+            local.workspace_mode,
+            pl_protocol::ThreadWorkspaceMode::Local
+        );
+        assert_eq!(
+            local.workspace_path, project.path,
+            "local 会话地址必须是 canonical Project 目录"
+        );
+        runtime.shutdown().await;
+
+        let home = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let (runtime, project) = worktree_runtime(&home, &workspace).await;
+        let (thread_id, path) = seeded_worktree_session(&runtime, &project).await;
+        let stored = runtime.read_thread(&thread_id).await.unwrap();
+        assert_eq!(
+            stored.workspace_mode,
+            pl_protocol::ThreadWorkspaceMode::Worktree
+        );
+        assert_eq!(stored.workspace_path, path.to_string_lossy());
+        // 目录更新只改标题，不覆写已写定的地址。
+        runtime
+            .rename_thread(thread_id.clone(), "renamed".to_string())
+            .await
+            .unwrap();
+        assert_eq!(
+            runtime
+                .read_thread(&thread_id)
+                .await
+                .unwrap()
+                .workspace_path,
+            path.to_string_lossy()
+        );
+        runtime.shutdown().await;
+    }
+
+    /// 归档会话树清理其工作树，恢复在同一确定性路径重建并再次激活，地址保持稳定。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn archiving_a_worktree_session_cleans_then_restores_on_the_same_path() {
+        use crate::studio::agent_host::worktree_lease::WorktreeLeaseState;
+        let home = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let (runtime, project) = worktree_runtime(&home, &workspace).await;
+        let (thread_id, path) = seeded_worktree_session(&runtime, &project).await;
+        let original_address = runtime
+            .read_thread(&thread_id)
+            .await
+            .unwrap()
+            .workspace_path;
+        assert!(path.exists());
+        runtime.ensure_thread_owner(&thread_id).await.unwrap();
+
+        let archived = runtime
+            .archive_thread(thread_id.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(archived.removed_thread_ids.contains(&thread_id));
+        assert!(runtime.read_thread(&thread_id).await.unwrap().archived);
+        assert!(!path.exists(), "归档必须删除会话工作树");
+        assert_eq!(
+            runtime
+                .agent_facility
+                .worktrees
+                .get(&thread_id)
+                .unwrap()
+                .state,
+            WorktreeLeaseState::Cleaned
+        );
+
+        let restored = runtime.restore_thread(thread_id.clone()).await.unwrap();
+        assert_eq!(
+            restored.workspace_path, original_address,
+            "归档与恢复之间会话地址必须稳定"
+        );
+        let lease = runtime.agent_facility.worktrees.get(&thread_id).unwrap();
+        assert_eq!(lease.state, WorktreeLeaseState::Active);
+        assert_eq!(lease.path, original_address);
+        assert!(path.exists(), "恢复必须在同一确定性路径重建工作树");
+        let owner = runtime.ensure_thread_owner(&thread_id).await.unwrap();
+        assert_ne!(
+            owner.snapshot().lifecycle,
+            pl_core::thread::ThreadLifecycle::Closed
+        );
+        runtime.shutdown().await;
+    }
+
+    /// 归档清理该会话树拥有的物理工作树：会话自身 `Session` lease 与树内 `Child` lease
+    /// 都按 `Cleanup` 收束，物理工作树与 Pure-owned 分支一并删除、lease 变为 `cleaned`。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn archive_cleanup_removes_session_and_child_worktrees_of_the_tree() {
+        use crate::studio::agent_host::worktree_lease::{
+            WorktreeLease, WorktreeLeaseOwnerKind, WorktreeLeaseState,
+        };
+        let home = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let (runtime, project) = worktree_runtime(&home, &workspace).await;
+        let (session_id, session_path) = seeded_worktree_session(&runtime, &project).await;
+        // 手工构造同树 child 工作树与其 ownership；child Thread 的真实 journal 由 spawn 产生，
+        // 这里只覆盖 `archive_thread` 用于整棵树的同一 `close_workspace` 收束路径。
+        let child_id = crate::studio::ids::new_id("child");
+        let repository_root = std::path::PathBuf::from(&project.path);
+        let manager = crate::agent::worktree::WorktreeManager::new(
+            repository_root.clone(),
+            std::sync::Arc::new(crate::agent::worktree::LocalWorktreeBackend::default()),
+        );
+        let ownership = crate::agent::worktree::WorktreeOwnership::Child {
+            child_id: child_id.clone(),
+        };
+        let base = manager.resolve_head(&repository_root).await.unwrap();
+        let handle = manager
+            .create(crate::agent::worktree::WorktreeCreateSpec {
+                repo_root: repository_root.clone(),
+                root_thread_id: session_id.clone(),
+                ownership,
+                base_commit: base.clone(),
+            })
+            .await
+            .unwrap();
+        let mut child_lease = WorktreeLease {
+            revision: 1,
+            state: WorktreeLeaseState::Prepared,
+            owner_kind: WorktreeLeaseOwnerKind::Child,
+            owner_thread_id: child_id.clone(),
+            root_thread_id: session_id.clone(),
+            project_id: project.id.clone(),
+            ssh_alias: None,
+            repository_root: project.path.clone(),
+            path: handle.path.to_string_lossy().into_owned(),
+            branch: handle.branch.clone(),
+            base_commit: base,
+        };
+        runtime
+            .agent_facility
+            .worktrees
+            .record(child_lease.clone())
+            .unwrap();
+        child_lease.transition(WorktreeLeaseState::Active);
+        runtime
+            .agent_facility
+            .worktrees
+            .record(child_lease.clone())
+            .unwrap();
+
+        runtime
+            .archive_cleanup_workspaces(&[session_id.clone(), child_id.clone()])
+            .await;
+
+        assert!(!session_path.exists(), "会话工作树必须被删除");
+        assert!(!handle.path.exists(), "child 工作树必须被删除");
+        assert_eq!(
+            runtime
+                .agent_facility
+                .worktrees
+                .get(&session_id)
+                .unwrap()
+                .state,
+            WorktreeLeaseState::Cleaned
+        );
+        assert_eq!(
+            runtime
+                .agent_facility
+                .worktrees
+                .get(&child_id)
+                .unwrap()
+                .state,
+            WorktreeLeaseState::Cleaned
+        );
+        runtime.shutdown().await;
+    }
+
+    /// 丢弃失败回落 `preserved`、发布 Recovery 卡片，归档本身仍成功返回。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn archive_cleanup_failure_preserves_the_lease_and_still_archives() {
+        use crate::studio::agent_host::worktree_lease::WorktreeLeaseState;
+        let home = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let (runtime, project) = worktree_runtime(&home, &workspace).await;
+        let (thread_id, path) = seeded_worktree_session(&runtime, &project).await;
+        git_command(
+            workspace.path(),
+            &["worktree", "lock", path.to_str().unwrap()],
+        )
+        .await;
+
+        let archived = runtime
+            .archive_thread(thread_id.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            archived.removed_thread_ids.contains(&thread_id),
+            "清理失败不得阻断归档"
+        );
+        assert!(runtime.read_thread(&thread_id).await.unwrap().archived);
+        assert!(path.exists(), "丢弃失败必须保留现场");
+        assert_eq!(
+            runtime
+                .agent_facility
+                .worktrees
+                .get(&thread_id)
+                .unwrap()
+                .state,
+            WorktreeLeaseState::Preserved
+        );
+        assert!(
+            runtime
+                .recovery_issues()
+                .iter()
+                .any(|issue| issue.worktree.is_some()),
+            "失败现场必须发布 Recovery 卡片"
+        );
+        git_command(
+            workspace.path(),
+            &["worktree", "unlock", path.to_str().unwrap()],
+        )
+        .await;
+        runtime.shutdown().await;
+    }
+
     async fn worktree_runtime(
         home: &tempfile::TempDir,
         workspace: &tempfile::TempDir,
@@ -1483,6 +1884,7 @@ mod tests {
                 "worktree session",
                 ThreadModeId::simple(),
                 ThreadWorkspaceMode::Worktree,
+                format!("{}/.anywork/worktrees/{thread_id}/session", project.path),
             )
         };
         let issues = async || {
@@ -2150,6 +2552,7 @@ mod tests {
             "worktree session",
             ThreadModeId::simple(),
             ThreadWorkspaceMode::Worktree,
+            project.path.clone(),
         );
         runtime
             .agent_facility
@@ -2507,6 +2910,7 @@ mod tests {
                 "worktree session",
                 ThreadModeId::simple(),
                 ThreadWorkspaceMode::Worktree,
+                format!("{project_id}/.anywork/worktrees/{thread_id}/session"),
             )
         };
 

@@ -60,7 +60,7 @@ pub(super) async fn prepare(product: &Path, _owner: &RuntimeLock) -> Result<()> 
         let session_version = inspect(&sessions).await?;
         if let Some(version) = product_version {
             ensure!(
-                matches!(version, 19..=21),
+                matches!(version, 19..=22),
                 "unsupported Studio schema {version}; existing data preserved"
             );
         }
@@ -70,9 +70,9 @@ pub(super) async fn prepare(product: &Path, _owner: &RuntimeLock) -> Result<()> 
                 "unsupported session schema {version}; existing data preserved"
             );
         }
-        if product_version == Some(20) {
-            // v20→v21 是产品数据在位迁移（会话工作区模式列 + worktree lease 载荷，
-            // 以及 SSH 服务器迁往用户 ssh config），不重置会话。
+        if matches!(product_version, Some(20) | Some(21)) {
+            // v20→v21→v22 是产品数据在位迁移（会话工作区模式列 + worktree lease 载荷、
+            // 会话工作区地址列，以及 SSH 服务器迁往用户 ssh config），不重置会话。
             if session_version
                 .is_none_or(|version| version == pl_core::persistence::SESSION_SCHEMA_VERSION)
             {

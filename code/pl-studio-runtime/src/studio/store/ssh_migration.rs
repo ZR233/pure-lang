@@ -181,8 +181,13 @@ async fn rewrite_projects_table(
         transaction
             .execute_unprepared("DROP TABLE ssh_alias_map;")
             .await?;
+        // 迁移结束时推进到 canonical schema 版本；v20→v21→v22 协调流会在本步之前或之后
+        // 落定同一版本，两个方向都幂等。
         transaction
-            .execute_unprepared("PRAGMA user_version=21;")
+            .execute_unprepared(&format!(
+                "PRAGMA user_version={};",
+                store_support::STUDIO_DATABASE_SCHEMA_VERSION
+            ))
             .await?;
         Ok::<_, anyhow::Error>(())
     }
@@ -439,7 +444,10 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(version.try_get::<i64>("", "user_version").unwrap(), 21);
+        assert_eq!(
+            version.try_get::<i64>("", "user_version").unwrap(),
+            store_support::STUDIO_DATABASE_SCHEMA_VERSION
+        );
         let table = db
             .query_one_raw(Statement::from_string(
                 DatabaseBackend::Sqlite,

@@ -37,6 +37,7 @@ pub fn thread_record(model: entities::thread::Model) -> Result<ThreadRecord> {
         title: model.title,
         mode,
         workspace_mode,
+        workspace_path: model.workspace_path,
         created_at: model.created_at,
         updated_at: model.updated_at,
         visibility: if model.archived == 0 {

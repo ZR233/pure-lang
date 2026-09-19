@@ -270,7 +270,7 @@ async fn inspect_database(path: &Path) -> Result<ExistingDatabaseState> {
         Ok(STUDIO_DATABASE_SCHEMA_VERSION) => validate_database(&database)
             .await
             .map(|()| ExistingDatabaseState::Current),
-        Ok(19 | 20) => Err(StudioDatabaseError::StorageMigrationRequired.into()),
+        Ok(19..=21) => Err(StudioDatabaseError::StorageMigrationRequired.into()),
         Ok(found) => Err(StudioDatabaseError::UnsupportedSchema {
             found,
             supported: STUDIO_DATABASE_SCHEMA_VERSION,

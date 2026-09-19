@@ -9,7 +9,7 @@ use sea_orm::{
 
 use crate::studio::entity;
 
-pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 21;
+pub(super) const STUDIO_DATABASE_SCHEMA_VERSION: i64 = 22;
 
 pub(super) async fn initialize_studio_schema(db: &DatabaseConnection) -> Result<()> {
     create_thread_lifecycle_tables(db).await?;
@@ -57,6 +57,7 @@ async fn create_thread_lifecycle_tables(db: &DatabaseConnection) -> Result<()> {
             updated_at INTEGER NOT NULL,
             archived INTEGER NOT NULL,
             workspace_mode TEXT NOT NULL DEFAULT 'local',
+            workspace_path TEXT NOT NULL DEFAULT '',
             FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
         );
 
@@ -137,7 +138,7 @@ async fn execute_index(db: &DatabaseConnection, index: IndexCreateStatement) -> 
 pub(super) async fn upgrade_session_storage(db: &DatabaseConnection) -> Result<()> {
     let tx = db.begin().await?;
     match studio_schema_version(&tx).await? {
-        20 | 21 => {}
+        20..=22 => {}
         19 => {
             tx.execute_unprepared("DROP TABLE IF EXISTS attachments;
                 DROP TABLE IF EXISTS thread_inputs;
@@ -164,27 +165,107 @@ pub(super) async fn upgrade_session_storage(db: &DatabaseConnection) -> Result<(
 pub(super) async fn upgrade_product_schema(db: &DatabaseConnection) -> Result<()> {
     let tx = db.begin().await?;
     match studio_schema_version(&tx).await? {
-        20 | 21 => upgrade_product_schema_in_transaction(&tx).await?,
+        20..=22 => upgrade_product_schema_in_transaction(&tx).await?,
         version => bail!("unsupported Studio schema {version}; product data preserved"),
     }
     tx.commit().await?;
     Ok(())
 }
 
-/// Applies the version 20 → 21 product schema upgrade in the caller's transaction.
+/// Applies the v20 → v21 → v22 product schema upgrades in the caller's transaction.
+///
+/// Each step is gated by the version it upgrades **from** and publishes `user_version`
+/// only after its own column change and payload backfill succeeded, so a v20 database
+/// reaches the current version through both steps in one transaction while a v21 database
+/// runs only the 21 → 22 step. Every step stays idempotent and restartable.
 async fn upgrade_product_schema_in_transaction(tx: &sea_orm::DatabaseTransaction) -> Result<()> {
-    if studio_schema_version(tx).await? != 20 {
-        return Ok(());
+    if studio_schema_version(tx).await? <= 20 {
+        tx.execute_unprepared(
+            "ALTER TABLE threads ADD COLUMN workspace_mode TEXT NOT NULL DEFAULT 'local';",
+        )
+        .await?;
+        migrate_worktree_lease_payloads(tx).await?;
+        tx.execute_unprepared("PRAGMA user_version = 21").await?;
     }
+    if studio_schema_version(tx).await? <= 21 {
+        tx.execute_unprepared(
+            "ALTER TABLE threads ADD COLUMN workspace_path TEXT NOT NULL DEFAULT '';",
+        )
+        .await?;
+        migrate_thread_workspace_paths(tx).await?;
+        tx.execute_unprepared(&format!(
+            "PRAGMA user_version = {STUDIO_DATABASE_SCHEMA_VERSION}"
+        ))
+        .await?;
+    }
+    Ok(())
+}
+
+/// Backfills `threads.workspace_path` for the v21 → v22 product migration.
+///
+/// `local` rows take their owning Project's canonical `path`. `worktree` rows take the
+/// `path` of the durable session `worktreeLease` payload owned by their root Thread
+/// (children inherit the session address); when no session lease remains the owning
+/// Project's `path` is used instead. The migration never substitutes a default value for
+/// a real address, and never removes Thread rows, session associations or leases.
+async fn migrate_thread_workspace_paths(tx: &sea_orm::DatabaseTransaction) -> Result<()> {
     tx.execute_unprepared(
-        "ALTER TABLE threads ADD COLUMN workspace_mode TEXT NOT NULL DEFAULT 'local';",
+        "UPDATE threads SET workspace_path = COALESCE( \
+            (SELECT path FROM projects WHERE projects.id = threads.project_id), '') \
+         WHERE workspace_mode = 'local';",
     )
     .await?;
-    migrate_worktree_lease_payloads(tx).await?;
-    tx.execute_unprepared(&format!(
-        "PRAGMA user_version = {STUDIO_DATABASE_SCHEMA_VERSION}"
-    ))
-    .await?;
+    let rows = tx
+        .query_all_raw(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "SELECT id, root_thread_id, project_id FROM threads WHERE workspace_mode = 'worktree'"
+                .to_owned(),
+        ))
+        .await?;
+    for row in rows {
+        let id: String = row.try_get("", "id")?;
+        let root_thread_id: String = row.try_get("", "root_thread_id")?;
+        let project_id: String = row.try_get("", "project_id")?;
+        let lease = tx
+            .query_one_raw(Statement::from_sql_and_values(
+                DatabaseBackend::Sqlite,
+                "SELECT payload_json FROM studio_objects \
+                 WHERE owner_kind = 'agent' AND owner_id = ? AND object_kind = 'worktreeLease'",
+                [Value::String(Some(root_thread_id))],
+            ))
+            .await?;
+        let mut lease_path = None;
+        if let Some(lease) = lease {
+            let payload_json: String = lease.try_get("", "payload_json")?;
+            let payload: serde_json::Value = serde_json::from_str(&payload_json)
+                .with_context(|| format!("invalid worktree lease payload for {id}"))?;
+            if payload.get("ownerKind").and_then(serde_json::Value::as_str) == Some("session") {
+                lease_path = payload
+                    .get("path")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned);
+            }
+        }
+        let workspace_path = match lease_path {
+            Some(path) => path,
+            None => tx
+                .query_one_raw(Statement::from_sql_and_values(
+                    DatabaseBackend::Sqlite,
+                    "SELECT path FROM projects WHERE id = ?",
+                    [Value::String(Some(project_id))],
+                ))
+                .await?
+                .map(|project| project.try_get::<String>("", "path"))
+                .transpose()?
+                .unwrap_or_default(),
+        };
+        tx.execute_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Sqlite,
+            "UPDATE threads SET workspace_path = ? WHERE id = ?",
+            [Value::String(Some(workspace_path)), Value::String(Some(id))],
+        ))
+        .await?;
+    }
     Ok(())
 }
 
@@ -356,11 +437,12 @@ mod tests {
 
         upgrade_product_schema(&db).await.unwrap();
 
-        assert_eq!(studio_schema_version(&db).await.unwrap(), 21);
+        assert_eq!(studio_schema_version(&db).await.unwrap(), 22);
         let row = db
             .query_one_raw(Statement::from_string(
                 DatabaseBackend::Sqlite,
-                "SELECT title, workspace_mode FROM threads WHERE id = 'thread-existing'".to_owned(),
+                "SELECT title, workspace_mode, workspace_path FROM threads WHERE id = 'thread-existing'"
+                    .to_owned(),
             ))
             .await
             .unwrap()
@@ -370,6 +452,11 @@ mod tests {
             row.try_get::<String>("", "workspace_mode").unwrap(),
             "local",
             "existing Thread rows must be interpreted as local"
+        );
+        assert_eq!(
+            row.try_get::<String>("", "workspace_path").unwrap(),
+            "/workspace",
+            "local rows must backfill their owning Project path"
         );
         let lease = db
             .query_one_raw(Statement::from_string(
@@ -394,7 +481,7 @@ mod tests {
 
         // 重复启动幂等：第二次升级不再改写任何事实。
         upgrade_product_schema(&db).await.unwrap();
-        assert_eq!(studio_schema_version(&db).await.unwrap(), 21);
+        assert_eq!(studio_schema_version(&db).await.unwrap(), 22);
         let again = db
             .query_one_raw(Statement::from_string(
                 DatabaseBackend::Sqlite,
@@ -435,6 +522,122 @@ mod tests {
             normalize(fresh_sql),
             "ALTER TABLE migration text must match canonical creation, otherwise the schema fingerprint rejects existing data"
         );
+    }
+
+    /// v21 → v22：回填 `workspace_path`——`local` 取所属 Project 的 `path`，`worktree` 取该
+    /// root Thread 的会话 lease `path`，子线程继承会话地址、缺失 lease 时回退 Project 的
+    /// `path`；迁移幂等且不删除 Thread 行或 lease。
+    #[tokio::test]
+    async fn schema_21_to_22_backfills_thread_workspace_paths() {
+        let directory = tempfile::tempdir().unwrap();
+        let db = open(&directory.path().join("studio.sqlite")).await;
+        db.execute_unprepared(VERSION_20_SCHEMA).await.unwrap();
+        db.execute_unprepared(
+            "ALTER TABLE threads ADD COLUMN workspace_mode TEXT NOT NULL DEFAULT 'local';
+             PRAGMA user_version=21;",
+        )
+        .await
+        .unwrap();
+        db.execute_unprepared(
+            "INSERT INTO projects (id, name, path, ssh_server_id, created_at, updated_at,
+                last_opened_at, closed)
+             VALUES ('project-1', 'Project', '/workspace', NULL, 1, 1, 1, 0);",
+        )
+        .await
+        .unwrap();
+        for (id, parent, root, mode) in [
+            ("thread-local", "NULL", "thread-local", "local"),
+            ("thread-worktree", "NULL", "thread-worktree", "worktree"),
+            (
+                "thread-child",
+                "'thread-worktree'",
+                "thread-worktree",
+                "worktree",
+            ),
+            ("thread-orphan", "NULL", "thread-orphan", "worktree"),
+        ] {
+            db.execute_unprepared(&format!(
+                "INSERT INTO threads (id, project_id, title, mode, root_thread_id, parent_thread_id,
+                    role, agent_path, state_json, revision, runtime_revision, event_sequence,
+                    metadata_json, usage_json, last_context_tokens, trace_sequence, created_at,
+                    updated_at, archived, workspace_mode)
+                 VALUES ('{id}', 'project-1', '{id}', 'mode.simple', '{root}', {parent},
+                    'planner', '{id}', '{{\"kind\":\"idle\",\"error\":null}}', 0, 1, 0,
+                    '{{}}', '{{}}', NULL, 0, 5, 7, 0, '{mode}');"
+            ))
+            .await
+            .unwrap();
+        }
+        let lease = serde_json::json!({
+            "revision": 2,
+            "state": "active",
+            "ownerKind": "session",
+            "ownerThreadId": "thread-worktree",
+            "rootThreadId": "thread-worktree",
+            "projectId": "project-1",
+            "sshAlias": null,
+            "repositoryRoot": "/repo",
+            "path": "/repo/.anywork/worktrees/thread-worktree/session",
+            "branch": "pure-session-thread-worktree",
+            "baseCommit": "base",
+        })
+        .to_string();
+        db.execute_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Sqlite,
+            "INSERT INTO studio_objects (owner_kind, owner_id, object_kind, revision,
+                schema_version, payload_json, payload_hash, updated_at)
+             VALUES ('agent', 'thread-worktree', 'worktreeLease', 2, 2, ?, ?, 9)",
+            [
+                Value::String(Some(lease.clone())),
+                Value::String(Some(pl_core::context::content_hash(lease.as_bytes()))),
+            ],
+        ))
+        .await
+        .unwrap();
+
+        upgrade_product_schema(&db).await.unwrap();
+        assert_eq!(studio_schema_version(&db).await.unwrap(), 22);
+        assert_eq!(
+            workspace_path(&db, "thread-local").await,
+            "/workspace",
+            "local rows take the canonical Project path"
+        );
+        assert_eq!(
+            workspace_path(&db, "thread-worktree").await,
+            "/repo/.anywork/worktrees/thread-worktree/session",
+            "worktree rows take their root session lease path"
+        );
+        assert_eq!(
+            workspace_path(&db, "thread-child").await,
+            "/repo/.anywork/worktrees/thread-worktree/session",
+            "child rows inherit the root session address"
+        );
+        assert_eq!(
+            workspace_path(&db, "thread-orphan").await,
+            "/workspace",
+            "a missing session lease falls back to the Project path"
+        );
+        // 重复启动幂等：不再改写任何事实。
+        upgrade_product_schema(&db).await.unwrap();
+        assert_eq!(studio_schema_version(&db).await.unwrap(), 22);
+        assert_eq!(
+            workspace_path(&db, "thread-worktree").await,
+            "/repo/.anywork/worktrees/thread-worktree/session"
+        );
+        let _ = db.close().await;
+    }
+
+    async fn workspace_path(db: &DatabaseConnection, id: &str) -> String {
+        db.query_one_raw(Statement::from_sql_and_values(
+            DatabaseBackend::Sqlite,
+            "SELECT workspace_path FROM threads WHERE id = ?",
+            [Value::String(Some(id.to_owned()))],
+        ))
+        .await
+        .unwrap()
+        .unwrap()
+        .try_get::<String>("", "workspace_path")
+        .unwrap()
     }
 
     async fn table_sql(db: &DatabaseConnection, name: &str) -> String {

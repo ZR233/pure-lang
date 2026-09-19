@@ -24,6 +24,7 @@ impl TryFrom<thread::Model> for ThreadRecord {
             mode: thread_mode_from_label(&model.mode)?,
             workspace_mode: pl_protocol::ThreadWorkspaceMode::from_label(&model.workspace_mode)
                 .map_err(|error| store_error(error.to_string()))?,
+            workspace_path: model.workspace_path,
             root_thread_id: model.root_thread_id,
             parent_thread_id: model.parent_thread_id,
             role: model.role,

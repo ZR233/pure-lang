@@ -20,6 +20,8 @@ pub struct ThreadRecord {
     pub mode: pl_protocol::ThreadModeId,
     /// 会话工作区模式：Thread 的 canonical 产品事实，不由 GUI 或目录查询推导。
     pub workspace_mode: pl_protocol::ThreadWorkspaceMode,
+    /// 会话对外唯一 canonical 工作区地址，创建会话时写定、之后只读。
+    pub workspace_path: String,
     pub created_at: i64,
     pub updated_at: i64,
     pub visibility: ThreadVisibility,
@@ -54,6 +56,7 @@ impl ThreadRecord {
             title: thread.title,
             mode: thread.mode,
             workspace_mode: thread.workspace_mode,
+            workspace_path: thread.workspace_path,
             created_at: thread.created_at,
             updated_at: thread.updated_at,
             parent_thread_id: thread.parent_thread_id,
@@ -76,6 +79,7 @@ impl From<ThreadRecord> for pl_protocol::Thread {
             title: value.title,
             mode: value.mode,
             workspace_mode: value.workspace_mode,
+            workspace_path: value.workspace_path,
             root_thread_id: value.root_thread_id,
             parent_thread_id: value.parent_thread_id,
             role: value.role,

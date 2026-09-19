@@ -37,6 +37,8 @@ pub mod thread {
         pub archived: i32,
         /// 会话工作区模式；canonical 值为 `local | worktree`，既有行解释为 `local`。
         pub workspace_mode: String,
+        /// 会话对外唯一 canonical 工作区地址，创建会话时写定、之后只读。
+        pub workspace_path: String,
     }
 
     #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

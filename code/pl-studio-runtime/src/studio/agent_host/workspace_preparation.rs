@@ -4,7 +4,7 @@ use super::worktree_lease::{
 };
 use crate::agent::worktree::{
     LocalWorktreeBackend, RemoteWorktreeBackend, WorktreeBackend, WorktreeCreateSpec,
-    WorktreeManager, WorktreeOwnership,
+    WorktreeHandle, WorktreeManager, WorktreeOwnership,
 };
 use crate::studio::records::ProjectRecord;
 use crate::{PureError, Result};
@@ -240,8 +240,14 @@ pub(in crate::studio) async fn create_root_session_worktree(
     let branch = WorktreeManager::branch_for(&ownership);
     // 远端项目的 durable lease 记录 POSIX 形式；本地项目保留宿主形态。
     let remote = project.ssh_alias.is_some();
+    // 会话冷恢复会在同一 owner 上重建 lease；revision 必须相对已有记录递增，
+    // 否则 `record` 的版本准入会拒绝重建（design/17 §17.1）。
+    let revision = worktrees
+        .get(thread_id)
+        .map(|lease| lease.revision.saturating_add(1))
+        .unwrap_or(1);
     let durable = WorktreeLease {
-        revision: 1,
+        revision,
         state: WorktreeLeaseState::Prepared,
         owner_kind: WorktreeLeaseOwnerKind::Session,
         owner_thread_id: thread_id.to_owned(),
@@ -262,6 +268,114 @@ pub(in crate::studio) async fn create_root_session_worktree(
             root_thread_id: thread_id.to_owned(),
             ownership,
             base_commit,
+        })
+        .await
+    {
+        Ok(handle) => handle,
+        Err(error) => {
+            settle_failed_create(worktrees, durable, &error).await;
+            return Err(lifecycle_error(error.to_string()));
+        }
+    };
+    if handle.path != path || handle.branch != durable.branch {
+        return Err(settle_identity_mismatch(worktrees, durable));
+    }
+    Ok(durable)
+}
+
+/// 收束一个 durable worktree lease：`validate_identity → preview_existing →
+/// cleanupRequested → discard → cleaned`，任一步失败回落 `preserved` 并返回错误。
+///
+/// 这是 child 关闭路径与归档清理共用的唯一实现；`disposition == Preserve` 时只把 lease
+/// 收束为 `preserved` 而不删除物理资源，`Cleanup` 才删除 Pure-owned 工作树与分支。
+pub(in crate::studio) async fn close_workspace(
+    leases: &WorktreeLeaseOwner,
+    manager: &WorktreeManager,
+    mut lease: WorktreeLease,
+    disposition: pl_tool::collaboration::thread::AgentWorkspaceDisposition,
+) -> anyhow::Result<()> {
+    use pl_tool::collaboration::thread::AgentWorkspaceDisposition;
+    if lease.state == WorktreeLeaseState::Cleaned {
+        return Ok(());
+    }
+    lease.transition(WorktreeLeaseState::Preserved);
+    leases.record(lease.clone())?;
+    match disposition {
+        AgentWorkspaceDisposition::Preserve => return Ok(()),
+        AgentWorkspaceDisposition::Cleanup => {}
+    }
+    lease.validate_identity()?;
+    let handle = WorktreeHandle {
+        path: PathBuf::from(&lease.path),
+        branch: lease.branch.clone(),
+        base_commit: lease.base_commit.clone(),
+    };
+    manager.preview_existing(&handle).await?;
+    lease.transition(WorktreeLeaseState::CleanupRequested);
+    leases.record(lease.clone())?;
+    if let Err(error) = manager.discard(&handle).await {
+        lease.transition(WorktreeLeaseState::Preserved);
+        leases.record(lease)?;
+        return Err(error.into());
+    }
+    lease.transition(WorktreeLeaseState::Cleaned);
+    leases.record(lease)?;
+    Ok(())
+}
+
+/// 冷激活时在同一确定性路径重建一个 child worktree，并记录 renewed 的 `prepared` lease。
+///
+/// 只在保存的 receipt 对应物理工作树缺失或 lease 已清理时调用；路径与 base 都来自冻结的
+/// receipt，因此重建落在与原地址一致的位置，child 地址保持稳定。
+pub(in crate::studio) async fn recreate_child_worktree(
+    worktrees: &WorktreeLeaseOwner,
+    ssh_manager: &Arc<pl_tool::remote::SshManager>,
+    project: &ProjectRecord,
+    root_thread_id: &str,
+    child_id: &str,
+    receipt: &AgentWorktreeSnapshot,
+) -> Result<WorktreeLease> {
+    let repository_root = PathBuf::from(&receipt.repository_root);
+    let manager = WorktreeManager::new(
+        repository_root.clone(),
+        backend_for(ssh_manager, project.ssh_alias.as_deref(), &repository_root),
+    );
+    let ownership = WorktreeOwnership::Child {
+        child_id: child_id.to_owned(),
+    };
+    let path = WorktreeManager::allocate_path(&repository_root, root_thread_id, &ownership);
+    if path.as_path() != Path::new(&receipt.path) {
+        return Err(lifecycle_error(
+            "saved child worktree receipt does not match its Pure-owned deterministic path",
+        ));
+    }
+    let branch = WorktreeManager::branch_for(&ownership);
+    let revision = worktrees
+        .get(child_id)
+        .map(|lease| lease.revision.saturating_add(1))
+        .unwrap_or(1);
+    let durable = WorktreeLease {
+        revision,
+        state: WorktreeLeaseState::Prepared,
+        owner_kind: WorktreeLeaseOwnerKind::Child,
+        owner_thread_id: child_id.to_owned(),
+        root_thread_id: root_thread_id.to_owned(),
+        project_id: project.id.clone(),
+        ssh_alias: project.ssh_alias.clone(),
+        repository_root: receipt.repository_root.clone(),
+        path: receipt.path.clone(),
+        branch: branch.clone(),
+        base_commit: receipt.base_commit.clone(),
+    };
+    worktrees
+        .record(durable.clone())
+        .map_err(|error| lifecycle_error(error.to_string()))?;
+    let handle = match manager
+        .create(WorktreeCreateSpec {
+            repo_root: repository_root,
+            root_thread_id: root_thread_id.to_owned(),
+            ownership,
+            base_commit: receipt.base_commit.clone(),
         })
         .await
     {

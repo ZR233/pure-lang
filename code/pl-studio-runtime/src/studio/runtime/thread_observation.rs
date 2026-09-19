@@ -425,6 +425,7 @@ mod tests {
             "task",
             pl_protocol::ThreadModeId::simple(),
             pl_protocol::ThreadWorkspaceMode::Local,
+            project.path.clone(),
         );
         let calls = Arc::new(AtomicUsize::new(0));
         let thread = ThreadHandle::start(

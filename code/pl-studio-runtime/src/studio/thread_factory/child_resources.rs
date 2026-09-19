@@ -160,6 +160,7 @@ impl StudioChildResources for StudioThreadFactory {
                 project_id: parent.project_id,
                 mode: parent.mode,
                 workspace_mode: parent.workspace_mode,
+                workspace_path: parent.workspace_path,
                 role: profile.profile.profile_id.clone(),
                 title: request.task_summary.as_str().to_owned(),
             })
@@ -225,9 +226,14 @@ impl StudioChildResources for StudioThreadFactory {
             &self.services.ssh_manager,
             &lease,
         );
-        close_workspace(&self.services.worktrees, &manager, lease, disposition)
-            .await
-            .map_err(|error| resource_error("close published workspace", error))
+        crate::studio::agent_host::workspace_preparation::close_workspace(
+            &self.services.worktrees,
+            &manager,
+            lease,
+            disposition,
+        )
+        .await
+        .map_err(|error| resource_error("close published workspace", error))
     }
 
     async fn discard_unpublished(&self, id: &str) -> Result<(), ThreadAssemblyError> {
@@ -280,46 +286,11 @@ fn check_cancelled(request: &ChildThreadRequest) -> Result<(), ThreadAssemblyErr
     }
 }
 
-async fn close_workspace(
-    leases: &crate::studio::agent_host::worktree_lease::WorktreeLeaseOwner,
-    manager: &crate::agent::worktree::WorktreeManager,
-    mut lease: crate::studio::agent_host::worktree_lease::WorktreeLease,
-    disposition: pl_tool::collaboration::thread::AgentWorkspaceDisposition,
-) -> anyhow::Result<()> {
-    use crate::studio::agent_host::worktree_lease::WorktreeLeaseState;
-    use pl_tool::collaboration::thread::AgentWorkspaceDisposition;
-    if lease.state == WorktreeLeaseState::Cleaned {
-        return Ok(());
-    }
-    lease.transition(WorktreeLeaseState::Preserved);
-    leases.record(lease.clone())?;
-    match disposition {
-        AgentWorkspaceDisposition::Preserve => return Ok(()),
-        AgentWorkspaceDisposition::Cleanup => {}
-    }
-    lease.validate_identity()?;
-    let handle = crate::agent::worktree::WorktreeHandle {
-        path: PathBuf::from(&lease.path),
-        branch: lease.branch.clone(),
-        base_commit: lease.base_commit.clone(),
-    };
-    manager.preview_existing(&handle).await?;
-    lease.transition(WorktreeLeaseState::CleanupRequested);
-    leases.record(lease.clone())?;
-    if let Err(error) = manager.discard(&handle).await {
-        lease.transition(WorktreeLeaseState::Preserved);
-        leases.record(lease)?;
-        return Err(error.into());
-    }
-    lease.transition(WorktreeLeaseState::Cleaned);
-    leases.record(lease)?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::agent::worktree::{LocalWorktreeBackend, WorktreeCreateSpec, WorktreeManager};
+    use crate::studio::agent_host::workspace_preparation::close_workspace;
     use crate::studio::agent_host::{
         ThreadWriteBehindWriter,
         worktree_lease::{

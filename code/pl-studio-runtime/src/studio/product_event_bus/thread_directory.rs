@@ -524,6 +524,7 @@ mod tests {
             "Worktree session",
             pl_protocol::ThreadModeId::simple(),
             ThreadWorkspaceMode::Worktree,
+            "/repo/.anywork/worktrees/session".to_string(),
         );
         bus.commit_directory(delta).await.unwrap();
         assert_eq!(

@@ -1,4 +1,6 @@
-//! Cold child activation restores saved facts and opens fresh services without recreating worktrees.
+//! Cold child activation restores saved facts and opens fresh services; a `worktree` child whose
+//! saved receipt has no physical worktree (or whose lease was cleaned by an archive) is recreated
+//! at the same deterministic path instead of reusing the missing location.
 use super::{StudioThreadFactory, errors::resource_error, thread_tools::ThreadToolAssembly};
 use crate::{
     resource_store::FileResourceStore,
@@ -104,6 +106,8 @@ impl StudioThreadFactory {
                     .ok_or_else(|| {
                         ThreadAssemblyError::Identity("invalid saved worktree receipt".into())
                     })?;
+                self.ensure_restored_child_worktree(receipt, &thread, &project)
+                    .await?;
                 AgentWorkspace::worktree(root, PathBuf::from(&receipt.path))
             }
             pl_protocol::AgentWorkspaceMode::Unrestricted
@@ -181,6 +185,49 @@ impl StudioThreadFactory {
             )),
         };
         Ok(prepared.tools.install(spec))
+    }
+
+    /// 保存的 worktree receipt 对应物理工作树缺失、或 lease 已被归档清理时，在同一确定性
+    /// 路径重建工作树并记录 renewed 的 `prepared` lease；已有可用现场时保持不变。
+    async fn ensure_restored_child_worktree(
+        &self,
+        receipt: &pl_protocol::AgentWorktreeSnapshot,
+        thread: &crate::studio::ThreadRecord,
+        project: &crate::studio::ProjectRecord,
+    ) -> Result<(), ThreadAssemblyError> {
+        use crate::studio::agent_host::worktree_lease::WorktreeLeaseState;
+        let child_id = &thread.id;
+        let recreate = match self.services.worktrees.get(child_id) {
+            None => true,
+            Some(lease) if lease.state == WorktreeLeaseState::Cleaned => true,
+            Some(lease) => {
+                let manager = crate::studio::agent_host::workspace_preparation::manager_from_lease(
+                    &self.services.ssh_manager,
+                    &lease,
+                );
+                let handle = crate::agent::worktree::WorktreeHandle {
+                    path: PathBuf::from(&lease.path),
+                    branch: lease.branch.clone(),
+                    base_commit: lease.base_commit.clone(),
+                };
+                matches!(manager.preview_existing(&handle).await, Ok(None))
+            }
+        };
+        if !recreate {
+            return Ok(());
+        }
+        let _creating = self.services.worktrees.creation_guard(child_id);
+        crate::studio::agent_host::workspace_preparation::recreate_child_worktree(
+            &self.services.worktrees,
+            &self.services.ssh_manager,
+            project,
+            &thread.root_thread_id,
+            child_id,
+            receipt,
+        )
+        .await
+        .map_err(|error| resource_error("recreate restored child worktree", error))?;
+        Ok(())
     }
 }
 

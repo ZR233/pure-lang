@@ -55,6 +55,7 @@ impl DirectoryDelta {
         title: &str,
         mode: ThreadModeId,
         workspace_mode: ThreadWorkspaceMode,
+        workspace_path: String,
     ) -> (Self, Thread) {
         let now = unix_seconds();
         let thread = Thread {
@@ -65,6 +66,7 @@ impl DirectoryDelta {
             title: non_empty_title(title),
             mode: mode.clone(),
             workspace_mode,
+            workspace_path,
             parent_thread_id: None,
             role: crate::config::StudioRole::Planner.key().to_string(),
             status: pl_protocol::ThreadStatus::Idle,
@@ -92,6 +94,7 @@ impl DirectoryDelta {
                 title: non_empty_title(&spec.title),
                 mode: spec.mode,
                 workspace_mode: spec.workspace_mode,
+                workspace_path: spec.workspace_path,
                 root_thread_id: spec.root_thread_id,
                 parent_thread_id: Some(spec.parent_thread_id),
                 role: spec.role,
@@ -133,6 +136,7 @@ pub(in crate::studio) struct RegisteredChildThread {
     pub(in crate::studio) root_thread_id: String,
     pub(in crate::studio) mode: ThreadModeId,
     pub(in crate::studio) workspace_mode: ThreadWorkspaceMode,
+    pub(in crate::studio) workspace_path: String,
     pub(in crate::studio) role: String,
     pub(in crate::studio) title: String,
 }
@@ -224,6 +228,7 @@ async fn upsert_thread_directory_row(
             title: Set(thread.title.clone()),
             mode: Set(thread.mode.label().to_string()),
             workspace_mode: Set(thread.workspace_mode.label().to_string()),
+            workspace_path: Set(thread.workspace_path.clone()),
             root_thread_id: Set(thread.root_thread_id.clone()),
             parent_thread_id: Set(thread.parent_thread_id.clone()),
             role: Set(thread.role.clone()),
@@ -254,6 +259,7 @@ async fn upsert_thread_directory_row(
         || existing.root_thread_id != thread.root_thread_id
         || existing.parent_thread_id != thread.parent_thread_id
         || existing.workspace_mode != thread.workspace_mode.label()
+        || existing.workspace_path != thread.workspace_path
     {
         bail!(
             "Thread {} directory identity changed: persisted {:?} vs delta {:?}",
@@ -263,12 +269,14 @@ async fn upsert_thread_directory_row(
                 existing.root_thread_id.as_str(),
                 existing.parent_thread_id.as_deref(),
                 existing.workspace_mode.as_str(),
+                existing.workspace_path.as_str(),
             ),
             (
                 thread.project_id.as_str(),
                 thread.root_thread_id.as_str(),
                 thread.parent_thread_id.as_deref(),
                 thread.workspace_mode.label(),
+                thread.workspace_path.as_str(),
             )
         );
     }
