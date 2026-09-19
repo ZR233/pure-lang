@@ -49,6 +49,7 @@ impl StudioThreadAssembler {
         &self,
         id: &str,
         message: pl_core::thread::inbox::ThreadMessage,
+        wake: bool,
     ) -> Result<(), ThreadAssemblyError> {
         let target = {
             let state = self.0.state();
@@ -69,7 +70,25 @@ impl StudioThreadAssembler {
         let Some((thread, execution)) = target else {
             return Ok(());
         };
-        match thread.send_message_and_resume(message, execution).await {
+        // The committed inbox already owns this immutable terminal watermark. In particular,
+        // replay must not resend a migrated, previously consumed notification with a new body.
+        let snapshot = thread.snapshot();
+        let message = match snapshot
+            .inbox
+            .iter()
+            .find(|record| record.message.id == message.id)
+        {
+            Some(record) if record.sequence <= snapshot.consumed_messages => return Ok(()),
+            Some(record) => record.message.clone(),
+            None => message,
+        };
+        let result = if wake {
+            thread.send_message_and_resume(message, execution).await
+        } else {
+            // History projection can repair an inbox but cannot start a model call.
+            thread.send_message(message).await
+        };
+        match result {
             Ok(_) => Ok(()),
             Err(ThreadError::Closed) if thread.snapshot().lifecycle != ThreadLifecycle::Open => {
                 Ok(())

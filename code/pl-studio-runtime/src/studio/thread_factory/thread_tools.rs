@@ -192,12 +192,16 @@ impl StudioThreadFactory {
             StudioWorkspaceTools {
                 binding,
                 store,
-                capabilities: config.runtime.tool_capabilities.clone(),
+                capabilities: {
+                    let mut capabilities = config.runtime.tool_capabilities.clone();
+                    capabilities.ask_user &= thread_id == root_thread_id;
+                    capabilities
+                },
             },
             commands,
         )
         .await?;
-        if config.runtime.tool_capabilities.ask_user {
+        if config.runtime.tool_capabilities.ask_user && thread_id == root_thread_id {
             tools = tools.with_tools(crate::plan_tool::plan_registrations(Default::default())?);
         }
         if config.runtime.tool_capabilities.git {

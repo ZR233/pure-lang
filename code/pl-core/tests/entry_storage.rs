@@ -23,7 +23,7 @@ async fn existing_unversioned_database_is_rejected_without_changing_its_data() {
         error,
         pl_core::persistence::SessionStoreError::UnsupportedSchema {
             found: 0,
-            supported: 6
+            supported: 7
         }
     ));
     assert_eq!(std::fs::read(path).unwrap(), before);
@@ -333,7 +333,7 @@ async fn old_business_session_schema_is_rejected_without_rewriting_history() {
         error,
         pl_core::persistence::SessionStoreError::UnsupportedSchema {
             found: 5,
-            supported: 6
+            supported: 7
         }
     ));
     assert_eq!(std::fs::read(path).unwrap(), before);

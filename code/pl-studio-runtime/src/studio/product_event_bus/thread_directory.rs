@@ -295,7 +295,7 @@ impl ProductEventBus {
     ///
     /// 激活路径只是建立查询缓存，不代表目录事实发生了变化；真正的目录
     /// mutation 必须继续通过 [`Self::apply_thread_delta`] 提交。
-    pub(in crate::studio) fn warm_thread_index(&self, entries: Vec<Thread>) {
+    pub(crate) fn warm_thread_index(&self, entries: Vec<Thread>) {
         if entries.is_empty() {
             return;
         }

@@ -75,6 +75,9 @@ impl Owner {
                     Some(error) => TurnState::Failed {
                         description: error.to_string(),
                     },
+                    None if self.interrupted_turn.as_deref() == Some(&turn_id) => {
+                        TurnState::Interrupted
+                    }
                     None => TurnState::Cancelled,
                 },
                 Err(error) => TurnState::Failed {
@@ -215,7 +218,7 @@ impl Owner {
                     {
                         return Ok(TurnCompletion {
                             model_steps: completed,
-                            outcome: TurnOutcome::ToolCompleted,
+                            outcome: TurnOutcome::Completed,
                             last_output: output,
                         });
                     }

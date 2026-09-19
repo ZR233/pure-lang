@@ -81,6 +81,11 @@ impl StudioRuntime {
                 cursor: previous.accepted_sequence,
             });
         }
+        if thread_record.parent_thread_id.is_none() {
+            self.thread_observations
+                .reconcile_children(&thread_id)
+                .await?;
+        }
         let original_request = input.clone();
         let pl_protocol::studio::StudioPromptInput {
             input_id,

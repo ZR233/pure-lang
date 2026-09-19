@@ -129,11 +129,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
-  BridgeAgentProgressDto dco_decode_box_autoadd_bridge_agent_progress_dto(
-    dynamic raw,
-  );
-
-  @protected
   BridgeAttachmentAdmissionContext
   dco_decode_box_autoadd_bridge_attachment_admission_context(dynamic raw);
 
@@ -631,9 +626,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeAgentProfileDto dco_decode_bridge_agent_profile_dto(dynamic raw);
-
-  @protected
-  BridgeAgentProgressDto dco_decode_bridge_agent_progress_dto(dynamic raw);
 
   @protected
   BridgeAgentState dco_decode_bridge_agent_state(dynamic raw);
@@ -1638,11 +1630,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String? dco_decode_opt_String(dynamic raw);
 
   @protected
-  BridgeAgentProgressDto? dco_decode_opt_box_autoadd_bridge_agent_progress_dto(
-    dynamic raw,
-  );
-
-  @protected
   BridgeConfigRecoveryReport?
   dco_decode_opt_box_autoadd_bridge_config_recovery_report(dynamic raw);
 
@@ -1899,11 +1886,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeAgentDirectoryState sse_decode_box_autoadd_bridge_agent_directory_state(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  BridgeAgentProgressDto sse_decode_box_autoadd_bridge_agent_progress_dto(
     SseDeserializer deserializer,
   );
 
@@ -2539,11 +2521,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   BridgeAgentProfileDto sse_decode_bridge_agent_profile_dto(
-    SseDeserializer deserializer,
-  );
-
-  @protected
-  BridgeAgentProgressDto sse_decode_bridge_agent_progress_dto(
     SseDeserializer deserializer,
   );
 
@@ -3806,11 +3783,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   String? sse_decode_opt_String(SseDeserializer deserializer);
 
   @protected
-  BridgeAgentProgressDto? sse_decode_opt_box_autoadd_bridge_agent_progress_dto(
-    SseDeserializer deserializer,
-  );
-
-  @protected
   BridgeConfigRecoveryReport?
   sse_decode_opt_box_autoadd_bridge_config_recovery_report(
     SseDeserializer deserializer,
@@ -4131,12 +4103,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_box_autoadd_bridge_agent_directory_state(
     BridgeAgentDirectoryState self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_box_autoadd_bridge_agent_progress_dto(
-    BridgeAgentProgressDto self,
     SseSerializer serializer,
   );
 
@@ -4857,12 +4823,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_bridge_agent_profile_dto(
     BridgeAgentProfileDto self,
-    SseSerializer serializer,
-  );
-
-  @protected
-  void sse_encode_bridge_agent_progress_dto(
-    BridgeAgentProgressDto self,
     SseSerializer serializer,
   );
 
@@ -6407,12 +6367,6 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer);
-
-  @protected
-  void sse_encode_opt_box_autoadd_bridge_agent_progress_dto(
-    BridgeAgentProgressDto? self,
-    SseSerializer serializer,
-  );
 
   @protected
   void sse_encode_opt_box_autoadd_bridge_config_recovery_report(

@@ -253,7 +253,7 @@ owner 在记录终态前消失；无法得到 provider 已知用量时保持未�
 内置的 todo、session note 工具从 Thread 扩展快照读取原始状态：todo 工具自身校验
 checklist 并生成载荷/上下文/CAS 变更，相同内容不写新扩展版本；note 工具正文保留原始
 换行和 Unicode，不自动进入上下文，写入回执使用 Thread 扩展水位给出实际候选版本。
-complete 工具提交完整完成结果与简洁模型摘要，Turn 结束使用注册授权的类型化控制。
+finish_turn 工具提交完整非空 message，不设应用层长度上限，Turn 结束使用注册授权的类型化控制。
 
 ## 16.7 计量与回执
 
@@ -301,3 +301,9 @@ resources 的服务，未指定服务时按稳定服务顺序聚合；读取结�
 宿主辅助命令的超时也必须经过物理收束：本地使用统一进程组/Job Object 包装，同时等待
 退出与两路输出；远程保留原退出接收器和输出读取任务，发送终止后继续等待。终止请求
 失败不能伪装成执行已结束，退出或排空失败保留明确诊断。
+
+定向 interrupt 与新输入打断保存 `TurnState::Interrupted`；关闭或取消令牌保存 `Cancelled`。
+内部取消错误仍用于收束在途执行，不能据此丢失 journal 中的实际停止原因。
+
+Studio 将 Interrupted 映射为取消展示的强类型原因 interrupted；没有结束耗时的恢复中断
+投影为 recovery，避免把运行中的定向打断误标为恢复。FRB 与 Dart 保留该原因。

@@ -39,7 +39,7 @@ Prompt 和真实验收，不能只修改提示词。
 每个 Thread 的 `studio.plan` Thread 扩展保存有界 Plan 状态：状态 revision、当前状态、计划
 文档及内容 hash、文档 version、pending Interaction ID、最近修订意见、转换历史和最近
 operation receipts。缺失 Plan 字段等价于 revision 0 的 `drafting`，查询不会为了物化默认值
-而写状态。Plan 不跨 Thread 共享。
+而写状态。Plan 不跨 Thread 共享；仅根 Thread 装配 Plan 工具和用户确认入口，child 通过 Turn 报告提出方案与问题。
 
 工具读取当前调用的不透明扩展快照，解码为产品 Plan 状态后由同一纯状态机计算候选，返回
 扩展 CAS；core 与工具完整结果及实际上下文一次提交。工具不持有可写状态机或第二份会话

@@ -79,7 +79,7 @@ model、effort、system instructions 和 workspace mode 创建容器、远端会
 
 Plan 属于各自的 Thread，不随 Profile、消息 fork 或 workspace assignment 复制到 child，也不
 存在 lineage 共享句柄。root 必须把 child 所需的已批准基线写入 `spawn_agent.message`；
-child 的 `plan_*` 工具只操作自己的 session，不能查询 root Plan。配置冻结与 Plan session
+child 不装配 `plan_*` 工具；方案与问题通过 Turn 报告交给 root。配置冻结与 Plan session
 隔离是两条独立边界。`spawn_agent.message` 和 root 后续通过 `send_message` 发送的补充输入
 都在 child Timeline 中显示为 `parentAgent` 文本消息，并由 Studio 标记为"主智能体 / Main
 agent"；`send_message` 对运行中 child 请求打断并在清理后携带新内容自动继续，对空闲 child 启动执行。
@@ -159,61 +159,38 @@ planning 开始和每批 child 交付后，root 都执行一次成本感知的�
 范围、适用 Profile、交付证据与 root-only 标记，形成任务 DAG。依赖已满足、边界清楚、可
 独立验收且预计能缩短关键路径或显著增加独立证据的节点构成 ready frontier；root 必须在
 首次 `wait` 前派出该前沿的全部 child，等待期间继续处理未委托的综合和编排工作，不得重复
-child 的任务。收齐本批 durable delivery 后，root 更新 DAG 并立即释放下一 ready frontier，
+child 的任务。收齐本批 Turn 报告后，root 更新 DAG 并立即释放下一 ready frontier，
 直到没有剩余节点。调度不使用固定 agent 数量。
 
-### durable delivery 与收据
+### Turn 报告与收据
 
-每个 child 都使用 durable delivery；非 reviewer child 完成实际工作后、final reply 前调用
-一次 `report_progress`，以 `readyForCompletion` 阶段提交 `CHILD_DELIVERY_READY` 及完整证据；
-worktree child 还必须在 detail 中提供 `WORKTREE_COMMIT_READY`、40 位 commit 与 workspace
-root，reviewer 继续使用专用 verdict marker。root 从成功 spawn receipt 保存 `agentId`、
-`profileId`、`messageAccepted` 和 `messageSequence`；`send_message` 返回 `target`、
-`messageId` 与 `sequence`。这些是消息准入收据，不携带 `turnId`，也不代表执行完成。每个
-child 同时只保留一个待交付任务；复用前记录已知 `lastTurn.turnId` 与通知
-`commitSequence`，后续必须看到新 Turn，不能用旧完成或旧 submission 满足新任务。消息
-sequence 与 journal commitSequence 属于不同域。
+主代理统一承担用户澄清和 Plan 确认。child 不装配 plan_* 或 request_user_input；权限审批仍由
+运行时处理。父消息提供已批准基线，child 遇到问题时结束本轮汇报，由父代理决定续跑。
 
-### wait 语义
+finish_turn({message}) 提交完整非空正文并结束 Turn；自然 final 同样结束本轮，不需要再调用
+工具或重复汇报。派发、续跑和汇报正文不设应用层长度上限；模型容量和存储背压仍按各自合同
+处理，不能静默截断。正文说明目标、事实、架构、接口形状、错误语义、依赖步骤、复杂流程
+伪代码、所有权和验收。契约明确、局部自主，事实和建议必须区分。
 
-父代理没有独立工作时，使用 `wait`（空任务列表，`timeoutMs` 上限 300000）等待 Thread 消息；
-这是最长等待时间，消息到达会提前唤醒；只有具体独立动作存在更早期限时才缩短等待。超时后
-不机械调用 `list_agents` 或读取全量历史；按新通知、逾期里程碑、缺失终态证据或显式错误
-进行目标明确的查询，否则继续等待。每条通知都需消费并核对尚未完成目标，不以减少查询为由
-忽略失败。`wait` 返回 `tasks`、`messagesReady`、`timedOut`，不返回事件批次。消息就绪、
-工具任务完成和 progress 都不是 child 的完成证据。
+TurnState 是唯一执行终态；报告由对应终态水位的 journal 投影，不拥有独立状态机、revision、
+registry 或就绪 marker。报告包含 child 身份、Turn/input 身份、触发及本轮消费消息的身份与序号、终态序号、实际停止原因、完整
+正文、未完成后台任务和交互，以及本轮实际权限审批记录（含已完成审批）。正常结束不等于任务完成，父代理结合目标和证据判断。
+强制停止没有模型总结时由运行时报告实际原因及本轮已提交可见输出，不追加模型请求、不借用
+旧轮总结、不转发隐藏 reasoning。步数耗尽保留现场，由父代理决定继续，不自动续跑。
 
-宿主将持久 child 通知作为 Thread 消息送入父模型上下文，字段为 `childId`、`commitSequence`、
-`turn`、`lifecycle`、`progress`。父模型只在 `childId` 绑定真实 spawn 目标，且
-`turn.state.kind = finished`、`turn.state.value = completed | toolCompleted` 时记录该
-`turn.turnId` 为成功完成。`list_agents` 的目标行 `lastTurn`、`pendingInputs` 与
-`runningTasks` 可用于核实；未出现在一次 wait 结果中的目标不能被推定完成。每个 pending
-目标都必须取得自己的当前完成证据。`turn.state.value = stepLimit` 是预算暂停，
-`waitingInteraction` 是等待交互，两者都不是成功交付：先读取该 child 的 durable Timeline
-判断进展，健康且工作未完成时才发送明确 continuation；保留新消息准入收据，等待新观察到的
-Turn 身份，不构造不存在的收据。父模型必须先消费匹配目标与 Turn 的成功终态通知，之后到达
-的通知不能使更早的阶段推进变为有效；checkpoint 请求之后才到达的通知不能倒推授权。
+spawn/send 收据仅表示消息受理。父代理绑定真实 agentId 和本轮 input/Turn 身份，不能把旧轮
+报告用作新任务交付。消息序号和 journal 序号属于不同域。
 
-### canonical submissions
+### 通知、等待与恢复
 
-每个目标都获得自己的当前成功终态后，才按绑定 agentId 读取 canonical 非空
-`read_agent_submissions`。只有 `CHILD_DELIVERY_READY` 的 progress 仍需等待成功终态；
-`stage = readyForCompletion` 不改变 Turn 生命周期，也不能清除 pending 或提前请求
-checkpoint。canonical page 必须非空且完整，大提交按返回的 `nextCursor` 和 `fragment` 完整
-读取，旧提交不可重复消费。
+终态提交后，完整报告以稳定 child/终态 commit 消息身份写入父 Thread inbox，重试幂等；固定终态水位
+禁止混入后续 Turn 输出。wait 只等待就绪，消息通过下一模型请求进入上下文，不再另外查询提交
+或返回重复报告。空 taskIds 等待子代理消息，工具 taskIds 仅引用工具任务。正常超时不机械轮询。
 
-提交页增加 `targetState`，其 `agentId`、`throughSequence`、`turn`、`completion`、
-`guidance` 均来自与 cursor 相同的冻结 history。`completion` 为穷尽值：`notStarted |
-running | completed | toolCompleted | waitingInteraction | stepLimit | cancelled |
-interrupted | failed`。`running/notStarted` 页即使非空或含完成 marker，也必须保留 pending，
-按 guidance 等待并消费匹配目标与 Turn 的成功终态通知，再不带旧 cursor 重新读取——冻结的
-Running 页不能靠翻页更新成当前终态。`completed/toolCompleted` 仅补充核实目标状态，不替代
-父模型消费终态通知的要求；其他状态按交互、预算或失败处理。正常顺序仍为先终态再交付查询，
-不因此新增提交轮询。取消、中断、失败或空提交进入诊断、收窄重派或显式关闭；
-`read_agent_session` 不能替代正常 durable submission——它读取持久化可见 Timeline（默认
-倒序最新 20 条文本 Item，可翻页、切换正序或请求完整 typed Item），查询在驻留 child 上先
-等待目标 revision 耐久化，也能读取已关闭、淘汰或重启后未驻留的 child；它不激活目标、
-不修改事件总线。空页进入诊断和收窄重派。
+显式恢复时核对已保存 child 终态与父 inbox 并补齐缺失通知；历史查询不激活模型。Turn 结束
+不关闭 Thread、不取消跨 Turn 后台任务、不清理 worktree。read_agent_session 保留为诊断与
+历史查询，不是正常交付必经步骤。旧进度与通知仅在迁移边界转换，保留原始内容、身份和顺序，
+不得把 readyForCompletion 推断成成功执行。
 
 ### 整合与 reviewer 门禁
 
@@ -233,15 +210,9 @@ id，再用新的调用重试一次；容量或 provider 暂时失败则等待�
 所有成果整合后必须创建 fresh-context 的只读 `reviewer`，综合检查目标、设计、完整 diff、
 错误路径、测试、冲突和 fallback。reviewer 不直接修复：代码 finding 回到 working 交给
 executor，设计 finding 回到 editing_documents 由 root 修订；重新整合后必须再派新的
-reviewer。reviewer 在最终回复前调用 `report_progress` 形成 durable verdict（finding 或
-approval）；root 必须通过 `read_agent_submissions` 读取与冻结 reviewer agentId、读取 call
-ID 绑定的 canonical page。该协作报告是只读审查的结构化交付，不允许文件/Git/exec 修复，
-也不能用 root 转述或 session 摘要伪造 approval。reviewer 必须明确批准或阻塞 finding，不能
-同时批准和要求先完成必要检查；root 自审不能替代 reviewer，必须等待该 wave 的每个
-reviewer terminal 并按 agentId 读取 durable verdict，只有全部 approval 才能进入最终门禁，
-任一阻塞 finding 都必须返工、重新整合并创建新的 review wave。范围较广或风险面可独立验收
-时，同一 review wave 还应在首次等待前并行派出分别覆盖 API/错误路径、测试、GUI、Git/整合
-等专项 reviewer。
+reviewer。reviewer 在本轮报告中明确批准或阻塞 finding，并提供证据；不能同时批准和要求先
+完成必要检查。root 消费对应 reviewer 本轮终态报告，不解析字符串 marker，不另读 submission。
+全部 reviewer 批准后进入最终验证，任一阻塞 finding 都需返工、整合和新的审查。审查者保持只读。
 
 上述职责由本 Turn 的 Mode/Profile 指令约束，不新增专用 executor/reviewer runtime 生命
 周期，也不按阶段裁剪普通工具能力。
@@ -253,11 +224,11 @@ root 保存任务读写范围与原执行者 `agentId` 的映射，交付后保�
 整合基线、修复范围和验证记录；只有执行者不可用或原权限无法覆盖修复时才重派，并记录具体
 原因。设计 finding 仍由 root 修订。worktree 返工前由 root 协调同步 canonical 基线；只采纳
 本轮新增修复提交，不重复整合旧提交。每次续跑都重新建立 pending 集合，使用本轮消息之后的
-terminal receipt 和 durable submission；旧轮次完成状态与旧交付不能证明返工完成。重新整合
+终态报告；旧轮次完成状态与旧交付不能证明返工完成。重新整合
 后创建 fresh-context reviewer，全部 approval 且最终验证通过后才关闭执行者、清理 worktree；
 停止或失败保留未交付现场并报告原因。
 
-执行者、reviewer 的 durable submission 和最终回复都包含验证记录：实际执行者、完整命令、
+执行者、reviewer 的本轮报告包含验证记录：实际执行者、完整命令、
 工作目录、代码基线（commit 加相关未提交 diff 或文件内容身份）、覆盖范围、环境、结果和
 工具/日志证据。明确区分本次实际执行、引用已有证据、尚未验证；没有执行测试也必须说明
 原因，阅读测试代码不算执行测试。root 向后续 child 传递已确认的记录，并在最终交付逐项
@@ -265,7 +236,7 @@ terminal receipt 和 durable submission；旧轮次完成状态与旧交付不�
 由 root 绑定 ID，不使用环境变量、进程或外层宿主 ID。相同命令、相关代码范围与环境未变且
 已有成功证据时复用；修改或依赖变化、冲突、失败诊断、覆盖缺口与强制门禁要求重跑时，报告
 具体原因。不同角色不机械重复全量检查，最终整合验证与项目强制门禁仍须满足；reviewer 不为
-补测试越过只读工具边界。验证记录使用现有 submission detail，不新增生产协议、持久化字段或
+补测试越过只读工具边界。验证记录使用报告正文，不新增生产协议、持久化字段或
 GUI 接口。复用会话增加上下文及 provider prompt cache 复用机会，缓存命中只按上游实际
 usage 报告，不承诺固定收益。阶段完成标准消费可复用的验证记录，只补缺失或失效的检查，
 不为阶段切换机械重复全量测试。
@@ -361,3 +332,11 @@ Agents 是 canonical Agent 配置中心，不保留重复 Roles 设置页。系�
 启用开关、provider/model/effort 控件，用户编辑器额外显示三模式选择。所有设置 mutation
 携带 `expectedSettingsRevision`，成功后以返回的完整 canonical settings snapshot 原子刷新
 UI（设置页整体契约见 [19](./19-studio-ui.md)）。
+
+显式 send_message 可按已保存的直接父子身份激活 cold child，沿用原 agentId、现场和上下文；
+list_agents 同时投影热、冷历史成员。恢复观察可补写缺失 inbox，但历史观察不唤醒模型；
+新的终态才主动唤醒父代理，显式输入/续跑负责消费恢复的待处理消息。已保存消息身份及消费水位
+去重，不因报告投影升级重送旧通知。保留 worktree 的恢复提示不阻断根任务续跑。
+
+根任务接受显式新输入时，对未加载子代理的保存 journal 做只读终态对账，补齐父 inbox；
+无需打开子代理工作区或调用模型。仅打开历史页面不触发这一步或恢复执行。

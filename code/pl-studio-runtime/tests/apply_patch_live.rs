@@ -100,10 +100,7 @@ async fn live_deepseek_applies_patch_with_prompt() {
     let result = result
         .unwrap_or_else(|error| panic!("live Turn failed: {error}; tasks={:?}", snapshot.tasks));
     assert!(
-        matches!(
-            result.outcome,
-            TurnOutcome::Completed | TurnOutcome::ToolCompleted
-        ),
+        matches!(result.outcome, TurnOutcome::Completed),
         "{result:?}"
     );
     let patch_tasks = snapshot

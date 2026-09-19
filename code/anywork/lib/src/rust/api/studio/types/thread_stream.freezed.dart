@@ -2297,14 +2297,15 @@ extension BridgeTurnCancellationCausePatterns on BridgeTurnCancellationCause {
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeTurnCancellationCause_Unspecified value)?  unspecified,TResult Function( BridgeTurnCancellationCause_UserRequested value)?  userRequested,TResult Function( BridgeTurnCancellationCause_RuntimeShutdown value)?  runtimeShutdown,TResult Function( BridgeTurnCancellationCause_AgentClosed value)?  agentClosed,TResult Function( BridgeTurnCancellationCause_Recovery value)?  recovery,TResult Function( BridgeTurnCancellationCause_Coalesced value)?  coalesced,required TResult orElse(),}){
+@optionalTypeArgs TResult maybeMap<TResult extends Object?>({TResult Function( BridgeTurnCancellationCause_Unspecified value)?  unspecified,TResult Function( BridgeTurnCancellationCause_UserRequested value)?  userRequested,TResult Function( BridgeTurnCancellationCause_RuntimeShutdown value)?  runtimeShutdown,TResult Function( BridgeTurnCancellationCause_AgentClosed value)?  agentClosed,TResult Function( BridgeTurnCancellationCause_Interrupted value)?  interrupted,TResult Function( BridgeTurnCancellationCause_Recovery value)?  recovery,TResult Function( BridgeTurnCancellationCause_Coalesced value)?  coalesced,required TResult orElse(),}){
 final _that = this;
 switch (_that) {
 case BridgeTurnCancellationCause_Unspecified() when unspecified != null:
 return unspecified(_that);case BridgeTurnCancellationCause_UserRequested() when userRequested != null:
 return userRequested(_that);case BridgeTurnCancellationCause_RuntimeShutdown() when runtimeShutdown != null:
 return runtimeShutdown(_that);case BridgeTurnCancellationCause_AgentClosed() when agentClosed != null:
-return agentClosed(_that);case BridgeTurnCancellationCause_Recovery() when recovery != null:
+return agentClosed(_that);case BridgeTurnCancellationCause_Interrupted() when interrupted != null:
+return interrupted(_that);case BridgeTurnCancellationCause_Recovery() when recovery != null:
 return recovery(_that);case BridgeTurnCancellationCause_Coalesced() when coalesced != null:
 return coalesced(_that);case _:
   return orElse();
@@ -2324,14 +2325,15 @@ return coalesced(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeTurnCancellationCause_Unspecified value)  unspecified,required TResult Function( BridgeTurnCancellationCause_UserRequested value)  userRequested,required TResult Function( BridgeTurnCancellationCause_RuntimeShutdown value)  runtimeShutdown,required TResult Function( BridgeTurnCancellationCause_AgentClosed value)  agentClosed,required TResult Function( BridgeTurnCancellationCause_Recovery value)  recovery,required TResult Function( BridgeTurnCancellationCause_Coalesced value)  coalesced,}){
+@optionalTypeArgs TResult map<TResult extends Object?>({required TResult Function( BridgeTurnCancellationCause_Unspecified value)  unspecified,required TResult Function( BridgeTurnCancellationCause_UserRequested value)  userRequested,required TResult Function( BridgeTurnCancellationCause_RuntimeShutdown value)  runtimeShutdown,required TResult Function( BridgeTurnCancellationCause_AgentClosed value)  agentClosed,required TResult Function( BridgeTurnCancellationCause_Interrupted value)  interrupted,required TResult Function( BridgeTurnCancellationCause_Recovery value)  recovery,required TResult Function( BridgeTurnCancellationCause_Coalesced value)  coalesced,}){
 final _that = this;
 switch (_that) {
 case BridgeTurnCancellationCause_Unspecified():
 return unspecified(_that);case BridgeTurnCancellationCause_UserRequested():
 return userRequested(_that);case BridgeTurnCancellationCause_RuntimeShutdown():
 return runtimeShutdown(_that);case BridgeTurnCancellationCause_AgentClosed():
-return agentClosed(_that);case BridgeTurnCancellationCause_Recovery():
+return agentClosed(_that);case BridgeTurnCancellationCause_Interrupted():
+return interrupted(_that);case BridgeTurnCancellationCause_Recovery():
 return recovery(_that);case BridgeTurnCancellationCause_Coalesced():
 return coalesced(_that);}
 }
@@ -2347,14 +2349,15 @@ return coalesced(_that);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeTurnCancellationCause_Unspecified value)?  unspecified,TResult? Function( BridgeTurnCancellationCause_UserRequested value)?  userRequested,TResult? Function( BridgeTurnCancellationCause_RuntimeShutdown value)?  runtimeShutdown,TResult? Function( BridgeTurnCancellationCause_AgentClosed value)?  agentClosed,TResult? Function( BridgeTurnCancellationCause_Recovery value)?  recovery,TResult? Function( BridgeTurnCancellationCause_Coalesced value)?  coalesced,}){
+@optionalTypeArgs TResult? mapOrNull<TResult extends Object?>({TResult? Function( BridgeTurnCancellationCause_Unspecified value)?  unspecified,TResult? Function( BridgeTurnCancellationCause_UserRequested value)?  userRequested,TResult? Function( BridgeTurnCancellationCause_RuntimeShutdown value)?  runtimeShutdown,TResult? Function( BridgeTurnCancellationCause_AgentClosed value)?  agentClosed,TResult? Function( BridgeTurnCancellationCause_Interrupted value)?  interrupted,TResult? Function( BridgeTurnCancellationCause_Recovery value)?  recovery,TResult? Function( BridgeTurnCancellationCause_Coalesced value)?  coalesced,}){
 final _that = this;
 switch (_that) {
 case BridgeTurnCancellationCause_Unspecified() when unspecified != null:
 return unspecified(_that);case BridgeTurnCancellationCause_UserRequested() when userRequested != null:
 return userRequested(_that);case BridgeTurnCancellationCause_RuntimeShutdown() when runtimeShutdown != null:
 return runtimeShutdown(_that);case BridgeTurnCancellationCause_AgentClosed() when agentClosed != null:
-return agentClosed(_that);case BridgeTurnCancellationCause_Recovery() when recovery != null:
+return agentClosed(_that);case BridgeTurnCancellationCause_Interrupted() when interrupted != null:
+return interrupted(_that);case BridgeTurnCancellationCause_Recovery() when recovery != null:
 return recovery(_that);case BridgeTurnCancellationCause_Coalesced() when coalesced != null:
 return coalesced(_that);case _:
   return null;
@@ -2373,13 +2376,14 @@ return coalesced(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function()?  unspecified,TResult Function()?  userRequested,TResult Function()?  runtimeShutdown,TResult Function()?  agentClosed,TResult Function()?  recovery,TResult Function( String targetTurnId)?  coalesced,required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>({TResult Function()?  unspecified,TResult Function()?  userRequested,TResult Function()?  runtimeShutdown,TResult Function()?  agentClosed,TResult Function()?  interrupted,TResult Function()?  recovery,TResult Function( String targetTurnId)?  coalesced,required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case BridgeTurnCancellationCause_Unspecified() when unspecified != null:
 return unspecified();case BridgeTurnCancellationCause_UserRequested() when userRequested != null:
 return userRequested();case BridgeTurnCancellationCause_RuntimeShutdown() when runtimeShutdown != null:
 return runtimeShutdown();case BridgeTurnCancellationCause_AgentClosed() when agentClosed != null:
-return agentClosed();case BridgeTurnCancellationCause_Recovery() when recovery != null:
+return agentClosed();case BridgeTurnCancellationCause_Interrupted() when interrupted != null:
+return interrupted();case BridgeTurnCancellationCause_Recovery() when recovery != null:
 return recovery();case BridgeTurnCancellationCause_Coalesced() when coalesced != null:
 return coalesced(_that.targetTurnId);case _:
   return orElse();
@@ -2399,13 +2403,14 @@ return coalesced(_that.targetTurnId);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function()  unspecified,required TResult Function()  userRequested,required TResult Function()  runtimeShutdown,required TResult Function()  agentClosed,required TResult Function()  recovery,required TResult Function( String targetTurnId)  coalesced,}) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>({required TResult Function()  unspecified,required TResult Function()  userRequested,required TResult Function()  runtimeShutdown,required TResult Function()  agentClosed,required TResult Function()  interrupted,required TResult Function()  recovery,required TResult Function( String targetTurnId)  coalesced,}) {final _that = this;
 switch (_that) {
 case BridgeTurnCancellationCause_Unspecified():
 return unspecified();case BridgeTurnCancellationCause_UserRequested():
 return userRequested();case BridgeTurnCancellationCause_RuntimeShutdown():
 return runtimeShutdown();case BridgeTurnCancellationCause_AgentClosed():
-return agentClosed();case BridgeTurnCancellationCause_Recovery():
+return agentClosed();case BridgeTurnCancellationCause_Interrupted():
+return interrupted();case BridgeTurnCancellationCause_Recovery():
 return recovery();case BridgeTurnCancellationCause_Coalesced():
 return coalesced(_that.targetTurnId);}
 }
@@ -2421,13 +2426,14 @@ return coalesced(_that.targetTurnId);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function()?  unspecified,TResult? Function()?  userRequested,TResult? Function()?  runtimeShutdown,TResult? Function()?  agentClosed,TResult? Function()?  recovery,TResult? Function( String targetTurnId)?  coalesced,}) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>({TResult? Function()?  unspecified,TResult? Function()?  userRequested,TResult? Function()?  runtimeShutdown,TResult? Function()?  agentClosed,TResult? Function()?  interrupted,TResult? Function()?  recovery,TResult? Function( String targetTurnId)?  coalesced,}) {final _that = this;
 switch (_that) {
 case BridgeTurnCancellationCause_Unspecified() when unspecified != null:
 return unspecified();case BridgeTurnCancellationCause_UserRequested() when userRequested != null:
 return userRequested();case BridgeTurnCancellationCause_RuntimeShutdown() when runtimeShutdown != null:
 return runtimeShutdown();case BridgeTurnCancellationCause_AgentClosed() when agentClosed != null:
-return agentClosed();case BridgeTurnCancellationCause_Recovery() when recovery != null:
+return agentClosed();case BridgeTurnCancellationCause_Interrupted() when interrupted != null:
+return interrupted();case BridgeTurnCancellationCause_Recovery() when recovery != null:
 return recovery();case BridgeTurnCancellationCause_Coalesced() when coalesced != null:
 return coalesced(_that.targetTurnId);case _:
   return null;
@@ -2557,6 +2563,38 @@ int get hashCode => runtimeType.hashCode;
 @override
 String toString() {
     return 'BridgeTurnCancellationCause.agentClosed()';
+}
+
+
+}
+
+
+
+
+/// @nodoc
+
+
+class BridgeTurnCancellationCause_Interrupted extends BridgeTurnCancellationCause {
+  const BridgeTurnCancellationCause_Interrupted(): super._();
+
+
+
+
+
+
+
+@override
+bool operator ==(Object other) {
+    return identical(this, other) || (other.runtimeType == runtimeType&&other is BridgeTurnCancellationCause_Interrupted);
+}
+
+
+@override
+int get hashCode => runtimeType.hashCode;
+
+@override
+String toString() {
+    return 'BridgeTurnCancellationCause.interrupted()';
 }
 
 

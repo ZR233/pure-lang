@@ -53,9 +53,7 @@ StudioAgentView _agentDirectoryEntryFromFrb(
     summary: agent.summary,
     depth: agent.depth,
     state: _agentStateFromFrb(agent.state),
-    progress: _agentProgressFromFrb(agent.progress),
     updatedAt: _dateFromUnix(agent.updatedAt),
-    summaryAgeSeconds: agent.summaryAgeSeconds.toInt(),
   );
 }
 
@@ -96,19 +94,6 @@ StudioAgentState _agentStateFromFrb(frb.BridgeAgentState state) {
       diagnosticTurnId: field0.diagnosticTurnId,
     ),
   };
-}
-
-AgentProgressView? _agentProgressFromFrb(frb.BridgeAgentProgressDto? progress) {
-  if (progress == null) {
-    return null;
-  }
-  return AgentProgressView(
-    stage: progress.stage,
-    summary: progress.summary,
-    nextStep: progress.nextStep,
-    revision: progress.revision.toInt(),
-    updatedAt: _dateFromUnix(progress.updatedAt),
-  );
 }
 
 StudioProject _projectFromFrb(frb.ProjectDto project) {

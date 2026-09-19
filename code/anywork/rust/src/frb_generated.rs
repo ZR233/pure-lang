@@ -3423,12 +3423,7 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeAgentDirectoryEntry
         let mut var_depth = <u32>::sse_decode(deserializer);
         let mut var_state =
             <crate::api::studio::types::runtime::BridgeAgentState>::sse_decode(deserializer);
-        let mut var_progress =
-            <Option<crate::api::studio::types::runtime::BridgeAgentProgressDto>>::sse_decode(
-                deserializer,
-            );
         let mut var_updatedAt = <i64>::sse_decode(deserializer);
-        let mut var_summaryAgeSeconds = <u64>::sse_decode(deserializer);
         return crate::api::studio::types::runtime::BridgeAgentDirectoryEntryDto {
             id: var_id,
             thread_id: var_threadId,
@@ -3440,9 +3435,7 @@ impl SseDecode for crate::api::studio::types::runtime::BridgeAgentDirectoryEntry
             summary: var_summary,
             depth: var_depth,
             state: var_state,
-            progress: var_progress,
             updated_at: var_updatedAt,
-            summary_age_seconds: var_summaryAgeSeconds,
         };
     }
 }
@@ -3581,24 +3574,6 @@ impl SseDecode for crate::api::studio::types::agent_profile::BridgeAgentProfileD
             system: var_system,
             enabled: var_enabled,
             workspace_mode: var_workspaceMode,
-        };
-    }
-}
-
-impl SseDecode for crate::api::studio::types::runtime::BridgeAgentProgressDto {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        let mut var_stage = <String>::sse_decode(deserializer);
-        let mut var_summary = <String>::sse_decode(deserializer);
-        let mut var_nextStep = <String>::sse_decode(deserializer);
-        let mut var_revision = <u64>::sse_decode(deserializer);
-        let mut var_updatedAt = <i64>::sse_decode(deserializer);
-        return crate::api::studio::types::runtime::BridgeAgentProgressDto {
-            stage: var_stage,
-            summary: var_summary,
-            next_step: var_nextStep,
-            revision: var_revision,
-            updated_at: var_updatedAt,
         };
     }
 }
@@ -8022,9 +7997,12 @@ impl SseDecode for crate::api::studio::types::thread_stream::BridgeTurnCancellat
                 return crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::AgentClosed;
             }
             4 => {
-                return crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::Recovery;
+                return crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::Interrupted;
             }
             5 => {
+                return crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::Recovery;
+            }
+            6 => {
                 let mut var_targetTurnId = <String>::sse_decode(deserializer);
                 return crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::Coalesced{target_turn_id: var_targetTurnId};
             }
@@ -9662,21 +9640,6 @@ impl SseDecode for Option<String> {
     }
 }
 
-impl SseDecode for Option<crate::api::studio::types::runtime::BridgeAgentProgressDto> {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
-        if (<bool>::sse_decode(deserializer)) {
-            return Some(
-                <crate::api::studio::types::runtime::BridgeAgentProgressDto>::sse_decode(
-                    deserializer,
-                ),
-            );
-        } else {
-            return None;
-        }
-    }
-}
-
 impl SseDecode for Option<crate::api::studio::types::response::BridgeConfigRecoveryReport> {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -10696,9 +10659,7 @@ impl flutter_rust_bridge::IntoDart
             self.summary.into_into_dart().into_dart(),
             self.depth.into_into_dart().into_dart(),
             self.state.into_into_dart().into_dart(),
-            self.progress.into_into_dart().into_dart(),
             self.updated_at.into_into_dart().into_dart(),
-            self.summary_age_seconds.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -10823,30 +10784,6 @@ impl
     > for crate::api::studio::types::agent_profile::BridgeAgentProfileDto
 {
     fn into_into_dart(self) -> crate::api::studio::types::agent_profile::BridgeAgentProfileDto {
-        self
-    }
-}
-// Codec=Dco (DartCObject based), see doc to use other codecs
-impl flutter_rust_bridge::IntoDart for crate::api::studio::types::runtime::BridgeAgentProgressDto {
-    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
-        [
-            self.stage.into_into_dart().into_dart(),
-            self.summary.into_into_dart().into_dart(),
-            self.next_step.into_into_dart().into_dart(),
-            self.revision.into_into_dart().into_dart(),
-            self.updated_at.into_into_dart().into_dart(),
-        ]
-        .into_dart()
-    }
-}
-impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
-    for crate::api::studio::types::runtime::BridgeAgentProgressDto
-{
-}
-impl flutter_rust_bridge::IntoIntoDart<crate::api::studio::types::runtime::BridgeAgentProgressDto>
-    for crate::api::studio::types::runtime::BridgeAgentProgressDto
-{
-    fn into_into_dart(self) -> crate::api::studio::types::runtime::BridgeAgentProgressDto {
         self
     }
 }
@@ -15956,8 +15893,9 @@ impl flutter_rust_bridge::IntoDart
 crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::UserRequested => { [1.into_dart()].into_dart() }
 crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::RuntimeShutdown => { [2.into_dart()].into_dart() }
 crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::AgentClosed => { [3.into_dart()].into_dart() }
-crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::Recovery => { [4.into_dart()].into_dart() }
-crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::Coalesced{target_turn_id} => { [5.into_dart(),
+crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::Interrupted => { [4.into_dart()].into_dart() }
+crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::Recovery => { [5.into_dart()].into_dart() }
+crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::Coalesced{target_turn_id} => { [6.into_dart(),
 target_turn_id.into_into_dart().into_dart()].into_dart() }
  _ => { unimplemented!(""); }}
     }
@@ -17819,12 +17757,7 @@ impl SseEncode for crate::api::studio::types::runtime::BridgeAgentDirectoryEntry
         <Option<String>>::sse_encode(self.summary, serializer);
         <u32>::sse_encode(self.depth, serializer);
         <crate::api::studio::types::runtime::BridgeAgentState>::sse_encode(self.state, serializer);
-        <Option<crate::api::studio::types::runtime::BridgeAgentProgressDto>>::sse_encode(
-            self.progress,
-            serializer,
-        );
         <i64>::sse_encode(self.updated_at, serializer);
-        <u64>::sse_encode(self.summary_age_seconds, serializer);
     }
 }
 
@@ -17933,17 +17866,6 @@ impl SseEncode for crate::api::studio::types::agent_profile::BridgeAgentProfileD
             self.workspace_mode,
             serializer,
         );
-    }
-}
-
-impl SseEncode for crate::api::studio::types::runtime::BridgeAgentProgressDto {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <String>::sse_encode(self.stage, serializer);
-        <String>::sse_encode(self.summary, serializer);
-        <String>::sse_encode(self.next_step, serializer);
-        <u64>::sse_encode(self.revision, serializer);
-        <i64>::sse_encode(self.updated_at, serializer);
     }
 }
 
@@ -21209,8 +21131,9 @@ impl SseEncode for crate::api::studio::types::thread_stream::BridgeTurnCancellat
 crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::UserRequested => { <i32>::sse_encode(1, serializer);  }
 crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::RuntimeShutdown => { <i32>::sse_encode(2, serializer);  }
 crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::AgentClosed => { <i32>::sse_encode(3, serializer);  }
-crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::Recovery => { <i32>::sse_encode(4, serializer);  }
-crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::Coalesced{target_turn_id} => { <i32>::sse_encode(5, serializer); <String>::sse_encode(target_turn_id, serializer);
+crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::Interrupted => { <i32>::sse_encode(4, serializer);  }
+crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::Recovery => { <i32>::sse_encode(5, serializer);  }
+crate::api::studio::types::thread_stream::BridgeTurnCancellationCause::Coalesced{target_turn_id} => { <i32>::sse_encode(6, serializer); <String>::sse_encode(target_turn_id, serializer);
  }
  _ => { unimplemented!(""); }}
     }
@@ -22453,18 +22376,6 @@ impl SseEncode for Option<String> {
         <bool>::sse_encode(self.is_some(), serializer);
         if let Some(value) = self {
             <String>::sse_encode(value, serializer);
-        }
-    }
-}
-
-impl SseEncode for Option<crate::api::studio::types::runtime::BridgeAgentProgressDto> {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
-        <bool>::sse_encode(self.is_some(), serializer);
-        if let Some(value) = self {
-            <crate::api::studio::types::runtime::BridgeAgentProgressDto>::sse_encode(
-                value, serializer,
-            );
         }
     }
 }

@@ -85,7 +85,7 @@ pub(super) async fn append(
     Ok(())
 }
 
-async fn read(
+pub(super) async fn read(
     db: &impl ConnectionTrait,
     session_id: &str,
     through: Option<u64>,

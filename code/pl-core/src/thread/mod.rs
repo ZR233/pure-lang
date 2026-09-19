@@ -348,7 +348,7 @@ mod tests {
             Err(ThreadError::Cancelled)
         ));
         let snapshot = thread.snapshot();
-        assert_eq!(snapshot.turns[0].state, TurnState::Cancelled);
+        assert_eq!(snapshot.turns[0].state, TurnState::Interrupted);
         assert!(snapshot.private_context.is_none());
         assert_eq!(snapshot.attempts[0].usage().unwrap().input_tokens, Some(13));
         assert!(!thread.interrupt_turn(Some("actual".into())).await.unwrap());

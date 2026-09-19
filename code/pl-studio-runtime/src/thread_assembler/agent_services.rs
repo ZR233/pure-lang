@@ -1,5 +1,4 @@
-//! Read-only product queries over authorized Thread journals and current Profile configuration.
-mod submissions;
+//! Saved agent identities, explicit cold activation and read-only journal/Profile queries.
 use super::*;
 use anyhow::{Context, Result, bail};
 use base64::Engine;
@@ -7,28 +6,26 @@ use pl_core::tool::{
     ToolOutput,
     opaque::{CallContext, Tool, ToolError},
 };
-use pl_protocol::{
-    AgentSessionPage, AgentSessionReadDetail, AgentSessionReadOrder, AgentSubmissionPage,
-};
+use pl_protocol::{AgentSessionPage, AgentSessionReadDetail, AgentSessionReadOrder};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone)]
-pub(super) struct QueryServices {
+pub(super) struct AgentServices {
+    factory: crate::studio::StudioThreadFactory,
     config: crate::config::ConfigRuntime,
     store: crate::studio::StudioStore,
     events: crate::studio::ProductEventBus,
 }
-impl std::fmt::Debug for QueryServices {
+impl std::fmt::Debug for AgentServices {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("AgentQueryServices")
+        f.write_str("AgentAgentServices")
     }
 }
 #[derive(Debug, Clone, Copy)]
 enum Kind {
     Profiles,
     Session,
-    Submissions,
 }
 #[derive(Debug)]
 struct QueryTool {
@@ -65,17 +62,6 @@ struct SessionInput {
     #[serde(default)]
     detail: Detail,
 }
-#[derive(Debug, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct SubmissionsInput {
-    target: String,
-    #[serde(default)]
-    cursor: Option<String>,
-    #[serde(default)]
-    offset: usize,
-    #[serde(default = "page_size")]
-    limit: usize,
-}
 fn page_size() -> usize {
     20
 }
@@ -97,8 +83,8 @@ struct Profiles {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("Agent query failed: {0}")]
-struct QueryError(#[source] anyhow::Error);
+#[error("Agent service failed: {0}")]
+pub(super) struct ServiceError(#[source] pub(super) anyhow::Error);
 
 impl Tool for QueryTool {
     async fn execute(
@@ -108,7 +94,7 @@ impl Tool for QueryTool {
     ) -> Result<ToolOutput, ToolError> {
         self.query(input, context)
             .await
-            .map_err(|error| ToolError::new(QueryError(error)))
+            .map_err(|error| ToolError::new(ServiceError(error)))
     }
     async fn close(&self) -> Result<(), ToolError> {
         Ok(())
@@ -135,7 +121,7 @@ impl QueryTool {
             }
             (
                 state
-                    .agent_queries
+                    .agent_services
                     .clone()
                     .context("agent product queries were not configured")?,
                 StudioThreadAssembler(registry.clone()),
@@ -159,21 +145,65 @@ impl QueryTool {
                 let history = services.history(&owner, &input.target).await?;
                 output(&session_page(input, path, history)?)
             }
-            Kind::Submissions => {
-                let input: SubmissionsInput = serde_json::from_str(input.content())?;
-                if !(1..=50).contains(&input.limit) {
-                    bail!("submission limit must be between 1 and 50");
-                }
-                services
-                    .authorize(&context.thread_id, &input.target)
-                    .await?;
-                let history = services.history(&owner, &input.target).await?;
-                submissions::page(input, history)
-            }
         }
     }
 }
-impl QueryServices {
+impl AgentServices {
+    pub(super) async fn saved_agents(
+        &self,
+        caller: &str,
+        loaded: &std::collections::BTreeSet<String>,
+    ) -> Result<Vec<serde_json::Value>> {
+        let caller = self.record(caller).await?;
+        let mut rows = Vec::new();
+        for record in self
+            .store
+            .list_threads_for_root(&caller.root_thread_id)
+            .await?
+        {
+            if loaded.contains(&record.id) {
+                continue;
+            }
+            let history = self
+                .store
+                .sessions()
+                .read_thread_journal(&record.id)
+                .await?;
+            let snapshot = pl_core::thread::journal::replay(&history)?;
+            rows.push(super::agents::agent_row(
+                &record.id,
+                record.parent_thread_id.as_deref(),
+                &snapshot,
+            ));
+        }
+        Ok(rows)
+    }
+
+    pub(super) async fn activate_child(
+        &self,
+        owner: &StudioThreadAssembler,
+        caller: &str,
+        target: &str,
+    ) -> Result<()> {
+        self.authorize(caller, target).await?;
+        let record = self.record(target).await?;
+        anyhow::ensure!(
+            record.parent_thread_id.as_deref() == Some(caller) && !record.archived,
+            "only an active direct child can be resumed"
+        );
+        self.events.warm_thread_index(vec![record.clone()]);
+        owner
+            .activate(
+                super::ThreadActivation {
+                    id: record.id,
+                    parent_id: record.parent_thread_id,
+                },
+                self.factory.clone(),
+            )
+            .await?;
+        Ok(())
+    }
+
     async fn record(&self, id: &str) -> Result<pl_protocol::Thread> {
         match self.events.thread_snapshot(id) {
             Some(thread) => Ok(thread),
@@ -338,21 +368,23 @@ fn output(value: &impl Serialize) -> Result<ToolOutput> {
     ))
 }
 impl StudioThreadAssembler {
-    pub(crate) fn set_agent_queries(
+    pub(crate) fn set_agent_services(
         &self,
         config: crate::config::ConfigRuntime,
         store: crate::studio::StudioStore,
         events: crate::studio::ProductEventBus,
+        factory: crate::studio::StudioThreadFactory,
     ) -> Result<(), ThreadAssemblyError> {
         let mut state = self.0.state();
         if state.closing
             || !state.entries.is_empty()
             || !state.creating.is_empty()
-            || state.agent_queries.is_some()
+            || state.agent_services.is_some()
         {
             return Err(ThreadAssemblyError::Closed);
         }
-        state.agent_queries = Some(QueryServices {
+        state.agent_services = Some(AgentServices {
+            factory,
             config,
             store,
             events,
@@ -360,7 +392,7 @@ impl StudioThreadAssembler {
         Ok(())
     }
     pub(super) fn agent_query_tools(&self) -> Result<Vec<Registration>, ThreadAssemblyError> {
-        if self.0.state().agent_queries.is_none() {
+        if self.0.state().agent_services.is_none() {
             return Ok(Vec::new());
         }
         let definitions = [
@@ -375,12 +407,6 @@ impl StudioThreadAssembler {
                 "Read this agent or a descendant's saved timeline. Continuation cursors freeze the original history watermark and filters.",
                 Kind::Session,
                 serde_json::to_value(schemars::schema_for!(SessionInput)),
-            ),
-            (
-                "read_agent_submissions",
-                "Read this agent or a descendant's explicit progress submissions in oldest-first order, with targetState frozen at the same history watermark. Running and readyForCompletion progress are not terminal delivery: continue wait until consuming the matching child/Turn successful completion notification before advancing dependent work.",
-                Kind::Submissions,
-                serde_json::to_value(schemars::schema_for!(SubmissionsInput)),
             ),
         ];
         definitions

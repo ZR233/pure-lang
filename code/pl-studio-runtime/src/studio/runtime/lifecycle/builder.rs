@@ -54,7 +54,7 @@ impl StudioRuntime {
         // Dropping the startup waiter must not release the lock while blocking filesystem work runs.
         let reset_timing = crate::startup_timing::Stage::new("inspect_storage_versions");
         let instance_lock = tokio::spawn(async move {
-            crate::studio::session_reset::prepare(&reset_path, &instance_lock).await?;
+            crate::studio::session_migration::prepare(&reset_path, &instance_lock).await?;
             Ok::<_, anyhow::Error>(instance_lock)
         })
         .await
@@ -157,10 +157,11 @@ impl StudioRuntime {
             },
         );
         let threads = crate::thread_assembler::StudioThreadAssembler::default();
-        threads.set_agent_queries(
+        threads.set_agent_services(
             config_runtime.clone(),
             store.clone(),
             product_events.clone(),
+            thread_factory.clone(),
         )?;
         threads.set_child_factory(crate::thread_assembler::ConfiguredChildFactory::new(
             config_runtime.clone(),

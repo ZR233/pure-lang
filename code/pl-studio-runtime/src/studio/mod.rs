@@ -1,4 +1,5 @@
 mod agent_host;
+mod collaboration_migration;
 pub(crate) mod entity;
 mod ids;
 mod mappers;
@@ -11,7 +12,7 @@ mod recovery_registry;
 mod runtime;
 mod runtime_lock;
 mod runtime_state;
-mod session_reset;
+mod session_migration;
 mod store;
 mod store_support;
 pub(crate) mod thread;
@@ -27,3 +28,5 @@ pub use runtime::*;
 pub use runtime_lock::{StudioHostKind, StudioRuntimeOptions};
 pub use runtime_state::*;
 pub use store::{StudioDatabaseError, StudioStore};
+
+pub(crate) use thread_factory::StudioThreadFactory;

@@ -859,6 +859,8 @@ sealed class BridgeTurnCancellationCause with _$BridgeTurnCancellationCause {
       BridgeTurnCancellationCause_RuntimeShutdown;
   const factory BridgeTurnCancellationCause.agentClosed() =
       BridgeTurnCancellationCause_AgentClosed;
+  const factory BridgeTurnCancellationCause.interrupted() =
+      BridgeTurnCancellationCause_Interrupted;
   const factory BridgeTurnCancellationCause.recovery() =
       BridgeTurnCancellationCause_Recovery;
   const factory BridgeTurnCancellationCause.coalesced({

@@ -81,13 +81,9 @@ fn state(
             stamp.started_at,
             phase(snapshot, &record.turn_id),
         )),
-        CoreTurnState::Finished(CoreTurnOutcome::Completed | CoreTurnOutcome::ToolCompleted) => {
-            TurnState::Completed(pl_protocol::CompletedTurnState::new(
-                started,
-                at,
-                pl_protocol::TurnCompletion::Normal,
-            ))
-        }
+        CoreTurnState::Finished(CoreTurnOutcome::Completed) => TurnState::Completed(
+            pl_protocol::CompletedTurnState::new(started, at, pl_protocol::TurnCompletion::Normal),
+        ),
         CoreTurnState::Finished(CoreTurnOutcome::WaitingInteraction) => {
             TurnState::Completed(pl_protocol::CompletedTurnState::new(
                 started,
@@ -134,7 +130,11 @@ fn state(
             started,
             at,
             at,
-            pl_protocol::TurnCancellationCause::Recovery,
+            if record.elapsed_ms.is_some() {
+                pl_protocol::TurnCancellationCause::Interrupted
+            } else {
+                pl_protocol::TurnCancellationCause::Recovery
+            },
         )),
         CoreTurnState::Failed { description } => {
             TurnState::Failed(pl_protocol::FailedTurnState::new(

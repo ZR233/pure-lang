@@ -30,7 +30,7 @@ pub(in crate::studio) struct StudioThreadServices {
 
 /// Assembles fresh model and tool instances from product inputs, without the old Turn engine.
 #[derive(Clone)]
-pub(in crate::studio) struct StudioThreadFactory {
+pub(crate) struct StudioThreadFactory {
     services: StudioThreadServices,
     bindings: Arc<std::sync::Mutex<std::collections::BTreeMap<String, tool_bindings::ToolBinding>>>,
     /// 测试探针：activation 实际解析出的会话工作区根。

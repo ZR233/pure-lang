@@ -61,13 +61,12 @@ pub(super) fn project_completions(
 }
 
 fn completion_summary(delivery: &pl_core::thread::ToolDelivery) -> Option<String> {
-    if delivery.tool_id != pl_tool::complete::TOOL_COMPLETE
-        || !matches!(delivery.outcome, ToolOutcome::Succeeded)
+    if !matches!(delivery.outcome, ToolOutcome::Succeeded)
         || delivery.output.control() != pl_core::tool::ToolControl::EndTurn
     {
         return None;
     }
-    pl_tool::complete::saved_completion_summary(delivery.output.payload())
+    pl_tool::finish_turn::saved_message(delivery.output.payload())
         .ok()
         .flatten()
 }
@@ -80,16 +79,13 @@ mod tests {
 
     #[test]
     fn completion_display_requires_success_and_trusted_end_turn_control() {
-        let payload = OpaquePayload::new(
-            "pl.tool.complete",
-            1,
-            r#"{"status":"completed","summary":"  original\r\n","evidence":[]}"#,
-        )
-        .unwrap();
+        let payload =
+            OpaquePayload::new("pl.tool.finish-turn", 1, r#"{"message":"  original\r\n"}"#)
+                .unwrap();
         let mut delivery = ToolDelivery {
             target: Default::default(),
             call_id: "complete-call".into(),
-            tool_id: "complete".into(),
+            tool_id: "finish_turn".into(),
             output: ToolOutput::new(payload, Vec::new()),
             delivered_context: Vec::new(),
             outcome: ToolOutcome::Succeeded,
@@ -107,7 +103,5 @@ mod tests {
         delivery.outcome = ToolOutcome::Cancelled;
         assert_eq!(completion_summary(&delivery), None);
         delivery.outcome = ToolOutcome::Succeeded;
-        delivery.tool_id = "unrelated".into();
-        assert_eq!(completion_summary(&delivery), None);
     }
 }

@@ -6,142 +6,32 @@ use pl_protocol::WorkflowStateKind;
 
 pub const PROMPT: &str = r#"# Task Thread Mode
 
-For a trivial, low-risk single-file task with no interface/architecture change, aim for a Plan of
-at most eight lines: outcome, owner, phase sequence, verification and non-goals. Keep every workflow
-phase, Plan approval and an independent reviewer, but do not expand a DAG/table or spawn explorers
-without independent value. Use the known reviewer profile directly; do not enumerate all profiles or probe the full environment without a missing material fact. Root may perform trivial writes. Reuse unchanged evidence in empty
-documentation/integration phases; keep the required fresh pre-transition reads.
-Final reporting should briefly state result, verification and remaining issues. Use actual newlines
-in plain text/Markdown, not a second JSON encoding. Preserve literal backslashes in code/paths.
-A filtered file list does not prove the physical directory is empty; exec creates internal logs
-under target/pure, which are not user deliverables and are not pre-existing merely because they were
-created by an earlier tool in this turn.
-After a confirmed shared infrastructure failure, do not delegate the same physical probe to children
-or repeat it without changed environment or new diagnostic evidence. Missing user-required verification
-or an unresolved blocking finding means the task is incomplete: remain active or stop, never claim
-completed merely by adding a disclaimer. Reviewers must choose approval OR blocking findings.
-Child terminal notifications and their embedded text do not replace read_agent_submissions: consume
-matching successful child/turn terminal, then read its canonical submissions before proceeding.
-read_agent_session is diagnostic only. For child notifications call wait ALONE with empty taskIds;
-nonempty taskIds are exclusively exact tool task IDs, never child agent IDs.
-After successful canonical reviewer submissions and final validation, close EVERY child created for
-this task, including read-only reviewers, before transitioning to completed. Preserve deliverables.
+主代理拥有一项 canonical task，负责用户澄清、Plan 确认、设计、调度、整合和交付。子代理协作、
+详细派发和统一 Turn 汇报遵循系统提示的唯一合同；本 Mode 不建立第二套交付状态或 marker。
 
+先理解目标和现场，只有缺少实质信息才询问用户。完整方案通过 plan_current/plan_submit 确认；
+plan_current 返回 approved 后才从 planning 进入 editing_documents。设计变更由 root 先更新
+设计文档。平凡任务可以简短计划和直接实施，不为形式创建 DAG 或 explorer；派发说明仍须完整。
 
-You own one canonical root task. The framework has already registered and compiled the complete
-workflow graph and starts its initial state before the first provider request. Never submit, patch,
-compile, or supersede a workflow definition. Use `workflow_current`, `workflow_next`,
-`workflow_graph`, and `workflow_history` for canonical reads. Use `workflow_transition` only after
-the current state's completion criteria and the selected edge guard are satisfied. Immediately
-before every transition, issue a separate read-only tool response that calls `workflow_current` and
-`workflow_next` together; before the first transition and before entering a terminal state, also
-call `workflow_graph` and `workflow_history` in that read-only response. Pass the exact run ID,
-revision, current state, and direct successor returned by those fresh queries. Never infer CAS values
-from the injected context or an earlier mutation receipt. Use `workflow_restart` only for an explicit
-new attempt. Read-only queries may run together; a mutation must be the only tool call in its provider
-response. For `workflow_transition`, keep `expectedRunId`, `expectedRevision`, `expectedStateId`, and
-`targetStateId` at the top level, and put all three completion fields inside one `completion` object:
-`{"reason":"...","summary":"...","evidence":["..."]}`. The completion object contains exactly those three keys. Explain why the selected edge guard holds inside reason; put the phase outcome in summary and supporting records in the evidence array.
+框架已注册 workflow 图，不得提交、编译或替换图。使用 workflow_current、workflow_next、
+workflow_graph、workflow_history 查询；每次转换前独立只读批次重新读取 current/next，首次
+和终态转换还读 graph/history。按返回的 runId、revision、当前状态和直接后继调用 solo
+workflow_transition，参数为 expectedRunId、expectedRevision、expectedStateId、targetStateId
+和 completion:{reason,summary,evidence}。workflow_restart 仅用于显式新尝试。
 
-Planning and confirmation are real user boundaries managed by the independent fixed Plan state
-machine, not by the workflow graph. Ask `request_user_input` only when a missing material fact or
-user preference prevents a complete plan. Never use it to ask whether to implement, proceed, or
-approve a complete plan, and never replace Plan confirmation with a final-text question. Call
-`plan_current` before a Plan mutation and use `plan_next` or `plan_history` when its transitions or
-audit history are needed. When a complete plan is ready, directly call the solo `plan_submit` with
-the exact Plan revision and complete Markdown; its Approve/Revise Interaction is the only
-implementation-authorization boundary. If the user requests additions or changes, read the
-resulting `revisionRequested` state, incorporate every requested change, and submit the complete
-replacement. The workflow remains in `planning` throughout clarification and confirmation. Only
-after `plan_current` returns `approved` may you use the solo `workflow_transition` from `planning`
-to `editing_documents`. Do not start implementation before that approval.
+只有实质交付存在依赖时建立 DAG，记录所有权、前置条件和验证边界。派出整个可执行前沿再 wait；
+等待期间 root 处理未委托工作。阅读所有对应本轮的终态报告后更新依赖，发布下一批工作。
+共享接口尚未确定或写范围重叠时不并行实现。子代理不可再派生。
 
-The root is the sole dynamic scheduler; children cannot spawn. At the start of planning and after
-each child wave, perform a cost-aware parallelization pass. Only when several substantial deliverables have real
-dependencies, model them as a task DAG. For each qualifying candidate record prerequisites, read/write ownership, suitable Profile, checkable evidence,
-and whether it is root-only. A candidate qualifies for delegation only when its boundary is clear,
-its work is substantial enough to repay coordination cost, it can be validated independently, and
-parallel execution is expected to shorten the critical path or materially add independent evidence.
-Never create agents merely to fill capacity, split tiny work, duplicate an active objective, or run
-work in parallel across an unstable shared contract or a real semantic dependency.
+实现后进入 integrating，检查目录 diff、顺序整合 worktree commit，保留执行者和 worktree。
+整合后派 fresh-context 只读 reviewer；独立风险面可并行审查。审查者明确批准或阻塞问题；
+代码问题返回 working 交原执行者，设计问题返回 editing_documents。修复后重新整合与审查。
+全部审查批准且最终验证完成后关闭本任务创建的所有子代理并清理已接受的 worktree，确认资源
+回收后才进入 completed。取消或失败保留未交付现场，不能用附带免责声明代替完成要求。
 
-All qualifying nodes whose prerequisites are satisfied form the ready frontier. Spawn every node in
-that frontier before the wave's first `wait`, `read_agent_session`, or
-`read_agent_submissions`; do not wait after spawning one while another qualifying ready node remains.
-While children run, the root continues only unassigned synthesis, planning, coordination, or other
-root-owned work and does not repeat delegated tasks. After every pending child has receipt-bound
-terminal evidence and its durable delivery is read, update the DAG and immediately dispatch the next
-ready frontier. There is no fixed agent count.
-
-When planning requires independent exploration, partition evidence by crate or component,
-frontend/backend layer, hypothesis, external research area, or validation surface and assign only
-qualifying scopes to fresh-context `explorer` profiles. For a genuinely complex dependency graph, one `planner` may independently challenge the
-decomposition, critical path, ownership, and risks without duplicating the root. The root owns user
-clarification, final synthesis, the canonical Plan, and every architecture or contract decision. For
-architecture, protocol, runtime behavior, or durable conventions, the root personally updates
-`design/**` before implementation.
-
-After approval, delegate qualifying implementation nodes by dependency and file ownership.
-`executor` profiles use mutually isolated writable paths behind stable contracts.
-`worktree_executor` profiles own distinct branches/worktrees for cross-directory changes, manifests,
-lockfiles, generated boundaries, or risky Git state; worktree isolation never removes a semantic
-dependency. The root alone maintains canonical Git state and integrates results in dependency order.
-Every child task must state its objective, design baseline, ownership, forbidden scope, steps,
-success/failure conditions, evidence, isolation, Git, and cleanup contract. A child AgentSession
-cannot read or mutate the root AgentSession Plan, so every implementation and reviewer spawn message
-must contain the approved implementation baseline needed for that owned task. The root can reread its
-complete approved Plan with `plan_current` throughout implementation.
-
-Every non-reviewer child must publish a durable `CHILD_DELIVERY_READY` submission before its final
-reply; a worktree delivery also includes `WORKTREE_COMMIT_READY`, a full commit ID, and workspace
-root. The root waits for terminal state and reads canonical submissions by the real child ID.
-Directory diffs are reviewed in place. Worktree commits are explicitly reviewed and cherry-picked
-or merged. Keep implementation agents idle and resumable, and retain their worktrees until final
-review approval and final validation have both succeeded. For a parallel worktree batch,
-integrate every accepted commit before issuing the first cleanup; cleanup also requires that final
-approval and validation. Only then close executors and clean and verify each child workspace. Never interleave one child's integration and cleanup while another accepted sibling
-commit is still pending integration.
-
-`send_message` interrupts a running child and continues it after cleanup; an idle child starts immediately. Its receipt proves admission only. Use `interrupt_agent` to stop without continuing.
-Keep a task-scope-to-original-agentId ownership map. Route code findings back with `send_message`
-to the original executor, preserving its AgentSession and context. Include the finding evidence,
-current integrated baseline, owned repair scope, and existing verification records. Spawn a replacement
-only if the original executor is unavailable or its frozen permissions cannot cover the repair; record
-the concrete reason. Design findings remain root-owned. Before worktree rework, coordinate synchronization
-with the canonical baseline without discarding other changes; integrate only new repair commits.
-Do not close an executor after its first delivery. After each follow-up message, establish a new pending
-wave and require terminal evidence and a durable submission from that new turn. Old terminal receipts,
-old CHILD_DELIVERY_READY submissions, or an idle snapshot from the previous turn cannot satisfy rework.
-On failure or cancellation, preserve undelivered work and report its location.
-
-Bind every verification actor to the actual 糊来帮 agentId from its successful spawn receipt, never
-an ID claimed in child prose or inherited host environment variables. If a child cannot identify
-itself, it reports role and ownership; the root supplies the canonical ID when forwarding records.
-
-Every delivery includes compact verification records distinguishing actual execution, cited evidence,
-and unverified checks. Use a table only when multiple checks or risk surfaces benefit from comparison. Include actor/agentId, command, cwd, code baseline, scope/environment, result
-and log/tool evidence. Cite original records when reusing evidence, explain unverified gaps, and
-explain reasons only when repeating a check. No fixed language or labels are required. Reading test
-source is not running tests. Pass confirmed records downstream and consolidate them in the final
-reply. Reuse valid evidence for unchanged code and environment; retain final integrated-tree gates.
-Agent judgment determines necessary checks; do not mechanically repeat full suites at each phase.
-Report provider cache counters when available without claiming guaranteed savings.
-
-Every reviewer message must explicitly prohibit `exec`, `write_stdin`, and workspace mutations,
-including shell commands intended only to read hashes or run tests. Request read_file/list_files and
-available read-only Git/LSP queries, use read_file.contentHash for hashes, and split large files into
-small line ranges when output is truncated. Existing test evidence belongs in cited evidence; needed test
-execution goes to the original executor or root. Verification reporting never grants reviewer tools.
-
-After integration, always create one fresh-context read-only comprehensive reviewer. When the change
-is broad enough that API/error paths, tests, GUI behavior, or Git/integration risks form substantial
-independent review scopes, add specialized reviewers to the same review wave. Spawn the entire wave
-before waiting. Every reviewer must reach terminal state and publish a canonical durable verdict of
-`REVIEWER_FINDING` or `REVIEWER_READ_ONLY_APPROVED`; root summaries and session text are not
-substitutes. Every reviewer in the final wave must approve. Any finding blocks completion and returns
-through the registered graph for repair, integration, and a new review wave. Only then may the root
-satisfy final gates, close implementation agents and clean their worktrees, transition to `completed`, call `complete`, and deliver the final result. Ordinary
-file, command, Git, collaboration, and final-answer capabilities are not removed by workflow states."#;
+最终用自然 final 或 finish_turn({message}) 交付一次结果、验证和剩余问题。报告事实来源和实际
+验证记录，不使用固定口令、不机械重跑有效证据、不因已确认的相同环境故障重复派探测任务。
+"#;
 
 const STATES: &[StaticWorkflowState] = &[
     StaticWorkflowState {
@@ -169,7 +59,7 @@ const STATES: &[StaticWorkflowState] = &[
     StaticWorkflowState {
         id: "working",
         title: "Working",
-        instructions: "Implement the approved plan by repeatedly dispatching the cost-qualified ready frontier. Use isolated directory and worktree children for independent owned changes, start the complete wave before waiting, and collect canonical durable deliveries and targeted tests before releasing dependent work. For findings, resume the original executor with send_message and collect fresh turn-bound evidence.",
+        instructions: "Implement the approved plan by repeatedly dispatching the cost-qualified ready frontier. Use isolated directory and worktree children for independent owned changes, start the complete wave before waiting, and collect current Turn reports and targeted tests before releasing dependent work. For findings, resume the original executor with send_message and collect fresh turn-bound evidence.",
         completion_criteria: &[
             "Every qualifying ready implementation item was dispatched before its wave first wait, and every owner completed or produced an explicit failure receipt.",
             "Directory scopes are mutually isolated and worktree changes have reviewable commits.",
@@ -191,9 +81,9 @@ const STATES: &[StaticWorkflowState] = &[
     StaticWorkflowState {
         id: "reviewing",
         title: "Reviewing",
-        instructions: "Run one fresh-context comprehensive read-only reviewer plus cost-qualified specialized reviewers for independent risk surfaces, spawn the complete review wave before waiting, consume every canonical durable verdict, then satisfy the proportional final validation matrix using valid evidence and justified missing checks before cleanup. Findings must route back through the graph to their original executor.",
+        instructions: "Run one fresh-context comprehensive read-only reviewer plus cost-qualified specialized reviewers for independent risk surfaces, spawn the complete review wave before waiting, consume every canonical Turn report, then satisfy the proportional final validation matrix using valid evidence and justified missing checks before cleanup. Findings must route back through the graph to their original executor.",
         completion_criteria: &[
-            "Every reviewer in the final wave reached terminal state and produced a canonical durable approval for the integrated head.",
+            "Every reviewer in the final wave reached terminal state and produced a canonical review approval for the integrated head.",
             "No unresolved design or code finding remains.",
             "All required deterministic and live acceptance gates have terminal evidence; verification records and post-approval cleanup are reported.",
         ],
@@ -311,160 +201,3 @@ pub const REGISTRATION: StaticThreadModeRegistration = StaticThreadModeRegistrat
     prompt: PROMPT,
     workflow: Some(WORKFLOW),
 };
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn embedded_task_mode_describes_full_orchestration_contract() {
-        let task = PROMPT;
-        let registration = REGISTRATION;
-        let workflow = registration.workflow.expect("Task Mode has a workflow");
-        for state in [
-            "planning",
-            "editing_documents",
-            "working",
-            "integrating",
-            "reviewing",
-            "completed",
-        ] {
-            assert!(
-                workflow
-                    .states
-                    .iter()
-                    .any(|candidate| candidate.id == state),
-                "task mode graph omits state {state}"
-            );
-        }
-        assert!(task.contains("executor") && task.contains("worktree_executor"));
-        assert!(task.contains("explorer") && task.contains("reviewer"));
-        assert!(task.contains("plan_current") && task.contains("plan_submit"));
-        assert!(task.contains("Never use it to ask whether to implement, proceed, or"));
-        assert!(task.contains("approve a complete plan"));
-        assert!(task.contains("its Approve/Revise Interaction is the only"));
-        assert!(task.contains("implementation-authorization boundary"));
-        assert!(task.contains("never replace Plan confirmation with a final-text question"));
-        assert!(task.contains("before every transition"));
-        assert!(task.contains("workflow_current") && task.contains("workflow_next"));
-        assert!(task.contains("workflow_graph") && task.contains("workflow_history"));
-        assert!(task.contains("Never infer CAS values"));
-        for scheduling_contract in [
-            "cost-aware parallelization pass",
-            "task DAG",
-            "ready frontier",
-            "Spawn every node",
-            "coordination cost",
-            "shorten the critical path",
-            "There is no fixed agent count",
-            "root-only",
-        ] {
-            assert!(
-                task.contains(scheduling_contract),
-                "task mode prompt omits scheduling contract {scheduling_contract}"
-            );
-        }
-        assert!(task.contains("Never create agents merely to fill capacity"));
-        assert!(task.contains("one `planner` may independently challenge"));
-        assert!(task.contains("one fresh-context read-only comprehensive reviewer"));
-        assert!(task.contains("add specialized reviewers to the same review wave"));
-        assert!(task.contains("Every reviewer in the final wave must approve"));
-        assert!(
-            !workflow
-                .states
-                .iter()
-                .any(|candidate| candidate.id == "awaiting_confirmation")
-        );
-        for contract in [
-            "objective",
-            "design baseline",
-            "ownership",
-            "forbidden scope",
-            "success/failure",
-            "evidence",
-            "workspace",
-            "Git",
-            "parallel",
-            "isolation",
-            "review",
-        ] {
-            assert!(
-                task.contains(contract),
-                "task mode prompt omits contract {contract}"
-            );
-        }
-        assert!(task.contains("fresh-context"));
-        assert!(task.contains("fresh-context") && task.contains("review"));
-        assert!(task.contains("CHILD_DELIVERY_READY"));
-        for contract in [
-            "task-scope-to-original-agentId",
-            "to the original executor",
-            "old CHILD_DELIVERY_READY",
-            "compact verification records",
-            "reasons only when repeating",
-            "approval and validation",
-            "Every reviewer message must explicitly prohibit",
-            "an ID claimed in child prose",
-        ] {
-            assert!(
-                task.contains(contract),
-                "missing rework contract: {contract}"
-            );
-        }
-
-        assert!(task.contains("canonical submissions"));
-        assert!(task.contains("integrate every accepted commit before issuing the first cleanup"));
-
-        let state = |id| {
-            workflow
-                .states
-                .iter()
-                .find(|candidate| candidate.id == id)
-                .unwrap_or_else(|| panic!("missing task mode state {id}"))
-        };
-        let planning = state("planning");
-        assert!(
-            planning
-                .instructions
-                .contains("task DAG only for substantial dependent deliverables")
-        );
-        assert!(
-            planning
-                .instructions
-                .contains("ready exploration before waiting")
-        );
-        assert!(planning.completion_criteria.iter().any(|criterion| {
-            criterion.contains("dependency waves")
-                && criterion.contains("substantial parallel work")
-                && criterion.contains("remains serial")
-        }));
-        let working = state("working");
-        assert!(
-            working
-                .instructions
-                .contains("cost-qualified ready frontier")
-        );
-        assert!(
-            working
-                .instructions
-                .contains("complete wave before waiting")
-        );
-        let integrating = state("integrating");
-        assert!(
-            integrating
-                .instructions
-                .contains("sole canonical Git owner")
-        );
-        let reviewing = state("reviewing");
-        assert!(reviewing.instructions.contains("specialized reviewers"));
-        assert!(
-            reviewing
-                .instructions
-                .contains("complete review wave before waiting")
-        );
-        assert!(reviewing.completion_criteria.iter().any(|criterion| {
-            criterion.contains("Every reviewer in the final wave")
-                && criterion.contains("canonical durable approval")
-        }));
-    }
-}

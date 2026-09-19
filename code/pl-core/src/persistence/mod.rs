@@ -1,13 +1,14 @@
 //! Independent session persistence. Runtime memory is authoritative; SQLite follows asynchronously.
 
 mod history;
+pub mod migration;
 mod repository;
 mod sqlite;
 mod thread_journal;
 mod writer;
 
 /// Current SQLite cold-history format. Unsupported formats are never automatically reset.
-pub const SESSION_SCHEMA_VERSION: i64 = 6;
+pub const SESSION_SCHEMA_VERSION: i64 = 7;
 
 use std::sync::Arc;
 

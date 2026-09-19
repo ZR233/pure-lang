@@ -3493,14 +3493,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeAgentProgressDto dco_decode_box_autoadd_bridge_agent_progress_dto(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return dco_decode_bridge_agent_progress_dto(raw);
-  }
-
-  @protected
   BridgeAttachmentAdmissionContext
   dco_decode_box_autoadd_bridge_attachment_admission_context(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
@@ -4369,8 +4361,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 13)
-      throw Exception('unexpected arr length: expect 13 but see ${arr.length}');
+    if (arr.length != 11)
+      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
     return BridgeAgentDirectoryEntryDto(
       id: dco_decode_String(arr[0]),
       threadId: dco_decode_String(arr[1]),
@@ -4382,9 +4374,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       summary: dco_decode_opt_String(arr[7]),
       depth: dco_decode_u_32(arr[8]),
       state: dco_decode_bridge_agent_state(arr[9]),
-      progress: dco_decode_opt_box_autoadd_bridge_agent_progress_dto(arr[10]),
-      updatedAt: dco_decode_i_64(arr[11]),
-      summaryAgeSeconds: dco_decode_u_64(arr[12]),
+      updatedAt: dco_decode_i_64(arr[10]),
     );
   }
 
@@ -4456,21 +4446,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       system: dco_decode_bool(arr[11]),
       enabled: dco_decode_bool(arr[12]),
       workspaceMode: dco_decode_bridge_agent_workspace_mode(arr[13]),
-    );
-  }
-
-  @protected
-  BridgeAgentProgressDto dco_decode_bridge_agent_progress_dto(dynamic raw) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    final arr = raw as List<dynamic>;
-    if (arr.length != 5)
-      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
-    return BridgeAgentProgressDto(
-      stage: dco_decode_String(arr[0]),
-      summary: dco_decode_String(arr[1]),
-      nextStep: dco_decode_String(arr[2]),
-      revision: dco_decode_u_64(arr[3]),
-      updatedAt: dco_decode_i_64(arr[4]),
     );
   }
 
@@ -7572,8 +7547,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       case 3:
         return BridgeTurnCancellationCause_AgentClosed();
       case 4:
-        return BridgeTurnCancellationCause_Recovery();
+        return BridgeTurnCancellationCause_Interrupted();
       case 5:
+        return BridgeTurnCancellationCause_Recovery();
+      case 6:
         return BridgeTurnCancellationCause_Coalesced(
           targetTurnId: dco_decode_String(raw[1]),
         );
@@ -8642,16 +8619,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeAgentProgressDto? dco_decode_opt_box_autoadd_bridge_agent_progress_dto(
-    dynamic raw,
-  ) {
-    // Codec=Dco (DartCObject based), see doc to use other codecs
-    return raw == null
-        ? null
-        : dco_decode_box_autoadd_bridge_agent_progress_dto(raw);
-  }
-
-  @protected
   BridgeConfigRecoveryReport?
   dco_decode_opt_box_autoadd_bridge_config_recovery_report(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
@@ -9377,14 +9344,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_bridge_agent_directory_state(deserializer));
-  }
-
-  @protected
-  BridgeAgentProgressDto sse_decode_box_autoadd_bridge_agent_progress_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    return (sse_decode_bridge_agent_progress_dto(deserializer));
   }
 
   @protected
@@ -10389,11 +10348,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     var var_summary = sse_decode_opt_String(deserializer);
     var var_depth = sse_decode_u_32(deserializer);
     var var_state = sse_decode_bridge_agent_state(deserializer);
-    var var_progress = sse_decode_opt_box_autoadd_bridge_agent_progress_dto(
-      deserializer,
-    );
     var var_updatedAt = sse_decode_i_64(deserializer);
-    var var_summaryAgeSeconds = sse_decode_u_64(deserializer);
     return BridgeAgentDirectoryEntryDto(
       id: var_id,
       threadId: var_threadId,
@@ -10405,9 +10360,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       summary: var_summary,
       depth: var_depth,
       state: var_state,
-      progress: var_progress,
       updatedAt: var_updatedAt,
-      summaryAgeSeconds: var_summaryAgeSeconds,
     );
   }
 
@@ -10524,25 +10477,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       system: var_system,
       enabled: var_enabled,
       workspaceMode: var_workspaceMode,
-    );
-  }
-
-  @protected
-  BridgeAgentProgressDto sse_decode_bridge_agent_progress_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    var var_stage = sse_decode_String(deserializer);
-    var var_summary = sse_decode_String(deserializer);
-    var var_nextStep = sse_decode_String(deserializer);
-    var var_revision = sse_decode_u_64(deserializer);
-    var var_updatedAt = sse_decode_i_64(deserializer);
-    return BridgeAgentProgressDto(
-      stage: var_stage,
-      summary: var_summary,
-      nextStep: var_nextStep,
-      revision: var_revision,
-      updatedAt: var_updatedAt,
     );
   }
 
@@ -14521,8 +14455,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       case 3:
         return BridgeTurnCancellationCause_AgentClosed();
       case 4:
-        return BridgeTurnCancellationCause_Recovery();
+        return BridgeTurnCancellationCause_Interrupted();
       case 5:
+        return BridgeTurnCancellationCause_Recovery();
+      case 6:
         var var_targetTurnId = sse_decode_String(deserializer);
         return BridgeTurnCancellationCause_Coalesced(
           targetTurnId: var_targetTurnId,
@@ -16038,19 +15974,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
-  BridgeAgentProgressDto? sse_decode_opt_box_autoadd_bridge_agent_progress_dto(
-    SseDeserializer deserializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    if (sse_decode_bool(deserializer)) {
-      return (sse_decode_box_autoadd_bridge_agent_progress_dto(deserializer));
-    } else {
-      return null;
-    }
-  }
-
-  @protected
   BridgeConfigRecoveryReport?
   sse_decode_opt_box_autoadd_bridge_config_recovery_report(
     SseDeserializer deserializer,
@@ -17014,15 +16937,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_bridge_agent_directory_state(self, serializer);
-  }
-
-  @protected
-  void sse_encode_box_autoadd_bridge_agent_progress_dto(
-    BridgeAgentProgressDto self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_bridge_agent_progress_dto(self, serializer);
   }
 
   @protected
@@ -18104,12 +18018,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_opt_String(self.summary, serializer);
     sse_encode_u_32(self.depth, serializer);
     sse_encode_bridge_agent_state(self.state, serializer);
-    sse_encode_opt_box_autoadd_bridge_agent_progress_dto(
-      self.progress,
-      serializer,
-    );
     sse_encode_i_64(self.updatedAt, serializer);
-    sse_encode_u_64(self.summaryAgeSeconds, serializer);
   }
 
   @protected
@@ -18185,19 +18094,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self.system, serializer);
     sse_encode_bool(self.enabled, serializer);
     sse_encode_bridge_agent_workspace_mode(self.workspaceMode, serializer);
-  }
-
-  @protected
-  void sse_encode_bridge_agent_progress_dto(
-    BridgeAgentProgressDto self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-    sse_encode_String(self.stage, serializer);
-    sse_encode_String(self.summary, serializer);
-    sse_encode_String(self.nextStep, serializer);
-    sse_encode_u_64(self.revision, serializer);
-    sse_encode_i_64(self.updatedAt, serializer);
   }
 
   @protected
@@ -21281,12 +21177,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_i_32(2, serializer);
       case BridgeTurnCancellationCause_AgentClosed():
         sse_encode_i_32(3, serializer);
-      case BridgeTurnCancellationCause_Recovery():
+      case BridgeTurnCancellationCause_Interrupted():
         sse_encode_i_32(4, serializer);
+      case BridgeTurnCancellationCause_Recovery():
+        sse_encode_i_32(5, serializer);
       case BridgeTurnCancellationCause_Coalesced(
         targetTurnId: final targetTurnId,
       ):
-        sse_encode_i_32(5, serializer);
+        sse_encode_i_32(6, serializer);
         sse_encode_String(targetTurnId, serializer);
     }
   }
@@ -22546,19 +22444,6 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self != null, serializer);
     if (self != null) {
       sse_encode_String(self, serializer);
-    }
-  }
-
-  @protected
-  void sse_encode_opt_box_autoadd_bridge_agent_progress_dto(
-    BridgeAgentProgressDto? self,
-    SseSerializer serializer,
-  ) {
-    // Codec=Sse (Serialization based), see doc to use other codecs
-
-    sse_encode_bool(self != null, serializer);
-    if (self != null) {
-      sse_encode_box_autoadd_bridge_agent_progress_dto(self, serializer);
     }
   }
 

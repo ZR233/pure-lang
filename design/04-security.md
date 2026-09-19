@@ -24,10 +24,9 @@ child 的 writablePaths 只约束内置 mutation 工具；worktree child 与会�
 也不会为该会话放开 worktree 之外的 host 路径或命令 cwd。GUI、工具描述与固定上下文必须
 如实区分这些边界。
 
-只读 reviewer 可以调用 `report_progress` 追加协作层的结构化审查报告；这不修改项目 workspace、Git
-或外部系统，不属于实现写入。验收与 root 编排只能把绑定到 reviewer agentId 的 canonical
-submission 作为 approval/finding 证据，不能把 root 转述、任意 session 文本或空 submission 当作
-授权。
+只读 reviewer 通过自然 final 或 `finish_turn({message})` 结束本轮并汇报审查结论；这不修改
+项目 workspace、Git 或外部系统。root 阅读绑定到真实 reviewer、Turn 与 journal 终态水位的
+完整报告，结合产物与验证判断是否接受，不从字符串口令推断批准。
 
 ## 4.2 分层边界
 

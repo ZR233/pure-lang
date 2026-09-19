@@ -134,30 +134,6 @@ async fn execute_index(db: &DatabaseConnection, index: IndexCreateStatement) -> 
     Ok(())
 }
 
-/// One-time split: preserve all product facts and physical resources.
-pub(super) async fn upgrade_session_storage(db: &DatabaseConnection) -> Result<()> {
-    let tx = db.begin().await?;
-    match studio_schema_version(&tx).await? {
-        20..=22 => {}
-        19 => {
-            tx.execute_unprepared("DROP TABLE IF EXISTS attachments;
-                DROP TABLE IF EXISTS thread_inputs;
-                DROP TABLE IF EXISTS items;
-                DROP TABLE IF EXISTS interactions;
-                DROP TABLE IF EXISTS turns;
-                DROP TABLE IF EXISTS thread_submissions;
-                DROP TABLE IF EXISTS thread_context_segments;
-                DELETE FROM studio_objects WHERE object_kind IN ('agentWorkingState','commitReceipt','modelPerformance');
-                DELETE FROM threads;
-                PRAGMA user_version=20;").await?;
-        }
-        version => bail!("unsupported Studio schema {version}; product data preserved"),
-    }
-    upgrade_product_schema_in_transaction(&tx).await?;
-    tx.commit().await?;
-    Ok(())
-}
-
 /// Additive product schema upgrade for an existing Studio database.
 ///
 /// Data-preserving and restartable: the schema version is published only after every column

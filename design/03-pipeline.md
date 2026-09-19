@@ -58,7 +58,7 @@ revision，且只能决议一次。
 带图 Mode 的首个根用户输入在 provider 前自动生成 lineage 与 run。`workflow_transition` 以
 run/revision/当前状态三重 CAS 完成当前阶段并沿直接边进入下一阶段；进入终态后 run 立即终止，但
 Turn 可继续交付。图 hash 变化由下一个 Turn 自动归档旧 run 并创建同 lineage 的 replacement；正常
-终态后的新任务自动创建新 lineage。所有 root Mode 在完成工作后都调用 `complete` 结束当前 Turn。
+终态后的新任务自动创建新 lineage。root 与 child 均可自然 final 或调用 `finish_turn({message})` 结束当前 Turn；业务完成由 root 核对目标与证据。
 
 Workflow 不拥有代码、文件、Git 或 Agent；任何阶段都可使用普通工具，图只约束状态记录和后续提示。
 Mode Prompt 可以在不裁剪工具的前提下声明合作式角色边界（例如要求 Task root 把普通实现交给

@@ -17,15 +17,7 @@ pub(crate) fn bridge_agent_directory_entry(
         summary: agent.summary,
         depth: agent.depth,
         state: bridge_agent_state(agent.state),
-        progress: agent.progress.map(|progress| BridgeAgentProgressDto {
-            stage: progress_stage_label(progress.report.stage).to_string(),
-            summary: progress.report.summary,
-            next_step: progress.report.next_step,
-            revision: progress.report.revision,
-            updated_at: progress.updated_at,
-        }),
         updated_at: agent.updated_at,
-        summary_age_seconds: agent.summary_age_seconds,
     }
 }
 
@@ -59,17 +51,6 @@ fn bridge_agent_state(state: AgentState) -> BridgeAgentState {
             error: bridge_state_error(value.error()),
             diagnostic_turn_id: value.turn_id().map(ToString::to_string),
         }),
-    }
-}
-
-fn progress_stage_label(stage: AgentProgressStage) -> &'static str {
-    match stage {
-        AgentProgressStage::Exploring => "exploring",
-        AgentProgressStage::Implementing => "implementing",
-        AgentProgressStage::Verifying => "verifying",
-        AgentProgressStage::Blocked => "blocked",
-        AgentProgressStage::ReadyForCompletion => "readyForCompletion",
-        AgentProgressStage::ReadyForReview => "readyForReview",
     }
 }
 

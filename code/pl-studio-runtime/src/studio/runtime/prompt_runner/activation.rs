@@ -34,6 +34,7 @@ impl StudioRuntime {
         };
         if self.recovery_issues().iter().any(|issue| {
             issue.scope == crate::StudioRecoveryIssueScope::Thread
+                && issue.category == crate::StudioRecoveryIssueCategory::AgentState
                 && issue.thread_id.as_deref() == Some(thread.root_thread_id.as_str())
         }) {
             return Err(anyhow::Error::new(pl_protocol::studio::StudioError::new(

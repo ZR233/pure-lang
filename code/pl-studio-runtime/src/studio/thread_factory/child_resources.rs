@@ -122,7 +122,7 @@ impl StudioChildResources for StudioThreadFactory {
             }],
             tool_calls: Vec::new(),
         });
-        let mut initial_extensions = BTreeMap::from([
+        let initial_extensions = BTreeMap::from([
             ("studio.instructions".into(), instruction_sources),
             (
                 "studio.project".into(),
@@ -141,15 +141,6 @@ impl StudioChildResources for StudioThreadFactory {
             ),
             ("studio.creation-metadata".into(), request.metadata.clone()),
         ]);
-        if profile.config.runtime.tool_capabilities.ask_user
-            && prepared_tools.visibility != crate::search::ToolVisibilityConstraint::Exclusive
-        {
-            initial_extensions.insert(
-                crate::plan_tool::PLAN_EXTENSION.into(),
-                crate::plan_tool::encode_plan_state(&Default::default())
-                    .map_err(|error| resource_error("freeze initial plan state", error))?,
-            );
-        }
         self.services
             .product_events
             .register_child_thread(crate::studio::store::directory::RegisteredChildThread {
@@ -179,13 +170,7 @@ impl StudioChildResources for StudioThreadFactory {
                 &profile.route,
                 profile.config.runtime.openai_compaction_mode,
             )?,
-            agent_controls: if prepared_tools.visibility
-                == crate::search::ToolVisibilityConstraint::Exclusive
-            {
-                crate::thread_assembler::AgentControlExposure::Disabled
-            } else {
-                crate::thread_assembler::AgentControlExposure::ProgressOnly
-            },
+            agent_controls: crate::thread_assembler::AgentControlExposure::Disabled,
             execution: pl_core::thread::input::InputDriverOptions {
                 max_model_steps: pl_core::thread::ModelStepLimit::Limited(
                     std::num::NonZeroU32::new(64).expect("fixed positive model step limit"),

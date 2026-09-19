@@ -40,7 +40,7 @@ void registerTimelineModelTests() {
             code: null,
             httpStatus: null,
             retryAfterMs: null,
-            message: 'turn must finalize with tool `complete`',
+            message: 'turn ended before its report',
             retryable: false,
           ),
         ),
@@ -85,14 +85,9 @@ void registerTimelineModelTests() {
       ),
     );
     await tester.pumpAndSettle();
+    expect(find.text('turn ended before its report'), findsOneWidget);
     expect(
-      find.text('turn must finalize with tool `complete`'),
-      findsOneWidget,
-    );
-    expect(
-      tester
-          .getTopLeft(find.text('turn must finalize with tool `complete`'))
-          .dy,
+      tester.getTopLeft(find.text('turn ended before its report')).dy,
       greaterThan(tester.getTopLeft(find.text('Generated report')).dy),
     );
   });

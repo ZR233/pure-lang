@@ -1,9 +1,8 @@
 //! One assembly and resource-owner registry for root, child and restored Threads.
 mod activation;
-mod agent_queries;
+mod agent_services;
 mod agents;
 mod observation;
-pub(crate) mod progress;
 pub use activation::{StudioActivationFactory, ThreadActivation, ThreadPreparation};
 mod interaction_key;
 mod user_input;
@@ -50,7 +49,6 @@ use pl_model::{
 /// Product-selected collaboration exposure, independent from core tool scheduling.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum AgentControlExposure {
-    ProgressOnly,
     #[default]
     Disabled,
     Enabled,
@@ -164,7 +162,7 @@ struct Preparation {
 
 #[derive(Debug, Default)]
 struct State {
-    agent_queries: Option<agent_queries::QueryServices>,
+    agent_services: Option<agent_services::AgentServices>,
     observation: Option<observation::AssemblyObservation>,
     child_factory: Option<children::ChildFactory>,
     closing: bool,
@@ -204,12 +202,6 @@ impl Drop for Reservation {
 }
 
 impl StudioThreadAssembler {
-    pub(crate) fn progress_tool_registration(
-        &self,
-    ) -> Result<pl_core::tool::opaque::Registration, ThreadAssemblyError> {
-        progress::registration()
-    }
-
     /// Installs the product factory before publishing any Thread that can create descendants.
     ///
     /// # Errors
@@ -274,13 +266,11 @@ impl StudioThreadAssembler {
         }
         match spec.agent_controls {
             AgentControlExposure::Disabled => {}
-            AgentControlExposure::ProgressOnly => spec.tools.push(progress::registration()?),
             AgentControlExposure::Enabled => {
                 if spec.parent_id.is_some() {
                     return Err(ThreadAssemblyError::ChildDepth);
                 }
                 spec.tools.extend(self.agent_control_tools()?);
-                spec.tools.push(progress::registration()?);
             }
         }
         let runtime = ModelRuntime::from_route(&spec.route)?;

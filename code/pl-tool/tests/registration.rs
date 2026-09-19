@@ -1,6 +1,6 @@
 use pl_core::context::OpaquePayload;
 use pl_tool::{
-    ask_user, complete, session_note,
+    ask_user, finish_turn, session_note,
     task_control::{TaskControlKind, TaskControlTool},
 };
 use pretty_assertions::assert_eq;
@@ -9,7 +9,7 @@ use pretty_assertions::assert_eq;
 fn downstream_can_select_public_tools_with_explicit_registration_authority() {
     let selected = [
         ask_user::registration(OpaquePayload::text("questions")).unwrap(),
-        complete::registration(OpaquePayload::text("complete")).unwrap(),
+        finish_turn::registration(OpaquePayload::text("finish_turn")).unwrap(),
         session_note::registration(
             session_note::SessionNoteToolKind::Read,
             OpaquePayload::text("note"),
@@ -26,7 +26,7 @@ fn downstream_can_select_public_tools_with_explicit_registration_authority() {
             .collect::<Vec<_>>(),
         vec![
             "request_user_input",
-            "complete",
+            "finish_turn",
             "read_session_note",
             "wait"
         ]

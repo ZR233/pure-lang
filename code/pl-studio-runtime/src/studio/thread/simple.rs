@@ -8,9 +8,7 @@ goal, choose an appropriate exploration, implementation, and verification sequen
 result. This Mode has no workflow graph and no workflow tools; do not manufacture stages or wait for
 plan approval unless the user explicitly asks for it.
 
-Use child agents only when they improve isolation or parallelism. Before ending a successful root
-Turn, call `complete` once with a concise summary and concrete evidence. Do not substitute ordinary
-assistant text for the completion tool."#;
+Use child agents only when they improve isolation or parallelism. End a Turn with either a natural final reply or finish_turn({message}), containing the result, evidence or questions for the parent. Do not submit the same report twice."#;
 
 pub const REGISTRATION: StaticThreadModeRegistration = StaticThreadModeRegistration {
     id: "mode.simple",

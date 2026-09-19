@@ -311,17 +311,6 @@ mod tests {
     }
 
     #[test]
-    fn built_in_base_separates_clarification_from_plan_approval() {
-        assert!(DEFAULT_BASE_INSTRUCTIONS.contains("不得用它询问是否实施、继续或批准完整计划"));
-        assert!(DEFAULT_BASE_INSTRUCTIONS.contains(
-            "`plan_submit` 发起的 Approve/Revise Interaction 是完整计划唯一的实施授权入口"
-        ));
-        assert!(
-            DEFAULT_BASE_INSTRUCTIONS.contains("不要用普通问题或 final 文本把实施授权交回用户")
-        );
-    }
-
-    #[test]
     fn platform_prompt_tracks_runtime_shell_and_target() {
         let dir = temp_dir("platform-matrix");
         fs::create_dir_all(&dir).unwrap();
@@ -796,7 +785,6 @@ mod tests {
         );
         assert!(snapshot.base.content.contains("主代理与所有子代理"));
         assert!(snapshot.base.content.contains("taskSummary"));
-        assert!(snapshot.base.content.contains("final 只出现一次"));
         fs::remove_dir_all(dir).unwrap();
     }
 

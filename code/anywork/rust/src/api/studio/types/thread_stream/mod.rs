@@ -191,6 +191,7 @@ pub enum BridgeTurnCancellationCause {
     UserRequested,
     RuntimeShutdown,
     AgentClosed,
+    Interrupted,
     Recovery,
     Coalesced { target_turn_id: String },
 }

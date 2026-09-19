@@ -578,6 +578,7 @@ StudioTurnCancellationCause _turnCancellationCauseFromFrb(
     userRequested: () => const UserRequestedTurnCancellation(),
     runtimeShutdown: () => const RuntimeShutdownTurnCancellation(),
     agentClosed: () => const AgentClosedTurnCancellation(),
+    interrupted: () => const InterruptedTurnCancellation(),
     recovery: () => const RecoveryTurnCancellation(),
     coalesced: (targetTurnId) =>
         CoalescedTurnCancellation(targetTurnId: targetTurnId),

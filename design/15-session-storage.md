@@ -84,3 +84,6 @@ owner。共享 SQLite store 在全部 Thread 关闭后排空 writer、join、关
 的不支持错误并保留字节，不自动重置，也不在正常读写路径双读旧版本。Studio 按
 [17](./17-studio-storage.md) 协调升级；各格式所有者提供迁移转换，core 只负责自身通用格式，
 不解码产品或 provider 内容。迁移完成后交给当前存储和重放入口。
+
+Turn 正常结束统一为 Completed；工具结束来源保留在原始工具事实中。格式升级将历史
+ToolCompleted 转换为 Completed，旧完成、进度和通知载荷在 Studio 迁移边界转换，不恢复旧执行入口。

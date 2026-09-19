@@ -8,7 +8,7 @@ pub mod session;
 pub mod workspace;
 
 pub mod ask_user;
-pub mod complete;
+pub mod finish_turn;
 pub mod session_note;
 pub mod todo;
 

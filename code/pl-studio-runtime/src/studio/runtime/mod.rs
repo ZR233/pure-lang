@@ -285,7 +285,7 @@ impl StudioRuntime {
     /// 从 agent framework 派生当前所有活动 turn。
     ///
     /// 活动 turn 列表不再手工维护：canonical source 是每个 agent 的
-    /// `AgentSnapshot.active_turn_id`。这里聚合整棵 agent tree 的活动 turn，
+    /// 旧 Agent 镜像字段。这里聚合整棵 agent tree 的活动 turn，
     /// 用于 idle 判断。UI 不消费此列表（它从 per-thread 流读取 busy 状态）。
     async fn derive_active_turns(&self) -> Result<Vec<StudioActiveTurn>> {
         Ok(self

@@ -313,10 +313,6 @@ impl StudioRuntime {
         match exposure {
             crate::thread_assembler::AgentControlExposure::Enabled => {
                 registrations.extend(self.threads.agent_control_tools()?);
-                registrations.push(self.threads.progress_tool_registration()?);
-            }
-            crate::thread_assembler::AgentControlExposure::ProgressOnly => {
-                registrations.push(self.threads.progress_tool_registration()?)
             }
             crate::thread_assembler::AgentControlExposure::Disabled => {}
         }
@@ -916,7 +912,7 @@ mod tests {
             "cold activation must not invalidate tools: {issues:?}"
         );
         thread
-            .reveal_tools(vec!["read_file".into(), "complete".into()])
+            .reveal_tools(vec!["read_file".into(), "finish_turn".into()])
             .await
             .unwrap();
         reopened

@@ -249,6 +249,7 @@ fn turn_cancellation_cause(value: TurnCancellationCause) -> BridgeTurnCancellati
         TurnCancellationCause::UserRequested => BridgeTurnCancellationCause::UserRequested,
         TurnCancellationCause::RuntimeShutdown => BridgeTurnCancellationCause::RuntimeShutdown,
         TurnCancellationCause::AgentClosed => BridgeTurnCancellationCause::AgentClosed,
+        TurnCancellationCause::Interrupted => BridgeTurnCancellationCause::Interrupted,
         TurnCancellationCause::Recovery => BridgeTurnCancellationCause::Recovery,
         TurnCancellationCause::Coalesced { target_turn_id } => {
             BridgeTurnCancellationCause::Coalesced { target_turn_id }

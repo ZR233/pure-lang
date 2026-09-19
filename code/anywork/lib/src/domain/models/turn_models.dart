@@ -127,6 +127,7 @@ sealed class StudioTurnCancellationCause {
     UserRequestedTurnCancellation() => 'Cancelled by user',
     RuntimeShutdownTurnCancellation() => 'Runtime shutdown',
     AgentClosedTurnCancellation() => 'Agent closed',
+    InterruptedTurnCancellation() => 'Interrupted',
     RecoveryTurnCancellation() => 'Cancelled during recovery',
     CoalescedTurnCancellation(:final targetTurnId) =>
       'Merged into Turn $targetTurnId',
@@ -148,6 +149,10 @@ final class RuntimeShutdownTurnCancellation
 
 final class AgentClosedTurnCancellation extends StudioTurnCancellationCause {
   const AgentClosedTurnCancellation();
+}
+
+final class InterruptedTurnCancellation extends StudioTurnCancellationCause {
+  const InterruptedTurnCancellation();
 }
 
 final class RecoveryTurnCancellation extends StudioTurnCancellationCause {

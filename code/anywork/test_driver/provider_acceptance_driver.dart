@@ -27,7 +27,7 @@ Future<void> main(List<String> arguments) async {
     request.response.headers.contentType = ContentType('text', 'event-stream');
     final tools = (payload['tools'] as List?) ?? const [];
     final completeTool = tools
-        .where((tool) => tool['function']?['name'] == 'complete')
+        .where((tool) => tool['function']?['name'] == 'finish_turn')
         .firstOrNull;
     final chunks = [
       {
@@ -44,9 +44,9 @@ Future<void> main(List<String> arguments) async {
                         'id': 'complete-${requests.length}',
                         'type': 'function',
                         'function': {
-                          'name': 'complete',
+                          'name': 'finish_turn',
                           'arguments': jsonEncode({
-                            'summary': 'Provider acceptance complete.',
+                            'message': 'Provider acceptance complete.',
                             'evidence': [
                               'Canonical compatible route and final usage received.',
                             ],

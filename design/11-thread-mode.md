@@ -9,7 +9,7 @@
 Mode 是 root Thread 的执行配置。Mode 不是 Skill、Agent Profile、provider wire mode 或另一种
 会话类型：Simple、Task 与后续自定义 Mode 继续使用同一套 Thread、Turn、模型循环和工具运行时；
 是否使用工作流由注册 Mode 是否携带图决定。工作流只影响模型提示和合法状态边，不关闭文件、
-命令、Git、Agent 或最终回复能力。所有 root Mode 统一通过 `complete` 工具提交完成事实并结束
+命令、Git、Agent 或最终回复能力。所有 Mode 使用 `finish_turn({message})` 或自然 final 提交汇报并结束
 Turn。
 
 跨 crate 的稳定 ID 是 ThreadModeId，wire 使用 `mode.<id>` 字符串（内置值为 `mode.simple` 与
@@ -106,7 +106,7 @@ workflow 工具，因此不能替 root 改写 run：
 - `workflow_transition`：以 run/revision/state 三重 CAS 进入直接后继，表示完成当前阶段。
 - `workflow_restart`：归档当前 run 并按同一预设图创建新 run。
 
-四个查询工具为 Coexist 且不修改 revision；两个写工具与 `complete` 为 Solo——同一 response
+四个查询工具为 Coexist 且不修改 revision；两个写工具与 `finish_turn` 为 Solo——同一 response
 中若还有任何其他调用则整批拒绝且无副作用。查询工具读取同一只读扩展快照；写工具从只读扩展
 快照计算 CAS 候选，显式授予扩展更新权限并独占批次。runtime 校验 schema、图、CAS、合法直接
 边、大小限制与 operation identity；guard、阶段完成标准和证据真实性由 Agent 判断。工具不
@@ -155,7 +155,7 @@ state 和直接后继；不得从注入摘要或旧 mutation receipt 推测 CAS�
 ## 11.6 内置 Mode
 
 `mode.simple` 不带 workflow，也不要求阶段转换：它直接工作、按风险验证，并在完成时调用
-`complete`；不增加 Git、固定审查轮次或交付门禁。
+`finish_turn`；不增加 Git、固定审查轮次或交付门禁。
 
 `mode.task` 注册预设图：
 
@@ -178,7 +178,7 @@ integrating 和 reviewing。状态指令、完成标准和每条边的 guard 属
 只有 `plan_current` 返回 `approved` 后才可 transition 到 editing_documents。计划确认不属于
 Mode 图：它由 Plan 固定状态机和整套 `plan_*` 工具管理（见 [13](./13-plan.md)），planning
 期间的澄清、提交、要求修订和重新批准都保持 workflow state 为 `planning`，Plan 已批准是
-`planning -> editing_documents` 的声明性条件。进入 `completed` 后调用 `complete`。
+`planning -> editing_documents` 的声明性条件。进入 `completed` 后自然 final 或调用 `finish_turn({message})`，只交付一次。
 
 ## 11.7 Studio 与 GUI
 

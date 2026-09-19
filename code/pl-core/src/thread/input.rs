@@ -274,7 +274,7 @@ impl Owner {
         };
         match result {
             Ok(Some(TurnCompletion {
-                outcome: TurnOutcome::Completed | TurnOutcome::ToolCompleted,
+                outcome: TurnOutcome::Completed,
                 ..
             })) => {}
             Ok(Some(TurnCompletion {
@@ -1192,7 +1192,7 @@ mod tests {
         .unwrap();
         let state = thread.snapshot();
         assert_eq!(state.turns.len(), 2);
-        assert_eq!(state.turns[0].state, TurnState::Cancelled);
+        assert_eq!(state.turns[0].state, TurnState::Interrupted);
         assert!(state.inputs.iter().all(|input| matches!(&input.state, InputState::Consumed { turn_id, .. } if turn_id == &state.turns[1].turn_id)));
         assert_eq!(requests.lock().unwrap().len(), 2);
         assert_eq!(
@@ -1269,7 +1269,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn continue_interrupts_execution_and_settles_the_turn_as_cancelled() {
+    async fn continue_interrupts_execution_and_preserves_the_interrupted_reason() {
         let executing = Arc::new(Notify::new());
         let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
         let thread = ThreadHandle::start(
@@ -1315,8 +1315,8 @@ mod tests {
         );
         assert_eq!(
             state.turns[0].state,
-            TurnState::Cancelled,
-            "a targeted execution interrupt settles the Turn as cancelled"
+            TurnState::Interrupted,
+            "a targeted execution interrupt preserves its terminal reason"
         );
         assert!(
             !matches!(state.turns[0].state, TurnState::Failed { .. }),

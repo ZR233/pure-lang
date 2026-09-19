@@ -1,6 +1,7 @@
 //! Owned, retryable product projections of the immutable Thread journal.
 mod billing;
 mod directory;
+mod reports;
 
 use super::{ModelPerformanceOwner, StudioRuntime};
 use crate::studio::{ProductEventBus, StudioStore};
@@ -105,7 +106,6 @@ impl ThreadObservations {
     }
 
     fn observe(&self, id: String, thread: ThreadHandle) {
-        let baseline = thread.snapshot().commit_sequence;
         let (progress, _) = watch::channel(Progress::default());
         let state = Arc::new(WorkerState {
             progress,
@@ -115,8 +115,16 @@ impl ThreadObservations {
         let projector = self.0.projector.clone();
         let worker_thread = thread.clone();
         let worker_id = id.clone();
+        let recovered_through = thread.snapshot().commit_sequence;
         let task = tokio::spawn(async move {
-            run(projector, worker_id, worker_thread, baseline, &worker_state).await;
+            run(
+                projector,
+                worker_id,
+                worker_thread,
+                &worker_state,
+                recovered_through,
+            )
+            .await;
         });
         let observation = Arc::new(Observation {
             thread,
@@ -180,6 +188,31 @@ impl ThreadObservations {
         Ok(())
     }
 
+    /// Explicit parent continuation repairs terminal notifications even for unloaded children.
+    /// This reads saved journals only; no child model or workspace is opened.
+    pub(super) async fn reconcile_children(&self, parent: &str) -> Result<()> {
+        let services = &self.0.projector;
+        for child in services.store.list_threads_for_root(parent).await? {
+            if child.parent_thread_id.as_deref() != Some(parent) {
+                continue;
+            }
+            if services.threads.thread(&child.id).is_some() {
+                self.synchronize(Some(&child.id)).await?;
+                continue;
+            }
+            let history = services
+                .store
+                .sessions()
+                .read_thread_journal(&child.id)
+                .await?;
+            let child = pl_protocol::Thread::from(child);
+            for through in 1..=history.len() {
+                reports::publish(services, &child, &history[..through], false).await?;
+            }
+        }
+        Ok(())
+    }
+
     pub(super) async fn finish(&self) -> Result<()> {
         self.synchronize(None).await?;
         let observations: Vec<_> = self
@@ -231,8 +264,8 @@ async fn run(
     projector: ObservationServices,
     id: String,
     thread: ThreadHandle,
-    baseline: u64,
     state: &WorkerState,
+    recovered_through: u64,
 ) {
     let mut updates = thread.subscribe();
     let mut journal = Vec::<Arc<ThreadCommit>>::new();
@@ -248,9 +281,9 @@ async fn run(
                 &id,
                 &thread,
                 &current,
-                baseline,
                 &mut journal,
                 state,
+                recovered_through,
             ))
             .catch_unwind()
             .await
@@ -311,9 +344,9 @@ async fn project(
     id: &str,
     thread: &ThreadHandle,
     snapshot: &ThreadSnapshot,
-    baseline: u64,
     journal: &mut Vec<Arc<ThreadCommit>>,
     state: &WorkerState,
+    recovered_through: u64,
 ) -> Result<()> {
     while (journal.len() as u64) < snapshot.commit_sequence {
         let page = thread
@@ -349,15 +382,19 @@ async fn project(
     let applied = state.progress.borrow().applied;
     for commit in journal.iter().filter(|commit| commit.sequence > applied) {
         billing::record(&projector.performance, &product.root_thread_id, commit)?;
-        if commit.sequence > baseline {
-            directory::notify_parent(projector, &product, commit).await?;
-        }
+        reports::publish(
+            projector,
+            &product,
+            &journal[..usize::try_from(commit.sequence)?],
+            commit.sequence > recovered_through,
+        )
+        .await?;
     }
     product.status = crate::studio::thread_projection::status(snapshot);
     product.updated_at = product
         .updated_at
         .max(journal.last().map_or(0, |commit| commit.committed_at));
-    directory::publish(projector, product, snapshot).await
+    directory::publish(projector, product, snapshot, journal).await
 }
 
 #[cfg(test)]

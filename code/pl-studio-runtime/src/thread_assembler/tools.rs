@@ -253,7 +253,7 @@ impl StudioThreadTools {
             )?)?);
         }
         registrations.extend([
-            pl_tool::complete::registration(declaration(ThreadBuiltin::Complete)?)?,
+            pl_tool::finish_turn::registration(declaration(ThreadBuiltin::FinishTurn)?)?,
             pl_tool::todo::registration(declaration(ThreadBuiltin::Todo)?)?,
             pl_tool::discovery::registration(declaration(ThreadBuiltin::Discover)?)?,
         ]);

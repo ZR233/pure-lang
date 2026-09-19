@@ -127,10 +127,7 @@ impl StudioThreadFactory {
                 "child Profile workspace policy changed".into(),
             ));
         }
-        if let Some(plan) = restored.extensions.get(crate::plan_tool::PLAN_EXTENSION) {
-            crate::plan_tool::decode_plan_state(&plan.payload)
-                .map_err(|error| resource_error("decode restored child plan", error))?;
-        }
+
         let resources = FileResourceStore::new(
             self.services
                 .store
@@ -158,13 +155,7 @@ impl StudioThreadFactory {
                 &profile.route,
                 profile.config.runtime.openai_compaction_mode,
             )?,
-            agent_controls: if prepared.visibility
-                == crate::search::ToolVisibilityConstraint::Exclusive
-            {
-                crate::thread_assembler::AgentControlExposure::Disabled
-            } else {
-                crate::thread_assembler::AgentControlExposure::ProgressOnly
-            },
+            agent_controls: crate::thread_assembler::AgentControlExposure::Disabled,
             execution: pl_core::thread::input::InputDriverOptions {
                 max_model_steps: pl_core::thread::ModelStepLimit::Limited(
                     std::num::NonZeroU32::new(64).expect("fixed positive model step limit"),

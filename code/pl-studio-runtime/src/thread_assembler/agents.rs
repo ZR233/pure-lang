@@ -86,6 +86,16 @@ fn output(value: impl serde::Serialize) -> Result<ToolOutput, ToolError> {
     ))
 }
 
+pub(super) fn agent_row(
+    id: &str,
+    parent: Option<&str>,
+    snapshot: &pl_core::thread::ThreadSnapshot,
+) -> serde_json::Value {
+    serde_json::json!({ "id":id, "parentId":parent, "lifecycle":snapshot.lifecycle,
+        "lastTurn":snapshot.turns.last(), "pendingInputs":snapshot.inputs.iter().filter(|input| input.state == InputState::Pending).count(),
+        "runningTasks":snapshot.tasks.values().filter(|task| task.status == TaskStatus::Running).count() })
+}
+
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SpawnReceipt {
@@ -260,6 +270,15 @@ impl AgentControlHost for AgentHost {
 
     async fn send(&self, caller: &str, message: AgentMessage) -> Result<ToolOutput, ToolError> {
         let owner = self.owner()?;
+        if owner.thread(&message.target).is_none() {
+            let services = owner.0.state().agent_services.clone();
+            if let Some(services) = services {
+                services
+                    .activate_child(&owner, caller, &message.target)
+                    .await
+                    .map_err(|error| ToolError::new(super::agent_services::ServiceError(error)))?;
+            }
+        }
         let (target, options) = {
             let state = owner.0.state();
             if state.closing {
@@ -299,7 +318,7 @@ impl AgentControlHost for AgentHost {
 
     async fn list(&self, caller: &str) -> Result<ToolOutput, ToolError> {
         let owner = self.owner()?;
-        let rows = {
+        let mut rows = {
             let state = owner.0.state();
             if state.closing {
                 return Err(ToolError::new(ControlError::Closed));
@@ -319,12 +338,23 @@ impl AgentControlHost for AgentHost {
                 {
                     continue;
                 }
-                rows.push(serde_json::json!({ "id":id, "parentId":entry.parent_id, "lifecycle":snapshot.lifecycle,
-                    "lastTurn":snapshot.turns.last(), "pendingInputs":snapshot.inputs.iter().filter(|input| input.state == InputState::Pending).count(),
-                    "runningTasks":snapshot.tasks.values().filter(|task| task.status == TaskStatus::Running).count() }));
+                rows.push(agent_row(id, entry.parent_id.as_deref(), &snapshot));
             }
             rows
         };
+        let services = owner.0.state().agent_services.clone();
+        if let Some(services) = services {
+            let loaded = rows
+                .iter()
+                .filter_map(|row| row["id"].as_str().map(str::to_owned))
+                .collect();
+            rows.extend(
+                services
+                    .saved_agents(caller, &loaded)
+                    .await
+                    .map_err(|error| ToolError::new(super::agent_services::ServiceError(error)))?,
+            );
+        }
         output(rows)
     }
 
@@ -613,7 +643,7 @@ mod tests {
         );
         assert_eq!(
             child.snapshot().turns[0].state,
-            pl_core::thread::TurnState::Cancelled
+            pl_core::thread::TurnState::Interrupted
         );
         host.send("root", message("idle-followup")).await.unwrap();
         tokio::time::timeout(std::time::Duration::from_secs(5), async {

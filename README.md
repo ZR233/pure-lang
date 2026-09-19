@@ -302,7 +302,7 @@ pure-lang/
 | 文件写入 | `write_file`, `create_directory`, `delete_path`, `copy_path`, `move_path` |
 | 补丁 | `apply_patch` |
 | 代码智能 | `lsp_capabilities`, `lsp_query` |
-| 子代理 | `spawn_agent`, `report_progress`, `send_message`, `interrupt_agent`, `list_agents`, `list_agent_profiles`, `read_agent_session`, `read_agent_submissions`, `close_agent` |
+| 子代理 | `spawn_agent`, `send_message`, `interrupt_agent`, `list_agents`, `list_agent_profiles`, `read_agent_session`, `close_agent` |
 | 会话任务与事件 | `wait`, `sleep`, `list_tool_tasks`, `get_tool_task`, `cancel_tool_task` |
 | 用户交互 | `request_user_input` |
 | 技能 | `skills_list`, `skill_view`, `skill_manage` |
@@ -374,8 +374,7 @@ cargo xtask verify-gui --integration
 cargo xtask verify-gui --web-integration
 
 # 显式使用已安装配置、真实 provider/model 与 API credential 验收统一工作流
-cargo xtask verify-workflow --live --headless
-cargo xtask verify-workflow --live --gui
+cargo run -p pl-studio-runtime --features live-tests --example collaboration_observe
 
 # 从仓库根目录运行 GUI
 cargo xtask run-gui
@@ -396,12 +395,13 @@ cargo xtask run-gui --demo
 `code/anywork/build/web-integration-artifacts`。Playwright 可作为额外截图或可访问性观察层，
 但 canonical 交互断言仍使用 Flutter integration test 的稳定 `ValueKey`。
 
-`verify-workflow --live` 会产生真实模型调用和费用，不进入默认 CI，也不会回退到 scripted
-provider。GUI 路径启动真实 native Studio，在 `planning` 中先通过 `request_user_input` 补齐事实，再由
-固定 Plan 状态机的 `plan_submit` 完成修订与批准；批准后的完整 Plan 作为 GUI 隐藏的用户消息进入同一
-Thread。完成后 durable shutdown，再以同一隔离
-Studio home 恢复相同 Thread 与 workflow run。脱敏 wire、workflow snapshot、命令输出、截图、
-render tree 和 Driver 日志保存在 `target/workflow-live-artifacts/`。
+`collaboration_observe` 使用现有 provider、model、effort 和凭据解析，在隔离 Studio home
+及临时项目中采集完整事件和快照，会产生真实模型调用费用，不进入默认 CI。
+`ANYWORK_OBSERVATION_PROMPT` 可指定任务文件，`ANYWORK_OBSERVATION_SECONDS` 设置观察时长，
+`ANYWORK_WORKFLOW_ARTIFACT_DIR` 设置保存目录；另可设置 `ANYWORK_WIRE_CAPTURE_DIR` 保存请求记录。
+采集结束不代表任务通过：阅读实际报告、终态与产物作出验收结论，不使用交付口令或固定工具顺序。
+HTTP/SSE 观察可使用 `pl-studio-server` 的隔离 `--studio-home` 与空闲 loopback 端口。
+原 submission/marker 验收命令已删除；GUI 布局与交互仍由 `verify-gui --integration` 验证。
 
 本仓库要求 Flutter 端使用 `flutter_rust_bridge` v2.12.x；本机 codegen 版本应与 Dart/Rust 依赖保持同一小版本。
 

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::error::ErrorKind;
-use clap::{ArgGroup, Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -30,10 +30,6 @@ pub(crate) enum Command {
     CheckGuiGenerated,
     /// Generate, analyze, and test the anywork desktop app.
     VerifyGui(VerifyGuiOptions),
-    /// Run the opt-in real-model workflow acceptance harness.
-    VerifyWorkflow(VerifyWorkflowOptions),
-    /// Run real directory/worktree child Agents through the native GUI.
-    VerifySubagents(VerifySubagentsOptions),
     /// Run the anywork desktop app.
     RunGui(RunGuiOptions),
     /// Build release artifacts for the current desktop OS.
@@ -73,41 +69,6 @@ pub(crate) struct VerifyGuiOptions {
     /// Run the demo integration test on Flutter's headless web-server device.
     #[arg(long)]
     pub(crate) web_integration: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Args)]
-#[command(group(
-    ArgGroup::new("target")
-        .required(true)
-        .multiple(false)
-        .args(["headless", "gui"])
-))]
-pub(crate) struct VerifyWorkflowOptions {
-    /// Confirm that real provider credentials and billable model calls may be used.
-    #[arg(long, required = true)]
-    pub(crate) live: bool,
-    /// Run the real-model headless workflow harness.
-    #[arg(long)]
-    pub(crate) headless: bool,
-    /// Run the real native GUI and Flutter Driver workflow harness.
-    #[arg(long)]
-    pub(crate) gui: bool,
-    /// Stop the real GUI harness after Plan revision and approval.
-    #[arg(long, requires = "gui", conflicts_with = "headless")]
-    pub(crate) plan_only: bool,
-    /// Run the smallest complete Task GUI scenario with DeepSeek Flash high.
-    #[arg(long, requires = "gui", conflicts_with_all = ["headless", "plan_only"])]
-    pub(crate) minimal: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Args)]
-pub(crate) struct VerifySubagentsOptions {
-    /// Confirm that real provider credentials and billable model calls may be used.
-    #[arg(long, required = true)]
-    pub(crate) live: bool,
-    /// Confirm that the native GUI and Flutter Driver acceptance surface is required.
-    #[arg(long, required = true)]
-    pub(crate) gui: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Args)]
@@ -380,65 +341,6 @@ mod tests {
                 web_integration: true,
             }))
         );
-        Ok(())
-    }
-
-    #[test]
-    fn live_task_verification_requires_one_execution_surface() -> Result<()> {
-        assert_eq!(
-            parse(["xtask", "verify-workflow", "--live", "--headless"].map(OsString::from))?,
-            ParseOutcome::Run(Command::VerifyWorkflow(VerifyWorkflowOptions {
-                live: true,
-                headless: true,
-                gui: false,
-                plan_only: false,
-                minimal: false,
-            }))
-        );
-        assert!(
-            parse(
-                ["xtask", "verify-workflow", "--live", "--headless", "--gui"].map(OsString::from)
-            )
-            .is_err()
-        );
-        assert_eq!(
-            parse(
-                ["xtask", "verify-workflow", "--live", "--gui", "--plan-only",].map(OsString::from),
-            )?,
-            ParseOutcome::Run(Command::VerifyWorkflow(VerifyWorkflowOptions {
-                live: true,
-                headless: false,
-                gui: true,
-                plan_only: true,
-                minimal: false,
-            }))
-        );
-        assert!(
-            parse(
-                [
-                    "xtask",
-                    "verify-workflow",
-                    "--live",
-                    "--headless",
-                    "--plan-only",
-                ]
-                .map(OsString::from)
-            )
-            .is_err()
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn live_subagents_verification_requires_gui_surface() -> Result<()> {
-        assert_eq!(
-            parse(["xtask", "verify-subagents", "--live", "--gui"].map(OsString::from))?,
-            ParseOutcome::Run(Command::VerifySubagents(VerifySubagentsOptions {
-                live: true,
-                gui: true,
-            }))
-        );
-        assert!(parse(["xtask", "verify-subagents", "--live"].map(OsString::from)).is_err());
         Ok(())
     }
 }

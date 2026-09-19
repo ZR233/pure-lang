@@ -17,7 +17,7 @@ pub enum ThreadBuiltin {
     Exec,
     WriteStdin,
     File(crate::workspace_file::WorkspaceFileToolKind),
-    Complete,
+    FinishTurn,
     AskUser,
     Todo,
     Discover,
@@ -70,9 +70,9 @@ impl ThreadBuiltin {
                 "exec",
                 "Run a shell command in the configured workspace. Completion includes process exit and output drain. Long commands return a task receipt; use wait or get_tool_task to observe completion. Full output is archived as a resource.",
             ),
-            Self::Complete => schema::<crate::complete::CompleteInput>(
-                "complete",
-                "Finish this Turn with a concise summary and supporting evidence.",
+            Self::FinishTurn => schema::<crate::finish_turn::FinishTurnInput>(
+                "finish_turn",
+                "End this Turn with a complete Markdown report. Report results, evidence or problems requiring the parent. No message length limit. Do not repeat a final reply afterward; this does not declare the task complete.",
             ),
             Self::AskUser => schema::<crate::ask_user::AskUserInput>(
                 "request_user_input",
@@ -88,7 +88,7 @@ impl ThreadBuiltin {
             ),
             Self::Task(TaskControlKind::Wait) => schema::<crate::task_control::WaitTasksInput>(
                 "wait",
-                "Call wait ALONE in a model response. For a tool use its exact receipt taskId: {\"taskIds\":[\"task:call-id\"]}. For child notifications use {\"taskIds\":[],\"timeoutMs\":300000}, then match childId and turn terminal before read_agent_submissions({\"target\":\"child-id\"}). Never put agentId or callId in taskIds. Returns readiness; completed background results arrive with the next model step.",
+                "Call wait ALONE in a model response. For a tool use its exact receipt taskId: {\"taskIds\":[\"task:call-id\"]}. For child notifications use {\"taskIds\":[],\"timeoutMs\":300000}, the full child Turn report arrives in your next model context. Match its childId, turn and input identity; decide whether to continue or accept the work. Never put agentId or callId in taskIds. Returns readiness; completed background results arrive with the next model step.",
             ),
             Self::Task(TaskControlKind::Query) => schema::<crate::task_control::QueryTaskInput>(
                 "get_tool_task",

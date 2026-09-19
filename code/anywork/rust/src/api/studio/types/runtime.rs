@@ -197,16 +197,6 @@ pub struct BridgeStudioRecoveryIssueDto {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct BridgeAgentProgressDto {
-    pub stage: String,
-    pub summary: String,
-    pub next_step: String,
-    pub revision: u64,
-    pub updated_at: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", content = "data", rename_all = "camelCase")]
 pub enum BridgeAgentState {
     Idle(BridgeIdleAgent),
@@ -284,9 +274,7 @@ pub struct BridgeAgentDirectoryEntryDto {
     pub summary: Option<String>,
     pub depth: u32,
     pub state: BridgeAgentState,
-    pub progress: Option<BridgeAgentProgressDto>,
     pub updated_at: i64,
-    pub summary_age_seconds: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

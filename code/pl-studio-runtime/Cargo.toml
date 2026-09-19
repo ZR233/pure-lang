@@ -45,9 +45,8 @@ dunce = { workspace = true }
 pretty_assertions = { workspace = true }
 tracing-subscriber = { workspace = true }
 
-[[test]]
-name = "workflow_live"
-path = "tests/workflow_live.rs"
+[[example]]
+name = "collaboration_observe"
 required-features = ["live-tests"]
 
 [[test]]

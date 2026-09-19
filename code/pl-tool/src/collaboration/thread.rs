@@ -23,6 +23,7 @@ pub struct AgentSpawn {
     pub profile_id: String,
     /// Brief task description shown in the child list; required, nonempty, at most 80 Unicode characters.
     pub task_summary: AgentTaskSummary,
+    /// Full self-contained task: goals, approved contract, facts, interfaces, steps, ownership and verification. No application length limit; include pseudocode when useful.
     pub message: String,
     /// Inherits conversation records only; the child receives its own Profile instructions.
     #[serde(default)]
@@ -172,6 +173,7 @@ struct CloseInput {
 #[serde(deny_unknown_fields)]
 struct SendInput {
     target: String,
+    /// Full continuation, including new decisions, superseded requirements and acceptance criteria. No application length limit.
     message: String,
 }
 

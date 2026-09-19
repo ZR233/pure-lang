@@ -252,7 +252,6 @@ pub struct TurnInput {
 #[serde(rename_all = "camelCase")]
 pub enum TurnOutcome {
     Completed,
-    ToolCompleted,
     WaitingInteraction,
     StepLimit,
 }

@@ -180,8 +180,6 @@ class StudioAgentView {
     this.summary,
     this.depth = 0,
     this.rootThreadId,
-    this.progress,
-    this.summaryAgeSeconds,
   });
 
   final String id;
@@ -194,8 +192,6 @@ class StudioAgentView {
   final int depth;
   final String? rootThreadId;
   final StudioAgentState state;
-  final AgentProgressView? progress;
-  final int? summaryAgeSeconds;
   final DateTime updatedAt;
 
   String get status => state.label;
@@ -216,8 +212,6 @@ class StudioAgentView {
           depth == other.depth &&
           rootThreadId == other.rootThreadId &&
           state == other.state &&
-          progress == other.progress &&
-          summaryAgeSeconds == other.summaryAgeSeconds &&
           updatedAt == other.updatedAt;
 
   @override
@@ -232,38 +226,6 @@ class StudioAgentView {
     depth,
     rootThreadId,
     state,
-    progress,
-    summaryAgeSeconds,
     updatedAt,
   );
-}
-
-class AgentProgressView {
-  const AgentProgressView({
-    required this.stage,
-    required this.summary,
-    required this.nextStep,
-    required this.revision,
-    required this.updatedAt,
-  });
-
-  final String stage;
-  final String summary;
-  final String nextStep;
-  final int revision;
-  final DateTime updatedAt;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is AgentProgressView &&
-          stage == other.stage &&
-          summary == other.summary &&
-          nextStep == other.nextStep &&
-          revision == other.revision &&
-          updatedAt == other.updatedAt;
-
-  @override
-  int get hashCode =>
-      Object.hash(stage, summary, nextStep, revision, updatedAt);
 }

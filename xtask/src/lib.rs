@@ -12,7 +12,6 @@ mod rust_bridge;
 mod studio_tool;
 mod studio_version;
 mod sync_skills;
-mod workflow_verify;
 
 pub fn run(args: impl IntoIterator<Item = OsString>) -> Result<()> {
     match cli::parse(args)? {
@@ -30,8 +29,6 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> Result<()> {
             cli::Command::GenerateGui => flutter::generate_gui(),
             cli::Command::CheckGuiGenerated => flutter::check_gui_generated(),
             cli::Command::VerifyGui(options) => flutter::verify_gui(options),
-            cli::Command::VerifyWorkflow(options) => workflow_verify::run(options),
-            cli::Command::VerifySubagents(options) => workflow_verify::run_subagents(options),
             cli::Command::RunGui(options) => flutter::run_gui(options),
             cli::Command::BuildGui(options) => flutter::build_gui(options),
             cli::Command::ReleaseGui { action } => release::run(action),

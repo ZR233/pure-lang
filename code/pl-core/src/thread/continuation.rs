@@ -330,7 +330,7 @@ mod tests {
             cleanup.release.notify_one();
             let state = settled(&thread, 2).await;
             assert_eq!(state.tasks["task:call"].status, task::TaskStatus::Cancelled);
-            assert_eq!(state.turns[0].state, TurnState::Cancelled);
+            assert_eq!(state.turns[0].state, TurnState::Interrupted);
             assert_eq!(
                 state.turns[1].state,
                 TurnState::Finished(TurnOutcome::Completed)

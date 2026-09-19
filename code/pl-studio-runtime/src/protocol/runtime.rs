@@ -18,9 +18,7 @@ pub struct StudioAgentDirectoryEntry {
     pub summary: Option<String>,
     pub depth: u32,
     pub state: pl_protocol::AgentState,
-    pub progress: Option<pl_protocol::AgentProgressCheckpoint>,
     pub updated_at: i64,
-    pub summary_age_seconds: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

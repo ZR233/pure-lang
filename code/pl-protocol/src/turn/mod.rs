@@ -125,6 +125,7 @@ pub enum TurnCancellationCause {
     UserRequested,
     RuntimeShutdown,
     AgentClosed,
+    Interrupted,
     Recovery,
     Coalesced {
         target_turn_id: String,

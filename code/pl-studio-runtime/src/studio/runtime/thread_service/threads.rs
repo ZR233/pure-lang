@@ -931,7 +931,7 @@ mod tests {
 
         let turns = thread.snapshot().turns;
         let last = turns.last().expect("the interrupted Turn is recorded");
-        assert_eq!(last.state, TurnState::Cancelled);
+        assert_eq!(last.state, TurnState::Interrupted);
         assert!(runtime.read_thread(&id).await.unwrap().archived);
         let visible = runtime
             .query_threads(&Default::default(), None, 20)
