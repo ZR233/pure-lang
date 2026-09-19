@@ -26,15 +26,30 @@ void main() {
     handler: _handleDriverData,
     commands: <CommandExtension>[RawTapCommandExtension()],
   );
-  _container = ProviderContainer();
+  _container = ProviderContainer(
+    overrides: [
+      if (const bool.fromEnvironment('ANYWORK_DEMO'))
+        shellChromeProvider.overrideWith(
+          (ref) => _previewStartup ? const AsyncLoading() : shellChrome(ref),
+        ),
+    ],
+  );
   studio.bootstrapStudio(container: _container);
 }
 
 late final ProviderContainer _container;
 Future<void>? _shutdownTask;
+bool _previewStartup = false;
 
 Future<String> _handleDriverData(String? message) async {
   switch (message) {
+    case 'preview-startup-demo' || 'finish-startup-demo':
+      if (_container.read(studioApiProvider) is! DriverDemoStudioApi) {
+        return jsonEncode({'error': 'startup preview requires demo mode'});
+      }
+      _previewStartup = message == 'preview-startup-demo';
+      _container.invalidate(shellChromeProvider);
+      return jsonEncode({'startupPreview': _previewStartup});
     case final String request when request.startsWith('timeline-native:'):
       return _timelineNativeFixture(
         request.substring('timeline-native:'.length),

@@ -6,6 +6,7 @@ class _StudioStartup extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      key: const ValueKey('studio-startup'),
       backgroundColor: context.colors.surface,
       body: SafeArea(
         child: Center(
@@ -15,7 +16,10 @@ class _StudioStartup extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Image.asset(
-                  'assets/branding/anywork-app-icon.png',
+                  MediaQuery.disableAnimationsOf(context)
+                      ? 'assets/branding/anywork-startup-cat.png'
+                      : 'assets/branding/anywork-startup-cat.webp',
+                  key: const ValueKey('studio-startup-animation'),
                   width: 160,
                   height: 160,
                   fit: BoxFit.contain,

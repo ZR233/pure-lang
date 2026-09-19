@@ -43,6 +43,8 @@ flutter:
   uses-material-design: true
   assets:
     - assets/branding/anywork-app-icon.png
+    - assets/branding/anywork-startup-cat.webp
+    - assets/branding/anywork-startup-cat.png
 
 flutter_rust_bridge:
   rust_root: rust/

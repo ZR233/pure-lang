@@ -4,6 +4,18 @@
 组件测试不是按私有方法逐个配套；不约束 widget 包装层、装饰参数、对象身份或内部 projection 数组。
 稳定 ValueKey 用于定位用户操作，不要求实现必须由某一种 Material 控件组成。
 
+## 启动动画原生验收
+
+启动 `cargo xtask run-gui --demo --driver` 后，从仓库根目录执行：
+
+```sh
+cargo dart run test_driver/startup_acceptance_driver.dart "$VM_URL" "$OUTPUT_DIR"
+```
+
+Driver demo 暂时显示真实启动页，记录动画区域坐标、连续截图及 render tree，检查布局溢出，
+再验证回到主界面并等待 runtime shutdown。核对截图中猫爪的变化，避免将下方旋转进度条
+误判为猫咪动画；生产启动流程不增加等待。启动 GUI 的宿主仍负责回收全部子进程。
+
 ## 本轮清理
 
 | 原覆盖 | 处理 | 保留的结果证明 |
