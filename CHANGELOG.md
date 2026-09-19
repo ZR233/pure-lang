@@ -5,6 +5,47 @@ anywork release notes are generated from Conventional Commits by Release Please.
 以下已发布记录保留当时的名称与行为，不作为当前工程规范；当前架构演进规则见
 [AGENTS.md](AGENTS.md)，数据迁移契约及实现缺口见[存储设计](design/17-studio-storage.md)。
 
+## [5.0.0](https://github.com/ZR233/pure-lang/compare/v4.0.0...v5.0.0) (2026-09-19)
+
+
+### ⚠ BREAKING CHANGES
+
+* **agent-runtime:** 统一子代理 Turn 汇报与协作恢复
+* **studio:** SSH 密码认证与进程内密码 lease/askpass 机制移除，仅支持 ssh-agent 与密钥；桥协议 SshServerDto/SaveSshServerRequest/连接快照重塑为 别名模型，studio.sqlite 升级到 v21（ssh_servers 迁出为用户 ssh config 标记块）。
+
+### Features
+
+* **agent-runtime:** 统一会话工作区地址并在归档时清理工作树 ([ef121ce](https://github.com/ZR233/pure-lang/commit/ef121ce7e2ecffcc1cf77a4464814bc58a61fc76))
+* **model:** Coding Plan 接入智谱官方 Responses 协议端点 ([6f14a44](https://github.com/ZR233/pure-lang/commit/6f14a4407727544bcece4d6c1798ed833e922925))
+* **studio:** SSH 配置统一迁移 ~/.ssh/config 并支持在 VS Code 中打开工作区 ([57dd3c7](https://github.com/ZR233/pure-lang/commit/57dd3c7a1c6bb6a263f208510c90a341bc6a824f))
+* **studio:** 优化智能体列表展示 ([cf32ea7](https://github.com/ZR233/pure-lang/commit/cf32ea7f5c1c3d17c761e9eb32cdb640041c4763))
+* **studio:** 新会话支持本地目录与新建工作树工作区模式 ([fbdcc45](https://github.com/ZR233/pure-lang/commit/fbdcc453d5f4f26bb0fb5f35e011454949e35d34))
+* **studio:** 添加猫咪敲键盘启动动画 ([4ed10d5](https://github.com/ZR233/pure-lang/commit/4ed10d5d374b925c05c3398a565388235e166cf2))
+* **studio:** 统一按会话工作区地址打开工作区 ([878ef15](https://github.com/ZR233/pure-lang/commit/878ef1503fc348e17db72796ab8ed7e17a6ff057))
+* **studio:** 远程项目支持会话工作树 ([8b1a82c](https://github.com/ZR233/pure-lang/commit/8b1a82c01e81386b93afa11b45a95a719998f3c9))
+
+
+### Bug Fixes
+
+* **agent-runtime:** 归档清理失败后的恢复必须落到可用会话工作区 ([17e6f7c](https://github.com/ZR233/pure-lang/commit/17e6f7c0670ca5d42203b7286ebf2264d7cdabf1))
+* **model:** 对齐估算与请求准备的不兼容上下文分类并透出模型失败原因 ([585c100](https://github.com/ZR233/pure-lang/commit/585c1004c6b14265def2b2ff99c7a80661075d5d))
+* **studio:** 修复 Windows 下 ssh config 写入的未使用变量 ([b9eae19](https://github.com/ZR233/pure-lang/commit/b9eae199a0278dfe1ae36dfadc703929e80a8547))
+* **studio:** 修复历史会话归档失败 ([d5040c0](https://github.com/ZR233/pure-lang/commit/d5040c08947fdf6823ed1528d7bcce494912f5fc))
+* **studio:** 修复远程工作树会话创建失败并支持运行中会话结束归档 ([8f0d3be](https://github.com/ZR233/pure-lang/commit/8f0d3bedff1987243653dad44bb5c5476768abc3))
+* **studio:** 修正工作区模式测试在 Windows 下的平台假设 ([5f4e40e](https://github.com/ZR233/pure-lang/commit/5f4e40e7268aa0d2729d9a0ee33a14c909d4f7b9))
+
+
+### Refactoring
+
+* **agent-runtime:** 统一子代理 Turn 汇报与协作恢复 ([9383dbd](https://github.com/ZR233/pure-lang/commit/9383dbded5168dcb8e6161b7be3442b44ce9ff97))
+
+
+### Documentation
+
+* **agent-runtime:** 将系统提示词与协作规范的产品名统一为「糊来帮」 ([4a661a6](https://github.com/ZR233/pure-lang/commit/4a661a6bb2a398e58ac724dec64cade3eb5155af))
+* **studio:** 统一会话工作区地址并定义归档清理语义 ([d676aa7](https://github.com/ZR233/pure-lang/commit/d676aa7fd26b3f453c32521192edfb5c8df792ff))
+* **studio:** 补全会话恢复对清理失败现场的处置语义 ([0ddef15](https://github.com/ZR233/pure-lang/commit/0ddef15972da3c0edee130df8a2973f72177131d))
+
 ## [4.0.0](https://github.com/ZR233/pure-lang/compare/v3.0.0...v4.0.0) (2026-09-17)
 
 
